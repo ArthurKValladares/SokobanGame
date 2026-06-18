@@ -31,20 +31,6 @@ Vec2 lerp(Vec2 from, Vec2 to, float t)
     };
 }
 
-int sampleCountValue(VkSampleCountFlagBits sampleCount)
-{
-    switch (sampleCount) {
-    case VK_SAMPLE_COUNT_2_BIT:
-        return 2;
-    case VK_SAMPLE_COUNT_4_BIT:
-        return 4;
-    case VK_SAMPLE_COUNT_8_BIT:
-        return 8;
-    default:
-        return 1;
-    }
-}
-
 } // namespace
 
 Application::Application()
@@ -147,7 +133,25 @@ void Application::drawDebugUi()
     if (ImGui::Combo("Anti-aliasing", &antiAliasingIndex, antiAliasingLabels, static_cast<int>(std::size(antiAliasingLabels)))) {
         renderer_.setAntiAliasingMode(static_cast<AntiAliasingMode>(antiAliasingIndex));
     }
-    ImGui::Text("Active samples %dx", sampleCountValue(renderer_.activeSampleCount()));
+
+    if (ImGui::CollapsingHeader("Rendering Stats")) {
+        const RenderStats renderStats = renderer_.renderStats();
+        const ImGuiIO& io = ImGui::GetIO();
+        ImGui::Text("Frame %.3f ms (%.1f FPS)", io.DeltaTime * 1000.0f, io.Framerate);
+        ImGui::Text("Recorded frame %llu", static_cast<unsigned long long>(renderStats.frameIndex));
+        ImGui::Text("Swapchain %u x %u, %u images", renderStats.swapchainWidth, renderStats.swapchainHeight, renderStats.swapchainImages);
+        ImGui::Text("Active samples %ux", renderStats.activeSamples);
+        ImGui::Text("Tiles %u", renderStats.totalTiles);
+        ImGui::Text("Visible faces %u", renderStats.visibleFaces);
+        ImGui::Text("Draw calls %u", renderStats.drawCalls);
+        ImGui::Text("Triangles %u", renderStats.triangles);
+        ImGui::Text("Vertices %u", renderStats.vertices);
+        ImGui::Text("Pipelines bound %u", renderStats.pipelineBinds);
+        ImGui::Text("Render passes %u", renderStats.renderPasses);
+        ImGui::Text("Image barriers %u", renderStats.imageBarriers);
+        ImGui::Text("Pipeline rebuilds %llu", static_cast<unsigned long long>(renderStats.pipelineRebuilds));
+        ImGui::Text("Swapchain recreations %llu", static_cast<unsigned long long>(renderStats.swapchainRecreations));
+    }
 #endif
 }
 

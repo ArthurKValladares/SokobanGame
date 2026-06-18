@@ -40,6 +40,24 @@ struct RenderFrameData {
     std::vector<Tile> tiles;
 };
 
+struct RenderStats {
+    uint64_t frameIndex = 0;
+    uint32_t totalTiles = 0;
+    uint32_t visibleFaces = 0;
+    uint32_t drawCalls = 0;
+    uint32_t vertices = 0;
+    uint32_t triangles = 0;
+    uint32_t pipelineBinds = 0;
+    uint32_t renderPasses = 0;
+    uint32_t imageBarriers = 0;
+    uint32_t swapchainWidth = 0;
+    uint32_t swapchainHeight = 0;
+    uint32_t swapchainImages = 0;
+    uint32_t activeSamples = 1;
+    uint64_t pipelineRebuilds = 0;
+    uint64_t swapchainRecreations = 0;
+};
+
 class VulkanRenderer {
 public:
     VulkanRenderer(SDL_Window* window, std::filesystem::path assetRoot);
@@ -56,6 +74,7 @@ public:
     void waitIdle() const;
     [[nodiscard]] AntiAliasingMode antiAliasingMode() const;
     [[nodiscard]] VkSampleCountFlagBits activeSampleCount() const;
+    [[nodiscard]] RenderStats renderStats() const;
     void setAntiAliasingMode(AntiAliasingMode mode);
 
 private:
@@ -143,6 +162,7 @@ private:
     [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
     [[nodiscard]] VkImageView createImageView(VkImage image, VkFormat format) const;
     [[nodiscard]] bool msaaEnabled() const;
+    [[nodiscard]] uint32_t sampleCountValue() const;
 
     SDL_Window* window_ = nullptr;
     std::filesystem::path assetRoot_;
@@ -172,6 +192,11 @@ private:
     uint32_t currentFrame_ = 0;
     AntiAliasingMode antiAliasingMode_ = AntiAliasingMode::None;
     VkSampleCountFlagBits activeSampleCount_ = VK_SAMPLE_COUNT_1_BIT;
+    mutable RenderStats pendingStats_ {};
+    RenderStats lastStats_ {};
+    uint64_t nextStatsFrameIndex_ = 1;
+    uint64_t pipelineRebuilds_ = 0;
+    uint64_t swapchainRecreations_ = 0;
 };
 
 } // namespace sokoban

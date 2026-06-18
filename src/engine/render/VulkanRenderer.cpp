@@ -335,6 +335,11 @@ VkSampleCountFlagBits VulkanRenderer::activeSampleCount() const
     return activeSampleCount_;
 }
 
+RenderStats VulkanRenderer::renderStats() const
+{
+    return lastStats_;
+}
+
 void VulkanRenderer::setAntiAliasingMode(AntiAliasingMode mode)
 {
     if (mode == antiAliasingMode_) {
@@ -626,6 +631,7 @@ void VulkanRenderer::createPipeline()
     };
 
     vkCheck(vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &linkedPipeline, nullptr, &pipeline_), "vkCreateGraphicsPipelines linked pipeline failed");
+    ++pipelineRebuilds_;
 }
 
 void VulkanRenderer::destroyPipeline()
@@ -747,6 +753,7 @@ void VulkanRenderer::recreateSwapchain()
     createSwapchain();
     createImageViews();
     createMsaaColorResources();
+    ++swapchainRecreations_;
 }
 
 void VulkanRenderer::cleanupSwapchain()
@@ -785,6 +792,17 @@ void VulkanRenderer::cleanupMsaaColorResources()
 
 void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData)
 {
+    pendingStats_ = {
+        .frameIndex = nextStatsFrameIndex_++,
+        .totalTiles = static_cast<uint32_t>(frameData.tiles.size()),
+        .swapchainWidth = swapchainExtent_.width,
+        .swapchainHeight = swapchainExtent_.height,
+        .swapchainImages = static_cast<uint32_t>(swapchainImages_.size()),
+        .activeSamples = sampleCountValue(),
+        .pipelineRebuilds = pipelineRebuilds_,
+        .swapchainRecreations = swapchainRecreations_,
+    };
+
     VkCommandBufferBeginInfo beginInfo {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
     };
@@ -815,6 +833,7 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
         .pImageMemoryBarriers = &swapchainToColorAttachment,
     };
     vkCmdPipelineBarrier2(commandBuffer, &swapchainToColorDependency);
+    ++pendingStats_.imageBarriers;
 
     if (msaaEnabled()) {
         VkImageMemoryBarrier2 msaaToColorAttachment {
@@ -842,6 +861,7 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
             .pImageMemoryBarriers = &msaaToColorAttachment,
         };
         vkCmdPipelineBarrier2(commandBuffer, &msaaToColorDependency);
+        ++pendingStats_.imageBarriers;
     }
 
     recordGameRendering(
@@ -877,8 +897,10 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
         .pImageMemoryBarriers = &toPresent,
     };
     vkCmdPipelineBarrier2(commandBuffer, &toPresentDependency);
+    ++pendingStats_.imageBarriers;
 
     vkCheck(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer failed");
+    lastStats_ = pendingStats_;
 }
 
 void VulkanRenderer::recordGameRendering(
@@ -912,6 +934,7 @@ void VulkanRenderer::recordGameRendering(
     };
 
     vkCmdBeginRendering(commandBuffer, &renderingInfo);
+    ++pendingStats_.renderPasses;
 
     VkViewport viewport {
         .x = 0.0f,
@@ -927,6 +950,7 @@ void VulkanRenderer::recordGameRendering(
     };
 
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
+    ++pendingStats_.pipelineBinds;
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
     vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
@@ -965,6 +989,7 @@ void VulkanRenderer::recordDebugUiRendering(VkCommandBuffer commandBuffer, VkIma
     };
 
     vkCmdBeginRendering(commandBuffer, &renderingInfo);
+    ++pendingStats_.renderPasses;
     renderDebugUi(commandBuffer);
     vkCmdEndRendering(commandBuffer);
 #else
@@ -1178,6 +1203,11 @@ void VulkanRenderer::drawIsoTile(VkCommandBuffer commandBuffer, const IsoRenderL
 
 void VulkanRenderer::drawFace(VkCommandBuffer commandBuffer, const std::array<Vec2, 4>& vertices, Vec4 color) const
 {
+    ++pendingStats_.visibleFaces;
+    ++pendingStats_.drawCalls;
+    pendingStats_.vertices += 6;
+    pendingStats_.triangles += 2;
+
     const TilePushConstants pushConstants {
         .vertices = {
             vertices[0],
@@ -1578,6 +1608,20 @@ VkImageView VulkanRenderer::createImageView(VkImage image, VkFormat format) cons
 bool VulkanRenderer::msaaEnabled() const
 {
     return activeSampleCount_ != VK_SAMPLE_COUNT_1_BIT;
+}
+
+uint32_t VulkanRenderer::sampleCountValue() const
+{
+    switch (activeSampleCount_) {
+    case VK_SAMPLE_COUNT_2_BIT:
+        return 2;
+    case VK_SAMPLE_COUNT_4_BIT:
+        return 4;
+    case VK_SAMPLE_COUNT_8_BIT:
+        return 8;
+    default:
+        return 1;
+    }
 }
 
 } // namespace sokoban
