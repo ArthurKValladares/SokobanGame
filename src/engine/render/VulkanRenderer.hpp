@@ -54,6 +54,8 @@ struct RenderStats {
     uint32_t swapchainHeight = 0;
     uint32_t swapchainImages = 0;
     uint32_t activeSamples = 1;
+    bool wireframeEnabled = false;
+    float wireframeLineWidth = 1.0f;
     uint64_t pipelineRebuilds = 0;
     uint64_t swapchainRecreations = 0;
 };
@@ -76,6 +78,12 @@ public:
     [[nodiscard]] VkSampleCountFlagBits activeSampleCount() const;
     [[nodiscard]] RenderStats renderStats() const;
     void setAntiAliasingMode(AntiAliasingMode mode);
+    [[nodiscard]] bool wireframeEnabled() const;
+    void setWireframeEnabled(bool enabled);
+    [[nodiscard]] bool wideLinesSupported() const;
+    [[nodiscard]] float wireframeLineWidth() const;
+    [[nodiscard]] std::array<float, 2> wireframeLineWidthRange() const;
+    void setWireframeLineWidth(float lineWidth);
 
 private:
     struct QueueFamilyIndices {
@@ -192,6 +200,10 @@ private:
     uint32_t currentFrame_ = 0;
     AntiAliasingMode antiAliasingMode_ = AntiAliasingMode::None;
     VkSampleCountFlagBits activeSampleCount_ = VK_SAMPLE_COUNT_1_BIT;
+    bool wireframeEnabled_ = false;
+    bool wideLinesSupported_ = false;
+    float wireframeLineWidth_ = 1.0f;
+    std::array<float, 2> wireframeLineWidthRange_ { 1.0f, 1.0f };
     mutable RenderStats pendingStats_ {};
     RenderStats lastStats_ {};
     uint64_t nextStatsFrameIndex_ = 1;

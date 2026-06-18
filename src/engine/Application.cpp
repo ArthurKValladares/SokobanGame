@@ -133,6 +133,19 @@ void Application::drawDebugUi()
     if (ImGui::Combo("Anti-aliasing", &antiAliasingIndex, antiAliasingLabels, static_cast<int>(std::size(antiAliasingLabels)))) {
         renderer_.setAntiAliasingMode(static_cast<AntiAliasingMode>(antiAliasingIndex));
     }
+    bool wireframeEnabled = renderer_.wireframeEnabled();
+    if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
+        renderer_.setWireframeEnabled(wireframeEnabled);
+    }
+    ImGui::SameLine();
+    float wireframeLineWidth = renderer_.wireframeLineWidth();
+    const auto lineWidthRange = renderer_.wireframeLineWidthRange();
+    ImGui::BeginDisabled(!renderer_.wideLinesSupported());
+    ImGui::SetNextItemWidth(120.0f);
+    if (ImGui::SliderFloat("Line Width", &wireframeLineWidth, lineWidthRange[0], lineWidthRange[1], "%.1f")) {
+        renderer_.setWireframeLineWidth(wireframeLineWidth);
+    }
+    ImGui::EndDisabled();
 
     if (ImGui::CollapsingHeader("Rendering Stats")) {
         const RenderStats renderStats = renderer_.renderStats();
@@ -141,6 +154,8 @@ void Application::drawDebugUi()
         ImGui::Text("Recorded frame %llu", static_cast<unsigned long long>(renderStats.frameIndex));
         ImGui::Text("Swapchain %u x %u, %u images", renderStats.swapchainWidth, renderStats.swapchainHeight, renderStats.swapchainImages);
         ImGui::Text("Active samples %ux", renderStats.activeSamples);
+        ImGui::Text("Wireframe %s", renderStats.wireframeEnabled ? "on" : "off");
+        ImGui::Text("Wireframe line width %.1f", renderStats.wireframeLineWidth);
         ImGui::Text("Tiles %u", renderStats.totalTiles);
         ImGui::Text("Visible faces %u", renderStats.visibleFaces);
         ImGui::Text("Draw calls %u", renderStats.drawCalls);

@@ -340,6 +340,44 @@ RenderStats VulkanRenderer::renderStats() const
     return lastStats_;
 }
 
+bool VulkanRenderer::wireframeEnabled() const
+{
+    return wireframeEnabled_;
+}
+
+void VulkanRenderer::setWireframeEnabled(bool enabled)
+{
+    if (enabled == wireframeEnabled_) {
+        return;
+    }
+
+    waitIdle();
+    wireframeEnabled_ = enabled;
+    destroyPipeline();
+    createPipeline();
+}
+
+bool VulkanRenderer::wideLinesSupported() const
+{
+    return wideLinesSupported_;
+}
+
+float VulkanRenderer::wireframeLineWidth() const
+{
+    return wireframeLineWidth_;
+}
+
+std::array<float, 2> VulkanRenderer::wireframeLineWidthRange() const
+{
+    return wireframeLineWidthRange_;
+}
+
+void VulkanRenderer::setWireframeLineWidth(float lineWidth)
+{
+    const float maxLineWidth = wideLinesSupported_ ? wireframeLineWidthRange_[1] : 1.0f;
+    wireframeLineWidth_ = std::clamp(lineWidth, 1.0f, maxLineWidth);
+}
+
 void VulkanRenderer::setAntiAliasingMode(AntiAliasingMode mode)
 {
     if (mode == antiAliasingMode_) {
@@ -454,6 +492,24 @@ void VulkanRenderer::createDevice()
         .dynamicRendering = VK_TRUE,
     };
 
+    VkPhysicalDeviceFeatures supportedFeatures {};
+    vkGetPhysicalDeviceFeatures(physicalDevice_, &supportedFeatures);
+    wideLinesSupported_ = supportedFeatures.wideLines == VK_TRUE;
+
+    VkPhysicalDeviceProperties properties {};
+    vkGetPhysicalDeviceProperties(physicalDevice_, &properties);
+    const float minLineWidth = std::max(properties.limits.lineWidthRange[0], 1.0f);
+    const float maxPracticalLineWidth = std::max(minLineWidth, std::min(properties.limits.lineWidthRange[1], config::maxWireframeLineWidth));
+    wireframeLineWidthRange_ = wideLinesSupported_
+        ? std::array<float, 2> { minLineWidth, maxPracticalLineWidth }
+        : std::array<float, 2> { 1.0f, 1.0f };
+    wireframeLineWidth_ = std::clamp(wireframeLineWidth_, 1.0f, wireframeLineWidthRange_[1]);
+
+    VkPhysicalDeviceFeatures enabledFeatures {
+        .fillModeNonSolid = VK_TRUE,
+        .wideLines = wideLinesSupported_ ? VK_TRUE : VK_FALSE,
+    };
+
     VkDeviceCreateInfo createInfo {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext = &vulkan13,
@@ -461,6 +517,7 @@ void VulkanRenderer::createDevice()
         .pQueueCreateInfos = queueInfos.data(),
         .enabledExtensionCount = static_cast<uint32_t>(requiredDeviceExtensions.size()),
         .ppEnabledExtensionNames = requiredDeviceExtensions.data(),
+        .pEnabledFeatures = &enabledFeatures,
     };
 
     vkCheck(vkCreateDevice(physicalDevice_, &createInfo, nullptr, &device_), "vkCreateDevice failed");
@@ -799,6 +856,8 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
         .swapchainHeight = swapchainExtent_.height,
         .swapchainImages = static_cast<uint32_t>(swapchainImages_.size()),
         .activeSamples = sampleCountValue(),
+        .wireframeEnabled = wireframeEnabled_,
+        .wireframeLineWidth = wireframeLineWidth_,
         .pipelineRebuilds = pipelineRebuilds_,
         .swapchainRecreations = swapchainRecreations_,
     };
@@ -956,6 +1015,7 @@ void VulkanRenderer::recordGameRendering(
     vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
     vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
     vkCmdSetPrimitiveTopology(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    vkCmdSetLineWidth(commandBuffer, wireframeEnabled_ ? wireframeLineWidth_ : 1.0f);
 
     if (frameData.viewMode == RenderViewMode::Isometric3D) {
         drawIsoFrame(commandBuffer, calculateIsoRenderLayout(frameData), frameData);
@@ -1342,6 +1402,7 @@ bool VulkanRenderer::isDeviceSuitable(VkPhysicalDevice device) const
 
     return vulkan13.dynamicRendering &&
         vulkan13.synchronization2 &&
+        features.features.fillModeNonSolid &&
         extendedDynamicState.extendedDynamicState &&
         graphicsPipelineLibrary.graphicsPipelineLibrary;
 }
@@ -1431,7 +1492,7 @@ std::array<VkPipeline, 2> VulkanRenderer::createGraphicsPipelineLibraries(VkShad
 
     VkPipelineRasterizationStateCreateInfo rasterizer {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-        .polygonMode = VK_POLYGON_MODE_FILL,
+        .polygonMode = wireframeEnabled_ ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL,
         .cullMode = VK_CULL_MODE_NONE,
         .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
         .lineWidth = 1.0f,
@@ -1461,6 +1522,7 @@ std::array<VkPipeline, 2> VulkanRenderer::createGraphicsPipelineLibraries(VkShad
         VK_DYNAMIC_STATE_CULL_MODE,
         VK_DYNAMIC_STATE_FRONT_FACE,
         VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
+        VK_DYNAMIC_STATE_LINE_WIDTH,
     };
 
     VkPipelineDynamicStateCreateInfo dynamicState {
