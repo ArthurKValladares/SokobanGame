@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 
 namespace sokoban {
 namespace {
@@ -28,10 +29,9 @@ Vec2 lerp(Vec2 from, Vec2 to, float t)
 Application::Application()
     : window_("Sokoban 3D", 1280, 720)
     , renderer_(window_.nativeHandle(), SOKOBAN_ASSET_DIR)
-    , level_(Level::loadFromFile(std::filesystem::path(SOKOBAN_ASSET_DIR) / "test-level.lvl"))
-    , playerCell_(level_.playerStart())
-    , playerRenderPosition_(toVec2(playerCell_))
+    , assetRoot_(SOKOBAN_ASSET_DIR)
 {
+    loadCurrentScreen();
 }
 
 Application::~Application()
@@ -68,6 +68,35 @@ void Application::update(float dt)
 {
     queuePressedMovement();
     advancePlayerMovement(dt);
+}
+
+void Application::loadCurrentScreen()
+{
+    level_ = Level::loadFromFile(screenPath(currentLevel_, currentScreen_));
+    playerCell_ = level_.playerStart();
+    playerRenderPosition_ = toVec2(playerCell_);
+    pendingMoves_.clear();
+    moving_ = false;
+    moveElapsed_ = 0.0f;
+    moveStart_ = playerCell_;
+    moveTarget_ = playerCell_;
+
+    std::cerr << "player started level " << currentLevel_ << " screen " << currentScreen_ << '\n';
+}
+
+void Application::advanceScreen()
+{
+    if (screenExists(currentLevel_, currentScreen_ + 1)) {
+        ++currentScreen_;
+    } else if (screenExists(currentLevel_ + 1, 0)) {
+        ++currentLevel_;
+        currentScreen_ = 0;
+    } else {
+        currentLevel_ = 0;
+        currentScreen_ = 0;
+    }
+
+    loadCurrentScreen();
 }
 
 void Application::queuePressedMovement()
@@ -116,6 +145,11 @@ void Application::advancePlayerMovement(float dt)
             playerRenderPosition_ = toVec2(playerCell_);
             moving_ = false;
             moveElapsed_ = 0.0f;
+
+            if (level_.isEnd(playerCell_)) {
+                advanceScreen();
+                return;
+            }
         }
     }
 }
@@ -186,6 +220,23 @@ GridPosition Application::movementTarget(MoveDirection direction) const
     }
 
     return target;
+}
+
+std::filesystem::path Application::screenPath(int levelIndex, int screenIndex) const
+{
+    return assetRoot_ /
+        "levels" /
+        ("level" + std::to_string(levelIndex)) /
+        ("screen" + std::to_string(screenIndex) + ".scr");
+}
+
+bool Application::screenExists(int levelIndex, int screenIndex) const
+{
+    if (levelIndex < 0 || screenIndex < 0) {
+        return false;
+    }
+
+    return std::filesystem::exists(screenPath(levelIndex, screenIndex));
 }
 
 RenderFrameData Application::buildRenderFrame() const

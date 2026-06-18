@@ -24,6 +24,7 @@ public:
     [[nodiscard]] TileType tileAt(uint32_t x, uint32_t y) const;
     [[nodiscard]] bool inBounds(GridPosition position) const;
     [[nodiscard]] bool isWalkable(GridPosition position) const;
+    [[nodiscard]] bool isEnd(GridPosition position) const;
 
 private:
     uint32_t width_ = 0;

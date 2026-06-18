@@ -8,6 +8,7 @@
 #include "engine/render/VulkanRenderer.hpp"
 
 #include <deque>
+#include <filesystem>
 
 namespace sokoban {
 
@@ -29,6 +30,8 @@ public:
     void run();
 
 private:
+    void loadCurrentScreen();
+    void advanceScreen();
     void update(float dt);
     void queuePressedMovement();
     void advancePlayerMovement(float dt);
@@ -36,11 +39,16 @@ private:
     [[nodiscard]] bool tryStartHeldMove();
     [[nodiscard]] bool tryStartMove(MoveDirection direction);
     [[nodiscard]] GridPosition movementTarget(MoveDirection direction) const;
+    [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;
+    [[nodiscard]] bool screenExists(int levelIndex, int screenIndex) const;
     [[nodiscard]] RenderFrameData buildRenderFrame() const;
 
     Window window_;
     VulkanRenderer renderer_;
+    std::filesystem::path assetRoot_;
     Level level_;
+    int currentLevel_ = 0;
+    int currentScreen_ = 0;
     InputState input_;
     FrameTimer frameTimer_;
     GridPosition playerCell_ {};

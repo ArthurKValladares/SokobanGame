@@ -29,8 +29,8 @@ find_program(GLSLC_EXECUTABLE glslc
 
 set(SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/shaders")
-set(LEVEL_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/test-level.lvl")
-set(LEVEL_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/assets/test-level.lvl")
+set(LEVEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/levels")
+set(LEVEL_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/levels")
 
 set(SHADER_SOURCES
     "${SHADER_SOURCE_DIR}/triangle.vert.glsl"
@@ -60,15 +60,14 @@ endforeach()
 
 add_custom_target(sokoban_shaders DEPENDS ${SHADER_OUTPUTS})
 
-add_custom_command(
-    OUTPUT "${LEVEL_OUTPUT}"
+file(GLOB_RECURSE LEVEL_SOURCES CONFIGURE_DEPENDS "${LEVEL_SOURCE_DIR}/*")
+
+add_custom_target(sokoban_assets
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/assets"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${LEVEL_SOURCE}" "${LEVEL_OUTPUT}"
-    DEPENDS "${LEVEL_SOURCE}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${LEVEL_SOURCE_DIR}" "${LEVEL_OUTPUT_DIR}"
+    DEPENDS ${LEVEL_SOURCES}
     VERBATIM
 )
-
-add_custom_target(sokoban_assets DEPENDS "${LEVEL_OUTPUT}")
 
 add_executable(sokoban
     src/main.cpp
