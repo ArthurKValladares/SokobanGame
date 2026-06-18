@@ -4,15 +4,33 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cmath>
 
 namespace sokoban {
+namespace {
+
+Vec2 toVec2(GridPosition position)
+{
+    return { static_cast<float>(position.x), static_cast<float>(position.y) };
+}
+
+Vec2 lerp(Vec2 from, Vec2 to, float t)
+{
+    return {
+        from.x + (to.x - from.x) * t,
+        from.y + (to.y - from.y) * t,
+    };
+}
+
+} // namespace
 
 Application::Application()
     : window_("Sokoban 3D", 1280, 720)
     , renderer_(window_.nativeHandle(), SOKOBAN_ASSET_DIR)
     , level_(Level::loadFromFile(std::filesystem::path(SOKOBAN_ASSET_DIR) / "test-level.lvl"))
-    , playerPosition_(level_.playerStart())
+    , playerCell_(level_.playerStart())
+    , playerRenderPosition_(toVec2(playerCell_))
 {
 }
 
@@ -48,29 +66,126 @@ void Application::run()
 
 void Application::update(float dt)
 {
-    Vec2 movement;
+    queuePressedMovement();
+    advancePlayerMovement(dt);
+}
 
-    if (input_.keyDown(SDL_SCANCODE_A)) {
-        movement.x -= 1.0f;
+void Application::queuePressedMovement()
+{
+    if (input_.keyPressed(SDL_SCANCODE_W)) {
+        pendingMoves_.push_back(MoveDirection::Up);
     }
-    if (input_.keyDown(SDL_SCANCODE_D)) {
-        movement.x += 1.0f;
+    if (input_.keyPressed(SDL_SCANCODE_S)) {
+        pendingMoves_.push_back(MoveDirection::Down);
     }
+    if (input_.keyPressed(SDL_SCANCODE_A)) {
+        pendingMoves_.push_back(MoveDirection::Left);
+    }
+    if (input_.keyPressed(SDL_SCANCODE_D)) {
+        pendingMoves_.push_back(MoveDirection::Right);
+    }
+}
+
+void Application::advancePlayerMovement(float dt)
+{
+    float remainingTime = dt;
+
+    while (remainingTime > 0.0f) {
+        if (!moving_ && !tryStartNextMove()) {
+            return;
+        }
+
+        if constexpr (config::playerMoveDurationSeconds <= 0.0f) {
+            playerCell_ = moveTarget_;
+            playerRenderPosition_ = toVec2(playerCell_);
+            moving_ = false;
+            continue;
+        }
+
+        constexpr float duration = config::playerMoveDurationSeconds;
+        const float timeToFinish = duration - moveElapsed_;
+        const float step = std::min(remainingTime, timeToFinish);
+        remainingTime -= step;
+        moveElapsed_ += step;
+
+        const float t = std::clamp(moveElapsed_ / duration, 0.0f, 1.0f);
+        playerRenderPosition_ = lerp(toVec2(moveStart_), toVec2(moveTarget_), t);
+
+        if (moveElapsed_ >= duration) {
+            playerCell_ = moveTarget_;
+            playerRenderPosition_ = toVec2(playerCell_);
+            moving_ = false;
+            moveElapsed_ = 0.0f;
+        }
+    }
+}
+
+bool Application::tryStartNextMove()
+{
+    while (!pendingMoves_.empty()) {
+        const MoveDirection direction = pendingMoves_.front();
+        pendingMoves_.pop_front();
+
+        if (tryStartMove(direction)) {
+            return true;
+        }
+    }
+
+    return tryStartHeldMove();
+}
+
+bool Application::tryStartHeldMove()
+{
     if (input_.keyDown(SDL_SCANCODE_W)) {
-        movement.y -= 1.0f;
+        return tryStartMove(MoveDirection::Up);
     }
     if (input_.keyDown(SDL_SCANCODE_S)) {
-        movement.y += 1.0f;
+        return tryStartMove(MoveDirection::Down);
+    }
+    if (input_.keyDown(SDL_SCANCODE_A)) {
+        return tryStartMove(MoveDirection::Left);
+    }
+    if (input_.keyDown(SDL_SCANCODE_D)) {
+        return tryStartMove(MoveDirection::Right);
     }
 
-    const float length = std::sqrt(movement.x * movement.x + movement.y * movement.y);
-    if (length > 0.0f) {
-        movement.x /= length;
-        movement.y /= length;
+    return false;
+}
+
+bool Application::tryStartMove(MoveDirection direction)
+{
+    const GridPosition target = movementTarget(direction);
+    if (!level_.isWalkable(target)) {
+        return false;
     }
 
-    playerPosition_.x += movement.x * config::playerMoveSpeedTilesPerSecond * dt;
-    playerPosition_.y += movement.y * config::playerMoveSpeedTilesPerSecond * dt;
+    moveStart_ = playerCell_;
+    moveTarget_ = target;
+    moveElapsed_ = 0.0f;
+    moving_ = true;
+    return true;
+}
+
+GridPosition Application::movementTarget(MoveDirection direction) const
+{
+    GridPosition target = playerCell_;
+
+    switch (direction) {
+    case MoveDirection::Up:
+        target.y -= 1;
+        break;
+    case MoveDirection::Down:
+        target.y += 1;
+        break;
+    case MoveDirection::Left:
+        target.x -= 1;
+        break;
+    case MoveDirection::Right:
+        target.x += 1;
+        break;
+    }
+
+    return target;
 }
 
 RenderFrameData Application::buildRenderFrame() const
@@ -78,7 +193,7 @@ RenderFrameData Application::buildRenderFrame() const
     RenderFrameData frame;
     frame.levelWidth = level_.width();
     frame.levelHeight = level_.height();
-    frame.playerPosition = playerPosition_;
+    frame.playerPosition = playerRenderPosition_;
 
     frame.tiles.reserve(static_cast<size_t>(level_.width()) * level_.height());
     for (uint32_t y = 0; y < level_.height(); ++y) {
@@ -106,7 +221,7 @@ RenderFrameData Application::buildRenderFrame() const
     }
 
     frame.tiles.push_back({
-        .position = playerPosition_,
+        .position = playerRenderPosition_,
         .color = { 0.0f, 1.0f, 0.15f, 1.0f },
     });
 

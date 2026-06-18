@@ -69,7 +69,7 @@ Level Level::loadFromFile(const std::filesystem::path& path)
                     throw std::runtime_error("Level has more than one player start: " + path.string());
                 }
                 hasPlayer = true;
-                level.playerStart_ = { static_cast<float>(x), static_cast<float>(y) };
+                level.playerStart_ = { static_cast<int>(x), static_cast<int>(y) };
             }
         }
     }
@@ -84,6 +84,23 @@ Level Level::loadFromFile(const std::filesystem::path& path)
 TileType Level::tileAt(uint32_t x, uint32_t y) const
 {
     return tiles_[static_cast<size_t>(y) * width_ + x];
+}
+
+bool Level::inBounds(GridPosition position) const
+{
+    return position.x >= 0 &&
+        position.y >= 0 &&
+        position.x < static_cast<int>(width_) &&
+        position.y < static_cast<int>(height_);
+}
+
+bool Level::isWalkable(GridPosition position) const
+{
+    if (!inBounds(position)) {
+        return false;
+    }
+
+    return tileAt(static_cast<uint32_t>(position.x), static_cast<uint32_t>(position.y)) != TileType::Wall;
 }
 
 } // namespace sokoban

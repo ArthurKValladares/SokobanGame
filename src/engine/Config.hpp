@@ -2,6 +2,6 @@
 
 namespace sokoban::config {
 
-inline constexpr float playerMoveSpeedTilesPerSecond = 3.0f;
+inline constexpr float playerMoveDurationSeconds = 0.15f;
 
 } // namespace sokoban::config

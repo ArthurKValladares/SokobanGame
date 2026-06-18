@@ -14,4 +14,9 @@ struct Vec4 {
     float w = 0.0f;
 };
 
+struct GridPosition {
+    int x = 0;
+    int y = 0;
+};
+
 } // namespace sokoban
