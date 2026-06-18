@@ -61,6 +61,7 @@ private:
     void loadCurrentScreen();
     void advanceScreen();
     void update(float dt);
+    void drawDebugUi();
     void queuePressedCommands();
     void advancePlayerMovement(float dt);
     [[nodiscard]] bool completeActiveAction();

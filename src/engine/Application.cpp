@@ -1,8 +1,13 @@
 #include "engine/Application.hpp"
 
 #include "engine/Config.hpp"
+#include "engine/DebugUi.hpp"
 
 #include <SDL3/SDL.h>
+
+#if SOKOBAN_ENABLE_DEBUG_UI
+#include <imgui.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -31,11 +36,18 @@ Application::Application()
     , renderer_(window_.nativeHandle(), SOKOBAN_ASSET_DIR)
     , assetRoot_(SOKOBAN_ASSET_DIR)
 {
+#if SOKOBAN_ENABLE_DEBUG_UI
+    DebugUi::addWindow("Engine", [this] {
+        drawDebugUi();
+    });
+#endif
+
     loadCurrentScreen();
 }
 
 Application::~Application()
 {
+    DebugUi::clearWindows();
     renderer_.waitIdle();
 }
 
@@ -46,7 +58,11 @@ void Application::run()
 
         SDL_Event event {};
         while (SDL_PollEvent(&event)) {
-            input_.handleEvent(event);
+            renderer_.handleEvent(event);
+
+            if (!renderer_.wantsKeyboardCapture() || event.type == SDL_EVENT_KEY_UP) {
+                input_.handleEvent(event);
+            }
 
             if (event.type == SDL_EVENT_QUIT) {
                 running_ = false;
@@ -60,6 +76,8 @@ void Application::run()
         const float dt = frameTimer_.tick();
         update(dt);
 
+        renderer_.beginDebugUiFrame();
+        DebugUi::draw();
         renderer_.drawFrame(buildRenderFrame());
     }
 }
@@ -68,6 +86,17 @@ void Application::update(float dt)
 {
     queuePressedCommands();
     advancePlayerMovement(dt);
+}
+
+void Application::drawDebugUi()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    ImGui::Text("Level %d Screen %d", currentLevel_, currentScreen_);
+    ImGui::Text("Player (%d, %d)", playerCell_.x, playerCell_.y);
+    ImGui::Text("Rocks %zu", rocks_.size());
+    ImGui::Text("History %zu", moveHistory_.size());
+    ImGui::Text("End %s", isEndUnlocked() ? "unlocked" : "locked");
+#endif
 }
 
 void Application::loadCurrentScreen()

@@ -4,3 +4,4 @@ out/
 *.user
 *.suo
 *.log
+imgui.ini

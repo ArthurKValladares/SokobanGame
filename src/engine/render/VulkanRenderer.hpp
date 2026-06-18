@@ -2,6 +2,7 @@
 
 #include "engine/Math.hpp"
 
+#include <SDL3/SDL_events.h>
 #include <SDL3/SDL_video.h>
 #include <vulkan/vulkan.h>
 
@@ -34,6 +35,9 @@ public:
     VulkanRenderer& operator=(const VulkanRenderer&) = delete;
 
     void drawFrame(const RenderFrameData& frameData);
+    void handleEvent(const SDL_Event& event);
+    void beginDebugUiFrame();
+    [[nodiscard]] bool wantsKeyboardCapture() const;
     void waitIdle() const;
 
 private:
@@ -73,6 +77,9 @@ private:
     void createCommandPool();
     void createPipeline();
     void createFrameResources();
+    void initializeDebugUi();
+    void shutdownDebugUi();
+    void renderDebugUi(VkCommandBuffer commandBuffer) const;
     void recreateSwapchain();
     void cleanupSwapchain();
 

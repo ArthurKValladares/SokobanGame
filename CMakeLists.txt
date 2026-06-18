@@ -22,6 +22,21 @@ else()
     find_package(SDL3 CONFIG REQUIRED)
 endif()
 
+set(SOKOBAN_IMGUI_SOURCES)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/imgui.cpp")
+    set(SOKOBAN_IMGUI_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/imgui.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/imgui_draw.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/imgui_tables.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/imgui_widgets.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/backends/imgui_impl_sdl3.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/backends/imgui_impl_vulkan.cpp"
+    )
+    if(MSVC)
+        set_source_files_properties(${SOKOBAN_IMGUI_SOURCES} PROPERTIES COMPILE_OPTIONS /W0)
+    endif()
+endif()
+
 find_program(GLSLC_EXECUTABLE glslc
     HINTS "$ENV{VULKAN_SDK}/Bin"
     REQUIRED
@@ -72,20 +87,32 @@ add_custom_target(sokoban_assets
 add_executable(sokoban
     src/main.cpp
     src/engine/Application.cpp
+    src/engine/DebugUi.cpp
     src/engine/Input.cpp
     src/engine/Level.cpp
     src/engine/Window.cpp
     src/engine/render/VulkanRenderer.cpp
 )
+foreach(imgui_source IN LISTS SOKOBAN_IMGUI_SOURCES)
+    target_sources(sokoban PRIVATE $<$<CONFIG:Debug>:${imgui_source}>)
+endforeach()
 
 add_dependencies(sokoban sokoban_shaders sokoban_assets)
 
-target_include_directories(sokoban PRIVATE src)
-target_link_libraries(sokoban PRIVATE Vulkan::Vulkan SDL3::SDL3)
+target_include_directories(sokoban PRIVATE
+    src
+    third_party/imgui
+    third_party/imgui/backends
+)
+target_link_libraries(sokoban PRIVATE
+    Vulkan::Vulkan
+    SDL3::SDL3
+)
 
 target_compile_definitions(sokoban PRIVATE
     SDL_MAIN_USE_CALLBACKS=0
     SOKOBAN_ASSET_DIR="${CMAKE_CURRENT_BINARY_DIR}/assets"
+    $<$<CONFIG:Debug>:SOKOBAN_ENABLE_DEBUG_UI=1>
 )
 
 if(SOKOBAN_ENABLE_VALIDATION)

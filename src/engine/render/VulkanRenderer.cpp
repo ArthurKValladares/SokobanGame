@@ -3,12 +3,22 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
+#if SOKOBAN_ENABLE_DEBUG_UI
+#include <imgui.h>
+#include <imgui_impl_sdl3.h>
+#include <imgui_impl_vulkan.h>
+#endif
+
 #include <algorithm>
 #include <array>
 #include <fstream>
 #include <optional>
 #include <set>
 #include <stdexcept>
+
+#ifndef SOKOBAN_ENABLE_DEBUG_UI
+#define SOKOBAN_ENABLE_DEBUG_UI 0
+#endif
 
 namespace sokoban {
 namespace {
@@ -87,6 +97,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, std::filesystem::path assetRo
     createCommandPool();
     createPipeline();
     createFrameResources();
+    initializeDebugUi();
 }
 
 VulkanRenderer::~VulkanRenderer()
@@ -94,6 +105,8 @@ VulkanRenderer::~VulkanRenderer()
     if (device_) {
         vkDeviceWaitIdle(device_);
     }
+
+    shutdownDebugUi();
 
     for (auto& frame : frames_) {
         if (frame.imageAvailable) {
@@ -152,6 +165,11 @@ void VulkanRenderer::drawFrame(const RenderFrameData& frameData)
 
     vkCheck(vkResetFences(device_, 1, &frame.inFlight), "vkResetFences failed");
     vkCheck(vkResetCommandBuffer(frame.commandBuffer, 0), "vkResetCommandBuffer failed");
+
+#if SOKOBAN_ENABLE_DEBUG_UI
+    ImGui::Render();
+#endif
+
     recordCommandBuffer(frame.commandBuffer, imageIndex, frameData);
 
     VkSemaphoreSubmitInfo waitSemaphore {
@@ -200,6 +218,33 @@ void VulkanRenderer::drawFrame(const RenderFrameData& frameData)
     }
 
     currentFrame_ = (currentFrame_ + 1) % maxFramesInFlight_;
+}
+
+void VulkanRenderer::handleEvent(const SDL_Event& event)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    ImGui_ImplSDL3_ProcessEvent(&event);
+#else
+    (void)event;
+#endif
+}
+
+void VulkanRenderer::beginDebugUiFrame()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+#endif
+}
+
+bool VulkanRenderer::wantsKeyboardCapture() const
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    return ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard;
+#else
+    return false;
+#endif
 }
 
 void VulkanRenderer::waitIdle() const
@@ -493,6 +538,66 @@ void VulkanRenderer::createFrameResources()
     }
 }
 
+void VulkanRenderer::initializeDebugUi()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    ImGui::StyleColorsDark();
+
+    if (!ImGui_ImplSDL3_InitForVulkan(window_)) {
+        throw std::runtime_error("ImGui_ImplSDL3_InitForVulkan failed");
+    }
+
+    const VkFormat colorAttachmentFormat = swapchainFormat_;
+    VkPipelineRenderingCreateInfoKHR pipelineRendering {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
+        .colorAttachmentCount = 1,
+        .pColorAttachmentFormats = &colorAttachmentFormat,
+    };
+
+    ImGui_ImplVulkan_InitInfo initInfo {};
+    initInfo.ApiVersion = VK_API_VERSION_1_4;
+    initInfo.Instance = instance_;
+    initInfo.PhysicalDevice = physicalDevice_;
+    initInfo.Device = device_;
+    initInfo.QueueFamily = queueFamilies_.graphics;
+    initInfo.Queue = graphicsQueue_;
+    initInfo.DescriptorPoolSize = 64;
+    initInfo.MinImageCount = 2;
+    initInfo.ImageCount = std::max(2U, static_cast<uint32_t>(swapchainImages_.size()));
+    initInfo.PipelineInfoMain.PipelineRenderingCreateInfo = pipelineRendering;
+    initInfo.UseDynamicRendering = true;
+    initInfo.MinAllocationSize = 1024 * 1024;
+
+    if (!ImGui_ImplVulkan_Init(&initInfo)) {
+        throw std::runtime_error("ImGui_ImplVulkan_Init failed");
+    }
+#endif
+}
+
+void VulkanRenderer::shutdownDebugUi()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (ImGui::GetCurrentContext()) {
+        ImGui_ImplVulkan_Shutdown();
+        ImGui_ImplSDL3_Shutdown();
+        ImGui::DestroyContext();
+    }
+#endif
+}
+
+void VulkanRenderer::renderDebugUi(VkCommandBuffer commandBuffer) const
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
+#else
+    (void)commandBuffer;
+#endif
+}
+
 void VulkanRenderer::recreateSwapchain()
 {
     int width = 0;
@@ -604,6 +709,8 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
     for (const auto& tile : frameData.tiles) {
         drawTile(commandBuffer, tileLayout, tile);
     }
+
+    renderDebugUi(commandBuffer);
 
     vkCmdEndRendering(commandBuffer);
 
