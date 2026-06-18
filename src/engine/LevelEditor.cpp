@@ -16,11 +16,6 @@ namespace sokoban {
 namespace {
 
 #if SOKOBAN_ENABLE_DEBUG_UI
-const char* tileButtonLabel(TileType tile)
-{
-    return tile == TileType::Empty ? "." : nullptr;
-}
-
 std::string_view levelCharacterName(char character)
 {
     if (const auto tile = charToTileType(character)) {
@@ -38,9 +33,8 @@ void drawPaintButton(const TileTypeDefinition& definition, TileType& selectedTil
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.50f, 0.85f, 1.0f));
     }
 
-    const char* emptyLabel = tileButtonLabel(definition.type);
-    std::string label = emptyLabel ? std::string(emptyLabel) : std::string(1, definition.character);
-    label += "##palette_";
+    std::string label(1, tileTypeToChar(definition.type));
+    label += " ##palette_";
     label += definition.name;
     if (ImGui::Button(label.c_str(), ImVec2(32.0f, 28.0f))) {
         selectedTile = definition.type;
@@ -281,8 +275,7 @@ void LevelEditor::drawGrid()
             for (size_t x = 0; x < document_.rows[y].size(); ++x) {
                 ImGui::PushID(static_cast<int>(y * document_.rows[y].size() + x));
                 char tile = document_.rows[y][x];
-                const char* emptyLabel = tileButtonLabel(charToTileType(tile).value_or(TileType::Count));
-                const std::string label = emptyLabel ? emptyLabel : std::string(1, tile);
+                const std::string label(1, tile);
                 if (ImGui::Button(label.c_str(), ImVec2(26.0f, 24.0f))) {
                     paintCell({ static_cast<int>(x), static_cast<int>(y) });
                 }
