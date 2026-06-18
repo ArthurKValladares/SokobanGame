@@ -14,12 +14,19 @@
 
 namespace sokoban {
 
+enum class RenderViewMode {
+    TopDown2D,
+    Isometric3D,
+};
+
 struct RenderFrameData {
     struct Tile {
         Vec2 position {};
         Vec4 color {};
+        float height = 0.0f;
     };
 
+    RenderViewMode viewMode = RenderViewMode::TopDown2D;
     uint32_t levelWidth = 0;
     uint32_t levelHeight = 0;
     Vec2 playerPosition {};
@@ -69,6 +76,16 @@ private:
         Vec2 tileSize {};
     };
 
+    struct IsoRenderLayout {
+        Vec3 cameraPosition {};
+        Vec3 cameraRight {};
+        Vec3 cameraUp {};
+        Vec3 cameraForward {};
+        Vec2 projectedCenter {};
+        float focalLength = 1.0f;
+        float fitScale = 1.0f;
+    };
+
     void createInstance();
     void createSurface();
     void pickPhysicalDevice();
@@ -86,7 +103,12 @@ private:
 
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData);
     [[nodiscard]] TileRenderLayout calculateTileRenderLayout(const RenderFrameData& frameData) const;
+    [[nodiscard]] IsoRenderLayout calculateIsoRenderLayout(const RenderFrameData& frameData) const;
     void drawTile(VkCommandBuffer commandBuffer, const TileRenderLayout& layout, const RenderFrameData::Tile& tile) const;
+    void drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const RenderFrameData& frameData) const;
+    void drawIsoTile(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const RenderFrameData::Tile& tile) const;
+    void drawFace(VkCommandBuffer commandBuffer, const std::array<Vec2, 4>& vertices, Vec4 color) const;
+    [[nodiscard]] Vec2 projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) const;
     [[nodiscard]] Vec2 pixelSizeToClipSpace(float pixelSize) const;
 
     [[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;

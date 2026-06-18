@@ -656,6 +656,7 @@ RenderFrameData Application::buildRenderFrame() const
 RenderFrameData Application::buildGameplayRenderFrame() const
 {
     RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
     frame.levelWidth = level_.width();
     frame.levelHeight = level_.height();
     frame.playerPosition = playerRenderPosition_;
@@ -670,6 +671,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             frame.tiles.push_back({
                 .position = { static_cast<float>(x), static_cast<float>(y) },
                 .color = tileColor(tile, tileIsActive),
+                .height = tile == TileType::Wall ? 1.0f : 0.0f,
             });
         }
     }
@@ -677,12 +679,14 @@ RenderFrameData Application::buildGameplayRenderFrame() const
     frame.tiles.push_back({
         .position = playerRenderPosition_,
         .color = tileColor(TileType::Player),
+        .height = 1.0f,
     });
 
     for (const Rock& rock : rocks_) {
         frame.tiles.push_back({
             .position = rock.renderPosition,
             .color = tileColor(TileType::Rock),
+            .height = 1.0f,
         });
     }
 
@@ -692,6 +696,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
 RenderFrameData Application::buildEditorRenderFrame() const
 {
     RenderFrameData frame;
+    frame.viewMode = RenderViewMode::TopDown2D;
     frame.levelWidth = levelEditor_.documentWidth();
     frame.levelHeight = levelEditor_.documentHeight();
 

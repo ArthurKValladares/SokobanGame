@@ -1,6 +1,7 @@
 #include "engine/render/VulkanRenderer.hpp"
 
 #include "engine/BoardLayout.hpp"
+#include "engine/Config.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -13,7 +14,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -33,10 +36,76 @@ constexpr std::array<const char*, 4> requiredDeviceExtensions {
 };
 
 struct TilePushConstants {
-    Vec2 origin;
-    Vec2 size;
+    std::array<Vec2, 6> vertices;
     Vec4 color;
 };
+
+struct IsoFace {
+    std::array<Vec2, 4> vertices {};
+    Vec4 color {};
+    float depth = 0.0f;
+};
+
+Vec3 subtract(Vec3 left, Vec3 right)
+{
+    return {
+        left.x - right.x,
+        left.y - right.y,
+        left.z - right.z,
+    };
+}
+
+Vec3 multiply(Vec3 value, float scalar)
+{
+    return {
+        value.x * scalar,
+        value.y * scalar,
+        value.z * scalar,
+    };
+}
+
+Vec3 add(Vec3 left, Vec3 right)
+{
+    return {
+        left.x + right.x,
+        left.y + right.y,
+        left.z + right.z,
+    };
+}
+
+float dot(Vec3 left, Vec3 right)
+{
+    return left.x * right.x + left.y * right.y + left.z * right.z;
+}
+
+Vec3 cross(Vec3 left, Vec3 right)
+{
+    return {
+        left.y * right.z - left.z * right.y,
+        left.z * right.x - left.x * right.z,
+        left.x * right.y - left.y * right.x,
+    };
+}
+
+Vec3 normalize(Vec3 value)
+{
+    const float length = std::sqrt(dot(value, value));
+    if (length <= 0.0001f) {
+        return {};
+    }
+
+    return multiply(value, 1.0f / length);
+}
+
+Vec4 shadeColor(Vec4 color, float multiplier)
+{
+    return {
+        color.x * multiplier,
+        color.y * multiplier,
+        color.z * multiplier,
+        color.w,
+    };
+}
 
 std::vector<const char*> validationLayers()
 {
@@ -698,9 +767,9 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
 
     VkViewport viewport {
         .x = 0.0f,
-        .y = 0.0f,
+        .y = static_cast<float>(swapchainExtent_.height),
         .width = static_cast<float>(swapchainExtent_.width),
-        .height = static_cast<float>(swapchainExtent_.height),
+        .height = -static_cast<float>(swapchainExtent_.height),
         .minDepth = 0.0f,
         .maxDepth = 1.0f,
     };
@@ -716,9 +785,13 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
     vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
     vkCmdSetPrimitiveTopology(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
 
-    const TileRenderLayout tileLayout = calculateTileRenderLayout(frameData);
-    for (const auto& tile : frameData.tiles) {
-        drawTile(commandBuffer, tileLayout, tile);
+    if (frameData.viewMode == RenderViewMode::Isometric3D) {
+        drawIsoFrame(commandBuffer, calculateIsoRenderLayout(frameData), frameData);
+    } else {
+        const TileRenderLayout tileLayout = calculateTileRenderLayout(frameData);
+        for (const auto& tile : frameData.tiles) {
+            drawTile(commandBuffer, tileLayout, tile);
+        }
     }
 
     renderDebugUi(commandBuffer);
@@ -772,15 +845,203 @@ VulkanRenderer::TileRenderLayout VulkanRenderer::calculateTileRenderLayout(const
     };
 }
 
+VulkanRenderer::IsoRenderLayout VulkanRenderer::calculateIsoRenderLayout(const RenderFrameData& frameData) const
+{
+    if (frameData.levelWidth == 0 || frameData.levelHeight == 0) {
+        return {};
+    }
+
+    constexpr float radiansPerDegree = 3.14159265358979323846f / 180.0f;
+    const float pitch = config::boardPitchDegrees * radiansPerDegree;
+    const float cameraDistance = std::max(
+        static_cast<float>(std::max(frameData.levelWidth, frameData.levelHeight)),
+        1.0f) * config::perspectiveCameraDistanceScale;
+    const Vec3 target {
+        static_cast<float>(frameData.levelWidth) * 0.5f,
+        static_cast<float>(frameData.levelHeight) * 0.5f,
+        0.0f,
+    };
+    const Vec3 cameraPosition {
+        target.x,
+        target.y + std::sin(pitch) * cameraDistance,
+        target.z + std::cos(pitch) * cameraDistance,
+    };
+    const Vec3 cameraForward = normalize(subtract(target, cameraPosition));
+    const Vec3 cameraRight = normalize(cross({ 0.0f, 0.0f, 1.0f }, cameraForward));
+    const Vec3 cameraUp = normalize(cross(cameraForward, cameraRight));
+    const float focalLength = 1.0f / std::tan(config::perspectiveFovDegrees * radiansPerDegree * 0.5f);
+
+    IsoRenderLayout layout {
+        .cameraPosition = cameraPosition,
+        .cameraRight = cameraRight,
+        .cameraUp = cameraUp,
+        .cameraForward = cameraForward,
+        .projectedCenter = {},
+        .focalLength = focalLength,
+        .fitScale = 1.0f,
+    };
+
+    Vec2 minPoint { std::numeric_limits<float>::max(), std::numeric_limits<float>::max() };
+    Vec2 maxPoint { std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest() };
+
+    auto includePoint = [&](Vec2 point) {
+        minPoint.x = std::min(minPoint.x, point.x);
+        minPoint.y = std::min(minPoint.y, point.y);
+        maxPoint.x = std::max(maxPoint.x, point.x);
+        maxPoint.y = std::max(maxPoint.y, point.y);
+    };
+    for (const RenderFrameData::Tile& tile : frameData.tiles) {
+        const float x = tile.position.x;
+        const float y = tile.position.y;
+        const float top = std::max(tile.height, 0.0f);
+        includePoint(projectIsoPoint(layout, { x, y, 0.0f }));
+        includePoint(projectIsoPoint(layout, { x + 1.0f, y, 0.0f }));
+        includePoint(projectIsoPoint(layout, { x + 1.0f, y + 1.0f, 0.0f }));
+        includePoint(projectIsoPoint(layout, { x, y + 1.0f, 0.0f }));
+        includePoint(projectIsoPoint(layout, { x, y, top }));
+        includePoint(projectIsoPoint(layout, { x + 1.0f, y, top }));
+        includePoint(projectIsoPoint(layout, { x + 1.0f, y + 1.0f, top }));
+        includePoint(projectIsoPoint(layout, { x, y + 1.0f, top }));
+    }
+
+    const Vec2 sceneSize {
+        std::max(maxPoint.x - minPoint.x, 0.001f),
+        std::max(maxPoint.y - minPoint.y, 0.001f),
+    };
+    layout.projectedCenter = {
+        (minPoint.x + maxPoint.x) * 0.5f,
+        (minPoint.y + maxPoint.y) * 0.5f,
+    };
+    layout.fitScale = 1.82f * std::min(1.0f / sceneSize.x, 1.0f / sceneSize.y);
+    return layout;
+}
+
 void VulkanRenderer::drawTile(VkCommandBuffer commandBuffer, const TileRenderLayout& layout, const RenderFrameData::Tile& tile) const
 {
+    const Vec2 origin {
+        layout.boardBottomLeft.x + tile.position.x * layout.tileSize.x,
+        layout.boardBottomLeft.y + tile.position.y * layout.tileSize.y,
+    };
+
+    drawFace(commandBuffer, {
+        origin,
+        { origin.x + layout.tileSize.x, origin.y },
+        { origin.x + layout.tileSize.x, origin.y + layout.tileSize.y },
+        { origin.x, origin.y + layout.tileSize.y },
+    }, tile.color);
+}
+
+void VulkanRenderer::drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const RenderFrameData& frameData) const
+{
+    std::vector<IsoFace> faces;
+    faces.reserve(frameData.tiles.size() * 5);
+
+    auto faceDepth = [&](const std::array<Vec3, 4>& vertices) {
+        float depth = 0.0f;
+        for (Vec3 vertex : vertices) {
+            depth += dot(subtract(vertex, layout.cameraPosition), layout.cameraForward);
+        }
+        return depth * 0.25f;
+    };
+
+    auto faceVisible = [&](const std::array<Vec3, 4>& vertices, Vec3 normal) {
+        const Vec3 center = multiply(add(add(vertices[0], vertices[1]), add(vertices[2], vertices[3])), 0.25f);
+        return dot(normal, subtract(layout.cameraPosition, center)) > 0.0f;
+    };
+
+    auto appendFace = [&](const std::array<Vec3, 4>& vertices, Vec3 normal, Vec4 color) {
+        if (!faceVisible(vertices, normal)) {
+            return;
+        }
+
+        faces.push_back({
+            .vertices = {
+                projectIsoPoint(layout, vertices[0]),
+                projectIsoPoint(layout, vertices[1]),
+                projectIsoPoint(layout, vertices[2]),
+                projectIsoPoint(layout, vertices[3]),
+            },
+            .color = color,
+            .depth = faceDepth(vertices),
+        });
+    };
+    for (const RenderFrameData::Tile& tile : frameData.tiles) {
+        const float x = tile.position.x;
+        const float y = tile.position.y;
+        const float height = std::max(tile.height, 0.0f);
+        const Vec3 a { x, y, 0.0f };
+        const Vec3 b { x + 1.0f, y, 0.0f };
+        const Vec3 c { x + 1.0f, y + 1.0f, 0.0f };
+        const Vec3 d { x, y + 1.0f, 0.0f };
+
+        if (height <= 0.0f) {
+            appendFace({ a, b, c, d }, { 0.0f, 0.0f, 1.0f }, tile.color);
+            continue;
+        }
+
+        const Vec3 e { x, y, height };
+        const Vec3 f { x + 1.0f, y, height };
+        const Vec3 g { x + 1.0f, y + 1.0f, height };
+        const Vec3 h { x, y + 1.0f, height };
+        appendFace({ a, b, f, e }, { 0.0f, -1.0f, 0.0f }, shadeColor(tile.color, 0.72f));
+        appendFace({ b, c, g, f }, { 1.0f, 0.0f, 0.0f }, shadeColor(tile.color, 0.82f));
+        appendFace({ c, d, h, g }, { 0.0f, 1.0f, 0.0f }, shadeColor(tile.color, 0.62f));
+        appendFace({ d, a, e, h }, { -1.0f, 0.0f, 0.0f }, shadeColor(tile.color, 0.82f));
+        appendFace({ e, f, g, h }, { 0.0f, 0.0f, 1.0f }, tile.color);
+    }
+
+    std::ranges::sort(faces, [](const IsoFace& left, const IsoFace& right) {
+        return left.depth > right.depth;
+    });
+
+    for (const IsoFace& face : faces) {
+        drawFace(commandBuffer, face.vertices, face.color);
+    }
+}
+
+void VulkanRenderer::drawIsoTile(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const RenderFrameData::Tile& tile) const
+{
+    const float x = tile.position.x;
+    const float y = tile.position.y;
+    const float height = std::max(tile.height, 0.0f);
+
+    if (height <= 0.0f) {
+        drawFace(commandBuffer, {
+            projectIsoPoint(layout, { x, y, 0.0f }),
+            projectIsoPoint(layout, { x + 1.0f, y, 0.0f }),
+            projectIsoPoint(layout, { x + 1.0f, y + 1.0f, 0.0f }),
+            projectIsoPoint(layout, { x, y + 1.0f, 0.0f }),
+        }, tile.color);
+        return;
+    }
+
+    const Vec2 a = projectIsoPoint(layout, { x, y, 0.0f });
+    const Vec2 b = projectIsoPoint(layout, { x + 1.0f, y, 0.0f });
+    const Vec2 c = projectIsoPoint(layout, { x + 1.0f, y + 1.0f, 0.0f });
+    const Vec2 d = projectIsoPoint(layout, { x, y + 1.0f, 0.0f });
+    const Vec2 e = projectIsoPoint(layout, { x, y, height });
+    const Vec2 f = projectIsoPoint(layout, { x + 1.0f, y, height });
+    const Vec2 g = projectIsoPoint(layout, { x + 1.0f, y + 1.0f, height });
+    const Vec2 h = projectIsoPoint(layout, { x, y + 1.0f, height });
+
+    drawFace(commandBuffer, { d, c, g, h }, shadeColor(tile.color, 0.62f));
+    drawFace(commandBuffer, { b, c, g, f }, shadeColor(tile.color, 0.78f));
+    drawFace(commandBuffer, { e, f, g, h }, tile.color);
+    (void)a;
+}
+
+void VulkanRenderer::drawFace(VkCommandBuffer commandBuffer, const std::array<Vec2, 4>& vertices, Vec4 color) const
+{
     const TilePushConstants pushConstants {
-        .origin = {
-            layout.boardBottomLeft.x + tile.position.x * layout.tileSize.x,
-            layout.boardBottomLeft.y + tile.position.y * layout.tileSize.y,
+        .vertices = {
+            vertices[0],
+            vertices[1],
+            vertices[2],
+            vertices[0],
+            vertices[2],
+            vertices[3],
         },
-        .size = layout.tileSize,
-        .color = tile.color,
+        .color = color,
     };
 
     vkCmdPushConstants(
@@ -791,6 +1052,24 @@ void VulkanRenderer::drawTile(VkCommandBuffer commandBuffer, const TileRenderLay
         sizeof(TilePushConstants),
         &pushConstants);
     vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+}
+
+Vec2 VulkanRenderer::projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) const
+{
+    const Vec3 relative = subtract(point, layout.cameraPosition);
+    const float cameraX = dot(relative, layout.cameraRight);
+    const float cameraY = dot(relative, layout.cameraUp);
+    const float cameraZ = std::max(dot(relative, layout.cameraForward), 0.001f);
+    const float aspect = static_cast<float>(swapchainExtent_.width) / static_cast<float>(swapchainExtent_.height);
+    const Vec2 projected {
+        layout.focalLength * cameraX / (cameraZ * aspect),
+        layout.focalLength * cameraY / cameraZ,
+    };
+
+    return {
+        (projected.x - layout.projectedCenter.x) * layout.fitScale,
+        (projected.y - layout.projectedCenter.y) * layout.fitScale,
+    };
 }
 
 Vec2 VulkanRenderer::pixelSizeToClipSpace(float pixelSize) const
