@@ -116,17 +116,14 @@ void Application::queuePressedCommands()
     if (input_.keyPressed(SDL_SCANCODE_R)) {
         pendingCommands_.push_back({ .type = MoveCommandType::Restart });
     }
-    if (input_.keyPressed(SDL_SCANCODE_W)) {
-        pendingCommands_.push_back({ .type = MoveCommandType::Move, .direction = MoveDirection::Up });
+
+    const std::optional<MoveDirection> vertical = pressedVerticalDirection();
+    const std::optional<MoveDirection> horizontal = pressedHorizontalDirection();
+    if (vertical) {
+        pendingCommands_.push_back({ .type = MoveCommandType::Move, .direction = *vertical });
     }
-    if (input_.keyPressed(SDL_SCANCODE_S)) {
-        pendingCommands_.push_back({ .type = MoveCommandType::Move, .direction = MoveDirection::Down });
-    }
-    if (input_.keyPressed(SDL_SCANCODE_A)) {
-        pendingCommands_.push_back({ .type = MoveCommandType::Move, .direction = MoveDirection::Left });
-    }
-    if (input_.keyPressed(SDL_SCANCODE_D)) {
-        pendingCommands_.push_back({ .type = MoveCommandType::Move, .direction = MoveDirection::Right });
+    if (horizontal) {
+        pendingCommands_.push_back({ .type = MoveCommandType::Move, .direction = *horizontal });
     }
 }
 
@@ -196,7 +193,7 @@ bool Application::tryStartNextMove()
             return true;
         }
 
-        if (command.type == MoveCommandType::Move && tryStartMove(command.direction)) {
+        if (command.type == MoveCommandType::Move && tryStartHeldDirection(command.direction, heldPerpendicularDirection(command.direction))) {
             return true;
         }
     }
@@ -209,17 +206,14 @@ bool Application::tryStartHeldMove()
     if (input_.keyDown(SDL_SCANCODE_Z)) {
         return tryStartUndoMove();
     }
-    if (input_.keyDown(SDL_SCANCODE_W)) {
-        return tryStartMove(MoveDirection::Up);
+
+    const std::optional<MoveDirection> vertical = heldVerticalDirection();
+    const std::optional<MoveDirection> horizontal = heldHorizontalDirection();
+    if (vertical && tryStartHeldDirection(*vertical, horizontal)) {
+        return true;
     }
-    if (input_.keyDown(SDL_SCANCODE_S)) {
-        return tryStartMove(MoveDirection::Down);
-    }
-    if (input_.keyDown(SDL_SCANCODE_A)) {
-        return tryStartMove(MoveDirection::Left);
-    }
-    if (input_.keyDown(SDL_SCANCODE_D)) {
-        return tryStartMove(MoveDirection::Right);
+    if (horizontal && tryStartHeldDirection(*horizontal, vertical)) {
+        return true;
     }
 
     return false;
@@ -298,6 +292,92 @@ bool Application::tryStartRestart()
     undoCursor_.reset();
     moveElapsed_ = 0.0f;
     moving_ = true;
+    return true;
+}
+
+std::optional<MoveDirection> Application::pressedVerticalDirection() const
+{
+    const bool upPressed = input_.keyPressed(SDL_SCANCODE_W);
+    const bool downPressed = input_.keyPressed(SDL_SCANCODE_S);
+    if (upPressed == downPressed) {
+        return std::nullopt;
+    }
+
+    if ((upPressed && input_.keyDown(SDL_SCANCODE_S)) || (downPressed && input_.keyDown(SDL_SCANCODE_W))) {
+        return std::nullopt;
+    }
+
+    return upPressed ? MoveDirection::Up : MoveDirection::Down;
+}
+
+std::optional<MoveDirection> Application::pressedHorizontalDirection() const
+{
+    const bool leftPressed = input_.keyPressed(SDL_SCANCODE_A);
+    const bool rightPressed = input_.keyPressed(SDL_SCANCODE_D);
+    if (leftPressed == rightPressed) {
+        return std::nullopt;
+    }
+
+    if ((leftPressed && input_.keyDown(SDL_SCANCODE_D)) || (rightPressed && input_.keyDown(SDL_SCANCODE_A))) {
+        return std::nullopt;
+    }
+
+    return leftPressed ? MoveDirection::Left : MoveDirection::Right;
+}
+
+std::optional<MoveDirection> Application::heldVerticalDirection() const
+{
+    const bool up = input_.keyDown(SDL_SCANCODE_W);
+    const bool down = input_.keyDown(SDL_SCANCODE_S);
+    if (up == down) {
+        return std::nullopt;
+    }
+
+    return up ? MoveDirection::Up : MoveDirection::Down;
+}
+
+std::optional<MoveDirection> Application::heldHorizontalDirection() const
+{
+    const bool left = input_.keyDown(SDL_SCANCODE_A);
+    const bool right = input_.keyDown(SDL_SCANCODE_D);
+    if (left == right) {
+        return std::nullopt;
+    }
+
+    return left ? MoveDirection::Left : MoveDirection::Right;
+}
+
+std::optional<MoveDirection> Application::heldPerpendicularDirection(MoveDirection direction) const
+{
+    switch (direction) {
+    case MoveDirection::Up:
+    case MoveDirection::Down:
+        return heldHorizontalDirection();
+    case MoveDirection::Left:
+    case MoveDirection::Right:
+        return heldVerticalDirection();
+    }
+
+    return std::nullopt;
+}
+
+bool Application::hasPendingMove(MoveDirection direction) const
+{
+    return std::ranges::any_of(pendingCommands_, [direction](const MoveCommand& command) {
+        return command.type == MoveCommandType::Move && command.direction == direction;
+    });
+}
+
+bool Application::tryStartHeldDirection(MoveDirection direction, std::optional<MoveDirection> queuedDirection)
+{
+    if (!tryStartMove(direction)) {
+        return false;
+    }
+
+    if (queuedDirection && !hasPendingMove(*queuedDirection)) {
+        pendingCommands_.push_back({ .type = MoveCommandType::Move, .direction = *queuedDirection });
+    }
+
     return true;
 }
 

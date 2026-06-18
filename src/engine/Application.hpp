@@ -69,6 +69,13 @@ private:
     [[nodiscard]] bool tryStartMove(MoveDirection direction);
     [[nodiscard]] bool tryStartUndoMove();
     [[nodiscard]] bool tryStartRestart();
+    [[nodiscard]] std::optional<MoveDirection> pressedVerticalDirection() const;
+    [[nodiscard]] std::optional<MoveDirection> pressedHorizontalDirection() const;
+    [[nodiscard]] std::optional<MoveDirection> heldVerticalDirection() const;
+    [[nodiscard]] std::optional<MoveDirection> heldHorizontalDirection() const;
+    [[nodiscard]] std::optional<MoveDirection> heldPerpendicularDirection(MoveDirection direction) const;
+    [[nodiscard]] bool hasPendingMove(MoveDirection direction) const;
+    [[nodiscard]] bool tryStartHeldDirection(MoveDirection direction, std::optional<MoveDirection> queuedDirection);
     [[nodiscard]] MoveRecord captureMoveRecord() const;
     void applyMoveRecord(const MoveRecord& record);
     [[nodiscard]] ActionRecord invertActionRecord(const ActionRecord& record) const;
