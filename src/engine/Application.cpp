@@ -31,6 +31,20 @@ Vec2 lerp(Vec2 from, Vec2 to, float t)
     };
 }
 
+int sampleCountValue(VkSampleCountFlagBits sampleCount)
+{
+    switch (sampleCount) {
+    case VK_SAMPLE_COUNT_2_BIT:
+        return 2;
+    case VK_SAMPLE_COUNT_4_BIT:
+        return 4;
+    case VK_SAMPLE_COUNT_8_BIT:
+        return 8;
+    default:
+        return 1;
+    }
+}
+
 } // namespace
 
 Application::Application()
@@ -126,6 +140,14 @@ void Application::drawDebugUi()
     ImGui::Text("Rocks %zu", rocks_.size());
     ImGui::Text("History %zu", moveHistory_.size());
     ImGui::Text("End %s", isEndUnlocked() ? "unlocked" : "locked");
+    ImGui::Separator();
+
+    constexpr const char* antiAliasingLabels[] { "None", "MSAA 2x", "MSAA 4x", "MSAA 8x" };
+    int antiAliasingIndex = static_cast<int>(renderer_.antiAliasingMode());
+    if (ImGui::Combo("Anti-aliasing", &antiAliasingIndex, antiAliasingLabels, static_cast<int>(std::size(antiAliasingLabels)))) {
+        renderer_.setAntiAliasingMode(static_cast<AntiAliasingMode>(antiAliasingIndex));
+    }
+    ImGui::Text("Active samples %dx", sampleCountValue(renderer_.activeSampleCount()));
 #endif
 }
 

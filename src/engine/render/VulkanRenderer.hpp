@@ -19,6 +19,13 @@ enum class RenderViewMode {
     Isometric3D,
 };
 
+enum class AntiAliasingMode {
+    None,
+    Msaa2x,
+    Msaa4x,
+    Msaa8x,
+};
+
 struct RenderFrameData {
     struct Tile {
         Vec2 position {};
@@ -47,6 +54,9 @@ public:
     [[nodiscard]] bool wantsKeyboardCapture() const;
     [[nodiscard]] bool wantsMouseCapture() const;
     void waitIdle() const;
+    [[nodiscard]] AntiAliasingMode antiAliasingMode() const;
+    [[nodiscard]] VkSampleCountFlagBits activeSampleCount() const;
+    void setAntiAliasingMode(AntiAliasingMode mode);
 
 private:
     struct QueueFamilyIndices {
@@ -61,6 +71,12 @@ private:
 
     struct SwapchainImage {
         VkImage image = VK_NULL_HANDLE;
+        VkImageView view = VK_NULL_HANDLE;
+    };
+
+    struct OwnedImage {
+        VkImage image = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
         VkImageView view = VK_NULL_HANDLE;
     };
 
@@ -92,16 +108,21 @@ private:
     void createDevice();
     void createSwapchain();
     void createImageViews();
+    void createMsaaColorResources();
     void createCommandPool();
     void createPipeline();
+    void destroyPipeline();
     void createFrameResources();
     void initializeDebugUi();
     void shutdownDebugUi();
     void renderDebugUi(VkCommandBuffer commandBuffer) const;
     void recreateSwapchain();
     void cleanupSwapchain();
+    void cleanupMsaaColorResources();
 
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData);
+    void recordGameRendering(VkCommandBuffer commandBuffer, VkImageView colorView, VkImageView resolveView, const RenderFrameData& frameData);
+    void recordDebugUiRendering(VkCommandBuffer commandBuffer, VkImageView colorView) const;
     [[nodiscard]] TileRenderLayout calculateTileRenderLayout(const RenderFrameData& frameData) const;
     [[nodiscard]] IsoRenderLayout calculateIsoRenderLayout(const RenderFrameData& frameData) const;
     void drawTile(VkCommandBuffer commandBuffer, const TileRenderLayout& layout, const RenderFrameData::Tile& tile) const;
@@ -118,6 +139,10 @@ private:
     [[nodiscard]] VkExtent2D chooseSwapchainExtent(const VkSurfaceCapabilitiesKHR& capabilities) const;
     [[nodiscard]] VkShaderModule createShaderModule(const std::filesystem::path& path) const;
     [[nodiscard]] std::array<VkPipeline, 2> createGraphicsPipelineLibraries(VkShaderModule vertexShader, VkShaderModule fragmentShader) const;
+    [[nodiscard]] VkSampleCountFlagBits sampleCountForMode(AntiAliasingMode mode) const;
+    [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
+    [[nodiscard]] VkImageView createImageView(VkImage image, VkFormat format) const;
+    [[nodiscard]] bool msaaEnabled() const;
 
     SDL_Window* window_ = nullptr;
     std::filesystem::path assetRoot_;
@@ -135,6 +160,7 @@ private:
     VkFormat swapchainFormat_ = VK_FORMAT_UNDEFINED;
     VkExtent2D swapchainExtent_ {};
     std::vector<SwapchainImage> swapchainImages_;
+    OwnedImage msaaColorImage_ {};
 
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
@@ -144,6 +170,8 @@ private:
     static constexpr uint32_t maxFramesInFlight_ = 2;
     std::array<FrameResources, maxFramesInFlight_> frames_ {};
     uint32_t currentFrame_ = 0;
+    AntiAliasingMode antiAliasingMode_ = AntiAliasingMode::None;
+    VkSampleCountFlagBits activeSampleCount_ = VK_SAMPLE_COUNT_1_BIT;
 };
 
 } // namespace sokoban

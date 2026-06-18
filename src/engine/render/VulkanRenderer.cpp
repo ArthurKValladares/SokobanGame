@@ -165,6 +165,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, std::filesystem::path assetRo
     createDevice();
     createSwapchain();
     createImageViews();
+    createMsaaColorResources();
     createCommandPool();
     createPipeline();
     createFrameResources();
@@ -191,17 +192,7 @@ VulkanRenderer::~VulkanRenderer()
         }
     }
 
-    if (pipeline_) {
-        vkDestroyPipeline(device_, pipeline_, nullptr);
-    }
-    for (VkPipeline library : pipelineLibraries_) {
-        if (library) {
-            vkDestroyPipeline(device_, library, nullptr);
-        }
-    }
-    if (pipelineLayout_) {
-        vkDestroyPipelineLayout(device_, pipelineLayout_, nullptr);
-    }
+    destroyPipeline();
     if (commandPool_) {
         vkDestroyCommandPool(device_, commandPool_, nullptr);
     }
@@ -332,6 +323,32 @@ void VulkanRenderer::waitIdle() const
     if (device_) {
         vkDeviceWaitIdle(device_);
     }
+}
+
+AntiAliasingMode VulkanRenderer::antiAliasingMode() const
+{
+    return antiAliasingMode_;
+}
+
+VkSampleCountFlagBits VulkanRenderer::activeSampleCount() const
+{
+    return activeSampleCount_;
+}
+
+void VulkanRenderer::setAntiAliasingMode(AntiAliasingMode mode)
+{
+    if (mode == antiAliasingMode_) {
+        return;
+    }
+
+    waitIdle();
+    antiAliasingMode_ = mode;
+    activeSampleCount_ = sampleCountForMode(mode);
+
+    destroyPipeline();
+    cleanupMsaaColorResources();
+    createMsaaColorResources();
+    createPipeline();
 }
 
 void VulkanRenderer::createInstance()
@@ -517,28 +534,48 @@ void VulkanRenderer::createSwapchain()
 void VulkanRenderer::createImageViews()
 {
     for (auto& image : swapchainImages_) {
-        VkImageViewCreateInfo createInfo {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = image.image,
-            .viewType = VK_IMAGE_VIEW_TYPE_2D,
-            .format = swapchainFormat_,
-            .components = {
-                .r = VK_COMPONENT_SWIZZLE_IDENTITY,
-                .g = VK_COMPONENT_SWIZZLE_IDENTITY,
-                .b = VK_COMPONENT_SWIZZLE_IDENTITY,
-                .a = VK_COMPONENT_SWIZZLE_IDENTITY,
-            },
-            .subresourceRange = {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1,
-            },
-        };
-
-        vkCheck(vkCreateImageView(device_, &createInfo, nullptr, &image.view), "vkCreateImageView failed");
+        image.view = createImageView(image.image, swapchainFormat_);
     }
+}
+
+void VulkanRenderer::createMsaaColorResources()
+{
+    if (!msaaEnabled() || swapchainExtent_.width == 0 || swapchainExtent_.height == 0) {
+        return;
+    }
+
+    VkImageCreateInfo imageInfo {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = swapchainFormat_,
+        .extent = {
+            .width = swapchainExtent_.width,
+            .height = swapchainExtent_.height,
+            .depth = 1,
+        },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = activeSampleCount_,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+
+    vkCheck(vkCreateImage(device_, &imageInfo, nullptr, &msaaColorImage_.image), "vkCreateImage MSAA color failed");
+
+    VkMemoryRequirements memoryRequirements {};
+    vkGetImageMemoryRequirements(device_, msaaColorImage_.image, &memoryRequirements);
+
+    VkMemoryAllocateInfo allocateInfo {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memoryRequirements.size,
+        .memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
+    };
+
+    vkCheck(vkAllocateMemory(device_, &allocateInfo, nullptr, &msaaColorImage_.memory), "vkAllocateMemory MSAA color failed");
+    vkCheck(vkBindImageMemory(device_, msaaColorImage_.image, msaaColorImage_.memory, 0), "vkBindImageMemory MSAA color failed");
+    msaaColorImage_.view = createImageView(msaaColorImage_.image, swapchainFormat_);
 }
 
 void VulkanRenderer::createCommandPool()
@@ -589,6 +626,24 @@ void VulkanRenderer::createPipeline()
     };
 
     vkCheck(vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &linkedPipeline, nullptr, &pipeline_), "vkCreateGraphicsPipelines linked pipeline failed");
+}
+
+void VulkanRenderer::destroyPipeline()
+{
+    if (pipeline_) {
+        vkDestroyPipeline(device_, pipeline_, nullptr);
+        pipeline_ = VK_NULL_HANDLE;
+    }
+    for (VkPipeline& library : pipelineLibraries_) {
+        if (library) {
+            vkDestroyPipeline(device_, library, nullptr);
+            library = VK_NULL_HANDLE;
+        }
+    }
+    if (pipelineLayout_) {
+        vkDestroyPipelineLayout(device_, pipelineLayout_, nullptr);
+        pipelineLayout_ = VK_NULL_HANDLE;
+    }
 }
 
 void VulkanRenderer::createFrameResources()
@@ -691,10 +746,13 @@ void VulkanRenderer::recreateSwapchain()
     cleanupSwapchain();
     createSwapchain();
     createImageViews();
+    createMsaaColorResources();
 }
 
 void VulkanRenderer::cleanupSwapchain()
 {
+    cleanupMsaaColorResources();
+
     for (auto& image : swapchainImages_) {
         if (image.view) {
             vkDestroyImageView(device_, image.view, nullptr);
@@ -709,6 +767,22 @@ void VulkanRenderer::cleanupSwapchain()
     }
 }
 
+void VulkanRenderer::cleanupMsaaColorResources()
+{
+    if (msaaColorImage_.view) {
+        vkDestroyImageView(device_, msaaColorImage_.view, nullptr);
+        msaaColorImage_.view = VK_NULL_HANDLE;
+    }
+    if (msaaColorImage_.image) {
+        vkDestroyImage(device_, msaaColorImage_.image, nullptr);
+        msaaColorImage_.image = VK_NULL_HANDLE;
+    }
+    if (msaaColorImage_.memory) {
+        vkFreeMemory(device_, msaaColorImage_.memory, nullptr);
+        msaaColorImage_.memory = VK_NULL_HANDLE;
+    }
+}
+
 void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData)
 {
     VkCommandBufferBeginInfo beginInfo {
@@ -716,7 +790,7 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
     };
     vkCheck(vkBeginCommandBuffer(commandBuffer, &beginInfo), "vkBeginCommandBuffer failed");
 
-    VkImageMemoryBarrier2 toColorAttachment {
+    VkImageMemoryBarrier2 swapchainToColorAttachment {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
         .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
         .srcAccessMask = VK_ACCESS_2_NONE,
@@ -735,23 +809,97 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
             .layerCount = 1,
         },
     };
-    VkDependencyInfo toColorDependency {
+    VkDependencyInfo swapchainToColorDependency {
         .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
         .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &toColorAttachment,
+        .pImageMemoryBarriers = &swapchainToColorAttachment,
     };
-    vkCmdPipelineBarrier2(commandBuffer, &toColorDependency);
+    vkCmdPipelineBarrier2(commandBuffer, &swapchainToColorDependency);
 
+    if (msaaEnabled()) {
+        VkImageMemoryBarrier2 msaaToColorAttachment {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
+            .srcAccessMask = VK_ACCESS_2_NONE,
+            .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = msaaColorImage_.image,
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+        };
+        VkDependencyInfo msaaToColorDependency {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &msaaToColorAttachment,
+        };
+        vkCmdPipelineBarrier2(commandBuffer, &msaaToColorDependency);
+    }
+
+    recordGameRendering(
+        commandBuffer,
+        msaaEnabled() ? msaaColorImage_.view : swapchainImages_[imageIndex].view,
+        msaaEnabled() ? swapchainImages_[imageIndex].view : VK_NULL_HANDLE,
+        frameData);
+
+    recordDebugUiRendering(commandBuffer, swapchainImages_[imageIndex].view);
+
+    VkImageMemoryBarrier2 toPresent {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_NONE,
+        .dstAccessMask = VK_ACCESS_2_NONE,
+        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = swapchainImages_[imageIndex].image,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+    VkDependencyInfo toPresentDependency {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &toPresent,
+    };
+    vkCmdPipelineBarrier2(commandBuffer, &toPresentDependency);
+
+    vkCheck(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer failed");
+}
+
+void VulkanRenderer::recordGameRendering(
+    VkCommandBuffer commandBuffer,
+    VkImageView colorView,
+    VkImageView resolveView,
+    const RenderFrameData& frameData)
+{
     VkClearValue clearValue {
         .color = { { 0.03f, 0.04f, 0.06f, 1.0f } },
     };
 
     VkRenderingAttachmentInfo colorAttachment {
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView = swapchainImages_[imageIndex].view,
+        .imageView = colorView,
         .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .resolveMode = resolveView ? VK_RESOLVE_MODE_AVERAGE_BIT : VK_RESOLVE_MODE_NONE,
+        .resolveImageView = resolveView,
+        .resolveImageLayout = resolveView ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .storeOp = resolveView ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE,
         .clearValue = clearValue,
     };
 
@@ -794,37 +942,35 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
         }
     }
 
-    renderDebugUi(commandBuffer);
-
     vkCmdEndRendering(commandBuffer);
+}
 
-    VkImageMemoryBarrier2 toPresent {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_NONE,
-        .dstAccessMask = VK_ACCESS_2_NONE,
-        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = swapchainImages_[imageIndex].image,
-        .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
+void VulkanRenderer::recordDebugUiRendering(VkCommandBuffer commandBuffer, VkImageView colorView) const
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    VkRenderingAttachmentInfo colorAttachment {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView = colorView,
+        .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
     };
-    VkDependencyInfo toPresentDependency {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &toPresent,
-    };
-    vkCmdPipelineBarrier2(commandBuffer, &toPresentDependency);
 
-    vkCheck(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer failed");
+    VkRenderingInfo renderingInfo {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+        .renderArea = { .offset = { 0, 0 }, .extent = swapchainExtent_ },
+        .layerCount = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &colorAttachment,
+    };
+
+    vkCmdBeginRendering(commandBuffer, &renderingInfo);
+    renderDebugUi(commandBuffer);
+    vkCmdEndRendering(commandBuffer);
+#else
+    (void)commandBuffer;
+    (void)colorView;
+#endif
 }
 
 VulkanRenderer::TileRenderLayout VulkanRenderer::calculateTileRenderLayout(const RenderFrameData& frameData) const
@@ -1263,7 +1409,7 @@ std::array<VkPipeline, 2> VulkanRenderer::createGraphicsPipelineLibraries(VkShad
 
     VkPipelineMultisampleStateCreateInfo multisampling {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+        .rasterizationSamples = activeSampleCount_,
     };
 
     VkPipelineColorBlendAttachmentState colorBlendAttachment {
@@ -1348,6 +1494,90 @@ std::array<VkPipeline, 2> VulkanRenderer::createGraphicsPipelineLibraries(VkShad
         vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, static_cast<uint32_t>(createInfos.size()), createInfos.data(), nullptr, libraries.data()),
         "vkCreateGraphicsPipelines libraries failed");
     return libraries;
+}
+
+VkSampleCountFlagBits VulkanRenderer::sampleCountForMode(AntiAliasingMode mode) const
+{
+    VkSampleCountFlagBits requested = VK_SAMPLE_COUNT_1_BIT;
+    switch (mode) {
+    case AntiAliasingMode::None:
+        requested = VK_SAMPLE_COUNT_1_BIT;
+        break;
+    case AntiAliasingMode::Msaa2x:
+        requested = VK_SAMPLE_COUNT_2_BIT;
+        break;
+    case AntiAliasingMode::Msaa4x:
+        requested = VK_SAMPLE_COUNT_4_BIT;
+        break;
+    case AntiAliasingMode::Msaa8x:
+        requested = VK_SAMPLE_COUNT_8_BIT;
+        break;
+    }
+
+    if (requested == VK_SAMPLE_COUNT_1_BIT) {
+        return requested;
+    }
+
+    VkPhysicalDeviceProperties properties {};
+    vkGetPhysicalDeviceProperties(physicalDevice_, &properties);
+    const VkSampleCountFlags supported = properties.limits.framebufferColorSampleCounts;
+    if (supported & requested) {
+        return requested;
+    }
+    if (requested >= VK_SAMPLE_COUNT_8_BIT && (supported & VK_SAMPLE_COUNT_4_BIT)) {
+        return VK_SAMPLE_COUNT_4_BIT;
+    }
+    if (requested >= VK_SAMPLE_COUNT_4_BIT && (supported & VK_SAMPLE_COUNT_2_BIT)) {
+        return VK_SAMPLE_COUNT_2_BIT;
+    }
+    return VK_SAMPLE_COUNT_1_BIT;
+}
+
+uint32_t VulkanRenderer::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const
+{
+    VkPhysicalDeviceMemoryProperties memoryProperties {};
+    vkGetPhysicalDeviceMemoryProperties(physicalDevice_, &memoryProperties);
+
+    for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i) {
+        if ((typeFilter & (1U << i)) &&
+            (memoryProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+            return i;
+        }
+    }
+
+    throw std::runtime_error("No suitable Vulkan memory type found");
+}
+
+VkImageView VulkanRenderer::createImageView(VkImage image, VkFormat format) const
+{
+    VkImageViewCreateInfo createInfo {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = format,
+        .components = {
+            .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .a = VK_COMPONENT_SWIZZLE_IDENTITY,
+        },
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+
+    VkImageView imageView = VK_NULL_HANDLE;
+    vkCheck(vkCreateImageView(device_, &createInfo, nullptr, &imageView), "vkCreateImageView failed");
+    return imageView;
+}
+
+bool VulkanRenderer::msaaEnabled() const
+{
+    return activeSampleCount_ != VK_SAMPLE_COUNT_1_BIT;
 }
 
 } // namespace sokoban
