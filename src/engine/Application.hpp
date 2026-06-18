@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/Input.hpp"
+#include "engine/Level.hpp"
 #include "engine/Math.hpp"
 #include "engine/Time.hpp"
 #include "engine/Window.hpp"
@@ -20,12 +21,14 @@ public:
 
 private:
     void update(float dt);
+    [[nodiscard]] RenderFrameData buildRenderFrame() const;
 
     Window window_;
     VulkanRenderer renderer_;
+    Level level_;
     InputState input_;
     FrameTimer frameTimer_;
-    Vec2 triangleOffset_ {};
+    Vec2 playerPosition_ {};
     bool running_ = true;
 };
 

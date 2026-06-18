@@ -2,6 +2,6 @@
 
 namespace sokoban::config {
 
-inline constexpr float triangleMoveSpeed = 0.85f;
+inline constexpr float playerMoveSpeedTilesPerSecond = 3.0f;
 
 } // namespace sokoban::config

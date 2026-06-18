@@ -14,7 +14,15 @@
 namespace sokoban {
 
 struct RenderFrameData {
-    Vec2 triangleOffset {};
+    struct Tile {
+        Vec2 position {};
+        Vec4 color {};
+    };
+
+    uint32_t levelWidth = 0;
+    uint32_t levelHeight = 0;
+    Vec2 playerPosition {};
+    std::vector<Tile> tiles;
 };
 
 class VulkanRenderer {
@@ -64,6 +72,7 @@ private:
     void cleanupSwapchain();
 
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData);
+    void drawTile(VkCommandBuffer commandBuffer, const RenderFrameData& frameData, const RenderFrameData::Tile& tile) const;
 
     [[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
     [[nodiscard]] bool isDeviceSuitable(VkPhysicalDevice device) const;

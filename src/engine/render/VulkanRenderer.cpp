@@ -20,6 +20,12 @@ constexpr std::array<const char*, 4> requiredDeviceExtensions {
     VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME,
 };
 
+struct TilePushConstants {
+    Vec2 origin;
+    Vec2 size;
+    Vec4 color;
+};
+
 std::vector<const char*> validationLayers()
 {
 #if SOKOBAN_ENABLE_VALIDATION
@@ -422,9 +428,9 @@ void VulkanRenderer::createCommandPool()
 void VulkanRenderer::createPipeline()
 {
     VkPushConstantRange pushConstantRange {
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
         .offset = 0,
-        .size = sizeof(Vec2),
+        .size = sizeof(TilePushConstants),
     };
 
     VkPipelineLayoutCreateInfo layoutInfo {
@@ -592,8 +598,10 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
     vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
     vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
     vkCmdSetPrimitiveTopology(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-    vkCmdPushConstants(commandBuffer, pipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Vec2), &frameData.triangleOffset);
-    vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+
+    for (const auto& tile : frameData.tiles) {
+        drawTile(commandBuffer, frameData, tile);
+    }
 
     vkCmdEndRendering(commandBuffer);
 
@@ -624,6 +632,47 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
     vkCmdPipelineBarrier2(commandBuffer, &toPresentDependency);
 
     vkCheck(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer failed");
+}
+
+void VulkanRenderer::drawTile(VkCommandBuffer commandBuffer, const RenderFrameData& frameData, const RenderFrameData::Tile& tile) const
+{
+    if (frameData.levelWidth == 0 || frameData.levelHeight == 0) {
+        return;
+    }
+
+    const float tileSizePixels = std::min(
+        static_cast<float>(swapchainExtent_.width) / static_cast<float>(frameData.levelWidth),
+        static_cast<float>(swapchainExtent_.height) / static_cast<float>(frameData.levelHeight));
+    const Vec2 tileSize {
+        2.0f * tileSizePixels / static_cast<float>(swapchainExtent_.width),
+        2.0f * tileSizePixels / static_cast<float>(swapchainExtent_.height),
+    };
+    const Vec2 boardSize {
+        tileSize.x * static_cast<float>(frameData.levelWidth),
+        tileSize.y * static_cast<float>(frameData.levelHeight),
+    };
+    const Vec2 boardTopLeft {
+        -boardSize.x * 0.5f,
+        -boardSize.y * 0.5f,
+    };
+
+    const TilePushConstants pushConstants {
+        .origin = {
+            boardTopLeft.x + tile.position.x * tileSize.x,
+            boardTopLeft.y + tile.position.y * tileSize.y,
+        },
+        .size = tileSize,
+        .color = tile.color,
+    };
+
+    vkCmdPushConstants(
+        commandBuffer,
+        pipelineLayout_,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        0,
+        sizeof(TilePushConstants),
+        &pushConstants);
+    vkCmdDraw(commandBuffer, 6, 1, 0, 0);
 }
 
 VulkanRenderer::QueueFamilyIndices VulkanRenderer::findQueueFamilies(VkPhysicalDevice device) const
