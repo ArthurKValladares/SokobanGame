@@ -12,6 +12,7 @@ enum class TileType {
     Empty,
     Wall,
     End,
+    PressurePlate,
 };
 
 class Level {
@@ -22,6 +23,7 @@ public:
     [[nodiscard]] uint32_t height() const { return height_; }
     [[nodiscard]] GridPosition playerStart() const { return playerStart_; }
     [[nodiscard]] const std::vector<GridPosition>& rocks() const { return rocks_; }
+    [[nodiscard]] const std::vector<GridPosition>& pressurePlates() const { return pressurePlates_; }
     [[nodiscard]] TileType tileAt(uint32_t x, uint32_t y) const;
     [[nodiscard]] bool inBounds(GridPosition position) const;
     [[nodiscard]] bool isWalkable(GridPosition position) const;
@@ -32,6 +34,7 @@ private:
     uint32_t height_ = 0;
     GridPosition playerStart_ {};
     std::vector<GridPosition> rocks_;
+    std::vector<GridPosition> pressurePlates_;
     std::vector<TileType> tiles_;
 };
 

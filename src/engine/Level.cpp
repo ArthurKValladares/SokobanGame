@@ -23,6 +23,8 @@ TileType parseTile(char value, bool& foundPlayer, bool& foundRock)
     case 'R':
         foundRock = true;
         return TileType::Empty;
+    case 'P':
+        return TileType::PressurePlate;
     default:
         throw std::runtime_error(std::string("Unknown level tile character: '") + value + "'");
     }
@@ -77,6 +79,9 @@ Level Level::loadFromFile(const std::filesystem::path& path)
             }
             if (foundRockHere) {
                 level.rocks_.push_back({ static_cast<int>(x), static_cast<int>(y) });
+            }
+            if (level.tiles_[static_cast<size_t>(y) * level.width_ + x] == TileType::PressurePlate) {
+                level.pressurePlates_.push_back({ static_cast<int>(x), static_cast<int>(y) });
             }
         }
     }

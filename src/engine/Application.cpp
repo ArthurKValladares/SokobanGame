@@ -170,7 +170,7 @@ void Application::advancePlayerMovement(float dt)
             moving_ = false;
             moveElapsed_ = 0.0f;
 
-            if (level_.isEnd(playerCell_)) {
+            if (level_.isEnd(playerCell_) && allPressurePlatesActive()) {
                 advanceScreen();
                 return;
             }
@@ -286,6 +286,13 @@ bool Application::canMoveRock(GridPosition position, MoveDirection direction) co
     return level_.isWalkable(target) && rockAt(target) == nullptr;
 }
 
+bool Application::allPressurePlatesActive() const
+{
+    return std::ranges::all_of(level_.pressurePlates(), [this](GridPosition plate) {
+        return playerCell_ == plate || rockAt(plate) != nullptr;
+    });
+}
+
 std::filesystem::path Application::screenPath(int levelIndex, int screenIndex) const
 {
     return assetRoot_ /
@@ -322,6 +329,9 @@ RenderFrameData Application::buildRenderFrame() const
                 break;
             case TileType::End:
                 color = { 1.0f, 0.05f, 0.04f, 1.0f };
+                break;
+            case TileType::PressurePlate:
+                color = { 0.18f, 0.18f, 0.18f, 1.0f };
                 break;
             case TileType::Empty:
                 color = { 0.82f, 0.82f, 0.84f, 1.0f };
