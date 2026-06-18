@@ -11,6 +11,12 @@ option(SOKOBAN_ENABLE_VALIDATION "Enable Vulkan validation layers in debug build
 find_package(Vulkan REQUIRED)
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL/CMakeLists.txt")
+    set(SDL_SHARED OFF CACHE BOOL "Build SDL3 as a shared library" FORCE)
+    set(SDL_STATIC ON CACHE BOOL "Build SDL3 as a static library" FORCE)
+    set(SDL_TEST_LIBRARY OFF CACHE BOOL "Build the SDL3_test library" FORCE)
+    set(SDL_TESTS OFF CACHE BOOL "Build SDL3 tests" FORCE)
+    set(SDL_EXAMPLES OFF CACHE BOOL "Build SDL3 examples" FORCE)
+    set(SDL_INSTALL OFF CACHE BOOL "Install SDL3" FORCE)
     add_subdirectory(third_party/SDL EXCLUDE_FROM_ALL)
 else()
     find_package(SDL3 CONFIG REQUIRED)

@@ -13,10 +13,9 @@ A tiny C++20 engine seed for a future Sokoban-like 3D game. The first milestone 
 
 - CMake 3.25+
 - Vulkan SDK 1.4+
-- SDL3
 - A C++20 compiler
 
-SDL3 can be provided either as a CMake package or by placing the SDL source checkout at `third_party/SDL`.
+SDL 3.4.10 is vendored in `third_party/SDL` and is built statically by the root CMake project.
 
 ## Build
 
@@ -25,5 +24,3 @@ cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Debug
 .\build\Debug\sokoban.exe
 ```
-
-If SDL3 is installed somewhere custom, point CMake at it with `-DCMAKE_PREFIX_PATH=...` or `-DSDL3_DIR=...`.
