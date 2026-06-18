@@ -86,14 +86,9 @@ void Application::loadCurrentScreen()
     pendingCommands_.clear();
     moveHistory_.clear();
     undoCursor_.reset();
-    activeMove_ = {};
+    activeAction_ = {};
     moving_ = false;
-    movingRock_ = nullptr;
     moveElapsed_ = 0.0f;
-    moveStart_ = playerCell_;
-    moveTarget_ = playerCell_;
-    rockMoveStart_ = {};
-    rockMoveTarget_ = {};
 
     std::cerr << "player started level " << currentLevel_ << " screen " << currentScreen_ << '\n';
 }
@@ -117,6 +112,9 @@ void Application::queuePressedCommands()
 {
     if (input_.keyPressed(SDL_SCANCODE_Z)) {
         pendingCommands_.push_back({ .type = MoveCommandType::Undo });
+    }
+    if (input_.keyPressed(SDL_SCANCODE_R)) {
+        pendingCommands_.push_back({ .type = MoveCommandType::Restart });
     }
     if (input_.keyPressed(SDL_SCANCODE_W)) {
         pendingCommands_.push_back({ .type = MoveCommandType::Move, .direction = MoveDirection::Up });
@@ -142,7 +140,7 @@ void Application::advancePlayerMovement(float dt)
         }
 
         if constexpr (config::playerMoveDurationSeconds <= 0.0f) {
-            if (completeActiveMove()) {
+            if (completeActiveAction()) {
                 return;
             }
             continue;
@@ -155,30 +153,24 @@ void Application::advancePlayerMovement(float dt)
         moveElapsed_ += step;
 
         const float t = std::clamp(moveElapsed_ / duration, 0.0f, 1.0f);
-        playerRenderPosition_ = lerp(toVec2(moveStart_), toVec2(moveTarget_), t);
-        if (movingRock_) {
-            movingRock_->renderPosition = lerp(toVec2(rockMoveStart_), toVec2(rockMoveTarget_), t);
+        playerRenderPosition_ = lerp(toVec2(activeAction_.before.player), toVec2(activeAction_.after.player), t);
+        for (size_t i = 0; i < rocks_.size(); ++i) {
+            rocks_[i].renderPosition = lerp(toVec2(activeAction_.before.rocks[i]), toVec2(activeAction_.after.rocks[i]), t);
         }
 
         if (moveElapsed_ >= duration) {
-            if (completeActiveMove()) {
+            if (completeActiveAction()) {
                 return;
             }
         }
     }
 }
 
-bool Application::completeActiveMove()
+bool Application::completeActiveAction()
 {
-    playerCell_ = moveTarget_;
-    playerRenderPosition_ = toVec2(playerCell_);
-    if (movingRock_) {
-        movingRock_->cell = rockMoveTarget_;
-        movingRock_->renderPosition = toVec2(movingRock_->cell);
-        movingRock_ = nullptr;
-    }
+    applyMoveRecord(activeAction_.after);
 
-    moveHistory_.push_back(activeMove_);
+    moveHistory_.push_back(activeAction_);
     moving_ = false;
     moveElapsed_ = 0.0f;
 
@@ -197,6 +189,10 @@ bool Application::tryStartNextMove()
         pendingCommands_.pop_front();
 
         if (command.type == MoveCommandType::Undo && tryStartUndoMove()) {
+            return true;
+        }
+
+        if (command.type == MoveCommandType::Restart && tryStartRestart()) {
             return true;
         }
 
@@ -236,28 +232,22 @@ bool Application::tryStartMove(MoveDirection direction)
         return false;
     }
 
-    movingRock_ = nullptr;
-    activeMove_ = {
-        .playerStart = playerCell_,
-        .playerEnd = target,
+    activeAction_ = {
+        .before = captureMoveRecord(),
+        .after = captureMoveRecord(),
     };
+    activeAction_.after.player = target;
+
     if (Rock* rock = rockAt(target)) {
         if (!canMoveRock(target, direction)) {
             return false;
         }
 
-        movingRock_ = rock;
-        rockMoveStart_ = rock->cell;
-        rockMoveTarget_ = movementTarget(rock->cell, direction);
-        activeMove_.movedRock = true;
-        activeMove_.rockIndex = static_cast<size_t>(rock - rocks_.data());
-        activeMove_.rockStart = rockMoveStart_;
-        activeMove_.rockEnd = rockMoveTarget_;
+        const size_t rockIndex = static_cast<size_t>(rock - rocks_.data());
+        activeAction_.after.rocks[rockIndex] = movementTarget(rock->cell, direction);
     }
 
     undoCursor_.reset();
-    moveStart_ = playerCell_;
-    moveTarget_ = target;
     moveElapsed_ = 0.0f;
     moving_ = true;
     return true;
@@ -280,31 +270,66 @@ bool Application::tryStartUndoMove()
     }
 
     --(*undoCursor_);
-    activeMove_ = invertMoveRecord(moveHistory_[*undoCursor_]);
-    moveStart_ = activeMove_.playerStart;
-    moveTarget_ = activeMove_.playerEnd;
-    movingRock_ = nullptr;
-
-    if (activeMove_.movedRock) {
-        movingRock_ = &rocks_[activeMove_.rockIndex];
-        rockMoveStart_ = activeMove_.rockStart;
-        rockMoveTarget_ = activeMove_.rockEnd;
-    }
-
+    activeAction_ = invertActionRecord(moveHistory_[*undoCursor_]);
     moveElapsed_ = 0.0f;
     moving_ = true;
     return true;
 }
 
-Application::MoveRecord Application::invertMoveRecord(const MoveRecord& record) const
+bool Application::tryStartRestart()
+{
+    MoveRecord restarted {
+        .player = level_.playerStart(),
+    };
+    restarted.rocks.reserve(level_.rocks().size());
+    for (GridPosition rockPosition : level_.rocks()) {
+        restarted.rocks.push_back(rockPosition);
+    }
+
+    const MoveRecord current = captureMoveRecord();
+    if (current.player == restarted.player && current.rocks == restarted.rocks) {
+        return false;
+    }
+
+    activeAction_ = {
+        .before = current,
+        .after = std::move(restarted),
+    };
+    undoCursor_.reset();
+    moveElapsed_ = 0.0f;
+    moving_ = true;
+    return true;
+}
+
+Application::MoveRecord Application::captureMoveRecord() const
+{
+    MoveRecord record {
+        .player = playerCell_,
+    };
+    record.rocks.reserve(rocks_.size());
+    for (const Rock& rock : rocks_) {
+        record.rocks.push_back(rock.cell);
+    }
+
+    return record;
+}
+
+void Application::applyMoveRecord(const MoveRecord& record)
+{
+    playerCell_ = record.player;
+    playerRenderPosition_ = toVec2(playerCell_);
+
+    for (size_t i = 0; i < rocks_.size(); ++i) {
+        rocks_[i].cell = record.rocks[i];
+        rocks_[i].renderPosition = toVec2(rocks_[i].cell);
+    }
+}
+
+Application::ActionRecord Application::invertActionRecord(const ActionRecord& record) const
 {
     return {
-        .playerStart = record.playerEnd,
-        .playerEnd = record.playerStart,
-        .movedRock = record.movedRock,
-        .rockIndex = record.rockIndex,
-        .rockStart = record.rockEnd,
-        .rockEnd = record.rockStart,
+        .before = record.after,
+        .after = record.before,
     };
 }
 

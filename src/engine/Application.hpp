@@ -40,6 +40,7 @@ private:
     enum class MoveCommandType {
         Move,
         Undo,
+        Restart,
     };
 
     struct MoveCommand {
@@ -48,12 +49,13 @@ private:
     };
 
     struct MoveRecord {
-        GridPosition playerStart {};
-        GridPosition playerEnd {};
-        bool movedRock = false;
-        size_t rockIndex = 0;
-        GridPosition rockStart {};
-        GridPosition rockEnd {};
+        GridPosition player {};
+        std::vector<GridPosition> rocks;
+    };
+
+    struct ActionRecord {
+        MoveRecord before;
+        MoveRecord after;
     };
 
     void loadCurrentScreen();
@@ -61,12 +63,15 @@ private:
     void update(float dt);
     void queuePressedCommands();
     void advancePlayerMovement(float dt);
-    [[nodiscard]] bool completeActiveMove();
+    [[nodiscard]] bool completeActiveAction();
     [[nodiscard]] bool tryStartNextMove();
     [[nodiscard]] bool tryStartHeldMove();
     [[nodiscard]] bool tryStartMove(MoveDirection direction);
     [[nodiscard]] bool tryStartUndoMove();
-    [[nodiscard]] MoveRecord invertMoveRecord(const MoveRecord& record) const;
+    [[nodiscard]] bool tryStartRestart();
+    [[nodiscard]] MoveRecord captureMoveRecord() const;
+    void applyMoveRecord(const MoveRecord& record);
+    [[nodiscard]] ActionRecord invertActionRecord(const ActionRecord& record) const;
     [[nodiscard]] GridPosition movementTarget(MoveDirection direction) const;
     [[nodiscard]] GridPosition movementTarget(GridPosition origin, MoveDirection direction) const;
     [[nodiscard]] Rock* rockAt(GridPosition position);
@@ -90,14 +95,9 @@ private:
     Vec2 playerRenderPosition_ {};
     std::vector<Rock> rocks_;
     std::deque<MoveCommand> pendingCommands_;
-    std::vector<MoveRecord> moveHistory_;
+    std::vector<ActionRecord> moveHistory_;
     std::optional<size_t> undoCursor_;
-    MoveRecord activeMove_;
-    GridPosition moveStart_ {};
-    GridPosition moveTarget_ {};
-    Rock* movingRock_ = nullptr;
-    GridPosition rockMoveStart_ {};
-    GridPosition rockMoveTarget_ {};
+    ActionRecord activeAction_;
     float moveElapsed_ = 0.0f;
     bool moving_ = false;
     bool running_ = true;
