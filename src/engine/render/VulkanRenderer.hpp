@@ -1,5 +1,7 @@
 #pragma once
 
+#include "engine/Math.hpp"
+
 #include <SDL3/SDL_video.h>
 #include <vulkan/vulkan.h>
 
@@ -11,6 +13,10 @@
 
 namespace sokoban {
 
+struct RenderFrameData {
+    Vec2 triangleOffset {};
+};
+
 class VulkanRenderer {
 public:
     VulkanRenderer(SDL_Window* window, std::filesystem::path assetRoot);
@@ -19,7 +25,7 @@ public:
     VulkanRenderer(const VulkanRenderer&) = delete;
     VulkanRenderer& operator=(const VulkanRenderer&) = delete;
 
-    void drawFrame();
+    void drawFrame(const RenderFrameData& frameData);
     void waitIdle() const;
 
 private:
@@ -57,7 +63,7 @@ private:
     void recreateSwapchain();
     void cleanupSwapchain();
 
-    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData);
 
     [[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
     [[nodiscard]] bool isDeviceSuitable(VkPhysicalDevice device) const;

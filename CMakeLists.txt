@@ -61,6 +61,7 @@ add_custom_target(sokoban_shaders DEPENDS ${SHADER_OUTPUTS})
 add_executable(sokoban
     src/main.cpp
     src/engine/Application.cpp
+    src/engine/Input.cpp
     src/engine/Window.cpp
     src/engine/render/VulkanRenderer.cpp
 )
