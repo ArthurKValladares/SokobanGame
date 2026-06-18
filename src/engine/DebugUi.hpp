@@ -14,7 +14,7 @@ public:
 #if SOKOBAN_ENABLE_DEBUG_UI
     using DrawCallback = std::function<void()>;
 
-    static void addWindow(std::string name, DrawCallback callback);
+    static void addWindow(std::string name, DrawCallback callback, bool startCollapsed = false);
     static void clearWindows();
     static void draw();
 #else

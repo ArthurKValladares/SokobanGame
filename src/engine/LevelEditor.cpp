@@ -33,15 +33,15 @@ void drawPaintButton(const TileTypeDefinition& definition, TileType& selectedTil
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.50f, 0.85f, 1.0f));
     }
 
+    ImGui::PushID(static_cast<int>(definition.type));
     std::string label(1, tileTypeToChar(definition.type));
-    label += " ##palette_";
-    label += definition.name;
     if (ImGui::Button(label.c_str(), ImVec2(32.0f, 28.0f))) {
         selectedTile = definition.type;
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("%.*s", static_cast<int>(definition.name.size()), definition.name.data());
     }
+    ImGui::PopID();
 
     if (selected) {
         ImGui::PopStyleColor();

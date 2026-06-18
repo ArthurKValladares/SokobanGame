@@ -13,6 +13,8 @@ namespace {
 struct DebugWindow {
     std::string name;
     DebugUi::DrawCallback callback;
+    bool startCollapsed = false;
+    bool appliedInitialState = false;
 };
 
 std::vector<DebugWindow>& debugWindows()
@@ -23,11 +25,12 @@ std::vector<DebugWindow>& debugWindows()
 
 } // namespace
 
-void DebugUi::addWindow(std::string name, DrawCallback callback)
+void DebugUi::addWindow(std::string name, DrawCallback callback, bool startCollapsed)
 {
     debugWindows().push_back({
         .name = std::move(name),
         .callback = std::move(callback),
+        .startCollapsed = startCollapsed,
     });
 }
 
@@ -39,6 +42,10 @@ void DebugUi::clearWindows()
 void DebugUi::draw()
 {
     for (DebugWindow& window : debugWindows()) {
+        if (!window.appliedInitialState) {
+            ImGui::SetNextWindowCollapsed(window.startCollapsed, ImGuiCond_Once);
+            window.appliedInitialState = true;
+        }
         if (ImGui::Begin(window.name.c_str())) {
             window.callback();
         }

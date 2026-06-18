@@ -55,7 +55,7 @@ Application::Application()
                 loadCurrentScreen();
             },
         });
-    });
+    }, true);
 #endif
 }
 
