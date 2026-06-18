@@ -31,6 +31,86 @@ Vec2 lerp(Vec2 from, Vec2 to, float t)
     };
 }
 
+struct StaticRenderCell {
+    TileType tile = TileType::Empty;
+    bool active = true;
+    float height = 0.0f;
+};
+
+bool canMergeStaticCells(const StaticRenderCell& left, const StaticRenderCell& right)
+{
+    return left.tile == right.tile &&
+        left.active == right.active &&
+        left.height == right.height;
+}
+
+StaticRenderCell staticRenderCellFor(const Level& level, uint32_t x, uint32_t y, bool endUnlocked)
+{
+    const TileType tile = level.tileAt(x, y);
+    return {
+        .tile = tile,
+        .active = tile != TileType::End || endUnlocked,
+        .height = tile == TileType::Wall ? 1.0f : 0.0f,
+    };
+}
+
+void appendGreedyMergedStaticTiles(RenderFrameData& frame, const Level& level, bool endUnlocked)
+{
+    const uint32_t width = level.width();
+    const uint32_t height = level.height();
+    std::vector<bool> consumed(static_cast<size_t>(width) * height, false);
+
+    auto index = [width](uint32_t x, uint32_t y) {
+        return static_cast<size_t>(y) * width + x;
+    };
+
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            if (consumed[index(x, y)]) {
+                continue;
+            }
+
+            const StaticRenderCell cell = staticRenderCellFor(level, x, y, endUnlocked);
+
+            uint32_t mergeWidth = 1;
+            while (x + mergeWidth < width &&
+                !consumed[index(x + mergeWidth, y)] &&
+                canMergeStaticCells(cell, staticRenderCellFor(level, x + mergeWidth, y, endUnlocked))) {
+                ++mergeWidth;
+            }
+
+            uint32_t mergeHeight = 1;
+            bool canGrowHeight = true;
+            while (y + mergeHeight < height && canGrowHeight) {
+                for (uint32_t offsetX = 0; offsetX < mergeWidth; ++offsetX) {
+                    if (consumed[index(x + offsetX, y + mergeHeight)] ||
+                        !canMergeStaticCells(cell, staticRenderCellFor(level, x + offsetX, y + mergeHeight, endUnlocked))) {
+                        canGrowHeight = false;
+                        break;
+                    }
+                }
+
+                if (canGrowHeight) {
+                    ++mergeHeight;
+                }
+            }
+
+            for (uint32_t offsetY = 0; offsetY < mergeHeight; ++offsetY) {
+                for (uint32_t offsetX = 0; offsetX < mergeWidth; ++offsetX) {
+                    consumed[index(x + offsetX, y + offsetY)] = true;
+                }
+            }
+
+            frame.tiles.push_back({
+                .position = { static_cast<float>(x), static_cast<float>(y) },
+                .size = { static_cast<float>(mergeWidth), static_cast<float>(mergeHeight) },
+                .color = tileColor(cell.tile, cell.active),
+                .height = cell.height,
+            });
+        }
+    }
+}
+
 } // namespace
 
 Application::Application()
@@ -156,7 +236,7 @@ void Application::drawDebugUi()
         ImGui::Text("Active samples %ux", renderStats.activeSamples);
         ImGui::Text("Wireframe %s", renderStats.wireframeEnabled ? "on" : "off");
         ImGui::Text("Wireframe line width %.1f", renderStats.wireframeLineWidth);
-        ImGui::Text("Tiles %u", renderStats.totalTiles);
+        ImGui::Text("Render tiles %u", renderStats.totalTiles);
         ImGui::Text("Visible faces %u", renderStats.visibleFaces);
         ImGui::Text("Draw calls %u", renderStats.drawCalls);
         ImGui::Text("Triangles %u", renderStats.triangles);
@@ -710,18 +790,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
     const bool endUnlocked = isEndUnlocked();
 
     frame.tiles.reserve(static_cast<size_t>(level_.width()) * level_.height());
-    for (uint32_t y = 0; y < level_.height(); ++y) {
-        for (uint32_t x = 0; x < level_.width(); ++x) {
-            const TileType tile = level_.tileAt(x, y);
-            const bool tileIsActive = tile != TileType::End || endUnlocked;
-
-            frame.tiles.push_back({
-                .position = { static_cast<float>(x), static_cast<float>(y) },
-                .color = tileColor(tile, tileIsActive),
-                .height = tile == TileType::Wall ? 1.0f : 0.0f,
-            });
-        }
-    }
+    appendGreedyMergedStaticTiles(frame, level_, endUnlocked);
 
     frame.tiles.push_back({
         .position = playerRenderPosition_,

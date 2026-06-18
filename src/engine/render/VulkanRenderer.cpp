@@ -1124,15 +1124,17 @@ VulkanRenderer::IsoRenderLayout VulkanRenderer::calculateIsoRenderLayout(const R
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
         const float x = tile.position.x;
         const float y = tile.position.y;
+        const float width = tile.size.x;
+        const float height = tile.size.y;
         const float top = std::max(tile.height, 0.0f);
         includePoint(projectIsoPoint(layout, { x, y, 0.0f }));
-        includePoint(projectIsoPoint(layout, { x + 1.0f, y, 0.0f }));
-        includePoint(projectIsoPoint(layout, { x + 1.0f, y + 1.0f, 0.0f }));
-        includePoint(projectIsoPoint(layout, { x, y + 1.0f, 0.0f }));
+        includePoint(projectIsoPoint(layout, { x + width, y, 0.0f }));
+        includePoint(projectIsoPoint(layout, { x + width, y + height, 0.0f }));
+        includePoint(projectIsoPoint(layout, { x, y + height, 0.0f }));
         includePoint(projectIsoPoint(layout, { x, y, top }));
-        includePoint(projectIsoPoint(layout, { x + 1.0f, y, top }));
-        includePoint(projectIsoPoint(layout, { x + 1.0f, y + 1.0f, top }));
-        includePoint(projectIsoPoint(layout, { x, y + 1.0f, top }));
+        includePoint(projectIsoPoint(layout, { x + width, y, top }));
+        includePoint(projectIsoPoint(layout, { x + width, y + height, top }));
+        includePoint(projectIsoPoint(layout, { x, y + height, top }));
     }
 
     const Vec2 sceneSize {
@@ -1203,11 +1205,13 @@ void VulkanRenderer::drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRender
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
         const float x = tile.position.x;
         const float y = tile.position.y;
+        const float width = tile.size.x;
+        const float depth = tile.size.y;
         const float height = std::max(tile.height, 0.0f);
         const Vec3 a { x, y, 0.0f };
-        const Vec3 b { x + 1.0f, y, 0.0f };
-        const Vec3 c { x + 1.0f, y + 1.0f, 0.0f };
-        const Vec3 d { x, y + 1.0f, 0.0f };
+        const Vec3 b { x + width, y, 0.0f };
+        const Vec3 c { x + width, y + depth, 0.0f };
+        const Vec3 d { x, y + depth, 0.0f };
 
         if (height <= 0.0f) {
             appendFace({ a, b, c, d }, { 0.0f, 0.0f, 1.0f }, tile.color);
@@ -1215,9 +1219,9 @@ void VulkanRenderer::drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRender
         }
 
         const Vec3 e { x, y, height };
-        const Vec3 f { x + 1.0f, y, height };
-        const Vec3 g { x + 1.0f, y + 1.0f, height };
-        const Vec3 h { x, y + 1.0f, height };
+        const Vec3 f { x + width, y, height };
+        const Vec3 g { x + width, y + depth, height };
+        const Vec3 h { x, y + depth, height };
         appendFace({ a, b, f, e }, { 0.0f, -1.0f, 0.0f }, shadeColor(tile.color, 0.72f));
         appendFace({ b, c, g, f }, { 1.0f, 0.0f, 0.0f }, shadeColor(tile.color, 0.82f));
         appendFace({ c, d, h, g }, { 0.0f, 1.0f, 0.0f }, shadeColor(tile.color, 0.62f));
