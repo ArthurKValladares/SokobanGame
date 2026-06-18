@@ -4,6 +4,8 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace sokoban {
@@ -18,6 +20,7 @@ enum class TileType {
 class Level {
 public:
     static Level loadFromFile(const std::filesystem::path& path);
+    static Level loadFromLines(const std::vector<std::string>& lines, std::string_view sourceName);
 
     [[nodiscard]] uint32_t width() const { return width_; }
     [[nodiscard]] uint32_t height() const { return height_; }

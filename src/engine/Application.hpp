@@ -10,6 +10,7 @@
 #include <deque>
 #include <filesystem>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace sokoban {
@@ -58,10 +59,36 @@ private:
         MoveRecord after;
     };
 
+    struct EditorDocument {
+        std::vector<std::string> rows;
+        std::filesystem::path filePath;
+        std::filesystem::path browserRoot;
+        std::string filePathBuffer;
+        std::string browserRootBuffer;
+        std::string status;
+        int requestedWidth = 12;
+        int requestedHeight = 8;
+        char selectedTile = '#';
+        bool dirty = false;
+        bool playingDraft = false;
+    };
+
     void loadCurrentScreen();
+    void applyLevel(Level level);
     void advanceScreen();
     void update(float dt);
     void drawDebugUi();
+    void initializeEditor();
+    void drawLevelEditorUi();
+    void drawEditorTilePalette();
+    void drawEditorFileBrowser();
+    void drawEditorGrid();
+    void newEditorDocument(int width, int height);
+    void resizeEditorDocument(int width, int height);
+    void loadEditorDocument(const std::filesystem::path& path);
+    void saveEditorDocument(const std::filesystem::path& path);
+    void playEditorDocument();
+    [[nodiscard]] Level editorDocumentToLevel() const;
     void queuePressedCommands();
     void advancePlayerMovement(float dt);
     [[nodiscard]] bool completeActiveAction();
@@ -106,6 +133,7 @@ private:
     std::vector<ActionRecord> moveHistory_;
     std::optional<size_t> undoCursor_;
     ActionRecord activeAction_;
+    EditorDocument editor_;
     float moveElapsed_ = 0.0f;
     bool moving_ = false;
     bool running_ = true;

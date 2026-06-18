@@ -4,6 +4,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace sokoban {
 namespace {
@@ -48,8 +49,14 @@ Level Level::loadFromFile(const std::filesystem::path& path)
         lines.push_back(line);
     }
 
+    return loadFromLines(lines, path.string());
+}
+
+Level Level::loadFromLines(const std::vector<std::string>& lines, std::string_view sourceName)
+{
+    const std::string source(sourceName);
     if (lines.empty()) {
-        throw std::runtime_error("Level file is empty: " + path.string());
+        throw std::runtime_error("Level is empty: " + source);
     }
 
     Level level;
@@ -59,7 +66,7 @@ Level Level::loadFromFile(const std::filesystem::path& path)
     }
 
     if (level.width_ == 0) {
-        throw std::runtime_error("Level has no tiles: " + path.string());
+        throw std::runtime_error("Level has no tiles: " + source);
     }
 
     level.tiles_.assign(static_cast<size_t>(level.width_) * level.height_, TileType::Empty);
@@ -72,7 +79,7 @@ Level Level::loadFromFile(const std::filesystem::path& path)
             level.tiles_[static_cast<size_t>(y) * level.width_ + x] = parseTile(lines[y][x], foundPlayerHere, foundRockHere);
             if (foundPlayerHere) {
                 if (hasPlayer) {
-                    throw std::runtime_error("Level has more than one player start: " + path.string());
+                    throw std::runtime_error("Level has more than one player start: " + source);
                 }
                 hasPlayer = true;
                 level.playerStart_ = { static_cast<int>(x), static_cast<int>(y) };
@@ -87,7 +94,7 @@ Level Level::loadFromFile(const std::filesystem::path& path)
     }
 
     if (!hasPlayer) {
-        throw std::runtime_error("Level is missing a player start tile 'C': " + path.string());
+        throw std::runtime_error("Level is missing a player start tile 'C': " + source);
     }
 
     return level;

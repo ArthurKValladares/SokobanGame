@@ -7,11 +7,15 @@
 
 #if SOKOBAN_ENABLE_DEBUG_UI
 #include <imgui.h>
+#include <imgui_stdlib.h>
 #endif
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <iostream>
+#include <system_error>
+#include <utility>
 
 namespace sokoban {
 namespace {
@@ -29,6 +33,33 @@ Vec2 lerp(Vec2 from, Vec2 to, float t)
     };
 }
 
+#if SOKOBAN_ENABLE_DEBUG_UI
+const char* tileName(char tile)
+{
+    switch (tile) {
+    case ' ':
+        return "Empty";
+    case '#':
+        return "Wall";
+    case 'E':
+        return "End";
+    case 'P':
+        return "Pressure";
+    case 'R':
+        return "Rock";
+    case 'C':
+        return "Player";
+    default:
+        return "Unknown";
+    }
+}
+
+const char* tileButtonLabel(char tile)
+{
+    return tile == ' ' ? "." : nullptr;
+}
+#endif
+
 } // namespace
 
 Application::Application()
@@ -36,13 +67,17 @@ Application::Application()
     , renderer_(window_.nativeHandle(), SOKOBAN_ASSET_DIR)
     , assetRoot_(SOKOBAN_ASSET_DIR)
 {
+    loadCurrentScreen();
+
 #if SOKOBAN_ENABLE_DEBUG_UI
+    initializeEditor();
     DebugUi::addWindow("Engine", [this] {
         drawDebugUi();
     });
+    DebugUi::addWindow("Level Editor", [this] {
+        drawLevelEditorUi();
+    });
 #endif
-
-    loadCurrentScreen();
 }
 
 Application::~Application()
@@ -101,7 +136,15 @@ void Application::drawDebugUi()
 
 void Application::loadCurrentScreen()
 {
-    level_ = Level::loadFromFile(screenPath(currentLevel_, currentScreen_));
+    applyLevel(Level::loadFromFile(screenPath(currentLevel_, currentScreen_)));
+    editor_.playingDraft = false;
+
+    std::cerr << "player started level " << currentLevel_ << " screen " << currentScreen_ << '\n';
+}
+
+void Application::applyLevel(Level level)
+{
+    level_ = std::move(level);
     playerCell_ = level_.playerStart();
     playerRenderPosition_ = toVec2(playerCell_);
     rocks_.clear();
@@ -118,8 +161,6 @@ void Application::loadCurrentScreen()
     activeAction_ = {};
     moving_ = false;
     moveElapsed_ = 0.0f;
-
-    std::cerr << "player started level " << currentLevel_ << " screen " << currentScreen_ << '\n';
 }
 
 void Application::advanceScreen()
@@ -201,6 +242,11 @@ bool Application::completeActiveAction()
     moveElapsed_ = 0.0f;
 
     if (level_.isEnd(playerCell_) && isEndUnlocked()) {
+        if (editor_.playingDraft) {
+            editor_.status = "Draft solved.";
+            return false;
+        }
+
         advanceScreen();
         return true;
     }
@@ -322,6 +368,300 @@ bool Application::tryStartRestart()
     moveElapsed_ = 0.0f;
     moving_ = true;
     return true;
+}
+
+void Application::initializeEditor()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    editor_.browserRoot = std::filesystem::current_path() / "levels";
+    if (!std::filesystem::exists(editor_.browserRoot)) {
+        editor_.browserRoot = assetRoot_ / "levels";
+    }
+    editor_.browserRootBuffer = editor_.browserRoot.string();
+
+    const std::filesystem::path currentSourcePath = editor_.browserRoot /
+        ("level" + std::to_string(currentLevel_)) /
+        ("screen" + std::to_string(currentScreen_) + ".scr");
+    if (std::filesystem::exists(currentSourcePath)) {
+        loadEditorDocument(currentSourcePath);
+    } else {
+        newEditorDocument(editor_.requestedWidth, editor_.requestedHeight);
+    }
+#endif
+}
+
+void Application::drawLevelEditorUi()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    ImGui::Text("Document");
+    ImGui::SameLine();
+    ImGui::TextUnformatted(editor_.dirty ? "modified" : "clean");
+    ImGui::InputText("Path", &editor_.filePathBuffer);
+
+    if (ImGui::Button("Load")) {
+        loadEditorDocument(editor_.filePathBuffer);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Save")) {
+        saveEditorDocument(editor_.filePathBuffer);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Play Draft")) {
+        playEditorDocument();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Return To Current Screen")) {
+        loadCurrentScreen();
+    }
+
+    ImGui::Separator();
+    ImGui::InputInt("Width", &editor_.requestedWidth);
+    ImGui::InputInt("Height", &editor_.requestedHeight);
+    if (ImGui::Button("New")) {
+        newEditorDocument(editor_.requestedWidth, editor_.requestedHeight);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Resize")) {
+        resizeEditorDocument(editor_.requestedWidth, editor_.requestedHeight);
+    }
+
+    drawEditorTilePalette();
+    ImGui::Separator();
+    drawEditorFileBrowser();
+    ImGui::Separator();
+    drawEditorGrid();
+
+    if (!editor_.status.empty()) {
+        ImGui::Separator();
+        ImGui::TextWrapped("%s", editor_.status.c_str());
+    }
+#endif
+}
+
+void Application::drawEditorTilePalette()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    constexpr char tiles[] { '#', ' ', 'E', 'P', 'R', 'C' };
+    ImGui::Text("Paint");
+    for (char tile : tiles) {
+        ImGui::SameLine();
+        const bool selected = editor_.selectedTile == tile;
+        if (selected) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.50f, 0.85f, 1.0f));
+        }
+
+        const char* emptyLabel = tileButtonLabel(tile);
+        std::string label = emptyLabel ? std::string(emptyLabel) : std::string(1, tile);
+        label += "##palette_";
+        label += tileName(tile);
+        if (ImGui::Button(label.c_str(), ImVec2(32.0f, 28.0f))) {
+            editor_.selectedTile = tile;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", tileName(tile));
+        }
+
+        if (selected) {
+            ImGui::PopStyleColor();
+        }
+    }
+    ImGui::Text("Selected: %s", tileName(editor_.selectedTile));
+#endif
+}
+
+void Application::drawEditorFileBrowser()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    ImGui::InputText("Root", &editor_.browserRootBuffer);
+    ImGui::SameLine();
+    if (ImGui::Button("Set Root")) {
+        std::filesystem::path root(editor_.browserRootBuffer);
+        if (std::filesystem::exists(root) && std::filesystem::is_directory(root)) {
+            editor_.browserRoot = root;
+            editor_.status = "Browser root changed.";
+        } else {
+            editor_.status = "Browser root does not exist or is not a directory.";
+        }
+    }
+
+    std::vector<std::filesystem::path> screens;
+    std::error_code error;
+    if (std::filesystem::exists(editor_.browserRoot, error)) {
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(editor_.browserRoot, error)) {
+            if (error) {
+                break;
+            }
+            if (entry.is_regular_file(error) && entry.path().extension() == ".scr") {
+                screens.push_back(entry.path());
+            }
+        }
+    }
+    std::ranges::sort(screens);
+
+    if (ImGui::BeginChild("LevelFiles", ImVec2(0.0f, 150.0f), true)) {
+        for (const auto& path : screens) {
+            const std::string relative = std::filesystem::relative(path, editor_.browserRoot, error).string();
+            const std::string label = error ? path.string() : relative;
+            if (ImGui::Selectable(label.c_str(), path == editor_.filePath)) {
+                loadEditorDocument(path);
+            }
+        }
+    }
+    ImGui::EndChild();
+#endif
+}
+
+void Application::drawEditorGrid()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (editor_.rows.empty()) {
+        ImGui::TextUnformatted("No document loaded.");
+        return;
+    }
+
+    ImGui::Text("Grid %zu x %zu", editor_.rows.front().size(), editor_.rows.size());
+    if (ImGui::BeginChild("LevelGrid", ImVec2(0.0f, 360.0f), true, ImGuiWindowFlags_HorizontalScrollbar)) {
+        for (size_t y = 0; y < editor_.rows.size(); ++y) {
+            for (size_t x = 0; x < editor_.rows[y].size(); ++x) {
+                ImGui::PushID(static_cast<int>(y * editor_.rows[y].size() + x));
+                char tile = editor_.rows[y][x];
+                const char* emptyLabel = tileButtonLabel(tile);
+                const std::string label = emptyLabel ? emptyLabel : std::string(1, tile);
+                if (ImGui::Button(label.c_str(), ImVec2(26.0f, 24.0f))) {
+                    if (editor_.selectedTile == 'C') {
+                        for (std::string& row : editor_.rows) {
+                            std::ranges::replace(row, 'C', ' ');
+                        }
+                    }
+                    editor_.rows[y][x] = editor_.selectedTile;
+                    editor_.dirty = true;
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("(%zu, %zu) %s", x, y, tileName(tile));
+                }
+                ImGui::PopID();
+                if (x + 1 < editor_.rows[y].size()) {
+                    ImGui::SameLine(0.0f, 1.0f);
+                }
+            }
+        }
+    }
+    ImGui::EndChild();
+#endif
+}
+
+void Application::newEditorDocument(int width, int height)
+{
+    width = std::max(width, 1);
+    height = std::max(height, 1);
+
+    editor_.rows.assign(static_cast<size_t>(height), std::string(static_cast<size_t>(width), ' '));
+    editor_.rows.front().front() = 'C';
+    editor_.requestedWidth = width;
+    editor_.requestedHeight = height;
+    editor_.dirty = true;
+    editor_.status = "Created new level.";
+}
+
+void Application::resizeEditorDocument(int width, int height)
+{
+    width = std::max(width, 1);
+    height = std::max(height, 1);
+
+    std::vector<std::string> resized(static_cast<size_t>(height), std::string(static_cast<size_t>(width), ' '));
+    const size_t copyHeight = std::min(resized.size(), editor_.rows.size());
+    for (size_t y = 0; y < copyHeight; ++y) {
+        const size_t copyWidth = std::min(resized[y].size(), editor_.rows[y].size());
+        std::copy_n(editor_.rows[y].begin(), copyWidth, resized[y].begin());
+    }
+
+    editor_.rows = std::move(resized);
+    editor_.requestedWidth = width;
+    editor_.requestedHeight = height;
+    editor_.dirty = true;
+    editor_.status = "Resized level.";
+}
+
+void Application::loadEditorDocument(const std::filesystem::path& path)
+{
+    std::ifstream file(path);
+    if (!file) {
+        editor_.status = "Failed to load: " + path.string();
+        return;
+    }
+
+    std::vector<std::string> rows;
+    std::string line;
+    while (std::getline(file, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        rows.push_back(line);
+    }
+
+    try {
+        Level::loadFromLines(rows, path.string());
+    } catch (const std::exception& error) {
+        editor_.status = error.what();
+        return;
+    }
+
+    editor_.rows = std::move(rows);
+    editor_.filePath = path;
+    editor_.filePathBuffer = path.string();
+    editor_.requestedHeight = static_cast<int>(editor_.rows.size());
+    editor_.requestedWidth = editor_.rows.empty() ? 1 : static_cast<int>(std::ranges::max(editor_.rows, {}, &std::string::size).size());
+    resizeEditorDocument(editor_.requestedWidth, editor_.requestedHeight);
+    editor_.dirty = false;
+    editor_.status = "Loaded " + path.string();
+}
+
+void Application::saveEditorDocument(const std::filesystem::path& path)
+{
+    if (editor_.rows.empty()) {
+        editor_.status = "Nothing to save.";
+        return;
+    }
+
+    std::error_code error;
+    if (path.has_parent_path()) {
+        std::filesystem::create_directories(path.parent_path(), error);
+        if (error) {
+            editor_.status = "Failed to create directories: " + error.message();
+            return;
+        }
+    }
+
+    std::ofstream file(path, std::ios::trunc);
+    if (!file) {
+        editor_.status = "Failed to save: " + path.string();
+        return;
+    }
+
+    for (const std::string& row : editor_.rows) {
+        file << row << '\n';
+    }
+
+    editor_.filePath = path;
+    editor_.filePathBuffer = path.string();
+    editor_.dirty = false;
+    editor_.status = "Saved " + path.string();
+}
+
+void Application::playEditorDocument()
+{
+    try {
+        applyLevel(editorDocumentToLevel());
+        editor_.playingDraft = true;
+        editor_.status = "Playing editor draft.";
+    } catch (const std::exception& error) {
+        editor_.status = error.what();
+    }
+}
+
+Level Application::editorDocumentToLevel() const
+{
+    return Level::loadFromLines(editor_.rows, "level editor draft");
 }
 
 std::optional<MoveDirection> Application::pressedVerticalDirection() const

@@ -31,6 +31,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/imgui.cpp")
         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/imgui_widgets.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/backends/imgui_impl_sdl3.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/backends/imgui_impl_vulkan.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/misc/cpp/imgui_stdlib.cpp"
     )
     if(MSVC)
         set_source_files_properties(${SOKOBAN_IMGUI_SOURCES} PROPERTIES COMPILE_OPTIONS /W0)
@@ -103,6 +104,7 @@ target_include_directories(sokoban PRIVATE
     src
     third_party/imgui
     third_party/imgui/backends
+    third_party/imgui/misc/cpp
 )
 target_link_libraries(sokoban PRIVATE
     Vulkan::Vulkan
