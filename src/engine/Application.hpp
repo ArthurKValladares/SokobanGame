@@ -9,6 +9,7 @@
 
 #include <deque>
 #include <filesystem>
+#include <optional>
 #include <vector>
 
 namespace sokoban {
@@ -36,14 +37,36 @@ private:
         Vec2 renderPosition {};
     };
 
+    enum class MoveCommandType {
+        Move,
+        Undo,
+    };
+
+    struct MoveCommand {
+        MoveCommandType type = MoveCommandType::Move;
+        MoveDirection direction = MoveDirection::Up;
+    };
+
+    struct MoveRecord {
+        GridPosition playerStart {};
+        GridPosition playerEnd {};
+        bool movedRock = false;
+        size_t rockIndex = 0;
+        GridPosition rockStart {};
+        GridPosition rockEnd {};
+    };
+
     void loadCurrentScreen();
     void advanceScreen();
     void update(float dt);
-    void queuePressedMovement();
+    void queuePressedCommands();
     void advancePlayerMovement(float dt);
+    [[nodiscard]] bool completeActiveMove();
     [[nodiscard]] bool tryStartNextMove();
     [[nodiscard]] bool tryStartHeldMove();
     [[nodiscard]] bool tryStartMove(MoveDirection direction);
+    [[nodiscard]] bool tryStartUndoMove();
+    [[nodiscard]] MoveRecord invertMoveRecord(const MoveRecord& record) const;
     [[nodiscard]] GridPosition movementTarget(MoveDirection direction) const;
     [[nodiscard]] GridPosition movementTarget(GridPosition origin, MoveDirection direction) const;
     [[nodiscard]] Rock* rockAt(GridPosition position);
@@ -66,7 +89,10 @@ private:
     GridPosition playerCell_ {};
     Vec2 playerRenderPosition_ {};
     std::vector<Rock> rocks_;
-    std::deque<MoveDirection> pendingMoves_;
+    std::deque<MoveCommand> pendingCommands_;
+    std::vector<MoveRecord> moveHistory_;
+    std::optional<size_t> undoCursor_;
+    MoveRecord activeMove_;
     GridPosition moveStart_ {};
     GridPosition moveTarget_ {};
     Rock* movingRock_ = nullptr;

@@ -66,7 +66,7 @@ void Application::run()
 
 void Application::update(float dt)
 {
-    queuePressedMovement();
+    queuePressedCommands();
     advancePlayerMovement(dt);
 }
 
@@ -83,7 +83,10 @@ void Application::loadCurrentScreen()
             .renderPosition = toVec2(rockPosition),
         });
     }
-    pendingMoves_.clear();
+    pendingCommands_.clear();
+    moveHistory_.clear();
+    undoCursor_.reset();
+    activeMove_ = {};
     moving_ = false;
     movingRock_ = nullptr;
     moveElapsed_ = 0.0f;
@@ -110,19 +113,22 @@ void Application::advanceScreen()
     loadCurrentScreen();
 }
 
-void Application::queuePressedMovement()
+void Application::queuePressedCommands()
 {
+    if (input_.keyPressed(SDL_SCANCODE_Z)) {
+        pendingCommands_.push_back({ .type = MoveCommandType::Undo });
+    }
     if (input_.keyPressed(SDL_SCANCODE_W)) {
-        pendingMoves_.push_back(MoveDirection::Up);
+        pendingCommands_.push_back({ .type = MoveCommandType::Move, .direction = MoveDirection::Up });
     }
     if (input_.keyPressed(SDL_SCANCODE_S)) {
-        pendingMoves_.push_back(MoveDirection::Down);
+        pendingCommands_.push_back({ .type = MoveCommandType::Move, .direction = MoveDirection::Down });
     }
     if (input_.keyPressed(SDL_SCANCODE_A)) {
-        pendingMoves_.push_back(MoveDirection::Left);
+        pendingCommands_.push_back({ .type = MoveCommandType::Move, .direction = MoveDirection::Left });
     }
     if (input_.keyPressed(SDL_SCANCODE_D)) {
-        pendingMoves_.push_back(MoveDirection::Right);
+        pendingCommands_.push_back({ .type = MoveCommandType::Move, .direction = MoveDirection::Right });
     }
 }
 
@@ -136,14 +142,9 @@ void Application::advancePlayerMovement(float dt)
         }
 
         if constexpr (config::playerMoveDurationSeconds <= 0.0f) {
-            playerCell_ = moveTarget_;
-            playerRenderPosition_ = toVec2(playerCell_);
-            if (movingRock_) {
-                movingRock_->cell = rockMoveTarget_;
-                movingRock_->renderPosition = toVec2(rockMoveTarget_);
-                movingRock_ = nullptr;
+            if (completeActiveMove()) {
+                return;
             }
-            moving_ = false;
             continue;
         }
 
@@ -160,31 +161,46 @@ void Application::advancePlayerMovement(float dt)
         }
 
         if (moveElapsed_ >= duration) {
-            playerCell_ = moveTarget_;
-            playerRenderPosition_ = toVec2(playerCell_);
-            if (movingRock_) {
-                movingRock_->cell = rockMoveTarget_;
-                movingRock_->renderPosition = toVec2(movingRock_->cell);
-                movingRock_ = nullptr;
-            }
-            moving_ = false;
-            moveElapsed_ = 0.0f;
-
-            if (level_.isEnd(playerCell_) && isEndUnlocked()) {
-                advanceScreen();
+            if (completeActiveMove()) {
                 return;
             }
         }
     }
 }
 
+bool Application::completeActiveMove()
+{
+    playerCell_ = moveTarget_;
+    playerRenderPosition_ = toVec2(playerCell_);
+    if (movingRock_) {
+        movingRock_->cell = rockMoveTarget_;
+        movingRock_->renderPosition = toVec2(movingRock_->cell);
+        movingRock_ = nullptr;
+    }
+
+    moveHistory_.push_back(activeMove_);
+    moving_ = false;
+    moveElapsed_ = 0.0f;
+
+    if (level_.isEnd(playerCell_) && isEndUnlocked()) {
+        advanceScreen();
+        return true;
+    }
+
+    return false;
+}
+
 bool Application::tryStartNextMove()
 {
-    while (!pendingMoves_.empty()) {
-        const MoveDirection direction = pendingMoves_.front();
-        pendingMoves_.pop_front();
+    while (!pendingCommands_.empty()) {
+        const MoveCommand command = pendingCommands_.front();
+        pendingCommands_.pop_front();
 
-        if (tryStartMove(direction)) {
+        if (command.type == MoveCommandType::Undo && tryStartUndoMove()) {
+            return true;
+        }
+
+        if (command.type == MoveCommandType::Move && tryStartMove(command.direction)) {
             return true;
         }
     }
@@ -194,6 +210,9 @@ bool Application::tryStartNextMove()
 
 bool Application::tryStartHeldMove()
 {
+    if (input_.keyDown(SDL_SCANCODE_Z)) {
+        return tryStartUndoMove();
+    }
     if (input_.keyDown(SDL_SCANCODE_W)) {
         return tryStartMove(MoveDirection::Up);
     }
@@ -218,6 +237,10 @@ bool Application::tryStartMove(MoveDirection direction)
     }
 
     movingRock_ = nullptr;
+    activeMove_ = {
+        .playerStart = playerCell_,
+        .playerEnd = target,
+    };
     if (Rock* rock = rockAt(target)) {
         if (!canMoveRock(target, direction)) {
             return false;
@@ -226,13 +249,63 @@ bool Application::tryStartMove(MoveDirection direction)
         movingRock_ = rock;
         rockMoveStart_ = rock->cell;
         rockMoveTarget_ = movementTarget(rock->cell, direction);
+        activeMove_.movedRock = true;
+        activeMove_.rockIndex = static_cast<size_t>(rock - rocks_.data());
+        activeMove_.rockStart = rockMoveStart_;
+        activeMove_.rockEnd = rockMoveTarget_;
     }
 
+    undoCursor_.reset();
     moveStart_ = playerCell_;
     moveTarget_ = target;
     moveElapsed_ = 0.0f;
     moving_ = true;
     return true;
+}
+
+bool Application::tryStartUndoMove()
+{
+    if (moveHistory_.empty()) {
+        return false;
+    }
+
+    if (!undoCursor_) {
+        // A contiguous undo run walks backward through the pre-existing history while
+        // each completed undo still appends its inverse move for future branching.
+        undoCursor_ = moveHistory_.size();
+    }
+
+    if (*undoCursor_ == 0) {
+        return false;
+    }
+
+    --(*undoCursor_);
+    activeMove_ = invertMoveRecord(moveHistory_[*undoCursor_]);
+    moveStart_ = activeMove_.playerStart;
+    moveTarget_ = activeMove_.playerEnd;
+    movingRock_ = nullptr;
+
+    if (activeMove_.movedRock) {
+        movingRock_ = &rocks_[activeMove_.rockIndex];
+        rockMoveStart_ = activeMove_.rockStart;
+        rockMoveTarget_ = activeMove_.rockEnd;
+    }
+
+    moveElapsed_ = 0.0f;
+    moving_ = true;
+    return true;
+}
+
+Application::MoveRecord Application::invertMoveRecord(const MoveRecord& record) const
+{
+    return {
+        .playerStart = record.playerEnd,
+        .playerEnd = record.playerStart,
+        .movedRock = record.movedRock,
+        .rockIndex = record.rockIndex,
+        .rockStart = record.rockEnd,
+        .rockEnd = record.rockStart,
+    };
 }
 
 GridPosition Application::movementTarget(MoveDirection direction) const
