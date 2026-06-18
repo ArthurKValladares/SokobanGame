@@ -1,5 +1,7 @@
 #include "engine/render/VulkanRenderer.hpp"
 
+#include "engine/BoardLayout.hpp"
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
@@ -242,6 +244,15 @@ bool VulkanRenderer::wantsKeyboardCapture() const
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     return ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard;
+#else
+    return false;
+#endif
+}
+
+bool VulkanRenderer::wantsMouseCapture() const
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    return ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureMouse;
 #else
     return false;
 #endif
@@ -745,25 +756,18 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
 
 VulkanRenderer::TileRenderLayout VulkanRenderer::calculateTileRenderLayout(const RenderFrameData& frameData) const
 {
-    if (frameData.levelWidth == 0 || frameData.levelHeight == 0) {
-        return {};
-    }
-
-    const float tileSizePixels = std::min(
-        static_cast<float>(swapchainExtent_.width) / static_cast<float>(frameData.levelWidth),
-        static_cast<float>(swapchainExtent_.height) / static_cast<float>(frameData.levelHeight));
-    const Vec2 tileSize = pixelSizeToClipSpace(tileSizePixels);
-    const Vec2 boardSize {
-        tileSize.x * static_cast<float>(frameData.levelWidth),
-        tileSize.y * static_cast<float>(frameData.levelHeight),
-    };
-    const Vec2 boardTopLeft {
-        -boardSize.x * 0.5f,
-        -boardSize.y * 0.5f,
+    const BoardPixelLayout pixelLayout = calculateBoardPixelLayout(
+        { static_cast<float>(swapchainExtent_.width), static_cast<float>(swapchainExtent_.height) },
+        frameData.levelWidth,
+        frameData.levelHeight);
+    const Vec2 tileSize = pixelSizeToClipSpace(pixelLayout.tileSize);
+    const Vec2 boardBottomLeft {
+        -1.0f + 2.0f * pixelLayout.bottomLeft.x / static_cast<float>(swapchainExtent_.width),
+        1.0f - 2.0f * pixelLayout.bottomLeft.y / static_cast<float>(swapchainExtent_.height),
     };
 
     return {
-        .boardTopLeft = boardTopLeft,
+        .boardBottomLeft = boardBottomLeft,
         .tileSize = tileSize,
     };
 }
@@ -772,8 +776,8 @@ void VulkanRenderer::drawTile(VkCommandBuffer commandBuffer, const TileRenderLay
 {
     const TilePushConstants pushConstants {
         .origin = {
-            layout.boardTopLeft.x + tile.position.x * layout.tileSize.x,
-            layout.boardTopLeft.y + tile.position.y * layout.tileSize.y,
+            layout.boardBottomLeft.x + tile.position.x * layout.tileSize.x,
+            layout.boardBottomLeft.y + tile.position.y * layout.tileSize.y,
         },
         .size = layout.tileSize,
         .color = tile.color,

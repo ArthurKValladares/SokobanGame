@@ -64,6 +64,7 @@ private:
     void advanceScreen();
     void update(float dt);
     void drawDebugUi();
+    void updateEditorPainting();
     void queuePressedCommands();
     void advancePlayerMovement(float dt);
     [[nodiscard]] bool completeActiveAction();
@@ -92,6 +93,8 @@ private:
     [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;
     [[nodiscard]] bool screenExists(int levelIndex, int screenIndex) const;
     [[nodiscard]] RenderFrameData buildRenderFrame() const;
+    [[nodiscard]] RenderFrameData buildGameplayRenderFrame() const;
+    [[nodiscard]] RenderFrameData buildEditorRenderFrame() const;
 
     Window window_;
     VulkanRenderer renderer_;

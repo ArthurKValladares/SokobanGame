@@ -38,6 +38,7 @@ public:
     void handleEvent(const SDL_Event& event);
     void beginDebugUiFrame();
     [[nodiscard]] bool wantsKeyboardCapture() const;
+    [[nodiscard]] bool wantsMouseCapture() const;
     void waitIdle() const;
 
 private:
@@ -64,7 +65,7 @@ private:
     };
 
     struct TileRenderLayout {
-        Vec2 boardTopLeft {};
+        Vec2 boardBottomLeft {};
         Vec2 tileSize {};
     };
 

@@ -2,6 +2,7 @@
 
 #include "engine/Level.hpp"
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <string>
@@ -25,7 +26,13 @@ public:
 
     void setPlayingDraft(bool playingDraft);
     [[nodiscard]] bool playingDraft() const;
+    void setEditingDocument(bool editingDocument);
+    [[nodiscard]] bool editingDocument() const;
     void markDraftSolved();
+    void paintCell(GridPosition position);
+    [[nodiscard]] uint32_t documentWidth() const;
+    [[nodiscard]] uint32_t documentHeight() const;
+    [[nodiscard]] const std::vector<std::string>& documentRows() const;
 
 private:
     struct Document {
@@ -40,6 +47,7 @@ private:
         TileType selectedTile = TileType::Wall;
         bool dirty = false;
         bool playingDraft = false;
+        bool editingDocument = false;
     };
 
     void drawTilePalette();

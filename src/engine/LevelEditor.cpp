@@ -73,6 +73,7 @@ void LevelEditor::initialize(const std::filesystem::path& assetRoot, int current
     } else {
         newDocument(document_.requestedWidth, document_.requestedHeight);
     }
+    document_.editingDocument = true;
 }
 
 void LevelEditor::draw(const Callbacks& callbacks)
@@ -91,17 +92,24 @@ void LevelEditor::draw(const Callbacks& callbacks)
         saveDocument(document_.filePathBuffer);
     }
     ImGui::SameLine();
+    if (ImGui::Button("Edit Draft")) {
+        document_.playingDraft = false;
+        document_.editingDocument = true;
+    }
+    ImGui::SameLine();
     if (ImGui::Button("Play Draft")) {
         playDocument(callbacks);
     }
     ImGui::SameLine();
     if (ImGui::Button("Return To Current Screen")) {
+        document_.editingDocument = false;
         if (callbacks.returnToCurrentScreen) {
             callbacks.returnToCurrentScreen();
         }
     }
 
     ImGui::Separator();
+    ImGui::Text("View: %s", document_.editingDocument ? "editing draft" : document_.playingDraft ? "playing draft" : "current screen");
     ImGui::InputInt("Width", &document_.requestedWidth);
     ImGui::InputInt("Height", &document_.requestedHeight);
     if (ImGui::Button("New")) {
@@ -116,7 +124,9 @@ void LevelEditor::draw(const Callbacks& callbacks)
     ImGui::Separator();
     drawFileBrowser();
     ImGui::Separator();
-    drawGrid();
+    if (ImGui::CollapsingHeader("Text Grid")) {
+        drawGrid();
+    }
 
     if (!document_.status.empty()) {
         ImGui::Separator();
@@ -130,6 +140,9 @@ void LevelEditor::draw(const Callbacks& callbacks)
 void LevelEditor::setPlayingDraft(bool playingDraft)
 {
     document_.playingDraft = playingDraft;
+    if (playingDraft) {
+        document_.editingDocument = false;
+    }
 }
 
 bool LevelEditor::playingDraft() const
@@ -137,9 +150,63 @@ bool LevelEditor::playingDraft() const
     return document_.playingDraft;
 }
 
+void LevelEditor::setEditingDocument(bool editingDocument)
+{
+    document_.editingDocument = editingDocument;
+    if (editingDocument) {
+        document_.playingDraft = false;
+    }
+}
+
+bool LevelEditor::editingDocument() const
+{
+    return document_.editingDocument;
+}
+
 void LevelEditor::markDraftSolved()
 {
     document_.status = "Draft solved.";
+}
+
+void LevelEditor::paintCell(GridPosition position)
+{
+    if (position.y < 0 || position.x < 0 || position.y >= static_cast<int>(document_.rows.size())) {
+        return;
+    }
+
+    std::string& row = document_.rows[static_cast<size_t>(position.y)];
+    if (position.x >= static_cast<int>(row.size())) {
+        return;
+    }
+
+    const char character = tileTypeToChar(document_.selectedTile);
+    if (row[static_cast<size_t>(position.x)] == character) {
+        return;
+    }
+
+    if (document_.selectedTile == TileType::Player) {
+        for (std::string& documentRow : document_.rows) {
+            std::ranges::replace(documentRow, tileTypeToChar(TileType::Player), tileTypeToChar(TileType::Empty));
+        }
+    }
+
+    row[static_cast<size_t>(position.x)] = character;
+    document_.dirty = true;
+}
+
+uint32_t LevelEditor::documentWidth() const
+{
+    return document_.rows.empty() ? 0U : static_cast<uint32_t>(document_.rows.front().size());
+}
+
+uint32_t LevelEditor::documentHeight() const
+{
+    return static_cast<uint32_t>(document_.rows.size());
+}
+
+const std::vector<std::string>& LevelEditor::documentRows() const
+{
+    return document_.rows;
 }
 
 void LevelEditor::drawTilePalette()
@@ -189,7 +256,9 @@ void LevelEditor::drawFileBrowser()
             const std::string relative = std::filesystem::relative(path, document_.browserRoot, error).string();
             const std::string label = error ? path.string() : relative;
             if (ImGui::Selectable(label.c_str(), path == document_.filePath)) {
-                loadDocument(path);
+                document_.filePath = path;
+                document_.filePathBuffer = path.string();
+                document_.status = "Selected " + path.string();
             }
         }
     }
@@ -214,13 +283,7 @@ void LevelEditor::drawGrid()
                 const char* emptyLabel = tileButtonLabel(charToTileType(tile).value_or(TileType::Count));
                 const std::string label = emptyLabel ? emptyLabel : std::string(1, tile);
                 if (ImGui::Button(label.c_str(), ImVec2(26.0f, 24.0f))) {
-                    if (document_.selectedTile == TileType::Player) {
-                        for (std::string& row : document_.rows) {
-                            std::ranges::replace(row, tileTypeToChar(TileType::Player), tileTypeToChar(TileType::Empty));
-                        }
-                    }
-                    document_.rows[y][x] = tileTypeToChar(document_.selectedTile);
-                    document_.dirty = true;
+                    paintCell({ static_cast<int>(x), static_cast<int>(y) });
                 }
                 if (ImGui::IsItemHovered()) {
                     const std::string_view name = levelCharacterName(tile);
@@ -247,6 +310,8 @@ void LevelEditor::newDocument(int width, int height)
     document_.requestedWidth = width;
     document_.requestedHeight = height;
     document_.dirty = true;
+    document_.playingDraft = false;
+    document_.editingDocument = true;
     document_.status = "Created new level.";
 }
 
@@ -300,6 +365,8 @@ void LevelEditor::loadDocument(const std::filesystem::path& path)
     document_.requestedWidth = document_.rows.empty() ? 1 : static_cast<int>(std::ranges::max(document_.rows, {}, &std::string::size).size());
     resizeDocument(document_.requestedWidth, document_.requestedHeight);
     document_.dirty = false;
+    document_.playingDraft = false;
+    document_.editingDocument = true;
     document_.status = "Loaded " + path.string();
 }
 
@@ -342,6 +409,7 @@ void LevelEditor::playDocument(const Callbacks& callbacks)
             callbacks.playDraft(documentToLevel());
         }
         document_.playingDraft = true;
+        document_.editingDocument = false;
         document_.status = "Playing editor draft.";
     } catch (const std::exception& error) {
         document_.status = error.what();

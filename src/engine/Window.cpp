@@ -32,4 +32,20 @@ Window::~Window()
     SDL_Quit();
 }
 
+Vec2 Window::size() const
+{
+    int width = 0;
+    int height = 0;
+    SDL_GetWindowSize(window_, &width, &height);
+    return { static_cast<float>(width), static_cast<float>(height) };
+}
+
+Vec2 Window::sizeInPixels() const
+{
+    int width = 0;
+    int height = 0;
+    SDL_GetWindowSizeInPixels(window_, &width, &height);
+    return { static_cast<float>(width), static_cast<float>(height) };
+}
+
 } // namespace sokoban

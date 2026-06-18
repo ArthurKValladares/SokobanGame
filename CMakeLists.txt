@@ -88,6 +88,7 @@ add_custom_target(sokoban_assets
 add_executable(sokoban
     src/main.cpp
     src/engine/Application.cpp
+    src/engine/BoardLayout.cpp
     src/engine/DebugUi.cpp
     src/engine/Input.cpp
     src/engine/Level.cpp

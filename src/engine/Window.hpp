@@ -1,5 +1,7 @@
 #pragma once
 
+#include "engine/Math.hpp"
+
 #include <SDL3/SDL_video.h>
 
 #include <string>
@@ -15,6 +17,8 @@ public:
     Window& operator=(const Window&) = delete;
 
     [[nodiscard]] SDL_Window* nativeHandle() const { return window_; }
+    [[nodiscard]] Vec2 size() const;
+    [[nodiscard]] Vec2 sizeInPixels() const;
 
 private:
     SDL_Window* window_ = nullptr;

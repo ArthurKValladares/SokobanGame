@@ -1,5 +1,6 @@
 #include "engine/Application.hpp"
 
+#include "engine/BoardLayout.hpp"
 #include "engine/Config.hpp"
 #include "engine/DebugUi.hpp"
 
@@ -73,7 +74,13 @@ void Application::run()
         while (SDL_PollEvent(&event)) {
             renderer_.handleEvent(event);
 
-            if (!renderer_.wantsKeyboardCapture() || event.type == SDL_EVENT_KEY_UP) {
+            const bool isKeyboardEvent = event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP;
+            const bool isMouseEvent = event.type == SDL_EVENT_MOUSE_MOTION ||
+                event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+                event.type == SDL_EVENT_MOUSE_BUTTON_UP;
+            const bool allowKeyboardInput = !isKeyboardEvent || !renderer_.wantsKeyboardCapture() || event.type == SDL_EVENT_KEY_UP;
+            const bool allowMouseInput = !isMouseEvent || !renderer_.wantsMouseCapture() || event.type == SDL_EVENT_MOUSE_BUTTON_UP;
+            if (allowKeyboardInput && allowMouseInput) {
                 input_.handleEvent(event);
             }
 
@@ -97,6 +104,15 @@ void Application::run()
 
 void Application::update(float dt)
 {
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (levelEditor_.editingDocument()) {
+        updateEditorPainting();
+        return;
+    }
+#else
+    (void)dt;
+#endif
+
     queuePressedCommands();
     advancePlayerMovement(dt);
 }
@@ -112,10 +128,42 @@ void Application::drawDebugUi()
 #endif
 }
 
+void Application::updateEditorPainting()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (!input_.mouseButtonDown(SDL_BUTTON_LEFT) || renderer_.wantsMouseCapture()) {
+        return;
+    }
+
+    const uint32_t documentWidth = levelEditor_.documentWidth();
+    const uint32_t documentHeight = levelEditor_.documentHeight();
+    if (documentWidth == 0 || documentHeight == 0) {
+        return;
+    }
+
+    const Vec2 windowSize = window_.size();
+    const Vec2 pixelSize = window_.sizeInPixels();
+    if (windowSize.x <= 0.0f || windowSize.y <= 0.0f || pixelSize.x <= 0.0f || pixelSize.y <= 0.0f) {
+        return;
+    }
+
+    const Vec2 mouse = input_.mousePosition();
+    const Vec2 mousePixels {
+        mouse.x * pixelSize.x / windowSize.x,
+        mouse.y * pixelSize.y / windowSize.y,
+    };
+    const BoardPixelLayout layout = calculateBoardPixelLayout(pixelSize, documentWidth, documentHeight);
+    if (const std::optional<GridPosition> position = pixelToGridPosition(mousePixels, layout, documentWidth, documentHeight)) {
+        levelEditor_.paintCell(*position);
+    }
+#endif
+}
+
 void Application::loadCurrentScreen()
 {
     applyLevel(Level::loadFromFile(screenPath(currentLevel_, currentScreen_)));
     levelEditor_.setPlayingDraft(false);
+    levelEditor_.setEditingDocument(false);
 
     std::cerr << "player started level " << currentLevel_ << " screen " << currentScreen_ << '\n';
 }
@@ -548,6 +596,17 @@ bool Application::screenExists(int levelIndex, int screenIndex) const
 
 RenderFrameData Application::buildRenderFrame() const
 {
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (levelEditor_.editingDocument()) {
+        return buildEditorRenderFrame();
+    }
+#endif
+
+    return buildGameplayRenderFrame();
+}
+
+RenderFrameData Application::buildGameplayRenderFrame() const
+{
     RenderFrameData frame;
     frame.levelWidth = level_.width();
     frame.levelHeight = level_.height();
@@ -577,6 +636,31 @@ RenderFrameData Application::buildRenderFrame() const
             .position = rock.renderPosition,
             .color = tileColor(TileType::Rock),
         });
+    }
+
+    return frame;
+}
+
+RenderFrameData Application::buildEditorRenderFrame() const
+{
+    RenderFrameData frame;
+    frame.levelWidth = levelEditor_.documentWidth();
+    frame.levelHeight = levelEditor_.documentHeight();
+
+    const std::vector<std::string>& rows = levelEditor_.documentRows();
+    frame.tiles.reserve(static_cast<size_t>(frame.levelWidth) * frame.levelHeight);
+    for (uint32_t y = 0; y < frame.levelHeight; ++y) {
+        const std::string& row = rows[static_cast<size_t>(y)];
+        for (uint32_t x = 0; x < frame.levelWidth; ++x) {
+            const TileType tile = x < row.size()
+                ? charToTileType(row[static_cast<size_t>(x)]).value_or(TileType::Count)
+                : TileType::Empty;
+
+            frame.tiles.push_back({
+                .position = { static_cast<float>(x), static_cast<float>(y) },
+                .color = tileColor(tile),
+            });
+        }
     }
 
     return frame;
