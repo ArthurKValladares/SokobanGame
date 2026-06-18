@@ -47,7 +47,7 @@ std::optional<GridPosition> pixelToGridPosition(
 
     const GridPosition position {
         static_cast<int>(std::floor(localX / layout.tileSize)),
-        static_cast<int>(std::floor(localY / layout.tileSize)),
+        static_cast<int>(levelHeight) - 1 - static_cast<int>(std::floor(localY / layout.tileSize)),
     };
     if (position.x < 0 || position.y < 0 || position.x >= static_cast<int>(levelWidth) || position.y >= static_cast<int>(levelHeight)) {
         return std::nullopt;

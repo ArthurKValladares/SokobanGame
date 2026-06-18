@@ -271,6 +271,11 @@ const std::vector<std::string>& LevelEditor::documentRows() const
     return document_.rows;
 }
 
+TileType LevelEditor::selectedTile() const
+{
+    return document_.selectedTile;
+}
+
 void LevelEditor::drawTilePalette()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI

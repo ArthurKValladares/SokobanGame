@@ -214,13 +214,15 @@ void Application::drawEditorModeIndicator()
 void Application::updateEditorPainting()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
+    editorHoverCell_.reset();
+
     if (input_.keyPressed(SDL_SCANCODE_Z)) {
         const bool undone = levelEditor_.tryUndoEdit();
         (void)undone;
         return;
     }
 
-    if (!input_.mouseButtonDown(SDL_BUTTON_LEFT) || renderer_.wantsMouseCapture()) {
+    if (renderer_.wantsMouseCapture()) {
         return;
     }
 
@@ -243,7 +245,10 @@ void Application::updateEditorPainting()
     };
     const BoardPixelLayout layout = calculateBoardPixelLayout(pixelSize, documentWidth, documentHeight);
     if (const std::optional<GridPosition> position = pixelToGridPosition(mousePixels, layout, documentWidth, documentHeight)) {
-        levelEditor_.paintCell(*position);
+        editorHoverCell_ = position;
+        if (input_.mouseButtonDown(SDL_BUTTON_LEFT)) {
+            levelEditor_.paintCell(*position);
+        }
     }
 #endif
 }
@@ -253,6 +258,7 @@ void Application::loadCurrentScreen()
     applyLevel(Level::loadFromFile(screenPath(currentLevel_, currentScreen_)));
     levelEditor_.setPlayingDraft(false);
     levelEditor_.setEditingDocument(false);
+    editorHoverCell_.reset();
 
     std::cerr << "player started level " << currentLevel_ << " screen " << currentScreen_ << '\n';
 }
@@ -742,7 +748,7 @@ RenderFrameData Application::buildEditorRenderFrame() const
     frame.levelHeight = levelEditor_.documentHeight();
 
     const std::vector<std::string>& rows = levelEditor_.documentRows();
-    frame.tiles.reserve(static_cast<size_t>(frame.levelWidth) * frame.levelHeight);
+    frame.tiles.reserve(static_cast<size_t>(frame.levelWidth) * frame.levelHeight + 1);
     for (uint32_t y = 0; y < frame.levelHeight; ++y) {
         const std::string& row = rows[static_cast<size_t>(y)];
         for (uint32_t x = 0; x < frame.levelWidth; ++x) {
@@ -755,6 +761,24 @@ RenderFrameData Application::buildEditorRenderFrame() const
                 .color = tileColor(tile),
             });
         }
+    }
+
+    if (editorHoverCell_ &&
+        editorHoverCell_->x >= 0 &&
+        editorHoverCell_->y >= 0 &&
+        editorHoverCell_->x < static_cast<int>(frame.levelWidth) &&
+        editorHoverCell_->y < static_cast<int>(frame.levelHeight)) {
+        Vec4 highlightColor = tileColor(levelEditor_.selectedTile());
+        highlightColor.w = 0.72f;
+
+        frame.tiles.push_back({
+            .position = {
+                static_cast<float>(editorHoverCell_->x) + 0.18f,
+                static_cast<float>(editorHoverCell_->y) + 0.18f,
+            },
+            .size = { 0.64f, 0.64f },
+            .color = highlightColor,
+        });
     }
 
     return frame;

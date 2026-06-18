@@ -29,6 +29,7 @@ enum class AntiAliasingMode {
 struct RenderFrameData {
     struct Tile {
         Vec2 position {};
+        Vec2 size { 1.0f, 1.0f };
         Vec4 color {};
         float height = 0.0f;
     };

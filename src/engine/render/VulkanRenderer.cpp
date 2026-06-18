@@ -1153,12 +1153,16 @@ void VulkanRenderer::drawTile(VkCommandBuffer commandBuffer, const TileRenderLay
         layout.boardBottomLeft.x + tile.position.x * layout.tileSize.x,
         layout.boardBottomLeft.y + tile.position.y * layout.tileSize.y,
     };
+    const Vec2 size {
+        layout.tileSize.x * tile.size.x,
+        layout.tileSize.y * tile.size.y,
+    };
 
     drawFace(commandBuffer, {
         origin,
-        { origin.x + layout.tileSize.x, origin.y },
-        { origin.x + layout.tileSize.x, origin.y + layout.tileSize.y },
-        { origin.x, origin.y + layout.tileSize.y },
+        { origin.x + size.x, origin.y },
+        { origin.x + size.x, origin.y + size.y },
+        { origin.x, origin.y + size.y },
     }, tile.color);
 }
 
@@ -1504,6 +1508,13 @@ std::array<VkPipeline, 2> VulkanRenderer::createGraphicsPipelineLibraries(VkShad
     };
 
     VkPipelineColorBlendAttachmentState colorBlendAttachment {
+        .blendEnable = VK_TRUE,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .colorBlendOp = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .alphaBlendOp = VK_BLEND_OP_ADD,
         .colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
             VK_COLOR_COMPONENT_G_BIT |
             VK_COLOR_COMPONENT_B_BIT |

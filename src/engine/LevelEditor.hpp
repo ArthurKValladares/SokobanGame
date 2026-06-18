@@ -39,6 +39,7 @@ public:
     [[nodiscard]] uint32_t documentWidth() const;
     [[nodiscard]] uint32_t documentHeight() const;
     [[nodiscard]] const std::vector<std::string>& documentRows() const;
+    [[nodiscard]] TileType selectedTile() const;
 
 private:
     struct Document {
