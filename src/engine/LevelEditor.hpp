@@ -37,7 +37,7 @@ private:
         std::string status;
         int requestedWidth = 12;
         int requestedHeight = 8;
-        char selectedTile = '#';
+        char selectedTile = tileTypeToChar(TileType::Wall);
         bool dirty = false;
         bool playingDraft = false;
     };

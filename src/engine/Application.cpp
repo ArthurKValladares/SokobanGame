@@ -573,6 +573,9 @@ RenderFrameData Application::buildRenderFrame() const
             case TileType::Empty:
                 color = { 0.82f, 0.82f, 0.84f, 1.0f };
                 break;
+            case TileType::Count:
+                color = { 1.0f, 0.0f, 1.0f, 1.0f };
+                break;
             }
 
             frame.tiles.push_back({

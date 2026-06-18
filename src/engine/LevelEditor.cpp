@@ -1,8 +1,11 @@
 #include "engine/LevelEditor.hpp"
 
 #include <algorithm>
+#include <array>
 #include <exception>
 #include <fstream>
+#include <optional>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -15,29 +18,58 @@ namespace sokoban {
 namespace {
 
 #if SOKOBAN_ENABLE_DEBUG_UI
-const char* tileName(char tile)
-{
-    switch (tile) {
-    case ' ':
-        return "Empty";
-    case '#':
-        return "Wall";
-    case 'E':
-        return "End";
-    case 'P':
-        return "Pressure";
-    case 'R':
-        return "Rock";
-    case 'C':
-        return "Player";
-    default:
-        return "Unknown";
-    }
-}
+struct EntityPaintDefinition {
+    char character = ' ';
+    std::string_view name;
+};
+
+constexpr std::array entityPaintDefinitions {
+    EntityPaintDefinition { playerStartCharacter, playerStartName },
+    EntityPaintDefinition { rockCharacter, rockName },
+};
 
 const char* tileButtonLabel(char tile)
 {
-    return tile == ' ' ? "." : nullptr;
+    return tile == tileTypeToChar(TileType::Empty) ? "." : nullptr;
+}
+
+std::string_view levelCharacterName(char character)
+{
+    if (const std::optional<TileType> tile = charToTileType(character)) {
+        return tileTypeName(*tile);
+    }
+    if (character == playerStartCharacter) {
+        return playerStartName;
+    }
+    if (character == rockCharacter) {
+        return rockName;
+    }
+
+    return "Unknown";
+}
+
+void drawPaintButton(char character, std::string_view name, char& selectedTile)
+{
+    ImGui::SameLine();
+    const bool selected = selectedTile == character;
+    if (selected) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.50f, 0.85f, 1.0f));
+    }
+
+    const char* emptyLabel = tileButtonLabel(character);
+    std::string label = emptyLabel ? std::string(emptyLabel) : std::string(1, character);
+    label += "##palette_";
+    label += name;
+    if (ImGui::Button(label.c_str(), ImVec2(32.0f, 28.0f))) {
+        selectedTile = character;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%.*s", static_cast<int>(name.size()), name.data());
+    }
+
+    if (selected) {
+        ImGui::PopStyleColor();
+    }
 }
 #endif
 
@@ -131,31 +163,16 @@ void LevelEditor::markDraftSolved()
 void LevelEditor::drawTilePalette()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    constexpr char tiles[] { '#', ' ', 'E', 'P', 'R', 'C' };
     ImGui::Text("Paint");
-    for (char tile : tiles) {
-        ImGui::SameLine();
-        const bool selected = document_.selectedTile == tile;
-        if (selected) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.50f, 0.85f, 1.0f));
-        }
-
-        const char* emptyLabel = tileButtonLabel(tile);
-        std::string label = emptyLabel ? std::string(emptyLabel) : std::string(1, tile);
-        label += "##palette_";
-        label += tileName(tile);
-        if (ImGui::Button(label.c_str(), ImVec2(32.0f, 28.0f))) {
-            document_.selectedTile = tile;
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s", tileName(tile));
-        }
-
-        if (selected) {
-            ImGui::PopStyleColor();
-        }
+    for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
+        drawPaintButton(definition.character, definition.name, document_.selectedTile);
     }
-    ImGui::Text("Selected: %s", tileName(document_.selectedTile));
+    for (const EntityPaintDefinition& definition : entityPaintDefinitions) {
+        drawPaintButton(definition.character, definition.name, document_.selectedTile);
+    }
+
+    const std::string_view selectedName = levelCharacterName(document_.selectedTile);
+    ImGui::Text("Selected: %.*s", static_cast<int>(selectedName.size()), selectedName.data());
 #endif
 }
 
@@ -218,16 +235,17 @@ void LevelEditor::drawGrid()
                 const char* emptyLabel = tileButtonLabel(tile);
                 const std::string label = emptyLabel ? emptyLabel : std::string(1, tile);
                 if (ImGui::Button(label.c_str(), ImVec2(26.0f, 24.0f))) {
-                    if (document_.selectedTile == 'C') {
+                    if (document_.selectedTile == playerStartCharacter) {
                         for (std::string& row : document_.rows) {
-                            std::ranges::replace(row, 'C', ' ');
+                            std::ranges::replace(row, playerStartCharacter, tileTypeToChar(TileType::Empty));
                         }
                     }
                     document_.rows[y][x] = document_.selectedTile;
                     document_.dirty = true;
                 }
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("(%zu, %zu) %s", x, y, tileName(tile));
+                    const std::string_view name = levelCharacterName(tile);
+                    ImGui::SetTooltip("(%zu, %zu) %.*s", x, y, static_cast<int>(name.size()), name.data());
                 }
                 ImGui::PopID();
                 if (x + 1 < document_.rows[y].size()) {
@@ -245,8 +263,8 @@ void LevelEditor::newDocument(int width, int height)
     width = std::max(width, 1);
     height = std::max(height, 1);
 
-    document_.rows.assign(static_cast<size_t>(height), std::string(static_cast<size_t>(width), ' '));
-    document_.rows.front().front() = 'C';
+    document_.rows.assign(static_cast<size_t>(height), std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Empty)));
+    document_.rows.front().front() = playerStartCharacter;
     document_.requestedWidth = width;
     document_.requestedHeight = height;
     document_.dirty = true;
@@ -258,7 +276,7 @@ void LevelEditor::resizeDocument(int width, int height)
     width = std::max(width, 1);
     height = std::max(height, 1);
 
-    std::vector<std::string> resized(static_cast<size_t>(height), std::string(static_cast<size_t>(width), ' '));
+    std::vector<std::string> resized(static_cast<size_t>(height), std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Empty)));
     const size_t copyHeight = std::min(resized.size(), document_.rows.size());
     for (size_t y = 0; y < copyHeight; ++y) {
         const size_t copyWidth = std::min(resized[y].size(), document_.rows[y].size());

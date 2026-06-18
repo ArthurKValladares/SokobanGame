@@ -9,26 +9,9 @@
 namespace sokoban {
 namespace {
 
-TileType parseTile(char value, bool& foundPlayer, bool& foundRock)
+std::runtime_error unknownLevelCharacter(char value)
 {
-    switch (value) {
-    case '#':
-        return TileType::Wall;
-    case 'E':
-        return TileType::End;
-    case ' ':
-        return TileType::Empty;
-    case 'C':
-        foundPlayer = true;
-        return TileType::Empty;
-    case 'R':
-        foundRock = true;
-        return TileType::Empty;
-    case 'P':
-        return TileType::PressurePlate;
-    default:
-        throw std::runtime_error(std::string("Unknown level tile character: '") + value + "'");
-    }
+    return std::runtime_error(std::string("Unknown level tile character: '") + value + "'");
 }
 
 } // namespace
@@ -74,21 +57,34 @@ Level Level::loadFromLines(const std::vector<std::string>& lines, std::string_vi
     bool hasPlayer = false;
     for (uint32_t y = 0; y < level.height_; ++y) {
         for (uint32_t x = 0; x < static_cast<uint32_t>(lines[y].size()); ++x) {
-            bool foundPlayerHere = false;
-            bool foundRockHere = false;
-            level.tiles_[static_cast<size_t>(y) * level.width_ + x] = parseTile(lines[y][x], foundPlayerHere, foundRockHere);
-            if (foundPlayerHere) {
+            const char character = lines[y][x];
+            const GridPosition position { static_cast<int>(x), static_cast<int>(y) };
+            const size_t tileIndex = static_cast<size_t>(y) * level.width_ + x;
+
+            if (character == playerStartCharacter) {
                 if (hasPlayer) {
                     throw std::runtime_error("Level has more than one player start: " + source);
                 }
                 hasPlayer = true;
-                level.playerStart_ = { static_cast<int>(x), static_cast<int>(y) };
+                level.playerStart_ = position;
+                level.tiles_[tileIndex] = TileType::Empty;
+                continue;
             }
-            if (foundRockHere) {
-                level.rocks_.push_back({ static_cast<int>(x), static_cast<int>(y) });
+
+            if (character == rockCharacter) {
+                level.rocks_.push_back(position);
+                level.tiles_[tileIndex] = TileType::Empty;
+                continue;
             }
-            if (level.tiles_[static_cast<size_t>(y) * level.width_ + x] == TileType::PressurePlate) {
-                level.pressurePlates_.push_back({ static_cast<int>(x), static_cast<int>(y) });
+
+            const std::optional<TileType> tile = charToTileType(character);
+            if (!tile) {
+                throw unknownLevelCharacter(character);
+            }
+
+            level.tiles_[tileIndex] = *tile;
+            if (*tile == TileType::PressurePlate) {
+                level.pressurePlates_.push_back(position);
             }
         }
     }
