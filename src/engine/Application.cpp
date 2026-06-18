@@ -75,11 +75,22 @@ void Application::loadCurrentScreen()
     level_ = Level::loadFromFile(screenPath(currentLevel_, currentScreen_));
     playerCell_ = level_.playerStart();
     playerRenderPosition_ = toVec2(playerCell_);
+    rocks_.clear();
+    rocks_.reserve(level_.rocks().size());
+    for (GridPosition rockPosition : level_.rocks()) {
+        rocks_.push_back({
+            .cell = rockPosition,
+            .renderPosition = toVec2(rockPosition),
+        });
+    }
     pendingMoves_.clear();
     moving_ = false;
+    movingRock_ = nullptr;
     moveElapsed_ = 0.0f;
     moveStart_ = playerCell_;
     moveTarget_ = playerCell_;
+    rockMoveStart_ = {};
+    rockMoveTarget_ = {};
 
     std::cerr << "player started level " << currentLevel_ << " screen " << currentScreen_ << '\n';
 }
@@ -127,6 +138,11 @@ void Application::advancePlayerMovement(float dt)
         if constexpr (config::playerMoveDurationSeconds <= 0.0f) {
             playerCell_ = moveTarget_;
             playerRenderPosition_ = toVec2(playerCell_);
+            if (movingRock_) {
+                movingRock_->cell = rockMoveTarget_;
+                movingRock_->renderPosition = toVec2(rockMoveTarget_);
+                movingRock_ = nullptr;
+            }
             moving_ = false;
             continue;
         }
@@ -139,10 +155,18 @@ void Application::advancePlayerMovement(float dt)
 
         const float t = std::clamp(moveElapsed_ / duration, 0.0f, 1.0f);
         playerRenderPosition_ = lerp(toVec2(moveStart_), toVec2(moveTarget_), t);
+        if (movingRock_) {
+            movingRock_->renderPosition = lerp(toVec2(rockMoveStart_), toVec2(rockMoveTarget_), t);
+        }
 
         if (moveElapsed_ >= duration) {
             playerCell_ = moveTarget_;
             playerRenderPosition_ = toVec2(playerCell_);
+            if (movingRock_) {
+                movingRock_->cell = rockMoveTarget_;
+                movingRock_->renderPosition = toVec2(movingRock_->cell);
+                movingRock_ = nullptr;
+            }
             moving_ = false;
             moveElapsed_ = 0.0f;
 
@@ -193,6 +217,17 @@ bool Application::tryStartMove(MoveDirection direction)
         return false;
     }
 
+    movingRock_ = nullptr;
+    if (Rock* rock = rockAt(target)) {
+        if (!canMoveRock(target, direction)) {
+            return false;
+        }
+
+        movingRock_ = rock;
+        rockMoveStart_ = rock->cell;
+        rockMoveTarget_ = movementTarget(rock->cell, direction);
+    }
+
     moveStart_ = playerCell_;
     moveTarget_ = target;
     moveElapsed_ = 0.0f;
@@ -202,7 +237,12 @@ bool Application::tryStartMove(MoveDirection direction)
 
 GridPosition Application::movementTarget(MoveDirection direction) const
 {
-    GridPosition target = playerCell_;
+    return movementTarget(playerCell_, direction);
+}
+
+GridPosition Application::movementTarget(GridPosition origin, MoveDirection direction) const
+{
+    GridPosition target = origin;
 
     switch (direction) {
     case MoveDirection::Up:
@@ -220,6 +260,30 @@ GridPosition Application::movementTarget(MoveDirection direction) const
     }
 
     return target;
+}
+
+Application::Rock* Application::rockAt(GridPosition position)
+{
+    const auto rock = std::ranges::find_if(rocks_, [position](const Rock& candidate) {
+        return candidate.cell == position;
+    });
+
+    return rock != rocks_.end() ? &*rock : nullptr;
+}
+
+const Application::Rock* Application::rockAt(GridPosition position) const
+{
+    const auto rock = std::ranges::find_if(rocks_, [position](const Rock& candidate) {
+        return candidate.cell == position;
+    });
+
+    return rock != rocks_.end() ? &*rock : nullptr;
+}
+
+bool Application::canMoveRock(GridPosition position, MoveDirection direction) const
+{
+    const GridPosition target = movementTarget(position, direction);
+    return level_.isWalkable(target) && rockAt(target) == nullptr;
 }
 
 std::filesystem::path Application::screenPath(int levelIndex, int screenIndex) const
@@ -275,6 +339,13 @@ RenderFrameData Application::buildRenderFrame() const
         .position = playerRenderPosition_,
         .color = { 0.0f, 1.0f, 0.15f, 1.0f },
     });
+
+    for (const Rock& rock : rocks_) {
+        frame.tiles.push_back({
+            .position = rock.renderPosition,
+            .color = { 0.20f, 0.10f, 0.04f, 1.0f },
+        });
+    }
 
     return frame;
 }

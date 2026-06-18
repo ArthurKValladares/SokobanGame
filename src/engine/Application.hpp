@@ -9,6 +9,7 @@
 
 #include <deque>
 #include <filesystem>
+#include <vector>
 
 namespace sokoban {
 
@@ -30,6 +31,11 @@ public:
     void run();
 
 private:
+    struct Rock {
+        GridPosition cell {};
+        Vec2 renderPosition {};
+    };
+
     void loadCurrentScreen();
     void advanceScreen();
     void update(float dt);
@@ -39,6 +45,10 @@ private:
     [[nodiscard]] bool tryStartHeldMove();
     [[nodiscard]] bool tryStartMove(MoveDirection direction);
     [[nodiscard]] GridPosition movementTarget(MoveDirection direction) const;
+    [[nodiscard]] GridPosition movementTarget(GridPosition origin, MoveDirection direction) const;
+    [[nodiscard]] Rock* rockAt(GridPosition position);
+    [[nodiscard]] const Rock* rockAt(GridPosition position) const;
+    [[nodiscard]] bool canMoveRock(GridPosition position, MoveDirection direction) const;
     [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;
     [[nodiscard]] bool screenExists(int levelIndex, int screenIndex) const;
     [[nodiscard]] RenderFrameData buildRenderFrame() const;
@@ -53,9 +63,13 @@ private:
     FrameTimer frameTimer_;
     GridPosition playerCell_ {};
     Vec2 playerRenderPosition_ {};
+    std::vector<Rock> rocks_;
     std::deque<MoveDirection> pendingMoves_;
     GridPosition moveStart_ {};
     GridPosition moveTarget_ {};
+    Rock* movingRock_ = nullptr;
+    GridPosition rockMoveStart_ {};
+    GridPosition rockMoveTarget_ {};
     float moveElapsed_ = 0.0f;
     bool moving_ = false;
     bool running_ = true;

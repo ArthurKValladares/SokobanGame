@@ -19,4 +19,9 @@ struct GridPosition {
     int y = 0;
 };
 
+inline bool operator==(GridPosition left, GridPosition right)
+{
+    return left.x == right.x && left.y == right.y;
+}
+
 } // namespace sokoban

@@ -8,7 +8,7 @@
 namespace sokoban {
 namespace {
 
-TileType parseTile(char value, bool& foundPlayer)
+TileType parseTile(char value, bool& foundPlayer, bool& foundRock)
 {
     switch (value) {
     case '#':
@@ -19,6 +19,9 @@ TileType parseTile(char value, bool& foundPlayer)
         return TileType::Empty;
     case 'C':
         foundPlayer = true;
+        return TileType::Empty;
+    case 'R':
+        foundRock = true;
         return TileType::Empty;
     default:
         throw std::runtime_error(std::string("Unknown level tile character: '") + value + "'");
@@ -63,13 +66,17 @@ Level Level::loadFromFile(const std::filesystem::path& path)
     for (uint32_t y = 0; y < level.height_; ++y) {
         for (uint32_t x = 0; x < static_cast<uint32_t>(lines[y].size()); ++x) {
             bool foundPlayerHere = false;
-            level.tiles_[static_cast<size_t>(y) * level.width_ + x] = parseTile(lines[y][x], foundPlayerHere);
+            bool foundRockHere = false;
+            level.tiles_[static_cast<size_t>(y) * level.width_ + x] = parseTile(lines[y][x], foundPlayerHere, foundRockHere);
             if (foundPlayerHere) {
                 if (hasPlayer) {
                     throw std::runtime_error("Level has more than one player start: " + path.string());
                 }
                 hasPlayer = true;
                 level.playerStart_ = { static_cast<int>(x), static_cast<int>(y) };
+            }
+            if (foundRockHere) {
+                level.rocks_.push_back({ static_cast<int>(x), static_cast<int>(y) });
             }
         }
     }

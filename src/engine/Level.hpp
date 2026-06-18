@@ -21,6 +21,7 @@ public:
     [[nodiscard]] uint32_t width() const { return width_; }
     [[nodiscard]] uint32_t height() const { return height_; }
     [[nodiscard]] GridPosition playerStart() const { return playerStart_; }
+    [[nodiscard]] const std::vector<GridPosition>& rocks() const { return rocks_; }
     [[nodiscard]] TileType tileAt(uint32_t x, uint32_t y) const;
     [[nodiscard]] bool inBounds(GridPosition position) const;
     [[nodiscard]] bool isWalkable(GridPosition position) const;
@@ -30,6 +31,7 @@ private:
     uint32_t width_ = 0;
     uint32_t height_ = 0;
     GridPosition playerStart_ {};
+    std::vector<GridPosition> rocks_;
     std::vector<TileType> tiles_;
 };
 
