@@ -599,8 +599,9 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
     vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
     vkCmdSetPrimitiveTopology(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
 
+    const TileRenderLayout tileLayout = calculateTileRenderLayout(frameData);
     for (const auto& tile : frameData.tiles) {
-        drawTile(commandBuffer, frameData, tile);
+        drawTile(commandBuffer, tileLayout, tile);
     }
 
     vkCmdEndRendering(commandBuffer);
@@ -634,19 +635,16 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
     vkCheck(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer failed");
 }
 
-void VulkanRenderer::drawTile(VkCommandBuffer commandBuffer, const RenderFrameData& frameData, const RenderFrameData::Tile& tile) const
+VulkanRenderer::TileRenderLayout VulkanRenderer::calculateTileRenderLayout(const RenderFrameData& frameData) const
 {
     if (frameData.levelWidth == 0 || frameData.levelHeight == 0) {
-        return;
+        return {};
     }
 
     const float tileSizePixels = std::min(
         static_cast<float>(swapchainExtent_.width) / static_cast<float>(frameData.levelWidth),
         static_cast<float>(swapchainExtent_.height) / static_cast<float>(frameData.levelHeight));
-    const Vec2 tileSize {
-        2.0f * tileSizePixels / static_cast<float>(swapchainExtent_.width),
-        2.0f * tileSizePixels / static_cast<float>(swapchainExtent_.height),
-    };
+    const Vec2 tileSize = pixelSizeToClipSpace(tileSizePixels);
     const Vec2 boardSize {
         tileSize.x * static_cast<float>(frameData.levelWidth),
         tileSize.y * static_cast<float>(frameData.levelHeight),
@@ -656,12 +654,20 @@ void VulkanRenderer::drawTile(VkCommandBuffer commandBuffer, const RenderFrameDa
         -boardSize.y * 0.5f,
     };
 
+    return {
+        .boardTopLeft = boardTopLeft,
+        .tileSize = tileSize,
+    };
+}
+
+void VulkanRenderer::drawTile(VkCommandBuffer commandBuffer, const TileRenderLayout& layout, const RenderFrameData::Tile& tile) const
+{
     const TilePushConstants pushConstants {
         .origin = {
-            boardTopLeft.x + tile.position.x * tileSize.x,
-            boardTopLeft.y + tile.position.y * tileSize.y,
+            layout.boardTopLeft.x + tile.position.x * layout.tileSize.x,
+            layout.boardTopLeft.y + tile.position.y * layout.tileSize.y,
         },
-        .size = tileSize,
+        .size = layout.tileSize,
         .color = tile.color,
     };
 
@@ -673,6 +679,17 @@ void VulkanRenderer::drawTile(VkCommandBuffer commandBuffer, const RenderFrameDa
         sizeof(TilePushConstants),
         &pushConstants);
     vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+}
+
+Vec2 VulkanRenderer::pixelSizeToClipSpace(float pixelSize) const
+{
+    // Pixel sizes are measured against the swapchain, but shader positions are
+    // in clip space where the visible width and height each span -1 to +1.
+    // Multiplying by 2 converts a screen fraction into that two-unit range.
+    return {
+        2.0f * pixelSize / static_cast<float>(swapchainExtent_.width),
+        2.0f * pixelSize / static_cast<float>(swapchainExtent_.height),
+    };
 }
 
 VulkanRenderer::QueueFamilyIndices VulkanRenderer::findQueueFamilies(VkPhysicalDevice device) const

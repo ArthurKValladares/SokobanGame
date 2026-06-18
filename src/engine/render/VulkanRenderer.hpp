@@ -59,6 +59,11 @@ private:
         VkFence inFlight = VK_NULL_HANDLE;
     };
 
+    struct TileRenderLayout {
+        Vec2 boardTopLeft {};
+        Vec2 tileSize {};
+    };
+
     void createInstance();
     void createSurface();
     void pickPhysicalDevice();
@@ -72,7 +77,9 @@ private:
     void cleanupSwapchain();
 
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData);
-    void drawTile(VkCommandBuffer commandBuffer, const RenderFrameData& frameData, const RenderFrameData::Tile& tile) const;
+    [[nodiscard]] TileRenderLayout calculateTileRenderLayout(const RenderFrameData& frameData) const;
+    void drawTile(VkCommandBuffer commandBuffer, const TileRenderLayout& layout, const RenderFrameData::Tile& tile) const;
+    [[nodiscard]] Vec2 pixelSizeToClipSpace(float pixelSize) const;
 
     [[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
     [[nodiscard]] bool isDeviceSuitable(VkPhysicalDevice device) const;
