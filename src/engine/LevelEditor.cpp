@@ -73,7 +73,8 @@ void LevelEditor::initialize(const std::filesystem::path& assetRoot, int current
     } else {
         newDocument(document_.requestedWidth, document_.requestedHeight);
     }
-    document_.editingDocument = true;
+    document_.playingDraft = false;
+    document_.editingDocument = false;
 }
 
 void LevelEditor::draw(const Callbacks& callbacks)

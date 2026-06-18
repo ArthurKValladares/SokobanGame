@@ -64,6 +64,7 @@ private:
     void advanceScreen();
     void update(float dt);
     void drawDebugUi();
+    void drawEditorModeIndicator();
     void updateEditorPainting();
     void queuePressedCommands();
     void advancePlayerMovement(float dt);

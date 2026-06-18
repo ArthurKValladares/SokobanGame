@@ -98,6 +98,7 @@ void Application::run()
 
         renderer_.beginDebugUiFrame();
         DebugUi::draw();
+        drawEditorModeIndicator();
         renderer_.drawFrame(buildRenderFrame());
     }
 }
@@ -125,6 +126,47 @@ void Application::drawDebugUi()
     ImGui::Text("Rocks %zu", rocks_.size());
     ImGui::Text("History %zu", moveHistory_.size());
     ImGui::Text("End %s", isEndUnlocked() ? "unlocked" : "locked");
+#endif
+}
+
+void Application::drawEditorModeIndicator()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    const char* label = nullptr;
+    ImVec4 color {};
+    if (levelEditor_.editingDocument()) {
+        label = "Editing Draft";
+        color = ImVec4(0.24f, 0.58f, 0.95f, 1.0f);
+    } else if (levelEditor_.playingDraft()) {
+        label = "Testing Draft";
+        color = ImVec4(0.20f, 0.72f, 0.38f, 1.0f);
+    }
+
+    if (!label) {
+        return;
+    }
+
+    constexpr float margin = 12.0f;
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(
+        ImVec2(viewport->WorkPos.x + margin, viewport->WorkPos.y + viewport->WorkSize.y - margin),
+        ImGuiCond_Always,
+        ImVec2(0.0f, 1.0f));
+    ImGui::SetNextWindowBgAlpha(0.82f);
+
+    constexpr ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoDecoration |
+        ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoFocusOnAppearing |
+        ImGuiWindowFlags_NoNav |
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoInputs;
+
+    if (ImGui::Begin("EditorModeIndicator", nullptr, flags)) {
+        ImGui::TextColored(color, "%s", label);
+    }
+    ImGui::End();
 #endif
 }
 
