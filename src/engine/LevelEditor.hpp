@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -34,6 +35,7 @@ public:
     [[nodiscard]] bool editingDocument() const;
     void markDraftSolved();
     void paintCell(GridPosition position);
+    [[nodiscard]] bool tryUndoEdit();
     [[nodiscard]] uint32_t documentWidth() const;
     [[nodiscard]] uint32_t documentHeight() const;
     [[nodiscard]] const std::vector<std::string>& documentRows() const;
@@ -56,18 +58,38 @@ private:
         bool editingDocument = false;
     };
 
+    struct DocumentSnapshot {
+        std::vector<std::string> rows;
+        std::filesystem::path filePath;
+        std::string filePathBuffer;
+        int requestedWidth = 12;
+        int requestedHeight = 8;
+        bool dirty = false;
+    };
+
+    struct EditActionRecord {
+        DocumentSnapshot before;
+        DocumentSnapshot after;
+    };
+
     void drawTilePalette();
     void drawFileBrowser();
     void drawGrid();
-    void newDocument(int width, int height);
-    void resizeDocument(int width, int height);
-    void loadDocument(const std::filesystem::path& path);
+    void newDocument(int width, int height, bool recordHistory = true);
+    void resizeDocument(int width, int height, bool recordHistory = true);
+    void loadDocument(const std::filesystem::path& path, bool recordHistory = true);
     void saveDocument(const std::filesystem::path& path);
     void playDocument(const Callbacks& callbacks);
+    void recordDocumentChange(const DocumentSnapshot& before);
+    void applyDocumentSnapshot(const DocumentSnapshot& snapshot);
     [[nodiscard]] Level documentToLevel() const;
+    [[nodiscard]] DocumentSnapshot captureDocumentSnapshot() const;
+    [[nodiscard]] EditActionRecord invertEditActionRecord(const EditActionRecord& record) const;
     [[nodiscard]] std::filesystem::path runtimeMirrorPath(const std::filesystem::path& sourcePath) const;
 
     Document document_;
+    std::vector<EditActionRecord> editHistory_;
+    std::optional<size_t> editUndoCursor_;
 };
 
 } // namespace sokoban

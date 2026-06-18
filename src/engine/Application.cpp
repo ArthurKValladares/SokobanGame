@@ -173,6 +173,12 @@ void Application::drawEditorModeIndicator()
 void Application::updateEditorPainting()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
+    if (input_.keyPressed(SDL_SCANCODE_Z)) {
+        const bool undone = levelEditor_.tryUndoEdit();
+        (void)undone;
+        return;
+    }
+
     if (!input_.mouseButtonDown(SDL_BUTTON_LEFT) || renderer_.wantsMouseCapture()) {
         return;
     }

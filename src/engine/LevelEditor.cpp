@@ -102,12 +102,14 @@ void LevelEditor::initialize(
         ("level" + std::to_string(currentLevel)) /
         ("screen" + std::to_string(currentScreen) + ".scr");
     if (std::filesystem::exists(currentSourcePath)) {
-        loadDocument(currentSourcePath);
+        loadDocument(currentSourcePath, false);
     } else {
-        newDocument(document_.requestedWidth, document_.requestedHeight);
+        newDocument(document_.requestedWidth, document_.requestedHeight, false);
     }
     document_.playingDraft = false;
     document_.editingDocument = false;
+    editHistory_.clear();
+    editUndoCursor_.reset();
 }
 
 void LevelEditor::draw(const Callbacks& callbacks)
@@ -220,6 +222,7 @@ void LevelEditor::paintCell(GridPosition position)
         return;
     }
 
+    const DocumentSnapshot before = captureDocumentSnapshot();
     if (document_.selectedTile == TileType::Player) {
         for (std::string& documentRow : document_.rows) {
             std::ranges::replace(documentRow, tileTypeToChar(TileType::Player), tileTypeToChar(TileType::Empty));
@@ -228,6 +231,29 @@ void LevelEditor::paintCell(GridPosition position)
 
     row[static_cast<size_t>(position.x)] = character;
     document_.dirty = true;
+    recordDocumentChange(before);
+}
+
+bool LevelEditor::tryUndoEdit()
+{
+    if (editHistory_.empty()) {
+        return false;
+    }
+
+    if (!editUndoCursor_) {
+        editUndoCursor_ = editHistory_.size();
+    }
+
+    if (*editUndoCursor_ == 0) {
+        return false;
+    }
+
+    --(*editUndoCursor_);
+    const EditActionRecord inverse = invertEditActionRecord(editHistory_[*editUndoCursor_]);
+    applyDocumentSnapshot(inverse.after);
+    editHistory_.push_back(inverse);
+    document_.status = "Undid editor change.";
+    return true;
 }
 
 uint32_t LevelEditor::documentWidth() const
@@ -335,8 +361,9 @@ void LevelEditor::drawGrid()
 #endif
 }
 
-void LevelEditor::newDocument(int width, int height)
+void LevelEditor::newDocument(int width, int height, bool recordHistory)
 {
+    const DocumentSnapshot before = captureDocumentSnapshot();
     width = std::max(width, 1);
     height = std::max(height, 1);
 
@@ -348,10 +375,14 @@ void LevelEditor::newDocument(int width, int height)
     document_.playingDraft = false;
     document_.editingDocument = true;
     document_.status = "Created new level.";
+    if (recordHistory) {
+        recordDocumentChange(before);
+    }
 }
 
-void LevelEditor::resizeDocument(int width, int height)
+void LevelEditor::resizeDocument(int width, int height, bool recordHistory)
 {
+    const DocumentSnapshot before = captureDocumentSnapshot();
     width = std::max(width, 1);
     height = std::max(height, 1);
 
@@ -367,10 +398,14 @@ void LevelEditor::resizeDocument(int width, int height)
     document_.requestedHeight = height;
     document_.dirty = true;
     document_.status = "Resized level.";
+    if (recordHistory) {
+        recordDocumentChange(before);
+    }
 }
 
-void LevelEditor::loadDocument(const std::filesystem::path& path)
+void LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHistory)
 {
+    const DocumentSnapshot before = captureDocumentSnapshot();
     std::ifstream file(path);
     if (!file) {
         document_.status = "Failed to load: " + path.string();
@@ -398,11 +433,14 @@ void LevelEditor::loadDocument(const std::filesystem::path& path)
     document_.filePathBuffer = path.string();
     document_.requestedHeight = static_cast<int>(document_.rows.size());
     document_.requestedWidth = document_.rows.empty() ? 1 : static_cast<int>(std::ranges::max(document_.rows, {}, &std::string::size).size());
-    resizeDocument(document_.requestedWidth, document_.requestedHeight);
+    resizeDocument(document_.requestedWidth, document_.requestedHeight, false);
     document_.dirty = false;
     document_.playingDraft = false;
     document_.editingDocument = true;
     document_.status = "Loaded " + path.string();
+    if (recordHistory) {
+        recordDocumentChange(before);
+    }
 }
 
 void LevelEditor::saveDocument(const std::filesystem::path& path)
@@ -476,9 +514,60 @@ void LevelEditor::playDocument(const Callbacks& callbacks)
     }
 }
 
+void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
+{
+    const DocumentSnapshot after = captureDocumentSnapshot();
+    if (before.rows == after.rows &&
+        before.filePath == after.filePath &&
+        before.filePathBuffer == after.filePathBuffer &&
+        before.requestedWidth == after.requestedWidth &&
+        before.requestedHeight == after.requestedHeight &&
+        before.dirty == after.dirty) {
+        return;
+    }
+
+    editHistory_.push_back({
+        .before = before,
+        .after = after,
+    });
+    editUndoCursor_.reset();
+}
+
+void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
+{
+    document_.rows = snapshot.rows;
+    document_.filePath = snapshot.filePath;
+    document_.filePathBuffer = snapshot.filePathBuffer;
+    document_.requestedWidth = snapshot.requestedWidth;
+    document_.requestedHeight = snapshot.requestedHeight;
+    document_.dirty = snapshot.dirty;
+    document_.playingDraft = false;
+    document_.editingDocument = true;
+}
+
 Level LevelEditor::documentToLevel() const
 {
     return Level::loadFromLines(document_.rows, "level editor draft");
+}
+
+LevelEditor::DocumentSnapshot LevelEditor::captureDocumentSnapshot() const
+{
+    return {
+        .rows = document_.rows,
+        .filePath = document_.filePath,
+        .filePathBuffer = document_.filePathBuffer,
+        .requestedWidth = document_.requestedWidth,
+        .requestedHeight = document_.requestedHeight,
+        .dirty = document_.dirty,
+    };
+}
+
+LevelEditor::EditActionRecord LevelEditor::invertEditActionRecord(const EditActionRecord& record) const
+{
+    return {
+        .before = record.after,
+        .after = record.before,
+    };
 }
 
 std::filesystem::path LevelEditor::runtimeMirrorPath(const std::filesystem::path& sourcePath) const
