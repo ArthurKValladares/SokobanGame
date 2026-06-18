@@ -34,10 +34,25 @@ void drawPaintButton(const TileTypeDefinition& definition, TileType& selectedTil
     }
 
     ImGui::PushID(static_cast<int>(definition.type));
-    std::string label(1, tileTypeToChar(definition.type));
-    if (ImGui::Button(label.c_str(), ImVec2(32.0f, 28.0f))) {
+    if (ImGui::Button("##paint_tile", ImVec2(32.0f, 28.0f))) {
         selectedTile = definition.type;
     }
+    const ImVec2 buttonMin = ImGui::GetItemRectMin();
+    const ImVec2 buttonMax = ImGui::GetItemRectMax();
+    const Vec4 color = tileColor(definition.type);
+    const ImVec2 swatchMin { buttonMin.x + 8.0f, buttonMin.y + 6.0f };
+    const ImVec2 swatchMax { buttonMax.x - 8.0f, buttonMax.y - 6.0f };
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    drawList->AddRectFilled(
+        swatchMin,
+        swatchMax,
+        ImGui::ColorConvertFloat4ToU32(ImVec4(color.x, color.y, color.z, color.w)),
+        2.0f);
+    drawList->AddRect(
+        swatchMin,
+        swatchMax,
+        ImGui::ColorConvertFloat4ToU32(ImVec4(0.0f, 0.0f, 0.0f, 0.55f)),
+        2.0f);
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("%.*s", static_cast<int>(definition.name.size()), definition.name.data());
     }
