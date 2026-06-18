@@ -87,7 +87,7 @@ private:
     [[nodiscard]] VkPresentModeKHR choosePresentMode(const std::vector<VkPresentModeKHR>& modes) const;
     [[nodiscard]] VkExtent2D chooseSwapchainExtent(const VkSurfaceCapabilitiesKHR& capabilities) const;
     [[nodiscard]] VkShaderModule createShaderModule(const std::filesystem::path& path) const;
-    [[nodiscard]] VkPipeline createGraphicsPipelineLibrary(VkShaderModule vertexShader, VkShaderModule fragmentShader) const;
+    [[nodiscard]] std::array<VkPipeline, 2> createGraphicsPipelineLibraries(VkShaderModule vertexShader, VkShaderModule fragmentShader) const;
 
     SDL_Window* window_ = nullptr;
     std::filesystem::path assetRoot_;
@@ -108,7 +108,7 @@ private:
 
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
-    VkPipeline pipelineLibrary_ = VK_NULL_HANDLE;
+    std::array<VkPipeline, 2> pipelineLibraries_ {};
     VkPipeline pipeline_ = VK_NULL_HANDLE;
 
     static constexpr uint32_t maxFramesInFlight_ = 2;

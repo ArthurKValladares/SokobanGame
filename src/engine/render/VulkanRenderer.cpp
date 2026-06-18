@@ -110,8 +110,10 @@ VulkanRenderer::~VulkanRenderer()
     if (pipeline_) {
         vkDestroyPipeline(device_, pipeline_, nullptr);
     }
-    if (pipelineLibrary_) {
-        vkDestroyPipeline(device_, pipelineLibrary_, nullptr);
+    for (VkPipeline library : pipelineLibraries_) {
+        if (library) {
+            vkDestroyPipeline(device_, library, nullptr);
+        }
     }
     if (pipelineLayout_) {
         vkDestroyPipelineLayout(device_, pipelineLayout_, nullptr);
@@ -443,16 +445,15 @@ void VulkanRenderer::createPipeline()
     VkShaderModule vertexShader = createShaderModule(assetRoot_ / "shaders/triangle.vert.glsl.spv");
     VkShaderModule fragmentShader = createShaderModule(assetRoot_ / "shaders/triangle.frag.glsl.spv");
 
-    pipelineLibrary_ = createGraphicsPipelineLibrary(vertexShader, fragmentShader);
+    pipelineLibraries_ = createGraphicsPipelineLibraries(vertexShader, fragmentShader);
 
     vkDestroyShaderModule(device_, fragmentShader, nullptr);
     vkDestroyShaderModule(device_, vertexShader, nullptr);
 
-    VkPipeline libraries[] { pipelineLibrary_ };
     VkPipelineLibraryCreateInfoKHR libraryInfo {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR,
-        .libraryCount = 1,
-        .pLibraries = libraries,
+        .libraryCount = static_cast<uint32_t>(pipelineLibraries_.size()),
+        .pLibraries = pipelineLibraries_.data(),
     };
 
     VkGraphicsPipelineCreateInfo linkedPipeline {
@@ -831,21 +832,20 @@ VkShaderModule VulkanRenderer::createShaderModule(const std::filesystem::path& p
     return shaderModule;
 }
 
-VkPipeline VulkanRenderer::createGraphicsPipelineLibrary(VkShaderModule vertexShader, VkShaderModule fragmentShader) const
+std::array<VkPipeline, 2> VulkanRenderer::createGraphicsPipelineLibraries(VkShaderModule vertexShader, VkShaderModule fragmentShader) const
 {
-    VkPipelineShaderStageCreateInfo shaderStages[] {
-        {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = VK_SHADER_STAGE_VERTEX_BIT,
-            .module = vertexShader,
-            .pName = "main",
-        },
-        {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-            .module = fragmentShader,
-            .pName = "main",
-        },
+    VkPipelineShaderStageCreateInfo vertexStage {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage = VK_SHADER_STAGE_VERTEX_BIT,
+        .module = vertexShader,
+        .pName = "main",
+    };
+
+    VkPipelineShaderStageCreateInfo fragmentStage {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+        .module = fragmentShader,
+        .pName = "main",
     };
 
     VkPipelineVertexInputStateCreateInfo vertexInput {
@@ -909,35 +909,55 @@ VkPipeline VulkanRenderer::createGraphicsPipelineLibrary(VkShaderModule vertexSh
         .pColorAttachmentFormats = &swapchainFormat_,
     };
 
-    VkGraphicsPipelineLibraryCreateInfoEXT libraryInfo {
+    VkGraphicsPipelineLibraryCreateInfoEXT vertexPreRasterLibraryInfo {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT,
-        .pNext = &rendering,
         .flags = VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT |
-            VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT |
-            VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT |
-            VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT,
+            VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT,
     };
 
-    VkGraphicsPipelineCreateInfo pipelineInfo {
+    VkGraphicsPipelineCreateInfo vertexPreRasterPipelineInfo {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-        .pNext = &libraryInfo,
+        .pNext = &vertexPreRasterLibraryInfo,
         .flags = VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
             VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT,
-        .stageCount = static_cast<uint32_t>(std::size(shaderStages)),
-        .pStages = shaderStages,
+        .stageCount = 1,
+        .pStages = &vertexStage,
         .pVertexInputState = &vertexInput,
         .pInputAssemblyState = &inputAssembly,
         .pViewportState = &viewportState,
         .pRasterizationState = &rasterizer,
-        .pMultisampleState = &multisampling,
-        .pColorBlendState = &colorBlending,
         .pDynamicState = &dynamicState,
         .layout = pipelineLayout_,
     };
 
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    vkCheck(vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline), "vkCreateGraphicsPipelines library failed");
-    return pipeline;
+    VkGraphicsPipelineLibraryCreateInfoEXT fragmentLibraryInfo {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT,
+        .pNext = &rendering,
+        .flags = VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT |
+            VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT,
+    };
+
+    VkGraphicsPipelineCreateInfo fragmentPipelineInfo {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .pNext = &fragmentLibraryInfo,
+        .flags = VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
+            VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT,
+        .stageCount = 1,
+        .pStages = &fragmentStage,
+        .pMultisampleState = &multisampling,
+        .pColorBlendState = &colorBlending,
+        .layout = pipelineLayout_,
+    };
+
+    std::array<VkGraphicsPipelineCreateInfo, 2> createInfos {
+        vertexPreRasterPipelineInfo,
+        fragmentPipelineInfo,
+    };
+    std::array<VkPipeline, 2> libraries {};
+    vkCheck(
+        vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, static_cast<uint32_t>(createInfos.size()), createInfos.data(), nullptr, libraries.data()),
+        "vkCreateGraphicsPipelines libraries failed");
+    return libraries;
 }
 
 } // namespace sokoban
