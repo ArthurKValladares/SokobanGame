@@ -50,6 +50,7 @@ private:
     [[nodiscard]] const Rock* rockAt(GridPosition position) const;
     [[nodiscard]] bool canMoveRock(GridPosition position, MoveDirection direction) const;
     [[nodiscard]] bool allPressurePlatesActive() const;
+    [[nodiscard]] bool isEndUnlocked() const;
     [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;
     [[nodiscard]] bool screenExists(int levelIndex, int screenIndex) const;
     [[nodiscard]] RenderFrameData buildRenderFrame() const;

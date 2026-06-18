@@ -170,7 +170,7 @@ void Application::advancePlayerMovement(float dt)
             moving_ = false;
             moveElapsed_ = 0.0f;
 
-            if (level_.isEnd(playerCell_) && allPressurePlatesActive()) {
+            if (level_.isEnd(playerCell_) && isEndUnlocked()) {
                 advanceScreen();
                 return;
             }
@@ -293,6 +293,11 @@ bool Application::allPressurePlatesActive() const
     });
 }
 
+bool Application::isEndUnlocked() const
+{
+    return allPressurePlatesActive();
+}
+
 std::filesystem::path Application::screenPath(int levelIndex, int screenIndex) const
 {
     return assetRoot_ /
@@ -316,6 +321,7 @@ RenderFrameData Application::buildRenderFrame() const
     frame.levelWidth = level_.width();
     frame.levelHeight = level_.height();
     frame.playerPosition = playerRenderPosition_;
+    const bool endUnlocked = isEndUnlocked();
 
     frame.tiles.reserve(static_cast<size_t>(level_.width()) * level_.height());
     for (uint32_t y = 0; y < level_.height(); ++y) {
@@ -328,7 +334,7 @@ RenderFrameData Application::buildRenderFrame() const
                 color = { 0.62f, 0.32f, 0.09f, 1.0f };
                 break;
             case TileType::End:
-                color = { 1.0f, 0.05f, 0.04f, 1.0f };
+                color = endUnlocked ? Vec4 { 1.0f, 0.05f, 0.04f, 1.0f } : Vec4 { 0.38f, 0.04f, 0.04f, 1.0f };
                 break;
             case TileType::PressurePlate:
                 color = { 0.18f, 0.18f, 0.18f, 1.0f };
