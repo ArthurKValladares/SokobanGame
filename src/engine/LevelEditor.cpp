@@ -118,6 +118,7 @@ void LevelEditor::draw(const Callbacks& callbacks)
     ImGui::SameLine();
     if (ImGui::Button("Play Draft")) {
         playDocument(callbacks);
+        ImGui::SetWindowCollapsed(true);
     }
     ImGui::SameLine();
     if (ImGui::Button("Return To Current Screen")) {
@@ -125,6 +126,7 @@ void LevelEditor::draw(const Callbacks& callbacks)
         if (callbacks.returnToCurrentScreen) {
             callbacks.returnToCurrentScreen();
         }
+        ImGui::SetWindowCollapsed(true);
     }
 
     ImGui::Separator();
