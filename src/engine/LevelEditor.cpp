@@ -49,14 +49,38 @@ void drawPaintButton(const TileTypeDefinition& definition, TileType& selectedTil
 }
 #endif
 
+std::filesystem::path normalizedAbsolutePath(const std::filesystem::path& path)
+{
+    return std::filesystem::absolute(path).lexically_normal();
+}
+
+bool pathStartsWith(const std::filesystem::path& path, const std::filesystem::path& root)
+{
+    const std::filesystem::path normalizedPath = normalizedAbsolutePath(path);
+    const std::filesystem::path normalizedRoot = normalizedAbsolutePath(root);
+    auto pathIt = normalizedPath.begin();
+    auto rootIt = normalizedRoot.begin();
+
+    for (; rootIt != normalizedRoot.end(); ++rootIt, ++pathIt) {
+        if (pathIt == normalizedPath.end() || *pathIt != *rootIt) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 } // namespace
 
-void LevelEditor::initialize(const std::filesystem::path& assetRoot, int currentLevel, int currentScreen)
+void LevelEditor::initialize(
+    const std::filesystem::path& sourceLevelRoot,
+    const std::filesystem::path& runtimeLevelRoot,
+    int currentLevel,
+    int currentScreen)
 {
-    document_.browserRoot = std::filesystem::current_path() / "levels";
-    if (!std::filesystem::exists(document_.browserRoot)) {
-        document_.browserRoot = assetRoot / "levels";
-    }
+    document_.sourceLevelRoot = sourceLevelRoot;
+    document_.runtimeLevelRoot = runtimeLevelRoot;
+    document_.browserRoot = sourceLevelRoot;
     document_.browserRootBuffer = document_.browserRoot.string();
 
     const std::filesystem::path currentSourcePath = document_.browserRoot /
@@ -371,29 +395,54 @@ void LevelEditor::saveDocument(const std::filesystem::path& path)
         return;
     }
 
+    const std::filesystem::path sourcePath = normalizedAbsolutePath(path);
     std::error_code error;
-    if (path.has_parent_path()) {
-        std::filesystem::create_directories(path.parent_path(), error);
+    if (sourcePath.has_parent_path()) {
+        std::filesystem::create_directories(sourcePath.parent_path(), error);
         if (error) {
             document_.status = "Failed to create directories: " + error.message();
             return;
         }
     }
 
-    std::ofstream file(path, std::ios::trunc);
+    std::ofstream file(sourcePath, std::ios::trunc);
     if (!file) {
-        document_.status = "Failed to save: " + path.string();
+        document_.status = "Failed to save: " + sourcePath.string();
         return;
     }
 
     for (const std::string& row : document_.rows) {
         file << row << '\n';
     }
+    file.close();
 
-    document_.filePath = path;
-    document_.filePathBuffer = path.string();
+    const std::filesystem::path mirrorPath = runtimeMirrorPath(sourcePath);
+    if (!mirrorPath.empty()) {
+        if (mirrorPath.has_parent_path()) {
+            std::filesystem::create_directories(mirrorPath.parent_path(), error);
+            if (error) {
+                document_.status = "Saved source, but failed to create runtime mirror directories: " + error.message();
+                return;
+            }
+        }
+
+        std::ofstream mirrorFile(mirrorPath, std::ios::trunc);
+        if (!mirrorFile) {
+            document_.status = "Saved source, but failed to update runtime mirror: " + mirrorPath.string();
+            return;
+        }
+
+        for (const std::string& row : document_.rows) {
+            mirrorFile << row << '\n';
+        }
+    }
+
+    document_.filePath = sourcePath;
+    document_.filePathBuffer = sourcePath.string();
     document_.dirty = false;
-    document_.status = "Saved " + path.string();
+    document_.status = mirrorPath.empty()
+        ? "Saved " + sourcePath.string()
+        : "Saved " + sourcePath.string() + " and updated runtime mirror.";
 }
 
 void LevelEditor::playDocument(const Callbacks& callbacks)
@@ -413,6 +462,22 @@ void LevelEditor::playDocument(const Callbacks& callbacks)
 Level LevelEditor::documentToLevel() const
 {
     return Level::loadFromLines(document_.rows, "level editor draft");
+}
+
+std::filesystem::path LevelEditor::runtimeMirrorPath(const std::filesystem::path& sourcePath) const
+{
+    const std::filesystem::path normalizedSourceRoot = normalizedAbsolutePath(document_.sourceLevelRoot);
+    const std::filesystem::path normalizedSourcePath = normalizedAbsolutePath(sourcePath);
+    if (!pathStartsWith(normalizedSourcePath, normalizedSourceRoot)) {
+        return {};
+    }
+
+    const std::filesystem::path relativePath = normalizedSourcePath.lexically_relative(normalizedSourceRoot);
+    if (relativePath.empty()) {
+        return {};
+    }
+
+    return normalizedAbsolutePath(document_.runtimeLevelRoot / relativePath);
 }
 
 } // namespace sokoban

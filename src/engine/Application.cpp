@@ -41,7 +41,7 @@ Application::Application()
     loadCurrentScreen();
 
 #if SOKOBAN_ENABLE_DEBUG_UI
-    levelEditor_.initialize(assetRoot_, currentLevel_, currentScreen_);
+    levelEditor_.initialize(SOKOBAN_SOURCE_LEVEL_DIR, assetRoot_ / "levels", currentLevel_, currentScreen_);
     DebugUi::addWindow("Engine", [this] {
         drawDebugUi();
     });

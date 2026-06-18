@@ -21,7 +21,11 @@ public:
         std::function<void()> returnToCurrentScreen;
     };
 
-    void initialize(const std::filesystem::path& assetRoot, int currentLevel, int currentScreen);
+    void initialize(
+        const std::filesystem::path& sourceLevelRoot,
+        const std::filesystem::path& runtimeLevelRoot,
+        int currentLevel,
+        int currentScreen);
     void draw(const Callbacks& callbacks);
 
     void setPlayingDraft(bool playingDraft);
@@ -39,6 +43,8 @@ private:
         std::vector<std::string> rows;
         std::filesystem::path filePath;
         std::filesystem::path browserRoot;
+        std::filesystem::path sourceLevelRoot;
+        std::filesystem::path runtimeLevelRoot;
         std::string filePathBuffer;
         std::string browserRootBuffer;
         std::string status;
@@ -59,6 +65,7 @@ private:
     void saveDocument(const std::filesystem::path& path);
     void playDocument(const Callbacks& callbacks);
     [[nodiscard]] Level documentToLevel() const;
+    [[nodiscard]] std::filesystem::path runtimeMirrorPath(const std::filesystem::path& sourcePath) const;
 
     Document document_;
 };

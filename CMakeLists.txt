@@ -117,6 +117,7 @@ target_link_libraries(sokoban PRIVATE
 target_compile_definitions(sokoban PRIVATE
     SDL_MAIN_USE_CALLBACKS=0
     SOKOBAN_ASSET_DIR="${CMAKE_CURRENT_BINARY_DIR}/assets"
+    SOKOBAN_SOURCE_LEVEL_DIR="${LEVEL_SOURCE_DIR}"
     $<$<CONFIG:Debug>:SOKOBAN_ENABLE_DEBUG_UI=1>
 )
 
