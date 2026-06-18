@@ -23,16 +23,18 @@ struct TileTypeDefinition {
     TileType type = TileType::Empty;
     char character = ' ';
     std::string_view name;
+    Vec4 activeColor {};
+    Vec4 inactiveColor {};
 };
 
 inline constexpr auto tileTypeCount = static_cast<std::size_t>(TileType::Count);
 inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitionTable {
-    TileTypeDefinition { TileType::Empty, ' ', "Empty" },
-    TileTypeDefinition { TileType::Wall, '#', "Wall" },
-    TileTypeDefinition { TileType::End, 'E', "End" },
-    TileTypeDefinition { TileType::PressurePlate, 'P', "Pressure" },
-    TileTypeDefinition { TileType::Player, 'C', "Player" },
-    TileTypeDefinition { TileType::Rock, 'R', "Rock" },
+    TileTypeDefinition { TileType::Empty, ' ', "Empty", { 0.82f, 0.82f, 0.84f, 1.0f } },
+    TileTypeDefinition { TileType::Wall, '#', "Wall", { 0.62f, 0.32f, 0.09f, 1.0f } },
+    TileTypeDefinition { TileType::End, 'E', "End", { 1.0f, 0.05f, 0.04f, 1.0f }, { 0.38f, 0.04f, 0.04f, 1.0f } },
+    TileTypeDefinition { TileType::PressurePlate, 'P', "Pressure", { 0.18f, 0.18f, 0.18f, 1.0f } },
+    TileTypeDefinition { TileType::Player, 'C', "Player", { 0.0f, 1.0f, 0.15f, 1.0f } },
+    TileTypeDefinition { TileType::Rock, 'R', "Rock", { 0.20f, 0.10f, 0.04f, 1.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -41,7 +43,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] std::string_view tileTypeName(TileType type);
 [[nodiscard]] bool tileTypeOccupiesLevelCell(TileType type);
 [[nodiscard]] TileType tileTypeInitialFloor(TileType type);
-[[nodiscard]] Vec4 tileColor(TileType type, bool endUnlocked);
+[[nodiscard]] Vec4 tileColor(TileType type, bool isActive = true);
 
 [[nodiscard]] constexpr bool tileTypeDefinitionsContainCharacter(char character)
 {

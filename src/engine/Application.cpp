@@ -558,23 +558,24 @@ RenderFrameData Application::buildRenderFrame() const
     for (uint32_t y = 0; y < level_.height(); ++y) {
         for (uint32_t x = 0; x < level_.width(); ++x) {
             const TileType tile = level_.tileAt(x, y);
+            const bool tileIsActive = tile != TileType::End || endUnlocked;
 
             frame.tiles.push_back({
                 .position = { static_cast<float>(x), static_cast<float>(y) },
-                .color = tileColor(tile, endUnlocked),
+                .color = tileColor(tile, tileIsActive),
             });
         }
     }
 
     frame.tiles.push_back({
         .position = playerRenderPosition_,
-        .color = tileColor(TileType::Player, endUnlocked),
+        .color = tileColor(TileType::Player),
     });
 
     for (const Rock& rock : rocks_) {
         frame.tiles.push_back({
             .position = rock.renderPosition,
-            .color = tileColor(TileType::Rock, endUnlocked),
+            .color = tileColor(TileType::Rock),
         });
     }
 

@@ -50,23 +50,12 @@ TileType tileTypeInitialFloor(TileType type)
     return tileTypeOccupiesLevelCell(type) ? TileType::Empty : type;
 }
 
-Vec4 tileColor(TileType type, bool endUnlocked)
+Vec4 tileColor(TileType type, bool isActive)
 {
-    switch (type) {
-    case TileType::Wall:
-        return { 0.62f, 0.32f, 0.09f, 1.0f };
-    case TileType::End:
-        return endUnlocked ? Vec4 { 1.0f, 0.05f, 0.04f, 1.0f } : Vec4 { 0.38f, 0.04f, 0.04f, 1.0f };
-    case TileType::PressurePlate:
-        return { 0.18f, 0.18f, 0.18f, 1.0f };
-    case TileType::Player:
-        return { 0.0f, 1.0f, 0.15f, 1.0f };
-    case TileType::Rock:
-        return { 0.20f, 0.10f, 0.04f, 1.0f };
-    case TileType::Empty:
-        return { 0.82f, 0.82f, 0.84f, 1.0f };
-    case TileType::Count:
-        return { 1.0f, 0.0f, 1.0f, 1.0f };
+    for (const TileTypeDefinition& definition : tileTypeDefinitionTable) {
+        if (definition.type == type) {
+            return isActive ? definition.activeColor : definition.inactiveColor;
+        }
     }
 
     return { 1.0f, 0.0f, 1.0f, 1.0f };
