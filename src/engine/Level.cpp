@@ -61,28 +61,24 @@ Level Level::loadFromLines(const std::vector<std::string>& lines, std::string_vi
             const GridPosition position { static_cast<int>(x), static_cast<int>(y) };
             const size_t tileIndex = static_cast<size_t>(y) * level.width_ + x;
 
-            if (character == playerStartCharacter) {
-                if (hasPlayer) {
-                    throw std::runtime_error("Level has more than one player start: " + source);
-                }
-                hasPlayer = true;
-                level.playerStart_ = position;
-                level.tiles_[tileIndex] = TileType::Empty;
-                continue;
-            }
-
-            if (character == rockCharacter) {
-                level.rocks_.push_back(position);
-                level.tiles_[tileIndex] = TileType::Empty;
-                continue;
-            }
-
             const std::optional<TileType> tile = charToTileType(character);
             if (!tile) {
                 throw unknownLevelCharacter(character);
             }
 
-            level.tiles_[tileIndex] = *tile;
+            if (*tile == TileType::Player) {
+                if (hasPlayer) {
+                    throw std::runtime_error("Level has more than one player start: " + source);
+                }
+                hasPlayer = true;
+                level.playerStart_ = position;
+            }
+
+            if (*tile == TileType::Rock) {
+                level.rocks_.push_back(position);
+            }
+
+            level.tiles_[tileIndex] = tileTypeInitialFloor(*tile);
             if (*tile == TileType::PressurePlate) {
                 level.pressurePlates_.push_back(position);
             }
@@ -90,7 +86,8 @@ Level Level::loadFromLines(const std::vector<std::string>& lines, std::string_vi
     }
 
     if (!hasPlayer) {
-        throw std::runtime_error("Level is missing a player start tile 'C': " + source);
+        throw std::runtime_error(std::string("Level is missing a player start tile '") +
+            tileTypeToChar(TileType::Player) + "': " + source);
     }
 
     return level;

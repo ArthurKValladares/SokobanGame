@@ -1,10 +1,8 @@
 #include "engine/LevelEditor.hpp"
 
 #include <algorithm>
-#include <array>
 #include <exception>
 #include <fstream>
-#include <optional>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -18,53 +16,37 @@ namespace sokoban {
 namespace {
 
 #if SOKOBAN_ENABLE_DEBUG_UI
-struct EntityPaintDefinition {
-    char character = ' ';
-    std::string_view name;
-};
-
-constexpr std::array entityPaintDefinitions {
-    EntityPaintDefinition { playerStartCharacter, playerStartName },
-    EntityPaintDefinition { rockCharacter, rockName },
-};
-
-const char* tileButtonLabel(char tile)
+const char* tileButtonLabel(TileType tile)
 {
-    return tile == tileTypeToChar(TileType::Empty) ? "." : nullptr;
+    return tile == TileType::Empty ? "." : nullptr;
 }
 
 std::string_view levelCharacterName(char character)
 {
-    if (const std::optional<TileType> tile = charToTileType(character)) {
+    if (const auto tile = charToTileType(character)) {
         return tileTypeName(*tile);
-    }
-    if (character == playerStartCharacter) {
-        return playerStartName;
-    }
-    if (character == rockCharacter) {
-        return rockName;
     }
 
     return "Unknown";
 }
 
-void drawPaintButton(char character, std::string_view name, char& selectedTile)
+void drawPaintButton(const TileTypeDefinition& definition, TileType& selectedTile)
 {
     ImGui::SameLine();
-    const bool selected = selectedTile == character;
+    const bool selected = selectedTile == definition.type;
     if (selected) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.50f, 0.85f, 1.0f));
     }
 
-    const char* emptyLabel = tileButtonLabel(character);
-    std::string label = emptyLabel ? std::string(emptyLabel) : std::string(1, character);
+    const char* emptyLabel = tileButtonLabel(definition.type);
+    std::string label = emptyLabel ? std::string(emptyLabel) : std::string(1, definition.character);
     label += "##palette_";
-    label += name;
+    label += definition.name;
     if (ImGui::Button(label.c_str(), ImVec2(32.0f, 28.0f))) {
-        selectedTile = character;
+        selectedTile = definition.type;
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%.*s", static_cast<int>(name.size()), name.data());
+        ImGui::SetTooltip("%.*s", static_cast<int>(definition.name.size()), definition.name.data());
     }
 
     if (selected) {
@@ -165,13 +147,10 @@ void LevelEditor::drawTilePalette()
 #if SOKOBAN_ENABLE_DEBUG_UI
     ImGui::Text("Paint");
     for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
-        drawPaintButton(definition.character, definition.name, document_.selectedTile);
-    }
-    for (const EntityPaintDefinition& definition : entityPaintDefinitions) {
-        drawPaintButton(definition.character, definition.name, document_.selectedTile);
+        drawPaintButton(definition, document_.selectedTile);
     }
 
-    const std::string_view selectedName = levelCharacterName(document_.selectedTile);
+    const std::string_view selectedName = tileTypeName(document_.selectedTile);
     ImGui::Text("Selected: %.*s", static_cast<int>(selectedName.size()), selectedName.data());
 #endif
 }
@@ -232,15 +211,15 @@ void LevelEditor::drawGrid()
             for (size_t x = 0; x < document_.rows[y].size(); ++x) {
                 ImGui::PushID(static_cast<int>(y * document_.rows[y].size() + x));
                 char tile = document_.rows[y][x];
-                const char* emptyLabel = tileButtonLabel(tile);
+                const char* emptyLabel = tileButtonLabel(charToTileType(tile).value_or(TileType::Count));
                 const std::string label = emptyLabel ? emptyLabel : std::string(1, tile);
                 if (ImGui::Button(label.c_str(), ImVec2(26.0f, 24.0f))) {
-                    if (document_.selectedTile == playerStartCharacter) {
+                    if (document_.selectedTile == TileType::Player) {
                         for (std::string& row : document_.rows) {
-                            std::ranges::replace(row, playerStartCharacter, tileTypeToChar(TileType::Empty));
+                            std::ranges::replace(row, tileTypeToChar(TileType::Player), tileTypeToChar(TileType::Empty));
                         }
                     }
-                    document_.rows[y][x] = document_.selectedTile;
+                    document_.rows[y][x] = tileTypeToChar(document_.selectedTile);
                     document_.dirty = true;
                 }
                 if (ImGui::IsItemHovered()) {
@@ -264,7 +243,7 @@ void LevelEditor::newDocument(int width, int height)
     height = std::max(height, 1);
 
     document_.rows.assign(static_cast<size_t>(height), std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Empty)));
-    document_.rows.front().front() = playerStartCharacter;
+    document_.rows.front().front() = tileTypeToChar(TileType::Player);
     document_.requestedWidth = width;
     document_.requestedHeight = height;
     document_.dirty = true;

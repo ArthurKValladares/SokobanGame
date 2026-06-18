@@ -558,42 +558,23 @@ RenderFrameData Application::buildRenderFrame() const
     for (uint32_t y = 0; y < level_.height(); ++y) {
         for (uint32_t x = 0; x < level_.width(); ++x) {
             const TileType tile = level_.tileAt(x, y);
-            Vec4 color;
-
-            switch (tile) {
-            case TileType::Wall:
-                color = { 0.62f, 0.32f, 0.09f, 1.0f };
-                break;
-            case TileType::End:
-                color = endUnlocked ? Vec4 { 1.0f, 0.05f, 0.04f, 1.0f } : Vec4 { 0.38f, 0.04f, 0.04f, 1.0f };
-                break;
-            case TileType::PressurePlate:
-                color = { 0.18f, 0.18f, 0.18f, 1.0f };
-                break;
-            case TileType::Empty:
-                color = { 0.82f, 0.82f, 0.84f, 1.0f };
-                break;
-            case TileType::Count:
-                color = { 1.0f, 0.0f, 1.0f, 1.0f };
-                break;
-            }
 
             frame.tiles.push_back({
                 .position = { static_cast<float>(x), static_cast<float>(y) },
-                .color = color,
+                .color = tileColor(tile, endUnlocked),
             });
         }
     }
 
     frame.tiles.push_back({
         .position = playerRenderPosition_,
-        .color = { 0.0f, 1.0f, 0.15f, 1.0f },
+        .color = tileColor(TileType::Player, endUnlocked),
     });
 
     for (const Rock& rock : rocks_) {
         frame.tiles.push_back({
             .position = rock.renderPosition,
-            .color = { 0.20f, 0.10f, 0.04f, 1.0f },
+            .color = tileColor(TileType::Rock, endUnlocked),
         });
     }
 

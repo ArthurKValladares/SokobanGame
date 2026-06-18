@@ -92,6 +92,7 @@ add_executable(sokoban
     src/engine/Input.cpp
     src/engine/Level.cpp
     src/engine/LevelEditor.cpp
+    src/engine/TileTypes.cpp
     src/engine/Window.cpp
     src/engine/render/VulkanRenderer.cpp
 )
