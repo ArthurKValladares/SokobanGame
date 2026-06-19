@@ -169,7 +169,15 @@ void Application::run()
             }
 
             if (event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_ESCAPE) {
+#if SOKOBAN_ENABLE_DEBUG_UI
+                if (levelEditor_.playingDraft()) {
+                    draftExitConfirmationOpen_ = true;
+                } else {
+                    quitConfirmationOpen_ = true;
+                }
+#else
                 running_ = false;
+#endif
             }
         }
 
@@ -178,6 +186,8 @@ void Application::run()
 
         renderer_.beginDebugUiFrame();
         DebugUi::draw();
+        drawQuitConfirmation();
+        drawDraftExitConfirmation();
         drawEditorModeIndicator();
         renderer_.drawFrame(buildRenderFrame());
     }
@@ -288,6 +298,77 @@ void Application::drawEditorModeIndicator()
         ImGui::TextColored(color, "%s", label);
     }
     ImGui::End();
+#endif
+}
+
+void Application::drawQuitConfirmation()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    constexpr const char* popupName = "Quit Game?";
+    if (quitConfirmationOpen_) {
+        ImGui::OpenPopup(popupName);
+    }
+
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(
+        ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f, viewport->WorkPos.y + viewport->WorkSize.y * 0.5f),
+        ImGuiCond_Appearing,
+        ImVec2(0.5f, 0.5f));
+
+    if (ImGui::BeginPopupModal(popupName, &quitConfirmationOpen_, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted("Quit the game?");
+        ImGui::Separator();
+
+        if (ImGui::Button("Quit", ImVec2(90.0f, 0.0f))) {
+            running_ = false;
+            quitConfirmationOpen_ = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(90.0f, 0.0f))) {
+            quitConfirmationOpen_ = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+#endif
+}
+
+void Application::drawDraftExitConfirmation()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    constexpr const char* popupName = "Stop Testing Draft?";
+    if (draftExitConfirmationOpen_) {
+        ImGui::OpenPopup(popupName);
+    }
+
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(
+        ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f, viewport->WorkPos.y + viewport->WorkSize.y * 0.5f),
+        ImGuiCond_Appearing,
+        ImVec2(0.5f, 0.5f));
+
+    if (ImGui::BeginPopupModal(popupName, &draftExitConfirmationOpen_, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted("Stop testing this draft and return to the editor?");
+        ImGui::Separator();
+
+        if (ImGui::Button("Stop Testing", ImVec2(120.0f, 0.0f))) {
+            levelEditor_.setEditingDocument(true);
+            editorHoverCell_.reset();
+            draftExitConfirmationOpen_ = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(90.0f, 0.0f))) {
+            draftExitConfirmationOpen_ = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
 #endif
 }
 

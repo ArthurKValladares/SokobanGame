@@ -65,6 +65,8 @@ private:
     void update(float dt);
     void drawDebugUi();
     void drawEditorModeIndicator();
+    void drawQuitConfirmation();
+    void drawDraftExitConfirmation();
     void updateEditorPainting();
     void queuePressedCommands();
     void advancePlayerMovement(float dt);
@@ -117,6 +119,8 @@ private:
     float moveElapsed_ = 0.0f;
     bool moving_ = false;
     bool running_ = true;
+    bool quitConfirmationOpen_ = false;
+    bool draftExitConfirmationOpen_ = false;
 };
 
 } // namespace sokoban

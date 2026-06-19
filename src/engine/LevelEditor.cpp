@@ -128,11 +128,6 @@ void LevelEditor::draw(const Callbacks& callbacks)
         saveDocument(document_.filePathBuffer);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Edit Draft")) {
-        document_.playingDraft = false;
-        document_.editingDocument = true;
-    }
-    ImGui::SameLine();
     if (ImGui::Button("Play Draft")) {
         playDocument(callbacks);
         ImGui::SetWindowCollapsed(true);
