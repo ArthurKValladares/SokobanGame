@@ -236,7 +236,7 @@ void Application::drawDebugUi()
 #if SOKOBAN_ENABLE_DEBUG_UI
     ImGui::Text("Level %d Screen %d", currentLevel_, currentScreen_);
     ImGui::Text("Player (%d, %d)", playerCell_.x, playerCell_.y);
-    ImGui::Text("Rocks %zu", rocks_.size());
+    ImGui::Text("Movables %zu", rocks_.size());
     ImGui::Text("History %zu", moveHistory_.size());
     ImGui::Text("End %s", isEndUnlocked() ? "unlocked" : "locked");
     ImGui::Separator();
@@ -446,11 +446,12 @@ void Application::applyLevel(Level level)
     playerCell_ = level_.playerStart();
     playerRenderPosition_ = toVec2(playerCell_);
     rocks_.clear();
-    rocks_.reserve(level_.rocks().size());
-    for (GridPosition rockPosition : level_.rocks()) {
+    rocks_.reserve(level_.movableTiles().size());
+    for (const Level::MovableTile& movable : level_.movableTiles()) {
         rocks_.push_back({
-            .cell = rockPosition,
-            .renderPosition = toVec2(rockPosition),
+            .type = movable.type,
+            .cell = movable.position,
+            .renderPosition = toVec2(movable.position),
         });
     }
     pendingCommands_.clear();
@@ -611,7 +612,9 @@ bool Application::tryStartMove(MoveDirection direction)
         }
 
         const size_t rockIndex = static_cast<size_t>(rock - rocks_.data());
-        activeAction_.after.rocks[rockIndex] = movementTarget(rock->cell, direction);
+        activeAction_.after.rocks[rockIndex] = rock->type == TileType::Ice
+            ? slidingTarget(rock->cell, direction)
+            : movementTarget(rock->cell, direction);
     }
 
     undoCursor_.reset();
@@ -648,9 +651,9 @@ bool Application::tryStartRestart()
     MoveRecord restarted {
         .player = level_.playerStart(),
     };
-    restarted.rocks.reserve(level_.rocks().size());
-    for (GridPosition rockPosition : level_.rocks()) {
-        restarted.rocks.push_back(rockPosition);
+    restarted.rocks.reserve(level_.movableTiles().size());
+    for (const Level::MovableTile& movable : level_.movableTiles()) {
+        restarted.rocks.push_back(movable.position);
     }
 
     const MoveRecord current = captureMoveRecord();
@@ -837,6 +840,19 @@ bool Application::canMoveRock(GridPosition position, MoveDirection direction) co
     return level_.isWalkable(target) && rockAt(target) == nullptr;
 }
 
+GridPosition Application::slidingTarget(GridPosition position, MoveDirection direction) const
+{
+    GridPosition current = position;
+    while (true) {
+        const GridPosition next = movementTarget(current, direction);
+        if (!level_.isWalkable(next) || rockAt(next) != nullptr) {
+            return current;
+        }
+
+        current = next;
+    }
+}
+
 bool Application::allPressurePlatesActive() const
 {
     return std::ranges::all_of(level_.pressurePlates(), [this](GridPosition plate) {
@@ -898,7 +914,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
     for (const Rock& rock : rocks_) {
         frame.tiles.push_back({
             .position = rock.renderPosition,
-            .color = tileColor(TileType::Rock),
+            .color = tileColor(rock.type),
             .height = 1.0f,
         });
     }

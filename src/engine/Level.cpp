@@ -74,8 +74,11 @@ Level Level::loadFromLines(const std::vector<std::string>& lines, std::string_vi
                 level.playerStart_ = position;
             }
 
-            if (*tile == TileType::Rock) {
-                level.rocks_.push_back(position);
+            if (*tile == TileType::Rock || *tile == TileType::Ice) {
+                level.movableTiles_.push_back({
+                    .type = *tile,
+                    .position = position,
+                });
             }
 
             level.tiles_[tileIndex] = tileTypeInitialFloor(*tile);

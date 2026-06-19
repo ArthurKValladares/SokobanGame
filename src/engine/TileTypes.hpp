@@ -16,6 +16,7 @@ enum class TileType {
     PressurePlate,
     Player,
     Rock,
+    Ice,
     Count,
 };
 
@@ -35,6 +36,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::PressurePlate, 'P', "Pressure", { 0.18f, 0.18f, 0.18f, 1.0f } },
     TileTypeDefinition { TileType::Player, 'C', "Player", { 0.0f, 1.0f, 0.15f, 1.0f } },
     TileTypeDefinition { TileType::Rock, 'R', "Rock", { 0.20f, 0.10f, 0.04f, 1.0f } },
+    TileTypeDefinition { TileType::Ice, 'I', "Ice", { 0.62f, 0.88f, 1.0f, 1.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();

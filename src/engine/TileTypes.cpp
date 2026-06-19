@@ -42,7 +42,7 @@ std::string_view tileTypeName(TileType type)
 
 bool tileTypeOccupiesLevelCell(TileType type)
 {
-    return type == TileType::Player || type == TileType::Rock;
+    return type == TileType::Player || type == TileType::Rock || type == TileType::Ice;
 }
 
 TileType tileTypeInitialFloor(TileType type)
