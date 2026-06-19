@@ -349,6 +349,7 @@ void LevelEditor::drawFileBrowser()
     }
 
     drawDeleteLevelConfirmation();
+    drawPermanentDeleteConfirmation();
 #endif
 }
 
@@ -357,13 +358,15 @@ void LevelEditor::drawActiveLevelsTab()
 #if SOKOBAN_ENABLE_DEBUG_UI
     const std::vector<LevelDirectory> levels = collectLevelDirectories();
     bool browserChanged = false;
-    if (ImGui::Button("Add Level At End")) {
-        const int levelIndex = levels.empty() ? 0 : levels.back().index + 1;
-        addLevelAt(levelIndex);
-        browserChanged = true;
-    }
 
     if (ImGui::BeginChild("ActiveLevelFiles", ImVec2(0.0f, 210.0f), true)) {
+        if (levels.empty()) {
+            if (ImGui::Button("+ Level")) {
+                addLevelAt(0);
+                browserChanged = true;
+            }
+        }
+
         for (const LevelDirectory& level : levels) {
             if (browserChanged) {
                 break;
@@ -448,19 +451,65 @@ void LevelEditor::drawActiveLevelsTab()
 void LevelEditor::drawDeletedLevelsTab()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    const std::vector<std::filesystem::path> deletedLevels = collectDeletedLevels();
+    const std::vector<LevelDirectory> deletedLevels = collectDeletedLevels();
     if (deletedLevels.empty()) {
         ImGui::TextUnformatted("No deleted levels.");
         return;
     }
 
+    bool browserChanged = false;
     if (ImGui::BeginChild("DeletedLevelFiles", ImVec2(0.0f, 210.0f), true)) {
-        for (const std::filesystem::path& deletedLevel : deletedLevels) {
-            ImGui::PushID(deletedLevel.string().c_str());
-            ImGui::TextUnformatted(deletedLevel.filename().string().c_str());
+        for (const LevelDirectory& deletedLevel : deletedLevels) {
+            if (browserChanged) {
+                break;
+            }
+
+            ImGui::PushID(deletedLevel.path.string().c_str());
+            const bool levelOpen = ImGui::TreeNodeEx(deletedLevel.path.filename().string().c_str(), ImGuiTreeNodeFlags_DefaultOpen);
             ImGui::SameLine();
             if (ImGui::Button("Restore")) {
-                restoreDeletedLevel(deletedLevel);
+                restoreDeletedLevel(deletedLevel.path);
+                browserChanged = true;
+            }
+            ImGui::SameLine();
+            if (!browserChanged && ImGui::Button("Permanently Delete")) {
+                requestPermanentDelete(deletedLevel.path);
+                browserChanged = true;
+            }
+
+            if (levelOpen) {
+                if (!browserChanged && deletedLevel.screens.empty()) {
+                    ImGui::TextUnformatted("No screens.");
+                }
+
+                if (!browserChanged && ImGui::BeginTable("DeletedScreens", 2, ImGuiTableFlags_SizingStretchProp)) {
+                    ImGui::TableSetupColumn("Screen");
+                    ImGui::TableSetupColumn("Delete", ImGuiTableColumnFlags_WidthFixed, 126.0f);
+
+                    for (const ScreenFile& screen : deletedLevel.screens) {
+                        if (browserChanged) {
+                            break;
+                        }
+
+                        ImGui::PushID(screen.path.string().c_str());
+                        ImGui::TableNextRow();
+
+                        ImGui::TableSetColumnIndex(0);
+                        ImGui::TextUnformatted(screen.path.filename().string().c_str());
+
+                        ImGui::TableSetColumnIndex(1);
+                        if (ImGui::SmallButton("Permanently Delete")) {
+                            requestPermanentDelete(screen.path);
+                            browserChanged = true;
+                        }
+
+                        ImGui::PopID();
+                    }
+
+                    ImGui::EndTable();
+                }
+
+                ImGui::TreePop();
             }
             ImGui::PopID();
         }
@@ -491,6 +540,35 @@ void LevelEditor::drawDeleteLevelConfirmation()
             deleteLevelConfirmationOpen_ = false;
             pendingDeleteLevelPath_.clear();
             pendingDeleteLevelIndex_ = -1;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+#endif
+}
+
+void LevelEditor::drawPermanentDeleteConfirmation()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    constexpr const char* popupName = "Permanently Delete?";
+    if (permanentDeleteConfirmationOpen_) {
+        ImGui::OpenPopup(popupName);
+    }
+
+    if (ImGui::BeginPopupModal(popupName, &permanentDeleteConfirmationOpen_, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Permanently delete %s?", pendingPermanentDeletePath_.filename().string().c_str());
+        ImGui::TextUnformatted("This cannot be restored from the Deleted tab.");
+        ImGui::Separator();
+
+        if (ImGui::Button("Delete Forever", ImVec2(120.0f, 0.0f))) {
+            confirmPermanentDelete();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(90.0f, 0.0f))) {
+            permanentDeleteConfirmationOpen_ = false;
+            pendingPermanentDeletePath_.clear();
             ImGui::CloseCurrentPopup();
         }
 
@@ -839,6 +917,43 @@ void LevelEditor::restoreDeletedLevel(const std::filesystem::path& deletedLevelP
     document_.status = "Restored " + restoredPath.filename().string() + ".";
 }
 
+void LevelEditor::requestPermanentDelete(const std::filesystem::path& path)
+{
+    const std::filesystem::path normalizedPath = normalizedAbsolutePath(path);
+    const std::filesystem::path normalizedDeletedRoot = normalizedAbsolutePath(deletedLevelRoot());
+    if (!pathStartsWith(normalizedPath, normalizedDeletedRoot) || normalizedPath == normalizedDeletedRoot) {
+        document_.status = "Permanent delete is only allowed inside the Deleted tab.";
+        return;
+    }
+
+    pendingPermanentDeletePath_ = normalizedPath;
+    permanentDeleteConfirmationOpen_ = true;
+}
+
+void LevelEditor::confirmPermanentDelete()
+{
+    if (pendingPermanentDeletePath_.empty()) {
+        permanentDeleteConfirmationOpen_ = false;
+        return;
+    }
+
+    std::error_code error;
+    if (std::filesystem::is_directory(pendingPermanentDeletePath_, error)) {
+        std::filesystem::remove_all(pendingPermanentDeletePath_, error);
+    } else {
+        std::filesystem::remove(pendingPermanentDeletePath_, error);
+    }
+
+    if (error) {
+        document_.status = "Failed to permanently delete: " + error.message();
+        return;
+    }
+
+    document_.status = "Permanently deleted " + pendingPermanentDeletePath_.filename().string() + ".";
+    pendingPermanentDeletePath_.clear();
+    permanentDeleteConfirmationOpen_ = false;
+}
+
 void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
 {
     const DocumentSnapshot after = captureDocumentSnapshot();
@@ -969,9 +1084,9 @@ std::vector<LevelEditor::LevelDirectory> LevelEditor::collectLevelDirectories() 
     return levels;
 }
 
-std::vector<std::filesystem::path> LevelEditor::collectDeletedLevels() const
+std::vector<LevelEditor::LevelDirectory> LevelEditor::collectDeletedLevels() const
 {
-    std::vector<std::filesystem::path> levels;
+    std::vector<LevelDirectory> levels;
     std::error_code error;
     const std::filesystem::path deletedRoot = deletedLevelRoot();
     if (!std::filesystem::exists(deletedRoot, error)) {
@@ -983,11 +1098,36 @@ std::vector<std::filesystem::path> LevelEditor::collectDeletedLevels() const
             break;
         }
         if (entry.is_directory(error)) {
-            levels.push_back(entry.path());
+            LevelDirectory level {
+                .index = parseNumberedName(entry.path().filename().string(), "level").value_or(0),
+                .path = entry.path(),
+            };
+
+            for (const auto& screenEntry : std::filesystem::directory_iterator(level.path, error)) {
+                if (error) {
+                    break;
+                }
+                if (!screenEntry.is_regular_file(error)) {
+                    continue;
+                }
+
+                const std::optional<int> screenIndex = parseNumberedName(screenEntry.path().filename().string(), "screen", ".scr");
+                if (!screenIndex) {
+                    continue;
+                }
+
+                level.screens.push_back({
+                    .index = *screenIndex,
+                    .path = screenEntry.path(),
+                });
+            }
+
+            std::ranges::sort(level.screens, {}, &ScreenFile::index);
+            levels.push_back(std::move(level));
         }
     }
 
-    std::ranges::sort(levels);
+    std::ranges::sort(levels, {}, &LevelDirectory::path);
     return levels;
 }
 

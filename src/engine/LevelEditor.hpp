@@ -89,6 +89,7 @@ private:
     void drawActiveLevelsTab();
     void drawDeletedLevelsTab();
     void drawDeleteLevelConfirmation();
+    void drawPermanentDeleteConfirmation();
     void drawGrid();
     void newDocument(int width, int height, bool recordHistory = true);
     void resizeDocument(int width, int height, bool recordHistory = true);
@@ -101,6 +102,8 @@ private:
     void addScreenAt(const LevelDirectory& level, int screenIndex);
     void deleteScreen(const LevelDirectory& level, int screenIndex);
     void restoreDeletedLevel(const std::filesystem::path& deletedLevelPath);
+    void requestPermanentDelete(const std::filesystem::path& path);
+    void confirmPermanentDelete();
     void recordDocumentChange(const DocumentSnapshot& before);
     void applyDocumentSnapshot(const DocumentSnapshot& snapshot);
     [[nodiscard]] Level documentToLevel() const;
@@ -109,7 +112,7 @@ private:
     [[nodiscard]] std::filesystem::path runtimeMirrorPath(const std::filesystem::path& sourcePath) const;
     [[nodiscard]] std::filesystem::path deletedLevelRoot() const;
     [[nodiscard]] std::vector<LevelDirectory> collectLevelDirectories() const;
-    [[nodiscard]] std::vector<std::filesystem::path> collectDeletedLevels() const;
+    [[nodiscard]] std::vector<LevelDirectory> collectDeletedLevels() const;
     [[nodiscard]] std::vector<std::string> defaultScreenRows() const;
     [[nodiscard]] std::filesystem::path uniqueDeletedLevelPath(const std::filesystem::path& levelPath) const;
     void writeScreenFile(const std::filesystem::path& path, const std::vector<std::string>& rows);
@@ -122,6 +125,8 @@ private:
     std::filesystem::path pendingDeleteLevelPath_;
     int pendingDeleteLevelIndex_ = -1;
     bool deleteLevelConfirmationOpen_ = false;
+    std::filesystem::path pendingPermanentDeletePath_;
+    bool permanentDeleteConfirmationOpen_ = false;
 };
 
 } // namespace sokoban
