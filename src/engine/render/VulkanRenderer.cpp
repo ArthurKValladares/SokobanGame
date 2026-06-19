@@ -210,7 +210,7 @@ VulkanRenderer::~VulkanRenderer()
     }
 }
 
-void VulkanRenderer::drawFrame(const RenderFrameData& frameData)
+void VulkanRenderer::drawFrame(const RenderFrameData& frameData, const UiDrawData& uiDrawData)
 {
     auto& frame = frames_[currentFrame_];
     vkCheck(vkWaitForFences(device_, 1, &frame.inFlight, VK_TRUE, UINT64_MAX), "vkWaitForFences failed");
@@ -232,7 +232,7 @@ void VulkanRenderer::drawFrame(const RenderFrameData& frameData)
     ImGui::Render();
 #endif
 
-    recordCommandBuffer(frame.commandBuffer, imageIndex, frameData);
+    recordCommandBuffer(frame.commandBuffer, imageIndex, frameData, uiDrawData);
 
     VkSemaphoreSubmitInfo waitSemaphore {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
@@ -847,7 +847,7 @@ void VulkanRenderer::cleanupMsaaColorResources()
     }
 }
 
-void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData)
+void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData, const UiDrawData& uiDrawData)
 {
     pendingStats_ = {
         .frameIndex = nextStatsFrameIndex_++,
@@ -929,6 +929,7 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
         msaaEnabled() ? swapchainImages_[imageIndex].view : VK_NULL_HANDLE,
         frameData);
 
+    recordUiRendering(commandBuffer, swapchainImages_[imageIndex].view, uiDrawData);
     recordDebugUiRendering(commandBuffer, swapchainImages_[imageIndex].view);
 
     VkImageMemoryBarrier2 toPresent {
@@ -1024,6 +1025,60 @@ void VulkanRenderer::recordGameRendering(
         for (const auto& tile : frameData.tiles) {
             drawTile(commandBuffer, tileLayout, tile);
         }
+    }
+
+    vkCmdEndRendering(commandBuffer);
+}
+
+void VulkanRenderer::recordUiRendering(VkCommandBuffer commandBuffer, VkImageView colorView, const UiDrawData& uiDrawData)
+{
+    if (uiDrawData.commands.empty() || uiDrawData.viewportSize.x <= 0.0f || uiDrawData.viewportSize.y <= 0.0f) {
+        return;
+    }
+
+    VkRenderingAttachmentInfo colorAttachment {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView = colorView,
+        .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+    };
+
+    VkRenderingInfo renderingInfo {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+        .renderArea = { .offset = { 0, 0 }, .extent = swapchainExtent_ },
+        .layerCount = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &colorAttachment,
+    };
+
+    vkCmdBeginRendering(commandBuffer, &renderingInfo);
+    ++pendingStats_.renderPasses;
+
+    VkViewport viewport {
+        .x = 0.0f,
+        .y = static_cast<float>(swapchainExtent_.height),
+        .width = static_cast<float>(swapchainExtent_.width),
+        .height = -static_cast<float>(swapchainExtent_.height),
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f,
+    };
+    VkRect2D scissor {
+        .offset = { 0, 0 },
+        .extent = swapchainExtent_,
+    };
+
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
+    ++pendingStats_.pipelineBinds;
+    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+    vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
+    vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    vkCmdSetPrimitiveTopology(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    vkCmdSetLineWidth(commandBuffer, 1.0f);
+
+    for (const UiDrawCommand& command : uiDrawData.commands) {
+        drawUiRect(commandBuffer, command, uiDrawData.viewportSize);
     }
 
     vkCmdEndRendering(commandBuffer);
@@ -1296,6 +1351,21 @@ void VulkanRenderer::drawFace(VkCommandBuffer commandBuffer, const std::array<Ve
         sizeof(TilePushConstants),
         &pushConstants);
     vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+}
+
+void VulkanRenderer::drawUiRect(VkCommandBuffer commandBuffer, const UiDrawCommand& command, Vec2 viewportSize) const
+{
+    const float left = -1.0f + 2.0f * command.rect.position.x / viewportSize.x;
+    const float right = -1.0f + 2.0f * (command.rect.position.x + command.rect.size.x) / viewportSize.x;
+    const float top = 1.0f - 2.0f * command.rect.position.y / viewportSize.y;
+    const float bottom = 1.0f - 2.0f * (command.rect.position.y + command.rect.size.y) / viewportSize.y;
+
+    drawFace(commandBuffer, {
+        Vec2 { left, top },
+        Vec2 { right, top },
+        Vec2 { right, bottom },
+        Vec2 { left, bottom },
+    }, command.color);
 }
 
 Vec2 VulkanRenderer::projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) const

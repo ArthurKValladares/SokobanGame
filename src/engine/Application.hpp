@@ -101,6 +101,7 @@ private:
 
     Window window_;
     VulkanRenderer renderer_;
+    UiContext ui_;
     std::filesystem::path assetRoot_;
     Level level_;
     int currentLevel_ = 0;

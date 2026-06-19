@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/Math.hpp"
+#include "engine/ui/Ui.hpp"
 
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_video.h>
@@ -69,7 +70,7 @@ public:
     VulkanRenderer(const VulkanRenderer&) = delete;
     VulkanRenderer& operator=(const VulkanRenderer&) = delete;
 
-    void drawFrame(const RenderFrameData& frameData);
+    void drawFrame(const RenderFrameData& frameData, const UiDrawData& uiDrawData);
     void handleEvent(const SDL_Event& event);
     void beginDebugUiFrame();
     [[nodiscard]] bool wantsKeyboardCapture() const;
@@ -148,8 +149,9 @@ private:
     void cleanupSwapchain();
     void cleanupMsaaColorResources();
 
-    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData);
+    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData, const UiDrawData& uiDrawData);
     void recordGameRendering(VkCommandBuffer commandBuffer, VkImageView colorView, VkImageView resolveView, const RenderFrameData& frameData);
+    void recordUiRendering(VkCommandBuffer commandBuffer, VkImageView colorView, const UiDrawData& uiDrawData);
     void recordDebugUiRendering(VkCommandBuffer commandBuffer, VkImageView colorView) const;
     [[nodiscard]] TileRenderLayout calculateTileRenderLayout(const RenderFrameData& frameData) const;
     [[nodiscard]] IsoRenderLayout calculateIsoRenderLayout(const RenderFrameData& frameData) const;
@@ -157,6 +159,7 @@ private:
     void drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const RenderFrameData& frameData) const;
     void drawIsoTile(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const RenderFrameData::Tile& tile) const;
     void drawFace(VkCommandBuffer commandBuffer, const std::array<Vec2, 4>& vertices, Vec4 color) const;
+    void drawUiRect(VkCommandBuffer commandBuffer, const UiDrawCommand& command, Vec2 viewportSize) const;
     [[nodiscard]] Vec2 projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) const;
     [[nodiscard]] Vec2 pixelSizeToClipSpace(float pixelSize) const;
 

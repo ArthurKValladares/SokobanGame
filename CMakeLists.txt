@@ -96,6 +96,7 @@ add_executable(sokoban
     src/engine/TileTypes.cpp
     src/engine/Window.cpp
     src/engine/render/VulkanRenderer.cpp
+    src/engine/ui/Ui.cpp
 )
 foreach(imgui_source IN LISTS SOKOBAN_IMGUI_SOURCES)
     target_sources(sokoban PRIVATE $<$<CONFIG:Debug>:${imgui_source}>)

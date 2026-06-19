@@ -176,7 +176,7 @@ void Application::run()
                     quitConfirmationOpen_ = true;
                 }
 #else
-                running_ = false;
+                quitConfirmationOpen_ = true;
 #endif
             }
         }
@@ -184,18 +184,41 @@ void Application::run()
         const float dt = frameTimer_.tick();
         update(dt);
 
+        const Vec2 windowSize = window_.size();
+        const Vec2 pixelSize = window_.sizeInPixels();
+        const Vec2 mouse = input_.mousePosition();
+        const Vec2 mousePixels {
+            windowSize.x > 0.0f ? mouse.x * pixelSize.x / windowSize.x : mouse.x,
+            windowSize.y > 0.0f ? mouse.y * pixelSize.y / windowSize.y : mouse.y,
+        };
+
+        ui_.beginFrame(
+            pixelSize,
+            mousePixels,
+            input_.mouseButtonDown(SDL_BUTTON_LEFT),
+            input_.mouseButtonPressed(SDL_BUTTON_LEFT));
+
         renderer_.beginDebugUiFrame();
         DebugUi::draw();
         drawQuitConfirmation();
         drawDraftExitConfirmation();
         drawEditorModeIndicator();
-        renderer_.drawFrame(buildRenderFrame());
+        ui_.endFrame();
+        renderer_.drawFrame(buildRenderFrame(), ui_.drawData());
     }
 }
 
 void Application::update(float dt)
 {
+    if (quitConfirmationOpen_) {
+        return;
+    }
+
 #if SOKOBAN_ENABLE_DEBUG_UI
+    if (draftExitConfirmationOpen_) {
+        return;
+    }
+
     if (levelEditor_.editingDocument()) {
         updateEditorPainting();
         return;
@@ -303,37 +326,30 @@ void Application::drawEditorModeIndicator()
 
 void Application::drawQuitConfirmation()
 {
-#if SOKOBAN_ENABLE_DEBUG_UI
-    constexpr const char* popupName = "Quit Game?";
-    if (quitConfirmationOpen_) {
-        ImGui::OpenPopup(popupName);
+    if (!quitConfirmationOpen_) {
+        return;
     }
 
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(
-        ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f, viewport->WorkPos.y + viewport->WorkSize.y * 0.5f),
-        ImGuiCond_Appearing,
-        ImVec2(0.5f, 0.5f));
+    const Vec2 viewport = window_.sizeInPixels();
+    const UiRect panel {
+        .position = {
+            (viewport.x - 360.0f) * 0.5f,
+            (viewport.y - 180.0f) * 0.5f,
+        },
+        .size = { 360.0f, 180.0f },
+    };
 
-    if (ImGui::BeginPopupModal(popupName, &quitConfirmationOpen_, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted("Quit the game?");
-        ImGui::Separator();
+    ui_.panel(panel);
+    ui_.text({ panel.position.x + 78.0f, panel.position.y + 38.0f }, "QUIT GAME?", { 0.96f, 0.88f, 0.72f, 1.0f }, 4.0f);
 
-        if (ImGui::Button("Quit", ImVec2(90.0f, 0.0f))) {
-            running_ = false;
-            quitConfirmationOpen_ = false;
-            ImGui::CloseCurrentPopup();
-        }
-
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(90.0f, 0.0f))) {
-            quitConfirmationOpen_ = false;
-            ImGui::CloseCurrentPopup();
-        }
-
-        ImGui::EndPopup();
+    if (ui_.button("quit_game_confirm", { { panel.position.x + 62.0f, panel.position.y + 108.0f }, { 104.0f, 42.0f } }, "QUIT")) {
+        running_ = false;
+        quitConfirmationOpen_ = false;
     }
-#endif
+
+    if (ui_.button("quit_game_cancel", { { panel.position.x + 194.0f, panel.position.y + 108.0f }, { 104.0f, 42.0f } }, "CANCEL")) {
+        quitConfirmationOpen_ = false;
+    }
 }
 
 void Application::drawDraftExitConfirmation()
