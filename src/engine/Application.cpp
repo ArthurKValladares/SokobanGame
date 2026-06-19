@@ -31,6 +31,45 @@ Vec2 lerp(Vec2 from, Vec2 to, float t)
     };
 }
 
+int gridDistance(GridPosition from, GridPosition to)
+{
+    return std::abs(to.x - from.x) + std::abs(to.y - from.y);
+}
+
+Vec2 interpolateGridMotion(GridPosition from, GridPosition to, float elapsedSeconds)
+{
+    const int distance = gridDistance(from, to);
+    if (distance == 0) {
+        return toVec2(to);
+    }
+
+    if constexpr (config::playerMoveDurationSeconds <= 0.0f) {
+        return toVec2(to);
+    }
+
+    const float traveledCells = std::min(
+        elapsedSeconds / config::playerMoveDurationSeconds,
+        static_cast<float>(distance));
+    const int dx = to.x - from.x;
+    const int dy = to.y - from.y;
+
+    if (dx != 0 && dy == 0) {
+        return {
+            static_cast<float>(from.x) + std::copysign(traveledCells, static_cast<float>(dx)),
+            static_cast<float>(from.y),
+        };
+    }
+
+    if (dy != 0 && dx == 0) {
+        return {
+            static_cast<float>(from.x),
+            static_cast<float>(from.y) + std::copysign(traveledCells, static_cast<float>(dy)),
+        };
+    }
+
+    return lerp(toVec2(from), toVec2(to), traveledCells / static_cast<float>(distance));
+}
+
 struct StaticRenderCell {
     TileType tile = TileType::Empty;
     bool active = true;
@@ -512,16 +551,22 @@ void Application::advancePlayerMovement(float dt)
             continue;
         }
 
-        constexpr float duration = config::playerMoveDurationSeconds;
+        const float duration = activeActionDuration();
+        if (duration <= 0.0f) {
+            if (completeActiveAction()) {
+                return;
+            }
+            continue;
+        }
+
         const float timeToFinish = duration - moveElapsed_;
         const float step = std::min(remainingTime, timeToFinish);
         remainingTime -= step;
         moveElapsed_ += step;
 
-        const float t = std::clamp(moveElapsed_ / duration, 0.0f, 1.0f);
-        playerRenderPosition_ = lerp(toVec2(activeAction_.before.player), toVec2(activeAction_.after.player), t);
+        playerRenderPosition_ = interpolateGridMotion(activeAction_.before.player, activeAction_.after.player, moveElapsed_);
         for (size_t i = 0; i < rocks_.size(); ++i) {
-            rocks_[i].renderPosition = lerp(toVec2(activeAction_.before.rocks[i]), toVec2(activeAction_.after.rocks[i]), t);
+            rocks_[i].renderPosition = interpolateGridMotion(activeAction_.before.rocks[i], activeAction_.after.rocks[i], moveElapsed_);
         }
 
         if (moveElapsed_ >= duration) {
@@ -551,6 +596,17 @@ bool Application::completeActiveAction()
     }
 
     return false;
+}
+
+float Application::activeActionDuration() const
+{
+    int maxDistance = gridDistance(activeAction_.before.player, activeAction_.after.player);
+    const size_t rockCount = std::min(activeAction_.before.rocks.size(), activeAction_.after.rocks.size());
+    for (size_t i = 0; i < rockCount; ++i) {
+        maxDistance = std::max(maxDistance, gridDistance(activeAction_.before.rocks[i], activeAction_.after.rocks[i]));
+    }
+
+    return static_cast<float>(maxDistance) * config::playerMoveDurationSeconds;
 }
 
 bool Application::tryStartNextMove()

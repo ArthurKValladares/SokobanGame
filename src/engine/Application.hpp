@@ -72,6 +72,7 @@ private:
     void queuePressedCommands();
     void advancePlayerMovement(float dt);
     [[nodiscard]] bool completeActiveAction();
+    [[nodiscard]] float activeActionDuration() const;
     [[nodiscard]] bool tryStartNextMove();
     [[nodiscard]] bool tryStartHeldMove();
     [[nodiscard]] bool tryStartMove(MoveDirection direction);
