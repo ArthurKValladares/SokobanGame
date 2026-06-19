@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <exception>
 #include <fstream>
+#include <charconv>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -83,6 +84,42 @@ bool pathStartsWith(const std::filesystem::path& path, const std::filesystem::pa
     }
 
     return true;
+}
+
+std::optional<int> parseNumberedName(std::string_view value, std::string_view prefix, std::string_view suffix = {})
+{
+    if (!value.starts_with(prefix) || value.size() < prefix.size() + suffix.size()) {
+        return std::nullopt;
+    }
+    if (!suffix.empty() && !value.ends_with(suffix)) {
+        return std::nullopt;
+    }
+
+    const size_t numberStart = prefix.size();
+    const size_t numberEnd = value.size() - suffix.size();
+    if (numberStart == numberEnd) {
+        return std::nullopt;
+    }
+
+    int number = 0;
+    const char* begin = value.data() + numberStart;
+    const char* end = value.data() + numberEnd;
+    const auto result = std::from_chars(begin, end, number);
+    if (result.ec != std::errc {} || result.ptr != end || number < 0) {
+        return std::nullopt;
+    }
+
+    return number;
+}
+
+std::filesystem::path levelDirectoryPath(const std::filesystem::path& root, int levelIndex)
+{
+    return root / ("level" + std::to_string(levelIndex));
+}
+
+std::filesystem::path screenFilePath(const std::filesystem::path& levelDirectory, int screenIndex)
+{
+    return levelDirectory / ("screen" + std::to_string(screenIndex) + ".scr");
 }
 
 } // namespace
@@ -299,32 +336,166 @@ void LevelEditor::drawFileBrowser()
         }
     }
 
-    std::vector<std::filesystem::path> screens;
-    std::error_code error;
-    if (std::filesystem::exists(document_.browserRoot, error)) {
-        for (const auto& entry : std::filesystem::recursive_directory_iterator(document_.browserRoot, error)) {
-            if (error) {
+    if (ImGui::BeginTabBar("LevelBrowserTabs")) {
+        if (ImGui::BeginTabItem("Levels")) {
+            drawActiveLevelsTab();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Deleted")) {
+            drawDeletedLevelsTab();
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+
+    drawDeleteLevelConfirmation();
+#endif
+}
+
+void LevelEditor::drawActiveLevelsTab()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    const std::vector<LevelDirectory> levels = collectLevelDirectories();
+    bool browserChanged = false;
+    if (ImGui::Button("Add Level At End")) {
+        const int levelIndex = levels.empty() ? 0 : levels.back().index + 1;
+        addLevelAt(levelIndex);
+        browserChanged = true;
+    }
+
+    if (ImGui::BeginChild("ActiveLevelFiles", ImVec2(0.0f, 210.0f), true)) {
+        for (const LevelDirectory& level : levels) {
+            if (browserChanged) {
                 break;
             }
-            if (entry.is_regular_file(error) && entry.path().extension() == ".scr") {
-                screens.push_back(entry.path());
-            }
-        }
-    }
-    std::ranges::sort(screens);
 
-    if (ImGui::BeginChild("LevelFiles", ImVec2(0.0f, 150.0f), true)) {
-        for (const auto& path : screens) {
-            const std::string relative = std::filesystem::relative(path, document_.browserRoot, error).string();
-            const std::string label = error ? path.string() : relative;
-            if (ImGui::Selectable(label.c_str(), path == document_.filePath)) {
-                document_.filePath = path;
-                document_.filePathBuffer = path.string();
-                document_.status = "Selected " + path.string();
+            ImGui::PushID(level.path.string().c_str());
+            const bool selectedLevel = document_.filePath.parent_path() == level.path;
+            ImGui::SetNextItemOpen(selectedLevel, ImGuiCond_Once);
+            const bool levelOpen = ImGui::TreeNodeEx(level.path.filename().string().c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+            ImGui::SameLine();
+            if (ImGui::SmallButton("+ Before")) {
+                addLevelAt(level.index);
+                browserChanged = true;
             }
+            ImGui::SameLine();
+            if (!browserChanged && ImGui::SmallButton("+ After")) {
+                addLevelAt(level.index + 1);
+                browserChanged = true;
+            }
+            ImGui::SameLine();
+            if (!browserChanged && ImGui::SmallButton("Delete")) {
+                requestDeleteLevel(level);
+                browserChanged = true;
+            }
+
+            if (levelOpen) {
+                if (!browserChanged && ImGui::BeginTable("Screens", 4, ImGuiTableFlags_SizingStretchProp)) {
+                    ImGui::TableSetupColumn("Screen");
+                    ImGui::TableSetupColumn("Before", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+                    ImGui::TableSetupColumn("After", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+                    ImGui::TableSetupColumn("Delete", ImGuiTableColumnFlags_WidthFixed, 58.0f);
+
+                    for (const ScreenFile& screen : level.screens) {
+                        if (browserChanged) {
+                            break;
+                        }
+
+                        ImGui::PushID(screen.path.string().c_str());
+                        ImGui::TableNextRow();
+
+                        ImGui::TableSetColumnIndex(0);
+                        const std::string screenLabel = screen.path.filename().string();
+                        if (ImGui::Selectable(screenLabel.c_str(), screen.path == document_.filePath)) {
+                            document_.filePath = screen.path;
+                            document_.filePathBuffer = screen.path.string();
+                            document_.status = "Selected " + screen.path.string();
+                        }
+
+                        ImGui::TableSetColumnIndex(1);
+                        if (ImGui::SmallButton("+ Before")) {
+                            addScreenAt(level, screen.index);
+                            browserChanged = true;
+                        }
+
+                        ImGui::TableSetColumnIndex(2);
+                        if (!browserChanged && ImGui::SmallButton("+ After")) {
+                            addScreenAt(level, screen.index + 1);
+                            browserChanged = true;
+                        }
+
+                        ImGui::TableSetColumnIndex(3);
+                        if (!browserChanged && ImGui::SmallButton("Delete")) {
+                            deleteScreen(level, screen.index);
+                            browserChanged = true;
+                        }
+
+                        ImGui::PopID();
+                    }
+
+                    ImGui::EndTable();
+                }
+
+                ImGui::TreePop();
+            }
+            ImGui::PopID();
         }
     }
     ImGui::EndChild();
+#endif
+}
+
+void LevelEditor::drawDeletedLevelsTab()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    const std::vector<std::filesystem::path> deletedLevels = collectDeletedLevels();
+    if (deletedLevels.empty()) {
+        ImGui::TextUnformatted("No deleted levels.");
+        return;
+    }
+
+    if (ImGui::BeginChild("DeletedLevelFiles", ImVec2(0.0f, 210.0f), true)) {
+        for (const std::filesystem::path& deletedLevel : deletedLevels) {
+            ImGui::PushID(deletedLevel.string().c_str());
+            ImGui::TextUnformatted(deletedLevel.filename().string().c_str());
+            ImGui::SameLine();
+            if (ImGui::Button("Restore")) {
+                restoreDeletedLevel(deletedLevel);
+            }
+            ImGui::PopID();
+        }
+    }
+    ImGui::EndChild();
+#endif
+}
+
+void LevelEditor::drawDeleteLevelConfirmation()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    constexpr const char* popupName = "Delete Level?";
+    if (deleteLevelConfirmationOpen_) {
+        ImGui::OpenPopup(popupName);
+    }
+
+    if (ImGui::BeginPopupModal(popupName, &deleteLevelConfirmationOpen_, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Delete %s?", pendingDeleteLevelPath_.filename().string().c_str());
+        ImGui::TextUnformatted("The level will be moved to the Deleted tab.");
+        ImGui::Separator();
+
+        if (ImGui::Button("Delete", ImVec2(90.0f, 0.0f))) {
+            confirmDeleteLevel();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(90.0f, 0.0f))) {
+            deleteLevelConfirmationOpen_ = false;
+            pendingDeleteLevelPath_.clear();
+            pendingDeleteLevelIndex_ = -1;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
 #endif
 }
 
@@ -514,6 +685,160 @@ void LevelEditor::playDocument(const Callbacks& callbacks)
     }
 }
 
+void LevelEditor::addLevelAt(int levelIndex)
+{
+    std::error_code error;
+    std::filesystem::create_directories(document_.browserRoot, error);
+    if (error) {
+        document_.status = "Failed to create browser root: " + error.message();
+        return;
+    }
+
+    std::vector<LevelDirectory> levels = collectLevelDirectories();
+    for (auto it = levels.rbegin(); it != levels.rend(); ++it) {
+        if (it->index >= levelIndex) {
+            std::filesystem::rename(it->path, levelDirectoryPath(document_.browserRoot, it->index + 1), error);
+            if (error) {
+                document_.status = "Failed to rename level: " + error.message();
+                return;
+            }
+        }
+    }
+
+    const std::filesystem::path newLevelPath = levelDirectoryPath(document_.browserRoot, levelIndex);
+    const std::filesystem::path newScreenPath = screenFilePath(newLevelPath, 0);
+    writeScreenFile(newScreenPath, defaultScreenRows());
+    mirrorBrowserRootToRuntime();
+    loadDocument(newScreenPath);
+    document_.status = "Added " + newLevelPath.filename().string() + ".";
+}
+
+void LevelEditor::requestDeleteLevel(const LevelDirectory& level)
+{
+    pendingDeleteLevelPath_ = level.path;
+    pendingDeleteLevelIndex_ = level.index;
+    deleteLevelConfirmationOpen_ = true;
+}
+
+void LevelEditor::confirmDeleteLevel()
+{
+    if (pendingDeleteLevelIndex_ < 0 || pendingDeleteLevelPath_.empty()) {
+        deleteLevelConfirmationOpen_ = false;
+        return;
+    }
+
+    std::error_code error;
+    const std::filesystem::path deletedRoot = deletedLevelRoot();
+    std::filesystem::create_directories(deletedRoot, error);
+    if (error) {
+        document_.status = "Failed to create Deleted directory: " + error.message();
+        return;
+    }
+
+    const std::filesystem::path deletedPath = uniqueDeletedLevelPath(pendingDeleteLevelPath_);
+    std::filesystem::rename(pendingDeleteLevelPath_, deletedPath, error);
+    if (error) {
+        document_.status = "Failed to move level to Deleted: " + error.message();
+        return;
+    }
+
+    std::vector<LevelDirectory> levels = collectLevelDirectories();
+    for (const LevelDirectory& level : levels) {
+        if (level.index > pendingDeleteLevelIndex_) {
+            std::filesystem::rename(level.path, levelDirectoryPath(document_.browserRoot, level.index - 1), error);
+            if (error) {
+                document_.status = "Deleted level, but failed to renumber levels: " + error.message();
+                break;
+            }
+        }
+    }
+
+    deleteLevelConfirmationOpen_ = false;
+    pendingDeleteLevelPath_.clear();
+    pendingDeleteLevelIndex_ = -1;
+    mirrorBrowserRootToRuntime();
+    loadFirstAvailableScreen();
+    document_.status = "Moved level to Deleted.";
+}
+
+void LevelEditor::addScreenAt(const LevelDirectory& level, int screenIndex)
+{
+    std::error_code error;
+    for (auto it = level.screens.rbegin(); it != level.screens.rend(); ++it) {
+        if (it->index >= screenIndex) {
+            std::filesystem::rename(it->path, screenFilePath(level.path, it->index + 1), error);
+            if (error) {
+                document_.status = "Failed to rename screen: " + error.message();
+                return;
+            }
+        }
+    }
+
+    const std::filesystem::path newScreenPath = screenFilePath(level.path, screenIndex);
+    writeScreenFile(newScreenPath, defaultScreenRows());
+    mirrorBrowserRootToRuntime();
+    loadDocument(newScreenPath);
+    document_.status = "Added " + newScreenPath.filename().string() + ".";
+}
+
+void LevelEditor::deleteScreen(const LevelDirectory& level, int screenIndex)
+{
+    if (level.screens.size() <= 1) {
+        document_.status = "Cannot delete the last screen in a level. Delete the level instead.";
+        return;
+    }
+
+    const auto screen = std::ranges::find_if(level.screens, [screenIndex](const ScreenFile& candidate) {
+        return candidate.index == screenIndex;
+    });
+    if (screen == level.screens.end()) {
+        return;
+    }
+
+    std::error_code error;
+    std::filesystem::remove(screen->path, error);
+    if (error) {
+        document_.status = "Failed to delete screen: " + error.message();
+        return;
+    }
+
+    for (const ScreenFile& candidate : level.screens) {
+        if (candidate.index > screenIndex) {
+            std::filesystem::rename(candidate.path, screenFilePath(level.path, candidate.index - 1), error);
+            if (error) {
+                document_.status = "Deleted screen, but failed to renumber screens: " + error.message();
+                return;
+            }
+        }
+    }
+
+    mirrorBrowserRootToRuntime();
+    const int nextScreenIndex = std::min(screenIndex, static_cast<int>(level.screens.size()) - 2);
+    loadDocument(screenFilePath(level.path, nextScreenIndex));
+    document_.status = "Deleted screen.";
+}
+
+void LevelEditor::restoreDeletedLevel(const std::filesystem::path& deletedLevelPath)
+{
+    std::vector<LevelDirectory> levels = collectLevelDirectories();
+    const int restoredIndex = levels.empty() ? 0 : levels.back().index + 1;
+    const std::filesystem::path restoredPath = levelDirectoryPath(document_.browserRoot, restoredIndex);
+
+    std::error_code error;
+    std::filesystem::rename(deletedLevelPath, restoredPath, error);
+    if (error) {
+        document_.status = "Failed to restore deleted level: " + error.message();
+        return;
+    }
+
+    mirrorBrowserRootToRuntime();
+    const std::filesystem::path firstScreen = screenFilePath(restoredPath, 0);
+    if (std::filesystem::exists(firstScreen)) {
+        loadDocument(firstScreen);
+    }
+    document_.status = "Restored " + restoredPath.filename().string() + ".";
+}
+
 void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
 {
     const DocumentSnapshot after = captureDocumentSnapshot();
@@ -584,6 +909,170 @@ std::filesystem::path LevelEditor::runtimeMirrorPath(const std::filesystem::path
     }
 
     return normalizedAbsolutePath(document_.runtimeLevelRoot / relativePath);
+}
+
+std::filesystem::path LevelEditor::deletedLevelRoot() const
+{
+    return document_.browserRoot / "Deleted";
+}
+
+std::vector<LevelEditor::LevelDirectory> LevelEditor::collectLevelDirectories() const
+{
+    std::vector<LevelDirectory> levels;
+    std::error_code error;
+    if (!std::filesystem::exists(document_.browserRoot, error)) {
+        return levels;
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(document_.browserRoot, error)) {
+        if (error) {
+            break;
+        }
+        if (!entry.is_directory(error) || entry.path() == deletedLevelRoot()) {
+            continue;
+        }
+
+        const std::optional<int> levelIndex = parseNumberedName(entry.path().filename().string(), "level");
+        if (!levelIndex) {
+            continue;
+        }
+
+        LevelDirectory level {
+            .index = *levelIndex,
+            .path = entry.path(),
+        };
+
+        for (const auto& screenEntry : std::filesystem::directory_iterator(level.path, error)) {
+            if (error) {
+                break;
+            }
+            if (!screenEntry.is_regular_file(error)) {
+                continue;
+            }
+
+            const std::optional<int> screenIndex = parseNumberedName(screenEntry.path().filename().string(), "screen", ".scr");
+            if (!screenIndex) {
+                continue;
+            }
+
+            level.screens.push_back({
+                .index = *screenIndex,
+                .path = screenEntry.path(),
+            });
+        }
+
+        std::ranges::sort(level.screens, {}, &ScreenFile::index);
+        levels.push_back(std::move(level));
+    }
+
+    std::ranges::sort(levels, {}, &LevelDirectory::index);
+    return levels;
+}
+
+std::vector<std::filesystem::path> LevelEditor::collectDeletedLevels() const
+{
+    std::vector<std::filesystem::path> levels;
+    std::error_code error;
+    const std::filesystem::path deletedRoot = deletedLevelRoot();
+    if (!std::filesystem::exists(deletedRoot, error)) {
+        return levels;
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(deletedRoot, error)) {
+        if (error) {
+            break;
+        }
+        if (entry.is_directory(error)) {
+            levels.push_back(entry.path());
+        }
+    }
+
+    std::ranges::sort(levels);
+    return levels;
+}
+
+std::vector<std::string> LevelEditor::defaultScreenRows() const
+{
+    const int width = std::max(document_.requestedWidth, 1);
+    const int height = std::max(document_.requestedHeight, 1);
+    std::vector<std::string> rows(static_cast<size_t>(height), std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Empty)));
+    rows[static_cast<size_t>(height / 2)][static_cast<size_t>(width / 2)] = tileTypeToChar(TileType::Player);
+    return rows;
+}
+
+std::filesystem::path LevelEditor::uniqueDeletedLevelPath(const std::filesystem::path& levelPath) const
+{
+    const std::filesystem::path deletedRoot = deletedLevelRoot();
+    std::filesystem::path candidate = deletedRoot / levelPath.filename();
+    for (int suffix = 1; std::filesystem::exists(candidate); ++suffix) {
+        candidate = deletedRoot / (levelPath.filename().string() + "_deleted" + std::to_string(suffix));
+    }
+    return candidate;
+}
+
+void LevelEditor::writeScreenFile(const std::filesystem::path& path, const std::vector<std::string>& rows)
+{
+    std::error_code error;
+    std::filesystem::create_directories(path.parent_path(), error);
+    if (error) {
+        document_.status = "Failed to create screen directory: " + error.message();
+        return;
+    }
+
+    std::ofstream file(path, std::ios::trunc);
+    if (!file) {
+        document_.status = "Failed to write screen: " + path.string();
+        return;
+    }
+
+    for (const std::string& row : rows) {
+        file << row << '\n';
+    }
+}
+
+void LevelEditor::mirrorBrowserRootToRuntime()
+{
+    const std::filesystem::path normalizedBrowserRoot = normalizedAbsolutePath(document_.browserRoot);
+    const std::filesystem::path normalizedSourceRoot = normalizedAbsolutePath(document_.sourceLevelRoot);
+    if (normalizedBrowserRoot != normalizedSourceRoot) {
+        return;
+    }
+
+    std::error_code error;
+    std::filesystem::remove_all(document_.runtimeLevelRoot, error);
+    if (error) {
+        document_.status = "Failed to clear runtime level mirror: " + error.message();
+        return;
+    }
+    std::filesystem::create_directories(document_.runtimeLevelRoot, error);
+    if (error) {
+        document_.status = "Failed to recreate runtime level mirror: " + error.message();
+        return;
+    }
+
+    for (const LevelDirectory& level : collectLevelDirectories()) {
+        std::filesystem::copy(
+            level.path,
+            document_.runtimeLevelRoot / level.path.filename(),
+            std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing,
+            error);
+        if (error) {
+            document_.status = "Failed to update runtime level mirror: " + error.message();
+            return;
+        }
+    }
+}
+
+void LevelEditor::loadFirstAvailableScreen()
+{
+    for (const LevelDirectory& level : collectLevelDirectories()) {
+        if (!level.screens.empty()) {
+            loadDocument(level.screens.front().path);
+            return;
+        }
+    }
+
+    newDocument(document_.requestedWidth, document_.requestedHeight, false);
 }
 
 } // namespace sokoban

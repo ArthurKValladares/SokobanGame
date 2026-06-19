@@ -73,24 +73,55 @@ private:
         DocumentSnapshot after;
     };
 
+    struct ScreenFile {
+        int index = 0;
+        std::filesystem::path path;
+    };
+
+    struct LevelDirectory {
+        int index = 0;
+        std::filesystem::path path;
+        std::vector<ScreenFile> screens;
+    };
+
     void drawTilePalette();
     void drawFileBrowser();
+    void drawActiveLevelsTab();
+    void drawDeletedLevelsTab();
+    void drawDeleteLevelConfirmation();
     void drawGrid();
     void newDocument(int width, int height, bool recordHistory = true);
     void resizeDocument(int width, int height, bool recordHistory = true);
     void loadDocument(const std::filesystem::path& path, bool recordHistory = true);
     void saveDocument(const std::filesystem::path& path);
     void playDocument(const Callbacks& callbacks);
+    void addLevelAt(int levelIndex);
+    void requestDeleteLevel(const LevelDirectory& level);
+    void confirmDeleteLevel();
+    void addScreenAt(const LevelDirectory& level, int screenIndex);
+    void deleteScreen(const LevelDirectory& level, int screenIndex);
+    void restoreDeletedLevel(const std::filesystem::path& deletedLevelPath);
     void recordDocumentChange(const DocumentSnapshot& before);
     void applyDocumentSnapshot(const DocumentSnapshot& snapshot);
     [[nodiscard]] Level documentToLevel() const;
     [[nodiscard]] DocumentSnapshot captureDocumentSnapshot() const;
     [[nodiscard]] EditActionRecord invertEditActionRecord(const EditActionRecord& record) const;
     [[nodiscard]] std::filesystem::path runtimeMirrorPath(const std::filesystem::path& sourcePath) const;
+    [[nodiscard]] std::filesystem::path deletedLevelRoot() const;
+    [[nodiscard]] std::vector<LevelDirectory> collectLevelDirectories() const;
+    [[nodiscard]] std::vector<std::filesystem::path> collectDeletedLevels() const;
+    [[nodiscard]] std::vector<std::string> defaultScreenRows() const;
+    [[nodiscard]] std::filesystem::path uniqueDeletedLevelPath(const std::filesystem::path& levelPath) const;
+    void writeScreenFile(const std::filesystem::path& path, const std::vector<std::string>& rows);
+    void mirrorBrowserRootToRuntime();
+    void loadFirstAvailableScreen();
 
     Document document_;
     std::vector<EditActionRecord> editHistory_;
     std::optional<size_t> editUndoCursor_;
+    std::filesystem::path pendingDeleteLevelPath_;
+    int pendingDeleteLevelIndex_ = -1;
+    bool deleteLevelConfirmationOpen_ = false;
 };
 
 } // namespace sokoban
