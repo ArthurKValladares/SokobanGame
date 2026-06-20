@@ -116,7 +116,7 @@ bool Level::isWalkable(GridPosition position) const
     }
 
     const TileType tile = tileAt(static_cast<uint32_t>(position.x), static_cast<uint32_t>(position.y));
-    return tile != TileType::Wall && tile != TileType::Water;
+    return tile != TileType::Wall;
 }
 
 bool Level::isEnd(GridPosition position) const

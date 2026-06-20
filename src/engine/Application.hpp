@@ -60,6 +60,7 @@ private:
 
     struct MoveRecord {
         GridPosition player {};
+        bool playerDead = false;
         std::vector<MovableRecord> rocks;
     };
 
@@ -101,10 +102,19 @@ private:
     [[nodiscard]] Rock* rockAt(GridPosition position);
     [[nodiscard]] const Rock* rockAt(GridPosition position) const;
     [[nodiscard]] const Rock* fallenRockAt(GridPosition position) const;
+    [[nodiscard]] std::optional<TileType> fallenTileAt(GridPosition position) const;
+    [[nodiscard]] std::optional<TileType> fallenTileAt(const MoveRecord& record, GridPosition position) const;
+    [[nodiscard]] const MovableRecord* movableRecordAt(const MoveRecord& record, GridPosition position) const;
+    [[nodiscard]] const MovableRecord* fallenMovableRecordAt(const MoveRecord& record, GridPosition position) const;
     [[nodiscard]] bool isUnfilledWater(GridPosition position) const;
+    [[nodiscard]] bool isUnfilledWater(GridPosition position, const MoveRecord& record) const;
+    [[nodiscard]] bool isIceFloor(GridPosition position, const MoveRecord& record) const;
     [[nodiscard]] bool isPlayerWalkable(GridPosition position) const;
+    [[nodiscard]] bool isPlayerWalkable(GridPosition position, const MoveRecord& record) const;
     [[nodiscard]] bool canMoveRock(GridPosition position, MoveDirection direction) const;
-    [[nodiscard]] GridPosition slidingTarget(GridPosition position, MoveDirection direction) const;
+    [[nodiscard]] bool canMovableOccupy(GridPosition position, const MoveRecord& record, size_t movableIndex) const;
+    [[nodiscard]] GridPosition movableSlidingTarget(size_t movableIndex, MoveDirection direction, const MoveRecord& record) const;
+    [[nodiscard]] GridPosition playerSlidingTarget(GridPosition position, MoveDirection direction, const MoveRecord& record) const;
     [[nodiscard]] bool allPressurePlatesActive() const;
     [[nodiscard]] bool isEndUnlocked() const;
     [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;
@@ -124,6 +134,7 @@ private:
     FrameTimer frameTimer_;
     GridPosition playerCell_ {};
     Vec2 playerRenderPosition_ {};
+    bool playerDead_ = false;
     std::vector<Rock> rocks_;
     std::deque<MoveCommand> pendingCommands_;
     std::vector<ActionRecord> moveHistory_;
