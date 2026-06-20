@@ -36,11 +36,17 @@ struct RenderFrameData {
         float height = 0.0f;
     };
 
+    struct IsoFace {
+        std::array<Vec3, 4> vertices {};
+        Vec4 color {};
+    };
+
     RenderViewMode viewMode = RenderViewMode::TopDown2D;
     uint32_t levelWidth = 0;
     uint32_t levelHeight = 0;
     Vec2 playerPosition {};
     std::vector<Tile> tiles;
+    std::vector<IsoFace> isoFaces;
 };
 
 struct RenderStats {
@@ -130,6 +136,8 @@ private:
         Vec2 projectedCenter {};
         float focalLength = 1.0f;
         float fitScale = 1.0f;
+        float nearestDepth = 0.0f;
+        float farthestDepth = 1.0f;
     };
 
     void createInstance();
@@ -139,6 +147,7 @@ private:
     void createSwapchain();
     void createImageViews();
     void createMsaaColorResources();
+    void createDepthResources();
     void createCommandPool();
     void createPipeline();
     void destroyPipeline();
@@ -149,6 +158,7 @@ private:
     void recreateSwapchain();
     void cleanupSwapchain();
     void cleanupMsaaColorResources();
+    void cleanupDepthResources();
 
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData, const UiDrawData& uiDrawData);
     void recordGameRendering(VkCommandBuffer commandBuffer, VkImageView colorView, VkImageView resolveView, const RenderFrameData& frameData);
@@ -159,9 +169,9 @@ private:
     void drawTile(VkCommandBuffer commandBuffer, const TileRenderLayout& layout, const RenderFrameData::Tile& tile) const;
     void drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const RenderFrameData& frameData) const;
     void drawIsoTile(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const RenderFrameData::Tile& tile) const;
-    void drawFace(VkCommandBuffer commandBuffer, const std::array<Vec2, 4>& vertices, Vec4 color) const;
+    void drawFace(VkCommandBuffer commandBuffer, const std::array<Vec3, 4>& vertices, Vec4 color) const;
     void drawUiRect(VkCommandBuffer commandBuffer, const UiDrawCommand& command, Vec2 viewportSize) const;
-    [[nodiscard]] Vec2 projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) const;
+    [[nodiscard]] Vec3 projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) const;
     [[nodiscard]] Vec2 pixelSizeToClipSpace(float pixelSize) const;
 
     [[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
@@ -173,7 +183,7 @@ private:
     [[nodiscard]] std::array<VkPipeline, 2> createGraphicsPipelineLibraries(VkShaderModule vertexShader, VkShaderModule fragmentShader) const;
     [[nodiscard]] VkSampleCountFlagBits sampleCountForMode(AntiAliasingMode mode) const;
     [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
-    [[nodiscard]] VkImageView createImageView(VkImage image, VkFormat format) const;
+    [[nodiscard]] VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectMask) const;
     [[nodiscard]] bool msaaEnabled() const;
     [[nodiscard]] uint32_t sampleCountValue() const;
 
@@ -191,9 +201,11 @@ private:
 
     VkSwapchainKHR swapchain_ = VK_NULL_HANDLE;
     VkFormat swapchainFormat_ = VK_FORMAT_UNDEFINED;
+    VkFormat depthFormat_ = VK_FORMAT_D32_SFLOAT;
     VkExtent2D swapchainExtent_ {};
     std::vector<SwapchainImage> swapchainImages_;
     OwnedImage msaaColorImage_ {};
+    OwnedImage depthImage_ {};
 
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
@@ -207,6 +219,7 @@ private:
     VkSampleCountFlagBits activeSampleCount_ = VK_SAMPLE_COUNT_1_BIT;
     bool wireframeEnabled_ = false;
     bool wideLinesSupported_ = false;
+    bool depthLayoutInitialized_ = false;
     float wireframeLineWidth_ = 1.0f;
     std::array<float, 2> wireframeLineWidthRange_ { 1.0f, 1.0f };
     mutable RenderStats pendingStats_ {};

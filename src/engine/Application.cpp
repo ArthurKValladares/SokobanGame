@@ -11,6 +11,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <utility>
@@ -88,14 +89,87 @@ bool canMergeStaticCells(const StaticRenderCell& left, const StaticRenderCell& r
 StaticRenderCell staticRenderCellFor(const Level& level, uint32_t x, uint32_t y, bool endUnlocked, std::optional<TileType> fallenTile)
 {
     const TileType tile = fallenTile.value_or(level.tileAt(x, y));
-    const float floorBase = -config::waterDepthBelowGround;
-    const float floorHeight = config::waterDepthBelowGround;
     return {
         .tile = tile,
         .active = tile != TileType::End || endUnlocked,
-        .baseElevation = floorBase,
-        .height = tile == TileType::Water ? 0.0f : tile == TileType::Wall ? 1.0f + floorHeight : floorHeight,
+        .baseElevation = tile == TileType::Water ? -config::waterDepthBelowGround : 0.0f,
+        .height = tile == TileType::Wall ? 1.0f : 0.0f,
     };
+}
+
+Vec4 shade(Vec4 color, float multiplier)
+{
+    return {
+        color.x * multiplier,
+        color.y * multiplier,
+        color.z * multiplier,
+        color.w,
+    };
+}
+
+void appendWaterEdgeFaces(RenderFrameData& frame, const Level& level, const auto& isUnfilledWaterAt)
+{
+    const float bottom = -config::waterDepthBelowGround;
+    const float top = 0.0f;
+    const Vec4 color = shade(tileColor(TileType::Empty), 0.78f);
+
+    auto appendEdge = [&](std::array<Vec3, 4> vertices, Vec4 edgeColor) {
+        frame.isoFaces.push_back({
+            .vertices = vertices,
+            .color = edgeColor,
+        });
+    };
+
+    auto neighborIsOpenWater = [&](GridPosition position) {
+        return level.inBounds(position) && isUnfilledWaterAt(position);
+    };
+
+    for (uint32_t y = 0; y < level.height(); ++y) {
+        for (uint32_t x = 0; x < level.width(); ++x) {
+            const GridPosition position { static_cast<int>(x), static_cast<int>(y) };
+            if (!isUnfilledWaterAt(position)) {
+                continue;
+            }
+
+            const float left = static_cast<float>(x);
+            const float right = left + 1.0f;
+            const float nearY = static_cast<float>(y);
+            const float farY = nearY + 1.0f;
+
+            if (!neighborIsOpenWater({ position.x, position.y - 1 })) {
+                appendEdge({
+                    Vec3 { left, nearY, bottom },
+                    Vec3 { right, nearY, bottom },
+                    Vec3 { right, nearY, top },
+                    Vec3 { left, nearY, top },
+                }, shade(color, 0.92f));
+            }
+            if (!neighborIsOpenWater({ position.x + 1, position.y })) {
+                appendEdge({
+                    Vec3 { right, nearY, bottom },
+                    Vec3 { right, farY, bottom },
+                    Vec3 { right, farY, top },
+                    Vec3 { right, nearY, top },
+                }, shade(color, 0.82f));
+            }
+            if (!neighborIsOpenWater({ position.x, position.y + 1 })) {
+                appendEdge({
+                    Vec3 { right, farY, bottom },
+                    Vec3 { left, farY, bottom },
+                    Vec3 { left, farY, top },
+                    Vec3 { right, farY, top },
+                }, shade(color, 0.70f));
+            }
+            if (!neighborIsOpenWater({ position.x - 1, position.y })) {
+                appendEdge({
+                    Vec3 { left, farY, bottom },
+                    Vec3 { left, nearY, bottom },
+                    Vec3 { left, nearY, top },
+                    Vec3 { left, farY, top },
+                }, shade(color, 0.82f));
+            }
+        }
+    }
 }
 
 template <typename CellAt>
@@ -1025,6 +1099,9 @@ RenderFrameData Application::buildGameplayRenderFrame() const
         return staticRenderCellFor(level_, x, y, endUnlocked, fallenTile);
     };
     appendGreedyMergedStaticTiles(frame, level_, staticCellAt);
+    appendWaterEdgeFaces(frame, level_, [this](GridPosition position) {
+        return isUnfilledWater(position);
+    });
 
     frame.tiles.push_back({
         .position = playerRenderPosition_,

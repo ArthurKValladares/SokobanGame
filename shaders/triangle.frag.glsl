@@ -5,7 +5,7 @@ layout(location = 0) out vec4 outColor;
 
 layout(push_constant) uniform PushConstants
 {
-    vec2 vertices[6];
+    vec4 vertices[6];
     vec4 color;
 } pc;
 

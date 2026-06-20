@@ -36,12 +36,12 @@ constexpr std::array<const char*, 4> requiredDeviceExtensions {
 };
 
 struct TilePushConstants {
-    std::array<Vec2, 6> vertices;
+    std::array<Vec4, 6> vertices;
     Vec4 color;
 };
 
 struct IsoFace {
-    std::array<Vec2, 4> vertices {};
+    std::array<Vec3, 4> vertices {};
     Vec4 color {};
     float depth = 0.0f;
 };
@@ -166,6 +166,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, std::filesystem::path assetRo
     createSwapchain();
     createImageViews();
     createMsaaColorResources();
+    createDepthResources();
     createCommandPool();
     createPipeline();
     createFrameResources();
@@ -390,7 +391,9 @@ void VulkanRenderer::setAntiAliasingMode(AntiAliasingMode mode)
 
     destroyPipeline();
     cleanupMsaaColorResources();
+    cleanupDepthResources();
     createMsaaColorResources();
+    createDepthResources();
     createPipeline();
 }
 
@@ -596,7 +599,7 @@ void VulkanRenderer::createSwapchain()
 void VulkanRenderer::createImageViews()
 {
     for (auto& image : swapchainImages_) {
-        image.view = createImageView(image.image, swapchainFormat_);
+        image.view = createImageView(image.image, swapchainFormat_, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 }
 
@@ -637,7 +640,47 @@ void VulkanRenderer::createMsaaColorResources()
 
     vkCheck(vkAllocateMemory(device_, &allocateInfo, nullptr, &msaaColorImage_.memory), "vkAllocateMemory MSAA color failed");
     vkCheck(vkBindImageMemory(device_, msaaColorImage_.image, msaaColorImage_.memory, 0), "vkBindImageMemory MSAA color failed");
-    msaaColorImage_.view = createImageView(msaaColorImage_.image, swapchainFormat_);
+    msaaColorImage_.view = createImageView(msaaColorImage_.image, swapchainFormat_, VK_IMAGE_ASPECT_COLOR_BIT);
+}
+
+void VulkanRenderer::createDepthResources()
+{
+    if (swapchainExtent_.width == 0 || swapchainExtent_.height == 0) {
+        return;
+    }
+
+    VkImageCreateInfo imageInfo {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = depthFormat_,
+        .extent = {
+            .width = swapchainExtent_.width,
+            .height = swapchainExtent_.height,
+            .depth = 1,
+        },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = activeSampleCount_,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+
+    vkCheck(vkCreateImage(device_, &imageInfo, nullptr, &depthImage_.image), "vkCreateImage depth failed");
+
+    VkMemoryRequirements memoryRequirements {};
+    vkGetImageMemoryRequirements(device_, depthImage_.image, &memoryRequirements);
+
+    VkMemoryAllocateInfo allocateInfo {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memoryRequirements.size,
+        .memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
+    };
+
+    vkCheck(vkAllocateMemory(device_, &allocateInfo, nullptr, &depthImage_.memory), "vkAllocateMemory depth failed");
+    vkCheck(vkBindImageMemory(device_, depthImage_.image, depthImage_.memory, 0), "vkBindImageMemory depth failed");
+    depthImage_.view = createImageView(depthImage_.image, depthFormat_, VK_IMAGE_ASPECT_DEPTH_BIT);
 }
 
 void VulkanRenderer::createCommandPool()
@@ -810,11 +853,13 @@ void VulkanRenderer::recreateSwapchain()
     createSwapchain();
     createImageViews();
     createMsaaColorResources();
+    createDepthResources();
     ++swapchainRecreations_;
 }
 
 void VulkanRenderer::cleanupSwapchain()
 {
+    cleanupDepthResources();
     cleanupMsaaColorResources();
 
     for (auto& image : swapchainImages_) {
@@ -844,6 +889,23 @@ void VulkanRenderer::cleanupMsaaColorResources()
     if (msaaColorImage_.memory) {
         vkFreeMemory(device_, msaaColorImage_.memory, nullptr);
         msaaColorImage_.memory = VK_NULL_HANDLE;
+    }
+}
+
+void VulkanRenderer::cleanupDepthResources()
+{
+    depthLayoutInitialized_ = false;
+    if (depthImage_.view) {
+        vkDestroyImageView(device_, depthImage_.view, nullptr);
+        depthImage_.view = VK_NULL_HANDLE;
+    }
+    if (depthImage_.image) {
+        vkDestroyImage(device_, depthImage_.image, nullptr);
+        depthImage_.image = VK_NULL_HANDLE;
+    }
+    if (depthImage_.memory) {
+        vkFreeMemory(device_, depthImage_.memory, nullptr);
+        depthImage_.memory = VK_NULL_HANDLE;
     }
 }
 
@@ -923,6 +985,42 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
         ++pendingStats_.imageBarriers;
     }
 
+    if (depthImage_.image) {
+        VkImageMemoryBarrier2 depthToAttachment {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = depthLayoutInitialized_
+                ? VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT
+                : VK_PIPELINE_STAGE_2_NONE,
+            .srcAccessMask = depthLayoutInitialized_
+                ? VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+                : VK_ACCESS_2_NONE,
+            .dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+            .dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+            .oldLayout = depthLayoutInitialized_
+                ? VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL
+                : VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = depthImage_.image,
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+        };
+        VkDependencyInfo depthToAttachmentDependency {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &depthToAttachment,
+        };
+        vkCmdPipelineBarrier2(commandBuffer, &depthToAttachmentDependency);
+        depthLayoutInitialized_ = true;
+        ++pendingStats_.imageBarriers;
+    }
+
     recordGameRendering(
         commandBuffer,
         msaaEnabled() ? msaaColorImage_.view : swapchainImages_[imageIndex].view,
@@ -985,12 +1083,25 @@ void VulkanRenderer::recordGameRendering(
         .clearValue = clearValue,
     };
 
+    VkClearValue depthClearValue {
+        .depthStencil = { .depth = 1.0f, .stencil = 0 },
+    };
+    VkRenderingAttachmentInfo depthAttachment {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView = depthImage_.view,
+        .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .clearValue = depthClearValue,
+    };
+
     VkRenderingInfo renderingInfo {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .renderArea = { .offset = { 0, 0 }, .extent = swapchainExtent_ },
         .layerCount = 1,
         .colorAttachmentCount = 1,
         .pColorAttachments = &colorAttachment,
+        .pDepthAttachment = depthImage_.view ? &depthAttachment : nullptr,
     };
 
     vkCmdBeginRendering(commandBuffer, &renderingInfo);
@@ -1017,6 +1128,9 @@ void VulkanRenderer::recordGameRendering(
     vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
     vkCmdSetPrimitiveTopology(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
     vkCmdSetLineWidth(commandBuffer, wireframeEnabled_ ? wireframeLineWidth_ : 1.0f);
+    vkCmdSetDepthTestEnable(commandBuffer, depthImage_.view ? VK_TRUE : VK_FALSE);
+    vkCmdSetDepthWriteEnable(commandBuffer, depthImage_.view ? VK_TRUE : VK_FALSE);
+    vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_LESS_OR_EQUAL);
 
     if (frameData.viewMode == RenderViewMode::Isometric3D) {
         drawIsoFrame(commandBuffer, calculateIsoRenderLayout(frameData), frameData);
@@ -1076,6 +1190,9 @@ void VulkanRenderer::recordUiRendering(VkCommandBuffer commandBuffer, VkImageVie
     vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
     vkCmdSetPrimitiveTopology(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
     vkCmdSetLineWidth(commandBuffer, 1.0f);
+    vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE);
+    vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
+    vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_ALWAYS);
 
     for (const UiDrawCommand& command : uiDrawData.commands) {
         drawUiRect(commandBuffer, command, uiDrawData.viewportSize);
@@ -1169,12 +1286,19 @@ VulkanRenderer::IsoRenderLayout VulkanRenderer::calculateIsoRenderLayout(const R
 
     Vec2 minPoint { std::numeric_limits<float>::max(), std::numeric_limits<float>::max() };
     Vec2 maxPoint { std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest() };
+    float nearestDepth = std::numeric_limits<float>::max();
+    float farthestDepth = std::numeric_limits<float>::lowest();
 
-    auto includePoint = [&](Vec2 point) {
-        minPoint.x = std::min(minPoint.x, point.x);
-        minPoint.y = std::min(minPoint.y, point.y);
-        maxPoint.x = std::max(maxPoint.x, point.x);
-        maxPoint.y = std::max(maxPoint.y, point.y);
+    auto includePoint = [&](Vec3 worldPoint) {
+        const Vec3 projected = projectIsoPoint(layout, worldPoint);
+        minPoint.x = std::min(minPoint.x, projected.x);
+        minPoint.y = std::min(minPoint.y, projected.y);
+        maxPoint.x = std::max(maxPoint.x, projected.x);
+        maxPoint.y = std::max(maxPoint.y, projected.y);
+
+        const float cameraDepth = dot(subtract(worldPoint, layout.cameraPosition), layout.cameraForward);
+        nearestDepth = std::min(nearestDepth, cameraDepth);
+        farthestDepth = std::max(farthestDepth, cameraDepth);
     };
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
         const float x = tile.position.x;
@@ -1183,14 +1307,19 @@ VulkanRenderer::IsoRenderLayout VulkanRenderer::calculateIsoRenderLayout(const R
         const float height = tile.size.y;
         const float base = tile.baseElevation;
         const float top = base + std::max(tile.height, 0.0f);
-        includePoint(projectIsoPoint(layout, { x, y, base }));
-        includePoint(projectIsoPoint(layout, { x + width, y, base }));
-        includePoint(projectIsoPoint(layout, { x + width, y + height, base }));
-        includePoint(projectIsoPoint(layout, { x, y + height, base }));
-        includePoint(projectIsoPoint(layout, { x, y, top }));
-        includePoint(projectIsoPoint(layout, { x + width, y, top }));
-        includePoint(projectIsoPoint(layout, { x + width, y + height, top }));
-        includePoint(projectIsoPoint(layout, { x, y + height, top }));
+        includePoint({ x, y, base });
+        includePoint({ x + width, y, base });
+        includePoint({ x + width, y + height, base });
+        includePoint({ x, y + height, base });
+        includePoint({ x, y, top });
+        includePoint({ x + width, y, top });
+        includePoint({ x + width, y + height, top });
+        includePoint({ x, y + height, top });
+    }
+    for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
+        for (Vec3 vertex : face.vertices) {
+            includePoint(vertex);
+        }
     }
 
     const Vec2 sceneSize {
@@ -1202,6 +1331,8 @@ VulkanRenderer::IsoRenderLayout VulkanRenderer::calculateIsoRenderLayout(const R
         (minPoint.y + maxPoint.y) * 0.5f,
     };
     layout.fitScale = 1.82f * std::min(1.0f / sceneSize.x, 1.0f / sceneSize.y);
+    layout.nearestDepth = nearestDepth;
+    layout.farthestDepth = std::max(farthestDepth, nearestDepth + 0.001f);
     return layout;
 }
 
@@ -1217,10 +1348,10 @@ void VulkanRenderer::drawTile(VkCommandBuffer commandBuffer, const TileRenderLay
     };
 
     drawFace(commandBuffer, {
-        origin,
-        { origin.x + size.x, origin.y },
-        { origin.x + size.x, origin.y + size.y },
-        { origin.x, origin.y + size.y },
+        Vec3 { origin.x, origin.y, 0.0f },
+        Vec3 { origin.x + size.x, origin.y, 0.0f },
+        Vec3 { origin.x + size.x, origin.y + size.y, 0.0f },
+        Vec3 { origin.x, origin.y + size.y, 0.0f },
     }, tile.color);
 }
 
@@ -1247,6 +1378,18 @@ void VulkanRenderer::drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRender
             return;
         }
 
+        faces.push_back({
+            .vertices = {
+                projectIsoPoint(layout, vertices[0]),
+                projectIsoPoint(layout, vertices[1]),
+                projectIsoPoint(layout, vertices[2]),
+                projectIsoPoint(layout, vertices[3]),
+            },
+            .color = color,
+            .depth = faceDepth(vertices),
+        });
+    };
+    auto appendDoubleSidedFace = [&](const std::array<Vec3, 4>& vertices, Vec4 color) {
         faces.push_back({
             .vertices = {
                 projectIsoPoint(layout, vertices[0]),
@@ -1286,6 +1429,9 @@ void VulkanRenderer::drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRender
         appendFace({ d, a, e, h }, { -1.0f, 0.0f, 0.0f }, shadeColor(tile.color, 0.82f));
         appendFace({ e, f, g, h }, { 0.0f, 0.0f, 1.0f }, tile.color);
     }
+    for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
+        appendDoubleSidedFace(face.vertices, face.color);
+    }
 
     std::ranges::sort(faces, [](const IsoFace& left, const IsoFace& right) {
         return left.depth > right.depth;
@@ -1314,14 +1460,14 @@ void VulkanRenderer::drawIsoTile(VkCommandBuffer commandBuffer, const IsoRenderL
     }
 
     const float top = base + height;
-    const Vec2 a = projectIsoPoint(layout, { x, y, base });
-    const Vec2 b = projectIsoPoint(layout, { x + 1.0f, y, base });
-    const Vec2 c = projectIsoPoint(layout, { x + 1.0f, y + 1.0f, base });
-    const Vec2 d = projectIsoPoint(layout, { x, y + 1.0f, base });
-    const Vec2 e = projectIsoPoint(layout, { x, y, top });
-    const Vec2 f = projectIsoPoint(layout, { x + 1.0f, y, top });
-    const Vec2 g = projectIsoPoint(layout, { x + 1.0f, y + 1.0f, top });
-    const Vec2 h = projectIsoPoint(layout, { x, y + 1.0f, top });
+    const Vec3 a = projectIsoPoint(layout, { x, y, base });
+    const Vec3 b = projectIsoPoint(layout, { x + 1.0f, y, base });
+    const Vec3 c = projectIsoPoint(layout, { x + 1.0f, y + 1.0f, base });
+    const Vec3 d = projectIsoPoint(layout, { x, y + 1.0f, base });
+    const Vec3 e = projectIsoPoint(layout, { x, y, top });
+    const Vec3 f = projectIsoPoint(layout, { x + 1.0f, y, top });
+    const Vec3 g = projectIsoPoint(layout, { x + 1.0f, y + 1.0f, top });
+    const Vec3 h = projectIsoPoint(layout, { x, y + 1.0f, top });
 
     drawFace(commandBuffer, { d, c, g, h }, shadeColor(tile.color, 0.62f));
     drawFace(commandBuffer, { b, c, g, f }, shadeColor(tile.color, 0.78f));
@@ -1329,7 +1475,7 @@ void VulkanRenderer::drawIsoTile(VkCommandBuffer commandBuffer, const IsoRenderL
     (void)a;
 }
 
-void VulkanRenderer::drawFace(VkCommandBuffer commandBuffer, const std::array<Vec2, 4>& vertices, Vec4 color) const
+void VulkanRenderer::drawFace(VkCommandBuffer commandBuffer, const std::array<Vec3, 4>& vertices, Vec4 color) const
 {
     ++pendingStats_.visibleFaces;
     ++pendingStats_.drawCalls;
@@ -1338,12 +1484,12 @@ void VulkanRenderer::drawFace(VkCommandBuffer commandBuffer, const std::array<Ve
 
     const TilePushConstants pushConstants {
         .vertices = {
-            vertices[0],
-            vertices[1],
-            vertices[2],
-            vertices[0],
-            vertices[2],
-            vertices[3],
+            Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, 1.0f },
+            Vec4 { vertices[1].x, vertices[1].y, vertices[1].z, 1.0f },
+            Vec4 { vertices[2].x, vertices[2].y, vertices[2].z, 1.0f },
+            Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, 1.0f },
+            Vec4 { vertices[2].x, vertices[2].y, vertices[2].z, 1.0f },
+            Vec4 { vertices[3].x, vertices[3].y, vertices[3].z, 1.0f },
         },
         .color = color,
     };
@@ -1366,14 +1512,14 @@ void VulkanRenderer::drawUiRect(VkCommandBuffer commandBuffer, const UiDrawComma
     const float bottom = 1.0f - 2.0f * (command.rect.position.y + command.rect.size.y) / viewportSize.y;
 
     drawFace(commandBuffer, {
-        Vec2 { left, top },
-        Vec2 { right, top },
-        Vec2 { right, bottom },
-        Vec2 { left, bottom },
+        Vec3 { left, top, 0.0f },
+        Vec3 { right, top, 0.0f },
+        Vec3 { right, bottom, 0.0f },
+        Vec3 { left, bottom, 0.0f },
     }, command.color);
 }
 
-Vec2 VulkanRenderer::projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) const
+Vec3 VulkanRenderer::projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) const
 {
     const Vec3 relative = subtract(point, layout.cameraPosition);
     const float cameraX = dot(relative, layout.cameraRight);
@@ -1385,9 +1531,13 @@ Vec2 VulkanRenderer::projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) 
         layout.focalLength * cameraY / cameraZ,
     };
 
+    const float depthRange = std::max(layout.farthestDepth - layout.nearestDepth, 0.001f);
+    const float normalizedDepth = std::clamp((cameraZ - layout.nearestDepth) / depthRange, 0.0f, 1.0f);
+
     return {
         (projected.x - layout.projectedCenter.x) * layout.fitScale,
         (projected.y - layout.projectedCenter.y) * layout.fitScale,
+        normalizedDepth,
     };
 }
 
@@ -1586,6 +1736,15 @@ std::array<VkPipeline, 2> VulkanRenderer::createGraphicsPipelineLibraries(VkShad
         .rasterizationSamples = activeSampleCount_,
     };
 
+    VkPipelineDepthStencilStateCreateInfo depthStencil {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable = VK_TRUE,
+        .depthWriteEnable = VK_TRUE,
+        .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .depthBoundsTestEnable = VK_FALSE,
+        .stencilTestEnable = VK_FALSE,
+    };
+
     VkPipelineColorBlendAttachmentState colorBlendAttachment {
         .blendEnable = VK_TRUE,
         .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
@@ -1613,6 +1772,9 @@ std::array<VkPipeline, 2> VulkanRenderer::createGraphicsPipelineLibraries(VkShad
         VK_DYNAMIC_STATE_FRONT_FACE,
         VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
         VK_DYNAMIC_STATE_LINE_WIDTH,
+        VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE,
+        VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
+        VK_DYNAMIC_STATE_DEPTH_COMPARE_OP,
     };
 
     VkPipelineDynamicStateCreateInfo dynamicState {
@@ -1625,6 +1787,7 @@ std::array<VkPipeline, 2> VulkanRenderer::createGraphicsPipelineLibraries(VkShad
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
         .colorAttachmentCount = 1,
         .pColorAttachmentFormats = &swapchainFormat_,
+        .depthAttachmentFormat = depthFormat_,
     };
 
     VkGraphicsPipelineLibraryCreateInfoEXT vertexPreRasterLibraryInfo {
@@ -1663,6 +1826,7 @@ std::array<VkPipeline, 2> VulkanRenderer::createGraphicsPipelineLibraries(VkShad
         .stageCount = 1,
         .pStages = &fragmentStage,
         .pMultisampleState = &multisampling,
+        .pDepthStencilState = &depthStencil,
         .pColorBlendState = &colorBlending,
         .layout = pipelineLayout_,
     };
@@ -1730,7 +1894,7 @@ uint32_t VulkanRenderer::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFla
     throw std::runtime_error("No suitable Vulkan memory type found");
 }
 
-VkImageView VulkanRenderer::createImageView(VkImage image, VkFormat format) const
+VkImageView VulkanRenderer::createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectMask) const
 {
     VkImageViewCreateInfo createInfo {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -1744,7 +1908,7 @@ VkImageView VulkanRenderer::createImageView(VkImage image, VkFormat format) cons
             .a = VK_COMPONENT_SWIZZLE_IDENTITY,
         },
         .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .aspectMask = aspectMask,
             .baseMipLevel = 0,
             .levelCount = 1,
             .baseArrayLayer = 0,
