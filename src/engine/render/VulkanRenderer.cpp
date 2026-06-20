@@ -1765,22 +1765,31 @@ std::array<VkPipeline, 2> VulkanRenderer::createGraphicsPipelineLibraries(VkShad
         .pAttachments = &colorBlendAttachment,
     };
 
-    VkDynamicState dynamicStates[] {
+    VkDynamicState preRasterDynamicStates[] {
         VK_DYNAMIC_STATE_VIEWPORT,
         VK_DYNAMIC_STATE_SCISSOR,
         VK_DYNAMIC_STATE_CULL_MODE,
         VK_DYNAMIC_STATE_FRONT_FACE,
         VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
         VK_DYNAMIC_STATE_LINE_WIDTH,
+    };
+
+    VkPipelineDynamicStateCreateInfo preRasterDynamicState {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = static_cast<uint32_t>(std::size(preRasterDynamicStates)),
+        .pDynamicStates = preRasterDynamicStates,
+    };
+
+    VkDynamicState fragmentDynamicStates[] {
         VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE,
         VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
         VK_DYNAMIC_STATE_DEPTH_COMPARE_OP,
     };
 
-    VkPipelineDynamicStateCreateInfo dynamicState {
+    VkPipelineDynamicStateCreateInfo fragmentDynamicState {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-        .dynamicStateCount = static_cast<uint32_t>(std::size(dynamicStates)),
-        .pDynamicStates = dynamicStates,
+        .dynamicStateCount = static_cast<uint32_t>(std::size(fragmentDynamicStates)),
+        .pDynamicStates = fragmentDynamicStates,
     };
 
     VkPipelineRenderingCreateInfo rendering {
@@ -1807,7 +1816,7 @@ std::array<VkPipeline, 2> VulkanRenderer::createGraphicsPipelineLibraries(VkShad
         .pInputAssemblyState = &inputAssembly,
         .pViewportState = &viewportState,
         .pRasterizationState = &rasterizer,
-        .pDynamicState = &dynamicState,
+        .pDynamicState = &preRasterDynamicState,
         .layout = pipelineLayout_,
     };
 
@@ -1828,6 +1837,7 @@ std::array<VkPipeline, 2> VulkanRenderer::createGraphicsPipelineLibraries(VkShad
         .pMultisampleState = &multisampling,
         .pDepthStencilState = &depthStencil,
         .pColorBlendState = &colorBlending,
+        .pDynamicState = &fragmentDynamicState,
         .layout = pipelineLayout_,
     };
 
