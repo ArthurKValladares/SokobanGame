@@ -37,6 +37,18 @@ int gridDistance(GridPosition from, GridPosition to)
     return std::abs(to.x - from.x) + std::abs(to.y - from.y);
 }
 
+// Text level files store rows top-to-bottom, while the 2D editor renderer uses
+// grid coordinates with y=0 at the bottom of the board.
+int documentRowToRenderY(uint32_t row, uint32_t height)
+{
+    return static_cast<int>(height - 1U - row);
+}
+
+int renderYToDocumentRow(int y, uint32_t height)
+{
+    return static_cast<int>(height) - 1 - y;
+}
+
 Vec2 interpolateGridMotion(GridPosition from, GridPosition to, float elapsedSeconds)
 {
     const int distance = gridDistance(from, to);
@@ -544,7 +556,10 @@ void Application::updateEditorPainting()
     if (const std::optional<GridPosition> position = pixelToGridPosition(mousePixels, layout, documentWidth, documentHeight)) {
         editorHoverCell_ = position;
         if (input_.mouseButtonDown(SDL_BUTTON_LEFT)) {
-            levelEditor_.paintCell(*position);
+            levelEditor_.paintCell({
+                position->x,
+                renderYToDocumentRow(position->y, documentHeight),
+            });
         }
     }
 #endif
@@ -1139,15 +1154,16 @@ RenderFrameData Application::buildEditorRenderFrame() const
 
     const std::vector<std::string>& rows = levelEditor_.documentRows();
     frame.tiles.reserve(static_cast<size_t>(frame.levelWidth) * frame.levelHeight + 1);
-    for (uint32_t y = 0; y < frame.levelHeight; ++y) {
-        const std::string& row = rows[static_cast<size_t>(y)];
+    for (uint32_t rowIndex = 0; rowIndex < frame.levelHeight; ++rowIndex) {
+        const std::string& row = rows[static_cast<size_t>(rowIndex)];
+        const int renderY = documentRowToRenderY(rowIndex, frame.levelHeight);
         for (uint32_t x = 0; x < frame.levelWidth; ++x) {
             const TileType tile = x < row.size()
                 ? charToTileType(row[static_cast<size_t>(x)]).value_or(TileType::Count)
                 : TileType::Empty;
 
             frame.tiles.push_back({
-                .position = { static_cast<float>(x), static_cast<float>(y) },
+                .position = { static_cast<float>(x), static_cast<float>(renderY) },
                 .color = tileColor(tile),
             });
         }
