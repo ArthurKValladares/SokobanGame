@@ -73,6 +73,7 @@ Vec2 interpolateGridMotion(GridPosition from, GridPosition to, float elapsedSeco
 struct StaticRenderCell {
     TileType tile = TileType::Empty;
     bool active = true;
+    float baseElevation = 0.0f;
     float height = 0.0f;
 };
 
@@ -80,20 +81,25 @@ bool canMergeStaticCells(const StaticRenderCell& left, const StaticRenderCell& r
 {
     return left.tile == right.tile &&
         left.active == right.active &&
+        left.baseElevation == right.baseElevation &&
         left.height == right.height;
 }
 
-StaticRenderCell staticRenderCellFor(const Level& level, uint32_t x, uint32_t y, bool endUnlocked)
+StaticRenderCell staticRenderCellFor(const Level& level, uint32_t x, uint32_t y, bool endUnlocked, std::optional<TileType> fallenTile)
 {
-    const TileType tile = level.tileAt(x, y);
+    const TileType tile = fallenTile.value_or(level.tileAt(x, y));
+    const float floorBase = -config::waterDepthBelowGround;
+    const float floorHeight = config::waterDepthBelowGround;
     return {
         .tile = tile,
         .active = tile != TileType::End || endUnlocked,
-        .height = tile == TileType::Wall ? 1.0f : 0.0f,
+        .baseElevation = floorBase,
+        .height = tile == TileType::Water ? 0.0f : tile == TileType::Wall ? 1.0f + floorHeight : floorHeight,
     };
 }
 
-void appendGreedyMergedStaticTiles(RenderFrameData& frame, const Level& level, bool endUnlocked)
+template <typename CellAt>
+void appendGreedyMergedStaticTiles(RenderFrameData& frame, const Level& level, CellAt cellAt)
 {
     const uint32_t width = level.width();
     const uint32_t height = level.height();
@@ -109,12 +115,12 @@ void appendGreedyMergedStaticTiles(RenderFrameData& frame, const Level& level, b
                 continue;
             }
 
-            const StaticRenderCell cell = staticRenderCellFor(level, x, y, endUnlocked);
+            const StaticRenderCell cell = cellAt(x, y);
 
             uint32_t mergeWidth = 1;
             while (x + mergeWidth < width &&
                 !consumed[index(x + mergeWidth, y)] &&
-                canMergeStaticCells(cell, staticRenderCellFor(level, x + mergeWidth, y, endUnlocked))) {
+                canMergeStaticCells(cell, cellAt(x + mergeWidth, y))) {
                 ++mergeWidth;
             }
 
@@ -123,7 +129,7 @@ void appendGreedyMergedStaticTiles(RenderFrameData& frame, const Level& level, b
             while (y + mergeHeight < height && canGrowHeight) {
                 for (uint32_t offsetX = 0; offsetX < mergeWidth; ++offsetX) {
                     if (consumed[index(x + offsetX, y + mergeHeight)] ||
-                        !canMergeStaticCells(cell, staticRenderCellFor(level, x + offsetX, y + mergeHeight, endUnlocked))) {
+                        !canMergeStaticCells(cell, cellAt(x + offsetX, y + mergeHeight))) {
                         canGrowHeight = false;
                         break;
                     }
@@ -144,6 +150,7 @@ void appendGreedyMergedStaticTiles(RenderFrameData& frame, const Level& level, b
                 .position = { static_cast<float>(x), static_cast<float>(y) },
                 .size = { static_cast<float>(mergeWidth), static_cast<float>(mergeHeight) },
                 .color = tileColor(cell.tile, cell.active),
+                .baseElevation = cell.baseElevation,
                 .height = cell.height,
             });
         }
@@ -566,7 +573,7 @@ void Application::advancePlayerMovement(float dt)
 
         playerRenderPosition_ = interpolateGridMotion(activeAction_.before.player, activeAction_.after.player, moveElapsed_);
         for (size_t i = 0; i < rocks_.size(); ++i) {
-            rocks_[i].renderPosition = interpolateGridMotion(activeAction_.before.rocks[i], activeAction_.after.rocks[i], moveElapsed_);
+            rocks_[i].renderPosition = interpolateGridMotion(activeAction_.before.rocks[i].cell, activeAction_.after.rocks[i].cell, moveElapsed_);
         }
 
         if (moveElapsed_ >= duration) {
@@ -603,7 +610,7 @@ float Application::activeActionDuration() const
     int maxDistance = gridDistance(activeAction_.before.player, activeAction_.after.player);
     const size_t rockCount = std::min(activeAction_.before.rocks.size(), activeAction_.after.rocks.size());
     for (size_t i = 0; i < rockCount; ++i) {
-        maxDistance = std::max(maxDistance, gridDistance(activeAction_.before.rocks[i], activeAction_.after.rocks[i]));
+        maxDistance = std::max(maxDistance, gridDistance(activeAction_.before.rocks[i].cell, activeAction_.after.rocks[i].cell));
     }
 
     return static_cast<float>(maxDistance) * config::playerMoveDurationSeconds;
@@ -652,7 +659,7 @@ bool Application::tryStartHeldMove()
 bool Application::tryStartMove(MoveDirection direction)
 {
     const GridPosition target = movementTarget(direction);
-    if (!level_.isWalkable(target)) {
+    if (!isPlayerWalkable(target)) {
         return false;
     }
 
@@ -669,8 +676,9 @@ bool Application::tryStartMove(MoveDirection direction)
 
         const size_t rockIndex = static_cast<size_t>(rock - rocks_.data());
         activeAction_.after.rocks[rockIndex] = rock->type == TileType::Ice
-            ? slidingTarget(rock->cell, direction)
-            : movementTarget(rock->cell, direction);
+            ? MovableRecord { .cell = slidingTarget(rock->cell, direction), .fallen = false }
+            : MovableRecord { .cell = movementTarget(rock->cell, direction), .fallen = false };
+        activeAction_.after.rocks[rockIndex].fallen = isUnfilledWater(activeAction_.after.rocks[rockIndex].cell);
     }
 
     undoCursor_.reset();
@@ -709,7 +717,10 @@ bool Application::tryStartRestart()
     };
     restarted.rocks.reserve(level_.movableTiles().size());
     for (const Level::MovableTile& movable : level_.movableTiles()) {
-        restarted.rocks.push_back(movable.position);
+        restarted.rocks.push_back({
+            .cell = movable.position,
+            .fallen = false,
+        });
     }
 
     const MoveRecord current = captureMoveRecord();
@@ -820,7 +831,10 @@ Application::MoveRecord Application::captureMoveRecord() const
     };
     record.rocks.reserve(rocks_.size());
     for (const Rock& rock : rocks_) {
-        record.rocks.push_back(rock.cell);
+        record.rocks.push_back({
+            .cell = rock.cell,
+            .fallen = rock.fallen,
+        });
     }
 
     return record;
@@ -832,8 +846,9 @@ void Application::applyMoveRecord(const MoveRecord& record)
     playerRenderPosition_ = toVec2(playerCell_);
 
     for (size_t i = 0; i < rocks_.size(); ++i) {
-        rocks_[i].cell = record.rocks[i];
+        rocks_[i].cell = record.rocks[i].cell;
         rocks_[i].renderPosition = toVec2(rocks_[i].cell);
+        rocks_[i].fallen = record.rocks[i].fallen;
     }
 }
 
@@ -875,7 +890,7 @@ GridPosition Application::movementTarget(GridPosition origin, MoveDirection dire
 Application::Rock* Application::rockAt(GridPosition position)
 {
     const auto rock = std::ranges::find_if(rocks_, [position](const Rock& candidate) {
-        return candidate.cell == position;
+        return !candidate.fallen && candidate.cell == position;
     });
 
     return rock != rocks_.end() ? &*rock : nullptr;
@@ -884,16 +899,49 @@ Application::Rock* Application::rockAt(GridPosition position)
 const Application::Rock* Application::rockAt(GridPosition position) const
 {
     const auto rock = std::ranges::find_if(rocks_, [position](const Rock& candidate) {
-        return candidate.cell == position;
+        return !candidate.fallen && candidate.cell == position;
     });
 
     return rock != rocks_.end() ? &*rock : nullptr;
 }
 
+const Application::Rock* Application::fallenRockAt(GridPosition position) const
+{
+    const auto rock = std::ranges::find_if(rocks_, [position](const Rock& candidate) {
+        return candidate.fallen && candidate.cell == position;
+    });
+
+    return rock != rocks_.end() ? &*rock : nullptr;
+}
+
+bool Application::isUnfilledWater(GridPosition position) const
+{
+    if (!level_.inBounds(position)) {
+        return false;
+    }
+
+    const TileType tile = level_.tileAt(static_cast<uint32_t>(position.x), static_cast<uint32_t>(position.y));
+    return tile == TileType::Water && fallenRockAt(position) == nullptr;
+}
+
+bool Application::isPlayerWalkable(GridPosition position) const
+{
+    if (!level_.inBounds(position)) {
+        return false;
+    }
+
+    const TileType tile = level_.tileAt(static_cast<uint32_t>(position.x), static_cast<uint32_t>(position.y));
+    return tile != TileType::Wall && (tile != TileType::Water || fallenRockAt(position) != nullptr);
+}
+
 bool Application::canMoveRock(GridPosition position, MoveDirection direction) const
 {
     const GridPosition target = movementTarget(position, direction);
-    return level_.isWalkable(target) && rockAt(target) == nullptr;
+    if (!level_.inBounds(target) || rockAt(target) != nullptr) {
+        return false;
+    }
+
+    return level_.tileAt(static_cast<uint32_t>(target.x), static_cast<uint32_t>(target.y)) != TileType::Wall;
 }
 
 GridPosition Application::slidingTarget(GridPosition position, MoveDirection direction) const
@@ -901,8 +949,16 @@ GridPosition Application::slidingTarget(GridPosition position, MoveDirection dir
     GridPosition current = position;
     while (true) {
         const GridPosition next = movementTarget(current, direction);
-        if (!level_.isWalkable(next) || rockAt(next) != nullptr) {
+        if (!level_.inBounds(next) || rockAt(next) != nullptr) {
             return current;
+        }
+
+        if (level_.tileAt(static_cast<uint32_t>(next.x), static_cast<uint32_t>(next.y)) == TileType::Wall) {
+            return current;
+        }
+
+        if (isUnfilledWater(next)) {
+            return next;
         }
 
         current = next;
@@ -959,7 +1015,16 @@ RenderFrameData Application::buildGameplayRenderFrame() const
     const bool endUnlocked = isEndUnlocked();
 
     frame.tiles.reserve(static_cast<size_t>(level_.width()) * level_.height());
-    appendGreedyMergedStaticTiles(frame, level_, endUnlocked);
+    auto staticCellAt = [this, endUnlocked](uint32_t x, uint32_t y) {
+        const GridPosition position { static_cast<int>(x), static_cast<int>(y) };
+        std::optional<TileType> fallenTile;
+        if (const Rock* fallenRock = fallenRockAt(position)) {
+            fallenTile = fallenRock->type;
+        }
+
+        return staticRenderCellFor(level_, x, y, endUnlocked, fallenTile);
+    };
+    appendGreedyMergedStaticTiles(frame, level_, staticCellAt);
 
     frame.tiles.push_back({
         .position = playerRenderPosition_,
@@ -967,7 +1032,17 @@ RenderFrameData Application::buildGameplayRenderFrame() const
         .height = 1.0f,
     });
 
-    for (const Rock& rock : rocks_) {
+    for (size_t rockIndex = 0; rockIndex < rocks_.size(); ++rockIndex) {
+        const Rock& rock = rocks_[rockIndex];
+        const bool movingOutOfWater = moving_ &&
+            rockIndex < activeAction_.before.rocks.size() &&
+            rockIndex < activeAction_.after.rocks.size() &&
+            activeAction_.before.rocks[rockIndex].fallen &&
+            !activeAction_.after.rocks[rockIndex].fallen;
+        if (rock.fallen && !movingOutOfWater) {
+            continue;
+        }
+
         frame.tiles.push_back({
             .position = rock.renderPosition,
             .color = tileColor(rock.type),

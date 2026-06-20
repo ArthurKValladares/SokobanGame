@@ -37,6 +37,7 @@ private:
         TileType type = TileType::Rock;
         GridPosition cell {};
         Vec2 renderPosition {};
+        bool fallen = false;
     };
 
     enum class MoveCommandType {
@@ -50,9 +51,16 @@ private:
         MoveDirection direction = MoveDirection::Up;
     };
 
+    struct MovableRecord {
+        GridPosition cell {};
+        bool fallen = false;
+
+        bool operator==(const MovableRecord&) const = default;
+    };
+
     struct MoveRecord {
         GridPosition player {};
-        std::vector<GridPosition> rocks;
+        std::vector<MovableRecord> rocks;
     };
 
     struct ActionRecord {
@@ -92,6 +100,9 @@ private:
     [[nodiscard]] GridPosition movementTarget(GridPosition origin, MoveDirection direction) const;
     [[nodiscard]] Rock* rockAt(GridPosition position);
     [[nodiscard]] const Rock* rockAt(GridPosition position) const;
+    [[nodiscard]] const Rock* fallenRockAt(GridPosition position) const;
+    [[nodiscard]] bool isUnfilledWater(GridPosition position) const;
+    [[nodiscard]] bool isPlayerWalkable(GridPosition position) const;
     [[nodiscard]] bool canMoveRock(GridPosition position, MoveDirection direction) const;
     [[nodiscard]] GridPosition slidingTarget(GridPosition position, MoveDirection direction) const;
     [[nodiscard]] bool allPressurePlatesActive() const;

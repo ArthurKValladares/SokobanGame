@@ -32,6 +32,7 @@ struct RenderFrameData {
         Vec2 position {};
         Vec2 size { 1.0f, 1.0f };
         Vec4 color {};
+        float baseElevation = 0.0f;
         float height = 0.0f;
     };
 

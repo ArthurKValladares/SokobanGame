@@ -1181,11 +1181,12 @@ VulkanRenderer::IsoRenderLayout VulkanRenderer::calculateIsoRenderLayout(const R
         const float y = tile.position.y;
         const float width = tile.size.x;
         const float height = tile.size.y;
-        const float top = std::max(tile.height, 0.0f);
-        includePoint(projectIsoPoint(layout, { x, y, 0.0f }));
-        includePoint(projectIsoPoint(layout, { x + width, y, 0.0f }));
-        includePoint(projectIsoPoint(layout, { x + width, y + height, 0.0f }));
-        includePoint(projectIsoPoint(layout, { x, y + height, 0.0f }));
+        const float base = tile.baseElevation;
+        const float top = base + std::max(tile.height, 0.0f);
+        includePoint(projectIsoPoint(layout, { x, y, base }));
+        includePoint(projectIsoPoint(layout, { x + width, y, base }));
+        includePoint(projectIsoPoint(layout, { x + width, y + height, base }));
+        includePoint(projectIsoPoint(layout, { x, y + height, base }));
         includePoint(projectIsoPoint(layout, { x, y, top }));
         includePoint(projectIsoPoint(layout, { x + width, y, top }));
         includePoint(projectIsoPoint(layout, { x + width, y + height, top }));
@@ -1262,21 +1263,23 @@ void VulkanRenderer::drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRender
         const float y = tile.position.y;
         const float width = tile.size.x;
         const float depth = tile.size.y;
+        const float base = tile.baseElevation;
         const float height = std::max(tile.height, 0.0f);
-        const Vec3 a { x, y, 0.0f };
-        const Vec3 b { x + width, y, 0.0f };
-        const Vec3 c { x + width, y + depth, 0.0f };
-        const Vec3 d { x, y + depth, 0.0f };
+        const Vec3 a { x, y, base };
+        const Vec3 b { x + width, y, base };
+        const Vec3 c { x + width, y + depth, base };
+        const Vec3 d { x, y + depth, base };
 
         if (height <= 0.0f) {
             appendFace({ a, b, c, d }, { 0.0f, 0.0f, 1.0f }, tile.color);
             continue;
         }
 
-        const Vec3 e { x, y, height };
-        const Vec3 f { x + width, y, height };
-        const Vec3 g { x + width, y + depth, height };
-        const Vec3 h { x, y + depth, height };
+        const float top = base + height;
+        const Vec3 e { x, y, top };
+        const Vec3 f { x + width, y, top };
+        const Vec3 g { x + width, y + depth, top };
+        const Vec3 h { x, y + depth, top };
         appendFace({ a, b, f, e }, { 0.0f, -1.0f, 0.0f }, shadeColor(tile.color, 0.72f));
         appendFace({ b, c, g, f }, { 1.0f, 0.0f, 0.0f }, shadeColor(tile.color, 0.82f));
         appendFace({ c, d, h, g }, { 0.0f, 1.0f, 0.0f }, shadeColor(tile.color, 0.62f));
@@ -1297,26 +1300,28 @@ void VulkanRenderer::drawIsoTile(VkCommandBuffer commandBuffer, const IsoRenderL
 {
     const float x = tile.position.x;
     const float y = tile.position.y;
+    const float base = tile.baseElevation;
     const float height = std::max(tile.height, 0.0f);
 
     if (height <= 0.0f) {
         drawFace(commandBuffer, {
-            projectIsoPoint(layout, { x, y, 0.0f }),
-            projectIsoPoint(layout, { x + 1.0f, y, 0.0f }),
-            projectIsoPoint(layout, { x + 1.0f, y + 1.0f, 0.0f }),
-            projectIsoPoint(layout, { x, y + 1.0f, 0.0f }),
+            projectIsoPoint(layout, { x, y, base }),
+            projectIsoPoint(layout, { x + 1.0f, y, base }),
+            projectIsoPoint(layout, { x + 1.0f, y + 1.0f, base }),
+            projectIsoPoint(layout, { x, y + 1.0f, base }),
         }, tile.color);
         return;
     }
 
-    const Vec2 a = projectIsoPoint(layout, { x, y, 0.0f });
-    const Vec2 b = projectIsoPoint(layout, { x + 1.0f, y, 0.0f });
-    const Vec2 c = projectIsoPoint(layout, { x + 1.0f, y + 1.0f, 0.0f });
-    const Vec2 d = projectIsoPoint(layout, { x, y + 1.0f, 0.0f });
-    const Vec2 e = projectIsoPoint(layout, { x, y, height });
-    const Vec2 f = projectIsoPoint(layout, { x + 1.0f, y, height });
-    const Vec2 g = projectIsoPoint(layout, { x + 1.0f, y + 1.0f, height });
-    const Vec2 h = projectIsoPoint(layout, { x, y + 1.0f, height });
+    const float top = base + height;
+    const Vec2 a = projectIsoPoint(layout, { x, y, base });
+    const Vec2 b = projectIsoPoint(layout, { x + 1.0f, y, base });
+    const Vec2 c = projectIsoPoint(layout, { x + 1.0f, y + 1.0f, base });
+    const Vec2 d = projectIsoPoint(layout, { x, y + 1.0f, base });
+    const Vec2 e = projectIsoPoint(layout, { x, y, top });
+    const Vec2 f = projectIsoPoint(layout, { x + 1.0f, y, top });
+    const Vec2 g = projectIsoPoint(layout, { x + 1.0f, y + 1.0f, top });
+    const Vec2 h = projectIsoPoint(layout, { x, y + 1.0f, top });
 
     drawFace(commandBuffer, { d, c, g, h }, shadeColor(tile.color, 0.62f));
     drawFace(commandBuffer, { b, c, g, f }, shadeColor(tile.color, 0.78f));
