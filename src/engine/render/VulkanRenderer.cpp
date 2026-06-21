@@ -36,12 +36,18 @@ constexpr std::array<const char*, 4> requiredDeviceExtensions {
 };
 
 struct TilePushConstants {
-    std::array<Vec4, 6> vertices;
+    std::array<Vec4, 4> vertices;
     Vec4 color;
+    Vec4 normalAndAmbientRed;
+    Vec4 sunDirectionAndAmbientGreen;
+    Vec4 sunRadianceAndAmbientBlue;
 };
+
+static_assert(sizeof(TilePushConstants) == 128);
 
 struct IsoFace {
     std::array<Vec3, 4> vertices {};
+    Vec3 normal {};
     Vec4 color {};
     float depth = 0.0f;
 };
@@ -95,16 +101,6 @@ Vec3 normalize(Vec3 value)
     }
 
     return multiply(value, 1.0f / length);
-}
-
-Vec4 shadeColor(Vec4 color, float multiplier)
-{
-    return {
-        color.x * multiplier,
-        color.y * multiplier,
-        color.z * multiplier,
-        color.w,
-    };
 }
 
 std::vector<const char*> validationLayers()
@@ -1133,11 +1129,11 @@ void VulkanRenderer::recordGameRendering(
     vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_LESS_OR_EQUAL);
 
     if (frameData.viewMode == RenderViewMode::Isometric3D) {
-        drawIsoFrame(commandBuffer, calculateIsoRenderLayout(frameData), frameData);
+        drawIsoFrame(commandBuffer, calculateIsoRenderLayout(frameData), frameData, frameData.lighting);
     } else {
         const TileRenderLayout tileLayout = calculateTileRenderLayout(frameData);
         for (const auto& tile : frameData.tiles) {
-            drawTile(commandBuffer, tileLayout, tile);
+            drawTile(commandBuffer, tileLayout, tile, frameData.lighting);
         }
     }
 
@@ -1194,8 +1190,9 @@ void VulkanRenderer::recordUiRendering(VkCommandBuffer commandBuffer, VkImageVie
     vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
     vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_ALWAYS);
 
+    const RenderFrameData::Lighting unlitLighting {};
     for (const UiDrawCommand& command : uiDrawData.commands) {
-        drawUiRect(commandBuffer, command, uiDrawData.viewportSize);
+        drawUiRect(commandBuffer, command, uiDrawData.viewportSize, unlitLighting);
     }
 
     vkCmdEndRendering(commandBuffer);
@@ -1336,7 +1333,11 @@ VulkanRenderer::IsoRenderLayout VulkanRenderer::calculateIsoRenderLayout(const R
     return layout;
 }
 
-void VulkanRenderer::drawTile(VkCommandBuffer commandBuffer, const TileRenderLayout& layout, const RenderFrameData::Tile& tile) const
+void VulkanRenderer::drawTile(
+    VkCommandBuffer commandBuffer,
+    const TileRenderLayout& layout,
+    const RenderFrameData::Tile& tile,
+    const RenderFrameData::Lighting& lighting) const
 {
     const Vec2 origin {
         layout.boardBottomLeft.x + tile.position.x * layout.tileSize.x,
@@ -1352,10 +1353,14 @@ void VulkanRenderer::drawTile(VkCommandBuffer commandBuffer, const TileRenderLay
         Vec3 { origin.x + size.x, origin.y, 0.0f },
         Vec3 { origin.x + size.x, origin.y + size.y, 0.0f },
         Vec3 { origin.x, origin.y + size.y, 0.0f },
-    }, tile.color);
+    }, tile.color, {}, lighting);
 }
 
-void VulkanRenderer::drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const RenderFrameData& frameData) const
+void VulkanRenderer::drawIsoFrame(
+    VkCommandBuffer commandBuffer,
+    const IsoRenderLayout& layout,
+    const RenderFrameData& frameData,
+    const RenderFrameData::Lighting& lighting) const
 {
     std::vector<IsoFace> faces;
     faces.reserve(frameData.tiles.size() * 5);
@@ -1385,11 +1390,13 @@ void VulkanRenderer::drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRender
                 projectIsoPoint(layout, vertices[2]),
                 projectIsoPoint(layout, vertices[3]),
             },
+            .normal = normal,
             .color = color,
             .depth = faceDepth(vertices),
         });
     };
     auto appendDoubleSidedFace = [&](const std::array<Vec3, 4>& vertices, Vec4 color) {
+        const Vec3 normal = normalize(cross(subtract(vertices[1], vertices[0]), subtract(vertices[2], vertices[0])));
         faces.push_back({
             .vertices = {
                 projectIsoPoint(layout, vertices[0]),
@@ -1397,6 +1404,7 @@ void VulkanRenderer::drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRender
                 projectIsoPoint(layout, vertices[2]),
                 projectIsoPoint(layout, vertices[3]),
             },
+            .normal = normal,
             .color = color,
             .depth = faceDepth(vertices),
         });
@@ -1423,10 +1431,10 @@ void VulkanRenderer::drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRender
         const Vec3 f { x + width, y, top };
         const Vec3 g { x + width, y + depth, top };
         const Vec3 h { x, y + depth, top };
-        appendFace({ a, b, f, e }, { 0.0f, -1.0f, 0.0f }, shadeColor(tile.color, 0.72f));
-        appendFace({ b, c, g, f }, { 1.0f, 0.0f, 0.0f }, shadeColor(tile.color, 0.82f));
-        appendFace({ c, d, h, g }, { 0.0f, 1.0f, 0.0f }, shadeColor(tile.color, 0.62f));
-        appendFace({ d, a, e, h }, { -1.0f, 0.0f, 0.0f }, shadeColor(tile.color, 0.82f));
+        appendFace({ a, b, f, e }, { 0.0f, -1.0f, 0.0f }, tile.color);
+        appendFace({ b, c, g, f }, { 1.0f, 0.0f, 0.0f }, tile.color);
+        appendFace({ c, d, h, g }, { 0.0f, 1.0f, 0.0f }, tile.color);
+        appendFace({ d, a, e, h }, { -1.0f, 0.0f, 0.0f }, tile.color);
         appendFace({ e, f, g, h }, { 0.0f, 0.0f, 1.0f }, tile.color);
     }
     for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
@@ -1438,60 +1446,44 @@ void VulkanRenderer::drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRender
     });
 
     for (const IsoFace& face : faces) {
-        drawFace(commandBuffer, face.vertices, face.color);
+        drawFace(commandBuffer, face.vertices, face.color, face.normal, lighting);
     }
 }
 
-void VulkanRenderer::drawIsoTile(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const RenderFrameData::Tile& tile) const
-{
-    const float x = tile.position.x;
-    const float y = tile.position.y;
-    const float base = tile.baseElevation;
-    const float height = std::max(tile.height, 0.0f);
-
-    if (height <= 0.0f) {
-        drawFace(commandBuffer, {
-            projectIsoPoint(layout, { x, y, base }),
-            projectIsoPoint(layout, { x + 1.0f, y, base }),
-            projectIsoPoint(layout, { x + 1.0f, y + 1.0f, base }),
-            projectIsoPoint(layout, { x, y + 1.0f, base }),
-        }, tile.color);
-        return;
-    }
-
-    const float top = base + height;
-    const Vec3 a = projectIsoPoint(layout, { x, y, base });
-    const Vec3 b = projectIsoPoint(layout, { x + 1.0f, y, base });
-    const Vec3 c = projectIsoPoint(layout, { x + 1.0f, y + 1.0f, base });
-    const Vec3 d = projectIsoPoint(layout, { x, y + 1.0f, base });
-    const Vec3 e = projectIsoPoint(layout, { x, y, top });
-    const Vec3 f = projectIsoPoint(layout, { x + 1.0f, y, top });
-    const Vec3 g = projectIsoPoint(layout, { x + 1.0f, y + 1.0f, top });
-    const Vec3 h = projectIsoPoint(layout, { x, y + 1.0f, top });
-
-    drawFace(commandBuffer, { d, c, g, h }, shadeColor(tile.color, 0.62f));
-    drawFace(commandBuffer, { b, c, g, f }, shadeColor(tile.color, 0.78f));
-    drawFace(commandBuffer, { e, f, g, h }, tile.color);
-    (void)a;
-}
-
-void VulkanRenderer::drawFace(VkCommandBuffer commandBuffer, const std::array<Vec3, 4>& vertices, Vec4 color) const
+void VulkanRenderer::drawFace(
+    VkCommandBuffer commandBuffer,
+    const std::array<Vec3, 4>& vertices,
+    Vec4 color,
+    Vec3 normal,
+    const RenderFrameData::Lighting& lighting) const
 {
     ++pendingStats_.visibleFaces;
     ++pendingStats_.drawCalls;
     pendingStats_.vertices += 6;
     pendingStats_.triangles += 2;
 
+    const Vec3 sunRadiance {
+        lighting.sun.color.x * lighting.sun.intensity,
+        lighting.sun.color.y * lighting.sun.intensity,
+        lighting.sun.color.z * lighting.sun.intensity,
+    };
+    const Vec3 ambientRadiance {
+        lighting.ambient.color.x * lighting.ambient.intensity,
+        lighting.ambient.color.y * lighting.ambient.intensity,
+        lighting.ambient.color.z * lighting.ambient.intensity,
+    };
+
     const TilePushConstants pushConstants {
         .vertices = {
             Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, 1.0f },
             Vec4 { vertices[1].x, vertices[1].y, vertices[1].z, 1.0f },
             Vec4 { vertices[2].x, vertices[2].y, vertices[2].z, 1.0f },
-            Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, 1.0f },
-            Vec4 { vertices[2].x, vertices[2].y, vertices[2].z, 1.0f },
             Vec4 { vertices[3].x, vertices[3].y, vertices[3].z, 1.0f },
         },
         .color = color,
+        .normalAndAmbientRed = { normal.x, normal.y, normal.z, ambientRadiance.x },
+        .sunDirectionAndAmbientGreen = { lighting.sun.direction.x, lighting.sun.direction.y, lighting.sun.direction.z, ambientRadiance.y },
+        .sunRadianceAndAmbientBlue = { sunRadiance.x, sunRadiance.y, sunRadiance.z, ambientRadiance.z },
     };
 
     vkCmdPushConstants(
@@ -1504,7 +1496,11 @@ void VulkanRenderer::drawFace(VkCommandBuffer commandBuffer, const std::array<Ve
     vkCmdDraw(commandBuffer, 6, 1, 0, 0);
 }
 
-void VulkanRenderer::drawUiRect(VkCommandBuffer commandBuffer, const UiDrawCommand& command, Vec2 viewportSize) const
+void VulkanRenderer::drawUiRect(
+    VkCommandBuffer commandBuffer,
+    const UiDrawCommand& command,
+    Vec2 viewportSize,
+    const RenderFrameData::Lighting& lighting) const
 {
     const float left = -1.0f + 2.0f * command.rect.position.x / viewportSize.x;
     const float right = -1.0f + 2.0f * (command.rect.position.x + command.rect.size.x) / viewportSize.x;
@@ -1516,7 +1512,7 @@ void VulkanRenderer::drawUiRect(VkCommandBuffer commandBuffer, const UiDrawComma
         Vec3 { right, top, 0.0f },
         Vec3 { right, bottom, 0.0f },
         Vec3 { left, bottom, 0.0f },
-    }, command.color);
+    }, command.color, {}, lighting);
 }
 
 Vec3 VulkanRenderer::projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) const

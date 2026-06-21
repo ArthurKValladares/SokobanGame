@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/Input.hpp"
+#include "engine/Config.hpp"
 #include "engine/Level.hpp"
 #include "engine/LevelEditor.hpp"
 #include "engine/Math.hpp"
@@ -135,6 +136,12 @@ private:
     GridPosition playerCell_ {};
     Vec2 playerRenderPosition_ {};
     bool playerDead_ = false;
+    float sunAzimuthDegrees_ = config::sunAzimuthDegrees;
+    float sunTiltDegrees_ = config::sunTiltDegrees;
+    Vec3 sunColor_ { config::sunColor };
+    float sunIntensity_ = config::sunIntensity;
+    Vec3 ambientLightColor_ { config::ambientLightColor };
+    float ambientLightIntensity_ = config::ambientLightIntensity;
     std::vector<Rock> rocks_;
     std::deque<MoveCommand> pendingCommands_;
     std::vector<ActionRecord> moveHistory_;

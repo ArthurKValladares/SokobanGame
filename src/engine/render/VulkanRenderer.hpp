@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/Config.hpp"
 #include "engine/Math.hpp"
 #include "engine/ui/Ui.hpp"
 
@@ -28,6 +29,22 @@ enum class AntiAliasingMode {
 };
 
 struct RenderFrameData {
+    struct DirectionalLight {
+        Vec3 direction { 0.0f, 0.0f, 1.0f };
+        Vec3 color { config::sunColor };
+        float intensity = config::sunIntensity;
+    };
+
+    struct AmbientLight {
+        Vec3 color { config::ambientLightColor };
+        float intensity = config::ambientLightIntensity;
+    };
+
+    struct Lighting {
+        DirectionalLight sun {};
+        AmbientLight ambient {};
+    };
+
     struct Tile {
         Vec2 position {};
         Vec2 size { 1.0f, 1.0f };
@@ -38,10 +55,12 @@ struct RenderFrameData {
 
     struct IsoFace {
         std::array<Vec3, 4> vertices {};
+        Vec3 normal {};
         Vec4 color {};
     };
 
     RenderViewMode viewMode = RenderViewMode::TopDown2D;
+    Lighting lighting {};
     uint32_t levelWidth = 0;
     uint32_t levelHeight = 0;
     Vec2 playerPosition {};
@@ -166,11 +185,15 @@ private:
     void recordDebugUiRendering(VkCommandBuffer commandBuffer, VkImageView colorView) const;
     [[nodiscard]] TileRenderLayout calculateTileRenderLayout(const RenderFrameData& frameData) const;
     [[nodiscard]] IsoRenderLayout calculateIsoRenderLayout(const RenderFrameData& frameData) const;
-    void drawTile(VkCommandBuffer commandBuffer, const TileRenderLayout& layout, const RenderFrameData::Tile& tile) const;
-    void drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const RenderFrameData& frameData) const;
-    void drawIsoTile(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const RenderFrameData::Tile& tile) const;
-    void drawFace(VkCommandBuffer commandBuffer, const std::array<Vec3, 4>& vertices, Vec4 color) const;
-    void drawUiRect(VkCommandBuffer commandBuffer, const UiDrawCommand& command, Vec2 viewportSize) const;
+    void drawTile(VkCommandBuffer commandBuffer, const TileRenderLayout& layout, const RenderFrameData::Tile& tile, const RenderFrameData::Lighting& lighting) const;
+    void drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const RenderFrameData& frameData, const RenderFrameData::Lighting& lighting) const;
+    void drawFace(
+        VkCommandBuffer commandBuffer,
+        const std::array<Vec3, 4>& vertices,
+        Vec4 color,
+        Vec3 normal,
+        const RenderFrameData::Lighting& lighting) const;
+    void drawUiRect(VkCommandBuffer commandBuffer, const UiDrawCommand& command, Vec2 viewportSize, const RenderFrameData::Lighting& lighting) const;
     [[nodiscard]] Vec3 projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) const;
     [[nodiscard]] Vec2 pixelSizeToClipSpace(float pixelSize) const;
 

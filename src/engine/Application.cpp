@@ -49,6 +49,73 @@ int renderYToDocumentRow(int y, uint32_t height)
     return static_cast<int>(height) - 1 - y;
 }
 
+float degreesToRadians(float degrees)
+{
+    constexpr float pi = 3.14159265358979323846f;
+    return degrees * pi / 180.0f;
+}
+
+Vec3 sunDirectionFromSpherical(float azimuthDegrees, float tiltDegrees)
+{
+    const float azimuth = degreesToRadians(azimuthDegrees);
+    const float tilt = degreesToRadians(tiltDegrees);
+    const float horizontalLength = std::sin(tilt);
+    return {
+        horizontalLength * std::cos(azimuth),
+        horizontalLength * std::sin(azimuth),
+        std::cos(tilt),
+    };
+}
+
+#if SOKOBAN_ENABLE_DEBUG_UI
+void drawSunDirectionPreview(Vec3 direction, float tiltDegrees)
+{
+    constexpr ImVec2 previewSize { 240.0f, 116.0f };
+    ImGui::InvisibleButton("sun_direction_preview", previewSize);
+
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+    const ImU32 background = ImGui::GetColorU32(ImGuiCol_FrameBg);
+    const ImU32 border = ImGui::GetColorU32(ImGuiCol_Border);
+    const ImU32 text = ImGui::GetColorU32(ImGuiCol_Text);
+    const ImU32 muted = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    const ImU32 sun = ImGui::GetColorU32(ImVec4 { 1.0f, 0.88f, 0.25f, 1.0f });
+
+    drawList->AddRectFilled(min, max, background, 4.0f);
+    drawList->AddRect(min, max, border, 4.0f);
+
+    const float radius = 34.0f;
+    const ImVec2 topCenter { min.x + 62.0f, min.y + 66.0f };
+    const ImVec2 sideCenter { min.x + 178.0f, min.y + 66.0f };
+
+    drawList->AddText(ImVec2 { topCenter.x - 16.0f, min.y + 10.0f }, text, "XY");
+    drawList->AddCircle(topCenter, radius, border, 48, 1.5f);
+    drawList->AddLine(ImVec2 { topCenter.x - radius, topCenter.y }, ImVec2 { topCenter.x + radius, topCenter.y }, muted);
+    drawList->AddLine(ImVec2 { topCenter.x, topCenter.y - radius }, ImVec2 { topCenter.x, topCenter.y + radius }, muted);
+    const ImVec2 topEnd {
+        topCenter.x + direction.x * radius,
+        topCenter.y + direction.y * radius,
+    };
+    drawList->AddLine(topCenter, topEnd, sun, 2.0f);
+    drawList->AddCircleFilled(topEnd, 4.0f, sun);
+
+    drawList->AddText(ImVec2 { sideCenter.x - 16.0f, min.y + 10.0f }, text, "Side");
+    drawList->AddCircle(sideCenter, radius, border, 48, 1.5f);
+    drawList->AddLine(ImVec2 { sideCenter.x - radius, sideCenter.y }, ImVec2 { sideCenter.x + radius, sideCenter.y }, muted);
+    drawList->AddLine(ImVec2 { sideCenter.x, sideCenter.y - radius }, ImVec2 { sideCenter.x, sideCenter.y + radius }, muted);
+
+    const float signedHorizontalLength = std::sin(degreesToRadians(tiltDegrees));
+    const ImVec2 sideEnd {
+        sideCenter.x + signedHorizontalLength * radius,
+        sideCenter.y - direction.z * radius,
+    };
+    drawList->AddLine(sideCenter, sideEnd, sun, 2.0f);
+    drawList->AddCircleFilled(sideEnd, 4.0f, sun);
+}
+#endif
+
 Vec2 interpolateGridMotion(GridPosition from, GridPosition to, float elapsedSeconds)
 {
     const int distance = gridDistance(from, to);
@@ -125,9 +192,10 @@ void appendWaterEdgeFaces(RenderFrameData& frame, const Level& level, const auto
     const float top = 0.0f;
     const Vec4 color = shade(tileColor(TileType::Empty), 0.78f);
 
-    auto appendEdge = [&](std::array<Vec3, 4> vertices, Vec4 edgeColor) {
+    auto appendEdge = [&](std::array<Vec3, 4> vertices, Vec3 normal, Vec4 edgeColor) {
         frame.isoFaces.push_back({
             .vertices = vertices,
+            .normal = normal,
             .color = edgeColor,
         });
     };
@@ -154,7 +222,7 @@ void appendWaterEdgeFaces(RenderFrameData& frame, const Level& level, const auto
                     Vec3 { right, nearY, bottom },
                     Vec3 { right, nearY, top },
                     Vec3 { left, nearY, top },
-                }, shade(color, 0.92f));
+                }, { 0.0f, -1.0f, 0.0f }, shade(color, 0.92f));
             }
             if (!neighborIsOpenWater({ position.x + 1, position.y })) {
                 appendEdge({
@@ -162,7 +230,7 @@ void appendWaterEdgeFaces(RenderFrameData& frame, const Level& level, const auto
                     Vec3 { right, farY, bottom },
                     Vec3 { right, farY, top },
                     Vec3 { right, nearY, top },
-                }, shade(color, 0.82f));
+                }, { 1.0f, 0.0f, 0.0f }, shade(color, 0.82f));
             }
             if (!neighborIsOpenWater({ position.x, position.y + 1 })) {
                 appendEdge({
@@ -170,7 +238,7 @@ void appendWaterEdgeFaces(RenderFrameData& frame, const Level& level, const auto
                     Vec3 { left, farY, bottom },
                     Vec3 { left, farY, top },
                     Vec3 { right, farY, top },
-                }, shade(color, 0.70f));
+                }, { 0.0f, 1.0f, 0.0f }, shade(color, 0.70f));
             }
             if (!neighborIsOpenWater({ position.x - 1, position.y })) {
                 appendEdge({
@@ -178,7 +246,7 @@ void appendWaterEdgeFaces(RenderFrameData& frame, const Level& level, const auto
                     Vec3 { left, nearY, bottom },
                     Vec3 { left, nearY, top },
                     Vec3 { left, farY, top },
-                }, shade(color, 0.82f));
+                }, { -1.0f, 0.0f, 0.0f }, shade(color, 0.82f));
             }
         }
     }
@@ -392,6 +460,31 @@ void Application::drawDebugUi()
         renderer_.setWireframeLineWidth(wireframeLineWidth);
     }
     ImGui::EndDisabled();
+
+    if (ImGui::CollapsingHeader("Lighting")) {
+        ImGui::DragFloat("Sun Azimuth", &sunAzimuthDegrees_, 0.5f, -180.0f, 180.0f, "%.1f deg");
+        sunAzimuthDegrees_ = std::clamp(sunAzimuthDegrees_, -180.0f, 180.0f);
+        ImGui::DragFloat("Sun Tilt", &sunTiltDegrees_, 0.5f, -90.0f, 90.0f, "%.1f deg");
+        sunTiltDegrees_ = std::clamp(sunTiltDegrees_, -90.0f, 90.0f);
+
+        const Vec3 sunDirection = sunDirectionFromSpherical(sunAzimuthDegrees_, sunTiltDegrees_);
+        ImGui::Text("Unit Vector %.2f, %.2f, %.2f", sunDirection.x, sunDirection.y, sunDirection.z);
+        drawSunDirectionPreview(sunDirection, sunTiltDegrees_);
+
+        float color[3] { sunColor_.x, sunColor_.y, sunColor_.z };
+        if (ImGui::ColorEdit3("Sun Color", color)) {
+            sunColor_ = { color[0], color[1], color[2] };
+        }
+
+        ImGui::DragFloat("Sun Intensity", &sunIntensity_, 0.02f, 0.0f, 4.0f, "%.2f");
+
+        float ambientColor[3] { ambientLightColor_.x, ambientLightColor_.y, ambientLightColor_.z };
+        if (ImGui::ColorEdit3("Ambient Color", ambientColor)) {
+            ambientLightColor_ = { ambientColor[0], ambientColor[1], ambientColor[2] };
+        }
+
+        ImGui::DragFloat("Ambient Intensity", &ambientLightIntensity_, 0.01f, 0.0f, 2.0f, "%.2f");
+    }
 
     if (ImGui::CollapsingHeader("Rendering Stats")) {
         const RenderStats renderStats = renderer_.renderStats();
@@ -1238,6 +1331,17 @@ RenderFrameData Application::buildGameplayRenderFrame() const
 {
     RenderFrameData frame;
     frame.viewMode = RenderViewMode::Isometric3D;
+    frame.lighting = {
+        .sun = {
+            .direction = sunDirectionFromSpherical(sunAzimuthDegrees_, sunTiltDegrees_),
+            .color = sunColor_,
+            .intensity = sunIntensity_,
+        },
+        .ambient = {
+            .color = ambientLightColor_,
+            .intensity = ambientLightIntensity_,
+        },
+    };
     frame.levelWidth = level_.width();
     frame.levelHeight = level_.height();
     frame.playerPosition = playerRenderPosition_;
@@ -1294,6 +1398,17 @@ RenderFrameData Application::buildEditorRenderFrame() const
 {
     RenderFrameData frame;
     frame.viewMode = RenderViewMode::TopDown2D;
+    frame.lighting = {
+        .sun = {
+            .direction = sunDirectionFromSpherical(sunAzimuthDegrees_, sunTiltDegrees_),
+            .color = sunColor_,
+            .intensity = sunIntensity_,
+        },
+        .ambient = {
+            .color = ambientLightColor_,
+            .intensity = ambientLightIntensity_,
+        },
+    };
     frame.levelWidth = levelEditor_.documentWidth();
     frame.levelHeight = levelEditor_.documentHeight();
 
