@@ -37,6 +37,11 @@ int gridDistance(GridPosition from, GridPosition to)
     return std::abs(to.x - from.x) + std::abs(to.y - from.y);
 }
 
+float gridDistance(Vec2 from, Vec2 to)
+{
+    return std::abs(to.x - from.x) + std::abs(to.y - from.y);
+}
+
 // Text level files store rows top-to-bottom, while the 2D editor renderer uses
 // grid coordinates with y=0 at the bottom of the board.
 int documentRowToRenderY(uint32_t row, uint32_t height)
@@ -116,38 +121,43 @@ void drawSunDirectionPreview(Vec3 direction, float tiltDegrees)
 }
 #endif
 
-Vec2 interpolateGridMotion(GridPosition from, GridPosition to, float elapsedSeconds)
+Vec2 interpolateGridMotion(Vec2 from, Vec2 to, float elapsedSeconds)
 {
-    const int distance = gridDistance(from, to);
-    if (distance == 0) {
-        return toVec2(to);
+    const float distance = gridDistance(from, to);
+    if (distance <= 0.0001f) {
+        return to;
     }
 
     if constexpr (config::playerMoveDurationSeconds <= 0.0f) {
-        return toVec2(to);
+        return to;
     }
 
     const float traveledCells = std::min(
         elapsedSeconds / config::playerMoveDurationSeconds,
-        static_cast<float>(distance));
-    const int dx = to.x - from.x;
-    const int dy = to.y - from.y;
+        distance);
+    const float dx = to.x - from.x;
+    const float dy = to.y - from.y;
 
-    if (dx != 0 && dy == 0) {
+    if (std::abs(dx) > 0.0001f && std::abs(dy) <= 0.0001f) {
         return {
-            static_cast<float>(from.x) + std::copysign(traveledCells, static_cast<float>(dx)),
-            static_cast<float>(from.y),
+            from.x + std::copysign(traveledCells, dx),
+            from.y,
         };
     }
 
-    if (dy != 0 && dx == 0) {
+    if (std::abs(dy) > 0.0001f && std::abs(dx) <= 0.0001f) {
         return {
-            static_cast<float>(from.x),
-            static_cast<float>(from.y) + std::copysign(traveledCells, static_cast<float>(dy)),
+            from.x,
+            from.y + std::copysign(traveledCells, dy),
         };
     }
 
-    return lerp(toVec2(from), toVec2(to), traveledCells / static_cast<float>(distance));
+    return lerp(from, to, traveledCells / distance);
+}
+
+Vec2 interpolateGridMotion(GridPosition from, GridPosition to, float elapsedSeconds)
+{
+    return interpolateGridMotion(toVec2(from), toVec2(to), elapsedSeconds);
 }
 
 struct StaticRenderCell {
@@ -688,6 +698,8 @@ void Application::applyLevel(Level level)
             .type = movable.type,
             .cell = movable.position,
             .renderPosition = toVec2(movable.position),
+            .animationStart = toVec2(movable.position),
+            .animationEnd = toVec2(movable.position),
         });
     }
     pendingCommands_.clear();
@@ -734,6 +746,8 @@ void Application::queuePressedCommands()
 
 void Application::advancePlayerMovement(float dt)
 {
+    advanceMovableAnimations(dt);
+
     float remainingTime = dt;
 
     while (remainingTime > 0.0f) {
@@ -762,15 +776,53 @@ void Application::advancePlayerMovement(float dt)
         moveElapsed_ += step;
 
         playerRenderPosition_ = interpolateGridMotion(activeAction_.before.player, activeAction_.after.player, moveElapsed_);
-        for (size_t i = 0; i < rocks_.size(); ++i) {
-            rocks_[i].renderPosition = interpolateGridMotion(activeAction_.before.rocks[i].cell, activeAction_.after.rocks[i].cell, moveElapsed_);
-        }
 
         if (moveElapsed_ >= duration) {
             if (completeActiveAction()) {
                 return;
             }
         }
+    }
+}
+
+void Application::advanceMovableAnimations(float dt)
+{
+    for (Rock& rock : rocks_) {
+        if (!rock.moving) {
+            continue;
+        }
+
+        rock.animationElapsed = std::min(rock.animationElapsed + dt, rock.animationDuration);
+        if (rock.animationDuration <= 0.0f || rock.animationElapsed >= rock.animationDuration) {
+            rock.renderPosition = rock.animationEnd;
+            rock.moving = false;
+            continue;
+        }
+
+        rock.renderPosition = interpolateGridMotion(rock.animationStart, rock.animationEnd, rock.animationElapsed);
+    }
+}
+
+void Application::startMovableAnimations(const ActionRecord& action)
+{
+    const size_t rockCount = std::min(action.before.rocks.size(), action.after.rocks.size());
+    for (size_t i = 0; i < rockCount && i < rocks_.size(); ++i) {
+        const Vec2 target = toVec2(action.after.rocks[i].cell);
+        if (gridDistance(rocks_[i].renderPosition, target) <= 0.0001f) {
+            rocks_[i].renderPosition = target;
+            rocks_[i].animationStart = target;
+            rocks_[i].animationEnd = target;
+            rocks_[i].animationElapsed = 0.0f;
+            rocks_[i].animationDuration = 0.0f;
+            rocks_[i].moving = false;
+            continue;
+        }
+
+        rocks_[i].animationStart = rocks_[i].renderPosition;
+        rocks_[i].animationEnd = target;
+        rocks_[i].animationElapsed = 0.0f;
+        rocks_[i].animationDuration = gridDistance(rocks_[i].animationStart, rocks_[i].animationEnd) * config::playerMoveDurationSeconds;
+        rocks_[i].moving = true;
     }
 }
 
@@ -797,13 +849,7 @@ bool Application::completeActiveAction()
 
 float Application::activeActionDuration() const
 {
-    int maxDistance = gridDistance(activeAction_.before.player, activeAction_.after.player);
-    const size_t rockCount = std::min(activeAction_.before.rocks.size(), activeAction_.after.rocks.size());
-    for (size_t i = 0; i < rockCount; ++i) {
-        maxDistance = std::max(maxDistance, gridDistance(activeAction_.before.rocks[i].cell, activeAction_.after.rocks[i].cell));
-    }
-
-    return static_cast<float>(maxDistance) * config::playerMoveDurationSeconds;
+    return static_cast<float>(gridDistance(activeAction_.before.player, activeAction_.after.player)) * config::playerMoveDurationSeconds;
 }
 
 bool Application::tryStartNextMove()
@@ -896,6 +942,7 @@ bool Application::tryStartMove(MoveDirection direction)
     undoCursor_.reset();
     moveElapsed_ = 0.0f;
     moving_ = true;
+    startMovableAnimations(activeAction_);
     return true;
 }
 
@@ -919,6 +966,7 @@ bool Application::tryStartUndoMove()
     activeAction_ = invertActionRecord(moveHistory_[*undoCursor_]);
     moveElapsed_ = 0.0f;
     moving_ = true;
+    startMovableAnimations(activeAction_);
     return true;
 }
 
@@ -954,6 +1002,7 @@ bool Application::tryStartRestart()
     undoCursor_.reset();
     moveElapsed_ = 0.0f;
     moving_ = true;
+    startMovableAnimations(activeAction_);
     return true;
 }
 
@@ -1068,7 +1117,13 @@ void Application::applyMoveRecord(const MoveRecord& record)
 
     for (size_t i = 0; i < rocks_.size(); ++i) {
         rocks_[i].cell = record.rocks[i].cell;
-        rocks_[i].renderPosition = toVec2(rocks_[i].cell);
+        if (!rocks_[i].moving) {
+            rocks_[i].renderPosition = toVec2(rocks_[i].cell);
+            rocks_[i].animationStart = rocks_[i].renderPosition;
+            rocks_[i].animationEnd = rocks_[i].renderPosition;
+            rocks_[i].animationElapsed = 0.0f;
+            rocks_[i].animationDuration = 0.0f;
+        }
         rocks_[i].fallen = record.rocks[i].fallen;
     }
 }
@@ -1364,7 +1419,9 @@ RenderFrameData Application::buildGameplayRenderFrame() const
         const GridPosition position { static_cast<int>(x), static_cast<int>(y) };
         std::optional<TileType> fallenTile;
         if (const Rock* fallenRock = fallenRockAt(position)) {
-            fallenTile = fallenRock->type;
+            if (!fallenRock->moving) {
+                fallenTile = fallenRock->type;
+            }
         } else if (playerDead_ && !playerMovingOutOfWater && position == playerCell_) {
             fallenTile = TileType::Player;
         }
@@ -1391,7 +1448,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             rockIndex < activeAction_.after.rocks.size() &&
             activeAction_.before.rocks[rockIndex].fallen &&
             !activeAction_.after.rocks[rockIndex].fallen;
-        if (rock.fallen && !movingOutOfWater) {
+        if (rock.fallen && !rock.moving && !movingOutOfWater) {
             continue;
         }
 

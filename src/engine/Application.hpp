@@ -38,6 +38,11 @@ private:
         TileType type = TileType::Rock;
         GridPosition cell {};
         Vec2 renderPosition {};
+        Vec2 animationStart {};
+        Vec2 animationEnd {};
+        float animationElapsed = 0.0f;
+        float animationDuration = 0.0f;
+        bool moving = false;
         bool fallen = false;
     };
 
@@ -81,6 +86,8 @@ private:
     void updateEditorPainting();
     void queuePressedCommands();
     void advancePlayerMovement(float dt);
+    void advanceMovableAnimations(float dt);
+    void startMovableAnimations(const ActionRecord& action);
     [[nodiscard]] bool completeActiveAction();
     [[nodiscard]] float activeActionDuration() const;
     [[nodiscard]] bool tryStartNextMove();
