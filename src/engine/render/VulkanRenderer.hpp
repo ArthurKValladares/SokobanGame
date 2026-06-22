@@ -58,6 +58,7 @@ struct RenderFrameData {
         Vec4 color {};
         float baseElevation = 0.0f;
         float height = 0.0f;
+        bool blurBehind = false;
     };
 
     struct IsoFace {
@@ -186,13 +187,16 @@ private:
     void createMsaaColorResources();
     void createDepthResources();
     void createShadowResources();
+    void createSceneColorResources();
     void createDescriptorResources();
+    void updateDescriptorSet();
     void createCommandPool();
     void createPipeline();
     void createShadowPipeline(VkShaderModule shadowVertexShader);
     void destroyPipeline();
     void destroyDescriptorResources();
     void cleanupShadowResources();
+    void cleanupSceneColorResources();
     void createFrameResources();
     void initializeDebugUi();
     void shutdownDebugUi();
@@ -204,21 +208,34 @@ private:
 
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData, const UiDrawData& uiDrawData);
     void recordShadowMapRendering(VkCommandBuffer commandBuffer, const RenderFrameData& frameData, const ShadowRenderLayout& layout);
-    void recordGameRendering(VkCommandBuffer commandBuffer, VkImageView colorView, VkImageView resolveView, const RenderFrameData& frameData);
+    void recordGameRendering(VkCommandBuffer commandBuffer, VkImageView colorView, VkImageView resolveView, VkImage resolvedColorImage, const RenderFrameData& frameData);
+    void recordScenePass(
+        VkCommandBuffer commandBuffer,
+        VkImageView colorView,
+        VkImageView resolveView,
+        const RenderFrameData& frameData,
+        const ShadowRenderLayout& shadowLayout,
+        bool translucentPass,
+        bool loadColor,
+        bool storeColor,
+        bool loadDepth,
+        bool writeDepth);
+    void copyResolvedSceneColor(VkCommandBuffer commandBuffer, VkImage resolvedColorImage);
     void recordUiRendering(VkCommandBuffer commandBuffer, VkImageView colorView, const UiDrawData& uiDrawData);
     void recordDebugUiRendering(VkCommandBuffer commandBuffer, VkImageView colorView) const;
     [[nodiscard]] TileRenderLayout calculateTileRenderLayout(const RenderFrameData& frameData) const;
     [[nodiscard]] IsoRenderLayout calculateIsoRenderLayout(const RenderFrameData& frameData) const;
     [[nodiscard]] ShadowRenderLayout calculateShadowRenderLayout(const RenderFrameData& frameData) const;
     void drawTile(VkCommandBuffer commandBuffer, const TileRenderLayout& layout, const RenderFrameData::Tile& tile, const RenderFrameData::Lighting& lighting) const;
-    void drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const ShadowRenderLayout& shadowLayout, const RenderFrameData& frameData, const RenderFrameData::Lighting& lighting) const;
+    void drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const ShadowRenderLayout& shadowLayout, const RenderFrameData& frameData, const RenderFrameData::Lighting& lighting, bool translucentPass) const;
     void drawFace(
         VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
         const std::array<Vec4, 4>& shadowVertices,
         Vec4 color,
         Vec3 normal,
-        const RenderFrameData::Lighting& lighting) const;
+        const RenderFrameData::Lighting& lighting,
+        bool blurBehind = false) const;
     void drawShadowFace(VkCommandBuffer commandBuffer, const std::array<Vec4, 4>& shadowVertices) const;
     void drawUiRect(VkCommandBuffer commandBuffer, const UiDrawCommand& command, Vec2 viewportSize, const RenderFrameData::Lighting& lighting) const;
     [[nodiscard]] Vec3 projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) const;
@@ -259,8 +276,11 @@ private:
     OwnedImage msaaColorImage_ {};
     OwnedImage depthImage_ {};
     OwnedImage shadowImage_ {};
+    OwnedImage sceneColorImage_ {};
     VkImageLayout shadowImageLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImageLayout sceneColorImageLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     VkSampler shadowSampler_ = VK_NULL_HANDLE;
+    VkSampler sceneColorSampler_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout descriptorSetLayout_ = VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool_ = VK_NULL_HANDLE;
     VkDescriptorSet descriptorSet_ = VK_NULL_HANDLE;

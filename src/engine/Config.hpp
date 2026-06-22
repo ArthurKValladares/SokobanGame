@@ -23,5 +23,7 @@ inline constexpr float shadowOpacity = 0.32f;
 inline constexpr float shadowBias = 0.004f;
 inline constexpr float shadowMapPadding = 1.0f;
 inline constexpr uint32_t shadowMapSize = 2048;
+inline constexpr float iceTintAlpha = 0.38f;
+inline constexpr float iceBlurRadiusPixels = 3.0f;
 
 } // namespace sokoban::config

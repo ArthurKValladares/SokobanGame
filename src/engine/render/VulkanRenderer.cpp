@@ -44,15 +44,17 @@ struct TilePushConstants {
     Vec4 sunDirectionAndAmbientGreen;
     Vec4 sunRadianceAndAmbientBlue;
     Vec4 shadowOptions;
+    Vec4 materialOptions;
 };
 
-static_assert(sizeof(TilePushConstants) == 208);
+static_assert(sizeof(TilePushConstants) == 224);
 
 struct IsoFace {
     std::array<Vec3, 4> vertices {};
     std::array<Vec4, 4> shadowVertices {};
     Vec3 normal {};
     Vec4 color {};
+    bool blurBehind = false;
     float depth = 0.0f;
 };
 
@@ -168,6 +170,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, std::filesystem::path assetRo
     createMsaaColorResources();
     createDepthResources();
     createShadowResources();
+    createSceneColorResources();
     createDescriptorResources();
     createCommandPool();
     createPipeline();
@@ -551,6 +554,9 @@ void VulkanRenderer::createSwapchain()
     const VkSurfaceFormatKHR surfaceFormat = chooseSurfaceFormat(formats);
     const VkPresentModeKHR presentMode = choosePresentMode(presentModes);
     const VkExtent2D extent = chooseSwapchainExtent(capabilities);
+    if ((capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0) {
+        throw std::runtime_error("Swapchain images do not support transfer source usage required for ice blur");
+    }
 
     uint32_t imageCount = capabilities.minImageCount + 1;
     if (capabilities.maxImageCount > 0 && imageCount > capabilities.maxImageCount) {
@@ -568,7 +574,7 @@ void VulkanRenderer::createSwapchain()
         .imageColorSpace = surfaceFormat.colorSpace,
         .imageExtent = extent,
         .imageArrayLayers = 1,
-        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
         .imageSharingMode = sharedQueues ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE,
         .queueFamilyIndexCount = sharedQueues ? static_cast<uint32_t>(queueFamilyIndices.size()) : 0U,
         .pQueueFamilyIndices = sharedQueues ? queueFamilyIndices.data() : nullptr,
@@ -741,31 +747,99 @@ void VulkanRenderer::createShadowResources()
     vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &shadowSampler_), "vkCreateSampler shadow map failed");
 }
 
+void VulkanRenderer::createSceneColorResources()
+{
+    if (swapchainExtent_.width == 0 || swapchainExtent_.height == 0) {
+        return;
+    }
+
+    VkImageCreateInfo imageInfo {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = swapchainFormat_,
+        .extent = {
+            .width = swapchainExtent_.width,
+            .height = swapchainExtent_.height,
+            .depth = 1,
+        },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+
+    vkCheck(vkCreateImage(device_, &imageInfo, nullptr, &sceneColorImage_.image), "vkCreateImage scene color failed");
+
+    VkMemoryRequirements memoryRequirements {};
+    vkGetImageMemoryRequirements(device_, sceneColorImage_.image, &memoryRequirements);
+
+    VkMemoryAllocateInfo allocateInfo {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memoryRequirements.size,
+        .memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
+    };
+
+    vkCheck(vkAllocateMemory(device_, &allocateInfo, nullptr, &sceneColorImage_.memory), "vkAllocateMemory scene color failed");
+    vkCheck(vkBindImageMemory(device_, sceneColorImage_.image, sceneColorImage_.memory, 0), "vkBindImageMemory scene color failed");
+    sceneColorImage_.view = createImageView(sceneColorImage_.image, swapchainFormat_, VK_IMAGE_ASPECT_COLOR_BIT);
+    sceneColorImageLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VkSamplerCreateInfo samplerInfo {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .mipLodBias = 0.0f,
+        .anisotropyEnable = VK_FALSE,
+        .compareEnable = VK_FALSE,
+        .minLod = 0.0f,
+        .maxLod = 0.0f,
+        .borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK,
+    };
+    vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &sceneColorSampler_), "vkCreateSampler scene color failed");
+}
+
 void VulkanRenderer::createDescriptorResources()
 {
-    VkDescriptorSetLayoutBinding shadowMapBinding {
+    std::array<VkDescriptorSetLayoutBinding, 2> bindings {
+        VkDescriptorSetLayoutBinding {
         .binding = 0,
         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         .descriptorCount = 1,
         .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        },
+        VkDescriptorSetLayoutBinding {
+            .binding = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        },
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = 1,
-        .pBindings = &shadowMapBinding,
+        .bindingCount = static_cast<uint32_t>(bindings.size()),
+        .pBindings = bindings.data(),
     };
     vkCheck(vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &descriptorSetLayout_), "vkCreateDescriptorSetLayout failed");
 
-    VkDescriptorPoolSize poolSize {
-        .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .descriptorCount = 1,
+    std::array<VkDescriptorPoolSize, 1> poolSizes {
+        VkDescriptorPoolSize {
+            .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 2,
+        },
     };
     VkDescriptorPoolCreateInfo poolInfo {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .maxSets = 1,
-        .poolSizeCount = 1,
-        .pPoolSizes = &poolSize,
+        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
+        .pPoolSizes = poolSizes.data(),
     };
     vkCheck(vkCreateDescriptorPool(device_, &poolInfo, nullptr, &descriptorPool_), "vkCreateDescriptorPool failed");
 
@@ -776,22 +850,46 @@ void VulkanRenderer::createDescriptorResources()
         .pSetLayouts = &descriptorSetLayout_,
     };
     vkCheck(vkAllocateDescriptorSets(device_, &allocateInfo, &descriptorSet_), "vkAllocateDescriptorSets failed");
+    updateDescriptorSet();
+}
+
+void VulkanRenderer::updateDescriptorSet()
+{
+    if (!descriptorSet_ || !shadowSampler_ || !shadowImage_.view || !sceneColorSampler_ || !sceneColorImage_.view) {
+        return;
+    }
 
     VkDescriptorImageInfo imageInfo {
         .sampler = shadowSampler_,
         .imageView = shadowImage_.view,
         .imageLayout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
     };
-    VkWriteDescriptorSet write {
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = descriptorSet_,
-        .dstBinding = 0,
-        .dstArrayElement = 0,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .pImageInfo = &imageInfo,
+    VkDescriptorImageInfo sceneImageInfo {
+        .sampler = sceneColorSampler_,
+        .imageView = sceneColorImage_.view,
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
     };
-    vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+    std::array<VkWriteDescriptorSet, 2> writes {
+        VkWriteDescriptorSet {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = descriptorSet_,
+            .dstBinding = 0,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &imageInfo,
+        },
+        VkWriteDescriptorSet {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = descriptorSet_,
+            .dstBinding = 1,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &sceneImageInfo,
+        },
+    };
+    vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 }
 
 void VulkanRenderer::createCommandPool()
@@ -1051,6 +1149,8 @@ void VulkanRenderer::recreateSwapchain()
     createImageViews();
     createMsaaColorResources();
     createDepthResources();
+    createSceneColorResources();
+    updateDescriptorSet();
     ++swapchainRecreations_;
 }
 
@@ -1058,6 +1158,7 @@ void VulkanRenderer::cleanupSwapchain()
 {
     cleanupDepthResources();
     cleanupMsaaColorResources();
+    cleanupSceneColorResources();
 
     for (auto& image : swapchainImages_) {
         if (image.view) {
@@ -1137,6 +1238,27 @@ void VulkanRenderer::cleanupShadowResources()
     if (shadowImage_.memory) {
         vkFreeMemory(device_, shadowImage_.memory, nullptr);
         shadowImage_.memory = VK_NULL_HANDLE;
+    }
+}
+
+void VulkanRenderer::cleanupSceneColorResources()
+{
+    sceneColorImageLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    if (sceneColorSampler_) {
+        vkDestroySampler(device_, sceneColorSampler_, nullptr);
+        sceneColorSampler_ = VK_NULL_HANDLE;
+    }
+    if (sceneColorImage_.view) {
+        vkDestroyImageView(device_, sceneColorImage_.view, nullptr);
+        sceneColorImage_.view = VK_NULL_HANDLE;
+    }
+    if (sceneColorImage_.image) {
+        vkDestroyImage(device_, sceneColorImage_.image, nullptr);
+        sceneColorImage_.image = VK_NULL_HANDLE;
+    }
+    if (sceneColorImage_.memory) {
+        vkFreeMemory(device_, sceneColorImage_.memory, nullptr);
+        sceneColorImage_.memory = VK_NULL_HANDLE;
     }
 }
 
@@ -1256,6 +1378,7 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
         commandBuffer,
         msaaEnabled() ? msaaColorImage_.view : swapchainImages_[imageIndex].view,
         msaaEnabled() ? swapchainImages_[imageIndex].view : VK_NULL_HANDLE,
+        swapchainImages_[imageIndex].image,
         frameData);
 
     recordUiRendering(commandBuffer, swapchainImages_[imageIndex].view, uiDrawData);
@@ -1449,6 +1572,7 @@ void VulkanRenderer::recordGameRendering(
     VkCommandBuffer commandBuffer,
     VkImageView colorView,
     VkImageView resolveView,
+    VkImage resolvedColorImage,
     const RenderFrameData& frameData)
 {
     ShadowRenderLayout shadowLayout {};
@@ -1457,6 +1581,83 @@ void VulkanRenderer::recordGameRendering(
         recordShadowMapRendering(commandBuffer, frameData, shadowLayout);
     }
 
+    const bool hasBlurredTiles = frameData.viewMode == RenderViewMode::Isometric3D &&
+        std::ranges::any_of(frameData.tiles, [](const RenderFrameData::Tile& tile) {
+            return tile.blurBehind;
+        });
+
+    if (!hasBlurredTiles && sceneColorImage_.image && sceneColorImageLayout_ == VK_IMAGE_LAYOUT_UNDEFINED) {
+        VkImageMemoryBarrier2 sceneColorToRead {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
+            .srcAccessMask = VK_ACCESS_2_NONE,
+            .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            .dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = sceneColorImage_.image,
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+        };
+        VkDependencyInfo dependency {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &sceneColorToRead,
+        };
+        vkCmdPipelineBarrier2(commandBuffer, &dependency);
+        sceneColorImageLayout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        ++pendingStats_.imageBarriers;
+    }
+
+    recordScenePass(
+        commandBuffer,
+        colorView,
+        resolveView,
+        frameData,
+        shadowLayout,
+        false,
+        false,
+        hasBlurredTiles || !resolveView,
+        false,
+        true);
+
+    if (!hasBlurredTiles) {
+        return;
+    }
+
+    copyResolvedSceneColor(commandBuffer, resolvedColorImage);
+    recordScenePass(
+        commandBuffer,
+        colorView,
+        resolveView,
+        frameData,
+        shadowLayout,
+        true,
+        true,
+        !resolveView,
+        true,
+        false);
+}
+
+void VulkanRenderer::recordScenePass(
+    VkCommandBuffer commandBuffer,
+    VkImageView colorView,
+    VkImageView resolveView,
+    const RenderFrameData& frameData,
+    const ShadowRenderLayout& shadowLayout,
+    bool translucentPass,
+    bool loadColor,
+    bool storeColor,
+    bool loadDepth,
+    bool writeDepth)
+{
     VkClearValue clearValue {
         .color = { { 0.03f, 0.04f, 0.06f, 1.0f } },
     };
@@ -1468,8 +1669,8 @@ void VulkanRenderer::recordGameRendering(
         .resolveMode = resolveView ? VK_RESOLVE_MODE_AVERAGE_BIT : VK_RESOLVE_MODE_NONE,
         .resolveImageView = resolveView,
         .resolveImageLayout = resolveView ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = resolveView ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE,
+        .loadOp = loadColor ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = storeColor ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE,
         .clearValue = clearValue,
     };
 
@@ -1480,8 +1681,8 @@ void VulkanRenderer::recordGameRendering(
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
         .imageView = depthImage_.view,
         .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .loadOp = loadDepth ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
         .clearValue = depthClearValue,
     };
 
@@ -1522,11 +1723,11 @@ void VulkanRenderer::recordGameRendering(
     vkCmdSetPrimitiveTopology(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
     vkCmdSetLineWidth(commandBuffer, wireframeEnabled_ ? wireframeLineWidth_ : 1.0f);
     vkCmdSetDepthTestEnable(commandBuffer, depthImage_.view ? VK_TRUE : VK_FALSE);
-    vkCmdSetDepthWriteEnable(commandBuffer, depthImage_.view ? VK_TRUE : VK_FALSE);
+    vkCmdSetDepthWriteEnable(commandBuffer, depthImage_.view && writeDepth ? VK_TRUE : VK_FALSE);
     vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_LESS_OR_EQUAL);
 
     if (frameData.viewMode == RenderViewMode::Isometric3D) {
-        drawIsoFrame(commandBuffer, calculateIsoRenderLayout(frameData), shadowLayout, frameData, frameData.lighting);
+        drawIsoFrame(commandBuffer, calculateIsoRenderLayout(frameData), shadowLayout, frameData, frameData.lighting, translucentPass);
     } else {
         const TileRenderLayout tileLayout = calculateTileRenderLayout(frameData);
         for (const auto& tile : frameData.tiles) {
@@ -1535,6 +1736,132 @@ void VulkanRenderer::recordGameRendering(
     }
 
     vkCmdEndRendering(commandBuffer);
+}
+
+void VulkanRenderer::copyResolvedSceneColor(VkCommandBuffer commandBuffer, VkImage resolvedColorImage)
+{
+    VkImageMemoryBarrier2 colorToTransfer {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+        .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = resolvedColorImage,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+    VkImageMemoryBarrier2 sceneColorToTransfer {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = sceneColorImageLayout_ == VK_IMAGE_LAYOUT_UNDEFINED ? VK_PIPELINE_STAGE_2_NONE : VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .srcAccessMask = sceneColorImageLayout_ == VK_IMAGE_LAYOUT_UNDEFINED ? VK_ACCESS_2_NONE : VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+        .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .oldLayout = sceneColorImageLayout_,
+        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = sceneColorImage_.image,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+    std::array<VkImageMemoryBarrier2, 2> toTransferBarriers { colorToTransfer, sceneColorToTransfer };
+    VkDependencyInfo toTransferDependency {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = static_cast<uint32_t>(toTransferBarriers.size()),
+        .pImageMemoryBarriers = toTransferBarriers.data(),
+    };
+    vkCmdPipelineBarrier2(commandBuffer, &toTransferDependency);
+    ++pendingStats_.imageBarriers;
+
+    VkImageCopy copyRegion {
+        .srcSubresource = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .dstSubresource = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .extent = {
+            .width = swapchainExtent_.width,
+            .height = swapchainExtent_.height,
+            .depth = 1,
+        },
+    };
+    vkCmdCopyImage(
+        commandBuffer,
+        resolvedColorImage,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        sceneColorImage_.image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1,
+        &copyRegion);
+
+    VkImageMemoryBarrier2 colorToAttachment {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+        .srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = resolvedColorImage,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+    VkImageMemoryBarrier2 sceneColorToRead {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+        .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = sceneColorImage_.image,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+    std::array<VkImageMemoryBarrier2, 2> fromTransferBarriers { colorToAttachment, sceneColorToRead };
+    VkDependencyInfo fromTransferDependency {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = static_cast<uint32_t>(fromTransferBarriers.size()),
+        .pImageMemoryBarriers = fromTransferBarriers.data(),
+    };
+    vkCmdPipelineBarrier2(commandBuffer, &fromTransferDependency);
+    sceneColorImageLayout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    ++pendingStats_.imageBarriers;
 }
 
 void VulkanRenderer::recordUiRendering(VkCommandBuffer commandBuffer, VkImageView colorView, const UiDrawData& uiDrawData)
@@ -1843,7 +2170,8 @@ void VulkanRenderer::drawIsoFrame(
     const IsoRenderLayout& layout,
     const ShadowRenderLayout& shadowLayout,
     const RenderFrameData& frameData,
-    const RenderFrameData::Lighting& lighting) const
+    const RenderFrameData::Lighting& lighting,
+    bool translucentPass) const
 {
     std::vector<IsoFace> faces;
     faces.reserve(frameData.tiles.size() * 5);
@@ -1861,7 +2189,7 @@ void VulkanRenderer::drawIsoFrame(
         return dot(normal, subtract(layout.cameraPosition, center)) > 0.0f;
     };
 
-    auto appendFace = [&](const std::array<Vec3, 4>& vertices, Vec3 normal, Vec4 color) {
+    auto appendFace = [&](const std::array<Vec3, 4>& vertices, Vec3 normal, Vec4 color, bool blurBehind) {
         if (!faceVisible(vertices, normal)) {
             return;
         }
@@ -1881,6 +2209,7 @@ void VulkanRenderer::drawIsoFrame(
             },
             .normal = normal,
             .color = color,
+            .blurBehind = blurBehind,
             .depth = faceDepth(vertices),
         });
     };
@@ -1901,10 +2230,15 @@ void VulkanRenderer::drawIsoFrame(
             },
             .normal = normal,
             .color = color,
+            .blurBehind = false,
             .depth = faceDepth(vertices),
         });
     };
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
+        if (tile.blurBehind != translucentPass) {
+            continue;
+        }
+
         const float x = tile.position.x;
         const float y = tile.position.y;
         const float width = tile.size.x;
@@ -1917,7 +2251,7 @@ void VulkanRenderer::drawIsoFrame(
         const Vec3 d { x, y + depth, base };
 
         if (height <= 0.0f) {
-            appendFace({ a, b, c, d }, { 0.0f, 0.0f, 1.0f }, tile.color);
+            appendFace({ a, b, c, d }, { 0.0f, 0.0f, 1.0f }, tile.color, tile.blurBehind);
             continue;
         }
 
@@ -1926,14 +2260,16 @@ void VulkanRenderer::drawIsoFrame(
         const Vec3 f { x + width, y, top };
         const Vec3 g { x + width, y + depth, top };
         const Vec3 h { x, y + depth, top };
-        appendFace({ a, b, f, e }, { 0.0f, -1.0f, 0.0f }, tile.color);
-        appendFace({ b, c, g, f }, { 1.0f, 0.0f, 0.0f }, tile.color);
-        appendFace({ c, d, h, g }, { 0.0f, 1.0f, 0.0f }, tile.color);
-        appendFace({ d, a, e, h }, { -1.0f, 0.0f, 0.0f }, tile.color);
-        appendFace({ e, f, g, h }, { 0.0f, 0.0f, 1.0f }, tile.color);
+        appendFace({ a, b, f, e }, { 0.0f, -1.0f, 0.0f }, tile.color, tile.blurBehind);
+        appendFace({ b, c, g, f }, { 1.0f, 0.0f, 0.0f }, tile.color, tile.blurBehind);
+        appendFace({ c, d, h, g }, { 0.0f, 1.0f, 0.0f }, tile.color, tile.blurBehind);
+        appendFace({ d, a, e, h }, { -1.0f, 0.0f, 0.0f }, tile.color, tile.blurBehind);
+        appendFace({ e, f, g, h }, { 0.0f, 0.0f, 1.0f }, tile.color, tile.blurBehind);
     }
-    for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
-        appendDoubleSidedFace(face.vertices, face.color);
+    if (!translucentPass) {
+        for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
+            appendDoubleSidedFace(face.vertices, face.color);
+        }
     }
 
     std::ranges::sort(faces, [](const IsoFace& left, const IsoFace& right) {
@@ -1941,7 +2277,7 @@ void VulkanRenderer::drawIsoFrame(
     });
 
     for (const IsoFace& face : faces) {
-        drawFace(commandBuffer, face.vertices, face.shadowVertices, face.color, face.normal, lighting);
+        drawFace(commandBuffer, face.vertices, face.shadowVertices, face.color, face.normal, lighting, face.blurBehind);
     }
 }
 
@@ -1951,7 +2287,8 @@ void VulkanRenderer::drawFace(
     const std::array<Vec4, 4>& shadowVertices,
     Vec4 color,
     Vec3 normal,
-    const RenderFrameData::Lighting& lighting) const
+    const RenderFrameData::Lighting& lighting,
+    bool blurBehind) const
 {
     ++pendingStats_.visibleFaces;
     ++pendingStats_.drawCalls;
@@ -1986,6 +2323,12 @@ void VulkanRenderer::drawFace(
             std::clamp(lighting.shadows.opacity, 0.0f, 1.0f),
             std::max(lighting.shadows.bias, 0.0f),
             0.0f,
+        },
+        .materialOptions = {
+            blurBehind ? 1.0f : 0.0f,
+            static_cast<float>(swapchainExtent_.width),
+            static_cast<float>(swapchainExtent_.height),
+            config::iceBlurRadiusPixels,
         },
     };
 

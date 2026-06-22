@@ -1452,10 +1452,16 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             continue;
         }
 
+        Vec4 color = tileColor(rock.type);
+        if (rock.type == TileType::Ice) {
+            color.w = config::iceTintAlpha;
+        }
+
         frame.tiles.push_back({
             .position = rock.renderPosition,
-            .color = tileColor(rock.type),
+            .color = color,
             .height = 1.0f,
+            .blurBehind = rock.type == TileType::Ice,
         });
     }
 

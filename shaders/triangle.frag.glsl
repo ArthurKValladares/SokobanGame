@@ -1,6 +1,7 @@
 #version 460
 
 layout(set = 0, binding = 0) uniform sampler2D shadowMap;
+layout(set = 0, binding = 1) uniform sampler2D sceneColor;
 
 layout(location = 0) in vec4 inShadowPosition;
 layout(location = 0) out vec4 outColor;
@@ -14,7 +15,26 @@ layout(push_constant) uniform PushConstants
     vec4 sunDirectionAndAmbientGreen;
     vec4 sunRadianceAndAmbientBlue;
     vec4 shadowOptions;
+    vec4 materialOptions;
 } pc;
+
+vec3 gaussianBlurredScene(vec2 uv)
+{
+    const float weights[5] = float[5](1.0, 4.0, 6.0, 4.0, 1.0);
+    vec2 texel = pc.materialOptions.w / pc.materialOptions.yz;
+    vec3 result = vec3(0.0);
+    float totalWeight = 0.0;
+
+    for (int y = -2; y <= 2; ++y) {
+        for (int x = -2; x <= 2; ++x) {
+            float weight = weights[x + 2] * weights[y + 2];
+            result += texture(sceneColor, uv + vec2(float(x), float(y)) * texel).rgb * weight;
+            totalWeight += weight;
+        }
+    }
+
+    return result / totalWeight;
+}
 
 void main()
 {
@@ -44,6 +64,13 @@ void main()
             }
         }
         color *= ambient + pc.sunRadianceAndAmbientBlue.rgb * diffuse * shadowFactor;
+    }
+
+    if (pc.materialOptions.x > 0.5) {
+        vec2 uv = gl_FragCoord.xy / pc.materialOptions.yz;
+        vec3 blurred = gaussianBlurredScene(uv);
+        outColor = vec4(mix(blurred, color, pc.color.a), 1.0);
+        return;
     }
 
     outColor = vec4(color, pc.color.a);
