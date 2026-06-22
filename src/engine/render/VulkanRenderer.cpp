@@ -20,6 +20,7 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <utility>
 
 #ifndef SOKOBAN_ENABLE_DEBUG_UI
 #define SOKOBAN_ENABLE_DEBUG_UI 0
@@ -37,16 +38,19 @@ constexpr std::array<const char*, 4> requiredDeviceExtensions {
 
 struct TilePushConstants {
     std::array<Vec4, 4> vertices;
+    std::array<Vec4, 4> shadowVertices;
     Vec4 color;
     Vec4 normalAndAmbientRed;
     Vec4 sunDirectionAndAmbientGreen;
     Vec4 sunRadianceAndAmbientBlue;
+    Vec4 shadowOptions;
 };
 
-static_assert(sizeof(TilePushConstants) == 128);
+static_assert(sizeof(TilePushConstants) == 208);
 
 struct IsoFace {
     std::array<Vec3, 4> vertices {};
+    std::array<Vec4, 4> shadowVertices {};
     Vec3 normal {};
     Vec4 color {};
     float depth = 0.0f;
@@ -163,6 +167,8 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, std::filesystem::path assetRo
     createImageViews();
     createMsaaColorResources();
     createDepthResources();
+    createShadowResources();
+    createDescriptorResources();
     createCommandPool();
     createPipeline();
     createFrameResources();
@@ -190,10 +196,12 @@ VulkanRenderer::~VulkanRenderer()
     }
 
     destroyPipeline();
+    destroyDescriptorResources();
     if (commandPool_) {
         vkDestroyCommandPool(device_, commandPool_, nullptr);
     }
 
+    cleanupShadowResources();
     cleanupSwapchain();
 
     if (device_) {
@@ -679,6 +687,113 @@ void VulkanRenderer::createDepthResources()
     depthImage_.view = createImageView(depthImage_.image, depthFormat_, VK_IMAGE_ASPECT_DEPTH_BIT);
 }
 
+void VulkanRenderer::createShadowResources()
+{
+    VkImageCreateInfo imageInfo {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = shadowFormat_,
+        .extent = {
+            .width = config::shadowMapSize,
+            .height = config::shadowMapSize,
+            .depth = 1,
+        },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+
+    vkCheck(vkCreateImage(device_, &imageInfo, nullptr, &shadowImage_.image), "vkCreateImage shadow map failed");
+
+    VkMemoryRequirements memoryRequirements {};
+    vkGetImageMemoryRequirements(device_, shadowImage_.image, &memoryRequirements);
+
+    VkMemoryAllocateInfo allocateInfo {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memoryRequirements.size,
+        .memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
+    };
+
+    vkCheck(vkAllocateMemory(device_, &allocateInfo, nullptr, &shadowImage_.memory), "vkAllocateMemory shadow map failed");
+    vkCheck(vkBindImageMemory(device_, shadowImage_.image, shadowImage_.memory, 0), "vkBindImageMemory shadow map failed");
+    shadowImage_.view = createImageView(shadowImage_.image, shadowFormat_, VK_IMAGE_ASPECT_DEPTH_BIT);
+    shadowImageLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VkSamplerCreateInfo samplerInfo {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_NEAREST,
+        .minFilter = VK_FILTER_NEAREST,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .mipLodBias = 0.0f,
+        .anisotropyEnable = VK_FALSE,
+        .compareEnable = VK_FALSE,
+        .minLod = 0.0f,
+        .maxLod = 0.0f,
+        .borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE,
+    };
+    vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &shadowSampler_), "vkCreateSampler shadow map failed");
+}
+
+void VulkanRenderer::createDescriptorResources()
+{
+    VkDescriptorSetLayoutBinding shadowMapBinding {
+        .binding = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+    };
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = &shadowMapBinding,
+    };
+    vkCheck(vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &descriptorSetLayout_), "vkCreateDescriptorSetLayout failed");
+
+    VkDescriptorPoolSize poolSize {
+        .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = 1,
+    };
+    VkDescriptorPoolCreateInfo poolInfo {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .maxSets = 1,
+        .poolSizeCount = 1,
+        .pPoolSizes = &poolSize,
+    };
+    vkCheck(vkCreateDescriptorPool(device_, &poolInfo, nullptr, &descriptorPool_), "vkCreateDescriptorPool failed");
+
+    VkDescriptorSetAllocateInfo allocateInfo {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = descriptorPool_,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &descriptorSetLayout_,
+    };
+    vkCheck(vkAllocateDescriptorSets(device_, &allocateInfo, &descriptorSet_), "vkAllocateDescriptorSets failed");
+
+    VkDescriptorImageInfo imageInfo {
+        .sampler = shadowSampler_,
+        .imageView = shadowImage_.view,
+        .imageLayout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+    };
+    VkWriteDescriptorSet write {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = descriptorSet_,
+        .dstBinding = 0,
+        .dstArrayElement = 0,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImageInfo = &imageInfo,
+    };
+    vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+}
+
 void VulkanRenderer::createCommandPool()
 {
     VkCommandPoolCreateInfo createInfo {
@@ -700,6 +815,8 @@ void VulkanRenderer::createPipeline()
 
     VkPipelineLayoutCreateInfo layoutInfo {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = descriptorSetLayout_ ? 1U : 0U,
+        .pSetLayouts = descriptorSetLayout_ ? &descriptorSetLayout_ : nullptr,
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &pushConstantRange,
     };
@@ -707,9 +824,12 @@ void VulkanRenderer::createPipeline()
 
     VkShaderModule vertexShader = createShaderModule(assetRoot_ / "shaders/triangle.vert.glsl.spv");
     VkShaderModule fragmentShader = createShaderModule(assetRoot_ / "shaders/triangle.frag.glsl.spv");
+    VkShaderModule shadowVertexShader = createShaderModule(assetRoot_ / "shaders/shadow.vert.glsl.spv");
 
     pipelineLibraries_ = createGraphicsPipelineLibraries(vertexShader, fragmentShader);
+    createShadowPipeline(shadowVertexShader);
 
+    vkDestroyShaderModule(device_, shadowVertexShader, nullptr);
     vkDestroyShaderModule(device_, fragmentShader, nullptr);
     vkDestroyShaderModule(device_, vertexShader, nullptr);
 
@@ -730,8 +850,89 @@ void VulkanRenderer::createPipeline()
     ++pipelineRebuilds_;
 }
 
+void VulkanRenderer::createShadowPipeline(VkShaderModule shadowVertexShader)
+{
+    VkPipelineShaderStageCreateInfo vertexStage {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage = VK_SHADER_STAGE_VERTEX_BIT,
+        .module = shadowVertexShader,
+        .pName = "main",
+    };
+
+    VkPipelineVertexInputStateCreateInfo vertexInput {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    };
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+    };
+    VkPipelineViewportStateCreateInfo viewportState {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .scissorCount = 1,
+    };
+    VkPipelineRasterizationStateCreateInfo rasterizer {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .cullMode = VK_CULL_MODE_NONE,
+        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+        .lineWidth = 1.0f,
+    };
+    VkPipelineMultisampleStateCreateInfo multisampling {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    };
+    VkPipelineDepthStencilStateCreateInfo depthStencil {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable = VK_TRUE,
+        .depthWriteEnable = VK_TRUE,
+        .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .depthBoundsTestEnable = VK_FALSE,
+        .stencilTestEnable = VK_FALSE,
+    };
+    VkDynamicState dynamicStates[] {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR,
+        VK_DYNAMIC_STATE_CULL_MODE,
+        VK_DYNAMIC_STATE_FRONT_FACE,
+        VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
+        VK_DYNAMIC_STATE_LINE_WIDTH,
+        VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE,
+        VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
+        VK_DYNAMIC_STATE_DEPTH_COMPARE_OP,
+    };
+    VkPipelineDynamicStateCreateInfo dynamicState {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = static_cast<uint32_t>(std::size(dynamicStates)),
+        .pDynamicStates = dynamicStates,
+    };
+    VkPipelineRenderingCreateInfo rendering {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+        .depthAttachmentFormat = shadowFormat_,
+    };
+    VkGraphicsPipelineCreateInfo createInfo {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .pNext = &rendering,
+        .stageCount = 1,
+        .pStages = &vertexStage,
+        .pVertexInputState = &vertexInput,
+        .pInputAssemblyState = &inputAssembly,
+        .pViewportState = &viewportState,
+        .pRasterizationState = &rasterizer,
+        .pMultisampleState = &multisampling,
+        .pDepthStencilState = &depthStencil,
+        .pDynamicState = &dynamicState,
+        .layout = pipelineLayout_,
+    };
+    vkCheck(vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &createInfo, nullptr, &shadowPipeline_), "vkCreateGraphicsPipelines shadow pipeline failed");
+}
+
 void VulkanRenderer::destroyPipeline()
 {
+    if (shadowPipeline_) {
+        vkDestroyPipeline(device_, shadowPipeline_, nullptr);
+        shadowPipeline_ = VK_NULL_HANDLE;
+    }
     if (pipeline_) {
         vkDestroyPipeline(device_, pipeline_, nullptr);
         pipeline_ = VK_NULL_HANDLE;
@@ -905,6 +1106,40 @@ void VulkanRenderer::cleanupDepthResources()
     }
 }
 
+void VulkanRenderer::destroyDescriptorResources()
+{
+    if (descriptorPool_) {
+        vkDestroyDescriptorPool(device_, descriptorPool_, nullptr);
+        descriptorPool_ = VK_NULL_HANDLE;
+        descriptorSet_ = VK_NULL_HANDLE;
+    }
+    if (descriptorSetLayout_) {
+        vkDestroyDescriptorSetLayout(device_, descriptorSetLayout_, nullptr);
+        descriptorSetLayout_ = VK_NULL_HANDLE;
+    }
+}
+
+void VulkanRenderer::cleanupShadowResources()
+{
+    shadowImageLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    if (shadowSampler_) {
+        vkDestroySampler(device_, shadowSampler_, nullptr);
+        shadowSampler_ = VK_NULL_HANDLE;
+    }
+    if (shadowImage_.view) {
+        vkDestroyImageView(device_, shadowImage_.view, nullptr);
+        shadowImage_.view = VK_NULL_HANDLE;
+    }
+    if (shadowImage_.image) {
+        vkDestroyImage(device_, shadowImage_.image, nullptr);
+        shadowImage_.image = VK_NULL_HANDLE;
+    }
+    if (shadowImage_.memory) {
+        vkFreeMemory(device_, shadowImage_.memory, nullptr);
+        shadowImage_.memory = VK_NULL_HANDLE;
+    }
+}
+
 void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData, const UiDrawData& uiDrawData)
 {
     pendingStats_ = {
@@ -1057,12 +1292,171 @@ void VulkanRenderer::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t
     lastStats_ = pendingStats_;
 }
 
+void VulkanRenderer::recordShadowMapRendering(VkCommandBuffer commandBuffer, const RenderFrameData& frameData, const ShadowRenderLayout& layout)
+{
+    VkImageMemoryBarrier2 shadowToAttachment {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = shadowImageLayout_ == VK_IMAGE_LAYOUT_UNDEFINED ? VK_PIPELINE_STAGE_2_NONE : VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .srcAccessMask = shadowImageLayout_ == VK_IMAGE_LAYOUT_UNDEFINED ? VK_ACCESS_2_NONE : VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+        .dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        .oldLayout = shadowImageLayout_,
+        .newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = shadowImage_.image,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+    VkDependencyInfo shadowToAttachmentDependency {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &shadowToAttachment,
+    };
+    vkCmdPipelineBarrier2(commandBuffer, &shadowToAttachmentDependency);
+    shadowImageLayout_ = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    ++pendingStats_.imageBarriers;
+
+    VkClearValue shadowClear {
+        .depthStencil = { .depth = 1.0f, .stencil = 0 },
+    };
+    VkRenderingAttachmentInfo depthAttachment {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView = shadowImage_.view,
+        .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue = shadowClear,
+    };
+    VkRenderingInfo renderingInfo {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+        .renderArea = { .offset = { 0, 0 }, .extent = { config::shadowMapSize, config::shadowMapSize } },
+        .layerCount = 1,
+        .pDepthAttachment = &depthAttachment,
+    };
+
+    vkCmdBeginRendering(commandBuffer, &renderingInfo);
+    ++pendingStats_.renderPasses;
+
+    VkViewport viewport {
+        .x = 0.0f,
+        .y = 0.0f,
+        .width = static_cast<float>(config::shadowMapSize),
+        .height = static_cast<float>(config::shadowMapSize),
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f,
+    };
+    VkRect2D scissor {
+        .offset = { 0, 0 },
+        .extent = { config::shadowMapSize, config::shadowMapSize },
+    };
+
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline_);
+    ++pendingStats_.pipelineBinds;
+    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+    vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
+    vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    vkCmdSetPrimitiveTopology(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    vkCmdSetLineWidth(commandBuffer, 1.0f);
+    vkCmdSetDepthTestEnable(commandBuffer, VK_TRUE);
+    vkCmdSetDepthWriteEnable(commandBuffer, VK_TRUE);
+    vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_LESS_OR_EQUAL);
+
+    auto drawTileFaces = [&](const RenderFrameData::Tile& tile) {
+        const float x = tile.position.x;
+        const float y = tile.position.y;
+        const float width = tile.size.x;
+        const float depth = tile.size.y;
+        const float base = tile.baseElevation;
+        const float height = std::max(tile.height, 0.0f);
+        const Vec3 a { x, y, base };
+        const Vec3 b { x + width, y, base };
+        const Vec3 c { x + width, y + depth, base };
+        const Vec3 d { x, y + depth, base };
+
+        if (height <= 0.0f) {
+            drawShadowFace(commandBuffer, {
+                projectShadowPoint(layout, a),
+                projectShadowPoint(layout, b),
+                projectShadowPoint(layout, c),
+                projectShadowPoint(layout, d),
+            });
+            return;
+        }
+
+        const float top = base + height;
+        const Vec3 e { x, y, top };
+        const Vec3 f { x + width, y, top };
+        const Vec3 g { x + width, y + depth, top };
+        const Vec3 h { x, y + depth, top };
+        drawShadowFace(commandBuffer, { projectShadowPoint(layout, a), projectShadowPoint(layout, b), projectShadowPoint(layout, f), projectShadowPoint(layout, e) });
+        drawShadowFace(commandBuffer, { projectShadowPoint(layout, b), projectShadowPoint(layout, c), projectShadowPoint(layout, g), projectShadowPoint(layout, f) });
+        drawShadowFace(commandBuffer, { projectShadowPoint(layout, c), projectShadowPoint(layout, d), projectShadowPoint(layout, h), projectShadowPoint(layout, g) });
+        drawShadowFace(commandBuffer, { projectShadowPoint(layout, d), projectShadowPoint(layout, a), projectShadowPoint(layout, e), projectShadowPoint(layout, h) });
+        drawShadowFace(commandBuffer, { projectShadowPoint(layout, e), projectShadowPoint(layout, f), projectShadowPoint(layout, g), projectShadowPoint(layout, h) });
+    };
+
+    for (const RenderFrameData::Tile& tile : frameData.tiles) {
+        drawTileFaces(tile);
+    }
+    for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
+        drawShadowFace(commandBuffer, {
+            projectShadowPoint(layout, face.vertices[0]),
+            projectShadowPoint(layout, face.vertices[1]),
+            projectShadowPoint(layout, face.vertices[2]),
+            projectShadowPoint(layout, face.vertices[3]),
+        });
+    }
+
+    vkCmdEndRendering(commandBuffer);
+
+    VkImageMemoryBarrier2 shadowToRead {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+        .srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = shadowImage_.image,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+    VkDependencyInfo shadowToReadDependency {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &shadowToRead,
+    };
+    vkCmdPipelineBarrier2(commandBuffer, &shadowToReadDependency);
+    shadowImageLayout_ = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL;
+    ++pendingStats_.imageBarriers;
+}
+
 void VulkanRenderer::recordGameRendering(
     VkCommandBuffer commandBuffer,
     VkImageView colorView,
     VkImageView resolveView,
     const RenderFrameData& frameData)
 {
+    ShadowRenderLayout shadowLayout {};
+    if (shadowImage_.view && shadowPipeline_) {
+        shadowLayout = calculateShadowRenderLayout(frameData);
+        recordShadowMapRendering(commandBuffer, frameData, shadowLayout);
+    }
+
     VkClearValue clearValue {
         .color = { { 0.03f, 0.04f, 0.06f, 1.0f } },
     };
@@ -1118,6 +1512,9 @@ void VulkanRenderer::recordGameRendering(
 
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
     ++pendingStats_.pipelineBinds;
+    if (descriptorSet_) {
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr);
+    }
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
     vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
@@ -1129,7 +1526,7 @@ void VulkanRenderer::recordGameRendering(
     vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_LESS_OR_EQUAL);
 
     if (frameData.viewMode == RenderViewMode::Isometric3D) {
-        drawIsoFrame(commandBuffer, calculateIsoRenderLayout(frameData), frameData, frameData.lighting);
+        drawIsoFrame(commandBuffer, calculateIsoRenderLayout(frameData), shadowLayout, frameData, frameData.lighting);
     } else {
         const TileRenderLayout tileLayout = calculateTileRenderLayout(frameData);
         for (const auto& tile : frameData.tiles) {
@@ -1180,6 +1577,9 @@ void VulkanRenderer::recordUiRendering(VkCommandBuffer commandBuffer, VkImageVie
 
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
     ++pendingStats_.pipelineBinds;
+    if (descriptorSet_) {
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr);
+    }
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
     vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
@@ -1333,6 +1733,88 @@ VulkanRenderer::IsoRenderLayout VulkanRenderer::calculateIsoRenderLayout(const R
     return layout;
 }
 
+VulkanRenderer::ShadowRenderLayout VulkanRenderer::calculateShadowRenderLayout(const RenderFrameData& frameData) const
+{
+    const Vec3 lightDirection = normalize(frameData.lighting.sun.direction);
+    const Vec3 lightForward = normalize(multiply(lightDirection.x == 0.0f && lightDirection.y == 0.0f && lightDirection.z == 0.0f
+            ? Vec3 { 0.0f, 0.0f, 1.0f }
+            : lightDirection,
+        -1.0f));
+    const Vec3 referenceUp = std::abs(lightForward.z) > 0.9f
+        ? Vec3 { 0.0f, 1.0f, 0.0f }
+        : Vec3 { 0.0f, 0.0f, 1.0f };
+    const Vec3 lightRight = normalize(cross(referenceUp, lightForward));
+    const Vec3 lightUp = normalize(cross(lightForward, lightRight));
+
+    Vec3 minPoint {
+        std::numeric_limits<float>::max(),
+        std::numeric_limits<float>::max(),
+        std::numeric_limits<float>::max(),
+    };
+    Vec3 maxPoint {
+        std::numeric_limits<float>::lowest(),
+        std::numeric_limits<float>::lowest(),
+        std::numeric_limits<float>::lowest(),
+    };
+
+    auto includePoint = [&](Vec3 worldPoint) {
+        const Vec3 lightPoint {
+            dot(worldPoint, lightRight),
+            dot(worldPoint, lightUp),
+            dot(worldPoint, lightForward),
+        };
+        minPoint.x = std::min(minPoint.x, lightPoint.x);
+        minPoint.y = std::min(minPoint.y, lightPoint.y);
+        minPoint.z = std::min(minPoint.z, lightPoint.z);
+        maxPoint.x = std::max(maxPoint.x, lightPoint.x);
+        maxPoint.y = std::max(maxPoint.y, lightPoint.y);
+        maxPoint.z = std::max(maxPoint.z, lightPoint.z);
+    };
+
+    for (const RenderFrameData::Tile& tile : frameData.tiles) {
+        const float x = tile.position.x;
+        const float y = tile.position.y;
+        const float width = tile.size.x;
+        const float height = tile.size.y;
+        const float base = tile.baseElevation;
+        const float top = base + std::max(tile.height, 0.0f);
+        includePoint({ x, y, base });
+        includePoint({ x + width, y, base });
+        includePoint({ x + width, y + height, base });
+        includePoint({ x, y + height, base });
+        includePoint({ x, y, top });
+        includePoint({ x + width, y, top });
+        includePoint({ x + width, y + height, top });
+        includePoint({ x, y + height, top });
+    }
+    for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
+        for (Vec3 vertex : face.vertices) {
+            includePoint(vertex);
+        }
+    }
+
+    if (frameData.tiles.empty() && frameData.isoFaces.empty()) {
+        minPoint = { -1.0f, -1.0f, -1.0f };
+        maxPoint = { 1.0f, 1.0f, 1.0f };
+    }
+
+    const float padding = config::shadowMapPadding;
+    const float centerX = (minPoint.x + maxPoint.x) * 0.5f;
+    const float centerY = (minPoint.y + maxPoint.y) * 0.5f;
+    const float centerZ = (minPoint.z + maxPoint.z) * 0.5f;
+
+    return {
+        .lightRight = lightRight,
+        .lightUp = lightUp,
+        .lightForward = lightForward,
+        .center = add(add(multiply(lightRight, centerX), multiply(lightUp, centerY)), multiply(lightForward, centerZ)),
+        .halfWidth = std::max((maxPoint.x - minPoint.x) * 0.5f + padding, 0.5f),
+        .halfHeight = std::max((maxPoint.y - minPoint.y) * 0.5f + padding, 0.5f),
+        .nearestDepth = minPoint.z - padding,
+        .farthestDepth = std::max(maxPoint.z + padding, minPoint.z + 0.001f),
+    };
+}
+
 void VulkanRenderer::drawTile(
     VkCommandBuffer commandBuffer,
     const TileRenderLayout& layout,
@@ -1353,12 +1835,13 @@ void VulkanRenderer::drawTile(
         Vec3 { origin.x + size.x, origin.y, 0.0f },
         Vec3 { origin.x + size.x, origin.y + size.y, 0.0f },
         Vec3 { origin.x, origin.y + size.y, 0.0f },
-    }, tile.color, {}, lighting);
+    }, {}, tile.color, {}, lighting);
 }
 
 void VulkanRenderer::drawIsoFrame(
     VkCommandBuffer commandBuffer,
     const IsoRenderLayout& layout,
+    const ShadowRenderLayout& shadowLayout,
     const RenderFrameData& frameData,
     const RenderFrameData::Lighting& lighting) const
 {
@@ -1390,6 +1873,12 @@ void VulkanRenderer::drawIsoFrame(
                 projectIsoPoint(layout, vertices[2]),
                 projectIsoPoint(layout, vertices[3]),
             },
+            .shadowVertices = {
+                projectShadowPoint(shadowLayout, vertices[0]),
+                projectShadowPoint(shadowLayout, vertices[1]),
+                projectShadowPoint(shadowLayout, vertices[2]),
+                projectShadowPoint(shadowLayout, vertices[3]),
+            },
             .normal = normal,
             .color = color,
             .depth = faceDepth(vertices),
@@ -1403,6 +1892,12 @@ void VulkanRenderer::drawIsoFrame(
                 projectIsoPoint(layout, vertices[1]),
                 projectIsoPoint(layout, vertices[2]),
                 projectIsoPoint(layout, vertices[3]),
+            },
+            .shadowVertices = {
+                projectShadowPoint(shadowLayout, vertices[0]),
+                projectShadowPoint(shadowLayout, vertices[1]),
+                projectShadowPoint(shadowLayout, vertices[2]),
+                projectShadowPoint(shadowLayout, vertices[3]),
             },
             .normal = normal,
             .color = color,
@@ -1446,13 +1941,14 @@ void VulkanRenderer::drawIsoFrame(
     });
 
     for (const IsoFace& face : faces) {
-        drawFace(commandBuffer, face.vertices, face.color, face.normal, lighting);
+        drawFace(commandBuffer, face.vertices, face.shadowVertices, face.color, face.normal, lighting);
     }
 }
 
 void VulkanRenderer::drawFace(
     VkCommandBuffer commandBuffer,
     const std::array<Vec3, 4>& vertices,
+    const std::array<Vec4, 4>& shadowVertices,
     Vec4 color,
     Vec3 normal,
     const RenderFrameData::Lighting& lighting) const
@@ -1480,10 +1976,33 @@ void VulkanRenderer::drawFace(
             Vec4 { vertices[2].x, vertices[2].y, vertices[2].z, 1.0f },
             Vec4 { vertices[3].x, vertices[3].y, vertices[3].z, 1.0f },
         },
+        .shadowVertices = shadowVertices,
         .color = color,
         .normalAndAmbientRed = { normal.x, normal.y, normal.z, ambientRadiance.x },
         .sunDirectionAndAmbientGreen = { lighting.sun.direction.x, lighting.sun.direction.y, lighting.sun.direction.z, ambientRadiance.y },
         .sunRadianceAndAmbientBlue = { sunRadiance.x, sunRadiance.y, sunRadiance.z, ambientRadiance.z },
+        .shadowOptions = {
+            lighting.shadows.enabled ? 1.0f : 0.0f,
+            std::clamp(lighting.shadows.opacity, 0.0f, 1.0f),
+            std::max(lighting.shadows.bias, 0.0f),
+            0.0f,
+        },
+    };
+
+    vkCmdPushConstants(
+        commandBuffer,
+        pipelineLayout_,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        0,
+        sizeof(TilePushConstants),
+        &pushConstants);
+    vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+}
+
+void VulkanRenderer::drawShadowFace(VkCommandBuffer commandBuffer, const std::array<Vec4, 4>& shadowVertices) const
+{
+    const TilePushConstants pushConstants {
+        .shadowVertices = shadowVertices,
     };
 
     vkCmdPushConstants(
@@ -1512,7 +2031,7 @@ void VulkanRenderer::drawUiRect(
         Vec3 { right, top, 0.0f },
         Vec3 { right, bottom, 0.0f },
         Vec3 { left, bottom, 0.0f },
-    }, command.color, {}, lighting);
+    }, {}, command.color, {}, lighting);
 }
 
 Vec3 VulkanRenderer::projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) const
@@ -1535,6 +2054,17 @@ Vec3 VulkanRenderer::projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) 
         (projected.y - layout.projectedCenter.y) * layout.fitScale,
         normalizedDepth,
     };
+}
+
+Vec4 VulkanRenderer::projectShadowPoint(const ShadowRenderLayout& layout, Vec3 point) const
+{
+    const Vec3 relative = subtract(point, layout.center);
+    const float x = dot(relative, layout.lightRight) / std::max(layout.halfWidth, 0.001f);
+    const float y = dot(relative, layout.lightUp) / std::max(layout.halfHeight, 0.001f);
+    const float depth = dot(point, layout.lightForward);
+    const float depthRange = std::max(layout.farthestDepth - layout.nearestDepth, 0.001f);
+    const float z = std::clamp((depth - layout.nearestDepth) / depthRange, 0.0f, 1.0f);
+    return { x, y, z, 1.0f };
 }
 
 Vec2 VulkanRenderer::pixelSizeToClipSpace(float pixelSize) const
@@ -1582,6 +2112,9 @@ bool VulkanRenderer::isDeviceSuitable(VkPhysicalDevice device) const
     vkGetPhysicalDeviceProperties(device, &properties);
     if (VK_API_VERSION_MAJOR(properties.apiVersion) < 1 ||
         (VK_API_VERSION_MAJOR(properties.apiVersion) == 1 && VK_API_VERSION_MINOR(properties.apiVersion) < 4)) {
+        return false;
+    }
+    if (properties.limits.maxPushConstantsSize < sizeof(TilePushConstants)) {
         return false;
     }
 

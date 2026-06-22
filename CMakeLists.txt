@@ -51,6 +51,7 @@ set(LEVEL_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/levels")
 set(SHADER_SOURCES
     "${SHADER_SOURCE_DIR}/triangle.vert.glsl"
     "${SHADER_SOURCE_DIR}/triangle.frag.glsl"
+    "${SHADER_SOURCE_DIR}/shadow.vert.glsl"
 )
 
 set(SHADER_OUTPUTS)

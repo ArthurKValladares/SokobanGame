@@ -2,6 +2,8 @@
 
 #include "engine/Math.hpp"
 
+#include <cstdint>
+
 namespace sokoban::config {
 
 inline constexpr float playerMoveDurationSeconds = 0.15f;
@@ -16,5 +18,10 @@ inline constexpr Vec3 sunColor { 1.0f, 0.96f, 0.86f };
 inline constexpr float sunIntensity = 1.25f;
 inline constexpr Vec3 ambientLightColor { 0.55f, 0.62f, 0.70f };
 inline constexpr float ambientLightIntensity = 0.28f;
+inline constexpr bool shadowsEnabled = true;
+inline constexpr float shadowOpacity = 0.32f;
+inline constexpr float shadowBias = 0.004f;
+inline constexpr float shadowMapPadding = 1.0f;
+inline constexpr uint32_t shadowMapSize = 2048;
 
 } // namespace sokoban::config

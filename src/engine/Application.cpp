@@ -484,6 +484,12 @@ void Application::drawDebugUi()
         }
 
         ImGui::DragFloat("Ambient Intensity", &ambientLightIntensity_, 0.01f, 0.0f, 2.0f, "%.2f");
+
+        ImGui::Checkbox("Shadows", &shadowsEnabled_);
+        ImGui::BeginDisabled(!shadowsEnabled_);
+        ImGui::DragFloat("Shadow Opacity", &shadowOpacity_, 0.01f, 0.0f, 0.85f, "%.2f");
+        ImGui::DragFloat("Shadow Bias", &shadowBias_, 0.0005f, 0.0f, 0.05f, "%.4f");
+        ImGui::EndDisabled();
     }
 
     if (ImGui::CollapsingHeader("Rendering Stats")) {
@@ -1341,6 +1347,11 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             .color = ambientLightColor_,
             .intensity = ambientLightIntensity_,
         },
+        .shadows = {
+            .enabled = shadowsEnabled_,
+            .opacity = shadowOpacity_,
+            .bias = shadowBias_,
+        },
     };
     frame.levelWidth = level_.width();
     frame.levelHeight = level_.height();
@@ -1407,6 +1418,11 @@ RenderFrameData Application::buildEditorRenderFrame() const
         .ambient = {
             .color = ambientLightColor_,
             .intensity = ambientLightIntensity_,
+        },
+        .shadows = {
+            .enabled = shadowsEnabled_,
+            .opacity = shadowOpacity_,
+            .bias = shadowBias_,
         },
     };
     frame.levelWidth = levelEditor_.documentWidth();

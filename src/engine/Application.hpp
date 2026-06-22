@@ -142,6 +142,9 @@ private:
     float sunIntensity_ = config::sunIntensity;
     Vec3 ambientLightColor_ { config::ambientLightColor };
     float ambientLightIntensity_ = config::ambientLightIntensity;
+    bool shadowsEnabled_ = config::shadowsEnabled;
+    float shadowOpacity_ = config::shadowOpacity;
+    float shadowBias_ = config::shadowBias;
     std::vector<Rock> rocks_;
     std::deque<MoveCommand> pendingCommands_;
     std::vector<ActionRecord> moveHistory_;

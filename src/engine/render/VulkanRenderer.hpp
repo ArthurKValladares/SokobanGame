@@ -41,8 +41,15 @@ struct RenderFrameData {
     };
 
     struct Lighting {
+        struct Shadows {
+            bool enabled = config::shadowsEnabled;
+            float opacity = config::shadowOpacity;
+            float bias = config::shadowBias;
+        };
+
         DirectionalLight sun {};
         AmbientLight ambient {};
+        Shadows shadows {};
     };
 
     struct Tile {
@@ -159,6 +166,17 @@ private:
         float farthestDepth = 1.0f;
     };
 
+    struct ShadowRenderLayout {
+        Vec3 lightRight {};
+        Vec3 lightUp {};
+        Vec3 lightForward {};
+        Vec3 center {};
+        float halfWidth = 1.0f;
+        float halfHeight = 1.0f;
+        float nearestDepth = 0.0f;
+        float farthestDepth = 1.0f;
+    };
+
     void createInstance();
     void createSurface();
     void pickPhysicalDevice();
@@ -167,9 +185,14 @@ private:
     void createImageViews();
     void createMsaaColorResources();
     void createDepthResources();
+    void createShadowResources();
+    void createDescriptorResources();
     void createCommandPool();
     void createPipeline();
+    void createShadowPipeline(VkShaderModule shadowVertexShader);
     void destroyPipeline();
+    void destroyDescriptorResources();
+    void cleanupShadowResources();
     void createFrameResources();
     void initializeDebugUi();
     void shutdownDebugUi();
@@ -180,21 +203,26 @@ private:
     void cleanupDepthResources();
 
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData, const UiDrawData& uiDrawData);
+    void recordShadowMapRendering(VkCommandBuffer commandBuffer, const RenderFrameData& frameData, const ShadowRenderLayout& layout);
     void recordGameRendering(VkCommandBuffer commandBuffer, VkImageView colorView, VkImageView resolveView, const RenderFrameData& frameData);
     void recordUiRendering(VkCommandBuffer commandBuffer, VkImageView colorView, const UiDrawData& uiDrawData);
     void recordDebugUiRendering(VkCommandBuffer commandBuffer, VkImageView colorView) const;
     [[nodiscard]] TileRenderLayout calculateTileRenderLayout(const RenderFrameData& frameData) const;
     [[nodiscard]] IsoRenderLayout calculateIsoRenderLayout(const RenderFrameData& frameData) const;
+    [[nodiscard]] ShadowRenderLayout calculateShadowRenderLayout(const RenderFrameData& frameData) const;
     void drawTile(VkCommandBuffer commandBuffer, const TileRenderLayout& layout, const RenderFrameData::Tile& tile, const RenderFrameData::Lighting& lighting) const;
-    void drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const RenderFrameData& frameData, const RenderFrameData::Lighting& lighting) const;
+    void drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const ShadowRenderLayout& shadowLayout, const RenderFrameData& frameData, const RenderFrameData::Lighting& lighting) const;
     void drawFace(
         VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
+        const std::array<Vec4, 4>& shadowVertices,
         Vec4 color,
         Vec3 normal,
         const RenderFrameData::Lighting& lighting) const;
+    void drawShadowFace(VkCommandBuffer commandBuffer, const std::array<Vec4, 4>& shadowVertices) const;
     void drawUiRect(VkCommandBuffer commandBuffer, const UiDrawCommand& command, Vec2 viewportSize, const RenderFrameData::Lighting& lighting) const;
     [[nodiscard]] Vec3 projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) const;
+    [[nodiscard]] Vec4 projectShadowPoint(const ShadowRenderLayout& layout, Vec3 point) const;
     [[nodiscard]] Vec2 pixelSizeToClipSpace(float pixelSize) const;
 
     [[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
@@ -225,15 +253,23 @@ private:
     VkSwapchainKHR swapchain_ = VK_NULL_HANDLE;
     VkFormat swapchainFormat_ = VK_FORMAT_UNDEFINED;
     VkFormat depthFormat_ = VK_FORMAT_D32_SFLOAT;
+    VkFormat shadowFormat_ = VK_FORMAT_D32_SFLOAT;
     VkExtent2D swapchainExtent_ {};
     std::vector<SwapchainImage> swapchainImages_;
     OwnedImage msaaColorImage_ {};
     OwnedImage depthImage_ {};
+    OwnedImage shadowImage_ {};
+    VkImageLayout shadowImageLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkSampler shadowSampler_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout descriptorSetLayout_ = VK_NULL_HANDLE;
+    VkDescriptorPool descriptorPool_ = VK_NULL_HANDLE;
+    VkDescriptorSet descriptorSet_ = VK_NULL_HANDLE;
 
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
     std::array<VkPipeline, 2> pipelineLibraries_ {};
     VkPipeline pipeline_ = VK_NULL_HANDLE;
+    VkPipeline shadowPipeline_ = VK_NULL_HANDLE;
 
     static constexpr uint32_t maxFramesInFlight_ = 2;
     std::array<FrameResources, maxFramesInFlight_> frames_ {};

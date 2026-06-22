@@ -1,7 +1,5 @@
 #version 460
 
-layout(location = 0) out vec4 outShadowPosition;
-
 layout(push_constant) uniform PushConstants
 {
     vec4 vertices[4];
@@ -17,7 +15,5 @@ const int indices[6] = int[6](0, 1, 2, 0, 2, 3);
 
 void main()
 {
-    const int index = indices[gl_VertexIndex];
-    gl_Position = pc.vertices[index];
-    outShadowPosition = pc.shadowVertices[index];
+    gl_Position = pc.shadowVertices[indices[gl_VertexIndex]];
 }
