@@ -90,7 +90,6 @@ private:
     void drawDeletedLevelsTab();
     void drawDeleteLevelConfirmation();
     void drawPermanentDeleteConfirmation();
-    void drawGrid();
     void newDocument(int width, int height, bool recordHistory = true);
     void resizeDocument(int width, int height, bool recordHistory = true);
     void loadDocument(const std::filesystem::path& path, bool recordHistory = true);

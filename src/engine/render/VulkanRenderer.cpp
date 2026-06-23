@@ -112,6 +112,36 @@ Vec3 normalize(Vec3 value)
     return multiply(value, 1.0f / length);
 }
 
+float cross2D(Vec2 left, Vec2 right)
+{
+    return left.x * right.y - left.y * right.x;
+}
+
+Vec2 subtract(Vec2 left, Vec2 right)
+{
+    return {
+        left.x - right.x,
+        left.y - right.y,
+    };
+}
+
+bool pointInTriangle(Vec2 point, Vec2 a, Vec2 b, Vec2 c)
+{
+    constexpr float epsilon = 0.001f;
+    const float ab = cross2D(subtract(b, a), subtract(point, a));
+    const float bc = cross2D(subtract(c, b), subtract(point, b));
+    const float ca = cross2D(subtract(a, c), subtract(point, c));
+    const bool hasNegative = ab < -epsilon || bc < -epsilon || ca < -epsilon;
+    const bool hasPositive = ab > epsilon || bc > epsilon || ca > epsilon;
+    return !(hasNegative && hasPositive);
+}
+
+bool pointInQuad(Vec2 point, const std::array<Vec2, 4>& quad)
+{
+    return pointInTriangle(point, quad[0], quad[1], quad[2]) ||
+        pointInTriangle(point, quad[0], quad[2], quad[3]);
+}
+
 std::vector<const char*> validationLayers()
 {
 #if SOKOBAN_ENABLE_VALIDATION
@@ -327,6 +357,101 @@ bool VulkanRenderer::wantsMouseCapture() const
 #else
     return false;
 #endif
+}
+
+std::optional<GridPosition> VulkanRenderer::pickIsoGridCell(const RenderFrameData& frameData, Vec2 pixelPosition) const
+{
+    if (frameData.viewMode != RenderViewMode::Isometric3D ||
+        frameData.levelWidth == 0 ||
+        frameData.levelHeight == 0 ||
+        swapchainExtent_.width == 0 ||
+        swapchainExtent_.height == 0) {
+        return std::nullopt;
+    }
+
+    const IsoRenderLayout layout = calculateIsoRenderLayout(frameData);
+
+    auto clipToPixel = [this](Vec3 clip) {
+        return Vec2 {
+            (clip.x + 1.0f) * 0.5f * static_cast<float>(swapchainExtent_.width),
+            (1.0f - clip.y) * 0.5f * static_cast<float>(swapchainExtent_.height),
+        };
+    };
+
+    auto faceVisible = [&](const std::array<Vec3, 4>& vertices, Vec3 normal) {
+        const Vec3 center = multiply(add(add(vertices[0], vertices[1]), add(vertices[2], vertices[3])), 0.25f);
+        return dot(normal, subtract(layout.cameraPosition, center)) > 0.0f;
+    };
+
+    std::optional<GridPosition> picked;
+    float pickedDepth = std::numeric_limits<float>::max();
+
+    auto testFace = [&](const RenderFrameData::Tile& tile, const std::array<Vec3, 4>& vertices, Vec3 normal) {
+        if (!faceVisible(vertices, normal)) {
+            return;
+        }
+
+        std::array<Vec3, 4> clipVertices {
+            projectIsoPoint(layout, vertices[0]),
+            projectIsoPoint(layout, vertices[1]),
+            projectIsoPoint(layout, vertices[2]),
+            projectIsoPoint(layout, vertices[3]),
+        };
+        const std::array<Vec2, 4> pixelQuad {
+            clipToPixel(clipVertices[0]),
+            clipToPixel(clipVertices[1]),
+            clipToPixel(clipVertices[2]),
+            clipToPixel(clipVertices[3]),
+        };
+        if (!pointInQuad(pixelPosition, pixelQuad)) {
+            return;
+        }
+
+        const float depth = (clipVertices[0].z + clipVertices[1].z + clipVertices[2].z + clipVertices[3].z) * 0.25f;
+        if (depth >= pickedDepth) {
+            return;
+        }
+
+        const int x = static_cast<int>(std::floor(tile.position.x + 0.0001f));
+        const int y = static_cast<int>(std::floor(tile.position.y + 0.0001f));
+        if (x < 0 || y < 0 || x >= static_cast<int>(frameData.levelWidth) || y >= static_cast<int>(frameData.levelHeight)) {
+            return;
+        }
+
+        picked = GridPosition { x, y };
+        pickedDepth = depth;
+    };
+
+    for (const RenderFrameData::Tile& tile : frameData.tiles) {
+        const float x = tile.position.x;
+        const float y = tile.position.y;
+        const float width = tile.size.x;
+        const float depth = tile.size.y;
+        const float base = tile.baseElevation;
+        const float height = std::max(tile.height, 0.0f);
+        const Vec3 a { x, y, base };
+        const Vec3 b { x + width, y, base };
+        const Vec3 c { x + width, y + depth, base };
+        const Vec3 d { x, y + depth, base };
+
+        if (height <= 0.0f) {
+            testFace(tile, { a, b, c, d }, { 0.0f, 0.0f, 1.0f });
+            continue;
+        }
+
+        const float top = base + height;
+        const Vec3 e { x, y, top };
+        const Vec3 f { x + width, y, top };
+        const Vec3 g { x + width, y + depth, top };
+        const Vec3 h { x, y + depth, top };
+        testFace(tile, { a, b, f, e }, { 0.0f, -1.0f, 0.0f });
+        testFace(tile, { b, c, g, f }, { 1.0f, 0.0f, 0.0f });
+        testFace(tile, { c, d, h, g }, { 0.0f, 1.0f, 0.0f });
+        testFace(tile, { d, a, e, h }, { -1.0f, 0.0f, 0.0f });
+        testFace(tile, { e, f, g, h }, { 0.0f, 0.0f, 1.0f });
+    }
+
+    return picked;
 }
 
 void VulkanRenderer::waitIdle() const

@@ -17,15 +17,6 @@ namespace sokoban {
 namespace {
 
 #if SOKOBAN_ENABLE_DEBUG_UI
-std::string_view levelCharacterName(char character)
-{
-    if (const auto tile = charToTileType(character)) {
-        return tileTypeName(*tile);
-    }
-
-    return "Unknown";
-}
-
 void drawPaintButton(const TileTypeDefinition& definition, TileType& selectedTile)
 {
     ImGui::SameLine();
@@ -193,10 +184,6 @@ void LevelEditor::draw(const Callbacks& callbacks)
     drawTilePalette();
     ImGui::Separator();
     drawFileBrowser();
-    ImGui::Separator();
-    if (ImGui::CollapsingHeader("Text Grid")) {
-        drawGrid();
-    }
 
     if (!document_.status.empty()) {
         ImGui::Separator();
@@ -574,39 +561,6 @@ void LevelEditor::drawPermanentDeleteConfirmation()
 
         ImGui::EndPopup();
     }
-#endif
-}
-
-void LevelEditor::drawGrid()
-{
-#if SOKOBAN_ENABLE_DEBUG_UI
-    if (document_.rows.empty()) {
-        ImGui::TextUnformatted("No document loaded.");
-        return;
-    }
-
-    ImGui::Text("Grid %zu x %zu", document_.rows.front().size(), document_.rows.size());
-    if (ImGui::BeginChild("LevelGrid", ImVec2(0.0f, 360.0f), true, ImGuiWindowFlags_HorizontalScrollbar)) {
-        for (size_t y = 0; y < document_.rows.size(); ++y) {
-            for (size_t x = 0; x < document_.rows[y].size(); ++x) {
-                ImGui::PushID(static_cast<int>(y * document_.rows[y].size() + x));
-                char tile = document_.rows[y][x];
-                const std::string label(1, tile);
-                if (ImGui::Button(label.c_str(), ImVec2(26.0f, 24.0f))) {
-                    paintCell({ static_cast<int>(x), static_cast<int>(y) });
-                }
-                if (ImGui::IsItemHovered()) {
-                    const std::string_view name = levelCharacterName(tile);
-                    ImGui::SetTooltip("(%zu, %zu) %.*s", x, y, static_cast<int>(name.size()), name.data());
-                }
-                ImGui::PopID();
-                if (x + 1 < document_.rows[y].size()) {
-                    ImGui::SameLine(0.0f, 1.0f);
-                }
-            }
-        }
-    }
-    ImGui::EndChild();
 #endif
 }
 

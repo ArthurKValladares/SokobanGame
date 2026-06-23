@@ -1,6 +1,5 @@
 #include "engine/Application.hpp"
 
-#include "engine/BoardLayout.hpp"
 #include "engine/Config.hpp"
 #include "engine/DebugUi.hpp"
 
@@ -40,18 +39,6 @@ int gridDistance(GridPosition from, GridPosition to)
 float gridDistance(Vec2 from, Vec2 to)
 {
     return std::abs(to.x - from.x) + std::abs(to.y - from.y);
-}
-
-// Text level files store rows top-to-bottom, while the 2D editor renderer uses
-// grid coordinates with y=0 at the bottom of the board.
-int documentRowToRenderY(uint32_t row, uint32_t height)
-{
-    return static_cast<int>(height - 1U - row);
-}
-
-int renderYToDocumentRow(int y, uint32_t height)
-{
-    return static_cast<int>(height) - 1 - y;
 }
 
 float degreesToRadians(float degrees)
@@ -190,7 +177,7 @@ Vec4 shade(Vec4 color, float multiplier)
     };
 }
 
-void appendWaterEdgeFaces(RenderFrameData& frame, const Level& level, const auto& isUnfilledWaterAt)
+void appendWaterEdgeFaces(RenderFrameData& frame, uint32_t width, uint32_t height, const auto& isUnfilledWaterAt)
 {
     const float bottom = -config::waterDepthBelowGround;
     const float top = 0.0f;
@@ -205,11 +192,15 @@ void appendWaterEdgeFaces(RenderFrameData& frame, const Level& level, const auto
     };
 
     auto neighborIsOpenWater = [&](GridPosition position) {
-        return level.inBounds(position) && isUnfilledWaterAt(position);
+        return position.x >= 0 &&
+            position.y >= 0 &&
+            position.x < static_cast<int>(width) &&
+            position.y < static_cast<int>(height) &&
+            isUnfilledWaterAt(position);
     };
 
-    for (uint32_t y = 0; y < level.height(); ++y) {
-        for (uint32_t x = 0; x < level.width(); ++x) {
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
             const GridPosition position { static_cast<int>(x), static_cast<int>(y) };
             if (!isUnfilledWaterAt(position)) {
                 continue;
@@ -627,14 +618,11 @@ void Application::updateEditorPainting()
         mouse.x * pixelSize.x / windowSize.x,
         mouse.y * pixelSize.y / windowSize.y,
     };
-    const BoardPixelLayout layout = calculateBoardPixelLayout(pixelSize, documentWidth, documentHeight);
-    if (const std::optional<GridPosition> position = pixelToGridPosition(mousePixels, layout, documentWidth, documentHeight)) {
+    const RenderFrameData editorFrame = buildEditorRenderFrame();
+    if (const std::optional<GridPosition> position = renderer_.pickIsoGridCell(editorFrame, mousePixels)) {
         editorHoverCell_ = position;
         if (input_.mouseButtonDown(SDL_BUTTON_LEFT)) {
-            levelEditor_.paintCell({
-                position->x,
-                renderYToDocumentRow(position->y, documentHeight),
-            });
+            levelEditor_.paintCell(*position);
         }
     }
 #endif
@@ -1398,7 +1386,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
         return staticRenderCellFor(level_, x, y, endUnlocked, fallenTile);
     };
     appendStaticTiles(frame, level_, staticCellAt);
-    appendWaterEdgeFaces(frame, level_, [this](GridPosition position) {
+    appendWaterEdgeFaces(frame, level_.width(), level_.height(), [this](GridPosition position) {
         return isUnfilledWater(position);
     });
 
@@ -1441,7 +1429,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
 RenderFrameData Application::buildEditorRenderFrame() const
 {
     RenderFrameData frame;
-    frame.viewMode = RenderViewMode::TopDown2D;
+    frame.viewMode = RenderViewMode::Isometric3D;
     frame.lighting = {
         .sun = {
             .direction = sunDirectionFromSpherical(sunAzimuthDegrees_, sunTiltDegrees_),
@@ -1466,37 +1454,84 @@ RenderFrameData Application::buildEditorRenderFrame() const
     frame.levelHeight = levelEditor_.documentHeight();
 
     const std::vector<std::string>& rows = levelEditor_.documentRows();
-    frame.tiles.reserve(static_cast<size_t>(frame.levelWidth) * frame.levelHeight + 1);
+    frame.tiles.reserve(static_cast<size_t>(frame.levelWidth) * frame.levelHeight * 2 + 1);
     for (uint32_t rowIndex = 0; rowIndex < frame.levelHeight; ++rowIndex) {
         const std::string& row = rows[static_cast<size_t>(rowIndex)];
-        const int renderY = documentRowToRenderY(rowIndex, frame.levelHeight);
         for (uint32_t x = 0; x < frame.levelWidth; ++x) {
             const TileType tile = x < row.size()
-                ? charToTileType(row[static_cast<size_t>(x)]).value_or(TileType::Count)
+                ? charToTileType(row[static_cast<size_t>(x)]).value_or(TileType::Empty)
                 : TileType::Empty;
+            const TileType floorTile = tileTypeInitialFloor(tile);
+            const bool floorIsWater = floorTile == TileType::Water;
+            const bool floorIsWall = floorTile == TileType::Wall;
 
             frame.tiles.push_back({
-                .position = { static_cast<float>(x), static_cast<float>(renderY) },
-                .color = tileColor(tile),
+                .position = { static_cast<float>(x), static_cast<float>(rowIndex) },
+                .color = tileColor(floorTile),
+                .baseElevation = floorIsWater ? -config::waterDepthBelowGround : 0.0f,
+                .height = floorIsWall ? 1.0f : 0.0f,
+                .showGrid = floorTile != TileType::Player,
             });
+
+            if (tileTypeOccupiesLevelCell(tile)) {
+                Vec4 color = tileColor(tile);
+                if (tile == TileType::Ice) {
+                    color.w = config::iceTintAlpha;
+                }
+
+                frame.tiles.push_back({
+                    .position = { static_cast<float>(x), static_cast<float>(rowIndex) },
+                    .color = color,
+                    .height = 1.0f,
+                    .blurBehind = tile == TileType::Ice,
+                    .showGrid = tile != TileType::Player,
+                });
+            }
         }
     }
+
+    auto documentHasOpenWater = [&](GridPosition position) {
+        if (position.x < 0 || position.y < 0 ||
+            position.x >= static_cast<int>(frame.levelWidth) ||
+            position.y >= static_cast<int>(frame.levelHeight)) {
+            return false;
+        }
+
+        const std::string& row = rows[static_cast<size_t>(position.y)];
+        const TileType tile = position.x < static_cast<int>(row.size())
+            ? charToTileType(row[static_cast<size_t>(position.x)]).value_or(TileType::Empty)
+            : TileType::Empty;
+        return tileTypeInitialFloor(tile) == TileType::Water;
+    };
+    appendWaterEdgeFaces(frame, frame.levelWidth, frame.levelHeight, documentHasOpenWater);
 
     if (editorHoverCell_ &&
         editorHoverCell_->x >= 0 &&
         editorHoverCell_->y >= 0 &&
         editorHoverCell_->x < static_cast<int>(frame.levelWidth) &&
         editorHoverCell_->y < static_cast<int>(frame.levelHeight)) {
-        Vec4 highlightColor = tileColor(levelEditor_.selectedTile());
-        highlightColor.w = 0.72f;
+        const TileType selectedTile = levelEditor_.selectedTile();
+        Vec4 highlightColor = tileColor(selectedTile);
+        highlightColor.w = 0.55f;
+
+        const std::string& hoverRow = rows[static_cast<size_t>(editorHoverCell_->y)];
+        const TileType hoveredTile = editorHoverCell_->x < static_cast<int>(hoverRow.size())
+            ? charToTileType(hoverRow[static_cast<size_t>(editorHoverCell_->x)]).value_or(TileType::Empty)
+            : TileType::Empty;
+        const TileType hoveredFloor = tileTypeInitialFloor(hoveredTile);
+        const float hoveredTop = hoveredFloor == TileType::Water
+            ? -config::waterDepthBelowGround
+            : (hoveredFloor == TileType::Wall || tileTypeOccupiesLevelCell(hoveredTile) ? 1.0f : 0.0f);
 
         frame.tiles.push_back({
             .position = {
-                static_cast<float>(editorHoverCell_->x) + 0.18f,
-                static_cast<float>(editorHoverCell_->y) + 0.18f,
+                static_cast<float>(editorHoverCell_->x),
+                static_cast<float>(editorHoverCell_->y),
             },
-            .size = { 0.64f, 0.64f },
+            .size = { 1.0f, 1.0f },
             .color = highlightColor,
+            .baseElevation = hoveredTop + 0.02f,
+            .showGrid = false,
         });
     }
 

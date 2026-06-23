@@ -11,6 +11,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -116,6 +117,7 @@ public:
     void beginDebugUiFrame();
     [[nodiscard]] bool wantsKeyboardCapture() const;
     [[nodiscard]] bool wantsMouseCapture() const;
+    [[nodiscard]] std::optional<GridPosition> pickIsoGridCell(const RenderFrameData& frameData, Vec2 pixelPosition) const;
     void waitIdle() const;
     [[nodiscard]] AntiAliasingMode antiAliasingMode() const;
     [[nodiscard]] VkSampleCountFlagBits activeSampleCount() const;
