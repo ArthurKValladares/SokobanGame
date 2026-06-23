@@ -57,6 +57,7 @@ struct IsoFace {
     Vec4 color {};
     bool blurBehind = false;
     bool showGrid = false;
+    bool isEditorPreview = false;
     Vec2 gridSize {};
     float depth = 0.0f;
 };
@@ -423,6 +424,10 @@ std::optional<GridPosition> VulkanRenderer::pickIsoGridCell(const RenderFrameDat
     };
 
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
+        if (tile.isEditorPreview) {
+            continue;
+        }
+
         const float x = tile.position.x;
         const float y = tile.position.y;
         const float width = tile.size.x;
@@ -1640,6 +1645,10 @@ void VulkanRenderer::recordShadowMapRendering(VkCommandBuffer commandBuffer, con
     };
 
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
+        if (tile.isEditorPreview) {
+            continue;
+        }
+
         drawTileFaces(tile);
     }
     for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
@@ -2144,6 +2153,10 @@ VulkanRenderer::IsoRenderLayout VulkanRenderer::calculateIsoRenderLayout(const R
         farthestDepth = std::max(farthestDepth, cameraDepth);
     };
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
+        if (tile.isEditorPreview) {
+            continue;
+        }
+
         const float x = tile.position.x;
         const float y = tile.position.y;
         const float width = tile.size.x;
@@ -2218,6 +2231,10 @@ VulkanRenderer::ShadowRenderLayout VulkanRenderer::calculateShadowRenderLayout(c
     };
 
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
+        if (tile.isEditorPreview) {
+            continue;
+        }
+
         const float x = tile.position.x;
         const float y = tile.position.y;
         const float width = tile.size.x;
@@ -2308,7 +2325,7 @@ void VulkanRenderer::drawIsoFrame(
         return dot(normal, subtract(layout.cameraPosition, center)) > 0.0f;
     };
 
-    auto appendFace = [&](const std::array<Vec3, 4>& vertices, Vec3 normal, Vec4 color, bool blurBehind, bool showGrid, Vec2 gridSize) {
+    auto appendFace = [&](const std::array<Vec3, 4>& vertices, Vec3 normal, Vec4 color, bool blurBehind, bool showGrid, bool isEditorPreview, Vec2 gridSize) {
         if (!faceVisible(vertices, normal)) {
             return false;
         }
@@ -2330,6 +2347,7 @@ void VulkanRenderer::drawIsoFrame(
             .color = color,
             .blurBehind = blurBehind,
             .showGrid = showGrid,
+            .isEditorPreview = isEditorPreview,
             .gridSize = gridSize,
             .depth = faceDepth(vertices),
         });
@@ -2354,6 +2372,7 @@ void VulkanRenderer::drawIsoFrame(
             .color = color,
             .blurBehind = false,
             .showGrid = false,
+            .isEditorPreview = false,
             .depth = faceDepth(vertices),
         });
     };
@@ -2375,7 +2394,7 @@ void VulkanRenderer::drawIsoFrame(
 
         if (height <= 0.0f) {
             const std::array<Vec3, 4> face { a, b, c, d };
-            appendFace(face, { 0.0f, 0.0f, 1.0f }, tile.color, tile.blurBehind, tile.showGrid, { width, depth });
+            appendFace(face, { 0.0f, 0.0f, 1.0f }, tile.color, tile.blurBehind, tile.showGrid, tile.isEditorPreview, { width, depth });
             continue;
         }
 
@@ -2389,11 +2408,11 @@ void VulkanRenderer::drawIsoFrame(
         const std::array<Vec3, 4> farFace { c, d, h, g };
         const std::array<Vec3, 4> leftFace { d, a, e, h };
         const std::array<Vec3, 4> topFace { e, f, g, h };
-        appendFace(nearFace, { 0.0f, -1.0f, 0.0f }, tile.color, tile.blurBehind, tile.showGrid, { width, height });
-        appendFace(rightFace, { 1.0f, 0.0f, 0.0f }, tile.color, tile.blurBehind, tile.showGrid, { depth, height });
-        appendFace(farFace, { 0.0f, 1.0f, 0.0f }, tile.color, tile.blurBehind, tile.showGrid, { width, height });
-        appendFace(leftFace, { -1.0f, 0.0f, 0.0f }, tile.color, tile.blurBehind, tile.showGrid, { depth, height });
-        appendFace(topFace, { 0.0f, 0.0f, 1.0f }, tile.color, tile.blurBehind, tile.showGrid, { width, depth });
+        appendFace(nearFace, { 0.0f, -1.0f, 0.0f }, tile.color, tile.blurBehind, tile.showGrid, tile.isEditorPreview, { width, height });
+        appendFace(rightFace, { 1.0f, 0.0f, 0.0f }, tile.color, tile.blurBehind, tile.showGrid, tile.isEditorPreview, { depth, height });
+        appendFace(farFace, { 0.0f, 1.0f, 0.0f }, tile.color, tile.blurBehind, tile.showGrid, tile.isEditorPreview, { width, height });
+        appendFace(leftFace, { -1.0f, 0.0f, 0.0f }, tile.color, tile.blurBehind, tile.showGrid, tile.isEditorPreview, { depth, height });
+        appendFace(topFace, { 0.0f, 0.0f, 1.0f }, tile.color, tile.blurBehind, tile.showGrid, tile.isEditorPreview, { width, depth });
     }
     if (!translucentPass) {
         for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
@@ -2416,7 +2435,8 @@ void VulkanRenderer::drawIsoFrame(
             face.blurBehind,
             face.showGrid ? frameData.gridOverlay.color : Vec4 {},
             face.gridSize,
-            frameData.gridOverlay.width);
+            frameData.gridOverlay.width,
+            face.isEditorPreview);
     }
 }
 
@@ -2491,7 +2511,8 @@ void VulkanRenderer::drawFace(
     bool blurBehind,
     Vec4 gridColor,
     Vec2 gridSize,
-    float gridLineWidth) const
+    float gridLineWidth,
+    bool isEditorPreview) const
 {
     vkCmdSetPrimitiveTopology(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
 
@@ -2533,7 +2554,7 @@ void VulkanRenderer::drawFace(
             blurBehind ? 1.0f : 0.0f,
             gridSize.x,
             gridSize.y,
-            config::iceBlurRadiusPixels,
+            isEditorPreview ? -config::iceBlurRadiusPixels : config::iceBlurRadiusPixels,
         },
         .gridColor = gridColor,
     };

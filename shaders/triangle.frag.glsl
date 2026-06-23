@@ -25,7 +25,7 @@ vec3 gaussianBlurredScene(vec2 uv)
 {
     const float weights[5] = float[5](1.0, 4.0, 6.0, 4.0, 1.0);
     vec2 viewportSize = vec2(textureSize(sceneColor, 0));
-    vec2 texel = pc.materialOptions.w / viewportSize;
+    vec2 texel = abs(pc.materialOptions.w) / viewportSize;
     vec3 result = vec3(0.0);
     float totalWeight = 0.0;
 
@@ -38,6 +38,35 @@ vec3 gaussianBlurredScene(vec2 uv)
     }
 
     return result / totalWeight;
+}
+
+float bayer8x8(ivec2 pixel)
+{
+    const float thresholds[64] = float[64](
+         0.0, 48.0, 12.0, 60.0,  3.0, 51.0, 15.0, 63.0,
+        32.0, 16.0, 44.0, 28.0, 35.0, 19.0, 47.0, 31.0,
+         8.0, 56.0,  4.0, 52.0, 11.0, 59.0,  7.0, 55.0,
+        40.0, 24.0, 36.0, 20.0, 43.0, 27.0, 39.0, 23.0,
+         2.0, 50.0, 14.0, 62.0,  1.0, 49.0, 13.0, 61.0,
+        34.0, 18.0, 46.0, 30.0, 33.0, 17.0, 45.0, 29.0,
+        10.0, 58.0,  6.0, 54.0,  9.0, 57.0,  5.0, 53.0,
+        42.0, 26.0, 38.0, 22.0, 41.0, 25.0, 37.0, 21.0);
+    ivec2 wrapped = pixel & ivec2(7);
+    return (thresholds[wrapped.y * 8 + wrapped.x] + 0.5) / 64.0;
+}
+
+void applyEditorPreviewDither()
+{
+    if (pc.materialOptions.w >= 0.0) {
+        return;
+    }
+
+    const float pixelScale = 2.0;
+    const float coverage = 0.56;
+    ivec2 ditherPixel = ivec2(floor(gl_FragCoord.xy / pixelScale));
+    if (bayer8x8(ditherPixel) >= coverage) {
+        discard;
+    }
 }
 
 float gridMask()
@@ -58,6 +87,8 @@ float gridMask()
 
 void main()
 {
+    applyEditorPreviewDither();
+
     vec3 color = mix(pc.color.rgb, pc.gridColor.rgb, gridMask());
     if (length(pc.normalAndAmbientRed.xyz) > 0.0001) {
         vec3 normal = normalize(pc.normalAndAmbientRed.xyz);

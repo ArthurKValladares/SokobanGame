@@ -61,6 +61,7 @@ struct RenderFrameData {
         float height = 0.0f;
         bool blurBehind = false;
         bool showGrid = true;
+        bool isEditorPreview = false;
     };
 
     struct IsoFace {
@@ -248,7 +249,8 @@ private:
         bool blurBehind = false,
         Vec4 gridColor = {},
         Vec2 gridSize = {},
-        float gridLineWidth = 0.0f) const;
+        float gridLineWidth = 0.0f,
+        bool isEditorPreview = false) const;
     void drawShadowFace(VkCommandBuffer commandBuffer, const std::array<Vec4, 4>& shadowVertices) const;
     void drawUiRect(VkCommandBuffer commandBuffer, const UiDrawCommand& command, Vec2 viewportSize, const RenderFrameData::Lighting& lighting) const;
     [[nodiscard]] Vec3 projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) const;

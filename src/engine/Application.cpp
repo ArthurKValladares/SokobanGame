@@ -1511,8 +1511,10 @@ RenderFrameData Application::buildEditorRenderFrame() const
         editorHoverCell_->x < static_cast<int>(frame.levelWidth) &&
         editorHoverCell_->y < static_cast<int>(frame.levelHeight)) {
         const TileType selectedTile = levelEditor_.selectedTile();
-        Vec4 highlightColor = tileColor(selectedTile);
-        highlightColor.w = 0.55f;
+        Vec4 previewColor = tileColor(selectedTile);
+        if (selectedTile == TileType::Ice) {
+            previewColor.w = config::iceTintAlpha;
+        }
 
         const std::string& hoverRow = rows[static_cast<size_t>(editorHoverCell_->y)];
         const TileType hoveredTile = editorHoverCell_->x < static_cast<int>(hoverRow.size())
@@ -1522,6 +1524,7 @@ RenderFrameData Application::buildEditorRenderFrame() const
         const float hoveredTop = hoveredFloor == TileType::Water
             ? -config::waterDepthBelowGround
             : (hoveredFloor == TileType::Wall || tileTypeOccupiesLevelCell(hoveredTile) ? 1.0f : 0.0f);
+        const bool previewIsRaised = selectedTile == TileType::Wall || tileTypeOccupiesLevelCell(selectedTile);
 
         frame.tiles.push_back({
             .position = {
@@ -1529,9 +1532,12 @@ RenderFrameData Application::buildEditorRenderFrame() const
                 static_cast<float>(editorHoverCell_->y),
             },
             .size = { 1.0f, 1.0f },
-            .color = highlightColor,
+            .color = previewColor,
             .baseElevation = hoveredTop + 0.02f,
-            .showGrid = false,
+            .height = previewIsRaised ? 1.0f : 0.0f,
+            .blurBehind = selectedTile == TileType::Ice,
+            .showGrid = selectedTile != TileType::Player,
+            .isEditorPreview = true,
         });
     }
 
