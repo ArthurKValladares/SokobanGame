@@ -168,15 +168,6 @@ struct StaticRenderCell {
     float height = 0.0f;
 };
 
-bool canMergeStaticCells(const StaticRenderCell& left, const StaticRenderCell& right)
-{
-    return left.tile == right.tile &&
-        left.active == right.active &&
-        left.showGrid == right.showGrid &&
-        left.baseElevation == right.baseElevation &&
-        left.height == right.height;
-}
-
 StaticRenderCell staticRenderCellFor(const Level& level, uint32_t x, uint32_t y, bool endUnlocked, std::optional<TileType> fallenTile)
 {
     const TileType tile = fallenTile.value_or(level.tileAt(x, y));
@@ -266,56 +257,13 @@ void appendWaterEdgeFaces(RenderFrameData& frame, const Level& level, const auto
 }
 
 template <typename CellAt>
-void appendGreedyMergedStaticTiles(RenderFrameData& frame, const Level& level, CellAt cellAt)
+void appendStaticTiles(RenderFrameData& frame, const Level& level, CellAt cellAt)
 {
-    const uint32_t width = level.width();
-    const uint32_t height = level.height();
-    std::vector<bool> consumed(static_cast<size_t>(width) * height, false);
-
-    auto index = [width](uint32_t x, uint32_t y) {
-        return static_cast<size_t>(y) * width + x;
-    };
-
-    for (uint32_t y = 0; y < height; ++y) {
-        for (uint32_t x = 0; x < width; ++x) {
-            if (consumed[index(x, y)]) {
-                continue;
-            }
-
+    for (uint32_t y = 0; y < level.height(); ++y) {
+        for (uint32_t x = 0; x < level.width(); ++x) {
             const StaticRenderCell cell = cellAt(x, y);
-
-            uint32_t mergeWidth = 1;
-            while (x + mergeWidth < width &&
-                !consumed[index(x + mergeWidth, y)] &&
-                canMergeStaticCells(cell, cellAt(x + mergeWidth, y))) {
-                ++mergeWidth;
-            }
-
-            uint32_t mergeHeight = 1;
-            bool canGrowHeight = true;
-            while (y + mergeHeight < height && canGrowHeight) {
-                for (uint32_t offsetX = 0; offsetX < mergeWidth; ++offsetX) {
-                    if (consumed[index(x + offsetX, y + mergeHeight)] ||
-                        !canMergeStaticCells(cell, cellAt(x + offsetX, y + mergeHeight))) {
-                        canGrowHeight = false;
-                        break;
-                    }
-                }
-
-                if (canGrowHeight) {
-                    ++mergeHeight;
-                }
-            }
-
-            for (uint32_t offsetY = 0; offsetY < mergeHeight; ++offsetY) {
-                for (uint32_t offsetX = 0; offsetX < mergeWidth; ++offsetX) {
-                    consumed[index(x + offsetX, y + offsetY)] = true;
-                }
-            }
-
             frame.tiles.push_back({
                 .position = { static_cast<float>(x), static_cast<float>(y) },
-                .size = { static_cast<float>(mergeWidth), static_cast<float>(mergeHeight) },
                 .color = tileColor(cell.tile, cell.active),
                 .baseElevation = cell.baseElevation,
                 .height = cell.height,
@@ -1449,7 +1397,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
 
         return staticRenderCellFor(level_, x, y, endUnlocked, fallenTile);
     };
-    appendGreedyMergedStaticTiles(frame, level_, staticCellAt);
+    appendStaticTiles(frame, level_, staticCellAt);
     appendWaterEdgeFaces(frame, level_, [this](GridPosition position) {
         return isUnfilledWater(position);
     });
