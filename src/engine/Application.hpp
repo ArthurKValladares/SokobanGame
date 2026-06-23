@@ -152,6 +152,8 @@ private:
     bool shadowsEnabled_ = config::shadowsEnabled;
     float shadowOpacity_ = config::shadowOpacity;
     float shadowBias_ = config::shadowBias;
+    Vec4 tileGridLineColor_ { config::tileGridLineColor };
+    float tileGridLineWidth_ = config::tileGridLineWidth;
     std::vector<Rock> rocks_;
     std::deque<MoveCommand> pendingCommands_;
     std::vector<ActionRecord> moveHistory_;

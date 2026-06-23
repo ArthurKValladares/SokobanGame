@@ -59,6 +59,7 @@ struct RenderFrameData {
         float baseElevation = 0.0f;
         float height = 0.0f;
         bool blurBehind = false;
+        bool showGrid = true;
     };
 
     struct IsoFace {
@@ -67,8 +68,14 @@ struct RenderFrameData {
         Vec4 color {};
     };
 
+    struct GridOverlay {
+        Vec4 color { config::tileGridLineColor };
+        float width = config::tileGridLineWidth;
+    };
+
     RenderViewMode viewMode = RenderViewMode::TopDown2D;
     Lighting lighting {};
+    GridOverlay gridOverlay {};
     uint32_t levelWidth = 0;
     uint32_t levelHeight = 0;
     Vec2 playerPosition {};
@@ -228,6 +235,7 @@ private:
     [[nodiscard]] ShadowRenderLayout calculateShadowRenderLayout(const RenderFrameData& frameData) const;
     void drawTile(VkCommandBuffer commandBuffer, const TileRenderLayout& layout, const RenderFrameData::Tile& tile, const RenderFrameData::Lighting& lighting) const;
     void drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const ShadowRenderLayout& shadowLayout, const RenderFrameData& frameData, const RenderFrameData::Lighting& lighting, bool translucentPass) const;
+    void drawTopDownGridOverlay(VkCommandBuffer commandBuffer, const TileRenderLayout& layout, const RenderFrameData& frameData) const;
     void drawFace(
         VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
@@ -235,7 +243,10 @@ private:
         Vec4 color,
         Vec3 normal,
         const RenderFrameData::Lighting& lighting,
-        bool blurBehind = false) const;
+        bool blurBehind = false,
+        Vec4 gridColor = {},
+        Vec2 gridSize = {},
+        float gridLineWidth = 0.0f) const;
     void drawShadowFace(VkCommandBuffer commandBuffer, const std::array<Vec4, 4>& shadowVertices) const;
     void drawUiRect(VkCommandBuffer commandBuffer, const UiDrawCommand& command, Vec2 viewportSize, const RenderFrameData::Lighting& lighting) const;
     [[nodiscard]] Vec3 projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) const;
@@ -248,6 +259,7 @@ private:
     [[nodiscard]] VkPresentModeKHR choosePresentMode(const std::vector<VkPresentModeKHR>& modes) const;
     [[nodiscard]] VkExtent2D chooseSwapchainExtent(const VkSurfaceCapabilitiesKHR& capabilities) const;
     [[nodiscard]] VkShaderModule createShaderModule(const std::filesystem::path& path) const;
+    [[nodiscard]] VkPipeline createGraphicsPipeline(VkShaderModule vertexShader, VkShaderModule fragmentShader) const;
     [[nodiscard]] std::array<VkPipeline, 2> createGraphicsPipelineLibraries(VkShaderModule vertexShader, VkShaderModule fragmentShader) const;
     [[nodiscard]] VkSampleCountFlagBits sampleCountForMode(AntiAliasingMode mode) const;
     [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;

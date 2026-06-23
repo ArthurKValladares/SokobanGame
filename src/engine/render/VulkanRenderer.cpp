@@ -45,9 +45,10 @@ struct TilePushConstants {
     Vec4 sunRadianceAndAmbientBlue;
     Vec4 shadowOptions;
     Vec4 materialOptions;
+    Vec4 gridColor;
 };
 
-static_assert(sizeof(TilePushConstants) == 224);
+static_assert(sizeof(TilePushConstants) == 240);
 
 struct IsoFace {
     std::array<Vec3, 4> vertices {};
@@ -55,6 +56,8 @@ struct IsoFace {
     Vec3 normal {};
     Vec4 color {};
     bool blurBehind = false;
+    bool showGrid = false;
+    Vec2 gridSize {};
     float depth = 0.0f;
 };
 
@@ -924,27 +927,13 @@ void VulkanRenderer::createPipeline()
     VkShaderModule fragmentShader = createShaderModule(assetRoot_ / "shaders/triangle.frag.glsl.spv");
     VkShaderModule shadowVertexShader = createShaderModule(assetRoot_ / "shaders/shadow.vert.glsl.spv");
 
-    pipelineLibraries_ = createGraphicsPipelineLibraries(vertexShader, fragmentShader);
+    pipeline_ = createGraphicsPipeline(vertexShader, fragmentShader);
     createShadowPipeline(shadowVertexShader);
 
     vkDestroyShaderModule(device_, shadowVertexShader, nullptr);
     vkDestroyShaderModule(device_, fragmentShader, nullptr);
     vkDestroyShaderModule(device_, vertexShader, nullptr);
 
-    VkPipelineLibraryCreateInfoKHR libraryInfo {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR,
-        .libraryCount = static_cast<uint32_t>(pipelineLibraries_.size()),
-        .pLibraries = pipelineLibraries_.data(),
-    };
-
-    VkGraphicsPipelineCreateInfo linkedPipeline {
-        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-        .pNext = &libraryInfo,
-        .flags = VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT,
-        .layout = pipelineLayout_,
-    };
-
-    vkCheck(vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &linkedPipeline, nullptr, &pipeline_), "vkCreateGraphicsPipelines linked pipeline failed");
     ++pipelineRebuilds_;
 }
 
@@ -1727,11 +1716,16 @@ void VulkanRenderer::recordScenePass(
     vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_LESS_OR_EQUAL);
 
     if (frameData.viewMode == RenderViewMode::Isometric3D) {
-        drawIsoFrame(commandBuffer, calculateIsoRenderLayout(frameData), shadowLayout, frameData, frameData.lighting, translucentPass);
+        const IsoRenderLayout isoLayout = calculateIsoRenderLayout(frameData);
+        drawIsoFrame(commandBuffer, isoLayout, shadowLayout, frameData, frameData.lighting, translucentPass);
     } else {
         const TileRenderLayout tileLayout = calculateTileRenderLayout(frameData);
         for (const auto& tile : frameData.tiles) {
             drawTile(commandBuffer, tileLayout, tile, frameData.lighting);
+        }
+        if (!translucentPass) {
+            vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
+            drawTopDownGridOverlay(commandBuffer, tileLayout, frameData);
         }
     }
 
@@ -2189,9 +2183,9 @@ void VulkanRenderer::drawIsoFrame(
         return dot(normal, subtract(layout.cameraPosition, center)) > 0.0f;
     };
 
-    auto appendFace = [&](const std::array<Vec3, 4>& vertices, Vec3 normal, Vec4 color, bool blurBehind) {
+    auto appendFace = [&](const std::array<Vec3, 4>& vertices, Vec3 normal, Vec4 color, bool blurBehind, bool showGrid, Vec2 gridSize) {
         if (!faceVisible(vertices, normal)) {
-            return;
+            return false;
         }
 
         faces.push_back({
@@ -2210,8 +2204,11 @@ void VulkanRenderer::drawIsoFrame(
             .normal = normal,
             .color = color,
             .blurBehind = blurBehind,
+            .showGrid = showGrid,
+            .gridSize = gridSize,
             .depth = faceDepth(vertices),
         });
+        return true;
     };
     auto appendDoubleSidedFace = [&](const std::array<Vec3, 4>& vertices, Vec4 color) {
         const Vec3 normal = normalize(cross(subtract(vertices[1], vertices[0]), subtract(vertices[2], vertices[0])));
@@ -2231,6 +2228,7 @@ void VulkanRenderer::drawIsoFrame(
             .normal = normal,
             .color = color,
             .blurBehind = false,
+            .showGrid = false,
             .depth = faceDepth(vertices),
         });
     };
@@ -2251,7 +2249,8 @@ void VulkanRenderer::drawIsoFrame(
         const Vec3 d { x, y + depth, base };
 
         if (height <= 0.0f) {
-            appendFace({ a, b, c, d }, { 0.0f, 0.0f, 1.0f }, tile.color, tile.blurBehind);
+            const std::array<Vec3, 4> face { a, b, c, d };
+            appendFace(face, { 0.0f, 0.0f, 1.0f }, tile.color, tile.blurBehind, tile.showGrid, { width, depth });
             continue;
         }
 
@@ -2260,11 +2259,16 @@ void VulkanRenderer::drawIsoFrame(
         const Vec3 f { x + width, y, top };
         const Vec3 g { x + width, y + depth, top };
         const Vec3 h { x, y + depth, top };
-        appendFace({ a, b, f, e }, { 0.0f, -1.0f, 0.0f }, tile.color, tile.blurBehind);
-        appendFace({ b, c, g, f }, { 1.0f, 0.0f, 0.0f }, tile.color, tile.blurBehind);
-        appendFace({ c, d, h, g }, { 0.0f, 1.0f, 0.0f }, tile.color, tile.blurBehind);
-        appendFace({ d, a, e, h }, { -1.0f, 0.0f, 0.0f }, tile.color, tile.blurBehind);
-        appendFace({ e, f, g, h }, { 0.0f, 0.0f, 1.0f }, tile.color, tile.blurBehind);
+        const std::array<Vec3, 4> nearFace { a, b, f, e };
+        const std::array<Vec3, 4> rightFace { b, c, g, f };
+        const std::array<Vec3, 4> farFace { c, d, h, g };
+        const std::array<Vec3, 4> leftFace { d, a, e, h };
+        const std::array<Vec3, 4> topFace { e, f, g, h };
+        appendFace(nearFace, { 0.0f, -1.0f, 0.0f }, tile.color, tile.blurBehind, tile.showGrid, { width, height });
+        appendFace(rightFace, { 1.0f, 0.0f, 0.0f }, tile.color, tile.blurBehind, tile.showGrid, { depth, height });
+        appendFace(farFace, { 0.0f, 1.0f, 0.0f }, tile.color, tile.blurBehind, tile.showGrid, { width, height });
+        appendFace(leftFace, { -1.0f, 0.0f, 0.0f }, tile.color, tile.blurBehind, tile.showGrid, { depth, height });
+        appendFace(topFace, { 0.0f, 0.0f, 1.0f }, tile.color, tile.blurBehind, tile.showGrid, { width, depth });
     }
     if (!translucentPass) {
         for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
@@ -2277,7 +2281,78 @@ void VulkanRenderer::drawIsoFrame(
     });
 
     for (const IsoFace& face : faces) {
-        drawFace(commandBuffer, face.vertices, face.shadowVertices, face.color, face.normal, lighting, face.blurBehind);
+        drawFace(
+            commandBuffer,
+            face.vertices,
+            face.shadowVertices,
+            face.color,
+            face.normal,
+            lighting,
+            face.blurBehind,
+            face.showGrid ? frameData.gridOverlay.color : Vec4 {},
+            face.gridSize,
+            frameData.gridOverlay.width);
+    }
+}
+
+void VulkanRenderer::drawTopDownGridOverlay(
+    VkCommandBuffer commandBuffer,
+    const TileRenderLayout& layout,
+    const RenderFrameData& frameData) const
+{
+    if (frameData.levelWidth == 0 || frameData.levelHeight == 0 || frameData.gridOverlay.color.w <= 0.0f) {
+        return;
+    }
+
+    const float tileWidthPixels = std::max(layout.tileSize.x * static_cast<float>(swapchainExtent_.width) * 0.5f, 0.001f);
+    const float lineWidth = std::clamp(frameData.gridOverlay.width / tileWidthPixels, 0.0f, 0.5f);
+    if (lineWidth <= 0.0f) {
+        return;
+    }
+
+    const RenderFrameData::Lighting unlitLighting {};
+    const float gridDepth = 0.0f;
+    const float levelWidth = static_cast<float>(frameData.levelWidth);
+    const float levelHeight = static_cast<float>(frameData.levelHeight);
+    const float halfLineWidth = lineWidth * 0.5f;
+
+    auto drawRect = [&](float leftTile, float bottomTile, float rightTile, float topTile) {
+        if (rightTile <= leftTile || topTile <= bottomTile) {
+            return;
+        }
+
+        const Vec2 min {
+            layout.boardBottomLeft.x + leftTile * layout.tileSize.x,
+            layout.boardBottomLeft.y + bottomTile * layout.tileSize.y,
+        };
+        const Vec2 max {
+            layout.boardBottomLeft.x + rightTile * layout.tileSize.x,
+            layout.boardBottomLeft.y + topTile * layout.tileSize.y,
+        };
+
+        drawFace(commandBuffer, {
+            Vec3 { min.x, min.y, gridDepth },
+            Vec3 { max.x, min.y, gridDepth },
+            Vec3 { max.x, max.y, gridDepth },
+            Vec3 { min.x, max.y, gridDepth },
+        }, {}, frameData.gridOverlay.color, {}, unlitLighting);
+    };
+
+    for (uint32_t x = 0; x <= frameData.levelWidth; ++x) {
+        const float center = static_cast<float>(x);
+        drawRect(
+            std::clamp(center - halfLineWidth, 0.0f, levelWidth),
+            0.0f,
+            std::clamp(center + halfLineWidth, 0.0f, levelWidth),
+            levelHeight);
+    }
+    for (uint32_t y = 0; y <= frameData.levelHeight; ++y) {
+        const float center = static_cast<float>(y);
+        drawRect(
+            0.0f,
+            std::clamp(center - halfLineWidth, 0.0f, levelHeight),
+            levelWidth,
+            std::clamp(center + halfLineWidth, 0.0f, levelHeight));
     }
 }
 
@@ -2288,8 +2363,13 @@ void VulkanRenderer::drawFace(
     Vec4 color,
     Vec3 normal,
     const RenderFrameData::Lighting& lighting,
-    bool blurBehind) const
+    bool blurBehind,
+    Vec4 gridColor,
+    Vec2 gridSize,
+    float gridLineWidth) const
 {
+    vkCmdSetPrimitiveTopology(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+
     ++pendingStats_.visibleFaces;
     ++pendingStats_.drawCalls;
     pendingStats_.vertices += 6;
@@ -2322,14 +2402,15 @@ void VulkanRenderer::drawFace(
             lighting.shadows.enabled ? 1.0f : 0.0f,
             std::clamp(lighting.shadows.opacity, 0.0f, 1.0f),
             std::max(lighting.shadows.bias, 0.0f),
-            0.0f,
+            gridColor.w > 0.0f && gridLineWidth > 0.0f && gridSize.x > 0.0f && gridSize.y > 0.0f ? gridLineWidth : 0.0f,
         },
         .materialOptions = {
             blurBehind ? 1.0f : 0.0f,
-            static_cast<float>(swapchainExtent_.width),
-            static_cast<float>(swapchainExtent_.height),
+            gridSize.x,
+            gridSize.y,
             config::iceBlurRadiusPixels,
         },
+        .gridColor = gridColor,
     };
 
     vkCmdPushConstants(
@@ -2562,6 +2643,115 @@ VkShaderModule VulkanRenderer::createShaderModule(const std::filesystem::path& p
     VkShaderModule shaderModule = VK_NULL_HANDLE;
     vkCheck(vkCreateShaderModule(device_, &createInfo, nullptr, &shaderModule), "vkCreateShaderModule failed");
     return shaderModule;
+}
+
+VkPipeline VulkanRenderer::createGraphicsPipeline(VkShaderModule vertexShader, VkShaderModule fragmentShader) const
+{
+    std::array<VkPipelineShaderStageCreateInfo, 2> stages {
+        VkPipelineShaderStageCreateInfo {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
+            .module = vertexShader,
+            .pName = "main",
+        },
+        VkPipelineShaderStageCreateInfo {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .module = fragmentShader,
+            .pName = "main",
+        },
+    };
+
+    VkPipelineVertexInputStateCreateInfo vertexInput {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    };
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+    };
+    VkPipelineViewportStateCreateInfo viewportState {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .scissorCount = 1,
+    };
+    VkPipelineRasterizationStateCreateInfo rasterizer {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = wireframeEnabled_ ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL,
+        .cullMode = VK_CULL_MODE_NONE,
+        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+        .lineWidth = 1.0f,
+    };
+    VkPipelineMultisampleStateCreateInfo multisampling {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = activeSampleCount_,
+    };
+    VkPipelineDepthStencilStateCreateInfo depthStencil {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable = VK_TRUE,
+        .depthWriteEnable = VK_TRUE,
+        .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .depthBoundsTestEnable = VK_FALSE,
+        .stencilTestEnable = VK_FALSE,
+    };
+    VkPipelineColorBlendAttachmentState colorBlendAttachment {
+        .blendEnable = VK_TRUE,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .colorBlendOp = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .alphaBlendOp = VK_BLEND_OP_ADD,
+        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
+            VK_COLOR_COMPONENT_G_BIT |
+            VK_COLOR_COMPONENT_B_BIT |
+            VK_COLOR_COMPONENT_A_BIT,
+    };
+    VkPipelineColorBlendStateCreateInfo colorBlending {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &colorBlendAttachment,
+    };
+    VkDynamicState dynamicStates[] {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR,
+        VK_DYNAMIC_STATE_CULL_MODE,
+        VK_DYNAMIC_STATE_FRONT_FACE,
+        VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
+        VK_DYNAMIC_STATE_LINE_WIDTH,
+        VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE,
+        VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
+        VK_DYNAMIC_STATE_DEPTH_COMPARE_OP,
+    };
+    VkPipelineDynamicStateCreateInfo dynamicState {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = static_cast<uint32_t>(std::size(dynamicStates)),
+        .pDynamicStates = dynamicStates,
+    };
+    VkPipelineRenderingCreateInfo rendering {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+        .colorAttachmentCount = 1,
+        .pColorAttachmentFormats = &swapchainFormat_,
+        .depthAttachmentFormat = depthFormat_,
+    };
+    VkGraphicsPipelineCreateInfo pipelineInfo {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .pNext = &rendering,
+        .stageCount = static_cast<uint32_t>(stages.size()),
+        .pStages = stages.data(),
+        .pVertexInputState = &vertexInput,
+        .pInputAssemblyState = &inputAssembly,
+        .pViewportState = &viewportState,
+        .pRasterizationState = &rasterizer,
+        .pMultisampleState = &multisampling,
+        .pDepthStencilState = &depthStencil,
+        .pColorBlendState = &colorBlending,
+        .pDynamicState = &dynamicState,
+        .layout = pipelineLayout_,
+    };
+
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    vkCheck(vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline), "vkCreateGraphicsPipelines main pipeline failed");
+    return pipeline;
 }
 
 std::array<VkPipeline, 2> VulkanRenderer::createGraphicsPipelineLibraries(VkShaderModule vertexShader, VkShaderModule fragmentShader) const

@@ -1,7 +1,6 @@
 #version 460
 
 layout(location = 0) out vec4 outShadowPosition;
-
 layout(push_constant) uniform PushConstants
 {
     vec4 vertices[4];
@@ -12,6 +11,7 @@ layout(push_constant) uniform PushConstants
     vec4 sunRadianceAndAmbientBlue;
     vec4 shadowOptions;
     vec4 materialOptions;
+    vec4 gridColor;
 } pc;
 
 const int indices[6] = int[6](0, 1, 2, 0, 2, 3);

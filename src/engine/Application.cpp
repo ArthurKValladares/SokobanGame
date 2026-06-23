@@ -163,6 +163,7 @@ Vec2 interpolateGridMotion(GridPosition from, GridPosition to, float elapsedSeco
 struct StaticRenderCell {
     TileType tile = TileType::Empty;
     bool active = true;
+    bool showGrid = true;
     float baseElevation = 0.0f;
     float height = 0.0f;
 };
@@ -171,6 +172,7 @@ bool canMergeStaticCells(const StaticRenderCell& left, const StaticRenderCell& r
 {
     return left.tile == right.tile &&
         left.active == right.active &&
+        left.showGrid == right.showGrid &&
         left.baseElevation == right.baseElevation &&
         left.height == right.height;
 }
@@ -181,6 +183,7 @@ StaticRenderCell staticRenderCellFor(const Level& level, uint32_t x, uint32_t y,
     return {
         .tile = tile,
         .active = tile != TileType::End || endUnlocked,
+        .showGrid = tile != TileType::Player,
         .baseElevation = tile == TileType::Water ? -config::waterDepthBelowGround : 0.0f,
         .height = tile == TileType::Wall ? 1.0f : 0.0f,
     };
@@ -316,6 +319,7 @@ void appendGreedyMergedStaticTiles(RenderFrameData& frame, const Level& level, C
                 .color = tileColor(cell.tile, cell.active),
                 .baseElevation = cell.baseElevation,
                 .height = cell.height,
+                .showGrid = cell.showGrid,
             });
         }
     }
@@ -470,6 +474,19 @@ void Application::drawDebugUi()
         renderer_.setWireframeLineWidth(wireframeLineWidth);
     }
     ImGui::EndDisabled();
+
+    if (ImGui::CollapsingHeader("Tile Grid")) {
+        float gridColor[3] { tileGridLineColor_.x, tileGridLineColor_.y, tileGridLineColor_.z };
+        if (ImGui::ColorEdit3("Grid Color", gridColor)) {
+            tileGridLineColor_.x = gridColor[0];
+            tileGridLineColor_.y = gridColor[1];
+            tileGridLineColor_.z = gridColor[2];
+        }
+        ImGui::DragFloat("Grid Alpha", &tileGridLineColor_.w, 0.01f, 0.0f, 1.0f, "%.2f");
+        tileGridLineColor_.w = std::clamp(tileGridLineColor_.w, 0.0f, 1.0f);
+        ImGui::DragFloat("Grid Width", &tileGridLineWidth_, 0.05f, 0.0f, 12.0f, "%.2f px");
+        tileGridLineWidth_ = std::clamp(tileGridLineWidth_, 0.0f, 12.0f);
+    }
 
     if (ImGui::CollapsingHeader("Lighting")) {
         ImGui::DragFloat("Sun Azimuth", &sunAzimuthDegrees_, 0.5f, -180.0f, 180.0f, "%.1f deg");
@@ -1408,6 +1425,10 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             .bias = shadowBias_,
         },
     };
+    frame.gridOverlay = {
+        .color = tileGridLineColor_,
+        .width = tileGridLineWidth_,
+    };
     frame.levelWidth = level_.width();
     frame.levelHeight = level_.height();
     frame.playerPosition = playerRenderPosition_;
@@ -1438,6 +1459,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             .position = playerRenderPosition_,
             .color = tileColor(TileType::Player),
             .height = 1.0f,
+            .showGrid = false,
         });
     }
 
@@ -1487,6 +1509,10 @@ RenderFrameData Application::buildEditorRenderFrame() const
             .opacity = shadowOpacity_,
             .bias = shadowBias_,
         },
+    };
+    frame.gridOverlay = {
+        .color = tileGridLineColor_,
+        .width = tileGridLineWidth_,
     };
     frame.levelWidth = levelEditor_.documentWidth();
     frame.levelHeight = levelEditor_.documentHeight();

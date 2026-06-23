@@ -25,5 +25,8 @@ inline constexpr float shadowMapPadding = 1.0f;
 inline constexpr uint32_t shadowMapSize = 2048;
 inline constexpr float iceTintAlpha = 0.38f;
 inline constexpr float iceBlurRadiusPixels = 3.0f;
+inline constexpr Vec4 tileGridLineColor { 0.26f, 0.27f, 0.29f, 0.42f };
+inline constexpr float tileGridLineWidth = 1.25f;
+inline constexpr float tileGridElevationOffset = 0.015f;
 
 } // namespace sokoban::config
