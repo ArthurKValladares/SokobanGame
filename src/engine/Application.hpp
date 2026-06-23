@@ -36,7 +36,7 @@ public:
 private:
     struct Rock {
         TileType type = TileType::Rock;
-        GridPosition cell {};
+        GridPosition3 cell {};
         Vec2 renderPosition {};
         Vec2 animationStart {};
         Vec2 animationEnd {};
@@ -58,14 +58,14 @@ private:
     };
 
     struct MovableRecord {
-        GridPosition cell {};
+        GridPosition3 cell {};
         bool fallen = false;
 
         bool operator==(const MovableRecord&) const = default;
     };
 
     struct MoveRecord {
-        GridPosition player {};
+        GridPosition3 player {};
         bool playerDead = false;
         std::vector<MovableRecord> rocks;
     };
@@ -105,24 +105,24 @@ private:
     [[nodiscard]] MoveRecord captureMoveRecord() const;
     void applyMoveRecord(const MoveRecord& record);
     [[nodiscard]] ActionRecord invertActionRecord(const ActionRecord& record) const;
-    [[nodiscard]] GridPosition movementTarget(MoveDirection direction) const;
-    [[nodiscard]] GridPosition movementTarget(GridPosition origin, MoveDirection direction) const;
-    [[nodiscard]] Rock* rockAt(GridPosition position);
-    [[nodiscard]] const Rock* rockAt(GridPosition position) const;
-    [[nodiscard]] const Rock* fallenRockAt(GridPosition position) const;
-    [[nodiscard]] std::optional<TileType> fallenTileAt(GridPosition position) const;
-    [[nodiscard]] std::optional<TileType> fallenTileAt(const MoveRecord& record, GridPosition position) const;
-    [[nodiscard]] const MovableRecord* movableRecordAt(const MoveRecord& record, GridPosition position) const;
-    [[nodiscard]] const MovableRecord* fallenMovableRecordAt(const MoveRecord& record, GridPosition position) const;
-    [[nodiscard]] bool isUnfilledWater(GridPosition position) const;
-    [[nodiscard]] bool isUnfilledWater(GridPosition position, const MoveRecord& record) const;
-    [[nodiscard]] bool isIceFloor(GridPosition position, const MoveRecord& record) const;
-    [[nodiscard]] bool isPlayerWalkable(GridPosition position) const;
-    [[nodiscard]] bool isPlayerWalkable(GridPosition position, const MoveRecord& record) const;
-    [[nodiscard]] bool canMoveRock(GridPosition position, MoveDirection direction) const;
-    [[nodiscard]] bool canMovableOccupy(GridPosition position, const MoveRecord& record, size_t movableIndex) const;
-    [[nodiscard]] GridPosition movableSlidingTarget(size_t movableIndex, MoveDirection direction, const MoveRecord& record) const;
-    [[nodiscard]] GridPosition playerSlidingTarget(GridPosition position, MoveDirection direction, const MoveRecord& record) const;
+    [[nodiscard]] GridPosition3 movementTarget(MoveDirection direction) const;
+    [[nodiscard]] GridPosition3 movementTarget(GridPosition3 origin, MoveDirection direction) const;
+    [[nodiscard]] Rock* rockAt(GridPosition3 position);
+    [[nodiscard]] const Rock* rockAt(GridPosition3 position) const;
+    [[nodiscard]] const Rock* fallenRockAt(GridPosition3 position) const;
+    [[nodiscard]] std::optional<TileType> fallenTileAt(GridPosition3 position) const;
+    [[nodiscard]] std::optional<TileType> fallenTileAt(const MoveRecord& record, GridPosition3 position) const;
+    [[nodiscard]] const MovableRecord* movableRecordAt(const MoveRecord& record, GridPosition3 position) const;
+    [[nodiscard]] const MovableRecord* fallenMovableRecordAt(const MoveRecord& record, GridPosition3 position) const;
+    [[nodiscard]] bool isUnfilledWater(GridPosition3 position) const;
+    [[nodiscard]] bool isUnfilledWater(GridPosition3 position, const MoveRecord& record) const;
+    [[nodiscard]] bool isIceFloor(GridPosition3 position, const MoveRecord& record) const;
+    [[nodiscard]] bool isPlayerWalkable(GridPosition3 position) const;
+    [[nodiscard]] bool isPlayerWalkable(GridPosition3 position, const MoveRecord& record) const;
+    [[nodiscard]] bool canMoveRock(GridPosition3 position, MoveDirection direction) const;
+    [[nodiscard]] bool canMovableOccupy(GridPosition3 position, const MoveRecord& record, size_t movableIndex) const;
+    [[nodiscard]] GridPosition3 movableSlidingTarget(size_t movableIndex, MoveDirection direction, const MoveRecord& record) const;
+    [[nodiscard]] GridPosition3 playerSlidingTarget(GridPosition3 position, MoveDirection direction, const MoveRecord& record) const;
     [[nodiscard]] bool allPressurePlatesActive() const;
     [[nodiscard]] bool isEndUnlocked() const;
     [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;
@@ -140,7 +140,7 @@ private:
     int currentScreen_ = 0;
     InputState input_;
     FrameTimer frameTimer_;
-    GridPosition playerCell_ {};
+    GridPosition3 playerCell_ {};
     Vec2 playerRenderPosition_ {};
     bool playerDead_ = false;
     float sunAzimuthDegrees_ = config::sunAzimuthDegrees;

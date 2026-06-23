@@ -17,6 +17,24 @@ A tiny C++20 engine seed for a future Sokoban-like 3D game. The first milestone 
 
 SDL 3.4.10 is vendored in `third_party/SDL` and is built statically by the root CMake project.
 
+## Layered Levels
+
+Existing screens without layer headers are loaded as layer 0. Multi-layer screens use sequential `@layer N` sections in the same `.scr` file:
+
+```text
+@layer 0
+#####
+# C #
+#####
+
+@layer 1
+AAAAA
+AA#AA
+AAAAA
+```
+
+`A` is Air and produces no geometry. A space remains an Empty floor tile. In the editor, new upper layers are filled with Air and selecting a layer shows that layer plus the layers beneath it.
+
 ## Build
 
 ```powershell

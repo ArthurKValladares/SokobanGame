@@ -45,6 +45,15 @@ void drawPaintButton(const TileTypeDefinition& definition, TileType& selectedTil
         swatchMax,
         ImGui::ColorConvertFloat4ToU32(ImVec4(0.0f, 0.0f, 0.0f, 0.55f)),
         2.0f);
+    if (definition.type == TileType::Air) {
+        const ImU32 airLine = ImGui::ColorConvertFloat4ToU32(ImVec4(0.62f, 0.68f, 0.76f, 0.9f));
+        drawList->AddLine(swatchMin, swatchMax, airLine, 1.5f);
+        drawList->AddLine(
+            ImVec2 { swatchMin.x, swatchMax.y },
+            ImVec2 { swatchMax.x, swatchMin.y },
+            airLine,
+            1.5f);
+    }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("%.*s", static_cast<int>(definition.name.size()), definition.name.data());
     }
@@ -181,6 +190,20 @@ void LevelEditor::draw(const Callbacks& callbacks)
         resizeDocument(document_.requestedWidth, document_.requestedHeight);
     }
 
+    ImGui::Separator();
+    ImGui::Text("Layer %d of %d", document_.activeLayer + 1, static_cast<int>(document_.layers.size()));
+    int selectedLayer = document_.activeLayer;
+    if (ImGui::SliderInt("Current Layer", &selectedLayer, 0, std::max(static_cast<int>(document_.layers.size()) - 1, 0))) {
+        document_.activeLayer = selectedLayer;
+    }
+    if (ImGui::Button("+ Layer Above")) {
+        addLayer();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Delete Layer")) {
+        deleteActiveLayer();
+    }
+
     drawTilePalette();
     ImGui::Separator();
     drawFileBrowser();
@@ -227,11 +250,18 @@ void LevelEditor::markDraftSolved()
 
 void LevelEditor::paintCell(GridPosition position)
 {
-    if (position.y < 0 || position.x < 0 || position.y >= static_cast<int>(document_.rows.size())) {
+    if (document_.layers.empty() ||
+        document_.activeLayer < 0 ||
+        document_.activeLayer >= static_cast<int>(document_.layers.size())) {
         return;
     }
 
-    std::string& row = document_.rows[static_cast<size_t>(position.y)];
+    std::vector<std::string>& activeRows = document_.layers[static_cast<size_t>(document_.activeLayer)];
+    if (position.y < 0 || position.x < 0 || position.y >= static_cast<int>(activeRows.size())) {
+        return;
+    }
+
+    std::string& row = activeRows[static_cast<size_t>(position.y)];
     if (position.x >= static_cast<int>(row.size())) {
         return;
     }
@@ -243,8 +273,10 @@ void LevelEditor::paintCell(GridPosition position)
 
     const DocumentSnapshot before = captureDocumentSnapshot();
     if (document_.selectedTile == TileType::Player) {
-        for (std::string& documentRow : document_.rows) {
-            std::ranges::replace(documentRow, tileTypeToChar(TileType::Player), tileTypeToChar(TileType::Empty));
+        for (std::vector<std::string>& layer : document_.layers) {
+            for (std::string& documentRow : layer) {
+                std::ranges::replace(documentRow, tileTypeToChar(TileType::Player), tileTypeToChar(TileType::Empty));
+            }
         }
     }
 
@@ -277,17 +309,34 @@ bool LevelEditor::tryUndoEdit()
 
 uint32_t LevelEditor::documentWidth() const
 {
-    return document_.rows.empty() ? 0U : static_cast<uint32_t>(document_.rows.front().size());
+    return document_.layers.empty() || document_.layers.front().empty()
+        ? 0U
+        : static_cast<uint32_t>(document_.layers.front().front().size());
 }
 
 uint32_t LevelEditor::documentHeight() const
 {
-    return static_cast<uint32_t>(document_.rows.size());
+    return document_.layers.empty() ? 0U : static_cast<uint32_t>(document_.layers.front().size());
+}
+
+uint32_t LevelEditor::documentDepth() const
+{
+    return static_cast<uint32_t>(document_.layers.size());
+}
+
+uint32_t LevelEditor::activeLayer() const
+{
+    return static_cast<uint32_t>(std::max(document_.activeLayer, 0));
 }
 
 const std::vector<std::string>& LevelEditor::documentRows() const
 {
-    return document_.rows;
+    return document_.layers[static_cast<size_t>(document_.activeLayer)];
+}
+
+const Level::LayerRows& LevelEditor::documentLayers() const
+{
+    return document_.layers;
 }
 
 TileType LevelEditor::selectedTile() const
@@ -570,10 +619,15 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
     width = std::max(width, 1);
     height = std::max(height, 1);
 
-    document_.rows.assign(static_cast<size_t>(height), std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Empty)));
-    document_.rows.front().front() = tileTypeToChar(TileType::Player);
+    document_.layers = {
+        std::vector<std::string>(
+            static_cast<size_t>(height),
+            std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Empty))),
+    };
+    document_.layers.front().front().front() = tileTypeToChar(TileType::Player);
     document_.requestedWidth = width;
     document_.requestedHeight = height;
+    document_.activeLayer = 0;
     document_.dirty = true;
     document_.playingDraft = false;
     document_.editingDocument = true;
@@ -589,14 +643,21 @@ void LevelEditor::resizeDocument(int width, int height, bool recordHistory)
     width = std::max(width, 1);
     height = std::max(height, 1);
 
-    std::vector<std::string> resized(static_cast<size_t>(height), std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Empty)));
-    const size_t copyHeight = std::min(resized.size(), document_.rows.size());
-    for (size_t y = 0; y < copyHeight; ++y) {
-        const size_t copyWidth = std::min(resized[y].size(), document_.rows[y].size());
-        std::copy_n(document_.rows[y].begin(), copyWidth, resized[y].begin());
+    for (size_t layerIndex = 0; layerIndex < document_.layers.size(); ++layerIndex) {
+        const char fill = layerIndex == 0
+            ? tileTypeToChar(TileType::Empty)
+            : tileTypeToChar(TileType::Air);
+        std::vector<std::string> resized(
+            static_cast<size_t>(height),
+            std::string(static_cast<size_t>(width), fill));
+        const size_t copyHeight = std::min(resized.size(), document_.layers[layerIndex].size());
+        for (size_t y = 0; y < copyHeight; ++y) {
+            const size_t copyWidth = std::min(resized[y].size(), document_.layers[layerIndex][y].size());
+            std::copy_n(document_.layers[layerIndex][y].begin(), copyWidth, resized[y].begin());
+        }
+        document_.layers[layerIndex] = std::move(resized);
     }
 
-    document_.rows = std::move(resized);
     document_.requestedWidth = width;
     document_.requestedHeight = height;
     document_.dirty = true;
@@ -604,6 +665,41 @@ void LevelEditor::resizeDocument(int width, int height, bool recordHistory)
     if (recordHistory) {
         recordDocumentChange(before);
     }
+}
+
+void LevelEditor::addLayer()
+{
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    const int width = std::max(document_.requestedWidth, 1);
+    const int height = std::max(document_.requestedHeight, 1);
+    const auto insertionPoint = document_.layers.begin() +
+        std::min(document_.activeLayer + 1, static_cast<int>(document_.layers.size()));
+    document_.layers.insert(
+        insertionPoint,
+        std::vector<std::string>(
+            static_cast<size_t>(height),
+            std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Air))));
+    ++document_.activeLayer;
+    document_.dirty = true;
+    document_.status = "Added layer.";
+    recordDocumentChange(before);
+}
+
+void LevelEditor::deleteActiveLayer()
+{
+    if (document_.layers.size() <= 1) {
+        document_.status = "A level must contain at least one layer.";
+        return;
+    }
+
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    document_.layers.erase(document_.layers.begin() + document_.activeLayer);
+    document_.activeLayer = std::min(
+        document_.activeLayer,
+        static_cast<int>(document_.layers.size()) - 1);
+    document_.dirty = true;
+    document_.status = "Deleted layer.";
+    recordDocumentChange(before);
 }
 
 void LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHistory)
@@ -624,19 +720,40 @@ void LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
         rows.push_back(line);
     }
 
+    Level::LayerRows layers;
     try {
-        Level::loadFromLines(rows, path.string());
+        layers = Level::parseLayerRows(rows, path.string());
+        Level::loadFromLayers(layers, path.string());
     } catch (const std::exception& error) {
         document_.status = error.what();
         return;
     }
 
-    document_.rows = std::move(rows);
+    uint32_t width = 0;
+    uint32_t height = 0;
+    for (const std::vector<std::string>& layer : layers) {
+        height = std::max(height, static_cast<uint32_t>(layer.size()));
+        for (const std::string& row : layer) {
+            width = std::max(width, static_cast<uint32_t>(row.size()));
+        }
+    }
+
+    for (size_t layerIndex = 0; layerIndex < layers.size(); ++layerIndex) {
+        const char fill = layers.size() == 1 || layerIndex == 0
+            ? tileTypeToChar(TileType::Empty)
+            : tileTypeToChar(TileType::Air);
+        layers[layerIndex].resize(height, std::string(width, fill));
+        for (std::string& row : layers[layerIndex]) {
+            row.resize(width, fill);
+        }
+    }
+
+    document_.layers = std::move(layers);
     document_.filePath = path;
     document_.filePathBuffer = path.string();
-    document_.requestedHeight = static_cast<int>(document_.rows.size());
-    document_.requestedWidth = document_.rows.empty() ? 1 : static_cast<int>(std::ranges::max(document_.rows, {}, &std::string::size).size());
-    resizeDocument(document_.requestedWidth, document_.requestedHeight, false);
+    document_.requestedHeight = static_cast<int>(height);
+    document_.requestedWidth = static_cast<int>(width);
+    document_.activeLayer = 0;
     document_.dirty = false;
     document_.playingDraft = false;
     document_.editingDocument = true;
@@ -648,7 +765,7 @@ void LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
 
 void LevelEditor::saveDocument(const std::filesystem::path& path)
 {
-    if (document_.rows.empty()) {
+    if (document_.layers.empty()) {
         document_.status = "Nothing to save.";
         return;
     }
@@ -669,8 +786,9 @@ void LevelEditor::saveDocument(const std::filesystem::path& path)
         return;
     }
 
-    for (const std::string& row : document_.rows) {
-        file << row << '\n';
+    const std::vector<std::string> serialized = Level::serializeLayerRows(document_.layers);
+    for (const std::string& line : serialized) {
+        file << line << '\n';
     }
     file.close();
 
@@ -690,8 +808,8 @@ void LevelEditor::saveDocument(const std::filesystem::path& path)
             return;
         }
 
-        for (const std::string& row : document_.rows) {
-            mirrorFile << row << '\n';
+        for (const std::string& line : serialized) {
+            mirrorFile << line << '\n';
         }
     }
 
@@ -911,11 +1029,12 @@ void LevelEditor::confirmPermanentDelete()
 void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
 {
     const DocumentSnapshot after = captureDocumentSnapshot();
-    if (before.rows == after.rows &&
+    if (before.layers == after.layers &&
         before.filePath == after.filePath &&
         before.filePathBuffer == after.filePathBuffer &&
         before.requestedWidth == after.requestedWidth &&
         before.requestedHeight == after.requestedHeight &&
+        before.activeLayer == after.activeLayer &&
         before.dirty == after.dirty) {
         return;
     }
@@ -929,11 +1048,12 @@ void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
 
 void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
 {
-    document_.rows = snapshot.rows;
+    document_.layers = snapshot.layers;
     document_.filePath = snapshot.filePath;
     document_.filePathBuffer = snapshot.filePathBuffer;
     document_.requestedWidth = snapshot.requestedWidth;
     document_.requestedHeight = snapshot.requestedHeight;
+    document_.activeLayer = snapshot.activeLayer;
     document_.dirty = snapshot.dirty;
     document_.playingDraft = false;
     document_.editingDocument = true;
@@ -941,17 +1061,18 @@ void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
 
 Level LevelEditor::documentToLevel() const
 {
-    return Level::loadFromLines(document_.rows, "level editor draft");
+    return Level::loadFromLayers(document_.layers, "level editor draft");
 }
 
 LevelEditor::DocumentSnapshot LevelEditor::captureDocumentSnapshot() const
 {
     return {
-        .rows = document_.rows,
+        .layers = document_.layers,
         .filePath = document_.filePath,
         .filePathBuffer = document_.filePathBuffer,
         .requestedWidth = document_.requestedWidth,
         .requestedHeight = document_.requestedHeight,
+        .activeLayer = document_.activeLayer,
         .dirty = document_.dirty,
     };
 }

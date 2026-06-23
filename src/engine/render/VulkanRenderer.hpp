@@ -80,6 +80,7 @@ struct RenderFrameData {
     GridOverlay gridOverlay {};
     uint32_t levelWidth = 0;
     uint32_t levelHeight = 0;
+    uint32_t levelDepth = 1;
     Vec2 playerPosition {};
     std::vector<Tile> tiles;
     std::vector<IsoFace> isoFaces;

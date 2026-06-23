@@ -2114,7 +2114,7 @@ VulkanRenderer::IsoRenderLayout VulkanRenderer::calculateIsoRenderLayout(const R
     const Vec3 target {
         static_cast<float>(frameData.levelWidth) * 0.5f,
         static_cast<float>(frameData.levelHeight) * 0.5f,
-        0.0f,
+        static_cast<float>(std::max(frameData.levelDepth, 1U) - 1U) * 0.5f,
     };
     const Vec3 cameraPosition {
         target.x,
@@ -2152,6 +2152,15 @@ VulkanRenderer::IsoRenderLayout VulkanRenderer::calculateIsoRenderLayout(const R
         nearestDepth = std::min(nearestDepth, cameraDepth);
         farthestDepth = std::max(farthestDepth, cameraDepth);
     };
+    const float levelTop = static_cast<float>(std::max(frameData.levelDepth, 1U));
+    includePoint({ 0.0f, 0.0f, 0.0f });
+    includePoint({ static_cast<float>(frameData.levelWidth), 0.0f, 0.0f });
+    includePoint({ static_cast<float>(frameData.levelWidth), static_cast<float>(frameData.levelHeight), 0.0f });
+    includePoint({ 0.0f, static_cast<float>(frameData.levelHeight), 0.0f });
+    includePoint({ 0.0f, 0.0f, levelTop });
+    includePoint({ static_cast<float>(frameData.levelWidth), 0.0f, levelTop });
+    includePoint({ static_cast<float>(frameData.levelWidth), static_cast<float>(frameData.levelHeight), levelTop });
+    includePoint({ 0.0f, static_cast<float>(frameData.levelHeight), levelTop });
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
         if (tile.isEditorPreview) {
             continue;

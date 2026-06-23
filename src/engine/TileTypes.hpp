@@ -10,6 +10,7 @@
 namespace sokoban {
 
 enum class TileType {
+    Air,
     Empty,
     Wall,
     End,
@@ -31,6 +32,7 @@ struct TileTypeDefinition {
 
 inline constexpr auto tileTypeCount = static_cast<std::size_t>(TileType::Count);
 inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitionTable {
+    TileTypeDefinition { TileType::Air, 'A', "Air", { 0.0f, 0.0f, 0.0f, 0.0f } },
     TileTypeDefinition { TileType::Empty, ' ', "Empty", { 0.82f, 0.82f, 0.84f, 1.0f } },
     TileTypeDefinition { TileType::Wall, '#', "Wall", { 0.62f, 0.32f, 0.09f, 1.0f } },
     TileTypeDefinition { TileType::End, 'E', "End", { 1.0f, 0.05f, 0.04f, 1.0f }, { 0.38f, 0.04f, 0.04f, 1.0f } },

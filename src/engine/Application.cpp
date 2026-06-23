@@ -23,6 +23,11 @@ Vec2 toVec2(GridPosition position)
     return { static_cast<float>(position.x), static_cast<float>(position.y) };
 }
 
+Vec2 toVec2(GridPosition3 position)
+{
+    return { static_cast<float>(position.x), static_cast<float>(position.y) };
+}
+
 Vec2 lerp(Vec2 from, Vec2 to, float t)
 {
     return {
@@ -31,9 +36,9 @@ Vec2 lerp(Vec2 from, Vec2 to, float t)
     };
 }
 
-int gridDistance(GridPosition from, GridPosition to)
+int gridDistance(GridPosition3 from, GridPosition3 to)
 {
-    return std::abs(to.x - from.x) + std::abs(to.y - from.y);
+    return std::abs(to.x - from.x) + std::abs(to.y - from.y) + std::abs(to.z - from.z);
 }
 
 float gridDistance(Vec2 from, Vec2 to)
@@ -142,7 +147,7 @@ Vec2 interpolateGridMotion(Vec2 from, Vec2 to, float elapsedSeconds)
     return lerp(from, to, traveledCells / distance);
 }
 
-Vec2 interpolateGridMotion(GridPosition from, GridPosition to, float elapsedSeconds)
+Vec2 interpolateGridMotion(GridPosition3 from, GridPosition3 to, float elapsedSeconds)
 {
     return interpolateGridMotion(toVec2(from), toVec2(to), elapsedSeconds);
 }
@@ -155,14 +160,21 @@ struct StaticRenderCell {
     float height = 0.0f;
 };
 
-StaticRenderCell staticRenderCellFor(const Level& level, uint32_t x, uint32_t y, bool endUnlocked, std::optional<TileType> fallenTile)
+StaticRenderCell staticRenderCellFor(
+    const Level& level,
+    uint32_t x,
+    uint32_t y,
+    uint32_t z,
+    bool endUnlocked,
+    std::optional<TileType> fallenTile)
 {
-    const TileType tile = fallenTile.value_or(level.tileAt(x, y));
+    const TileType tile = fallenTile.value_or(level.tileAt(x, y, z));
     return {
         .tile = tile,
         .active = tile != TileType::End || endUnlocked,
         .showGrid = tile != TileType::Player,
-        .baseElevation = tile == TileType::Water ? -config::waterDepthBelowGround : 0.0f,
+        .baseElevation = static_cast<float>(z) +
+            (tile == TileType::Water ? -config::waterDepthBelowGround : 0.0f),
         .height = tile == TileType::Wall ? 1.0f : 0.0f,
     };
 }
@@ -177,10 +189,15 @@ Vec4 shade(Vec4 color, float multiplier)
     };
 }
 
-void appendWaterEdgeFaces(RenderFrameData& frame, uint32_t width, uint32_t height, const auto& isUnfilledWaterAt)
+void appendWaterEdgeFaces(
+    RenderFrameData& frame,
+    uint32_t width,
+    uint32_t height,
+    float layerElevation,
+    const auto& isUnfilledWaterAt)
 {
-    const float bottom = -config::waterDepthBelowGround;
-    const float top = 0.0f;
+    const float bottom = layerElevation - config::waterDepthBelowGround;
+    const float top = layerElevation;
     const Vec4 color = shade(tileColor(TileType::Empty), 0.78f);
 
     auto appendEdge = [&](std::array<Vec3, 4> vertices, Vec3 normal, Vec4 edgeColor) {
@@ -250,16 +267,21 @@ void appendWaterEdgeFaces(RenderFrameData& frame, uint32_t width, uint32_t heigh
 template <typename CellAt>
 void appendStaticTiles(RenderFrameData& frame, const Level& level, CellAt cellAt)
 {
-    for (uint32_t y = 0; y < level.height(); ++y) {
-        for (uint32_t x = 0; x < level.width(); ++x) {
-            const StaticRenderCell cell = cellAt(x, y);
-            frame.tiles.push_back({
-                .position = { static_cast<float>(x), static_cast<float>(y) },
-                .color = tileColor(cell.tile, cell.active),
-                .baseElevation = cell.baseElevation,
-                .height = cell.height,
-                .showGrid = cell.showGrid,
-            });
+    for (uint32_t z = 0; z < level.depth(); ++z) {
+        for (uint32_t y = 0; y < level.height(); ++y) {
+            for (uint32_t x = 0; x < level.width(); ++x) {
+                const StaticRenderCell cell = cellAt(x, y, z);
+                if (cell.tile == TileType::Air) {
+                    continue;
+                }
+                frame.tiles.push_back({
+                    .position = { static_cast<float>(x), static_cast<float>(y) },
+                    .color = tileColor(cell.tile, cell.active),
+                    .baseElevation = cell.baseElevation,
+                    .height = cell.height,
+                    .showGrid = cell.showGrid,
+                });
+            }
         }
     }
 }
@@ -388,7 +410,7 @@ void Application::drawDebugUi()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     ImGui::Text("Level %d Screen %d", currentLevel_, currentScreen_);
-    ImGui::Text("Player (%d, %d)", playerCell_.x, playerCell_.y);
+    ImGui::Text("Player (%d, %d, %d)", playerCell_.x, playerCell_.y, playerCell_.z);
     ImGui::Text("Player %s", playerDead_ ? "dead" : "alive");
     ImGui::Text("Movables %zu", rocks_.size());
     ImGui::Text("History %zu", moveHistory_.size());
@@ -863,7 +885,7 @@ bool Application::tryStartMove(MoveDirection direction)
         return false;
     }
 
-    const GridPosition target = movementTarget(direction);
+    const GridPosition3 target = movementTarget(direction);
     if (!isPlayerWalkable(target)) {
         return false;
     }
@@ -1089,14 +1111,14 @@ Application::ActionRecord Application::invertActionRecord(const ActionRecord& re
     };
 }
 
-GridPosition Application::movementTarget(MoveDirection direction) const
+GridPosition3 Application::movementTarget(MoveDirection direction) const
 {
     return movementTarget(playerCell_, direction);
 }
 
-GridPosition Application::movementTarget(GridPosition origin, MoveDirection direction) const
+GridPosition3 Application::movementTarget(GridPosition3 origin, MoveDirection direction) const
 {
-    GridPosition target = origin;
+    GridPosition3 target = origin;
 
     switch (direction) {
     case MoveDirection::Up:
@@ -1116,7 +1138,7 @@ GridPosition Application::movementTarget(GridPosition origin, MoveDirection dire
     return target;
 }
 
-Application::Rock* Application::rockAt(GridPosition position)
+Application::Rock* Application::rockAt(GridPosition3 position)
 {
     const auto rock = std::ranges::find_if(rocks_, [position](const Rock& candidate) {
         return !candidate.fallen && candidate.cell == position;
@@ -1125,7 +1147,7 @@ Application::Rock* Application::rockAt(GridPosition position)
     return rock != rocks_.end() ? &*rock : nullptr;
 }
 
-const Application::Rock* Application::rockAt(GridPosition position) const
+const Application::Rock* Application::rockAt(GridPosition3 position) const
 {
     const auto rock = std::ranges::find_if(rocks_, [position](const Rock& candidate) {
         return !candidate.fallen && candidate.cell == position;
@@ -1134,7 +1156,7 @@ const Application::Rock* Application::rockAt(GridPosition position) const
     return rock != rocks_.end() ? &*rock : nullptr;
 }
 
-const Application::Rock* Application::fallenRockAt(GridPosition position) const
+const Application::Rock* Application::fallenRockAt(GridPosition3 position) const
 {
     const auto rock = std::ranges::find_if(rocks_, [position](const Rock& candidate) {
         return candidate.fallen && candidate.cell == position;
@@ -1143,7 +1165,7 @@ const Application::Rock* Application::fallenRockAt(GridPosition position) const
     return rock != rocks_.end() ? &*rock : nullptr;
 }
 
-std::optional<TileType> Application::fallenTileAt(GridPosition position) const
+std::optional<TileType> Application::fallenTileAt(GridPosition3 position) const
 {
     if (const Rock* rock = fallenRockAt(position)) {
         return rock->type;
@@ -1152,7 +1174,7 @@ std::optional<TileType> Application::fallenTileAt(GridPosition position) const
     return std::nullopt;
 }
 
-std::optional<TileType> Application::fallenTileAt(const MoveRecord& record, GridPosition position) const
+std::optional<TileType> Application::fallenTileAt(const MoveRecord& record, GridPosition3 position) const
 {
     for (size_t i = 0; i < record.rocks.size() && i < rocks_.size(); ++i) {
         if (record.rocks[i].fallen && record.rocks[i].cell == position) {
@@ -1163,7 +1185,7 @@ std::optional<TileType> Application::fallenTileAt(const MoveRecord& record, Grid
     return std::nullopt;
 }
 
-const Application::MovableRecord* Application::movableRecordAt(const MoveRecord& record, GridPosition position) const
+const Application::MovableRecord* Application::movableRecordAt(const MoveRecord& record, GridPosition3 position) const
 {
     const auto rock = std::ranges::find_if(record.rocks, [position](const MovableRecord& candidate) {
         return !candidate.fallen && candidate.cell == position;
@@ -1172,7 +1194,7 @@ const Application::MovableRecord* Application::movableRecordAt(const MoveRecord&
     return rock != record.rocks.end() ? &*rock : nullptr;
 }
 
-const Application::MovableRecord* Application::fallenMovableRecordAt(const MoveRecord& record, GridPosition position) const
+const Application::MovableRecord* Application::fallenMovableRecordAt(const MoveRecord& record, GridPosition3 position) const
 {
     const auto rock = std::ranges::find_if(record.rocks, [position](const MovableRecord& candidate) {
         return candidate.fallen && candidate.cell == position;
@@ -1181,74 +1203,93 @@ const Application::MovableRecord* Application::fallenMovableRecordAt(const MoveR
     return rock != record.rocks.end() ? &*rock : nullptr;
 }
 
-bool Application::isUnfilledWater(GridPosition position) const
+bool Application::isUnfilledWater(GridPosition3 position) const
 {
     if (!level_.inBounds(position)) {
         return false;
     }
 
-    const TileType tile = level_.tileAt(static_cast<uint32_t>(position.x), static_cast<uint32_t>(position.y));
+    const TileType tile = level_.tileAt(
+        static_cast<uint32_t>(position.x),
+        static_cast<uint32_t>(position.y),
+        static_cast<uint32_t>(position.z));
     return tile == TileType::Water &&
         fallenRockAt(position) == nullptr &&
         !(playerDead_ && playerCell_ == position);
 }
 
-bool Application::isUnfilledWater(GridPosition position, const MoveRecord& record) const
+bool Application::isUnfilledWater(GridPosition3 position, const MoveRecord& record) const
 {
     if (!level_.inBounds(position)) {
         return false;
     }
 
-    const TileType tile = level_.tileAt(static_cast<uint32_t>(position.x), static_cast<uint32_t>(position.y));
+    const TileType tile = level_.tileAt(
+        static_cast<uint32_t>(position.x),
+        static_cast<uint32_t>(position.y),
+        static_cast<uint32_t>(position.z));
     return tile == TileType::Water &&
         fallenMovableRecordAt(record, position) == nullptr &&
         !(record.playerDead && record.player == position);
 }
 
-bool Application::isIceFloor(GridPosition position, const MoveRecord& record) const
+bool Application::isIceFloor(GridPosition3 position, const MoveRecord& record) const
 {
     if (!level_.inBounds(position)) {
         return false;
     }
 
-    if (level_.tileAt(static_cast<uint32_t>(position.x), static_cast<uint32_t>(position.y)) == TileType::Ice) {
+    if (level_.tileAt(
+            static_cast<uint32_t>(position.x),
+            static_cast<uint32_t>(position.y),
+            static_cast<uint32_t>(position.z)) == TileType::Ice) {
         return true;
     }
 
     return fallenTileAt(record, position) == TileType::Ice;
 }
 
-bool Application::isPlayerWalkable(GridPosition position) const
+bool Application::isPlayerWalkable(GridPosition3 position) const
 {
     if (!level_.inBounds(position)) {
         return false;
     }
 
-    const TileType tile = level_.tileAt(static_cast<uint32_t>(position.x), static_cast<uint32_t>(position.y));
-    return tile != TileType::Wall;
+    const TileType tile = level_.tileAt(
+        static_cast<uint32_t>(position.x),
+        static_cast<uint32_t>(position.y),
+        static_cast<uint32_t>(position.z));
+    return tile != TileType::Wall && tile != TileType::Air;
 }
 
-bool Application::isPlayerWalkable(GridPosition position, const MoveRecord& record) const
+bool Application::isPlayerWalkable(GridPosition3 position, const MoveRecord& record) const
 {
     if (!level_.inBounds(position) || movableRecordAt(record, position) != nullptr) {
         return false;
     }
 
-    const TileType tile = level_.tileAt(static_cast<uint32_t>(position.x), static_cast<uint32_t>(position.y));
-    return tile != TileType::Wall;
+    const TileType tile = level_.tileAt(
+        static_cast<uint32_t>(position.x),
+        static_cast<uint32_t>(position.y),
+        static_cast<uint32_t>(position.z));
+    return tile != TileType::Wall && tile != TileType::Air;
 }
 
-bool Application::canMoveRock(GridPosition position, MoveDirection direction) const
+bool Application::canMoveRock(GridPosition3 position, MoveDirection direction) const
 {
-    const GridPosition target = movementTarget(position, direction);
+    const GridPosition3 target = movementTarget(position, direction);
     if (!level_.inBounds(target) || rockAt(target) != nullptr) {
         return false;
     }
 
-    return level_.tileAt(static_cast<uint32_t>(target.x), static_cast<uint32_t>(target.y)) != TileType::Wall;
+    const TileType tile = level_.tileAt(
+        static_cast<uint32_t>(target.x),
+        static_cast<uint32_t>(target.y),
+        static_cast<uint32_t>(target.z));
+    return tile != TileType::Wall && tile != TileType::Air;
 }
 
-bool Application::canMovableOccupy(GridPosition position, const MoveRecord& record, size_t movableIndex) const
+bool Application::canMovableOccupy(GridPosition3 position, const MoveRecord& record, size_t movableIndex) const
 {
     if (!level_.inBounds(position)) {
         return false;
@@ -1260,19 +1301,23 @@ bool Application::canMovableOccupy(GridPosition position, const MoveRecord& reco
         }
     }
 
-    return level_.tileAt(static_cast<uint32_t>(position.x), static_cast<uint32_t>(position.y)) != TileType::Wall;
+    const TileType tile = level_.tileAt(
+        static_cast<uint32_t>(position.x),
+        static_cast<uint32_t>(position.y),
+        static_cast<uint32_t>(position.z));
+    return tile != TileType::Wall && tile != TileType::Air;
 }
 
-GridPosition Application::movableSlidingTarget(size_t movableIndex, MoveDirection direction, const MoveRecord& record) const
+GridPosition3 Application::movableSlidingTarget(size_t movableIndex, MoveDirection direction, const MoveRecord& record) const
 {
     if (movableIndex >= record.rocks.size() || movableIndex >= rocks_.size()) {
         return {};
     }
 
-    GridPosition current = record.rocks[movableIndex].cell;
+    GridPosition3 current = record.rocks[movableIndex].cell;
     const bool movableIsIce = rocks_[movableIndex].type == TileType::Ice;
     while (movableIsIce || isIceFloor(current, record)) {
-        const GridPosition next = movementTarget(current, direction);
+        const GridPosition3 next = movementTarget(current, direction);
         if (!canMovableOccupy(next, record, movableIndex)) {
             return current;
         }
@@ -1286,11 +1331,11 @@ GridPosition Application::movableSlidingTarget(size_t movableIndex, MoveDirectio
     return current;
 }
 
-GridPosition Application::playerSlidingTarget(GridPosition position, MoveDirection direction, const MoveRecord& record) const
+GridPosition3 Application::playerSlidingTarget(GridPosition3 position, MoveDirection direction, const MoveRecord& record) const
 {
-    GridPosition current = position;
+    GridPosition3 current = position;
     while (isIceFloor(current, record)) {
-        const GridPosition next = movementTarget(current, direction);
+        const GridPosition3 next = movementTarget(current, direction);
         if (!isPlayerWalkable(next, record)) {
             return current;
         }
@@ -1303,7 +1348,7 @@ GridPosition Application::playerSlidingTarget(GridPosition position, MoveDirecti
 
 bool Application::allPressurePlatesActive() const
 {
-    return std::ranges::all_of(level_.pressurePlates(), [this](GridPosition plate) {
+    return std::ranges::all_of(level_.pressurePlates(), [this](GridPosition3 plate) {
         return playerCell_ == plate || rockAt(plate) != nullptr;
     });
 }
@@ -1367,13 +1412,18 @@ RenderFrameData Application::buildGameplayRenderFrame() const
     };
     frame.levelWidth = level_.width();
     frame.levelHeight = level_.height();
+    frame.levelDepth = level_.depth();
     frame.playerPosition = playerRenderPosition_;
     const bool endUnlocked = isEndUnlocked();
 
-    frame.tiles.reserve(static_cast<size_t>(level_.width()) * level_.height());
+    frame.tiles.reserve(static_cast<size_t>(level_.width()) * level_.height() * level_.depth());
     const bool playerMovingOutOfWater = moving_ && activeAction_.before.playerDead && !activeAction_.after.playerDead;
-    auto staticCellAt = [this, endUnlocked, playerMovingOutOfWater](uint32_t x, uint32_t y) {
-        const GridPosition position { static_cast<int>(x), static_cast<int>(y) };
+    auto staticCellAt = [this, endUnlocked, playerMovingOutOfWater](uint32_t x, uint32_t y, uint32_t z) {
+        const GridPosition3 position {
+            static_cast<int>(x),
+            static_cast<int>(y),
+            static_cast<int>(z),
+        };
         std::optional<TileType> fallenTile;
         if (const Rock* fallenRock = fallenRockAt(position)) {
             if (!fallenRock->moving) {
@@ -1383,17 +1433,29 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             fallenTile = TileType::Player;
         }
 
-        return staticRenderCellFor(level_, x, y, endUnlocked, fallenTile);
+        return staticRenderCellFor(level_, x, y, z, endUnlocked, fallenTile);
     };
     appendStaticTiles(frame, level_, staticCellAt);
-    appendWaterEdgeFaces(frame, level_.width(), level_.height(), [this](GridPosition position) {
-        return isUnfilledWater(position);
-    });
+    for (uint32_t z = 0; z < level_.depth(); ++z) {
+        appendWaterEdgeFaces(
+            frame,
+            level_.width(),
+            level_.height(),
+            static_cast<float>(z),
+            [this, z](GridPosition position) {
+                return isUnfilledWater({
+                    position.x,
+                    position.y,
+                    static_cast<int>(z),
+                });
+            });
+    }
 
     if (!playerDead_ || playerMovingOutOfWater) {
         frame.tiles.push_back({
             .position = playerRenderPosition_,
             .color = tileColor(TileType::Player),
+            .baseElevation = static_cast<float>(playerCell_.z),
             .height = 1.0f,
             .showGrid = false,
         });
@@ -1418,6 +1480,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
         frame.tiles.push_back({
             .position = rock.renderPosition,
             .color = color,
+            .baseElevation = static_cast<float>(rock.cell.z),
             .height = 1.0f,
             .blurBehind = rock.type == TileType::Ice,
         });
@@ -1453,57 +1516,87 @@ RenderFrameData Application::buildEditorRenderFrame() const
     frame.levelWidth = levelEditor_.documentWidth();
     frame.levelHeight = levelEditor_.documentHeight();
 
-    const std::vector<std::string>& rows = levelEditor_.documentRows();
-    frame.tiles.reserve(static_cast<size_t>(frame.levelWidth) * frame.levelHeight * 2 + 1);
-    for (uint32_t rowIndex = 0; rowIndex < frame.levelHeight; ++rowIndex) {
-        const std::string& row = rows[static_cast<size_t>(rowIndex)];
-        for (uint32_t x = 0; x < frame.levelWidth; ++x) {
-            const TileType tile = x < row.size()
-                ? charToTileType(row[static_cast<size_t>(x)]).value_or(TileType::Empty)
-                : TileType::Empty;
-            const TileType floorTile = tileTypeInitialFloor(tile);
-            const bool floorIsWater = floorTile == TileType::Water;
-            const bool floorIsWall = floorTile == TileType::Wall;
+    const Level::LayerRows& layers = levelEditor_.documentLayers();
+    const uint32_t activeLayer = levelEditor_.activeLayer();
+    const uint32_t visibleLayerCount = std::min(activeLayer + 1, static_cast<uint32_t>(layers.size()));
+    frame.levelDepth = std::max(visibleLayerCount, 1U);
+    frame.tiles.reserve(
+        static_cast<size_t>(frame.levelWidth) *
+        frame.levelHeight *
+        visibleLayerCount *
+        2 +
+        2);
 
-            frame.tiles.push_back({
-                .position = { static_cast<float>(x), static_cast<float>(rowIndex) },
-                .color = tileColor(floorTile),
-                .baseElevation = floorIsWater ? -config::waterDepthBelowGround : 0.0f,
-                .height = floorIsWall ? 1.0f : 0.0f,
-                .showGrid = floorTile != TileType::Player,
-            });
+    auto documentTileAt = [&](uint32_t x, uint32_t y, uint32_t z) {
+        if (z >= layers.size() || y >= layers[z].size() || x >= layers[z][y].size()) {
+            return TileType::Air;
+        }
+        return charToTileType(layers[z][y][x]).value_or(TileType::Air);
+    };
 
-            if (tileTypeOccupiesLevelCell(tile)) {
-                Vec4 color = tileColor(tile);
-                if (tile == TileType::Ice) {
-                    color.w = config::iceTintAlpha;
+    for (uint32_t z = 0; z < visibleLayerCount; ++z) {
+        for (uint32_t y = 0; y < frame.levelHeight; ++y) {
+            for (uint32_t x = 0; x < frame.levelWidth; ++x) {
+                if (z == activeLayer &&
+                    editorHoverCell_ &&
+                    editorHoverCell_->x == static_cast<int>(x) &&
+                    editorHoverCell_->y == static_cast<int>(y)) {
+                    continue;
                 }
 
-                frame.tiles.push_back({
-                    .position = { static_cast<float>(x), static_cast<float>(rowIndex) },
-                    .color = color,
-                    .height = 1.0f,
-                    .blurBehind = tile == TileType::Ice,
-                    .showGrid = tile != TileType::Player,
-                });
+                const TileType tile = documentTileAt(x, y, z);
+                const TileType floorTile = tileTypeInitialFloor(tile);
+                if (floorTile != TileType::Air) {
+                    frame.tiles.push_back({
+                        .position = { static_cast<float>(x), static_cast<float>(y) },
+                        .color = tileColor(floorTile),
+                        .baseElevation = static_cast<float>(z) +
+                            (floorTile == TileType::Water ? -config::waterDepthBelowGround : 0.0f),
+                        .height = floorTile == TileType::Wall ? 1.0f : 0.0f,
+                        .showGrid = floorTile != TileType::Player,
+                    });
+                }
+
+                if (tileTypeOccupiesLevelCell(tile)) {
+                    Vec4 color = tileColor(tile);
+                    if (tile == TileType::Ice) {
+                        color.w = config::iceTintAlpha;
+                    }
+
+                    frame.tiles.push_back({
+                        .position = { static_cast<float>(x), static_cast<float>(y) },
+                        .color = color,
+                        .baseElevation = static_cast<float>(z),
+                        .height = 1.0f,
+                        .blurBehind = tile == TileType::Ice,
+                        .showGrid = tile != TileType::Player,
+                    });
+                }
             }
         }
     }
 
-    auto documentHasOpenWater = [&](GridPosition position) {
+    auto documentHasOpenWater = [&](GridPosition position, uint32_t z) {
         if (position.x < 0 || position.y < 0 ||
             position.x >= static_cast<int>(frame.levelWidth) ||
             position.y >= static_cast<int>(frame.levelHeight)) {
             return false;
         }
-
-        const std::string& row = rows[static_cast<size_t>(position.y)];
-        const TileType tile = position.x < static_cast<int>(row.size())
-            ? charToTileType(row[static_cast<size_t>(position.x)]).value_or(TileType::Empty)
-            : TileType::Empty;
-        return tileTypeInitialFloor(tile) == TileType::Water;
+        return tileTypeInitialFloor(documentTileAt(
+                   static_cast<uint32_t>(position.x),
+                   static_cast<uint32_t>(position.y),
+                   z)) == TileType::Water;
     };
-    appendWaterEdgeFaces(frame, frame.levelWidth, frame.levelHeight, documentHasOpenWater);
+    for (uint32_t z = 0; z < visibleLayerCount; ++z) {
+        appendWaterEdgeFaces(
+            frame,
+            frame.levelWidth,
+            frame.levelHeight,
+            static_cast<float>(z),
+            [&, z](GridPosition position) {
+                return documentHasOpenWater(position, z);
+            });
+    }
 
     if (editorHoverCell_ &&
         editorHoverCell_->x >= 0 &&
@@ -1511,34 +1604,48 @@ RenderFrameData Application::buildEditorRenderFrame() const
         editorHoverCell_->x < static_cast<int>(frame.levelWidth) &&
         editorHoverCell_->y < static_cast<int>(frame.levelHeight)) {
         const TileType selectedTile = levelEditor_.selectedTile();
-        Vec4 previewColor = tileColor(selectedTile);
-        if (selectedTile == TileType::Ice) {
+        const TileType hoveredTile = documentTileAt(
+            static_cast<uint32_t>(editorHoverCell_->x),
+            static_cast<uint32_t>(editorHoverCell_->y),
+            activeLayer);
+        const TileType previewTile = selectedTile == TileType::Air ? hoveredTile : selectedTile;
+        Vec4 previewColor = tileColor(previewTile);
+        if (previewTile == TileType::Ice) {
             previewColor.w = config::iceTintAlpha;
         }
 
-        const std::string& hoverRow = rows[static_cast<size_t>(editorHoverCell_->y)];
-        const TileType hoveredTile = editorHoverCell_->x < static_cast<int>(hoverRow.size())
-            ? charToTileType(hoverRow[static_cast<size_t>(editorHoverCell_->x)]).value_or(TileType::Empty)
-            : TileType::Empty;
-        const TileType hoveredFloor = tileTypeInitialFloor(hoveredTile);
-        const float hoveredTop = hoveredFloor == TileType::Water
-            ? -config::waterDepthBelowGround
-            : (hoveredFloor == TileType::Wall || tileTypeOccupiesLevelCell(hoveredTile) ? 1.0f : 0.0f);
-        const bool previewIsRaised = selectedTile == TileType::Wall || tileTypeOccupiesLevelCell(selectedTile);
+        const TileType previewFloor = tileTypeInitialFloor(previewTile);
+        if (previewFloor != TileType::Air) {
+            frame.tiles.push_back({
+                .position = {
+                    static_cast<float>(editorHoverCell_->x),
+                    static_cast<float>(editorHoverCell_->y),
+                },
+                .size = { 1.0f, 1.0f },
+                .color = tileColor(previewFloor),
+                .baseElevation = static_cast<float>(activeLayer) +
+                    (previewFloor == TileType::Water ? -config::waterDepthBelowGround : 0.02f),
+                .height = previewFloor == TileType::Wall ? 1.0f : 0.0f,
+                .showGrid = previewFloor != TileType::Player,
+                .isEditorPreview = true,
+            });
+        }
 
-        frame.tiles.push_back({
-            .position = {
-                static_cast<float>(editorHoverCell_->x),
-                static_cast<float>(editorHoverCell_->y),
-            },
-            .size = { 1.0f, 1.0f },
-            .color = previewColor,
-            .baseElevation = hoveredTop + 0.02f,
-            .height = previewIsRaised ? 1.0f : 0.0f,
-            .blurBehind = selectedTile == TileType::Ice,
-            .showGrid = selectedTile != TileType::Player,
-            .isEditorPreview = true,
-        });
+        if (tileTypeOccupiesLevelCell(previewTile)) {
+            frame.tiles.push_back({
+                .position = {
+                    static_cast<float>(editorHoverCell_->x),
+                    static_cast<float>(editorHoverCell_->y),
+                },
+                .size = { 1.0f, 1.0f },
+                .color = previewColor,
+                .baseElevation = static_cast<float>(activeLayer) + 0.02f,
+                .height = 1.0f,
+                .blurBehind = previewTile == TileType::Ice,
+                .showGrid = previewTile != TileType::Player,
+                .isEditorPreview = true,
+            });
+        }
     }
 
     return frame;

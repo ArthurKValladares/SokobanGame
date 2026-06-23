@@ -25,9 +25,25 @@ struct GridPosition {
     int y = 0;
 };
 
+struct GridPosition3 {
+    int x = 0;
+    int y = 0;
+    int z = 0;
+};
+
 inline bool operator==(GridPosition left, GridPosition right)
 {
     return left.x == right.x && left.y == right.y;
+}
+
+inline bool operator==(GridPosition3 left, GridPosition3 right)
+{
+    return left.x == right.x && left.y == right.y && left.z == right.z;
+}
+
+[[nodiscard]] inline GridPosition xy(GridPosition3 position)
+{
+    return { position.x, position.y };
 }
 
 } // namespace sokoban

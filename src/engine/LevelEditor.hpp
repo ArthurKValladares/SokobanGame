@@ -38,12 +38,15 @@ public:
     [[nodiscard]] bool tryUndoEdit();
     [[nodiscard]] uint32_t documentWidth() const;
     [[nodiscard]] uint32_t documentHeight() const;
+    [[nodiscard]] uint32_t documentDepth() const;
+    [[nodiscard]] uint32_t activeLayer() const;
     [[nodiscard]] const std::vector<std::string>& documentRows() const;
+    [[nodiscard]] const Level::LayerRows& documentLayers() const;
     [[nodiscard]] TileType selectedTile() const;
 
 private:
     struct Document {
-        std::vector<std::string> rows;
+        Level::LayerRows layers;
         std::filesystem::path filePath;
         std::filesystem::path browserRoot;
         std::filesystem::path sourceLevelRoot;
@@ -53,6 +56,7 @@ private:
         std::string status;
         int requestedWidth = 12;
         int requestedHeight = 8;
+        int activeLayer = 0;
         TileType selectedTile = TileType::Wall;
         bool dirty = false;
         bool playingDraft = false;
@@ -60,11 +64,12 @@ private:
     };
 
     struct DocumentSnapshot {
-        std::vector<std::string> rows;
+        Level::LayerRows layers;
         std::filesystem::path filePath;
         std::string filePathBuffer;
         int requestedWidth = 12;
         int requestedHeight = 8;
+        int activeLayer = 0;
         bool dirty = false;
     };
 
@@ -92,6 +97,8 @@ private:
     void drawPermanentDeleteConfirmation();
     void newDocument(int width, int height, bool recordHistory = true);
     void resizeDocument(int width, int height, bool recordHistory = true);
+    void addLayer();
+    void deleteActiveLayer();
     void loadDocument(const std::filesystem::path& path, bool recordHistory = true);
     void saveDocument(const std::filesystem::path& path);
     void playDocument(const Callbacks& callbacks);
