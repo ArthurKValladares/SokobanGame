@@ -62,6 +62,11 @@ bool tileTypeAllowsEntity(TileType type)
         type == TileType::PressurePlate;
 }
 
+bool tileTypeIsSurfaceEntity(TileType type)
+{
+    return type == TileType::End || type == TileType::PressurePlate;
+}
+
 Vec4 tileColor(TileType type, bool isActive)
 {
     for (const TileTypeDefinition& definition : tileTypeDefinitionTable) {

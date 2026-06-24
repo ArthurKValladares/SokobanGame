@@ -51,6 +51,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] bool tileTypeIsSolidBlock(TileType type);
 [[nodiscard]] bool tileTypeSupportsEntity(TileType type);
 [[nodiscard]] bool tileTypeAllowsEntity(TileType type);
+[[nodiscard]] bool tileTypeIsSurfaceEntity(TileType type);
 [[nodiscard]] Vec4 tileColor(TileType type, bool isActive = true);
 
 [[nodiscard]] constexpr bool tileTypeDefinitionsContainCharacter(char character)

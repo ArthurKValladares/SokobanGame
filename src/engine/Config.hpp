@@ -12,6 +12,8 @@ inline constexpr float perspectiveFovDegrees = 35.0f;
 inline constexpr float perspectiveCameraDistanceScale = 2.2f;
 inline constexpr float maxWireframeLineWidth = 16.0f;
 inline constexpr float waterDepthBelowGround = 0.18f;
+inline constexpr float surfaceEntityHeight = 0.08f;
+inline constexpr float surfaceEntityWidthDepth = 0.72f;
 inline constexpr float sunAzimuthDegrees = -122.5f;
 inline constexpr float sunTiltDegrees = 33.0f;
 inline constexpr Vec3 sunColor { 1.0f, 0.96f, 0.86f };

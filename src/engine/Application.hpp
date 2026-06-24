@@ -154,6 +154,8 @@ private:
     float shadowBias_ = config::shadowBias;
     Vec4 tileGridLineColor_ { config::tileGridLineColor };
     float tileGridLineWidth_ = config::tileGridLineWidth;
+    float surfaceEntityHeight_ = config::surfaceEntityHeight;
+    float surfaceEntityWidthDepth_ = config::surfaceEntityWidthDepth;
     std::vector<Rock> rocks_;
     std::deque<MoveCommand> pendingCommands_;
     std::vector<ActionRecord> moveHistory_;

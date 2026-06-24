@@ -156,6 +156,8 @@ struct StaticRenderCell {
     TileType tile = TileType::Ground;
     bool active = true;
     bool showGrid = true;
+    Vec2 size { 1.0f, 1.0f };
+    Vec2 positionOffset {};
     float baseElevation = 0.0f;
     float height = 0.0f;
 };
@@ -166,16 +168,24 @@ StaticRenderCell staticRenderCellFor(
     uint32_t y,
     uint32_t z,
     bool endUnlocked,
-    std::optional<TileType> fallenTile)
+    std::optional<TileType> fallenTile,
+    float surfaceEntityHeight,
+    float surfaceEntitySize)
 {
     const TileType tile = fallenTile.value_or(level.tileAt(x, y, z));
+    const bool surfaceEntity = tileTypeIsSurfaceEntity(tile);
+    const float centeredOffset = (1.0f - surfaceEntitySize) * 0.5f;
     return {
         .tile = tile,
         .active = tile != TileType::End || endUnlocked,
         .showGrid = tile != TileType::Player,
+        .size = surfaceEntity ? Vec2 { surfaceEntitySize, surfaceEntitySize } : Vec2 { 1.0f, 1.0f },
+        .positionOffset = surfaceEntity ? Vec2 { centeredOffset, centeredOffset } : Vec2 {},
         .baseElevation = static_cast<float>(z) +
             (tile == TileType::Water ? 1.0f - config::waterDepthBelowGround : 0.0f),
-        .height = tileTypeIsSolidBlock(tile) ? 1.0f : 0.0f,
+        .height = surfaceEntity
+            ? surfaceEntityHeight
+            : (tileTypeIsSolidBlock(tile) ? 1.0f : 0.0f),
     };
 }
 
@@ -275,7 +285,11 @@ void appendStaticTiles(RenderFrameData& frame, const Level& level, CellAt cellAt
                     continue;
                 }
                 frame.tiles.push_back({
-                    .position = { static_cast<float>(x), static_cast<float>(y) },
+                    .position = {
+                        static_cast<float>(x) + cell.positionOffset.x,
+                        static_cast<float>(y) + cell.positionOffset.y,
+                    },
+                    .size = cell.size,
                     .color = tileColor(cell.tile, cell.active),
                     .baseElevation = cell.baseElevation,
                     .height = cell.height,
@@ -447,6 +461,26 @@ void Application::drawDebugUi()
         tileGridLineColor_.w = std::clamp(tileGridLineColor_.w, 0.0f, 1.0f);
         ImGui::DragFloat("Grid Width", &tileGridLineWidth_, 0.05f, 0.0f, 12.0f, "%.2f px");
         tileGridLineWidth_ = std::clamp(tileGridLineWidth_, 0.0f, 12.0f);
+    }
+
+    if (ImGui::CollapsingHeader("Tile Geometry")) {
+        ImGui::DragFloat(
+            "Surface Entity Height",
+            &surfaceEntityHeight_,
+            0.005f,
+            0.01f,
+            0.5f,
+            "%.3f");
+        surfaceEntityHeight_ = std::clamp(surfaceEntityHeight_, 0.01f, 0.5f);
+        ImGui::DragFloat(
+            "Surface Entity Width / Depth",
+            &surfaceEntityWidthDepth_,
+            0.01f,
+            0.1f,
+            1.0f,
+            "%.2f");
+        surfaceEntityWidthDepth_ = std::clamp(surfaceEntityWidthDepth_, 0.1f, 1.0f);
+        ImGui::TextDisabled("End and pressure plate geometry");
     }
 
     if (ImGui::CollapsingHeader("Lighting")) {
@@ -1405,7 +1439,15 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             fallenTile = TileType::Player;
         }
 
-        return staticRenderCellFor(level_, x, y, z, endUnlocked, fallenTile);
+        return staticRenderCellFor(
+            level_,
+            x,
+            y,
+            z,
+            endUnlocked,
+            fallenTile,
+            surfaceEntityHeight_,
+            surfaceEntityWidthDepth_);
     };
     appendStaticTiles(frame, level_, staticCellAt);
     for (uint32_t z = 0; z < level_.depth(); ++z) {
@@ -1510,6 +1552,9 @@ RenderFrameData Application::buildEditorRenderFrame() const
             return;
         }
 
+        const bool surfaceEntity = tileTypeIsSurfaceEntity(tile);
+        const float tileSize = surfaceEntity ? surfaceEntityWidthDepth_ : 1.0f;
+        const float centeredOffset = (1.0f - tileSize) * 0.5f;
         Vec4 color = tileColor(tile);
         if (tile == TileType::Ice) {
             color.w = config::iceTintAlpha;
@@ -1517,12 +1562,18 @@ RenderFrameData Application::buildEditorRenderFrame() const
 
         const float previewOffset = preview ? 0.02f : 0.0f;
         frame.tiles.push_back({
-            .position = { static_cast<float>(x), static_cast<float>(y) },
+            .position = {
+                static_cast<float>(x) + centeredOffset,
+                static_cast<float>(y) + centeredOffset,
+            },
+            .size = { tileSize, tileSize },
             .color = color,
             .baseElevation = static_cast<float>(z) +
                 (tile == TileType::Water ? 1.0f - config::waterDepthBelowGround : 0.0f) +
                 previewOffset,
-            .height = tileTypeIsSolidBlock(tile) || tileTypeOccupiesLevelCell(tile) ? 1.0f : 0.0f,
+            .height = surfaceEntity
+                ? surfaceEntityHeight_
+                : (tileTypeIsSolidBlock(tile) || tileTypeOccupiesLevelCell(tile) ? 1.0f : 0.0f),
             .blurBehind = tile == TileType::Ice,
             .showGrid = tile != TileType::Player,
             .isEditorPreview = preview,
