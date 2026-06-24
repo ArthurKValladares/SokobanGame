@@ -162,7 +162,7 @@ private:
     std::optional<size_t> undoCursor_;
     ActionRecord activeAction_;
     LevelEditor levelEditor_;
-    std::optional<GridPosition> editorHoverCell_;
+    std::optional<GridPosition3> editorHoverCell_;
     float moveElapsed_ = 0.0f;
     bool moving_ = false;
     bool running_ = true;

@@ -196,6 +196,10 @@ void LevelEditor::draw(const Callbacks& callbacks)
     if (ImGui::SliderInt("Current Layer", &selectedLayer, 0, std::max(static_cast<int>(document_.layers.size()) - 1, 0))) {
         document_.activeLayer = selectedLayer;
     }
+    ImGui::Checkbox("Lock Edits To Current Layer", &document_.layerLocked);
+    if (!document_.layerLocked) {
+        ImGui::TextDisabled("Click: add above   Hold R + click: replace");
+    }
     if (ImGui::Button("+ Layer Above")) {
         addLayer();
     }
@@ -248,30 +252,38 @@ void LevelEditor::markDraftSolved()
     document_.status = "Draft solved.";
 }
 
-void LevelEditor::paintCell(GridPosition position)
+void LevelEditor::paintCell(GridPosition3 position)
 {
-    if (document_.layers.empty() ||
-        document_.activeLayer < 0 ||
-        document_.activeLayer >= static_cast<int>(document_.layers.size())) {
+    if (document_.layers.empty() || position.z < 0) {
         return;
     }
 
-    std::vector<std::string>& activeRows = document_.layers[static_cast<size_t>(document_.activeLayer)];
-    if (position.y < 0 || position.x < 0 || position.y >= static_cast<int>(activeRows.size())) {
-        return;
-    }
-
-    std::string& row = activeRows[static_cast<size_t>(position.y)];
-    if (position.x >= static_cast<int>(row.size())) {
+    const int height = static_cast<int>(documentHeight());
+    const int width = static_cast<int>(documentWidth());
+    if (position.y < 0 ||
+        position.x < 0 ||
+        position.y >= height ||
+        position.x >= width) {
         return;
     }
 
     const char character = tileTypeToChar(document_.selectedTile);
-    if (row[static_cast<size_t>(position.x)] == character) {
+    if (document_.selectedTile == TileType::Air &&
+        position.z >= static_cast<int>(document_.layers.size())) {
+        return;
+    }
+    if (position.z < static_cast<int>(document_.layers.size()) &&
+        document_.layers[static_cast<size_t>(position.z)][static_cast<size_t>(position.y)][static_cast<size_t>(position.x)] == character) {
         return;
     }
 
     const DocumentSnapshot before = captureDocumentSnapshot();
+    while (position.z >= static_cast<int>(document_.layers.size())) {
+        document_.layers.emplace_back(
+            static_cast<size_t>(height),
+            std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Air)));
+    }
+
     if (document_.selectedTile == TileType::Player) {
         for (std::vector<std::string>& layer : document_.layers) {
             for (std::string& documentRow : layer) {
@@ -280,8 +292,10 @@ void LevelEditor::paintCell(GridPosition position)
         }
     }
 
-    row[static_cast<size_t>(position.x)] = character;
+    document_.layers[static_cast<size_t>(position.z)][static_cast<size_t>(position.y)][static_cast<size_t>(position.x)] = character;
+    document_.activeLayer = position.z;
     document_.dirty = true;
+    document_.status = "Painted layer " + std::to_string(position.z + 1) + ".";
     recordDocumentChange(before);
 }
 
@@ -327,6 +341,11 @@ uint32_t LevelEditor::documentDepth() const
 uint32_t LevelEditor::activeLayer() const
 {
     return static_cast<uint32_t>(std::max(document_.activeLayer, 0));
+}
+
+bool LevelEditor::layerLocked() const
+{
+    return document_.layerLocked;
 }
 
 const std::vector<std::string>& LevelEditor::documentRows() const

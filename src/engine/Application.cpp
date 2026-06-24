@@ -285,6 +285,11 @@ void appendStaticTiles(RenderFrameData& frame, const Level& level, CellAt cellAt
                     continue;
                 }
                 frame.tiles.push_back({
+                    .cell = {
+                        static_cast<int>(x),
+                        static_cast<int>(y),
+                        static_cast<int>(z),
+                    },
                     .position = {
                         static_cast<float>(x) + cell.positionOffset.x,
                         static_cast<float>(y) + cell.positionOffset.y,
@@ -675,10 +680,17 @@ void Application::updateEditorPainting()
         mouse.y * pixelSize.y / windowSize.y,
     };
     const RenderFrameData editorFrame = buildEditorRenderFrame();
-    if (const std::optional<GridPosition> position = renderer_.pickIsoGridCell(editorFrame, mousePixels)) {
-        editorHoverCell_ = position;
-        if (input_.mouseButtonDown(SDL_BUTTON_LEFT)) {
-            levelEditor_.paintCell(*position);
+    if (const std::optional<GridPosition3> clicked = renderer_.pickIsoGridCell(editorFrame, mousePixels)) {
+        GridPosition3 target = *clicked;
+        if (levelEditor_.layerLocked()) {
+            target.z = static_cast<int>(levelEditor_.activeLayer());
+        } else if (!input_.keyDown(SDL_SCANCODE_R)) {
+            ++target.z;
+        }
+
+        editorHoverCell_ = target;
+        if (input_.mouseButtonPressed(SDL_BUTTON_LEFT)) {
+            levelEditor_.paintCell(target);
         }
     }
 #endif
@@ -1532,12 +1544,13 @@ RenderFrameData Application::buildEditorRenderFrame() const
 
     const Level::LayerRows& layers = levelEditor_.documentLayers();
     const uint32_t activeLayer = levelEditor_.activeLayer();
-    const uint32_t visibleLayerCount = std::min(activeLayer + 1, static_cast<uint32_t>(layers.size()));
-    frame.levelDepth = std::max(visibleLayerCount, 1U);
+    const uint32_t layerCount = static_cast<uint32_t>(layers.size());
+    const bool layerLocked = levelEditor_.layerLocked();
+    frame.levelDepth = std::max(layerCount, 1U);
     frame.tiles.reserve(
         static_cast<size_t>(frame.levelWidth) *
         frame.levelHeight *
-        visibleLayerCount *
+        layerCount *
         2 +
         2);
 
@@ -1559,9 +1572,13 @@ RenderFrameData Application::buildEditorRenderFrame() const
         if (tile == TileType::Ice) {
             color.w = config::iceTintAlpha;
         }
-
         const float previewOffset = preview ? 0.02f : 0.0f;
         frame.tiles.push_back({
+            .cell = {
+                static_cast<int>(x),
+                static_cast<int>(y),
+                static_cast<int>(z),
+            },
             .position = {
                 static_cast<float>(x) + centeredOffset,
                 static_cast<float>(y) + centeredOffset,
@@ -1580,17 +1597,33 @@ RenderFrameData Application::buildEditorRenderFrame() const
         });
     };
 
-    for (uint32_t z = 0; z < visibleLayerCount; ++z) {
+    for (uint32_t z = 0; z < layerCount; ++z) {
+        if (layerLocked && z != activeLayer) {
+            continue;
+        }
         for (uint32_t y = 0; y < frame.levelHeight; ++y) {
             for (uint32_t x = 0; x < frame.levelWidth; ++x) {
-                if (z == activeLayer &&
-                    editorHoverCell_ &&
+                if (editorHoverCell_ &&
+                    editorHoverCell_->z == static_cast<int>(z) &&
                     editorHoverCell_->x == static_cast<int>(x) &&
                     editorHoverCell_->y == static_cast<int>(y)) {
                     continue;
                 }
 
                 const TileType tile = documentTileAt(x, y, z);
+                if (layerLocked && tile == TileType::Air) {
+                    frame.tiles.push_back({
+                        .cell = {
+                            static_cast<int>(x),
+                            static_cast<int>(y),
+                            static_cast<int>(z),
+                        },
+                        .position = { static_cast<float>(x), static_cast<float>(y) },
+                        .baseElevation = static_cast<float>(z),
+                        .pickOnly = true,
+                    });
+                    continue;
+                }
                 appendEditorTile(x, y, z, tile, false);
             }
         }
@@ -1607,7 +1640,10 @@ RenderFrameData Application::buildEditorRenderFrame() const
                    static_cast<uint32_t>(position.y),
                    z) == TileType::Water;
     };
-    for (uint32_t z = 0; z < visibleLayerCount; ++z) {
+    for (uint32_t z = 0; z < layerCount; ++z) {
+        if (layerLocked && z != activeLayer) {
+            continue;
+        }
         appendWaterEdgeFaces(
             frame,
             frame.levelWidth,
@@ -1627,12 +1663,12 @@ RenderFrameData Application::buildEditorRenderFrame() const
         const TileType hoveredTile = documentTileAt(
             static_cast<uint32_t>(editorHoverCell_->x),
             static_cast<uint32_t>(editorHoverCell_->y),
-            activeLayer);
+            static_cast<uint32_t>(editorHoverCell_->z));
         const TileType previewTile = selectedTile == TileType::Air ? hoveredTile : selectedTile;
         appendEditorTile(
             static_cast<uint32_t>(editorHoverCell_->x),
             static_cast<uint32_t>(editorHoverCell_->y),
-            activeLayer,
+            static_cast<uint32_t>(editorHoverCell_->z),
             previewTile,
             true);
     }

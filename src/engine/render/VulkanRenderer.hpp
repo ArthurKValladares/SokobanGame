@@ -54,12 +54,14 @@ struct RenderFrameData {
     };
 
     struct Tile {
+        GridPosition3 cell {};
         Vec2 position {};
         Vec2 size { 1.0f, 1.0f };
         Vec4 color {};
         float baseElevation = 0.0f;
         float height = 0.0f;
         bool blurBehind = false;
+        bool pickOnly = false;
         bool showGrid = true;
         bool isEditorPreview = false;
     };
@@ -119,7 +121,7 @@ public:
     void beginDebugUiFrame();
     [[nodiscard]] bool wantsKeyboardCapture() const;
     [[nodiscard]] bool wantsMouseCapture() const;
-    [[nodiscard]] std::optional<GridPosition> pickIsoGridCell(const RenderFrameData& frameData, Vec2 pixelPosition) const;
+    [[nodiscard]] std::optional<GridPosition3> pickIsoGridCell(const RenderFrameData& frameData, Vec2 pixelPosition) const;
     void waitIdle() const;
     [[nodiscard]] AntiAliasingMode antiAliasingMode() const;
     [[nodiscard]] VkSampleCountFlagBits activeSampleCount() const;

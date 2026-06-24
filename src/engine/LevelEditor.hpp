@@ -34,12 +34,13 @@ public:
     void setEditingDocument(bool editingDocument);
     [[nodiscard]] bool editingDocument() const;
     void markDraftSolved();
-    void paintCell(GridPosition position);
+    void paintCell(GridPosition3 position);
     [[nodiscard]] bool tryUndoEdit();
     [[nodiscard]] uint32_t documentWidth() const;
     [[nodiscard]] uint32_t documentHeight() const;
     [[nodiscard]] uint32_t documentDepth() const;
     [[nodiscard]] uint32_t activeLayer() const;
+    [[nodiscard]] bool layerLocked() const;
     [[nodiscard]] const std::vector<std::string>& documentRows() const;
     [[nodiscard]] const Level::LayerRows& documentLayers() const;
     [[nodiscard]] TileType selectedTile() const;
@@ -58,6 +59,7 @@ private:
         int requestedHeight = 8;
         int activeLayer = 0;
         TileType selectedTile = TileType::Wall;
+        bool layerLocked = false;
         bool dirty = false;
         bool playingDraft = false;
         bool editingDocument = false;

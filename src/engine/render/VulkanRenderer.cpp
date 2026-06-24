@@ -360,7 +360,7 @@ bool VulkanRenderer::wantsMouseCapture() const
 #endif
 }
 
-std::optional<GridPosition> VulkanRenderer::pickIsoGridCell(const RenderFrameData& frameData, Vec2 pixelPosition) const
+std::optional<GridPosition3> VulkanRenderer::pickIsoGridCell(const RenderFrameData& frameData, Vec2 pixelPosition) const
 {
     if (frameData.viewMode != RenderViewMode::Isometric3D ||
         frameData.levelWidth == 0 ||
@@ -384,7 +384,7 @@ std::optional<GridPosition> VulkanRenderer::pickIsoGridCell(const RenderFrameDat
         return dot(normal, subtract(layout.cameraPosition, center)) > 0.0f;
     };
 
-    std::optional<GridPosition> picked;
+    std::optional<GridPosition3> picked;
     float pickedDepth = std::numeric_limits<float>::max();
 
     auto testFace = [&](const RenderFrameData::Tile& tile, const std::array<Vec3, 4>& vertices, Vec3 normal) {
@@ -419,7 +419,7 @@ std::optional<GridPosition> VulkanRenderer::pickIsoGridCell(const RenderFrameDat
             return;
         }
 
-        picked = GridPosition { x, y };
+        picked = tile.cell;
         pickedDepth = depth;
     };
 
@@ -1645,7 +1645,7 @@ void VulkanRenderer::recordShadowMapRendering(VkCommandBuffer commandBuffer, con
     };
 
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
-        if (tile.isEditorPreview) {
+        if (tile.isEditorPreview || tile.pickOnly) {
             continue;
         }
 
@@ -2386,6 +2386,9 @@ void VulkanRenderer::drawIsoFrame(
         });
     };
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
+        if (tile.pickOnly) {
+            continue;
+        }
         if (tile.blurBehind != translucentPass) {
             continue;
         }
