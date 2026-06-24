@@ -275,7 +275,7 @@ void LevelEditor::paintCell(GridPosition position)
     if (document_.selectedTile == TileType::Player) {
         for (std::vector<std::string>& layer : document_.layers) {
             for (std::string& documentRow : layer) {
-                std::ranges::replace(documentRow, tileTypeToChar(TileType::Player), tileTypeToChar(TileType::Empty));
+                std::ranges::replace(documentRow, tileTypeToChar(TileType::Player), tileTypeToChar(TileType::Air));
             }
         }
     }
@@ -622,12 +622,15 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
     document_.layers = {
         std::vector<std::string>(
             static_cast<size_t>(height),
-            std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Empty))),
+            std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Ground))),
+        std::vector<std::string>(
+            static_cast<size_t>(height),
+            std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Air))),
     };
-    document_.layers.front().front().front() = tileTypeToChar(TileType::Player);
+    document_.layers[1].front().front() = tileTypeToChar(TileType::Player);
     document_.requestedWidth = width;
     document_.requestedHeight = height;
-    document_.activeLayer = 0;
+    document_.activeLayer = 1;
     document_.dirty = true;
     document_.playingDraft = false;
     document_.editingDocument = true;
@@ -645,7 +648,7 @@ void LevelEditor::resizeDocument(int width, int height, bool recordHistory)
 
     for (size_t layerIndex = 0; layerIndex < document_.layers.size(); ++layerIndex) {
         const char fill = layerIndex == 0
-            ? tileTypeToChar(TileType::Empty)
+            ? tileTypeToChar(TileType::Ground)
             : tileTypeToChar(TileType::Air);
         std::vector<std::string> resized(
             static_cast<size_t>(height),
@@ -739,9 +742,7 @@ void LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     }
 
     for (size_t layerIndex = 0; layerIndex < layers.size(); ++layerIndex) {
-        const char fill = layers.size() == 1 || layerIndex == 0
-            ? tileTypeToChar(TileType::Empty)
-            : tileTypeToChar(TileType::Air);
+        const char fill = tileTypeToChar(TileType::Air);
         layers[layerIndex].resize(height, std::string(width, fill));
         for (std::string& row : layers[layerIndex]) {
             row.resize(width, fill);
@@ -1210,9 +1211,17 @@ std::vector<std::string> LevelEditor::defaultScreenRows() const
 {
     const int width = std::max(document_.requestedWidth, 1);
     const int height = std::max(document_.requestedHeight, 1);
-    std::vector<std::string> rows(static_cast<size_t>(height), std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Empty)));
-    rows[static_cast<size_t>(height / 2)][static_cast<size_t>(width / 2)] = tileTypeToChar(TileType::Player);
-    return rows;
+    Level::LayerRows layers {
+        std::vector<std::string>(
+            static_cast<size_t>(height),
+            std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Ground))),
+        std::vector<std::string>(
+            static_cast<size_t>(height),
+            std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Air))),
+    };
+    layers[1][static_cast<size_t>(height / 2)][static_cast<size_t>(width / 2)] =
+        tileTypeToChar(TileType::Player);
+    return Level::serializeLayerRows(layers);
 }
 
 std::filesystem::path LevelEditor::uniqueDeletedLevelPath(const std::filesystem::path& levelPath) const

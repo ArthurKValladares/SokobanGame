@@ -45,9 +45,21 @@ bool tileTypeOccupiesLevelCell(TileType type)
     return type == TileType::Player || type == TileType::Rock || type == TileType::Ice;
 }
 
-TileType tileTypeInitialFloor(TileType type)
+bool tileTypeIsSolidBlock(TileType type)
 {
-    return tileTypeOccupiesLevelCell(type) ? TileType::Empty : type;
+    return type == TileType::Ground || type == TileType::Wall;
+}
+
+bool tileTypeSupportsEntity(TileType type)
+{
+    return tileTypeIsSolidBlock(type) || type == TileType::Water;
+}
+
+bool tileTypeAllowsEntity(TileType type)
+{
+    return type == TileType::Air ||
+        type == TileType::End ||
+        type == TileType::PressurePlate;
 }
 
 Vec4 tileColor(TileType type, bool isActive)

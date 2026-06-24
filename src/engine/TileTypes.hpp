@@ -11,7 +11,7 @@ namespace sokoban {
 
 enum class TileType {
     Air,
-    Empty,
+    Ground,
     Wall,
     End,
     PressurePlate,
@@ -23,7 +23,7 @@ enum class TileType {
 };
 
 struct TileTypeDefinition {
-    TileType type = TileType::Empty;
+    TileType type = TileType::Ground;
     char character = ' ';
     std::string_view name;
     Vec4 activeColor {};
@@ -32,8 +32,8 @@ struct TileTypeDefinition {
 
 inline constexpr auto tileTypeCount = static_cast<std::size_t>(TileType::Count);
 inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitionTable {
-    TileTypeDefinition { TileType::Air, 'A', "Air", { 0.0f, 0.0f, 0.0f, 0.0f } },
-    TileTypeDefinition { TileType::Empty, ' ', "Empty", { 0.82f, 0.82f, 0.84f, 1.0f } },
+    TileTypeDefinition { TileType::Air, ' ', "Air", { 0.0f, 0.0f, 0.0f, 0.0f } },
+    TileTypeDefinition { TileType::Ground, '.', "Ground", { 0.82f, 0.82f, 0.84f, 1.0f } },
     TileTypeDefinition { TileType::Wall, '#', "Wall", { 0.62f, 0.32f, 0.09f, 1.0f } },
     TileTypeDefinition { TileType::End, 'E', "End", { 1.0f, 0.05f, 0.04f, 1.0f }, { 0.38f, 0.04f, 0.04f, 1.0f } },
     TileTypeDefinition { TileType::PressurePlate, 'P', "Pressure", { 0.18f, 0.18f, 0.18f, 1.0f } },
@@ -48,7 +48,9 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] std::optional<TileType> charToTileType(char character);
 [[nodiscard]] std::string_view tileTypeName(TileType type);
 [[nodiscard]] bool tileTypeOccupiesLevelCell(TileType type);
-[[nodiscard]] TileType tileTypeInitialFloor(TileType type);
+[[nodiscard]] bool tileTypeIsSolidBlock(TileType type);
+[[nodiscard]] bool tileTypeSupportsEntity(TileType type);
+[[nodiscard]] bool tileTypeAllowsEntity(TileType type);
 [[nodiscard]] Vec4 tileColor(TileType type, bool isActive = true);
 
 [[nodiscard]] constexpr bool tileTypeDefinitionsContainCharacter(char character)

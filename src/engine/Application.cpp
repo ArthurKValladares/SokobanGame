@@ -153,7 +153,7 @@ Vec2 interpolateGridMotion(GridPosition3 from, GridPosition3 to, float elapsedSe
 }
 
 struct StaticRenderCell {
-    TileType tile = TileType::Empty;
+    TileType tile = TileType::Ground;
     bool active = true;
     bool showGrid = true;
     float baseElevation = 0.0f;
@@ -174,8 +174,8 @@ StaticRenderCell staticRenderCellFor(
         .active = tile != TileType::End || endUnlocked,
         .showGrid = tile != TileType::Player,
         .baseElevation = static_cast<float>(z) +
-            (tile == TileType::Water ? -config::waterDepthBelowGround : 0.0f),
-        .height = tile == TileType::Wall ? 1.0f : 0.0f,
+            (tile == TileType::Water ? 1.0f - config::waterDepthBelowGround : 0.0f),
+        .height = tileTypeIsSolidBlock(tile) ? 1.0f : 0.0f,
     };
 }
 
@@ -198,7 +198,7 @@ void appendWaterEdgeFaces(
 {
     const float bottom = layerElevation - config::waterDepthBelowGround;
     const float top = layerElevation;
-    const Vec4 color = shade(tileColor(TileType::Empty), 0.78f);
+    const Vec4 color = shade(tileColor(TileType::Ground), 0.78f);
 
     auto appendEdge = [&](std::array<Vec3, 4> vertices, Vec3 normal, Vec4 edgeColor) {
         frame.isoFaces.push_back({
@@ -1209,11 +1209,7 @@ bool Application::isUnfilledWater(GridPosition3 position) const
         return false;
     }
 
-    const TileType tile = level_.tileAt(
-        static_cast<uint32_t>(position.x),
-        static_cast<uint32_t>(position.y),
-        static_cast<uint32_t>(position.z));
-    return tile == TileType::Water &&
+    return level_.supportingTileAt(position) == TileType::Water &&
         fallenRockAt(position) == nullptr &&
         !(playerDead_ && playerCell_ == position);
 }
@@ -1224,11 +1220,7 @@ bool Application::isUnfilledWater(GridPosition3 position, const MoveRecord& reco
         return false;
     }
 
-    const TileType tile = level_.tileAt(
-        static_cast<uint32_t>(position.x),
-        static_cast<uint32_t>(position.y),
-        static_cast<uint32_t>(position.z));
-    return tile == TileType::Water &&
+    return level_.supportingTileAt(position) == TileType::Water &&
         fallenMovableRecordAt(record, position) == nullptr &&
         !(record.playerDead && record.player == position);
 }
@@ -1251,47 +1243,31 @@ bool Application::isIceFloor(GridPosition3 position, const MoveRecord& record) c
 
 bool Application::isPlayerWalkable(GridPosition3 position) const
 {
-    if (!level_.inBounds(position)) {
-        return false;
-    }
-
-    const TileType tile = level_.tileAt(
-        static_cast<uint32_t>(position.x),
-        static_cast<uint32_t>(position.y),
-        static_cast<uint32_t>(position.z));
-    return tile != TileType::Wall && tile != TileType::Air;
+    return level_.isWalkable(position);
 }
 
 bool Application::isPlayerWalkable(GridPosition3 position, const MoveRecord& record) const
 {
-    if (!level_.inBounds(position) || movableRecordAt(record, position) != nullptr) {
+    if (movableRecordAt(record, position) != nullptr) {
         return false;
     }
 
-    const TileType tile = level_.tileAt(
-        static_cast<uint32_t>(position.x),
-        static_cast<uint32_t>(position.y),
-        static_cast<uint32_t>(position.z));
-    return tile != TileType::Wall && tile != TileType::Air;
+    return level_.isWalkable(position);
 }
 
 bool Application::canMoveRock(GridPosition3 position, MoveDirection direction) const
 {
     const GridPosition3 target = movementTarget(position, direction);
-    if (!level_.inBounds(target) || rockAt(target) != nullptr) {
+    if (rockAt(target) != nullptr) {
         return false;
     }
 
-    const TileType tile = level_.tileAt(
-        static_cast<uint32_t>(target.x),
-        static_cast<uint32_t>(target.y),
-        static_cast<uint32_t>(target.z));
-    return tile != TileType::Wall && tile != TileType::Air;
+    return level_.isWalkable(target);
 }
 
 bool Application::canMovableOccupy(GridPosition3 position, const MoveRecord& record, size_t movableIndex) const
 {
-    if (!level_.inBounds(position)) {
+    if (!level_.isWalkable(position)) {
         return false;
     }
 
@@ -1301,11 +1277,7 @@ bool Application::canMovableOccupy(GridPosition3 position, const MoveRecord& rec
         }
     }
 
-    const TileType tile = level_.tileAt(
-        static_cast<uint32_t>(position.x),
-        static_cast<uint32_t>(position.y),
-        static_cast<uint32_t>(position.z));
-    return tile != TileType::Wall && tile != TileType::Air;
+    return true;
 }
 
 GridPosition3 Application::movableSlidingTarget(size_t movableIndex, MoveDirection direction, const MoveRecord& record) const
@@ -1441,12 +1413,12 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             frame,
             level_.width(),
             level_.height(),
-            static_cast<float>(z),
+            static_cast<float>(z) + 1.0f,
             [this, z](GridPosition position) {
                 return isUnfilledWater({
                     position.x,
                     position.y,
-                    static_cast<int>(z),
+                    static_cast<int>(z) + 1,
                 });
             });
     }
@@ -1533,6 +1505,29 @@ RenderFrameData Application::buildEditorRenderFrame() const
         }
         return charToTileType(layers[z][y][x]).value_or(TileType::Air);
     };
+    auto appendEditorTile = [&](uint32_t x, uint32_t y, uint32_t z, TileType tile, bool preview) {
+        if (tile == TileType::Air) {
+            return;
+        }
+
+        Vec4 color = tileColor(tile);
+        if (tile == TileType::Ice) {
+            color.w = config::iceTintAlpha;
+        }
+
+        const float previewOffset = preview ? 0.02f : 0.0f;
+        frame.tiles.push_back({
+            .position = { static_cast<float>(x), static_cast<float>(y) },
+            .color = color,
+            .baseElevation = static_cast<float>(z) +
+                (tile == TileType::Water ? 1.0f - config::waterDepthBelowGround : 0.0f) +
+                previewOffset,
+            .height = tileTypeIsSolidBlock(tile) || tileTypeOccupiesLevelCell(tile) ? 1.0f : 0.0f,
+            .blurBehind = tile == TileType::Ice,
+            .showGrid = tile != TileType::Player,
+            .isEditorPreview = preview,
+        });
+    };
 
     for (uint32_t z = 0; z < visibleLayerCount; ++z) {
         for (uint32_t y = 0; y < frame.levelHeight; ++y) {
@@ -1545,33 +1540,7 @@ RenderFrameData Application::buildEditorRenderFrame() const
                 }
 
                 const TileType tile = documentTileAt(x, y, z);
-                const TileType floorTile = tileTypeInitialFloor(tile);
-                if (floorTile != TileType::Air) {
-                    frame.tiles.push_back({
-                        .position = { static_cast<float>(x), static_cast<float>(y) },
-                        .color = tileColor(floorTile),
-                        .baseElevation = static_cast<float>(z) +
-                            (floorTile == TileType::Water ? -config::waterDepthBelowGround : 0.0f),
-                        .height = floorTile == TileType::Wall ? 1.0f : 0.0f,
-                        .showGrid = floorTile != TileType::Player,
-                    });
-                }
-
-                if (tileTypeOccupiesLevelCell(tile)) {
-                    Vec4 color = tileColor(tile);
-                    if (tile == TileType::Ice) {
-                        color.w = config::iceTintAlpha;
-                    }
-
-                    frame.tiles.push_back({
-                        .position = { static_cast<float>(x), static_cast<float>(y) },
-                        .color = color,
-                        .baseElevation = static_cast<float>(z),
-                        .height = 1.0f,
-                        .blurBehind = tile == TileType::Ice,
-                        .showGrid = tile != TileType::Player,
-                    });
-                }
+                appendEditorTile(x, y, z, tile, false);
             }
         }
     }
@@ -1582,17 +1551,17 @@ RenderFrameData Application::buildEditorRenderFrame() const
             position.y >= static_cast<int>(frame.levelHeight)) {
             return false;
         }
-        return tileTypeInitialFloor(documentTileAt(
+        return documentTileAt(
                    static_cast<uint32_t>(position.x),
                    static_cast<uint32_t>(position.y),
-                   z)) == TileType::Water;
+                   z) == TileType::Water;
     };
     for (uint32_t z = 0; z < visibleLayerCount; ++z) {
         appendWaterEdgeFaces(
             frame,
             frame.levelWidth,
             frame.levelHeight,
-            static_cast<float>(z),
+            static_cast<float>(z) + 1.0f,
             [&, z](GridPosition position) {
                 return documentHasOpenWater(position, z);
             });
@@ -1609,43 +1578,12 @@ RenderFrameData Application::buildEditorRenderFrame() const
             static_cast<uint32_t>(editorHoverCell_->y),
             activeLayer);
         const TileType previewTile = selectedTile == TileType::Air ? hoveredTile : selectedTile;
-        Vec4 previewColor = tileColor(previewTile);
-        if (previewTile == TileType::Ice) {
-            previewColor.w = config::iceTintAlpha;
-        }
-
-        const TileType previewFloor = tileTypeInitialFloor(previewTile);
-        if (previewFloor != TileType::Air) {
-            frame.tiles.push_back({
-                .position = {
-                    static_cast<float>(editorHoverCell_->x),
-                    static_cast<float>(editorHoverCell_->y),
-                },
-                .size = { 1.0f, 1.0f },
-                .color = tileColor(previewFloor),
-                .baseElevation = static_cast<float>(activeLayer) +
-                    (previewFloor == TileType::Water ? -config::waterDepthBelowGround : 0.02f),
-                .height = previewFloor == TileType::Wall ? 1.0f : 0.0f,
-                .showGrid = previewFloor != TileType::Player,
-                .isEditorPreview = true,
-            });
-        }
-
-        if (tileTypeOccupiesLevelCell(previewTile)) {
-            frame.tiles.push_back({
-                .position = {
-                    static_cast<float>(editorHoverCell_->x),
-                    static_cast<float>(editorHoverCell_->y),
-                },
-                .size = { 1.0f, 1.0f },
-                .color = previewColor,
-                .baseElevation = static_cast<float>(activeLayer) + 0.02f,
-                .height = 1.0f,
-                .blurBehind = previewTile == TileType::Ice,
-                .showGrid = previewTile != TileType::Player,
-                .isEditorPreview = true,
-            });
-        }
+        appendEditorTile(
+            static_cast<uint32_t>(editorHoverCell_->x),
+            static_cast<uint32_t>(editorHoverCell_->y),
+            activeLayer,
+            previewTile,
+            true);
     }
 
     return frame;

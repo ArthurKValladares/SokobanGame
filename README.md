@@ -19,21 +19,21 @@ SDL 3.4.10 is vendored in `third_party/SDL` and is built statically by the root 
 
 ## Layered Levels
 
-Existing screens without layer headers are loaded as layer 0. Multi-layer screens use sequential `@layer N` sections in the same `.scr` file:
+Screens use sequential `@layer N` sections in the same `.scr` file. Ground and water normally occupy layer 0, while walls, goals, pressure plates, the player, and movable blocks occupy layer 1:
 
 ```text
 @layer 0
+.....
+..W..
+.....
+
+@layer 1
 #####
 # C #
 #####
-
-@layer 1
-AAAAA
-AA#AA
-AAAAA
 ```
 
-`A` is Air and produces no geometry. A space remains an Empty floor tile. In the editor, new upper layers are filled with Air and selecting a layer shows that layer plus the layers beneath it.
+`.` is a solid Ground block. A space is Air and produces no geometry. Entities move through open cells supported by Ground, walls, or water directly beneath them; unsupported air is not walkable. In the editor, new documents start with a Ground layer and an Air/gameplay layer, and selecting a layer shows that layer plus the layers beneath it.
 
 ## Build
 

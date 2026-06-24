@@ -129,20 +129,7 @@ std::vector<std::string> Level::serializeLayerRows(const LayerRows& layers)
 
 Level Level::loadFromLines(const std::vector<std::string>& lines, std::string_view sourceName)
 {
-    LayerRows layers = parseLayerRows(lines, sourceName);
-    const bool usesLayerHeaders = std::ranges::any_of(lines, [](const std::string& line) {
-        return line.starts_with(layerPrefix);
-    });
-    if (!usesLayerHeaders && layers.size() == 1) {
-        size_t width = 0;
-        for (const std::string& row : layers.front()) {
-            width = std::max(width, row.size());
-        }
-        for (std::string& row : layers.front()) {
-            row.resize(width, tileTypeToChar(TileType::Empty));
-        }
-    }
-    return loadFromLayers(layers, sourceName);
+    return loadFromLayers(parseLayerRows(lines, sourceName), sourceName);
 }
 
 Level Level::loadFromLayers(const LayerRows& sourceLayers, std::string_view sourceName)
@@ -201,7 +188,8 @@ Level Level::loadFromLayers(const LayerRows& sourceLayers, std::string_view sour
                     });
                 }
 
-                level.tiles_[tileIndex(x, y, z, level.width_, level.height_)] = tileTypeInitialFloor(*tile);
+                level.tiles_[tileIndex(x, y, z, level.width_, level.height_)] =
+                    tileTypeOccupiesLevelCell(*tile) ? TileType::Air : *tile;
                 if (*tile == TileType::PressurePlate) {
                     level.pressurePlates_.push_back(position);
                 }
@@ -220,6 +208,23 @@ Level Level::loadFromLayers(const LayerRows& sourceLayers, std::string_view sour
 TileType Level::tileAt(uint32_t x, uint32_t y, uint32_t z) const
 {
     return tiles_[tileIndex(x, y, z, width_, height_)];
+}
+
+std::optional<TileType> Level::supportingTileAt(GridPosition3 position) const
+{
+    const GridPosition3 support {
+        position.x,
+        position.y,
+        position.z - 1,
+    };
+    if (!inBounds(support)) {
+        return std::nullopt;
+    }
+
+    return tileAt(
+        static_cast<uint32_t>(support.x),
+        static_cast<uint32_t>(support.y),
+        static_cast<uint32_t>(support.z));
 }
 
 bool Level::inBounds(GridPosition3 position) const
@@ -242,7 +247,10 @@ bool Level::isWalkable(GridPosition3 position) const
         static_cast<uint32_t>(position.x),
         static_cast<uint32_t>(position.y),
         static_cast<uint32_t>(position.z));
-    return tile != TileType::Wall && tile != TileType::Air;
+    const std::optional<TileType> support = supportingTileAt(position);
+    return tileTypeAllowsEntity(tile) &&
+        support &&
+        tileTypeSupportsEntity(*support);
 }
 
 bool Level::isEnd(GridPosition3 position) const

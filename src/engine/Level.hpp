@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -33,6 +34,7 @@ public:
     [[nodiscard]] const std::vector<MovableTile>& movableTiles() const { return movableTiles_; }
     [[nodiscard]] const std::vector<GridPosition3>& pressurePlates() const { return pressurePlates_; }
     [[nodiscard]] TileType tileAt(uint32_t x, uint32_t y, uint32_t z = 0) const;
+    [[nodiscard]] std::optional<TileType> supportingTileAt(GridPosition3 position) const;
     [[nodiscard]] bool inBounds(GridPosition3 position) const;
     [[nodiscard]] bool isWalkable(GridPosition3 position) const;
     [[nodiscard]] bool isEnd(GridPosition3 position) const;
