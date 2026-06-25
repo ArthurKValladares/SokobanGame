@@ -152,6 +152,20 @@ struct StaticRenderCell {
     float height = 0.0f;
 };
 
+RenderModel renderModelForTile(TileType tile)
+{
+    switch (tile) {
+    case TileType::Wall:
+        return RenderModel::BricksA;
+    case TileType::Rock:
+        return RenderModel::Stone;
+    case TileType::Water:
+        return RenderModel::Water;
+    default:
+        return RenderModel::Cube;
+    }
+}
+
 StaticRenderCell staticRenderCellFor(
     const Level& level,
     uint32_t x,
@@ -173,11 +187,13 @@ StaticRenderCell staticRenderCellFor(
         .size = surfaceEntity ? Vec2 { surfaceEntitySize, surfaceEntitySize } : Vec2 { 1.0f, 1.0f },
         .positionOffset = surfaceEntity ? Vec2 { centeredOffset, centeredOffset } : Vec2 {},
         .baseElevation = static_cast<float>(z) +
-            (tile == TileType::Water ? 1.0f - config::waterDepthBelowGround : 0.0f) -
+            (tile == TileType::Water ? 1.0f - 2.0f * config::waterDepthBelowGround : 0.0f) -
             (submergedEntity ? config::waterDepthBelowGround : 0.0f),
         .height = surfaceEntity
             ? surfaceEntityHeight
-            : (tileTypeIsSolidBlock(tile) ? 1.0f : 0.0f),
+            : (tile == TileType::Water
+                    ? config::waterDepthBelowGround
+                    : (tileTypeIsSolidBlock(tile) ? 1.0f : 0.0f)),
     };
 }
 
@@ -291,9 +307,7 @@ void appendStaticTiles(RenderFrameData& frame, const Level& level, CellAt cellAt
                     .baseElevation = cell.baseElevation,
                     .height = cell.height,
                     .showGrid = cell.showGrid,
-                    .model = cell.tile == TileType::Wall
-                        ? RenderModel::BricksA
-                        : RenderModel::Cube,
+                    .model = renderModelForTile(cell.tile),
                 });
             }
         }
@@ -1630,6 +1644,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             .baseElevation = rock.renderPosition.z,
             .height = 1.0f,
             .blurBehind = rock.type == TileType::Ice,
+            .model = renderModelForTile(rock.type),
         });
     }
 
@@ -1707,17 +1722,17 @@ RenderFrameData Application::buildEditorRenderFrame() const
             .size = { tileSize, tileSize },
             .color = color,
             .baseElevation = static_cast<float>(z) +
-                (tile == TileType::Water ? 1.0f - config::waterDepthBelowGround : 0.0f) +
+                (tile == TileType::Water ? 1.0f - 2.0f * config::waterDepthBelowGround : 0.0f) +
                 previewOffset,
             .height = surfaceEntity
                 ? surfaceEntityHeight_
-                : (tileTypeIsSolidBlock(tile) || tileTypeOccupiesLevelCell(tile) ? 1.0f : 0.0f),
+                : (tile == TileType::Water
+                        ? config::waterDepthBelowGround
+                        : (tileTypeIsSolidBlock(tile) || tileTypeOccupiesLevelCell(tile) ? 1.0f : 0.0f)),
             .blurBehind = tile == TileType::Ice,
             .showGrid = tile != TileType::Player,
             .isEditorPreview = preview,
-            .model = tile == TileType::Wall
-                ? RenderModel::BricksA
-                : RenderModel::Cube,
+            .model = renderModelForTile(tile),
         });
     };
 

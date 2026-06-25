@@ -33,6 +33,8 @@ enum class AntiAliasingMode {
 enum class RenderModel {
     Cube,
     BricksA,
+    Stone,
+    Water,
 };
 
 struct RenderFrameData {
@@ -168,6 +170,12 @@ private:
         VkDeviceMemory memory = VK_NULL_HANDLE;
     };
 
+    struct GpuMesh {
+        OwnedBuffer vertexBuffer {};
+        OwnedBuffer indexBuffer {};
+        uint32_t indexCount = 0;
+    };
+
     struct FrameResources {
         VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
         VkSemaphore imageAvailable = VK_NULL_HANDLE;
@@ -218,6 +226,9 @@ private:
     void createCommandPool();
     void createModelResources();
     void destroyModelResources();
+    [[nodiscard]] GpuMesh uploadMesh(const MeshData& mesh) const;
+    void destroyMesh(GpuMesh& mesh) const;
+    [[nodiscard]] const GpuMesh& meshForModel(RenderModel model) const;
     void createPipeline();
     void createShadowPipeline(VkShaderModule shadowVertexShader);
     void createModelShadowPipeline(VkShaderModule shadowVertexShader);
@@ -338,9 +349,9 @@ private:
     VkPipeline shadowPipeline_ = VK_NULL_HANDLE;
     VkPipeline modelPipeline_ = VK_NULL_HANDLE;
     VkPipeline modelShadowPipeline_ = VK_NULL_HANDLE;
-    OwnedBuffer bricksAVertexBuffer_ {};
-    OwnedBuffer bricksAIndexBuffer_ {};
-    uint32_t bricksAIndexCount_ = 0;
+    GpuMesh bricksAMesh_ {};
+    GpuMesh stoneMesh_ {};
+    GpuMesh waterMesh_ {};
 
     static constexpr uint32_t maxFramesInFlight_ = 2;
     std::array<FrameResources, maxFramesInFlight_> frames_ {};

@@ -89,10 +89,18 @@ add_custom_target(sokoban_assets
     COMMAND "${CMAKE_COMMAND}" -E copy_directory "${LEVEL_SOURCE_DIR}" "${LEVEL_OUTPUT_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/bricks_A.gltf" "${MODEL_OUTPUT_DIR}/bricks_A.gltf"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/bricks_A.bin" "${MODEL_OUTPUT_DIR}/bricks_A.bin"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/stone.gltf" "${MODEL_OUTPUT_DIR}/stone.gltf"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/stone.bin" "${MODEL_OUTPUT_DIR}/stone.bin"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/water.gltf" "${MODEL_OUTPUT_DIR}/water.gltf"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/water.bin" "${MODEL_OUTPUT_DIR}/water.bin"
     DEPENDS
         ${LEVEL_SOURCES}
         "${MODEL_SOURCE_DIR}/bricks_A.gltf"
         "${MODEL_SOURCE_DIR}/bricks_A.bin"
+        "${MODEL_SOURCE_DIR}/stone.gltf"
+        "${MODEL_SOURCE_DIR}/stone.bin"
+        "${MODEL_SOURCE_DIR}/water.gltf"
+        "${MODEL_SOURCE_DIR}/water.bin"
     VERBATIM
 )
 

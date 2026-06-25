@@ -1062,54 +1062,84 @@ void VulkanRenderer::createCommandPool()
 
 void VulkanRenderer::createModelResources()
 {
-    const MeshData mesh = loadGltfMesh(assetRoot_ / "models/bricks_A.gltf");
+    bricksAMesh_ = uploadMesh(loadGltfMesh(assetRoot_ / "models/bricks_A.gltf"));
+    stoneMesh_ = uploadMesh(loadGltfMesh(assetRoot_ / "models/stone.gltf"));
+    waterMesh_ = uploadMesh(loadGltfMesh(assetRoot_ / "models/water.gltf"));
+}
+
+VulkanRenderer::GpuMesh VulkanRenderer::uploadMesh(const MeshData& mesh) const
+{
     if (mesh.vertices.empty() || mesh.indices.empty()) {
-        throw std::runtime_error("Bricks_A glTF mesh contains no geometry");
+        throw std::runtime_error("glTF mesh contains no geometry");
     }
 
     const VkDeviceSize vertexBytes = sizeof(MeshVertex) * mesh.vertices.size();
     const VkDeviceSize indexBytes = sizeof(uint32_t) * mesh.indices.size();
-    bricksAVertexBuffer_ = createBuffer(
+    GpuMesh result;
+    result.vertexBuffer = createBuffer(
         vertexBytes,
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    bricksAIndexBuffer_ = createBuffer(
+    result.indexBuffer = createBuffer(
         indexBytes,
         VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
     void* mapped = nullptr;
-    vkCheck(vkMapMemory(device_, bricksAVertexBuffer_.memory, 0, vertexBytes, 0, &mapped), "vkMapMemory model vertex buffer failed");
+    vkCheck(vkMapMemory(device_, result.vertexBuffer.memory, 0, vertexBytes, 0, &mapped), "vkMapMemory model vertex buffer failed");
     std::memcpy(mapped, mesh.vertices.data(), static_cast<size_t>(vertexBytes));
-    vkUnmapMemory(device_, bricksAVertexBuffer_.memory);
+    vkUnmapMemory(device_, result.vertexBuffer.memory);
 
     mapped = nullptr;
-    vkCheck(vkMapMemory(device_, bricksAIndexBuffer_.memory, 0, indexBytes, 0, &mapped), "vkMapMemory model index buffer failed");
+    vkCheck(vkMapMemory(device_, result.indexBuffer.memory, 0, indexBytes, 0, &mapped), "vkMapMemory model index buffer failed");
     std::memcpy(mapped, mesh.indices.data(), static_cast<size_t>(indexBytes));
-    vkUnmapMemory(device_, bricksAIndexBuffer_.memory);
+    vkUnmapMemory(device_, result.indexBuffer.memory);
 
-    bricksAIndexCount_ = static_cast<uint32_t>(mesh.indices.size());
+    result.indexCount = static_cast<uint32_t>(mesh.indices.size());
+    return result;
 }
 
 void VulkanRenderer::destroyModelResources()
 {
-    if (bricksAIndexBuffer_.buffer) {
-        vkDestroyBuffer(device_, bricksAIndexBuffer_.buffer, nullptr);
-        bricksAIndexBuffer_.buffer = VK_NULL_HANDLE;
+    destroyMesh(waterMesh_);
+    destroyMesh(stoneMesh_);
+    destroyMesh(bricksAMesh_);
+}
+
+void VulkanRenderer::destroyMesh(GpuMesh& mesh) const
+{
+    if (mesh.indexBuffer.buffer) {
+        vkDestroyBuffer(device_, mesh.indexBuffer.buffer, nullptr);
+        mesh.indexBuffer.buffer = VK_NULL_HANDLE;
     }
-    if (bricksAIndexBuffer_.memory) {
-        vkFreeMemory(device_, bricksAIndexBuffer_.memory, nullptr);
-        bricksAIndexBuffer_.memory = VK_NULL_HANDLE;
+    if (mesh.indexBuffer.memory) {
+        vkFreeMemory(device_, mesh.indexBuffer.memory, nullptr);
+        mesh.indexBuffer.memory = VK_NULL_HANDLE;
     }
-    if (bricksAVertexBuffer_.buffer) {
-        vkDestroyBuffer(device_, bricksAVertexBuffer_.buffer, nullptr);
-        bricksAVertexBuffer_.buffer = VK_NULL_HANDLE;
+    if (mesh.vertexBuffer.buffer) {
+        vkDestroyBuffer(device_, mesh.vertexBuffer.buffer, nullptr);
+        mesh.vertexBuffer.buffer = VK_NULL_HANDLE;
     }
-    if (bricksAVertexBuffer_.memory) {
-        vkFreeMemory(device_, bricksAVertexBuffer_.memory, nullptr);
-        bricksAVertexBuffer_.memory = VK_NULL_HANDLE;
+    if (mesh.vertexBuffer.memory) {
+        vkFreeMemory(device_, mesh.vertexBuffer.memory, nullptr);
+        mesh.vertexBuffer.memory = VK_NULL_HANDLE;
     }
-    bricksAIndexCount_ = 0;
+    mesh.indexCount = 0;
+}
+
+const VulkanRenderer::GpuMesh& VulkanRenderer::meshForModel(RenderModel model) const
+{
+    switch (model) {
+    case RenderModel::BricksA:
+        return bricksAMesh_;
+    case RenderModel::Stone:
+        return stoneMesh_;
+    case RenderModel::Water:
+        return waterMesh_;
+    case RenderModel::Cube:
+        break;
+    }
+    throw std::runtime_error("Cube tiles do not have a GPU model mesh");
 }
 
 void VulkanRenderer::createPipeline()
@@ -2818,6 +2848,7 @@ void VulkanRenderer::drawModel(
     const RenderFrameData::Tile& tile,
     const RenderFrameData::Lighting& lighting) const
 {
+    const GpuMesh& mesh = meshForModel(tile.model);
     const Vec3 origin { tile.position.x, tile.position.y, tile.baseElevation };
     const Vec3 xPoint { origin.x + tile.size.x, origin.y, origin.z };
     const Vec3 yPoint { origin.x, origin.y + tile.size.y, origin.z };
@@ -2876,10 +2907,10 @@ void VulkanRenderer::drawModel(
         },
     };
 
-    const VkBuffer vertexBuffer = bricksAVertexBuffer_.buffer;
+    const VkBuffer vertexBuffer = mesh.vertexBuffer.buffer;
     constexpr VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer, &offset);
-    vkCmdBindIndexBuffer(commandBuffer, bricksAIndexBuffer_.buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindIndexBuffer(commandBuffer, mesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdPushConstants(
         commandBuffer,
         pipelineLayout_,
@@ -2887,12 +2918,12 @@ void VulkanRenderer::drawModel(
         0,
         sizeof(TilePushConstants),
         &pushConstants);
-    vkCmdDrawIndexed(commandBuffer, bricksAIndexCount_, 1, 0, 0, 0);
+    vkCmdDrawIndexed(commandBuffer, mesh.indexCount, 1, 0, 0, 0);
 
-    pendingStats_.visibleFaces += bricksAIndexCount_ / 3;
+    pendingStats_.visibleFaces += mesh.indexCount / 3;
     ++pendingStats_.drawCalls;
-    pendingStats_.vertices += bricksAIndexCount_;
-    pendingStats_.triangles += bricksAIndexCount_ / 3;
+    pendingStats_.vertices += mesh.indexCount;
+    pendingStats_.triangles += mesh.indexCount / 3;
 }
 
 void VulkanRenderer::drawModelShadow(
@@ -2900,6 +2931,7 @@ void VulkanRenderer::drawModelShadow(
     const ShadowRenderLayout& layout,
     const RenderFrameData::Tile& tile) const
 {
+    const GpuMesh& mesh = meshForModel(tile.model);
     const Vec3 origin { tile.position.x, tile.position.y, tile.baseElevation };
     const Vec3 xPoint { origin.x + tile.size.x, origin.y, origin.z };
     const Vec3 yPoint { origin.x, origin.y + tile.size.y, origin.z };
@@ -2912,10 +2944,10 @@ void VulkanRenderer::drawModelShadow(
             projectShadowPoint(layout, zPoint)),
     };
 
-    const VkBuffer vertexBuffer = bricksAVertexBuffer_.buffer;
+    const VkBuffer vertexBuffer = mesh.vertexBuffer.buffer;
     constexpr VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer, &offset);
-    vkCmdBindIndexBuffer(commandBuffer, bricksAIndexBuffer_.buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindIndexBuffer(commandBuffer, mesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdPushConstants(
         commandBuffer,
         pipelineLayout_,
@@ -2923,7 +2955,7 @@ void VulkanRenderer::drawModelShadow(
         0,
         sizeof(TilePushConstants),
         &pushConstants);
-    vkCmdDrawIndexed(commandBuffer, bricksAIndexCount_, 1, 0, 0, 0);
+    vkCmdDrawIndexed(commandBuffer, mesh.indexCount, 1, 0, 0, 0);
 }
 
 void VulkanRenderer::drawUiRect(
