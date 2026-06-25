@@ -166,8 +166,11 @@ ModelTransformPoints modelTransformPoints(const RenderFrameData::Tile& tile)
     const float depth = tile.size.y;
     const float height = std::max(tile.height, 0.0f);
 
+    const uint32_t quarterTurns = tile.model == RenderModel::Rogue
+        ? tile.modelRotationQuarterTurns % 4
+        : 0;
     ModelTransformPoints result;
-    switch (tile.modelRotationQuarterTurns % 4) {
+    switch (quarterTurns) {
     case 0:
         result.origin = { x, y, z };
         result.xPoint = { x + width, y, z };
@@ -3177,7 +3180,9 @@ void VulkanRenderer::drawModel(
         },
         .textureOptions = {
             tile.model == RenderModel::Rogue ? 1.0f : 0.0f,
-            static_cast<float>(tile.modelRotationQuarterTurns % 4),
+            tile.model == RenderModel::Rogue
+                ? static_cast<float>(tile.modelRotationQuarterTurns % 4)
+                : 0.0f,
             0.0f,
             0.0f,
         },

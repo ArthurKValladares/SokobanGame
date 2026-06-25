@@ -40,5 +40,14 @@ void main()
     outShadowPosition = shadowTransform * vec4(inPosition, 1.0);
     outFaceCoordU = inUv.x;
     outFaceCoordV = inUv.y;
-    outNormal = inNormal;
+    int quarterTurns = int(pc.textureOptions.y + 0.5) & 3;
+    if (quarterTurns == 1) {
+        outNormal = vec3(-inNormal.y, inNormal.x, inNormal.z);
+    } else if (quarterTurns == 2) {
+        outNormal = vec3(-inNormal.x, -inNormal.y, inNormal.z);
+    } else if (quarterTurns == 3) {
+        outNormal = vec3(inNormal.y, -inNormal.x, inNormal.z);
+    } else {
+        outNormal = inNormal;
+    }
 }

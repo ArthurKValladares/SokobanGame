@@ -1117,9 +1117,6 @@ bool Application::tryStartRestart()
         .before = current,
         .after = std::move(restarted),
     };
-    if (const auto direction = movementDirection(activeAction_.before.player, activeAction_.after.player)) {
-        playerFacingQuarterTurns_ = facingQuarterTurns(*direction);
-    }
     undoCursor_.reset();
     moveElapsed_ = 0.0f;
     moving_ = true;
