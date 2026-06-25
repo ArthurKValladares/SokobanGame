@@ -150,6 +150,7 @@ private:
     FrameTimer frameTimer_;
     GridPosition3 playerCell_ {};
     Vec3 playerRenderPosition_ {};
+    uint32_t playerFacingQuarterTurns_ = 0;
     bool playerDead_ = false;
     float sunAzimuthDegrees_ = config::sunAzimuthDegrees;
     float sunTiltDegrees_ = config::sunTiltDegrees;

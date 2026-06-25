@@ -36,6 +36,7 @@ enum class RenderModel {
     Stone,
     Water,
     Glass,
+    Rogue,
 };
 
 struct RenderFrameData {
@@ -74,6 +75,7 @@ struct RenderFrameData {
         bool showGrid = true;
         bool isEditorPreview = false;
         RenderModel model = RenderModel::Cube;
+        uint32_t modelRotationQuarterTurns = 0;
     };
 
     struct IsoFace {
@@ -227,6 +229,8 @@ private:
     void createCommandPool();
     void createModelResources();
     void destroyModelResources();
+    void createModelTextureResources();
+    void destroyModelTextureResources();
     [[nodiscard]] GpuMesh uploadMesh(const MeshData& mesh) const;
     void destroyMesh(GpuMesh& mesh) const;
     [[nodiscard]] const GpuMesh& meshForModel(RenderModel model) const;
@@ -354,6 +358,9 @@ private:
     GpuMesh stoneMesh_ {};
     GpuMesh waterMesh_ {};
     GpuMesh glassMesh_ {};
+    GpuMesh rogueMesh_ {};
+    OwnedImage rogueTextureImage_ {};
+    VkSampler rogueTextureSampler_ = VK_NULL_HANDLE;
 
     static constexpr uint32_t maxFramesInFlight_ = 2;
     std::array<FrameResources, maxFramesInFlight_> frames_ {};

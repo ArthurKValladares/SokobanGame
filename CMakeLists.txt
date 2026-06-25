@@ -48,6 +48,7 @@ set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/shaders")
 set(LEVEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/levels")
 set(LEVEL_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/levels")
 set(MODEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit_BlockBits_1.0_FREE/Assets/gltf")
+set(CHARACTER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit_Adventurers_2.0_FREE/Characters/gltf")
 set(MODEL_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/models")
 
 set(SHADER_SOURCES
@@ -95,6 +96,8 @@ add_custom_target(sokoban_assets
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/water.bin" "${MODEL_OUTPUT_DIR}/water.bin"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/glass.gltf" "${MODEL_OUTPUT_DIR}/glass.gltf"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/glass.bin" "${MODEL_OUTPUT_DIR}/glass.bin"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CHARACTER_SOURCE_DIR}/Rogue.glb" "${MODEL_OUTPUT_DIR}/Rogue.glb"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CHARACTER_SOURCE_DIR}/rogue_texture.png" "${MODEL_OUTPUT_DIR}/rogue_texture.png"
     DEPENDS
         ${LEVEL_SOURCES}
         "${MODEL_SOURCE_DIR}/bricks_A.gltf"
@@ -105,6 +108,8 @@ add_custom_target(sokoban_assets
         "${MODEL_SOURCE_DIR}/water.bin"
         "${MODEL_SOURCE_DIR}/glass.gltf"
         "${MODEL_SOURCE_DIR}/glass.bin"
+        "${CHARACTER_SOURCE_DIR}/Rogue.glb"
+        "${CHARACTER_SOURCE_DIR}/rogue_texture.png"
     VERBATIM
 )
 
@@ -120,6 +125,7 @@ add_executable(sokoban
     src/engine/Window.cpp
     src/engine/render/VulkanRenderer.cpp
     src/engine/render/GltfMesh.cpp
+    src/engine/render/ImageData.cpp
     src/engine/ui/Ui.cpp
 )
 foreach(imgui_source IN LISTS SOKOBAN_IMGUI_SOURCES)
@@ -137,6 +143,8 @@ target_include_directories(sokoban PRIVATE
 target_link_libraries(sokoban PRIVATE
     Vulkan::Vulkan
     SDL3::SDL3
+    ole32
+    windowscodecs
 )
 
 target_compile_definitions(sokoban PRIVATE

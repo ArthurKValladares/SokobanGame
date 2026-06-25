@@ -150,6 +150,7 @@ struct StaticRenderCell {
     Vec2 positionOffset {};
     float baseElevation = 0.0f;
     float height = 0.0f;
+    uint32_t modelRotationQuarterTurns = 0;
 };
 
 RenderModel renderModelForTile(TileType tile)
@@ -163,9 +164,45 @@ RenderModel renderModelForTile(TileType tile)
         return RenderModel::Water;
     case TileType::Ice:
         return RenderModel::Glass;
+    case TileType::Player:
+        return RenderModel::Rogue;
     default:
         return RenderModel::Cube;
     }
+}
+
+uint32_t facingQuarterTurns(MoveDirection direction)
+{
+    switch (direction) {
+    case MoveDirection::Down:
+        return 0;
+    case MoveDirection::Left:
+        return 1;
+    case MoveDirection::Up:
+        return 2;
+    case MoveDirection::Right:
+        return 3;
+    }
+    return 0;
+}
+
+std::optional<MoveDirection> movementDirection(GridPosition3 from, GridPosition3 to)
+{
+    const int deltaX = to.x - from.x;
+    const int deltaY = to.y - from.y;
+    if (deltaX < 0) {
+        return MoveDirection::Left;
+    }
+    if (deltaX > 0) {
+        return MoveDirection::Right;
+    }
+    if (deltaY < 0) {
+        return MoveDirection::Up;
+    }
+    if (deltaY > 0) {
+        return MoveDirection::Down;
+    }
+    return std::nullopt;
 }
 
 StaticRenderCell staticRenderCellFor(
@@ -176,7 +213,8 @@ StaticRenderCell staticRenderCellFor(
     bool endUnlocked,
     std::optional<TileType> fallenTile,
     float surfaceEntityHeight,
-    float surfaceEntitySize)
+    float surfaceEntitySize,
+    uint32_t playerFacingQuarterTurns)
 {
     const TileType tile = fallenTile.value_or(level.tileAt(x, y, z));
     const bool surfaceEntity = tileTypeIsSurfaceEntity(tile);
@@ -196,6 +234,9 @@ StaticRenderCell staticRenderCellFor(
             : (tile == TileType::Water
                     ? config::waterDepthBelowGround
                     : (tileTypeIsSolidBlock(tile) ? 1.0f : 0.0f)),
+        .modelRotationQuarterTurns = tile == TileType::Player
+            ? playerFacingQuarterTurns
+            : 0,
     };
 }
 
@@ -305,11 +346,14 @@ void appendStaticTiles(RenderFrameData& frame, const Level& level, CellAt cellAt
                         static_cast<float>(y) + cell.positionOffset.y,
                     },
                     .size = cell.size,
-                    .color = tileColor(cell.tile, cell.active),
+                    .color = cell.tile == TileType::Player
+                        ? Vec4 { 1.0f, 1.0f, 1.0f, 1.0f }
+                        : tileColor(cell.tile, cell.active),
                     .baseElevation = cell.baseElevation,
                     .height = cell.height,
                     .showGrid = cell.showGrid,
                     .model = renderModelForTile(cell.tile),
+                    .modelRotationQuarterTurns = cell.modelRotationQuarterTurns,
                 });
             }
         }
@@ -738,6 +782,7 @@ void Application::applyLevel(Level level)
     level_ = std::move(level);
     playerCell_ = level_.playerStart();
     playerRenderPosition_ = toVec3(playerCell_);
+    playerFacingQuarterTurns_ = facingQuarterTurns(MoveDirection::Down);
     playerDead_ = false;
     rocks_.clear();
     rocks_.reserve(level_.movableTiles().size());
@@ -1008,6 +1053,7 @@ bool Application::tryStartMove(MoveDirection direction)
     activeAction_.after.player = playerFall.cell;
     activeAction_.after.playerDead = playerFall.fallen;
 
+    playerFacingQuarterTurns_ = facingQuarterTurns(direction);
     undoCursor_.reset();
     moveElapsed_ = 0.0f;
     moving_ = true;
@@ -1033,6 +1079,9 @@ bool Application::tryStartUndoMove()
 
     --(*undoCursor_);
     activeAction_ = invertActionRecord(moveHistory_[*undoCursor_]);
+    if (const auto direction = movementDirection(activeAction_.before.player, activeAction_.after.player)) {
+        playerFacingQuarterTurns_ = facingQuarterTurns(*direction);
+    }
     moveElapsed_ = 0.0f;
     moving_ = true;
     startMovableAnimations(activeAction_);
@@ -1068,6 +1117,9 @@ bool Application::tryStartRestart()
         .before = current,
         .after = std::move(restarted),
     };
+    if (const auto direction = movementDirection(activeAction_.before.player, activeAction_.after.player)) {
+        playerFacingQuarterTurns_ = facingQuarterTurns(*direction);
+    }
     undoCursor_.reset();
     moveElapsed_ = 0.0f;
     moving_ = true;
@@ -1596,7 +1648,8 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             endUnlocked,
             fallenTile,
             surfaceEntityHeight_,
-            surfaceEntityWidthDepth_);
+            surfaceEntityWidthDepth_,
+            playerFacingQuarterTurns_);
     };
     appendStaticTiles(frame, level_, staticCellAt);
     for (uint32_t z = 0; z < level_.depth(); ++z) {
@@ -1617,10 +1670,12 @@ RenderFrameData Application::buildGameplayRenderFrame() const
     if (!playerDead_ || playerMovingOutOfWater) {
         frame.tiles.push_back({
             .position = { playerRenderPosition_.x, playerRenderPosition_.y },
-            .color = tileColor(TileType::Player),
+            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
             .baseElevation = playerRenderPosition_.z,
             .height = 1.0f,
             .showGrid = false,
+            .model = RenderModel::Rogue,
+            .modelRotationQuarterTurns = playerFacingQuarterTurns_,
         });
     }
 
@@ -1707,6 +1762,9 @@ RenderFrameData Application::buildEditorRenderFrame() const
         const float tileSize = surfaceEntity ? surfaceEntityWidthDepth_ : 1.0f;
         const float centeredOffset = (1.0f - tileSize) * 0.5f;
         Vec4 color = tileColor(tile);
+        if (tile == TileType::Player) {
+            color = { 1.0f, 1.0f, 1.0f, 1.0f };
+        }
         if (tile == TileType::Ice) {
             color.w = config::iceTintAlpha;
         }

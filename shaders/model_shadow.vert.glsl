@@ -13,6 +13,7 @@ layout(push_constant) uniform PushConstants
     vec4 shadowOptions;
     vec4 materialOptions;
     vec4 gridColor;
+    vec4 textureOptions;
 } pc;
 
 void main()

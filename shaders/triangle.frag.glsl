@@ -2,6 +2,7 @@
 
 layout(set = 0, binding = 0) uniform sampler2D shadowMap;
 layout(set = 0, binding = 1) uniform sampler2D sceneColor;
+layout(set = 0, binding = 2) uniform sampler2D modelTexture;
 
 layout(location = 0) in vec4 inShadowPosition;
 layout(location = 1) in float inFaceCoordU;
@@ -20,6 +21,7 @@ layout(push_constant) uniform PushConstants
     vec4 shadowOptions;
     vec4 materialOptions;
     vec4 gridColor;
+    vec4 textureOptions;
 } pc;
 
 vec3 gaussianBlurredScene(vec2 uv)
@@ -90,7 +92,11 @@ void main()
 {
     applyEditorPreviewDither();
 
-    vec3 color = mix(pc.color.rgb, pc.gridColor.rgb, gridMask());
+    vec4 materialColor = pc.color;
+    if (pc.textureOptions.x > 0.5) {
+        materialColor *= texture(modelTexture, vec2(inFaceCoordU, inFaceCoordV));
+    }
+    vec3 color = mix(materialColor.rgb, pc.gridColor.rgb, gridMask());
     if (length(inNormal) > 0.0001) {
         vec3 normal = normalize(inNormal);
         vec3 lightDirection = length(pc.sunDirectionAndAmbientGreen.xyz) > 0.0001
@@ -121,9 +127,9 @@ void main()
     if (pc.materialOptions.x > 0.5) {
         vec2 uv = gl_FragCoord.xy / vec2(textureSize(sceneColor, 0));
         vec3 blurred = gaussianBlurredScene(uv);
-        outColor = vec4(mix(blurred, color, pc.color.a), 1.0);
+        outColor = vec4(mix(blurred, color, materialColor.a), 1.0);
         return;
     }
 
-    outColor = vec4(color, pc.color.a);
+    outColor = vec4(color, materialColor.a);
 }

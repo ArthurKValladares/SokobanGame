@@ -2,6 +2,7 @@
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
+layout(location = 2) in vec2 inUv;
 
 layout(location = 0) out vec4 outShadowPosition;
 layout(location = 1) out float outFaceCoordU;
@@ -19,6 +20,7 @@ layout(push_constant) uniform PushConstants
     vec4 shadowOptions;
     vec4 materialOptions;
     vec4 gridColor;
+    vec4 textureOptions;
 } pc;
 
 void main()
@@ -36,7 +38,7 @@ void main()
 
     gl_Position = clipTransform * vec4(inPosition, 1.0);
     outShadowPosition = shadowTransform * vec4(inPosition, 1.0);
-    outFaceCoordU = 0.0;
-    outFaceCoordV = 0.0;
+    outFaceCoordU = inUv.x;
+    outFaceCoordV = inUv.y;
     outNormal = inNormal;
 }

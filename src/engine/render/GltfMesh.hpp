@@ -11,6 +11,7 @@ namespace sokoban {
 struct MeshVertex {
     Vec3 position {};
     Vec3 normal {};
+    Vec2 uv {};
 };
 
 struct MeshData {
@@ -18,6 +19,13 @@ struct MeshData {
     std::vector<uint32_t> indices;
 };
 
-[[nodiscard]] MeshData loadGltfMesh(const std::filesystem::path& path);
+struct GltfMeshLoadOptions {
+    bool preserveAspectRatio = false;
+    bool rotateHalfTurn = false;
+};
+
+[[nodiscard]] MeshData loadGltfMesh(
+    const std::filesystem::path& path,
+    GltfMeshLoadOptions options = {});
 
 } // namespace sokoban
