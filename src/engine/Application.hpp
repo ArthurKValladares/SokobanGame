@@ -37,9 +37,9 @@ private:
     struct Rock {
         TileType type = TileType::Rock;
         GridPosition3 cell {};
-        Vec2 renderPosition {};
-        Vec2 animationStart {};
-        Vec2 animationEnd {};
+        Vec3 renderPosition {};
+        Vec3 animationStart {};
+        Vec3 animationEnd {};
         float animationElapsed = 0.0f;
         float animationDuration = 0.0f;
         bool moving = false;
@@ -73,6 +73,11 @@ private:
     struct ActionRecord {
         MoveRecord before;
         MoveRecord after;
+    };
+
+    struct FallResult {
+        GridPosition3 cell {};
+        bool fallen = false;
     };
 
     void loadCurrentScreen();
@@ -121,6 +126,9 @@ private:
     [[nodiscard]] bool isPlayerWalkable(GridPosition3 position, const MoveRecord& record) const;
     [[nodiscard]] bool canMoveRock(GridPosition3 position, MoveDirection direction) const;
     [[nodiscard]] bool canMovableOccupy(GridPosition3 position, const MoveRecord& record, size_t movableIndex) const;
+    [[nodiscard]] bool staticCellAllowsEntity(GridPosition3 position) const;
+    [[nodiscard]] FallResult playerFallTarget(GridPosition3 position, const MoveRecord& record) const;
+    [[nodiscard]] FallResult movableFallTarget(size_t movableIndex, GridPosition3 position, const MoveRecord& record) const;
     [[nodiscard]] GridPosition3 movableSlidingTarget(size_t movableIndex, MoveDirection direction, const MoveRecord& record) const;
     [[nodiscard]] GridPosition3 playerSlidingTarget(GridPosition3 position, MoveDirection direction, const MoveRecord& record) const;
     [[nodiscard]] bool allPressurePlatesActive() const;
@@ -141,7 +149,7 @@ private:
     InputState input_;
     FrameTimer frameTimer_;
     GridPosition3 playerCell_ {};
-    Vec2 playerRenderPosition_ {};
+    Vec3 playerRenderPosition_ {};
     bool playerDead_ = false;
     float sunAzimuthDegrees_ = config::sunAzimuthDegrees;
     float sunTiltDegrees_ = config::sunTiltDegrees;

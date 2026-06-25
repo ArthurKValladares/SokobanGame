@@ -18,32 +18,29 @@
 namespace sokoban {
 namespace {
 
-Vec2 toVec2(GridPosition position)
-{
-    return { static_cast<float>(position.x), static_cast<float>(position.y) };
-}
-
-Vec2 toVec2(GridPosition3 position)
-{
-    return { static_cast<float>(position.x), static_cast<float>(position.y) };
-}
-
-Vec2 lerp(Vec2 from, Vec2 to, float t)
+Vec3 toVec3(GridPosition3 position)
 {
     return {
-        from.x + (to.x - from.x) * t,
-        from.y + (to.y - from.y) * t,
+        static_cast<float>(position.x),
+        static_cast<float>(position.y),
+        static_cast<float>(position.z),
     };
 }
 
-int gridDistance(GridPosition3 from, GridPosition3 to)
+Vec3 entityRenderTarget(GridPosition3 position, bool fallen)
 {
-    return std::abs(to.x - from.x) + std::abs(to.y - from.y) + std::abs(to.z - from.z);
+    Vec3 target = toVec3(position);
+    if (fallen) {
+        target.z -= config::waterDepthBelowGround;
+    }
+    return target;
 }
 
-float gridDistance(Vec2 from, Vec2 to)
+float gridDistance(Vec3 from, Vec3 to)
 {
-    return std::abs(to.x - from.x) + std::abs(to.y - from.y);
+    return std::abs(to.x - from.x) +
+        std::abs(to.y - from.y) +
+        std::abs(to.z - from.z);
 }
 
 float degreesToRadians(float degrees)
@@ -113,43 +110,36 @@ void drawSunDirectionPreview(Vec3 direction, float tiltDegrees)
 }
 #endif
 
-Vec2 interpolateGridMotion(Vec2 from, Vec2 to, float elapsedSeconds)
+Vec3 interpolateGridMotion(Vec3 from, Vec3 to, float elapsedSeconds)
 {
     const float distance = gridDistance(from, to);
-    if (distance <= 0.0001f) {
+    if (distance <= 0.0001f || config::playerMoveDurationSeconds <= 0.0f) {
         return to;
     }
 
-    if constexpr (config::playerMoveDurationSeconds <= 0.0f) {
-        return to;
-    }
-
-    const float traveledCells = std::min(
+    float remaining = std::min(
         elapsedSeconds / config::playerMoveDurationSeconds,
         distance);
-    const float dx = to.x - from.x;
-    const float dy = to.y - from.y;
+    Vec3 result = from;
 
-    if (std::abs(dx) > 0.0001f && std::abs(dy) <= 0.0001f) {
-        return {
-            from.x + std::copysign(traveledCells, dx),
-            from.y,
-        };
+    auto travelAxis = [&](float target, float& value) {
+        const float delta = target - value;
+        const float step = std::min(std::abs(delta), remaining);
+        if (step > 0.0f) {
+            value += std::copysign(step, delta);
+            remaining -= step;
+        }
+    };
+
+    if (to.z > from.z) {
+        travelAxis(to.z, result.z);
     }
-
-    if (std::abs(dy) > 0.0001f && std::abs(dx) <= 0.0001f) {
-        return {
-            from.x,
-            from.y + std::copysign(traveledCells, dy),
-        };
+    travelAxis(to.x, result.x);
+    travelAxis(to.y, result.y);
+    if (to.z <= from.z) {
+        travelAxis(to.z, result.z);
     }
-
-    return lerp(from, to, traveledCells / distance);
-}
-
-Vec2 interpolateGridMotion(GridPosition3 from, GridPosition3 to, float elapsedSeconds)
-{
-    return interpolateGridMotion(toVec2(from), toVec2(to), elapsedSeconds);
+    return result;
 }
 
 struct StaticRenderCell {
@@ -174,6 +164,7 @@ StaticRenderCell staticRenderCellFor(
 {
     const TileType tile = fallenTile.value_or(level.tileAt(x, y, z));
     const bool surfaceEntity = tileTypeIsSurfaceEntity(tile);
+    const bool submergedEntity = fallenTile.has_value();
     const float centeredOffset = (1.0f - surfaceEntitySize) * 0.5f;
     return {
         .tile = tile,
@@ -182,7 +173,8 @@ StaticRenderCell staticRenderCellFor(
         .size = surfaceEntity ? Vec2 { surfaceEntitySize, surfaceEntitySize } : Vec2 { 1.0f, 1.0f },
         .positionOffset = surfaceEntity ? Vec2 { centeredOffset, centeredOffset } : Vec2 {},
         .baseElevation = static_cast<float>(z) +
-            (tile == TileType::Water ? 1.0f - config::waterDepthBelowGround : 0.0f),
+            (tile == TileType::Water ? 1.0f - config::waterDepthBelowGround : 0.0f) -
+            (submergedEntity ? config::waterDepthBelowGround : 0.0f),
         .height = surfaceEntity
             ? surfaceEntityHeight
             : (tileTypeIsSolidBlock(tile) ? 1.0f : 0.0f),
@@ -726,7 +718,7 @@ void Application::applyLevel(Level level)
 {
     level_ = std::move(level);
     playerCell_ = level_.playerStart();
-    playerRenderPosition_ = toVec2(playerCell_);
+    playerRenderPosition_ = toVec3(playerCell_);
     playerDead_ = false;
     rocks_.clear();
     rocks_.reserve(level_.movableTiles().size());
@@ -734,9 +726,9 @@ void Application::applyLevel(Level level)
         rocks_.push_back({
             .type = movable.type,
             .cell = movable.position,
-            .renderPosition = toVec2(movable.position),
-            .animationStart = toVec2(movable.position),
-            .animationEnd = toVec2(movable.position),
+            .renderPosition = toVec3(movable.position),
+            .animationStart = toVec3(movable.position),
+            .animationEnd = toVec3(movable.position),
         });
     }
     pendingCommands_.clear();
@@ -812,7 +804,10 @@ void Application::advancePlayerMovement(float dt)
         remainingTime -= step;
         moveElapsed_ += step;
 
-        playerRenderPosition_ = interpolateGridMotion(activeAction_.before.player, activeAction_.after.player, moveElapsed_);
+        playerRenderPosition_ = interpolateGridMotion(
+            entityRenderTarget(activeAction_.before.player, activeAction_.before.playerDead),
+            entityRenderTarget(activeAction_.after.player, activeAction_.after.playerDead),
+            moveElapsed_);
 
         if (moveElapsed_ >= duration) {
             if (completeActiveAction()) {
@@ -844,7 +839,7 @@ void Application::startMovableAnimations(const ActionRecord& action)
 {
     const size_t rockCount = std::min(action.before.rocks.size(), action.after.rocks.size());
     for (size_t i = 0; i < rockCount && i < rocks_.size(); ++i) {
-        const Vec2 target = toVec2(action.after.rocks[i].cell);
+        const Vec3 target = entityRenderTarget(action.after.rocks[i].cell, action.after.rocks[i].fallen);
         if (gridDistance(rocks_[i].renderPosition, target) <= 0.0001f) {
             rocks_[i].renderPosition = target;
             rocks_[i].animationStart = target;
@@ -886,7 +881,18 @@ bool Application::completeActiveAction()
 
 float Application::activeActionDuration() const
 {
-    return static_cast<float>(gridDistance(activeAction_.before.player, activeAction_.after.player)) * config::playerMoveDurationSeconds;
+    float distance = gridDistance(
+        entityRenderTarget(activeAction_.before.player, activeAction_.before.playerDead),
+        entityRenderTarget(activeAction_.after.player, activeAction_.after.playerDead));
+    const size_t rockCount = std::min(activeAction_.before.rocks.size(), activeAction_.after.rocks.size());
+    for (size_t i = 0; i < rockCount; ++i) {
+        distance = std::max(
+            distance,
+            gridDistance(
+                entityRenderTarget(activeAction_.before.rocks[i].cell, activeAction_.before.rocks[i].fallen),
+                entityRenderTarget(activeAction_.after.rocks[i].cell, activeAction_.after.rocks[i].fallen)));
+    }
+    return distance * config::playerMoveDurationSeconds;
 }
 
 bool Application::tryStartNextMove()
@@ -969,12 +975,19 @@ bool Application::tryStartMove(MoveDirection direction)
             .fallen = false,
         };
         activeAction_.after.rocks[rockIndex].cell = movableSlidingTarget(rockIndex, direction, activeAction_.after);
-        activeAction_.after.rocks[rockIndex].fallen = isUnfilledWater(
+        const FallResult rockFall = movableFallTarget(
+            rockIndex,
             activeAction_.after.rocks[rockIndex].cell,
             activeAction_.after);
+        activeAction_.after.rocks[rockIndex] = {
+            .cell = rockFall.cell,
+            .fallen = rockFall.fallen,
+        };
     }
     activeAction_.after.player = playerSlidingTarget(activeAction_.after.player, direction, activeAction_.after);
-    activeAction_.after.playerDead = isUnfilledWater(activeAction_.after.player, activeAction_.after);
+    const FallResult playerFall = playerFallTarget(activeAction_.after.player, activeAction_.after);
+    activeAction_.after.player = playerFall.cell;
+    activeAction_.after.playerDead = playerFall.fallen;
 
     undoCursor_.reset();
     moveElapsed_ = 0.0f;
@@ -1149,13 +1162,13 @@ Application::MoveRecord Application::captureMoveRecord() const
 void Application::applyMoveRecord(const MoveRecord& record)
 {
     playerCell_ = record.player;
-    playerRenderPosition_ = toVec2(playerCell_);
+    playerRenderPosition_ = entityRenderTarget(playerCell_, record.playerDead);
     playerDead_ = record.playerDead;
 
     for (size_t i = 0; i < rocks_.size(); ++i) {
         rocks_[i].cell = record.rocks[i].cell;
         if (!rocks_[i].moving) {
-            rocks_[i].renderPosition = toVec2(rocks_[i].cell);
+            rocks_[i].renderPosition = entityRenderTarget(rocks_[i].cell, record.rocks[i].fallen);
             rocks_[i].animationStart = rocks_[i].renderPosition;
             rocks_[i].animationEnd = rocks_[i].renderPosition;
             rocks_[i].animationElapsed = 0.0f;
@@ -1305,7 +1318,7 @@ bool Application::isIceFloor(GridPosition3 position, const MoveRecord& record) c
 
 bool Application::isPlayerWalkable(GridPosition3 position) const
 {
-    return level_.isWalkable(position);
+    return staticCellAllowsEntity(position);
 }
 
 bool Application::isPlayerWalkable(GridPosition3 position, const MoveRecord& record) const
@@ -1314,7 +1327,7 @@ bool Application::isPlayerWalkable(GridPosition3 position, const MoveRecord& rec
         return false;
     }
 
-    return level_.isWalkable(position);
+    return staticCellAllowsEntity(position);
 }
 
 bool Application::canMoveRock(GridPosition3 position, MoveDirection direction) const
@@ -1324,12 +1337,12 @@ bool Application::canMoveRock(GridPosition3 position, MoveDirection direction) c
         return false;
     }
 
-    return level_.isWalkable(target);
+    return staticCellAllowsEntity(target);
 }
 
 bool Application::canMovableOccupy(GridPosition3 position, const MoveRecord& record, size_t movableIndex) const
 {
-    if (!level_.isWalkable(position)) {
+    if (!staticCellAllowsEntity(position)) {
         return false;
     }
 
@@ -1340,6 +1353,90 @@ bool Application::canMovableOccupy(GridPosition3 position, const MoveRecord& rec
     }
 
     return true;
+}
+
+bool Application::staticCellAllowsEntity(GridPosition3 position) const
+{
+    if (!level_.inBounds(position)) {
+        return false;
+    }
+
+    return tileTypeAllowsEntity(level_.tileAt(
+        static_cast<uint32_t>(position.x),
+        static_cast<uint32_t>(position.y),
+        static_cast<uint32_t>(position.z)));
+}
+
+Application::FallResult Application::playerFallTarget(GridPosition3 position, const MoveRecord& record) const
+{
+    GridPosition3 current = position;
+    while (current.z > 0) {
+        const GridPosition3 below { current.x, current.y, current.z - 1 };
+        const TileType support = level_.tileAt(
+            static_cast<uint32_t>(below.x),
+            static_cast<uint32_t>(below.y),
+            static_cast<uint32_t>(below.z));
+
+        if (tileTypeIsSolidBlock(support) ||
+            movableRecordAt(record, below) != nullptr ||
+            fallenMovableRecordAt(record, below) != nullptr) {
+            return { .cell = current, .fallen = false };
+        }
+        if (support == TileType::Water) {
+            return {
+                .cell = current,
+                .fallen = isUnfilledWater(current, record),
+            };
+        }
+        if (!staticCellAllowsEntity(below)) {
+            return { .cell = current, .fallen = false };
+        }
+
+        current = below;
+    }
+
+    return { .cell = current, .fallen = false };
+}
+
+Application::FallResult Application::movableFallTarget(
+    size_t movableIndex,
+    GridPosition3 position,
+    const MoveRecord& record) const
+{
+    GridPosition3 current = position;
+    while (current.z > 0) {
+        const GridPosition3 below { current.x, current.y, current.z - 1 };
+        const TileType support = level_.tileAt(
+            static_cast<uint32_t>(below.x),
+            static_cast<uint32_t>(below.y),
+            static_cast<uint32_t>(below.z));
+
+        bool movableBelow = false;
+        for (size_t i = 0; i < record.rocks.size(); ++i) {
+            if (i != movableIndex && record.rocks[i].cell == below) {
+                movableBelow = true;
+                break;
+            }
+        }
+        if (tileTypeIsSolidBlock(support) ||
+            movableBelow ||
+            (!record.playerDead && record.player == below)) {
+            return { .cell = current, .fallen = false };
+        }
+        if (support == TileType::Water) {
+            return {
+                .cell = current,
+                .fallen = isUnfilledWater(current, record),
+            };
+        }
+        if (!staticCellAllowsEntity(below)) {
+            return { .cell = current, .fallen = false };
+        }
+
+        current = below;
+    }
+
+    return { .cell = current, .fallen = false };
 }
 
 GridPosition3 Application::movableSlidingTarget(size_t movableIndex, MoveDirection direction, const MoveRecord& record) const
@@ -1357,8 +1454,9 @@ GridPosition3 Application::movableSlidingTarget(size_t movableIndex, MoveDirecti
         }
 
         current = next;
-        if (isUnfilledWater(current, record)) {
-            return current;
+        const FallResult fall = movableFallTarget(movableIndex, current, record);
+        if (fall.cell.z != current.z || fall.fallen) {
+            return fall.cell;
         }
     }
 
@@ -1375,6 +1473,10 @@ GridPosition3 Application::playerSlidingTarget(GridPosition3 position, MoveDirec
         }
 
         current = next;
+        const FallResult fall = playerFallTarget(current, record);
+        if (fall.cell.z != current.z || fall.fallen) {
+            return fall.cell;
+        }
     }
 
     return current;
@@ -1447,7 +1549,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
     frame.levelWidth = level_.width();
     frame.levelHeight = level_.height();
     frame.levelDepth = level_.depth();
-    frame.playerPosition = playerRenderPosition_;
+    frame.playerPosition = { playerRenderPosition_.x, playerRenderPosition_.y };
     const bool endUnlocked = isEndUnlocked();
 
     frame.tiles.reserve(static_cast<size_t>(level_.width()) * level_.height() * level_.depth());
@@ -1495,9 +1597,9 @@ RenderFrameData Application::buildGameplayRenderFrame() const
 
     if (!playerDead_ || playerMovingOutOfWater) {
         frame.tiles.push_back({
-            .position = playerRenderPosition_,
+            .position = { playerRenderPosition_.x, playerRenderPosition_.y },
             .color = tileColor(TileType::Player),
-            .baseElevation = static_cast<float>(playerCell_.z),
+            .baseElevation = playerRenderPosition_.z,
             .height = 1.0f,
             .showGrid = false,
         });
@@ -1520,9 +1622,9 @@ RenderFrameData Application::buildGameplayRenderFrame() const
         }
 
         frame.tiles.push_back({
-            .position = rock.renderPosition,
+            .position = { rock.renderPosition.x, rock.renderPosition.y },
             .color = color,
-            .baseElevation = static_cast<float>(rock.cell.z),
+            .baseElevation = rock.renderPosition.z,
             .height = 1.0f,
             .blurBehind = rock.type == TileType::Ice,
         });
