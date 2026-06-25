@@ -352,7 +352,17 @@ void Application::run()
             const bool isMouseEvent = event.type == SDL_EVENT_MOUSE_MOTION ||
                 event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
                 event.type == SDL_EVENT_MOUSE_BUTTON_UP;
-            const bool allowKeyboardInput = !isKeyboardEvent || !renderer_.wantsKeyboardCapture() || event.type == SDL_EVENT_KEY_UP;
+            bool isEditorReplaceModifier = false;
+#if SOKOBAN_ENABLE_DEBUG_UI
+            isEditorReplaceModifier = isKeyboardEvent &&
+                levelEditor_.editingDocument() &&
+                event.key.scancode == SDL_SCANCODE_R;
+#endif
+            const bool allowKeyboardInput =
+                !isKeyboardEvent ||
+                !renderer_.wantsKeyboardCapture() ||
+                event.type == SDL_EVENT_KEY_UP ||
+                isEditorReplaceModifier;
             const bool allowMouseInput = !isMouseEvent || !renderer_.wantsMouseCapture() || event.type == SDL_EVENT_MOUSE_BUTTON_UP;
             if (allowKeyboardInput && allowMouseInput) {
                 input_.handleEvent(event);
