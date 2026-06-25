@@ -35,6 +35,7 @@ enum class RenderModel {
     BricksA,
     Stone,
     Water,
+    Glass,
 };
 
 struct RenderFrameData {
@@ -352,6 +353,7 @@ private:
     GpuMesh bricksAMesh_ {};
     GpuMesh stoneMesh_ {};
     GpuMesh waterMesh_ {};
+    GpuMesh glassMesh_ {};
 
     static constexpr uint32_t maxFramesInFlight_ = 2;
     std::array<FrameResources, maxFramesInFlight_> frames_ {};

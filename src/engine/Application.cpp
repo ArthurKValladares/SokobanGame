@@ -161,6 +161,8 @@ RenderModel renderModelForTile(TileType tile)
         return RenderModel::Stone;
     case TileType::Water:
         return RenderModel::Water;
+    case TileType::Ice:
+        return RenderModel::Glass;
     default:
         return RenderModel::Cube;
     }

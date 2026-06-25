@@ -1065,6 +1065,7 @@ void VulkanRenderer::createModelResources()
     bricksAMesh_ = uploadMesh(loadGltfMesh(assetRoot_ / "models/bricks_A.gltf"));
     stoneMesh_ = uploadMesh(loadGltfMesh(assetRoot_ / "models/stone.gltf"));
     waterMesh_ = uploadMesh(loadGltfMesh(assetRoot_ / "models/water.gltf"));
+    glassMesh_ = uploadMesh(loadGltfMesh(assetRoot_ / "models/glass.gltf"));
 }
 
 VulkanRenderer::GpuMesh VulkanRenderer::uploadMesh(const MeshData& mesh) const
@@ -1101,6 +1102,7 @@ VulkanRenderer::GpuMesh VulkanRenderer::uploadMesh(const MeshData& mesh) const
 
 void VulkanRenderer::destroyModelResources()
 {
+    destroyMesh(glassMesh_);
     destroyMesh(waterMesh_);
     destroyMesh(stoneMesh_);
     destroyMesh(bricksAMesh_);
@@ -1136,6 +1138,8 @@ const VulkanRenderer::GpuMesh& VulkanRenderer::meshForModel(RenderModel model) c
         return stoneMesh_;
     case RenderModel::Water:
         return waterMesh_;
+    case RenderModel::Glass:
+        return glassMesh_;
     case RenderModel::Cube:
         break;
     }
@@ -1935,7 +1939,7 @@ void VulkanRenderer::recordGameRendering(
             return tile.blurBehind;
         });
 
-    if (!hasBlurredTiles && sceneColorImage_.image && sceneColorImageLayout_ == VK_IMAGE_LAYOUT_UNDEFINED) {
+    if (sceneColorImage_.image && sceneColorImageLayout_ == VK_IMAGE_LAYOUT_UNDEFINED) {
         VkImageMemoryBarrier2 sceneColorToRead {
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
             .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
