@@ -352,17 +352,18 @@ void Application::run()
             const bool isMouseEvent = event.type == SDL_EVENT_MOUSE_MOTION ||
                 event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
                 event.type == SDL_EVENT_MOUSE_BUTTON_UP;
-            bool isEditorReplaceModifier = false;
+            bool isEditorEditModifier = false;
 #if SOKOBAN_ENABLE_DEBUG_UI
-            isEditorReplaceModifier = isKeyboardEvent &&
+            isEditorEditModifier = isKeyboardEvent &&
                 levelEditor_.editingDocument() &&
-                event.key.scancode == SDL_SCANCODE_R;
+                (event.key.scancode == SDL_SCANCODE_R ||
+                    event.key.scancode == SDL_SCANCODE_D);
 #endif
             const bool allowKeyboardInput =
                 !isKeyboardEvent ||
                 !renderer_.wantsKeyboardCapture() ||
                 event.type == SDL_EVENT_KEY_UP ||
-                isEditorReplaceModifier;
+                isEditorEditModifier;
             const bool allowMouseInput = !isMouseEvent || !renderer_.wantsMouseCapture() || event.type == SDL_EVENT_MOUSE_BUTTON_UP;
             if (allowKeyboardInput && allowMouseInput) {
                 input_.handleEvent(event);
@@ -692,15 +693,20 @@ void Application::updateEditorPainting()
     const RenderFrameData editorFrame = buildEditorRenderFrame();
     if (const std::optional<GridPosition3> clicked = renderer_.pickIsoGridCell(editorFrame, mousePixels)) {
         GridPosition3 target = *clicked;
+        const bool deleting = input_.keyDown(SDL_SCANCODE_D);
         if (levelEditor_.layerLocked()) {
             target.z = static_cast<int>(levelEditor_.activeLayer());
-        } else if (!input_.keyDown(SDL_SCANCODE_R)) {
+        } else if (!deleting && !input_.keyDown(SDL_SCANCODE_R)) {
             ++target.z;
         }
 
         editorHoverCell_ = target;
         if (input_.mouseButtonPressed(SDL_BUTTON_LEFT)) {
-            levelEditor_.paintCell(target);
+            if (deleting) {
+                levelEditor_.eraseCell(target);
+            } else {
+                levelEditor_.paintCell(target);
+            }
         }
     }
 #endif
@@ -1669,18 +1675,21 @@ RenderFrameData Application::buildEditorRenderFrame() const
         editorHoverCell_->y >= 0 &&
         editorHoverCell_->x < static_cast<int>(frame.levelWidth) &&
         editorHoverCell_->y < static_cast<int>(frame.levelHeight)) {
-        const TileType selectedTile = levelEditor_.selectedTile();
+        const bool deleting = input_.keyDown(SDL_SCANCODE_D);
+        const TileType selectedTile = deleting ? TileType::Air : levelEditor_.selectedTile();
         const TileType hoveredTile = documentTileAt(
             static_cast<uint32_t>(editorHoverCell_->x),
             static_cast<uint32_t>(editorHoverCell_->y),
             static_cast<uint32_t>(editorHoverCell_->z));
-        const TileType previewTile = selectedTile == TileType::Air ? hoveredTile : selectedTile;
-        appendEditorTile(
-            static_cast<uint32_t>(editorHoverCell_->x),
-            static_cast<uint32_t>(editorHoverCell_->y),
-            static_cast<uint32_t>(editorHoverCell_->z),
-            previewTile,
-            true);
+        if (!deleting) {
+            const TileType previewTile = selectedTile == TileType::Air ? hoveredTile : selectedTile;
+            appendEditorTile(
+                static_cast<uint32_t>(editorHoverCell_->x),
+                static_cast<uint32_t>(editorHoverCell_->y),
+                static_cast<uint32_t>(editorHoverCell_->z),
+                previewTile,
+                true);
+        }
     }
 
     return frame;

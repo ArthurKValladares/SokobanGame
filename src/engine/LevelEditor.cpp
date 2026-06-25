@@ -198,7 +198,7 @@ void LevelEditor::draw(const Callbacks& callbacks)
     }
     ImGui::Checkbox("Lock Edits To Current Layer", &document_.layerLocked);
     if (!document_.layerLocked) {
-        ImGui::TextDisabled("Click: add above   Hold R + click: replace");
+        ImGui::TextDisabled("Click: add above   R + click: replace   D + click: delete");
     }
     if (ImGui::Button("+ Layer Above")) {
         addLayer();
@@ -254,6 +254,16 @@ void LevelEditor::markDraftSolved()
 
 void LevelEditor::paintCell(GridPosition3 position)
 {
+    setCell(position, document_.selectedTile);
+}
+
+void LevelEditor::eraseCell(GridPosition3 position)
+{
+    setCell(position, TileType::Air);
+}
+
+void LevelEditor::setCell(GridPosition3 position, TileType tile)
+{
     if (document_.layers.empty() || position.z < 0) {
         return;
     }
@@ -267,8 +277,8 @@ void LevelEditor::paintCell(GridPosition3 position)
         return;
     }
 
-    const char character = tileTypeToChar(document_.selectedTile);
-    if (document_.selectedTile == TileType::Air &&
+    const char character = tileTypeToChar(tile);
+    if (tile == TileType::Air &&
         position.z >= static_cast<int>(document_.layers.size())) {
         return;
     }
@@ -284,7 +294,7 @@ void LevelEditor::paintCell(GridPosition3 position)
             std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Air)));
     }
 
-    if (document_.selectedTile == TileType::Player) {
+    if (tile == TileType::Player) {
         for (std::vector<std::string>& layer : document_.layers) {
             for (std::string& documentRow : layer) {
                 std::ranges::replace(documentRow, tileTypeToChar(TileType::Player), tileTypeToChar(TileType::Air));
@@ -295,7 +305,9 @@ void LevelEditor::paintCell(GridPosition3 position)
     document_.layers[static_cast<size_t>(position.z)][static_cast<size_t>(position.y)][static_cast<size_t>(position.x)] = character;
     document_.activeLayer = position.z;
     document_.dirty = true;
-    document_.status = "Painted layer " + std::to_string(position.z + 1) + ".";
+    document_.status = tile == TileType::Air
+        ? "Deleted tile from layer " + std::to_string(position.z + 1) + "."
+        : "Painted layer " + std::to_string(position.z + 1) + ".";
     recordDocumentChange(before);
 }
 

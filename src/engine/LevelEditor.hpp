@@ -35,6 +35,7 @@ public:
     [[nodiscard]] bool editingDocument() const;
     void markDraftSolved();
     void paintCell(GridPosition3 position);
+    void eraseCell(GridPosition3 position);
     [[nodiscard]] bool tryUndoEdit();
     [[nodiscard]] uint32_t documentWidth() const;
     [[nodiscard]] uint32_t documentHeight() const;
@@ -92,6 +93,7 @@ private:
     };
 
     void drawTilePalette();
+    void setCell(GridPosition3 position, TileType tile);
     void drawFileBrowser();
     void drawActiveLevelsTab();
     void drawDeletedLevelsTab();
