@@ -291,6 +291,9 @@ void appendStaticTiles(RenderFrameData& frame, const Level& level, CellAt cellAt
                     .baseElevation = cell.baseElevation,
                     .height = cell.height,
                     .showGrid = cell.showGrid,
+                    .model = cell.tile == TileType::Wall
+                        ? RenderModel::BricksA
+                        : RenderModel::Cube,
                 });
             }
         }
@@ -1712,6 +1715,9 @@ RenderFrameData Application::buildEditorRenderFrame() const
             .blurBehind = tile == TileType::Ice,
             .showGrid = tile != TileType::Player,
             .isEditorPreview = preview,
+            .model = tile == TileType::Wall
+                ? RenderModel::BricksA
+                : RenderModel::Cube,
         });
     };
 

@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
+#include <cstring>
 #include <fstream>
 #include <limits>
 #include <optional>
@@ -126,6 +128,26 @@ Vec2 subtract(Vec2 left, Vec2 right)
     };
 }
 
+Vec4 subtract(Vec4 left, Vec4 right)
+{
+    return {
+        left.x - right.x,
+        left.y - right.y,
+        left.z - right.z,
+        left.w - right.w,
+    };
+}
+
+std::array<Vec4, 4> affineTransformColumns(Vec4 origin, Vec4 xPoint, Vec4 yPoint, Vec4 zPoint)
+{
+    return {
+        subtract(xPoint, origin),
+        subtract(yPoint, origin),
+        subtract(zPoint, origin),
+        origin,
+    };
+}
+
 bool pointInTriangle(Vec2 point, Vec2 a, Vec2 b, Vec2 c)
 {
     constexpr float epsilon = 0.001f;
@@ -207,6 +229,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, std::filesystem::path assetRo
     createSceneColorResources();
     createDescriptorResources();
     createCommandPool();
+    createModelResources();
     createPipeline();
     createFrameResources();
     initializeDebugUi();
@@ -233,6 +256,7 @@ VulkanRenderer::~VulkanRenderer()
     }
 
     destroyPipeline();
+    destroyModelResources();
     destroyDescriptorResources();
     if (commandPool_) {
         vkDestroyCommandPool(device_, commandPool_, nullptr);
@@ -1036,6 +1060,58 @@ void VulkanRenderer::createCommandPool()
     vkCheck(vkCreateCommandPool(device_, &createInfo, nullptr, &commandPool_), "vkCreateCommandPool failed");
 }
 
+void VulkanRenderer::createModelResources()
+{
+    const MeshData mesh = loadGltfMesh(assetRoot_ / "models/bricks_A.gltf");
+    if (mesh.vertices.empty() || mesh.indices.empty()) {
+        throw std::runtime_error("Bricks_A glTF mesh contains no geometry");
+    }
+
+    const VkDeviceSize vertexBytes = sizeof(MeshVertex) * mesh.vertices.size();
+    const VkDeviceSize indexBytes = sizeof(uint32_t) * mesh.indices.size();
+    bricksAVertexBuffer_ = createBuffer(
+        vertexBytes,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    bricksAIndexBuffer_ = createBuffer(
+        indexBytes,
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    void* mapped = nullptr;
+    vkCheck(vkMapMemory(device_, bricksAVertexBuffer_.memory, 0, vertexBytes, 0, &mapped), "vkMapMemory model vertex buffer failed");
+    std::memcpy(mapped, mesh.vertices.data(), static_cast<size_t>(vertexBytes));
+    vkUnmapMemory(device_, bricksAVertexBuffer_.memory);
+
+    mapped = nullptr;
+    vkCheck(vkMapMemory(device_, bricksAIndexBuffer_.memory, 0, indexBytes, 0, &mapped), "vkMapMemory model index buffer failed");
+    std::memcpy(mapped, mesh.indices.data(), static_cast<size_t>(indexBytes));
+    vkUnmapMemory(device_, bricksAIndexBuffer_.memory);
+
+    bricksAIndexCount_ = static_cast<uint32_t>(mesh.indices.size());
+}
+
+void VulkanRenderer::destroyModelResources()
+{
+    if (bricksAIndexBuffer_.buffer) {
+        vkDestroyBuffer(device_, bricksAIndexBuffer_.buffer, nullptr);
+        bricksAIndexBuffer_.buffer = VK_NULL_HANDLE;
+    }
+    if (bricksAIndexBuffer_.memory) {
+        vkFreeMemory(device_, bricksAIndexBuffer_.memory, nullptr);
+        bricksAIndexBuffer_.memory = VK_NULL_HANDLE;
+    }
+    if (bricksAVertexBuffer_.buffer) {
+        vkDestroyBuffer(device_, bricksAVertexBuffer_.buffer, nullptr);
+        bricksAVertexBuffer_.buffer = VK_NULL_HANDLE;
+    }
+    if (bricksAVertexBuffer_.memory) {
+        vkFreeMemory(device_, bricksAVertexBuffer_.memory, nullptr);
+        bricksAVertexBuffer_.memory = VK_NULL_HANDLE;
+    }
+    bricksAIndexCount_ = 0;
+}
+
 void VulkanRenderer::createPipeline()
 {
     VkPushConstantRange pushConstantRange {
@@ -1056,10 +1132,16 @@ void VulkanRenderer::createPipeline()
     VkShaderModule vertexShader = createShaderModule(assetRoot_ / "shaders/triangle.vert.glsl.spv");
     VkShaderModule fragmentShader = createShaderModule(assetRoot_ / "shaders/triangle.frag.glsl.spv");
     VkShaderModule shadowVertexShader = createShaderModule(assetRoot_ / "shaders/shadow.vert.glsl.spv");
+    VkShaderModule modelVertexShader = createShaderModule(assetRoot_ / "shaders/model.vert.glsl.spv");
+    VkShaderModule modelShadowVertexShader = createShaderModule(assetRoot_ / "shaders/model_shadow.vert.glsl.spv");
 
     pipeline_ = createGraphicsPipeline(vertexShader, fragmentShader);
+    modelPipeline_ = createModelGraphicsPipeline(modelVertexShader, fragmentShader);
     createShadowPipeline(shadowVertexShader);
+    createModelShadowPipeline(modelShadowVertexShader);
 
+    vkDestroyShaderModule(device_, modelShadowVertexShader, nullptr);
+    vkDestroyShaderModule(device_, modelVertexShader, nullptr);
     vkDestroyShaderModule(device_, shadowVertexShader, nullptr);
     vkDestroyShaderModule(device_, fragmentShader, nullptr);
     vkDestroyShaderModule(device_, vertexShader, nullptr);
@@ -1144,8 +1226,103 @@ void VulkanRenderer::createShadowPipeline(VkShaderModule shadowVertexShader)
     vkCheck(vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &createInfo, nullptr, &shadowPipeline_), "vkCreateGraphicsPipelines shadow pipeline failed");
 }
 
+void VulkanRenderer::createModelShadowPipeline(VkShaderModule shadowVertexShader)
+{
+    VkPipelineShaderStageCreateInfo vertexStage {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage = VK_SHADER_STAGE_VERTEX_BIT,
+        .module = shadowVertexShader,
+        .pName = "main",
+    };
+    const VkVertexInputBindingDescription binding {
+        .binding = 0,
+        .stride = sizeof(MeshVertex),
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+    };
+    const VkVertexInputAttributeDescription attribute {
+        .location = 0,
+        .binding = 0,
+        .format = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset = offsetof(MeshVertex, position),
+    };
+    VkPipelineVertexInputStateCreateInfo vertexInput {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .vertexBindingDescriptionCount = 1,
+        .pVertexBindingDescriptions = &binding,
+        .vertexAttributeDescriptionCount = 1,
+        .pVertexAttributeDescriptions = &attribute,
+    };
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+    };
+    VkPipelineViewportStateCreateInfo viewportState {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .scissorCount = 1,
+    };
+    VkPipelineRasterizationStateCreateInfo rasterizer {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .cullMode = VK_CULL_MODE_NONE,
+        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+        .lineWidth = 1.0f,
+    };
+    VkPipelineMultisampleStateCreateInfo multisampling {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    };
+    VkPipelineDepthStencilStateCreateInfo depthStencil {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable = VK_TRUE,
+        .depthWriteEnable = VK_TRUE,
+        .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+    };
+    VkDynamicState dynamicStates[] {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR,
+        VK_DYNAMIC_STATE_CULL_MODE,
+        VK_DYNAMIC_STATE_FRONT_FACE,
+        VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
+        VK_DYNAMIC_STATE_LINE_WIDTH,
+        VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE,
+        VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
+        VK_DYNAMIC_STATE_DEPTH_COMPARE_OP,
+    };
+    VkPipelineDynamicStateCreateInfo dynamicState {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = static_cast<uint32_t>(std::size(dynamicStates)),
+        .pDynamicStates = dynamicStates,
+    };
+    VkPipelineRenderingCreateInfo rendering {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+        .depthAttachmentFormat = shadowFormat_,
+    };
+    VkGraphicsPipelineCreateInfo createInfo {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .pNext = &rendering,
+        .stageCount = 1,
+        .pStages = &vertexStage,
+        .pVertexInputState = &vertexInput,
+        .pInputAssemblyState = &inputAssembly,
+        .pViewportState = &viewportState,
+        .pRasterizationState = &rasterizer,
+        .pMultisampleState = &multisampling,
+        .pDepthStencilState = &depthStencil,
+        .pDynamicState = &dynamicState,
+        .layout = pipelineLayout_,
+    };
+    vkCheck(
+        vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &createInfo, nullptr, &modelShadowPipeline_),
+        "vkCreateGraphicsPipelines model shadow pipeline failed");
+}
+
 void VulkanRenderer::destroyPipeline()
 {
+    if (modelShadowPipeline_) {
+        vkDestroyPipeline(device_, modelShadowPipeline_, nullptr);
+        modelShadowPipeline_ = VK_NULL_HANDLE;
+    }
     if (shadowPipeline_) {
         vkDestroyPipeline(device_, shadowPipeline_, nullptr);
         shadowPipeline_ = VK_NULL_HANDLE;
@@ -1153,6 +1330,10 @@ void VulkanRenderer::destroyPipeline()
     if (pipeline_) {
         vkDestroyPipeline(device_, pipeline_, nullptr);
         pipeline_ = VK_NULL_HANDLE;
+    }
+    if (modelPipeline_) {
+        vkDestroyPipeline(device_, modelPipeline_, nullptr);
+        modelPipeline_ = VK_NULL_HANDLE;
     }
     for (VkPipeline& library : pipelineLibraries_) {
         if (library) {
@@ -1648,6 +1829,9 @@ void VulkanRenderer::recordShadowMapRendering(VkCommandBuffer commandBuffer, con
         if (tile.isEditorPreview || tile.pickOnly) {
             continue;
         }
+        if (tile.model != RenderModel::Cube) {
+            continue;
+        }
 
         drawTileFaces(tile);
     }
@@ -1658,6 +1842,18 @@ void VulkanRenderer::recordShadowMapRendering(VkCommandBuffer commandBuffer, con
             projectShadowPoint(layout, face.vertices[2]),
             projectShadowPoint(layout, face.vertices[3]),
         });
+    }
+    bool modelPipelineBound = false;
+    for (const RenderFrameData::Tile& tile : frameData.tiles) {
+        if (tile.isEditorPreview || tile.pickOnly || tile.model == RenderModel::Cube) {
+            continue;
+        }
+        if (!modelPipelineBound) {
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, modelShadowPipeline_);
+            ++pendingStats_.pipelineBinds;
+            modelPipelineBound = true;
+        }
+        drawModelShadow(commandBuffer, layout, tile);
     }
 
     vkCmdEndRendering(commandBuffer);
@@ -2392,6 +2588,9 @@ void VulkanRenderer::drawIsoFrame(
         if (tile.blurBehind != translucentPass) {
             continue;
         }
+        if (tile.model != RenderModel::Cube) {
+            continue;
+        }
 
         const float x = tile.position.x;
         const float y = tile.position.y;
@@ -2449,6 +2648,21 @@ void VulkanRenderer::drawIsoFrame(
             face.gridSize,
             frameData.gridOverlay.width,
             face.isEditorPreview);
+    }
+
+    bool modelPipelineBound = false;
+    for (const RenderFrameData::Tile& tile : frameData.tiles) {
+        if (tile.pickOnly ||
+            tile.blurBehind != translucentPass ||
+            tile.model == RenderModel::Cube) {
+            continue;
+        }
+        if (!modelPipelineBound) {
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, modelPipeline_);
+            ++pendingStats_.pipelineBinds;
+            modelPipelineBound = true;
+        }
+        drawModel(commandBuffer, layout, shadowLayout, tile, lighting);
     }
 }
 
@@ -2595,6 +2809,121 @@ void VulkanRenderer::drawShadowFace(VkCommandBuffer commandBuffer, const std::ar
         sizeof(TilePushConstants),
         &pushConstants);
     vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+}
+
+void VulkanRenderer::drawModel(
+    VkCommandBuffer commandBuffer,
+    const IsoRenderLayout& layout,
+    const ShadowRenderLayout& shadowLayout,
+    const RenderFrameData::Tile& tile,
+    const RenderFrameData::Lighting& lighting) const
+{
+    const Vec3 origin { tile.position.x, tile.position.y, tile.baseElevation };
+    const Vec3 xPoint { origin.x + tile.size.x, origin.y, origin.z };
+    const Vec3 yPoint { origin.x, origin.y + tile.size.y, origin.z };
+    const Vec3 zPoint { origin.x, origin.y, origin.z + std::max(tile.height, 0.0f) };
+    auto isoPoint = [&](Vec3 point) {
+        const Vec3 projected = projectIsoPoint(layout, point);
+        return Vec4 { projected.x, projected.y, projected.z, 1.0f };
+    };
+
+    const Vec3 sunRadiance {
+        lighting.sun.color.x * lighting.sun.intensity,
+        lighting.sun.color.y * lighting.sun.intensity,
+        lighting.sun.color.z * lighting.sun.intensity,
+    };
+    const Vec3 ambientRadiance {
+        lighting.ambient.color.x * lighting.ambient.intensity,
+        lighting.ambient.color.y * lighting.ambient.intensity,
+        lighting.ambient.color.z * lighting.ambient.intensity,
+    };
+    const TilePushConstants pushConstants {
+        .vertices = affineTransformColumns(
+            isoPoint(origin),
+            isoPoint(xPoint),
+            isoPoint(yPoint),
+            isoPoint(zPoint)),
+        .shadowVertices = affineTransformColumns(
+            projectShadowPoint(shadowLayout, origin),
+            projectShadowPoint(shadowLayout, xPoint),
+            projectShadowPoint(shadowLayout, yPoint),
+            projectShadowPoint(shadowLayout, zPoint)),
+        .color = tile.color,
+        .normalAndAmbientRed = { 0.0f, 0.0f, 0.0f, ambientRadiance.x },
+        .sunDirectionAndAmbientGreen = {
+            lighting.sun.direction.x,
+            lighting.sun.direction.y,
+            lighting.sun.direction.z,
+            ambientRadiance.y,
+        },
+        .sunRadianceAndAmbientBlue = {
+            sunRadiance.x,
+            sunRadiance.y,
+            sunRadiance.z,
+            ambientRadiance.z,
+        },
+        .shadowOptions = {
+            lighting.shadows.enabled ? 1.0f : 0.0f,
+            std::clamp(lighting.shadows.opacity, 0.0f, 1.0f),
+            std::max(lighting.shadows.bias, 0.0f),
+            0.0f,
+        },
+        .materialOptions = {
+            tile.blurBehind ? 1.0f : 0.0f,
+            0.0f,
+            0.0f,
+            tile.isEditorPreview ? -config::iceBlurRadiusPixels : config::iceBlurRadiusPixels,
+        },
+    };
+
+    const VkBuffer vertexBuffer = bricksAVertexBuffer_.buffer;
+    constexpr VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer, &offset);
+    vkCmdBindIndexBuffer(commandBuffer, bricksAIndexBuffer_.buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdPushConstants(
+        commandBuffer,
+        pipelineLayout_,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        0,
+        sizeof(TilePushConstants),
+        &pushConstants);
+    vkCmdDrawIndexed(commandBuffer, bricksAIndexCount_, 1, 0, 0, 0);
+
+    pendingStats_.visibleFaces += bricksAIndexCount_ / 3;
+    ++pendingStats_.drawCalls;
+    pendingStats_.vertices += bricksAIndexCount_;
+    pendingStats_.triangles += bricksAIndexCount_ / 3;
+}
+
+void VulkanRenderer::drawModelShadow(
+    VkCommandBuffer commandBuffer,
+    const ShadowRenderLayout& layout,
+    const RenderFrameData::Tile& tile) const
+{
+    const Vec3 origin { tile.position.x, tile.position.y, tile.baseElevation };
+    const Vec3 xPoint { origin.x + tile.size.x, origin.y, origin.z };
+    const Vec3 yPoint { origin.x, origin.y + tile.size.y, origin.z };
+    const Vec3 zPoint { origin.x, origin.y, origin.z + std::max(tile.height, 0.0f) };
+    const TilePushConstants pushConstants {
+        .shadowVertices = affineTransformColumns(
+            projectShadowPoint(layout, origin),
+            projectShadowPoint(layout, xPoint),
+            projectShadowPoint(layout, yPoint),
+            projectShadowPoint(layout, zPoint)),
+    };
+
+    const VkBuffer vertexBuffer = bricksAVertexBuffer_.buffer;
+    constexpr VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer, &offset);
+    vkCmdBindIndexBuffer(commandBuffer, bricksAIndexBuffer_.buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdPushConstants(
+        commandBuffer,
+        pipelineLayout_,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        0,
+        sizeof(TilePushConstants),
+        &pushConstants);
+    vkCmdDrawIndexed(commandBuffer, bricksAIndexCount_, 1, 0, 0, 0);
 }
 
 void VulkanRenderer::drawUiRect(
@@ -2912,6 +3241,137 @@ VkPipeline VulkanRenderer::createGraphicsPipeline(VkShaderModule vertexShader, V
     return pipeline;
 }
 
+VkPipeline VulkanRenderer::createModelGraphicsPipeline(VkShaderModule vertexShader, VkShaderModule fragmentShader) const
+{
+    std::array<VkPipelineShaderStageCreateInfo, 2> stages {
+        VkPipelineShaderStageCreateInfo {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
+            .module = vertexShader,
+            .pName = "main",
+        },
+        VkPipelineShaderStageCreateInfo {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .module = fragmentShader,
+            .pName = "main",
+        },
+    };
+    const VkVertexInputBindingDescription binding {
+        .binding = 0,
+        .stride = sizeof(MeshVertex),
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+    };
+    const std::array<VkVertexInputAttributeDescription, 2> attributes {
+        VkVertexInputAttributeDescription {
+            .location = 0,
+            .binding = 0,
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = offsetof(MeshVertex, position),
+        },
+        VkVertexInputAttributeDescription {
+            .location = 1,
+            .binding = 0,
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = offsetof(MeshVertex, normal),
+        },
+    };
+    VkPipelineVertexInputStateCreateInfo vertexInput {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .vertexBindingDescriptionCount = 1,
+        .pVertexBindingDescriptions = &binding,
+        .vertexAttributeDescriptionCount = static_cast<uint32_t>(attributes.size()),
+        .pVertexAttributeDescriptions = attributes.data(),
+    };
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+    };
+    VkPipelineViewportStateCreateInfo viewportState {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .scissorCount = 1,
+    };
+    VkPipelineRasterizationStateCreateInfo rasterizer {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = wireframeEnabled_ ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL,
+        .cullMode = VK_CULL_MODE_NONE,
+        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+        .lineWidth = 1.0f,
+    };
+    VkPipelineMultisampleStateCreateInfo multisampling {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = activeSampleCount_,
+    };
+    VkPipelineDepthStencilStateCreateInfo depthStencil {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable = VK_TRUE,
+        .depthWriteEnable = VK_TRUE,
+        .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+    };
+    VkPipelineColorBlendAttachmentState colorBlendAttachment {
+        .blendEnable = VK_TRUE,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .colorBlendOp = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .alphaBlendOp = VK_BLEND_OP_ADD,
+        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
+            VK_COLOR_COMPONENT_G_BIT |
+            VK_COLOR_COMPONENT_B_BIT |
+            VK_COLOR_COMPONENT_A_BIT,
+    };
+    VkPipelineColorBlendStateCreateInfo colorBlending {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &colorBlendAttachment,
+    };
+    VkDynamicState dynamicStates[] {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR,
+        VK_DYNAMIC_STATE_CULL_MODE,
+        VK_DYNAMIC_STATE_FRONT_FACE,
+        VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
+        VK_DYNAMIC_STATE_LINE_WIDTH,
+        VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE,
+        VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
+        VK_DYNAMIC_STATE_DEPTH_COMPARE_OP,
+    };
+    VkPipelineDynamicStateCreateInfo dynamicState {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = static_cast<uint32_t>(std::size(dynamicStates)),
+        .pDynamicStates = dynamicStates,
+    };
+    VkPipelineRenderingCreateInfo rendering {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+        .colorAttachmentCount = 1,
+        .pColorAttachmentFormats = &swapchainFormat_,
+        .depthAttachmentFormat = depthFormat_,
+    };
+    VkGraphicsPipelineCreateInfo pipelineInfo {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .pNext = &rendering,
+        .stageCount = static_cast<uint32_t>(stages.size()),
+        .pStages = stages.data(),
+        .pVertexInputState = &vertexInput,
+        .pInputAssemblyState = &inputAssembly,
+        .pViewportState = &viewportState,
+        .pRasterizationState = &rasterizer,
+        .pMultisampleState = &multisampling,
+        .pDepthStencilState = &depthStencil,
+        .pColorBlendState = &colorBlending,
+        .pDynamicState = &dynamicState,
+        .layout = pipelineLayout_,
+    };
+
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    vkCheck(
+        vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline),
+        "vkCreateGraphicsPipelines model pipeline failed");
+    return pipeline;
+}
+
 std::array<VkPipeline, 2> VulkanRenderer::createGraphicsPipelineLibraries(VkShaderModule vertexShader, VkShaderModule fragmentShader) const
 {
     VkPipelineShaderStageCreateInfo vertexStage {
@@ -3122,6 +3582,41 @@ uint32_t VulkanRenderer::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFla
     }
 
     throw std::runtime_error("No suitable Vulkan memory type found");
+}
+
+VulkanRenderer::OwnedBuffer VulkanRenderer::createBuffer(
+    VkDeviceSize size,
+    VkBufferUsageFlags usage,
+    VkMemoryPropertyFlags properties) const
+{
+    OwnedBuffer result;
+    VkBufferCreateInfo bufferInfo {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = size,
+        .usage = usage,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+    vkCheck(vkCreateBuffer(device_, &bufferInfo, nullptr, &result.buffer), "vkCreateBuffer failed");
+
+    VkMemoryRequirements requirements {};
+    vkGetBufferMemoryRequirements(device_, result.buffer, &requirements);
+    VkMemoryAllocateInfo allocationInfo {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = requirements.size,
+        .memoryTypeIndex = findMemoryType(requirements.memoryTypeBits, properties),
+    };
+    const VkResult allocationResult = vkAllocateMemory(device_, &allocationInfo, nullptr, &result.memory);
+    if (allocationResult != VK_SUCCESS) {
+        vkDestroyBuffer(device_, result.buffer, nullptr);
+        vkCheck(allocationResult, "vkAllocateMemory buffer failed");
+    }
+    const VkResult bindResult = vkBindBufferMemory(device_, result.buffer, result.memory, 0);
+    if (bindResult != VK_SUCCESS) {
+        vkFreeMemory(device_, result.memory, nullptr);
+        vkDestroyBuffer(device_, result.buffer, nullptr);
+        vkCheck(bindResult, "vkBindBufferMemory failed");
+    }
+    return result;
 }
 
 VkImageView VulkanRenderer::createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectMask) const

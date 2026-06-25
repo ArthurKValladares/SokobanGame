@@ -2,6 +2,7 @@
 
 #include "engine/Config.hpp"
 #include "engine/Math.hpp"
+#include "engine/render/GltfMesh.hpp"
 #include "engine/ui/Ui.hpp"
 
 #include <SDL3/SDL_events.h>
@@ -27,6 +28,11 @@ enum class AntiAliasingMode {
     Msaa2x,
     Msaa4x,
     Msaa8x,
+};
+
+enum class RenderModel {
+    Cube,
+    BricksA,
 };
 
 struct RenderFrameData {
@@ -64,6 +70,7 @@ struct RenderFrameData {
         bool pickOnly = false;
         bool showGrid = true;
         bool isEditorPreview = false;
+        RenderModel model = RenderModel::Cube;
     };
 
     struct IsoFace {
@@ -156,6 +163,11 @@ private:
         VkImageView view = VK_NULL_HANDLE;
     };
 
+    struct OwnedBuffer {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+    };
+
     struct FrameResources {
         VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
         VkSemaphore imageAvailable = VK_NULL_HANDLE;
@@ -204,8 +216,11 @@ private:
     void createDescriptorResources();
     void updateDescriptorSet();
     void createCommandPool();
+    void createModelResources();
+    void destroyModelResources();
     void createPipeline();
     void createShadowPipeline(VkShaderModule shadowVertexShader);
+    void createModelShadowPipeline(VkShaderModule shadowVertexShader);
     void destroyPipeline();
     void destroyDescriptorResources();
     void cleanupShadowResources();
@@ -255,6 +270,16 @@ private:
         float gridLineWidth = 0.0f,
         bool isEditorPreview = false) const;
     void drawShadowFace(VkCommandBuffer commandBuffer, const std::array<Vec4, 4>& shadowVertices) const;
+    void drawModel(
+        VkCommandBuffer commandBuffer,
+        const IsoRenderLayout& layout,
+        const ShadowRenderLayout& shadowLayout,
+        const RenderFrameData::Tile& tile,
+        const RenderFrameData::Lighting& lighting) const;
+    void drawModelShadow(
+        VkCommandBuffer commandBuffer,
+        const ShadowRenderLayout& layout,
+        const RenderFrameData::Tile& tile) const;
     void drawUiRect(VkCommandBuffer commandBuffer, const UiDrawCommand& command, Vec2 viewportSize, const RenderFrameData::Lighting& lighting) const;
     [[nodiscard]] Vec3 projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) const;
     [[nodiscard]] Vec4 projectShadowPoint(const ShadowRenderLayout& layout, Vec3 point) const;
@@ -267,9 +292,11 @@ private:
     [[nodiscard]] VkExtent2D chooseSwapchainExtent(const VkSurfaceCapabilitiesKHR& capabilities) const;
     [[nodiscard]] VkShaderModule createShaderModule(const std::filesystem::path& path) const;
     [[nodiscard]] VkPipeline createGraphicsPipeline(VkShaderModule vertexShader, VkShaderModule fragmentShader) const;
+    [[nodiscard]] VkPipeline createModelGraphicsPipeline(VkShaderModule vertexShader, VkShaderModule fragmentShader) const;
     [[nodiscard]] std::array<VkPipeline, 2> createGraphicsPipelineLibraries(VkShaderModule vertexShader, VkShaderModule fragmentShader) const;
     [[nodiscard]] VkSampleCountFlagBits sampleCountForMode(AntiAliasingMode mode) const;
     [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
+    [[nodiscard]] OwnedBuffer createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) const;
     [[nodiscard]] VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectMask) const;
     [[nodiscard]] bool msaaEnabled() const;
     [[nodiscard]] uint32_t sampleCountValue() const;
@@ -309,6 +336,11 @@ private:
     std::array<VkPipeline, 2> pipelineLibraries_ {};
     VkPipeline pipeline_ = VK_NULL_HANDLE;
     VkPipeline shadowPipeline_ = VK_NULL_HANDLE;
+    VkPipeline modelPipeline_ = VK_NULL_HANDLE;
+    VkPipeline modelShadowPipeline_ = VK_NULL_HANDLE;
+    OwnedBuffer bricksAVertexBuffer_ {};
+    OwnedBuffer bricksAIndexBuffer_ {};
+    uint32_t bricksAIndexCount_ = 0;
 
     static constexpr uint32_t maxFramesInFlight_ = 2;
     std::array<FrameResources, maxFramesInFlight_> frames_ {};

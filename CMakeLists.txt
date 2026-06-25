@@ -47,11 +47,15 @@ set(SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/shaders")
 set(LEVEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/levels")
 set(LEVEL_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/levels")
+set(MODEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit_BlockBits_1.0_FREE/Assets/gltf")
+set(MODEL_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/models")
 
 set(SHADER_SOURCES
     "${SHADER_SOURCE_DIR}/triangle.vert.glsl"
     "${SHADER_SOURCE_DIR}/triangle.frag.glsl"
     "${SHADER_SOURCE_DIR}/shadow.vert.glsl"
+    "${SHADER_SOURCE_DIR}/model.vert.glsl"
+    "${SHADER_SOURCE_DIR}/model_shadow.vert.glsl"
 )
 
 set(SHADER_OUTPUTS)
@@ -81,8 +85,14 @@ file(GLOB_RECURSE LEVEL_SOURCES CONFIGURE_DEPENDS "${LEVEL_SOURCE_DIR}/*")
 
 add_custom_target(sokoban_assets
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/assets"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${MODEL_OUTPUT_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E copy_directory "${LEVEL_SOURCE_DIR}" "${LEVEL_OUTPUT_DIR}"
-    DEPENDS ${LEVEL_SOURCES}
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/bricks_A.gltf" "${MODEL_OUTPUT_DIR}/bricks_A.gltf"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/bricks_A.bin" "${MODEL_OUTPUT_DIR}/bricks_A.bin"
+    DEPENDS
+        ${LEVEL_SOURCES}
+        "${MODEL_SOURCE_DIR}/bricks_A.gltf"
+        "${MODEL_SOURCE_DIR}/bricks_A.bin"
     VERBATIM
 )
 
@@ -97,6 +107,7 @@ add_executable(sokoban
     src/engine/TileTypes.cpp
     src/engine/Window.cpp
     src/engine/render/VulkanRenderer.cpp
+    src/engine/render/GltfMesh.cpp
     src/engine/ui/Ui.cpp
 )
 foreach(imgui_source IN LISTS SOKOBAN_IMGUI_SOURCES)

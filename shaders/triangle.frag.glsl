@@ -6,6 +6,7 @@ layout(set = 0, binding = 1) uniform sampler2D sceneColor;
 layout(location = 0) in vec4 inShadowPosition;
 layout(location = 1) in float inFaceCoordU;
 layout(location = 2) in float inFaceCoordV;
+layout(location = 3) flat in vec3 inNormal;
 layout(location = 0) out vec4 outColor;
 
 layout(push_constant) uniform PushConstants
@@ -90,8 +91,8 @@ void main()
     applyEditorPreviewDither();
 
     vec3 color = mix(pc.color.rgb, pc.gridColor.rgb, gridMask());
-    if (length(pc.normalAndAmbientRed.xyz) > 0.0001) {
-        vec3 normal = normalize(pc.normalAndAmbientRed.xyz);
+    if (length(inNormal) > 0.0001) {
+        vec3 normal = normalize(inNormal);
         vec3 lightDirection = length(pc.sunDirectionAndAmbientGreen.xyz) > 0.0001
             ? normalize(pc.sunDirectionAndAmbientGreen.xyz)
             : vec3(0.0, 0.0, 1.0);
