@@ -9,6 +9,7 @@
 #include "engine/Window.hpp"
 #include "engine/render/VulkanRenderer.hpp"
 
+#include <array>
 #include <deque>
 #include <filesystem>
 #include <optional>
@@ -138,6 +139,7 @@ private:
     [[nodiscard]] RenderFrameData buildRenderFrame() const;
     [[nodiscard]] RenderFrameData buildGameplayRenderFrame() const;
     [[nodiscard]] RenderFrameData buildEditorRenderFrame() const;
+    [[nodiscard]] float tileTypeToScale(TileType type) const;
 
     Window window_;
     VulkanRenderer renderer_;
@@ -168,6 +170,17 @@ private:
     float tileGridLineWidth_ = config::tileGridLineWidth;
     float surfaceEntityHeight_ = config::surfaceEntityHeight;
     float surfaceEntityWidthDepth_ = config::surfaceEntityWidthDepth;
+    std::array<float, tileTypeCount> tileScales_ {
+        config::airTileScale,
+        config::groundTileScale,
+        config::wallTileScale,
+        config::endTileScale,
+        config::pressurePlateTileScale,
+        config::playerTileScale,
+        config::rockTileScale,
+        config::iceTileScale,
+        config::waterTileScale,
+    };
     std::vector<Rock> rocks_;
     std::deque<MoveCommand> pendingCommands_;
     std::vector<ActionRecord> moveHistory_;

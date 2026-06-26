@@ -171,6 +171,33 @@ RenderModel renderModelForTile(TileType tile)
     }
 }
 
+float clampedTileScale(float scale)
+{
+    return std::clamp(scale, config::minTileScale, config::maxTileScale);
+}
+
+void applyTileScale(RenderFrameData::Tile& tile, float scale)
+{
+    scale = clampedTileScale(scale);
+    if (std::abs(scale - 1.0f) < 0.0001f) {
+        return;
+    }
+
+    const Vec2 center {
+        tile.position.x + tile.size.x * 0.5f,
+        tile.position.y + tile.size.y * 0.5f,
+    };
+    tile.size = {
+        tile.size.x * scale,
+        tile.size.y * scale,
+    };
+    tile.position = {
+        center.x - tile.size.x * 0.5f,
+        center.y - tile.size.y * 0.5f,
+    };
+    tile.height *= scale;
+}
+
 uint32_t facingQuarterTurns(MoveDirection direction)
 {
     switch (direction) {
@@ -325,8 +352,8 @@ void appendWaterEdgeFaces(
     }
 }
 
-template <typename CellAt>
-void appendStaticTiles(RenderFrameData& frame, const Level& level, CellAt cellAt)
+template <typename CellAt, typename ScaleForTile>
+void appendStaticTiles(RenderFrameData& frame, const Level& level, CellAt cellAt, ScaleForTile scaleForTile)
 {
     for (uint32_t z = 0; z < level.depth(); ++z) {
         for (uint32_t y = 0; y < level.height(); ++y) {
@@ -335,7 +362,7 @@ void appendStaticTiles(RenderFrameData& frame, const Level& level, CellAt cellAt
                 if (cell.tile == TileType::Air) {
                     continue;
                 }
-                frame.tiles.push_back({
+                RenderFrameData::Tile renderTile {
                     .cell = {
                         static_cast<int>(x),
                         static_cast<int>(y),
@@ -354,7 +381,9 @@ void appendStaticTiles(RenderFrameData& frame, const Level& level, CellAt cellAt
                     .showGrid = cell.showGrid,
                     .model = renderModelForTile(cell.tile),
                     .modelRotationQuarterTurns = cell.modelRotationQuarterTurns,
-                });
+                };
+                applyTileScale(renderTile, scaleForTile(cell.tile));
+                frame.tiles.push_back(renderTile);
             }
         }
     }
@@ -552,6 +581,26 @@ void Application::drawDebugUi()
             "%.2f");
         surfaceEntityWidthDepth_ = std::clamp(surfaceEntityWidthDepth_, 0.1f, 1.0f);
         ImGui::TextDisabled("End and pressure plate geometry");
+
+        if (ImGui::TreeNode("Tile Scale")) {
+            for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
+                if (definition.type == TileType::Air) {
+                    continue;
+                }
+
+                const auto index = static_cast<std::size_t>(definition.type);
+                ImGui::DragFloat(
+                    definition.name.data(),
+                    &tileScales_[index],
+                    0.01f,
+                    config::minTileScale,
+                    config::maxTileScale,
+                    "%.2f");
+                tileScales_[index] = clampedTileScale(tileScales_[index]);
+            }
+            ImGui::TextDisabled("Visual scale around each tile's bottom-center.");
+            ImGui::TreePop();
+        }
     }
 
     if (ImGui::CollapsingHeader("Lighting")) {
@@ -1598,6 +1647,16 @@ RenderFrameData Application::buildRenderFrame() const
     return buildGameplayRenderFrame();
 }
 
+float Application::tileTypeToScale(TileType type) const
+{
+    const auto index = static_cast<std::size_t>(type);
+    if (index >= tileScales_.size()) {
+        return 1.0f;
+    }
+
+    return clampedTileScale(tileScales_[index]);
+}
+
 RenderFrameData Application::buildGameplayRenderFrame() const
 {
     RenderFrameData frame;
@@ -1659,7 +1718,9 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             surfaceEntityWidthDepth_,
             playerFacingQuarterTurns_);
     };
-    appendStaticTiles(frame, level_, staticCellAt);
+    appendStaticTiles(frame, level_, staticCellAt, [this](TileType tile) {
+        return tileTypeToScale(tile);
+    });
     for (uint32_t z = 0; z < level_.depth(); ++z) {
         appendWaterEdgeFaces(
             frame,
@@ -1676,7 +1737,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
     }
 
     if (!playerDead_ || playerMovingOutOfWater) {
-        frame.tiles.push_back({
+        RenderFrameData::Tile playerTile {
             .position = { playerRenderPosition_.x, playerRenderPosition_.y },
             .color = { 1.0f, 1.0f, 1.0f, 1.0f },
             .baseElevation = playerRenderPosition_.z,
@@ -1684,7 +1745,9 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             .showGrid = false,
             .model = RenderModel::Rogue,
             .modelRotationQuarterTurns = playerFacingQuarterTurns_,
-        });
+        };
+        applyTileScale(playerTile, tileTypeToScale(TileType::Player));
+        frame.tiles.push_back(playerTile);
     }
 
     for (size_t rockIndex = 0; rockIndex < rocks_.size(); ++rockIndex) {
@@ -1703,14 +1766,16 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             color.w = config::iceTintAlpha;
         }
 
-        frame.tiles.push_back({
+        RenderFrameData::Tile rockTile {
             .position = { rock.renderPosition.x, rock.renderPosition.y },
             .color = color,
             .baseElevation = rock.renderPosition.z,
             .height = 1.0f,
             .blurBehind = rock.type == TileType::Ice,
             .model = renderModelForTile(rock.type),
-        });
+        };
+        applyTileScale(rockTile, tileTypeToScale(rock.type));
+        frame.tiles.push_back(rockTile);
     }
 
     return frame;
@@ -1780,7 +1845,7 @@ RenderFrameData Application::buildEditorRenderFrame() const
             color.w = config::iceTintAlpha;
         }
         const float previewOffset = preview ? 0.02f : 0.0f;
-        frame.tiles.push_back({
+        RenderFrameData::Tile renderTile {
             .cell = {
                 static_cast<int>(x),
                 static_cast<int>(y),
@@ -1804,7 +1869,9 @@ RenderFrameData Application::buildEditorRenderFrame() const
             .showGrid = tile != TileType::Player,
             .isEditorPreview = preview,
             .model = renderModelForTile(tile),
-        });
+        };
+        applyTileScale(renderTile, tileTypeToScale(tile));
+        frame.tiles.push_back(renderTile);
     };
 
     for (uint32_t z = 0; z < layerCount; ++z) {
