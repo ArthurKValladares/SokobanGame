@@ -7,7 +7,7 @@ layout(location = 2) in vec2 inUv;
 layout(location = 0) out vec4 outShadowPosition;
 layout(location = 1) out float outFaceCoordU;
 layout(location = 2) out float outFaceCoordV;
-layout(location = 3) flat out vec3 outNormal;
+layout(location = 3) out vec3 outNormal;
 
 layout(push_constant) uniform PushConstants
 {

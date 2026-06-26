@@ -61,6 +61,9 @@ struct RenderFrameData {
         DirectionalLight sun {};
         AmbientLight ambient {};
         Shadows shadows {};
+        float specularStrength = config::specularStrength;
+        float specularPower = config::specularPower;
+        float modelShadowReceive = config::modelShadowReceive;
     };
 
     struct Tile {

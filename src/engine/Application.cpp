@@ -578,6 +578,14 @@ void Application::drawDebugUi()
 
         ImGui::DragFloat("Ambient Intensity", &ambientLightIntensity_, 0.01f, 0.0f, 2.0f, "%.2f");
 
+        ImGui::DragFloat("Specular Strength", &specularStrength_, 0.01f, 0.0f, 1.0f, "%.2f");
+        specularStrength_ = std::clamp(specularStrength_, 0.0f, 1.0f);
+        ImGui::DragFloat("Specular Power", &specularPower_, 0.5f, 1.0f, 128.0f, "%.1f");
+        specularPower_ = std::clamp(specularPower_, 1.0f, 128.0f);
+        ImGui::DragFloat("Model Shadow Receive", &modelShadowReceive_, 0.01f, 0.0f, 1.0f, "%.2f");
+        modelShadowReceive_ = std::clamp(modelShadowReceive_, 0.0f, 1.0f);
+        ImGui::TextDisabled("Lower model shadow receive reduces harsh self-shadowing.");
+
         ImGui::Checkbox("Shadows", &shadowsEnabled_);
         ImGui::BeginDisabled(!shadowsEnabled_);
         ImGui::DragFloat("Shadow Opacity", &shadowOpacity_, 0.01f, 0.0f, 0.85f, "%.2f");
@@ -1609,6 +1617,9 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             .opacity = shadowOpacity_,
             .bias = shadowBias_,
         },
+        .specularStrength = specularStrength_,
+        .specularPower = specularPower_,
+        .modelShadowReceive = modelShadowReceive_,
     };
     frame.gridOverlay = {
         .color = tileGridLineColor_,
@@ -1724,6 +1735,9 @@ RenderFrameData Application::buildEditorRenderFrame() const
             .opacity = shadowOpacity_,
             .bias = shadowBias_,
         },
+        .specularStrength = specularStrength_,
+        .specularPower = specularPower_,
+        .modelShadowReceive = modelShadowReceive_,
     };
     frame.gridOverlay = {
         .color = tileGridLineColor_,

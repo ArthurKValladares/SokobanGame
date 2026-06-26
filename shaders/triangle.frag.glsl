@@ -7,7 +7,7 @@ layout(set = 0, binding = 2) uniform sampler2D modelTexture;
 layout(location = 0) in vec4 inShadowPosition;
 layout(location = 1) in float inFaceCoordU;
 layout(location = 2) in float inFaceCoordV;
-layout(location = 3) flat in vec3 inNormal;
+layout(location = 3) in vec3 inNormal;
 layout(location = 0) out vec4 outColor;
 
 layout(push_constant) uniform PushConstants
@@ -88,6 +88,34 @@ float gridMask()
     return max(line.x, line.y) * pc.gridColor.a;
 }
 
+float shadowFactor(vec4 shadowPosition, float diffuse)
+{
+    if (pc.shadowOptions.x <= 0.5 || diffuse <= 0.0 || abs(shadowPosition.w) <= 0.0001) {
+        return 1.0;
+    }
+
+    vec3 shadowCoord = shadowPosition.xyz / shadowPosition.w;
+    vec2 shadowUv = shadowCoord.xy * 0.5 + 0.5;
+    if (any(lessThan(shadowUv, vec2(0.0))) ||
+        any(greaterThan(shadowUv, vec2(1.0))) ||
+        shadowCoord.z < 0.0 ||
+        shadowCoord.z > 1.0) {
+        return 1.0;
+    }
+
+    vec2 texel = 1.0 / vec2(textureSize(shadowMap, 0));
+    float shadowedSamples = 0.0;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            float closestDepth = texture(shadowMap, shadowUv + vec2(float(x), float(y)) * texel).r;
+            shadowedSamples += shadowCoord.z - pc.shadowOptions.z > closestDepth ? 1.0 : 0.0;
+        }
+    }
+
+    float shadowAmount = shadowedSamples / 9.0;
+    return 1.0 - shadowAmount * pc.shadowOptions.y;
+}
+
 void main()
 {
     applyEditorPreviewDither();
@@ -102,26 +130,28 @@ void main()
         vec3 lightDirection = length(pc.sunDirectionAndAmbientGreen.xyz) > 0.0001
             ? normalize(pc.sunDirectionAndAmbientGreen.xyz)
             : vec3(0.0, 0.0, 1.0);
-        float diffuse = max(dot(normal, lightDirection), 0.0);
+        float rawDiffuse = dot(normal, lightDirection);
+        float lambertDiffuse = max(rawDiffuse, 0.0);
+        float wrappedDiffuse = clamp(rawDiffuse * 0.5 + 0.5, 0.0, 1.0);
+        float diffuse = mix(lambertDiffuse, wrappedDiffuse * wrappedDiffuse, 0.65);
         vec3 ambient = vec3(
             pc.normalAndAmbientRed.w,
             pc.sunDirectionAndAmbientGreen.w,
             pc.sunRadianceAndAmbientBlue.w);
-        float shadowFactor = 1.0;
-        if (pc.shadowOptions.x > 0.5 && diffuse > 0.0 && abs(inShadowPosition.w) > 0.0001) {
-            vec3 shadowCoord = inShadowPosition.xyz / inShadowPosition.w;
-            vec2 shadowUv = shadowCoord.xy * 0.5 + 0.5;
-            if (all(greaterThanEqual(shadowUv, vec2(0.0))) &&
-                all(lessThanEqual(shadowUv, vec2(1.0))) &&
-                shadowCoord.z >= 0.0 &&
-                shadowCoord.z <= 1.0) {
-                float closestDepth = texture(shadowMap, shadowUv).r;
-                if (shadowCoord.z - pc.shadowOptions.z > closestDepth) {
-                    shadowFactor = 1.0 - pc.shadowOptions.y;
-                }
-            }
+        float shadow = shadowFactor(inShadowPosition, lambertDiffuse);
+        float skyFill = smoothstep(-0.35, 1.0, normal.z);
+        vec3 diffuseLighting = ambient * (1.0 + skyFill * 0.35) + pc.sunRadianceAndAmbientBlue.rgb * diffuse * shadow;
+        color *= diffuseLighting;
+
+        float specularStrength = max(pc.textureOptions.z, 0.0);
+        if (specularStrength > 0.0 && lambertDiffuse > 0.0) {
+            const vec3 viewDirection = normalize(vec3(0.0, 0.25881904, 0.9659258));
+            vec3 halfDirection = normalize(lightDirection + viewDirection);
+            float specularPower = max(pc.textureOptions.w, 1.0);
+            float specular = pow(max(dot(normal, halfDirection), 0.0), specularPower);
+            specular *= smoothstep(0.0, 0.2, lambertDiffuse) * shadow * specularStrength;
+            color += pc.sunRadianceAndAmbientBlue.rgb * specular * materialColor.a;
         }
-        color *= ambient + pc.sunRadianceAndAmbientBlue.rgb * diffuse * shadowFactor;
     }
 
     if (pc.materialOptions.x > 0.5) {

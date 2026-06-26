@@ -3089,6 +3089,12 @@ void VulkanRenderer::drawFace(
             isEditorPreview ? -config::iceBlurRadiusPixels : config::iceBlurRadiusPixels,
         },
         .gridColor = gridColor,
+        .textureOptions = {
+            0.0f,
+            0.0f,
+            std::max(lighting.specularStrength, 0.0f),
+            std::max(lighting.specularPower, 1.0f),
+        },
     };
 
     vkCmdPushConstants(
@@ -3168,7 +3174,7 @@ void VulkanRenderer::drawModel(
         },
         .shadowOptions = {
             lighting.shadows.enabled ? 1.0f : 0.0f,
-            std::clamp(lighting.shadows.opacity, 0.0f, 1.0f),
+            std::clamp(lighting.shadows.opacity * std::clamp(lighting.modelShadowReceive, 0.0f, 1.0f), 0.0f, 1.0f),
             std::max(lighting.shadows.bias, 0.0f),
             0.0f,
         },
@@ -3183,8 +3189,8 @@ void VulkanRenderer::drawModel(
             tile.model == RenderModel::Rogue
                 ? static_cast<float>(tile.modelRotationQuarterTurns % 4)
                 : 0.0f,
-            0.0f,
-            0.0f,
+            std::max(lighting.specularStrength, 0.0f),
+            std::max(lighting.specularPower, 1.0f),
         },
     };
 
