@@ -260,7 +260,7 @@ StaticRenderCell staticRenderCellFor(
             ? surfaceEntityHeight
             : (tile == TileType::Water
                     ? config::waterDepthBelowGround
-                    : (tileTypeIsSolidBlock(tile) ? 1.0f : 0.0f)),
+                    : (tileTypeIsSolidBlock(tile) || tileTypeOccupiesLevelCell(tile) ? 1.0f : 0.0f)),
         .modelRotationQuarterTurns = tile == TileType::Player
             ? playerFacingQuarterTurns
             : 0,
@@ -1700,10 +1700,28 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             static_cast<int>(y),
             static_cast<int>(z),
         };
+        if (level_.tileAt(x, y, z) == TileType::Water) {
+            const GridPosition3 entityPosition {
+                position.x,
+                position.y,
+                position.z + 1,
+            };
+            if (const Rock* fallenRock = fallenRockAt(entityPosition)) {
+                if (!fallenRock->moving) {
+                    return StaticRenderCell { .tile = TileType::Air };
+                }
+            }
+        }
+
         std::optional<TileType> fallenTile;
         if (const Rock* fallenRock = fallenRockAt(position)) {
             if (!fallenRock->moving) {
-                fallenTile = fallenRock->type;
+                return StaticRenderCell {
+                    .tile = fallenRock->type,
+                    .showGrid = true,
+                    .baseElevation = static_cast<float>(std::max(position.z - 1, 0)),
+                    .height = 1.0f,
+                };
             }
         } else if (playerDead_ && !playerMovingOutOfWater && position == playerCell_) {
             fallenTile = TileType::Player;
