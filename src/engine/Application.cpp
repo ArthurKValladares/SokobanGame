@@ -499,6 +499,8 @@ void Application::run()
 
 void Application::update(float dt)
 {
+    playerAnimationTimeSeconds_ += dt;
+
     if (quitConfirmationOpen_) {
         return;
     }
@@ -1744,6 +1746,8 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             .height = 1.0f,
             .showGrid = false,
             .model = RenderModel::Rogue,
+            .animation = moving_ ? RenderAnimation::RogueMovement : RenderAnimation::RogueIdle,
+            .animationTimeSeconds = playerAnimationTimeSeconds_,
             .modelRotationQuarterTurns = playerFacingQuarterTurns_,
         };
         applyTileScale(playerTile, tileTypeToScale(TileType::Player));
@@ -1869,6 +1873,8 @@ RenderFrameData Application::buildEditorRenderFrame() const
             .showGrid = tile != TileType::Player,
             .isEditorPreview = preview,
             .model = renderModelForTile(tile),
+            .animation = tile == TileType::Player ? RenderAnimation::RogueIdle : RenderAnimation::None,
+            .animationTimeSeconds = tile == TileType::Player ? playerAnimationTimeSeconds_ : 0.0f,
         };
         applyTileScale(renderTile, tileTypeToScale(tile));
         frame.tiles.push_back(renderTile);

@@ -39,6 +39,12 @@ enum class RenderModel {
     Rogue,
 };
 
+enum class RenderAnimation {
+    None,
+    RogueIdle,
+    RogueMovement,
+};
+
 struct RenderFrameData {
     struct DirectionalLight {
         Vec3 direction { 0.0f, 0.0f, 1.0f };
@@ -78,6 +84,8 @@ struct RenderFrameData {
         bool showGrid = true;
         bool isEditorPreview = false;
         RenderModel model = RenderModel::Cube;
+        RenderAnimation animation = RenderAnimation::None;
+        float animationTimeSeconds = 0.0f;
         uint32_t modelRotationQuarterTurns = 0;
     };
 
@@ -180,6 +188,7 @@ private:
         OwnedBuffer vertexBuffer {};
         OwnedBuffer indexBuffer {};
         uint32_t indexCount = 0;
+        uint32_t vertexCount = 0;
     };
 
     struct FrameResources {
@@ -235,6 +244,8 @@ private:
     void createModelTextureResources();
     void destroyModelTextureResources();
     [[nodiscard]] GpuMesh uploadMesh(const MeshData& mesh) const;
+    void updateMeshVertices(const GpuMesh& gpuMesh, const std::vector<MeshVertex>& vertices) const;
+    void updateAnimatedModelMeshes(const RenderFrameData& frameData);
     void destroyMesh(GpuMesh& mesh) const;
     [[nodiscard]] const GpuMesh& meshForModel(RenderModel model) const;
     void createPipeline();
@@ -362,6 +373,11 @@ private:
     GpuMesh waterMesh_ {};
     GpuMesh glassMesh_ {};
     GpuMesh rogueMesh_ {};
+    SkinnedMeshData rogueSkinnedMesh_ {};
+    GltfAnimationClip rogueIdleAnimation_ {};
+    GltfAnimationClip rogueMovementAnimation_ {};
+    RenderAnimation activeRogueAnimation_ = RenderAnimation::None;
+    float activeRogueAnimationTime_ = -1.0f;
     OwnedImage rogueTextureImage_ {};
     VkSampler rogueTextureSampler_ = VK_NULL_HANDLE;
 

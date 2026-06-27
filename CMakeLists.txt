@@ -49,6 +49,7 @@ set(LEVEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/levels")
 set(LEVEL_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/levels")
 set(MODEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit_BlockBits_1.0_FREE/Assets/gltf")
 set(CHARACTER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit_Adventurers_2.0_FREE/Characters/gltf")
+set(CHARACTER_ANIMATION_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit_Adventurers_2.0_FREE/Animations/gltf/Rig_Medium")
 set(MODEL_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/models")
 
 set(SHADER_SOURCES
@@ -98,6 +99,8 @@ add_custom_target(sokoban_assets
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/glass.bin" "${MODEL_OUTPUT_DIR}/glass.bin"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CHARACTER_SOURCE_DIR}/Rogue.glb" "${MODEL_OUTPUT_DIR}/Rogue.glb"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CHARACTER_SOURCE_DIR}/rogue_texture.png" "${MODEL_OUTPUT_DIR}/rogue_texture.png"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CHARACTER_ANIMATION_SOURCE_DIR}/Rig_Medium_General.glb" "${MODEL_OUTPUT_DIR}/Rig_Medium_General.glb"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CHARACTER_ANIMATION_SOURCE_DIR}/Rig_Medium_MovementBasic.glb" "${MODEL_OUTPUT_DIR}/Rig_Medium_MovementBasic.glb"
     DEPENDS
         ${LEVEL_SOURCES}
         "${MODEL_SOURCE_DIR}/bricks_A.gltf"
@@ -110,6 +113,8 @@ add_custom_target(sokoban_assets
         "${MODEL_SOURCE_DIR}/glass.bin"
         "${CHARACTER_SOURCE_DIR}/Rogue.glb"
         "${CHARACTER_SOURCE_DIR}/rogue_texture.png"
+        "${CHARACTER_ANIMATION_SOURCE_DIR}/Rig_Medium_General.glb"
+        "${CHARACTER_ANIMATION_SOURCE_DIR}/Rig_Medium_MovementBasic.glb"
     VERBATIM
 )
 

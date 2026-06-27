@@ -52,6 +52,11 @@ struct TilePushConstants {
     Vec4 textureOptions;
 };
 
+uint32_t animationIndexFromUserNumber(uint32_t animationNumber)
+{
+    return animationNumber == 0 ? 0 : animationNumber - 1;
+}
+
 static_assert(sizeof(TilePushConstants) == 256);
 
 struct IsoFace {
@@ -330,6 +335,7 @@ void VulkanRenderer::drawFrame(const RenderFrameData& frameData, const UiDrawDat
 {
     auto& frame = frames_[currentFrame_];
     vkCheck(vkWaitForFences(device_, 1, &frame.inFlight, VK_TRUE, UINT64_MAX), "vkWaitForFences failed");
+    updateAnimatedModelMeshes(frameData);
 
     uint32_t imageIndex = 0;
     VkResult acquired = vkAcquireNextImageKHR(device_, swapchain_, UINT64_MAX, frame.imageAvailable, VK_NULL_HANDLE, &imageIndex);
@@ -1142,12 +1148,19 @@ void VulkanRenderer::createModelResources()
     stoneMesh_ = uploadMesh(loadGltfMesh(assetRoot_ / "models/stone.gltf"));
     waterMesh_ = uploadMesh(loadGltfMesh(assetRoot_ / "models/water.gltf"));
     glassMesh_ = uploadMesh(loadGltfMesh(assetRoot_ / "models/glass.gltf"));
-    rogueMesh_ = uploadMesh(loadGltfMesh(
+    rogueSkinnedMesh_ = loadGltfSkinnedMesh(
         assetRoot_ / "models/Rogue.glb",
         {
             .preserveAspectRatio = true,
             .rotateHalfTurn = true,
-        }));
+        });
+    rogueIdleAnimation_ = loadGltfAnimationClip(
+        assetRoot_ / "models/Rig_Medium_General.glb",
+        animationIndexFromUserNumber(config::playerIdleAnimationNumber));
+    rogueMovementAnimation_ = loadGltfAnimationClip(
+        assetRoot_ / "models/Rig_Medium_MovementBasic.glb",
+        animationIndexFromUserNumber(config::playerMovementAnimationNumber));
+    rogueMesh_ = uploadMesh(skinGltfMesh(rogueSkinnedMesh_, rogueIdleAnimation_, 0.0f));
 }
 
 VulkanRenderer::GpuMesh VulkanRenderer::uploadMesh(const MeshData& mesh) const
@@ -1179,7 +1192,53 @@ VulkanRenderer::GpuMesh VulkanRenderer::uploadMesh(const MeshData& mesh) const
     vkUnmapMemory(device_, result.indexBuffer.memory);
 
     result.indexCount = static_cast<uint32_t>(mesh.indices.size());
+    result.vertexCount = static_cast<uint32_t>(mesh.vertices.size());
     return result;
+}
+
+void VulkanRenderer::updateMeshVertices(const GpuMesh& gpuMesh, const std::vector<MeshVertex>& vertices) const
+{
+    if (!gpuMesh.vertexBuffer.memory || vertices.empty() || vertices.size() != gpuMesh.vertexCount) {
+        return;
+    }
+
+    const VkDeviceSize vertexBytes = sizeof(MeshVertex) * vertices.size();
+    void* mapped = nullptr;
+    vkCheck(vkMapMemory(device_, gpuMesh.vertexBuffer.memory, 0, vertexBytes, 0, &mapped), "vkMapMemory animated vertex buffer failed");
+    std::memcpy(mapped, vertices.data(), static_cast<size_t>(vertexBytes));
+    vkUnmapMemory(device_, gpuMesh.vertexBuffer.memory);
+}
+
+void VulkanRenderer::updateAnimatedModelMeshes(const RenderFrameData& frameData)
+{
+    RenderAnimation requestedAnimation = RenderAnimation::None;
+    float requestedTime = 0.0f;
+    for (const RenderFrameData::Tile& tile : frameData.tiles) {
+        if (tile.model == RenderModel::Rogue && tile.animation != RenderAnimation::None) {
+            requestedAnimation = tile.animation;
+            requestedTime = tile.animationTimeSeconds;
+            break;
+        }
+    }
+
+    if (requestedAnimation == RenderAnimation::None ||
+        rogueSkinnedMesh_.vertices.empty() ||
+        !rogueMesh_.vertexBuffer.memory) {
+        return;
+    }
+
+    if (requestedAnimation == activeRogueAnimation_ &&
+        std::abs(requestedTime - activeRogueAnimationTime_) < 0.0001f) {
+        return;
+    }
+
+    const GltfAnimationClip& clip = requestedAnimation == RenderAnimation::RogueMovement
+        ? rogueMovementAnimation_
+        : rogueIdleAnimation_;
+    const MeshData skinnedMesh = skinGltfMesh(rogueSkinnedMesh_, clip, requestedTime);
+    updateMeshVertices(rogueMesh_, skinnedMesh.vertices);
+    activeRogueAnimation_ = requestedAnimation;
+    activeRogueAnimationTime_ = requestedTime;
 }
 
 void VulkanRenderer::destroyModelResources()

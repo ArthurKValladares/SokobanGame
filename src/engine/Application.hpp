@@ -153,6 +153,7 @@ private:
     GridPosition3 playerCell_ {};
     Vec3 playerRenderPosition_ {};
     uint32_t playerFacingQuarterTurns_ = 0;
+    float playerAnimationTimeSeconds_ = 0.0f;
     bool playerDead_ = false;
     float sunAzimuthDegrees_ = config::sunAzimuthDegrees;
     float sunTiltDegrees_ = config::sunTiltDegrees;
