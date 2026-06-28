@@ -25,6 +25,7 @@ inline constexpr float playerTileScale = 1.0f;
 inline constexpr float rockTileScale = 1.0f;
 inline constexpr float iceTileScale = 1.0f;
 inline constexpr float waterTileScale = 1.0f;
+inline constexpr float ladderTileScale = 1.0f;
 inline constexpr uint32_t playerMovementAnimationNumber = 7;
 inline constexpr uint32_t playerIdleAnimationNumber = 15;
 inline constexpr float sunAzimuthDegrees = -122.5f;

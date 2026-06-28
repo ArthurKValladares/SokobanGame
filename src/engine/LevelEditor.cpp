@@ -1,6 +1,7 @@
 #include "engine/LevelEditor.hpp"
 
 #include <algorithm>
+#include <array>
 #include <exception>
 #include <fstream>
 #include <charconv>
@@ -275,6 +276,41 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
         position.y >= height ||
         position.x >= width) {
         return;
+    }
+
+    auto documentTileAt = [&](GridPosition3 cell) {
+        if (cell.x < 0 ||
+            cell.y < 0 ||
+            cell.z < 0 ||
+            cell.y >= height ||
+            cell.x >= width ||
+            cell.z >= static_cast<int>(document_.layers.size())) {
+            return TileType::Air;
+        }
+        return charToTileType(
+            document_.layers[static_cast<size_t>(cell.z)]
+                [static_cast<size_t>(cell.y)]
+                [static_cast<size_t>(cell.x)]).value_or(TileType::Air);
+    };
+
+    if (tile == TileType::Ladder) {
+        constexpr std::array<GridPosition, 4> offsets {
+            GridPosition { 0, -1 },
+            GridPosition { 1, 0 },
+            GridPosition { 0, 1 },
+            GridPosition { -1, 0 },
+        };
+        const bool adjacentGround = std::ranges::any_of(offsets, [&](GridPosition offset) {
+            return documentTileAt({
+                position.x + offset.x,
+                position.y + offset.y,
+                position.z,
+            }) == TileType::Ground;
+        });
+        if (!adjacentGround) {
+            document_.status = "Ladders must be next to ground on the same layer.";
+            return;
+        }
     }
 
     const char character = tileTypeToChar(tile);

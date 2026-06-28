@@ -58,6 +58,7 @@ bool tileTypeSupportsEntity(TileType type)
 bool tileTypeAllowsEntity(TileType type)
 {
     return type == TileType::Air ||
+        type == TileType::Ladder ||
         type == TileType::End ||
         type == TileType::PressurePlate;
 }

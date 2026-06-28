@@ -213,6 +213,21 @@ uint32_t facingQuarterTurns(MoveDirection direction)
     return 0;
 }
 
+GridPosition directionOffset(MoveDirection direction)
+{
+    switch (direction) {
+    case MoveDirection::Up:
+        return { 0, -1 };
+    case MoveDirection::Down:
+        return { 0, 1 };
+    case MoveDirection::Left:
+        return { -1, 0 };
+    case MoveDirection::Right:
+        return { 1, 0 };
+    }
+    return {};
+}
+
 std::optional<MoveDirection> movementDirection(GridPosition3 from, GridPosition3 to)
 {
     const int deltaX = to.x - from.x;
@@ -275,6 +290,117 @@ Vec4 shade(Vec4 color, float multiplier)
         color.z * multiplier,
         color.w,
     };
+}
+
+void appendLadderRungFace(
+    RenderFrameData& frame,
+    GridPosition3 groundCell,
+    GridPosition3 ladderCell,
+    float rungCenter,
+    bool preview)
+{
+    constexpr float rungLengthInset = 0.10f;
+    constexpr float rungHalfThickness = 0.07f;
+    constexpr float faceOffset = 0.003f;
+
+    const Vec4 color = preview
+        ? Vec4 { 0.43f, 0.22f, 0.08f, 0.62f }
+        : tileColor(TileType::Ladder);
+    const float bottom = static_cast<float>(groundCell.z) + rungCenter - rungHalfThickness;
+    const float top = static_cast<float>(groundCell.z) + rungCenter + rungHalfThickness;
+    const float gx = static_cast<float>(groundCell.x);
+    const float gy = static_cast<float>(groundCell.y);
+
+    auto appendFace = [&](std::array<Vec3, 4> vertices, Vec3 normal) {
+        frame.isoFaces.push_back({
+            .vertices = vertices,
+            .normal = normal,
+            .color = color,
+        });
+    };
+
+    if (ladderCell.x < groundCell.x) {
+        const float x = gx - faceOffset;
+        const float y0 = gy + rungLengthInset;
+        const float y1 = gy + 1.0f - rungLengthInset;
+        appendFace({
+            Vec3 { x, y1, bottom },
+            Vec3 { x, y0, bottom },
+            Vec3 { x, y0, top },
+            Vec3 { x, y1, top },
+        }, { -1.0f, 0.0f, 0.0f });
+        return;
+    }
+
+    if (ladderCell.x > groundCell.x) {
+        const float x = gx + 1.0f + faceOffset;
+        const float y0 = gy + rungLengthInset;
+        const float y1 = gy + 1.0f - rungLengthInset;
+        appendFace({
+            Vec3 { x, y0, bottom },
+            Vec3 { x, y1, bottom },
+            Vec3 { x, y1, top },
+            Vec3 { x, y0, top },
+        }, { 1.0f, 0.0f, 0.0f });
+        return;
+    }
+
+    if (ladderCell.y < groundCell.y) {
+        const float y = gy - faceOffset;
+        const float x0 = gx + rungLengthInset;
+        const float x1 = gx + 1.0f - rungLengthInset;
+        appendFace({
+            Vec3 { x0, y, bottom },
+            Vec3 { x1, y, bottom },
+            Vec3 { x1, y, top },
+            Vec3 { x0, y, top },
+        }, { 0.0f, -1.0f, 0.0f });
+        return;
+    }
+
+    if (ladderCell.y > groundCell.y) {
+        const float y = gy + 1.0f + faceOffset;
+        const float x0 = gx + rungLengthInset;
+        const float x1 = gx + 1.0f - rungLengthInset;
+        appendFace({
+            Vec3 { x1, y, bottom },
+            Vec3 { x0, y, bottom },
+            Vec3 { x0, y, top },
+            Vec3 { x1, y, top },
+        }, { 0.0f, 1.0f, 0.0f });
+    }
+}
+
+void appendLadderRungs(RenderFrameData& frame, GridPosition3 ladderCell, GridPosition3 groundCell, bool preview = false)
+{
+    appendLadderRungFace(frame, groundCell, ladderCell, 0.32f, preview);
+    appendLadderRungFace(frame, groundCell, ladderCell, 0.68f, preview);
+}
+
+template <typename TileAt>
+void appendLadderRungsForCell(RenderFrameData& frame, GridPosition3 ladderCell, TileAt tileAt, bool preview = false)
+{
+    if (tileAt(ladderCell) != TileType::Ladder) {
+        return;
+    }
+
+    constexpr std::array<GridPosition, 4> offsets {
+        GridPosition { 0, -1 },
+        GridPosition { 1, 0 },
+        GridPosition { 0, 1 },
+        GridPosition { -1, 0 },
+    };
+
+    for (GridPosition offset : offsets) {
+        const GridPosition3 groundCell {
+            ladderCell.x + offset.x,
+            ladderCell.y + offset.y,
+            ladderCell.z,
+        };
+        if (tileAt(groundCell) == TileType::Ground) {
+            appendLadderRungs(frame, ladderCell, groundCell, preview);
+        }
+    }
 }
 
 void appendWaterEdgeFaces(
@@ -359,7 +485,7 @@ void appendStaticTiles(RenderFrameData& frame, const Level& level, CellAt cellAt
         for (uint32_t y = 0; y < level.height(); ++y) {
             for (uint32_t x = 0; x < level.width(); ++x) {
                 const StaticRenderCell cell = cellAt(x, y, z);
-                if (cell.tile == TileType::Air) {
+                if (cell.tile == TileType::Air || cell.tile == TileType::Ladder) {
                     continue;
                 }
                 RenderFrameData::Tile renderTile {
@@ -1076,7 +1202,7 @@ bool Application::tryStartMove(MoveDirection direction)
         return false;
     }
 
-    const GridPosition3 target = movementTarget(direction);
+    const GridPosition3 target = playerLadderClimbTarget(direction).value_or(movementTarget(direction));
     if (!isPlayerWalkable(target)) {
         return false;
     }
@@ -1322,22 +1448,68 @@ GridPosition3 Application::movementTarget(GridPosition3 origin, MoveDirection di
 {
     GridPosition3 target = origin;
 
-    switch (direction) {
-    case MoveDirection::Up:
-        target.y -= 1;
-        break;
-    case MoveDirection::Down:
-        target.y += 1;
-        break;
-    case MoveDirection::Left:
-        target.x -= 1;
-        break;
-    case MoveDirection::Right:
-        target.x += 1;
-        break;
-    }
+    const GridPosition offset = directionOffset(direction);
+    target.x += offset.x;
+    target.y += offset.y;
 
     return target;
+}
+
+std::optional<GridPosition3> Application::playerLadderClimbTarget(MoveDirection direction) const
+{
+    const GridPosition3 flatTarget = movementTarget(direction);
+    if (!level_.inBounds(flatTarget)) {
+        return std::nullopt;
+    }
+
+    if (!level_.inBounds(playerCell_)) {
+        return std::nullopt;
+    }
+
+    const TileType currentTile = level_.tileAt(
+        static_cast<uint32_t>(playerCell_.x),
+        static_cast<uint32_t>(playerCell_.y),
+        static_cast<uint32_t>(playerCell_.z));
+    if (currentTile == TileType::Ladder) {
+        return ladderClimbTarget(playerCell_, flatTarget);
+    }
+
+    return std::nullopt;
+}
+
+std::optional<GridPosition3> Application::ladderClimbTarget(GridPosition3 ladderCell, GridPosition3 groundCell) const
+{
+    if (ladderCell.z != groundCell.z ||
+        !level_.inBounds(ladderCell) ||
+        !level_.inBounds(groundCell)) {
+        return std::nullopt;
+    }
+
+    const TileType ladderTile = level_.tileAt(
+        static_cast<uint32_t>(ladderCell.x),
+        static_cast<uint32_t>(ladderCell.y),
+        static_cast<uint32_t>(ladderCell.z));
+    const TileType groundTile = level_.tileAt(
+        static_cast<uint32_t>(groundCell.x),
+        static_cast<uint32_t>(groundCell.y),
+        static_cast<uint32_t>(groundCell.z));
+    if (ladderTile != TileType::Ladder || groundTile != TileType::Ground) {
+        return std::nullopt;
+    }
+
+    const GridPosition3 topCell {
+        groundCell.x,
+        groundCell.y,
+        groundCell.z + 1,
+    };
+    if (!staticCellAllowsEntity(topCell)) {
+        return std::nullopt;
+    }
+    if (rockAt(topCell) != nullptr) {
+        return std::nullopt;
+    }
+
+    return topCell;
 }
 
 Application::Rock* Application::rockAt(GridPosition3 position)
@@ -1484,8 +1656,16 @@ bool Application::canMovableOccupy(GridPosition3 position, const MoveRecord& rec
 
 bool Application::staticCellAllowsEntity(GridPosition3 position) const
 {
-    if (!level_.inBounds(position)) {
+    if (position.x < 0 ||
+        position.y < 0 ||
+        position.z < 0 ||
+        position.x >= static_cast<int>(level_.width()) ||
+        position.y >= static_cast<int>(level_.height()) ||
+        position.z > static_cast<int>(level_.depth())) {
         return false;
+    }
+    if (position.z == static_cast<int>(level_.depth())) {
+        return true;
     }
 
     return tileTypeAllowsEntity(level_.tileAt(
@@ -1741,6 +1921,29 @@ RenderFrameData Application::buildGameplayRenderFrame() const
     appendStaticTiles(frame, level_, staticCellAt, [this](TileType tile) {
         return tileTypeToScale(tile);
     });
+    auto levelTileAt = [this](GridPosition3 position) {
+        if (!level_.inBounds(position)) {
+            return TileType::Air;
+        }
+        return level_.tileAt(
+            static_cast<uint32_t>(position.x),
+            static_cast<uint32_t>(position.y),
+            static_cast<uint32_t>(position.z));
+    };
+    for (uint32_t z = 0; z < level_.depth(); ++z) {
+        for (uint32_t y = 0; y < level_.height(); ++y) {
+            for (uint32_t x = 0; x < level_.width(); ++x) {
+                appendLadderRungsForCell(
+                    frame,
+                    {
+                        static_cast<int>(x),
+                        static_cast<int>(y),
+                        static_cast<int>(z),
+                    },
+                    levelTileAt);
+            }
+        }
+    }
     for (uint32_t z = 0; z < level_.depth(); ++z) {
         appendWaterEdgeFaces(
             frame,
@@ -1851,8 +2054,38 @@ RenderFrameData Application::buildEditorRenderFrame() const
         }
         return charToTileType(layers[z][y][x]).value_or(TileType::Air);
     };
+    auto documentTileAtPosition = [&](GridPosition3 position) {
+        if (position.x < 0 || position.y < 0 || position.z < 0) {
+            return TileType::Air;
+        }
+        return documentTileAt(
+            static_cast<uint32_t>(position.x),
+            static_cast<uint32_t>(position.y),
+            static_cast<uint32_t>(position.z));
+    };
     auto appendEditorTile = [&](uint32_t x, uint32_t y, uint32_t z, TileType tile, bool preview) {
         if (tile == TileType::Air) {
+            return;
+        }
+        if (tile == TileType::Ladder) {
+            auto tileAtForLadder = [&](GridPosition3 position) {
+                if (preview &&
+                    position.x == static_cast<int>(x) &&
+                    position.y == static_cast<int>(y) &&
+                    position.z == static_cast<int>(z)) {
+                    return TileType::Ladder;
+                }
+                return documentTileAtPosition(position);
+            };
+            appendLadderRungsForCell(
+                frame,
+                {
+                    static_cast<int>(x),
+                    static_cast<int>(y),
+                    static_cast<int>(z),
+                },
+                tileAtForLadder,
+                preview);
             return;
         }
 

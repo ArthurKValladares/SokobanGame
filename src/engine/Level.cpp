@@ -1,6 +1,7 @@
 #include "engine/Level.hpp"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <fstream>
 #include <stdexcept>
@@ -36,6 +37,35 @@ std::optional<uint32_t> parseLayerHeader(std::string_view line)
 size_t tileIndex(uint32_t x, uint32_t y, uint32_t z, uint32_t width, uint32_t height)
 {
     return (static_cast<size_t>(z) * height + y) * width + x;
+}
+
+bool hasAdjacentGround(const Level& level, GridPosition3 position)
+{
+    constexpr std::array<GridPosition, 4> offsets {
+        GridPosition { 0, -1 },
+        GridPosition { 1, 0 },
+        GridPosition { 0, 1 },
+        GridPosition { -1, 0 },
+    };
+
+    for (GridPosition offset : offsets) {
+        const GridPosition3 neighbor {
+            position.x + offset.x,
+            position.y + offset.y,
+            position.z,
+        };
+        if (!level.inBounds(neighbor)) {
+            continue;
+        }
+        if (level.tileAt(
+                static_cast<uint32_t>(neighbor.x),
+                static_cast<uint32_t>(neighbor.y),
+                static_cast<uint32_t>(neighbor.z)) == TileType::Ground) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 } // namespace
@@ -200,6 +230,25 @@ Level Level::loadFromLayers(const LayerRows& sourceLayers, std::string_view sour
     if (!hasPlayer) {
         throw std::runtime_error(std::string("Level is missing a player start tile '") +
             tileTypeToChar(TileType::Player) + "': " + source);
+    }
+
+    for (uint32_t z = 0; z < level.depth_; ++z) {
+        for (uint32_t y = 0; y < level.height_; ++y) {
+            for (uint32_t x = 0; x < level.width_; ++x) {
+                if (level.tileAt(x, y, z) != TileType::Ladder) {
+                    continue;
+                }
+                const GridPosition3 position {
+                    static_cast<int>(x),
+                    static_cast<int>(y),
+                    static_cast<int>(z),
+                };
+                if (!hasAdjacentGround(level, position)) {
+                    throw std::runtime_error(
+                        "Ladder tile 'L' must be next to a ground tile on the same layer: " + source);
+                }
+            }
+        }
     }
 
     return level;

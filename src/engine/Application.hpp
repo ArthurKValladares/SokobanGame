@@ -113,6 +113,8 @@ private:
     [[nodiscard]] ActionRecord invertActionRecord(const ActionRecord& record) const;
     [[nodiscard]] GridPosition3 movementTarget(MoveDirection direction) const;
     [[nodiscard]] GridPosition3 movementTarget(GridPosition3 origin, MoveDirection direction) const;
+    [[nodiscard]] std::optional<GridPosition3> playerLadderClimbTarget(MoveDirection direction) const;
+    [[nodiscard]] std::optional<GridPosition3> ladderClimbTarget(GridPosition3 ladderCell, GridPosition3 groundCell) const;
     [[nodiscard]] Rock* rockAt(GridPosition3 position);
     [[nodiscard]] const Rock* rockAt(GridPosition3 position) const;
     [[nodiscard]] const Rock* fallenRockAt(GridPosition3 position) const;
@@ -181,6 +183,7 @@ private:
         config::rockTileScale,
         config::iceTileScale,
         config::waterTileScale,
+        config::ladderTileScale,
     };
     std::vector<Rock> rocks_;
     std::deque<MoveCommand> pendingCommands_;
