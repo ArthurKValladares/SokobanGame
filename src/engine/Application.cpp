@@ -934,9 +934,31 @@ void Application::updateEditorPainting()
     if (const std::optional<GridPosition3> clicked = renderer_.pickIsoGridCell(editorFrame, mousePixels)) {
         GridPosition3 target = *clicked;
         const bool deleting = input_.keyDown(SDL_SCANCODE_D);
+        auto topmostOccupiedLayer = [&](GridPosition3 position) {
+            const Level::LayerRows& layers = levelEditor_.documentLayers();
+            for (int z = static_cast<int>(layers.size()) - 1; z >= 0; --z) {
+                if (position.y < 0 ||
+                    position.x < 0 ||
+                    position.y >= static_cast<int>(layers[static_cast<size_t>(z)].size()) ||
+                    position.x >= static_cast<int>(layers[static_cast<size_t>(z)][static_cast<size_t>(position.y)].size())) {
+                    continue;
+                }
+                if (charToTileType(
+                        layers[static_cast<size_t>(z)]
+                            [static_cast<size_t>(position.y)]
+                            [static_cast<size_t>(position.x)]).value_or(TileType::Air) != TileType::Air) {
+                    return z;
+                }
+            }
+            return position.z;
+        };
+
         if (levelEditor_.layerLocked()) {
             target.z = static_cast<int>(levelEditor_.activeLayer());
-        } else if (!deleting && !input_.keyDown(SDL_SCANCODE_R)) {
+        } else if (deleting) {
+            target.z = topmostOccupiedLayer(target);
+        } else if (!input_.keyDown(SDL_SCANCODE_R)) {
+            target.z = topmostOccupiedLayer(target);
             ++target.z;
         }
 
@@ -2199,15 +2221,13 @@ RenderFrameData Application::buildEditorRenderFrame() const
             static_cast<uint32_t>(editorHoverCell_->x),
             static_cast<uint32_t>(editorHoverCell_->y),
             static_cast<uint32_t>(editorHoverCell_->z));
-        if (!deleting) {
-            const TileType previewTile = selectedTile == TileType::Air ? hoveredTile : selectedTile;
-            appendEditorTile(
-                static_cast<uint32_t>(editorHoverCell_->x),
-                static_cast<uint32_t>(editorHoverCell_->y),
-                static_cast<uint32_t>(editorHoverCell_->z),
-                previewTile,
-                true);
-        }
+        const TileType previewTile = selectedTile == TileType::Air ? hoveredTile : selectedTile;
+        appendEditorTile(
+            static_cast<uint32_t>(editorHoverCell_->x),
+            static_cast<uint32_t>(editorHoverCell_->y),
+            static_cast<uint32_t>(editorHoverCell_->z),
+            previewTile,
+            true);
     }
 
     return frame;

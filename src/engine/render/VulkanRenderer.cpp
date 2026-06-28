@@ -218,6 +218,35 @@ bool pointInQuad(Vec2 point, const std::array<Vec2, 4>& quad)
         pointInTriangle(point, quad[0], quad[2], quad[3]);
 }
 
+std::optional<float> pointDepthInTriangle(Vec2 point, Vec3 a, Vec3 b, Vec3 c)
+{
+    constexpr float epsilon = 0.00001f;
+    const Vec2 a2 { a.x, a.y };
+    const Vec2 b2 { b.x, b.y };
+    const Vec2 c2 { c.x, c.y };
+    const float area = cross2D(subtract(b2, a2), subtract(c2, a2));
+    if (std::abs(area) <= epsilon) {
+        return std::nullopt;
+    }
+
+    const float weightA = cross2D(subtract(b2, point), subtract(c2, point)) / area;
+    const float weightB = cross2D(subtract(c2, point), subtract(a2, point)) / area;
+    const float weightC = 1.0f - weightA - weightB;
+    if (weightA < -epsilon || weightB < -epsilon || weightC < -epsilon) {
+        return std::nullopt;
+    }
+
+    return weightA * a.z + weightB * b.z + weightC * c.z;
+}
+
+std::optional<float> pointDepthInQuad(Vec2 point, const std::array<Vec3, 4>& quad)
+{
+    if (const std::optional<float> depth = pointDepthInTriangle(point, quad[0], quad[1], quad[2])) {
+        return depth;
+    }
+    return pointDepthInTriangle(point, quad[0], quad[2], quad[3]);
+}
+
 std::vector<const char*> validationLayers()
 {
 #if SOKOBAN_ENABLE_VALIDATION
@@ -478,18 +507,24 @@ std::optional<GridPosition3> VulkanRenderer::pickIsoGridCell(const RenderFrameDa
             projectIsoPoint(layout, vertices[2]),
             projectIsoPoint(layout, vertices[3]),
         };
-        const std::array<Vec2, 4> pixelQuad {
-            clipToPixel(clipVertices[0]),
-            clipToPixel(clipVertices[1]),
-            clipToPixel(clipVertices[2]),
-            clipToPixel(clipVertices[3]),
+        const std::array<Vec3, 4> pixelQuad {
+            Vec3 { clipToPixel(clipVertices[0]).x, clipToPixel(clipVertices[0]).y, clipVertices[0].z },
+            Vec3 { clipToPixel(clipVertices[1]).x, clipToPixel(clipVertices[1]).y, clipVertices[1].z },
+            Vec3 { clipToPixel(clipVertices[2]).x, clipToPixel(clipVertices[2]).y, clipVertices[2].z },
+            Vec3 { clipToPixel(clipVertices[3]).x, clipToPixel(clipVertices[3]).y, clipVertices[3].z },
         };
-        if (!pointInQuad(pixelPosition, pixelQuad)) {
+        const std::array<Vec2, 4> pixelQuad2D {
+            Vec2 { pixelQuad[0].x, pixelQuad[0].y },
+            Vec2 { pixelQuad[1].x, pixelQuad[1].y },
+            Vec2 { pixelQuad[2].x, pixelQuad[2].y },
+            Vec2 { pixelQuad[3].x, pixelQuad[3].y },
+        };
+        if (!pointInQuad(pixelPosition, pixelQuad2D)) {
             return;
         }
 
-        const float depth = (clipVertices[0].z + clipVertices[1].z + clipVertices[2].z + clipVertices[3].z) * 0.25f;
-        if (depth >= pickedDepth) {
+        const std::optional<float> depth = pointDepthInQuad(pixelPosition, pixelQuad);
+        if (!depth || *depth >= pickedDepth) {
             return;
         }
 
@@ -500,7 +535,7 @@ std::optional<GridPosition3> VulkanRenderer::pickIsoGridCell(const RenderFrameDa
         }
 
         picked = tile.cell;
-        pickedDepth = depth;
+        pickedDepth = *depth;
     };
 
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
