@@ -47,10 +47,10 @@ set(SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/shaders")
 set(LEVEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/levels")
 set(LEVEL_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/levels")
-set(MODEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit_BlockBits_1.0_FREE/Assets/gltf")
+set(MODEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit Block Bits 1.0/Assets/gltf")
 set(PLATFORMER_MODEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit Platformer Pack 1.0/Assets/gltf/blue")
-set(CHARACTER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit_Adventurers_2.0_FREE/Characters/gltf")
-set(CHARACTER_ANIMATION_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit_Adventurers_2.0_FREE/Animations/gltf/Rig_Medium")
+set(CHARACTER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit Adventurers 2.0/Characters/gltf")
+set(CHARACTER_ANIMATION_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit Adventurers 2.0/Animations/gltf/Rig_Medium")
 set(MODEL_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/models")
 
 set(SHADER_SOURCES
