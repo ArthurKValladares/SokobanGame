@@ -804,7 +804,13 @@ void includeBounds(SourceBounds& bounds, Vec3 position)
     bounds.maximum.z = std::max(bounds.maximum.z, position.z);
 }
 
-MeshVertex normalizedVertex(Vec3 position, Vec3 normal, Vec2 uv, SourceBounds bounds, GltfMeshLoadOptions options)
+MeshVertex normalizedVertex(
+    Vec3 position,
+    Vec3 normal,
+    Vec2 uv,
+    float textureIndex,
+    SourceBounds bounds,
+    GltfMeshLoadOptions options)
 {
     const float sourceHeight = std::max(bounds.maximum.y - bounds.minimum.y, 0.000001f);
     const Vec3 extent {
@@ -844,6 +850,7 @@ MeshVertex normalizedVertex(Vec3 position, Vec3 normal, Vec2 uv, SourceBounds bo
         vertex.normal.y = -vertex.normal.y;
     }
     vertex.uv = uv;
+    vertex.textureIndex = textureIndex;
     return vertex;
 }
 
@@ -984,6 +991,9 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
             const size_t normalIndex = requiredUnsignedField(primitive, "NORMAL");
             const size_t uvIndex = requiredUnsignedField(primitive, "TEXCOORD_0");
             const size_t indicesIndex = requiredUnsignedField(primitive, "indices");
+            const float textureIndex = options.usePrimitiveMaterialTextures
+                ? static_cast<float>(unsignedField(primitive, "material").value_or(0) + 1)
+                : 0.0f;
             if (positionIndex >= accessors.size() ||
                 normalIndex >= accessors.size() ||
                 uvIndex >= accessors.size() ||
@@ -1025,6 +1035,7 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
                     .position = position,
                     .normal = normal,
                     .uv = uv,
+                    .textureIndex = textureIndex,
                 });
                 minimum.x = std::min(minimum.x, position.x);
                 minimum.y = std::min(minimum.y, position.y);
@@ -1424,7 +1435,13 @@ MeshData skinGltfMesh(const SkinnedMeshData& mesh, const GltfAnimationClip& anim
         if (skinnedNormal.x == 0.0f && skinnedNormal.y == 0.0f && skinnedNormal.z == 0.0f) {
             skinnedNormal = source.normal;
         }
-        result.vertices.push_back(normalizedVertex(skinnedPosition, normalize(skinnedNormal), source.uv, bounds, options));
+        result.vertices.push_back(normalizedVertex(
+            skinnedPosition,
+            normalize(skinnedNormal),
+            source.uv,
+            0.0f,
+            bounds,
+            options));
     }
 
     return result;

@@ -74,6 +74,8 @@ private:
     struct ActionRecord {
         MoveRecord before;
         MoveRecord after;
+        float animationSecondsPerTile = config::playerMoveDurationSeconds;
+        bool conveyorDriven = false;
     };
 
     struct FallResult {
@@ -91,6 +93,7 @@ private:
     void drawDraftExitConfirmation();
     void updateEditorPainting();
     void queuePressedCommands();
+    void updateConveyorMovement(float dt);
     void advancePlayerMovement(float dt);
     void advanceMovableAnimations(float dt);
     void startMovableAnimations(const ActionRecord& action);
@@ -98,7 +101,11 @@ private:
     [[nodiscard]] float activeActionDuration() const;
     [[nodiscard]] bool tryStartNextMove();
     [[nodiscard]] bool tryStartHeldMove();
-    [[nodiscard]] bool tryStartMove(MoveDirection direction);
+    [[nodiscard]] bool tryStartMove(
+        MoveDirection direction,
+        bool allowPush = true,
+        float animationSecondsPerTile = config::playerMoveDurationSeconds,
+        bool conveyorDriven = false);
     [[nodiscard]] bool tryStartUndoMove();
     [[nodiscard]] bool tryStartRestart();
     [[nodiscard]] std::optional<MoveDirection> pressedVerticalDirection() const;
@@ -115,6 +122,7 @@ private:
     [[nodiscard]] GridPosition3 movementTarget(GridPosition3 origin, MoveDirection direction) const;
     [[nodiscard]] std::optional<GridPosition3> playerLadderClimbTarget(MoveDirection direction) const;
     [[nodiscard]] std::optional<GridPosition3> ladderClimbTarget(GridPosition3 ladderCell, GridPosition3 groundCell) const;
+    [[nodiscard]] std::optional<MoveDirection> conveyorDirectionAt(GridPosition3 position) const;
     [[nodiscard]] Rock* rockAt(GridPosition3 position);
     [[nodiscard]] const Rock* rockAt(GridPosition3 position) const;
     [[nodiscard]] const Rock* fallenRockAt(GridPosition3 position) const;
@@ -184,6 +192,10 @@ private:
         config::iceTileScale,
         config::waterTileScale,
         config::ladderTileScale,
+        config::conveyorTileScale,
+        config::conveyorTileScale,
+        config::conveyorTileScale,
+        config::conveyorTileScale,
     };
     std::vector<Rock> rocks_;
     std::deque<MoveCommand> pendingCommands_;
@@ -193,6 +205,8 @@ private:
     LevelEditor levelEditor_;
     std::optional<GridPosition3> editorHoverCell_;
     float moveElapsed_ = 0.0f;
+    float conveyorElapsed_ = 0.0f;
+    float conveyorTilesPerSecond_ = config::conveyorTilesPerSecond;
     bool moving_ = false;
     bool running_ = true;
     bool quitConfirmationOpen_ = false;

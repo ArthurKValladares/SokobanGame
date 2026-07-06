@@ -59,6 +59,7 @@ bool tileTypeAllowsEntity(TileType type)
 {
     return type == TileType::Air ||
         type == TileType::Ladder ||
+        tileTypeIsConveyor(type) ||
         type == TileType::End ||
         type == TileType::PressurePlate;
 }
@@ -66,6 +67,14 @@ bool tileTypeAllowsEntity(TileType type)
 bool tileTypeIsSurfaceEntity(TileType type)
 {
     return type == TileType::End || type == TileType::PressurePlate;
+}
+
+bool tileTypeIsConveyor(TileType type)
+{
+    return type == TileType::ConveyorUp ||
+        type == TileType::ConveyorDown ||
+        type == TileType::ConveyorRight ||
+        type == TileType::ConveyorLeft;
 }
 
 Vec4 tileColor(TileType type, bool isActive)

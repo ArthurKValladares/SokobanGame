@@ -164,6 +164,11 @@ RenderModel renderModelForTile(TileType tile)
         return RenderModel::Water;
     case TileType::Ice:
         return RenderModel::Glass;
+    case TileType::ConveyorUp:
+    case TileType::ConveyorDown:
+    case TileType::ConveyorRight:
+    case TileType::ConveyorLeft:
+        return RenderModel::Conveyor;
     case TileType::Player:
         return RenderModel::Rogue;
     default:
@@ -247,6 +252,22 @@ std::optional<MoveDirection> movementDirection(GridPosition3 from, GridPosition3
     return std::nullopt;
 }
 
+std::optional<MoveDirection> conveyorDirectionForTile(TileType tile)
+{
+    switch (tile) {
+    case TileType::ConveyorUp:
+        return MoveDirection::Up;
+    case TileType::ConveyorDown:
+        return MoveDirection::Down;
+    case TileType::ConveyorRight:
+        return MoveDirection::Right;
+    case TileType::ConveyorLeft:
+        return MoveDirection::Left;
+    default:
+        return std::nullopt;
+    }
+}
+
 StaticRenderCell staticRenderCellFor(
     const Level& level,
     uint32_t x,
@@ -260,6 +281,7 @@ StaticRenderCell staticRenderCellFor(
 {
     const TileType tile = fallenTile.value_or(level.tileAt(x, y, z));
     const bool surfaceEntity = tileTypeIsSurfaceEntity(tile);
+    const bool conveyor = tileTypeIsConveyor(tile);
     const bool submergedEntity = fallenTile.has_value();
     const float centeredOffset = (1.0f - surfaceEntitySize) * 0.5f;
     return {
@@ -275,10 +297,14 @@ StaticRenderCell staticRenderCellFor(
             ? surfaceEntityHeight
             : (tile == TileType::Water
                     ? config::waterDepthBelowGround
-                    : (tileTypeIsSolidBlock(tile) || tileTypeOccupiesLevelCell(tile) ? 1.0f : 0.0f)),
+                    : (conveyor
+                            ? config::conveyorTileHeight
+                            : (tileTypeIsSolidBlock(tile) || tileTypeOccupiesLevelCell(tile) ? 1.0f : 0.0f))),
         .modelRotationQuarterTurns = tile == TileType::Player
             ? playerFacingQuarterTurns
-            : 0,
+            : (conveyorDirectionForTile(tile)
+                    ? facingQuarterTurns(*conveyorDirectionForTile(tile))
+                    : 0),
     };
 }
 
@@ -646,6 +672,7 @@ void Application::update(float dt)
 
     queuePressedCommands();
     advancePlayerMovement(dt);
+    updateConveyorMovement(dt);
 }
 
 void Application::drawDebugUi()
@@ -692,6 +719,14 @@ void Application::drawDebugUi()
     }
 
     if (ImGui::CollapsingHeader("Tile Geometry")) {
+        ImGui::DragFloat(
+            "Conveyor Rate",
+            &conveyorTilesPerSecond_,
+            0.05f,
+            0.0f,
+            12.0f,
+            "%.2f tiles/s");
+        conveyorTilesPerSecond_ = std::clamp(conveyorTilesPerSecond_, 0.0f, 12.0f);
         ImGui::DragFloat(
             "Surface Entity Height",
             &surfaceEntityHeight_,
@@ -1008,6 +1043,7 @@ void Application::applyLevel(Level level)
     activeAction_ = {};
     moving_ = false;
     moveElapsed_ = 0.0f;
+    conveyorElapsed_ = 0.0f;
 }
 
 void Application::advanceScreen()
@@ -1042,6 +1078,29 @@ void Application::queuePressedCommands()
     if (horizontal) {
         pendingCommands_.push_back({ .type = MoveCommandType::Move, .direction = *horizontal });
     }
+}
+
+void Application::updateConveyorMovement(float dt)
+{
+    if (moving_ || playerDead_ || !pendingCommands_.empty() || conveyorTilesPerSecond_ <= 0.0f) {
+        conveyorElapsed_ = 0.0f;
+        return;
+    }
+
+    const std::optional<MoveDirection> direction = conveyorDirectionAt(playerCell_);
+    if (!direction) {
+        conveyorElapsed_ = 0.0f;
+        return;
+    }
+
+    conveyorElapsed_ += dt;
+    const float interval = 1.0f / conveyorTilesPerSecond_;
+    if (conveyorElapsed_ < interval) {
+        return;
+    }
+
+    conveyorElapsed_ = 0.0f;
+    (void)tryStartMove(*direction, false, interval, true);
 }
 
 void Application::advancePlayerMovement(float dt)
@@ -1124,7 +1183,7 @@ void Application::startMovableAnimations(const ActionRecord& action)
         rocks_[i].animationStart = rocks_[i].renderPosition;
         rocks_[i].animationEnd = target;
         rocks_[i].animationElapsed = 0.0f;
-        rocks_[i].animationDuration = gridDistance(rocks_[i].animationStart, rocks_[i].animationEnd) * config::playerMoveDurationSeconds;
+        rocks_[i].animationDuration = gridDistance(rocks_[i].animationStart, rocks_[i].animationEnd) * action.animationSecondsPerTile;
         rocks_[i].moving = true;
     }
 }
@@ -1134,6 +1193,9 @@ bool Application::completeActiveAction()
     applyMoveRecord(activeAction_.after);
 
     moveHistory_.push_back(activeAction_);
+    if (activeAction_.conveyorDriven && conveyorTilesPerSecond_ > 0.0f) {
+        conveyorElapsed_ = 1.0f / conveyorTilesPerSecond_;
+    }
     moving_ = false;
     moveElapsed_ = 0.0f;
 
@@ -1163,7 +1225,7 @@ float Application::activeActionDuration() const
                 entityRenderTarget(activeAction_.before.rocks[i].cell, activeAction_.before.rocks[i].fallen),
                 entityRenderTarget(activeAction_.after.rocks[i].cell, activeAction_.after.rocks[i].fallen)));
     }
-    return distance * config::playerMoveDurationSeconds;
+    return distance * activeAction_.animationSecondsPerTile;
 }
 
 bool Application::tryStartNextMove()
@@ -1218,7 +1280,11 @@ bool Application::tryStartHeldMove()
     return false;
 }
 
-bool Application::tryStartMove(MoveDirection direction)
+bool Application::tryStartMove(
+    MoveDirection direction,
+    bool allowPush,
+    float animationSecondsPerTile,
+    bool conveyorDriven)
 {
     if (playerDead_) {
         return false;
@@ -1232,10 +1298,15 @@ bool Application::tryStartMove(MoveDirection direction)
     activeAction_ = {
         .before = captureMoveRecord(),
         .after = captureMoveRecord(),
+        .animationSecondsPerTile = animationSecondsPerTile,
+        .conveyorDriven = conveyorDriven,
     };
     activeAction_.after.player = target;
 
     if (Rock* rock = rockAt(target)) {
+        if (!allowPush) {
+            return false;
+        }
         if (!canMoveRock(target, direction)) {
             return false;
         }
@@ -1532,6 +1603,18 @@ std::optional<GridPosition3> Application::ladderClimbTarget(GridPosition3 ladder
     }
 
     return topCell;
+}
+
+std::optional<MoveDirection> Application::conveyorDirectionAt(GridPosition3 position) const
+{
+    if (!level_.inBounds(position)) {
+        return std::nullopt;
+    }
+
+    return conveyorDirectionForTile(level_.tileAt(
+        static_cast<uint32_t>(position.x),
+        static_cast<uint32_t>(position.y),
+        static_cast<uint32_t>(position.z)));
 }
 
 Application::Rock* Application::rockAt(GridPosition3 position)
@@ -2112,6 +2195,7 @@ RenderFrameData Application::buildEditorRenderFrame() const
         }
 
         const bool surfaceEntity = tileTypeIsSurfaceEntity(tile);
+        const bool conveyor = tileTypeIsConveyor(tile);
         const float tileSize = surfaceEntity ? surfaceEntityWidthDepth_ : 1.0f;
         const float centeredOffset = (1.0f - tileSize) * 0.5f;
         Vec4 color = tileColor(tile);
@@ -2141,13 +2225,18 @@ RenderFrameData Application::buildEditorRenderFrame() const
                 ? surfaceEntityHeight_
                 : (tile == TileType::Water
                         ? config::waterDepthBelowGround
-                        : (tileTypeIsSolidBlock(tile) || tileTypeOccupiesLevelCell(tile) ? 1.0f : 0.0f)),
+                        : (conveyor
+                                ? config::conveyorTileHeight
+                                : (tileTypeIsSolidBlock(tile) || tileTypeOccupiesLevelCell(tile) ? 1.0f : 0.0f))),
             .blurBehind = tile == TileType::Ice,
             .showGrid = tile != TileType::Player,
             .isEditorPreview = preview,
             .model = renderModelForTile(tile),
             .animation = tile == TileType::Player ? RenderAnimation::RogueIdle : RenderAnimation::None,
             .animationTimeSeconds = tile == TileType::Player ? playerAnimationTimeSeconds_ : 0.0f,
+            .modelRotationQuarterTurns = conveyorDirectionForTile(tile)
+                ? facingQuarterTurns(*conveyorDirectionForTile(tile))
+                : 0,
         };
         applyTileScale(renderTile, tileTypeToScale(tile));
         frame.tiles.push_back(renderTile);

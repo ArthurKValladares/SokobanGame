@@ -3,11 +3,14 @@
 layout(set = 0, binding = 0) uniform sampler2D shadowMap;
 layout(set = 0, binding = 1) uniform sampler2D sceneColor;
 layout(set = 0, binding = 2) uniform sampler2D modelTexture;
+layout(set = 0, binding = 3) uniform sampler2D platformerTexture;
+layout(set = 0, binding = 4) uniform sampler2D platformerThreadTexture;
 
 layout(location = 0) in vec4 inShadowPosition;
 layout(location = 1) in float inFaceCoordU;
 layout(location = 2) in float inFaceCoordV;
 layout(location = 3) in vec3 inNormal;
+layout(location = 4) in float inTextureIndex;
 layout(location = 0) out vec4 outColor;
 
 layout(push_constant) uniform PushConstants
@@ -121,7 +124,13 @@ void main()
     applyEditorPreviewDither();
 
     vec4 materialColor = pc.color;
-    if (pc.textureOptions.x > 0.5) {
+    if (pc.textureOptions.x > 1.5) {
+        if (inTextureIndex > 1.5) {
+            materialColor *= texture(platformerThreadTexture, vec2(inFaceCoordU, inFaceCoordV));
+        } else if (inTextureIndex > 0.5) {
+            materialColor *= texture(platformerTexture, vec2(inFaceCoordU, inFaceCoordV));
+        }
+    } else if (pc.textureOptions.x > 0.5) {
         materialColor *= texture(modelTexture, vec2(inFaceCoordU, inFaceCoordV));
     }
     vec3 color = mix(materialColor.rgb, pc.gridColor.rgb, gridMask());

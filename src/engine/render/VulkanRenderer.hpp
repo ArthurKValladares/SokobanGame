@@ -36,6 +36,7 @@ enum class RenderModel {
     Stone,
     Water,
     Glass,
+    Conveyor,
     Rogue,
 };
 
@@ -243,6 +244,8 @@ private:
     void destroyModelResources();
     void createModelTextureResources();
     void destroyModelTextureResources();
+    void createTextureResource(const std::filesystem::path& path, OwnedImage& textureImage, VkSampler& sampler);
+    void destroyTextureResource(OwnedImage& textureImage, VkSampler& sampler);
     [[nodiscard]] GpuMesh uploadMesh(const MeshData& mesh) const;
     void updateMeshVertices(const GpuMesh& gpuMesh, const std::vector<MeshVertex>& vertices) const;
     void updateAnimatedModelMeshes(const RenderFrameData& frameData);
@@ -372,6 +375,7 @@ private:
     GpuMesh stoneMesh_ {};
     GpuMesh waterMesh_ {};
     GpuMesh glassMesh_ {};
+    GpuMesh conveyorMesh_ {};
     GpuMesh rogueMesh_ {};
     SkinnedMeshData rogueSkinnedMesh_ {};
     GltfAnimationClip rogueIdleAnimation_ {};
@@ -380,6 +384,10 @@ private:
     float activeRogueAnimationTime_ = -1.0f;
     OwnedImage rogueTextureImage_ {};
     VkSampler rogueTextureSampler_ = VK_NULL_HANDLE;
+    OwnedImage platformerTextureImage_ {};
+    VkSampler platformerTextureSampler_ = VK_NULL_HANDLE;
+    OwnedImage platformerThreadTextureImage_ {};
+    VkSampler platformerThreadTextureSampler_ = VK_NULL_HANDLE;
 
     static constexpr uint32_t maxFramesInFlight_ = 2;
     std::array<FrameResources, maxFramesInFlight_> frames_ {};

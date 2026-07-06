@@ -20,6 +20,10 @@ enum class TileType {
     Ice,
     Water,
     Ladder,
+    ConveyorUp,
+    ConveyorDown,
+    ConveyorRight,
+    ConveyorLeft,
     Count,
 };
 
@@ -43,6 +47,10 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::Ice, 'I', "Ice", { 0.62f, 0.88f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::Water, 'W', "Water", { 0.08f, 0.34f, 0.78f, 1.0f } },
     TileTypeDefinition { TileType::Ladder, 'L', "Ladder", { 0.43f, 0.22f, 0.08f, 1.0f } },
+    TileTypeDefinition { TileType::ConveyorUp, '^', "Conveyor Up", { 0.22f, 0.56f, 0.95f, 1.0f } },
+    TileTypeDefinition { TileType::ConveyorDown, 'v', "Conveyor Down", { 0.22f, 0.56f, 0.95f, 1.0f } },
+    TileTypeDefinition { TileType::ConveyorRight, '>', "Conveyor Right", { 0.22f, 0.56f, 0.95f, 1.0f } },
+    TileTypeDefinition { TileType::ConveyorLeft, '<', "Conveyor Left", { 0.22f, 0.56f, 0.95f, 1.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -54,6 +62,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] bool tileTypeSupportsEntity(TileType type);
 [[nodiscard]] bool tileTypeAllowsEntity(TileType type);
 [[nodiscard]] bool tileTypeIsSurfaceEntity(TileType type);
+[[nodiscard]] bool tileTypeIsConveyor(TileType type);
 [[nodiscard]] Vec4 tileColor(TileType type, bool isActive = true);
 
 [[nodiscard]] constexpr bool tileTypeDefinitionsContainCharacter(char character)

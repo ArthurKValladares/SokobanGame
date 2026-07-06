@@ -171,9 +171,7 @@ ModelTransformPoints modelTransformPoints(const RenderFrameData::Tile& tile)
     const float depth = tile.size.y;
     const float height = std::max(tile.height, 0.0f);
 
-    const uint32_t quarterTurns = tile.model == RenderModel::Rogue
-        ? tile.modelRotationQuarterTurns % 4
-        : 0;
+    const uint32_t quarterTurns = tile.modelRotationQuarterTurns % 4;
     ModelTransformPoints result;
     switch (quarterTurns) {
     case 0:
@@ -1055,7 +1053,7 @@ void VulkanRenderer::createSceneColorResources()
 
 void VulkanRenderer::createDescriptorResources()
 {
-    std::array<VkDescriptorSetLayoutBinding, 3> bindings {
+    std::array<VkDescriptorSetLayoutBinding, 5> bindings {
         VkDescriptorSetLayoutBinding {
         .binding = 0,
         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -1074,6 +1072,18 @@ void VulkanRenderer::createDescriptorResources()
             .descriptorCount = 1,
             .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
+        VkDescriptorSetLayoutBinding {
+            .binding = 3,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        },
+        VkDescriptorSetLayoutBinding {
+            .binding = 4,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        },
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo {
@@ -1086,7 +1096,7 @@ void VulkanRenderer::createDescriptorResources()
     std::array<VkDescriptorPoolSize, 1> poolSizes {
         VkDescriptorPoolSize {
             .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = 3,
+            .descriptorCount = 5,
         },
     };
     VkDescriptorPoolCreateInfo poolInfo {
@@ -1115,7 +1125,11 @@ void VulkanRenderer::updateDescriptorSet()
         !sceneColorSampler_ ||
         !sceneColorImage_.view ||
         !rogueTextureSampler_ ||
-        !rogueTextureImage_.view) {
+        !rogueTextureImage_.view ||
+        !platformerTextureSampler_ ||
+        !platformerTextureImage_.view ||
+        !platformerThreadTextureSampler_ ||
+        !platformerThreadTextureImage_.view) {
         return;
     }
 
@@ -1134,7 +1148,17 @@ void VulkanRenderer::updateDescriptorSet()
         .imageView = rogueTextureImage_.view,
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
     };
-    std::array<VkWriteDescriptorSet, 3> writes {
+    VkDescriptorImageInfo platformerImageInfo {
+        .sampler = platformerTextureSampler_,
+        .imageView = platformerTextureImage_.view,
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    };
+    VkDescriptorImageInfo platformerThreadImageInfo {
+        .sampler = platformerThreadTextureSampler_,
+        .imageView = platformerThreadTextureImage_.view,
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    };
+    std::array<VkWriteDescriptorSet, 5> writes {
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = descriptorSet_,
@@ -1162,6 +1186,24 @@ void VulkanRenderer::updateDescriptorSet()
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .pImageInfo = &modelImageInfo,
         },
+        VkWriteDescriptorSet {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = descriptorSet_,
+            .dstBinding = 3,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &platformerImageInfo,
+        },
+        VkWriteDescriptorSet {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = descriptorSet_,
+            .dstBinding = 4,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &platformerThreadImageInfo,
+        },
     };
     vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 }
@@ -1183,6 +1225,11 @@ void VulkanRenderer::createModelResources()
     stoneMesh_ = uploadMesh(loadGltfMesh(assetRoot_ / "models/stone.gltf"));
     waterMesh_ = uploadMesh(loadGltfMesh(assetRoot_ / "models/water.gltf"));
     glassMesh_ = uploadMesh(loadGltfMesh(assetRoot_ / "models/glass.gltf"));
+    conveyorMesh_ = uploadMesh(loadGltfMesh(
+        assetRoot_ / "models/conveyor_4x4x1_blue.gltf",
+        {
+            .usePrimitiveMaterialTextures = true,
+        }));
     rogueSkinnedMesh_ = loadGltfSkinnedMesh(
         assetRoot_ / "models/Rogue.glb",
         {
@@ -1279,6 +1326,7 @@ void VulkanRenderer::updateAnimatedModelMeshes(const RenderFrameData& frameData)
 void VulkanRenderer::destroyModelResources()
 {
     destroyMesh(rogueMesh_);
+    destroyMesh(conveyorMesh_);
     destroyMesh(glassMesh_);
     destroyMesh(waterMesh_);
     destroyMesh(stoneMesh_);
@@ -1287,7 +1335,17 @@ void VulkanRenderer::destroyModelResources()
 
 void VulkanRenderer::createModelTextureResources()
 {
-    const ImageData image = loadRgbaImage(assetRoot_ / "models/rogue_texture.png");
+    createTextureResource(assetRoot_ / "models/rogue_texture.png", rogueTextureImage_, rogueTextureSampler_);
+    createTextureResource(assetRoot_ / "models/platformer_texture.png", platformerTextureImage_, platformerTextureSampler_);
+    createTextureResource(assetRoot_ / "models/threads.png", platformerThreadTextureImage_, platformerThreadTextureSampler_);
+}
+
+void VulkanRenderer::createTextureResource(
+    const std::filesystem::path& path,
+    OwnedImage& textureImage,
+    VkSampler& sampler)
+{
+    const ImageData image = loadRgbaImage(path);
     const VkDeviceSize imageBytes = image.rgba.size();
     OwnedBuffer staging = createBuffer(
         imageBytes,
@@ -1316,17 +1374,17 @@ void VulkanRenderer::createModelTextureResources()
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
-    vkCheck(vkCreateImage(device_, &imageInfo, nullptr, &rogueTextureImage_.image), "vkCreateImage Rogue texture failed");
+    vkCheck(vkCreateImage(device_, &imageInfo, nullptr, &textureImage.image), "vkCreateImage model texture failed");
 
     VkMemoryRequirements requirements {};
-    vkGetImageMemoryRequirements(device_, rogueTextureImage_.image, &requirements);
+    vkGetImageMemoryRequirements(device_, textureImage.image, &requirements);
     VkMemoryAllocateInfo allocationInfo {
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         .allocationSize = requirements.size,
         .memoryTypeIndex = findMemoryType(requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
     };
-    vkCheck(vkAllocateMemory(device_, &allocationInfo, nullptr, &rogueTextureImage_.memory), "vkAllocateMemory Rogue texture failed");
-    vkCheck(vkBindImageMemory(device_, rogueTextureImage_.image, rogueTextureImage_.memory, 0), "vkBindImageMemory Rogue texture failed");
+    vkCheck(vkAllocateMemory(device_, &allocationInfo, nullptr, &textureImage.memory), "vkAllocateMemory model texture failed");
+    vkCheck(vkBindImageMemory(device_, textureImage.image, textureImage.memory, 0), "vkBindImageMemory model texture failed");
 
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
     VkCommandBufferAllocateInfo commandBufferInfo {
@@ -1352,7 +1410,7 @@ void VulkanRenderer::createModelTextureResources()
         .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = rogueTextureImage_.image,
+        .image = textureImage.image,
         .subresourceRange = {
             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
             .baseMipLevel = 0,
@@ -1384,7 +1442,7 @@ void VulkanRenderer::createModelTextureResources()
     vkCmdCopyBufferToImage(
         commandBuffer,
         staging.buffer,
-        rogueTextureImage_.image,
+        textureImage.image,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         1,
         &copyRegion);
@@ -1399,7 +1457,7 @@ void VulkanRenderer::createModelTextureResources()
         .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = rogueTextureImage_.image,
+        .image = textureImage.image,
         .subresourceRange = {
             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
             .baseMipLevel = 0,
@@ -1431,8 +1489,8 @@ void VulkanRenderer::createModelTextureResources()
 
     vkDestroyBuffer(device_, staging.buffer, nullptr);
     vkFreeMemory(device_, staging.memory, nullptr);
-    rogueTextureImage_.view = createImageView(
-        rogueTextureImage_.image,
+    textureImage.view = createImageView(
+        textureImage.image,
         VK_FORMAT_R8G8B8A8_SRGB,
         VK_IMAGE_ASPECT_COLOR_BIT);
 
@@ -1449,26 +1507,33 @@ void VulkanRenderer::createModelTextureResources()
         .minLod = 0.0f,
         .maxLod = 0.0f,
     };
-    vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &rogueTextureSampler_), "vkCreateSampler Rogue texture failed");
+    vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &sampler), "vkCreateSampler model texture failed");
 }
 
 void VulkanRenderer::destroyModelTextureResources()
 {
-    if (rogueTextureSampler_) {
-        vkDestroySampler(device_, rogueTextureSampler_, nullptr);
-        rogueTextureSampler_ = VK_NULL_HANDLE;
+    destroyTextureResource(platformerThreadTextureImage_, platformerThreadTextureSampler_);
+    destroyTextureResource(platformerTextureImage_, platformerTextureSampler_);
+    destroyTextureResource(rogueTextureImage_, rogueTextureSampler_);
+}
+
+void VulkanRenderer::destroyTextureResource(OwnedImage& textureImage, VkSampler& sampler)
+{
+    if (sampler) {
+        vkDestroySampler(device_, sampler, nullptr);
+        sampler = VK_NULL_HANDLE;
     }
-    if (rogueTextureImage_.view) {
-        vkDestroyImageView(device_, rogueTextureImage_.view, nullptr);
-        rogueTextureImage_.view = VK_NULL_HANDLE;
+    if (textureImage.view) {
+        vkDestroyImageView(device_, textureImage.view, nullptr);
+        textureImage.view = VK_NULL_HANDLE;
     }
-    if (rogueTextureImage_.image) {
-        vkDestroyImage(device_, rogueTextureImage_.image, nullptr);
-        rogueTextureImage_.image = VK_NULL_HANDLE;
+    if (textureImage.image) {
+        vkDestroyImage(device_, textureImage.image, nullptr);
+        textureImage.image = VK_NULL_HANDLE;
     }
-    if (rogueTextureImage_.memory) {
-        vkFreeMemory(device_, rogueTextureImage_.memory, nullptr);
-        rogueTextureImage_.memory = VK_NULL_HANDLE;
+    if (textureImage.memory) {
+        vkFreeMemory(device_, textureImage.memory, nullptr);
+        textureImage.memory = VK_NULL_HANDLE;
     }
 }
 
@@ -1504,6 +1569,8 @@ const VulkanRenderer::GpuMesh& VulkanRenderer::meshForModel(RenderModel model) c
         return waterMesh_;
     case RenderModel::Glass:
         return glassMesh_;
+    case RenderModel::Conveyor:
+        return conveyorMesh_;
     case RenderModel::Rogue:
         return rogueMesh_;
     case RenderModel::Cube:
@@ -3279,10 +3346,8 @@ void VulkanRenderer::drawModel(
             tile.isEditorPreview ? -config::iceBlurRadiusPixels : config::iceBlurRadiusPixels,
         },
         .textureOptions = {
-            tile.model == RenderModel::Rogue ? 1.0f : 0.0f,
-            tile.model == RenderModel::Rogue
-                ? static_cast<float>(tile.modelRotationQuarterTurns % 4)
-                : 0.0f,
+            tile.model == RenderModel::Conveyor ? 2.0f : tile.model == RenderModel::Rogue ? 1.0f : 0.0f,
+            static_cast<float>(tile.modelRotationQuarterTurns % 4),
             std::max(lighting.specularStrength, 0.0f),
             std::max(lighting.specularPower, 1.0f),
         },
@@ -3672,7 +3737,7 @@ VkPipeline VulkanRenderer::createModelGraphicsPipeline(VkShaderModule vertexShad
         .stride = sizeof(MeshVertex),
         .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
     };
-    const std::array<VkVertexInputAttributeDescription, 3> attributes {
+    const std::array<VkVertexInputAttributeDescription, 4> attributes {
         VkVertexInputAttributeDescription {
             .location = 0,
             .binding = 0,
@@ -3690,6 +3755,12 @@ VkPipeline VulkanRenderer::createModelGraphicsPipeline(VkShaderModule vertexShad
             .binding = 0,
             .format = VK_FORMAT_R32G32_SFLOAT,
             .offset = offsetof(MeshVertex, uv),
+        },
+        VkVertexInputAttributeDescription {
+            .location = 3,
+            .binding = 0,
+            .format = VK_FORMAT_R32_SFLOAT,
+            .offset = offsetof(MeshVertex, textureIndex),
         },
     };
     VkPipelineVertexInputStateCreateInfo vertexInput {

@@ -48,6 +48,7 @@ set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/shaders")
 set(LEVEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/levels")
 set(LEVEL_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/levels")
 set(MODEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit_BlockBits_1.0_FREE/Assets/gltf")
+set(PLATFORMER_MODEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit Platformer Pack 1.0/Assets/gltf/blue")
 set(CHARACTER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit_Adventurers_2.0_FREE/Characters/gltf")
 set(CHARACTER_ANIMATION_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit_Adventurers_2.0_FREE/Animations/gltf/Rig_Medium")
 set(MODEL_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/models")
@@ -97,6 +98,10 @@ add_custom_target(sokoban_assets
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/water.bin" "${MODEL_OUTPUT_DIR}/water.bin"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/glass.gltf" "${MODEL_OUTPUT_DIR}/glass.gltf"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/glass.bin" "${MODEL_OUTPUT_DIR}/glass.bin"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PLATFORMER_MODEL_SOURCE_DIR}/conveyor_4x4x1_blue.gltf" "${MODEL_OUTPUT_DIR}/conveyor_4x4x1_blue.gltf"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PLATFORMER_MODEL_SOURCE_DIR}/conveyor_4x4x1_blue.bin" "${MODEL_OUTPUT_DIR}/conveyor_4x4x1_blue.bin"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PLATFORMER_MODEL_SOURCE_DIR}/platformer_texture.png" "${MODEL_OUTPUT_DIR}/platformer_texture.png"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PLATFORMER_MODEL_SOURCE_DIR}/threads.png" "${MODEL_OUTPUT_DIR}/threads.png"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CHARACTER_SOURCE_DIR}/Rogue.glb" "${MODEL_OUTPUT_DIR}/Rogue.glb"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CHARACTER_SOURCE_DIR}/rogue_texture.png" "${MODEL_OUTPUT_DIR}/rogue_texture.png"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CHARACTER_ANIMATION_SOURCE_DIR}/Rig_Medium_General.glb" "${MODEL_OUTPUT_DIR}/Rig_Medium_General.glb"
@@ -111,6 +116,10 @@ add_custom_target(sokoban_assets
         "${MODEL_SOURCE_DIR}/water.bin"
         "${MODEL_SOURCE_DIR}/glass.gltf"
         "${MODEL_SOURCE_DIR}/glass.bin"
+        "${PLATFORMER_MODEL_SOURCE_DIR}/conveyor_4x4x1_blue.gltf"
+        "${PLATFORMER_MODEL_SOURCE_DIR}/conveyor_4x4x1_blue.bin"
+        "${PLATFORMER_MODEL_SOURCE_DIR}/platformer_texture.png"
+        "${PLATFORMER_MODEL_SOURCE_DIR}/threads.png"
         "${CHARACTER_SOURCE_DIR}/Rogue.glb"
         "${CHARACTER_SOURCE_DIR}/rogue_texture.png"
         "${CHARACTER_ANIMATION_SOURCE_DIR}/Rig_Medium_General.glb"

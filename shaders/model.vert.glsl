@@ -3,11 +3,13 @@
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inUv;
+layout(location = 3) in float inTextureIndex;
 
 layout(location = 0) out vec4 outShadowPosition;
 layout(location = 1) out float outFaceCoordU;
 layout(location = 2) out float outFaceCoordV;
 layout(location = 3) out vec3 outNormal;
+layout(location = 4) out float outTextureIndex;
 
 layout(push_constant) uniform PushConstants
 {
@@ -40,6 +42,7 @@ void main()
     outShadowPosition = shadowTransform * vec4(inPosition, 1.0);
     outFaceCoordU = inUv.x;
     outFaceCoordV = inUv.y;
+    outTextureIndex = inTextureIndex;
     int quarterTurns = int(pc.textureOptions.y + 0.5) & 3;
     if (quarterTurns == 1) {
         outNormal = vec3(-inNormal.y, inNormal.x, inNormal.z);

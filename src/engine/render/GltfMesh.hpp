@@ -14,6 +14,7 @@ struct MeshVertex {
     Vec3 position {};
     Vec3 normal {};
     Vec2 uv {};
+    float textureIndex = 0.0f;
 };
 
 struct MeshData {
@@ -79,6 +80,7 @@ struct GltfAnimationClip {
 struct GltfMeshLoadOptions {
     bool preserveAspectRatio = false;
     bool rotateHalfTurn = false;
+    bool usePrimitiveMaterialTextures = false;
 };
 
 [[nodiscard]] MeshData loadGltfMesh(
