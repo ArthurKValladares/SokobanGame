@@ -110,15 +110,15 @@ void drawSunDirectionPreview(Vec3 direction, float tiltDegrees)
 }
 #endif
 
-Vec3 interpolateGridMotion(Vec3 from, Vec3 to, float elapsedSeconds)
+Vec3 interpolateGridMotion(Vec3 from, Vec3 to, float elapsedSeconds, float secondsPerTile)
 {
     const float distance = gridDistance(from, to);
-    if (distance <= 0.0001f || config::playerMoveDurationSeconds <= 0.0f) {
+    if (distance <= 0.0001f || secondsPerTile <= 0.0f) {
         return to;
     }
 
     float remaining = std::min(
-        elapsedSeconds / config::playerMoveDurationSeconds,
+        elapsedSeconds / secondsPerTile,
         distance);
     Vec3 result = from;
 
@@ -1137,7 +1137,8 @@ void Application::advancePlayerMovement(float dt)
         playerRenderPosition_ = interpolateGridMotion(
             entityRenderTarget(activeAction_.before.player, activeAction_.before.playerDead),
             entityRenderTarget(activeAction_.after.player, activeAction_.after.playerDead),
-            moveElapsed_);
+            moveElapsed_,
+            activeAction_.animationSecondsPerTile);
 
         if (moveElapsed_ >= duration) {
             if (completeActiveAction()) {
@@ -1161,7 +1162,11 @@ void Application::advanceMovableAnimations(float dt)
             continue;
         }
 
-        rock.renderPosition = interpolateGridMotion(rock.animationStart, rock.animationEnd, rock.animationElapsed);
+        rock.renderPosition = interpolateGridMotion(
+            rock.animationStart,
+            rock.animationEnd,
+            rock.animationElapsed,
+            rock.animationSecondsPerTile);
     }
 }
 
@@ -1176,6 +1181,7 @@ void Application::startMovableAnimations(const ActionRecord& action)
             rocks_[i].animationEnd = target;
             rocks_[i].animationElapsed = 0.0f;
             rocks_[i].animationDuration = 0.0f;
+            rocks_[i].animationSecondsPerTile = 0.0f;
             rocks_[i].moving = false;
             continue;
         }
@@ -1184,6 +1190,7 @@ void Application::startMovableAnimations(const ActionRecord& action)
         rocks_[i].animationEnd = target;
         rocks_[i].animationElapsed = 0.0f;
         rocks_[i].animationDuration = gridDistance(rocks_[i].animationStart, rocks_[i].animationEnd) * action.animationSecondsPerTile;
+        rocks_[i].animationSecondsPerTile = action.animationSecondsPerTile;
         rocks_[i].moving = true;
     }
 }
@@ -1519,6 +1526,7 @@ void Application::applyMoveRecord(const MoveRecord& record)
             rocks_[i].animationEnd = rocks_[i].renderPosition;
             rocks_[i].animationElapsed = 0.0f;
             rocks_[i].animationDuration = 0.0f;
+            rocks_[i].animationSecondsPerTile = 0.0f;
         }
         rocks_[i].fallen = record.rocks[i].fallen;
     }

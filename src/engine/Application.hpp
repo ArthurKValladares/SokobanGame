@@ -43,6 +43,7 @@ private:
         Vec3 animationEnd {};
         float animationElapsed = 0.0f;
         float animationDuration = 0.0f;
+        float animationSecondsPerTile = 0.0f;
         bool moving = false;
         bool fallen = false;
     };
