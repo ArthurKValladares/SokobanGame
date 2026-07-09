@@ -150,6 +150,7 @@ private:
     [[nodiscard]] RenderFrameData buildRenderFrame() const;
     [[nodiscard]] RenderFrameData buildGameplayRenderFrame() const;
     [[nodiscard]] RenderFrameData buildEditorRenderFrame() const;
+    [[nodiscard]] float conveyorBeltScrollOffset() const;
     [[nodiscard]] float tileTypeToScale(TileType type) const;
 
     Window window_;

@@ -87,6 +87,7 @@ struct RenderFrameData {
         RenderModel model = RenderModel::Cube;
         RenderAnimation animation = RenderAnimation::None;
         float animationTimeSeconds = 0.0f;
+        float beltScrollOffset = 0.0f;
         uint32_t modelRotationQuarterTurns = 0;
     };
 

@@ -1942,6 +1942,18 @@ RenderFrameData Application::buildRenderFrame() const
     return buildGameplayRenderFrame();
 }
 
+float Application::conveyorBeltScrollOffset() const
+{
+    if (conveyorTilesPerSecond_ <= 0.0f) {
+        return 0.0f;
+    }
+
+    // The belt texture spans one full V cycle per tile of travel, so the belt
+    // surface visually moves at the same rate entities are conveyed. Negate
+    // here if the scroll direction turns out to oppose the movement direction.
+    return std::fmod(playerAnimationTimeSeconds_ * conveyorTilesPerSecond_, 1.0f);
+}
+
 float Application::tileTypeToScale(TileType type) const
 {
     const auto index = static_cast<std::size_t>(type);
@@ -2114,6 +2126,13 @@ RenderFrameData Application::buildGameplayRenderFrame() const
         };
         applyTileScale(rockTile, tileTypeToScale(rock.type));
         frame.tiles.push_back(rockTile);
+    }
+
+    const float beltScrollOffset = conveyorBeltScrollOffset();
+    for (RenderFrameData::Tile& tile : frame.tiles) {
+        if (tile.model == RenderModel::Conveyor) {
+            tile.beltScrollOffset = beltScrollOffset;
+        }
     }
 
     return frame;
@@ -2325,6 +2344,13 @@ RenderFrameData Application::buildEditorRenderFrame() const
             static_cast<uint32_t>(editorHoverCell_->z),
             previewTile,
             true);
+    }
+
+    const float beltScrollOffset = conveyorBeltScrollOffset();
+    for (RenderFrameData::Tile& tile : frame.tiles) {
+        if (tile.model == RenderModel::Conveyor) {
+            tile.beltScrollOffset = beltScrollOffset;
+        }
     }
 
     return frame;

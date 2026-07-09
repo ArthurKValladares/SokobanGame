@@ -3341,7 +3341,7 @@ void VulkanRenderer::drawModel(
         },
         .materialOptions = {
             tile.blurBehind ? 1.0f : 0.0f,
-            0.0f,
+            tile.beltScrollOffset,
             0.0f,
             tile.isEditorPreview ? -config::iceBlurRadiusPixels : config::iceBlurRadiusPixels,
         },

@@ -126,7 +126,9 @@ void main()
     vec4 materialColor = pc.color;
     if (pc.textureOptions.x > 1.5) {
         if (inTextureIndex > 1.5) {
-            materialColor *= texture(platformerThreadTexture, vec2(inFaceCoordU, inFaceCoordV));
+            // materialOptions.y carries the belt scroll offset; the belt UVs span
+            // a full 0..1 along V, so fract() wraps the scroll seamlessly.
+            materialColor *= texture(platformerThreadTexture, vec2(inFaceCoordU, fract(inFaceCoordV + pc.materialOptions.y)));
         } else if (inTextureIndex > 0.5) {
             materialColor *= texture(platformerTexture, vec2(inFaceCoordU, inFaceCoordV));
         }
