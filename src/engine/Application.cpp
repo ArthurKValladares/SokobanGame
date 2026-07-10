@@ -218,21 +218,6 @@ uint32_t facingQuarterTurns(MoveDirection direction)
     return 0;
 }
 
-GridPosition directionOffset(MoveDirection direction)
-{
-    switch (direction) {
-    case MoveDirection::Up:
-        return { 0, -1 };
-    case MoveDirection::Down:
-        return { 0, 1 };
-    case MoveDirection::Left:
-        return { -1, 0 };
-    case MoveDirection::Right:
-        return { 1, 0 };
-    }
-    return {};
-}
-
 std::optional<MoveDirection> movementDirection(GridPosition3 from, GridPosition3 to)
 {
     const int deltaX = to.x - from.x;
@@ -250,22 +235,6 @@ std::optional<MoveDirection> movementDirection(GridPosition3 from, GridPosition3
         return MoveDirection::Down;
     }
     return std::nullopt;
-}
-
-std::optional<MoveDirection> conveyorDirectionForTile(TileType tile)
-{
-    switch (tile) {
-    case TileType::ConveyorUp:
-        return MoveDirection::Up;
-    case TileType::ConveyorDown:
-        return MoveDirection::Down;
-    case TileType::ConveyorRight:
-        return MoveDirection::Right;
-    case TileType::ConveyorLeft:
-        return MoveDirection::Left;
-    default:
-        return std::nullopt;
-    }
 }
 
 StaticRenderCell staticRenderCellFor(
@@ -302,8 +271,8 @@ StaticRenderCell staticRenderCellFor(
                             : (tileTypeIsSolidBlock(tile) || tileTypeOccupiesLevelCell(tile) ? 1.0f : 0.0f))),
         .modelRotationQuarterTurns = tile == TileType::Player
             ? playerFacingQuarterTurns
-            : (conveyorDirectionForTile(tile)
-                    ? facingQuarterTurns(*conveyorDirectionForTile(tile))
+            : (rules::conveyorDirectionForTile(tile)
+                    ? facingQuarterTurns(*rules::conveyorDirectionForTile(tile))
                     : 0),
     };
 }
@@ -679,11 +648,11 @@ void Application::drawDebugUi()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     ImGui::Text("Level %d Screen %d", currentLevel_, currentScreen_);
-    ImGui::Text("Player (%d, %d, %d)", playerCell_.x, playerCell_.y, playerCell_.z);
-    ImGui::Text("Player %s", playerDead_ ? "dead" : "alive");
-    ImGui::Text("Movables %zu", rocks_.size());
+    ImGui::Text("Player (%d, %d, %d)", state_.player.x, state_.player.y, state_.player.z);
+    ImGui::Text("Player %s", state_.playerDead ? "dead" : "alive");
+    ImGui::Text("Movables %zu", state_.movables.size());
     ImGui::Text("History %zu", moveHistory_.size());
-    ImGui::Text("End %s", isEndUnlocked() ? "unlocked" : "locked");
+    ImGui::Text("End %s", rules::isEndUnlocked(level_, state_) ? "unlocked" : "locked");
     ImGui::Separator();
 
     constexpr const char* antiAliasingLabels[] { "None", "MSAA 2x", "MSAA 4x", "MSAA 8x" };
@@ -1022,19 +991,16 @@ void Application::loadCurrentScreen()
 void Application::applyLevel(Level level)
 {
     level_ = std::move(level);
-    playerCell_ = level_.playerStart();
-    playerRenderPosition_ = toVec3(playerCell_);
+    state_ = rules::initialState(level_);
+    playerRenderPosition_ = toVec3(state_.player);
     playerFacingQuarterTurns_ = facingQuarterTurns(MoveDirection::Down);
-    playerDead_ = false;
-    rocks_.clear();
-    rocks_.reserve(level_.movableTiles().size());
-    for (const Level::MovableTile& movable : level_.movableTiles()) {
-        rocks_.push_back({
-            .type = movable.type,
-            .cell = movable.position,
-            .renderPosition = toVec3(movable.position),
-            .animationStart = toVec3(movable.position),
-            .animationEnd = toVec3(movable.position),
+    movableVisuals_.clear();
+    movableVisuals_.reserve(state_.movables.size());
+    for (const GameState::Movable& movable : state_.movables) {
+        movableVisuals_.push_back({
+            .renderPosition = toVec3(movable.cell),
+            .animationStart = toVec3(movable.cell),
+            .animationEnd = toVec3(movable.cell),
         });
     }
     pendingCommands_.clear();
@@ -1082,13 +1048,12 @@ void Application::queuePressedCommands()
 
 void Application::updateConveyorMovement(float dt)
 {
-    if (moving_ || playerDead_ || !pendingCommands_.empty() || conveyorTilesPerSecond_ <= 0.0f) {
+    if (moving_ || state_.playerDead || !pendingCommands_.empty() || conveyorTilesPerSecond_ <= 0.0f) {
         conveyorElapsed_ = 0.0f;
         return;
     }
 
-    const std::optional<MoveDirection> direction = conveyorDirectionAt(playerCell_);
-    if (!direction) {
+    if (!rules::anyEntityOnConveyor(level_, state_)) {
         conveyorElapsed_ = 0.0f;
         return;
     }
@@ -1100,7 +1065,25 @@ void Application::updateConveyorMovement(float dt)
     }
 
     conveyorElapsed_ = 0.0f;
-    (void)tryStartMove(*direction, false, interval, true);
+    std::optional<GameState> after = rules::applyConveyorStep(level_, state_);
+    if (!after) {
+        return;
+    }
+
+    activeAction_ = {
+        .before = state_,
+        .after = std::move(*after),
+        .animationSecondsPerTile = interval,
+        .conveyorDriven = true,
+    };
+    if (const std::optional<MoveDirection> direction =
+            movementDirection(activeAction_.before.player, activeAction_.after.player)) {
+        playerFacingQuarterTurns_ = facingQuarterTurns(*direction);
+    }
+    undoCursor_.reset();
+    moveElapsed_ = 0.0f;
+    moving_ = true;
+    startMovableAnimations(activeAction_);
 }
 
 void Application::advancePlayerMovement(float dt)
@@ -1150,54 +1133,55 @@ void Application::advancePlayerMovement(float dt)
 
 void Application::advanceMovableAnimations(float dt)
 {
-    for (Rock& rock : rocks_) {
-        if (!rock.moving) {
+    for (MovableVisual& visual : movableVisuals_) {
+        if (!visual.moving) {
             continue;
         }
 
-        rock.animationElapsed = std::min(rock.animationElapsed + dt, rock.animationDuration);
-        if (rock.animationDuration <= 0.0f || rock.animationElapsed >= rock.animationDuration) {
-            rock.renderPosition = rock.animationEnd;
-            rock.moving = false;
+        visual.animationElapsed = std::min(visual.animationElapsed + dt, visual.animationDuration);
+        if (visual.animationDuration <= 0.0f || visual.animationElapsed >= visual.animationDuration) {
+            visual.renderPosition = visual.animationEnd;
+            visual.moving = false;
             continue;
         }
 
-        rock.renderPosition = interpolateGridMotion(
-            rock.animationStart,
-            rock.animationEnd,
-            rock.animationElapsed,
-            rock.animationSecondsPerTile);
+        visual.renderPosition = interpolateGridMotion(
+            visual.animationStart,
+            visual.animationEnd,
+            visual.animationElapsed,
+            visual.animationSecondsPerTile);
     }
 }
 
 void Application::startMovableAnimations(const ActionRecord& action)
 {
-    const size_t rockCount = std::min(action.before.rocks.size(), action.after.rocks.size());
-    for (size_t i = 0; i < rockCount && i < rocks_.size(); ++i) {
-        const Vec3 target = entityRenderTarget(action.after.rocks[i].cell, action.after.rocks[i].fallen);
-        if (gridDistance(rocks_[i].renderPosition, target) <= 0.0001f) {
-            rocks_[i].renderPosition = target;
-            rocks_[i].animationStart = target;
-            rocks_[i].animationEnd = target;
-            rocks_[i].animationElapsed = 0.0f;
-            rocks_[i].animationDuration = 0.0f;
-            rocks_[i].animationSecondsPerTile = 0.0f;
-            rocks_[i].moving = false;
+    const size_t movableCount = std::min(action.before.movables.size(), action.after.movables.size());
+    for (size_t i = 0; i < movableCount && i < movableVisuals_.size(); ++i) {
+        MovableVisual& visual = movableVisuals_[i];
+        const Vec3 target = entityRenderTarget(action.after.movables[i].cell, action.after.movables[i].fallen);
+        if (gridDistance(visual.renderPosition, target) <= 0.0001f) {
+            visual.renderPosition = target;
+            visual.animationStart = target;
+            visual.animationEnd = target;
+            visual.animationElapsed = 0.0f;
+            visual.animationDuration = 0.0f;
+            visual.animationSecondsPerTile = 0.0f;
+            visual.moving = false;
             continue;
         }
 
-        rocks_[i].animationStart = rocks_[i].renderPosition;
-        rocks_[i].animationEnd = target;
-        rocks_[i].animationElapsed = 0.0f;
-        rocks_[i].animationDuration = gridDistance(rocks_[i].animationStart, rocks_[i].animationEnd) * action.animationSecondsPerTile;
-        rocks_[i].animationSecondsPerTile = action.animationSecondsPerTile;
-        rocks_[i].moving = true;
+        visual.animationStart = visual.renderPosition;
+        visual.animationEnd = target;
+        visual.animationElapsed = 0.0f;
+        visual.animationDuration = gridDistance(visual.animationStart, visual.animationEnd) * action.animationSecondsPerTile;
+        visual.animationSecondsPerTile = action.animationSecondsPerTile;
+        visual.moving = true;
     }
 }
 
 bool Application::completeActiveAction()
 {
-    applyMoveRecord(activeAction_.after);
+    applyGameState(activeAction_.after);
 
     moveHistory_.push_back(activeAction_);
     if (activeAction_.conveyorDriven && conveyorTilesPerSecond_ > 0.0f) {
@@ -1206,7 +1190,7 @@ bool Application::completeActiveAction()
     moving_ = false;
     moveElapsed_ = 0.0f;
 
-    if (level_.isEnd(playerCell_) && isEndUnlocked()) {
+    if (rules::isAtUnlockedEnd(level_, state_)) {
         if (levelEditor_.playingDraft()) {
             levelEditor_.markDraftSolved();
             return false;
@@ -1224,20 +1208,20 @@ float Application::activeActionDuration() const
     float distance = gridDistance(
         entityRenderTarget(activeAction_.before.player, activeAction_.before.playerDead),
         entityRenderTarget(activeAction_.after.player, activeAction_.after.playerDead));
-    const size_t rockCount = std::min(activeAction_.before.rocks.size(), activeAction_.after.rocks.size());
-    for (size_t i = 0; i < rockCount; ++i) {
+    const size_t movableCount = std::min(activeAction_.before.movables.size(), activeAction_.after.movables.size());
+    for (size_t i = 0; i < movableCount; ++i) {
         distance = std::max(
             distance,
             gridDistance(
-                entityRenderTarget(activeAction_.before.rocks[i].cell, activeAction_.before.rocks[i].fallen),
-                entityRenderTarget(activeAction_.after.rocks[i].cell, activeAction_.after.rocks[i].fallen)));
+                entityRenderTarget(activeAction_.before.movables[i].cell, activeAction_.before.movables[i].fallen),
+                entityRenderTarget(activeAction_.after.movables[i].cell, activeAction_.after.movables[i].fallen)));
     }
     return distance * activeAction_.animationSecondsPerTile;
 }
 
 bool Application::tryStartNextMove()
 {
-    if (playerDead_) {
+    if (state_.playerDead) {
         while (!pendingCommands_.empty()) {
             const MoveCommand command = pendingCommands_.front();
             pendingCommands_.pop_front();
@@ -1293,50 +1277,17 @@ bool Application::tryStartMove(
     float animationSecondsPerTile,
     bool conveyorDriven)
 {
-    if (playerDead_) {
-        return false;
-    }
-
-    const GridPosition3 target = playerLadderClimbTarget(direction).value_or(movementTarget(direction));
-    if (!isPlayerWalkable(target)) {
+    std::optional<GameState> after = rules::tryMove(level_, state_, direction, allowPush);
+    if (!after) {
         return false;
     }
 
     activeAction_ = {
-        .before = captureMoveRecord(),
-        .after = captureMoveRecord(),
+        .before = state_,
+        .after = std::move(*after),
         .animationSecondsPerTile = animationSecondsPerTile,
         .conveyorDriven = conveyorDriven,
     };
-    activeAction_.after.player = target;
-
-    if (Rock* rock = rockAt(target)) {
-        if (!allowPush) {
-            return false;
-        }
-        if (!canMoveRock(target, direction)) {
-            return false;
-        }
-
-        const size_t rockIndex = static_cast<size_t>(rock - rocks_.data());
-        activeAction_.after.rocks[rockIndex] = {
-            .cell = movementTarget(rock->cell, direction),
-            .fallen = false,
-        };
-        activeAction_.after.rocks[rockIndex].cell = movableSlidingTarget(rockIndex, direction, activeAction_.after);
-        const FallResult rockFall = movableFallTarget(
-            rockIndex,
-            activeAction_.after.rocks[rockIndex].cell,
-            activeAction_.after);
-        activeAction_.after.rocks[rockIndex] = {
-            .cell = rockFall.cell,
-            .fallen = rockFall.fallen,
-        };
-    }
-    activeAction_.after.player = playerSlidingTarget(activeAction_.after.player, direction, activeAction_.after);
-    const FallResult playerFall = playerFallTarget(activeAction_.after.player, activeAction_.after);
-    activeAction_.after.player = playerFall.cell;
-    activeAction_.after.playerDead = playerFall.fallen;
 
     playerFacingQuarterTurns_ = facingQuarterTurns(direction);
     undoCursor_.reset();
@@ -1375,31 +1326,17 @@ bool Application::tryStartUndoMove()
 
 bool Application::tryStartRestart()
 {
-    if (playerDead_) {
+    if (state_.playerDead) {
         return false;
     }
 
-    MoveRecord restarted {
-        .player = level_.playerStart(),
-        .playerDead = false,
-    };
-    restarted.rocks.reserve(level_.movableTiles().size());
-    for (const Level::MovableTile& movable : level_.movableTiles()) {
-        restarted.rocks.push_back({
-            .cell = movable.position,
-            .fallen = false,
-        });
-    }
-
-    const MoveRecord current = captureMoveRecord();
-    if (current.player == restarted.player &&
-        current.playerDead == restarted.playerDead &&
-        current.rocks == restarted.rocks) {
+    GameState restarted = rules::initialState(level_);
+    if (state_ == restarted) {
         return false;
     }
 
     activeAction_ = {
-        .before = current,
+        .before = state_,
         .after = std::move(restarted),
     };
     undoCursor_.reset();
@@ -1495,40 +1432,22 @@ bool Application::tryStartHeldDirection(MoveDirection direction, std::optional<M
     return true;
 }
 
-Application::MoveRecord Application::captureMoveRecord() const
+void Application::applyGameState(const GameState& state)
 {
-    MoveRecord record {
-        .player = playerCell_,
-        .playerDead = playerDead_,
-    };
-    record.rocks.reserve(rocks_.size());
-    for (const Rock& rock : rocks_) {
-        record.rocks.push_back({
-            .cell = rock.cell,
-            .fallen = rock.fallen,
-        });
-    }
+    state_ = state;
+    playerRenderPosition_ = entityRenderTarget(state_.player, state_.playerDead);
 
-    return record;
-}
-
-void Application::applyMoveRecord(const MoveRecord& record)
-{
-    playerCell_ = record.player;
-    playerRenderPosition_ = entityRenderTarget(playerCell_, record.playerDead);
-    playerDead_ = record.playerDead;
-
-    for (size_t i = 0; i < rocks_.size(); ++i) {
-        rocks_[i].cell = record.rocks[i].cell;
-        if (!rocks_[i].moving) {
-            rocks_[i].renderPosition = entityRenderTarget(rocks_[i].cell, record.rocks[i].fallen);
-            rocks_[i].animationStart = rocks_[i].renderPosition;
-            rocks_[i].animationEnd = rocks_[i].renderPosition;
-            rocks_[i].animationElapsed = 0.0f;
-            rocks_[i].animationDuration = 0.0f;
-            rocks_[i].animationSecondsPerTile = 0.0f;
+    for (size_t i = 0; i < movableVisuals_.size() && i < state_.movables.size(); ++i) {
+        if (movableVisuals_[i].moving) {
+            continue;
         }
-        rocks_[i].fallen = record.rocks[i].fallen;
+        const Vec3 target = entityRenderTarget(state_.movables[i].cell, state_.movables[i].fallen);
+        movableVisuals_[i].renderPosition = target;
+        movableVisuals_[i].animationStart = target;
+        movableVisuals_[i].animationEnd = target;
+        movableVisuals_[i].animationElapsed = 0.0f;
+        movableVisuals_[i].animationDuration = 0.0f;
+        movableVisuals_[i].animationSecondsPerTile = 0.0f;
     }
 }
 
@@ -1538,380 +1457,6 @@ Application::ActionRecord Application::invertActionRecord(const ActionRecord& re
         .before = record.after,
         .after = record.before,
     };
-}
-
-GridPosition3 Application::movementTarget(MoveDirection direction) const
-{
-    return movementTarget(playerCell_, direction);
-}
-
-GridPosition3 Application::movementTarget(GridPosition3 origin, MoveDirection direction) const
-{
-    GridPosition3 target = origin;
-
-    const GridPosition offset = directionOffset(direction);
-    target.x += offset.x;
-    target.y += offset.y;
-
-    return target;
-}
-
-std::optional<GridPosition3> Application::playerLadderClimbTarget(MoveDirection direction) const
-{
-    const GridPosition3 flatTarget = movementTarget(direction);
-    if (!level_.inBounds(flatTarget)) {
-        return std::nullopt;
-    }
-
-    if (!level_.inBounds(playerCell_)) {
-        return std::nullopt;
-    }
-
-    const TileType currentTile = level_.tileAt(
-        static_cast<uint32_t>(playerCell_.x),
-        static_cast<uint32_t>(playerCell_.y),
-        static_cast<uint32_t>(playerCell_.z));
-    if (currentTile == TileType::Ladder) {
-        return ladderClimbTarget(playerCell_, flatTarget);
-    }
-
-    return std::nullopt;
-}
-
-std::optional<GridPosition3> Application::ladderClimbTarget(GridPosition3 ladderCell, GridPosition3 groundCell) const
-{
-    if (ladderCell.z != groundCell.z ||
-        !level_.inBounds(ladderCell) ||
-        !level_.inBounds(groundCell)) {
-        return std::nullopt;
-    }
-
-    const TileType ladderTile = level_.tileAt(
-        static_cast<uint32_t>(ladderCell.x),
-        static_cast<uint32_t>(ladderCell.y),
-        static_cast<uint32_t>(ladderCell.z));
-    const TileType groundTile = level_.tileAt(
-        static_cast<uint32_t>(groundCell.x),
-        static_cast<uint32_t>(groundCell.y),
-        static_cast<uint32_t>(groundCell.z));
-    if (ladderTile != TileType::Ladder || groundTile != TileType::Ground) {
-        return std::nullopt;
-    }
-
-    const GridPosition3 topCell {
-        groundCell.x,
-        groundCell.y,
-        groundCell.z + 1,
-    };
-    if (!staticCellAllowsEntity(topCell)) {
-        return std::nullopt;
-    }
-    if (rockAt(topCell) != nullptr) {
-        return std::nullopt;
-    }
-
-    return topCell;
-}
-
-std::optional<MoveDirection> Application::conveyorDirectionAt(GridPosition3 position) const
-{
-    if (!level_.inBounds(position)) {
-        return std::nullopt;
-    }
-
-    return conveyorDirectionForTile(level_.tileAt(
-        static_cast<uint32_t>(position.x),
-        static_cast<uint32_t>(position.y),
-        static_cast<uint32_t>(position.z)));
-}
-
-Application::Rock* Application::rockAt(GridPosition3 position)
-{
-    const auto rock = std::ranges::find_if(rocks_, [position](const Rock& candidate) {
-        return !candidate.fallen && candidate.cell == position;
-    });
-
-    return rock != rocks_.end() ? &*rock : nullptr;
-}
-
-const Application::Rock* Application::rockAt(GridPosition3 position) const
-{
-    const auto rock = std::ranges::find_if(rocks_, [position](const Rock& candidate) {
-        return !candidate.fallen && candidate.cell == position;
-    });
-
-    return rock != rocks_.end() ? &*rock : nullptr;
-}
-
-const Application::Rock* Application::fallenRockAt(GridPosition3 position) const
-{
-    const auto rock = std::ranges::find_if(rocks_, [position](const Rock& candidate) {
-        return candidate.fallen && candidate.cell == position;
-    });
-
-    return rock != rocks_.end() ? &*rock : nullptr;
-}
-
-std::optional<TileType> Application::fallenTileAt(GridPosition3 position) const
-{
-    if (const Rock* rock = fallenRockAt(position)) {
-        return rock->type;
-    }
-
-    return std::nullopt;
-}
-
-std::optional<TileType> Application::fallenTileAt(const MoveRecord& record, GridPosition3 position) const
-{
-    for (size_t i = 0; i < record.rocks.size() && i < rocks_.size(); ++i) {
-        if (record.rocks[i].fallen && record.rocks[i].cell == position) {
-            return rocks_[i].type;
-        }
-    }
-
-    return std::nullopt;
-}
-
-const Application::MovableRecord* Application::movableRecordAt(const MoveRecord& record, GridPosition3 position) const
-{
-    const auto rock = std::ranges::find_if(record.rocks, [position](const MovableRecord& candidate) {
-        return !candidate.fallen && candidate.cell == position;
-    });
-
-    return rock != record.rocks.end() ? &*rock : nullptr;
-}
-
-const Application::MovableRecord* Application::fallenMovableRecordAt(const MoveRecord& record, GridPosition3 position) const
-{
-    const auto rock = std::ranges::find_if(record.rocks, [position](const MovableRecord& candidate) {
-        return candidate.fallen && candidate.cell == position;
-    });
-
-    return rock != record.rocks.end() ? &*rock : nullptr;
-}
-
-bool Application::isUnfilledWater(GridPosition3 position) const
-{
-    if (!level_.inBounds(position)) {
-        return false;
-    }
-
-    return level_.supportingTileAt(position) == TileType::Water &&
-        fallenRockAt(position) == nullptr &&
-        !(playerDead_ && playerCell_ == position);
-}
-
-bool Application::isUnfilledWater(GridPosition3 position, const MoveRecord& record) const
-{
-    if (!level_.inBounds(position)) {
-        return false;
-    }
-
-    return level_.supportingTileAt(position) == TileType::Water &&
-        fallenMovableRecordAt(record, position) == nullptr &&
-        !(record.playerDead && record.player == position);
-}
-
-bool Application::isIceFloor(GridPosition3 position, const MoveRecord& record) const
-{
-    if (!level_.inBounds(position)) {
-        return false;
-    }
-
-    if (level_.tileAt(
-            static_cast<uint32_t>(position.x),
-            static_cast<uint32_t>(position.y),
-            static_cast<uint32_t>(position.z)) == TileType::Ice) {
-        return true;
-    }
-
-    return fallenTileAt(record, position) == TileType::Ice;
-}
-
-bool Application::isPlayerWalkable(GridPosition3 position) const
-{
-    return staticCellAllowsEntity(position);
-}
-
-bool Application::isPlayerWalkable(GridPosition3 position, const MoveRecord& record) const
-{
-    if (movableRecordAt(record, position) != nullptr) {
-        return false;
-    }
-
-    return staticCellAllowsEntity(position);
-}
-
-bool Application::canMoveRock(GridPosition3 position, MoveDirection direction) const
-{
-    const GridPosition3 target = movementTarget(position, direction);
-    if (rockAt(target) != nullptr) {
-        return false;
-    }
-
-    return staticCellAllowsEntity(target);
-}
-
-bool Application::canMovableOccupy(GridPosition3 position, const MoveRecord& record, size_t movableIndex) const
-{
-    if (!staticCellAllowsEntity(position)) {
-        return false;
-    }
-
-    for (size_t i = 0; i < record.rocks.size(); ++i) {
-        if (i != movableIndex && !record.rocks[i].fallen && record.rocks[i].cell == position) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-bool Application::staticCellAllowsEntity(GridPosition3 position) const
-{
-    if (position.x < 0 ||
-        position.y < 0 ||
-        position.z < 0 ||
-        position.x >= static_cast<int>(level_.width()) ||
-        position.y >= static_cast<int>(level_.height()) ||
-        position.z > static_cast<int>(level_.depth())) {
-        return false;
-    }
-    if (position.z == static_cast<int>(level_.depth())) {
-        return true;
-    }
-
-    return tileTypeAllowsEntity(level_.tileAt(
-        static_cast<uint32_t>(position.x),
-        static_cast<uint32_t>(position.y),
-        static_cast<uint32_t>(position.z)));
-}
-
-Application::FallResult Application::playerFallTarget(GridPosition3 position, const MoveRecord& record) const
-{
-    GridPosition3 current = position;
-    while (current.z > 0) {
-        const GridPosition3 below { current.x, current.y, current.z - 1 };
-        const TileType support = level_.tileAt(
-            static_cast<uint32_t>(below.x),
-            static_cast<uint32_t>(below.y),
-            static_cast<uint32_t>(below.z));
-
-        if (tileTypeIsSolidBlock(support) ||
-            movableRecordAt(record, below) != nullptr ||
-            fallenMovableRecordAt(record, below) != nullptr) {
-            return { .cell = current, .fallen = false };
-        }
-        if (support == TileType::Water) {
-            return {
-                .cell = current,
-                .fallen = isUnfilledWater(current, record),
-            };
-        }
-        if (!staticCellAllowsEntity(below)) {
-            return { .cell = current, .fallen = false };
-        }
-
-        current = below;
-    }
-
-    return { .cell = current, .fallen = false };
-}
-
-Application::FallResult Application::movableFallTarget(
-    size_t movableIndex,
-    GridPosition3 position,
-    const MoveRecord& record) const
-{
-    GridPosition3 current = position;
-    while (current.z > 0) {
-        const GridPosition3 below { current.x, current.y, current.z - 1 };
-        const TileType support = level_.tileAt(
-            static_cast<uint32_t>(below.x),
-            static_cast<uint32_t>(below.y),
-            static_cast<uint32_t>(below.z));
-
-        bool movableBelow = false;
-        for (size_t i = 0; i < record.rocks.size(); ++i) {
-            if (i != movableIndex && record.rocks[i].cell == below) {
-                movableBelow = true;
-                break;
-            }
-        }
-        if (tileTypeIsSolidBlock(support) ||
-            movableBelow ||
-            (!record.playerDead && record.player == below)) {
-            return { .cell = current, .fallen = false };
-        }
-        if (support == TileType::Water) {
-            return {
-                .cell = current,
-                .fallen = isUnfilledWater(current, record),
-            };
-        }
-        if (!staticCellAllowsEntity(below)) {
-            return { .cell = current, .fallen = false };
-        }
-
-        current = below;
-    }
-
-    return { .cell = current, .fallen = false };
-}
-
-GridPosition3 Application::movableSlidingTarget(size_t movableIndex, MoveDirection direction, const MoveRecord& record) const
-{
-    if (movableIndex >= record.rocks.size() || movableIndex >= rocks_.size()) {
-        return {};
-    }
-
-    GridPosition3 current = record.rocks[movableIndex].cell;
-    const bool movableIsIce = rocks_[movableIndex].type == TileType::Ice;
-    while (movableIsIce || isIceFloor(current, record)) {
-        const GridPosition3 next = movementTarget(current, direction);
-        if (!canMovableOccupy(next, record, movableIndex)) {
-            return current;
-        }
-
-        current = next;
-        const FallResult fall = movableFallTarget(movableIndex, current, record);
-        if (fall.cell.z != current.z || fall.fallen) {
-            return fall.cell;
-        }
-    }
-
-    return current;
-}
-
-GridPosition3 Application::playerSlidingTarget(GridPosition3 position, MoveDirection direction, const MoveRecord& record) const
-{
-    GridPosition3 current = position;
-    while (isIceFloor(current, record)) {
-        const GridPosition3 next = movementTarget(current, direction);
-        if (!isPlayerWalkable(next, record)) {
-            return current;
-        }
-
-        current = next;
-        const FallResult fall = playerFallTarget(current, record);
-        if (fall.cell.z != current.z || fall.fallen) {
-            return fall.cell;
-        }
-    }
-
-    return current;
-}
-
-bool Application::allPressurePlatesActive() const
-{
-    return std::ranges::all_of(level_.pressurePlates(), [this](GridPosition3 plate) {
-        return playerCell_ == plate || rockAt(plate) != nullptr;
-    });
-}
-
-bool Application::isEndUnlocked() const
-{
-    return allPressurePlatesActive();
 }
 
 std::filesystem::path Application::screenPath(int levelIndex, int screenIndex) const
@@ -1995,11 +1540,15 @@ RenderFrameData Application::buildGameplayRenderFrame() const
     frame.levelHeight = level_.height();
     frame.levelDepth = level_.depth();
     frame.playerPosition = { playerRenderPosition_.x, playerRenderPosition_.y };
-    const bool endUnlocked = isEndUnlocked();
+    const bool endUnlocked = rules::isEndUnlocked(level_, state_);
 
     frame.tiles.reserve(static_cast<size_t>(level_.width()) * level_.height() * level_.depth());
     const bool playerMovingOutOfWater = moving_ && activeAction_.before.playerDead && !activeAction_.after.playerDead;
-    auto staticCellAt = [this, endUnlocked, playerMovingOutOfWater](uint32_t x, uint32_t y, uint32_t z) {
+    auto fallenMovableIsMoving = [this](const GameState::Movable* movable) {
+        const auto index = static_cast<size_t>(movable - state_.movables.data());
+        return index < movableVisuals_.size() && movableVisuals_[index].moving;
+    };
+    auto staticCellAt = [this, endUnlocked, playerMovingOutOfWater, fallenMovableIsMoving](uint32_t x, uint32_t y, uint32_t z) {
         const GridPosition3 position {
             static_cast<int>(x),
             static_cast<int>(y),
@@ -2011,24 +1560,24 @@ RenderFrameData Application::buildGameplayRenderFrame() const
                 position.y,
                 position.z + 1,
             };
-            if (const Rock* fallenRock = fallenRockAt(entityPosition)) {
-                if (!fallenRock->moving) {
+            if (const GameState::Movable* fallenMovable = rules::fallenMovableAt(state_, entityPosition)) {
+                if (!fallenMovableIsMoving(fallenMovable)) {
                     return StaticRenderCell { .tile = TileType::Air };
                 }
             }
         }
 
         std::optional<TileType> fallenTile;
-        if (const Rock* fallenRock = fallenRockAt(position)) {
-            if (!fallenRock->moving) {
+        if (const GameState::Movable* fallenMovable = rules::fallenMovableAt(state_, position)) {
+            if (!fallenMovableIsMoving(fallenMovable)) {
                 return StaticRenderCell {
-                    .tile = fallenRock->type,
+                    .tile = fallenMovable->type,
                     .showGrid = true,
                     .baseElevation = static_cast<float>(std::max(position.z - 1, 0)),
                     .height = 1.0f,
                 };
             }
-        } else if (playerDead_ && !playerMovingOutOfWater && position == playerCell_) {
+        } else if (state_.playerDead && !playerMovingOutOfWater && position == state_.player) {
             fallenTile = TileType::Player;
         }
 
@@ -2076,7 +1625,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             level_.height(),
             static_cast<float>(z) + 1.0f,
             [this, z](GridPosition position) {
-                return isUnfilledWater({
+                return rules::isUnfilledWater(level_, state_, {
                     position.x,
                     position.y,
                     static_cast<int>(z) + 1,
@@ -2084,7 +1633,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             });
     }
 
-    if (!playerDead_ || playerMovingOutOfWater) {
+    if (!state_.playerDead || playerMovingOutOfWater) {
         RenderFrameData::Tile playerTile {
             .position = { playerRenderPosition_.x, playerRenderPosition_.y },
             .color = { 1.0f, 1.0f, 1.0f, 1.0f },
@@ -2100,32 +1649,33 @@ RenderFrameData Application::buildGameplayRenderFrame() const
         frame.tiles.push_back(playerTile);
     }
 
-    for (size_t rockIndex = 0; rockIndex < rocks_.size(); ++rockIndex) {
-        const Rock& rock = rocks_[rockIndex];
+    for (size_t movableIndex = 0; movableIndex < state_.movables.size() && movableIndex < movableVisuals_.size(); ++movableIndex) {
+        const GameState::Movable& movable = state_.movables[movableIndex];
+        const MovableVisual& visual = movableVisuals_[movableIndex];
         const bool movingOutOfWater = moving_ &&
-            rockIndex < activeAction_.before.rocks.size() &&
-            rockIndex < activeAction_.after.rocks.size() &&
-            activeAction_.before.rocks[rockIndex].fallen &&
-            !activeAction_.after.rocks[rockIndex].fallen;
-        if (rock.fallen && !rock.moving && !movingOutOfWater) {
+            movableIndex < activeAction_.before.movables.size() &&
+            movableIndex < activeAction_.after.movables.size() &&
+            activeAction_.before.movables[movableIndex].fallen &&
+            !activeAction_.after.movables[movableIndex].fallen;
+        if (movable.fallen && !visual.moving && !movingOutOfWater) {
             continue;
         }
 
-        Vec4 color = tileColor(rock.type);
-        if (rock.type == TileType::Ice) {
+        Vec4 color = tileColor(movable.type);
+        if (movable.type == TileType::Ice) {
             color.w = config::iceTintAlpha;
         }
 
-        RenderFrameData::Tile rockTile {
-            .position = { rock.renderPosition.x, rock.renderPosition.y },
+        RenderFrameData::Tile movableTile {
+            .position = { visual.renderPosition.x, visual.renderPosition.y },
             .color = color,
-            .baseElevation = rock.renderPosition.z,
+            .baseElevation = visual.renderPosition.z,
             .height = 1.0f,
-            .blurBehind = rock.type == TileType::Ice,
-            .model = renderModelForTile(rock.type),
+            .blurBehind = movable.type == TileType::Ice,
+            .model = renderModelForTile(movable.type),
         };
-        applyTileScale(rockTile, tileTypeToScale(rock.type));
-        frame.tiles.push_back(rockTile);
+        applyTileScale(movableTile, tileTypeToScale(movable.type));
+        frame.tiles.push_back(movableTile);
     }
 
     const float beltScrollOffset = conveyorBeltScrollOffset();
@@ -2261,8 +1811,8 @@ RenderFrameData Application::buildEditorRenderFrame() const
             .model = renderModelForTile(tile),
             .animation = tile == TileType::Player ? RenderAnimation::RogueIdle : RenderAnimation::None,
             .animationTimeSeconds = tile == TileType::Player ? playerAnimationTimeSeconds_ : 0.0f,
-            .modelRotationQuarterTurns = conveyorDirectionForTile(tile)
-                ? facingQuarterTurns(*conveyorDirectionForTile(tile))
+            .modelRotationQuarterTurns = rules::conveyorDirectionForTile(tile)
+                ? facingQuarterTurns(*rules::conveyorDirectionForTile(tile))
                 : 0,
         };
         applyTileScale(renderTile, tileTypeToScale(tile));

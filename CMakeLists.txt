@@ -135,6 +135,7 @@ add_executable(sokoban
     src/engine/Input.cpp
     src/engine/Level.cpp
     src/engine/LevelEditor.cpp
+    src/engine/Rules.cpp
     src/engine/TileTypes.cpp
     src/engine/Window.cpp
     src/engine/render/VulkanRenderer.cpp
@@ -178,4 +179,22 @@ if(MSVC)
     target_compile_options(sokoban PRIVATE /W4 /permissive-)
 else()
     target_compile_options(sokoban PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+option(SOKOBAN_BUILD_TESTS "Build headless rules tests" ON)
+if(SOKOBAN_BUILD_TESTS)
+    enable_testing()
+    add_executable(sokoban_rules_tests
+        tests/RulesTests.cpp
+        src/engine/Level.cpp
+        src/engine/Rules.cpp
+        src/engine/TileTypes.cpp
+    )
+    target_include_directories(sokoban_rules_tests PRIVATE src)
+    if(MSVC)
+        target_compile_options(sokoban_rules_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_rules_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME rules COMMAND sokoban_rules_tests)
 endif()

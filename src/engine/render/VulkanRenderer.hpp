@@ -325,7 +325,11 @@ private:
     [[nodiscard]] VkPresentModeKHR choosePresentMode(const std::vector<VkPresentModeKHR>& modes) const;
     [[nodiscard]] VkExtent2D chooseSwapchainExtent(const VkSurfaceCapabilitiesKHR& capabilities) const;
     [[nodiscard]] VkShaderModule createShaderModule(const std::filesystem::path& path) const;
-    [[nodiscard]] VkPipeline createGraphicsPipeline(VkShaderModule vertexShader, VkShaderModule fragmentShader) const;
+    [[nodiscard]] VkPipeline createGraphicsPipeline(
+        VkShaderModule vertexShader,
+        VkShaderModule fragmentShader,
+        VkSampleCountFlagBits sampleCount,
+        VkFormat depthAttachmentFormat) const;
     [[nodiscard]] VkPipeline createModelGraphicsPipeline(VkShaderModule vertexShader, VkShaderModule fragmentShader) const;
     [[nodiscard]] std::array<VkPipeline, 2> createGraphicsPipelineLibraries(VkShaderModule vertexShader, VkShaderModule fragmentShader) const;
     [[nodiscard]] VkSampleCountFlagBits sampleCountForMode(AntiAliasingMode mode) const;
@@ -369,6 +373,7 @@ private:
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
     std::array<VkPipeline, 2> pipelineLibraries_ {};
     VkPipeline pipeline_ = VK_NULL_HANDLE;
+    VkPipeline uiPipeline_ = VK_NULL_HANDLE;
     VkPipeline shadowPipeline_ = VK_NULL_HANDLE;
     VkPipeline modelPipeline_ = VK_NULL_HANDLE;
     VkPipeline modelShadowPipeline_ = VK_NULL_HANDLE;

@@ -40,12 +40,20 @@ cmake --build build --config Debug
 .\build\Debug\sokoban.exe
 ```
 
+Headless rules tests (no SDL/Vulkan needed at runtime; built by default via `SOKOBAN_BUILD_TESTS`):
+
+```powershell
+cmake --build build --config Debug --target sokoban_rules_tests
+.\build\Debug\sokoban_rules_tests.exe
+```
+
 Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine controls and the level editor. Release builds may not have the editor/debug UI available.
 
 ## Important Source Map
 
 - `src/main.cpp`: process entry point.
-- `src/engine/Application.*`: main loop, input handling, gameplay rules, level loading, editor integration, frame construction for rendering.
+- `src/engine/Application.*`: main loop, input handling, animation/presentation, level loading, editor integration, frame construction for rendering. Gameplay state lives in a single `GameState state_` member; per-movable animation data lives in a parallel `movableVisuals_` vector.
+- `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags) plus pure functions in `sokoban::rules` — `tryMove` applies one move (push, ladder climb, ice slide, fall, water) and returns the resulting state; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
 - `src/engine/Level.*`: level file parsing, serialization, layered grid storage, walkability/support rules, player/movable extraction.
 - `src/engine/TileTypes.*`: tile enum, character mapping, colors, helper predicates such as `tileTypeAllowsEntity`.
 - `src/engine/LevelEditor.*`: ImGui level editor, document state, painting/deleting, file browser, draft play mode, deleted-level handling.
@@ -176,7 +184,7 @@ Conveyors:
 - `^`, `v`, `>`, `<` represent conveyor directions.
 - Conveyors use the KayKit Platformer `conveyor_4x4x1_blue` GLTF asset.
 - Conveyor rate is adjustable in the Debug UI; default is `config::conveyorTilesPerSecond = 2.0f`.
-- Conveyor movement does not push rocks.
+- Conveyors move every entity standing on them: player and movables (rocks/ice) advance one tile per tick, simultaneously, via `rules::applyConveyorStep`. Conveyed movables get the usual slide/fall/water treatment. Conveyors never push one entity into another; blocked entities stay put.
 - Conveyor-started movement uses the conveyor interval as animation duration, so chained conveyor motion appears continuous.
 - Conveyor rendering uses primitive material texture indices from the GLTF so the blue body, dark belt, and white arrows show correctly.
 
@@ -318,8 +326,9 @@ Major recent additions and fixes:
 - Added conveyor tiles `^`, `v`, `>`, `<`.
   - Uses Platformer Pack conveyor asset.
   - Adds adjustable conveyor movement rate.
-  - Conveyor movement does not push rocks.
+  - Conveyors move all entities on them (player and movables) via `rules::applyConveyorStep`; they never push one entity into another.
   - Conveyor animation duration now matches the conveyor interval for continuous motion.
+  - Conveyor belt surfaces are animated by scrolling the thread texture in sync with the movement rate.
   - Fixed conveyor GLTF material rendering by carrying primitive material texture indices through the mesh pipeline.
 - Renamed asset paths in `CMakeLists.txt` from old `_FREE` folder names to the current space-containing KayKit folder names.
 
@@ -344,7 +353,8 @@ The `rg` command above should return no matches.
 
 ## Important Design Decisions
 
-- Keep gameplay grid logic in `Application`/`Level`; renderer receives a render-frame description rather than owning game rules.
+- Keep gameplay rules in the headless `Rules` module as pure functions of `(Level, GameState)`; `Application` owns input, animation, and presentation only, and the renderer receives a render-frame description rather than owning game rules.
+- When changing or adding mechanics, implement them in `Rules.cpp` and add cases to `tests/RulesTests.cpp`; the tests compile without SDL/Vulkan so they can run anywhere.
 - Store `Player`, `Rock`, and movable `Ice` as dynamic entities extracted from level data rather than static cells.
 - Use character-driven tile definitions as the single source of truth for level parsing/editor palette.
 - Use layered `.scr` text files instead of a binary or JSON format for now.
@@ -356,9 +366,9 @@ The `rg` command above should return no matches.
 
 High-value gameplay/editor work:
 
-- Add tests for level parsing, ladder validation, movement, conveyors, undo, falling, water, and editor document operations.
+- Extend `tests/RulesTests.cpp` (movement/push/slide/fall/water/ladder/conveyor basics exist) with level parsing, ladder validation, undo round-trips, and editor document operations.
 - Add more Sokoban mechanics only after hardening interactions among existing ones.
-- Improve conveyor interactions with rocks if conveyors should eventually move blocks too.
+- Revisit conveyor edge cases if needed (e.g. conveyor loops/cycles do not rotate; entities in a full cycle stay put).
 - Revisit the exact semantics of water/fallen entities and ice sliding edge cases.
 - Add better level progression metadata, names, and completion tracking.
 
@@ -379,8 +389,7 @@ UI:
 
 Engineering:
 
-- Split `Application.cpp`; it currently owns too many gameplay, rendering-layout, editor, and UI responsibilities.
-- Create focused tests and maybe a headless rules engine path.
+- Gameplay rules now live in the headless `Rules` module with tests; `Application.cpp` still owns rendering-layout, editor, and UI responsibilities that could be split further.
 - Add save format/versioning if level files evolve.
 - Review asset licensing/readme files before distribution.
 

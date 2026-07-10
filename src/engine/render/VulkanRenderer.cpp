@@ -1602,7 +1602,10 @@ void VulkanRenderer::createPipeline()
     VkShaderModule modelVertexShader = createShaderModule(assetRoot_ / "shaders/model.vert.glsl.spv");
     VkShaderModule modelShadowVertexShader = createShaderModule(assetRoot_ / "shaders/model_shadow.vert.glsl.spv");
 
-    pipeline_ = createGraphicsPipeline(vertexShader, fragmentShader);
+    pipeline_ = createGraphicsPipeline(vertexShader, fragmentShader, activeSampleCount_, depthFormat_);
+    // The in-game UI renders directly to the single-sampled swapchain image
+    // with no depth attachment, so it needs its own pipeline variant.
+    uiPipeline_ = createGraphicsPipeline(vertexShader, fragmentShader, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_UNDEFINED);
     modelPipeline_ = createModelGraphicsPipeline(modelVertexShader, fragmentShader);
     createShadowPipeline(shadowVertexShader);
     createModelShadowPipeline(modelShadowVertexShader);
@@ -1797,6 +1800,10 @@ void VulkanRenderer::destroyPipeline()
     if (pipeline_) {
         vkDestroyPipeline(device_, pipeline_, nullptr);
         pipeline_ = VK_NULL_HANDLE;
+    }
+    if (uiPipeline_) {
+        vkDestroyPipeline(device_, uiPipeline_, nullptr);
+        uiPipeline_ = VK_NULL_HANDLE;
     }
     if (modelPipeline_) {
         vkDestroyPipeline(device_, modelPipeline_, nullptr);
@@ -2693,7 +2700,7 @@ void VulkanRenderer::recordUiRendering(VkCommandBuffer commandBuffer, VkImageVie
         .extent = swapchainExtent_,
     };
 
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, uiPipeline_);
     ++pendingStats_.pipelineBinds;
     if (descriptorSet_) {
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr);
@@ -3607,7 +3614,11 @@ VkShaderModule VulkanRenderer::createShaderModule(const std::filesystem::path& p
     return shaderModule;
 }
 
-VkPipeline VulkanRenderer::createGraphicsPipeline(VkShaderModule vertexShader, VkShaderModule fragmentShader) const
+VkPipeline VulkanRenderer::createGraphicsPipeline(
+    VkShaderModule vertexShader,
+    VkShaderModule fragmentShader,
+    VkSampleCountFlagBits sampleCount,
+    VkFormat depthAttachmentFormat) const
 {
     std::array<VkPipelineShaderStageCreateInfo, 2> stages {
         VkPipelineShaderStageCreateInfo {
@@ -3645,7 +3656,7 @@ VkPipeline VulkanRenderer::createGraphicsPipeline(VkShaderModule vertexShader, V
     };
     VkPipelineMultisampleStateCreateInfo multisampling {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-        .rasterizationSamples = activeSampleCount_,
+        .rasterizationSamples = sampleCount,
     };
     VkPipelineDepthStencilStateCreateInfo depthStencil {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -3693,7 +3704,7 @@ VkPipeline VulkanRenderer::createGraphicsPipeline(VkShaderModule vertexShader, V
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
         .colorAttachmentCount = 1,
         .pColorAttachmentFormats = &swapchainFormat_,
-        .depthAttachmentFormat = depthFormat_,
+        .depthAttachmentFormat = depthAttachmentFormat,
     };
     VkGraphicsPipelineCreateInfo pipelineInfo {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,

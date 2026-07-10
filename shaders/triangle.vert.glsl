@@ -4,6 +4,7 @@ layout(location = 0) out vec4 outShadowPosition;
 layout(location = 1) out float outFaceCoordU;
 layout(location = 2) out float outFaceCoordV;
 layout(location = 3) out vec3 outNormal;
+layout(location = 4) out float outTextureIndex;
 layout(push_constant) uniform PushConstants
 {
     vec4 vertices[4];
@@ -34,4 +35,8 @@ void main()
     outFaceCoordU = faceCoord.x;
     outFaceCoordV = faceCoord.y;
     outNormal = pc.normalAndAmbientRed.xyz;
+    // Tile faces never use per-vertex texture indices (textureOptions.x is 0
+    // on this path), but the shared fragment shader consumes location 4, so
+    // the interface must still provide it.
+    outTextureIndex = 0.0;
 }
