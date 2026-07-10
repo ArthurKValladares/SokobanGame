@@ -938,7 +938,7 @@ void Application::updateEditorPainting()
     if (const std::optional<GridPosition3> clicked = renderer_.pickIsoGridCell(editorFrame, mousePixels)) {
         GridPosition3 target = *clicked;
         const bool deleting = input_.keyDown(SDL_SCANCODE_D);
-        auto topmostOccupiedLayer = [&](GridPosition3 position) {
+        auto topmostOccupiedLayer = [&](GridPosition3 position) -> std::optional<int> {
             const Level::LayerRows& layers = levelEditor_.documentLayers();
             for (int z = static_cast<int>(layers.size()) - 1; z >= 0; --z) {
                 if (position.y < 0 ||
@@ -954,16 +954,18 @@ void Application::updateEditorPainting()
                     return z;
                 }
             }
-            return position.z;
+            return std::nullopt;
         };
 
         if (levelEditor_.layerLocked()) {
             target.z = static_cast<int>(levelEditor_.activeLayer());
         } else if (deleting) {
-            target.z = topmostOccupiedLayer(target);
+            target.z = topmostOccupiedLayer(target).value_or(target.z);
         } else if (!input_.keyDown(SDL_SCANCODE_R)) {
-            target.z = topmostOccupiedLayer(target);
-            ++target.z;
+            // Add above the topmost occupied layer; fully empty columns paint
+            // the bottom layer itself so they never become unreachable.
+            const std::optional<int> occupied = topmostOccupiedLayer(target);
+            target.z = occupied ? *occupied + 1 : 0;
         }
 
         editorHoverCell_ = target;
@@ -1845,6 +1847,28 @@ RenderFrameData Application::buildEditorRenderFrame() const
                         .pickOnly = true,
                     });
                     continue;
+                }
+                if (!layerLocked && z == 0 && tile == TileType::Air) {
+                    // Columns that are Air on every layer render nothing, which
+                    // would leave the mouse picker with nothing to hit and make
+                    // the column unpaintable. Emit a pick-only ground cell.
+                    bool columnEmpty = true;
+                    for (uint32_t layer = 1; layer < layerCount && columnEmpty; ++layer) {
+                        columnEmpty = documentTileAt(x, y, layer) == TileType::Air;
+                    }
+                    if (columnEmpty) {
+                        frame.tiles.push_back({
+                            .cell = {
+                                static_cast<int>(x),
+                                static_cast<int>(y),
+                                0,
+                            },
+                            .position = { static_cast<float>(x), static_cast<float>(y) },
+                            .baseElevation = 0.0f,
+                            .pickOnly = true,
+                        });
+                        continue;
+                    }
                 }
                 appendEditorTile(x, y, z, tile, false);
             }
