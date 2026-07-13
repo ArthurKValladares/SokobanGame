@@ -1333,7 +1333,10 @@ MeshData skinGltfMesh(const SkinnedMeshData& mesh, const GltfAnimationClip& anim
     }
 
     if (animation.durationSeconds > 0.000001f) {
-        timeSeconds = std::fmod(std::max(timeSeconds, 0.0f), animation.durationSeconds);
+        timeSeconds = std::fmod(timeSeconds, animation.durationSeconds);
+        if (timeSeconds < 0.0f) {
+            timeSeconds += animation.durationSeconds;
+        }
     } else {
         timeSeconds = 0.0f;
     }

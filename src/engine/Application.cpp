@@ -620,7 +620,7 @@ void Application::run()
 
 void Application::update(float dt)
 {
-    playerAnimationTimeSeconds_ += dt;
+    playerAnimationTimeSeconds_ += (moving_ && activeAction_.reversed) ? -dt : dt;
 
     if (quitConfirmationOpen_) {
         return;
@@ -1288,7 +1288,9 @@ bool Application::tryStartUndoMove()
     activeAction_ = invertActionRecord(moveHistory_[*undoCursor_]);
     activeAction_.durationSeconds = stepDurationSeconds_;
     autoMotionPaused_ = true;
-    if (const auto direction = movementDirection(activeAction_.before.player, activeAction_.after.player)) {
+    // Face the way the original step went, so rewinding a push keeps the
+    // player turned toward the block while sliding backwards.
+    if (const auto direction = movementDirection(activeAction_.after.player, activeAction_.before.player)) {
         playerFacingQuarterTurns_ = facingQuarterTurns(*direction);
     }
     moveElapsed_ = 0.0f;
@@ -1431,6 +1433,8 @@ Application::ActionRecord Application::invertActionRecord(const ActionRecord& re
     return {
         .before = record.after,
         .after = record.before,
+        .playerPushing = record.playerPushing,
+        .reversed = true,
     };
 }
 
@@ -1616,7 +1620,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             .height = 1.0f,
             .showGrid = false,
             .model = RenderModel::Rogue,
-            .animation = moving_
+            .animation = moving_ && !(activeAction_.before.player == activeAction_.after.player)
                 ? (activeAction_.playerPushing ? RenderAnimation::RoguePush : RenderAnimation::RogueMovement)
                 : RenderAnimation::RogueIdle,
             .animationTimeSeconds = playerAnimationTimeSeconds_,

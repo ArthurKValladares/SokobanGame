@@ -60,6 +60,9 @@ private:
         GameState after;
         float durationSeconds = config::stepDurationSeconds;
         bool playerPushing = false;
+        // Undo transitions animate the original step backwards: original
+        // facing and animation clip are kept, and the clip plays in reverse.
+        bool reversed = false;
     };
 
     void loadCurrentScreen();
