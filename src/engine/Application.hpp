@@ -29,9 +29,9 @@ public:
     void run();
 
 private:
-    // Presentation-only animation state for one movable; the authoritative
-    // gameplay state lives in state_.movables at the same index.
-    struct MovableVisual {
+    // Presentation-only motion state for one entity; the authoritative
+    // gameplay state lives in state_. Each entity animates independently.
+    struct EntityVisual {
         Vec3 renderPosition {};
         Vec3 animationStart {};
         Vec3 animationEnd {};
@@ -39,6 +39,17 @@ private:
         float animationDuration = 0.0f;
         float animationSecondsPerTile = 0.0f;
         bool moving = false;
+    };
+
+    // The player's visual state: motion like any entity, plus the skeletal
+    // clip to play while moving, a per-entity clip clock, playback direction
+    // (negative while rewinding), and facing.
+    struct PlayerVisual {
+        EntityVisual motion;
+        RenderAnimation movingClip = RenderAnimation::RogueMovement;
+        float clipTimeSeconds = 0.0f;
+        float clipPlaybackRate = 1.0f;
+        uint32_t facingQuarterTurns = 0;
     };
 
     enum class MoveCommandType {
@@ -76,8 +87,8 @@ private:
     void updateEditorPainting();
     void queuePressedCommands();
     void advancePlayerMovement(float dt);
-    void advanceMovableAnimations(float dt);
-    void startMovableAnimations(const ActionRecord& action);
+    void advanceEntityAnimations(float dt);
+    void startActionAnimations(const ActionRecord& action);
     [[nodiscard]] bool completeActiveAction();
     [[nodiscard]] float activeActionDuration() const;
     [[nodiscard]] bool tryStartNextMove();
@@ -112,9 +123,10 @@ private:
     int currentScreen_ = 0;
     InputState input_;
     FrameTimer frameTimer_;
-    Vec3 playerRenderPosition_ {};
-    uint32_t playerFacingQuarterTurns_ = 0;
-    float playerAnimationTimeSeconds_ = 0.0f;
+    PlayerVisual playerVisual_;
+    // Presentation clock for level geometry (conveyor belt scrolling, editor
+    // previews); runs backwards while an undo transition is animating.
+    float worldAnimationTimeSeconds_ = 0.0f;
     float sunAzimuthDegrees_ = config::sunAzimuthDegrees;
     float sunTiltDegrees_ = config::sunTiltDegrees;
     Vec3 sunColor_ { config::sunColor };
@@ -147,7 +159,7 @@ private:
         config::conveyorTileScale,
         config::conveyorTileScale,
     };
-    std::vector<MovableVisual> movableVisuals_;
+    std::vector<EntityVisual> movableVisuals_;
     std::deque<MoveCommand> pendingCommands_;
     std::vector<ActionRecord> moveHistory_;
     std::optional<size_t> undoCursor_;

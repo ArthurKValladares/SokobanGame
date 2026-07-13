@@ -620,7 +620,8 @@ void Application::run()
 
 void Application::update(float dt)
 {
-    playerAnimationTimeSeconds_ += (moving_ && activeAction_.reversed) ? -dt : dt;
+    worldAnimationTimeSeconds_ += (moving_ && activeAction_.reversed) ? -dt : dt;
+    playerVisual_.clipTimeSeconds += dt * playerVisual_.clipPlaybackRate;
 
     if (quitConfirmationOpen_) {
         return;
@@ -1000,8 +1001,11 @@ void Application::applyLevel(Level level)
 {
     level_ = std::move(level);
     state_ = rules::initialState(level_);
-    playerRenderPosition_ = toVec3(state_.player);
-    playerFacingQuarterTurns_ = facingQuarterTurns(MoveDirection::Down);
+    playerVisual_ = {};
+    playerVisual_.motion.renderPosition = toVec3(state_.player);
+    playerVisual_.motion.animationStart = playerVisual_.motion.renderPosition;
+    playerVisual_.motion.animationEnd = playerVisual_.motion.renderPosition;
+    playerVisual_.facingQuarterTurns = facingQuarterTurns(MoveDirection::Down);
     movableVisuals_.clear();
     movableVisuals_.reserve(state_.movables.size());
     for (const GameState::Movable& movable : state_.movables) {
@@ -1056,7 +1060,7 @@ void Application::queuePressedCommands()
 
 void Application::advancePlayerMovement(float dt)
 {
-    advanceMovableAnimations(dt);
+    advanceEntityAnimations(dt);
 
     float remainingTime = dt;
 
@@ -1078,15 +1082,6 @@ void Application::advancePlayerMovement(float dt)
         remainingTime -= step;
         moveElapsed_ += step;
 
-        const Vec3 playerFrom = entityRenderTarget(activeAction_.before.player, activeAction_.before.playerDead);
-        const Vec3 playerTo = entityRenderTarget(activeAction_.after.player, activeAction_.after.playerDead);
-        const float playerDistance = gridDistance(playerFrom, playerTo);
-        playerRenderPosition_ = interpolateGridMotion(
-            playerFrom,
-            playerTo,
-            moveElapsed_,
-            playerDistance > 0.0001f ? duration / playerDistance : 0.0f);
-
         if (moveElapsed_ >= duration) {
             if (completeActiveAction()) {
                 return;
@@ -1095,18 +1090,18 @@ void Application::advancePlayerMovement(float dt)
     }
 }
 
-void Application::advanceMovableAnimations(float dt)
+void Application::advanceEntityAnimations(float dt)
 {
-    for (MovableVisual& visual : movableVisuals_) {
+    auto advance = [dt](EntityVisual& visual) {
         if (!visual.moving) {
-            continue;
+            return;
         }
 
         visual.animationElapsed = std::min(visual.animationElapsed + dt, visual.animationDuration);
         if (visual.animationDuration <= 0.0f || visual.animationElapsed >= visual.animationDuration) {
             visual.renderPosition = visual.animationEnd;
             visual.moving = false;
-            continue;
+            return;
         }
 
         visual.renderPosition = interpolateGridMotion(
@@ -1114,15 +1109,17 @@ void Application::advanceMovableAnimations(float dt)
             visual.animationEnd,
             visual.animationElapsed,
             visual.animationSecondsPerTile);
+    };
+
+    advance(playerVisual_.motion);
+    for (EntityVisual& visual : movableVisuals_) {
+        advance(visual);
     }
 }
 
-void Application::startMovableAnimations(const ActionRecord& action)
+void Application::startActionAnimations(const ActionRecord& action)
 {
-    const size_t movableCount = std::min(action.before.movables.size(), action.after.movables.size());
-    for (size_t i = 0; i < movableCount && i < movableVisuals_.size(); ++i) {
-        MovableVisual& visual = movableVisuals_[i];
-        const Vec3 target = entityRenderTarget(action.after.movables[i].cell, action.after.movables[i].fallen);
+    auto beginMotion = [&action](EntityVisual& visual, Vec3 target) {
         if (gridDistance(visual.renderPosition, target) <= 0.0001f) {
             visual.renderPosition = target;
             visual.animationStart = target;
@@ -1131,7 +1128,7 @@ void Application::startMovableAnimations(const ActionRecord& action)
             visual.animationDuration = 0.0f;
             visual.animationSecondsPerTile = 0.0f;
             visual.moving = false;
-            continue;
+            return;
         }
 
         visual.animationStart = visual.renderPosition;
@@ -1141,6 +1138,23 @@ void Application::startMovableAnimations(const ActionRecord& action)
         visual.animationDuration = action.durationSeconds;
         visual.animationSecondsPerTile = distance > 0.0001f ? action.durationSeconds / distance : 0.0f;
         visual.moving = true;
+    };
+
+    beginMotion(playerVisual_.motion, entityRenderTarget(action.after.player, action.after.playerDead));
+    if (playerVisual_.motion.moving) {
+        playerVisual_.movingClip = action.playerPushing
+            ? RenderAnimation::RoguePush
+            : RenderAnimation::RogueMovement;
+        playerVisual_.clipPlaybackRate = action.reversed ? -1.0f : 1.0f;
+    } else {
+        playerVisual_.clipPlaybackRate = 1.0f;
+    }
+
+    const size_t movableCount = std::min(action.before.movables.size(), action.after.movables.size());
+    for (size_t i = 0; i < movableCount && i < movableVisuals_.size(); ++i) {
+        beginMotion(
+            movableVisuals_[i],
+            entityRenderTarget(action.after.movables[i].cell, action.after.movables[i].fallen));
     }
 }
 
@@ -1150,6 +1164,7 @@ bool Application::completeActiveAction()
 
     moveHistory_.push_back(activeAction_);
     moving_ = false;
+    playerVisual_.clipPlaybackRate = 1.0f;
     moveElapsed_ = 0.0f;
 
     if (rules::isAtUnlockedEnd(level_, state_)) {
@@ -1255,16 +1270,16 @@ bool Application::tryStartWorldStep(std::optional<MoveDirection> playerInput)
     }
 
     if (playerInput) {
-        playerFacingQuarterTurns_ = facingQuarterTurns(*playerInput);
+        playerVisual_.facingQuarterTurns = facingQuarterTurns(*playerInput);
         autoMotionPaused_ = false;
     } else if (const std::optional<MoveDirection> direction =
                    movementDirection(activeAction_.before.player, activeAction_.after.player)) {
-        playerFacingQuarterTurns_ = facingQuarterTurns(*direction);
+        playerVisual_.facingQuarterTurns = facingQuarterTurns(*direction);
     }
     undoCursor_.reset();
     moveElapsed_ = 0.0f;
     moving_ = true;
-    startMovableAnimations(activeAction_);
+    startActionAnimations(activeAction_);
     return true;
 }
 
@@ -1291,11 +1306,11 @@ bool Application::tryStartUndoMove()
     // Face the way the original step went, so rewinding a push keeps the
     // player turned toward the block while sliding backwards.
     if (const auto direction = movementDirection(activeAction_.after.player, activeAction_.before.player)) {
-        playerFacingQuarterTurns_ = facingQuarterTurns(*direction);
+        playerVisual_.facingQuarterTurns = facingQuarterTurns(*direction);
     }
     moveElapsed_ = 0.0f;
     moving_ = true;
-    startMovableAnimations(activeAction_);
+    startActionAnimations(activeAction_);
     return true;
 }
 
@@ -1319,7 +1334,7 @@ bool Application::tryStartRestart()
     undoCursor_.reset();
     moveElapsed_ = 0.0f;
     moving_ = true;
-    startMovableAnimations(activeAction_);
+    startActionAnimations(activeAction_);
     return true;
 }
 
@@ -1412,7 +1427,15 @@ bool Application::tryStartHeldDirection(MoveDirection direction, std::optional<M
 void Application::applyGameState(const GameState& state)
 {
     state_ = state;
-    playerRenderPosition_ = entityRenderTarget(state_.player, state_.playerDead);
+    if (!playerVisual_.motion.moving) {
+        const Vec3 target = entityRenderTarget(state_.player, state_.playerDead);
+        playerVisual_.motion.renderPosition = target;
+        playerVisual_.motion.animationStart = target;
+        playerVisual_.motion.animationEnd = target;
+        playerVisual_.motion.animationElapsed = 0.0f;
+        playerVisual_.motion.animationDuration = 0.0f;
+        playerVisual_.motion.animationSecondsPerTile = 0.0f;
+    }
 
     for (size_t i = 0; i < movableVisuals_.size() && i < state_.movables.size(); ++i) {
         if (movableVisuals_[i].moving) {
@@ -1475,7 +1498,7 @@ float Application::conveyorBeltScrollOffset() const
     // Belts move riders one tile per step and the belt texture spans one full
     // V cycle per tile, so one cycle per step keeps the surface in sync with
     // conveyed entities. Negate to flip the scroll direction if needed.
-    return std::fmod(playerAnimationTimeSeconds_ / stepDurationSeconds_, 1.0f);
+    return std::fmod(worldAnimationTimeSeconds_ / stepDurationSeconds_, 1.0f);
 }
 
 float Application::tileTypeToScale(TileType type) const
@@ -1518,7 +1541,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
     frame.levelWidth = level_.width();
     frame.levelHeight = level_.height();
     frame.levelDepth = level_.depth();
-    frame.playerPosition = { playerRenderPosition_.x, playerRenderPosition_.y };
+    frame.playerPosition = { playerVisual_.motion.renderPosition.x, playerVisual_.motion.renderPosition.y };
     const bool endUnlocked = rules::isEndUnlocked(level_, state_);
 
     frame.tiles.reserve(static_cast<size_t>(level_.width()) * level_.height() * level_.depth());
@@ -1569,7 +1592,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             fallenTile,
             surfaceEntityHeight_,
             surfaceEntityWidthDepth_,
-            playerFacingQuarterTurns_);
+            playerVisual_.facingQuarterTurns);
     };
     appendStaticTiles(frame, level_, staticCellAt, [this](TileType tile) {
         return tileTypeToScale(tile);
@@ -1614,17 +1637,15 @@ RenderFrameData Application::buildGameplayRenderFrame() const
 
     if (!state_.playerDead || playerMovingOutOfWater) {
         RenderFrameData::Tile playerTile {
-            .position = { playerRenderPosition_.x, playerRenderPosition_.y },
+            .position = { playerVisual_.motion.renderPosition.x, playerVisual_.motion.renderPosition.y },
             .color = { 1.0f, 1.0f, 1.0f, 1.0f },
-            .baseElevation = playerRenderPosition_.z,
+            .baseElevation = playerVisual_.motion.renderPosition.z,
             .height = 1.0f,
             .showGrid = false,
             .model = RenderModel::Rogue,
-            .animation = moving_ && !(activeAction_.before.player == activeAction_.after.player)
-                ? (activeAction_.playerPushing ? RenderAnimation::RoguePush : RenderAnimation::RogueMovement)
-                : RenderAnimation::RogueIdle,
-            .animationTimeSeconds = playerAnimationTimeSeconds_,
-            .modelRotationQuarterTurns = playerFacingQuarterTurns_,
+            .animation = playerVisual_.motion.moving ? playerVisual_.movingClip : RenderAnimation::RogueIdle,
+            .animationTimeSeconds = playerVisual_.clipTimeSeconds,
+            .modelRotationQuarterTurns = playerVisual_.facingQuarterTurns,
         };
         applyTileScale(playerTile, tileTypeToScale(TileType::Player));
         frame.tiles.push_back(playerTile);
@@ -1632,7 +1653,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
 
     for (size_t movableIndex = 0; movableIndex < state_.movables.size() && movableIndex < movableVisuals_.size(); ++movableIndex) {
         const GameState::Movable& movable = state_.movables[movableIndex];
-        const MovableVisual& visual = movableVisuals_[movableIndex];
+        const EntityVisual& visual = movableVisuals_[movableIndex];
         const bool movingOutOfWater = moving_ &&
             movableIndex < activeAction_.before.movables.size() &&
             movableIndex < activeAction_.after.movables.size() &&
@@ -1791,7 +1812,7 @@ RenderFrameData Application::buildEditorRenderFrame() const
             .isEditorPreview = preview,
             .model = renderModelForTile(tile),
             .animation = tile == TileType::Player ? RenderAnimation::RogueIdle : RenderAnimation::None,
-            .animationTimeSeconds = tile == TileType::Player ? playerAnimationTimeSeconds_ : 0.0f,
+            .animationTimeSeconds = tile == TileType::Player ? worldAnimationTimeSeconds_ : 0.0f,
             .modelRotationQuarterTurns = rules::conveyorDirectionForTile(tile)
                 ? facingQuarterTurns(*rules::conveyorDirectionForTile(tile))
                 : 0,
