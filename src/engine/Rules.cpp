@@ -298,44 +298,28 @@ bool hasPendingMotion(const Level& level, const GameState& state)
     });
 }
 
-GameState step(const Level& level, const GameState& state, std::optional<MoveDirection> playerInput)
+GameState step(
+    const Level& level,
+    const GameState& state,
+    std::optional<MoveDirection> playerInput,
+    const StepRates& rates)
 {
     GameState after = state;
-
-    // Movement intents for this step. Slide momentum overrides player input;
-    // input overrides conveyors.
-    std::optional<MoveDirection> playerIntent;
-    bool playerInputDriven = false;
-    if (!after.playerDead) {
-        if (after.playerSliding) {
-            playerIntent = after.playerSliding;
-        } else if (playerInput) {
-            playerIntent = playerInput;
-            playerInputDriven = true;
-        } else {
-            playerIntent = conveyorDirectionAt(level, after.player);
-        }
-    }
-
     const size_t movableCount = after.movables.size();
-    std::vector<std::optional<MoveDirection>> movableIntent(movableCount);
-    std::vector<bool> movableResolved(movableCount, false);
-    std::vector<bool> movableMoved(movableCount, false);
-    for (size_t i = 0; i < movableCount; ++i) {
-        if (!after.movables[i].fallen) {
-            movableIntent[i] = after.movables[i].sliding
-                ? after.movables[i].sliding
-                : conveyorDirectionAt(level, after.movables[i].cell);
-        }
-        movableResolved[i] = !movableIntent[i].has_value();
-    }
-    bool playerResolved = !playerIntent.has_value();
+
+    // Movement budget consumed so far this step, per entity. Budgets are
+    // checked against the rate of the entity's *current* movement source, so
+    // intents and rates are re-derived before every micro-step.
+    int playerConsumed = 0;
+    bool playerDone = after.playerDead;
+    std::vector<int> movableConsumed(movableCount, 0);
+    std::vector<bool> movableDone(movableCount, false);
 
     // Moves one tile, resolves the fall, and updates slide momentum. Momentum
     // continues while the entity is icy (an ice block, or anything standing
     // on an ice floor), did not fall, and the next cell is not statically
-    // blocked; entity-blocked slides are retried next step and cancelled if
-    // still blocked.
+    // blocked; entity-blocked slides are retried and cancelled if still
+    // blocked when their micro-step resolves.
     auto applyMovableMove = [&](size_t i, MoveDirection direction, GridPosition3 target) {
         after.movables[i].cell = target;
         const FallResult fall = movableFallTarget(level, after, i, target);
@@ -348,8 +332,7 @@ GameState step(const Level& level, const GameState& state, std::optional<MoveDir
             (!fell && slippery && staticCellAllowsEntity(level, movementTarget(fall.cell, direction)))
                 ? std::optional<MoveDirection>(direction)
                 : std::nullopt;
-        movableResolved[i] = true;
-        movableMoved[i] = true;
+        ++movableConsumed[i];
     };
 
     auto applyPlayerMove = [&](MoveDirection direction, GridPosition3 target) {
@@ -364,82 +347,152 @@ GameState step(const Level& level, const GameState& state, std::optional<MoveDir
                 staticCellAllowsEntity(level, movementTarget(fall.cell, direction)))
                 ? std::optional<MoveDirection>(direction)
                 : std::nullopt;
-        playerResolved = true;
+        ++playerConsumed;
     };
 
-    // All entities move simultaneously: keep making passes so an entity
-    // blocked only by another entity that vacates its cell this step still
-    // advances. Each entity moves at most once per step.
-    bool progressed = true;
-    while (progressed) {
-        progressed = false;
+    bool microProgressed = true;
+    while (microProgressed) {
+        microProgressed = false;
 
-        for (size_t i = 0; i < movableCount; ++i) {
-            if (movableResolved[i]) {
-                continue;
-            }
-            const MoveDirection direction = *movableIntent[i];
-            const GridPosition3 target = movementTarget(after.movables[i].cell, direction);
-            if (!staticCellAllowsEntity(level, target)) {
-                after.movables[i].sliding = std::nullopt;
-                movableResolved[i] = true;
-                progressed = true;
-                continue;
-            }
-            if (movableBlocksAt(after, target, i) ||
-                (!after.playerDead && after.player == target)) {
-                continue; // the blocking entity may still move this step
-            }
-            applyMovableMove(i, direction, target);
-            progressed = true;
-        }
-
-        if (!playerResolved) {
-            const MoveDirection direction = *playerIntent;
-            GridPosition3 target = movementTarget(after.player, direction);
-            if (playerInputDriven) {
-                target = playerLadderClimbTarget(level, after, direction).value_or(target);
-            }
-
-            if (!staticCellAllowsEntity(level, target)) {
-                after.playerSliding = std::nullopt;
-                playerResolved = true;
-                progressed = true;
-            } else if (const GameState::Movable* blocker = movableAt(after, target)) {
-                const auto blockerIndex = static_cast<size_t>(blocker - after.movables.data());
-                if (movableResolved[blockerIndex]) {
-                    // The blocker has finished its own movement for this step.
-                    // Direct input may push it, spending its one move.
-                    const GridPosition3 pushTarget = movementTarget(target, direction);
-                    if (playerInputDriven &&
-                        !movableMoved[blockerIndex] &&
-                        staticCellAllowsEntity(level, pushTarget) &&
-                        !movableBlocksAt(after, pushTarget, blockerIndex)) {
-                        applyMovableMove(blockerIndex, direction, pushTarget);
-                        applyPlayerMove(direction, target);
-                    } else {
-                        after.playerSliding = std::nullopt;
-                        playerResolved = true;
-                    }
-                    progressed = true;
+        // Derive this micro-step's intents from the current state and the
+        // remaining budget of each entity's movement source.
+        std::optional<MoveDirection> playerIntent;
+        bool playerInputDriven = false;
+        if (!playerDone && !after.playerDead) {
+            if (after.playerSliding) {
+                if (playerConsumed < rates.slide) {
+                    playerIntent = after.playerSliding;
                 }
-                // else: wait for the blocker to resolve first
-            } else {
-                applyPlayerMove(direction, target);
-                progressed = true;
+            } else if (playerInput) {
+                if (playerConsumed < rates.playerMove) {
+                    playerIntent = playerInput;
+                    playerInputDriven = true;
+                }
+            } else if (const std::optional<MoveDirection> belt = conveyorDirectionAt(level, after.player)) {
+                if (playerConsumed < rates.conveyor) {
+                    playerIntent = belt;
+                }
             }
         }
-    }
 
-    // Anything still unresolved is stuck in a mutual block this step; slide
-    // momentum does not survive a blocked attempt.
-    for (size_t i = 0; i < movableCount; ++i) {
-        if (!movableResolved[i]) {
-            after.movables[i].sliding = std::nullopt;
+        std::vector<std::optional<MoveDirection>> movableIntent(movableCount);
+        for (size_t i = 0; i < movableCount; ++i) {
+            if (movableDone[i] || after.movables[i].fallen) {
+                continue;
+            }
+            if (after.movables[i].sliding) {
+                if (movableConsumed[i] < rates.slide) {
+                    movableIntent[i] = after.movables[i].sliding;
+                }
+            } else if (const std::optional<MoveDirection> belt = conveyorDirectionAt(level, after.movables[i].cell)) {
+                if (movableConsumed[i] < rates.conveyor) {
+                    movableIntent[i] = belt;
+                }
+            }
         }
-    }
-    if (!playerResolved) {
-        after.playerSliding = std::nullopt;
+
+        // Resolve this micro-step's simultaneous one-tile moves: keep making
+        // passes so an entity blocked only by another entity that vacates its
+        // cell this micro-step still advances. Each entity moves at most once
+        // per micro-step.
+        std::vector<bool> movableResolved(movableCount);
+        std::vector<bool> movedThisMicro(movableCount, false);
+        for (size_t i = 0; i < movableCount; ++i) {
+            movableResolved[i] = !movableIntent[i].has_value();
+        }
+        bool playerResolved = !playerIntent.has_value();
+        bool playerMovedThisMicro = false;
+
+        bool progressed = true;
+        while (progressed) {
+            progressed = false;
+
+            for (size_t i = 0; i < movableCount; ++i) {
+                if (movableResolved[i]) {
+                    continue;
+                }
+                const MoveDirection direction = *movableIntent[i];
+                const GridPosition3 target = movementTarget(after.movables[i].cell, direction);
+                if (!staticCellAllowsEntity(level, target)) {
+                    after.movables[i].sliding = std::nullopt;
+                    movableDone[i] = true;
+                    movableResolved[i] = true;
+                    progressed = true;
+                    continue;
+                }
+                if (movableBlocksAt(after, target, i) ||
+                    (!after.playerDead && after.player == target)) {
+                    continue; // the blocking entity may still move this micro-step
+                }
+                applyMovableMove(i, direction, target);
+                movableResolved[i] = true;
+                movedThisMicro[i] = true;
+                progressed = true;
+                microProgressed = true;
+            }
+
+            if (!playerResolved) {
+                const MoveDirection direction = *playerIntent;
+                GridPosition3 target = movementTarget(after.player, direction);
+                if (playerInputDriven) {
+                    target = playerLadderClimbTarget(level, after, direction).value_or(target);
+                }
+
+                if (!staticCellAllowsEntity(level, target)) {
+                    after.playerSliding = std::nullopt;
+                    playerDone = true;
+                    playerResolved = true;
+                    progressed = true;
+                } else if (const GameState::Movable* blocker = movableAt(after, target)) {
+                    const auto blockerIndex = static_cast<size_t>(blocker - after.movables.data());
+                    if (movableResolved[blockerIndex]) {
+                        // The blocker has finished its own movement for this
+                        // micro-step. Direct input may push it.
+                        const GridPosition3 pushTarget = movementTarget(target, direction);
+                        if (playerInputDriven &&
+                            !movedThisMicro[blockerIndex] &&
+                            staticCellAllowsEntity(level, pushTarget) &&
+                            !movableBlocksAt(after, pushTarget, blockerIndex)) {
+                            applyMovableMove(blockerIndex, direction, pushTarget);
+                            movedThisMicro[blockerIndex] = true;
+                            movableDone[blockerIndex] = false;
+                            applyPlayerMove(direction, target);
+                            playerMovedThisMicro = true;
+                            microProgressed = true;
+                        } else if (after.playerSliding) {
+                            // Blocked slides stop for good.
+                            after.playerSliding = std::nullopt;
+                            playerDone = true;
+                        }
+                        playerResolved = true;
+                        progressed = true;
+                    }
+                    // else: wait for the blocker to resolve first
+                } else {
+                    applyPlayerMove(direction, target);
+                    playerMovedThisMicro = true;
+                    playerResolved = true;
+                    progressed = true;
+                    microProgressed = true;
+                }
+            }
+        }
+
+        // Anything with an intent that could not move this micro-step is in a
+        // mutual block; blocked slide momentum does not survive.
+        for (size_t i = 0; i < movableCount; ++i) {
+            if (!movableIntent[i] || movedThisMicro[i]) {
+                continue;
+            }
+            if (after.movables[i].sliding) {
+                after.movables[i].sliding = std::nullopt;
+                movableDone[i] = true;
+            }
+        }
+        if (playerIntent && !playerMovedThisMicro && after.playerSliding) {
+            after.playerSliding = std::nullopt;
+            playerDone = true;
+        }
     }
 
     return after;

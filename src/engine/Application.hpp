@@ -152,6 +152,7 @@ private:
     std::optional<GridPosition3> editorHoverCell_;
     float moveElapsed_ = 0.0f;
     float stepDurationSeconds_ = config::stepDurationSeconds;
+    rules::StepRates stepRates_ {};
     bool moving_ = false;
     // Set while rewinding: pending world motion (slides, conveyors) stays
     // frozen after an undo until the player makes a new input-driven step.

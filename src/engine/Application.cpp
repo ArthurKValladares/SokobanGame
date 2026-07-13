@@ -695,6 +695,13 @@ void Application::drawDebugUi()
             1.0f,
             "%.3f s");
         stepDurationSeconds_ = std::clamp(stepDurationSeconds_, 0.05f, 1.0f);
+        if (ImGui::TreeNode("Step Rates (tiles/step)")) {
+            ImGui::SliderInt("Player", &stepRates_.playerMove, 0, 5);
+            ImGui::SliderInt("Slide", &stepRates_.slide, 0, 5);
+            ImGui::SliderInt("Conveyor", &stepRates_.conveyor, 0, 5);
+            ImGui::TextDisabled("Movement rates by source; default 1.");
+            ImGui::TreePop();
+        }
         ImGui::DragFloat(
             "Surface Entity Height",
             &surfaceEntityHeight_,
@@ -1223,7 +1230,7 @@ bool Application::tryStartHeldMove()
 
 bool Application::tryStartWorldStep(std::optional<MoveDirection> playerInput)
 {
-    GameState after = rules::step(level_, state_, playerInput);
+    GameState after = rules::step(level_, state_, playerInput, stepRates_);
     if (after == state_) {
         return false;
     }

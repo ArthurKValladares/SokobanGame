@@ -47,10 +47,22 @@ struct GameState {
 // of its arguments.
 //
 // Time advances in discrete world steps. Within one step, every entity moves
-// at most its per-step rate (currently one tile for everything), and all
-// entities move simultaneously: an entity blocked only by another entity that
-// vacates its cell this step still advances.
+// at most its per-step rate in tiles (see StepRates; everything defaults to
+// one), and all entities move simultaneously: an entity blocked only by
+// another entity that vacates its cell this step still advances.
 namespace rules {
+
+// Movement rates in tiles per world step, by movement source. The step
+// algorithm supports any non-negative rate: multi-tile movement resolves as
+// repeated simultaneous one-tile micro-steps, so faster entities still
+// interact correctly with slower ones (blocking, vacating, pushing).
+struct StepRates {
+    int playerMove = 1; // input-driven walking and pushing
+    int slide = 1;      // ice-slide momentum (player and movables)
+    int conveyor = 1;   // belt riders
+
+    bool operator==(const StepRates&) const = default;
+};
 
 [[nodiscard]] GameState initialState(const Level& level);
 
@@ -80,15 +92,17 @@ namespace rules {
 // Advances the world one discrete step and returns the resulting state
 // (unchanged if nothing can move). Movement intents per entity:
 //   - slide momentum first (it overrides player input),
-//   - then player input (which may push a movable, including onto its own
-//     one-tile move; only direct input pushes),
+//   - then player input (which may push a movable; only direct input pushes),
 //   - then conveyors for entities standing on them.
-// Each entity moves at most one tile per step; falls resolve within the step
-// and cancel momentum. Ladder climbing applies to input-driven moves only.
+// Each entity moves at most its rate in tiles per step (intents and rates are
+// re-derived between micro-steps, so e.g. an entity carried off a belt stops
+// even with budget left). Falls resolve within the step and cancel momentum.
+// Ladder climbing applies to input-driven moves only.
 [[nodiscard]] GameState step(
     const Level& level,
     const GameState& state,
-    std::optional<MoveDirection> playerInput = std::nullopt);
+    std::optional<MoveDirection> playerInput = std::nullopt,
+    const StepRates& rates = {});
 
 } // namespace rules
 

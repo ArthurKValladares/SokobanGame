@@ -484,6 +484,90 @@ void testConveyorCarriesPlayer()
     CHECK(steered.player == cell(0, 0, 1));
 }
 
+
+void testFastConveyorRate()
+{
+    TEST("fastConveyorRate");
+    const Level level = makeLevel({
+        { "....." },
+        { "C>>R " },
+    });
+    GameState state = rules::initialState(level);
+    state.movables[0].cell = cell(1, 0, 1);
+
+    // At two tiles per step the belt carries the rock across both belt cells
+    // in a single step; it stops once carried onto plain ground.
+    rules::StepRates rates;
+    rates.conveyor = 2;
+    state = rules::step(level, state, std::nullopt, rates);
+    CHECK(state.movables[0].cell == cell(3, 0, 1));
+    CHECK(!rules::hasPendingMotion(level, state));
+}
+
+void testFastPlayerRate()
+{
+    TEST("fastPlayerRate");
+    const Level level = makeLevel({
+        { "....." },
+        { "C    " },
+    });
+    rules::StepRates rates;
+    rates.playerMove = 2;
+    const GameState moved = rules::step(level, rules::initialState(level), MoveDirection::Right, rates);
+    CHECK(moved.player == cell(2, 0, 1));
+
+    // A fast player shoves a pushable along, one push per micro-step.
+    const Level pushLevel = makeLevel({
+        { "....." },
+        { "CR   " },
+    });
+    const GameState pushed = rules::step(pushLevel, rules::initialState(pushLevel), MoveDirection::Right, rates);
+    CHECK(pushed.player == cell(2, 0, 1));
+    CHECK(pushed.movables[0].cell == cell(3, 0, 1));
+}
+
+void testFastSlideRate()
+{
+    TEST("fastSlideRate");
+    const Level level = makeLevel({
+        { "......" },
+        { "CI   #" },
+    });
+    rules::StepRates rates;
+    rates.slide = 2;
+    GameState state = rules::initialState(level);
+
+    // The push spends the ice's first tile; its fresh momentum spends the
+    // second within the same step (budgets follow the current source).
+    state = rules::step(level, state, MoveDirection::Right, rates);
+    CHECK(state.movables[0].cell == cell(3, 0, 1));
+    CHECK(state.movables[0].sliding == MoveDirection::Right);
+
+    // Two more tiles of slide; the wall is next, so momentum ends.
+    state = rules::step(level, state, std::nullopt, rates);
+    CHECK(state.movables[0].cell == cell(4, 0, 1));
+    CHECK(!state.movables[0].sliding);
+    CHECK(!rules::hasPendingMotion(level, state));
+}
+
+void testZeroRateFreezesSource()
+{
+    TEST("zeroRateFreezesSource");
+    const Level level = makeLevel({
+        { "...." },
+        { "C> R " },
+    });
+    GameState state = rules::initialState(level);
+    state.movables[0].cell = cell(1, 0, 1);
+
+    // Conveyors at zero tiles per step carry nothing, but input still works.
+    rules::StepRates rates;
+    rates.conveyor = 0;
+    const GameState stepped = rules::step(level, state, MoveDirection::Up, rates);
+    CHECK(stepped.movables[0].cell == cell(1, 0, 1));
+    CHECK(stepped == state); // up is out of bounds here, so nothing changed
+}
+
 } // namespace
 
 int main()
@@ -511,6 +595,10 @@ int main()
     testLadderClimbBlockedByMovable();
     testFallToLowerLayer();
     testConveyorCarriesPlayer();
+    testFastConveyorRate();
+    testFastPlayerRate();
+    testFastSlideRate();
+    testZeroRateFreezesSource();
 
     if (failures == 0) {
         std::cout << "All " << checks << " checks passed.\n";

@@ -141,15 +141,19 @@ Entity support/walkability:
 Core movement (discrete step system):
 
 - Game time advances in discrete world steps (`rules::step`); every entity
-  moves at most one tile per step, and all entities move simultaneously
-  (player can walk while ice slides and conveyors carry rocks).
+  moves at most its per-step rate in tiles, and all entities move
+  simultaneously (player can walk while ice slides and conveyors carry rocks).
 - Ice sliding is momentum stored in `GameState` (`playerSliding`,
   `Movable::sliding`): one tile per step until blocked, fallen, or off
   slippery ground. Slide momentum overrides player input.
 - Steps last `config::stepDurationSeconds` (debug-adjustable); all entities
   interpolate across the same step duration, so chained steps animate as
-  continuous motion. Per-step movement rates other than one tile are a
-  planned extension.
+  continuous motion.
+- Movement rates are `rules::StepRates` in tiles per step, by movement source
+  (player input, slide momentum, conveyors); everything defaults to one.
+  Multi-tile rates resolve as repeated simultaneous one-tile micro-steps, so
+  fast entities still block, vacate, and push correctly. Rates are adjustable
+  in the Debug UI under Tile Geometry > Step Rates.
 - WASD moves the player (one tile per step; held keys step repeatedly).
 - `Z` undoes one step; undoing pauses pending world motion until the next
   input-driven step. `R` restarts.
