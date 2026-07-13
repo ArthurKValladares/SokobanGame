@@ -44,6 +44,7 @@ enum class RenderAnimation {
     None,
     RogueIdle,
     RogueMovement,
+    RoguePush,
 };
 
 struct RenderFrameData {
@@ -386,6 +387,7 @@ private:
     SkinnedMeshData rogueSkinnedMesh_ {};
     GltfAnimationClip rogueIdleAnimation_ {};
     GltfAnimationClip rogueMovementAnimation_ {};
+    GltfAnimationClip roguePushAnimation_ {};
     RenderAnimation activeRogueAnimation_ = RenderAnimation::None;
     float activeRogueAnimationTime_ = -1.0f;
     OwnedImage rogueTextureImage_ {};

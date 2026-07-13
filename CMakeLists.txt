@@ -51,6 +51,7 @@ set(MODEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit Block Bits 1.0/A
 set(PLATFORMER_MODEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit Platformer Pack 1.0/Assets/gltf/blue")
 set(CHARACTER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit Adventurers 2.0/Characters/gltf")
 set(CHARACTER_ANIMATION_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit Adventurers 2.0/Animations/gltf/Rig_Medium")
+set(CUSTOM_ANIMATION_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/custom")
 set(MODEL_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/models")
 
 set(SHADER_SOURCES
@@ -106,6 +107,7 @@ add_custom_target(sokoban_assets
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CHARACTER_SOURCE_DIR}/rogue_texture.png" "${MODEL_OUTPUT_DIR}/rogue_texture.png"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CHARACTER_ANIMATION_SOURCE_DIR}/Rig_Medium_General.glb" "${MODEL_OUTPUT_DIR}/Rig_Medium_General.glb"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CHARACTER_ANIMATION_SOURCE_DIR}/Rig_Medium_MovementBasic.glb" "${MODEL_OUTPUT_DIR}/Rig_Medium_MovementBasic.glb"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CUSTOM_ANIMATION_SOURCE_DIR}/Rig_Medium_Push.glb" "${MODEL_OUTPUT_DIR}/Rig_Medium_Push.glb"
     DEPENDS
         ${LEVEL_SOURCES}
         "${MODEL_SOURCE_DIR}/bricks_A.gltf"
@@ -124,6 +126,7 @@ add_custom_target(sokoban_assets
         "${CHARACTER_SOURCE_DIR}/rogue_texture.png"
         "${CHARACTER_ANIMATION_SOURCE_DIR}/Rig_Medium_General.glb"
         "${CHARACTER_ANIMATION_SOURCE_DIR}/Rig_Medium_MovementBasic.glb"
+        "${CUSTOM_ANIMATION_SOURCE_DIR}/Rig_Medium_Push.glb"
     VERBATIM
 )
 

@@ -1241,6 +1241,19 @@ bool Application::tryStartWorldStep(std::optional<MoveDirection> playerInput)
         .durationSeconds = stepDurationSeconds_,
     };
 
+    // The step was a push if input displaced a movable out of the cell the
+    // player stepped toward.
+    if (playerInput && !(activeAction_.before.player == activeAction_.after.player)) {
+        const GridPosition3 pushCell = rules::movementTarget(activeAction_.before.player, *playerInput);
+        for (size_t i = 0; i < activeAction_.before.movables.size() && i < activeAction_.after.movables.size(); ++i) {
+            if (activeAction_.before.movables[i].cell == pushCell &&
+                !(activeAction_.after.movables[i].cell == pushCell)) {
+                activeAction_.playerPushing = true;
+                break;
+            }
+        }
+    }
+
     if (playerInput) {
         playerFacingQuarterTurns_ = facingQuarterTurns(*playerInput);
         autoMotionPaused_ = false;
@@ -1603,7 +1616,9 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             .height = 1.0f,
             .showGrid = false,
             .model = RenderModel::Rogue,
-            .animation = moving_ ? RenderAnimation::RogueMovement : RenderAnimation::RogueIdle,
+            .animation = moving_
+                ? (activeAction_.playerPushing ? RenderAnimation::RoguePush : RenderAnimation::RogueMovement)
+                : RenderAnimation::RogueIdle,
             .animationTimeSeconds = playerAnimationTimeSeconds_,
             .modelRotationQuarterTurns = playerFacingQuarterTurns_,
         };

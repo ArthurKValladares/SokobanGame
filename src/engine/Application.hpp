@@ -59,6 +59,7 @@ private:
         GameState before;
         GameState after;
         float durationSeconds = config::stepDurationSeconds;
+        bool playerPushing = false;
     };
 
     void loadCurrentScreen();

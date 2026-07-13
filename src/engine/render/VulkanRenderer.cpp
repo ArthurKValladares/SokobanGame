@@ -1242,6 +1242,9 @@ void VulkanRenderer::createModelResources()
     rogueMovementAnimation_ = loadGltfAnimationClip(
         assetRoot_ / "models/Rig_Medium_MovementBasic.glb",
         animationIndexFromUserNumber(config::playerMovementAnimationNumber));
+    roguePushAnimation_ = loadGltfAnimationClip(
+        assetRoot_ / "models/Rig_Medium_Push.glb",
+        animationIndexFromUserNumber(config::playerPushAnimationNumber));
     rogueMesh_ = uploadMesh(skinGltfMesh(rogueSkinnedMesh_, rogueIdleAnimation_, 0.0f));
 }
 
@@ -1314,9 +1317,11 @@ void VulkanRenderer::updateAnimatedModelMeshes(const RenderFrameData& frameData)
         return;
     }
 
-    const GltfAnimationClip& clip = requestedAnimation == RenderAnimation::RogueMovement
-        ? rogueMovementAnimation_
-        : rogueIdleAnimation_;
+    const GltfAnimationClip& clip = requestedAnimation == RenderAnimation::RoguePush
+        ? roguePushAnimation_
+        : (requestedAnimation == RenderAnimation::RogueMovement
+                ? rogueMovementAnimation_
+                : rogueIdleAnimation_);
     const MeshData skinnedMesh = skinGltfMesh(rogueSkinnedMesh_, clip, requestedTime);
     updateMeshVertices(rogueMesh_, skinnedMesh.vertices);
     activeRogueAnimation_ = requestedAnimation;

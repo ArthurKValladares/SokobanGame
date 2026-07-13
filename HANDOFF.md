@@ -258,6 +258,12 @@ Model assets currently used:
   - `Rogue.glb`
   - `rogue_texture.png`
   - animation clips from `Animations/gltf/Rig_Medium`.
+- `assets/custom/Rig_Medium_Push.glb`: generated block-pushing walk cycle
+  (Walking_B with both arm chains frozen straight forward; the pose is solved
+  with forward kinematics against the Rogue skeleton and numerically verified,
+  see ARM_TARGETS in the tool to tweak direction/height). Regenerate with
+  `python tools/make_push_animation.py`; used as the player's push animation
+  (`config::playerPushAnimationNumber`, `RenderAnimation::RoguePush`).
 - KayKit Platformer Pack 1.0:
   - `conveyor_4x4x1_blue.gltf`
   - `conveyor_4x4x1_blue.bin`
