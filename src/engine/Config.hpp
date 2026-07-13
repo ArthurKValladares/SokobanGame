@@ -6,7 +6,7 @@
 
 namespace sokoban::config {
 
-inline constexpr float playerMoveDurationSeconds = 0.25f;
+inline constexpr float stepDurationSeconds = 0.25f;
 inline constexpr float boardPitchDegrees = 15.0f;
 inline constexpr float perspectiveFovDegrees = 35.0f;
 inline constexpr float perspectiveCameraDistanceScale = 2.2f;
@@ -28,7 +28,6 @@ inline constexpr float waterTileScale = 1.0f;
 inline constexpr float ladderTileScale = 1.0f;
 inline constexpr float conveyorTileScale = 1.0f;
 inline constexpr float conveyorTileHeight = 0.12f;
-inline constexpr float conveyorTilesPerSecond = 2.0f;
 inline constexpr uint32_t playerMovementAnimationNumber = 7;
 inline constexpr uint32_t playerIdleAnimationNumber = 15;
 inline constexpr float sunAzimuthDegrees = -122.5f;

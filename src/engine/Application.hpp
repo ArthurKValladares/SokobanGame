@@ -52,11 +52,13 @@ private:
         MoveDirection direction = MoveDirection::Up;
     };
 
+    // One discrete world step (or undo/restart transition) being animated.
+    // All entities animate across the same durationSeconds so consecutive
+    // steps chain into visually continuous motion.
     struct ActionRecord {
         GameState before;
         GameState after;
-        float animationSecondsPerTile = config::playerMoveDurationSeconds;
-        bool conveyorDriven = false;
+        float durationSeconds = config::stepDurationSeconds;
     };
 
     void loadCurrentScreen();
@@ -69,7 +71,6 @@ private:
     void drawDraftExitConfirmation();
     void updateEditorPainting();
     void queuePressedCommands();
-    void updateConveyorMovement(float dt);
     void advancePlayerMovement(float dt);
     void advanceMovableAnimations(float dt);
     void startMovableAnimations(const ActionRecord& action);
@@ -77,11 +78,7 @@ private:
     [[nodiscard]] float activeActionDuration() const;
     [[nodiscard]] bool tryStartNextMove();
     [[nodiscard]] bool tryStartHeldMove();
-    [[nodiscard]] bool tryStartMove(
-        MoveDirection direction,
-        bool allowPush = true,
-        float animationSecondsPerTile = config::playerMoveDurationSeconds,
-        bool conveyorDriven = false);
+    [[nodiscard]] bool tryStartWorldStep(std::optional<MoveDirection> playerInput);
     [[nodiscard]] bool tryStartUndoMove();
     [[nodiscard]] bool tryStartRestart();
     [[nodiscard]] std::optional<MoveDirection> pressedVerticalDirection() const;
@@ -154,9 +151,11 @@ private:
     LevelEditor levelEditor_;
     std::optional<GridPosition3> editorHoverCell_;
     float moveElapsed_ = 0.0f;
-    float conveyorElapsed_ = 0.0f;
-    float conveyorTilesPerSecond_ = config::conveyorTilesPerSecond;
+    float stepDurationSeconds_ = config::stepDurationSeconds;
     bool moving_ = false;
+    // Set while rewinding: pending world motion (slides, conveyors) stays
+    // frozen after an undo until the player makes a new input-driven step.
+    bool autoMotionPaused_ = false;
     bool running_ = true;
     bool quitConfirmationOpen_ = false;
     bool draftExitConfirmationOpen_ = false;

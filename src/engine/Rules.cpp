@@ -40,38 +40,15 @@ bool isIceFloor(const Level& level, const GameState& state, GridPosition3 positi
     return fallenTileAt(state, position) == TileType::Ice;
 }
 
-bool isPlayerWalkable(const Level& level, const GameState& state, GridPosition3 position)
+bool movableBlocksAt(const GameState& state, GridPosition3 position, size_t ignoreIndex)
 {
-    if (movableAt(state, position) != nullptr) {
-        return false;
-    }
-
-    return staticCellAllowsEntity(level, position);
-}
-
-bool canPushMovable(const Level& level, const GameState& state, GridPosition3 position, MoveDirection direction)
-{
-    const GridPosition3 target = movementTarget(position, direction);
-    if (movableAt(state, target) != nullptr) {
-        return false;
-    }
-
-    return staticCellAllowsEntity(level, target);
-}
-
-bool canMovableOccupy(const Level& level, const GameState& state, GridPosition3 position, size_t movableIndex)
-{
-    if (!staticCellAllowsEntity(level, position)) {
-        return false;
-    }
-
     for (size_t i = 0; i < state.movables.size(); ++i) {
-        if (i != movableIndex && !state.movables[i].fallen && state.movables[i].cell == position) {
-            return false;
+        if (i != ignoreIndex && !state.movables[i].fallen && state.movables[i].cell == position) {
+            return true;
         }
     }
 
-    return true;
+    return false;
 }
 
 FallResult playerFallTarget(const Level& level, const GameState& state, GridPosition3 position)
@@ -137,45 +114,6 @@ FallResult movableFallTarget(const Level& level, const GameState& state, size_t 
     return { .cell = current, .fallen = false };
 }
 
-GridPosition3 movableSlidingTarget(const Level& level, const GameState& state, size_t movableIndex, MoveDirection direction)
-{
-    GridPosition3 current = state.movables[movableIndex].cell;
-    const bool movableIsIce = state.movables[movableIndex].type == TileType::Ice;
-    while (movableIsIce || isIceFloor(level, state, current)) {
-        const GridPosition3 next = movementTarget(current, direction);
-        if (!canMovableOccupy(level, state, next, movableIndex)) {
-            return current;
-        }
-
-        current = next;
-        const FallResult fall = movableFallTarget(level, state, movableIndex, current);
-        if (fall.cell.z != current.z || fall.fallen) {
-            return fall.cell;
-        }
-    }
-
-    return current;
-}
-
-GridPosition3 playerSlidingTarget(const Level& level, const GameState& state, GridPosition3 position, MoveDirection direction)
-{
-    GridPosition3 current = position;
-    while (isIceFloor(level, state, current)) {
-        const GridPosition3 next = movementTarget(current, direction);
-        if (!isPlayerWalkable(level, state, next)) {
-            return current;
-        }
-
-        current = next;
-        const FallResult fall = playerFallTarget(level, state, current);
-        if (fall.cell.z != current.z || fall.fallen) {
-            return fall.cell;
-        }
-    }
-
-    return current;
-}
-
 std::optional<GridPosition3> ladderClimbTarget(
     const Level& level,
     const GameState& state,
@@ -230,10 +168,10 @@ GameState initialState(const Level& level)
     state.player = level.playerStart();
     state.movables.reserve(level.movableTiles().size());
     for (const Level::MovableTile& movable : level.movableTiles()) {
-        state.movables.push_back({
-            .type = movable.type,
-            .cell = movable.position,
-        });
+        GameState::Movable entry;
+        entry.type = movable.type;
+        entry.cell = movable.position;
+        state.movables.push_back(entry);
     }
 
     return state;
@@ -347,118 +285,161 @@ bool isAtUnlockedEnd(const Level& level, const GameState& state)
     return level.isEnd(state.player) && isEndUnlocked(level, state);
 }
 
-std::optional<GameState> tryMove(
-    const Level& level,
-    const GameState& state,
-    MoveDirection direction,
-    bool allowPush)
+bool hasPendingMotion(const Level& level, const GameState& state)
 {
-    if (state.playerDead) {
-        return std::nullopt;
-    }
-
-    const GridPosition3 target =
-        playerLadderClimbTarget(level, state, direction)
-            .value_or(movementTarget(state.player, direction));
-    if (!staticCellAllowsEntity(level, target)) {
-        return std::nullopt;
-    }
-
-    GameState after = state;
-    after.player = target;
-
-    if (const GameState::Movable* movable = movableAt(state, target)) {
-        if (!allowPush) {
-            return std::nullopt;
-        }
-        if (!canPushMovable(level, state, target, direction)) {
-            return std::nullopt;
-        }
-
-        const auto movableIndex = static_cast<size_t>(movable - state.movables.data());
-        after.movables[movableIndex].cell = movementTarget(movable->cell, direction);
-        after.movables[movableIndex].fallen = false;
-        after.movables[movableIndex].cell = movableSlidingTarget(level, after, movableIndex, direction);
-        const FallResult movableFall =
-            movableFallTarget(level, after, movableIndex, after.movables[movableIndex].cell);
-        after.movables[movableIndex].cell = movableFall.cell;
-        after.movables[movableIndex].fallen = movableFall.fallen;
-    }
-
-    after.player = playerSlidingTarget(level, after, after.player, direction);
-    const FallResult playerFall = playerFallTarget(level, after, after.player);
-    after.player = playerFall.cell;
-    after.playerDead = playerFall.fallen;
-
-    return after;
-}
-
-bool anyEntityOnConveyor(const Level& level, const GameState& state)
-{
-    if (!state.playerDead && conveyorDirectionAt(level, state.player)) {
+    if (!state.playerDead &&
+        (state.playerSliding || conveyorDirectionAt(level, state.player))) {
         return true;
     }
 
     return std::ranges::any_of(state.movables, [&](const GameState::Movable& movable) {
-        return !movable.fallen && conveyorDirectionAt(level, movable.cell).has_value();
+        return !movable.fallen &&
+            (movable.sliding || conveyorDirectionAt(level, movable.cell).has_value());
     });
 }
 
-std::optional<GameState> applyConveyorStep(const Level& level, const GameState& state)
+GameState step(const Level& level, const GameState& state, std::optional<MoveDirection> playerInput)
 {
     GameState after = state;
-    std::vector<bool> movableMoved(after.movables.size(), false);
-    bool playerMoved = false;
 
-    // Entities move simultaneously: an entity blocked only by another entity
-    // that itself moves away this tick still advances, so keep making passes
-    // until nothing else can move. Each entity moves at most once per tick.
+    // Movement intents for this step. Slide momentum overrides player input;
+    // input overrides conveyors.
+    std::optional<MoveDirection> playerIntent;
+    bool playerInputDriven = false;
+    if (!after.playerDead) {
+        if (after.playerSliding) {
+            playerIntent = after.playerSliding;
+        } else if (playerInput) {
+            playerIntent = playerInput;
+            playerInputDriven = true;
+        } else {
+            playerIntent = conveyorDirectionAt(level, after.player);
+        }
+    }
+
+    const size_t movableCount = after.movables.size();
+    std::vector<std::optional<MoveDirection>> movableIntent(movableCount);
+    std::vector<bool> movableResolved(movableCount, false);
+    std::vector<bool> movableMoved(movableCount, false);
+    for (size_t i = 0; i < movableCount; ++i) {
+        if (!after.movables[i].fallen) {
+            movableIntent[i] = after.movables[i].sliding
+                ? after.movables[i].sliding
+                : conveyorDirectionAt(level, after.movables[i].cell);
+        }
+        movableResolved[i] = !movableIntent[i].has_value();
+    }
+    bool playerResolved = !playerIntent.has_value();
+
+    // Moves one tile, resolves the fall, and updates slide momentum. Momentum
+    // continues while the entity is icy (an ice block, or anything standing
+    // on an ice floor), did not fall, and the next cell is not statically
+    // blocked; entity-blocked slides are retried next step and cancelled if
+    // still blocked.
+    auto applyMovableMove = [&](size_t i, MoveDirection direction, GridPosition3 target) {
+        after.movables[i].cell = target;
+        const FallResult fall = movableFallTarget(level, after, i, target);
+        const bool fell = fall.cell.z != target.z || fall.fallen;
+        after.movables[i].cell = fall.cell;
+        after.movables[i].fallen = fall.fallen;
+        const bool slippery = after.movables[i].type == TileType::Ice ||
+            isIceFloor(level, after, fall.cell);
+        after.movables[i].sliding =
+            (!fell && slippery && staticCellAllowsEntity(level, movementTarget(fall.cell, direction)))
+                ? std::optional<MoveDirection>(direction)
+                : std::nullopt;
+        movableResolved[i] = true;
+        movableMoved[i] = true;
+    };
+
+    auto applyPlayerMove = [&](MoveDirection direction, GridPosition3 target) {
+        after.player = target;
+        const FallResult fall = playerFallTarget(level, after, target);
+        const bool fell = fall.cell.z != target.z || fall.fallen;
+        after.player = fall.cell;
+        after.playerDead = fall.fallen;
+        after.playerSliding =
+            (!fell && !after.playerDead &&
+                isIceFloor(level, after, fall.cell) &&
+                staticCellAllowsEntity(level, movementTarget(fall.cell, direction)))
+                ? std::optional<MoveDirection>(direction)
+                : std::nullopt;
+        playerResolved = true;
+    };
+
+    // All entities move simultaneously: keep making passes so an entity
+    // blocked only by another entity that vacates its cell this step still
+    // advances. Each entity moves at most once per step.
     bool progressed = true;
     while (progressed) {
         progressed = false;
 
-        for (size_t i = 0; i < after.movables.size(); ++i) {
-            if (movableMoved[i] || after.movables[i].fallen) {
+        for (size_t i = 0; i < movableCount; ++i) {
+            if (movableResolved[i]) {
                 continue;
             }
-            const std::optional<MoveDirection> direction = conveyorDirectionAt(level, after.movables[i].cell);
-            if (!direction) {
+            const MoveDirection direction = *movableIntent[i];
+            const GridPosition3 target = movementTarget(after.movables[i].cell, direction);
+            if (!staticCellAllowsEntity(level, target)) {
+                after.movables[i].sliding = std::nullopt;
+                movableResolved[i] = true;
+                progressed = true;
                 continue;
             }
-            const GridPosition3 target = movementTarget(after.movables[i].cell, *direction);
-            if (!canMovableOccupy(level, after, target, i)) {
-                continue;
+            if (movableBlocksAt(after, target, i) ||
+                (!after.playerDead && after.player == target)) {
+                continue; // the blocking entity may still move this step
             }
-            if (!after.playerDead && after.player == target) {
-                continue;
-            }
-
-            after.movables[i].cell = target;
-            after.movables[i].cell = movableSlidingTarget(level, after, i, *direction);
-            const FallResult fall = movableFallTarget(level, after, i, after.movables[i].cell);
-            after.movables[i].cell = fall.cell;
-            after.movables[i].fallen = fall.fallen;
-            movableMoved[i] = true;
+            applyMovableMove(i, direction, target);
             progressed = true;
         }
 
-        if (!playerMoved && !after.playerDead) {
-            if (const std::optional<MoveDirection> direction = conveyorDirectionAt(level, after.player)) {
-                const GridPosition3 target = movementTarget(after.player, *direction);
-                if (isPlayerWalkable(level, after, target)) {
-                    after.player = playerSlidingTarget(level, after, target, *direction);
-                    const FallResult fall = playerFallTarget(level, after, after.player);
-                    after.player = fall.cell;
-                    after.playerDead = fall.fallen;
-                    playerMoved = true;
+        if (!playerResolved) {
+            const MoveDirection direction = *playerIntent;
+            GridPosition3 target = movementTarget(after.player, direction);
+            if (playerInputDriven) {
+                target = playerLadderClimbTarget(level, after, direction).value_or(target);
+            }
+
+            if (!staticCellAllowsEntity(level, target)) {
+                after.playerSliding = std::nullopt;
+                playerResolved = true;
+                progressed = true;
+            } else if (const GameState::Movable* blocker = movableAt(after, target)) {
+                const auto blockerIndex = static_cast<size_t>(blocker - after.movables.data());
+                if (movableResolved[blockerIndex]) {
+                    // The blocker has finished its own movement for this step.
+                    // Direct input may push it, spending its one move.
+                    const GridPosition3 pushTarget = movementTarget(target, direction);
+                    if (playerInputDriven &&
+                        !movableMoved[blockerIndex] &&
+                        staticCellAllowsEntity(level, pushTarget) &&
+                        !movableBlocksAt(after, pushTarget, blockerIndex)) {
+                        applyMovableMove(blockerIndex, direction, pushTarget);
+                        applyPlayerMove(direction, target);
+                    } else {
+                        after.playerSliding = std::nullopt;
+                        playerResolved = true;
+                    }
                     progressed = true;
                 }
+                // else: wait for the blocker to resolve first
+            } else {
+                applyPlayerMove(direction, target);
+                progressed = true;
             }
         }
     }
 
-    if (after == state) {
-        return std::nullopt;
+    // Anything still unresolved is stuck in a mutual block this step; slide
+    // momentum does not survive a blocked attempt.
+    for (size_t i = 0; i < movableCount; ++i) {
+        if (!movableResolved[i]) {
+            after.movables[i].sliding = std::nullopt;
+        }
+    }
+    if (!playerResolved) {
+        after.playerSliding = std::nullopt;
     }
 
     return after;

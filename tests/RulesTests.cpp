@@ -1,5 +1,5 @@
-// Headless tests for the gameplay rules engine. No SDL/Vulkan dependencies:
-// this file compiles against Level, TileTypes, and Rules only.
+// Headless tests for the step-based gameplay rules engine. No SDL/Vulkan
+// dependencies: this file compiles against Level, TileTypes, and Rules only.
 
 #include "engine/Level.hpp"
 #include "engine/Rules.hpp"
@@ -56,42 +56,45 @@ void testInitialState()
 
     CHECK(state.player == cell(0, 0, 1));
     CHECK(!state.playerDead);
+    CHECK(!state.playerSliding);
     CHECK(state.movables.size() == 2);
     CHECK(state.movables[0].type == TileType::Rock);
     CHECK(state.movables[0].cell == cell(1, 0, 1));
     CHECK(!state.movables[0].fallen);
+    CHECK(!state.movables[0].sliding);
     CHECK(state.movables[1].type == TileType::Ice);
     CHECK(state.movables[1].cell == cell(2, 0, 1));
 
     // Movable cells become Air in the static level.
     CHECK(level.tileAt(1, 0, 1) == TileType::Air);
     CHECK(level.tileAt(2, 0, 1) == TileType::Air);
+    CHECK(!rules::hasPendingMotion(level, state));
 }
 
-void testSimpleMoveAndWall()
+void testStepMovesPlayer()
 {
-    TEST("simpleMoveAndWall");
+    TEST("stepMovesPlayer");
     const Level level = makeLevel({
         { "..." },
         { " C#" },
     });
     const GameState state = rules::initialState(level);
 
-    const auto left = rules::tryMove(level, state, MoveDirection::Left);
-    CHECK(left.has_value());
-    CHECK(left->player == cell(0, 0, 1));
-    CHECK(!left->playerDead);
+    const GameState left = rules::step(level, state, MoveDirection::Left);
+    CHECK(left.player == cell(0, 0, 1));
+    CHECK(!left.playerDead);
 
-    const auto right = rules::tryMove(level, state, MoveDirection::Right);
-    CHECK(!right.has_value());
+    // Blocked by the wall / by the level edge: the step changes nothing.
+    CHECK(rules::step(level, state, MoveDirection::Right) == state);
+    CHECK(rules::step(level, state, MoveDirection::Up) == state);
 
-    const auto up = rules::tryMove(level, state, MoveDirection::Up);
-    CHECK(!up.has_value());
+    // No input and nothing pending: nothing happens.
+    CHECK(rules::step(level, state) == state);
 }
 
-void testTryMoveIsPure()
+void testStepIsPure()
 {
-    TEST("tryMoveIsPure");
+    TEST("stepIsPure");
     const Level level = makeLevel({
         { "..." },
         { "CR " },
@@ -99,8 +102,8 @@ void testTryMoveIsPure()
     const GameState state = rules::initialState(level);
     const GameState snapshot = state;
 
-    const auto moved = rules::tryMove(level, state, MoveDirection::Right);
-    CHECK(moved.has_value());
+    const GameState moved = rules::step(level, state, MoveDirection::Right);
+    CHECK(moved != state);
     CHECK(state == snapshot);
 }
 
@@ -113,11 +116,14 @@ void testPushRock()
     });
     const GameState state = rules::initialState(level);
 
-    const auto moved = rules::tryMove(level, state, MoveDirection::Right);
-    CHECK(moved.has_value());
-    CHECK(moved->player == cell(1, 0, 1));
-    CHECK(moved->movables[0].cell == cell(2, 0, 1));
-    CHECK(!moved->movables[0].fallen);
+    // Push resolves within one step: player and rock advance together.
+    const GameState pushed = rules::step(level, state, MoveDirection::Right);
+    CHECK(pushed.player == cell(1, 0, 1));
+    CHECK(pushed.movables[0].cell == cell(2, 0, 1));
+    CHECK(!pushed.movables[0].fallen);
+    // A rock on plain ground has no momentum: the world settles immediately.
+    CHECK(!pushed.movables[0].sliding);
+    CHECK(!rules::hasPendingMotion(level, pushed));
 }
 
 void testPushBlocked()
@@ -127,45 +133,217 @@ void testPushBlocked()
         { "..." },
         { "CR#" },
     });
-    CHECK(!rules::tryMove(wallBehind, rules::initialState(wallBehind), MoveDirection::Right).has_value());
+    const GameState wallState = rules::initialState(wallBehind);
+    CHECK(rules::step(wallBehind, wallState, MoveDirection::Right) == wallState);
 
     const Level rockBehind = makeLevel({
         { "...." },
         { "CRR " },
     });
-    CHECK(!rules::tryMove(rockBehind, rules::initialState(rockBehind), MoveDirection::Right).has_value());
+    const GameState rockState = rules::initialState(rockBehind);
+    CHECK(rules::step(rockBehind, rockState, MoveDirection::Right) == rockState);
 }
 
-void testConveyorCannotPush()
+void testIceSlidesOneTilePerStep()
 {
-    TEST("conveyorCannotPush");
+    TEST("iceSlidesOneTilePerStep");
+    const Level level = makeLevel({
+        { "....." },
+        { "CI  #" },
+    });
+    GameState state = rules::initialState(level);
+
+    // Step 1: the push moves the ice one tile and gives it momentum.
+    state = rules::step(level, state, MoveDirection::Right);
+    CHECK(state.player == cell(1, 0, 1));
+    CHECK(state.movables[0].cell == cell(2, 0, 1));
+    CHECK(state.movables[0].sliding == MoveDirection::Right);
+    CHECK(rules::hasPendingMotion(level, state));
+
+    // Step 2: momentum carries it one more tile; the wall is next, so the
+    // slide ends here.
+    state = rules::step(level, state);
+    CHECK(state.movables[0].cell == cell(3, 0, 1));
+    CHECK(!state.movables[0].sliding);
+    CHECK(!rules::hasPendingMotion(level, state));
+}
+
+void testPlayerMovesWhileIceSlides()
+{
+    TEST("playerMovesWhileIceSlides");
+    const Level level = makeLevel({
+        { "......", "......" },
+        { "CI   #", "      " },
+    });
+    GameState state = rules::initialState(level);
+
+    state = rules::step(level, state, MoveDirection::Right); // push
+    CHECK(state.player == cell(1, 0, 1));
+    CHECK(state.movables[0].cell == cell(2, 0, 1));
+    CHECK(state.movables[0].sliding == MoveDirection::Right);
+
+    // While the ice keeps sliding, the player walks somewhere else in the
+    // very same step.
+    state = rules::step(level, state, MoveDirection::Down);
+    CHECK(state.player == cell(1, 1, 1));
+    CHECK(state.movables[0].cell == cell(3, 0, 1));
+    CHECK(state.movables[0].sliding == MoveDirection::Right);
+
+    state = rules::step(level, state);
+    CHECK(state.movables[0].cell == cell(4, 0, 1));
+    CHECK(!state.movables[0].sliding); // wall ahead ends the slide
+    CHECK(!rules::hasPendingMotion(level, state));
+}
+
+void testPlayerMovesWhileConveyorCarriesRock()
+{
+    TEST("playerMovesWhileConveyorCarriesRock");
+    const Level level = makeLevel({
+        { "....." },
+        { "C> R " },
+    });
+    GameState state = rules::initialState(level);
+    state.movables[0].cell = cell(1, 0, 1); // place the rock on the belt
+    CHECK(rules::hasPendingMotion(level, state));
+
+    // One step: the belt carries the rock while the player, on direct input,
+    // walks into the cell the rock vacates.
+    state = rules::step(level, state, MoveDirection::Right);
+    CHECK(state.movables[0].cell == cell(2, 0, 1));
+    CHECK(state.player == cell(1, 0, 1));
+}
+
+void testConveyorMovesRockEachStep()
+{
+    TEST("conveyorMovesRockEachStep");
+    const Level level = makeLevel({
+        { "....." },
+        { "C>>R " },
+    });
+    GameState state = rules::initialState(level);
+    state.movables[0].cell = cell(1, 0, 1);
+
+    state = rules::step(level, state);
+    CHECK(state.movables[0].cell == cell(2, 0, 1)); // still on a belt
+    CHECK(rules::hasPendingMotion(level, state));
+
+    state = rules::step(level, state);
+    CHECK(state.movables[0].cell == cell(3, 0, 1)); // carried off the belt
+    CHECK(!rules::hasPendingMotion(level, state));
+    CHECK(state.player == cell(0, 0, 1)); // player never moved
+}
+
+void testConveyorBlocked()
+{
+    TEST("conveyorBlocked");
+    const Level level = makeLevel({
+        { "...." },
+        { ">#RC" },
+    });
+    GameState state = rules::initialState(level);
+    state.movables[0].cell = cell(0, 0, 1); // on the belt, wall ahead
+
+    CHECK(rules::hasPendingMotion(level, state)); // it keeps trying
+    CHECK(rules::step(level, state) == state);    // but nothing changes
+}
+
+void testConveyorRockBlockedByPlayer()
+{
+    TEST("conveyorRockBlockedByPlayer");
     const Level level = makeLevel({
         { "..." },
-        { "CR " },
+        { ">CR" },
     });
-    const GameState state = rules::initialState(level);
+    GameState state = rules::initialState(level);
+    state.movables[0].cell = cell(0, 0, 1); // on the belt, player ahead
 
-    // allowPush = false models conveyor-driven movement.
-    CHECK(!rules::tryMove(level, state, MoveDirection::Right, false).has_value());
-    CHECK(rules::tryMove(level, state, MoveDirection::Right, true).has_value());
+    CHECK(rules::step(level, state) == state);
 }
 
-void testConveyorDirection()
+void testConveyorRockIntoWater()
 {
-    TEST("conveyorDirection");
+    TEST("conveyorRockIntoWater");
     const Level level = makeLevel({
-        { ".." },
-        { "C>" },
+        { "..W." },
+        { "C> R" },
     });
+    GameState state = rules::initialState(level);
+    state.movables[0].cell = cell(1, 0, 1);
 
-    CHECK(rules::conveyorDirectionAt(level, cell(1, 0, 1)) == MoveDirection::Right);
-    CHECK(rules::conveyorDirectionAt(level, cell(0, 0, 1)) == std::nullopt);
-    CHECK(rules::conveyorDirectionAt(level, cell(9, 0, 1)) == std::nullopt);
+    state = rules::step(level, state);
+    CHECK(state.movables[0].cell == cell(2, 0, 1));
+    CHECK(state.movables[0].fallen);
+    CHECK(!state.movables[0].sliding);
+    CHECK(!rules::isUnfilledWater(level, state, cell(2, 0, 1)));
+}
 
-    // The player can step onto a conveyor tile like any passable cell.
-    const auto moved = rules::tryMove(level, rules::initialState(level), MoveDirection::Right);
-    CHECK(moved.has_value());
-    CHECK(moved->player == cell(1, 0, 1));
+void testIceIntoWater()
+{
+    TEST("iceIntoWater");
+    const Level level = makeLevel({
+        { "..W." },
+        { "CI  " },
+    });
+    GameState state = rules::initialState(level);
+
+    // The push lands the ice on the water cell; it falls in and the fall
+    // cancels its momentum.
+    state = rules::step(level, state, MoveDirection::Right);
+    CHECK(state.movables[0].cell == cell(2, 0, 1));
+    CHECK(state.movables[0].fallen);
+    CHECK(!state.movables[0].sliding);
+    CHECK(!rules::hasPendingMotion(level, state));
+}
+
+void testPlayerSlidesOnFallenIce()
+{
+    TEST("playerSlidesOnFallenIce");
+    const Level level = makeLevel({
+        { "...W." },
+        { "CI   " },
+    });
+    GameState state = rules::initialState(level);
+
+    state = rules::step(level, state, MoveDirection::Right); // push; ice slides
+    CHECK(state.movables[0].sliding == MoveDirection::Right);
+    state = rules::step(level, state); // ice reaches the water and falls in
+    CHECK(state.movables[0].cell == cell(3, 0, 1));
+    CHECK(state.movables[0].fallen);
+
+    state = rules::step(level, state, MoveDirection::Right); // player to x=2
+    CHECK(state.player == cell(2, 0, 1));
+
+    // Stepping onto the ice-filled water gives the player slide momentum.
+    state = rules::step(level, state, MoveDirection::Right);
+    CHECK(state.player == cell(3, 0, 1));
+    CHECK(state.playerSliding == MoveDirection::Right);
+    CHECK(rules::hasPendingMotion(level, state));
+
+    // Momentum carries the player off the ice, then ends on normal ground.
+    state = rules::step(level, state);
+    CHECK(state.player == cell(4, 0, 1));
+    CHECK(!state.playerSliding);
+    CHECK(!state.playerDead);
+}
+
+void testSlideMomentumOverridesInput()
+{
+    TEST("slideMomentumOverridesInput");
+    const Level level = makeLevel({
+        { "...W..", "......" },
+        { "CI    ", "      " },
+    });
+    GameState state = rules::initialState(level);
+    state = rules::step(level, state, MoveDirection::Right); // push
+    state = rules::step(level, state);                       // ice falls into water
+    state = rules::step(level, state, MoveDirection::Right); // player to x=2
+    state = rules::step(level, state, MoveDirection::Right); // onto the ice floor
+    CHECK(state.playerSliding == MoveDirection::Right);
+
+    // Input cannot steer a sliding player: the slide continues instead.
+    state = rules::step(level, state, MoveDirection::Down);
+    CHECK(state.player == cell(4, 0, 1));
+    CHECK(state.player.y == 0);
 }
 
 void testPressurePlateUnlocksEnd()
@@ -175,14 +353,13 @@ void testPressurePlateUnlocksEnd()
         { "...." },
         { "CRPE" },
     });
-    GameState state = rules::initialState(level);
+    const GameState state = rules::initialState(level);
     CHECK(!rules::isEndUnlocked(level, state));
 
-    const auto pushed = rules::tryMove(level, state, MoveDirection::Right);
-    CHECK(pushed.has_value());
-    CHECK(pushed->movables[0].cell == cell(2, 0, 1));
-    CHECK(rules::isEndUnlocked(level, *pushed));
-    CHECK(!rules::isAtUnlockedEnd(level, *pushed));
+    const GameState pushed = rules::step(level, state, MoveDirection::Right);
+    CHECK(pushed.movables[0].cell == cell(2, 0, 1));
+    CHECK(rules::isEndUnlocked(level, pushed));
+    CHECK(!rules::isAtUnlockedEnd(level, pushed));
 }
 
 void testPlayerOnPlateUnlocks()
@@ -192,9 +369,9 @@ void testPlayerOnPlateUnlocks()
         { ".." },
         { "CP" },
     });
-    const auto moved = rules::tryMove(level, rules::initialState(level), MoveDirection::Right);
-    CHECK(moved.has_value());
-    CHECK(rules::isEndUnlocked(level, *moved));
+    const GameState moved = rules::step(level, rules::initialState(level), MoveDirection::Right);
+    CHECK(moved.player == cell(1, 0, 1));
+    CHECK(rules::isEndUnlocked(level, moved));
 }
 
 void testPlayerDrownsInWater()
@@ -207,14 +384,15 @@ void testPlayerDrownsInWater()
     const GameState state = rules::initialState(level);
     CHECK(rules::isUnfilledWater(level, state, cell(1, 0, 1)));
 
-    const auto moved = rules::tryMove(level, state, MoveDirection::Right);
-    CHECK(moved.has_value());
-    CHECK(moved->player == cell(1, 0, 1));
-    CHECK(moved->playerDead);
+    const GameState drowned = rules::step(level, state, MoveDirection::Right);
+    CHECK(drowned.player == cell(1, 0, 1));
+    CHECK(drowned.playerDead);
+    CHECK(!drowned.playerSliding);
+    CHECK(!rules::isUnfilledWater(level, drowned, cell(1, 0, 1)));
 
-    // A dead player cannot move; drowned player fills the water.
-    CHECK(!rules::tryMove(level, *moved, MoveDirection::Left).has_value());
-    CHECK(!rules::isUnfilledWater(level, *moved, cell(1, 0, 1)));
+    // Dead players ignore input; the drowned world is inert.
+    CHECK(rules::step(level, drowned, MoveDirection::Left) == drowned);
+    CHECK(!rules::hasPendingMotion(level, drowned));
 }
 
 void testRockFillsWater()
@@ -226,163 +404,15 @@ void testRockFillsWater()
     });
     GameState state = rules::initialState(level);
 
-    const auto pushed = rules::tryMove(level, state, MoveDirection::Right);
-    CHECK(pushed.has_value());
-    CHECK(pushed->movables[0].cell == cell(2, 0, 1));
-    CHECK(pushed->movables[0].fallen);
-    CHECK(!rules::isUnfilledWater(level, *pushed, cell(2, 0, 1)));
+    state = rules::step(level, state, MoveDirection::Right);
+    CHECK(state.movables[0].cell == cell(2, 0, 1));
+    CHECK(state.movables[0].fallen);
+    CHECK(!rules::isUnfilledWater(level, state, cell(2, 0, 1)));
 
     // The filled water is now safe to walk over.
-    const auto walked = rules::tryMove(level, *pushed, MoveDirection::Right);
-    CHECK(walked.has_value());
-    CHECK(walked->player == cell(2, 0, 1));
-    CHECK(!walked->playerDead);
-}
-
-void testIceBlockSlides()
-{
-    TEST("iceBlockSlides");
-    const Level level = makeLevel({
-        { "....." },
-        { "CI  #" },
-    });
-    const auto moved = rules::tryMove(level, rules::initialState(level), MoveDirection::Right);
-    CHECK(moved.has_value());
-    CHECK(moved->player == cell(1, 0, 1));
-    // The ice block slides until it hits the wall.
-    CHECK(moved->movables[0].cell == cell(3, 0, 1));
-    CHECK(!moved->movables[0].fallen);
-}
-
-void testIceBlockSlidesIntoWater()
-{
-    TEST("iceBlockSlidesIntoWater");
-    const Level level = makeLevel({
-        { "...W." },
-        { "CI   " },
-    });
-    const auto moved = rules::tryMove(level, rules::initialState(level), MoveDirection::Right);
-    CHECK(moved.has_value());
-    CHECK(moved->movables[0].cell == cell(3, 0, 1));
-    CHECK(moved->movables[0].fallen);
-}
-
-void testPlayerSlidesOnFallenIce()
-{
-    TEST("playerSlidesOnFallenIce");
-    const Level level = makeLevel({
-        { "...W." },
-        { "CI   " },
-    });
-    GameState state = rules::initialState(level);
-    state = *rules::tryMove(level, state, MoveDirection::Right); // ice falls into water at x=3
-    state = *rules::tryMove(level, state, MoveDirection::Right); // player to x=2
-
-    // Stepping onto the ice-filled water slides the player across it.
-    const auto slid = rules::tryMove(level, state, MoveDirection::Right);
-    CHECK(slid.has_value());
-    CHECK(slid->player == cell(4, 0, 1));
-    CHECK(!slid->playerDead);
-}
-
-void testConveyorStepMovesRock()
-{
-    TEST("conveyorStepMovesRock");
-    const Level level = makeLevel({
-        { "....." },
-        { "C> R " },
-    });
-    GameState state = rules::initialState(level);
-    state.movables[0].cell = cell(1, 0, 1); // place the rock on the conveyor
-
-    CHECK(rules::anyEntityOnConveyor(level, state));
-    const auto stepped = rules::applyConveyorStep(level, state);
-    CHECK(stepped.has_value());
-    CHECK(stepped->movables[0].cell == cell(2, 0, 1));
-    CHECK(stepped->player == cell(0, 0, 1)); // player not on a conveyor
-
-    // Off the belt now: nothing left to convey.
-    CHECK(!rules::anyEntityOnConveyor(level, *stepped));
-}
-
-void testConveyorStepChainsRocks()
-{
-    TEST("conveyorStepChainsRocks");
-    const Level level = makeLevel({
-        { "......" },
-        { ">>>RRC" },
-    });
-    GameState state = rules::initialState(level);
-    state.movables[0].cell = cell(1, 0, 1);
-    state.movables[1].cell = cell(2, 0, 1);
-
-    // The front rock vacates its cell this same tick, so both advance.
-    const auto stepped = rules::applyConveyorStep(level, state);
-    CHECK(stepped.has_value());
-    CHECK(stepped->movables[0].cell == cell(2, 0, 1));
-    CHECK(stepped->movables[1].cell == cell(3, 0, 1));
-}
-
-void testConveyorStepBlocked()
-{
-    TEST("conveyorStepBlocked");
-    const Level level = makeLevel({
-        { "...." },
-        { ">#RC" },
-    });
-    GameState state = rules::initialState(level);
-    state.movables[0].cell = cell(0, 0, 1); // on the conveyor, wall ahead
-
-    CHECK(rules::anyEntityOnConveyor(level, state));
-    CHECK(!rules::applyConveyorStep(level, state).has_value());
-}
-
-void testConveyorStepRockBlockedByPlayer()
-{
-    TEST("conveyorStepRockBlockedByPlayer");
-    const Level level = makeLevel({
-        { "..." },
-        { ">CR" },
-    });
-    GameState state = rules::initialState(level);
-    state.movables[0].cell = cell(0, 0, 1); // on the conveyor, player ahead
-
-    CHECK(!rules::applyConveyorStep(level, state).has_value());
-}
-
-void testConveyorStepMovesPlayerAndRockTogether()
-{
-    TEST("conveyorStepMovesPlayerAndRockTogether");
-    const Level level = makeLevel({
-        { "....." },
-        { ">>C R" },
-    });
-    GameState state = rules::initialState(level);
-    state.player = cell(0, 0, 1);           // on the first conveyor
-    state.movables[0].cell = cell(1, 0, 1); // on the second conveyor
-
-    const auto stepped = rules::applyConveyorStep(level, state);
-    CHECK(stepped.has_value());
-    CHECK(stepped->movables[0].cell == cell(2, 0, 1));
-    CHECK(stepped->player == cell(1, 0, 1)); // into the cell the rock vacated
-    CHECK(!stepped->playerDead);
-}
-
-void testConveyorStepRockIntoWater()
-{
-    TEST("conveyorStepRockIntoWater");
-    const Level level = makeLevel({
-        { "..W." },
-        { "C> R" },
-    });
-    GameState state = rules::initialState(level);
-    state.movables[0].cell = cell(1, 0, 1);
-
-    const auto stepped = rules::applyConveyorStep(level, state);
-    CHECK(stepped.has_value());
-    CHECK(stepped->movables[0].cell == cell(2, 0, 1));
-    CHECK(stepped->movables[0].fallen);
-    CHECK(!rules::isUnfilledWater(level, *stepped, cell(2, 0, 1)));
+    state = rules::step(level, state, MoveDirection::Right);
+    CHECK(state.player == cell(2, 0, 1));
+    CHECK(!state.playerDead);
 }
 
 void testLadderClimb()
@@ -394,32 +424,31 @@ void testLadderClimb()
     });
     GameState state = rules::initialState(level);
 
-    const auto ontoLadder = rules::tryMove(level, state, MoveDirection::Left);
-    CHECK(ontoLadder.has_value());
-    CHECK(ontoLadder->player == cell(1, 0, 1));
+    state = rules::step(level, state, MoveDirection::Left);
+    CHECK(state.player == cell(1, 0, 1)); // onto the ladder
 
     // Moving toward the attached ground climbs on top of it.
-    const auto climbed = rules::tryMove(level, *ontoLadder, MoveDirection::Left);
-    CHECK(climbed.has_value());
-    CHECK(climbed->player == cell(0, 0, 2));
-    CHECK(!climbed->playerDead);
+    state = rules::step(level, state, MoveDirection::Left);
+    CHECK(state.player == cell(0, 0, 2));
+    CHECK(!state.playerDead);
 }
 
 void testLadderClimbBlockedByMovable()
 {
     TEST("ladderClimbBlockedByMovable");
     // A rock sits on top of the ground block the ladder is attached to.
-    const Level blocked = makeLevel({
+    const Level level = makeLevel({
         { "..." },
         { ".LC" },
         { "R  " },
     });
-    GameState state = rules::initialState(blocked);
-    state = *rules::tryMove(blocked, state, MoveDirection::Left); // onto ladder
+    GameState state = rules::initialState(level);
+    state = rules::step(level, state, MoveDirection::Left); // onto ladder
+    CHECK(state.player == cell(1, 0, 1));
 
     // The climb destination (0, 0, 2) is occupied by the rock, and the flat
-    // target is solid ground, so the move fails entirely.
-    CHECK(!rules::tryMove(blocked, state, MoveDirection::Left).has_value());
+    // target is solid ground, so the step changes nothing.
+    CHECK(rules::step(level, state, MoveDirection::Left) == state);
 }
 
 void testFallToLowerLayer()
@@ -431,10 +460,28 @@ void testFallToLowerLayer()
         { ".  " },
         { "C  " },
     });
-    const auto moved = rules::tryMove(level, rules::initialState(level), MoveDirection::Right);
-    CHECK(moved.has_value());
-    CHECK(moved->player == cell(1, 0, 0));
-    CHECK(!moved->playerDead);
+    const GameState moved = rules::step(level, rules::initialState(level), MoveDirection::Right);
+    CHECK(moved.player == cell(1, 0, 0));
+    CHECK(!moved.playerDead);
+}
+
+void testConveyorCarriesPlayer()
+{
+    TEST("conveyorCarriesPlayer");
+    const Level level = makeLevel({
+        { "...." },
+        { "C>> " },
+    });
+    GameState state = rules::initialState(level);
+    state.player = cell(1, 0, 1); // standing on the first belt
+    CHECK(rules::hasPendingMotion(level, state));
+
+    // Without input the belt carries the player; direct input overrides it.
+    const GameState carried = rules::step(level, state);
+    CHECK(carried.player == cell(2, 0, 1));
+
+    const GameState steered = rules::step(level, state, MoveDirection::Left);
+    CHECK(steered.player == cell(0, 0, 1));
 }
 
 } // namespace
@@ -442,28 +489,28 @@ void testFallToLowerLayer()
 int main()
 {
     testInitialState();
-    testSimpleMoveAndWall();
-    testTryMoveIsPure();
+    testStepMovesPlayer();
+    testStepIsPure();
     testPushRock();
     testPushBlocked();
-    testConveyorCannotPush();
-    testConveyorDirection();
-    testConveyorStepMovesRock();
-    testConveyorStepChainsRocks();
-    testConveyorStepBlocked();
-    testConveyorStepRockBlockedByPlayer();
-    testConveyorStepMovesPlayerAndRockTogether();
-    testConveyorStepRockIntoWater();
+    testIceSlidesOneTilePerStep();
+    testPlayerMovesWhileIceSlides();
+    testPlayerMovesWhileConveyorCarriesRock();
+    testConveyorMovesRockEachStep();
+    testConveyorBlocked();
+    testConveyorRockBlockedByPlayer();
+    testConveyorRockIntoWater();
+    testIceIntoWater();
+    testPlayerSlidesOnFallenIce();
+    testSlideMomentumOverridesInput();
     testPressurePlateUnlocksEnd();
     testPlayerOnPlateUnlocks();
     testPlayerDrownsInWater();
     testRockFillsWater();
-    testIceBlockSlides();
-    testIceBlockSlidesIntoWater();
-    testPlayerSlidesOnFallenIce();
     testLadderClimb();
     testLadderClimbBlockedByMovable();
     testFallToLowerLayer();
+    testConveyorCarriesPlayer();
 
     if (failures == 0) {
         std::cout << "All " << checks << " checks passed.\n";

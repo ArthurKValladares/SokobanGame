@@ -53,7 +53,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
 
 - `src/main.cpp`: process entry point.
 - `src/engine/Application.*`: main loop, input handling, animation/presentation, level loading, editor integration, frame construction for rendering. Gameplay state lives in a single `GameState state_` member; per-movable animation data lives in a parallel `movableVisuals_` vector.
-- `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags) plus pure functions in `sokoban::rules` — `tryMove` applies one move (push, ladder climb, ice slide, fall, water) and returns the resulting state; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
+- `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags + slide momentum) plus pure functions in `sokoban::rules` — `step` advances the whole world one discrete step (simultaneous one-tile moves, pushes, ladder climbs, momentum, falls, water, conveyors); `hasPendingMotion` reports whether the world would keep moving without input; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
 - `src/engine/Level.*`: level file parsing, serialization, layered grid storage, walkability/support rules, player/movable extraction.
 - `src/engine/TileTypes.*`: tile enum, character mapping, colors, helper predicates such as `tileTypeAllowsEntity`.
 - `src/engine/LevelEditor.*`: ImGui level editor, document state, painting/deleting, file browser, draft play mode, deleted-level handling.
@@ -138,14 +138,22 @@ Entity support/walkability:
 
 ## Gameplay Features
 
-Core movement:
+Core movement (discrete step system):
 
-- WASD moves the player.
-- `Z` undoes.
-- `R` restarts.
-- Held movement supports repeated movement.
-- Movement is animated over `config::playerMoveDurationSeconds`.
-- Movement history stores action records for undo.
+- Game time advances in discrete world steps (`rules::step`); every entity
+  moves at most one tile per step, and all entities move simultaneously
+  (player can walk while ice slides and conveyors carry rocks).
+- Ice sliding is momentum stored in `GameState` (`playerSliding`,
+  `Movable::sliding`): one tile per step until blocked, fallen, or off
+  slippery ground. Slide momentum overrides player input.
+- Steps last `config::stepDurationSeconds` (debug-adjustable); all entities
+  interpolate across the same step duration, so chained steps animate as
+  continuous motion. Per-step movement rates other than one tile are a
+  planned extension.
+- WASD moves the player (one tile per step; held keys step repeatedly).
+- `Z` undoes one step; undoing pauses pending world motion until the next
+  input-driven step. `R` restarts.
+- Movement history stores one record per step for undo.
 
 Goals and pressure plates:
 
@@ -183,8 +191,8 @@ Conveyors:
 
 - `^`, `v`, `>`, `<` represent conveyor directions.
 - Conveyors use the KayKit Platformer `conveyor_4x4x1_blue` GLTF asset.
-- Conveyor rate is adjustable in the Debug UI; default is `config::conveyorTilesPerSecond = 2.0f`.
-- Conveyors move every entity standing on them: player and movables (rocks/ice) advance one tile per tick, simultaneously, via `rules::applyConveyorStep`. Conveyed movables get the usual slide/fall/water treatment. Conveyors never push one entity into another; blocked entities stay put.
+- Conveyors move every entity standing on them one tile per world step, resolved inside `rules::step` together with all other movement (player input overrides the belt under the player). Conveyed movables get the usual slide/fall/water treatment. Conveyors never push one entity into another; blocked entities stay put.
+- Belt surfaces scroll one texture cycle per step, matching rider speed.
 - Conveyor-started movement uses the conveyor interval as animation duration, so chained conveyor motion appears continuous.
 - Conveyor rendering uses primitive material texture indices from the GLTF so the blue body, dark belt, and white arrows show correctly.
 

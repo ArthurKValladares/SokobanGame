@@ -19,18 +19,24 @@ enum class MoveDirection {
 
 // Complete gameplay state for one screen: everything the rules need besides
 // the static Level. Values of this type are cheap to copy and compare, which
-// is what move application, undo history, and tests are built on.
+// is what step application, undo history, and tests are built on.
+//
+// `sliding` fields are ice-slide momentum: an entity with momentum moves one
+// tile in that direction every world step until it is blocked, falls, or
+// leaves slippery ground.
 struct GameState {
     struct Movable {
         TileType type = TileType::Rock;
         GridPosition3 cell {};
         bool fallen = false;
+        std::optional<MoveDirection> sliding;
 
         bool operator==(const Movable&) const = default;
     };
 
     GridPosition3 player {};
     bool playerDead = false;
+    std::optional<MoveDirection> playerSliding;
     std::vector<Movable> movables;
 
     bool operator==(const GameState&) const = default;
@@ -39,6 +45,11 @@ struct GameState {
 // Pure, headless gameplay rules. Nothing here touches rendering, input,
 // animation, or the file system; every function is a deterministic function
 // of its arguments.
+//
+// Time advances in discrete world steps. Within one step, every entity moves
+// at most its per-step rate (currently one tile for everything), and all
+// entities move simultaneously: an entity blocked only by another entity that
+// vacates its cell this step still advances.
 namespace rules {
 
 [[nodiscard]] GameState initialState(const Level& level);
@@ -62,23 +73,22 @@ namespace rules {
 [[nodiscard]] bool isEndUnlocked(const Level& level, const GameState& state);
 [[nodiscard]] bool isAtUnlockedEnd(const Level& level, const GameState& state);
 
-// Applies one player move (including pushing, ladder climbing, ice sliding,
-// falling, and water) and returns the resulting state, or nullopt if the move
-// is not possible.
-[[nodiscard]] std::optional<GameState> tryMove(
+// True when the world would keep moving without player input: any surviving
+// entity has slide momentum or stands on a conveyor.
+[[nodiscard]] bool hasPendingMotion(const Level& level, const GameState& state);
+
+// Advances the world one discrete step and returns the resulting state
+// (unchanged if nothing can move). Movement intents per entity:
+//   - slide momentum first (it overrides player input),
+//   - then player input (which may push a movable, including onto its own
+//     one-tile move; only direct input pushes),
+//   - then conveyors for entities standing on them.
+// Each entity moves at most one tile per step; falls resolve within the step
+// and cancel momentum. Ladder climbing applies to input-driven moves only.
+[[nodiscard]] GameState step(
     const Level& level,
     const GameState& state,
-    MoveDirection direction,
-    bool allowPush = true);
-
-// True when the (living) player or any surfaced movable stands on a conveyor.
-[[nodiscard]] bool anyEntityOnConveyor(const Level& level, const GameState& state);
-
-// Applies one conveyor tick: every entity standing on a conveyor tile moves
-// one tile in the belt direction, simultaneously, with the usual slide/fall/
-// water treatment. Conveyors never push entities into each other; blocked
-// entities stay put. Returns nullopt if nothing moves.
-[[nodiscard]] std::optional<GameState> applyConveyorStep(const Level& level, const GameState& state);
+    std::optional<MoveDirection> playerInput = std::nullopt);
 
 } // namespace rules
 

@@ -641,7 +641,6 @@ void Application::update(float dt)
 
     queuePressedCommands();
     advancePlayerMovement(dt);
-    updateConveyorMovement(dt);
 }
 
 void Application::drawDebugUi()
@@ -689,13 +688,13 @@ void Application::drawDebugUi()
 
     if (ImGui::CollapsingHeader("Tile Geometry")) {
         ImGui::DragFloat(
-            "Conveyor Rate",
-            &conveyorTilesPerSecond_,
+            "Step Duration",
+            &stepDurationSeconds_,
+            0.005f,
             0.05f,
-            0.0f,
-            12.0f,
-            "%.2f tiles/s");
-        conveyorTilesPerSecond_ = std::clamp(conveyorTilesPerSecond_, 0.0f, 12.0f);
+            1.0f,
+            "%.3f s");
+        stepDurationSeconds_ = std::clamp(stepDurationSeconds_, 0.05f, 1.0f);
         ImGui::DragFloat(
             "Surface Entity Height",
             &surfaceEntityHeight_,
@@ -1011,7 +1010,7 @@ void Application::applyLevel(Level level)
     activeAction_ = {};
     moving_ = false;
     moveElapsed_ = 0.0f;
-    conveyorElapsed_ = 0.0f;
+    autoMotionPaused_ = false;
 }
 
 void Application::advanceScreen()
@@ -1048,46 +1047,6 @@ void Application::queuePressedCommands()
     }
 }
 
-void Application::updateConveyorMovement(float dt)
-{
-    if (moving_ || state_.playerDead || !pendingCommands_.empty() || conveyorTilesPerSecond_ <= 0.0f) {
-        conveyorElapsed_ = 0.0f;
-        return;
-    }
-
-    if (!rules::anyEntityOnConveyor(level_, state_)) {
-        conveyorElapsed_ = 0.0f;
-        return;
-    }
-
-    conveyorElapsed_ += dt;
-    const float interval = 1.0f / conveyorTilesPerSecond_;
-    if (conveyorElapsed_ < interval) {
-        return;
-    }
-
-    conveyorElapsed_ = 0.0f;
-    std::optional<GameState> after = rules::applyConveyorStep(level_, state_);
-    if (!after) {
-        return;
-    }
-
-    activeAction_ = {
-        .before = state_,
-        .after = std::move(*after),
-        .animationSecondsPerTile = interval,
-        .conveyorDriven = true,
-    };
-    if (const std::optional<MoveDirection> direction =
-            movementDirection(activeAction_.before.player, activeAction_.after.player)) {
-        playerFacingQuarterTurns_ = facingQuarterTurns(*direction);
-    }
-    undoCursor_.reset();
-    moveElapsed_ = 0.0f;
-    moving_ = true;
-    startMovableAnimations(activeAction_);
-}
-
 void Application::advancePlayerMovement(float dt)
 {
     advanceMovableAnimations(dt);
@@ -1097,13 +1056,6 @@ void Application::advancePlayerMovement(float dt)
     while (remainingTime > 0.0f) {
         if (!moving_ && !tryStartNextMove()) {
             return;
-        }
-
-        if constexpr (config::playerMoveDurationSeconds <= 0.0f) {
-            if (completeActiveAction()) {
-                return;
-            }
-            continue;
         }
 
         const float duration = activeActionDuration();
@@ -1119,11 +1071,14 @@ void Application::advancePlayerMovement(float dt)
         remainingTime -= step;
         moveElapsed_ += step;
 
+        const Vec3 playerFrom = entityRenderTarget(activeAction_.before.player, activeAction_.before.playerDead);
+        const Vec3 playerTo = entityRenderTarget(activeAction_.after.player, activeAction_.after.playerDead);
+        const float playerDistance = gridDistance(playerFrom, playerTo);
         playerRenderPosition_ = interpolateGridMotion(
-            entityRenderTarget(activeAction_.before.player, activeAction_.before.playerDead),
-            entityRenderTarget(activeAction_.after.player, activeAction_.after.playerDead),
+            playerFrom,
+            playerTo,
             moveElapsed_,
-            activeAction_.animationSecondsPerTile);
+            playerDistance > 0.0001f ? duration / playerDistance : 0.0f);
 
         if (moveElapsed_ >= duration) {
             if (completeActiveAction()) {
@@ -1175,8 +1130,9 @@ void Application::startMovableAnimations(const ActionRecord& action)
         visual.animationStart = visual.renderPosition;
         visual.animationEnd = target;
         visual.animationElapsed = 0.0f;
-        visual.animationDuration = gridDistance(visual.animationStart, visual.animationEnd) * action.animationSecondsPerTile;
-        visual.animationSecondsPerTile = action.animationSecondsPerTile;
+        const float distance = gridDistance(visual.animationStart, visual.animationEnd);
+        visual.animationDuration = action.durationSeconds;
+        visual.animationSecondsPerTile = distance > 0.0001f ? action.durationSeconds / distance : 0.0f;
         visual.moving = true;
     }
 }
@@ -1186,9 +1142,6 @@ bool Application::completeActiveAction()
     applyGameState(activeAction_.after);
 
     moveHistory_.push_back(activeAction_);
-    if (activeAction_.conveyorDriven && conveyorTilesPerSecond_ > 0.0f) {
-        conveyorElapsed_ = 1.0f / conveyorTilesPerSecond_;
-    }
     moving_ = false;
     moveElapsed_ = 0.0f;
 
@@ -1207,18 +1160,7 @@ bool Application::completeActiveAction()
 
 float Application::activeActionDuration() const
 {
-    float distance = gridDistance(
-        entityRenderTarget(activeAction_.before.player, activeAction_.before.playerDead),
-        entityRenderTarget(activeAction_.after.player, activeAction_.after.playerDead));
-    const size_t movableCount = std::min(activeAction_.before.movables.size(), activeAction_.after.movables.size());
-    for (size_t i = 0; i < movableCount; ++i) {
-        distance = std::max(
-            distance,
-            gridDistance(
-                entityRenderTarget(activeAction_.before.movables[i].cell, activeAction_.before.movables[i].fallen),
-                entityRenderTarget(activeAction_.after.movables[i].cell, activeAction_.after.movables[i].fallen)));
-    }
-    return distance * activeAction_.animationSecondsPerTile;
+    return activeAction_.durationSeconds;
 }
 
 bool Application::tryStartNextMove()
@@ -1252,7 +1194,13 @@ bool Application::tryStartNextMove()
         }
     }
 
-    return tryStartHeldMove();
+    if (tryStartHeldMove()) {
+        return true;
+    }
+
+    return !autoMotionPaused_ &&
+        rules::hasPendingMotion(level_, state_) &&
+        tryStartWorldStep(std::nullopt);
 }
 
 bool Application::tryStartHeldMove()
@@ -1273,25 +1221,26 @@ bool Application::tryStartHeldMove()
     return false;
 }
 
-bool Application::tryStartMove(
-    MoveDirection direction,
-    bool allowPush,
-    float animationSecondsPerTile,
-    bool conveyorDriven)
+bool Application::tryStartWorldStep(std::optional<MoveDirection> playerInput)
 {
-    std::optional<GameState> after = rules::tryMove(level_, state_, direction, allowPush);
-    if (!after) {
+    GameState after = rules::step(level_, state_, playerInput);
+    if (after == state_) {
         return false;
     }
 
     activeAction_ = {
         .before = state_,
-        .after = std::move(*after),
-        .animationSecondsPerTile = animationSecondsPerTile,
-        .conveyorDriven = conveyorDriven,
+        .after = std::move(after),
+        .durationSeconds = stepDurationSeconds_,
     };
 
-    playerFacingQuarterTurns_ = facingQuarterTurns(direction);
+    if (playerInput) {
+        playerFacingQuarterTurns_ = facingQuarterTurns(*playerInput);
+        autoMotionPaused_ = false;
+    } else if (const std::optional<MoveDirection> direction =
+                   movementDirection(activeAction_.before.player, activeAction_.after.player)) {
+        playerFacingQuarterTurns_ = facingQuarterTurns(*direction);
+    }
     undoCursor_.reset();
     moveElapsed_ = 0.0f;
     moving_ = true;
@@ -1317,6 +1266,8 @@ bool Application::tryStartUndoMove()
 
     --(*undoCursor_);
     activeAction_ = invertActionRecord(moveHistory_[*undoCursor_]);
+    activeAction_.durationSeconds = stepDurationSeconds_;
+    autoMotionPaused_ = true;
     if (const auto direction = movementDirection(activeAction_.before.player, activeAction_.after.player)) {
         playerFacingQuarterTurns_ = facingQuarterTurns(*direction);
     }
@@ -1340,7 +1291,9 @@ bool Application::tryStartRestart()
     activeAction_ = {
         .before = state_,
         .after = std::move(restarted),
+        .durationSeconds = stepDurationSeconds_,
     };
+    autoMotionPaused_ = false;
     undoCursor_.reset();
     moveElapsed_ = 0.0f;
     moving_ = true;
@@ -1423,7 +1376,7 @@ bool Application::hasPendingMove(MoveDirection direction) const
 
 bool Application::tryStartHeldDirection(MoveDirection direction, std::optional<MoveDirection> queuedDirection)
 {
-    if (!tryStartMove(direction)) {
+    if (!tryStartWorldStep(direction)) {
         return false;
     }
 
@@ -1491,14 +1444,14 @@ RenderFrameData Application::buildRenderFrame() const
 
 float Application::conveyorBeltScrollOffset() const
 {
-    if (conveyorTilesPerSecond_ <= 0.0f) {
+    if (stepDurationSeconds_ <= 0.0f) {
         return 0.0f;
     }
 
-    // The belt texture spans one full V cycle per tile of travel, so the belt
-    // surface visually moves at the same rate entities are conveyed. Negate
-    // here if the scroll direction turns out to oppose the movement direction.
-    return std::fmod(playerAnimationTimeSeconds_ * conveyorTilesPerSecond_, 1.0f);
+    // Belts move riders one tile per step and the belt texture spans one full
+    // V cycle per tile, so one cycle per step keeps the surface in sync with
+    // conveyed entities. Negate to flip the scroll direction if needed.
+    return std::fmod(playerAnimationTimeSeconds_ / stepDurationSeconds_, 1.0f);
 }
 
 float Application::tileTypeToScale(TileType type) const
