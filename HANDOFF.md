@@ -58,7 +58,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
 - `src/engine/TileTypes.*`: tile enum, character mapping, colors, helper predicates such as `tileTypeAllowsEntity`.
 - `src/engine/LevelEditor.*`: ImGui level editor, document state, painting/deleting, file browser, draft play mode, deleted-level handling.
 - `src/engine/render/VulkanRenderer.*`: Vulkan setup, swapchain, dynamic rendering, shadow pass, model pass, debug UI rendering, descriptor resources.
-- `src/engine/render/GltfMesh.*`: small custom GLTF/GLB loader, static mesh loading, skinned mesh loading, animation sampling/skinning.
+- `src/engine/render/GltfMesh.*`: small custom GLTF/GLB loader, static mesh loading, skinned mesh loading, animation sampling/skinning. `skinGltfMeshBlended` skins with a pose blended between two clips; the renderer uses it to crossfade the player's idle/walk/push animations over `config::playerAnimationFadeSeconds`.
 - `src/engine/render/ImageData.*`: texture loading through WIC.
 - `src/engine/ui/Ui.*`: very small in-game immediate UI used for the quit confirmation, including crude bitmap-glyph text.
 - `shaders/`: GLSL shader sources compiled to SPIR-V by CMake.

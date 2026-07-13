@@ -390,6 +390,9 @@ private:
     GltfAnimationClip roguePushAnimation_ {};
     RenderAnimation activeRogueAnimation_ = RenderAnimation::None;
     float activeRogueAnimationTime_ = -1.0f;
+    RenderAnimation rogueFadeFromAnimation_ = RenderAnimation::None;
+    float rogueFadeFromTime_ = 0.0f;
+    float rogueFadeElapsed_ = 0.0f;
     OwnedImage rogueTextureImage_ {};
     VkSampler rogueTextureSampler_ = VK_NULL_HANDLE;
     OwnedImage platformerTextureImage_ {};

@@ -100,4 +100,14 @@ struct GltfMeshLoadOptions {
     const GltfAnimationClip& animation,
     float timeSeconds);
 
+// Skins with a pose blended between two clips (0 = from, 1 = to); used for
+// short crossfades when the active animation changes.
+[[nodiscard]] MeshData skinGltfMeshBlended(
+    const SkinnedMeshData& mesh,
+    const GltfAnimationClip& fromAnimation,
+    float fromTimeSeconds,
+    const GltfAnimationClip& toAnimation,
+    float toTimeSeconds,
+    float blend);
+
 } // namespace sokoban

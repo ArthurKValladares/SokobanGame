@@ -1312,17 +1312,60 @@ void VulkanRenderer::updateAnimatedModelMeshes(const RenderFrameData& frameData)
         return;
     }
 
-    if (requestedAnimation == activeRogueAnimation_ &&
+    auto clipFor = [this](RenderAnimation animation) -> const GltfAnimationClip& {
+        switch (animation) {
+        case RenderAnimation::RoguePush:
+            return roguePushAnimation_;
+        case RenderAnimation::RogueMovement:
+            return rogueMovementAnimation_;
+        default:
+            return rogueIdleAnimation_;
+        }
+    };
+
+    // The per-entity clip clock is continuous across clip switches, so its
+    // frame-to-frame delta doubles as the crossfade timer (absolute value,
+    // because the clock runs backwards while rewinding).
+    const float timeDelta = activeRogueAnimation_ == RenderAnimation::None
+        ? 0.0f
+        : requestedTime - activeRogueAnimationTime_;
+
+    if (requestedAnimation != activeRogueAnimation_ &&
+        activeRogueAnimation_ != RenderAnimation::None) {
+        // Start a crossfade from the clip that was showing.
+        rogueFadeFromAnimation_ = activeRogueAnimation_;
+        rogueFadeFromTime_ = activeRogueAnimationTime_;
+        rogueFadeElapsed_ = 0.0f;
+    }
+
+    if (rogueFadeFromAnimation_ == RenderAnimation::None &&
+        requestedAnimation == activeRogueAnimation_ &&
         std::abs(requestedTime - activeRogueAnimationTime_) < 0.0001f) {
         return;
     }
 
-    const GltfAnimationClip& clip = requestedAnimation == RenderAnimation::RoguePush
-        ? roguePushAnimation_
-        : (requestedAnimation == RenderAnimation::RogueMovement
-                ? rogueMovementAnimation_
-                : rogueIdleAnimation_);
-    const MeshData skinnedMesh = skinGltfMesh(rogueSkinnedMesh_, clip, requestedTime);
+    MeshData skinnedMesh;
+    if (rogueFadeFromAnimation_ != RenderAnimation::None) {
+        rogueFadeFromTime_ += timeDelta; // the outgoing clip keeps playing
+        rogueFadeElapsed_ += std::abs(timeDelta);
+        constexpr float fadeSeconds = config::playerAnimationFadeSeconds;
+        if (fadeSeconds <= 0.0f || rogueFadeElapsed_ >= fadeSeconds) {
+            rogueFadeFromAnimation_ = RenderAnimation::None;
+            skinnedMesh = skinGltfMesh(rogueSkinnedMesh_, clipFor(requestedAnimation), requestedTime);
+        } else {
+            float blend = rogueFadeElapsed_ / fadeSeconds;
+            blend = blend * blend * (3.0f - 2.0f * blend); // smoothstep
+            skinnedMesh = skinGltfMeshBlended(
+                rogueSkinnedMesh_,
+                clipFor(rogueFadeFromAnimation_),
+                rogueFadeFromTime_,
+                clipFor(requestedAnimation),
+                requestedTime,
+                blend);
+        }
+    } else {
+        skinnedMesh = skinGltfMesh(rogueSkinnedMesh_, clipFor(requestedAnimation), requestedTime);
+    }
     updateMeshVertices(rogueMesh_, skinnedMesh.vertices);
     activeRogueAnimation_ = requestedAnimation;
     activeRogueAnimationTime_ = requestedTime;

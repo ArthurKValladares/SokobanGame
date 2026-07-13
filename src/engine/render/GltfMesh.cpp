@@ -1326,12 +1326,16 @@ GltfAnimationClip loadGltfAnimationClip(const std::filesystem::path& path, uint3
     return clip;
 }
 
-MeshData skinGltfMesh(const SkinnedMeshData& mesh, const GltfAnimationClip& animation, float timeSeconds)
-{
-    if (mesh.nodes.empty() || mesh.jointNodeIndices.empty() || mesh.inverseBindMatrices.size() != mesh.jointNodeIndices.size()) {
-        throw std::runtime_error("Cannot skin an incomplete glTF mesh");
-    }
+namespace {
 
+struct NodePose {
+    Vec3 translation {};
+    Vec4 rotation { 0.0f, 0.0f, 0.0f, 1.0f };
+    Vec3 scale { 1.0f, 1.0f, 1.0f };
+};
+
+std::vector<NodePose> sampleAnimationPoses(const SkinnedMeshData& mesh, const GltfAnimationClip& animation, float timeSeconds)
+{
     if (animation.durationSeconds > 0.000001f) {
         timeSeconds = std::fmod(timeSeconds, animation.durationSeconds);
         if (timeSeconds < 0.0f) {
@@ -1340,12 +1344,6 @@ MeshData skinGltfMesh(const SkinnedMeshData& mesh, const GltfAnimationClip& anim
     } else {
         timeSeconds = 0.0f;
     }
-
-    struct NodePose {
-        Vec3 translation {};
-        Vec4 rotation { 0.0f, 0.0f, 0.0f, 1.0f };
-        Vec3 scale { 1.0f, 1.0f, 1.0f };
-    };
 
     std::vector<NodePose> poses;
     poses.reserve(mesh.nodes.size());
@@ -1379,6 +1377,39 @@ MeshData skinGltfMesh(const SkinnedMeshData& mesh, const GltfAnimationClip& anim
             pose.scale = { value.x, value.y, value.z };
             break;
         }
+    }
+
+    return poses;
+}
+
+Vec3 lerpVec3(Vec3 a, Vec3 b, float t)
+{
+    return {
+        a.x + (b.x - a.x) * t,
+        a.y + (b.y - a.y) * t,
+        a.z + (b.z - a.z) * t,
+    };
+}
+
+Vec4 blendRotation(Vec4 a, Vec4 b, float t)
+{
+    // Normalized lerp along the shortest arc; plenty for short crossfades.
+    const float dot = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+    if (dot < 0.0f) {
+        b = { -b.x, -b.y, -b.z, -b.w };
+    }
+    return normalize(Vec4 {
+        a.x + (b.x - a.x) * t,
+        a.y + (b.y - a.y) * t,
+        a.z + (b.z - a.z) * t,
+        a.w + (b.w - a.w) * t,
+    });
+}
+
+MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>& poses)
+{
+    if (mesh.nodes.empty() || mesh.jointNodeIndices.empty() || mesh.inverseBindMatrices.size() != mesh.jointNodeIndices.size()) {
+        throw std::runtime_error("Cannot skin an incomplete glTF mesh");
     }
 
     std::vector<Mat4> localMatrices(mesh.nodes.size(), identityMatrix());
@@ -1448,6 +1479,32 @@ MeshData skinGltfMesh(const SkinnedMeshData& mesh, const GltfAnimationClip& anim
     }
 
     return result;
+}
+
+} // namespace
+
+MeshData skinGltfMesh(const SkinnedMeshData& mesh, const GltfAnimationClip& animation, float timeSeconds)
+{
+    return skinWithPoses(mesh, sampleAnimationPoses(mesh, animation, timeSeconds));
+}
+
+MeshData skinGltfMeshBlended(
+    const SkinnedMeshData& mesh,
+    const GltfAnimationClip& fromAnimation,
+    float fromTimeSeconds,
+    const GltfAnimationClip& toAnimation,
+    float toTimeSeconds,
+    float blend)
+{
+    blend = std::clamp(blend, 0.0f, 1.0f);
+    std::vector<NodePose> poses = sampleAnimationPoses(mesh, fromAnimation, fromTimeSeconds);
+    const std::vector<NodePose> target = sampleAnimationPoses(mesh, toAnimation, toTimeSeconds);
+    for (size_t i = 0; i < poses.size() && i < target.size(); ++i) {
+        poses[i].translation = lerpVec3(poses[i].translation, target[i].translation, blend);
+        poses[i].rotation = blendRotation(poses[i].rotation, target[i].rotation, blend);
+        poses[i].scale = lerpVec3(poses[i].scale, target[i].scale, blend);
+    }
+    return skinWithPoses(mesh, poses);
 }
 
 } // namespace sokoban
