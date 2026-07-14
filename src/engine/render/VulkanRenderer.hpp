@@ -159,6 +159,10 @@ public:
     [[nodiscard]] float wireframeLineWidth() const;
     [[nodiscard]] std::array<float, 2> wireframeLineWidthRange() const;
     void setWireframeLineWidth(float lineWidth);
+    // Debug: overrides the player model's animation with an arbitrary clip
+    // (nullptr restores gameplay animation). The clip must stay alive while
+    // set; call every frame with the current preview time.
+    void setAnimationPreview(const GltfAnimationClip* clip, float timeSeconds);
 
 private:
     struct QueueFamilyIndices {
@@ -393,6 +397,10 @@ private:
     RenderAnimation rogueFadeFromAnimation_ = RenderAnimation::None;
     float rogueFadeFromTime_ = 0.0f;
     float rogueFadeElapsed_ = 0.0f;
+    const GltfAnimationClip* previewClip_ = nullptr;
+    float previewTimeSeconds_ = 0.0f;
+    const GltfAnimationClip* activePreviewClip_ = nullptr;
+    float activePreviewTime_ = -1.0f;
     OwnedImage rogueTextureImage_ {};
     VkSampler rogueTextureSampler_ = VK_NULL_HANDLE;
     OwnedImage platformerTextureImage_ {};

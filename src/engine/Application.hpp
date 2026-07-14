@@ -14,6 +14,7 @@
 #include <deque>
 #include <filesystem>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace sokoban {
@@ -52,6 +53,24 @@ private:
         uint32_t facingQuarterTurns = 0;
     };
 
+    // Debug-only animation browser: previews any clip from any glTF/GLB in
+    // the source assets tree on the player model, overriding the gameplay
+    // animation while active.
+    struct AnimationPreviewState {
+        std::vector<std::filesystem::path> files;
+        std::vector<std::string> fileLabels;
+        int fileIndex = -1;
+        std::vector<std::string> clipNames;
+        int clipIndex = -1;
+        std::optional<GltfAnimationClip> clip;
+        std::string error;
+        float time = 0.0f;
+        float speed = 1.0f;
+        bool playing = true;
+        bool active = false;
+        bool scanned = false;
+    };
+
     enum class MoveCommandType {
         Move,
         Undo,
@@ -86,6 +105,9 @@ private:
     void drawDraftExitConfirmation();
     void updateEditorPainting();
     void queuePressedCommands();
+    void updateAnimationPreview(float dt);
+    void drawAnimationPreviewUi();
+    void rescanAnimationPreviewFiles();
     void advancePlayerMovement(float dt);
     void advanceEntityAnimations(float dt);
     void startActionAnimations(const ActionRecord& action);
@@ -165,6 +187,7 @@ private:
     std::optional<size_t> undoCursor_;
     ActionRecord activeAction_;
     LevelEditor levelEditor_;
+    AnimationPreviewState animationPreview_;
     std::optional<GridPosition3> editorHoverCell_;
     float moveElapsed_ = 0.0f;
     float stepDurationSeconds_ = config::stepDurationSeconds;

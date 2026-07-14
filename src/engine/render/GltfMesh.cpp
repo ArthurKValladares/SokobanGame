@@ -1242,6 +1242,25 @@ SkinnedMeshData loadGltfSkinnedMesh(const std::filesystem::path& path, GltfMeshL
     return mesh;
 }
 
+std::vector<std::string> listGltfAnimationNames(const std::filesystem::path& path)
+{
+    std::vector<std::string> names;
+    try {
+        const GltfDocument document = loadDocument(path);
+        const std::vector<std::string_view> animationObjects =
+            jsonObjects(topLevelJsonArray(document.json, "animations"));
+        names.reserve(animationObjects.size());
+        for (size_t i = 0; i < animationObjects.size(); ++i) {
+            names.push_back(stringField(animationObjects[i], "name")
+                    .value_or("animation " + std::to_string(i + 1)));
+        }
+    } catch (const std::exception&) {
+        names.clear();
+    }
+
+    return names;
+}
+
 GltfAnimationClip loadGltfAnimationClip(const std::filesystem::path& path, uint32_t animationIndex)
 {
     GltfDocument document = loadDocument(path);

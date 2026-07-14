@@ -1294,8 +1294,33 @@ void VulkanRenderer::updateMeshVertices(const GpuMesh& gpuMesh, const std::vecto
     vkUnmapMemory(device_, gpuMesh.vertexBuffer.memory);
 }
 
+void VulkanRenderer::setAnimationPreview(const GltfAnimationClip* clip, float timeSeconds)
+{
+    previewClip_ = clip;
+    previewTimeSeconds_ = timeSeconds;
+}
+
 void VulkanRenderer::updateAnimatedModelMeshes(const RenderFrameData& frameData)
 {
+    if (previewClip_ != nullptr) {
+        if (rogueSkinnedMesh_.vertices.empty() || !rogueMesh_.vertexBuffer.memory) {
+            return;
+        }
+        if (previewClip_ == activePreviewClip_ &&
+            std::abs(previewTimeSeconds_ - activePreviewTime_) < 0.0001f) {
+            return;
+        }
+        const MeshData skinnedMesh = skinGltfMesh(rogueSkinnedMesh_, *previewClip_, previewTimeSeconds_);
+        updateMeshVertices(rogueMesh_, skinnedMesh.vertices);
+        activePreviewClip_ = previewClip_;
+        activePreviewTime_ = previewTimeSeconds_;
+        // Restart gameplay animation cleanly once the preview ends.
+        activeRogueAnimation_ = RenderAnimation::None;
+        rogueFadeFromAnimation_ = RenderAnimation::None;
+        return;
+    }
+    activePreviewClip_ = nullptr;
+
     RenderAnimation requestedAnimation = RenderAnimation::None;
     float requestedTime = 0.0f;
     for (const RenderFrameData::Tile& tile : frameData.tiles) {

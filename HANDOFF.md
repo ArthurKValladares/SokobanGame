@@ -47,7 +47,7 @@ cmake --build build --config Debug --target sokoban_rules_tests
 .\build\Debug\sokoban_rules_tests.exe
 ```
 
-Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine controls and the level editor. Release builds may not have the editor/debug UI available.
+Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine controls, the level editor, and an Animation Preview window (browses every glTF/GLB under the source `assets/` tree and plays any clip on the player model with play/pause/scrub/speed controls, overriding gameplay animation while active). Release builds may not have the editor/debug UI available.
 
 ## Important Source Map
 

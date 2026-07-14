@@ -45,6 +45,21 @@ SIDES = ["l", "r"]
 # this only spreads the hands apart. Negative values pinch them inward.
 ARM_SPREAD = 0.12
 
+# Forward lean of the torso while pushing, in degrees, as if leaning on the
+# block for support. Applied at LEAN_BONE (the waist), so hips and the leg
+# walk cycle stay upright while chest, head, and shoulders tip toward the
+# block - which also carries the hands closer to the neighboring tile. The
+# lean is baked into every keyframe of the bone's walk channel, so the
+# walking torso sway is preserved on top of it.
+LEAN_DEGREES = 45.0
+LEAN_BONE = "spine"
+
+# How much of the lean the head counter-rotates to stay upright while the
+# torso tips forward. 1.0 keeps the head fully level (looking ahead), 0.0
+# lets it follow the lean and look at the ground, 0.5 splits the difference.
+HEAD_COUNTER_FRACTION = 1.0
+HEAD_BONE = "head"
+
 COMPONENT_FLOAT = 5126
 TYPE_SIZES = {"SCALAR": 1, "VEC3": 3, "VEC4": 4}
 
@@ -87,6 +102,23 @@ def vcross(a, b):
 
 def vdot(a, b):
     return sum(x * y for x, y in zip(a, b))
+
+
+def q_axis_angle(axis, degrees):
+    half = math.radians(degrees) * 0.5
+    s = math.sin(half)
+    return (axis[0] * s, axis[1] * s, axis[2] * s, math.cos(half))
+
+
+def localized_pitch(skeleton, bone, forward, up, degrees):
+    """A world-space pitch about the character's right axis (positive tips
+    forward), expressed in the given bone's local space by conjugating with
+    the bone's rest parent rotation."""
+    right = vnormalize(vcross(up, forward))
+    world_pitch = q_axis_angle(right, degrees)
+    index = skeleton.by_name[bone]
+    parent_rotation = skeleton.world_rotation(skeleton.parent[index])
+    return qnormalize(qmul(qmul(qconj(parent_rotation), world_pitch), parent_rotation))
 
 
 def q_from_to(a, b):
@@ -267,7 +299,9 @@ def verify_pose(skeleton, forward):
     separation = math.sqrt(sum((a - b) ** 2 for a, b in zip(hands['l'], hands['r'])))
     symmetry = abs(hands['l'][1] - hands['r'][1]) + abs(
         vdot(hands['l'], forward) - vdot(hands['r'], forward))
+    reach = vdot(hands['l'], forward)
     print(f"  hand separation {separation:.3f} (shoulder width 0.424), symmetry error {symmetry:.4f}")
+    print(f"  forward reach from body center {reach:.3f}")
     if symmetry > 0.02 or not ok:
         raise SystemExit("pose verification failed; arms are not both straight forward")
 
@@ -284,6 +318,19 @@ def main():
     forward = vnormalize((toes[0] - foot[0], 0.0, toes[2] - foot[2]))
     up = (0.0, 1.0, 0.0)
     print(f"character forward axis: {tuple(round(v, 3) for v in forward)}")
+
+    # Lean the torso first so the arm solver aims from the shoulders' leaned
+    # (further forward) positions.
+    lean_local = localized_pitch(skeleton, LEAN_BONE, forward, up, LEAN_DEGREES)
+    lean_index = skeleton.by_name[LEAN_BONE]
+    skeleton.local_rotation[lean_index] = qnormalize(
+        qmul(lean_local, skeleton.local_rotation[lean_index]))
+    # Counter-rotate the head so it stays upright despite the torso lean.
+    head_counter = localized_pitch(
+        skeleton, HEAD_BONE, forward, up, -LEAN_DEGREES * HEAD_COUNTER_FRACTION)
+    head_index = skeleton.by_name[HEAD_BONE]
+    skeleton.local_rotation[head_index] = qnormalize(
+        qmul(head_counter, skeleton.local_rotation[head_index]))
 
     pose = solve_arm_pose(skeleton, forward, up)
     verify_pose(skeleton, forward)
@@ -306,12 +353,35 @@ def main():
 
     time_accessor = append_accessor(base_gltf, base_bin, [(0.0,), (duration,)], "SCALAR")
 
+    base_skeleton = Skeleton(base_gltf)
+    baked_pitches = {
+        LEAN_BONE: localized_pitch(base_skeleton, LEAN_BONE, forward, up, LEAN_DEGREES),
+        HEAD_BONE: localized_pitch(
+            base_skeleton, HEAD_BONE, forward, up, -LEAN_DEGREES * HEAD_COUNTER_FRACTION),
+    }
+
     frozen = 0
+    leaned_keys = 0
     for channel in walk["channels"]:
         target = channel["target"]
         if target.get("path") != "rotation":
             continue
         bone = names[target["node"]]
+        if bone in baked_pitches:
+            # Bake the constant pitch (torso lean / head counter-lean) into
+            # every keyframe so the walk's sway survives on top of it.
+            sampler = walk["samplers"][channel["sampler"]]
+            values = read_accessor(base_gltf, base_bin, sampler["output"])
+            leaned = [qnormalize(qmul(baked_pitches[bone], tuple(value))) for value in values]
+            output_accessor = append_accessor(base_gltf, base_bin, leaned, "VEC4")
+            walk["samplers"].append({
+                "input": sampler["input"],
+                "output": output_accessor,
+                "interpolation": sampler.get("interpolation", "LINEAR"),
+            })
+            channel["sampler"] = len(walk["samplers"]) - 1
+            leaned_keys += len(leaned)
+            continue
         if bone not in pose:
             continue
         rotation = tuple(pose[bone])
@@ -331,10 +401,14 @@ def main():
     base_gltf["animations"] = [walk]
     base_gltf["buffers"][0]["byteLength"] = len(base_bin)
 
+    if leaned_keys == 0:
+        print("warning: no rotation channel found for the lean bone", file=sys.stderr)
+
     OUTPUT_GLB.parent.mkdir(parents=True, exist_ok=True)
     write_glb(OUTPUT_GLB, base_gltf, base_bin)
     print(f"wrote {OUTPUT_GLB} ({OUTPUT_GLB.stat().st_size} bytes), "
-          f"animation '{OUTPUT_ANIMATION}', duration {duration:.3f}s, {frozen} arm channels frozen")
+          f"animation '{OUTPUT_ANIMATION}', duration {duration:.3f}s, {frozen} arm channels frozen, "
+          f"lean/head-counter baked into {leaned_keys} keyframes")
 
 
 if __name__ == "__main__":

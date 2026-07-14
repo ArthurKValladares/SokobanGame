@@ -95,6 +95,12 @@ struct GltfMeshLoadOptions {
     const std::filesystem::path& path,
     uint32_t animationIndex);
 
+// Names of all animations in a glTF/GLB file, in index order (unnamed clips
+// get "animation N"). Returns an empty list for files without animations or
+// files this loader cannot parse; never throws.
+[[nodiscard]] std::vector<std::string> listGltfAnimationNames(
+    const std::filesystem::path& path);
+
 [[nodiscard]] MeshData skinGltfMesh(
     const SkinnedMeshData& mesh,
     const GltfAnimationClip& animation,

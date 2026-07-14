@@ -535,6 +535,9 @@ Application::Application()
             },
         });
     }, true);
+    DebugUi::addWindow("Animation Preview", [this] {
+        drawAnimationPreviewUi();
+    });
 #endif
 }
 
@@ -593,6 +596,7 @@ void Application::run()
 
         const float dt = frameTimer_.tick();
         update(dt);
+        updateAnimationPreview(dt);
 
         const Vec2 windowSize = window_.size();
         const Vec2 pixelSize = window_.sizeInPixels();
@@ -801,6 +805,155 @@ void Application::drawDebugUi()
         ImGui::Text("Pipeline rebuilds %llu", static_cast<unsigned long long>(renderStats.pipelineRebuilds));
         ImGui::Text("Swapchain recreations %llu", static_cast<unsigned long long>(renderStats.swapchainRecreations));
     }
+#endif
+}
+
+void Application::updateAnimationPreview(float dt)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    AnimationPreviewState& preview = animationPreview_;
+    if (preview.active && preview.clip) {
+        if (preview.playing) {
+            preview.time += dt * preview.speed;
+            if (preview.clip->durationSeconds > 0.0001f && preview.time > preview.clip->durationSeconds) {
+                preview.time = std::fmod(preview.time, preview.clip->durationSeconds);
+            }
+        }
+        renderer_.setAnimationPreview(&*preview.clip, preview.time);
+    } else {
+        renderer_.setAnimationPreview(nullptr, 0.0f);
+    }
+#else
+    (void)dt;
+#endif
+}
+
+void Application::rescanAnimationPreviewFiles()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    // Clearing may destroy a clip the renderer still points at.
+    renderer_.setAnimationPreview(nullptr, 0.0f);
+    animationPreview_ = {};
+    animationPreview_.scanned = true;
+
+    const std::filesystem::path root { SOKOBAN_SOURCE_ASSET_DIR };
+    std::error_code errorCode;
+    std::filesystem::recursive_directory_iterator it(root, errorCode);
+    const std::filesystem::recursive_directory_iterator end;
+    for (; !errorCode && it != end; it.increment(errorCode)) {
+        if (!it->is_regular_file(errorCode)) {
+            continue;
+        }
+        const std::string extension = it->path().extension().string();
+        if (extension == ".glb" || extension == ".gltf") {
+            animationPreview_.files.push_back(it->path());
+        }
+    }
+    std::ranges::sort(animationPreview_.files);
+    animationPreview_.fileLabels.reserve(animationPreview_.files.size());
+    for (const std::filesystem::path& path : animationPreview_.files) {
+        animationPreview_.fileLabels.push_back(path.lexically_relative(root).generic_string());
+    }
+#endif
+}
+
+void Application::drawAnimationPreviewUi()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    AnimationPreviewState& preview = animationPreview_;
+    if (!preview.scanned) {
+        rescanAnimationPreviewFiles();
+    }
+
+    if (ImGui::Button("Rescan Assets")) {
+        rescanAnimationPreviewFiles();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("%zu glTF files", preview.files.size());
+
+    const char* fileLabel = preview.fileIndex >= 0
+        ? preview.fileLabels[static_cast<size_t>(preview.fileIndex)].c_str()
+        : "Select file...";
+    if (ImGui::BeginCombo("File", fileLabel)) {
+        for (int i = 0; i < static_cast<int>(preview.files.size()); ++i) {
+            const bool selected = i == preview.fileIndex;
+            if (ImGui::Selectable(preview.fileLabels[static_cast<size_t>(i)].c_str(), selected) &&
+                i != preview.fileIndex) {
+                renderer_.setAnimationPreview(nullptr, 0.0f);
+                preview.fileIndex = i;
+                preview.clipNames = listGltfAnimationNames(preview.files[static_cast<size_t>(i)]);
+                preview.clipIndex = -1;
+                preview.clip.reset();
+                preview.active = false;
+                preview.error.clear();
+            }
+            if (selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    if (preview.fileIndex < 0) {
+        ImGui::TextDisabled("Pick a glTF/GLB file to browse its animations.");
+        return;
+    }
+    if (preview.clipNames.empty()) {
+        ImGui::TextDisabled("No animations in this file.");
+        return;
+    }
+
+    const char* clipLabel = preview.clipIndex >= 0
+        ? preview.clipNames[static_cast<size_t>(preview.clipIndex)].c_str()
+        : "Select animation...";
+    if (ImGui::BeginCombo("Animation", clipLabel)) {
+        for (int i = 0; i < static_cast<int>(preview.clipNames.size()); ++i) {
+            const bool selected = i == preview.clipIndex;
+            if (ImGui::Selectable(preview.clipNames[static_cast<size_t>(i)].c_str(), selected) &&
+                i != preview.clipIndex) {
+                preview.clipIndex = i;
+                preview.error.clear();
+                try {
+                    preview.clip = loadGltfAnimationClip(
+                        preview.files[static_cast<size_t>(preview.fileIndex)],
+                        static_cast<uint32_t>(i));
+                    preview.time = 0.0f;
+                    preview.playing = true;
+                    preview.active = true;
+                } catch (const std::exception& exception) {
+                    renderer_.setAnimationPreview(nullptr, 0.0f);
+                    preview.clip.reset();
+                    preview.active = false;
+                    preview.error = exception.what();
+                }
+            }
+            if (selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    if (!preview.error.empty()) {
+        ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "%s", preview.error.c_str());
+    }
+    if (!preview.clip) {
+        return;
+    }
+
+    ImGui::Text("Duration %.2fs, %zu channels", preview.clip->durationSeconds, preview.clip->channels.size());
+    ImGui::Checkbox("Preview On Player", &preview.active);
+    if (ImGui::Button(preview.playing ? "Pause" : "Play")) {
+        preview.playing = !preview.playing;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Restart")) {
+        preview.time = 0.0f;
+    }
+    ImGui::SliderFloat("Speed", &preview.speed, 0.1f, 3.0f, "%.2fx");
+    const float duration = std::max(preview.clip->durationSeconds, 0.0001f);
+    ImGui::SliderFloat("Time", &preview.time, 0.0f, duration, "%.2fs");
+    ImGui::TextDisabled("Plays on the player model, overriding gameplay animation.");
 #endif
 }
 
