@@ -61,6 +61,9 @@ set(SHADER_SOURCES
     "${SHADER_SOURCE_DIR}/shadow.vert.glsl"
     "${SHADER_SOURCE_DIR}/model.vert.glsl"
     "${SHADER_SOURCE_DIR}/model_shadow.vert.glsl"
+    "${SHADER_SOURCE_DIR}/fullscreen.vert.glsl"
+    "${SHADER_SOURCE_DIR}/ssao.frag.glsl"
+    "${SHADER_SOURCE_DIR}/ssao_composite.frag.glsl"
 )
 
 set(SHADER_OUTPUTS)

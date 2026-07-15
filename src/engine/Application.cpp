@@ -783,6 +783,13 @@ void Application::drawDebugUi()
         modelShadowReceive_ = std::clamp(modelShadowReceive_, 0.0f, 1.0f);
         ImGui::TextDisabled("Lower model shadow receive reduces harsh self-shadowing.");
 
+        ImGui::Checkbox("Ambient Occlusion", &ambientOcclusionEnabled_);
+        ImGui::BeginDisabled(!ambientOcclusionEnabled_);
+        ImGui::DragFloat("AO Strength", &ambientOcclusionStrength_, 0.01f, 0.0f, 1.0f, "%.2f");
+        ImGui::Checkbox("Visualize SSAO", &ambientOcclusionVisualize_);
+        ImGui::EndDisabled();
+        ambientOcclusionStrength_ = std::clamp(ambientOcclusionStrength_, 0.0f, 1.0f);
+
         ImGui::Checkbox("Shadows", &shadowsEnabled_);
         ImGui::BeginDisabled(!shadowsEnabled_);
         ImGui::DragFloat("Shadow Opacity", &shadowOpacity_, 0.01f, 0.0f, 0.85f, "%.2f");
@@ -1688,6 +1695,11 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             .opacity = shadowOpacity_,
             .bias = shadowBias_,
         },
+        .ambientOcclusion = {
+            .enabled = ambientOcclusionEnabled_,
+            .strength = ambientOcclusionStrength_,
+            .visualize = ambientOcclusionVisualize_,
+        },
         .specularStrength = specularStrength_,
         .specularPower = specularPower_,
         .modelShadowReceive = modelShadowReceive_,
@@ -1866,6 +1878,11 @@ RenderFrameData Application::buildEditorRenderFrame() const
             .enabled = shadowsEnabled_,
             .opacity = shadowOpacity_,
             .bias = shadowBias_,
+        },
+        .ambientOcclusion = {
+            .enabled = ambientOcclusionEnabled_,
+            .strength = ambientOcclusionStrength_,
+            .visualize = ambientOcclusionVisualize_,
         },
         .specularStrength = specularStrength_,
         .specularPower = specularPower_,

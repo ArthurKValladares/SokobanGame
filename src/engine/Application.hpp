@@ -158,6 +158,9 @@ private:
     float specularStrength_ = config::specularStrength;
     float specularPower_ = config::specularPower;
     float modelShadowReceive_ = config::modelShadowReceive;
+    bool ambientOcclusionEnabled_ = config::ambientOcclusionEnabled;
+    float ambientOcclusionStrength_ = config::ambientOcclusionStrength;
+    bool ambientOcclusionVisualize_ = false;
     bool shadowsEnabled_ = config::shadowsEnabled;
     float shadowOpacity_ = config::shadowOpacity;
     float shadowBias_ = config::shadowBias;

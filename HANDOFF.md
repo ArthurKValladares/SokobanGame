@@ -245,7 +245,8 @@ Renderer:
 - Vulkan 1.4, dynamic rendering, synchronization2, extended dynamic state, graphics pipeline libraries.
 - Uses SDL3 window/Vulkan integration.
 - Has a shadow pass and scene pass.
-- Supports MSAA modes, wireframe, line width controls, lighting controls, grid overlay, and render stats in Debug UI.
+- Supports MSAA modes (default is MSAA 8x, automatically falling back to the highest count the device's color+depth framebuffers support; the Debug UI combo shows the requested mode, Rendering Stats shows the active sample count), wireframe, line width controls, lighting controls, grid overlay, and render stats in Debug UI.
+- Screen-space ambient occlusion (SSAO) applies to all geometry, tiles and GLTF models alike. It runs as post-processing after the scene passes: scene depth is sampled directly at 1x MSAA, or resolved into `resolveDepthImage_` via the core-mandated `SAMPLE_ZERO` depth resolve when MSAA is on; `recordSsaoRendering` then runs a fullscreen depth-only AO pass (12-tap golden-angle spiral, range falloff to avoid halos, `config::ssaoRadiusPixels/DepthRange`) into an R8 target and multiply-composites the box-blurred result onto the lit image before UI. Descriptor bindings 5 (scene depth) and 6 (AO) extend the shared set; new shaders are `fullscreen.vert`, `ssao.frag`, `ssao_composite.frag`. Toggle, strength, and a raw-AO-buffer visualization checkbox live in Debug UI > Lighting (`config::ambientOcclusionEnabled/Strength`); disabled skips both passes entirely.
 - Renders simple tile faces procedurally and GLTF models for certain tiles/entities.
 
 Model assets currently used:

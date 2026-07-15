@@ -66,9 +66,17 @@ struct RenderFrameData {
             float bias = config::shadowBias;
         };
 
+        struct AmbientOcclusion {
+            bool enabled = config::ambientOcclusionEnabled;
+            float strength = config::ambientOcclusionStrength;
+            // Debug: draw the raw AO buffer instead of compositing it.
+            bool visualize = false;
+        };
+
         DirectionalLight sun {};
         AmbientLight ambient {};
         Shadows shadows {};
+        AmbientOcclusion ambientOcclusion {};
         float specularStrength = config::specularStrength;
         float specularPower = config::specularPower;
         float modelShadowReceive = config::modelShadowReceive;
@@ -243,6 +251,14 @@ private:
     void createDepthResources();
     void createShadowResources();
     void createSceneColorResources();
+    void createSsaoResources();
+    void cleanupSsaoResources();
+    void recordSsaoRendering(VkCommandBuffer commandBuffer, VkImageView targetView, const RenderFrameData& frameData);
+    [[nodiscard]] VkPipeline createPostProcessPipeline(
+        VkShaderModule vertexShader,
+        VkShaderModule fragmentShader,
+        VkFormat colorFormat,
+        bool multiplyBlend) const;
     void createDescriptorResources();
     void updateDescriptorSet();
     void createCommandPool();
@@ -309,6 +325,7 @@ private:
         float gridLineWidth = 0.0f,
         bool isEditorPreview = false) const;
     void drawShadowFace(VkCommandBuffer commandBuffer, const std::array<Vec4, 4>& shadowVertices) const;
+
     void drawModel(
         VkCommandBuffer commandBuffer,
         const IsoRenderLayout& layout,
@@ -379,6 +396,9 @@ private:
     std::array<VkPipeline, 2> pipelineLibraries_ {};
     VkPipeline pipeline_ = VK_NULL_HANDLE;
     VkPipeline uiPipeline_ = VK_NULL_HANDLE;
+    VkPipeline ssaoPipeline_ = VK_NULL_HANDLE;
+    VkPipeline ssaoCompositePipeline_ = VK_NULL_HANDLE;
+    VkPipeline ssaoVisualizePipeline_ = VK_NULL_HANDLE;
     VkPipeline shadowPipeline_ = VK_NULL_HANDLE;
     VkPipeline modelPipeline_ = VK_NULL_HANDLE;
     VkPipeline modelShadowPipeline_ = VK_NULL_HANDLE;
@@ -392,6 +412,9 @@ private:
     GltfAnimationClip rogueIdleAnimation_ {};
     GltfAnimationClip rogueMovementAnimation_ {};
     GltfAnimationClip roguePushAnimation_ {};
+    OwnedImage resolveDepthImage_ {};
+    OwnedImage ssaoImage_ {};
+    VkSampler ssaoSampler_ = VK_NULL_HANDLE;
     RenderAnimation activeRogueAnimation_ = RenderAnimation::None;
     float activeRogueAnimationTime_ = -1.0f;
     RenderAnimation rogueFadeFromAnimation_ = RenderAnimation::None;
@@ -411,7 +434,7 @@ private:
     static constexpr uint32_t maxFramesInFlight_ = 2;
     std::array<FrameResources, maxFramesInFlight_> frames_ {};
     uint32_t currentFrame_ = 0;
-    AntiAliasingMode antiAliasingMode_ = AntiAliasingMode::None;
+    AntiAliasingMode antiAliasingMode_ = AntiAliasingMode::Msaa8x;
     VkSampleCountFlagBits activeSampleCount_ = VK_SAMPLE_COUNT_1_BIT;
     bool wireframeEnabled_ = false;
     bool wideLinesSupported_ = false;
