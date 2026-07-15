@@ -1,5 +1,7 @@
 #include "engine/render/GltfMesh.hpp"
 
+#include "engine/TaskSystem.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -1472,30 +1474,35 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
 
     MeshData result;
     result.indices = mesh.indices;
-    result.vertices.reserve(mesh.vertices.size());
-    for (const SkinnedVertex& source : mesh.vertices) {
-        Vec3 skinnedPosition {};
-        Vec3 skinnedNormal {};
-        for (size_t i = 0; i < 4; ++i) {
-            const float weight = source.weights[i];
-            const uint16_t joint = source.joints[i];
-            if (weight <= 0.0f || joint >= jointMatrices.size()) {
-                continue;
+    result.vertices.resize(mesh.vertices.size());
+    // Each vertex writes only its own output slot, so chunks parallelize
+    // freely; small meshes run inline via the minChunk threshold.
+    taskSystem().parallelFor(mesh.vertices.size(), 2048, [&](size_t begin, size_t end) {
+        for (size_t vertexIndex = begin; vertexIndex < end; ++vertexIndex) {
+            const SkinnedVertex& source = mesh.vertices[vertexIndex];
+            Vec3 skinnedPosition {};
+            Vec3 skinnedNormal {};
+            for (size_t i = 0; i < 4; ++i) {
+                const float weight = source.weights[i];
+                const uint16_t joint = source.joints[i];
+                if (weight <= 0.0f || joint >= jointMatrices.size()) {
+                    continue;
+                }
+                skinnedPosition = add(skinnedPosition, multiply(transformPoint(jointMatrices[joint], source.position), weight));
+                skinnedNormal = add(skinnedNormal, multiply(transformVector(jointMatrices[joint], source.normal), weight));
             }
-            skinnedPosition = add(skinnedPosition, multiply(transformPoint(jointMatrices[joint], source.position), weight));
-            skinnedNormal = add(skinnedNormal, multiply(transformVector(jointMatrices[joint], source.normal), weight));
+            if (skinnedNormal.x == 0.0f && skinnedNormal.y == 0.0f && skinnedNormal.z == 0.0f) {
+                skinnedNormal = source.normal;
+            }
+            result.vertices[vertexIndex] = normalizedVertex(
+                skinnedPosition,
+                normalize(skinnedNormal),
+                source.uv,
+                0.0f,
+                bounds,
+                options);
         }
-        if (skinnedNormal.x == 0.0f && skinnedNormal.y == 0.0f && skinnedNormal.z == 0.0f) {
-            skinnedNormal = source.normal;
-        }
-        result.vertices.push_back(normalizedVertex(
-            skinnedPosition,
-            normalize(skinnedNormal),
-            source.uv,
-            0.0f,
-            bounds,
-            options));
-    }
+    });
 
     return result;
 }

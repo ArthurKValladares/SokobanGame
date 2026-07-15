@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(SOKOBAN_ENABLE_VALIDATION "Enable Vulkan validation layers in debug builds" ON)
 
 find_package(Vulkan REQUIRED)
+find_package(Threads REQUIRED)
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL/CMakeLists.txt")
     set(SDL_SHARED OFF CACHE BOOL "Build SDL3 as a shared library" FORCE)
@@ -139,6 +140,7 @@ add_executable(sokoban
     src/engine/Level.cpp
     src/engine/LevelEditor.cpp
     src/engine/Rules.cpp
+    src/engine/TaskSystem.cpp
     src/engine/TileTypes.cpp
     src/engine/Window.cpp
     src/engine/render/VulkanRenderer.cpp
@@ -160,6 +162,7 @@ target_include_directories(sokoban PRIVATE
 )
 target_link_libraries(sokoban PRIVATE
     Vulkan::Vulkan
+    Threads::Threads
     SDL3::SDL3
     ole32
     windowscodecs
@@ -201,4 +204,17 @@ if(SOKOBAN_BUILD_TESTS)
         target_compile_options(sokoban_rules_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME rules COMMAND sokoban_rules_tests)
+
+    add_executable(sokoban_task_tests
+        tests/TaskSystemTests.cpp
+        src/engine/TaskSystem.cpp
+    )
+    target_include_directories(sokoban_task_tests PRIVATE src)
+    target_link_libraries(sokoban_task_tests PRIVATE Threads::Threads)
+    if(MSVC)
+        target_compile_options(sokoban_task_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_task_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME tasks COMMAND sokoban_task_tests)
 endif()

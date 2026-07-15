@@ -2,6 +2,7 @@
 
 #include "engine/Config.hpp"
 #include "engine/DebugUi.hpp"
+#include "engine/TaskSystem.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -657,6 +658,10 @@ void Application::drawDebugUi()
     ImGui::Text("Movables %zu", state_.movables.size());
     ImGui::Text("History %zu", moveHistory_.size());
     ImGui::Text("End %s", rules::isEndUnlocked(level_, state_) ? "unlocked" : "locked");
+    ImGui::Text(
+        "Task workers %u, tasks run %llu",
+        taskSystem().workerCount(),
+        static_cast<unsigned long long>(taskSystem().executedTaskCount()));
     ImGui::Separator();
 
     constexpr const char* antiAliasingLabels[] { "None", "MSAA 2x", "MSAA 4x", "MSAA 8x" };

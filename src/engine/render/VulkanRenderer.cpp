@@ -1,5 +1,7 @@
 #include "engine/render/VulkanRenderer.hpp"
 
+#include "engine/TaskSystem.hpp"
+
 #include "engine/BoardLayout.hpp"
 #include "engine/Config.hpp"
 #include "engine/render/ImageData.hpp"
@@ -1221,30 +1223,61 @@ void VulkanRenderer::createCommandPool()
 
 void VulkanRenderer::createModelResources()
 {
-    bricksAMesh_ = uploadMesh(loadGltfMesh(assetRoot_ / "models/bricks_A.gltf"));
-    stoneMesh_ = uploadMesh(loadGltfMesh(assetRoot_ / "models/stone.gltf"));
-    waterMesh_ = uploadMesh(loadGltfMesh(assetRoot_ / "models/water.gltf"));
-    glassMesh_ = uploadMesh(loadGltfMesh(assetRoot_ / "models/glass.gltf"));
-    conveyorMesh_ = uploadMesh(loadGltfMesh(
-        assetRoot_ / "models/conveyor_4x4x1_blue.gltf",
-        {
-            .usePrimitiveMaterialTextures = true,
-        }));
-    rogueSkinnedMesh_ = loadGltfSkinnedMesh(
-        assetRoot_ / "models/Rogue.glb",
-        {
-            .preserveAspectRatio = true,
-            .rotateHalfTurn = true,
-        });
-    rogueIdleAnimation_ = loadGltfAnimationClip(
-        assetRoot_ / "models/Rig_Medium_General.glb",
-        animationIndexFromUserNumber(config::playerIdleAnimationNumber));
-    rogueMovementAnimation_ = loadGltfAnimationClip(
-        assetRoot_ / "models/Rig_Medium_MovementBasic.glb",
-        animationIndexFromUserNumber(config::playerMovementAnimationNumber));
-    roguePushAnimation_ = loadGltfAnimationClip(
-        assetRoot_ / "models/Rig_Medium_Push.glb",
-        animationIndexFromUserNumber(config::playerPushAnimationNumber));
+    // CPU-side glTF parsing is independent per file, so it runs on the task
+    // system; GPU uploads stay on this thread (the Vulkan queue is used
+    // single-threaded). Load failures propagate through future.get().
+    auto bricksData = taskSystem().enqueue([this] {
+        return loadGltfMesh(assetRoot_ / "models/bricks_A.gltf");
+    });
+    auto stoneData = taskSystem().enqueue([this] {
+        return loadGltfMesh(assetRoot_ / "models/stone.gltf");
+    });
+    auto waterData = taskSystem().enqueue([this] {
+        return loadGltfMesh(assetRoot_ / "models/water.gltf");
+    });
+    auto glassData = taskSystem().enqueue([this] {
+        return loadGltfMesh(assetRoot_ / "models/glass.gltf");
+    });
+    auto conveyorData = taskSystem().enqueue([this] {
+        return loadGltfMesh(
+            assetRoot_ / "models/conveyor_4x4x1_blue.gltf",
+            {
+                .usePrimitiveMaterialTextures = true,
+            });
+    });
+    auto rogueData = taskSystem().enqueue([this] {
+        return loadGltfSkinnedMesh(
+            assetRoot_ / "models/Rogue.glb",
+            {
+                .preserveAspectRatio = true,
+                .rotateHalfTurn = true,
+            });
+    });
+    auto idleClip = taskSystem().enqueue([this] {
+        return loadGltfAnimationClip(
+            assetRoot_ / "models/Rig_Medium_General.glb",
+            animationIndexFromUserNumber(config::playerIdleAnimationNumber));
+    });
+    auto movementClip = taskSystem().enqueue([this] {
+        return loadGltfAnimationClip(
+            assetRoot_ / "models/Rig_Medium_MovementBasic.glb",
+            animationIndexFromUserNumber(config::playerMovementAnimationNumber));
+    });
+    auto pushClip = taskSystem().enqueue([this] {
+        return loadGltfAnimationClip(
+            assetRoot_ / "models/Rig_Medium_Push.glb",
+            animationIndexFromUserNumber(config::playerPushAnimationNumber));
+    });
+
+    bricksAMesh_ = uploadMesh(bricksData.get());
+    stoneMesh_ = uploadMesh(stoneData.get());
+    waterMesh_ = uploadMesh(waterData.get());
+    glassMesh_ = uploadMesh(glassData.get());
+    conveyorMesh_ = uploadMesh(conveyorData.get());
+    rogueSkinnedMesh_ = rogueData.get();
+    rogueIdleAnimation_ = idleClip.get();
+    rogueMovementAnimation_ = movementClip.get();
+    roguePushAnimation_ = pushClip.get();
     rogueMesh_ = uploadMesh(skinGltfMesh(rogueSkinnedMesh_, rogueIdleAnimation_, 0.0f));
 }
 

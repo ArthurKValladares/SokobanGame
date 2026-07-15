@@ -55,6 +55,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
 - `src/engine/Application.*`: main loop, input handling, animation/presentation, level loading, editor integration, frame construction for rendering. Gameplay state lives in a single `GameState state_` member. Presentation is per-entity: movables animate via a parallel `movableVisuals_` vector of `EntityVisual`, and the player via `playerVisual_` (`EntityVisual` motion plus clip choice, per-entity clip clock, playback direction, and facing). `worldAnimationTimeSeconds_` is the only shared presentation clock, used for level geometry like belt scrolling; it (and per-entity clip clocks) run backwards while an undo transition animates.
 - `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags + slide momentum) plus pure functions in `sokoban::rules` — `step` advances the whole world one discrete step (simultaneous one-tile moves, pushes, ladder climbs, momentum, falls, water, conveyors); `hasPendingMotion` reports whether the world would keep moving without input; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
 - `src/engine/Level.*`: level file parsing, serialization, layered grid storage, walkability/support rules, player/movable extraction.
+- `src/engine/TaskSystem.*`: standard-library-only worker pool for task-based parallelism. `taskSystem().enqueue(fn)` returns a future (exceptions propagate on get); `parallelFor(count, minChunk, fn(begin, end))` runs chunked loops with the calling thread participating. Tasks must not block on other tasks (no dependency graph yet). Used by GLTF vertex skinning (`skinWithPoses`) and parallel CPU-side asset loading in `createModelResources`; GPU uploads stay on the main thread. Tested by `tests/TaskSystemTests.cpp` (`sokoban_task_tests`).
 - `src/engine/TileTypes.*`: tile enum, character mapping, colors, helper predicates such as `tileTypeAllowsEntity`.
 - `src/engine/LevelEditor.*`: ImGui level editor, document state, painting/deleting, file browser, draft play mode, deleted-level handling.
 - `src/engine/render/VulkanRenderer.*`: Vulkan setup, swapchain, dynamic rendering, shadow pass, model pass, debug UI rendering, descriptor resources.
@@ -408,6 +409,7 @@ UI:
 Engineering:
 
 - Gameplay rules now live in the headless `Rules` module with tests; `Application.cpp` still owns rendering-layout, editor, and UI responsibilities that could be split further.
+- The `TaskSystem` gives the engine a multi-threading foundation; grow it by moving more per-frame work onto tasks (render-frame building, animation updates) and eventually adding task dependencies/graphs when systems need ordering. Keep the Vulkan queue single-threaded unless command-pool-per-thread work is done deliberately.
 - Add save format/versioning if level files evolve.
 - Review asset licensing/readme files before distribution.
 
