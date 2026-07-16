@@ -1,8 +1,8 @@
 #include "engine/Application.hpp"
 
-#include "engine/Config.hpp"
 #include "engine/DebugUi.hpp"
-#include "engine/TaskSystem.hpp"
+#include "engine/RenderFrameBuilder.hpp"
+#include "engine/Rules.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -11,501 +11,37 @@
 #endif
 
 #include <algorithm>
-#include <array>
-#include <cmath>
 #include <iostream>
 #include <utility>
 
 namespace sokoban {
-namespace {
-
-Vec3 toVec3(GridPosition3 position)
-{
-    return {
-        static_cast<float>(position.x),
-        static_cast<float>(position.y),
-        static_cast<float>(position.z),
-    };
-}
-
-Vec3 entityRenderTarget(GridPosition3 position, bool fallen)
-{
-    Vec3 target = toVec3(position);
-    if (fallen) {
-        target.z -= config::waterDepthBelowGround;
-    }
-    return target;
-}
-
-float gridDistance(Vec3 from, Vec3 to)
-{
-    return std::abs(to.x - from.x) +
-        std::abs(to.y - from.y) +
-        std::abs(to.z - from.z);
-}
-
-float degreesToRadians(float degrees)
-{
-    constexpr float pi = 3.14159265358979323846f;
-    return degrees * pi / 180.0f;
-}
-
-Vec3 sunDirectionFromSpherical(float azimuthDegrees, float tiltDegrees)
-{
-    const float azimuth = degreesToRadians(azimuthDegrees);
-    const float tilt = degreesToRadians(tiltDegrees);
-    const float horizontalLength = std::sin(tilt);
-    return {
-        horizontalLength * std::cos(azimuth),
-        horizontalLength * std::sin(azimuth),
-        std::cos(tilt),
-    };
-}
-
-#if SOKOBAN_ENABLE_DEBUG_UI
-void drawSunDirectionPreview(Vec3 direction, float tiltDegrees)
-{
-    constexpr ImVec2 previewSize { 240.0f, 116.0f };
-    ImGui::InvisibleButton("sun_direction_preview", previewSize);
-
-    const ImVec2 min = ImGui::GetItemRectMin();
-    const ImVec2 max = ImGui::GetItemRectMax();
-    ImDrawList* drawList = ImGui::GetWindowDrawList();
-
-    const ImU32 background = ImGui::GetColorU32(ImGuiCol_FrameBg);
-    const ImU32 border = ImGui::GetColorU32(ImGuiCol_Border);
-    const ImU32 text = ImGui::GetColorU32(ImGuiCol_Text);
-    const ImU32 muted = ImGui::GetColorU32(ImGuiCol_TextDisabled);
-    const ImU32 sun = ImGui::GetColorU32(ImVec4 { 1.0f, 0.88f, 0.25f, 1.0f });
-
-    drawList->AddRectFilled(min, max, background, 4.0f);
-    drawList->AddRect(min, max, border, 4.0f);
-
-    const float radius = 34.0f;
-    const ImVec2 topCenter { min.x + 62.0f, min.y + 66.0f };
-    const ImVec2 sideCenter { min.x + 178.0f, min.y + 66.0f };
-
-    drawList->AddText(ImVec2 { topCenter.x - 16.0f, min.y + 10.0f }, text, "XY");
-    drawList->AddCircle(topCenter, radius, border, 48, 1.5f);
-    drawList->AddLine(ImVec2 { topCenter.x - radius, topCenter.y }, ImVec2 { topCenter.x + radius, topCenter.y }, muted);
-    drawList->AddLine(ImVec2 { topCenter.x, topCenter.y - radius }, ImVec2 { topCenter.x, topCenter.y + radius }, muted);
-    const ImVec2 topEnd {
-        topCenter.x + direction.x * radius,
-        topCenter.y + direction.y * radius,
-    };
-    drawList->AddLine(topCenter, topEnd, sun, 2.0f);
-    drawList->AddCircleFilled(topEnd, 4.0f, sun);
-
-    drawList->AddText(ImVec2 { sideCenter.x - 16.0f, min.y + 10.0f }, text, "Side");
-    drawList->AddCircle(sideCenter, radius, border, 48, 1.5f);
-    drawList->AddLine(ImVec2 { sideCenter.x - radius, sideCenter.y }, ImVec2 { sideCenter.x + radius, sideCenter.y }, muted);
-    drawList->AddLine(ImVec2 { sideCenter.x, sideCenter.y - radius }, ImVec2 { sideCenter.x, sideCenter.y + radius }, muted);
-
-    const float signedHorizontalLength = std::sin(degreesToRadians(tiltDegrees));
-    const ImVec2 sideEnd {
-        sideCenter.x + signedHorizontalLength * radius,
-        sideCenter.y - direction.z * radius,
-    };
-    drawList->AddLine(sideCenter, sideEnd, sun, 2.0f);
-    drawList->AddCircleFilled(sideEnd, 4.0f, sun);
-}
-#endif
-
-Vec3 interpolateGridMotion(Vec3 from, Vec3 to, float elapsedSeconds, float secondsPerTile)
-{
-    const float distance = gridDistance(from, to);
-    if (distance <= 0.0001f || secondsPerTile <= 0.0f) {
-        return to;
-    }
-
-    float remaining = std::min(
-        elapsedSeconds / secondsPerTile,
-        distance);
-    Vec3 result = from;
-
-    auto travelAxis = [&](float target, float& value) {
-        const float delta = target - value;
-        const float step = std::min(std::abs(delta), remaining);
-        if (step > 0.0f) {
-            value += std::copysign(step, delta);
-            remaining -= step;
-        }
-    };
-
-    if (to.z > from.z) {
-        travelAxis(to.z, result.z);
-    }
-    travelAxis(to.x, result.x);
-    travelAxis(to.y, result.y);
-    if (to.z <= from.z) {
-        travelAxis(to.z, result.z);
-    }
-    return result;
-}
-
-struct StaticRenderCell {
-    TileType tile = TileType::Ground;
-    bool active = true;
-    bool showGrid = true;
-    Vec2 size { 1.0f, 1.0f };
-    Vec2 positionOffset {};
-    float baseElevation = 0.0f;
-    float height = 0.0f;
-    uint32_t modelRotationQuarterTurns = 0;
-};
-
-RenderModel renderModelForTile(TileType tile)
-{
-    switch (tile) {
-    case TileType::Wall:
-        return RenderModel::BricksA;
-    case TileType::Rock:
-        return RenderModel::Stone;
-    case TileType::Water:
-        return RenderModel::Water;
-    case TileType::Ice:
-        return RenderModel::Glass;
-    case TileType::ConveyorUp:
-    case TileType::ConveyorDown:
-    case TileType::ConveyorRight:
-    case TileType::ConveyorLeft:
-        return RenderModel::Conveyor;
-    case TileType::Player:
-        return RenderModel::Rogue;
-    default:
-        return RenderModel::Cube;
-    }
-}
-
-float clampedTileScale(float scale)
-{
-    return std::clamp(scale, config::minTileScale, config::maxTileScale);
-}
-
-void applyTileScale(RenderFrameData::Tile& tile, float scale)
-{
-    scale = clampedTileScale(scale);
-    if (std::abs(scale - 1.0f) < 0.0001f) {
-        return;
-    }
-
-    const Vec2 center {
-        tile.position.x + tile.size.x * 0.5f,
-        tile.position.y + tile.size.y * 0.5f,
-    };
-    tile.size = {
-        tile.size.x * scale,
-        tile.size.y * scale,
-    };
-    tile.position = {
-        center.x - tile.size.x * 0.5f,
-        center.y - tile.size.y * 0.5f,
-    };
-    tile.height *= scale;
-}
-
-uint32_t facingQuarterTurns(MoveDirection direction)
-{
-    switch (direction) {
-    case MoveDirection::Down:
-        return 0;
-    case MoveDirection::Left:
-        return 1;
-    case MoveDirection::Up:
-        return 2;
-    case MoveDirection::Right:
-        return 3;
-    }
-    return 0;
-}
-
-StaticRenderCell staticRenderCellFor(
-    const Level& level,
-    uint32_t x,
-    uint32_t y,
-    uint32_t z,
-    bool endUnlocked,
-    std::optional<TileType> fallenTile,
-    float surfaceEntityHeight,
-    float surfaceEntitySize,
-    uint32_t playerFacingQuarterTurns)
-{
-    const TileType tile = fallenTile.value_or(level.tileAt(x, y, z));
-    const bool surfaceEntity = tileTypeIsSurfaceEntity(tile);
-    const bool conveyor = tileTypeIsConveyor(tile);
-    const bool submergedEntity = fallenTile.has_value();
-    const float centeredOffset = (1.0f - surfaceEntitySize) * 0.5f;
-    return {
-        .tile = tile,
-        .active = tile != TileType::End || endUnlocked,
-        .showGrid = tile != TileType::Player,
-        .size = surfaceEntity ? Vec2 { surfaceEntitySize, surfaceEntitySize } : Vec2 { 1.0f, 1.0f },
-        .positionOffset = surfaceEntity ? Vec2 { centeredOffset, centeredOffset } : Vec2 {},
-        .baseElevation = static_cast<float>(z) +
-            (tile == TileType::Water ? 1.0f - 2.0f * config::waterDepthBelowGround : 0.0f) -
-            (submergedEntity ? config::waterDepthBelowGround : 0.0f),
-        .height = surfaceEntity
-            ? surfaceEntityHeight
-            : (tile == TileType::Water
-                    ? config::waterDepthBelowGround
-                    : (conveyor
-                            ? config::conveyorTileHeight
-                            : (tileTypeIsSolidBlock(tile) || tileTypeOccupiesLevelCell(tile) ? 1.0f : 0.0f))),
-        .modelRotationQuarterTurns = tile == TileType::Player
-            ? playerFacingQuarterTurns
-            : (rules::conveyorDirectionForTile(tile)
-                    ? facingQuarterTurns(*rules::conveyorDirectionForTile(tile))
-                    : 0),
-    };
-}
-
-Vec4 shade(Vec4 color, float multiplier)
-{
-    return {
-        color.x * multiplier,
-        color.y * multiplier,
-        color.z * multiplier,
-        color.w,
-    };
-}
-
-void appendLadderRungFace(
-    RenderFrameData& frame,
-    GridPosition3 groundCell,
-    GridPosition3 ladderCell,
-    float rungCenter,
-    bool preview)
-{
-    constexpr float rungLengthInset = 0.10f;
-    constexpr float rungHalfThickness = 0.07f;
-    constexpr float faceOffset = 0.003f;
-
-    const Vec4 color = preview
-        ? Vec4 { 0.43f, 0.22f, 0.08f, 0.62f }
-        : tileColor(TileType::Ladder);
-    const float bottom = static_cast<float>(groundCell.z) + rungCenter - rungHalfThickness;
-    const float top = static_cast<float>(groundCell.z) + rungCenter + rungHalfThickness;
-    const float gx = static_cast<float>(groundCell.x);
-    const float gy = static_cast<float>(groundCell.y);
-
-    auto appendFace = [&](std::array<Vec3, 4> vertices, Vec3 normal) {
-        frame.isoFaces.push_back({
-            .vertices = vertices,
-            .normal = normal,
-            .color = color,
-        });
-    };
-
-    if (ladderCell.x < groundCell.x) {
-        const float x = gx - faceOffset;
-        const float y0 = gy + rungLengthInset;
-        const float y1 = gy + 1.0f - rungLengthInset;
-        appendFace({
-            Vec3 { x, y1, bottom },
-            Vec3 { x, y0, bottom },
-            Vec3 { x, y0, top },
-            Vec3 { x, y1, top },
-        }, { -1.0f, 0.0f, 0.0f });
-        return;
-    }
-
-    if (ladderCell.x > groundCell.x) {
-        const float x = gx + 1.0f + faceOffset;
-        const float y0 = gy + rungLengthInset;
-        const float y1 = gy + 1.0f - rungLengthInset;
-        appendFace({
-            Vec3 { x, y0, bottom },
-            Vec3 { x, y1, bottom },
-            Vec3 { x, y1, top },
-            Vec3 { x, y0, top },
-        }, { 1.0f, 0.0f, 0.0f });
-        return;
-    }
-
-    if (ladderCell.y < groundCell.y) {
-        const float y = gy - faceOffset;
-        const float x0 = gx + rungLengthInset;
-        const float x1 = gx + 1.0f - rungLengthInset;
-        appendFace({
-            Vec3 { x0, y, bottom },
-            Vec3 { x1, y, bottom },
-            Vec3 { x1, y, top },
-            Vec3 { x0, y, top },
-        }, { 0.0f, -1.0f, 0.0f });
-        return;
-    }
-
-    if (ladderCell.y > groundCell.y) {
-        const float y = gy + 1.0f + faceOffset;
-        const float x0 = gx + rungLengthInset;
-        const float x1 = gx + 1.0f - rungLengthInset;
-        appendFace({
-            Vec3 { x1, y, bottom },
-            Vec3 { x0, y, bottom },
-            Vec3 { x0, y, top },
-            Vec3 { x1, y, top },
-        }, { 0.0f, 1.0f, 0.0f });
-    }
-}
-
-void appendLadderRungs(RenderFrameData& frame, GridPosition3 ladderCell, GridPosition3 groundCell, bool preview = false)
-{
-    appendLadderRungFace(frame, groundCell, ladderCell, 0.32f, preview);
-    appendLadderRungFace(frame, groundCell, ladderCell, 0.68f, preview);
-}
-
-template <typename TileAt>
-void appendLadderRungsForCell(RenderFrameData& frame, GridPosition3 ladderCell, TileAt tileAt, bool preview = false)
-{
-    if (tileAt(ladderCell) != TileType::Ladder) {
-        return;
-    }
-
-    constexpr std::array<GridPosition, 4> offsets {
-        GridPosition { 0, -1 },
-        GridPosition { 1, 0 },
-        GridPosition { 0, 1 },
-        GridPosition { -1, 0 },
-    };
-
-    for (GridPosition offset : offsets) {
-        const GridPosition3 groundCell {
-            ladderCell.x + offset.x,
-            ladderCell.y + offset.y,
-            ladderCell.z,
-        };
-        if (tileAt(groundCell) == TileType::Ground) {
-            appendLadderRungs(frame, ladderCell, groundCell, preview);
-        }
-    }
-}
-
-void appendWaterEdgeFaces(
-    RenderFrameData& frame,
-    uint32_t width,
-    uint32_t height,
-    float layerElevation,
-    const auto& isUnfilledWaterAt)
-{
-    const float bottom = layerElevation - config::waterDepthBelowGround;
-    const float top = layerElevation;
-    const Vec4 color = shade(tileColor(TileType::Ground), 0.78f);
-
-    auto appendEdge = [&](std::array<Vec3, 4> vertices, Vec3 normal, Vec4 edgeColor) {
-        frame.isoFaces.push_back({
-            .vertices = vertices,
-            .normal = normal,
-            .color = edgeColor,
-        });
-    };
-
-    auto neighborIsOpenWater = [&](GridPosition position) {
-        return position.x >= 0 &&
-            position.y >= 0 &&
-            position.x < static_cast<int>(width) &&
-            position.y < static_cast<int>(height) &&
-            isUnfilledWaterAt(position);
-    };
-
-    for (uint32_t y = 0; y < height; ++y) {
-        for (uint32_t x = 0; x < width; ++x) {
-            const GridPosition position { static_cast<int>(x), static_cast<int>(y) };
-            if (!isUnfilledWaterAt(position)) {
-                continue;
-            }
-
-            const float left = static_cast<float>(x);
-            const float right = left + 1.0f;
-            const float nearY = static_cast<float>(y);
-            const float farY = nearY + 1.0f;
-
-            if (!neighborIsOpenWater({ position.x, position.y - 1 })) {
-                appendEdge({
-                    Vec3 { left, nearY, bottom },
-                    Vec3 { right, nearY, bottom },
-                    Vec3 { right, nearY, top },
-                    Vec3 { left, nearY, top },
-                }, { 0.0f, -1.0f, 0.0f }, shade(color, 0.92f));
-            }
-            if (!neighborIsOpenWater({ position.x + 1, position.y })) {
-                appendEdge({
-                    Vec3 { right, nearY, bottom },
-                    Vec3 { right, farY, bottom },
-                    Vec3 { right, farY, top },
-                    Vec3 { right, nearY, top },
-                }, { 1.0f, 0.0f, 0.0f }, shade(color, 0.82f));
-            }
-            if (!neighborIsOpenWater({ position.x, position.y + 1 })) {
-                appendEdge({
-                    Vec3 { right, farY, bottom },
-                    Vec3 { left, farY, bottom },
-                    Vec3 { left, farY, top },
-                    Vec3 { right, farY, top },
-                }, { 0.0f, 1.0f, 0.0f }, shade(color, 0.70f));
-            }
-            if (!neighborIsOpenWater({ position.x - 1, position.y })) {
-                appendEdge({
-                    Vec3 { left, farY, bottom },
-                    Vec3 { left, nearY, bottom },
-                    Vec3 { left, nearY, top },
-                    Vec3 { left, farY, top },
-                }, { -1.0f, 0.0f, 0.0f }, shade(color, 0.82f));
-            }
-        }
-    }
-}
-
-template <typename CellAt, typename ScaleForTile>
-void appendStaticTiles(RenderFrameData& frame, const Level& level, CellAt cellAt, ScaleForTile scaleForTile)
-{
-    for (uint32_t z = 0; z < level.depth(); ++z) {
-        for (uint32_t y = 0; y < level.height(); ++y) {
-            for (uint32_t x = 0; x < level.width(); ++x) {
-                const StaticRenderCell cell = cellAt(x, y, z);
-                if (cell.tile == TileType::Air || cell.tile == TileType::Ladder) {
-                    continue;
-                }
-                RenderFrameData::Tile renderTile {
-                    .cell = {
-                        static_cast<int>(x),
-                        static_cast<int>(y),
-                        static_cast<int>(z),
-                    },
-                    .position = {
-                        static_cast<float>(x) + cell.positionOffset.x,
-                        static_cast<float>(y) + cell.positionOffset.y,
-                    },
-                    .size = cell.size,
-                    .color = cell.tile == TileType::Player
-                        ? Vec4 { 1.0f, 1.0f, 1.0f, 1.0f }
-                        : tileColor(cell.tile, cell.active),
-                    .baseElevation = cell.baseElevation,
-                    .height = cell.height,
-                    .showGrid = cell.showGrid,
-                    .model = renderModelForTile(cell.tile),
-                    .modelRotationQuarterTurns = cell.modelRotationQuarterTurns,
-                };
-                applyTileScale(renderTile, scaleForTile(cell.tile));
-                frame.tiles.push_back(renderTile);
-            }
-        }
-    }
-}
-
-} // namespace
 
 Application::Application()
     : window_("Sokoban 3D", 1280, 720)
     , renderer_(window_.nativeHandle(), SOKOBAN_ASSET_DIR)
     , assetRoot_(SOKOBAN_ASSET_DIR)
 {
+    presentationSettings_.normalize();
     loadCurrentScreen();
 
 #if SOKOBAN_ENABLE_DEBUG_UI
-    levelEditor_.initialize(SOKOBAN_SOURCE_LEVEL_DIR, assetRoot_ / "levels", currentLevel_, currentScreen_);
+    levelEditor_.initialize(
+        SOKOBAN_SOURCE_LEVEL_DIR,
+        assetRoot_ / "levels",
+        currentLevel_,
+        currentScreen_);
     levelEditorDebugUi_.initialize(levelEditor_);
+    animationPreviewDebugUi_.initialize(SOKOBAN_SOURCE_ASSET_DIR);
+
     DebugUi::addWindow("Engine", [this] {
-        drawDebugUi();
+        applicationDebugUi_.draw({
+            .currentLevel = currentLevel_,
+            .currentScreen = currentScreen_,
+            .level = level_,
+            .gameplaySession = gameplaySession_,
+            .renderer = renderer_,
+            .settings = presentationSettings_,
+        });
     });
     DebugUi::addWindow("Level Editor", [this] {
         levelEditorDebugUi_.draw(levelEditor_, {
@@ -518,7 +54,7 @@ Application::Application()
         });
     }, true);
     DebugUi::addWindow("Animation Preview", [this] {
-        drawAnimationPreviewUi();
+        animationPreviewDebugUi_.draw(renderer_);
     });
 #endif
 }
@@ -538,13 +74,17 @@ void Application::run()
         while (SDL_PollEvent(&event)) {
             renderer_.handleEvent(event);
 
-            const bool isKeyboardEvent = event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP;
-            const bool isMouseEvent = event.type == SDL_EVENT_MOUSE_MOTION ||
+            const bool isKeyboardEvent =
+                event.type == SDL_EVENT_KEY_DOWN ||
+                event.type == SDL_EVENT_KEY_UP;
+            const bool isMouseEvent =
+                event.type == SDL_EVENT_MOUSE_MOTION ||
                 event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
                 event.type == SDL_EVENT_MOUSE_BUTTON_UP;
             bool isEditorEditModifier = false;
 #if SOKOBAN_ENABLE_DEBUG_UI
-            isEditorEditModifier = isKeyboardEvent &&
+            isEditorEditModifier =
+                isKeyboardEvent &&
                 levelEditor_.editingDocument() &&
                 (event.key.scancode == SDL_SCANCODE_R ||
                     event.key.scancode == SDL_SCANCODE_D);
@@ -554,7 +94,10 @@ void Application::run()
                 !renderer_.wantsKeyboardCapture() ||
                 event.type == SDL_EVENT_KEY_UP ||
                 isEditorEditModifier;
-            const bool allowMouseInput = !isMouseEvent || !renderer_.wantsMouseCapture() || event.type == SDL_EVENT_MOUSE_BUTTON_UP;
+            const bool allowMouseInput =
+                !isMouseEvent ||
+                !renderer_.wantsMouseCapture() ||
+                event.type == SDL_EVENT_MOUSE_BUTTON_UP;
             if (allowKeyboardInput && allowMouseInput) {
                 input_.handleEvent(event);
             }
@@ -562,8 +105,8 @@ void Application::run()
             if (event.type == SDL_EVENT_QUIT) {
                 running_ = false;
             }
-
-            if (event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_ESCAPE) {
+            if (event.type == SDL_EVENT_KEY_DOWN &&
+                event.key.scancode == SDL_SCANCODE_ESCAPE) {
 #if SOKOBAN_ENABLE_DEBUG_UI
                 if (levelEditor_.playingDraft()) {
                     draftExitConfirmationOpen_ = true;
@@ -578,14 +121,18 @@ void Application::run()
 
         const float dt = frameTimer_.tick();
         update(dt);
-        updateAnimationPreview(dt);
+        animationPreviewDebugUi_.update(dt, renderer_);
 
         const Vec2 windowSize = window_.size();
         const Vec2 pixelSize = window_.sizeInPixels();
         const Vec2 mouse = input_.mousePosition();
         const Vec2 mousePixels {
-            windowSize.x > 0.0f ? mouse.x * pixelSize.x / windowSize.x : mouse.x,
-            windowSize.y > 0.0f ? mouse.y * pixelSize.y / windowSize.y : mouse.y,
+            windowSize.x > 0.0f
+                ? mouse.x * pixelSize.x / windowSize.x
+                : mouse.x,
+            windowSize.y > 0.0f
+                ? mouse.y * pixelSize.y / windowSize.y
+                : mouse.y,
         };
 
         ui_.beginFrame(
@@ -606,9 +153,10 @@ void Application::run()
 
 void Application::update(float dt)
 {
-    worldAnimationTimeSeconds_ +=
-        (gameplaySession_.moving() && gameplaySession_.activeAction().reversed) ? -dt : dt;
-    playerVisual_.clipTimeSeconds += dt * playerVisual_.clipPlaybackRate;
+    const bool reversed =
+        gameplaySession_.moving() &&
+        gameplaySession_.activeAction().reversed;
+    presentation_.advanceClocks(dt, reversed);
 
     if (quitConfirmationOpen_) {
         return;
@@ -618,341 +166,14 @@ void Application::update(float dt)
     if (draftExitConfirmationOpen_) {
         return;
     }
-
     if (levelEditor_.editingDocument()) {
         updateEditorPainting();
         return;
     }
-#else
-    (void)dt;
 #endif
 
     queuePressedCommands();
     advancePlayerMovement(dt);
-}
-
-void Application::drawDebugUi()
-{
-#if SOKOBAN_ENABLE_DEBUG_UI
-    const GameState& state = gameplaySession_.state();
-    ImGui::Text("Level %d Screen %d", currentLevel_, currentScreen_);
-    ImGui::Text("Player (%d, %d, %d)", state.player.x, state.player.y, state.player.z);
-    ImGui::Text("Player %s", state.playerDead ? "dead" : "alive");
-    ImGui::Text("Movables %zu", state.movables.size());
-    ImGui::Text("History %zu", gameplaySession_.historySize());
-    ImGui::Text("End %s", rules::isEndUnlocked(level_, state) ? "unlocked" : "locked");
-    ImGui::Text(
-        "Task workers %u, tasks run %llu",
-        taskSystem().workerCount(),
-        static_cast<unsigned long long>(taskSystem().executedTaskCount()));
-    ImGui::Separator();
-
-    constexpr const char* antiAliasingLabels[] { "None", "MSAA 2x", "MSAA 4x", "MSAA 8x" };
-    int antiAliasingIndex = static_cast<int>(renderer_.antiAliasingMode());
-    if (ImGui::Combo("Anti-aliasing", &antiAliasingIndex, antiAliasingLabels, static_cast<int>(std::size(antiAliasingLabels)))) {
-        renderer_.setAntiAliasingMode(static_cast<AntiAliasingMode>(antiAliasingIndex));
-    }
-    bool wireframeEnabled = renderer_.wireframeEnabled();
-    if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
-        renderer_.setWireframeEnabled(wireframeEnabled);
-    }
-    ImGui::SameLine();
-    float wireframeLineWidth = renderer_.wireframeLineWidth();
-    const auto lineWidthRange = renderer_.wireframeLineWidthRange();
-    ImGui::BeginDisabled(!renderer_.wideLinesSupported());
-    ImGui::SetNextItemWidth(120.0f);
-    if (ImGui::SliderFloat("Line Width", &wireframeLineWidth, lineWidthRange[0], lineWidthRange[1], "%.1f")) {
-        renderer_.setWireframeLineWidth(wireframeLineWidth);
-    }
-    ImGui::EndDisabled();
-
-    if (ImGui::CollapsingHeader("Tile Grid")) {
-        float gridColor[3] { tileGridLineColor_.x, tileGridLineColor_.y, tileGridLineColor_.z };
-        if (ImGui::ColorEdit3("Grid Color", gridColor)) {
-            tileGridLineColor_.x = gridColor[0];
-            tileGridLineColor_.y = gridColor[1];
-            tileGridLineColor_.z = gridColor[2];
-        }
-        ImGui::DragFloat("Grid Alpha", &tileGridLineColor_.w, 0.01f, 0.0f, 1.0f, "%.2f");
-        tileGridLineColor_.w = std::clamp(tileGridLineColor_.w, 0.0f, 1.0f);
-        ImGui::DragFloat("Grid Width", &tileGridLineWidth_, 0.05f, 0.0f, 12.0f, "%.2f px");
-        tileGridLineWidth_ = std::clamp(tileGridLineWidth_, 0.0f, 12.0f);
-    }
-
-    if (ImGui::CollapsingHeader("Tile Geometry")) {
-        float stepDurationSeconds = gameplaySession_.stepDurationSeconds();
-        ImGui::DragFloat(
-            "Step Duration",
-            &stepDurationSeconds,
-            0.005f,
-            0.05f,
-            1.0f,
-            "%.3f s");
-        gameplaySession_.setStepDurationSeconds(std::clamp(stepDurationSeconds, 0.05f, 1.0f));
-        if (ImGui::TreeNode("Step Rates (tiles/step)")) {
-            rules::StepRates stepRates = gameplaySession_.stepRates();
-            ImGui::SliderInt("Player", &stepRates.playerMove, 0, 5);
-            ImGui::SliderInt("Slide", &stepRates.slide, 0, 5);
-            ImGui::SliderInt("Conveyor", &stepRates.conveyor, 0, 5);
-            gameplaySession_.setStepRates(stepRates);
-            ImGui::TextDisabled("Movement rates by source; default 1.");
-            ImGui::TreePop();
-        }
-        ImGui::DragFloat(
-            "Surface Entity Height",
-            &surfaceEntityHeight_,
-            0.005f,
-            0.01f,
-            0.5f,
-            "%.3f");
-        surfaceEntityHeight_ = std::clamp(surfaceEntityHeight_, 0.01f, 0.5f);
-        ImGui::DragFloat(
-            "Surface Entity Width / Depth",
-            &surfaceEntityWidthDepth_,
-            0.01f,
-            0.1f,
-            1.0f,
-            "%.2f");
-        surfaceEntityWidthDepth_ = std::clamp(surfaceEntityWidthDepth_, 0.1f, 1.0f);
-        ImGui::TextDisabled("End and pressure plate geometry");
-
-        if (ImGui::TreeNode("Tile Scale")) {
-            for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
-                if (definition.type == TileType::Air) {
-                    continue;
-                }
-
-                const auto index = static_cast<std::size_t>(definition.type);
-                ImGui::DragFloat(
-                    definition.name.data(),
-                    &tileScales_[index],
-                    0.01f,
-                    config::minTileScale,
-                    config::maxTileScale,
-                    "%.2f");
-                tileScales_[index] = clampedTileScale(tileScales_[index]);
-            }
-            ImGui::TextDisabled("Visual scale around each tile's bottom-center.");
-            ImGui::TreePop();
-        }
-    }
-
-    if (ImGui::CollapsingHeader("Lighting")) {
-        ImGui::DragFloat("Sun Azimuth", &sunAzimuthDegrees_, 0.5f, -180.0f, 180.0f, "%.1f deg");
-        sunAzimuthDegrees_ = std::clamp(sunAzimuthDegrees_, -180.0f, 180.0f);
-        ImGui::DragFloat("Sun Tilt", &sunTiltDegrees_, 0.5f, -90.0f, 90.0f, "%.1f deg");
-        sunTiltDegrees_ = std::clamp(sunTiltDegrees_, -90.0f, 90.0f);
-
-        const Vec3 sunDirection = sunDirectionFromSpherical(sunAzimuthDegrees_, sunTiltDegrees_);
-        ImGui::Text("Unit Vector %.2f, %.2f, %.2f", sunDirection.x, sunDirection.y, sunDirection.z);
-        drawSunDirectionPreview(sunDirection, sunTiltDegrees_);
-
-        float color[3] { sunColor_.x, sunColor_.y, sunColor_.z };
-        if (ImGui::ColorEdit3("Sun Color", color)) {
-            sunColor_ = { color[0], color[1], color[2] };
-        }
-
-        ImGui::DragFloat("Sun Intensity", &sunIntensity_, 0.02f, 0.0f, 4.0f, "%.2f");
-
-        float ambientColor[3] { ambientLightColor_.x, ambientLightColor_.y, ambientLightColor_.z };
-        if (ImGui::ColorEdit3("Ambient Color", ambientColor)) {
-            ambientLightColor_ = { ambientColor[0], ambientColor[1], ambientColor[2] };
-        }
-
-        ImGui::DragFloat("Ambient Intensity", &ambientLightIntensity_, 0.01f, 0.0f, 2.0f, "%.2f");
-
-        ImGui::DragFloat("Specular Strength", &specularStrength_, 0.01f, 0.0f, 1.0f, "%.2f");
-        specularStrength_ = std::clamp(specularStrength_, 0.0f, 1.0f);
-        ImGui::DragFloat("Specular Power", &specularPower_, 0.5f, 1.0f, 128.0f, "%.1f");
-        specularPower_ = std::clamp(specularPower_, 1.0f, 128.0f);
-        ImGui::DragFloat("Model Shadow Receive", &modelShadowReceive_, 0.01f, 0.0f, 1.0f, "%.2f");
-        modelShadowReceive_ = std::clamp(modelShadowReceive_, 0.0f, 1.0f);
-        ImGui::TextDisabled("Lower model shadow receive reduces harsh self-shadowing.");
-
-        ImGui::Checkbox("Ambient Occlusion", &ambientOcclusionEnabled_);
-        ImGui::BeginDisabled(!ambientOcclusionEnabled_);
-        ImGui::DragFloat("AO Strength", &ambientOcclusionStrength_, 0.01f, 0.0f, 1.0f, "%.2f");
-        ImGui::Checkbox("Visualize SSAO", &ambientOcclusionVisualize_);
-        ImGui::EndDisabled();
-        ambientOcclusionStrength_ = std::clamp(ambientOcclusionStrength_, 0.0f, 1.0f);
-
-        ImGui::Checkbox("Shadows", &shadowsEnabled_);
-        ImGui::BeginDisabled(!shadowsEnabled_);
-        ImGui::DragFloat("Shadow Opacity", &shadowOpacity_, 0.01f, 0.0f, 0.85f, "%.2f");
-        ImGui::DragFloat("Shadow Bias", &shadowBias_, 0.0005f, 0.0f, 0.05f, "%.4f");
-        ImGui::EndDisabled();
-    }
-
-    if (ImGui::CollapsingHeader("Rendering Stats")) {
-        const RenderStats renderStats = renderer_.renderStats();
-        const ImGuiIO& io = ImGui::GetIO();
-        ImGui::Text("Frame %.3f ms (%.1f FPS)", io.DeltaTime * 1000.0f, io.Framerate);
-        ImGui::Text("Recorded frame %llu", static_cast<unsigned long long>(renderStats.frameIndex));
-        ImGui::Text("Swapchain %u x %u, %u images", renderStats.swapchainWidth, renderStats.swapchainHeight, renderStats.swapchainImages);
-        ImGui::Text("Active samples %ux", renderStats.activeSamples);
-        ImGui::Text("Wireframe %s", renderStats.wireframeEnabled ? "on" : "off");
-        ImGui::Text("Wireframe line width %.1f", renderStats.wireframeLineWidth);
-        ImGui::Text("Render tiles %u", renderStats.totalTiles);
-        ImGui::Text("Visible faces %u", renderStats.visibleFaces);
-        ImGui::Text("Draw calls %u", renderStats.drawCalls);
-        ImGui::Text("Triangles %u", renderStats.triangles);
-        ImGui::Text("Vertices %u", renderStats.vertices);
-        ImGui::Text("Pipelines bound %u", renderStats.pipelineBinds);
-        ImGui::Text("Render passes %u", renderStats.renderPasses);
-        ImGui::Text("Image barriers %u", renderStats.imageBarriers);
-        ImGui::Text("Pipeline rebuilds %llu", static_cast<unsigned long long>(renderStats.pipelineRebuilds));
-        ImGui::Text("Swapchain recreations %llu", static_cast<unsigned long long>(renderStats.swapchainRecreations));
-    }
-#endif
-}
-
-void Application::updateAnimationPreview(float dt)
-{
-#if SOKOBAN_ENABLE_DEBUG_UI
-    AnimationPreviewState& preview = animationPreview_;
-    if (preview.active && preview.clip) {
-        if (preview.playing) {
-            preview.time += dt * preview.speed;
-            if (preview.clip->durationSeconds > 0.0001f && preview.time > preview.clip->durationSeconds) {
-                preview.time = std::fmod(preview.time, preview.clip->durationSeconds);
-            }
-        }
-        renderer_.setAnimationPreview(&*preview.clip, preview.time);
-    } else {
-        renderer_.setAnimationPreview(nullptr, 0.0f);
-    }
-#else
-    (void)dt;
-#endif
-}
-
-void Application::rescanAnimationPreviewFiles()
-{
-#if SOKOBAN_ENABLE_DEBUG_UI
-    // Clearing may destroy a clip the renderer still points at.
-    renderer_.setAnimationPreview(nullptr, 0.0f);
-    animationPreview_ = {};
-    animationPreview_.scanned = true;
-
-    const std::filesystem::path root { SOKOBAN_SOURCE_ASSET_DIR };
-    std::error_code errorCode;
-    std::filesystem::recursive_directory_iterator it(root, errorCode);
-    const std::filesystem::recursive_directory_iterator end;
-    for (; !errorCode && it != end; it.increment(errorCode)) {
-        if (!it->is_regular_file(errorCode)) {
-            continue;
-        }
-        const std::string extension = it->path().extension().string();
-        if (extension == ".glb" || extension == ".gltf") {
-            animationPreview_.files.push_back(it->path());
-        }
-    }
-    std::ranges::sort(animationPreview_.files);
-    animationPreview_.fileLabels.reserve(animationPreview_.files.size());
-    for (const std::filesystem::path& path : animationPreview_.files) {
-        animationPreview_.fileLabels.push_back(path.lexically_relative(root).generic_string());
-    }
-#endif
-}
-
-void Application::drawAnimationPreviewUi()
-{
-#if SOKOBAN_ENABLE_DEBUG_UI
-    AnimationPreviewState& preview = animationPreview_;
-    if (!preview.scanned) {
-        rescanAnimationPreviewFiles();
-    }
-
-    if (ImGui::Button("Rescan Assets")) {
-        rescanAnimationPreviewFiles();
-    }
-    ImGui::SameLine();
-    ImGui::TextDisabled("%zu glTF files", preview.files.size());
-
-    const char* fileLabel = preview.fileIndex >= 0
-        ? preview.fileLabels[static_cast<size_t>(preview.fileIndex)].c_str()
-        : "Select file...";
-    if (ImGui::BeginCombo("File", fileLabel)) {
-        for (int i = 0; i < static_cast<int>(preview.files.size()); ++i) {
-            const bool selected = i == preview.fileIndex;
-            if (ImGui::Selectable(preview.fileLabels[static_cast<size_t>(i)].c_str(), selected) &&
-                i != preview.fileIndex) {
-                renderer_.setAnimationPreview(nullptr, 0.0f);
-                preview.fileIndex = i;
-                preview.clipNames = listGltfAnimationNames(preview.files[static_cast<size_t>(i)]);
-                preview.clipIndex = -1;
-                preview.clip.reset();
-                preview.active = false;
-                preview.error.clear();
-            }
-            if (selected) {
-                ImGui::SetItemDefaultFocus();
-            }
-        }
-        ImGui::EndCombo();
-    }
-
-    if (preview.fileIndex < 0) {
-        ImGui::TextDisabled("Pick a glTF/GLB file to browse its animations.");
-        return;
-    }
-    if (preview.clipNames.empty()) {
-        ImGui::TextDisabled("No animations in this file.");
-        return;
-    }
-
-    const char* clipLabel = preview.clipIndex >= 0
-        ? preview.clipNames[static_cast<size_t>(preview.clipIndex)].c_str()
-        : "Select animation...";
-    if (ImGui::BeginCombo("Animation", clipLabel)) {
-        for (int i = 0; i < static_cast<int>(preview.clipNames.size()); ++i) {
-            const bool selected = i == preview.clipIndex;
-            if (ImGui::Selectable(preview.clipNames[static_cast<size_t>(i)].c_str(), selected) &&
-                i != preview.clipIndex) {
-                preview.clipIndex = i;
-                preview.error.clear();
-                try {
-                    preview.clip = loadGltfAnimationClip(
-                        preview.files[static_cast<size_t>(preview.fileIndex)],
-                        static_cast<uint32_t>(i));
-                    preview.time = 0.0f;
-                    preview.playing = true;
-                    preview.active = true;
-                } catch (const std::exception& exception) {
-                    renderer_.setAnimationPreview(nullptr, 0.0f);
-                    preview.clip.reset();
-                    preview.active = false;
-                    preview.error = exception.what();
-                }
-            }
-            if (selected) {
-                ImGui::SetItemDefaultFocus();
-            }
-        }
-        ImGui::EndCombo();
-    }
-
-    if (!preview.error.empty()) {
-        ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "%s", preview.error.c_str());
-    }
-    if (!preview.clip) {
-        return;
-    }
-
-    ImGui::Text("Duration %.2fs, %zu channels", preview.clip->durationSeconds, preview.clip->channels.size());
-    ImGui::Checkbox("Preview On Player", &preview.active);
-    if (ImGui::Button(preview.playing ? "Pause" : "Play")) {
-        preview.playing = !preview.playing;
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Restart")) {
-        preview.time = 0.0f;
-    }
-    ImGui::SliderFloat("Speed", &preview.speed, 0.1f, 3.0f, "%.2fx");
-    const float duration = std::max(preview.clip->durationSeconds, 0.0001f);
-    ImGui::SliderFloat("Time", &preview.time, 0.0f, duration, "%.2fs");
-    ImGui::TextDisabled("Plays on the player model, overriding gameplay animation.");
-#endif
 }
 
 void Application::drawEditorModeIndicator()
@@ -967,7 +188,6 @@ void Application::drawEditorModeIndicator()
         label = "Testing Draft";
         color = ImVec4(0.20f, 0.72f, 0.38f, 1.0f);
     }
-
     if (!label) {
         return;
     }
@@ -975,7 +195,9 @@ void Application::drawEditorModeIndicator()
     constexpr float margin = 12.0f;
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(
-        ImVec2(viewport->WorkPos.x + margin, viewport->WorkPos.y + viewport->WorkSize.y - margin),
+        ImVec2(
+            viewport->WorkPos.x + margin,
+            viewport->WorkPos.y + viewport->WorkSize.y - margin),
         ImGuiCond_Always,
         ImVec2(0.0f, 1.0f));
     ImGui::SetNextWindowBgAlpha(0.82f);
@@ -988,7 +210,6 @@ void Application::drawEditorModeIndicator()
         ImGuiWindowFlags_NoNav |
         ImGuiWindowFlags_NoMove |
         ImGuiWindowFlags_NoInputs;
-
     if (ImGui::Begin("EditorModeIndicator", nullptr, flags)) {
         ImGui::TextColored(color, "%s", label);
     }
@@ -1012,14 +233,29 @@ void Application::drawQuitConfirmation()
     };
 
     ui_.panel(panel);
-    ui_.text({ panel.position.x + 78.0f, panel.position.y + 38.0f }, "QUIT GAME?", { 0.96f, 0.88f, 0.72f, 1.0f }, 4.0f);
+    ui_.text(
+        { panel.position.x + 78.0f, panel.position.y + 38.0f },
+        "QUIT GAME?",
+        { 0.96f, 0.88f, 0.72f, 1.0f },
+        4.0f);
 
-    if (ui_.button("quit_game_confirm", { { panel.position.x + 62.0f, panel.position.y + 108.0f }, { 104.0f, 42.0f } }, "QUIT")) {
+    if (ui_.button(
+            "quit_game_confirm",
+            {
+                { panel.position.x + 62.0f, panel.position.y + 108.0f },
+                { 104.0f, 42.0f },
+            },
+            "QUIT")) {
         running_ = false;
         quitConfirmationOpen_ = false;
     }
-
-    if (ui_.button("quit_game_cancel", { { panel.position.x + 194.0f, panel.position.y + 108.0f }, { 104.0f, 42.0f } }, "CANCEL")) {
+    if (ui_.button(
+            "quit_game_cancel",
+            {
+                { panel.position.x + 194.0f, panel.position.y + 108.0f },
+                { 104.0f, 42.0f },
+            },
+            "CANCEL")) {
         quitConfirmationOpen_ = false;
     }
 }
@@ -1034,12 +270,18 @@ void Application::drawDraftExitConfirmation()
 
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(
-        ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f, viewport->WorkPos.y + viewport->WorkSize.y * 0.5f),
+        ImVec2(
+            viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
+            viewport->WorkPos.y + viewport->WorkSize.y * 0.5f),
         ImGuiCond_Appearing,
         ImVec2(0.5f, 0.5f));
 
-    if (ImGui::BeginPopupModal(popupName, &draftExitConfirmationOpen_, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted("Stop testing this draft and return to the editor?");
+    if (ImGui::BeginPopupModal(
+            popupName,
+            &draftExitConfirmationOpen_,
+            ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted(
+            "Stop testing this draft and return to the editor?");
         ImGui::Separator();
 
         if (ImGui::Button("Stop Testing", ImVec2(120.0f, 0.0f))) {
@@ -1048,13 +290,11 @@ void Application::drawDraftExitConfirmation()
             draftExitConfirmationOpen_ = false;
             ImGui::CloseCurrentPopup();
         }
-
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2(90.0f, 0.0f))) {
             draftExitConfirmationOpen_ = false;
             ImGui::CloseCurrentPopup();
         }
-
         ImGui::EndPopup();
     }
 #endif
@@ -1064,13 +304,11 @@ void Application::updateEditorPainting()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     editorHoverCell_.reset();
-
     if (input_.keyPressed(SDL_SCANCODE_Z)) {
         const bool undone = levelEditor_.tryUndoEdit();
         (void)undone;
         return;
     }
-
     if (renderer_.wantsMouseCapture()) {
         return;
     }
@@ -1083,7 +321,10 @@ void Application::updateEditorPainting()
 
     const Vec2 windowSize = window_.size();
     const Vec2 pixelSize = window_.sizeInPixels();
-    if (windowSize.x <= 0.0f || windowSize.y <= 0.0f || pixelSize.x <= 0.0f || pixelSize.y <= 0.0f) {
+    if (windowSize.x <= 0.0f ||
+        windowSize.y <= 0.0f ||
+        pixelSize.x <= 0.0f ||
+        pixelSize.y <= 0.0f) {
         return;
     }
 
@@ -1092,37 +333,56 @@ void Application::updateEditorPainting()
         mouse.x * pixelSize.x / windowSize.x,
         mouse.y * pixelSize.y / windowSize.y,
     };
-    const RenderFrameData editorFrame = buildEditorRenderFrame();
-    if (const std::optional<GridPosition3> clicked = renderer_.pickIsoGridCell(editorFrame, mousePixels)) {
+    const RenderFrameData editorFrame = RenderFrameBuilder::buildEditor({
+        .editor = levelEditor_,
+        .settings = presentationSettings_,
+        .hoverCell = editorHoverCell_,
+        .deleting = input_.keyDown(SDL_SCANCODE_D),
+        .worldAnimationTimeSeconds =
+            presentation_.worldAnimationTimeSeconds(),
+        .conveyorBeltScrollOffset =
+            presentation_.conveyorBeltScrollOffset(
+                gameplaySession_.stepDurationSeconds()),
+    });
+    if (const std::optional<GridPosition3> clicked =
+            renderer_.pickIsoGridCell(editorFrame, mousePixels)) {
         GridPosition3 target = *clicked;
         const bool deleting = input_.keyDown(SDL_SCANCODE_D);
-        auto topmostOccupiedLayer = [&](GridPosition3 position) -> std::optional<int> {
-            const Level::LayerRows& layers = levelEditor_.documentLayers();
-            for (int z = static_cast<int>(layers.size()) - 1; z >= 0; --z) {
-                if (position.y < 0 ||
-                    position.x < 0 ||
-                    position.y >= static_cast<int>(layers[static_cast<size_t>(z)].size()) ||
-                    position.x >= static_cast<int>(layers[static_cast<size_t>(z)][static_cast<size_t>(position.y)].size())) {
-                    continue;
+        auto topmostOccupiedLayer =
+            [&](GridPosition3 position) -> std::optional<int> {
+                const Level::LayerRows& layers =
+                    levelEditor_.documentLayers();
+                for (int z = static_cast<int>(layers.size()) - 1;
+                     z >= 0;
+                     --z) {
+                    if (position.y < 0 ||
+                        position.x < 0 ||
+                        position.y >= static_cast<int>(
+                            layers[static_cast<std::size_t>(z)].size()) ||
+                        position.x >= static_cast<int>(
+                            layers[static_cast<std::size_t>(z)]
+                                [static_cast<std::size_t>(position.y)]
+                                    .size())) {
+                        continue;
+                    }
+                    if (charToTileType(
+                            layers[static_cast<std::size_t>(z)]
+                                [static_cast<std::size_t>(position.y)]
+                                [static_cast<std::size_t>(position.x)])
+                            .value_or(TileType::Air) != TileType::Air) {
+                        return z;
+                    }
                 }
-                if (charToTileType(
-                        layers[static_cast<size_t>(z)]
-                            [static_cast<size_t>(position.y)]
-                            [static_cast<size_t>(position.x)]).value_or(TileType::Air) != TileType::Air) {
-                    return z;
-                }
-            }
-            return std::nullopt;
-        };
+                return std::nullopt;
+            };
 
         if (levelEditor_.layerLocked()) {
             target.z = static_cast<int>(levelEditor_.activeLayer());
         } else if (deleting) {
             target.z = topmostOccupiedLayer(target).value_or(target.z);
         } else if (!input_.keyDown(SDL_SCANCODE_R)) {
-            // Add above the topmost occupied layer; fully empty columns paint
-            // the bottom layer itself so they never become unreachable.
-            const std::optional<int> occupied = topmostOccupiedLayer(target);
+            const std::optional<int> occupied =
+                topmostOccupiedLayer(target);
             target.z = occupied ? *occupied + 1 : 0;
         }
 
@@ -1140,33 +400,24 @@ void Application::updateEditorPainting()
 
 void Application::loadCurrentScreen()
 {
-    applyLevel(Level::loadFromFile(screenPath(currentLevel_, currentScreen_)));
+    applyLevel(
+        Level::loadFromFile(screenPath(currentLevel_, currentScreen_)));
     levelEditor_.setPlayingDraft(false);
     levelEditor_.setEditingDocument(false);
     editorHoverCell_.reset();
 
-    std::cerr << "player started level " << currentLevel_ << " screen " << currentScreen_ << '\n';
+    std::cerr << "player started level "
+              << currentLevel_
+              << " screen "
+              << currentScreen_
+              << '\n';
 }
 
 void Application::applyLevel(Level level)
 {
     level_ = std::move(level);
     gameplaySession_.reset(level_);
-    const GameState& state = gameplaySession_.state();
-    playerVisual_ = {};
-    playerVisual_.motion.renderPosition = toVec3(state.player);
-    playerVisual_.motion.animationStart = playerVisual_.motion.renderPosition;
-    playerVisual_.motion.animationEnd = playerVisual_.motion.renderPosition;
-    playerVisual_.facingQuarterTurns = facingQuarterTurns(MoveDirection::Down);
-    movableVisuals_.clear();
-    movableVisuals_.reserve(state.movables.size());
-    for (const GameState::Movable& movable : state.movables) {
-        movableVisuals_.push_back({
-            .renderPosition = toVec3(movable.cell),
-            .animationStart = toVec3(movable.cell),
-            .animationEnd = toVec3(movable.cell),
-        });
-    }
+    presentation_.resetEntities(gameplaySession_.state());
 }
 
 void Application::advanceScreen()
@@ -1180,7 +431,6 @@ void Application::advanceScreen()
         currentLevel_ = 0;
         currentScreen_ = 0;
     }
-
     loadCurrentScreen();
 }
 
@@ -1193,8 +443,10 @@ void Application::queuePressedCommands()
         gameplaySession_.queueRestart();
     }
 
-    const std::optional<MoveDirection> vertical = pressedVerticalDirection();
-    const std::optional<MoveDirection> horizontal = pressedHorizontalDirection();
+    const std::optional<MoveDirection> vertical =
+        pressedVerticalDirection();
+    const std::optional<MoveDirection> horizontal =
+        pressedHorizontalDirection();
     if (vertical) {
         gameplaySession_.queueMove(*vertical);
     }
@@ -1205,8 +457,7 @@ void Application::queuePressedCommands()
 
 void Application::advancePlayerMovement(float dt)
 {
-    advanceEntityAnimations(dt);
-
+    presentation_.advanceAnimations(dt);
     float remainingTime = dt;
 
     while (remainingTime > 0.0f) {
@@ -1214,7 +465,8 @@ void Application::advancePlayerMovement(float dt)
             return;
         }
 
-        const float duration = gameplaySession_.activeActionDuration();
+        const float duration =
+            gameplaySession_.activeActionDuration();
         if (duration <= 0.0f) {
             if (completeActiveAction()) {
                 return;
@@ -1222,103 +474,32 @@ void Application::advancePlayerMovement(float dt)
             continue;
         }
 
-        const float timeToFinish = gameplaySession_.activeActionRemainingSeconds();
+        const float timeToFinish =
+            gameplaySession_.activeActionRemainingSeconds();
         const float step = std::min(remainingTime, timeToFinish);
         remainingTime -= step;
         gameplaySession_.advanceActiveAction(step);
 
-        if (gameplaySession_.activeActionComplete()) {
-            if (completeActiveAction()) {
-                return;
-            }
-        }
-    }
-}
-
-void Application::advanceEntityAnimations(float dt)
-{
-    auto advance = [dt](EntityVisual& visual) {
-        if (!visual.moving) {
+        if (gameplaySession_.activeActionComplete() &&
+            completeActiveAction()) {
             return;
         }
-
-        visual.animationElapsed = std::min(visual.animationElapsed + dt, visual.animationDuration);
-        if (visual.animationDuration <= 0.0f || visual.animationElapsed >= visual.animationDuration) {
-            visual.renderPosition = visual.animationEnd;
-            visual.moving = false;
-            return;
-        }
-
-        visual.renderPosition = interpolateGridMotion(
-            visual.animationStart,
-            visual.animationEnd,
-            visual.animationElapsed,
-            visual.animationSecondsPerTile);
-    };
-
-    advance(playerVisual_.motion);
-    for (EntityVisual& visual : movableVisuals_) {
-        advance(visual);
-    }
-}
-
-void Application::startActionAnimations(const GameplaySession::Action& action)
-{
-    auto beginMotion = [&action](EntityVisual& visual, Vec3 target) {
-        if (gridDistance(visual.renderPosition, target) <= 0.0001f) {
-            visual.renderPosition = target;
-            visual.animationStart = target;
-            visual.animationEnd = target;
-            visual.animationElapsed = 0.0f;
-            visual.animationDuration = 0.0f;
-            visual.animationSecondsPerTile = 0.0f;
-            visual.moving = false;
-            return;
-        }
-
-        visual.animationStart = visual.renderPosition;
-        visual.animationEnd = target;
-        visual.animationElapsed = 0.0f;
-        const float distance = gridDistance(visual.animationStart, visual.animationEnd);
-        visual.animationDuration = action.durationSeconds;
-        visual.animationSecondsPerTile = distance > 0.0001f ? action.durationSeconds / distance : 0.0f;
-        visual.moving = true;
-    };
-
-    beginMotion(playerVisual_.motion, entityRenderTarget(action.after.player, action.after.playerDead));
-    if (playerVisual_.motion.moving) {
-        playerVisual_.movingClip = action.playerPushing
-            ? RenderAnimation::RoguePush
-            : RenderAnimation::RogueMovement;
-        playerVisual_.clipPlaybackRate = action.reversed ? -1.0f : 1.0f;
-    } else {
-        playerVisual_.clipPlaybackRate = 1.0f;
-    }
-
-    const size_t movableCount = std::min(action.before.movables.size(), action.after.movables.size());
-    for (size_t i = 0; i < movableCount && i < movableVisuals_.size(); ++i) {
-        beginMotion(
-            movableVisuals_[i],
-            entityRenderTarget(action.after.movables[i].cell, action.after.movables[i].fallen));
     }
 }
 
 bool Application::completeActiveAction()
 {
     gameplaySession_.completeActiveAction();
-    syncVisualsToGameState();
-    playerVisual_.clipPlaybackRate = 1.0f;
+    presentation_.finishAction(gameplaySession_.state());
 
     if (rules::isAtUnlockedEnd(level_, gameplaySession_.state())) {
         if (levelEditor_.playingDraft()) {
             levelEditor_.markDraftSolved();
             return false;
         }
-
         advanceScreen();
         return true;
     }
-
     return false;
 }
 
@@ -1332,12 +513,7 @@ bool Application::tryStartNextMove()
     if (!gameplaySession_.tryStartNextAction(level_, controls)) {
         return false;
     }
-
-    const GameplaySession::Action& action = gameplaySession_.activeAction();
-    if (action.facingDirection) {
-        playerVisual_.facingQuarterTurns = facingQuarterTurns(*action.facingDirection);
-    }
-    startActionAnimations(action);
+    presentation_.beginAction(gameplaySession_.activeAction());
     return true;
 }
 
@@ -1348,11 +524,10 @@ std::optional<MoveDirection> Application::pressedVerticalDirection() const
     if (upPressed == downPressed) {
         return std::nullopt;
     }
-
-    if ((upPressed && input_.keyDown(SDL_SCANCODE_S)) || (downPressed && input_.keyDown(SDL_SCANCODE_W))) {
+    if ((upPressed && input_.keyDown(SDL_SCANCODE_S)) ||
+        (downPressed && input_.keyDown(SDL_SCANCODE_W))) {
         return std::nullopt;
     }
-
     return upPressed ? MoveDirection::Up : MoveDirection::Down;
 }
 
@@ -1363,11 +538,10 @@ std::optional<MoveDirection> Application::pressedHorizontalDirection() const
     if (leftPressed == rightPressed) {
         return std::nullopt;
     }
-
-    if ((leftPressed && input_.keyDown(SDL_SCANCODE_D)) || (rightPressed && input_.keyDown(SDL_SCANCODE_A))) {
+    if ((leftPressed && input_.keyDown(SDL_SCANCODE_D)) ||
+        (rightPressed && input_.keyDown(SDL_SCANCODE_A))) {
         return std::nullopt;
     }
-
     return leftPressed ? MoveDirection::Left : MoveDirection::Right;
 }
 
@@ -1378,7 +552,6 @@ std::optional<MoveDirection> Application::heldVerticalDirection() const
     if (up == down) {
         return std::nullopt;
     }
-
     return up ? MoveDirection::Up : MoveDirection::Down;
 }
 
@@ -1389,38 +562,12 @@ std::optional<MoveDirection> Application::heldHorizontalDirection() const
     if (left == right) {
         return std::nullopt;
     }
-
     return left ? MoveDirection::Left : MoveDirection::Right;
 }
 
-void Application::syncVisualsToGameState()
-{
-    const GameState& state = gameplaySession_.state();
-    if (!playerVisual_.motion.moving) {
-        const Vec3 target = entityRenderTarget(state.player, state.playerDead);
-        playerVisual_.motion.renderPosition = target;
-        playerVisual_.motion.animationStart = target;
-        playerVisual_.motion.animationEnd = target;
-        playerVisual_.motion.animationElapsed = 0.0f;
-        playerVisual_.motion.animationDuration = 0.0f;
-        playerVisual_.motion.animationSecondsPerTile = 0.0f;
-    }
-
-    for (size_t i = 0; i < movableVisuals_.size() && i < state.movables.size(); ++i) {
-        if (movableVisuals_[i].moving) {
-            continue;
-        }
-        const Vec3 target = entityRenderTarget(state.movables[i].cell, state.movables[i].fallen);
-        movableVisuals_[i].renderPosition = target;
-        movableVisuals_[i].animationStart = target;
-        movableVisuals_[i].animationEnd = target;
-        movableVisuals_[i].animationElapsed = 0.0f;
-        movableVisuals_[i].animationDuration = 0.0f;
-        movableVisuals_[i].animationSecondsPerTile = 0.0f;
-    }
-}
-
-std::filesystem::path Application::screenPath(int levelIndex, int screenIndex) const
+std::filesystem::path Application::screenPath(
+    int levelIndex,
+    int screenIndex) const
 {
     return assetRoot_ /
         "levels" /
@@ -1433,474 +580,38 @@ bool Application::screenExists(int levelIndex, int screenIndex) const
     if (levelIndex < 0 || screenIndex < 0) {
         return false;
     }
-
-    return std::filesystem::exists(screenPath(levelIndex, screenIndex));
+    return std::filesystem::exists(
+        screenPath(levelIndex, screenIndex));
 }
 
 RenderFrameData Application::buildRenderFrame() const
 {
+    const float beltScrollOffset =
+        presentation_.conveyorBeltScrollOffset(
+            gameplaySession_.stepDurationSeconds());
 #if SOKOBAN_ENABLE_DEBUG_UI
     if (levelEditor_.editingDocument()) {
-        return buildEditorRenderFrame();
+        return RenderFrameBuilder::buildEditor({
+            .editor = levelEditor_,
+            .settings = presentationSettings_,
+            .hoverCell = editorHoverCell_,
+            .deleting = input_.keyDown(SDL_SCANCODE_D),
+            .worldAnimationTimeSeconds =
+                presentation_.worldAnimationTimeSeconds(),
+            .conveyorBeltScrollOffset = beltScrollOffset,
+        });
     }
 #endif
 
-    return buildGameplayRenderFrame();
-}
-
-float Application::conveyorBeltScrollOffset() const
-{
-    const float stepDurationSeconds = gameplaySession_.stepDurationSeconds();
-    if (stepDurationSeconds <= 0.0f) {
-        return 0.0f;
-    }
-
-    // Belts move riders one tile per step and the belt texture spans one full
-    // V cycle per tile, so one cycle per step keeps the surface in sync with
-    // conveyed entities. Negate to flip the scroll direction if needed.
-    return std::fmod(worldAnimationTimeSeconds_ / stepDurationSeconds, 1.0f);
-}
-
-float Application::tileTypeToScale(TileType type) const
-{
-    const auto index = static_cast<std::size_t>(type);
-    if (index >= tileScales_.size()) {
-        return 1.0f;
-    }
-
-    return clampedTileScale(tileScales_[index]);
-}
-
-RenderFrameData Application::buildGameplayRenderFrame() const
-{
-    const GameState& state = gameplaySession_.state();
-    const bool moving = gameplaySession_.moving();
-    const GameplaySession::Action& activeAction = gameplaySession_.activeAction();
-    RenderFrameData frame;
-    frame.viewMode = RenderViewMode::Isometric3D;
-    frame.lighting = {
-        .sun = {
-            .direction = sunDirectionFromSpherical(sunAzimuthDegrees_, sunTiltDegrees_),
-            .color = sunColor_,
-            .intensity = sunIntensity_,
-        },
-        .ambient = {
-            .color = ambientLightColor_,
-            .intensity = ambientLightIntensity_,
-        },
-        .shadows = {
-            .enabled = shadowsEnabled_,
-            .opacity = shadowOpacity_,
-            .bias = shadowBias_,
-        },
-        .ambientOcclusion = {
-            .enabled = ambientOcclusionEnabled_,
-            .strength = ambientOcclusionStrength_,
-            .visualize = ambientOcclusionVisualize_,
-        },
-        .specularStrength = specularStrength_,
-        .specularPower = specularPower_,
-        .modelShadowReceive = modelShadowReceive_,
-    };
-    frame.gridOverlay = {
-        .color = tileGridLineColor_,
-        .width = tileGridLineWidth_,
-    };
-    frame.levelWidth = level_.width();
-    frame.levelHeight = level_.height();
-    frame.levelDepth = level_.depth();
-    frame.playerPosition = { playerVisual_.motion.renderPosition.x, playerVisual_.motion.renderPosition.y };
-    const bool endUnlocked = rules::isEndUnlocked(level_, state);
-
-    frame.tiles.reserve(static_cast<size_t>(level_.width()) * level_.height() * level_.depth());
-    const bool playerMovingOutOfWater = moving && activeAction.before.playerDead && !activeAction.after.playerDead;
-    auto fallenMovableIsMoving = [this, &state](const GameState::Movable* movable) {
-        const auto index = static_cast<size_t>(movable - state.movables.data());
-        return index < movableVisuals_.size() && movableVisuals_[index].moving;
-    };
-    auto staticCellAt = [this, &state, endUnlocked, playerMovingOutOfWater, fallenMovableIsMoving](uint32_t x, uint32_t y, uint32_t z) {
-        const GridPosition3 position {
-            static_cast<int>(x),
-            static_cast<int>(y),
-            static_cast<int>(z),
-        };
-        if (level_.tileAt(x, y, z) == TileType::Water) {
-            const GridPosition3 entityPosition {
-                position.x,
-                position.y,
-                position.z + 1,
-            };
-            if (const GameState::Movable* fallenMovable = rules::fallenMovableAt(state, entityPosition)) {
-                if (!fallenMovableIsMoving(fallenMovable)) {
-                    return StaticRenderCell { .tile = TileType::Air };
-                }
-            }
-        }
-
-        std::optional<TileType> fallenTile;
-        if (const GameState::Movable* fallenMovable = rules::fallenMovableAt(state, position)) {
-            if (!fallenMovableIsMoving(fallenMovable)) {
-                return StaticRenderCell {
-                    .tile = fallenMovable->type,
-                    .showGrid = true,
-                    .baseElevation = static_cast<float>(std::max(position.z - 1, 0)),
-                    .height = 1.0f,
-                };
-            }
-        } else if (state.playerDead && !playerMovingOutOfWater && position == state.player) {
-            fallenTile = TileType::Player;
-        }
-
-        return staticRenderCellFor(
-            level_,
-            x,
-            y,
-            z,
-            endUnlocked,
-            fallenTile,
-            surfaceEntityHeight_,
-            surfaceEntityWidthDepth_,
-            playerVisual_.facingQuarterTurns);
-    };
-    appendStaticTiles(frame, level_, staticCellAt, [this](TileType tile) {
-        return tileTypeToScale(tile);
+    return RenderFrameBuilder::buildGameplay({
+        .level = level_,
+        .state = gameplaySession_.state(),
+        .moving = gameplaySession_.moving(),
+        .activeAction = gameplaySession_.activeAction(),
+        .presentation = presentation_,
+        .settings = presentationSettings_,
+        .conveyorBeltScrollOffset = beltScrollOffset,
     });
-    auto levelTileAt = [this](GridPosition3 position) {
-        if (!level_.inBounds(position)) {
-            return TileType::Air;
-        }
-        return level_.tileAt(
-            static_cast<uint32_t>(position.x),
-            static_cast<uint32_t>(position.y),
-            static_cast<uint32_t>(position.z));
-    };
-    for (uint32_t z = 0; z < level_.depth(); ++z) {
-        for (uint32_t y = 0; y < level_.height(); ++y) {
-            for (uint32_t x = 0; x < level_.width(); ++x) {
-                appendLadderRungsForCell(
-                    frame,
-                    {
-                        static_cast<int>(x),
-                        static_cast<int>(y),
-                        static_cast<int>(z),
-                    },
-                    levelTileAt);
-            }
-        }
-    }
-    for (uint32_t z = 0; z < level_.depth(); ++z) {
-        appendWaterEdgeFaces(
-            frame,
-            level_.width(),
-            level_.height(),
-            static_cast<float>(z) + 1.0f,
-            [this, &state, z](GridPosition position) {
-                return rules::isUnfilledWater(level_, state, {
-                    position.x,
-                    position.y,
-                    static_cast<int>(z) + 1,
-                });
-            });
-    }
-
-    if (!state.playerDead || playerMovingOutOfWater) {
-        RenderFrameData::Tile playerTile {
-            .position = { playerVisual_.motion.renderPosition.x, playerVisual_.motion.renderPosition.y },
-            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
-            .baseElevation = playerVisual_.motion.renderPosition.z,
-            .height = 1.0f,
-            .showGrid = false,
-            .model = RenderModel::Rogue,
-            .animation = playerVisual_.motion.moving ? playerVisual_.movingClip : RenderAnimation::RogueIdle,
-            .animationTimeSeconds = playerVisual_.clipTimeSeconds,
-            .modelRotationQuarterTurns = playerVisual_.facingQuarterTurns,
-        };
-        applyTileScale(playerTile, tileTypeToScale(TileType::Player));
-        frame.tiles.push_back(playerTile);
-    }
-
-    for (size_t movableIndex = 0; movableIndex < state.movables.size() && movableIndex < movableVisuals_.size(); ++movableIndex) {
-        const GameState::Movable& movable = state.movables[movableIndex];
-        const EntityVisual& visual = movableVisuals_[movableIndex];
-        const bool movingOutOfWater = moving &&
-            movableIndex < activeAction.before.movables.size() &&
-            movableIndex < activeAction.after.movables.size() &&
-            activeAction.before.movables[movableIndex].fallen &&
-            !activeAction.after.movables[movableIndex].fallen;
-        if (movable.fallen && !visual.moving && !movingOutOfWater) {
-            continue;
-        }
-
-        Vec4 color = tileColor(movable.type);
-        if (movable.type == TileType::Ice) {
-            color.w = config::iceTintAlpha;
-        }
-
-        RenderFrameData::Tile movableTile {
-            .position = { visual.renderPosition.x, visual.renderPosition.y },
-            .color = color,
-            .baseElevation = visual.renderPosition.z,
-            .height = 1.0f,
-            .blurBehind = movable.type == TileType::Ice,
-            .model = renderModelForTile(movable.type),
-        };
-        applyTileScale(movableTile, tileTypeToScale(movable.type));
-        frame.tiles.push_back(movableTile);
-    }
-
-    const float beltScrollOffset = conveyorBeltScrollOffset();
-    for (RenderFrameData::Tile& tile : frame.tiles) {
-        if (tile.model == RenderModel::Conveyor) {
-            tile.beltScrollOffset = beltScrollOffset;
-        }
-    }
-
-    return frame;
-}
-
-RenderFrameData Application::buildEditorRenderFrame() const
-{
-    RenderFrameData frame;
-    frame.viewMode = RenderViewMode::Isometric3D;
-    frame.lighting = {
-        .sun = {
-            .direction = sunDirectionFromSpherical(sunAzimuthDegrees_, sunTiltDegrees_),
-            .color = sunColor_,
-            .intensity = sunIntensity_,
-        },
-        .ambient = {
-            .color = ambientLightColor_,
-            .intensity = ambientLightIntensity_,
-        },
-        .shadows = {
-            .enabled = shadowsEnabled_,
-            .opacity = shadowOpacity_,
-            .bias = shadowBias_,
-        },
-        .ambientOcclusion = {
-            .enabled = ambientOcclusionEnabled_,
-            .strength = ambientOcclusionStrength_,
-            .visualize = ambientOcclusionVisualize_,
-        },
-        .specularStrength = specularStrength_,
-        .specularPower = specularPower_,
-        .modelShadowReceive = modelShadowReceive_,
-    };
-    frame.gridOverlay = {
-        .color = tileGridLineColor_,
-        .width = tileGridLineWidth_,
-    };
-    frame.levelWidth = levelEditor_.documentWidth();
-    frame.levelHeight = levelEditor_.documentHeight();
-
-    const Level::LayerRows& layers = levelEditor_.documentLayers();
-    const uint32_t activeLayer = levelEditor_.activeLayer();
-    const uint32_t layerCount = static_cast<uint32_t>(layers.size());
-    const bool layerLocked = levelEditor_.layerLocked();
-    frame.levelDepth = std::max(layerCount, 1U);
-    frame.tiles.reserve(
-        static_cast<size_t>(frame.levelWidth) *
-        frame.levelHeight *
-        layerCount *
-        2 +
-        2);
-
-    auto documentTileAt = [&](uint32_t x, uint32_t y, uint32_t z) {
-        if (z >= layers.size() || y >= layers[z].size() || x >= layers[z][y].size()) {
-            return TileType::Air;
-        }
-        return charToTileType(layers[z][y][x]).value_or(TileType::Air);
-    };
-    auto documentTileAtPosition = [&](GridPosition3 position) {
-        if (position.x < 0 || position.y < 0 || position.z < 0) {
-            return TileType::Air;
-        }
-        return documentTileAt(
-            static_cast<uint32_t>(position.x),
-            static_cast<uint32_t>(position.y),
-            static_cast<uint32_t>(position.z));
-    };
-    auto appendEditorTile = [&](uint32_t x, uint32_t y, uint32_t z, TileType tile, bool preview) {
-        if (tile == TileType::Air) {
-            return;
-        }
-        if (tile == TileType::Ladder) {
-            auto tileAtForLadder = [&](GridPosition3 position) {
-                if (preview &&
-                    position.x == static_cast<int>(x) &&
-                    position.y == static_cast<int>(y) &&
-                    position.z == static_cast<int>(z)) {
-                    return TileType::Ladder;
-                }
-                return documentTileAtPosition(position);
-            };
-            appendLadderRungsForCell(
-                frame,
-                {
-                    static_cast<int>(x),
-                    static_cast<int>(y),
-                    static_cast<int>(z),
-                },
-                tileAtForLadder,
-                preview);
-            return;
-        }
-
-        const bool surfaceEntity = tileTypeIsSurfaceEntity(tile);
-        const bool conveyor = tileTypeIsConveyor(tile);
-        const float tileSize = surfaceEntity ? surfaceEntityWidthDepth_ : 1.0f;
-        const float centeredOffset = (1.0f - tileSize) * 0.5f;
-        Vec4 color = tileColor(tile);
-        if (tile == TileType::Player) {
-            color = { 1.0f, 1.0f, 1.0f, 1.0f };
-        }
-        if (tile == TileType::Ice) {
-            color.w = config::iceTintAlpha;
-        }
-        const float previewOffset = preview ? 0.02f : 0.0f;
-        RenderFrameData::Tile renderTile {
-            .cell = {
-                static_cast<int>(x),
-                static_cast<int>(y),
-                static_cast<int>(z),
-            },
-            .position = {
-                static_cast<float>(x) + centeredOffset,
-                static_cast<float>(y) + centeredOffset,
-            },
-            .size = { tileSize, tileSize },
-            .color = color,
-            .baseElevation = static_cast<float>(z) +
-                (tile == TileType::Water ? 1.0f - 2.0f * config::waterDepthBelowGround : 0.0f) +
-                previewOffset,
-            .height = surfaceEntity
-                ? surfaceEntityHeight_
-                : (tile == TileType::Water
-                        ? config::waterDepthBelowGround
-                        : (conveyor
-                                ? config::conveyorTileHeight
-                                : (tileTypeIsSolidBlock(tile) || tileTypeOccupiesLevelCell(tile) ? 1.0f : 0.0f))),
-            .blurBehind = tile == TileType::Ice,
-            .showGrid = tile != TileType::Player,
-            .isEditorPreview = preview,
-            .model = renderModelForTile(tile),
-            .animation = tile == TileType::Player ? RenderAnimation::RogueIdle : RenderAnimation::None,
-            .animationTimeSeconds = tile == TileType::Player ? worldAnimationTimeSeconds_ : 0.0f,
-            .modelRotationQuarterTurns = rules::conveyorDirectionForTile(tile)
-                ? facingQuarterTurns(*rules::conveyorDirectionForTile(tile))
-                : 0,
-        };
-        applyTileScale(renderTile, tileTypeToScale(tile));
-        frame.tiles.push_back(renderTile);
-    };
-
-    for (uint32_t z = 0; z < layerCount; ++z) {
-        if (layerLocked && z != activeLayer) {
-            continue;
-        }
-        for (uint32_t y = 0; y < frame.levelHeight; ++y) {
-            for (uint32_t x = 0; x < frame.levelWidth; ++x) {
-                if (editorHoverCell_ &&
-                    editorHoverCell_->z == static_cast<int>(z) &&
-                    editorHoverCell_->x == static_cast<int>(x) &&
-                    editorHoverCell_->y == static_cast<int>(y)) {
-                    continue;
-                }
-
-                const TileType tile = documentTileAt(x, y, z);
-                if (layerLocked && tile == TileType::Air) {
-                    frame.tiles.push_back({
-                        .cell = {
-                            static_cast<int>(x),
-                            static_cast<int>(y),
-                            static_cast<int>(z),
-                        },
-                        .position = { static_cast<float>(x), static_cast<float>(y) },
-                        .baseElevation = static_cast<float>(z),
-                        .pickOnly = true,
-                    });
-                    continue;
-                }
-                if (!layerLocked && z == 0 && tile == TileType::Air) {
-                    // Columns that are Air on every layer render nothing, which
-                    // would leave the mouse picker with nothing to hit and make
-                    // the column unpaintable. Emit a pick-only ground cell.
-                    bool columnEmpty = true;
-                    for (uint32_t layer = 1; layer < layerCount && columnEmpty; ++layer) {
-                        columnEmpty = documentTileAt(x, y, layer) == TileType::Air;
-                    }
-                    if (columnEmpty) {
-                        frame.tiles.push_back({
-                            .cell = {
-                                static_cast<int>(x),
-                                static_cast<int>(y),
-                                0,
-                            },
-                            .position = { static_cast<float>(x), static_cast<float>(y) },
-                            .baseElevation = 0.0f,
-                            .pickOnly = true,
-                        });
-                        continue;
-                    }
-                }
-                appendEditorTile(x, y, z, tile, false);
-            }
-        }
-    }
-
-    auto documentHasOpenWater = [&](GridPosition position, uint32_t z) {
-        if (position.x < 0 || position.y < 0 ||
-            position.x >= static_cast<int>(frame.levelWidth) ||
-            position.y >= static_cast<int>(frame.levelHeight)) {
-            return false;
-        }
-        return documentTileAt(
-                   static_cast<uint32_t>(position.x),
-                   static_cast<uint32_t>(position.y),
-                   z) == TileType::Water;
-    };
-    for (uint32_t z = 0; z < layerCount; ++z) {
-        if (layerLocked && z != activeLayer) {
-            continue;
-        }
-        appendWaterEdgeFaces(
-            frame,
-            frame.levelWidth,
-            frame.levelHeight,
-            static_cast<float>(z) + 1.0f,
-            [&, z](GridPosition position) {
-                return documentHasOpenWater(position, z);
-            });
-    }
-
-    if (editorHoverCell_ &&
-        editorHoverCell_->x >= 0 &&
-        editorHoverCell_->y >= 0 &&
-        editorHoverCell_->x < static_cast<int>(frame.levelWidth) &&
-        editorHoverCell_->y < static_cast<int>(frame.levelHeight)) {
-        const bool deleting = input_.keyDown(SDL_SCANCODE_D);
-        const TileType selectedTile = deleting ? TileType::Air : levelEditor_.selectedTile();
-        const TileType hoveredTile = documentTileAt(
-            static_cast<uint32_t>(editorHoverCell_->x),
-            static_cast<uint32_t>(editorHoverCell_->y),
-            static_cast<uint32_t>(editorHoverCell_->z));
-        const TileType previewTile = selectedTile == TileType::Air ? hoveredTile : selectedTile;
-        appendEditorTile(
-            static_cast<uint32_t>(editorHoverCell_->x),
-            static_cast<uint32_t>(editorHoverCell_->y),
-            static_cast<uint32_t>(editorHoverCell_->z),
-            previewTile,
-            true);
-    }
-
-    const float beltScrollOffset = conveyorBeltScrollOffset();
-    for (RenderFrameData::Tile& tile : frame.tiles) {
-        if (tile.model == RenderModel::Conveyor) {
-            tile.beltScrollOffset = beltScrollOffset;
-        }
-    }
-
-    return frame;
 }
 
 } // namespace sokoban

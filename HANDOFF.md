@@ -72,12 +72,26 @@ cmake --build build --config Debug --target sokoban_animation_controller_tests
 .\build\Debug\sokoban_animation_controller_tests.exe
 ```
 
+Headless presentation tests cover mutable settings normalization, lighting/grid
+conversion, entity interpolation, clip/facing behavior, fallen offsets, and
+gameplay render-frame construction:
+
+```powershell
+cmake --build build --config Debug --target sokoban_presentation_tests
+.\build\Debug\sokoban_presentation_tests.exe
+```
+
 Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine controls, the `LevelEditorDebugUi` adapter, and an Animation Preview window (browses every glTF/GLB under the source `assets/` tree and plays any clip on the player model with play/pause/scrub/speed controls, overriding gameplay animation while active). Release builds still compile the headless `LevelEditor` API but do not expose the ImGui editor/debug UI.
 
 ## Important Source Map
 
 - `src/main.cpp`: process entry point.
-- `src/engine/Application.*`: main loop, SDL input translation, animation/presentation, level loading, editor integration, and frame construction for rendering. It delegates gameplay orchestration to `GameplaySession` and only consumes the session's state/action snapshots. Presentation is per-entity: movables animate via a parallel `movableVisuals_` vector of `EntityVisual`, and the player via `playerVisual_` (`EntityVisual` motion plus clip choice, per-entity clip clock, playback direction, and facing). `worldAnimationTimeSeconds_` is the only shared presentation clock, used for level geometry like belt scrolling; it (and per-entity clip clocks) run backwards while an undo transition animates.
+- `src/engine/Application.*`: top-level coordinator for the SDL event loop, input translation, level/screen progression, gameplay-session scheduling, editor picking/painting, modal flow, and component lifetime. It no longer owns mutable rendering settings, visual interpolation, debug animation-browser state, or render-frame construction.
+- `src/engine/PresentationSettings.*`: mutable runtime presentation settings initialized from the immutable defaults in `Config.hpp`. Owns lighting, SSAO/shadow tuning, grid appearance, surface geometry, tile scales, normalization, sun-direction conversion, and renderer-facing lighting/grid values.
+- `src/engine/GameplayPresentation.*`: headless presentation state derived from `GameplaySession::Action` snapshots. Owns player/movable interpolation, fallen render offsets, player clip/facing/playback state, and the shared world/conveyor animation clock without mutating authoritative gameplay state.
+- `src/engine/RenderFrameBuilder.*`: SDL/Vulkan-free construction of gameplay and editor `RenderFrameData`. Owns tile/model mapping, static geometry, water edges, ladder rungs, editor previews/pick-only cells, dynamic entities, tile scaling, and conveyor texture offsets.
+- `src/engine/ApplicationDebugUi.*`: Debug-only ImGui adapter for engine statistics and tuning. Edits `PresentationSettings` and calls the public `GameplaySession`/`VulkanRenderer` controls instead of storing application logic.
+- `src/engine/AnimationPreviewDebugUi.*`: Debug-only owner of animation asset scanning, clip selection, preview playback state, and renderer preview delegation.
 - `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, action history, a branch-safe undo stack, automatic world steps, and the post-undo automatic-motion pause. Emits `Action` snapshots for `Application` to animate. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
 - `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags + slide momentum) plus pure functions in `sokoban::rules` — `step` advances the whole world one discrete step (simultaneous one-tile moves, pushes, ladder climbs, momentum, falls, water, conveyors); `hasPendingMotion` reports whether the world would keep moving without input; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
 - `src/engine/Level.*`: level file parsing, serialization, layered grid storage, walkability/support rules, player/movable extraction. Tested by `tests/LevelTests.cpp` (`sokoban_level_tests`).
@@ -291,7 +305,7 @@ Renderer:
 - Uses SDL3 window/Vulkan integration.
 - Has a shadow pass and scene pass.
 - Supports MSAA modes (default is MSAA 8x, automatically falling back to the highest count the device's color+depth framebuffers support; the Debug UI combo shows the requested mode, Rendering Stats shows the active sample count), wireframe, line width controls, lighting controls, grid overlay, and render stats in Debug UI.
-- Screen-space ambient occlusion (SSAO) applies to all geometry, tiles and GLTF models alike. It runs as post-processing after the scene passes: scene depth is sampled directly at 1x MSAA, or resolved into `resolveDepthImage_` via the core-mandated `SAMPLE_ZERO` depth resolve when MSAA is on; `recordSsaoRendering` then runs a fullscreen depth-only AO pass (12-tap golden-angle spiral, range falloff to avoid halos, `config::ssaoRadiusPixels/DepthRange`) into an R8 target and multiply-composites the box-blurred result onto the lit image before UI. Descriptor bindings 5 (scene depth) and 6 (AO) extend the shared set; new shaders are `fullscreen.vert`, `ssao.frag`, `ssao_composite.frag`. Toggle, strength, and a raw-AO-buffer visualization checkbox live in Debug UI > Lighting (`config::ambientOcclusionEnabled/Strength`); disabled skips both passes entirely.
+- Screen-space ambient occlusion (SSAO) applies to all geometry, tiles and GLTF models alike. `VulkanSwapchainResources` provides sampled or resolved scene depth, and `VulkanSsaoPass` records the fullscreen depth-only AO pass (12-tap golden-angle spiral, range falloff to avoid halos, `config::ssaoRadiusPixels/DepthRange`) into an R8 target before multiply-compositing the blurred result onto the lit image. Descriptor bindings 5 (scene depth) and 6 (AO) live in `VulkanSceneDescriptors`. Toggle, strength, and raw-AO visualization are mutable `PresentationSettings` edited by Debug UI > Lighting.
 - Renders simple tile faces procedurally and GLTF models for certain tiles/entities.
 
 Model assets currently used:
@@ -399,6 +413,12 @@ Major recent additions and fixes:
   allocation in `VulkanResourceUtils`. `VulkanRenderer.cpp` is now roughly
   2,150 lines and retains orchestration and scene traversal instead of owning
   those resource lifetimes and construction details.
+- Split application presentation/configuration responsibilities into
+  `PresentationSettings`, `GameplayPresentation`, and `RenderFrameBuilder`,
+  with `ApplicationDebugUi` and `AnimationPreviewDebugUi` as adapters.
+  `Application.cpp` dropped from roughly 1,900 lines to roughly 620 and now
+  concentrates on event-loop, level progression, gameplay scheduling, editor
+  interaction, and modal orchestration.
 - Split headless gameplay orchestration out of `Application` into
   `GameplaySession`. `Application` now translates SDL controls and animates
   session actions, while state/history/undo/restart/action timing are covered
@@ -432,14 +452,13 @@ Major recent additions and fixes:
 
 At the time this handoff was updated:
 
-- The working tree contains the uncommitted
-  animation/model-resource split and the focused Vulkan pass, swapchain,
-  pipeline, and descriptor components described above.
+- The working tree contains the uncommitted Application settings,
+  presentation, render-frame builder, and debug-adapter split described above.
 - The full Debug build and a Vulkan-validation runtime smoke test passed after
-  these splits.
-- All six CTest suites pass: rules 131 checks, level parsing 42 checks,
+  this split.
+- All seven CTest suites pass: rules 131 checks, level parsing 42 checks,
   gameplay session 101 checks, level editor 88 checks, animation controller 40
-  checks, and task system 11 checks (413 total).
+  checks, presentation 62 checks, and task system 11 checks (475 total).
 
 Known useful verification commands:
 
@@ -455,7 +474,7 @@ The `rg` command above should return no matches.
 
 ## Important Design Decisions
 
-- Keep gameplay rules in the headless `Rules` module as pure functions of `(Level, GameState)`. `GameplaySession` owns command/state/history orchestration, `Application` owns SDL input translation and presentation, and the renderer receives a render-frame description rather than owning game rules.
+- Keep gameplay rules in the headless `Rules` module as pure functions of `(Level, GameState)`. `GameplaySession` owns command/state/history orchestration, `GameplayPresentation` owns visual interpolation/animation state, `Application` coordinates SDL input and component lifetime, and the renderer receives a render-frame description rather than owning game rules.
 - When changing or adding mechanics, implement them in `Rules.cpp` and add cases to `tests/RulesTests.cpp`; the tests compile without SDL/Vulkan so they can run anywhere.
 - Store `Player`, `Rock`, and movable `Ice` as dynamic entities extracted from level data rather than static cells.
 - Use character-driven tile definitions as the single source of truth for level parsing/editor palette.
@@ -464,6 +483,10 @@ The `rg` command above should return no matches.
   the build directory contains only needed assets while CMake and C++ consume
   the same metadata.
 - Keep editor behavior in the headless `LevelEditor` API. ImGui and any future player-facing editor UI should be adapters that call it rather than owning document or filesystem logic.
+- Keep compile-time constants/defaults in `Config.hpp`, mutable presentation
+  tuning in `PresentationSettings`, authoritative gameplay tuning/state in
+  `GameplaySession`, and renderer-facing frame assembly in `RenderFrameBuilder`.
+  UI layers may edit/call those APIs but should not duplicate their state.
 - Preserve existing code style and avoid broad abstractions unless a mechanic really needs them.
 
 ## Likely Next Improvements
@@ -494,7 +517,12 @@ UI:
 
 Engineering:
 
-- Gameplay rules, gameplay orchestration, and editor behavior now live in the headless `Rules`, `GameplaySession`, and `LevelEditor` modules with tests. `Application.cpp` still owns render-frame construction and editor integration; extracting a render-frame builder is the next natural split.
+- Gameplay rules, gameplay orchestration, presentation, render-frame
+  construction, and editor document behavior now live in headless `Rules`,
+  `GameplaySession`, `GameplayPresentation`, `RenderFrameBuilder`, and
+  `LevelEditor` components with tests. `Application` still owns SDL input
+  translation, editor pointer interaction, level progression, and modal flow;
+  extract one of those only when it gains enough independent policy to test.
 - The `TaskSystem` gives the engine a multi-threading foundation; grow it by moving more per-frame work onto tasks (render-frame building, animation updates) and eventually adding task dependencies/graphs when systems need ordering. Keep the Vulkan queue single-threaded unless command-pool-per-thread work is done deliberately.
 - Add save format/versioning if level files evolve.
 - Review asset licensing/readme files before distribution.
@@ -516,6 +544,7 @@ Engineering:
   - Add a `RenderModel` enum if needed.
   - Add its source/runtime paths, geometry options, material mode, textures,
     animations, and support files to `cmake/AssetManifest.cmake`.
-  - Set per-tile transform/scale/rotation in `Application`.
+  - Set per-tile transform/scale/rotation in `RenderFrameBuilder` and mutable
+    scale defaults in `PresentationSettings`.
   - Extend material modes only if the model cannot use `Untextured`,
     `SingleTexture`, or `PrimitiveTextureIndex`.

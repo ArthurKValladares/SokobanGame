@@ -99,14 +99,19 @@ add_custom_target(sokoban_assets
 
 add_executable(sokoban
     src/main.cpp
+    src/engine/AnimationPreviewDebugUi.cpp
     src/engine/Application.cpp
+    src/engine/ApplicationDebugUi.cpp
     src/engine/BoardLayout.cpp
     src/engine/DebugUi.cpp
+    src/engine/GameplayPresentation.cpp
     src/engine/GameplaySession.cpp
     src/engine/Input.cpp
     src/engine/Level.cpp
     src/engine/LevelEditor.cpp
     src/engine/LevelEditorDebugUi.cpp
+    src/engine/PresentationSettings.cpp
+    src/engine/RenderFrameBuilder.cpp
     src/engine/Rules.cpp
     src/engine/TaskSystem.cpp
     src/engine/TileTypes.cpp
@@ -236,6 +241,24 @@ if(SOKOBAN_BUILD_TESTS)
         target_compile_options(sokoban_animation_controller_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME animation_controller COMMAND sokoban_animation_controller_tests)
+
+    add_executable(sokoban_presentation_tests
+        tests/PresentationTests.cpp
+        src/engine/GameplayPresentation.cpp
+        src/engine/Level.cpp
+        src/engine/LevelEditor.cpp
+        src/engine/PresentationSettings.cpp
+        src/engine/RenderFrameBuilder.cpp
+        src/engine/Rules.cpp
+        src/engine/TileTypes.cpp
+    )
+    target_include_directories(sokoban_presentation_tests PRIVATE src)
+    if(MSVC)
+        target_compile_options(sokoban_presentation_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_presentation_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME presentation COMMAND sokoban_presentation_tests)
 
     add_executable(sokoban_task_tests
         tests/TaskSystemTests.cpp
