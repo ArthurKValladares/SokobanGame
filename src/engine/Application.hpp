@@ -5,6 +5,7 @@
 #include "engine/GameplaySession.hpp"
 #include "engine/Level.hpp"
 #include "engine/LevelEditor.hpp"
+#include "engine/LevelEditorDebugUi.hpp"
 #include "engine/Math.hpp"
 #include "engine/Rules.hpp"
 #include "engine/Time.hpp"
@@ -154,6 +155,7 @@ private:
     };
     std::vector<EntityVisual> movableVisuals_;
     LevelEditor levelEditor_;
+    LevelEditorDebugUi levelEditorDebugUi_;
     AnimationPreviewState animationPreview_;
     std::optional<GridPosition3> editorHoverCell_;
     bool running_ = true;

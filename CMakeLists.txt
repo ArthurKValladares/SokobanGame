@@ -106,6 +106,7 @@ add_executable(sokoban
     src/engine/Input.cpp
     src/engine/Level.cpp
     src/engine/LevelEditor.cpp
+    src/engine/LevelEditorDebugUi.cpp
     src/engine/Rules.cpp
     src/engine/TaskSystem.cpp
     src/engine/TileTypes.cpp
@@ -157,7 +158,7 @@ else()
     target_compile_options(sokoban PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-option(SOKOBAN_BUILD_TESTS "Build headless gameplay and task-system tests" ON)
+option(SOKOBAN_BUILD_TESTS "Build headless engine tests" ON)
 if(SOKOBAN_BUILD_TESTS)
     enable_testing()
     add_executable(sokoban_rules_tests
@@ -174,6 +175,19 @@ if(SOKOBAN_BUILD_TESTS)
     endif()
     add_test(NAME rules COMMAND sokoban_rules_tests)
 
+    add_executable(sokoban_level_tests
+        tests/LevelTests.cpp
+        src/engine/Level.cpp
+        src/engine/TileTypes.cpp
+    )
+    target_include_directories(sokoban_level_tests PRIVATE src)
+    if(MSVC)
+        target_compile_options(sokoban_level_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_level_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME level COMMAND sokoban_level_tests)
+
     add_executable(sokoban_gameplay_session_tests
         tests/GameplaySessionTests.cpp
         src/engine/GameplaySession.cpp
@@ -188,6 +202,20 @@ if(SOKOBAN_BUILD_TESTS)
         target_compile_options(sokoban_gameplay_session_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME gameplay_session COMMAND sokoban_gameplay_session_tests)
+
+    add_executable(sokoban_level_editor_tests
+        tests/LevelEditorTests.cpp
+        src/engine/LevelEditor.cpp
+        src/engine/Level.cpp
+        src/engine/TileTypes.cpp
+    )
+    target_include_directories(sokoban_level_editor_tests PRIVATE src)
+    if(MSVC)
+        target_compile_options(sokoban_level_editor_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_level_editor_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME level_editor COMMAND sokoban_level_editor_tests)
 
     add_executable(sokoban_task_tests
         tests/TaskSystemTests.cpp

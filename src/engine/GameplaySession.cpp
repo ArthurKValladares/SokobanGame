@@ -32,8 +32,8 @@ void GameplaySession::reset(const Level& level)
 {
     state_ = rules::initialState(level);
     pendingCommands_.clear();
+    undoHistory_.clear();
     moveHistory_.clear();
-    undoCursor_.reset();
     activeAction_ = {};
     moveElapsed_ = 0.0f;
     moving_ = false;
@@ -123,6 +123,13 @@ void GameplaySession::completeActiveAction()
 
     state_ = activeAction_.after;
     moveHistory_.push_back(activeAction_);
+    if (activeAction_.reversed) {
+        if (!undoHistory_.empty()) {
+            undoHistory_.pop_back();
+        }
+    } else {
+        undoHistory_.push_back(activeAction_);
+    }
     moving_ = false;
     moveElapsed_ = 0.0f;
 }
@@ -184,27 +191,17 @@ bool GameplaySession::tryStartWorldStep(const Level& level, std::optional<MoveDi
     } else {
         action.facingDirection = movementDirection(action.before.player, action.after.player);
     }
-    undoCursor_.reset();
     beginAction(std::move(action));
     return true;
 }
 
 bool GameplaySession::tryStartUndoMove()
 {
-    if (moveHistory_.empty()) {
+    if (undoHistory_.empty()) {
         return false;
     }
 
-    if (!undoCursor_) {
-        undoCursor_ = moveHistory_.size();
-    }
-
-    if (*undoCursor_ == 0) {
-        return false;
-    }
-
-    --(*undoCursor_);
-    Action action = invertAction(moveHistory_[*undoCursor_]);
+    Action action = invertAction(undoHistory_.back());
     action.durationSeconds = stepDurationSeconds_;
     action.facingDirection = movementDirection(action.after.player, action.before.player);
     autoMotionPaused_ = true;
@@ -223,7 +220,6 @@ bool GameplaySession::tryStartRestart(const Level& level)
         return false;
     }
 
-    undoCursor_.reset();
     autoMotionPaused_ = false;
     beginAction({
         .before = state_,

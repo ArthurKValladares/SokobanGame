@@ -503,14 +503,14 @@ Application::Application()
 
 #if SOKOBAN_ENABLE_DEBUG_UI
     levelEditor_.initialize(SOKOBAN_SOURCE_LEVEL_DIR, assetRoot_ / "levels", currentLevel_, currentScreen_);
+    levelEditorDebugUi_.initialize(levelEditor_);
     DebugUi::addWindow("Engine", [this] {
         drawDebugUi();
     });
     DebugUi::addWindow("Level Editor", [this] {
-        levelEditor_.draw({
+        levelEditorDebugUi_.draw(levelEditor_, {
             .playDraft = [this](Level level) {
                 applyLevel(std::move(level));
-                levelEditor_.setPlayingDraft(true);
             },
             .returnToCurrentScreen = [this] {
                 loadCurrentScreen();

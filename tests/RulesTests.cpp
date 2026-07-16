@@ -568,6 +568,102 @@ void testZeroRateFreezesSource()
     CHECK(stepped == state); // up is out of bounds here, so nothing changed
 }
 
+void testContestedConveyorDestinationBlocksEveryMover()
+{
+    TEST("contestedConveyorDestinationBlocksEveryMover");
+    const Level level = makeLevel({
+        { "...", "..." },
+        { "> <", "CRR" },
+    });
+    GameState state = rules::initialState(level);
+    state.movables[0].cell = cell(0, 0, 1);
+    state.movables[1].cell = cell(2, 0, 1);
+
+    CHECK(rules::hasPendingMotion(level, state));
+    CHECK(rules::step(level, state) == state);
+
+    // Resolution must not depend on movable vector order.
+    std::ranges::reverse(state.movables);
+    CHECK(rules::step(level, state) == state);
+}
+
+void testPlayerAndMovableContestingDestinationBothWait()
+{
+    TEST("playerAndMovableContestingDestinationBothWait");
+    const Level level = makeLevel({
+        { "..", "..", ".." },
+        { "> ", " ^", "CR" },
+    });
+    GameState state = rules::initialState(level);
+    state.player = cell(0, 0, 1);
+    state.movables[0].cell = cell(1, 1, 1);
+
+    const GameState stepped = rules::step(level, state);
+    CHECK(stepped.player == state.player);
+    CHECK(stepped.movables[0].cell == state.movables[0].cell);
+}
+
+void testConveyorChainMovesIntoVacatedCells()
+{
+    TEST("conveyorChainMovesIntoVacatedCells");
+    const Level level = makeLevel({
+        { "...", "..." },
+        { ">> ", "CRR" },
+    });
+    GameState state = rules::initialState(level);
+    state.movables[0].cell = cell(0, 0, 1);
+    state.movables[1].cell = cell(1, 0, 1);
+
+    const GameState stepped = rules::step(level, state);
+    CHECK(stepped.movables[0].cell == cell(1, 0, 1));
+    CHECK(stepped.movables[1].cell == cell(2, 0, 1));
+}
+
+void testHeadOnSlidesStopWithoutOverlap()
+{
+    TEST("headOnSlidesStopWithoutOverlap");
+    const Level level = makeLevel({
+        { "...", "..." },
+        { "   ", "CRR" },
+    });
+    GameState state = rules::initialState(level);
+    state.movables[0].cell = cell(0, 0, 1);
+    state.movables[0].sliding = MoveDirection::Right;
+    state.movables[1].cell = cell(2, 0, 1);
+    state.movables[1].sliding = MoveDirection::Left;
+
+    const GameState stepped = rules::step(level, state);
+    CHECK(stepped.movables[0].cell == cell(0, 0, 1));
+    CHECK(stepped.movables[1].cell == cell(2, 0, 1));
+    CHECK(!stepped.movables[0].sliding);
+    CHECK(!stepped.movables[1].sliding);
+    CHECK(!rules::hasPendingMotion(level, stepped));
+}
+
+void testEveryPressurePlateMustHaveLiveOccupant()
+{
+    TEST("everyPressurePlateMustHaveLiveOccupant");
+    const Level level = makeLevel({
+        { "......" },
+        { "CPPR E" },
+    });
+    GameState state = rules::initialState(level);
+    CHECK(!rules::isEndUnlocked(level, state));
+
+    state.player = cell(2, 0, 1);
+    state.movables[0].cell = cell(1, 0, 1);
+    CHECK(rules::isEndUnlocked(level, state));
+
+    state.movables[0].fallen = true;
+    CHECK(!rules::isEndUnlocked(level, state));
+
+    const Level noPlates = makeLevel({
+        { ".." },
+        { "CE" },
+    });
+    CHECK(rules::isEndUnlocked(noPlates, rules::initialState(noPlates)));
+}
+
 } // namespace
 
 int main()
@@ -599,6 +695,11 @@ int main()
     testFastPlayerRate();
     testFastSlideRate();
     testZeroRateFreezesSource();
+    testContestedConveyorDestinationBlocksEveryMover();
+    testPlayerAndMovableContestingDestinationBothWait();
+    testConveyorChainMovesIntoVacatedCells();
+    testHeadOnSlidesStopWithoutOverlap();
+    testEveryPressurePlateMustHaveLiveOccupant();
 
     if (failures == 0) {
         std::cout << "All " << checks << " checks passed.\n";

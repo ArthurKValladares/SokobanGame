@@ -47,6 +47,15 @@ cmake --build build --config Debug --target sokoban_rules_tests
 .\build\Debug\sokoban_rules_tests.exe
 ```
 
+Level parser/serializer tests cover legacy and layered files, malformed input,
+ragged-layer normalization, CRLF loading, entity extraction, and ladder
+validation:
+
+```powershell
+cmake --build build --config Debug --target sokoban_level_tests
+.\build\Debug\sokoban_level_tests.exe
+```
+
 Headless gameplay-session tests cover command buffering, action timing,
 push metadata, restart, undo, and automatic-motion pausing:
 
@@ -55,18 +64,19 @@ cmake --build build --config Debug --target sokoban_gameplay_session_tests
 .\build\Debug\sokoban_gameplay_session_tests.exe
 ```
 
-Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine controls, the level editor, and an Animation Preview window (browses every glTF/GLB under the source `assets/` tree and plays any clip on the player model with play/pause/scrub/speed controls, overriding gameplay animation while active). Release builds may not have the editor/debug UI available.
+Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine controls, the `LevelEditorDebugUi` adapter, and an Animation Preview window (browses every glTF/GLB under the source `assets/` tree and plays any clip on the player model with play/pause/scrub/speed controls, overriding gameplay animation while active). Release builds still compile the headless `LevelEditor` API but do not expose the ImGui editor/debug UI.
 
 ## Important Source Map
 
 - `src/main.cpp`: process entry point.
 - `src/engine/Application.*`: main loop, SDL input translation, animation/presentation, level loading, editor integration, and frame construction for rendering. It delegates gameplay orchestration to `GameplaySession` and only consumes the session's state/action snapshots. Presentation is per-entity: movables animate via a parallel `movableVisuals_` vector of `EntityVisual`, and the player via `playerVisual_` (`EntityVisual` motion plus clip choice, per-entity clip clock, playback direction, and facing). `worldAnimationTimeSeconds_` is the only shared presentation clock, used for level geometry like belt scrolling; it (and per-entity clip clocks) run backwards while an undo transition animates.
-- `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, movement history, contiguous undo cursor, automatic world steps, and the post-undo automatic-motion pause. Emits `Action` snapshots for `Application` to animate. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
+- `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, action history, a branch-safe undo stack, automatic world steps, and the post-undo automatic-motion pause. Emits `Action` snapshots for `Application` to animate. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
 - `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags + slide momentum) plus pure functions in `sokoban::rules` — `step` advances the whole world one discrete step (simultaneous one-tile moves, pushes, ladder climbs, momentum, falls, water, conveyors); `hasPendingMotion` reports whether the world would keep moving without input; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
-- `src/engine/Level.*`: level file parsing, serialization, layered grid storage, walkability/support rules, player/movable extraction.
+- `src/engine/Level.*`: level file parsing, serialization, layered grid storage, walkability/support rules, player/movable extraction. Tested by `tests/LevelTests.cpp` (`sokoban_level_tests`).
 - `src/engine/TaskSystem.*`: standard-library-only worker pool for task-based parallelism. `taskSystem().enqueue(fn)` returns a future (exceptions propagate on get); `parallelFor(count, minChunk, fn(begin, end))` runs chunked loops with the calling thread participating. Tasks must not block on other tasks (no dependency graph yet). Used by GLTF vertex skinning (`skinWithPoses`) and parallel CPU-side asset loading in `VulkanModelResources`; GPU uploads stay on the main thread. Tested by `tests/TaskSystemTests.cpp` (`sokoban_task_tests`).
 - `src/engine/TileTypes.*`: tile enum, character mapping, colors, helper predicates such as `tileTypeAllowsEntity`.
-- `src/engine/LevelEditor.*`: ImGui level editor, document state, painting/deleting, file browser, draft play mode, deleted-level handling.
+- `src/engine/LevelEditor.*`: headless editor model and command API. Owns document state/history, tile validation, draft construction, level load/save, source/runtime mirroring, browser enumeration, screen/level renumbering, soft-delete/restore, and guarded permanent deletion. It has no SDL, Vulkan, or ImGui dependency and is tested by `tests/LevelEditorTests.cpp` (`sokoban_level_editor_tests`).
+- `src/engine/LevelEditorDebugUi.*`: Debug-only ImGui adapter for `LevelEditor`. Owns widget text buffers and confirmation-modal presentation only; every editor state transition and filesystem action is delegated to the headless API.
 - `src/engine/render/RenderTypes.hpp`: renderer-facing frame contract and model/animation enums, independent of the Vulkan facade.
 - `src/engine/render/RenderAssetCatalog.hpp`: typed model, texture, animation, geometry, and material metadata consumed by the generated asset catalog.
 - `src/engine/render/VulkanModelResources.*`: owns model meshes, texture images/samplers, animation clips/crossfades, preview state, uploads, and cleanup. Loads definitions from the generated asset catalog and exposes lightweight mesh/material/texture views to the renderer.
@@ -211,13 +221,14 @@ Conveyors:
 - `^`, `v`, `>`, `<` represent conveyor directions.
 - Conveyors use the KayKit Platformer `conveyor_4x4x1_blue` GLTF asset.
 - Conveyors move every entity standing on them one tile per world step, resolved inside `rules::step` together with all other movement (player input overrides the belt under the player). Conveyed movables get the usual slide/fall/water treatment. Conveyors never push one entity into another; blocked entities stay put.
+- Simultaneous intents that target the same destination all wait; movable storage order never picks a winner. Chains can still advance into cells vacated during the same micro-step.
 - Belt surfaces scroll one texture cycle per step, matching rider speed.
 - Conveyor-started movement uses the conveyor interval as animation duration, so chained conveyor motion appears continuous.
 - Conveyor rendering uses primitive material texture indices from the GLTF so the blue body, dark belt, and white arrows show correctly.
 
 ## Level Editor
 
-The editor is built with ImGui and is enabled in Debug builds. It is not polished product UI.
+The editor logic is available through the headless `LevelEditor` API. Debug builds expose it through `LevelEditorDebugUi`, an ImGui adapter that is not polished product UI. A future in-game editor can use the same commands without depending on ImGui.
 
 Editor capabilities:
 
@@ -237,6 +248,10 @@ Editor capabilities:
 
 Important editor behavior:
 
+- ImGui does not mutate editor document or filesystem state directly. It reads `LevelEditor` state and invokes explicit commands/setters.
+- Draft validation and the transition into draft playback are handled by `LevelEditor::beginDraftPlayback`; the UI only forwards the returned level to the application callback.
+- Document history, load/save, project renumbering, runtime mirroring, deleted-level restore, and permanent-delete containment are covered by headless tests.
+- Undo histories are branch-safe: making a new gameplay move or editor edit after undo does not replay an abandoned action during later undos.
 - The active layer is shown with lower layers underneath.
 - "Lock edits to current layer" changes paint targeting behavior.
 - Clicking usually adds above; `R + click` replaces; `D + click` deletes.
@@ -389,14 +404,11 @@ Major recent additions and fixes:
 
 ## Current Codebase State
 
-At the time this handoff was created:
+At the time this handoff was updated:
 
-- The working tree contains the uncommitted asset catalog, material binding,
-  and `VulkanModelResources` changes described above.
-- The full Debug build and a Vulkan-validation runtime smoke test passed after
-  the asset/material refactor.
-- `sokoban_gameplay_session_tests` passed 52 checks, `sokoban_rules_tests`
-  passed 115 checks, and `sokoban_task_tests` passed 11 checks.
+- The working tree contains the uncommitted headless level-editor/ImGui-adapter split and expanded edge-case tests described above.
+- The full Debug build and a Vulkan-validation runtime smoke test passed after these changes.
+- All five CTest suites pass: rules 131 checks, level parsing 42 checks, gameplay session 101 checks, level editor 88 checks, and task system 11 checks (373 total).
 
 Known useful verification commands:
 
@@ -404,6 +416,7 @@ Known useful verification commands:
 git status --short
 rg -n "KayKit_Adventurers_2\.0_FREE|KayKit_BlockBits_1\.0_FREE" .
 cmake --build build --config Debug
+ctest --test-dir build -C Debug --output-on-failure
 .\build\Debug\sokoban.exe
 ```
 
@@ -419,14 +432,14 @@ The `rg` command above should return no matches.
 - Keep runtime asset selection explicit through `cmake/AssetManifest.cmake` so
   the build directory contains only needed assets while CMake and C++ consume
   the same metadata.
-- Use ImGui only for debug/editor tooling, not final player-facing UI.
+- Keep editor behavior in the headless `LevelEditor` API. ImGui and any future player-facing editor UI should be adapters that call it rather than owning document or filesystem logic.
 - Preserve existing code style and avoid broad abstractions unless a mechanic really needs them.
 
 ## Likely Next Improvements
 
 High-value gameplay/editor work:
 
-- Extend `tests/RulesTests.cpp` (movement/push/slide/fall/water/ladder/conveyor basics exist) with level parsing, ladder validation, undo round-trips, and editor document operations.
+- Extend parser/rules/editor coverage alongside new mechanics; parser normalization, movement conflicts, command/history boundaries, editor mutation, and core project-filesystem workflows now have dedicated regression cases.
 - Add more Sokoban mechanics only after hardening interactions among existing ones.
 - Revisit conveyor edge cases if needed (e.g. conveyor loops/cycles do not rotate; entities in a full cycle stay put).
 - Revisit the exact semantics of water/fallen entities and ice sliding edge cases.
@@ -449,10 +462,7 @@ UI:
 
 Engineering:
 
-- Gameplay rules and orchestration now live in the headless `Rules` and
-  `GameplaySession` modules with tests. `Application.cpp` still owns render-frame
-  construction, editor integration, and UI responsibilities; extracting a
-  render-frame builder is the next natural split.
+- Gameplay rules, gameplay orchestration, and editor behavior now live in the headless `Rules`, `GameplaySession`, and `LevelEditor` modules with tests. `Application.cpp` still owns render-frame construction and editor integration; extracting a render-frame builder is the next natural split.
 - The `TaskSystem` gives the engine a multi-threading foundation; grow it by moving more per-frame work onto tasks (render-frame building, animation updates) and eventually adding task dependencies/graphs when systems need ordering. Keep the Vulkan queue single-threaded unless command-pool-per-thread work is done deliberately.
 - Add save format/versioning if level files evolve.
 - Review asset licensing/readme files before distribution.

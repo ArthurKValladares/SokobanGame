@@ -200,6 +200,157 @@ void testUndoPausesAutomaticMotion()
     CHECK(!session.tryStartNextAction(level, {}));
 }
 
+void testActionTimingClampsAndIgnoresNegativeDelta()
+{
+    TEST("actionTimingClampsAndIgnoresNegativeDelta");
+    const Level level = makeLevel({
+        { "..." },
+        { "C  " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.25f);
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+
+    CHECK(session.activeActionRemainingSeconds() == 0.25f);
+    session.advanceActiveAction(-1.0f);
+    CHECK(session.activeActionRemainingSeconds() == 0.25f);
+    session.advanceActiveAction(10.0f);
+    CHECK(session.activeActionRemainingSeconds() == 0.0f);
+    CHECK(session.activeActionComplete());
+    session.completeActiveAction();
+    const std::size_t historySize = session.historySize();
+    session.completeActiveAction();
+    CHECK(session.historySize() == historySize);
+}
+
+void testQueuedCommandsWaitForActiveAction()
+{
+    TEST("queuedCommandsWaitForActiveAction");
+    const Level level = makeLevel({
+        { "...." },
+        { "C   " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+
+    session.queueMove(MoveDirection::Right);
+    CHECK(!session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().player == cell(1, 0, 1));
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().player == cell(2, 0, 1));
+}
+
+void testBlockedQueuedCommandDoesNotStarveNextCommand()
+{
+    TEST("blockedQueuedCommandDoesNotStarveNextCommand");
+    const Level level = makeLevel({
+        { "..." },
+        { "C  " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.queueMove(MoveDirection::Up);
+    session.queueMove(MoveDirection::Right);
+
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeAction().after.player == cell(1, 0, 1));
+}
+
+void testDeadPlayerDiscardsCommandsUntilUndo()
+{
+    TEST("deadPlayerDiscardsCommandsUntilUndo");
+    const Level level = makeLevel({
+        { ".W" },
+        { "C " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().playerDead);
+
+    session.queueRestart();
+    session.queueMove(MoveDirection::Left);
+    session.queueUndo();
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeAction().reversed);
+    finishAction(session);
+    CHECK(!session.state().playerDead);
+    CHECK(session.state().player == cell(0, 0, 1));
+}
+
+void testRestartCanBeUndone()
+{
+    TEST("restartCanBeUndone");
+    const Level level = makeLevel({
+        { "...." },
+        { "C   " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    const GameState moved = session.state();
+
+    session.queueRestart();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state() == rules::initialState(level));
+
+    session.queueUndo();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state() == moved);
+}
+
+void testNewMoveAfterUndoCreatesCleanHistoryBranch()
+{
+    TEST("newMoveAfterUndoCreatesCleanHistoryBranch");
+    const Level level = makeLevel({
+        { "....." },
+        { " C   " },
+    });
+    GameplaySession session;
+    session.reset(level);
+
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().player == cell(3, 0, 1));
+
+    session.queueUndo();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().player == cell(2, 0, 1));
+
+    session.queueMove(MoveDirection::Left);
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().player == cell(1, 0, 1));
+
+    session.queueUndo();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().player == cell(2, 0, 1));
+    session.queueUndo();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().player == cell(1, 0, 1));
+    session.queueUndo();
+    CHECK(!session.tryStartNextAction(level, {}));
+}
+
 } // namespace
 
 int main()
@@ -210,6 +361,12 @@ int main()
     testContiguousUndoWalksOriginalHistory();
     testRestart();
     testUndoPausesAutomaticMotion();
+    testActionTimingClampsAndIgnoresNegativeDelta();
+    testQueuedCommandsWaitForActiveAction();
+    testBlockedQueuedCommandDoesNotStarveNextCommand();
+    testDeadPlayerDiscardsCommandsUntilUndo();
+    testRestartCanBeUndone();
+    testNewMoveAfterUndoCreatesCleanHistoryBranch();
 
     if (failures == 0) {
         std::cout << "GameplaySessionTests: " << checks << " checks passed\n";

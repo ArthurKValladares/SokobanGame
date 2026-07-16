@@ -391,6 +391,41 @@ GameState step(
             }
         }
 
+        std::vector<std::optional<GridPosition3>> movableTargets(movableCount);
+        for (size_t i = 0; i < movableCount; ++i) {
+            if (movableIntent[i]) {
+                movableTargets[i] = movementTarget(after.movables[i].cell, *movableIntent[i]);
+            }
+        }
+        std::optional<GridPosition3> playerTarget;
+        if (playerIntent) {
+            playerTarget = movementTarget(after.player, *playerIntent);
+            if (playerInputDriven) {
+                playerTarget = playerLadderClimbTarget(level, after, *playerIntent).value_or(*playerTarget);
+            }
+        }
+
+        // Multiple simultaneous intents for one destination all lose. Without
+        // this pre-pass, movable vector order would arbitrarily choose a
+        // winner before the remaining intents were considered.
+        std::vector<bool> movableTargetContested(movableCount, false);
+        bool playerTargetContested = false;
+        for (size_t i = 0; i < movableCount; ++i) {
+            if (!movableTargets[i]) {
+                continue;
+            }
+            for (size_t j = i + 1; j < movableCount; ++j) {
+                if (movableTargets[j] && *movableTargets[i] == *movableTargets[j]) {
+                    movableTargetContested[i] = true;
+                    movableTargetContested[j] = true;
+                }
+            }
+            if (playerTarget && *movableTargets[i] == *playerTarget) {
+                movableTargetContested[i] = true;
+                playerTargetContested = true;
+            }
+        }
+
         // Resolve this micro-step's simultaneous one-tile moves: keep making
         // passes so an entity blocked only by another entity that vacates its
         // cell this micro-step still advances. Each entity moves at most once
@@ -412,7 +447,16 @@ GameState step(
                     continue;
                 }
                 const MoveDirection direction = *movableIntent[i];
-                const GridPosition3 target = movementTarget(after.movables[i].cell, direction);
+                const GridPosition3 target = *movableTargets[i];
+                if (movableTargetContested[i]) {
+                    if (after.movables[i].sliding) {
+                        after.movables[i].sliding = std::nullopt;
+                        movableDone[i] = true;
+                    }
+                    movableResolved[i] = true;
+                    progressed = true;
+                    continue;
+                }
                 if (!staticCellAllowsEntity(level, target)) {
                     after.movables[i].sliding = std::nullopt;
                     movableDone[i] = true;
@@ -433,12 +477,16 @@ GameState step(
 
             if (!playerResolved) {
                 const MoveDirection direction = *playerIntent;
-                GridPosition3 target = movementTarget(after.player, direction);
-                if (playerInputDriven) {
-                    target = playerLadderClimbTarget(level, after, direction).value_or(target);
-                }
+                const GridPosition3 target = *playerTarget;
 
-                if (!staticCellAllowsEntity(level, target)) {
+                if (playerTargetContested) {
+                    if (after.playerSliding) {
+                        after.playerSliding = std::nullopt;
+                        playerDone = true;
+                    }
+                    playerResolved = true;
+                    progressed = true;
+                } else if (!staticCellAllowsEntity(level, target)) {
                     after.playerSliding = std::nullopt;
                     playerDone = true;
                     playerResolved = true;

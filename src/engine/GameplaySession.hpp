@@ -82,8 +82,10 @@ private:
 
     GameState state_;
     std::deque<Command> pendingCommands_;
+    // Completed forward actions that can still be undone. Reversed actions
+    // remain in moveHistory_ for diagnostics but never become undoable again.
+    std::vector<Action> undoHistory_;
     std::vector<Action> moveHistory_;
-    std::optional<std::size_t> undoCursor_;
     Action activeAction_;
     float moveElapsed_ = 0.0f;
     float stepDurationSeconds_ = config::stepDurationSeconds;
