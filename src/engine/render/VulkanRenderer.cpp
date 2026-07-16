@@ -1,10 +1,7 @@
 #include "engine/render/VulkanRenderer.hpp"
 
-#include "engine/TaskSystem.hpp"
-
 #include "engine/BoardLayout.hpp"
 #include "engine/Config.hpp"
-#include "engine/render/ImageData.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -53,11 +50,6 @@ struct TilePushConstants {
     Vec4 gridColor;
     Vec4 textureOptions;
 };
-
-uint32_t animationIndexFromUserNumber(uint32_t animationNumber)
-{
-    return animationNumber == 0 ? 0 : animationNumber - 1;
-}
 
 static_assert(sizeof(TilePushConstants) == 256);
 
@@ -313,8 +305,7 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, std::filesystem::path assetRo
     createSceneColorResources();
     createSsaoResources();
     createCommandPool();
-    createModelResources();
-    createModelTextureResources();
+    modelResources_.create(physicalDevice_, device_, commandPool_, graphicsQueue_, assetRoot_);
     createDescriptorResources();
     createPipeline();
     createFrameResources();
@@ -343,8 +334,7 @@ VulkanRenderer::~VulkanRenderer()
 
     destroyPipeline();
     destroyDescriptorResources();
-    destroyModelTextureResources();
-    destroyModelResources();
+    modelResources_.destroy();
     if (commandPool_) {
         vkDestroyCommandPool(device_, commandPool_, nullptr);
     }
@@ -367,7 +357,7 @@ void VulkanRenderer::drawFrame(const RenderFrameData& frameData, const UiDrawDat
 {
     auto& frame = frames_[currentFrame_];
     vkCheck(vkWaitForFences(device_, 1, &frame.inFlight, VK_TRUE, UINT64_MAX), "vkWaitForFences failed");
-    updateAnimatedModelMeshes(frameData);
+    modelResources_.updateAnimations(frameData);
 
     uint32_t imageIndex = 0;
     VkResult acquired = vkAcquireNextImageKHR(device_, swapchain_, UINT64_MAX, frame.imageAvailable, VK_NULL_HANDLE, &imageIndex);
@@ -1148,12 +1138,17 @@ void VulkanRenderer::cleanupSsaoResources()
 
 void VulkanRenderer::createDescriptorResources()
 {
-    std::array<VkDescriptorSetLayoutBinding, 7> bindings {
+    const uint32_t modelTextureCount = modelResources_.textureCount();
+    if (modelTextureCount == 0) {
+        throw std::runtime_error("Asset catalog must contain at least one model texture");
+    }
+
+    std::array<VkDescriptorSetLayoutBinding, 5> bindings {
         VkDescriptorSetLayoutBinding {
-        .binding = 0,
-        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .descriptorCount = 1,
-        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .binding = 0,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
         VkDescriptorSetLayoutBinding {
             .binding = 1,
@@ -1164,19 +1159,7 @@ void VulkanRenderer::createDescriptorResources()
         VkDescriptorSetLayoutBinding {
             .binding = 2,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = 1,
-            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-        },
-        VkDescriptorSetLayoutBinding {
-            .binding = 3,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = 1,
-            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-        },
-        VkDescriptorSetLayoutBinding {
-            .binding = 4,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = 1,
+            .descriptorCount = modelTextureCount,
             .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
         },
         VkDescriptorSetLayoutBinding {
@@ -1203,7 +1186,7 @@ void VulkanRenderer::createDescriptorResources()
     std::array<VkDescriptorPoolSize, 1> poolSizes {
         VkDescriptorPoolSize {
             .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = 7,
+            .descriptorCount = modelTextureCount + 4,
         },
     };
     VkDescriptorPoolCreateInfo poolInfo {
@@ -1226,24 +1209,33 @@ void VulkanRenderer::createDescriptorResources()
 
 void VulkanRenderer::updateDescriptorSet()
 {
+    const std::vector<VulkanModelResources::TextureView> modelTextures = modelResources_.textures();
     if (!descriptorSet_ ||
         !shadowSampler_ ||
         !shadowImage_.view ||
         !sceneColorSampler_ ||
         !sceneColorImage_.view ||
-        !rogueTextureSampler_ ||
-        !rogueTextureImage_.view ||
-        !platformerTextureSampler_ ||
-        !platformerTextureImage_.view ||
-        !platformerThreadTextureSampler_ ||
-        !platformerThreadTextureImage_.view ||
+        modelTextures.empty() ||
         !ssaoSampler_ ||
         !ssaoImage_.view ||
         !depthImage_.view) {
         return;
     }
 
-    VkDescriptorImageInfo imageInfo {
+    std::vector<VkDescriptorImageInfo> modelImageInfos;
+    modelImageInfos.reserve(modelTextures.size());
+    for (const VulkanModelResources::TextureView texture : modelTextures) {
+        if (!texture.valid()) {
+            return;
+        }
+        modelImageInfos.push_back({
+            .sampler = texture.sampler,
+            .imageView = texture.imageView,
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        });
+    }
+
+    VkDescriptorImageInfo shadowImageInfo {
         .sampler = shadowSampler_,
         .imageView = shadowImage_.view,
         .imageLayout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
@@ -1251,21 +1243,6 @@ void VulkanRenderer::updateDescriptorSet()
     VkDescriptorImageInfo sceneImageInfo {
         .sampler = sceneColorSampler_,
         .imageView = sceneColorImage_.view,
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-    };
-    VkDescriptorImageInfo modelImageInfo {
-        .sampler = rogueTextureSampler_,
-        .imageView = rogueTextureImage_.view,
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-    };
-    VkDescriptorImageInfo platformerImageInfo {
-        .sampler = platformerTextureSampler_,
-        .imageView = platformerTextureImage_.view,
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-    };
-    VkDescriptorImageInfo platformerThreadImageInfo {
-        .sampler = platformerThreadTextureSampler_,
-        .imageView = platformerThreadTextureImage_.view,
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
     };
     VkDescriptorImageInfo sceneDepthImageInfo {
@@ -1278,21 +1255,19 @@ void VulkanRenderer::updateDescriptorSet()
         .imageView = ssaoImage_.view,
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
     };
-    std::array<VkWriteDescriptorSet, 7> writes {
+    std::array<VkWriteDescriptorSet, 5> writes {
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = descriptorSet_,
             .dstBinding = 0,
-            .dstArrayElement = 0,
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo = &imageInfo,
+            .pImageInfo = &shadowImageInfo,
         },
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = descriptorSet_,
             .dstBinding = 1,
-            .dstArrayElement = 0,
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .pImageInfo = &sceneImageInfo,
@@ -1301,34 +1276,14 @@ void VulkanRenderer::updateDescriptorSet()
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = descriptorSet_,
             .dstBinding = 2,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
+            .descriptorCount = static_cast<uint32_t>(modelImageInfos.size()),
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo = &modelImageInfo,
-        },
-        VkWriteDescriptorSet {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = descriptorSet_,
-            .dstBinding = 3,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo = &platformerImageInfo,
-        },
-        VkWriteDescriptorSet {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = descriptorSet_,
-            .dstBinding = 4,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo = &platformerThreadImageInfo,
+            .pImageInfo = modelImageInfos.data(),
         },
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = descriptorSet_,
             .dstBinding = 5,
-            .dstArrayElement = 0,
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .pImageInfo = &sceneDepthImageInfo,
@@ -1337,7 +1292,6 @@ void VulkanRenderer::updateDescriptorSet()
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = descriptorSet_,
             .dstBinding = 6,
-            .dstArrayElement = 0,
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .pImageInfo = &ssaoImageInfo,
@@ -1357,468 +1311,9 @@ void VulkanRenderer::createCommandPool()
     vkCheck(vkCreateCommandPool(device_, &createInfo, nullptr, &commandPool_), "vkCreateCommandPool failed");
 }
 
-void VulkanRenderer::createModelResources()
-{
-    // CPU-side glTF parsing is independent per file, so it runs on the task
-    // system; GPU uploads stay on this thread (the Vulkan queue is used
-    // single-threaded). Load failures propagate through future.get().
-    auto bricksData = taskSystem().enqueue([this] {
-        return loadGltfMesh(assetRoot_ / "models/bricks_A.gltf");
-    });
-    auto stoneData = taskSystem().enqueue([this] {
-        return loadGltfMesh(assetRoot_ / "models/stone.gltf");
-    });
-    auto waterData = taskSystem().enqueue([this] {
-        return loadGltfMesh(assetRoot_ / "models/water.gltf");
-    });
-    auto glassData = taskSystem().enqueue([this] {
-        return loadGltfMesh(assetRoot_ / "models/glass.gltf");
-    });
-    auto conveyorData = taskSystem().enqueue([this] {
-        return loadGltfMesh(
-            assetRoot_ / "models/conveyor_4x4x1_blue.gltf",
-            {
-                .usePrimitiveMaterialTextures = true,
-            });
-    });
-    auto rogueData = taskSystem().enqueue([this] {
-        return loadGltfSkinnedMesh(
-            assetRoot_ / "models/Rogue.glb",
-            {
-                .preserveAspectRatio = true,
-                .rotateHalfTurn = true,
-            });
-    });
-    auto idleClip = taskSystem().enqueue([this] {
-        return loadGltfAnimationClip(
-            assetRoot_ / "models/Rig_Medium_General.glb",
-            animationIndexFromUserNumber(config::playerIdleAnimationNumber));
-    });
-    auto movementClip = taskSystem().enqueue([this] {
-        return loadGltfAnimationClip(
-            assetRoot_ / "models/Rig_Medium_MovementBasic.glb",
-            animationIndexFromUserNumber(config::playerMovementAnimationNumber));
-    });
-    auto pushClip = taskSystem().enqueue([this] {
-        return loadGltfAnimationClip(
-            assetRoot_ / "models/Rig_Medium_Push.glb",
-            animationIndexFromUserNumber(config::playerPushAnimationNumber));
-    });
-
-    bricksAMesh_ = uploadMesh(bricksData.get());
-    stoneMesh_ = uploadMesh(stoneData.get());
-    waterMesh_ = uploadMesh(waterData.get());
-    glassMesh_ = uploadMesh(glassData.get());
-    conveyorMesh_ = uploadMesh(conveyorData.get());
-    rogueSkinnedMesh_ = rogueData.get();
-    rogueIdleAnimation_ = idleClip.get();
-    rogueMovementAnimation_ = movementClip.get();
-    roguePushAnimation_ = pushClip.get();
-    rogueMesh_ = uploadMesh(skinGltfMesh(rogueSkinnedMesh_, rogueIdleAnimation_, 0.0f));
-}
-
-VulkanRenderer::GpuMesh VulkanRenderer::uploadMesh(const MeshData& mesh) const
-{
-    if (mesh.vertices.empty() || mesh.indices.empty()) {
-        throw std::runtime_error("glTF mesh contains no geometry");
-    }
-
-    const VkDeviceSize vertexBytes = sizeof(MeshVertex) * mesh.vertices.size();
-    const VkDeviceSize indexBytes = sizeof(uint32_t) * mesh.indices.size();
-    GpuMesh result;
-    result.vertexBuffer = createBuffer(
-        vertexBytes,
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    result.indexBuffer = createBuffer(
-        indexBytes,
-        VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-    void* mapped = nullptr;
-    vkCheck(vkMapMemory(device_, result.vertexBuffer.memory, 0, vertexBytes, 0, &mapped), "vkMapMemory model vertex buffer failed");
-    std::memcpy(mapped, mesh.vertices.data(), static_cast<size_t>(vertexBytes));
-    vkUnmapMemory(device_, result.vertexBuffer.memory);
-
-    mapped = nullptr;
-    vkCheck(vkMapMemory(device_, result.indexBuffer.memory, 0, indexBytes, 0, &mapped), "vkMapMemory model index buffer failed");
-    std::memcpy(mapped, mesh.indices.data(), static_cast<size_t>(indexBytes));
-    vkUnmapMemory(device_, result.indexBuffer.memory);
-
-    result.indexCount = static_cast<uint32_t>(mesh.indices.size());
-    result.vertexCount = static_cast<uint32_t>(mesh.vertices.size());
-    return result;
-}
-
-void VulkanRenderer::updateMeshVertices(const GpuMesh& gpuMesh, const std::vector<MeshVertex>& vertices) const
-{
-    if (!gpuMesh.vertexBuffer.memory || vertices.empty() || vertices.size() != gpuMesh.vertexCount) {
-        return;
-    }
-
-    const VkDeviceSize vertexBytes = sizeof(MeshVertex) * vertices.size();
-    void* mapped = nullptr;
-    vkCheck(vkMapMemory(device_, gpuMesh.vertexBuffer.memory, 0, vertexBytes, 0, &mapped), "vkMapMemory animated vertex buffer failed");
-    std::memcpy(mapped, vertices.data(), static_cast<size_t>(vertexBytes));
-    vkUnmapMemory(device_, gpuMesh.vertexBuffer.memory);
-}
-
 void VulkanRenderer::setAnimationPreview(const GltfAnimationClip* clip, float timeSeconds)
 {
-    previewClip_ = clip;
-    previewTimeSeconds_ = timeSeconds;
-}
-
-void VulkanRenderer::updateAnimatedModelMeshes(const RenderFrameData& frameData)
-{
-    if (previewClip_ != nullptr) {
-        if (rogueSkinnedMesh_.vertices.empty() || !rogueMesh_.vertexBuffer.memory) {
-            return;
-        }
-        if (previewClip_ == activePreviewClip_ &&
-            std::abs(previewTimeSeconds_ - activePreviewTime_) < 0.0001f) {
-            return;
-        }
-        const MeshData skinnedMesh = skinGltfMesh(rogueSkinnedMesh_, *previewClip_, previewTimeSeconds_);
-        updateMeshVertices(rogueMesh_, skinnedMesh.vertices);
-        activePreviewClip_ = previewClip_;
-        activePreviewTime_ = previewTimeSeconds_;
-        // Restart gameplay animation cleanly once the preview ends.
-        activeRogueAnimation_ = RenderAnimation::None;
-        rogueFadeFromAnimation_ = RenderAnimation::None;
-        return;
-    }
-    activePreviewClip_ = nullptr;
-
-    RenderAnimation requestedAnimation = RenderAnimation::None;
-    float requestedTime = 0.0f;
-    for (const RenderFrameData::Tile& tile : frameData.tiles) {
-        if (tile.model == RenderModel::Rogue && tile.animation != RenderAnimation::None) {
-            requestedAnimation = tile.animation;
-            requestedTime = tile.animationTimeSeconds;
-            break;
-        }
-    }
-
-    if (requestedAnimation == RenderAnimation::None ||
-        rogueSkinnedMesh_.vertices.empty() ||
-        !rogueMesh_.vertexBuffer.memory) {
-        return;
-    }
-
-    auto clipFor = [this](RenderAnimation animation) -> const GltfAnimationClip& {
-        switch (animation) {
-        case RenderAnimation::RoguePush:
-            return roguePushAnimation_;
-        case RenderAnimation::RogueMovement:
-            return rogueMovementAnimation_;
-        default:
-            return rogueIdleAnimation_;
-        }
-    };
-
-    // The per-entity clip clock is continuous across clip switches, so its
-    // frame-to-frame delta doubles as the crossfade timer (absolute value,
-    // because the clock runs backwards while rewinding).
-    const float timeDelta = activeRogueAnimation_ == RenderAnimation::None
-        ? 0.0f
-        : requestedTime - activeRogueAnimationTime_;
-
-    if (requestedAnimation != activeRogueAnimation_ &&
-        activeRogueAnimation_ != RenderAnimation::None) {
-        // Start a crossfade from the clip that was showing.
-        rogueFadeFromAnimation_ = activeRogueAnimation_;
-        rogueFadeFromTime_ = activeRogueAnimationTime_;
-        rogueFadeElapsed_ = 0.0f;
-    }
-
-    if (rogueFadeFromAnimation_ == RenderAnimation::None &&
-        requestedAnimation == activeRogueAnimation_ &&
-        std::abs(requestedTime - activeRogueAnimationTime_) < 0.0001f) {
-        return;
-    }
-
-    MeshData skinnedMesh;
-    if (rogueFadeFromAnimation_ != RenderAnimation::None) {
-        rogueFadeFromTime_ += timeDelta; // the outgoing clip keeps playing
-        rogueFadeElapsed_ += std::abs(timeDelta);
-        constexpr float fadeSeconds = config::playerAnimationFadeSeconds;
-        if (fadeSeconds <= 0.0f || rogueFadeElapsed_ >= fadeSeconds) {
-            rogueFadeFromAnimation_ = RenderAnimation::None;
-            skinnedMesh = skinGltfMesh(rogueSkinnedMesh_, clipFor(requestedAnimation), requestedTime);
-        } else {
-            float blend = rogueFadeElapsed_ / fadeSeconds;
-            blend = blend * blend * (3.0f - 2.0f * blend); // smoothstep
-            skinnedMesh = skinGltfMeshBlended(
-                rogueSkinnedMesh_,
-                clipFor(rogueFadeFromAnimation_),
-                rogueFadeFromTime_,
-                clipFor(requestedAnimation),
-                requestedTime,
-                blend);
-        }
-    } else {
-        skinnedMesh = skinGltfMesh(rogueSkinnedMesh_, clipFor(requestedAnimation), requestedTime);
-    }
-    updateMeshVertices(rogueMesh_, skinnedMesh.vertices);
-    activeRogueAnimation_ = requestedAnimation;
-    activeRogueAnimationTime_ = requestedTime;
-}
-
-void VulkanRenderer::destroyModelResources()
-{
-    destroyMesh(rogueMesh_);
-    destroyMesh(conveyorMesh_);
-    destroyMesh(glassMesh_);
-    destroyMesh(waterMesh_);
-    destroyMesh(stoneMesh_);
-    destroyMesh(bricksAMesh_);
-}
-
-void VulkanRenderer::createModelTextureResources()
-{
-    createTextureResource(assetRoot_ / "models/rogue_texture.png", rogueTextureImage_, rogueTextureSampler_);
-    createTextureResource(assetRoot_ / "models/platformer_texture.png", platformerTextureImage_, platformerTextureSampler_);
-    createTextureResource(assetRoot_ / "models/threads.png", platformerThreadTextureImage_, platformerThreadTextureSampler_);
-}
-
-void VulkanRenderer::createTextureResource(
-    const std::filesystem::path& path,
-    OwnedImage& textureImage,
-    VkSampler& sampler)
-{
-    const ImageData image = loadRgbaImage(path);
-    const VkDeviceSize imageBytes = image.rgba.size();
-    OwnedBuffer staging = createBuffer(
-        imageBytes,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-    void* mapped = nullptr;
-    vkCheck(vkMapMemory(device_, staging.memory, 0, imageBytes, 0, &mapped), "vkMapMemory texture staging failed");
-    std::memcpy(mapped, image.rgba.data(), image.rgba.size());
-    vkUnmapMemory(device_, staging.memory);
-
-    VkImageCreateInfo imageInfo {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
-        .format = VK_FORMAT_R8G8B8A8_SRGB,
-        .extent = {
-            .width = image.width,
-            .height = image.height,
-            .depth = 1,
-        },
-        .mipLevels = 1,
-        .arrayLayers = 1,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-    };
-    vkCheck(vkCreateImage(device_, &imageInfo, nullptr, &textureImage.image), "vkCreateImage model texture failed");
-
-    VkMemoryRequirements requirements {};
-    vkGetImageMemoryRequirements(device_, textureImage.image, &requirements);
-    VkMemoryAllocateInfo allocationInfo {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = requirements.size,
-        .memoryTypeIndex = findMemoryType(requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
-    };
-    vkCheck(vkAllocateMemory(device_, &allocationInfo, nullptr, &textureImage.memory), "vkAllocateMemory model texture failed");
-    vkCheck(vkBindImageMemory(device_, textureImage.image, textureImage.memory, 0), "vkBindImageMemory model texture failed");
-
-    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-    VkCommandBufferAllocateInfo commandBufferInfo {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = commandPool_,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1,
-    };
-    vkCheck(vkAllocateCommandBuffers(device_, &commandBufferInfo, &commandBuffer), "vkAllocateCommandBuffers texture upload failed");
-    VkCommandBufferBeginInfo beginInfo {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    };
-    vkCheck(vkBeginCommandBuffer(commandBuffer, &beginInfo), "vkBeginCommandBuffer texture upload failed");
-
-    VkImageMemoryBarrier2 toTransfer {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
-        .srcAccessMask = VK_ACCESS_2_NONE,
-        .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = textureImage.image,
-        .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
-    };
-    VkDependencyInfo toTransferDependency {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &toTransfer,
-    };
-    vkCmdPipelineBarrier2(commandBuffer, &toTransferDependency);
-
-    VkBufferImageCopy copyRegion {
-        .imageSubresource = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .mipLevel = 0,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
-        .imageExtent = {
-            .width = image.width,
-            .height = image.height,
-            .depth = 1,
-        },
-    };
-    vkCmdCopyBufferToImage(
-        commandBuffer,
-        staging.buffer,
-        textureImage.image,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        1,
-        &copyRegion);
-
-    VkImageMemoryBarrier2 toRead {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-        .dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = textureImage.image,
-        .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
-    };
-    VkDependencyInfo toReadDependency {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &toRead,
-    };
-    vkCmdPipelineBarrier2(commandBuffer, &toReadDependency);
-    vkCheck(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer texture upload failed");
-
-    VkCommandBufferSubmitInfo commandBufferSubmit {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-        .commandBuffer = commandBuffer,
-    };
-    VkSubmitInfo2 submit {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .commandBufferInfoCount = 1,
-        .pCommandBufferInfos = &commandBufferSubmit,
-    };
-    vkCheck(vkQueueSubmit2(graphicsQueue_, 1, &submit, VK_NULL_HANDLE), "vkQueueSubmit2 texture upload failed");
-    vkCheck(vkQueueWaitIdle(graphicsQueue_), "vkQueueWaitIdle texture upload failed");
-    vkFreeCommandBuffers(device_, commandPool_, 1, &commandBuffer);
-
-    vkDestroyBuffer(device_, staging.buffer, nullptr);
-    vkFreeMemory(device_, staging.memory, nullptr);
-    textureImage.view = createImageView(
-        textureImage.image,
-        VK_FORMAT_R8G8B8A8_SRGB,
-        VK_IMAGE_ASPECT_COLOR_BIT);
-
-    VkSamplerCreateInfo samplerInfo {
-        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-        .magFilter = VK_FILTER_NEAREST,
-        .minFilter = VK_FILTER_NEAREST,
-        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
-        .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .anisotropyEnable = VK_FALSE,
-        .compareEnable = VK_FALSE,
-        .minLod = 0.0f,
-        .maxLod = 0.0f,
-    };
-    vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &sampler), "vkCreateSampler model texture failed");
-}
-
-void VulkanRenderer::destroyModelTextureResources()
-{
-    destroyTextureResource(platformerThreadTextureImage_, platformerThreadTextureSampler_);
-    destroyTextureResource(platformerTextureImage_, platformerTextureSampler_);
-    destroyTextureResource(rogueTextureImage_, rogueTextureSampler_);
-}
-
-void VulkanRenderer::destroyTextureResource(OwnedImage& textureImage, VkSampler& sampler)
-{
-    if (sampler) {
-        vkDestroySampler(device_, sampler, nullptr);
-        sampler = VK_NULL_HANDLE;
-    }
-    if (textureImage.view) {
-        vkDestroyImageView(device_, textureImage.view, nullptr);
-        textureImage.view = VK_NULL_HANDLE;
-    }
-    if (textureImage.image) {
-        vkDestroyImage(device_, textureImage.image, nullptr);
-        textureImage.image = VK_NULL_HANDLE;
-    }
-    if (textureImage.memory) {
-        vkFreeMemory(device_, textureImage.memory, nullptr);
-        textureImage.memory = VK_NULL_HANDLE;
-    }
-}
-
-void VulkanRenderer::destroyMesh(GpuMesh& mesh) const
-{
-    if (mesh.indexBuffer.buffer) {
-        vkDestroyBuffer(device_, mesh.indexBuffer.buffer, nullptr);
-        mesh.indexBuffer.buffer = VK_NULL_HANDLE;
-    }
-    if (mesh.indexBuffer.memory) {
-        vkFreeMemory(device_, mesh.indexBuffer.memory, nullptr);
-        mesh.indexBuffer.memory = VK_NULL_HANDLE;
-    }
-    if (mesh.vertexBuffer.buffer) {
-        vkDestroyBuffer(device_, mesh.vertexBuffer.buffer, nullptr);
-        mesh.vertexBuffer.buffer = VK_NULL_HANDLE;
-    }
-    if (mesh.vertexBuffer.memory) {
-        vkFreeMemory(device_, mesh.vertexBuffer.memory, nullptr);
-        mesh.vertexBuffer.memory = VK_NULL_HANDLE;
-    }
-    mesh.indexCount = 0;
-}
-
-const VulkanRenderer::GpuMesh& VulkanRenderer::meshForModel(RenderModel model) const
-{
-    switch (model) {
-    case RenderModel::BricksA:
-        return bricksAMesh_;
-    case RenderModel::Stone:
-        return stoneMesh_;
-    case RenderModel::Water:
-        return waterMesh_;
-    case RenderModel::Glass:
-        return glassMesh_;
-    case RenderModel::Conveyor:
-        return conveyorMesh_;
-    case RenderModel::Rogue:
-        return rogueMesh_;
-    case RenderModel::Cube:
-        break;
-    }
-    throw std::runtime_error("Cube tiles do not have a GPU model mesh");
+    modelResources_.setAnimationPreview(clip, timeSeconds);
 }
 
 void VulkanRenderer::createPipeline()
@@ -3791,7 +3286,8 @@ void VulkanRenderer::drawModel(
     const RenderFrameData::Tile& tile,
     const RenderFrameData::Lighting& lighting) const
 {
-    const GpuMesh& mesh = meshForModel(tile.model);
+    const VulkanModelResources::MeshView mesh = modelResources_.meshForModel(tile.model);
+    const VulkanModelResources::MaterialBinding material = modelResources_.materialForModel(tile.model);
     const ModelTransformPoints transform = modelTransformPoints(tile);
     auto isoPoint = [&](Vec3 point) {
         const Vec3 projected = projectIsoPoint(layout, point);
@@ -3842,21 +3338,21 @@ void VulkanRenderer::drawModel(
         .materialOptions = {
             tile.blurBehind ? 1.0f : 0.0f,
             tile.beltScrollOffset,
-            0.0f,
+            static_cast<float>(material.textureIndex),
             tile.isEditorPreview ? -config::iceBlurRadiusPixels : config::iceBlurRadiusPixels,
         },
         .textureOptions = {
-            tile.model == RenderModel::Conveyor ? 2.0f : tile.model == RenderModel::Rogue ? 1.0f : 0.0f,
+            shaderValue(material.mode),
             static_cast<float>(tile.modelRotationQuarterTurns % 4),
             std::max(lighting.specularStrength, 0.0f),
             std::max(lighting.specularPower, 1.0f),
         },
     };
 
-    const VkBuffer vertexBuffer = mesh.vertexBuffer.buffer;
+    const VkBuffer vertexBuffer = mesh.vertexBuffer;
     constexpr VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer, &offset);
-    vkCmdBindIndexBuffer(commandBuffer, mesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindIndexBuffer(commandBuffer, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdPushConstants(
         commandBuffer,
         pipelineLayout_,
@@ -3877,7 +3373,7 @@ void VulkanRenderer::drawModelShadow(
     const ShadowRenderLayout& layout,
     const RenderFrameData::Tile& tile) const
 {
-    const GpuMesh& mesh = meshForModel(tile.model);
+    const VulkanModelResources::MeshView mesh = modelResources_.meshForModel(tile.model);
     const ModelTransformPoints transform = modelTransformPoints(tile);
     const TilePushConstants pushConstants {
         .shadowVertices = affineTransformColumns(
@@ -3887,10 +3383,10 @@ void VulkanRenderer::drawModelShadow(
             projectShadowPoint(layout, transform.zPoint)),
     };
 
-    const VkBuffer vertexBuffer = mesh.vertexBuffer.buffer;
+    const VkBuffer vertexBuffer = mesh.vertexBuffer;
     constexpr VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer, &offset);
-    vkCmdBindIndexBuffer(commandBuffer, mesh.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindIndexBuffer(commandBuffer, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdPushConstants(
         commandBuffer,
         pipelineLayout_,

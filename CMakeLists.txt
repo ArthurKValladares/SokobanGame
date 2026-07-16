@@ -48,12 +48,8 @@ set(SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/shaders")
 set(LEVEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/levels")
 set(LEVEL_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/levels")
-set(MODEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit Block Bits 1.0/Assets/gltf")
-set(PLATFORMER_MODEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit Platformer Pack 1.0/Assets/gltf/blue")
-set(CHARACTER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit Adventurers 2.0/Characters/gltf")
-set(CHARACTER_ANIMATION_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/KayKit Adventurers 2.0/Animations/gltf/Rig_Medium")
-set(CUSTOM_ANIMATION_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/custom")
-set(MODEL_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/models")
+
+include(cmake/AssetManifest.cmake)
 
 set(SHADER_SOURCES
     "${SHADER_SOURCE_DIR}/triangle.vert.glsl"
@@ -81,7 +77,7 @@ foreach(shader_source IN LISTS SHADER_SOURCES)
     add_custom_command(
         OUTPUT "${shader_output}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${SHADER_OUTPUT_DIR}"
-        COMMAND "${GLSLC_EXECUTABLE}" --target-env=vulkan1.4 -fshader-stage=${shader_stage} "${shader_source}" -o "${shader_output}"
+        COMMAND "${GLSLC_EXECUTABLE}" --target-env=vulkan1.4 -DMODEL_TEXTURE_COUNT=${SOKOBAN_MODEL_TEXTURE_COUNT} -fshader-stage=${shader_stage} "${shader_source}" -o "${shader_output}"
         DEPENDS "${shader_source}"
         VERBATIM
     )
@@ -93,44 +89,11 @@ file(GLOB_RECURSE LEVEL_SOURCES CONFIGURE_DEPENDS "${LEVEL_SOURCE_DIR}/*")
 
 add_custom_target(sokoban_assets
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/assets"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${MODEL_OUTPUT_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E copy_directory "${LEVEL_SOURCE_DIR}" "${LEVEL_OUTPUT_DIR}"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/bricks_A.gltf" "${MODEL_OUTPUT_DIR}/bricks_A.gltf"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/bricks_A.bin" "${MODEL_OUTPUT_DIR}/bricks_A.bin"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/stone.gltf" "${MODEL_OUTPUT_DIR}/stone.gltf"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/stone.bin" "${MODEL_OUTPUT_DIR}/stone.bin"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/water.gltf" "${MODEL_OUTPUT_DIR}/water.gltf"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/water.bin" "${MODEL_OUTPUT_DIR}/water.bin"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/glass.gltf" "${MODEL_OUTPUT_DIR}/glass.gltf"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MODEL_SOURCE_DIR}/glass.bin" "${MODEL_OUTPUT_DIR}/glass.bin"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PLATFORMER_MODEL_SOURCE_DIR}/conveyor_4x4x1_blue.gltf" "${MODEL_OUTPUT_DIR}/conveyor_4x4x1_blue.gltf"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PLATFORMER_MODEL_SOURCE_DIR}/conveyor_4x4x1_blue.bin" "${MODEL_OUTPUT_DIR}/conveyor_4x4x1_blue.bin"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PLATFORMER_MODEL_SOURCE_DIR}/platformer_texture.png" "${MODEL_OUTPUT_DIR}/platformer_texture.png"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PLATFORMER_MODEL_SOURCE_DIR}/threads.png" "${MODEL_OUTPUT_DIR}/threads.png"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CHARACTER_SOURCE_DIR}/Rogue.glb" "${MODEL_OUTPUT_DIR}/Rogue.glb"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CHARACTER_SOURCE_DIR}/rogue_texture.png" "${MODEL_OUTPUT_DIR}/rogue_texture.png"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CHARACTER_ANIMATION_SOURCE_DIR}/Rig_Medium_General.glb" "${MODEL_OUTPUT_DIR}/Rig_Medium_General.glb"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CHARACTER_ANIMATION_SOURCE_DIR}/Rig_Medium_MovementBasic.glb" "${MODEL_OUTPUT_DIR}/Rig_Medium_MovementBasic.glb"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CUSTOM_ANIMATION_SOURCE_DIR}/Rig_Medium_Push.glb" "${MODEL_OUTPUT_DIR}/Rig_Medium_Push.glb"
+    ${SOKOBAN_ASSET_COPY_COMMANDS}
     DEPENDS
         ${LEVEL_SOURCES}
-        "${MODEL_SOURCE_DIR}/bricks_A.gltf"
-        "${MODEL_SOURCE_DIR}/bricks_A.bin"
-        "${MODEL_SOURCE_DIR}/stone.gltf"
-        "${MODEL_SOURCE_DIR}/stone.bin"
-        "${MODEL_SOURCE_DIR}/water.gltf"
-        "${MODEL_SOURCE_DIR}/water.bin"
-        "${MODEL_SOURCE_DIR}/glass.gltf"
-        "${MODEL_SOURCE_DIR}/glass.bin"
-        "${PLATFORMER_MODEL_SOURCE_DIR}/conveyor_4x4x1_blue.gltf"
-        "${PLATFORMER_MODEL_SOURCE_DIR}/conveyor_4x4x1_blue.bin"
-        "${PLATFORMER_MODEL_SOURCE_DIR}/platformer_texture.png"
-        "${PLATFORMER_MODEL_SOURCE_DIR}/threads.png"
-        "${CHARACTER_SOURCE_DIR}/Rogue.glb"
-        "${CHARACTER_SOURCE_DIR}/rogue_texture.png"
-        "${CHARACTER_ANIMATION_SOURCE_DIR}/Rig_Medium_General.glb"
-        "${CHARACTER_ANIMATION_SOURCE_DIR}/Rig_Medium_MovementBasic.glb"
-        "${CUSTOM_ANIMATION_SOURCE_DIR}/Rig_Medium_Push.glb"
+        ${SOKOBAN_ASSET_DEPENDENCIES}
     VERBATIM
 )
 
@@ -150,6 +113,7 @@ add_executable(sokoban
     src/engine/render/VulkanRenderer.cpp
     src/engine/render/GltfMesh.cpp
     src/engine/render/ImageData.cpp
+    src/engine/render/VulkanModelResources.cpp
     src/engine/ui/Ui.cpp
 )
 foreach(imgui_source IN LISTS SOKOBAN_IMGUI_SOURCES)
@@ -160,6 +124,7 @@ add_dependencies(sokoban sokoban_shaders sokoban_assets)
 
 target_include_directories(sokoban PRIVATE
     src
+    "${CMAKE_CURRENT_BINARY_DIR}/generated"
     third_party/imgui
     third_party/imgui/backends
     third_party/imgui/misc/cpp

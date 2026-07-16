@@ -64,10 +64,13 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
 - `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, movement history, contiguous undo cursor, automatic world steps, and the post-undo automatic-motion pause. Emits `Action` snapshots for `Application` to animate. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
 - `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags + slide momentum) plus pure functions in `sokoban::rules` — `step` advances the whole world one discrete step (simultaneous one-tile moves, pushes, ladder climbs, momentum, falls, water, conveyors); `hasPendingMotion` reports whether the world would keep moving without input; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
 - `src/engine/Level.*`: level file parsing, serialization, layered grid storage, walkability/support rules, player/movable extraction.
-- `src/engine/TaskSystem.*`: standard-library-only worker pool for task-based parallelism. `taskSystem().enqueue(fn)` returns a future (exceptions propagate on get); `parallelFor(count, minChunk, fn(begin, end))` runs chunked loops with the calling thread participating. Tasks must not block on other tasks (no dependency graph yet). Used by GLTF vertex skinning (`skinWithPoses`) and parallel CPU-side asset loading in `createModelResources`; GPU uploads stay on the main thread. Tested by `tests/TaskSystemTests.cpp` (`sokoban_task_tests`).
+- `src/engine/TaskSystem.*`: standard-library-only worker pool for task-based parallelism. `taskSystem().enqueue(fn)` returns a future (exceptions propagate on get); `parallelFor(count, minChunk, fn(begin, end))` runs chunked loops with the calling thread participating. Tasks must not block on other tasks (no dependency graph yet). Used by GLTF vertex skinning (`skinWithPoses`) and parallel CPU-side asset loading in `VulkanModelResources`; GPU uploads stay on the main thread. Tested by `tests/TaskSystemTests.cpp` (`sokoban_task_tests`).
 - `src/engine/TileTypes.*`: tile enum, character mapping, colors, helper predicates such as `tileTypeAllowsEntity`.
 - `src/engine/LevelEditor.*`: ImGui level editor, document state, painting/deleting, file browser, draft play mode, deleted-level handling.
-- `src/engine/render/VulkanRenderer.*`: Vulkan setup, swapchain, dynamic rendering, shadow pass, model pass, debug UI rendering, descriptor resources.
+- `src/engine/render/RenderTypes.hpp`: renderer-facing frame contract and model/animation enums, independent of the Vulkan facade.
+- `src/engine/render/RenderAssetCatalog.hpp`: typed model, texture, animation, geometry, and material metadata consumed by the generated asset catalog.
+- `src/engine/render/VulkanModelResources.*`: owns model meshes, texture images/samplers, animation clips/crossfades, preview state, uploads, and cleanup. Loads definitions from the generated asset catalog and exposes lightweight mesh/material/texture views to the renderer.
+- `src/engine/render/VulkanRenderer.*`: Vulkan instance/device/swapchain, dynamic rendering, render passes, pipelines, descriptor resources, debug UI, and draw submission. Model-specific resource ownership is delegated to `VulkanModelResources`.
 - `src/engine/render/GltfMesh.*`: small custom GLTF/GLB loader, static mesh loading, skinned mesh loading, animation sampling/skinning. `skinGltfMeshBlended` skins with a pose blended between two clips; the renderer uses it to crossfade the player's idle/walk/push animations over `config::playerAnimationFadeSeconds`.
 - `src/engine/render/ImageData.*`: texture loading through WIC.
 - `src/engine/ui/Ui.*`: very small in-game immediate UI used for the quit confirmation, including crude bitmap-glyph text.
@@ -289,31 +292,42 @@ Asset path decisions:
   - `assets/KayKit Block Bits 1.0`
   - `assets/KayKit Adventurers 2.0`
   - `assets/KayKit Platformer Pack 1.0`
-- The old folder names `KayKit_BlockBits_1.0_FREE` and `KayKit_Adventurers_2.0_FREE` were replaced in `CMakeLists.txt`.
+- The old folder names `KayKit_BlockBits_1.0_FREE` and `KayKit_Adventurers_2.0_FREE` were replaced in the asset manifest.
 
 CMake asset pipeline:
 
 - Shaders are compiled from `shaders/*.glsl` to `build/assets/shaders/*.spv`.
 - Levels are copied from `levels/` to `build/assets/levels`.
-- Only selected model files are copied into `build/assets/models`; adding a new model usually requires adding copy commands and dependencies in `CMakeLists.txt`.
+- `cmake/AssetManifest.cmake` is the single source of truth for model, texture,
+  animation, and support-file source/destination paths plus model loading and
+  material metadata.
+- CMake generates `build/generated/engine/render/GeneratedAssetCatalog.hpp`
+  from `cmake/GeneratedAssetCatalog.hpp.in`; the same manifest drives runtime
+  asset copying and C++ loading metadata.
+- The generated catalog validates duplicate enum entries and texture indices at
+  compile time. Adding a model no longer requires editing renderer loading code
+  or adding individual copy commands to `CMakeLists.txt`.
 
 GLTF loader notes:
 
 - `GltfMesh.*` is a small custom loader, not a general-purpose robust GLTF implementation.
 - It supports enough JSON parsing, buffers, accessors, nodes, skins, and animations for the current assets.
-- Static model vertices include `textureIndex`; conveyors opt into `usePrimitiveMaterialTextures`.
-- The conveyor texture mapping currently relies on primitive material indices mapping to shader sampler choices.
+- Static model vertices include `textureIndex`; the catalog declares whether a
+  model uses those primitive indices.
+- Catalog texture order defines the Vulkan descriptor-array indices. The current
+  conveyor asset maps primitive indices 1 and 2 to `Platformer` and
+  `PlatformerThread`; this invariant is documented beside the texture list.
 - If adding complex GLTF assets, consider switching to a proven GLTF library or broadening loader support carefully.
 
 Shader notes:
 
 - `model.vert.glsl` accepts position, normal, UV, and texture index.
-- `triangle.frag.glsl` samples:
-  - shadow map
-  - resolved scene color for blur/translucency
-  - rogue texture
-  - platformer texture
-  - platformer thread texture
+- `triangle.frag.glsl` samples the shadow map, resolved scene color, and a
+  catalog-sized model texture descriptor array. CMake passes
+  `MODEL_TEXTURE_COUNT` while compiling shaders.
+- Each model catalog entry declares `Untextured`, `SingleTexture`, or
+  `PrimitiveTextureIndex`; draw code passes that mode and texture index through
+  push constants instead of checking model names or sampler bindings.
 - Push constants carry transform, lighting, grid, material, and texture options.
 
 ## UI And Text Rendering Rough State
@@ -338,6 +352,12 @@ If making player-facing menus, pause screens, settings, or polished editor UI, p
 
 Major recent additions and fixes:
 
+- Replaced hard-coded asset and material plumbing with
+  `cmake/AssetManifest.cmake`, generated typed C++ metadata, and a Vulkan model
+  texture descriptor array.
+- Extracted model mesh/texture/animation lifetime management from
+  `VulkanRenderer` into `VulkanModelResources`; `VulkanRenderer.cpp` dropped
+  from roughly 4,750 lines to roughly 3,800 lines.
 - Split headless gameplay orchestration out of `Application` into
   `GameplaySession`. `Application` now translates SDL controls and animates
   session actions, while state/history/undo/restart/action timing are covered
@@ -371,10 +391,10 @@ Major recent additions and fixes:
 
 At the time this handoff was created:
 
-- The working tree contains the uncommitted `GameplaySession` split described
-  above (`CMakeLists.txt`, `HANDOFF.md`, `Application.*`, new
-  `GameplaySession.*`, and `tests/GameplaySessionTests.cpp`).
-- The full Debug `sokoban` target passed after the `GameplaySession` split.
+- The working tree contains the uncommitted asset catalog, material binding,
+  and `VulkanModelResources` changes described above.
+- The full Debug build and a Vulkan-validation runtime smoke test passed after
+  the asset/material refactor.
 - `sokoban_gameplay_session_tests` passed 52 checks, `sokoban_rules_tests`
   passed 115 checks, and `sokoban_task_tests` passed 11 checks.
 
@@ -396,7 +416,9 @@ The `rg` command above should return no matches.
 - Store `Player`, `Rock`, and movable `Ice` as dynamic entities extracted from level data rather than static cells.
 - Use character-driven tile definitions as the single source of truth for level parsing/editor palette.
 - Use layered `.scr` text files instead of a binary or JSON format for now.
-- Keep CMake asset copying explicit so the runtime build directory contains only the assets actually needed.
+- Keep runtime asset selection explicit through `cmake/AssetManifest.cmake` so
+  the build directory contains only needed assets while CMake and C++ consume
+  the same metadata.
 - Use ImGui only for debug/editor tooling, not final player-facing UI.
 - Preserve existing code style and avoid broad abstractions unless a mechanic really needs them.
 
@@ -413,10 +435,10 @@ High-value gameplay/editor work:
 Rendering/assets:
 
 - Replace the custom GLTF parsing with a robust library if assets get more complex.
-- Generalize material/texture binding instead of hard-coding rogue/platformer samplers.
-- Add asset manifests to avoid growing `CMakeLists.txt` copy commands forever.
 - Improve visual consistency between procedural tiles and GLTF assets.
 - Verify model orientation/scale whenever a new asset is added.
+- Continue splitting `VulkanRenderer` by extracting post-processing and
+  swapchain-dependent attachment ownership.
 
 UI:
 
@@ -445,13 +467,13 @@ Engineering:
   - Update `TileType` and `tileTypeDefinitionTable`.
   - Update helper predicates in `TileTypes.cpp`.
   - Update parser/render/gameplay/editor behavior as needed.
-  - Add CMake asset copies if a new model/texture is needed.
+  - Add model/texture files and metadata to `cmake/AssetManifest.cmake` if needed.
   - Add editor preview/rendering support.
   - Verify level serialization still maps one-to-one.
 - When adding a model:
-  - Copy model, bin, and textures through `sokoban_assets`.
   - Add a `RenderModel` enum if needed.
-  - Load/upload mesh in `VulkanRenderer::createModelResources`.
-  - Return it from `meshForModel`.
+  - Add its source/runtime paths, geometry options, material mode, textures,
+    animations, and support files to `cmake/AssetManifest.cmake`.
   - Set per-tile transform/scale/rotation in `Application`.
-  - Add descriptor/shader support if the model needs textures/materials beyond current bindings.
+  - Extend material modes only if the model cannot use `Untextured`,
+    `SingleTexture`, or `PrimitiveTextureIndex`.

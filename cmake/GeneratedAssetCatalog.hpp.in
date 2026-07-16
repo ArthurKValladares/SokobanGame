@@ -1,0 +1,53 @@
+#pragma once
+
+#include "engine/Config.hpp"
+#include "engine/render/RenderAssetCatalog.hpp"
+
+#include <array>
+#include <cstddef>
+
+namespace sokoban::assetCatalog {
+
+inline constexpr std::array<ModelAssetDefinition, @SOKOBAN_MODEL_ASSET_COUNT@> models {{
+@SOKOBAN_GENERATED_MODEL_ENTRIES@}};
+
+inline constexpr std::array<TextureAssetDefinition, @SOKOBAN_MODEL_TEXTURE_COUNT@> textures {{
+@SOKOBAN_GENERATED_TEXTURE_ENTRIES@}};
+
+inline constexpr std::array<AnimationAssetDefinition, @SOKOBAN_ANIMATION_ASSET_COUNT@> animations {{
+@SOKOBAN_GENERATED_ANIMATION_ENTRIES@}};
+
+consteval bool valid()
+{
+    if (textures.empty()) {
+        return false;
+    }
+
+    std::array<bool, static_cast<std::size_t>(RenderModel::Count)> seenModels {};
+    for (const ModelAssetDefinition& model : models) {
+        const std::size_t index = static_cast<std::size_t>(model.model);
+        if (model.model == RenderModel::Cube ||
+            model.model == RenderModel::Count ||
+            seenModels[index] ||
+            (model.materialMode == ModelMaterialMode::SingleTexture && model.textureIndex >= textures.size())) {
+            return false;
+        }
+        seenModels[index] = true;
+    }
+
+    std::array<bool, static_cast<std::size_t>(RenderAnimation::Count)> seenAnimations {};
+    for (const AnimationAssetDefinition& animation : animations) {
+        const std::size_t index = static_cast<std::size_t>(animation.animation);
+        if (animation.animation == RenderAnimation::None ||
+            animation.animation == RenderAnimation::Count ||
+            seenAnimations[index]) {
+            return false;
+        }
+        seenAnimations[index] = true;
+    }
+    return true;
+}
+
+static_assert(valid(), "Generated asset catalog contains invalid or duplicate entries");
+
+} // namespace sokoban::assetCatalog

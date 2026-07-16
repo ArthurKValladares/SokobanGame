@@ -4,6 +4,7 @@
 #include "engine/Math.hpp"
 #include "engine/render/GltfMesh.hpp"
 #include "engine/render/RenderTypes.hpp"
+#include "engine/render/VulkanModelResources.hpp"
 #include "engine/ui/Ui.hpp"
 
 #include <SDL3/SDL_events.h>
@@ -83,13 +84,6 @@ private:
         VkDeviceMemory memory = VK_NULL_HANDLE;
     };
 
-    struct GpuMesh {
-        OwnedBuffer vertexBuffer {};
-        OwnedBuffer indexBuffer {};
-        uint32_t indexCount = 0;
-        uint32_t vertexCount = 0;
-    };
-
     struct FrameResources {
         VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
         VkSemaphore imageAvailable = VK_NULL_HANDLE;
@@ -146,17 +140,6 @@ private:
     void createDescriptorResources();
     void updateDescriptorSet();
     void createCommandPool();
-    void createModelResources();
-    void destroyModelResources();
-    void createModelTextureResources();
-    void destroyModelTextureResources();
-    void createTextureResource(const std::filesystem::path& path, OwnedImage& textureImage, VkSampler& sampler);
-    void destroyTextureResource(OwnedImage& textureImage, VkSampler& sampler);
-    [[nodiscard]] GpuMesh uploadMesh(const MeshData& mesh) const;
-    void updateMeshVertices(const GpuMesh& gpuMesh, const std::vector<MeshVertex>& vertices) const;
-    void updateAnimatedModelMeshes(const RenderFrameData& frameData);
-    void destroyMesh(GpuMesh& mesh) const;
-    [[nodiscard]] const GpuMesh& meshForModel(RenderModel model) const;
     void createPipeline();
     void createShadowPipeline(VkShaderModule shadowVertexShader);
     void createModelShadowPipeline(VkShaderModule shadowVertexShader);
@@ -286,34 +269,10 @@ private:
     VkPipeline shadowPipeline_ = VK_NULL_HANDLE;
     VkPipeline modelPipeline_ = VK_NULL_HANDLE;
     VkPipeline modelShadowPipeline_ = VK_NULL_HANDLE;
-    GpuMesh bricksAMesh_ {};
-    GpuMesh stoneMesh_ {};
-    GpuMesh waterMesh_ {};
-    GpuMesh glassMesh_ {};
-    GpuMesh conveyorMesh_ {};
-    GpuMesh rogueMesh_ {};
-    SkinnedMeshData rogueSkinnedMesh_ {};
-    GltfAnimationClip rogueIdleAnimation_ {};
-    GltfAnimationClip rogueMovementAnimation_ {};
-    GltfAnimationClip roguePushAnimation_ {};
+    VulkanModelResources modelResources_;
     OwnedImage resolveDepthImage_ {};
     OwnedImage ssaoImage_ {};
     VkSampler ssaoSampler_ = VK_NULL_HANDLE;
-    RenderAnimation activeRogueAnimation_ = RenderAnimation::None;
-    float activeRogueAnimationTime_ = -1.0f;
-    RenderAnimation rogueFadeFromAnimation_ = RenderAnimation::None;
-    float rogueFadeFromTime_ = 0.0f;
-    float rogueFadeElapsed_ = 0.0f;
-    const GltfAnimationClip* previewClip_ = nullptr;
-    float previewTimeSeconds_ = 0.0f;
-    const GltfAnimationClip* activePreviewClip_ = nullptr;
-    float activePreviewTime_ = -1.0f;
-    OwnedImage rogueTextureImage_ {};
-    VkSampler rogueTextureSampler_ = VK_NULL_HANDLE;
-    OwnedImage platformerTextureImage_ {};
-    VkSampler platformerTextureSampler_ = VK_NULL_HANDLE;
-    OwnedImage platformerThreadTextureImage_ {};
-    VkSampler platformerThreadTextureSampler_ = VK_NULL_HANDLE;
 
     static constexpr uint32_t maxFramesInFlight_ = 2;
     std::array<FrameResources, maxFramesInFlight_> frames_ {};

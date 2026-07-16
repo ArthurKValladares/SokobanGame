@@ -2,9 +2,7 @@
 
 layout(set = 0, binding = 0) uniform sampler2D shadowMap;
 layout(set = 0, binding = 1) uniform sampler2D sceneColor;
-layout(set = 0, binding = 2) uniform sampler2D modelTexture;
-layout(set = 0, binding = 3) uniform sampler2D platformerTexture;
-layout(set = 0, binding = 4) uniform sampler2D platformerThreadTexture;
+layout(set = 0, binding = 2) uniform sampler2D modelTextures[MODEL_TEXTURE_COUNT];
 
 layout(location = 0) in vec4 inShadowPosition;
 layout(location = 1) in float inFaceCoordU;
@@ -124,16 +122,20 @@ void main()
     applyEditorPreviewDither();
 
     vec4 materialColor = pc.color;
-    if (pc.textureOptions.x > 1.5) {
+    int materialMode = int(pc.textureOptions.x + 0.5);
+    if (materialMode == 2) {
         if (inTextureIndex > 1.5) {
             // materialOptions.y carries the belt scroll offset; the belt UVs span
             // a full 0..1 along V, so fract() wraps the scroll seamlessly.
-            materialColor *= texture(platformerThreadTexture, vec2(inFaceCoordU, fract(inFaceCoordV + pc.materialOptions.y)));
+            int textureIndex = clamp(int(inTextureIndex + pc.materialOptions.z + 0.5), 0, MODEL_TEXTURE_COUNT - 1);
+            materialColor *= texture(modelTextures[textureIndex], vec2(inFaceCoordU, fract(inFaceCoordV + pc.materialOptions.y)));
         } else if (inTextureIndex > 0.5) {
-            materialColor *= texture(platformerTexture, vec2(inFaceCoordU, inFaceCoordV));
+            int textureIndex = clamp(int(inTextureIndex + pc.materialOptions.z + 0.5), 0, MODEL_TEXTURE_COUNT - 1);
+            materialColor *= texture(modelTextures[textureIndex], vec2(inFaceCoordU, inFaceCoordV));
         }
-    } else if (pc.textureOptions.x > 0.5) {
-        materialColor *= texture(modelTexture, vec2(inFaceCoordU, inFaceCoordV));
+    } else if (materialMode == 1) {
+        int textureIndex = clamp(int(pc.materialOptions.z + 0.5), 0, MODEL_TEXTURE_COUNT - 1);
+        materialColor *= texture(modelTextures[textureIndex], vec2(inFaceCoordU, inFaceCoordV));
     }
     vec3 color = mix(materialColor.rgb, pc.gridColor.rgb, gridMask());
     if (length(inNormal) > 0.0001) {

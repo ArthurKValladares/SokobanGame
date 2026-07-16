@@ -1,10 +1,11 @@
 #pragma once
 
-#include "engine/render/GltfMesh.hpp"
-#include "engine/render/RenderTypes.hpp"
+#include "engine/render/RenderAssetCatalog.hpp"
 
 #include <vulkan/vulkan.h>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <vector>
@@ -28,6 +29,11 @@ public:
         [[nodiscard]] bool valid() const { return imageView && sampler; }
     };
 
+    struct MaterialBinding {
+        ModelMaterialMode mode = ModelMaterialMode::Untextured;
+        uint32_t textureIndex = 0;
+    };
+
     VulkanModelResources() = default;
     ~VulkanModelResources();
 
@@ -46,9 +52,9 @@ public:
     void updateAnimations(const RenderFrameData& frameData);
 
     [[nodiscard]] MeshView meshForModel(RenderModel model) const;
-    [[nodiscard]] TextureView rogueTexture() const;
-    [[nodiscard]] TextureView platformerTexture() const;
-    [[nodiscard]] TextureView platformerThreadTexture() const;
+    [[nodiscard]] MaterialBinding materialForModel(RenderModel model) const;
+    [[nodiscard]] std::vector<TextureView> textures() const;
+    [[nodiscard]] uint32_t textureCount() const;
 
 private:
     struct OwnedBuffer {
@@ -67,6 +73,11 @@ private:
         OwnedBuffer indexBuffer {};
         uint32_t indexCount = 0;
         uint32_t vertexCount = 0;
+    };
+
+    struct TextureResource {
+        OwnedImage image {};
+        VkSampler sampler = VK_NULL_HANDLE;
     };
 
     void createModels();
@@ -93,16 +104,9 @@ private:
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     std::filesystem::path assetRoot_;
 
-    GpuMesh bricksAMesh_ {};
-    GpuMesh stoneMesh_ {};
-    GpuMesh waterMesh_ {};
-    GpuMesh glassMesh_ {};
-    GpuMesh conveyorMesh_ {};
-    GpuMesh rogueMesh_ {};
+    std::array<GpuMesh, static_cast<std::size_t>(RenderModel::Count)> meshes_ {};
     SkinnedMeshData rogueSkinnedMesh_ {};
-    GltfAnimationClip rogueIdleAnimation_ {};
-    GltfAnimationClip rogueMovementAnimation_ {};
-    GltfAnimationClip roguePushAnimation_ {};
+    std::array<GltfAnimationClip, static_cast<std::size_t>(RenderAnimation::Count)> animationClips_ {};
 
     RenderAnimation activeRogueAnimation_ = RenderAnimation::None;
     float activeRogueAnimationTime_ = -1.0f;
@@ -114,12 +118,7 @@ private:
     const GltfAnimationClip* activePreviewClip_ = nullptr;
     float activePreviewTime_ = -1.0f;
 
-    OwnedImage rogueTextureImage_ {};
-    VkSampler rogueTextureSampler_ = VK_NULL_HANDLE;
-    OwnedImage platformerTextureImage_ {};
-    VkSampler platformerTextureSampler_ = VK_NULL_HANDLE;
-    OwnedImage platformerThreadTextureImage_ {};
-    VkSampler platformerThreadTextureSampler_ = VK_NULL_HANDLE;
+    std::vector<TextureResource> textures_;
 };
 
 } // namespace sokoban

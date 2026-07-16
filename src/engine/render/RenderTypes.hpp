@@ -22,6 +22,7 @@ enum class RenderModel {
     Glass,
     Conveyor,
     Rogue,
+    Count,
 };
 
 enum class RenderAnimation {
@@ -29,6 +30,7 @@ enum class RenderAnimation {
     RogueIdle,
     RogueMovement,
     RoguePush,
+    Count,
 };
 
 struct RenderFrameData {
