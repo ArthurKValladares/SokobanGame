@@ -219,25 +219,6 @@ uint32_t facingQuarterTurns(MoveDirection direction)
     return 0;
 }
 
-std::optional<MoveDirection> movementDirection(GridPosition3 from, GridPosition3 to)
-{
-    const int deltaX = to.x - from.x;
-    const int deltaY = to.y - from.y;
-    if (deltaX < 0) {
-        return MoveDirection::Left;
-    }
-    if (deltaX > 0) {
-        return MoveDirection::Right;
-    }
-    if (deltaY < 0) {
-        return MoveDirection::Up;
-    }
-    if (deltaY > 0) {
-        return MoveDirection::Down;
-    }
-    return std::nullopt;
-}
-
 StaticRenderCell staticRenderCellFor(
     const Level& level,
     uint32_t x,
@@ -625,7 +606,8 @@ void Application::run()
 
 void Application::update(float dt)
 {
-    worldAnimationTimeSeconds_ += (moving_ && activeAction_.reversed) ? -dt : dt;
+    worldAnimationTimeSeconds_ +=
+        (gameplaySession_.moving() && gameplaySession_.activeAction().reversed) ? -dt : dt;
     playerVisual_.clipTimeSeconds += dt * playerVisual_.clipPlaybackRate;
 
     if (quitConfirmationOpen_) {
@@ -652,12 +634,13 @@ void Application::update(float dt)
 void Application::drawDebugUi()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
+    const GameState& state = gameplaySession_.state();
     ImGui::Text("Level %d Screen %d", currentLevel_, currentScreen_);
-    ImGui::Text("Player (%d, %d, %d)", state_.player.x, state_.player.y, state_.player.z);
-    ImGui::Text("Player %s", state_.playerDead ? "dead" : "alive");
-    ImGui::Text("Movables %zu", state_.movables.size());
-    ImGui::Text("History %zu", moveHistory_.size());
-    ImGui::Text("End %s", rules::isEndUnlocked(level_, state_) ? "unlocked" : "locked");
+    ImGui::Text("Player (%d, %d, %d)", state.player.x, state.player.y, state.player.z);
+    ImGui::Text("Player %s", state.playerDead ? "dead" : "alive");
+    ImGui::Text("Movables %zu", state.movables.size());
+    ImGui::Text("History %zu", gameplaySession_.historySize());
+    ImGui::Text("End %s", rules::isEndUnlocked(level_, state) ? "unlocked" : "locked");
     ImGui::Text(
         "Task workers %u, tasks run %llu",
         taskSystem().workerCount(),
@@ -697,18 +680,21 @@ void Application::drawDebugUi()
     }
 
     if (ImGui::CollapsingHeader("Tile Geometry")) {
+        float stepDurationSeconds = gameplaySession_.stepDurationSeconds();
         ImGui::DragFloat(
             "Step Duration",
-            &stepDurationSeconds_,
+            &stepDurationSeconds,
             0.005f,
             0.05f,
             1.0f,
             "%.3f s");
-        stepDurationSeconds_ = std::clamp(stepDurationSeconds_, 0.05f, 1.0f);
+        gameplaySession_.setStepDurationSeconds(std::clamp(stepDurationSeconds, 0.05f, 1.0f));
         if (ImGui::TreeNode("Step Rates (tiles/step)")) {
-            ImGui::SliderInt("Player", &stepRates_.playerMove, 0, 5);
-            ImGui::SliderInt("Slide", &stepRates_.slide, 0, 5);
-            ImGui::SliderInt("Conveyor", &stepRates_.conveyor, 0, 5);
+            rules::StepRates stepRates = gameplaySession_.stepRates();
+            ImGui::SliderInt("Player", &stepRates.playerMove, 0, 5);
+            ImGui::SliderInt("Slide", &stepRates.slide, 0, 5);
+            ImGui::SliderInt("Conveyor", &stepRates.conveyor, 0, 5);
+            gameplaySession_.setStepRates(stepRates);
             ImGui::TextDisabled("Movement rates by source; default 1.");
             ImGui::TreePop();
         }
@@ -1165,28 +1151,22 @@ void Application::loadCurrentScreen()
 void Application::applyLevel(Level level)
 {
     level_ = std::move(level);
-    state_ = rules::initialState(level_);
+    gameplaySession_.reset(level_);
+    const GameState& state = gameplaySession_.state();
     playerVisual_ = {};
-    playerVisual_.motion.renderPosition = toVec3(state_.player);
+    playerVisual_.motion.renderPosition = toVec3(state.player);
     playerVisual_.motion.animationStart = playerVisual_.motion.renderPosition;
     playerVisual_.motion.animationEnd = playerVisual_.motion.renderPosition;
     playerVisual_.facingQuarterTurns = facingQuarterTurns(MoveDirection::Down);
     movableVisuals_.clear();
-    movableVisuals_.reserve(state_.movables.size());
-    for (const GameState::Movable& movable : state_.movables) {
+    movableVisuals_.reserve(state.movables.size());
+    for (const GameState::Movable& movable : state.movables) {
         movableVisuals_.push_back({
             .renderPosition = toVec3(movable.cell),
             .animationStart = toVec3(movable.cell),
             .animationEnd = toVec3(movable.cell),
         });
     }
-    pendingCommands_.clear();
-    moveHistory_.clear();
-    undoCursor_.reset();
-    activeAction_ = {};
-    moving_ = false;
-    moveElapsed_ = 0.0f;
-    autoMotionPaused_ = false;
 }
 
 void Application::advanceScreen()
@@ -1207,19 +1187,19 @@ void Application::advanceScreen()
 void Application::queuePressedCommands()
 {
     if (input_.keyPressed(SDL_SCANCODE_Z)) {
-        pendingCommands_.push_back({ .type = MoveCommandType::Undo });
+        gameplaySession_.queueUndo();
     }
     if (input_.keyPressed(SDL_SCANCODE_R)) {
-        pendingCommands_.push_back({ .type = MoveCommandType::Restart });
+        gameplaySession_.queueRestart();
     }
 
     const std::optional<MoveDirection> vertical = pressedVerticalDirection();
     const std::optional<MoveDirection> horizontal = pressedHorizontalDirection();
     if (vertical) {
-        pendingCommands_.push_back({ .type = MoveCommandType::Move, .direction = *vertical });
+        gameplaySession_.queueMove(*vertical);
     }
     if (horizontal) {
-        pendingCommands_.push_back({ .type = MoveCommandType::Move, .direction = *horizontal });
+        gameplaySession_.queueMove(*horizontal);
     }
 }
 
@@ -1230,11 +1210,11 @@ void Application::advancePlayerMovement(float dt)
     float remainingTime = dt;
 
     while (remainingTime > 0.0f) {
-        if (!moving_ && !tryStartNextMove()) {
+        if (!gameplaySession_.moving() && !tryStartNextMove()) {
             return;
         }
 
-        const float duration = activeActionDuration();
+        const float duration = gameplaySession_.activeActionDuration();
         if (duration <= 0.0f) {
             if (completeActiveAction()) {
                 return;
@@ -1242,12 +1222,12 @@ void Application::advancePlayerMovement(float dt)
             continue;
         }
 
-        const float timeToFinish = duration - moveElapsed_;
+        const float timeToFinish = gameplaySession_.activeActionRemainingSeconds();
         const float step = std::min(remainingTime, timeToFinish);
         remainingTime -= step;
-        moveElapsed_ += step;
+        gameplaySession_.advanceActiveAction(step);
 
-        if (moveElapsed_ >= duration) {
+        if (gameplaySession_.activeActionComplete()) {
             if (completeActiveAction()) {
                 return;
             }
@@ -1282,7 +1262,7 @@ void Application::advanceEntityAnimations(float dt)
     }
 }
 
-void Application::startActionAnimations(const ActionRecord& action)
+void Application::startActionAnimations(const GameplaySession::Action& action)
 {
     auto beginMotion = [&action](EntityVisual& visual, Vec3 target) {
         if (gridDistance(visual.renderPosition, target) <= 0.0001f) {
@@ -1325,14 +1305,11 @@ void Application::startActionAnimations(const ActionRecord& action)
 
 bool Application::completeActiveAction()
 {
-    applyGameState(activeAction_.after);
-
-    moveHistory_.push_back(activeAction_);
-    moving_ = false;
+    gameplaySession_.completeActiveAction();
+    syncVisualsToGameState();
     playerVisual_.clipPlaybackRate = 1.0f;
-    moveElapsed_ = 0.0f;
 
-    if (rules::isAtUnlockedEnd(level_, state_)) {
+    if (rules::isAtUnlockedEnd(level_, gameplaySession_.state())) {
         if (levelEditor_.playingDraft()) {
             levelEditor_.markDraftSolved();
             return false;
@@ -1345,161 +1322,22 @@ bool Application::completeActiveAction()
     return false;
 }
 
-float Application::activeActionDuration() const
-{
-    return activeAction_.durationSeconds;
-}
-
 bool Application::tryStartNextMove()
 {
-    if (state_.playerDead) {
-        while (!pendingCommands_.empty()) {
-            const MoveCommand command = pendingCommands_.front();
-            pendingCommands_.pop_front();
-            if (command.type == MoveCommandType::Undo && tryStartUndoMove()) {
-                return true;
-            }
-        }
-
-        return input_.keyDown(SDL_SCANCODE_Z) && tryStartUndoMove();
-    }
-
-    while (!pendingCommands_.empty()) {
-        const MoveCommand command = pendingCommands_.front();
-        pendingCommands_.pop_front();
-
-        if (command.type == MoveCommandType::Undo && tryStartUndoMove()) {
-            return true;
-        }
-
-        if (command.type == MoveCommandType::Restart && tryStartRestart()) {
-            return true;
-        }
-
-        if (command.type == MoveCommandType::Move && tryStartHeldDirection(command.direction, heldPerpendicularDirection(command.direction))) {
-            return true;
-        }
-    }
-
-    if (tryStartHeldMove()) {
-        return true;
-    }
-
-    return !autoMotionPaused_ &&
-        rules::hasPendingMotion(level_, state_) &&
-        tryStartWorldStep(std::nullopt);
-}
-
-bool Application::tryStartHeldMove()
-{
-    if (input_.keyDown(SDL_SCANCODE_Z)) {
-        return tryStartUndoMove();
-    }
-
-    const std::optional<MoveDirection> vertical = heldVerticalDirection();
-    const std::optional<MoveDirection> horizontal = heldHorizontalDirection();
-    if (vertical && tryStartHeldDirection(*vertical, horizontal)) {
-        return true;
-    }
-    if (horizontal && tryStartHeldDirection(*horizontal, vertical)) {
-        return true;
-    }
-
-    return false;
-}
-
-bool Application::tryStartWorldStep(std::optional<MoveDirection> playerInput)
-{
-    GameState after = rules::step(level_, state_, playerInput, stepRates_);
-    if (after == state_) {
-        return false;
-    }
-
-    activeAction_ = {
-        .before = state_,
-        .after = std::move(after),
-        .durationSeconds = stepDurationSeconds_,
+    const GameplaySession::Controls controls {
+        .undoHeld = input_.keyDown(SDL_SCANCODE_Z),
+        .verticalMove = heldVerticalDirection(),
+        .horizontalMove = heldHorizontalDirection(),
     };
-
-    // The step was a push if input displaced a movable out of the cell the
-    // player stepped toward.
-    if (playerInput && !(activeAction_.before.player == activeAction_.after.player)) {
-        const GridPosition3 pushCell = rules::movementTarget(activeAction_.before.player, *playerInput);
-        for (size_t i = 0; i < activeAction_.before.movables.size() && i < activeAction_.after.movables.size(); ++i) {
-            if (activeAction_.before.movables[i].cell == pushCell &&
-                !(activeAction_.after.movables[i].cell == pushCell)) {
-                activeAction_.playerPushing = true;
-                break;
-            }
-        }
-    }
-
-    if (playerInput) {
-        playerVisual_.facingQuarterTurns = facingQuarterTurns(*playerInput);
-        autoMotionPaused_ = false;
-    } else if (const std::optional<MoveDirection> direction =
-                   movementDirection(activeAction_.before.player, activeAction_.after.player)) {
-        playerVisual_.facingQuarterTurns = facingQuarterTurns(*direction);
-    }
-    undoCursor_.reset();
-    moveElapsed_ = 0.0f;
-    moving_ = true;
-    startActionAnimations(activeAction_);
-    return true;
-}
-
-bool Application::tryStartUndoMove()
-{
-    if (moveHistory_.empty()) {
+    if (!gameplaySession_.tryStartNextAction(level_, controls)) {
         return false;
     }
 
-    if (!undoCursor_) {
-        // A contiguous undo run walks backward through the pre-existing history while
-        // each completed undo still appends its inverse move for future branching.
-        undoCursor_ = moveHistory_.size();
+    const GameplaySession::Action& action = gameplaySession_.activeAction();
+    if (action.facingDirection) {
+        playerVisual_.facingQuarterTurns = facingQuarterTurns(*action.facingDirection);
     }
-
-    if (*undoCursor_ == 0) {
-        return false;
-    }
-
-    --(*undoCursor_);
-    activeAction_ = invertActionRecord(moveHistory_[*undoCursor_]);
-    activeAction_.durationSeconds = stepDurationSeconds_;
-    autoMotionPaused_ = true;
-    // Face the way the original step went, so rewinding a push keeps the
-    // player turned toward the block while sliding backwards.
-    if (const auto direction = movementDirection(activeAction_.after.player, activeAction_.before.player)) {
-        playerVisual_.facingQuarterTurns = facingQuarterTurns(*direction);
-    }
-    moveElapsed_ = 0.0f;
-    moving_ = true;
-    startActionAnimations(activeAction_);
-    return true;
-}
-
-bool Application::tryStartRestart()
-{
-    if (state_.playerDead) {
-        return false;
-    }
-
-    GameState restarted = rules::initialState(level_);
-    if (state_ == restarted) {
-        return false;
-    }
-
-    activeAction_ = {
-        .before = state_,
-        .after = std::move(restarted),
-        .durationSeconds = stepDurationSeconds_,
-    };
-    autoMotionPaused_ = false;
-    undoCursor_.reset();
-    moveElapsed_ = 0.0f;
-    moving_ = true;
-    startActionAnimations(activeAction_);
+    startActionAnimations(action);
     return true;
 }
 
@@ -1555,45 +1393,11 @@ std::optional<MoveDirection> Application::heldHorizontalDirection() const
     return left ? MoveDirection::Left : MoveDirection::Right;
 }
 
-std::optional<MoveDirection> Application::heldPerpendicularDirection(MoveDirection direction) const
+void Application::syncVisualsToGameState()
 {
-    switch (direction) {
-    case MoveDirection::Up:
-    case MoveDirection::Down:
-        return heldHorizontalDirection();
-    case MoveDirection::Left:
-    case MoveDirection::Right:
-        return heldVerticalDirection();
-    }
-
-    return std::nullopt;
-}
-
-bool Application::hasPendingMove(MoveDirection direction) const
-{
-    return std::ranges::any_of(pendingCommands_, [direction](const MoveCommand& command) {
-        return command.type == MoveCommandType::Move && command.direction == direction;
-    });
-}
-
-bool Application::tryStartHeldDirection(MoveDirection direction, std::optional<MoveDirection> queuedDirection)
-{
-    if (!tryStartWorldStep(direction)) {
-        return false;
-    }
-
-    if (queuedDirection && !hasPendingMove(*queuedDirection)) {
-        pendingCommands_.push_back({ .type = MoveCommandType::Move, .direction = *queuedDirection });
-    }
-
-    return true;
-}
-
-void Application::applyGameState(const GameState& state)
-{
-    state_ = state;
+    const GameState& state = gameplaySession_.state();
     if (!playerVisual_.motion.moving) {
-        const Vec3 target = entityRenderTarget(state_.player, state_.playerDead);
+        const Vec3 target = entityRenderTarget(state.player, state.playerDead);
         playerVisual_.motion.renderPosition = target;
         playerVisual_.motion.animationStart = target;
         playerVisual_.motion.animationEnd = target;
@@ -1602,11 +1406,11 @@ void Application::applyGameState(const GameState& state)
         playerVisual_.motion.animationSecondsPerTile = 0.0f;
     }
 
-    for (size_t i = 0; i < movableVisuals_.size() && i < state_.movables.size(); ++i) {
+    for (size_t i = 0; i < movableVisuals_.size() && i < state.movables.size(); ++i) {
         if (movableVisuals_[i].moving) {
             continue;
         }
-        const Vec3 target = entityRenderTarget(state_.movables[i].cell, state_.movables[i].fallen);
+        const Vec3 target = entityRenderTarget(state.movables[i].cell, state.movables[i].fallen);
         movableVisuals_[i].renderPosition = target;
         movableVisuals_[i].animationStart = target;
         movableVisuals_[i].animationEnd = target;
@@ -1614,16 +1418,6 @@ void Application::applyGameState(const GameState& state)
         movableVisuals_[i].animationDuration = 0.0f;
         movableVisuals_[i].animationSecondsPerTile = 0.0f;
     }
-}
-
-Application::ActionRecord Application::invertActionRecord(const ActionRecord& record) const
-{
-    return {
-        .before = record.after,
-        .after = record.before,
-        .playerPushing = record.playerPushing,
-        .reversed = true,
-    };
 }
 
 std::filesystem::path Application::screenPath(int levelIndex, int screenIndex) const
@@ -1656,14 +1450,15 @@ RenderFrameData Application::buildRenderFrame() const
 
 float Application::conveyorBeltScrollOffset() const
 {
-    if (stepDurationSeconds_ <= 0.0f) {
+    const float stepDurationSeconds = gameplaySession_.stepDurationSeconds();
+    if (stepDurationSeconds <= 0.0f) {
         return 0.0f;
     }
 
     // Belts move riders one tile per step and the belt texture spans one full
     // V cycle per tile, so one cycle per step keeps the surface in sync with
     // conveyed entities. Negate to flip the scroll direction if needed.
-    return std::fmod(worldAnimationTimeSeconds_ / stepDurationSeconds_, 1.0f);
+    return std::fmod(worldAnimationTimeSeconds_ / stepDurationSeconds, 1.0f);
 }
 
 float Application::tileTypeToScale(TileType type) const
@@ -1678,6 +1473,9 @@ float Application::tileTypeToScale(TileType type) const
 
 RenderFrameData Application::buildGameplayRenderFrame() const
 {
+    const GameState& state = gameplaySession_.state();
+    const bool moving = gameplaySession_.moving();
+    const GameplaySession::Action& activeAction = gameplaySession_.activeAction();
     RenderFrameData frame;
     frame.viewMode = RenderViewMode::Isometric3D;
     frame.lighting = {
@@ -1712,15 +1510,15 @@ RenderFrameData Application::buildGameplayRenderFrame() const
     frame.levelHeight = level_.height();
     frame.levelDepth = level_.depth();
     frame.playerPosition = { playerVisual_.motion.renderPosition.x, playerVisual_.motion.renderPosition.y };
-    const bool endUnlocked = rules::isEndUnlocked(level_, state_);
+    const bool endUnlocked = rules::isEndUnlocked(level_, state);
 
     frame.tiles.reserve(static_cast<size_t>(level_.width()) * level_.height() * level_.depth());
-    const bool playerMovingOutOfWater = moving_ && activeAction_.before.playerDead && !activeAction_.after.playerDead;
-    auto fallenMovableIsMoving = [this](const GameState::Movable* movable) {
-        const auto index = static_cast<size_t>(movable - state_.movables.data());
+    const bool playerMovingOutOfWater = moving && activeAction.before.playerDead && !activeAction.after.playerDead;
+    auto fallenMovableIsMoving = [this, &state](const GameState::Movable* movable) {
+        const auto index = static_cast<size_t>(movable - state.movables.data());
         return index < movableVisuals_.size() && movableVisuals_[index].moving;
     };
-    auto staticCellAt = [this, endUnlocked, playerMovingOutOfWater, fallenMovableIsMoving](uint32_t x, uint32_t y, uint32_t z) {
+    auto staticCellAt = [this, &state, endUnlocked, playerMovingOutOfWater, fallenMovableIsMoving](uint32_t x, uint32_t y, uint32_t z) {
         const GridPosition3 position {
             static_cast<int>(x),
             static_cast<int>(y),
@@ -1732,7 +1530,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
                 position.y,
                 position.z + 1,
             };
-            if (const GameState::Movable* fallenMovable = rules::fallenMovableAt(state_, entityPosition)) {
+            if (const GameState::Movable* fallenMovable = rules::fallenMovableAt(state, entityPosition)) {
                 if (!fallenMovableIsMoving(fallenMovable)) {
                     return StaticRenderCell { .tile = TileType::Air };
                 }
@@ -1740,7 +1538,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
         }
 
         std::optional<TileType> fallenTile;
-        if (const GameState::Movable* fallenMovable = rules::fallenMovableAt(state_, position)) {
+        if (const GameState::Movable* fallenMovable = rules::fallenMovableAt(state, position)) {
             if (!fallenMovableIsMoving(fallenMovable)) {
                 return StaticRenderCell {
                     .tile = fallenMovable->type,
@@ -1749,7 +1547,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
                     .height = 1.0f,
                 };
             }
-        } else if (state_.playerDead && !playerMovingOutOfWater && position == state_.player) {
+        } else if (state.playerDead && !playerMovingOutOfWater && position == state.player) {
             fallenTile = TileType::Player;
         }
 
@@ -1796,8 +1594,8 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             level_.width(),
             level_.height(),
             static_cast<float>(z) + 1.0f,
-            [this, z](GridPosition position) {
-                return rules::isUnfilledWater(level_, state_, {
+            [this, &state, z](GridPosition position) {
+                return rules::isUnfilledWater(level_, state, {
                     position.x,
                     position.y,
                     static_cast<int>(z) + 1,
@@ -1805,7 +1603,7 @@ RenderFrameData Application::buildGameplayRenderFrame() const
             });
     }
 
-    if (!state_.playerDead || playerMovingOutOfWater) {
+    if (!state.playerDead || playerMovingOutOfWater) {
         RenderFrameData::Tile playerTile {
             .position = { playerVisual_.motion.renderPosition.x, playerVisual_.motion.renderPosition.y },
             .color = { 1.0f, 1.0f, 1.0f, 1.0f },
@@ -1821,14 +1619,14 @@ RenderFrameData Application::buildGameplayRenderFrame() const
         frame.tiles.push_back(playerTile);
     }
 
-    for (size_t movableIndex = 0; movableIndex < state_.movables.size() && movableIndex < movableVisuals_.size(); ++movableIndex) {
-        const GameState::Movable& movable = state_.movables[movableIndex];
+    for (size_t movableIndex = 0; movableIndex < state.movables.size() && movableIndex < movableVisuals_.size(); ++movableIndex) {
+        const GameState::Movable& movable = state.movables[movableIndex];
         const EntityVisual& visual = movableVisuals_[movableIndex];
-        const bool movingOutOfWater = moving_ &&
-            movableIndex < activeAction_.before.movables.size() &&
-            movableIndex < activeAction_.after.movables.size() &&
-            activeAction_.before.movables[movableIndex].fallen &&
-            !activeAction_.after.movables[movableIndex].fallen;
+        const bool movingOutOfWater = moving &&
+            movableIndex < activeAction.before.movables.size() &&
+            movableIndex < activeAction.after.movables.size() &&
+            activeAction.before.movables[movableIndex].fallen &&
+            !activeAction.after.movables[movableIndex].fallen;
         if (movable.fallen && !visual.moving && !movingOutOfWater) {
             continue;
         }

@@ -139,6 +139,7 @@ add_executable(sokoban
     src/engine/Application.cpp
     src/engine/BoardLayout.cpp
     src/engine/DebugUi.cpp
+    src/engine/GameplaySession.cpp
     src/engine/Input.cpp
     src/engine/Level.cpp
     src/engine/LevelEditor.cpp
@@ -191,7 +192,7 @@ else()
     target_compile_options(sokoban PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-option(SOKOBAN_BUILD_TESTS "Build headless rules tests" ON)
+option(SOKOBAN_BUILD_TESTS "Build headless gameplay and task-system tests" ON)
 if(SOKOBAN_BUILD_TESTS)
     enable_testing()
     add_executable(sokoban_rules_tests
@@ -207,6 +208,21 @@ if(SOKOBAN_BUILD_TESTS)
         target_compile_options(sokoban_rules_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME rules COMMAND sokoban_rules_tests)
+
+    add_executable(sokoban_gameplay_session_tests
+        tests/GameplaySessionTests.cpp
+        src/engine/GameplaySession.cpp
+        src/engine/Level.cpp
+        src/engine/Rules.cpp
+        src/engine/TileTypes.cpp
+    )
+    target_include_directories(sokoban_gameplay_session_tests PRIVATE src)
+    if(MSVC)
+        target_compile_options(sokoban_gameplay_session_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_gameplay_session_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME gameplay_session COMMAND sokoban_gameplay_session_tests)
 
     add_executable(sokoban_task_tests
         tests/TaskSystemTests.cpp

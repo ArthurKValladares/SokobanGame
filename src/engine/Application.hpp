@@ -2,6 +2,7 @@
 
 #include "engine/Input.hpp"
 #include "engine/Config.hpp"
+#include "engine/GameplaySession.hpp"
 #include "engine/Level.hpp"
 #include "engine/LevelEditor.hpp"
 #include "engine/Math.hpp"
@@ -11,7 +12,6 @@
 #include "engine/render/VulkanRenderer.hpp"
 
 #include <array>
-#include <deque>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -31,7 +31,8 @@ public:
 
 private:
     // Presentation-only motion state for one entity; the authoritative
-    // gameplay state lives in state_. Each entity animates independently.
+    // gameplay state lives in gameplaySession_. Each entity animates
+    // independently.
     struct EntityVisual {
         Vec3 renderPosition {};
         Vec3 animationStart {};
@@ -71,30 +72,6 @@ private:
         bool scanned = false;
     };
 
-    enum class MoveCommandType {
-        Move,
-        Undo,
-        Restart,
-    };
-
-    struct MoveCommand {
-        MoveCommandType type = MoveCommandType::Move;
-        MoveDirection direction = MoveDirection::Up;
-    };
-
-    // One discrete world step (or undo/restart transition) being animated.
-    // All entities animate across the same durationSeconds so consecutive
-    // steps chain into visually continuous motion.
-    struct ActionRecord {
-        GameState before;
-        GameState after;
-        float durationSeconds = config::stepDurationSeconds;
-        bool playerPushing = false;
-        // Undo transitions animate the original step backwards: original
-        // facing and animation clip are kept, and the clip plays in reverse.
-        bool reversed = false;
-    };
-
     void loadCurrentScreen();
     void applyLevel(Level level);
     void advanceScreen();
@@ -110,23 +87,14 @@ private:
     void rescanAnimationPreviewFiles();
     void advancePlayerMovement(float dt);
     void advanceEntityAnimations(float dt);
-    void startActionAnimations(const ActionRecord& action);
+    void startActionAnimations(const GameplaySession::Action& action);
     [[nodiscard]] bool completeActiveAction();
-    [[nodiscard]] float activeActionDuration() const;
     [[nodiscard]] bool tryStartNextMove();
-    [[nodiscard]] bool tryStartHeldMove();
-    [[nodiscard]] bool tryStartWorldStep(std::optional<MoveDirection> playerInput);
-    [[nodiscard]] bool tryStartUndoMove();
-    [[nodiscard]] bool tryStartRestart();
     [[nodiscard]] std::optional<MoveDirection> pressedVerticalDirection() const;
     [[nodiscard]] std::optional<MoveDirection> pressedHorizontalDirection() const;
     [[nodiscard]] std::optional<MoveDirection> heldVerticalDirection() const;
     [[nodiscard]] std::optional<MoveDirection> heldHorizontalDirection() const;
-    [[nodiscard]] std::optional<MoveDirection> heldPerpendicularDirection(MoveDirection direction) const;
-    [[nodiscard]] bool hasPendingMove(MoveDirection direction) const;
-    [[nodiscard]] bool tryStartHeldDirection(MoveDirection direction, std::optional<MoveDirection> queuedDirection);
-    void applyGameState(const GameState& state);
-    [[nodiscard]] ActionRecord invertActionRecord(const ActionRecord& record) const;
+    void syncVisualsToGameState();
     [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;
     [[nodiscard]] bool screenExists(int levelIndex, int screenIndex) const;
     [[nodiscard]] RenderFrameData buildRenderFrame() const;
@@ -140,7 +108,7 @@ private:
     UiContext ui_;
     std::filesystem::path assetRoot_;
     Level level_;
-    GameState state_;
+    GameplaySession gameplaySession_;
     int currentLevel_ = 0;
     int currentScreen_ = 0;
     InputState input_;
@@ -185,20 +153,9 @@ private:
         config::conveyorTileScale,
     };
     std::vector<EntityVisual> movableVisuals_;
-    std::deque<MoveCommand> pendingCommands_;
-    std::vector<ActionRecord> moveHistory_;
-    std::optional<size_t> undoCursor_;
-    ActionRecord activeAction_;
     LevelEditor levelEditor_;
     AnimationPreviewState animationPreview_;
     std::optional<GridPosition3> editorHoverCell_;
-    float moveElapsed_ = 0.0f;
-    float stepDurationSeconds_ = config::stepDurationSeconds;
-    rules::StepRates stepRates_ {};
-    bool moving_ = false;
-    // Set while rewinding: pending world motion (slides, conveyors) stays
-    // frozen after an undo until the player makes a new input-driven step.
-    bool autoMotionPaused_ = false;
     bool running_ = true;
     bool quitConfirmationOpen_ = false;
     bool draftExitConfirmationOpen_ = false;

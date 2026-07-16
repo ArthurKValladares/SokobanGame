@@ -47,12 +47,21 @@ cmake --build build --config Debug --target sokoban_rules_tests
 .\build\Debug\sokoban_rules_tests.exe
 ```
 
+Headless gameplay-session tests cover command buffering, action timing,
+push metadata, restart, undo, and automatic-motion pausing:
+
+```powershell
+cmake --build build --config Debug --target sokoban_gameplay_session_tests
+.\build\Debug\sokoban_gameplay_session_tests.exe
+```
+
 Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine controls, the level editor, and an Animation Preview window (browses every glTF/GLB under the source `assets/` tree and plays any clip on the player model with play/pause/scrub/speed controls, overriding gameplay animation while active). Release builds may not have the editor/debug UI available.
 
 ## Important Source Map
 
 - `src/main.cpp`: process entry point.
-- `src/engine/Application.*`: main loop, input handling, animation/presentation, level loading, editor integration, frame construction for rendering. Gameplay state lives in a single `GameState state_` member. Presentation is per-entity: movables animate via a parallel `movableVisuals_` vector of `EntityVisual`, and the player via `playerVisual_` (`EntityVisual` motion plus clip choice, per-entity clip clock, playback direction, and facing). `worldAnimationTimeSeconds_` is the only shared presentation clock, used for level geometry like belt scrolling; it (and per-entity clip clocks) run backwards while an undo transition animates.
+- `src/engine/Application.*`: main loop, SDL input translation, animation/presentation, level loading, editor integration, and frame construction for rendering. It delegates gameplay orchestration to `GameplaySession` and only consumes the session's state/action snapshots. Presentation is per-entity: movables animate via a parallel `movableVisuals_` vector of `EntityVisual`, and the player via `playerVisual_` (`EntityVisual` motion plus clip choice, per-entity clip clock, playback direction, and facing). `worldAnimationTimeSeconds_` is the only shared presentation clock, used for level geometry like belt scrolling; it (and per-entity clip clocks) run backwards while an undo transition animates.
+- `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, movement history, contiguous undo cursor, automatic world steps, and the post-undo automatic-motion pause. Emits `Action` snapshots for `Application` to animate. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
 - `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags + slide momentum) plus pure functions in `sokoban::rules` — `step` advances the whole world one discrete step (simultaneous one-tile moves, pushes, ladder climbs, momentum, falls, water, conveyors); `hasPendingMotion` reports whether the world would keep moving without input; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
 - `src/engine/Level.*`: level file parsing, serialization, layered grid storage, walkability/support rules, player/movable extraction.
 - `src/engine/TaskSystem.*`: standard-library-only worker pool for task-based parallelism. `taskSystem().enqueue(fn)` returns a future (exceptions propagate on get); `parallelFor(count, minChunk, fn(begin, end))` runs chunked loops with the calling thread participating. Tasks must not block on other tasks (no dependency graph yet). Used by GLTF vertex skinning (`skinWithPoses`) and parallel CPU-side asset loading in `createModelResources`; GPU uploads stay on the main thread. Tested by `tests/TaskSystemTests.cpp` (`sokoban_task_tests`).
@@ -158,7 +167,9 @@ Core movement (discrete step system):
 - WASD moves the player (one tile per step; held keys step repeatedly).
 - `Z` undoes one step; undoing pauses pending world motion until the next
   input-driven step. `R` restarts.
-- Movement history stores one record per step for undo.
+- `GameplaySession` stores one action record per completed step for undo; the
+  authoritative state commits only after `Application` finishes animating the
+  action.
 
 Goals and pressure plates:
 
@@ -327,6 +338,10 @@ If making player-facing menus, pause screens, settings, or polished editor UI, p
 
 Major recent additions and fixes:
 
+- Split headless gameplay orchestration out of `Application` into
+  `GameplaySession`. `Application` now translates SDL controls and animates
+  session actions, while state/history/undo/restart/action timing are covered
+  by a dedicated 52-check test executable.
 - Added layered levels with `@layer N` sections.
 - Added level editor/document browser and draft play flow.
 - Added Debug UI controls for rendering, lighting, tile scale, grid, and conveyor rate.
@@ -356,9 +371,12 @@ Major recent additions and fixes:
 
 At the time this handoff was created:
 
-- The live checkout had a clean `git status`.
-- `cmake --build build --config Debug` had passed after the latest changes.
-- `HANDOFF.md` was added after that verification, so run another build if desired after reviewing this file.
+- The working tree contains the uncommitted `GameplaySession` split described
+  above (`CMakeLists.txt`, `HANDOFF.md`, `Application.*`, new
+  `GameplaySession.*`, and `tests/GameplaySessionTests.cpp`).
+- The full Debug `sokoban` target passed after the `GameplaySession` split.
+- `sokoban_gameplay_session_tests` passed 52 checks, `sokoban_rules_tests`
+  passed 115 checks, and `sokoban_task_tests` passed 11 checks.
 
 Known useful verification commands:
 
@@ -373,7 +391,7 @@ The `rg` command above should return no matches.
 
 ## Important Design Decisions
 
-- Keep gameplay rules in the headless `Rules` module as pure functions of `(Level, GameState)`; `Application` owns input, animation, and presentation only, and the renderer receives a render-frame description rather than owning game rules.
+- Keep gameplay rules in the headless `Rules` module as pure functions of `(Level, GameState)`. `GameplaySession` owns command/state/history orchestration, `Application` owns SDL input translation and presentation, and the renderer receives a render-frame description rather than owning game rules.
 - When changing or adding mechanics, implement them in `Rules.cpp` and add cases to `tests/RulesTests.cpp`; the tests compile without SDL/Vulkan so they can run anywhere.
 - Store `Player`, `Rock`, and movable `Ice` as dynamic entities extracted from level data rather than static cells.
 - Use character-driven tile definitions as the single source of truth for level parsing/editor palette.
@@ -409,7 +427,10 @@ UI:
 
 Engineering:
 
-- Gameplay rules now live in the headless `Rules` module with tests; `Application.cpp` still owns rendering-layout, editor, and UI responsibilities that could be split further.
+- Gameplay rules and orchestration now live in the headless `Rules` and
+  `GameplaySession` modules with tests. `Application.cpp` still owns render-frame
+  construction, editor integration, and UI responsibilities; extracting a
+  render-frame builder is the next natural split.
 - The `TaskSystem` gives the engine a multi-threading foundation; grow it by moving more per-frame work onto tasks (render-frame building, animation updates) and eventually adding task dependencies/graphs when systems need ordering. Keep the Vulkan queue single-threaded unless command-pool-per-thread work is done deliberately.
 - Add save format/versioning if level files evolve.
 - Review asset licensing/readme files before distribution.
