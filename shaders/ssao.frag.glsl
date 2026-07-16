@@ -48,13 +48,19 @@ void main()
         // only genuine concavity (creases, corners, contacts) occludes.
         float depthA = texture(depthTexture, uv + offset).r;
         float depthB = texture(depthTexture, uv - offset).r;
-        float concavity = centerDepth - 0.5 * (depthA + depthB);
 
-        float contribution = smoothstep(bias, depthRange, concavity);
-        // Large discontinuities are unrelated geometry, not creases; fade
-        // them out to avoid halos.
-        contribution *= 1.0 - smoothstep(depthRange * 2.0, depthRange * 6.0, concavity);
-        occlusion += contribution;
+        // Halo rejection: a tap whose depth is far from the center belongs to
+        // unrelated geometry (e.g. a character in front of this floor pixel),
+        // not to a crease. Replace rejected taps with the planar mirror of
+        // the opposite tap, which keeps slope cancellation intact and makes
+        // fully rejected pairs contribute exactly zero.
+        float validA = 1.0 - smoothstep(depthRange * 2.0, depthRange * 4.0, abs(centerDepth - depthA));
+        float validB = 1.0 - smoothstep(depthRange * 2.0, depthRange * 4.0, abs(centerDepth - depthB));
+        float mirroredA = mix(2.0 * centerDepth - depthB, depthA, validA);
+        float mirroredB = mix(2.0 * centerDepth - depthA, depthB, validB);
+        float concavity = centerDepth - 0.5 * (mirroredA + mirroredB);
+
+        occlusion += smoothstep(bias, depthRange, concavity);
     }
 
     float ao = clamp(1.0 - occlusion / float(pairCount) * 1.6, 0.0, 1.0);
