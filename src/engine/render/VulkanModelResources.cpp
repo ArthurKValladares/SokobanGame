@@ -1,12 +1,10 @@
 #include "engine/render/VulkanModelResources.hpp"
 
-#include "engine/Config.hpp"
 #include "engine/TaskSystem.hpp"
 #include "engine/render/GeneratedAssetCatalog.hpp"
 #include "engine/render/ImageData.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <cstring>
 #include <future>
 #include <optional>
@@ -68,6 +66,7 @@ void VulkanModelResources::create(
 void VulkanModelResources::destroy()
 {
     if (device_) {
+        skinnedMeshUpdater_.destroy();
         for (auto texture = textures_.rbegin(); texture != textures_.rend(); ++texture) {
             destroyTexture(texture->image, texture->sampler);
         }
@@ -77,17 +76,7 @@ void VulkanModelResources::destroy()
     }
 
     textures_.clear();
-    rogueSkinnedMesh_ = {};
-    animationClips_ = {};
-    activeRogueAnimation_ = RenderAnimation::None;
-    activeRogueAnimationTime_ = -1.0f;
-    rogueFadeFromAnimation_ = RenderAnimation::None;
-    rogueFadeFromTime_ = 0.0f;
-    rogueFadeElapsed_ = 0.0f;
-    previewClip_ = nullptr;
-    previewTimeSeconds_ = 0.0f;
-    activePreviewClip_ = nullptr;
-    activePreviewTime_ = -1.0f;
+    animationController_.clear();
     assetRoot_.clear();
     graphicsQueue_ = VK_NULL_HANDLE;
     commandPool_ = VK_NULL_HANDLE;
@@ -113,6 +102,7 @@ void VulkanModelResources::createModels()
     std::vector<PendingStaticModel> staticModels;
     std::vector<PendingSkinnedModel> skinnedModels;
     std::vector<PendingAnimation> animations;
+    SkinnedMeshData skinnedMesh;
     staticModels.reserve(assetCatalog::models.size());
     skinnedModels.reserve(assetCatalog::models.size());
     animations.reserve(assetCatalog::animations.size());
@@ -157,17 +147,21 @@ void VulkanModelResources::createModels()
         if (pending.definition->model != RenderModel::Rogue) {
             throw std::runtime_error("Unsupported skinned model in asset catalog");
         }
-        rogueSkinnedMesh_ = pending.data.get();
+        skinnedMesh = pending.data.get();
     }
     for (PendingAnimation& pending : animations) {
-        animationClips_[enumIndex(pending.definition->animation)] = pending.data.get();
+        animationController_.setClip(pending.definition->animation, pending.data.get());
     }
 
-    const GltfAnimationClip& idle = animationClips_[enumIndex(RenderAnimation::RogueIdle)];
-    if (rogueSkinnedMesh_.vertices.empty() || idle.channels.empty()) {
+    if (skinnedMesh.vertices.empty() ||
+        !animationController_.hasClip(RenderAnimation::RogueIdle)) {
         throw std::runtime_error("Asset catalog must provide the Rogue mesh and idle animation");
     }
-    meshes_[enumIndex(RenderModel::Rogue)] = uploadMesh(skinGltfMesh(rogueSkinnedMesh_, idle, 0.0f));
+    skinnedMeshUpdater_.create(
+        physicalDevice_,
+        device_,
+        std::move(skinnedMesh),
+        animationController_.clip(RenderAnimation::RogueIdle));
 }
 
 void VulkanModelResources::createTextures()
@@ -183,106 +177,22 @@ void VulkanModelResources::createTextures()
 
 void VulkanModelResources::setAnimationPreview(const GltfAnimationClip* clip, float timeSeconds)
 {
-    previewClip_ = clip;
-    previewTimeSeconds_ = timeSeconds;
+    animationController_.setPreview(clip, timeSeconds);
 }
 
 void VulkanModelResources::updateAnimations(const RenderFrameData& frameData)
 {
-    GpuMesh& rogueMesh = meshes_[enumIndex(RenderModel::Rogue)];
-    if (previewClip_ != nullptr) {
-        if (rogueSkinnedMesh_.vertices.empty() || !rogueMesh.vertexBuffer.memory) {
-            return;
-        }
-        if (previewClip_ == activePreviewClip_ &&
-            std::abs(previewTimeSeconds_ - activePreviewTime_) < 0.0001f) {
-            return;
-        }
-        const MeshData skinnedMesh = skinGltfMesh(rogueSkinnedMesh_, *previewClip_, previewTimeSeconds_);
-        updateMeshVertices(rogueMesh, skinnedMesh.vertices);
-        activePreviewClip_ = previewClip_;
-        activePreviewTime_ = previewTimeSeconds_;
-        activeRogueAnimation_ = RenderAnimation::None;
-        rogueFadeFromAnimation_ = RenderAnimation::None;
-        return;
+    if (const std::optional<AnimationController::SkinningRequest> request =
+            animationController_.update(frameData)) {
+        skinnedMeshUpdater_.update(*request);
     }
-    activePreviewClip_ = nullptr;
-
-    RenderAnimation requestedAnimation = RenderAnimation::None;
-    float requestedTime = 0.0f;
-    for (const RenderFrameData::Tile& tile : frameData.tiles) {
-        if (tile.model == RenderModel::Rogue && tile.animation != RenderAnimation::None) {
-            requestedAnimation = tile.animation;
-            requestedTime = tile.animationTimeSeconds;
-            break;
-        }
-    }
-
-    if (requestedAnimation == RenderAnimation::None ||
-        rogueSkinnedMesh_.vertices.empty() ||
-        !rogueMesh.vertexBuffer.memory) {
-        return;
-    }
-
-    auto clipFor = [this](RenderAnimation animation) -> const GltfAnimationClip& {
-        switch (animation) {
-        case RenderAnimation::RoguePush:
-        case RenderAnimation::RogueMovement:
-        case RenderAnimation::RogueIdle:
-            return animationClips_[enumIndex(animation)];
-        case RenderAnimation::None:
-        case RenderAnimation::Count:
-            return animationClips_[enumIndex(RenderAnimation::RogueIdle)];
-        }
-        return animationClips_[enumIndex(RenderAnimation::RogueIdle)];
-    };
-
-    const float timeDelta = activeRogueAnimation_ == RenderAnimation::None
-        ? 0.0f
-        : requestedTime - activeRogueAnimationTime_;
-
-    if (requestedAnimation != activeRogueAnimation_ &&
-        activeRogueAnimation_ != RenderAnimation::None) {
-        rogueFadeFromAnimation_ = activeRogueAnimation_;
-        rogueFadeFromTime_ = activeRogueAnimationTime_;
-        rogueFadeElapsed_ = 0.0f;
-    }
-
-    if (rogueFadeFromAnimation_ == RenderAnimation::None &&
-        requestedAnimation == activeRogueAnimation_ &&
-        std::abs(requestedTime - activeRogueAnimationTime_) < 0.0001f) {
-        return;
-    }
-
-    MeshData skinnedMesh;
-    if (rogueFadeFromAnimation_ != RenderAnimation::None) {
-        rogueFadeFromTime_ += timeDelta;
-        rogueFadeElapsed_ += std::abs(timeDelta);
-        constexpr float fadeSeconds = config::playerAnimationFadeSeconds;
-        if (fadeSeconds <= 0.0f || rogueFadeElapsed_ >= fadeSeconds) {
-            rogueFadeFromAnimation_ = RenderAnimation::None;
-            skinnedMesh = skinGltfMesh(rogueSkinnedMesh_, clipFor(requestedAnimation), requestedTime);
-        } else {
-            float blend = rogueFadeElapsed_ / fadeSeconds;
-            blend = blend * blend * (3.0f - 2.0f * blend);
-            skinnedMesh = skinGltfMeshBlended(
-                rogueSkinnedMesh_,
-                clipFor(rogueFadeFromAnimation_),
-                rogueFadeFromTime_,
-                clipFor(requestedAnimation),
-                requestedTime,
-                blend);
-        }
-    } else {
-        skinnedMesh = skinGltfMesh(rogueSkinnedMesh_, clipFor(requestedAnimation), requestedTime);
-    }
-    updateMeshVertices(rogueMesh, skinnedMesh.vertices);
-    activeRogueAnimation_ = requestedAnimation;
-    activeRogueAnimationTime_ = requestedTime;
 }
 
 VulkanModelResources::MeshView VulkanModelResources::meshForModel(RenderModel model) const
 {
+    if (model == RenderModel::Rogue) {
+        return skinnedMeshUpdater_.mesh();
+    }
     const GpuMesh& mesh = gpuMeshForModel(model);
     return {
         .vertexBuffer = mesh.vertexBuffer.buffer,
@@ -351,23 +261,7 @@ VulkanModelResources::GpuMesh VulkanModelResources::uploadMesh(const MeshData& m
     vkUnmapMemory(device_, result.indexBuffer.memory);
 
     result.indexCount = static_cast<uint32_t>(mesh.indices.size());
-    result.vertexCount = static_cast<uint32_t>(mesh.vertices.size());
     return result;
-}
-
-void VulkanModelResources::updateMeshVertices(
-    const GpuMesh& gpuMesh,
-    const std::vector<MeshVertex>& vertices) const
-{
-    if (!gpuMesh.vertexBuffer.memory || vertices.empty() || vertices.size() != gpuMesh.vertexCount) {
-        return;
-    }
-
-    const VkDeviceSize vertexBytes = sizeof(MeshVertex) * vertices.size();
-    void* mapped = nullptr;
-    vkCheck(vkMapMemory(device_, gpuMesh.vertexBuffer.memory, 0, vertexBytes, 0, &mapped), "vkMapMemory animated vertex buffer failed");
-    std::memcpy(mapped, vertices.data(), static_cast<std::size_t>(vertexBytes));
-    vkUnmapMemory(device_, gpuMesh.vertexBuffer.memory);
 }
 
 void VulkanModelResources::createTexture(
@@ -554,7 +448,7 @@ void VulkanModelResources::destroyMesh(GpuMesh& mesh) const
 
 const VulkanModelResources::GpuMesh& VulkanModelResources::gpuMeshForModel(RenderModel model) const
 {
-    if (model == RenderModel::Cube || model == RenderModel::Count) {
+    if (model == RenderModel::Cube || model == RenderModel::Rogue || model == RenderModel::Count) {
         throw std::runtime_error("Render model does not have a GPU mesh");
     }
     const GpuMesh& mesh = meshes_[enumIndex(model)];

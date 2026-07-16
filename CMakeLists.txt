@@ -112,9 +112,17 @@ add_executable(sokoban
     src/engine/TileTypes.cpp
     src/engine/Window.cpp
     src/engine/render/VulkanRenderer.cpp
+    src/engine/render/AnimationController.cpp
     src/engine/render/GltfMesh.cpp
     src/engine/render/ImageData.cpp
+    src/engine/render/SkinnedMeshUpdater.cpp
     src/engine/render/VulkanModelResources.cpp
+    src/engine/render/VulkanPipelineFactory.cpp
+    src/engine/render/VulkanResourceUtils.cpp
+    src/engine/render/VulkanSceneDescriptors.cpp
+    src/engine/render/VulkanShadowPass.cpp
+    src/engine/render/VulkanSsaoPass.cpp
+    src/engine/render/VulkanSwapchainResources.cpp
     src/engine/ui/Ui.cpp
 )
 foreach(imgui_source IN LISTS SOKOBAN_IMGUI_SOURCES)
@@ -216,6 +224,18 @@ if(SOKOBAN_BUILD_TESTS)
         target_compile_options(sokoban_level_editor_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME level_editor COMMAND sokoban_level_editor_tests)
+
+    add_executable(sokoban_animation_controller_tests
+        tests/AnimationControllerTests.cpp
+        src/engine/render/AnimationController.cpp
+    )
+    target_include_directories(sokoban_animation_controller_tests PRIVATE src)
+    if(MSVC)
+        target_compile_options(sokoban_animation_controller_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_animation_controller_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME animation_controller COMMAND sokoban_animation_controller_tests)
 
     add_executable(sokoban_task_tests
         tests/TaskSystemTests.cpp

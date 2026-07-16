@@ -64,6 +64,14 @@ cmake --build build --config Debug --target sokoban_gameplay_session_tests
 .\build\Debug\sokoban_gameplay_session_tests.exe
 ```
 
+Headless animation-controller tests cover Rogue animation selection,
+deduplication, crossfades, reverse playback, preview overrides, and reset:
+
+```powershell
+cmake --build build --config Debug --target sokoban_animation_controller_tests
+.\build\Debug\sokoban_animation_controller_tests.exe
+```
+
 Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine controls, the `LevelEditorDebugUi` adapter, and an Animation Preview window (browses every glTF/GLB under the source `assets/` tree and plays any clip on the player model with play/pause/scrub/speed controls, overriding gameplay animation while active). Release builds still compile the headless `LevelEditor` API but do not expose the ImGui editor/debug UI.
 
 ## Important Source Map
@@ -79,9 +87,17 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
 - `src/engine/LevelEditorDebugUi.*`: Debug-only ImGui adapter for `LevelEditor`. Owns widget text buffers and confirmation-modal presentation only; every editor state transition and filesystem action is delegated to the headless API.
 - `src/engine/render/RenderTypes.hpp`: renderer-facing frame contract and model/animation enums, independent of the Vulkan facade.
 - `src/engine/render/RenderAssetCatalog.hpp`: typed model, texture, animation, geometry, and material metadata consumed by the generated asset catalog.
-- `src/engine/render/VulkanModelResources.*`: owns model meshes, texture images/samplers, animation clips/crossfades, preview state, uploads, and cleanup. Loads definitions from the generated asset catalog and exposes lightweight mesh/material/texture views to the renderer.
-- `src/engine/render/VulkanRenderer.*`: Vulkan instance/device/swapchain, dynamic rendering, render passes, pipelines, descriptor resources, debug UI, and draw submission. Model-specific resource ownership is delegated to `VulkanModelResources`.
-- `src/engine/render/GltfMesh.*`: small custom GLTF/GLB loader, static mesh loading, skinned mesh loading, animation sampling/skinning. `skinGltfMeshBlended` skins with a pose blended between two clips; the renderer uses it to crossfade the player's idle/walk/push animations over `config::playerAnimationFadeSeconds`.
+- `src/engine/render/AnimationController.*`: Vulkan-free owner of gameplay animation clips, Rogue clip selection, preview overrides, deduplication, and crossfade state. It emits immutable skinning requests and is tested by `tests/AnimationControllerTests.cpp` (`sokoban_animation_controller_tests`).
+- `src/engine/render/SkinnedMeshUpdater.*`: owns the Rogue's skinned source mesh and dynamic Vulkan vertex/index buffers. It consumes `AnimationController` requests, performs CPU skinning/blending, and uploads changed vertices.
+- `src/engine/render/VulkanModelResources.*`: owns static model meshes, texture images/samplers, catalog material bindings, and asset loading. It orchestrates `AnimationController` and `SkinnedMeshUpdater` while exposing lightweight mesh/material/texture views to the renderer.
+- `src/engine/render/VulkanSsaoPass.*`: owns the swapchain-sized R8 ambient-occlusion target and sampler, plus depth/AO transitions and the fullscreen AO/composite recording sequence. Pipelines and scene descriptors are passed in as non-owning handles.
+- `src/engine/render/VulkanShadowPass.*`: owns the fixed-size shadow depth image, sampler, and image-layout state. It records pass setup/transitions while `VulkanRenderer` supplies the scene-specific shadow draw traversal between `begin` and `end`.
+- `src/engine/render/VulkanSwapchainResources.*`: owns the swapchain, image views, MSAA color attachment, scene depth/resolve-depth, scene-color sampling target, acquire/present calls, resize lifecycle, frame attachment transitions, and the ice-blur scene-color copy.
+- `src/engine/render/VulkanPipelineFactory.*`: owns the shared pipeline layout and all scene, model, UI, shadow, SSAO, composite, and visualization pipelines. Shader-module loading and graphics-pipeline construction no longer live in `VulkanRenderer`.
+- `src/engine/render/VulkanSceneDescriptors.*`: owns the scene descriptor-set layout, pool, set, and bindings for shadow, copied scene color, model textures, sampled scene depth, and SSAO. Resize/MSAA changes update the same set with new attachment views.
+- `src/engine/render/VulkanResourceUtils.*`: exception-safe shared Vulkan image allocation, image-view creation, memory-type selection, and destruction used by the focused resource owners. `VulkanRenderConstants.hpp` holds the shared 256-byte push-constant contract.
+- `src/engine/render/VulkanRenderer.*`: top-level Vulkan instance/device/queue and frame orchestration, command buffers/synchronization, debug UI, camera/projection calculations, and scene draw traversal. Resource, pass, pipeline, descriptor, model, and animation ownership is delegated to the focused components above.
+- `src/engine/render/GltfMesh.*`: small custom GLTF/GLB loader, static mesh loading, skinned mesh loading, animation sampling/skinning. `skinGltfMeshBlended` skins with a pose blended between two clips; `SkinnedMeshUpdater` uses it for the player crossfades requested by `AnimationController` over `config::playerAnimationFadeSeconds`.
 - `src/engine/render/ImageData.*`: texture loading through WIC.
 - `src/engine/ui/Ui.*`: very small in-game immediate UI used for the quit confirmation, including crude bitmap-glyph text.
 - `shaders/`: GLSL shader sources compiled to SPIR-V by CMake.
@@ -271,7 +287,7 @@ Rough editor areas:
 
 Renderer:
 
-- Vulkan 1.4, dynamic rendering, synchronization2, extended dynamic state, graphics pipeline libraries.
+- Vulkan 1.4, dynamic rendering, synchronization2, and extended dynamic state.
 - Uses SDL3 window/Vulkan integration.
 - Has a shadow pass and scene pass.
 - Supports MSAA modes (default is MSAA 8x, automatically falling back to the highest count the device's color+depth framebuffers support; the Debug UI combo shows the requested mode, Rendering Stats shows the active sample count), wireframe, line width controls, lighting controls, grid overlay, and render stats in Debug UI.
@@ -373,6 +389,16 @@ Major recent additions and fixes:
 - Extracted model mesh/texture/animation lifetime management from
   `VulkanRenderer` into `VulkanModelResources`; `VulkanRenderer.cpp` dropped
   from roughly 4,750 lines to roughly 3,800 lines.
+- Split Rogue animation and dynamic mesh responsibilities out of
+  `VulkanModelResources`: `AnimationController` now owns Vulkan-free clip,
+  preview, deduplication, and crossfade semantics, while
+  `SkinnedMeshUpdater` owns CPU skinning and the dynamic Vulkan mesh buffers.
+- Split the remaining Vulkan renderer responsibilities into
+  `VulkanSsaoPass`, `VulkanShadowPass`, `VulkanSwapchainResources`,
+  `VulkanPipelineFactory`, and `VulkanSceneDescriptors`, with shared image
+  allocation in `VulkanResourceUtils`. `VulkanRenderer.cpp` is now roughly
+  2,150 lines and retains orchestration and scene traversal instead of owning
+  those resource lifetimes and construction details.
 - Split headless gameplay orchestration out of `Application` into
   `GameplaySession`. `Application` now translates SDL controls and animates
   session actions, while state/history/undo/restart/action timing are covered
@@ -406,9 +432,14 @@ Major recent additions and fixes:
 
 At the time this handoff was updated:
 
-- The working tree contains the uncommitted headless level-editor/ImGui-adapter split and expanded edge-case tests described above.
-- The full Debug build and a Vulkan-validation runtime smoke test passed after these changes.
-- All five CTest suites pass: rules 131 checks, level parsing 42 checks, gameplay session 101 checks, level editor 88 checks, and task system 11 checks (373 total).
+- The working tree contains the uncommitted
+  animation/model-resource split and the focused Vulkan pass, swapchain,
+  pipeline, and descriptor components described above.
+- The full Debug build and a Vulkan-validation runtime smoke test passed after
+  these splits.
+- All six CTest suites pass: rules 131 checks, level parsing 42 checks,
+  gameplay session 101 checks, level editor 88 checks, animation controller 40
+  checks, and task system 11 checks (413 total).
 
 Known useful verification commands:
 
@@ -450,8 +481,9 @@ Rendering/assets:
 - Replace the custom GLTF parsing with a robust library if assets get more complex.
 - Improve visual consistency between procedural tiles and GLTF assets.
 - Verify model orientation/scale whenever a new asset is added.
-- Continue splitting `VulkanRenderer` by extracting post-processing and
-  swapchain-dependent attachment ownership.
+- Keep `VulkanRenderer` as the frame orchestrator. If its remaining scene
+  traversal grows, extract a scene recorder or projection/layout component
+  around a concrete need rather than moving Vulkan ownership back into it.
 
 UI:
 

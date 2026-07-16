@@ -5,6 +5,11 @@
 #include "engine/render/GltfMesh.hpp"
 #include "engine/render/RenderTypes.hpp"
 #include "engine/render/VulkanModelResources.hpp"
+#include "engine/render/VulkanPipelineFactory.hpp"
+#include "engine/render/VulkanSceneDescriptors.hpp"
+#include "engine/render/VulkanShadowPass.hpp"
+#include "engine/render/VulkanSsaoPass.hpp"
+#include "engine/render/VulkanSwapchainResources.hpp"
 #include "engine/ui/Ui.hpp"
 
 #include <SDL3/SDL_events.h>
@@ -68,22 +73,6 @@ private:
         }
     };
 
-    struct SwapchainImage {
-        VkImage image = VK_NULL_HANDLE;
-        VkImageView view = VK_NULL_HANDLE;
-    };
-
-    struct OwnedImage {
-        VkImage image = VK_NULL_HANDLE;
-        VkDeviceMemory memory = VK_NULL_HANDLE;
-        VkImageView view = VK_NULL_HANDLE;
-    };
-
-    struct OwnedBuffer {
-        VkBuffer buffer = VK_NULL_HANDLE;
-        VkDeviceMemory memory = VK_NULL_HANDLE;
-    };
-
     struct FrameResources {
         VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
         VkSemaphore imageAvailable = VK_NULL_HANDLE;
@@ -123,38 +112,15 @@ private:
     void createSurface();
     void pickPhysicalDevice();
     void createDevice();
-    void createSwapchain();
-    void createImageViews();
-    void createMsaaColorResources();
-    void createDepthResources();
-    void createShadowResources();
-    void createSceneColorResources();
-    void createSsaoResources();
-    void cleanupSsaoResources();
-    void recordSsaoRendering(VkCommandBuffer commandBuffer, VkImageView targetView, const RenderFrameData& frameData);
-    [[nodiscard]] VkPipeline createPostProcessPipeline(
-        VkShaderModule vertexShader,
-        VkShaderModule fragmentShader,
-        VkFormat colorFormat,
-        bool multiplyBlend) const;
-    void createDescriptorResources();
-    void updateDescriptorSet();
+    [[nodiscard]] VulkanSceneDescriptors::Resources descriptorResources() const;
     void createCommandPool();
     void createPipeline();
-    void createShadowPipeline(VkShaderModule shadowVertexShader);
-    void createModelShadowPipeline(VkShaderModule shadowVertexShader);
     void destroyPipeline();
-    void destroyDescriptorResources();
-    void cleanupShadowResources();
-    void cleanupSceneColorResources();
     void createFrameResources();
     void initializeDebugUi();
     void shutdownDebugUi();
     void renderDebugUi(VkCommandBuffer commandBuffer) const;
     void recreateSwapchain();
-    void cleanupSwapchain();
-    void cleanupMsaaColorResources();
-    void cleanupDepthResources();
 
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData, const UiDrawData& uiDrawData);
     void recordShadowMapRendering(VkCommandBuffer commandBuffer, const RenderFrameData& frameData, const ShadowRenderLayout& layout);
@@ -170,7 +136,6 @@ private:
         bool storeColor,
         bool loadDepth,
         bool writeDepth);
-    void copyResolvedSceneColor(VkCommandBuffer commandBuffer, VkImage resolvedColorImage);
     void recordUiRendering(VkCommandBuffer commandBuffer, VkImageView colorView, const UiDrawData& uiDrawData);
     void recordDebugUiRendering(VkCommandBuffer commandBuffer, VkImageView colorView) const;
     [[nodiscard]] TileRenderLayout calculateTileRenderLayout(const RenderFrameData& frameData) const;
@@ -210,21 +175,7 @@ private:
 
     [[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
     [[nodiscard]] bool isDeviceSuitable(VkPhysicalDevice device) const;
-    [[nodiscard]] VkSurfaceFormatKHR chooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& formats) const;
-    [[nodiscard]] VkPresentModeKHR choosePresentMode(const std::vector<VkPresentModeKHR>& modes) const;
-    [[nodiscard]] VkExtent2D chooseSwapchainExtent(const VkSurfaceCapabilitiesKHR& capabilities) const;
-    [[nodiscard]] VkShaderModule createShaderModule(const std::filesystem::path& path) const;
-    [[nodiscard]] VkPipeline createGraphicsPipeline(
-        VkShaderModule vertexShader,
-        VkShaderModule fragmentShader,
-        VkSampleCountFlagBits sampleCount,
-        VkFormat depthAttachmentFormat) const;
-    [[nodiscard]] VkPipeline createModelGraphicsPipeline(VkShaderModule vertexShader, VkShaderModule fragmentShader) const;
-    [[nodiscard]] std::array<VkPipeline, 2> createGraphicsPipelineLibraries(VkShaderModule vertexShader, VkShaderModule fragmentShader) const;
     [[nodiscard]] VkSampleCountFlagBits sampleCountForMode(AntiAliasingMode mode) const;
-    [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
-    [[nodiscard]] OwnedBuffer createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) const;
-    [[nodiscard]] VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectMask) const;
     [[nodiscard]] bool msaaEnabled() const;
     [[nodiscard]] uint32_t sampleCountValue() const;
 
@@ -240,39 +191,16 @@ private:
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     VkQueue presentQueue_ = VK_NULL_HANDLE;
 
-    VkSwapchainKHR swapchain_ = VK_NULL_HANDLE;
-    VkFormat swapchainFormat_ = VK_FORMAT_UNDEFINED;
     VkFormat depthFormat_ = VK_FORMAT_D32_SFLOAT;
     VkFormat shadowFormat_ = VK_FORMAT_D32_SFLOAT;
-    VkExtent2D swapchainExtent_ {};
-    std::vector<SwapchainImage> swapchainImages_;
-    OwnedImage msaaColorImage_ {};
-    OwnedImage depthImage_ {};
-    OwnedImage shadowImage_ {};
-    OwnedImage sceneColorImage_ {};
-    VkImageLayout shadowImageLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
-    VkImageLayout sceneColorImageLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
-    VkSampler shadowSampler_ = VK_NULL_HANDLE;
-    VkSampler sceneColorSampler_ = VK_NULL_HANDLE;
-    VkDescriptorSetLayout descriptorSetLayout_ = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool_ = VK_NULL_HANDLE;
-    VkDescriptorSet descriptorSet_ = VK_NULL_HANDLE;
+    VulkanSwapchainResources swapchainResources_;
+    VulkanShadowPass shadowPass_;
+    VulkanSsaoPass ssaoPass_;
+    VulkanSceneDescriptors sceneDescriptors_;
 
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
-    std::array<VkPipeline, 2> pipelineLibraries_ {};
-    VkPipeline pipeline_ = VK_NULL_HANDLE;
-    VkPipeline uiPipeline_ = VK_NULL_HANDLE;
-    VkPipeline ssaoPipeline_ = VK_NULL_HANDLE;
-    VkPipeline ssaoCompositePipeline_ = VK_NULL_HANDLE;
-    VkPipeline ssaoVisualizePipeline_ = VK_NULL_HANDLE;
-    VkPipeline shadowPipeline_ = VK_NULL_HANDLE;
-    VkPipeline modelPipeline_ = VK_NULL_HANDLE;
-    VkPipeline modelShadowPipeline_ = VK_NULL_HANDLE;
+    VulkanPipelineFactory pipelines_;
     VulkanModelResources modelResources_;
-    OwnedImage resolveDepthImage_ {};
-    OwnedImage ssaoImage_ {};
-    VkSampler ssaoSampler_ = VK_NULL_HANDLE;
 
     static constexpr uint32_t maxFramesInFlight_ = 2;
     std::array<FrameResources, maxFramesInFlight_> frames_ {};
@@ -281,7 +209,6 @@ private:
     VkSampleCountFlagBits activeSampleCount_ = VK_SAMPLE_COUNT_1_BIT;
     bool wireframeEnabled_ = false;
     bool wideLinesSupported_ = false;
-    bool depthLayoutInitialized_ = false;
     float wireframeLineWidth_ = 1.0f;
     std::array<float, 2> wireframeLineWidthRange_ { 1.0f, 1.0f };
     mutable RenderStats pendingStats_ {};

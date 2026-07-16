@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/render/RenderAssetCatalog.hpp"
+#include "engine/render/SkinnedMeshUpdater.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -12,15 +13,11 @@
 
 namespace sokoban {
 
-// Owns all model-specific GPU and animation resources. The renderer provides
-// the Vulkan context, then consumes lightweight buffer/texture views.
+// Owns static model meshes, textures, and catalog material bindings. Animation
+// selection and skinned-mesh updates are delegated to focused components.
 class VulkanModelResources {
 public:
-    struct MeshView {
-        VkBuffer vertexBuffer = VK_NULL_HANDLE;
-        VkBuffer indexBuffer = VK_NULL_HANDLE;
-        uint32_t indexCount = 0;
-    };
+    using MeshView = SkinnedMeshUpdater::MeshView;
 
     struct TextureView {
         VkImageView imageView = VK_NULL_HANDLE;
@@ -72,7 +69,6 @@ private:
         OwnedBuffer vertexBuffer {};
         OwnedBuffer indexBuffer {};
         uint32_t indexCount = 0;
-        uint32_t vertexCount = 0;
     };
 
     struct TextureResource {
@@ -83,7 +79,6 @@ private:
     void createModels();
     void createTextures();
     [[nodiscard]] GpuMesh uploadMesh(const MeshData& mesh) const;
-    void updateMeshVertices(const GpuMesh& gpuMesh, const std::vector<MeshVertex>& vertices) const;
     void createTexture(const std::filesystem::path& path, OwnedImage& image, VkSampler& sampler);
     void destroyTexture(OwnedImage& image, VkSampler& sampler);
     void destroyMesh(GpuMesh& mesh) const;
@@ -105,18 +100,8 @@ private:
     std::filesystem::path assetRoot_;
 
     std::array<GpuMesh, static_cast<std::size_t>(RenderModel::Count)> meshes_ {};
-    SkinnedMeshData rogueSkinnedMesh_ {};
-    std::array<GltfAnimationClip, static_cast<std::size_t>(RenderAnimation::Count)> animationClips_ {};
-
-    RenderAnimation activeRogueAnimation_ = RenderAnimation::None;
-    float activeRogueAnimationTime_ = -1.0f;
-    RenderAnimation rogueFadeFromAnimation_ = RenderAnimation::None;
-    float rogueFadeFromTime_ = 0.0f;
-    float rogueFadeElapsed_ = 0.0f;
-    const GltfAnimationClip* previewClip_ = nullptr;
-    float previewTimeSeconds_ = 0.0f;
-    const GltfAnimationClip* activePreviewClip_ = nullptr;
-    float activePreviewTime_ = -1.0f;
+    AnimationController animationController_ {};
+    SkinnedMeshUpdater skinnedMeshUpdater_ {};
 
     std::vector<TextureResource> textures_;
 };
