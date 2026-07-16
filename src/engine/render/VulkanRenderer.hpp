@@ -136,8 +136,11 @@ private:
         bool storeColor,
         bool loadDepth,
         bool writeDepth);
-    void recordUiRendering(VkCommandBuffer commandBuffer, VkImageView colorView, const UiDrawData& uiDrawData);
-    void recordDebugUiRendering(VkCommandBuffer commandBuffer, VkImageView colorView) const;
+    void recordOverlayRendering(
+        VkCommandBuffer commandBuffer,
+        VkImage colorImage,
+        VkImageView colorView,
+        const UiDrawData& uiDrawData);
     [[nodiscard]] TileRenderLayout calculateTileRenderLayout(const RenderFrameData& frameData) const;
     [[nodiscard]] IsoRenderLayout calculateIsoRenderLayout(const RenderFrameData& frameData) const;
     [[nodiscard]] ShadowRenderLayout calculateShadowRenderLayout(const RenderFrameData& frameData) const;

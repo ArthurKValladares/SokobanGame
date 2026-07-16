@@ -944,8 +944,11 @@ void VulkanRenderer::recordCommandBuffer(
         },
         pendingStats_);
 
-    recordUiRendering(commandBuffer, swapchainResources_.imageView(imageIndex), uiDrawData);
-    recordDebugUiRendering(commandBuffer, swapchainResources_.imageView(imageIndex));
+    recordOverlayRendering(
+        commandBuffer,
+        swapchainResources_.image(imageIndex),
+        swapchainResources_.imageView(imageIndex),
+        uiDrawData);
     swapchainResources_.endFrame(commandBuffer, imageIndex, pendingStats_);
 
     vkCheck(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer failed");
@@ -1178,94 +1181,108 @@ void VulkanRenderer::recordScenePass(
     vkCmdEndRendering(commandBuffer);
 }
 
-void VulkanRenderer::recordUiRendering(VkCommandBuffer commandBuffer, VkImageView colorView, const UiDrawData& uiDrawData)
+void VulkanRenderer::recordOverlayRendering(
+    VkCommandBuffer commandBuffer,
+    VkImage colorImage,
+    VkImageView colorView,
+    const UiDrawData& uiDrawData)
 {
-    if (uiDrawData.commands.empty() || uiDrawData.viewportSize.x <= 0.0f || uiDrawData.viewportSize.y <= 0.0f) {
+    const bool hasGameUi = !uiDrawData.commands.empty() &&
+        uiDrawData.viewportSize.x > 0.0f &&
+        uiDrawData.viewportSize.y > 0.0f;
+#if !SOKOBAN_ENABLE_DEBUG_UI
+    if (!hasGameUi) {
         return;
     }
-
-    VkRenderingAttachmentInfo colorAttachment {
-        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView = colorView,
-        .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-    };
-
-    VkRenderingInfo renderingInfo {
-        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-        .renderArea = { .offset = { 0, 0 }, .extent = swapchainResources_.extent() },
-        .layerCount = 1,
-        .colorAttachmentCount = 1,
-        .pColorAttachments = &colorAttachment,
-    };
-
-    vkCmdBeginRendering(commandBuffer, &renderingInfo);
-    ++pendingStats_.renderPasses;
-
-    VkViewport viewport {
-        .x = 0.0f,
-        .y = static_cast<float>(swapchainResources_.extent().height),
-        .width = static_cast<float>(swapchainResources_.extent().width),
-        .height = -static_cast<float>(swapchainResources_.extent().height),
-        .minDepth = 0.0f,
-        .maxDepth = 1.0f,
-    };
-    VkRect2D scissor {
-        .offset = { 0, 0 },
-        .extent = swapchainResources_.extent(),
-    };
-
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.ui());
-    ++pendingStats_.pipelineBinds;
-    if (sceneDescriptors_.set()) {
-        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.layout(), 0, 1, &sceneDescriptors_.set(), 0, nullptr);
-    }
-    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-    vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
-    vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
-    vkCmdSetPrimitiveTopology(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-    vkCmdSetLineWidth(commandBuffer, 1.0f);
-    vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE);
-    vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
-    vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_ALWAYS);
-
-    const RenderFrameData::Lighting unlitLighting {};
-    for (const UiDrawCommand& command : uiDrawData.commands) {
-        drawUiRect(commandBuffer, command, uiDrawData.viewportSize, unlitLighting);
-    }
-
-    vkCmdEndRendering(commandBuffer);
-}
-
-void VulkanRenderer::recordDebugUiRendering(VkCommandBuffer commandBuffer, VkImageView colorView) const
-{
-#if SOKOBAN_ENABLE_DEBUG_UI
-    VkRenderingAttachmentInfo colorAttachment {
-        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView = colorView,
-        .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-    };
-
-    VkRenderingInfo renderingInfo {
-        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-        .renderArea = { .offset = { 0, 0 }, .extent = swapchainResources_.extent() },
-        .layerCount = 1,
-        .colorAttachmentCount = 1,
-        .pColorAttachments = &colorAttachment,
-    };
-
-    vkCmdBeginRendering(commandBuffer, &renderingInfo);
-    ++pendingStats_.renderPasses;
-    renderDebugUi(commandBuffer);
-    vkCmdEndRendering(commandBuffer);
-#else
-    (void)commandBuffer;
-    (void)colorView;
 #endif
+
+    // Make prior scene/post-process writes visible to this attachment LOAD.
+    VkImageMemoryBarrier2 overlayBarrier {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = colorImage,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+    VkDependencyInfo overlayDependency {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &overlayBarrier,
+    };
+    vkCmdPipelineBarrier2(commandBuffer, &overlayDependency);
+    ++pendingStats_.imageBarriers;
+
+    VkRenderingAttachmentInfo colorAttachment {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView = colorView,
+        .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+    };
+
+    VkRenderingInfo renderingInfo {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+        .renderArea = { .offset = { 0, 0 }, .extent = swapchainResources_.extent() },
+        .layerCount = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &colorAttachment,
+    };
+
+    vkCmdBeginRendering(commandBuffer, &renderingInfo);
+    ++pendingStats_.renderPasses;
+
+    if (hasGameUi) {
+        VkViewport viewport {
+            .x = 0.0f,
+            .y = static_cast<float>(swapchainResources_.extent().height),
+            .width = static_cast<float>(swapchainResources_.extent().width),
+            .height = -static_cast<float>(swapchainResources_.extent().height),
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+        };
+        VkRect2D scissor {
+            .offset = { 0, 0 },
+            .extent = swapchainResources_.extent(),
+        };
+
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.ui());
+        ++pendingStats_.pipelineBinds;
+        if (sceneDescriptors_.set()) {
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.layout(), 0, 1, &sceneDescriptors_.set(), 0, nullptr);
+        }
+        vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+        vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+        vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
+        vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+        vkCmdSetPrimitiveTopology(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+        vkCmdSetLineWidth(commandBuffer, 1.0f);
+        vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE);
+        vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
+        vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_ALWAYS);
+
+        const RenderFrameData::Lighting unlitLighting {};
+        for (const UiDrawCommand& command : uiDrawData.commands) {
+            drawUiRect(commandBuffer, command, uiDrawData.viewportSize, unlitLighting);
+        }
+    }
+
+#if SOKOBAN_ENABLE_DEBUG_UI
+    renderDebugUi(commandBuffer);
+#endif
+    vkCmdEndRendering(commandBuffer);
 }
 
 VulkanRenderer::TileRenderLayout VulkanRenderer::calculateTileRenderLayout(const RenderFrameData& frameData) const
