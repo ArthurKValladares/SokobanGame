@@ -326,6 +326,11 @@ VulkanRenderer::~VulkanRenderer()
 
 void VulkanRenderer::drawFrame(const RenderFrameData& frameData, const UiDrawData& uiDrawData)
 {
+    ensureAssets(renderAssetRequirementsForFrame(frameData));
+    if (modelResources_.publishReadyAssets(1)) {
+        sceneDescriptors_.update(descriptorResources());
+    }
+
     auto& frame = frames_[currentFrame_];
     vkCheck(vkWaitForFences(device_, 1, &frame.inFlight, VK_TRUE, UINT64_MAX), "vkWaitForFences failed");
     modelResources_.updateAnimations(frameData);
@@ -387,6 +392,18 @@ void VulkanRenderer::drawFrame(const RenderFrameData& frameData, const UiDrawDat
     }
 
     currentFrame_ = (currentFrame_ + 1) % maxFramesInFlight_;
+}
+
+void VulkanRenderer::preloadAssets(const RenderAssetRequirements& requirements)
+{
+    modelResources_.requestAssets(requirements);
+}
+
+void VulkanRenderer::ensureAssets(const RenderAssetRequirements& requirements)
+{
+    if (modelResources_.ensureAssets(requirements)) {
+        sceneDescriptors_.update(descriptorResources());
+    }
 }
 
 void VulkanRenderer::handleEvent(const SDL_Event& event)
@@ -550,6 +567,11 @@ VkSampleCountFlagBits VulkanRenderer::activeSampleCount() const
 RenderStats VulkanRenderer::renderStats() const
 {
     return lastStats_;
+}
+
+VulkanModelResources::LoadingStats VulkanRenderer::assetLoadingStats() const
+{
+    return modelResources_.loadingStats();
 }
 
 bool VulkanRenderer::wireframeEnabled() const

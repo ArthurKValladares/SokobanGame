@@ -48,6 +48,8 @@ private:
     [[nodiscard]] std::optional<MoveDirection> heldHorizontalDirection() const;
     [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;
     [[nodiscard]] bool screenExists(int levelIndex, int screenIndex) const;
+    [[nodiscard]] RenderAssetRequirements levelAssetRequirements(int levelIndex) const;
+    void preloadUpcomingAssets();
     [[nodiscard]] RenderFrameData buildRenderFrame() const;
 
     Window window_;

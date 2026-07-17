@@ -1,6 +1,8 @@
 #pragma once
 
+#include "engine/render/ImageData.hpp"
 #include "engine/render/RenderAssetCatalog.hpp"
+#include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/SkinnedMeshUpdater.hpp"
 
 #include <vulkan/vulkan.h>
@@ -8,13 +10,17 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
+#include <future>
+#include <optional>
+#include <variant>
 #include <vector>
 
 namespace sokoban {
 
-// Owns static model meshes, textures, and catalog material bindings. Animation
-// selection and skinned-mesh updates are delegated to focused components.
+// Owns lazy CPU preparation and render-thread Vulkan publication for model
+// meshes, textures, and animation clips. Worker tasks never touch Vulkan.
 class VulkanModelResources {
 public:
     using MeshView = SkinnedMeshUpdater::MeshView;
@@ -31,6 +37,19 @@ public:
         uint32_t textureIndex = 0;
     };
 
+    struct LoadingStats {
+        uint32_t loadedModels = 0;
+        uint32_t pendingModels = 0;
+        uint32_t totalModels = 0;
+        uint32_t loadedTextures = 0;
+        uint32_t pendingTextures = 0;
+        uint32_t totalTextures = 0;
+        uint32_t loadedAnimations = 0;
+        uint32_t pendingAnimations = 0;
+        uint32_t totalAnimations = 0;
+        uint32_t failedAssets = 0;
+    };
+
     VulkanModelResources() = default;
     ~VulkanModelResources();
 
@@ -45,6 +64,15 @@ public:
         std::filesystem::path assetRoot);
     void destroy();
 
+    // Starts independent CPU tasks and returns immediately.
+    void requestAssets(const RenderAssetRequirements& requirements);
+    // Publishes every required asset, waiting for CPU tasks when necessary.
+    // Returns true when texture descriptors must be refreshed.
+    [[nodiscard]] bool ensureAssets(const RenderAssetRequirements& requirements);
+    // Publishes up to maxPublications completed background tasks without
+    // waiting. Failed preloads are retained and rethrown if later required.
+    [[nodiscard]] bool publishReadyAssets(std::size_t maxPublications);
+
     void setAnimationPreview(const GltfAnimationClip* clip, float timeSeconds);
     void updateAnimations(const RenderFrameData& frameData);
 
@@ -52,8 +80,17 @@ public:
     [[nodiscard]] MaterialBinding materialForModel(RenderModel model) const;
     [[nodiscard]] std::vector<TextureView> textures() const;
     [[nodiscard]] uint32_t textureCount() const;
+    [[nodiscard]] LoadingStats loadingStats() const;
 
 private:
+    enum class LoadState {
+        Unrequested,
+        Loading,
+        CpuReady,
+        Ready,
+        Failed,
+    };
+
     struct OwnedBuffer {
         VkBuffer buffer = VK_NULL_HANDLE;
         VkDeviceMemory memory = VK_NULL_HANDLE;
@@ -76,10 +113,51 @@ private:
         VkSampler sampler = VK_NULL_HANDLE;
     };
 
-    void createModels();
-    void createTextures();
+    using PreparedModel = std::variant<MeshData, SkinnedMeshData>;
+
+    struct ModelSlot {
+        LoadState state = LoadState::Unrequested;
+        GpuMesh gpu {};
+        std::future<PreparedModel> future;
+        std::optional<PreparedModel> prepared;
+        std::exception_ptr failure;
+    };
+
+    struct TextureSlot {
+        LoadState state = LoadState::Unrequested;
+        TextureResource gpu {};
+        std::future<ImageData> future;
+        std::exception_ptr failure;
+    };
+
+    struct AnimationSlot {
+        LoadState state = LoadState::Unrequested;
+        std::future<GltfAnimationClip> future;
+        std::exception_ptr failure;
+    };
+
+    void requestModel(RenderModel model);
+    void requestTexture(std::size_t textureIndex);
+    void requestAnimation(RenderAnimation animation);
+    void requestModelDependencies(const ModelAssetDefinition& definition);
+
+    [[nodiscard]] bool publishModel(RenderModel model, bool wait);
+    [[nodiscard]] bool publishTexture(std::size_t textureIndex, bool wait);
+    [[nodiscard]] bool publishAnimation(RenderAnimation animation, bool wait);
+    void finalizeSkinnedMeshIfReady();
+    void throwIfFailed(
+        LoadState state,
+        const std::exception_ptr& failure,
+        const std::filesystem::path& path,
+        const char* kind) const;
+
+    [[nodiscard]] const ModelAssetDefinition& modelDefinition(RenderModel model) const;
+    [[nodiscard]] const AnimationAssetDefinition& animationDefinition(RenderAnimation animation) const;
+    [[nodiscard]] std::vector<bool> requiredTextures(const RenderAssetRequirements& requirements) const;
+    [[nodiscard]] bool assetsReady(const RenderAssetRequirements& requirements) const;
+
     [[nodiscard]] GpuMesh uploadMesh(const MeshData& mesh) const;
-    void createTexture(const std::filesystem::path& path, OwnedImage& image, VkSampler& sampler);
+    void createTexture(const ImageData& image, OwnedImage& gpuImage, VkSampler& sampler);
     void destroyTexture(OwnedImage& image, VkSampler& sampler);
     void destroyMesh(GpuMesh& mesh) const;
     [[nodiscard]] const GpuMesh& gpuMeshForModel(RenderModel model) const;
@@ -99,11 +177,12 @@ private:
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     std::filesystem::path assetRoot_;
 
-    std::array<GpuMesh, static_cast<std::size_t>(RenderModel::Count)> meshes_ {};
+    std::array<ModelSlot, static_cast<std::size_t>(RenderModel::Count)> models_ {};
+    std::array<AnimationSlot, static_cast<std::size_t>(RenderAnimation::Count)> animations_ {};
+    std::vector<TextureSlot> textures_;
+    TextureResource fallbackTexture_ {};
     AnimationController animationController_ {};
     SkinnedMeshUpdater skinnedMeshUpdater_ {};
-
-    std::vector<TextureResource> textures_;
 };
 
 } // namespace sokoban

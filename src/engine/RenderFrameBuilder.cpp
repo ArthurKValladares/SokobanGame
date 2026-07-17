@@ -3,6 +3,7 @@
 #include "engine/Config.hpp"
 #include "engine/Rules.hpp"
 #include "engine/TileTypes.hpp"
+#include "engine/render/RenderAssetRequirements.hpp"
 
 #include <algorithm>
 #include <array>
@@ -21,29 +22,6 @@ struct StaticRenderCell {
     float height = 0.0f;
     uint32_t modelRotationQuarterTurns = 0;
 };
-
-RenderModel renderModelForTile(TileType tile)
-{
-    switch (tile) {
-    case TileType::Wall:
-        return RenderModel::BricksA;
-    case TileType::Rock:
-        return RenderModel::Stone;
-    case TileType::Water:
-        return RenderModel::Water;
-    case TileType::Ice:
-        return RenderModel::Glass;
-    case TileType::ConveyorUp:
-    case TileType::ConveyorDown:
-    case TileType::ConveyorRight:
-    case TileType::ConveyorLeft:
-        return RenderModel::Conveyor;
-    case TileType::Player:
-        return RenderModel::Rogue;
-    default:
-        return RenderModel::Cube;
-    }
-}
 
 void applyTileScale(RenderFrameData::Tile& tile, float scale)
 {

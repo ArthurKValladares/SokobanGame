@@ -41,6 +41,8 @@ public:
     VulkanRenderer& operator=(const VulkanRenderer&) = delete;
 
     void drawFrame(const RenderFrameData& frameData, const UiDrawData& uiDrawData);
+    void preloadAssets(const RenderAssetRequirements& requirements);
+    void ensureAssets(const RenderAssetRequirements& requirements);
     void handleEvent(const SDL_Event& event);
     void beginDebugUiFrame();
     [[nodiscard]] bool wantsKeyboardCapture() const;
@@ -50,6 +52,7 @@ public:
     [[nodiscard]] AntiAliasingMode antiAliasingMode() const;
     [[nodiscard]] VkSampleCountFlagBits activeSampleCount() const;
     [[nodiscard]] RenderStats renderStats() const;
+    [[nodiscard]] VulkanModelResources::LoadingStats assetLoadingStats() const;
     void setAntiAliasingMode(AntiAliasingMode mode);
     [[nodiscard]] bool wireframeEnabled() const;
     void setWireframeEnabled(bool enabled);

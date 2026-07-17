@@ -402,6 +402,7 @@ void Application::loadCurrentScreen()
 {
     applyLevel(
         Level::loadFromFile(screenPath(currentLevel_, currentScreen_)));
+    preloadUpcomingAssets();
     levelEditor_.setPlayingDraft(false);
     levelEditor_.setEditingDocument(false);
     editorHoverCell_.reset();
@@ -415,6 +416,7 @@ void Application::loadCurrentScreen()
 
 void Application::applyLevel(Level level)
 {
+    renderer_.ensureAssets(renderAssetRequirementsForLevel(level));
     level_ = std::move(level);
     gameplaySession_.reset(level_);
     presentation_.resetEntities(gameplaySession_.state());
@@ -582,6 +584,37 @@ bool Application::screenExists(int levelIndex, int screenIndex) const
     }
     return std::filesystem::exists(
         screenPath(levelIndex, screenIndex));
+}
+
+RenderAssetRequirements Application::levelAssetRequirements(int levelIndex) const
+{
+    RenderAssetRequirements requirements;
+    for (int screenIndex = 0; screenExists(levelIndex, screenIndex); ++screenIndex) {
+        try {
+            requirements.merge(renderAssetRequirementsForLevel(
+                Level::loadFromFile(screenPath(levelIndex, screenIndex))));
+        } catch (const std::exception& error) {
+            std::cerr << "asset preload skipped "
+                      << screenPath(levelIndex, screenIndex).string()
+                      << ": " << error.what() << '\n';
+        }
+    }
+    return requirements;
+}
+
+void Application::preloadUpcomingAssets()
+{
+    RenderAssetRequirements requirements =
+        levelAssetRequirements(currentLevel_);
+
+    int nextLevel = currentLevel_ + 1;
+    if (!screenExists(nextLevel, 0)) {
+        nextLevel = 0;
+    }
+    if (nextLevel != currentLevel_ && screenExists(nextLevel, 0)) {
+        requirements.merge(levelAssetRequirements(nextLevel));
+    }
+    renderer_.preloadAssets(requirements);
 }
 
 RenderFrameData Application::buildRenderFrame() const

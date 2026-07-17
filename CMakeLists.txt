@@ -120,6 +120,7 @@ add_executable(sokoban
     src/engine/render/AnimationController.cpp
     src/engine/render/GltfMesh.cpp
     src/engine/render/ImageData.cpp
+    src/engine/render/RenderAssetRequirements.cpp
     src/engine/render/SkinnedMeshUpdater.cpp
     src/engine/render/VulkanModelResources.cpp
     src/engine/render/VulkanPipelineFactory.cpp
@@ -251,6 +252,7 @@ if(SOKOBAN_BUILD_TESTS)
         src/engine/RenderFrameBuilder.cpp
         src/engine/Rules.cpp
         src/engine/TileTypes.cpp
+        src/engine/render/RenderAssetRequirements.cpp
     )
     target_include_directories(sokoban_presentation_tests PRIVATE src)
     if(MSVC)
@@ -259,6 +261,20 @@ if(SOKOBAN_BUILD_TESTS)
         target_compile_options(sokoban_presentation_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME presentation COMMAND sokoban_presentation_tests)
+
+    add_executable(sokoban_asset_requirements_tests
+        tests/AssetRequirementsTests.cpp
+        src/engine/Level.cpp
+        src/engine/TileTypes.cpp
+        src/engine/render/RenderAssetRequirements.cpp
+    )
+    target_include_directories(sokoban_asset_requirements_tests PRIVATE src)
+    if(MSVC)
+        target_compile_options(sokoban_asset_requirements_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_asset_requirements_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME asset_requirements COMMAND sokoban_asset_requirements_tests)
 
     add_executable(sokoban_task_tests
         tests/TaskSystemTests.cpp

@@ -356,6 +356,8 @@ void ApplicationDebugUi::draw(const Context& context) const
 
     if (ImGui::CollapsingHeader("Rendering Stats")) {
         const RenderStats renderStats = context.renderer.renderStats();
+        const VulkanModelResources::LoadingStats assetStats =
+            context.renderer.assetLoadingStats();
         const ImGuiIO& io = ImGui::GetIO();
         ImGui::Text(
             "Frame %.3f ms (%.1f FPS)",
@@ -384,6 +386,24 @@ void ApplicationDebugUi::draw(const Context& context) const
         ImGui::Text("Pipelines bound %u", renderStats.pipelineBinds);
         ImGui::Text("Render passes %u", renderStats.renderPasses);
         ImGui::Text("Image barriers %u", renderStats.imageBarriers);
+        ImGui::Text(
+            "Models %u/%u loaded, %u pending",
+            assetStats.loadedModels,
+            assetStats.totalModels,
+            assetStats.pendingModels);
+        ImGui::Text(
+            "Textures %u/%u loaded, %u pending",
+            assetStats.loadedTextures,
+            assetStats.totalTextures,
+            assetStats.pendingTextures);
+        ImGui::Text(
+            "Animations %u/%u loaded, %u pending",
+            assetStats.loadedAnimations,
+            assetStats.totalAnimations,
+            assetStats.pendingAnimations);
+        if (assetStats.failedAssets > 0) {
+            ImGui::Text("Asset load failures %u", assetStats.failedAssets);
+        }
         ImGui::Text(
             "Pipeline rebuilds %llu",
             static_cast<unsigned long long>(renderStats.pipelineRebuilds));
