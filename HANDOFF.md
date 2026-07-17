@@ -31,6 +31,7 @@ Main dependencies:
 - Visual Studio 2022 / C++20 compiler
 - SDL3 is vendored in `third_party/SDL` and built statically.
 - ImGui is optional but used in Debug if `third_party/imgui` exists.
+- miniaudio is vendored in `third_party/miniaudio` (header-only; compiled once in `src/engine/MiniaudioImpl.cpp` together with its bundled `extras/stb_vorbis.c` for OGG decoding — that TU builds with warnings disabled and nothing else may define `MINIAUDIO_IMPLEMENTATION`).
 
 Common commands:
 
@@ -92,18 +93,20 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
 - `src/engine/RenderFrameBuilder.*`: SDL/Vulkan-free construction of gameplay and editor `RenderFrameData`. Owns tile/model mapping, static geometry, water edges, ladder rungs, editor previews/pick-only cells, dynamic entities, tile scaling, and conveyor texture offsets.
 - `src/engine/ApplicationDebugUi.*`: Debug-only ImGui adapter for engine statistics and tuning. Edits `PresentationSettings` and calls the public `GameplaySession`/`VulkanRenderer` controls instead of storing application logic.
 - `src/engine/AnimationPreviewDebugUi.*`: Debug-only owner of animation asset scanning, clip selection, preview playback state, and renderer preview delegation.
+- `src/engine/AudioSystem.*`: miniaudio-backed sound playback behind a pimpl (`EngineHandle`), so no miniaudio types leak into headers. Preloads the three footstep OGGs (`footstep04/05/06.ogg`, copied by CMake from the Kenney RPG Audio pack into `build assets/audio/`) with `MA_SOUND_FLAG_DECODE` into a never-reallocated `std::vector<ma_sound>`. `update(dt, playerWalking)` drives the pure `FootstepCadence` struct (first step fires immediately on walk start, then one per `footstepIntervalSeconds`, burst-capped with debt drop after hitches) and plays a random non-repeating footstep. Degrades gracefully (`available()` false, silent) if the device or files are missing. `Application::update` feeds it `presentation_.player().motion.moving` on the normal gameplay path only, so dialogs/editor are silent. Defaults come from `config::masterVolume` / `config::footstepIntervalSeconds`; both are runtime-tunable in Debug UI > Audio (tune Footstep Interval there to match the walk animation).
 - `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, action history, a branch-safe undo stack, automatic world steps, and the post-undo automatic-motion pause. Emits `Action` snapshots for `Application` to animate. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
 - `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags + slide momentum) plus pure functions in `sokoban::rules` — `step` advances the whole world one discrete step (simultaneous one-tile moves, pushes, ladder climbs, momentum, falls, water, conveyors); `hasPendingMotion` reports whether the world would keep moving without input; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
 - `src/engine/Level.*`: level file parsing, serialization, layered grid storage, walkability/support rules, player/movable extraction. Tested by `tests/LevelTests.cpp` (`sokoban_level_tests`).
-- `src/engine/TaskSystem.*`: standard-library-only worker pool for task-based parallelism. `taskSystem().enqueue(fn)` returns a future (exceptions propagate on get); `parallelFor(count, minChunk, fn(begin, end))` runs chunked loops with the calling thread participating. Tasks must not block on other tasks (no dependency graph yet). Used by GLTF vertex skinning (`skinWithPoses`) and parallel CPU-side asset loading in `VulkanModelResources`; GPU uploads stay on the main thread. Tested by `tests/TaskSystemTests.cpp` (`sokoban_task_tests`).
+- `src/engine/TaskSystem.*`: standard-library-only worker pool for task-based parallelism. `taskSystem().enqueue(fn)` returns a future (exceptions propagate on get); `parallelFor(count, minChunk, fn(begin, end))` runs chunked loops with the calling thread participating. Tasks must not block on other tasks (no dependency graph yet). Used by GLTF vertex skinning (`skinWithPoses`) and lazy CPU-side model/texture/animation preparation in `VulkanModelResources`; Vulkan publication stays on the render thread. Tested by `tests/TaskSystemTests.cpp` (`sokoban_task_tests`).
 - `src/engine/TileTypes.*`: tile enum, character mapping, colors, helper predicates such as `tileTypeAllowsEntity`.
 - `src/engine/LevelEditor.*`: headless editor model and command API. Owns document state/history, tile validation, draft construction, level load/save, source/runtime mirroring, browser enumeration, screen/level renumbering, soft-delete/restore, and guarded permanent deletion. It has no SDL, Vulkan, or ImGui dependency and is tested by `tests/LevelEditorTests.cpp` (`sokoban_level_editor_tests`).
 - `src/engine/LevelEditorDebugUi.*`: Debug-only ImGui adapter for `LevelEditor`. Owns widget text buffers and confirmation-modal presentation only; every editor state transition and filesystem action is delegated to the headless API.
 - `src/engine/render/RenderTypes.hpp`: renderer-facing frame contract and model/animation enums, independent of the Vulkan facade.
 - `src/engine/render/RenderAssetCatalog.hpp`: typed model, texture, animation, geometry, and material metadata consumed by the generated asset catalog.
+- `src/engine/render/RenderAssetRequirements.*`: Vulkan-free model/animation requirement sets plus shared tile-to-model mapping. Computes requirements from a loaded `Level` for prefetching or from `RenderFrameData` as a draw-time safety net. Tested by `tests/AssetRequirementsTests.cpp` (`sokoban_asset_requirements_tests`).
 - `src/engine/render/AnimationController.*`: Vulkan-free owner of gameplay animation clips, Rogue clip selection, preview overrides, deduplication, and crossfade state. It emits immutable skinning requests and is tested by `tests/AnimationControllerTests.cpp` (`sokoban_animation_controller_tests`).
 - `src/engine/render/SkinnedMeshUpdater.*`: owns the Rogue's skinned source mesh and dynamic Vulkan vertex/index buffers. It consumes `AnimationController` requests, performs CPU skinning/blending, and uploads changed vertices.
-- `src/engine/render/VulkanModelResources.*`: owns static model meshes, texture images/samplers, catalog material bindings, and asset loading. It orchestrates `AnimationController` and `SkinnedMeshUpdater` while exposing lightweight mesh/material/texture views to the renderer.
+- `src/engine/render/VulkanModelResources.*`: owns lazy per-asset load states, TaskSystem futures, static model meshes, texture images/samplers, catalog material bindings, and failure retention. CPU parsing/decoding runs on workers; completed results are published to Vulkan on the render thread. It orchestrates `AnimationController` and `SkinnedMeshUpdater` while exposing lightweight mesh/material/texture views and loading statistics to the renderer.
 - `src/engine/render/VulkanSsaoPass.*`: owns the swapchain-sized R8 ambient-occlusion target and sampler, plus depth/AO transitions and the fullscreen AO/composite recording sequence. Pipelines and scene descriptors are passed in as non-owning handles.
 - `src/engine/render/VulkanShadowPass.*`: owns the fixed-size shadow depth image, sampler, and image-layout state. It records pass setup/transitions while `VulkanRenderer` supplies the scene-specific shadow draw traversal between `begin` and `end`.
 - `src/engine/render/VulkanSwapchainResources.*`: owns the swapchain, image views, MSAA color attachment, scene depth/resolve-depth, scene-color sampling target, acquire/present calls, resize lifecycle, frame attachment transitions, and the ice-blur scene-color copy.
@@ -353,6 +356,35 @@ CMake asset pipeline:
   compile time. Adding a model no longer requires editing renderer loading code
   or adding individual copy commands to `CMakeLists.txt`.
 
+Runtime lazy asset pipeline:
+
+- Renderer creation allocates only a 1x1 white fallback texture needed to keep
+  every descriptor-array slot valid. Catalog models, textures, and animations
+  are not loaded up front.
+- `Application::applyLevel` computes the active screen's requirements and calls
+  `VulkanRenderer::ensureAssets`. Required CPU tasks are scheduled together and
+  may execute in parallel; the call blocks only when an asset needed now has
+  not finished preparing.
+- After a normal screen load, `Application` scans every screen in the current
+  level and every screen in the next level, merges their requirements, and
+  calls `VulkanRenderer::preloadAssets`. Level files are small and read on the
+  main thread; model parsing, animation parsing, and WIC image decoding run as
+  independent TaskSystem jobs.
+- `VulkanRenderer::drawFrame` verifies the exact frame requirements and then
+  publishes at most one completed preload per frame. Loaded assets remain
+  cached for the process lifetime; there is no eviction policy yet.
+- Static/skinned Vulkan buffers, texture images, upload command buffers, queue
+  submission, and descriptor updates all happen on the render thread. Texture
+  uploads use the existing graphics queue and command pool and wait for that
+  queue before replacing shared descriptors. There are deliberately no worker
+  command pools, dedicated transfer queues, or concurrent Vulkan uploads.
+- Background failures are retained in the asset slot, counted in Debug UI, and
+  reported without interrupting the current level. If that asset later becomes
+  required, `ensureAssets` throws a contextual path/kind error.
+- Debug UI > Rendering Stats reports loaded/pending model, texture, and
+  animation counts plus failures. Unrequested assets are the difference between
+  total, loaded, pending, and failed counts.
+
 GLTF loader notes:
 
 - `GltfMesh.*` is a small custom loader, not a general-purpose robust GLTF implementation.
@@ -396,6 +428,14 @@ If making player-facing menus, pause screens, settings, or polished editor UI, p
 ## Recent Work Summary
 
 Major recent additions and fixes:
+
+- Replaced eager runtime catalog loading with a lazy, TaskSystem-backed asset
+  pipeline. The active screen is guaranteed before use, current/next-level
+  assets prepare in the background, and completed GPU resources are published
+  serially on the render thread at a one-asset-per-frame budget.
+- Added headless `RenderAssetRequirements` planning so level prefetch and frame
+  fallback use the same tile/model semantics as `RenderFrameBuilder`, with a
+  dedicated 26-check regression suite.
 
 - Replaced hard-coded asset and material plumbing with
   `cmake/AssetManifest.cmake`, generated typed C++ metadata, and a Vulkan model
@@ -452,22 +492,25 @@ Major recent additions and fixes:
 
 At the time this handoff was updated:
 
-- The working tree contains the uncommitted Application settings,
-  presentation, render-frame builder, and debug-adapter split described above.
-- The full Debug build and a Vulkan-validation runtime smoke test passed after
-  this split.
-- All seven CTest suites pass: rules 131 checks, level parsing 42 checks,
+- Commit `54a5324` contains the lazy asset pipeline,
+  `RenderAssetRequirements`, level prefetch integration, diagnostics, and tests
+  described above.
+- Full Debug and Release builds passed from the clean `out/visual-studio` build
+  tree. A Debug Vulkan-validation visual runtime smoke test rendered level 0
+  correctly, and the process remained healthy while background tasks completed.
+- All eight CTest suites pass: rules 131 checks, level parsing 42 checks,
   gameplay session 101 checks, level editor 88 checks, animation controller 40
-  checks, presentation 62 checks, and task system 11 checks (475 total).
+  checks, presentation 62 checks, asset requirements 26 checks, and task system
+  11 checks (501 total).
 
 Known useful verification commands:
 
 ```powershell
 git status --short
 rg -n "KayKit_Adventurers_2\.0_FREE|KayKit_BlockBits_1\.0_FREE" .
-cmake --build build --config Debug
-ctest --test-dir build -C Debug --output-on-failure
-.\build\Debug\sokoban.exe
+cmake --build out\visual-studio --config Debug
+ctest --test-dir out\visual-studio -C Debug --output-on-failure
+.\out\visual-studio\Debug\sokoban.exe
 ```
 
 The `rg` command above should return no matches.
@@ -482,6 +525,11 @@ The `rg` command above should return no matches.
 - Keep runtime asset selection explicit through `cmake/AssetManifest.cmake` so
   the build directory contains only needed assets while CMake and C++ consume
   the same metadata.
+- Keep runtime asset requirement planning in the Vulkan-free
+  `RenderAssetRequirements` layer. CPU file work may use `TaskSystem`, but all
+  Vulkan object creation, upload submission, and descriptor mutation must stay
+  on the render thread unless the queue/command-pool architecture is redesigned
+  and validated as a separate change.
 - Keep editor behavior in the headless `LevelEditor` API. ImGui and any future player-facing editor UI should be adapters that call it rather than owning document or filesystem logic.
 - Keep compile-time constants/defaults in `Config.hpp`, mutable presentation
   tuning in `PresentationSettings`, authoritative gameplay tuning/state in
@@ -501,6 +549,13 @@ High-value gameplay/editor work:
 
 Rendering/assets:
 
+- Add an explicit cache budget/eviction policy if the catalog grows enough for
+  lifetime caching to become expensive.
+- Extend generated material metadata with exact primitive-texture dependency
+  masks; `PrimitiveTextureIndex` models currently conservatively request every
+  catalog texture.
+- Add timing/history diagnostics for blocking `ensureAssets` calls and
+  background CPU preparation if asset stalls become difficult to reproduce.
 - Replace the custom GLTF parsing with a robust library if assets get more complex.
 - Improve visual consistency between procedural tiles and GLTF assets.
 - Verify model orientation/scale whenever a new asset is added.
@@ -523,7 +578,10 @@ Engineering:
   `LevelEditor` components with tests. `Application` still owns SDL input
   translation, editor pointer interaction, level progression, and modal flow;
   extract one of those only when it gains enough independent policy to test.
-- The `TaskSystem` gives the engine a multi-threading foundation; grow it by moving more per-frame work onto tasks (render-frame building, animation updates) and eventually adding task dependencies/graphs when systems need ordering. Keep the Vulkan queue single-threaded unless command-pool-per-thread work is done deliberately.
+- The `TaskSystem` now handles lazy CPU asset preparation as well as skinning.
+  Grow it by moving more independent CPU work onto tasks (render-frame building,
+  animation updates) and eventually adding task dependencies/graphs when
+  systems need ordering. Keep Vulkan publication render-thread-owned.
 - Add save format/versioning if level files evolve.
 - Review asset licensing/readme files before distribution.
 

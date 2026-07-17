@@ -7,6 +7,8 @@
 
 namespace sokoban {
 
+class AudioSystem;
+
 class ApplicationDebugUi {
 public:
     struct Context {
@@ -16,6 +18,7 @@ public:
         GameplaySession& gameplaySession;
         VulkanRenderer& renderer;
         PresentationSettings& settings;
+        AudioSystem& audio;
     };
 
     void draw(const Context& context) const;

@@ -87,13 +87,30 @@ add_custom_target(sokoban_shaders DEPENDS ${SHADER_OUTPUTS})
 
 file(GLOB_RECURSE LEVEL_SOURCES CONFIGURE_DEPENDS "${LEVEL_SOURCE_DIR}/*")
 
+set(AUDIO_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/Kenney Game Assets All-in-1 3.5.0/Audio/RPG Audio/Audio")
+set(AUDIO_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/audio")
+set(SOKOBAN_AUDIO_FILES
+    footstep02.ogg
+    footstep09.ogg
+)
+set(SOKOBAN_AUDIO_COPY_COMMANDS)
+set(SOKOBAN_AUDIO_DEPENDENCIES)
+foreach(audio_file IN LISTS SOKOBAN_AUDIO_FILES)
+    list(APPEND SOKOBAN_AUDIO_COPY_COMMANDS
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${AUDIO_SOURCE_DIR}/${audio_file}" "${AUDIO_OUTPUT_DIR}/${audio_file}")
+    list(APPEND SOKOBAN_AUDIO_DEPENDENCIES "${AUDIO_SOURCE_DIR}/${audio_file}")
+endforeach()
+
 add_custom_target(sokoban_assets
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/assets"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${AUDIO_OUTPUT_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E copy_directory "${LEVEL_SOURCE_DIR}" "${LEVEL_OUTPUT_DIR}"
     ${SOKOBAN_ASSET_COPY_COMMANDS}
+    ${SOKOBAN_AUDIO_COPY_COMMANDS}
     DEPENDS
         ${LEVEL_SOURCES}
         ${SOKOBAN_ASSET_DEPENDENCIES}
+        ${SOKOBAN_AUDIO_DEPENDENCIES}
     VERBATIM
 )
 
@@ -102,6 +119,7 @@ add_executable(sokoban
     src/engine/AnimationPreviewDebugUi.cpp
     src/engine/Application.cpp
     src/engine/ApplicationDebugUi.cpp
+    src/engine/AudioSystem.cpp
     src/engine/BoardLayout.cpp
     src/engine/DebugUi.cpp
     src/engine/GameplayPresentation.cpp
@@ -110,6 +128,7 @@ add_executable(sokoban
     src/engine/Level.cpp
     src/engine/LevelEditor.cpp
     src/engine/LevelEditorDebugUi.cpp
+    src/engine/MiniaudioImpl.cpp
     src/engine/PresentationSettings.cpp
     src/engine/RenderFrameBuilder.cpp
     src/engine/Rules.cpp
@@ -143,7 +162,13 @@ target_include_directories(sokoban PRIVATE
     third_party/imgui
     third_party/imgui/backends
     third_party/imgui/misc/cpp
+    third_party/miniaudio
 )
+if(MSVC)
+    set_source_files_properties(src/engine/MiniaudioImpl.cpp PROPERTIES COMPILE_OPTIONS /W0)
+else()
+    set_source_files_properties(src/engine/MiniaudioImpl.cpp PROPERTIES COMPILE_OPTIONS -w)
+endif()
 target_link_libraries(sokoban PRIVATE
     Vulkan::Vulkan
     Threads::Threads

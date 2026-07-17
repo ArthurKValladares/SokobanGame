@@ -1,5 +1,7 @@
 #include "engine/ApplicationDebugUi.hpp"
 
+#include "engine/AudioSystem.hpp"
+
 #include "engine/Config.hpp"
 #include "engine/Rules.hpp"
 #include "engine/TaskSystem.hpp"
@@ -227,6 +229,21 @@ void ApplicationDebugUi::draw(const Context& context) const
             ImGui::TextDisabled(
                 "Visual scale around each tile's bottom-center.");
             ImGui::TreePop();
+        }
+    }
+
+    if (ImGui::CollapsingHeader("Audio")) {
+        float volume = context.audio.masterVolume();
+        if (ImGui::SliderFloat("Master Volume", &volume, 0.0f, 1.0f, "%.2f")) {
+            context.audio.setMasterVolume(volume);
+        }
+        float footstepInterval = context.audio.footstepIntervalSeconds();
+        if (ImGui::DragFloat("Footstep Interval", &footstepInterval, 0.005f, 0.05f, 1.0f, "%.3f s")) {
+            context.audio.setFootstepIntervalSeconds(footstepInterval);
+        }
+        ImGui::TextDisabled("Footsteps play while the player walks or pushes.");
+        if (!context.audio.available()) {
+            ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f), "Audio unavailable (no device or missing files).");
         }
     }
 

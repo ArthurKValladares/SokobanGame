@@ -2,6 +2,7 @@
 
 #include "engine/AnimationPreviewDebugUi.hpp"
 #include "engine/ApplicationDebugUi.hpp"
+#include "engine/AudioSystem.hpp"
 #include "engine/GameplayPresentation.hpp"
 #include "engine/Input.hpp"
 #include "engine/GameplaySession.hpp"
@@ -56,6 +57,7 @@ private:
     VulkanRenderer renderer_;
     UiContext ui_;
     std::filesystem::path assetRoot_;
+    AudioSystem audioSystem_;
     Level level_;
     GameplaySession gameplaySession_;
     int currentLevel_ = 0;

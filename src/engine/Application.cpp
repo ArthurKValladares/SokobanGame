@@ -20,6 +20,7 @@ Application::Application()
     : window_("Sokoban 3D", 1280, 720)
     , renderer_(window_.nativeHandle(), SOKOBAN_ASSET_DIR)
     , assetRoot_(SOKOBAN_ASSET_DIR)
+    , audioSystem_(assetRoot_ / "audio")
 {
     presentationSettings_.normalize();
     loadCurrentScreen();
@@ -41,6 +42,7 @@ Application::Application()
             .gameplaySession = gameplaySession_,
             .renderer = renderer_,
             .settings = presentationSettings_,
+            .audio = audioSystem_,
         });
     });
     DebugUi::addWindow("Level Editor", [this] {
@@ -174,6 +176,7 @@ void Application::update(float dt)
 
     queuePressedCommands();
     advancePlayerMovement(dt);
+    audioSystem_.update(dt, presentation_.player().motion.moving);
 }
 
 void Application::drawEditorModeIndicator()
