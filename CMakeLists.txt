@@ -87,18 +87,30 @@ add_custom_target(sokoban_shaders DEPENDS ${SHADER_OUTPUTS})
 
 file(GLOB_RECURSE LEVEL_SOURCES CONFIGURE_DEPENDS "${LEVEL_SOURCE_DIR}/*")
 
-set(AUDIO_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/Kenney Game Assets All-in-1 3.5.0/Audio/RPG Audio/Audio")
+set(AUDIO_KENNEY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/Kenney Game Assets All-in-1 3.5.0/Audio")
 set(AUDIO_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/audio")
-set(SOKOBAN_AUDIO_FILES
-    footstep02.ogg
-    footstep09.ogg
+set(SOKOBAN_AUDIO_SOURCE_FILES
+    "${AUDIO_KENNEY_DIR}/Impact Sounds/Audio/footstep_concrete_000.ogg"
+    "${AUDIO_KENNEY_DIR}/Impact Sounds/Audio/footstep_concrete_001.ogg"
+    "${AUDIO_KENNEY_DIR}/Impact Sounds/Audio/footstep_concrete_002.ogg"
+    "${AUDIO_KENNEY_DIR}/Impact Sounds/Audio/footstep_concrete_003.ogg"
+    "${AUDIO_KENNEY_DIR}/Impact Sounds/Audio/footstep_concrete_004.ogg"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/custom/audio/stoneDragLoop1.ogg"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/custom/audio/stoneDragLoop2.ogg"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/custom/audio/stoneDragLoop3.ogg"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/custom/audio/stoneDragLoop4.ogg"
+    "${AUDIO_KENNEY_DIR}/Music Loops/Loops/Sad Town.ogg"
+    "${AUDIO_KENNEY_DIR}/Music Loops/Loops/Sad Descent.ogg"
+    "${AUDIO_KENNEY_DIR}/Music Loops/Loops/Mission Plausible.ogg"
+    "${AUDIO_KENNEY_DIR}/Music Loops/Loops/Space Cadet.ogg"
 )
 set(SOKOBAN_AUDIO_COPY_COMMANDS)
 set(SOKOBAN_AUDIO_DEPENDENCIES)
-foreach(audio_file IN LISTS SOKOBAN_AUDIO_FILES)
+foreach(audio_source IN LISTS SOKOBAN_AUDIO_SOURCE_FILES)
+    get_filename_component(audio_name "${audio_source}" NAME)
     list(APPEND SOKOBAN_AUDIO_COPY_COMMANDS
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${AUDIO_SOURCE_DIR}/${audio_file}" "${AUDIO_OUTPUT_DIR}/${audio_file}")
-    list(APPEND SOKOBAN_AUDIO_DEPENDENCIES "${AUDIO_SOURCE_DIR}/${audio_file}")
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${audio_source}" "${AUDIO_OUTPUT_DIR}/${audio_name}")
+    list(APPEND SOKOBAN_AUDIO_DEPENDENCIES "${audio_source}")
 endforeach()
 
 add_custom_target(sokoban_assets

@@ -7,7 +7,8 @@
 namespace sokoban::config {
 
 inline constexpr float stepDurationSeconds = 0.25f;
-inline constexpr float masterVolume = 0.005f;
+inline constexpr float masterVolume = 0.03f;
+inline constexpr float musicVolume = 0.5f; // relative to master
 inline constexpr float footstepIntervalSeconds = 0.25f; // one footstep per tile at the default step duration
 inline constexpr float boardPitchDegrees = 15.0f;
 inline constexpr float perspectiveFovDegrees = 35.0f;

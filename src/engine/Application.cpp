@@ -15,6 +15,21 @@
 #include <utility>
 
 namespace sokoban {
+namespace {
+
+// Each level loops one soundtrack across all of its screens.
+[[nodiscard]] const char* musicTrackForLevel(int level)
+{
+    switch (level) {
+    case 0: return "Sad Town.ogg";
+    case 1: return "Sad Descent.ogg";
+    case 2: return "Mission Plausible.ogg";
+    case 3: return "Space Cadet.ogg";
+    default: return nullptr;
+    }
+}
+
+} // namespace
 
 Application::Application()
     : window_("Sokoban 3D", 1280, 720)
@@ -161,14 +176,17 @@ void Application::update(float dt)
     presentation_.advanceClocks(dt, reversed);
 
     if (quitConfirmationOpen_) {
+        audioSystem_.update(dt, false, false);
         return;
     }
 
 #if SOKOBAN_ENABLE_DEBUG_UI
     if (draftExitConfirmationOpen_) {
+        audioSystem_.update(dt, false, false);
         return;
     }
     if (levelEditor_.editingDocument()) {
+        audioSystem_.update(dt, false, false);
         updateEditorPainting();
         return;
     }
@@ -176,7 +194,12 @@ void Application::update(float dt)
 
     queuePressedCommands();
     advancePlayerMovement(dt);
-    audioSystem_.update(dt, presentation_.player().motion.moving);
+
+    const GameplayPresentation::PlayerVisual& playerVisual = presentation_.player();
+    const bool pushing =
+        playerVisual.motion.moving &&
+        playerVisual.movingClip == RenderAnimation::RoguePush;
+    audioSystem_.update(dt, playerVisual.motion.moving, pushing);
 }
 
 void Application::drawEditorModeIndicator()
@@ -405,6 +428,7 @@ void Application::loadCurrentScreen()
 {
     applyLevel(
         Level::loadFromFile(screenPath(currentLevel_, currentScreen_)));
+    audioSystem_.playMusic(musicTrackForLevel(currentLevel_));
     preloadUpcomingAssets();
     levelEditor_.setPlayingDraft(false);
     levelEditor_.setEditingDocument(false);

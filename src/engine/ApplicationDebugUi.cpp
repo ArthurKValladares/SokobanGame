@@ -237,11 +237,15 @@ void ApplicationDebugUi::draw(const Context& context) const
         if (ImGui::SliderFloat("Master Volume", &volume, 0.0f, 1.0f, "%.2f")) {
             context.audio.setMasterVolume(volume);
         }
+        float musicVolume = context.audio.musicVolume();
+        if (ImGui::SliderFloat("Music Volume", &musicVolume, 0.0f, 1.0f, "%.2f")) {
+            context.audio.setMusicVolume(musicVolume);
+        }
         float footstepInterval = context.audio.footstepIntervalSeconds();
         if (ImGui::DragFloat("Footstep Interval", &footstepInterval, 0.005f, 0.05f, 1.0f, "%.3f s")) {
             context.audio.setFootstepIntervalSeconds(footstepInterval);
         }
-        ImGui::TextDisabled("Footsteps play while the player walks or pushes.");
+        ImGui::TextDisabled("Footsteps while walking; a looping stone drag while pushing.");
         if (!context.audio.available()) {
             ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f), "Audio unavailable (no device or missing files).");
         }

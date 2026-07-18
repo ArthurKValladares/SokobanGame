@@ -64,11 +64,21 @@ public:
     AudioSystem& operator=(const AudioSystem&) = delete;
 
     // Advances gameplay audio. While the player is walking (or pushing), a
-    // footstep variation plays on the cadence interval.
-    void update(float dt, bool playerWalking);
+    // footstep variation plays on the cadence interval. While a stone is being
+    // pushed, a randomly chosen stone-drag loop plays seamlessly and fades out
+    // when the push ends.
+    void update(float dt, bool playerWalking, bool pushingStone);
+
+    // Starts the given music track looping, crossfading from the current one.
+    // nullptr (or an unloaded name) fades the music out. Requesting the track
+    // that is already playing is a no-op, so per-screen reloads within a level
+    // keep the soundtrack running seamlessly.
+    void playMusic(const char* fileName);
 
     void setMasterVolume(float volume);
     [[nodiscard]] float masterVolume() const { return masterVolume_; }
+    void setMusicVolume(float volume);
+    [[nodiscard]] float musicVolume() const { return musicVolume_; }
     void setFootstepIntervalSeconds(float seconds);
     [[nodiscard]] float footstepIntervalSeconds() const { return cadence_.intervalSeconds; }
     [[nodiscard]] bool available() const;
@@ -77,13 +87,18 @@ private:
     struct EngineHandle;
 
     void playFootstep();
+    void startStoneDrag();
+    void stopStoneDrag();
 
     std::unique_ptr<EngineHandle> engine_;
     std::filesystem::path audioRoot_;
     std::mt19937 random_;
     FootstepCadence cadence_;
     float masterVolume_ = config::masterVolume;
+    float musicVolume_ = config::musicVolume;
     int lastFootstepIndex_ = -1;
+    int lastDragIndex_ = -1;
+    bool pushing_ = false;
 };
 
 } // namespace sokoban
