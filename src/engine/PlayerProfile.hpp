@@ -2,6 +2,7 @@
 
 #include "engine/Config.hpp"
 #include "engine/GameplaySession.hpp"
+#include "engine/InputBindings.hpp"
 
 #include <optional>
 #include <string>
@@ -10,7 +11,7 @@
 
 namespace sokoban {
 
-inline constexpr int currentPlayerProfileFormat = 3;
+inline constexpr int currentPlayerProfileFormat = 4;
 
 struct PlayerProfile {
     struct LevelProgress {
@@ -36,17 +37,6 @@ struct PlayerProfile {
         bool vsync = false;
 
         bool operator==(const VideoSettings&) const = default;
-    };
-
-    struct InputSettings {
-        std::string moveUp = "W";
-        std::string moveDown = "S";
-        std::string moveLeft = "A";
-        std::string moveRight = "D";
-        std::string undo = "Z";
-        std::string restart = "R";
-
-        bool operator==(const InputSettings&) const = default;
     };
 
     struct AccessibilitySettings {
@@ -76,7 +66,7 @@ struct PlayerProfile {
     std::optional<ActiveScreen> activeScreen;
     AudioSettings audio;
     VideoSettings video;
-    InputSettings input;
+    InputBindings input = defaultInputBindings();
     AccessibilitySettings accessibility;
 
     void normalize();
@@ -100,7 +90,7 @@ struct DecodedPlayerProfile {
 };
 
 // Throws std::runtime_error for malformed, unsupported, or semantically
-// invalid profile data. Formats 1 and 2 are migrated into the current model.
+// invalid profile data. Formats 1 through 3 migrate into the current model.
 [[nodiscard]] DecodedPlayerProfile decodePlayerProfile(std::string_view text);
 
 } // namespace sokoban

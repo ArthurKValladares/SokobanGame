@@ -20,13 +20,6 @@ namespace {
 
 constexpr double profileAutosaveIntervalSeconds = 2.0;
 
-SDL_Scancode profileScancode(std::string_view name, SDL_Scancode fallback)
-{
-    const std::string text(name);
-    const SDL_Scancode scancode = SDL_GetScancodeFromName(text.c_str());
-    return scancode == SDL_SCANCODE_UNKNOWN ? fallback : scancode;
-}
-
 } // namespace
 
 Application::Application()
@@ -60,6 +53,7 @@ Application::Application()
         playerProfile_.accessibility.reducedMotion
             ? 0.05f
             : config::stepDurationSeconds);
+    input_.setBindings(playerProfile_.input);
     presentationSettings_.applyTileScales(assetManifest_);
     presentationSettings_.normalize();
     presentation_.setPlayerClips(
@@ -84,6 +78,7 @@ Application::Application()
             .currentScreen = currentScreen_,
             .level = level_,
             .gameplaySession = gameplaySession_,
+            .input = input_,
             .renderer = renderer_,
             .settings = presentationSettings_,
             .audio = audioSystem_,
@@ -158,7 +153,10 @@ void Application::run()
                 !isKeyboardEvent ||
                 !renderer_.wantsKeyboardCapture() ||
                 event.type == SDL_EVENT_KEY_UP ||
-                isEditorEditModifier;
+                isEditorEditModifier ||
+                input_.keyBoundToAction(
+                    event.key.scancode,
+                    InputAction::MenuBack);
             const bool allowMouseInput =
                 !isMouseEvent ||
                 !renderer_.wantsMouseCapture() ||
@@ -170,17 +168,19 @@ void Application::run()
             if (event.type == SDL_EVENT_QUIT) {
                 running_ = false;
             }
-            if (event.type == SDL_EVENT_KEY_DOWN &&
-                event.key.scancode == SDL_SCANCODE_ESCAPE) {
+        }
+
+        if (input_.actionPressed(InputAction::MenuBack)) {
+            if (quitConfirmationOpen_) {
+                quitConfirmationOpen_ = false;
 #if SOKOBAN_ENABLE_DEBUG_UI
-                if (levelEditor_.playingDraft()) {
-                    draftExitConfirmationOpen_ = true;
-                } else {
-                    quitConfirmationOpen_ = true;
-                }
-#else
-                quitConfirmationOpen_ = true;
+            } else if (draftExitConfirmationOpen_) {
+                draftExitConfirmationOpen_ = false;
+            } else if (levelEditor_.playingDraft()) {
+                draftExitConfirmationOpen_ = true;
 #endif
+            } else {
+                quitConfirmationOpen_ = true;
             }
         }
 
@@ -618,12 +618,10 @@ void Application::persistProfile(bool immediate)
 
 void Application::queuePressedCommands()
 {
-    if (input_.keyPressed(profileScancode(
-            playerProfile_.input.undo, SDL_SCANCODE_Z))) {
+    if (input_.actionPressed(InputAction::Undo)) {
         gameplaySession_.queueUndo();
     }
-    if (input_.keyPressed(profileScancode(
-            playerProfile_.input.restart, SDL_SCANCODE_R))) {
+    if (input_.actionPressed(InputAction::Restart)) {
         gameplaySession_.queueRestart();
     }
 
@@ -693,8 +691,7 @@ bool Application::completeActiveAction()
 bool Application::tryStartNextMove()
 {
     const GameplaySession::Controls controls {
-        .undoHeld = input_.keyDown(profileScancode(
-            playerProfile_.input.undo, SDL_SCANCODE_Z)),
+        .undoHeld = input_.actionDown(InputAction::Undo),
         .verticalMove = heldVerticalDirection(),
         .horizontalMove = heldHorizontalDirection(),
     };
@@ -707,15 +704,13 @@ bool Application::tryStartNextMove()
 
 std::optional<MoveDirection> Application::pressedVerticalDirection() const
 {
-    const SDL_Scancode upKey = profileScancode(playerProfile_.input.moveUp, SDL_SCANCODE_W);
-    const SDL_Scancode downKey = profileScancode(playerProfile_.input.moveDown, SDL_SCANCODE_S);
-    const bool upPressed = input_.keyPressed(upKey);
-    const bool downPressed = input_.keyPressed(downKey);
+    const bool upPressed = input_.actionPressed(InputAction::MoveUp);
+    const bool downPressed = input_.actionPressed(InputAction::MoveDown);
     if (upPressed == downPressed) {
         return std::nullopt;
     }
-    if ((upPressed && input_.keyDown(downKey)) ||
-        (downPressed && input_.keyDown(upKey))) {
+    if ((upPressed && input_.actionDown(InputAction::MoveDown)) ||
+        (downPressed && input_.actionDown(InputAction::MoveUp))) {
         return std::nullopt;
     }
     return upPressed ? MoveDirection::Up : MoveDirection::Down;
@@ -723,15 +718,13 @@ std::optional<MoveDirection> Application::pressedVerticalDirection() const
 
 std::optional<MoveDirection> Application::pressedHorizontalDirection() const
 {
-    const SDL_Scancode leftKey = profileScancode(playerProfile_.input.moveLeft, SDL_SCANCODE_A);
-    const SDL_Scancode rightKey = profileScancode(playerProfile_.input.moveRight, SDL_SCANCODE_D);
-    const bool leftPressed = input_.keyPressed(leftKey);
-    const bool rightPressed = input_.keyPressed(rightKey);
+    const bool leftPressed = input_.actionPressed(InputAction::MoveLeft);
+    const bool rightPressed = input_.actionPressed(InputAction::MoveRight);
     if (leftPressed == rightPressed) {
         return std::nullopt;
     }
-    if ((leftPressed && input_.keyDown(rightKey)) ||
-        (rightPressed && input_.keyDown(leftKey))) {
+    if ((leftPressed && input_.actionDown(InputAction::MoveRight)) ||
+        (rightPressed && input_.actionDown(InputAction::MoveLeft))) {
         return std::nullopt;
     }
     return leftPressed ? MoveDirection::Left : MoveDirection::Right;
@@ -739,10 +732,8 @@ std::optional<MoveDirection> Application::pressedHorizontalDirection() const
 
 std::optional<MoveDirection> Application::heldVerticalDirection() const
 {
-    const bool up = input_.keyDown(profileScancode(
-        playerProfile_.input.moveUp, SDL_SCANCODE_W));
-    const bool down = input_.keyDown(profileScancode(
-        playerProfile_.input.moveDown, SDL_SCANCODE_S));
+    const bool up = input_.actionDown(InputAction::MoveUp);
+    const bool down = input_.actionDown(InputAction::MoveDown);
     if (up == down) {
         return std::nullopt;
     }
@@ -751,10 +742,8 @@ std::optional<MoveDirection> Application::heldVerticalDirection() const
 
 std::optional<MoveDirection> Application::heldHorizontalDirection() const
 {
-    const bool left = input_.keyDown(profileScancode(
-        playerProfile_.input.moveLeft, SDL_SCANCODE_A));
-    const bool right = input_.keyDown(profileScancode(
-        playerProfile_.input.moveRight, SDL_SCANCODE_D));
+    const bool left = input_.actionDown(InputAction::MoveLeft);
+    const bool right = input_.actionDown(InputAction::MoveRight);
     if (left == right) {
         return std::nullopt;
     }

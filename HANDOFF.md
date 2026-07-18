@@ -91,7 +91,7 @@ cmake --build build --config Debug --target sokoban_gameplay_session_tests
 .\build\Debug\sokoban_gameplay_session_tests.exe
 ```
 
-Player-profile tests cover format-3 round trips, format-1/2 migration, exact
+Player-profile tests cover format-4 round trips, format-1/2/3 migration, exact
 active-screen/undo checkpoints, completion bests, normalization, atomic writes,
 asynchronous save coalescing/shutdown flushing, prior-save backups,
 corrupt-save archival, backup recovery, and double-corruption default recovery:
@@ -99,6 +99,15 @@ corrupt-save archival, backup recovery, and double-corruption default recovery:
 ```powershell
 cmake --build build --config Debug --target sokoban_profile_tests
 .\build\Debug\sokoban_profile_tests.exe
+```
+
+Input tests cover keyboard and gamepad action mapping, remapping, button edges,
+stick direction thresholds, invalid-binding diagnostics, and raw SDL event
+capture for a future remapping UI:
+
+```powershell
+cmake --build build --config Debug --target sokoban_input_tests
+.\build\Debug\sokoban_input_tests.exe
 ```
 
 Headless animation-controller tests cover Rogue animation selection,
@@ -140,7 +149,9 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
 - `src/engine/AnimationPreviewDebugUi.*`: Debug-only owner of animation asset scanning, clip selection, preview playback state, and renderer preview delegation.
 - `src/engine/AudioSystem.*`: miniaudio-backed sound playback behind a pimpl (`EngineHandle`), so no miniaudio types leak into headers. Preloads the manifest's `footsteps` and `stone-drag` sound sets from the staged runtime content tree with `MA_SOUND_FLAG_DECODE` into never-reallocated `std::vector<ma_sound>`s. `update(dt, playerWalking, pushingStone)` drives the pure `FootstepCadence` struct and plays randomized non-repeating footsteps. Stone dragging uses randomized seamless loops with short fades; music streams one looping track per level with a 600 ms crossfade. Manifest gains remain authored in the Asset Manifest window; profile-backed master, music, and sound-effect bus gains are previewed live and persisted when Debug UI sliders are committed. Audio degrades gracefully (`available()` false, silent) if the device or files are missing.
 - `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, action history, a branch-safe undo stack, automatic world steps, the post-undo automatic-motion pause, and solution-move snapshots that restore correctly across undo/restart. Its committed-state snapshot/restore API persists the exact player/movable state and usable undo chain; restore rejects disconnected or impossible rules transitions without mutating the live session. `reset` always clears undo state at a screen boundary. Emits `Action` snapshots for `Application` to animate. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
-- `src/engine/PlayerProfile.*`: current format-3 player progress/settings model and strict JSON codec. Stores unlocked/current level and screen, an active-screen committed gameplay checkpoint with the multi-screen level move/time counters, per-level completion and optional move/time bests, audio/video/input/accessibility settings, bounded normalization, and explicit format-1/2 migrations. Headless and covered with `SaveStore` by `tests/PlayerProfileTests.cpp` (`sokoban_profile_tests`).
+- `src/engine/InputBindings.*`: platform-neutral semantic action and binding model. Each action owns an ordered list of keyboard, gamepad-button, and signed gamepad-axis bindings, allowing keyboard+D-pad+stick defaults and future replacement/appending by a remapping UI without changing gameplay code.
+- `src/engine/Input.*`: SDL3 device owner and action mapper. Tracks raw keyboard/mouse state for editor tooling, hot-plugs gamepads, selects the most recently used controller, normalizes stick axes with threshold/pressed-edge semantics, clears stuck input on focus loss, reports active-device diagnostics, and converts raw SDL events into typed remapping candidates. `Application` consumes semantic actions only for gameplay. Covered by `tests/InputTests.cpp` (`sokoban_input_tests`).
+- `src/engine/PlayerProfile.*`: current format-4 player progress/settings model and strict JSON codec. Stores unlocked/current level and screen, an active-screen committed gameplay checkpoint with the multi-screen level move/time counters, per-level completion and optional move/time bests, typed keyboard/controller action bindings, audio/video/accessibility settings, bounded normalization, and explicit format-1/2/3 migrations. Headless and covered with `SaveStore` by `tests/PlayerProfileTests.cpp` (`sokoban_profile_tests`).
 - `src/engine/SaveStore.*`: profile persistence rooted at SDL's platform-appropriate `SDL_GetPrefPath`. Writes validated JSON through same-directory temporary replacement, keeps the previous valid primary as `profile.backup.json`, migrates old versions, archives corrupt primary/backup files for diagnosis, recovers from backup, and restores defaults when both copies are unusable.
 - `src/engine/AsyncSaveStore.*`: dedicated serialized persistence worker around `SaveStore`. Deferred requests coalesce over a configurable window, while JSON encoding, backup rotation, and atomic filesystem replacement always happen off the game thread. Screen transitions and committed settings request immediate worker saves; clean shutdown flushes the newest pending profile. Diagnostics expose request/write/coalescing counts and pending/writing state.
 - `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags + slide momentum) plus pure functions in `sokoban::rules` — `step` advances the whole world one discrete step (simultaneous one-tile moves, pushes, ladder climbs, momentum, falls, water, conveyors); `hasPendingMotion` reports whether the world would keep moving without input; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
@@ -265,7 +276,8 @@ Core movement (discrete step system):
 - WASD moves the player by default (one tile per step; held keys step repeatedly).
 - `Z` undoes one step by default; undoing pauses pending world motion until the
   next input-driven step. `R` restarts by default. These six gameplay bindings
-  are loaded from `PlayerProfile::InputSettings`.
+  are loaded from `PlayerProfile::input`. Gamepads use D-pad or left stick for
+  movement, west/X for undo, north/Y for restart, and Start for menu/back.
 - `GameplaySession` stores one action record per completed step for undo; the
   authoritative state commits only after `Application` finishes animating the
   action.
@@ -492,14 +504,15 @@ If making player-facing menus, pause screens, settings, or polished editor UI, p
 
 Major recent additions and fixes:
 
-- Added format-3 player persistence under `SDL_GetPrefPath`: current/unlocked
+- Added format-4 player persistence under `SDL_GetPrefPath`: current/unlocked
   level, current screen, an exact committed screen state and undo stack,
   per-level completion and best move/time records, audio/video/input/
-  accessibility settings, format-1/2 migration, atomic replacement, previous-save
+  accessibility settings, typed keyboard/controller bindings, format-1/2/3
+  migration, atomic replacement, previous-save
   backups, corrupt-file archival, backup recovery, and default recovery. Level
   completion records successful player moves across multi-screen levels and
-  excludes automatic world steps; undo/restart restore count snapshots. A
-  committed actions mark the checkpoint dirty, and the latest state is captured
+  excludes automatic world steps; undo/restart restore count snapshots.
+  Committed actions mark the checkpoint dirty, and the latest state is captured
   at most once every two seconds at a committed/idle boundary. Screen entry is
   captured immediately; entering a screen resets its undo stack before that
   checkpoint is queued. Saved
@@ -512,6 +525,12 @@ Major recent additions and fixes:
   are queued immediately. Writes remain strictly serialized, shutdown flushes
   the newest state, and the Engine window reports save requests, completed
   writes, coalescing, and worker state.
+- Added a semantic input abstraction and SDL3 gamepad support. Gameplay reads
+  actions instead of SDL controls; defaults combine keyboard, D-pad, and left
+  stick, with face buttons for undo/restart and Start for menu/back. Controllers
+  hot-plug safely, axis edges use configurable thresholds, format-4 profiles
+  persist typed multi-device bindings, and raw SDL events can be captured as
+  binding candidates by a future remapping screen.
 - Added the audio system (miniaudio): randomized non-repeating concrete
   footsteps on a tunable cadence while walking/pushing, a seamlessly looping
   stone-drag sound while a rock is pushed (loop-ready assets generated by
@@ -593,7 +612,8 @@ At the time this handoff was updated:
 - Full Debug and Release builds passed from the clean `out/visual-studio` build
   tree. Clean installed Release builds also start and remain healthy without
   access to the source checkout.
-- All twelve CTest suites pass, including profile migration/recovery, gameplay
+- All thirteen CTest suites pass, including input/gamepad mapping, profile
+  migration/recovery, gameplay
   move-count semantics, mandatory validation of the shipped manifest,
   manifest-editor save semantics, and the `content_pipeline` suite.
 - `cmake --build out\visual-studio --config Release --target package` produces
@@ -610,8 +630,8 @@ At the time this handoff was updated:
   manifest-backed tile scale and per-sound-set controls were removed from the
   Engine window.
 - Release startup creates or loads `%APPDATA%/Sokoban3D/Sokoban3D/profile.json`
-  on Windows through SDL's preference-path API. Existing format-2 profiles are
-  migrated to format 3; successful screen loading writes the initial or restored
+  on Windows through SDL's preference-path API. Existing format-1/2/3 profiles
+  migrate to format 4; successful screen loading writes the initial or restored
   gameplay checkpoint without leaving a temporary replacement file.
 
 Known useful verification commands:

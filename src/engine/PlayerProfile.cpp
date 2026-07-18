@@ -8,6 +8,7 @@
 #include <initializer_list>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 
 namespace sokoban {
@@ -373,6 +374,165 @@ OrderedJson sessionSnapshotToJson(const GameplaySession::Snapshot& snapshot)
     };
 }
 
+void setLegacyKeyboardBinding(
+    InputBindings& bindings,
+    InputAction action,
+    std::string scancode)
+{
+    std::vector<InputBinding>& actionBindings = bindings.forAction(action);
+    for (InputBinding& binding : actionBindings) {
+        if (KeyboardBinding* keyboard = std::get_if<KeyboardBinding>(&binding)) {
+            keyboard->scancode = std::move(scancode);
+            return;
+        }
+    }
+    actionBindings.insert(
+        actionBindings.begin(),
+        KeyboardBinding { std::move(scancode) });
+}
+
+InputBinding inputBindingFromJson(const Json& value, std::string_view context)
+{
+    requireObject(value, context);
+    const std::string type = stringProperty(value, "type", context);
+    if (type == "keyboard") {
+        rejectUnknownProperties(value, { "type", "control" }, context);
+        return KeyboardBinding { stringProperty(value, "control", context) };
+    }
+    if (type == "gamepadButton") {
+        rejectUnknownProperties(value, { "type", "control" }, context);
+        const std::string control = stringProperty(value, "control", context);
+        if (!isKnownGamepadButtonName(control)) {
+            fail(context, "unknown gamepad button '" + control + "'");
+        }
+        return GamepadButtonBinding { control };
+    }
+    if (type == "gamepadAxis") {
+        rejectUnknownProperties(
+            value,
+            { "type", "control", "direction", "threshold" },
+            context);
+        AxisDirection direction;
+        try {
+            direction = axisDirectionFromName(
+                stringProperty(value, "direction", context));
+        } catch (const std::invalid_argument& error) {
+            fail(context, error.what());
+        }
+        const float threshold = floatProperty(value, "threshold", context);
+        if (threshold < 0.1f || threshold > 1.0f) {
+            fail(context, "axis threshold must be between 0.1 and 1.0");
+        }
+        const std::string control = stringProperty(value, "control", context);
+        if (!isKnownGamepadAxisName(control)) {
+            fail(context, "unknown gamepad axis '" + control + "'");
+        }
+        return GamepadAxisBinding {
+            .axis = control,
+            .direction = direction,
+            .threshold = threshold,
+        };
+    }
+    fail(context, "unknown binding type '" + type + "'");
+}
+
+OrderedJson inputBindingToJson(const InputBinding& binding)
+{
+    return std::visit([](const auto& value) -> OrderedJson {
+        using Binding = std::decay_t<decltype(value)>;
+        if constexpr (std::is_same_v<Binding, KeyboardBinding>) {
+            if (value.scancode.empty()) {
+                throw std::runtime_error("player profile keyboard binding is empty");
+            }
+            return {
+                { "type", "keyboard" },
+                { "control", value.scancode },
+            };
+        } else if constexpr (std::is_same_v<Binding, GamepadButtonBinding>) {
+            if (!isKnownGamepadButtonName(value.button)) {
+                throw std::runtime_error(
+                    "player profile gamepad button binding is invalid");
+            }
+            return {
+                { "type", "gamepadButton" },
+                { "control", value.button },
+            };
+        } else {
+            if (!isKnownGamepadAxisName(value.axis) ||
+                !std::isfinite(value.threshold) ||
+                value.threshold < 0.1f || value.threshold > 1.0f) {
+                throw std::runtime_error(
+                    "player profile gamepad axis binding is invalid");
+            }
+            return {
+                { "type", "gamepadAxis" },
+                { "control", value.axis },
+                { "direction", axisDirectionName(value.direction) },
+                { "threshold", value.threshold },
+            };
+        }
+    }, binding);
+}
+
+InputBindings inputBindingsFromJson(const Json& value, std::string_view context)
+{
+    rejectUnknownProperties(value, {
+        "moveUp", "moveDown", "moveLeft", "moveRight",
+        "undo", "restart", "menuBack",
+    }, context);
+    InputBindings result;
+    for (std::size_t i = 0; i < inputActionCount; ++i) {
+        const InputAction action = static_cast<InputAction>(i);
+        const std::string actionName(inputActionName(action));
+        const Json& bindings = requiredProperty(value, actionName, context);
+        if (!bindings.is_array() || bindings.empty()) {
+            fail(context, "property '" + actionName + "' must be a non-empty array");
+        }
+        std::vector<InputBinding>& parsed = result.forAction(action);
+        for (std::size_t bindingIndex = 0; bindingIndex < bindings.size(); ++bindingIndex) {
+            const std::string bindingContext = std::string(context) + "." +
+                actionName + "[" + std::to_string(bindingIndex) + "]";
+            InputBinding binding = inputBindingFromJson(bindings[bindingIndex], bindingContext);
+            if (std::ranges::find(parsed, binding) != parsed.end()) {
+                fail(bindingContext, "duplicate binding");
+            }
+            parsed.push_back(std::move(binding));
+        }
+    }
+    return result;
+}
+
+OrderedJson inputBindingsToJson(const InputBindings& bindings)
+{
+    OrderedJson result = OrderedJson::object();
+    for (std::size_t i = 0; i < inputActionCount; ++i) {
+        const InputAction action = static_cast<InputAction>(i);
+        OrderedJson actionBindings = OrderedJson::array();
+        for (const InputBinding& binding : bindings.forAction(action)) {
+            actionBindings.push_back(inputBindingToJson(binding));
+        }
+        if (actionBindings.empty()) {
+            throw std::runtime_error(
+                "player profile action '" + std::string(inputActionName(action)) +
+                "' has no bindings");
+        }
+        result[std::string(inputActionName(action))] = std::move(actionBindings);
+    }
+    return result;
+}
+
+Json legacyInputDefaultsJson()
+{
+    return {
+        { "moveUp", "W" },
+        { "moveDown", "S" },
+        { "moveLeft", "A" },
+        { "moveRight", "D" },
+        { "undo", "Z" },
+        { "restart", "R" },
+    };
+}
+
 PlayerProfile parseFormat2(const Json& root)
 {
     rejectUnknownProperties(root, { "format", "progress", "settings" }, "root");
@@ -437,12 +597,18 @@ PlayerProfile parseFormat2(const Json& root)
         input,
         { "moveUp", "moveDown", "moveLeft", "moveRight", "undo", "restart" },
         "settings.input");
-    profile.input.moveUp = stringProperty(input, "moveUp", "settings.input");
-    profile.input.moveDown = stringProperty(input, "moveDown", "settings.input");
-    profile.input.moveLeft = stringProperty(input, "moveLeft", "settings.input");
-    profile.input.moveRight = stringProperty(input, "moveRight", "settings.input");
-    profile.input.undo = stringProperty(input, "undo", "settings.input");
-    profile.input.restart = stringProperty(input, "restart", "settings.input");
+    setLegacyKeyboardBinding(profile.input, InputAction::MoveUp,
+        stringProperty(input, "moveUp", "settings.input"));
+    setLegacyKeyboardBinding(profile.input, InputAction::MoveDown,
+        stringProperty(input, "moveDown", "settings.input"));
+    setLegacyKeyboardBinding(profile.input, InputAction::MoveLeft,
+        stringProperty(input, "moveLeft", "settings.input"));
+    setLegacyKeyboardBinding(profile.input, InputAction::MoveRight,
+        stringProperty(input, "moveRight", "settings.input"));
+    setLegacyKeyboardBinding(profile.input, InputAction::Undo,
+        stringProperty(input, "undo", "settings.input"));
+    setLegacyKeyboardBinding(profile.input, InputAction::Restart,
+        stringProperty(input, "restart", "settings.input"));
 
     const Json& accessibility = requiredProperty(settings, "accessibility", "settings");
     rejectUnknownProperties(
@@ -505,6 +671,26 @@ PlayerProfile parseFormat3(const Json& root)
         }
         profile.activeScreen = std::move(checkpoint);
     }
+    profile.normalize();
+    return profile;
+}
+
+PlayerProfile parseFormat4(const Json& root)
+{
+    rejectUnknownProperties(root, { "format", "progress", "settings" }, "root");
+    const Json& settings = requiredProperty(root, "settings", "root");
+    rejectUnknownProperties(
+        settings,
+        { "audio", "video", "input", "accessibility" },
+        "settings");
+    const InputBindings input = inputBindingsFromJson(
+        requiredProperty(settings, "input", "settings"),
+        "settings.input");
+
+    Json legacyRoot = root;
+    legacyRoot["settings"]["input"] = legacyInputDefaultsJson();
+    PlayerProfile profile = parseFormat3(legacyRoot);
+    profile.input = input;
     profile.normalize();
     return profile;
 }
@@ -671,14 +857,7 @@ std::string PlayerProfile::serialize() const
                 { "fullscreen", normalized.video.fullscreen },
                 { "vsync", normalized.video.vsync },
             } },
-            { "input", {
-                { "moveUp", normalized.input.moveUp },
-                { "moveDown", normalized.input.moveDown },
-                { "moveLeft", normalized.input.moveLeft },
-                { "moveRight", normalized.input.moveRight },
-                { "undo", normalized.input.undo },
-                { "restart", normalized.input.restart },
-            } },
+            { "input", inputBindingsToJson(normalized.input) },
             { "accessibility", {
                 { "reducedMotion", normalized.accessibility.reducedMotion },
                 { "highContrast", normalized.accessibility.highContrast },
@@ -709,8 +888,11 @@ DecodedPlayerProfile decodePlayerProfile(std::string_view text)
     if (format == 2) {
         return { .profile = parseFormat2(root), .sourceFormat = 2 };
     }
+    if (format == 3) {
+        return { .profile = parseFormat3(root), .sourceFormat = 3 };
+    }
     if (format == currentPlayerProfileFormat) {
-        return { .profile = parseFormat3(root), .sourceFormat = format };
+        return { .profile = parseFormat4(root), .sourceFormat = format };
     }
     fail("root", "unsupported format " + std::to_string(format));
 }

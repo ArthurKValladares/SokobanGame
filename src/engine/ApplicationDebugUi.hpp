@@ -2,6 +2,7 @@
 
 #include "engine/AsyncSaveStore.hpp"
 #include "engine/GameplaySession.hpp"
+#include "engine/Input.hpp"
 #include "engine/Level.hpp"
 #include "engine/PlayerProfile.hpp"
 #include "engine/PresentationSettings.hpp"
@@ -20,6 +21,7 @@ public:
         int currentScreen = 0;
         const Level& level;
         GameplaySession& gameplaySession;
+        const InputState& input;
         VulkanRenderer& renderer;
         PresentationSettings& settings;
         AudioSystem& audio;

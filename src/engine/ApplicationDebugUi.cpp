@@ -99,6 +99,17 @@ void ApplicationDebugUi::draw(const Context& context) const
     ImGui::Text("Movables %zu", state.movables.size());
     ImGui::Text("History %zu", context.gameplaySession.historySize());
     ImGui::Text(
+        "Input %s, gamepads %zu%s%s",
+        context.input.activeDevice() == ActiveInputDevice::Gamepad
+            ? "gamepad"
+            : "keyboard/mouse",
+        context.input.connectedGamepadCount(),
+        context.input.activeGamepadName().empty() ? "" : " - ",
+        context.input.activeGamepadName().c_str());
+    if (context.input.invalidBindingCount() != 0) {
+        ImGui::Text("Invalid input bindings %zu", context.input.invalidBindingCount());
+    }
+    ImGui::Text(
         "End %s",
         rules::isEndUnlocked(context.level, state) ? "unlocked" : "locked");
     ImGui::Text(

@@ -2,6 +2,8 @@
 #include "engine/PlayerProfile.hpp"
 #include "engine/SaveStore.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -36,18 +38,16 @@ void writeFile(const std::filesystem::path& path, std::string_view contents)
     stream << contents;
 }
 
-void eraseJsonLine(std::string& text, std::string_view property)
+const sokoban::KeyboardBinding* keyboardBinding(
+    const sokoban::InputBindings& bindings,
+    sokoban::InputAction action)
 {
-    const std::size_t propertyPosition = text.find(property);
-    check(propertyPosition != std::string::npos, "JSON test property found");
-    if (propertyPosition == std::string::npos) {
-        return;
+    for (const sokoban::InputBinding& binding : bindings.forAction(action)) {
+        if (const auto* keyboard = std::get_if<sokoban::KeyboardBinding>(&binding)) {
+            return keyboard;
+        }
     }
-    const std::size_t lineStart = text.rfind('\n', propertyPosition) + 1;
-    const std::size_t newline = text.find('\n', propertyPosition);
-    text.erase(lineStart, newline == std::string::npos
-        ? std::string::npos
-        : newline + 1 - lineStart);
+    return nullptr;
 }
 
 class TemporaryDirectory {
@@ -79,8 +79,16 @@ void testRoundTripAndBests()
     profile.setCurrentLevel(2);
     profile.audio = { .masterVolume = 0.8f, .musicVolume = 0.4f, .soundVolume = 0.6f };
     profile.video = { .fullscreen = true, .vsync = true };
-    profile.input.moveUp = "Up";
-    profile.input.undo = "Backspace";
+    profile.input.forAction(sokoban::InputAction::MoveUp) = {
+        sokoban::KeyboardBinding { "Up" },
+        sokoban::GamepadButtonBinding { "dpup" },
+        sokoban::GamepadAxisBinding {
+            "lefty", sokoban::AxisDirection::Negative, 0.6f },
+    };
+    profile.input.forAction(sokoban::InputAction::Undo) = {
+        sokoban::KeyboardBinding { "Backspace" },
+        sokoban::GamepadButtonBinding { "south" },
+    };
     profile.accessibility.reducedMotion = true;
     profile.accessibility.highContrast = true;
     profile.recordLevelCompletion(0, 30, 48.5, true);
@@ -181,18 +189,46 @@ void testNormalizationAndMigration()
             sokoban::currentPlayerProfileFormat,
         "migrated profile serializes as current format");
 
-    std::string format2 = sokoban::PlayerProfile {}.serialize();
-    format2.replace(format2.find("\"format\": 3"), 11, "\"format\": 2");
-    format2.replace(format2.find("\"levels\": [],"), 13, "\"levels\": []");
-    eraseJsonLine(format2, "\"currentScreen\"");
-    eraseJsonLine(format2, "\"activeScreen\"");
+    nlohmann::json legacyInput = {
+        { "moveUp", "Up" },
+        { "moveDown", "Down" },
+        { "moveLeft", "Left" },
+        { "moveRight", "Right" },
+        { "undo", "Backspace" },
+        { "restart", "R" },
+    };
+    nlohmann::json format2Root = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    format2Root["format"] = 2;
+    format2Root["progress"].erase("currentScreen");
+    format2Root["progress"].erase("activeScreen");
+    format2Root["settings"]["input"] = legacyInput;
     const sokoban::DecodedPlayerProfile migratedFormat2 =
-        sokoban::decodePlayerProfile(format2);
+        sokoban::decodePlayerProfile(format2Root.dump());
     check(migratedFormat2.sourceFormat == 2, "format 2 source reported");
     check(migratedFormat2.profile.currentScreen == 0,
         "format 2 receives default screen");
     check(!migratedFormat2.profile.activeScreen,
         "format 2 receives no gameplay checkpoint");
+    const sokoban::KeyboardBinding* migratedKeyboard = keyboardBinding(
+        migratedFormat2.profile.input, sokoban::InputAction::MoveUp);
+    check(migratedKeyboard && migratedKeyboard->scancode == "Up",
+        "format 2 keyboard binding migrates");
+    check(migratedFormat2.profile.input.forAction(
+            sokoban::InputAction::MoveUp).size() == 3,
+        "format 2 migration adds controller defaults");
+
+    nlohmann::json format3Root = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    format3Root["format"] = 3;
+    format3Root["settings"]["input"] = legacyInput;
+    const sokoban::DecodedPlayerProfile migratedFormat3 =
+        sokoban::decodePlayerProfile(format3Root.dump());
+    check(migratedFormat3.sourceFormat == 3, "format 3 source reported");
+    migratedKeyboard = keyboardBinding(
+        migratedFormat3.profile.input, sokoban::InputAction::Undo);
+    check(migratedKeyboard && migratedKeyboard->scancode == "Backspace",
+        "format 3 keyboard binding migrates");
 
     checkThrows([] {
         (void)sokoban::decodePlayerProfile(R"json({ "format": 99 })json");
@@ -221,6 +257,26 @@ void testNormalizationAndMigration()
     checkThrows([&] {
         (void)sokoban::decodePlayerProfile(incompleteBest);
     }, "incomplete level best rejected");
+
+    nlohmann::json invalidBindings = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    invalidBindings["settings"]["input"]["moveUp"] = nlohmann::json::array();
+    checkThrows([&] {
+        (void)sokoban::decodePlayerProfile(invalidBindings.dump());
+    }, "actions without bindings are rejected");
+
+    invalidBindings = nlohmann::json::parse(sokoban::PlayerProfile {}.serialize());
+    invalidBindings["settings"]["input"]["undo"].push_back(
+        invalidBindings["settings"]["input"]["undo"].front());
+    checkThrows([&] {
+        (void)sokoban::decodePlayerProfile(invalidBindings.dump());
+    }, "duplicate action bindings are rejected");
+
+    invalidBindings = nlohmann::json::parse(sokoban::PlayerProfile {}.serialize());
+    invalidBindings["settings"]["input"]["moveLeft"][2]["threshold"] = 0.01;
+    checkThrows([&] {
+        (void)sokoban::decodePlayerProfile(invalidBindings.dump());
+    }, "invalid gamepad axis threshold is rejected");
 }
 
 void testStoreBackupsAndRecovery()

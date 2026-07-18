@@ -134,6 +134,7 @@ add_executable(sokoban
     src/engine/GameplayPresentation.cpp
     src/engine/GameplaySession.cpp
     src/engine/Input.cpp
+    src/engine/InputBindings.cpp
     src/engine/Level.cpp
     src/engine/LevelEditor.cpp
     src/engine/LevelEditorDebugUi.cpp
@@ -276,6 +277,7 @@ if(SOKOBAN_BUILD_TESTS)
     add_executable(sokoban_profile_tests
         tests/PlayerProfileTests.cpp
         src/engine/AsyncSaveStore.cpp
+        src/engine/InputBindings.cpp
         src/engine/PlayerProfile.cpp
         src/engine/SaveStore.cpp
         src/engine/TileTypes.cpp
@@ -288,6 +290,20 @@ if(SOKOBAN_BUILD_TESTS)
         target_compile_options(sokoban_profile_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME player_profile COMMAND sokoban_profile_tests)
+
+    add_executable(sokoban_input_tests
+        tests/InputTests.cpp
+        src/engine/Input.cpp
+        src/engine/InputBindings.cpp
+    )
+    target_include_directories(sokoban_input_tests PRIVATE src)
+    target_link_libraries(sokoban_input_tests PRIVATE SDL3::SDL3)
+    if(MSVC)
+        target_compile_options(sokoban_input_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_input_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME input COMMAND sokoban_input_tests)
 
     add_executable(sokoban_level_editor_tests
         tests/LevelEditorTests.cpp
