@@ -58,7 +58,7 @@ private:
 // reports available() == false.
 class AudioSystem {
 public:
-    // audioRoot is the source assets directory; the manifest's "footsteps"
+    // audioRoot is the staged runtime content directory; the manifest's "footsteps"
     // and "stone-drag" sound sets and per-level music entries are loaded
     // relative to it. The manifest must outlive this object.
     AudioSystem(std::filesystem::path audioRoot, const AssetManifest& manifest);
@@ -105,8 +105,9 @@ private:
     FootstepCadence cadence_;
     float masterVolume_ = config::masterVolume;
     float musicVolume_ = config::musicVolume;
-    float footstepVolume_ = config::footstepVolume;
-    float stoneDragVolume_ = config::stoneDragVolume;
+    // Seeded from the manifest's sound-set volumes in the constructor.
+    float footstepVolume_ = 1.0f;
+    float stoneDragVolume_ = 1.0f;
     int lastFootstepIndex_ = -1;
     int lastDragIndex_ = -1;
     bool pushing_ = false;

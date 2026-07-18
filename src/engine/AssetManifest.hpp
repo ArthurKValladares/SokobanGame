@@ -74,11 +74,13 @@ public:
     struct SoundSet {
         std::string name;
         std::vector<std::string> files; // relative to the assets root
+        float volume = 1.0f; // relative to the master volume
     };
 
     struct MusicTrack {
         int level = 0;
         std::string file; // relative to the assets root
+        float volume = 1.0f; // multiplies the global music volume
     };
 
     // Throws std::runtime_error with a line-numbered message on any parse or
@@ -109,6 +111,8 @@ public:
 
     // Returns an empty list for unknown set names.
     [[nodiscard]] const std::vector<std::string>& soundSet(std::string_view name) const;
+    // Returns 1.0 for unknown set names.
+    [[nodiscard]] float soundSetVolume(std::string_view name) const;
     // Returns nullptr when the level has no soundtrack.
     [[nodiscard]] const std::string* musicForLevel(int level) const;
 

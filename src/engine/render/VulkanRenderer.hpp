@@ -36,13 +36,12 @@ enum class AntiAliasingMode {
 
 class VulkanRenderer {
 public:
-    // assetRoot holds built runtime assets (shaders); modelAssetRoot is the
-    // source assets directory the manifest's paths are relative to. The
-    // manifest must outlive the renderer.
+    // assetRoot is the staged runtime content directory containing shaders
+    // and every manifest-relative asset. The manifest must outlive the
+    // renderer.
     VulkanRenderer(
         SDL_Window* window,
         std::filesystem::path assetRoot,
-        std::filesystem::path modelAssetRoot,
         const AssetManifest& manifest);
     ~VulkanRenderer();
 

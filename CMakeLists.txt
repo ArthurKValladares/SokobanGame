@@ -1,10 +1,22 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(Sokoban3D LANGUAGES CXX)
+project(Sokoban3D VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+if(MSVC)
+    # Keep the ZIP self-contained instead of requiring the Visual C++
+    # Redistributable to be installed separately on a player's machine.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    # Avoid leaking machine-specific checkout paths through __FILE__ strings
+    # and make binaries produced from different workspaces more reproducible.
+    add_compile_options(
+        /experimental:deterministic
+        "/pathmap:${CMAKE_SOURCE_DIR}=."
+    )
+endif()
 
 option(SOKOBAN_ENABLE_VALIDATION "Enable Vulkan validation layers in debug builds" ON)
 
@@ -45,9 +57,8 @@ find_program(GLSLC_EXECUTABLE glslc
 )
 
 set(SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
-set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/shaders")
+set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders")
 set(LEVEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/levels")
-set(LEVEL_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/levels")
 
 set(SHADER_SOURCES
     "${SHADER_SOURCE_DIR}/triangle.vert.glsl"
@@ -85,19 +96,22 @@ endforeach()
 
 add_custom_target(sokoban_shaders DEPENDS ${SHADER_OUTPUTS})
 
-file(GLOB_RECURSE LEVEL_SOURCES CONFIGURE_DEPENDS "${LEVEL_SOURCE_DIR}/*")
-
-# Models, textures, animations, and sounds are defined by assets/manifest.txt
-# and loaded directly from the source assets directory at runtime - adding an
-# asset does not touch this file. Only levels and shaders are staged into the
-# build tree.
-add_custom_target(sokoban_assets
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/assets"
-    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${LEVEL_SOURCE_DIR}" "${LEVEL_OUTPUT_DIR}"
-    DEPENDS
-        ${LEVEL_SOURCES}
-    VERBATIM
+add_executable(sokoban_content_tool
+    tools/ContentTool.cpp
+    src/engine/AssetManifest.cpp
+    src/engine/ContentPipeline.cpp
+    src/engine/Level.cpp
+    src/engine/TileTypes.cpp
 )
+target_include_directories(sokoban_content_tool PRIVATE src)
+set_target_properties(sokoban_content_tool PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tools/$<CONFIG>"
+)
+if(MSVC)
+    target_compile_options(sokoban_content_tool PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(sokoban_content_tool PRIVATE -Wall -Wextra -Wpedantic)
+endif()
 
 add_executable(sokoban
     src/main.cpp
@@ -118,6 +132,7 @@ add_executable(sokoban
     src/engine/PresentationSettings.cpp
     src/engine/RenderFrameBuilder.cpp
     src/engine/Rules.cpp
+    src/engine/RuntimeContent.cpp
     src/engine/TaskSystem.cpp
     src/engine/TileTypes.cpp
     src/engine/Window.cpp
@@ -140,7 +155,26 @@ foreach(imgui_source IN LISTS SOKOBAN_IMGUI_SOURCES)
     target_sources(sokoban PRIVATE $<$<CONFIG:Debug>:${imgui_source}>)
 endforeach()
 
-add_dependencies(sokoban sokoban_shaders sokoban_assets)
+set_target_properties(sokoban PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
+)
+
+# Every build validates the manifest, its external glTF dependencies, playable
+# levels, and compiled shaders before replacing the executable's content tree.
+# The tool copies only reachable assets, keeping vendor packs out of packages.
+add_custom_target(sokoban_content ALL
+    COMMAND "$<TARGET_FILE:sokoban_content_tool>"
+        --assets "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+        --levels "${LEVEL_SOURCE_DIR}"
+        --shaders "${SHADER_OUTPUT_DIR}"
+        --output "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/assets"
+        --version "${PROJECT_VERSION}"
+    DEPENDS
+        sokoban_content_tool
+        sokoban_shaders
+    VERBATIM
+)
+add_dependencies(sokoban sokoban_content)
 
 target_include_directories(sokoban PRIVATE
     src
@@ -164,9 +198,9 @@ target_link_libraries(sokoban PRIVATE
 
 target_compile_definitions(sokoban PRIVATE
     SDL_MAIN_USE_CALLBACKS=0
-    SOKOBAN_ASSET_DIR="${CMAKE_CURRENT_BINARY_DIR}/assets"
-    SOKOBAN_SOURCE_LEVEL_DIR="${LEVEL_SOURCE_DIR}"
-    SOKOBAN_SOURCE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    SOKOBAN_GAME_VERSION="${PROJECT_VERSION}"
+    $<$<CONFIG:Debug>:SOKOBAN_SOURCE_LEVEL_DIR="${LEVEL_SOURCE_DIR}">
+    $<$<CONFIG:Debug>:SOKOBAN_SOURCE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets">
     $<$<CONFIG:Debug>:SOKOBAN_ENABLE_DEBUG_UI=1>
 )
 
@@ -257,6 +291,9 @@ if(SOKOBAN_BUILD_TESTS)
         target_compile_options(sokoban_asset_manifest_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME asset_manifest COMMAND sokoban_asset_manifest_tests)
+    set_tests_properties(asset_manifest PROPERTIES
+        ENVIRONMENT "SOKOBAN_ASSETS=${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    )
     target_include_directories(sokoban_animation_controller_tests PRIVATE src)
     if(MSVC)
         target_compile_options(sokoban_animation_controller_tests PRIVATE /W4 /permissive-)
@@ -312,4 +349,53 @@ if(SOKOBAN_BUILD_TESTS)
         target_compile_options(sokoban_task_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME tasks COMMAND sokoban_task_tests)
+
+    add_executable(sokoban_content_pipeline_tests
+        tests/ContentPipelineTests.cpp
+        src/engine/AssetManifest.cpp
+        src/engine/ContentPipeline.cpp
+        src/engine/Level.cpp
+        src/engine/TileTypes.cpp
+    )
+    target_include_directories(sokoban_content_pipeline_tests PRIVATE src)
+    if(MSVC)
+        target_compile_options(sokoban_content_pipeline_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_content_pipeline_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME content_pipeline COMMAND sokoban_content_pipeline_tests)
 endif()
+
+install(TARGETS sokoban RUNTIME DESTINATION . COMPONENT Runtime)
+install(
+    DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/assets/"
+    DESTINATION assets
+    COMPONENT Runtime
+)
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL/LICENSE.txt"
+    DESTINATION licenses
+    RENAME SDL-LICENSE.txt
+    COMPONENT Runtime
+)
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniaudio/LICENSE"
+    DESTINATION licenses
+    RENAME miniaudio-LICENSE.txt
+    COMPONENT Runtime
+)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/LICENSE.txt")
+    install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/LICENSE.txt"
+        DESTINATION licenses
+        RENAME imgui-LICENSE.txt
+        COMPONENT Runtime
+    )
+endif()
+
+set(CPACK_GENERATOR ZIP)
+set(CPACK_PACKAGE_NAME "Sokoban3D")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_FILE_NAME "Sokoban3D-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-x64")
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
+include(CPack)

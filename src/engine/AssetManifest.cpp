@@ -266,16 +266,28 @@ AssetManifest AssetManifest::parse(std::string_view text)
             break;
         }
         case Section::Sound: {
+            SoundSet& set = manifest.sounds_[sectionIndex];
             if (line.key == "file") {
-                manifest.sounds_[sectionIndex].files.push_back(std::string(line.rest));
+                set.files.push_back(std::string(line.rest));
+            } else if (line.key == "volume") {
+                set.volume = parseFloat(line);
+                if (set.volume < 0.0f) {
+                    fail(line.number, "volume must not be negative");
+                }
             } else {
                 fail(line.number, "unknown sound property '" + std::string(line.key) + "'");
             }
             break;
         }
         case Section::Music: {
+            MusicTrack& track = manifest.music_[sectionIndex];
             if (line.key == "file") {
-                manifest.music_[sectionIndex].file = std::string(line.rest);
+                track.file = std::string(line.rest);
+            } else if (line.key == "volume") {
+                track.volume = parseFloat(line);
+                if (track.volume < 0.0f) {
+                    fail(line.number, "volume must not be negative");
+                }
             } else {
                 fail(line.number, "unknown music property '" + std::string(line.key) + "'");
             }
@@ -484,6 +496,16 @@ const std::vector<std::string>& AssetManifest::soundSet(std::string_view name) c
         }
     }
     return empty;
+}
+
+float AssetManifest::soundSetVolume(std::string_view name) const
+{
+    for (const SoundSet& set : sounds_) {
+        if (set.name == name) {
+            return set.volume;
+        }
+    }
+    return 1.0f;
 }
 
 const std::string* AssetManifest::musicForLevel(int level) const

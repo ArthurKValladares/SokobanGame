@@ -257,7 +257,6 @@ bool supportsValidationLayer()
 VulkanRenderer::VulkanRenderer(
     SDL_Window* window,
     std::filesystem::path assetRoot,
-    std::filesystem::path modelAssetRoot,
     const AssetManifest& manifest)
     : window_(window)
     , assetRoot_(std::move(assetRoot))
@@ -281,7 +280,7 @@ VulkanRenderer::VulkanRenderer(
     createCommandPool();
     modelResources_.create(
         physicalDevice_, device_, commandPool_, graphicsQueue_,
-        std::move(modelAssetRoot), manifest);
+        assetRoot_, manifest);
     sceneDescriptors_.create(device_, descriptorResources());
     createPipeline();
     createFrameResources();

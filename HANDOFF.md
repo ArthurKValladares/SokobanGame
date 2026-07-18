@@ -41,6 +41,27 @@ cmake --build build --config Debug
 .\build\Debug\sokoban.exe
 ```
 
+Every normal build runs the manifest-driven content pipeline and stages a
+versioned `assets/` tree beside the executable. The game never reads models,
+audio, shaders, or levels from the source checkout at runtime. To validate and
+refresh content explicitly after editing `assets/manifest.txt` or a level:
+
+```powershell
+cmake --build build --config Debug --target sokoban_content
+```
+
+Release install and ZIP packaging:
+
+```powershell
+cmake --build build --config Release
+cmake --install build --config Release --prefix build\install
+cmake --build build --config Release --target package
+```
+
+The install contains `sokoban.exe`, its executable-relative `assets/` tree,
+and dependency licenses. MSVC builds use the static C/C++ runtime so the ZIP
+does not require a separately installed Visual C++ Redistributable.
+
 Headless rules tests (no SDL/Vulkan needed at runtime; built by default via `SOKOBAN_BUILD_TESTS`):
 
 ```powershell
@@ -82,7 +103,16 @@ cmake --build build --config Debug --target sokoban_presentation_tests
 .\build\Debug\sokoban_presentation_tests.exe
 ```
 
-Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine controls, the `LevelEditorDebugUi` adapter, and an Animation Preview window (browses every glTF/GLB under the source `assets/` tree and plays any clip on the player model with play/pause/scrub/speed controls, overriding gameplay animation while active). Release builds still compile the headless `LevelEditor` API but do not expose the ImGui editor/debug UI.
+Headless content-pipeline tests cover manifest/file validation, path
+containment, external glTF sidecars, level continuity, staging replacement,
+and notice inclusion:
+
+```powershell
+cmake --build build --config Debug --target sokoban_content_pipeline_tests
+.\build\Debug\sokoban_content_pipeline_tests.exe
+```
+
+Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine controls, the `LevelEditorDebugUi` adapter, and an Animation Preview window (browses source glTF/GLB content as an authoring tool and plays any clip on the player model with play/pause/scrub/speed controls, overriding gameplay animation while active). Release builds still compile the headless `LevelEditor` API but do not expose the ImGui editor/debug UI or compile source-asset paths into the executable.
 
 ## Important Source Map
 
@@ -93,7 +123,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
 - `src/engine/RenderFrameBuilder.*`: SDL/Vulkan-free construction of gameplay and editor `RenderFrameData`. Owns tile/model mapping, static geometry, water edges, ladder rungs, editor previews/pick-only cells, dynamic entities, tile scaling, and conveyor texture offsets.
 - `src/engine/ApplicationDebugUi.*`: Debug-only ImGui adapter for engine statistics and tuning. Edits `PresentationSettings` and calls the public `GameplaySession`/`VulkanRenderer` controls instead of storing application logic.
 - `src/engine/AnimationPreviewDebugUi.*`: Debug-only owner of animation asset scanning, clip selection, preview playback state, and renderer preview delegation.
-- `src/engine/AudioSystem.*`: miniaudio-backed sound playback behind a pimpl (`EngineHandle`), so no miniaudio types leak into headers. Preloads the manifest's `footsteps` and `stone-drag` sound sets straight from the source assets tree (no copying) with `MA_SOUND_FLAG_DECODE` into never-reallocated `std::vector<ma_sound>`s. `update(dt, playerWalking, pushingStone)` drives the pure `FootstepCadence` struct (first step fires immediately on walk start, then one per `footstepIntervalSeconds`, burst-capped with debt drop after hitches) and plays a random non-repeating footstep. It also edge-detects `pushingStone` (from `player().movingClip == RoguePush && motion.moving`, so undoing a push drags too): push start picks a random non-repeating `stoneDragLoop1..4.ogg` and plays it as a seamless miniaudio loop with a 15 ms fade-in; push end fades it out over 40 ms. The loop assets live in `assets/custom/audio/` and are generated from the Kenney Foley `stoneDrag*` samples by `tools/make_drag_loops.py` (ffmpeg required): silence-trimmed, tail crossfaded into the head for a continuous seam, plus a 1.5 ms edge ramp because Vorbis does not decode file edges exactly (raw whole-file looping would dip/click). Dialog/editor paths call `update(dt, false, false)` so an Escape mid-push stops the loop. `playMusicForLevel(level)` streams (`MA_SOUND_FLAG_STREAM`) one looping per-level soundtrack with a 600 ms crossfade on switch; the level-to-track mapping lives in the manifest's `music <level>` sections and is applied in `loadCurrentScreen`, where re-requesting the playing level is a no-op so screens within a level keep the music running. Per-sound volumes relative to master (`config::musicVolume/footstepVolume/stoneDragVolume`) are tunable in Debug UI > Audio alongside the master volume and footstep interval; the drag and music volumes apply live to the playing loop. Degrades gracefully (`available()` false, silent) if the device or files are missing. `Application::update` feeds it `presentation_.player().motion.moving` on the normal gameplay path only, so dialogs/editor are silent. Defaults come from `config::masterVolume` / `config::footstepIntervalSeconds`; both are runtime-tunable in Debug UI > Audio (tune Footstep Interval there to match the walk animation).
+- `src/engine/AudioSystem.*`: miniaudio-backed sound playback behind a pimpl (`EngineHandle`), so no miniaudio types leak into headers. Preloads the manifest's `footsteps` and `stone-drag` sound sets from the staged runtime content tree with `MA_SOUND_FLAG_DECODE` into never-reallocated `std::vector<ma_sound>`s. `update(dt, playerWalking, pushingStone)` drives the pure `FootstepCadence` struct (first step fires immediately on walk start, then one per `footstepIntervalSeconds`, burst-capped with debt drop after hitches) and plays a random non-repeating footstep. It also edge-detects `pushingStone` (from `player().movingClip == RoguePush && motion.moving`, so undoing a push drags too): push start picks a random non-repeating `stoneDragLoop1..4.ogg` and plays it as a seamless miniaudio loop with a 15 ms fade-in; push end fades it out over 40 ms. The loop assets live in `assets/custom/audio/` and are generated from the Kenney Foley `stoneDrag*` samples by `tools/make_drag_loops.py` (ffmpeg required): silence-trimmed, tail crossfaded into the head for a continuous seam, plus a 1.5 ms edge ramp because Vorbis does not decode file edges exactly (raw whole-file looping would dip/click). Dialog/editor paths call `update(dt, false, false)` so an Escape mid-push stops the loop. `playMusicForLevel(level)` streams (`MA_SOUND_FLAG_STREAM`) one looping per-level soundtrack with a 600 ms crossfade on switch; the level-to-track mapping lives in the manifest's `music <level>` sections and is applied in `loadCurrentScreen`, where re-requesting the playing level is a no-op so screens within a level keep the music running. Footstep and stone-drag volumes are seeded from the manifest sound sections (`volume <x>`, relative to master); each music track may also set `volume <x>`, which multiplies the global `config::musicVolume`. All are runtime-tunable in Debug UI > Audio alongside the master volume and footstep interval; the drag and music volumes apply live to the playing loop. Degrades gracefully (`available()` false, silent) if the device or files are missing. `Application::update` feeds it `presentation_.player().motion.moving` on the normal gameplay path only, so dialogs/editor are silent. Defaults come from `config::masterVolume` / `config::footstepIntervalSeconds`; both are runtime-tunable in Debug UI > Audio (tune Footstep Interval there to match the walk animation).
 - `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, action history, a branch-safe undo stack, automatic world steps, and the post-undo automatic-motion pause. Emits `Action` snapshots for `Application` to animate. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
 - `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags + slide momentum) plus pure functions in `sokoban::rules` — `step` advances the whole world one discrete step (simultaneous one-tile moves, pushes, ladder climbs, momentum, falls, water, conveyors); `hasPendingMotion` reports whether the world would keep moving without input; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
 - `src/engine/Level.*`: level file parsing, serialization, layered grid storage, walkability/support rules, player/movable extraction. Tested by `tests/LevelTests.cpp` (`sokoban_level_tests`).
@@ -102,7 +132,9 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
 - `src/engine/LevelEditor.*`: headless editor model and command API. Owns document state/history, tile validation, draft construction, level load/save, source/runtime mirroring, browser enumeration, screen/level renumbering, soft-delete/restore, and guarded permanent deletion. It has no SDL, Vulkan, or ImGui dependency and is tested by `tests/LevelEditorTests.cpp` (`sokoban_level_editor_tests`).
 - `src/engine/LevelEditorDebugUi.*`: Debug-only ImGui adapter for `LevelEditor`. Owns widget text buffers and confirmation-modal presentation only; every editor state transition and filesystem action is delegated to the headless API.
 - `src/engine/render/RenderTypes.hpp`: renderer-facing frame contract and model/animation enums, independent of the Vulkan facade.
-- `src/engine/AssetManifest.*`: runtime asset manifest - the single source of truth for models, textures, animations, tile visuals (model + render scale per tile type), and sounds. Parses `assets/manifest.txt` (plain text, sections start unindented, properties indented, `#` comments, paths relative to the assets root) at startup with line-numbered errors and full validation (unique names, resolvable material textures, exactly one `role player` skinned model, all three `player-idle/move/push` animation roles, texture count <= `maxModelTextures`). `RenderModel`/`RenderAnimation` are now runtime ids (index+1 into the manifest lists; 0 = cube/none) defined in `RenderTypes.hpp`. Adding an asset, tile visual, or sound is a manifest edit plus relaunch - no CMake, enum, or renderer change. Headless; tested by `tests/AssetManifestTests.cpp` (`sokoban_asset_manifest_tests`).
+- `src/engine/AssetManifest.*`: runtime asset manifest - the single source of truth for models, textures, animations, tile visuals (model + render scale per tile type), and sounds. Parses `assets/manifest.txt` (plain text, sections start unindented, properties indented, `#` comments, paths relative to the assets root) at startup with line-numbered errors and full validation (unique names, resolvable material textures, exactly one `role player` skinned model, all three `player-idle/move/push` animation roles, texture count <= `maxModelTextures`). `RenderModel`/`RenderAnimation` are now runtime ids (index+1 into the manifest lists; 0 = cube/none) defined in `RenderTypes.hpp`. Adding an asset, tile visual, or sound is a manifest edit plus rebuilding `sokoban_content` and relaunching - no CMake, enum, or renderer change. Headless; tested by `tests/AssetManifestTests.cpp` (`sokoban_asset_manifest_tests`).
+- `src/engine/ContentPipeline.*` + `tools/ContentTool.cpp`: headless production-content inventory, validation, and staging. Resolves manifest references and external `.gltf` URIs, rejects missing/escaping paths, parses every playable level, requires contiguous level/screen indices, verifies all compiled shaders, includes nearby asset notices, excludes `levels/Deleted`, and atomically replaces the output with only reachable files. Writes `content.index` with format/game version, file count, sizes, and paths. Tested by `tests/ContentPipelineTests.cpp` (`sokoban_content_pipeline_tests`).
+- `src/engine/RuntimeContent.*`: resolves the read-only `assets/` directory beside the executable through `SDL_GetBasePath` and rejects missing, corrupt, unsupported, or game-version-mismatched `content.index` files. `Application`, `VulkanRenderer`, and `AudioSystem` all use this one runtime root.
 - `src/engine/render/RenderAssetRequirements.*`: Vulkan-free model/animation requirement sets plus shared tile-to-model mapping. Computes requirements from a loaded `Level` for prefetching or from `RenderFrameData` as a draw-time safety net. Tested by `tests/AssetRequirementsTests.cpp` (`sokoban_asset_requirements_tests`).
 - `src/engine/render/AnimationController.*`: Vulkan-free owner of gameplay animation clips, Rogue clip selection, preview overrides, deduplication, and crossfade state. It emits immutable skinning requests and is tested by `tests/AnimationControllerTests.cpp` (`sokoban_animation_controller_tests`).
 - `src/engine/render/SkinnedMeshUpdater.*`: owns the Rogue's skinned source mesh and dynamic Vulkan vertex/index buffers. It consumes `AnimationController` requests, performs CPU skinning/blending, and uploads changed vertices.
@@ -341,16 +373,21 @@ Asset path decisions:
   - `assets/KayKit Adventurers 2.0`
   - `assets/KayKit Platformer Pack 1.0`
 - The old folder names `KayKit_BlockBits_1.0_FREE` and `KayKit_Adventurers_2.0_FREE` were replaced in the asset manifest.
-- Model/texture/animation/sound files load directly from the source `assets/` tree (paths in `assets/manifest.txt`); `.bin` glTF sidecars resolve naturally next to their `.gltf`.
+- Model/texture/animation/sound files load from the staged executable-relative `assets/` tree; paths remain authored relative to source `assets/manifest.txt` and `.bin` glTF sidecars are discovered automatically.
 
 CMake asset pipeline:
 
-- Shaders are compiled from `shaders/*.glsl` to `build/assets/shaders/*.spv`.
-- Levels are copied from `levels/` to `build/assets/levels`.
-- Everything else (models, textures, animations, sounds, tile visuals) is
-  defined in `assets/manifest.txt` and loaded at runtime straight from the
-  source assets tree - CMake is not involved. `AssetManifest::loadFromFile`
-  validates the manifest at startup and throws descriptive errors.
+- Shaders compile into an intermediate generated directory.
+- The `sokoban_content_tool` validates source assets, levels, external glTF
+  dependencies, and shaders, then stages only reachable files into
+  `<executable directory>/assets`. A normal build runs this target automatically.
+- Staging writes to a sibling temporary directory and replaces the old content
+  tree only after every source validates and copies successfully, preventing
+  partial packages and removing stale files from deleted manifest entries.
+- Runtime loads only the staged tree and validates `content.index` format and
+  game version before reading `manifest.txt`.
+- CMake `install` and CPack ZIP rules consume this same staged tree and include
+  SDL, miniaudio, ImGui, and discovered asset license/readme files.
 - Shaders compile with a fixed `MODEL_TEXTURE_COUNT=16`, which must equal
   `sokoban::maxModelTextures` (`AssetManifest.hpp`); descriptor writes pad the
   texture array with a fallback texture, so the manifest can define up to 16
@@ -432,6 +469,15 @@ If making player-facing menus, pause screens, settings, or polished editor UI, p
 
 Major recent additions and fixes:
 
+- Added the audio system (miniaudio): randomized non-repeating concrete
+  footsteps on a tunable cadence while walking/pushing, a seamlessly looping
+  stone-drag sound while a rock is pushed (loop-ready assets generated by
+  `tools/make_drag_loops.py`; starts/stops with short fades and survives the
+  miniaudio scheduled-stop restart gotcha via
+  `ma_sound_reset_stop_time_and_fade`), and one streamed looping soundtrack
+  per level with a 600 ms crossfade between levels. Sound files, sets, and
+  volumes are manifest-driven; Debug UI > Audio has master/music/footstep/drag
+  volume sliders plus the footstep interval.
 - Replaced eager runtime catalog loading with a lazy, TaskSystem-backed asset
   pipeline. The active screen is guaranteed before use, current/next-level
   assets prepare in the background, and completed GPU resources are published
@@ -470,7 +516,7 @@ Major recent additions and fixes:
   by a dedicated 52-check test executable.
 - Added layered levels with `@layer N` sections.
 - Added level editor/document browser and draft play flow.
-- Added Debug UI controls for rendering, lighting, tile scale, grid, and conveyor rate.
+- Added Debug UI controls for rendering, lighting, audio (volumes + footstep interval), tile scale, grid, and conveyor rate.
 - Added KayKit GLTF asset pipeline for blocks, Rogue character, animations, and conveyors.
 - Added animated Rogue player rendering.
 - Added rocks/movables, undo, restart, pressure plates, and screen progression.
@@ -501,10 +547,14 @@ At the time this handoff was updated:
   `RenderAssetRequirements`, level prefetch integration, diagnostics, and tests
   described above.
 - Full Debug and Release builds passed from the clean `out/visual-studio` build
-  tree. A Debug Vulkan-validation visual runtime smoke test rendered level 0
-  correctly, and the process remained healthy while background tasks completed.
-- All nine CTest suites pass, including the new `asset_manifest` suite
-  (manifest parsing, validation failures, and the shipped manifest file).
+  tree. Clean installed Release builds also start and remain healthy without
+  access to the source checkout.
+- All ten CTest suites pass, including mandatory validation of the shipped
+  manifest and the new `content_pipeline` regression suite.
+- `cmake --build out\visual-studio --config Release --target package` produces
+  `out/visual-studio/Sokoban3D-0.1.0-Windows-x64.zip`. The current staged tree
+  contains 53 reachable files (about 4 MB) instead of the roughly 236 MB / 5,964
+  files in the source vendor packs.
 
 Known useful verification commands:
 
@@ -514,6 +564,7 @@ rg -n "KayKit_Adventurers_2\.0_FREE|KayKit_BlockBits_1\.0_FREE" .
 cmake --build out\visual-studio --config Debug
 ctest --test-dir out\visual-studio -C Debug --output-on-failure
 .\out\visual-studio\Debug\sokoban.exe
+cmake --build out\visual-studio --config Release --target package
 ```
 
 The `rg` command above should return no matches.
@@ -565,6 +616,13 @@ Rendering/assets:
 - Keep `VulkanRenderer` as the frame orchestrator. If its remaining scene
   traversal grows, extract a scene recorder or projection/layout component
   around a concrete need rather than moving Vulkan ownership back into it.
+
+Audio:
+
+- Add sounds for more events (undo, restart, level completion, falling into
+  water, conveyor hum) as manifest sound sets.
+- Consider a mixer section in the manifest if global master/music gains should
+  move out of `Config.hpp`.
 
 UI:
 

@@ -3,6 +3,7 @@
 #include "engine/DebugUi.hpp"
 #include "engine/RenderFrameBuilder.hpp"
 #include "engine/Rules.hpp"
+#include "engine/RuntimeContent.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -17,16 +18,14 @@
 namespace sokoban {
 
 Application::Application()
-    : assetManifest_(AssetManifest::loadFromFile(
-          std::filesystem::path(SOKOBAN_SOURCE_ASSET_DIR) / "manifest.txt"))
-    , window_("Sokoban 3D", 1280, 720)
+    : window_("Sokoban 3D", 1280, 720)
+    , assetRoot_(runtimeContentRoot())
+    , assetManifest_(AssetManifest::loadFromFile(assetRoot_ / "manifest.txt"))
     , renderer_(
           window_.nativeHandle(),
-          SOKOBAN_ASSET_DIR,
-          SOKOBAN_SOURCE_ASSET_DIR,
+          assetRoot_,
           assetManifest_)
-    , assetRoot_(SOKOBAN_ASSET_DIR)
-    , audioSystem_(SOKOBAN_SOURCE_ASSET_DIR, assetManifest_)
+    , audioSystem_(assetRoot_, assetManifest_)
 {
     presentationSettings_.applyTileScales(assetManifest_);
     presentationSettings_.normalize();

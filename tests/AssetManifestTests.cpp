@@ -78,6 +78,7 @@ tile Ground
   scale 0.9
 
 sound footsteps
+  volume 0.3
   file audio/step with spaces 1.ogg
   file audio/step2.ogg
 
@@ -86,6 +87,7 @@ music 0
 
 music 2
   file audio/track two.ogg
+  volume 0.8
 )";
 
 void testValidManifest()
@@ -131,11 +133,15 @@ void testValidManifest()
     check(manifest.soundSet("footsteps")[0] == "audio/step with spaces 1.ogg",
         "sound path with spaces");
     check(manifest.soundSet("missing").empty(), "unknown sound set is empty");
+    check(manifest.soundSetVolume("footsteps") == 0.3f, "sound set volume");
+    check(manifest.soundSetVolume("missing") == 1.0f, "unknown sound set volume defaults to 1");
 
     check(manifest.musicForLevel(0) != nullptr && *manifest.musicForLevel(0) == "audio/track zero.ogg",
         "music level 0");
     check(manifest.musicForLevel(1) == nullptr, "no music for level 1");
     check(manifest.musicForLevel(2) != nullptr, "music level 2");
+    check(manifest.musicTracks()[0].volume == 1.0f, "music volume defaults to 1");
+    check(manifest.musicTracks()[1].volume == 0.8f, "music track volume parsed");
 }
 
 void testValidationFailures()
@@ -158,6 +164,8 @@ void testValidationFailures()
         "duplicate music level");
     checkThrows([&] { (void)AssetManifest::parse(base + "\nsound empty-set\n"); },
         "sound set without files");
+    checkThrows([&] { (void)AssetManifest::parse(base + "\nsound bad-volume\n  volume -1\n  file f.ogg\n"); },
+        "negative sound volume");
     checkThrows([&] { (void)AssetManifest::parse(base + "\nmodel NoTex\n  path p.gltf\n  material texture Ghost\n"); },
         "unknown material texture");
     checkThrows([&] { (void)AssetManifest::parse(base + "\nmodel BadIdx\n  path p.gltf\n  material primitive-texture-index 9\n"); },

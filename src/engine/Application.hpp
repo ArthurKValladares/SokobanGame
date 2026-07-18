@@ -54,12 +54,12 @@ private:
     void preloadUpcomingAssets();
     [[nodiscard]] RenderFrameData buildRenderFrame() const;
 
+    Window window_;
+    std::filesystem::path assetRoot_;
     // Declared before the renderer/audio members that hold references to it.
     AssetManifest assetManifest_;
-    Window window_;
     VulkanRenderer renderer_;
     UiContext ui_;
-    std::filesystem::path assetRoot_;
     AudioSystem audioSystem_;
     Level level_;
     GameplaySession gameplaySession_;

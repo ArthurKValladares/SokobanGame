@@ -79,6 +79,8 @@ AudioSystem::AudioSystem(std::filesystem::path audioRoot, const AssetManifest& m
     }
     engine_->engineInitialized = true;
     ma_engine_set_volume(&engine_->engine, masterVolume_);
+    footstepVolume_ = std::clamp(manifest.soundSetVolume("footsteps"), 0.0f, 1.0f);
+    stoneDragVolume_ = std::clamp(manifest.soundSetVolume("stone-drag"), 0.0f, 1.0f);
 
     loadSoundSet(
         engine_->engine, audioRoot_,
@@ -241,7 +243,7 @@ void AudioSystem::playMusicForLevel(int level)
     ma_sound_reset_stop_time_and_fade(&sound);
     ma_sound_set_looping(&sound, MA_TRUE);
     ma_sound_seek_to_pcm_frame(&sound, 0);
-    ma_sound_set_volume(&sound, musicVolume_);
+    ma_sound_set_volume(&sound, musicVolume_ * tracks[static_cast<size_t>(target)].volume);
     ma_sound_set_fade_in_milliseconds(&sound, 0.0f, 1.0f, musicCrossfadeMilliseconds);
     ma_sound_start(&sound);
 }
@@ -250,9 +252,10 @@ void AudioSystem::setMusicVolume(float volume)
 {
     musicVolume_ = std::clamp(volume, 0.0f, 1.0f);
     if (engine_->engineInitialized && engine_->activeMusic >= 0) {
+        const std::size_t active = static_cast<std::size_t>(engine_->activeMusic);
         ma_sound_set_volume(
-            &engine_->musicSounds[static_cast<size_t>(engine_->activeMusic)],
-            musicVolume_);
+            &engine_->musicSounds[active],
+            musicVolume_ * manifest_->musicTracks()[active].volume);
     }
 }
 
