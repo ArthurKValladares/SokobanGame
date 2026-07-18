@@ -142,6 +142,7 @@ void testValidManifest()
     check(manifest.modelForTile(sokoban::TileType::Wall) == manifest.modelIdByName("Box"),
         "wall tile model");
     check(manifest.tileScale(sokoban::TileType::Wall) == 1.25f, "wall tile scale");
+    check(manifest.tileEntries().size() == 3, "authored tile entries retained");
     check(manifest.modelForTile(sokoban::TileType::Ground).isCube(), "ground stays cube");
     check(manifest.tileScale(sokoban::TileType::Ground) == 0.9f, "ground scale without model");
     check(manifest.modelForTile(sokoban::TileType::End).isCube(), "unlisted tile defaults to cube");

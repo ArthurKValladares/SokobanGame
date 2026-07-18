@@ -366,8 +366,13 @@ static void parseTiles(const Json& root, AssetManifest& manifest)
         }
         configured[index] = true;
 
-        manifest.tileVisuals_[index].scale = optionalFloat(tileJson, "scale", 1.0f, context);
-        manifest.tileModelNames_[index] = optionalString(tileJson, "model", context).value_or("");
+        AssetManifest::TileEntry entry;
+        entry.tile = *type;
+        entry.scale = optionalFloat(tileJson, "scale", 1.0f, context);
+        entry.modelName = optionalString(tileJson, "model", context).value_or("");
+        manifest.tileVisuals_[index].scale = entry.scale;
+        manifest.tileModelNames_[index] = entry.modelName;
+        manifest.tiles_.push_back(std::move(entry));
     }
 }
 

@@ -42,6 +42,8 @@ Application::Application()
         currentScreen_);
     levelEditorDebugUi_.initialize(levelEditor_);
     animationPreviewDebugUi_.initialize(SOKOBAN_SOURCE_ASSET_DIR);
+    assetManifestEditor_.initialize(
+        std::filesystem::path(SOKOBAN_SOURCE_ASSET_DIR) / "manifest.json");
 
     DebugUi::addWindow("Engine", [this] {
         applicationDebugUi_.draw({
@@ -54,6 +56,9 @@ Application::Application()
             .audio = audioSystem_,
         });
     });
+    DebugUi::addWindow("Asset Manifest", [this] {
+        assetManifestDebugUi_.draw(assetManifestEditor_);
+    }, true);
     DebugUi::addWindow("Level Editor", [this] {
         levelEditorDebugUi_.draw(levelEditor_, {
             .playDraft = [this](Level level) {

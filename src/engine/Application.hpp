@@ -3,6 +3,8 @@
 #include "engine/AnimationPreviewDebugUi.hpp"
 #include "engine/ApplicationDebugUi.hpp"
 #include "engine/AssetManifest.hpp"
+#include "engine/AssetManifestDebugUi.hpp"
+#include "engine/AssetManifestEditor.hpp"
 #include "engine/AudioSystem.hpp"
 #include "engine/GameplayPresentation.hpp"
 #include "engine/Input.hpp"
@@ -70,6 +72,8 @@ private:
     PresentationSettings presentationSettings_;
     GameplayPresentation presentation_;
     ApplicationDebugUi applicationDebugUi_;
+    AssetManifestEditor assetManifestEditor_;
+    AssetManifestDebugUi assetManifestDebugUi_;
     LevelEditor levelEditor_;
     LevelEditorDebugUi levelEditorDebugUi_;
     AnimationPreviewDebugUi animationPreviewDebugUi_;

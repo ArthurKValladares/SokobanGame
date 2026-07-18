@@ -72,6 +72,12 @@ public:
         float scale = 1.0f;
     };
 
+    struct TileEntry {
+        TileType tile = TileType::Ground;
+        std::string modelName; // empty selects the procedural cube
+        float scale = 1.0f;
+    };
+
     struct SoundSet {
         std::string name;
         std::vector<std::string> files; // relative to the assets root
@@ -92,6 +98,7 @@ public:
     [[nodiscard]] const std::vector<Texture>& textures() const { return textures_; }
     [[nodiscard]] const std::vector<Model>& models() const { return models_; }
     [[nodiscard]] const std::vector<Animation>& animations() const { return animations_; }
+    [[nodiscard]] const std::vector<TileEntry>& tileEntries() const { return tiles_; }
     [[nodiscard]] const std::vector<SoundSet>& soundSets() const { return sounds_; }
     [[nodiscard]] const std::vector<MusicTrack>& musicTracks() const { return music_; }
 
@@ -126,6 +133,7 @@ private:
     std::array<std::string, tileTypeCount> tileModelNames_ {};
     std::vector<Model> models_;
     std::vector<Animation> animations_;
+    std::vector<TileEntry> tiles_;
     std::array<TileVisual, tileTypeCount> tileVisuals_ {};
     std::vector<SoundSet> sounds_;
     std::vector<MusicTrack> music_;

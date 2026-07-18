@@ -5,7 +5,6 @@
 #include "engine/Config.hpp"
 #include "engine/Rules.hpp"
 #include "engine/TaskSystem.hpp"
-#include "engine/TileTypes.hpp"
 
 #if SOKOBAN_ENABLE_DEBUG_UI
 #include <imgui.h>
@@ -210,26 +209,6 @@ void ApplicationDebugUi::draw(const Context& context) const
             "%.2f");
         ImGui::TextDisabled("End and pressure plate geometry");
 
-        if (ImGui::TreeNode("Tile Scale")) {
-            for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
-                if (definition.type == TileType::Air) {
-                    continue;
-                }
-                float scale = settings.tileScale(definition.type);
-                if (ImGui::DragFloat(
-                        definition.name.data(),
-                        &scale,
-                        0.01f,
-                        config::minTileScale,
-                        config::maxTileScale,
-                        "%.2f")) {
-                    settings.setTileScale(definition.type, scale);
-                }
-            }
-            ImGui::TextDisabled(
-                "Visual scale around each tile's bottom-center.");
-            ImGui::TreePop();
-        }
     }
 
     if (ImGui::CollapsingHeader("Audio")) {
@@ -240,14 +219,6 @@ void ApplicationDebugUi::draw(const Context& context) const
         float musicVolume = context.audio.musicVolume();
         if (ImGui::SliderFloat("Music Volume", &musicVolume, 0.0f, 1.0f, "%.2f")) {
             context.audio.setMusicVolume(musicVolume);
-        }
-        float footstepVolume = context.audio.footstepVolume();
-        if (ImGui::SliderFloat("Footstep Volume", &footstepVolume, 0.0f, 1.0f, "%.2f")) {
-            context.audio.setFootstepVolume(footstepVolume);
-        }
-        float dragVolume = context.audio.stoneDragVolume();
-        if (ImGui::SliderFloat("Stone Drag Volume", &dragVolume, 0.0f, 1.0f, "%.2f")) {
-            context.audio.setStoneDragVolume(dragVolume);
         }
         float footstepInterval = context.audio.footstepIntervalSeconds();
         if (ImGui::DragFloat("Footstep Interval", &footstepInterval, 0.005f, 0.05f, 1.0f, "%.3f s")) {

@@ -125,6 +125,8 @@ add_executable(sokoban
     src/engine/Application.cpp
     src/engine/ApplicationDebugUi.cpp
     src/engine/AssetManifest.cpp
+    src/engine/AssetManifestDebugUi.cpp
+    src/engine/AssetManifestEditor.cpp
     src/engine/AudioSystem.cpp
     src/engine/BoardLayout.cpp
     src/engine/DebugUi.cpp
@@ -300,6 +302,23 @@ if(SOKOBAN_BUILD_TESTS)
     endif()
     add_test(NAME asset_manifest COMMAND sokoban_asset_manifest_tests)
     set_tests_properties(asset_manifest PROPERTIES
+        ENVIRONMENT "SOKOBAN_ASSETS=${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    )
+    add_executable(sokoban_asset_manifest_editor_tests
+        tests/AssetManifestEditorTests.cpp
+        src/engine/AssetManifest.cpp
+        src/engine/AssetManifestEditor.cpp
+        src/engine/TileTypes.cpp
+    )
+    target_include_directories(sokoban_asset_manifest_editor_tests PRIVATE src)
+    target_link_libraries(sokoban_asset_manifest_editor_tests PRIVATE sokoban_json)
+    if(MSVC)
+        target_compile_options(sokoban_asset_manifest_editor_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_asset_manifest_editor_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME asset_manifest_editor COMMAND sokoban_asset_manifest_editor_tests)
+    set_tests_properties(asset_manifest_editor PROPERTIES
         ENVIRONMENT "SOKOBAN_ASSETS=${CMAKE_CURRENT_SOURCE_DIR}/assets"
     )
     target_include_directories(sokoban_animation_controller_tests PRIVATE src)
