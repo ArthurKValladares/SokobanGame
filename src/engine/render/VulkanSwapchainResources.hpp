@@ -32,7 +32,8 @@ public:
         SDL_Window* window,
         QueueFamilies queueFamilies,
         VkSampleCountFlagBits sampleCount,
-        VkFormat depthFormat);
+        VkFormat depthFormat,
+        bool vsync);
     void recreate();
     void recreateAttachments(VkSampleCountFlagBits sampleCount);
     void destroy();
@@ -99,6 +100,7 @@ private:
     VkFormat depthFormat_ = VK_FORMAT_D32_SFLOAT;
     VkExtent2D extent_ {};
     VkSampleCountFlagBits sampleCount_ = VK_SAMPLE_COUNT_1_BIT;
+    bool vsync_ = false;
     std::vector<SwapchainImage> images_;
     vulkanResources::OwnedImage msaaColorImage_ {};
     vulkanResources::OwnedImage depthImage_ {};

@@ -351,6 +351,161 @@ void testNewMoveAfterUndoCreatesCleanHistoryBranch()
     CHECK(!session.tryStartNextAction(level, {}));
 }
 
+void testPlayerMoveCountTracksUndoAndRestart()
+{
+    TEST("playerMoveCountTracksUndoAndRestart");
+    const Level level = makeLevel({
+        { "....." },
+        { " C   " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    CHECK(session.playerMoveCount() == 0);
+
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.playerMoveCount() == 1);
+
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.playerMoveCount() == 2);
+
+    session.queueUndo();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.playerMoveCount() == 1);
+
+    session.queueRestart();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.playerMoveCount() == 0);
+
+    session.queueUndo();
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.playerMoveCount() == 1);
+}
+
+void testSnapshotRestoresExactStateAndUndoStack()
+{
+    TEST("snapshotRestoresExactStateAndUndoStack");
+    const Level level = makeLevel({
+        { "....." },
+        { " C   " },
+    });
+    GameplaySession original;
+    original.reset(level);
+    original.queueMove(MoveDirection::Right);
+    CHECK(original.tryStartNextAction(level, {}));
+    finishAction(original);
+    original.queueMove(MoveDirection::Right);
+    CHECK(original.tryStartNextAction(level, {}));
+    finishAction(original);
+
+    const GameplaySession::Snapshot saved = original.snapshot();
+    CHECK(saved.undoStack.size() == 2);
+    CHECK(saved.state.player == cell(3, 0, 1));
+    CHECK(saved.playerMoveCount == 2);
+
+    GameplaySession restored;
+    CHECK(restored.restore(level, saved));
+    CHECK(restored.snapshot() == saved);
+    CHECK(restored.undoCount() == 2);
+
+    restored.queueUndo();
+    CHECK(restored.tryStartNextAction(level, {}));
+    finishAction(restored);
+    CHECK(restored.state().player == cell(2, 0, 1));
+    CHECK(restored.playerMoveCount() == 1);
+    CHECK(restored.undoCount() == 1);
+}
+
+void testResetClearsUndoStackForNewScreen()
+{
+    TEST("resetClearsUndoStackForNewScreen");
+    const Level firstScreen = makeLevel({
+        { "...." },
+        { " C  " },
+    });
+    const Level nextScreen = makeLevel({
+        { "..." },
+        { "C  " },
+    });
+    GameplaySession session;
+    session.reset(firstScreen);
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(firstScreen, {}));
+    finishAction(session);
+    CHECK(session.undoCount() == 1);
+
+    session.reset(nextScreen);
+    CHECK(session.undoCount() == 0);
+    CHECK(session.snapshot().undoStack.empty());
+    CHECK(session.state() == rules::initialState(nextScreen));
+    session.queueUndo();
+    CHECK(!session.tryStartNextAction(nextScreen, {}));
+}
+
+void testSnapshotRestoreAcceptsRestartHistory()
+{
+    TEST("snapshotRestoreAcceptsRestartHistory");
+    const Level level = makeLevel({
+        { "...." },
+        { " C  " },
+    });
+    GameplaySession original;
+    original.reset(level);
+    original.queueMove(MoveDirection::Right);
+    CHECK(original.tryStartNextAction(level, {}));
+    finishAction(original);
+    const GameState moved = original.state();
+
+    original.queueRestart();
+    CHECK(original.tryStartNextAction(level, {}));
+    finishAction(original);
+    CHECK(original.state() == rules::initialState(level));
+
+    GameplaySession restored;
+    CHECK(restored.restore(level, original.snapshot()));
+    CHECK(restored.undoCount() == 2);
+    restored.queueUndo();
+    CHECK(restored.tryStartNextAction(level, {}));
+    finishAction(restored);
+    CHECK(restored.state() == moved);
+    CHECK(restored.playerMoveCount() == 1);
+}
+
+void testInvalidSnapshotIsRejectedWithoutMutation()
+{
+    TEST("invalidSnapshotIsRejectedWithoutMutation");
+    const Level level = makeLevel({
+        { "...." },
+        { " C  " },
+    });
+    GameplaySession source;
+    source.reset(level);
+    source.queueMove(MoveDirection::Right);
+    CHECK(source.tryStartNextAction(level, {}));
+    finishAction(source);
+
+    GameplaySession::Snapshot corrupted = source.snapshot();
+    corrupted.undoStack.front().before.player.x += 1;
+
+    GameplaySession target;
+    target.reset(level);
+    const GameplaySession::Snapshot beforeRestore = target.snapshot();
+    CHECK(!target.restore(level, corrupted));
+    CHECK(target.snapshot() == beforeRestore);
+
+    corrupted = source.snapshot();
+    corrupted.undoStack.front().after.player.x += 10;
+    corrupted.state = corrupted.undoStack.front().after;
+    CHECK(!target.restore(level, corrupted));
+    CHECK(target.snapshot() == beforeRestore);
+}
+
 } // namespace
 
 int main()
@@ -367,6 +522,11 @@ int main()
     testDeadPlayerDiscardsCommandsUntilUndo();
     testRestartCanBeUndone();
     testNewMoveAfterUndoCreatesCleanHistoryBranch();
+    testPlayerMoveCountTracksUndoAndRestart();
+    testSnapshotRestoresExactStateAndUndoStack();
+    testResetClearsUndoStackForNewScreen();
+    testSnapshotRestoreAcceptsRestartHistory();
+    testInvalidSnapshotIsRejectedWithoutMutation();
 
     if (failures == 0) {
         std::cout << "GameplaySessionTests: " << checks << " checks passed\n";

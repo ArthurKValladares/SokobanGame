@@ -82,11 +82,23 @@ cmake --build build --config Debug --target sokoban_level_tests
 ```
 
 Headless gameplay-session tests cover command buffering, action timing,
-push metadata, restart, undo, and automatic-motion pausing:
+push metadata, restart, undo, automatic-motion pausing, solution move counts,
+checkpoint restore, invalid/impossible history rejection, and per-screen undo
+reset:
 
 ```powershell
 cmake --build build --config Debug --target sokoban_gameplay_session_tests
 .\build\Debug\sokoban_gameplay_session_tests.exe
+```
+
+Player-profile tests cover format-3 round trips, format-1/2 migration, exact
+active-screen/undo checkpoints, completion bests, normalization, atomic writes,
+asynchronous save coalescing/shutdown flushing, prior-save backups,
+corrupt-save archival, backup recovery, and double-corruption default recovery:
+
+```powershell
+cmake --build build --config Debug --target sokoban_profile_tests
+.\build\Debug\sokoban_profile_tests.exe
 ```
 
 Headless animation-controller tests cover Rogue animation selection,
@@ -120,14 +132,17 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
 ## Important Source Map
 
 - `src/main.cpp`: process entry point.
-- `src/engine/Application.*`: top-level coordinator for the SDL event loop, input translation, level/screen progression, gameplay-session scheduling, editor picking/painting, modal flow, and component lifetime. It no longer owns mutable rendering settings, visual interpolation, debug animation-browser state, or render-frame construction.
+- `src/engine/Application.*`: top-level coordinator for the SDL event loop, profile-backed input translation, level/screen progression and completion recording, gameplay-session scheduling, editor picking/painting, modal flow, and component lifetime. It no longer owns mutable rendering settings, visual interpolation, debug animation-browser state, or render-frame construction.
 - `src/engine/PresentationSettings.*`: mutable runtime presentation settings initialized from the immutable defaults in `Config.hpp`. Owns lighting, SSAO/shadow tuning, grid appearance, surface geometry, tile scales, normalization, sun-direction conversion, and renderer-facing lighting/grid values.
 - `src/engine/GameplayPresentation.*`: headless presentation state derived from `GameplaySession::Action` snapshots. Owns player/movable interpolation, fallen render offsets, player clip/facing/playback state, and the shared world/conveyor animation clock without mutating authoritative gameplay state.
 - `src/engine/RenderFrameBuilder.*`: SDL/Vulkan-free construction of gameplay and editor `RenderFrameData`. Owns tile/model mapping, static geometry, water edges, ladder rungs, editor previews/pick-only cells, dynamic entities, tile scaling, and conveyor texture offsets.
 - `src/engine/ApplicationDebugUi.*`: Debug-only ImGui adapter for engine statistics and tuning. Edits `PresentationSettings` and calls the public `GameplaySession`/`VulkanRenderer` controls instead of storing application logic.
 - `src/engine/AnimationPreviewDebugUi.*`: Debug-only owner of animation asset scanning, clip selection, preview playback state, and renderer preview delegation.
-- `src/engine/AudioSystem.*`: miniaudio-backed sound playback behind a pimpl (`EngineHandle`), so no miniaudio types leak into headers. Preloads the manifest's `footsteps` and `stone-drag` sound sets from the staged runtime content tree with `MA_SOUND_FLAG_DECODE` into never-reallocated `std::vector<ma_sound>`s. `update(dt, playerWalking, pushingStone)` drives the pure `FootstepCadence` struct and plays randomized non-repeating footsteps. Stone dragging uses randomized seamless loops with short fades; music streams one looping track per level with a 600 ms crossfade. Sound-set and per-track gains come from the manifest and are edited in the Asset Manifest window; Debug UI > Audio retains runtime master/music gain and footstep cadence controls. Authored manifest changes apply after rebuilding/restarting. Audio degrades gracefully (`available()` false, silent) if the device or files are missing.
-- `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, action history, a branch-safe undo stack, automatic world steps, and the post-undo automatic-motion pause. Emits `Action` snapshots for `Application` to animate. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
+- `src/engine/AudioSystem.*`: miniaudio-backed sound playback behind a pimpl (`EngineHandle`), so no miniaudio types leak into headers. Preloads the manifest's `footsteps` and `stone-drag` sound sets from the staged runtime content tree with `MA_SOUND_FLAG_DECODE` into never-reallocated `std::vector<ma_sound>`s. `update(dt, playerWalking, pushingStone)` drives the pure `FootstepCadence` struct and plays randomized non-repeating footsteps. Stone dragging uses randomized seamless loops with short fades; music streams one looping track per level with a 600 ms crossfade. Manifest gains remain authored in the Asset Manifest window; profile-backed master, music, and sound-effect bus gains are previewed live and persisted when Debug UI sliders are committed. Audio degrades gracefully (`available()` false, silent) if the device or files are missing.
+- `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, action history, a branch-safe undo stack, automatic world steps, the post-undo automatic-motion pause, and solution-move snapshots that restore correctly across undo/restart. Its committed-state snapshot/restore API persists the exact player/movable state and usable undo chain; restore rejects disconnected or impossible rules transitions without mutating the live session. `reset` always clears undo state at a screen boundary. Emits `Action` snapshots for `Application` to animate. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
+- `src/engine/PlayerProfile.*`: current format-3 player progress/settings model and strict JSON codec. Stores unlocked/current level and screen, an active-screen committed gameplay checkpoint with the multi-screen level move/time counters, per-level completion and optional move/time bests, audio/video/input/accessibility settings, bounded normalization, and explicit format-1/2 migrations. Headless and covered with `SaveStore` by `tests/PlayerProfileTests.cpp` (`sokoban_profile_tests`).
+- `src/engine/SaveStore.*`: profile persistence rooted at SDL's platform-appropriate `SDL_GetPrefPath`. Writes validated JSON through same-directory temporary replacement, keeps the previous valid primary as `profile.backup.json`, migrates old versions, archives corrupt primary/backup files for diagnosis, recovers from backup, and restores defaults when both copies are unusable.
+- `src/engine/AsyncSaveStore.*`: dedicated serialized persistence worker around `SaveStore`. Deferred requests coalesce over a configurable window, while JSON encoding, backup rotation, and atomic filesystem replacement always happen off the game thread. Screen transitions and committed settings request immediate worker saves; clean shutdown flushes the newest pending profile. Diagnostics expose request/write/coalescing counts and pending/writing state.
 - `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags + slide momentum) plus pure functions in `sokoban::rules` — `step` advances the whole world one discrete step (simultaneous one-tile moves, pushes, ladder climbs, momentum, falls, water, conveyors); `hasPendingMotion` reports whether the world would keep moving without input; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
 - `src/engine/Level.*`: level file parsing, serialization, layered grid storage, walkability/support rules, player/movable extraction. Tested by `tests/LevelTests.cpp` (`sokoban_level_tests`).
 - `src/engine/TaskSystem.*`: standard-library-only worker pool for task-based parallelism. `taskSystem().enqueue(fn)` returns a future (exceptions propagate on get); `parallelFor(count, minChunk, fn(begin, end))` runs chunked loops with the calling thread participating. Tasks must not block on other tasks (no dependency graph yet). Used by GLTF vertex skinning (`skinWithPoses`) and lazy CPU-side model/texture/animation preparation in `VulkanModelResources`; Vulkan publication stays on the render thread. Tested by `tests/TaskSystemTests.cpp` (`sokoban_task_tests`).
@@ -146,7 +161,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
 - `src/engine/render/VulkanModelResources.*`: owns lazy per-asset load states, TaskSystem futures, static model meshes, texture images/samplers, manifest material bindings, and failure retention. CPU parsing/decoding runs on workers; completed results are published to Vulkan on the render thread. It orchestrates `AnimationController` and `SkinnedMeshUpdater` while exposing lightweight mesh/material/texture views and loading statistics to the renderer.
 - `src/engine/render/VulkanSsaoPass.*`: owns the swapchain-sized R8 ambient-occlusion target and sampler, plus depth/AO transitions and the fullscreen AO/composite recording sequence. Pipelines and scene descriptors are passed in as non-owning handles.
 - `src/engine/render/VulkanShadowPass.*`: owns the fixed-size shadow depth image, sampler, and image-layout state. It records pass setup/transitions while `VulkanRenderer` supplies the scene-specific shadow draw traversal between `begin` and `end`.
-- `src/engine/render/VulkanSwapchainResources.*`: owns the swapchain, image views, MSAA color attachment, scene depth/resolve-depth, scene-color sampling target, acquire/present calls, resize lifecycle, frame attachment transitions, and the ice-blur scene-color copy.
+- `src/engine/render/VulkanSwapchainResources.*`: owns the swapchain, image views, MSAA color attachment, scene depth/resolve-depth, scene-color sampling target, acquire/present calls, resize lifecycle, frame attachment transitions, and the ice-blur scene-color copy. Profile VSync selects guaranteed FIFO; disabled VSync prefers mailbox, then immediate, then FIFO fallback.
 - `src/engine/render/VulkanPipelineFactory.*`: owns the shared pipeline layout and all scene, model, UI, shadow, SSAO, composite, and visualization pipelines. Shader-module loading and graphics-pipeline construction no longer live in `VulkanRenderer`.
 - `src/engine/render/VulkanSceneDescriptors.*`: owns the scene descriptor-set layout, pool, set, and bindings for shadow, copied scene color, model textures, sampled scene depth, and SSAO. Resize/MSAA changes update the same set with new attachment views.
 - `src/engine/render/VulkanResourceUtils.*`: exception-safe shared Vulkan image allocation, image-view creation, memory-type selection, and destruction used by the focused resource owners. `VulkanRenderConstants.hpp` holds the shared 256-byte push-constant contract.
@@ -247,9 +262,10 @@ Core movement (discrete step system):
   Multi-tile rates resolve as repeated simultaneous one-tile micro-steps, so
   fast entities still block, vacate, and push correctly. Rates are adjustable
   in the Debug UI under Tile Geometry > Step Rates.
-- WASD moves the player (one tile per step; held keys step repeatedly).
-- `Z` undoes one step; undoing pauses pending world motion until the next
-  input-driven step. `R` restarts.
+- WASD moves the player by default (one tile per step; held keys step repeatedly).
+- `Z` undoes one step by default; undoing pauses pending world motion until the
+  next input-driven step. `R` restarts by default. These six gameplay bindings
+  are loaded from `PlayerProfile::InputSettings`.
 - `GameplaySession` stores one action record per completed step for undo; the
   authoritative state commits only after `Application` finishes animating the
   action.
@@ -476,6 +492,26 @@ If making player-facing menus, pause screens, settings, or polished editor UI, p
 
 Major recent additions and fixes:
 
+- Added format-3 player persistence under `SDL_GetPrefPath`: current/unlocked
+  level, current screen, an exact committed screen state and undo stack,
+  per-level completion and best move/time records, audio/video/input/
+  accessibility settings, format-1/2 migration, atomic replacement, previous-save
+  backups, corrupt-file archival, backup recovery, and default recovery. Level
+  completion records successful player moves across multi-screen levels and
+  excludes automatic world steps; undo/restart restore count snapshots. A
+  committed actions mark the checkpoint dirty, and the latest state is captured
+  at most once every two seconds at a committed/idle boundary. Screen entry is
+  captured immediately; entering a screen resets its undo stack before that
+  checkpoint is queued. Saved
+  fullscreen, VSync, input bindings, reduced motion, and audio buses are applied
+  at runtime. Debug master/music/sound sliders now update the profile instead of
+  disappearing at process exit.
+- Moved all runtime profile writes off the game thread through `AsyncSaveStore`.
+  Actions now only mark the in-memory checkpoint dirty; snapshot copying happens
+  at most once every two seconds, while screen transitions and committed settings
+  are queued immediately. Writes remain strictly serialized, shutdown flushes
+  the newest state, and the Engine window reports save requests, completed
+  writes, coalescing, and worker state.
 - Added the audio system (miniaudio): randomized non-repeating concrete
   footsteps on a tunable cadence while walking/pushing, a seamlessly looping
   stone-drag sound while a rock is pushed (loop-ready assets generated by
@@ -521,7 +557,7 @@ Major recent additions and fixes:
 - Split headless gameplay orchestration out of `Application` into
   `GameplaySession`. `Application` now translates SDL controls and animates
   session actions, while state/history/undo/restart/action timing are covered
-  by a dedicated 52-check test executable.
+  by a dedicated headless test executable.
 - Added layered levels with `@layer N` sections.
 - Added level editor/document browser and draft play flow.
 - Added Debug UI controls for rendering, lighting, runtime audio, grid, and conveyor rate. Authored tile scales and sound/music volumes live in the dedicated Asset Manifest window.
@@ -557,8 +593,9 @@ At the time this handoff was updated:
 - Full Debug and Release builds passed from the clean `out/visual-studio` build
   tree. Clean installed Release builds also start and remain healthy without
   access to the source checkout.
-- All eleven CTest suites pass, including mandatory validation of the shipped
-  manifest, manifest-editor save semantics, and the `content_pipeline` suite.
+- All twelve CTest suites pass, including profile migration/recovery, gameplay
+  move-count semantics, mandatory validation of the shipped manifest,
+  manifest-editor save semantics, and the `content_pipeline` suite.
 - `cmake --build out\visual-studio --config Release --target package` produces
   `out/visual-studio/Sokoban3D-0.1.0-Windows-x64.zip`. The current staged tree
   contains 53 reachable files (about 4 MB) instead of the roughly 236 MB / 5,964
@@ -572,6 +609,10 @@ At the time this handoff was updated:
   delegates to a headless, tested document API with validated safe saving;
   manifest-backed tile scale and per-sound-set controls were removed from the
   Engine window.
+- Release startup creates or loads `%APPDATA%/Sokoban3D/Sokoban3D/profile.json`
+  on Windows through SDL's preference-path API. Existing format-2 profiles are
+  migrated to format 3; successful screen loading writes the initial or restored
+  gameplay checkpoint without leaving a temporary replacement file.
 
 Known useful verification commands:
 
@@ -616,7 +657,8 @@ High-value gameplay/editor work:
 - Add more Sokoban mechanics only after hardening interactions among existing ones.
 - Revisit conveyor edge cases if needed (e.g. conveyor loops/cycles do not rotate; entities in a full cycle stay put).
 - Revisit the exact semantics of water/fallen entities and ice sliding edge cases.
-- Add better level progression metadata, names, and completion tracking.
+- Add better level metadata/names and a player-facing level-select screen over
+  the persisted unlock/completion records.
 
 Rendering/assets:
 

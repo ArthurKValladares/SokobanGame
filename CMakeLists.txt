@@ -120,6 +120,7 @@ else()
 endif()
 
 add_executable(sokoban
+    src/engine/AsyncSaveStore.cpp
     src/main.cpp
     src/engine/AnimationPreviewDebugUi.cpp
     src/engine/Application.cpp
@@ -138,9 +139,11 @@ add_executable(sokoban
     src/engine/LevelEditorDebugUi.cpp
     src/engine/MiniaudioImpl.cpp
     src/engine/PresentationSettings.cpp
+    src/engine/PlayerProfile.cpp
     src/engine/RenderFrameBuilder.cpp
     src/engine/Rules.cpp
     src/engine/RuntimeContent.cpp
+    src/engine/SaveStore.cpp
     src/engine/TaskSystem.cpp
     src/engine/TileTypes.cpp
     src/engine/Window.cpp
@@ -269,6 +272,22 @@ if(SOKOBAN_BUILD_TESTS)
         target_compile_options(sokoban_gameplay_session_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME gameplay_session COMMAND sokoban_gameplay_session_tests)
+
+    add_executable(sokoban_profile_tests
+        tests/PlayerProfileTests.cpp
+        src/engine/AsyncSaveStore.cpp
+        src/engine/PlayerProfile.cpp
+        src/engine/SaveStore.cpp
+        src/engine/TileTypes.cpp
+    )
+    target_include_directories(sokoban_profile_tests PRIVATE src)
+    target_link_libraries(sokoban_profile_tests PRIVATE sokoban_json SDL3::SDL3)
+    if(MSVC)
+        target_compile_options(sokoban_profile_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_profile_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME player_profile COMMAND sokoban_profile_tests)
 
     add_executable(sokoban_level_editor_tests
         tests/LevelEditorTests.cpp

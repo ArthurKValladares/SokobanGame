@@ -1,6 +1,7 @@
 #include "engine/GameplaySession.hpp"
 
 #include <algorithm>
+#include <array>
 #include <ranges>
 #include <utility>
 
@@ -26,6 +27,34 @@ std::optional<MoveDirection> movementDirection(GridPosition3 from, GridPosition3
     return std::nullopt;
 }
 
+bool matchesForwardTransition(
+    const Level& level,
+    const GameplaySession::Action& action,
+    const rules::StepRates& rates)
+{
+    const GameState initial = rules::initialState(level);
+    if (!action.before.playerDead && !(action.before == initial) &&
+        action.after == initial && action.playerMoveCountAfter == 0) {
+        return true;
+    }
+
+    constexpr std::array<std::optional<MoveDirection>, 5> inputs {
+        std::nullopt,
+        MoveDirection::Up,
+        MoveDirection::Down,
+        MoveDirection::Left,
+        MoveDirection::Right,
+    };
+    return std::ranges::any_of(inputs, [&](std::optional<MoveDirection> input) {
+        const GameState after = rules::step(level, action.before, input, rates);
+        const int expectedMoveCount = action.playerMoveCountBefore +
+            (input && !(action.before.player == after.player) ? 1 : 0);
+        return !(after == action.before) &&
+            after == action.after &&
+            action.playerMoveCountAfter == expectedMoveCount;
+    });
+}
+
 } // namespace
 
 void GameplaySession::reset(const Level& level)
@@ -36,8 +65,62 @@ void GameplaySession::reset(const Level& level)
     moveHistory_.clear();
     activeAction_ = {};
     moveElapsed_ = 0.0f;
+    playerMoveCount_ = 0;
     moving_ = false;
     autoMotionPaused_ = false;
+}
+
+GameplaySession::Snapshot GameplaySession::snapshot() const
+{
+    Snapshot result {
+        .state = state_,
+        .undoStack = undoHistory_,
+        .playerMoveCount = playerMoveCount_,
+        .automaticMotionPaused = autoMotionPaused_,
+    };
+    for (Action& action : result.undoStack) {
+        action.durationSeconds = config::stepDurationSeconds;
+        action.reversed = false;
+        action.facingDirection.reset();
+    }
+    return result;
+}
+
+bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
+{
+    if (snapshot.playerMoveCount < 0) {
+        return false;
+    }
+
+    GameState expectedState = rules::initialState(level);
+    int expectedMoveCount = 0;
+    for (const Action& action : snapshot.undoStack) {
+        if (action.reversed ||
+            action.playerMoveCountBefore < 0 ||
+            action.playerMoveCountAfter < 0 ||
+            !(action.before == expectedState) ||
+            action.playerMoveCountBefore != expectedMoveCount ||
+            !matchesForwardTransition(level, action, stepRates_)) {
+            return false;
+        }
+        expectedState = action.after;
+        expectedMoveCount = action.playerMoveCountAfter;
+    }
+    if (!(snapshot.state == expectedState) ||
+        snapshot.playerMoveCount != expectedMoveCount) {
+        return false;
+    }
+
+    state_ = snapshot.state;
+    pendingCommands_.clear();
+    undoHistory_ = snapshot.undoStack;
+    moveHistory_.clear();
+    activeAction_ = {};
+    moveElapsed_ = 0.0f;
+    playerMoveCount_ = snapshot.playerMoveCount;
+    moving_ = false;
+    autoMotionPaused_ = snapshot.automaticMotionPaused;
+    return true;
 }
 
 void GameplaySession::queueMove(MoveDirection direction)
@@ -123,6 +206,7 @@ void GameplaySession::completeActiveAction()
 
     state_ = activeAction_.after;
     moveHistory_.push_back(activeAction_);
+    playerMoveCount_ = activeAction_.playerMoveCountAfter;
     if (activeAction_.reversed) {
         if (!undoHistory_.empty()) {
             undoHistory_.pop_back();
@@ -167,11 +251,15 @@ bool GameplaySession::tryStartWorldStep(const Level& level, std::optional<MoveDi
     if (after == state_) {
         return false;
     }
+    const bool countsAsPlayerMove = playerInput.has_value() &&
+        !(state_.player == after.player);
 
     Action action {
         .before = state_,
         .after = std::move(after),
         .durationSeconds = stepDurationSeconds_,
+        .playerMoveCountBefore = playerMoveCount_,
+        .playerMoveCountAfter = playerMoveCount_ + (countsAsPlayerMove ? 1 : 0),
         .facingDirection = playerInput,
     };
 
@@ -225,6 +313,8 @@ bool GameplaySession::tryStartRestart(const Level& level)
         .before = state_,
         .after = std::move(restarted),
         .durationSeconds = stepDurationSeconds_,
+        .playerMoveCountBefore = playerMoveCount_,
+        .playerMoveCountAfter = 0,
     });
     return true;
 }
@@ -259,6 +349,8 @@ GameplaySession::Action GameplaySession::invertAction(const Action& action) cons
         .after = action.before,
         .playerPushing = action.playerPushing,
         .reversed = true,
+        .playerMoveCountBefore = action.playerMoveCountAfter,
+        .playerMoveCountAfter = action.playerMoveCountBefore,
     };
 }
 

@@ -1,9 +1,13 @@
 #pragma once
 
+#include "engine/AsyncSaveStore.hpp"
 #include "engine/GameplaySession.hpp"
 #include "engine/Level.hpp"
+#include "engine/PlayerProfile.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/render/VulkanRenderer.hpp"
+
+#include <functional>
 
 namespace sokoban {
 
@@ -19,6 +23,9 @@ public:
         VulkanRenderer& renderer;
         PresentationSettings& settings;
         AudioSystem& audio;
+        AsyncSaveStore::Diagnostics saveDiagnostics;
+        const PlayerProfile::AudioSettings& audioSettings;
+        std::function<void(PlayerProfile::AudioSettings, bool)> updateAudioSettings;
     };
 
     void draw(const Context& context) const;

@@ -19,6 +19,7 @@ public:
     [[nodiscard]] SDL_Window* nativeHandle() const { return window_; }
     [[nodiscard]] Vec2 size() const;
     [[nodiscard]] Vec2 sizeInPixels() const;
+    void setFullscreen(bool fullscreen);
 
 private:
     SDL_Window* window_ = nullptr;

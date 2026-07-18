@@ -257,7 +257,8 @@ bool supportsValidationLayer()
 VulkanRenderer::VulkanRenderer(
     SDL_Window* window,
     std::filesystem::path assetRoot,
-    const AssetManifest& manifest)
+    const AssetManifest& manifest,
+    bool vsync)
     : window_(window)
     , assetRoot_(std::move(assetRoot))
 {
@@ -274,7 +275,8 @@ VulkanRenderer::VulkanRenderer(
         window_,
         { .graphics = queueFamilies_.graphics, .present = queueFamilies_.present },
         activeSampleCount_,
-        depthFormat_);
+        depthFormat_,
+        vsync);
     shadowPass_.create(physicalDevice_, device_, shadowFormat_);
     ssaoPass_.create(physicalDevice_, device_, swapchainResources_.extent());
     createCommandPool();

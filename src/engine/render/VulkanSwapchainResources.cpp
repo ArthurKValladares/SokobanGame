@@ -32,7 +32,8 @@ void VulkanSwapchainResources::create(
     SDL_Window* window,
     QueueFamilies queueFamilies,
     VkSampleCountFlagBits sampleCount,
-    VkFormat depthFormat)
+    VkFormat depthFormat,
+    bool vsync)
 {
     destroy();
     physicalDevice_ = physicalDevice;
@@ -42,6 +43,7 @@ void VulkanSwapchainResources::create(
     queueFamilies_ = queueFamilies;
     sampleCount_ = sampleCount;
     depthFormat_ = depthFormat;
+    vsync_ = vsync;
 
     try {
         createSwapchain();
@@ -626,8 +628,16 @@ VkSurfaceFormatKHR VulkanSwapchainResources::chooseSurfaceFormat(
 VkPresentModeKHR VulkanSwapchainResources::choosePresentMode(
     const std::vector<VkPresentModeKHR>& modes) const
 {
+    if (vsync_) {
+        return VK_PRESENT_MODE_FIFO_KHR;
+    }
     for (VkPresentModeKHR mode : modes) {
         if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
+            return mode;
+        }
+    }
+    for (VkPresentModeKHR mode : modes) {
+        if (mode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
             return mode;
         }
     }

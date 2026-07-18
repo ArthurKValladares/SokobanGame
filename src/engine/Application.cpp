@@ -16,17 +16,50 @@
 #include <utility>
 
 namespace sokoban {
+namespace {
+
+constexpr double profileAutosaveIntervalSeconds = 2.0;
+
+SDL_Scancode profileScancode(std::string_view name, SDL_Scancode fallback)
+{
+    const std::string text(name);
+    const SDL_Scancode scancode = SDL_GetScancodeFromName(text.c_str());
+    return scancode == SDL_SCANCODE_UNKNOWN ? fallback : scancode;
+}
+
+} // namespace
 
 Application::Application()
     : window_("Sokoban 3D", 1280, 720)
+    , saveStore_(SaveStore::preferencePath("Sokoban3D", "Sokoban3D"))
+    , playerProfile_(saveStore_.load().profile)
     , assetRoot_(runtimeContentRoot())
     , assetManifest_(AssetManifest::loadFromFile(assetRoot_ / "manifest.json"))
     , renderer_(
           window_.nativeHandle(),
           assetRoot_,
-          assetManifest_)
+          assetManifest_,
+          playerProfile_.video.vsync)
     , audioSystem_(assetRoot_, assetManifest_)
 {
+    std::cerr << saveStore_.status() << '\n';
+    currentLevel_ = playerProfile_.currentLevel;
+    currentScreen_ = playerProfile_.currentScreen;
+    if (!screenExists(currentLevel_, currentScreen_)) {
+        currentLevel_ = 0;
+        currentScreen_ = 0;
+        playerProfile_.setCurrentLevel(0);
+    }
+    if (playerProfile_.video.fullscreen) {
+        window_.setFullscreen(true);
+    }
+    audioSystem_.setMasterVolume(playerProfile_.audio.masterVolume);
+    audioSystem_.setMusicVolume(playerProfile_.audio.musicVolume);
+    audioSystem_.setSoundVolume(playerProfile_.audio.soundVolume);
+    gameplaySession_.setStepDurationSeconds(
+        playerProfile_.accessibility.reducedMotion
+            ? 0.05f
+            : config::stepDurationSeconds);
     presentationSettings_.applyTileScales(assetManifest_);
     presentationSettings_.normalize();
     presentation_.setPlayerClips(
@@ -54,6 +87,13 @@ Application::Application()
             .renderer = renderer_,
             .settings = presentationSettings_,
             .audio = audioSystem_,
+            .saveDiagnostics = saveStore_.diagnostics(),
+            .audioSettings = playerProfile_.audio,
+            .updateAudioSettings = [this](
+                PlayerProfile::AudioSettings settings,
+                bool persist) {
+                applyAudioSettings(settings, persist);
+            },
         });
     });
     DebugUi::addWindow("Asset Manifest", [this] {
@@ -62,7 +102,7 @@ Application::Application()
     DebugUi::addWindow("Level Editor", [this] {
         levelEditorDebugUi_.draw(levelEditor_, {
             .playDraft = [this](Level level) {
-                applyLevel(std::move(level));
+                (void)applyLevel(std::move(level));
             },
             .returnToCurrentScreen = [this] {
                 loadCurrentScreen();
@@ -77,6 +117,15 @@ Application::Application()
 
 Application::~Application()
 {
+    if (!gameplaySession_.moving() && !levelEditor_.playingDraft()) {
+        checkpointCurrentScreen(false);
+    } else {
+        persistProfile(true);
+    }
+    saveStore_.flush();
+    if (!saveStore_.diagnostics().lastWriteSucceeded) {
+        std::cerr << saveStore_.status() << '\n';
+    }
     DebugUi::clearWindows();
     renderer_.waitIdle();
 }
@@ -191,8 +240,10 @@ void Application::update(float dt)
     }
 #endif
 
+    currentLevelElapsedSeconds_ += static_cast<double>(std::max(dt, 0.0f));
     queuePressedCommands();
     advancePlayerMovement(dt);
+    updateDeferredCheckpoint(dt);
 
     const GameplayPresentation::PlayerVisual& playerVisual = presentation_.player();
     const bool pushing =
@@ -426,8 +477,25 @@ void Application::updateEditorPainting()
 
 void Application::loadCurrentScreen()
 {
-    applyLevel(
-        Level::loadFromFile(screenPath(currentLevel_, currentScreen_)));
+    const PlayerProfile::ActiveScreen* checkpoint = nullptr;
+    if (playerProfile_.activeScreen &&
+        playerProfile_.activeScreen->level == currentLevel_ &&
+        playerProfile_.activeScreen->screen == currentScreen_) {
+        checkpoint = &*playerProfile_.activeScreen;
+        completedLevelMoveCount_ = checkpoint->completedLevelMoveCount;
+        currentLevelElapsedSeconds_ = checkpoint->levelElapsedSeconds;
+    }
+
+    const bool restored = applyLevel(
+        Level::loadFromFile(screenPath(currentLevel_, currentScreen_)),
+        checkpoint ? &checkpoint->session : nullptr);
+    if (checkpoint && !restored) {
+        std::cerr << "Discarded invalid gameplay checkpoint for level "
+                  << currentLevel_ << " screen " << currentScreen_ << '\n';
+        playerProfile_.activeScreen.reset();
+    }
+    playerProfile_.setCurrentScreen(currentLevel_, currentScreen_);
+    checkpointCurrentScreen(true);
     audioSystem_.playMusicForLevel(currentLevel_);
     preloadUpcomingAssets();
     levelEditor_.setPlayingDraft(false);
@@ -441,34 +509,121 @@ void Application::loadCurrentScreen()
               << '\n';
 }
 
-void Application::applyLevel(Level level)
+bool Application::applyLevel(
+    Level level,
+    const GameplaySession::Snapshot* snapshot)
 {
     renderer_.ensureAssets(renderAssetRequirementsForLevel(level, assetManifest_));
     level_ = std::move(level);
-    gameplaySession_.reset(level_);
+    const bool restored = snapshot && gameplaySession_.restore(level_, *snapshot);
+    if (!restored) {
+        gameplaySession_.reset(level_);
+    }
     presentation_.resetEntities(gameplaySession_.state());
+    return restored;
 }
 
 void Application::advanceScreen()
 {
+    const int completedMoves =
+        completedLevelMoveCount_ + gameplaySession_.playerMoveCount();
     if (screenExists(currentLevel_, currentScreen_ + 1)) {
+        completedLevelMoveCount_ = completedMoves;
         ++currentScreen_;
     } else if (screenExists(currentLevel_ + 1, 0)) {
+        playerProfile_.recordLevelCompletion(
+            currentLevel_,
+            completedMoves,
+            currentLevelElapsedSeconds_,
+            true);
         ++currentLevel_;
         currentScreen_ = 0;
+        completedLevelMoveCount_ = 0;
+        currentLevelElapsedSeconds_ = 0.0;
     } else {
+        playerProfile_.recordLevelCompletion(
+            currentLevel_,
+            completedMoves,
+            currentLevelElapsedSeconds_,
+            false);
         currentLevel_ = 0;
         currentScreen_ = 0;
+        completedLevelMoveCount_ = 0;
+        currentLevelElapsedSeconds_ = 0.0;
     }
+    playerProfile_.setCurrentScreen(currentLevel_, currentScreen_);
     loadCurrentScreen();
+}
+
+void Application::checkpointCurrentScreen(bool immediateSave)
+{
+    playerProfile_.setCurrentScreen(currentLevel_, currentScreen_);
+    playerProfile_.activeScreen = PlayerProfile::ActiveScreen {
+        .level = currentLevel_,
+        .screen = currentScreen_,
+        .completedLevelMoveCount = completedLevelMoveCount_,
+        .levelElapsedSeconds = currentLevelElapsedSeconds_,
+        .session = gameplaySession_.snapshot(),
+    };
+    deferredCheckpointPending_ = false;
+    deferredCheckpointAgeSeconds_ = 0.0;
+    persistProfile(immediateSave);
+}
+
+void Application::deferCurrentScreenCheckpoint()
+{
+    if (!deferredCheckpointPending_) {
+        deferredCheckpointPending_ = true;
+        deferredCheckpointAgeSeconds_ = 0.0;
+    }
+    if (deferredCheckpointAgeSeconds_ >= profileAutosaveIntervalSeconds) {
+        checkpointCurrentScreen(true);
+    }
+}
+
+void Application::updateDeferredCheckpoint(float dt)
+{
+    if (!deferredCheckpointPending_ || levelEditor_.playingDraft()) {
+        return;
+    }
+    deferredCheckpointAgeSeconds_ += static_cast<double>(std::max(dt, 0.0f));
+    if (deferredCheckpointAgeSeconds_ >= profileAutosaveIntervalSeconds &&
+        !gameplaySession_.moving()) {
+        checkpointCurrentScreen(true);
+    }
+}
+
+void Application::applyAudioSettings(
+    const PlayerProfile::AudioSettings& settings,
+    bool persist)
+{
+    playerProfile_.audio = settings;
+    playerProfile_.normalize();
+    audioSystem_.setMasterVolume(playerProfile_.audio.masterVolume);
+    audioSystem_.setMusicVolume(playerProfile_.audio.musicVolume);
+    audioSystem_.setSoundVolume(playerProfile_.audio.soundVolume);
+    if (persist) {
+        persistProfile(true);
+    }
+}
+
+void Application::persistProfile(bool immediate)
+{
+    saveStore_.requestSave(
+        playerProfile_,
+        immediate
+            ? AsyncSaveStore::Urgency::Immediate
+            : AsyncSaveStore::Urgency::Deferred);
 }
 
 void Application::queuePressedCommands()
 {
-    if (input_.keyPressed(SDL_SCANCODE_Z)) {
+    if (input_.keyPressed(profileScancode(
+            playerProfile_.input.undo, SDL_SCANCODE_Z))) {
         gameplaySession_.queueUndo();
     }
-    if (input_.keyPressed(SDL_SCANCODE_R)) {
+    if (input_.keyPressed(profileScancode(
+            playerProfile_.input.restart, SDL_SCANCODE_R))) {
         gameplaySession_.queueRestart();
     }
 
@@ -529,13 +684,17 @@ bool Application::completeActiveAction()
         advanceScreen();
         return true;
     }
+    if (!levelEditor_.playingDraft()) {
+        deferCurrentScreenCheckpoint();
+    }
     return false;
 }
 
 bool Application::tryStartNextMove()
 {
     const GameplaySession::Controls controls {
-        .undoHeld = input_.keyDown(SDL_SCANCODE_Z),
+        .undoHeld = input_.keyDown(profileScancode(
+            playerProfile_.input.undo, SDL_SCANCODE_Z)),
         .verticalMove = heldVerticalDirection(),
         .horizontalMove = heldHorizontalDirection(),
     };
@@ -548,13 +707,15 @@ bool Application::tryStartNextMove()
 
 std::optional<MoveDirection> Application::pressedVerticalDirection() const
 {
-    const bool upPressed = input_.keyPressed(SDL_SCANCODE_W);
-    const bool downPressed = input_.keyPressed(SDL_SCANCODE_S);
+    const SDL_Scancode upKey = profileScancode(playerProfile_.input.moveUp, SDL_SCANCODE_W);
+    const SDL_Scancode downKey = profileScancode(playerProfile_.input.moveDown, SDL_SCANCODE_S);
+    const bool upPressed = input_.keyPressed(upKey);
+    const bool downPressed = input_.keyPressed(downKey);
     if (upPressed == downPressed) {
         return std::nullopt;
     }
-    if ((upPressed && input_.keyDown(SDL_SCANCODE_S)) ||
-        (downPressed && input_.keyDown(SDL_SCANCODE_W))) {
+    if ((upPressed && input_.keyDown(downKey)) ||
+        (downPressed && input_.keyDown(upKey))) {
         return std::nullopt;
     }
     return upPressed ? MoveDirection::Up : MoveDirection::Down;
@@ -562,13 +723,15 @@ std::optional<MoveDirection> Application::pressedVerticalDirection() const
 
 std::optional<MoveDirection> Application::pressedHorizontalDirection() const
 {
-    const bool leftPressed = input_.keyPressed(SDL_SCANCODE_A);
-    const bool rightPressed = input_.keyPressed(SDL_SCANCODE_D);
+    const SDL_Scancode leftKey = profileScancode(playerProfile_.input.moveLeft, SDL_SCANCODE_A);
+    const SDL_Scancode rightKey = profileScancode(playerProfile_.input.moveRight, SDL_SCANCODE_D);
+    const bool leftPressed = input_.keyPressed(leftKey);
+    const bool rightPressed = input_.keyPressed(rightKey);
     if (leftPressed == rightPressed) {
         return std::nullopt;
     }
-    if ((leftPressed && input_.keyDown(SDL_SCANCODE_D)) ||
-        (rightPressed && input_.keyDown(SDL_SCANCODE_A))) {
+    if ((leftPressed && input_.keyDown(rightKey)) ||
+        (rightPressed && input_.keyDown(leftKey))) {
         return std::nullopt;
     }
     return leftPressed ? MoveDirection::Left : MoveDirection::Right;
@@ -576,8 +739,10 @@ std::optional<MoveDirection> Application::pressedHorizontalDirection() const
 
 std::optional<MoveDirection> Application::heldVerticalDirection() const
 {
-    const bool up = input_.keyDown(SDL_SCANCODE_W);
-    const bool down = input_.keyDown(SDL_SCANCODE_S);
+    const bool up = input_.keyDown(profileScancode(
+        playerProfile_.input.moveUp, SDL_SCANCODE_W));
+    const bool down = input_.keyDown(profileScancode(
+        playerProfile_.input.moveDown, SDL_SCANCODE_S));
     if (up == down) {
         return std::nullopt;
     }
@@ -586,8 +751,10 @@ std::optional<MoveDirection> Application::heldVerticalDirection() const
 
 std::optional<MoveDirection> Application::heldHorizontalDirection() const
 {
-    const bool left = input_.keyDown(SDL_SCANCODE_A);
-    const bool right = input_.keyDown(SDL_SCANCODE_D);
+    const bool left = input_.keyDown(profileScancode(
+        playerProfile_.input.moveLeft, SDL_SCANCODE_A));
+    const bool right = input_.keyDown(profileScancode(
+        playerProfile_.input.moveRight, SDL_SCANCODE_D));
     if (left == right) {
         return std::nullopt;
     }

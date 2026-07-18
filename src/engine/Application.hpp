@@ -2,6 +2,7 @@
 
 #include "engine/AnimationPreviewDebugUi.hpp"
 #include "engine/ApplicationDebugUi.hpp"
+#include "engine/AsyncSaveStore.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/AssetManifestDebugUi.hpp"
 #include "engine/AssetManifestEditor.hpp"
@@ -14,6 +15,7 @@
 #include "engine/LevelEditorDebugUi.hpp"
 #include "engine/Math.hpp"
 #include "engine/PresentationSettings.hpp"
+#include "engine/PlayerProfile.hpp"
 #include "engine/Time.hpp"
 #include "engine/Window.hpp"
 #include "engine/render/VulkanRenderer.hpp"
@@ -35,8 +37,15 @@ public:
 
 private:
     void loadCurrentScreen();
-    void applyLevel(Level level);
+    [[nodiscard]] bool applyLevel(
+        Level level,
+        const GameplaySession::Snapshot* snapshot = nullptr);
     void advanceScreen();
+    void checkpointCurrentScreen(bool immediateSave);
+    void deferCurrentScreenCheckpoint();
+    void updateDeferredCheckpoint(float dt);
+    void applyAudioSettings(const PlayerProfile::AudioSettings& settings, bool persist);
+    void persistProfile(bool immediate);
     void update(float dt);
     void drawEditorModeIndicator();
     void drawQuitConfirmation();
@@ -57,6 +66,8 @@ private:
     [[nodiscard]] RenderFrameData buildRenderFrame() const;
 
     Window window_;
+    AsyncSaveStore saveStore_;
+    PlayerProfile playerProfile_;
     std::filesystem::path assetRoot_;
     // Declared before the renderer/audio members that hold references to it.
     AssetManifest assetManifest_;
@@ -67,6 +78,10 @@ private:
     GameplaySession gameplaySession_;
     int currentLevel_ = 0;
     int currentScreen_ = 0;
+    int completedLevelMoveCount_ = 0;
+    double currentLevelElapsedSeconds_ = 0.0;
+    double deferredCheckpointAgeSeconds_ = 0.0;
+    bool deferredCheckpointPending_ = false;
     InputState input_;
     FrameTimer frameTimer_;
     PresentationSettings presentationSettings_;

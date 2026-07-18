@@ -7,6 +7,7 @@
 namespace sokoban::config {
 
 inline constexpr float stepDurationSeconds = 0.25f;
+// Defaults for a newly created player profile. Runtime values are persisted.
 inline constexpr float masterVolume = 0.03f;
 inline constexpr float musicVolume = 0.5f; // relative to master
 // Per-sound-set volumes live in assets/manifest.json (sound entries).

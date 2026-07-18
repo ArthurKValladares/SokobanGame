@@ -30,10 +30,25 @@ public:
         float durationSeconds = config::stepDurationSeconds;
         bool playerPushing = false;
         bool reversed = false;
+        int playerMoveCountBefore = 0;
+        int playerMoveCountAfter = 0;
         std::optional<MoveDirection> facingDirection;
+
+        bool operator==(const Action&) const = default;
+    };
+
+    struct Snapshot {
+        GameState state;
+        std::vector<Action> undoStack;
+        int playerMoveCount = 0;
+        bool automaticMotionPaused = false;
+
+        bool operator==(const Snapshot&) const = default;
     };
 
     void reset(const Level& level);
+    [[nodiscard]] Snapshot snapshot() const;
+    [[nodiscard]] bool restore(const Level& level, const Snapshot& snapshot);
 
     void queueMove(MoveDirection direction);
     void queueUndo();
@@ -50,6 +65,8 @@ public:
     [[nodiscard]] float activeActionRemainingSeconds() const;
     [[nodiscard]] bool activeActionComplete() const;
     [[nodiscard]] std::size_t historySize() const { return moveHistory_.size(); }
+    [[nodiscard]] std::size_t undoCount() const { return undoHistory_.size(); }
+    [[nodiscard]] int playerMoveCount() const { return playerMoveCount_; }
     [[nodiscard]] float stepDurationSeconds() const { return stepDurationSeconds_; }
     [[nodiscard]] const rules::StepRates& stepRates() const { return stepRates_; }
 
@@ -89,6 +106,7 @@ private:
     Action activeAction_;
     float moveElapsed_ = 0.0f;
     float stepDurationSeconds_ = config::stepDurationSeconds;
+    int playerMoveCount_ = 0;
     rules::StepRates stepRates_ {};
     bool moving_ = false;
     // Rewinding freezes pending slides and conveyors until the next

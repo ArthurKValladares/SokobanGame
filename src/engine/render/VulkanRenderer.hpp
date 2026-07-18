@@ -42,7 +42,8 @@ public:
     VulkanRenderer(
         SDL_Window* window,
         std::filesystem::path assetRoot,
-        const AssetManifest& manifest);
+        const AssetManifest& manifest,
+        bool vsync = false);
     ~VulkanRenderer();
 
     VulkanRenderer(const VulkanRenderer&) = delete;

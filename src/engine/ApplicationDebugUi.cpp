@@ -105,6 +105,14 @@ void ApplicationDebugUi::draw(const Context& context) const
         "Task workers %u, tasks run %llu",
         taskSystem().workerCount(),
         static_cast<unsigned long long>(taskSystem().executedTaskCount()));
+    ImGui::Text(
+        "Profile saves %llu writes / %llu requests (%llu coalesced)%s",
+        static_cast<unsigned long long>(context.saveDiagnostics.completedWrites),
+        static_cast<unsigned long long>(context.saveDiagnostics.requests),
+        static_cast<unsigned long long>(context.saveDiagnostics.coalescedRequests),
+        context.saveDiagnostics.writing
+            ? " - writing"
+            : (context.saveDiagnostics.pending ? " - pending" : ""));
     ImGui::Separator();
 
     constexpr const char* antiAliasingLabels[] {
@@ -212,13 +220,22 @@ void ApplicationDebugUi::draw(const Context& context) const
     }
 
     if (ImGui::CollapsingHeader("Audio")) {
-        float volume = context.audio.masterVolume();
-        if (ImGui::SliderFloat("Master Volume", &volume, 0.0f, 1.0f, "%.2f")) {
-            context.audio.setMasterVolume(volume);
-        }
-        float musicVolume = context.audio.musicVolume();
-        if (ImGui::SliderFloat("Music Volume", &musicVolume, 0.0f, 1.0f, "%.2f")) {
-            context.audio.setMusicVolume(musicVolume);
+        PlayerProfile::AudioSettings audioSettings = context.audioSettings;
+        bool settingsChanged = false;
+        bool settingsCommitted = false;
+        settingsChanged = ImGui::SliderFloat(
+            "Master Volume", &audioSettings.masterVolume, 0.0f, 1.0f, "%.2f");
+        settingsCommitted = ImGui::IsItemDeactivatedAfterEdit();
+        settingsChanged = ImGui::SliderFloat(
+            "Music Volume", &audioSettings.musicVolume, 0.0f, 1.0f, "%.2f") ||
+            settingsChanged;
+        settingsCommitted = ImGui::IsItemDeactivatedAfterEdit() || settingsCommitted;
+        settingsChanged = ImGui::SliderFloat(
+            "Sound Volume", &audioSettings.soundVolume, 0.0f, 1.0f, "%.2f") ||
+            settingsChanged;
+        settingsCommitted = ImGui::IsItemDeactivatedAfterEdit() || settingsCommitted;
+        if ((settingsChanged || settingsCommitted) && context.updateAudioSettings) {
+            context.updateAudioSettings(audioSettings, settingsCommitted);
         }
         float footstepInterval = context.audio.footstepIntervalSeconds();
         if (ImGui::DragFloat("Footstep Interval", &footstepInterval, 0.005f, 0.05f, 1.0f, "%.3f s")) {

@@ -159,7 +159,7 @@ void AudioSystem::playFootstep()
     lastFootstepIndex_ = pick;
 
     ma_sound& sound = engine_->footstepSounds[static_cast<size_t>(pick)];
-    ma_sound_set_volume(&sound, footstepVolume_);
+    ma_sound_set_volume(&sound, soundVolume_ * footstepVolume_);
     ma_sound_seek_to_pcm_frame(&sound, 0);
     ma_sound_start(&sound);
 }
@@ -187,7 +187,7 @@ void AudioSystem::startStoneDrag()
     ma_sound_reset_stop_time_and_fade(&sound);
     ma_sound_set_looping(&sound, MA_TRUE);
     ma_sound_seek_to_pcm_frame(&sound, 0);
-    ma_sound_set_volume(&sound, stoneDragVolume_);
+    ma_sound_set_volume(&sound, soundVolume_ * stoneDragVolume_);
     // The prior stop-with-fade also leaves the fade at zero; fade back in.
     ma_sound_set_fade_in_milliseconds(&sound, 0.0f, 1.0f, dragFadeInMilliseconds);
     ma_sound_start(&sound);
@@ -264,13 +264,23 @@ void AudioSystem::setFootstepVolume(float volume)
     footstepVolume_ = std::clamp(volume, 0.0f, 1.0f);
 }
 
+void AudioSystem::setSoundVolume(float volume)
+{
+    soundVolume_ = std::clamp(volume, 0.0f, 1.0f);
+    if (engine_->engineInitialized && engine_->activeStoneDrag >= 0) {
+        ma_sound_set_volume(
+            &engine_->stoneDragSounds[static_cast<size_t>(engine_->activeStoneDrag)],
+            soundVolume_ * stoneDragVolume_);
+    }
+}
+
 void AudioSystem::setStoneDragVolume(float volume)
 {
     stoneDragVolume_ = std::clamp(volume, 0.0f, 1.0f);
     if (engine_->engineInitialized && engine_->activeStoneDrag >= 0) {
         ma_sound_set_volume(
             &engine_->stoneDragSounds[static_cast<size_t>(engine_->activeStoneDrag)],
-            stoneDragVolume_);
+            soundVolume_ * stoneDragVolume_);
     }
 }
 

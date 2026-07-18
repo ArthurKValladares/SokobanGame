@@ -48,4 +48,12 @@ Vec2 Window::sizeInPixels() const
     return { static_cast<float>(width), static_cast<float>(height) };
 }
 
+void Window::setFullscreen(bool fullscreen)
+{
+    if (!SDL_SetWindowFullscreen(window_, fullscreen)) {
+        throw std::runtime_error(
+            std::string("SDL_SetWindowFullscreen failed: ") + SDL_GetError());
+    }
+}
+
 } // namespace sokoban

@@ -83,6 +83,8 @@ public:
     [[nodiscard]] float masterVolume() const { return masterVolume_; }
     void setMusicVolume(float volume);
     [[nodiscard]] float musicVolume() const { return musicVolume_; }
+    void setSoundVolume(float volume);
+    [[nodiscard]] float soundVolume() const { return soundVolume_; }
     void setFootstepVolume(float volume);
     [[nodiscard]] float footstepVolume() const { return footstepVolume_; }
     void setStoneDragVolume(float volume);
@@ -105,6 +107,7 @@ private:
     FootstepCadence cadence_;
     float masterVolume_ = config::masterVolume;
     float musicVolume_ = config::musicVolume;
+    float soundVolume_ = 1.0f;
     // Seeded from the manifest's sound-set volumes in the constructor.
     float footstepVolume_ = 1.0f;
     float stoneDragVolume_ = 1.0f;
