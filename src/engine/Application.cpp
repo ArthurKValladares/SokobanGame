@@ -15,29 +15,24 @@
 #include <utility>
 
 namespace sokoban {
-namespace {
-
-// Each level loops one soundtrack across all of its screens.
-[[nodiscard]] const char* musicTrackForLevel(int level)
-{
-    switch (level) {
-    case 0: return "Sad Town.ogg";
-    case 1: return "Sad Descent.ogg";
-    case 2: return "Mission Plausible.ogg";
-    case 3: return "Space Cadet.ogg";
-    default: return nullptr;
-    }
-}
-
-} // namespace
 
 Application::Application()
-    : window_("Sokoban 3D", 1280, 720)
-    , renderer_(window_.nativeHandle(), SOKOBAN_ASSET_DIR)
+    : assetManifest_(AssetManifest::loadFromFile(
+          std::filesystem::path(SOKOBAN_SOURCE_ASSET_DIR) / "manifest.txt"))
+    , window_("Sokoban 3D", 1280, 720)
+    , renderer_(
+          window_.nativeHandle(),
+          SOKOBAN_ASSET_DIR,
+          SOKOBAN_SOURCE_ASSET_DIR,
+          assetManifest_)
     , assetRoot_(SOKOBAN_ASSET_DIR)
-    , audioSystem_(assetRoot_ / "audio")
+    , audioSystem_(SOKOBAN_SOURCE_ASSET_DIR, assetManifest_)
 {
+    presentationSettings_.applyTileScales(assetManifest_);
     presentationSettings_.normalize();
+    presentation_.setPlayerClips(
+        assetManifest_.playerMoveAnimation(),
+        assetManifest_.playerPushAnimation());
     loadCurrentScreen();
 
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -198,7 +193,7 @@ void Application::update(float dt)
     const GameplayPresentation::PlayerVisual& playerVisual = presentation_.player();
     const bool pushing =
         playerVisual.motion.moving &&
-        playerVisual.movingClip == RenderAnimation::RoguePush;
+        playerVisual.movingClip == assetManifest_.playerPushAnimation();
     audioSystem_.update(dt, playerVisual.motion.moving, pushing);
 }
 
@@ -360,6 +355,7 @@ void Application::updateEditorPainting()
         mouse.y * pixelSize.y / windowSize.y,
     };
     const RenderFrameData editorFrame = RenderFrameBuilder::buildEditor({
+        .manifest = assetManifest_,
         .editor = levelEditor_,
         .settings = presentationSettings_,
         .hoverCell = editorHoverCell_,
@@ -428,7 +424,7 @@ void Application::loadCurrentScreen()
 {
     applyLevel(
         Level::loadFromFile(screenPath(currentLevel_, currentScreen_)));
-    audioSystem_.playMusic(musicTrackForLevel(currentLevel_));
+    audioSystem_.playMusicForLevel(currentLevel_);
     preloadUpcomingAssets();
     levelEditor_.setPlayingDraft(false);
     levelEditor_.setEditingDocument(false);
@@ -443,7 +439,7 @@ void Application::loadCurrentScreen()
 
 void Application::applyLevel(Level level)
 {
-    renderer_.ensureAssets(renderAssetRequirementsForLevel(level));
+    renderer_.ensureAssets(renderAssetRequirementsForLevel(level, assetManifest_));
     level_ = std::move(level);
     gameplaySession_.reset(level_);
     presentation_.resetEntities(gameplaySession_.state());
@@ -619,7 +615,8 @@ RenderAssetRequirements Application::levelAssetRequirements(int levelIndex) cons
     for (int screenIndex = 0; screenExists(levelIndex, screenIndex); ++screenIndex) {
         try {
             requirements.merge(renderAssetRequirementsForLevel(
-                Level::loadFromFile(screenPath(levelIndex, screenIndex))));
+                Level::loadFromFile(screenPath(levelIndex, screenIndex)),
+                assetManifest_));
         } catch (const std::exception& error) {
             std::cerr << "asset preload skipped "
                       << screenPath(levelIndex, screenIndex).string()
@@ -652,6 +649,7 @@ RenderFrameData Application::buildRenderFrame() const
 #if SOKOBAN_ENABLE_DEBUG_UI
     if (levelEditor_.editingDocument()) {
         return RenderFrameBuilder::buildEditor({
+            .manifest = assetManifest_,
             .editor = levelEditor_,
             .settings = presentationSettings_,
             .hoverCell = editorHoverCell_,
@@ -664,6 +662,7 @@ RenderFrameData Application::buildRenderFrame() const
 #endif
 
     return RenderFrameBuilder::buildGameplay({
+        .manifest = assetManifest_,
         .level = level_,
         .state = gameplaySession_.state(),
         .moving = gameplaySession_.moving(),

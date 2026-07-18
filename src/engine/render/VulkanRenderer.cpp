@@ -254,7 +254,11 @@ bool supportsValidationLayer()
 
 } // namespace
 
-VulkanRenderer::VulkanRenderer(SDL_Window* window, std::filesystem::path assetRoot)
+VulkanRenderer::VulkanRenderer(
+    SDL_Window* window,
+    std::filesystem::path assetRoot,
+    std::filesystem::path modelAssetRoot,
+    const AssetManifest& manifest)
     : window_(window)
     , assetRoot_(std::move(assetRoot))
 {
@@ -275,7 +279,9 @@ VulkanRenderer::VulkanRenderer(SDL_Window* window, std::filesystem::path assetRo
     shadowPass_.create(physicalDevice_, device_, shadowFormat_);
     ssaoPass_.create(physicalDevice_, device_, swapchainResources_.extent());
     createCommandPool();
-    modelResources_.create(physicalDevice_, device_, commandPool_, graphicsQueue_, assetRoot_);
+    modelResources_.create(
+        physicalDevice_, device_, commandPool_, graphicsQueue_,
+        std::move(modelAssetRoot), manifest);
     sceneDescriptors_.create(device_, descriptorResources());
     createPipeline();
     createFrameResources();
@@ -1022,7 +1028,7 @@ void VulkanRenderer::recordShadowMapRendering(
         if (tile.isEditorPreview || tile.pickOnly) {
             continue;
         }
-        if (tile.model != RenderModel::Cube) {
+        if (!tile.model.isCube()) {
             continue;
         }
 
@@ -1038,7 +1044,7 @@ void VulkanRenderer::recordShadowMapRendering(
     }
     bool modelPipelineBound = false;
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
-        if (tile.isEditorPreview || tile.pickOnly || tile.model == RenderModel::Cube) {
+        if (tile.isEditorPreview || tile.pickOnly || tile.model.isCube()) {
             continue;
         }
         if (!modelPipelineBound) {
@@ -1617,7 +1623,7 @@ void VulkanRenderer::drawIsoFrame(
         if (tile.blurBehind != translucentPass) {
             continue;
         }
-        if (tile.model != RenderModel::Cube) {
+        if (!tile.model.isCube()) {
             continue;
         }
 
@@ -1683,7 +1689,7 @@ void VulkanRenderer::drawIsoFrame(
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
         if (tile.pickOnly ||
             tile.blurBehind != translucentPass ||
-            tile.model == RenderModel::Cube) {
+            tile.model.isCube()) {
             continue;
         }
         if (!modelPipelineBound) {

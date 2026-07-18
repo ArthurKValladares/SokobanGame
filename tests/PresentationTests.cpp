@@ -1,6 +1,7 @@
 // Headless tests for mutable presentation settings, entity interpolation, and
 // render-frame construction.
 
+#include "engine/AssetManifest.hpp"
 #include "engine/GameplayPresentation.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/RenderFrameBuilder.hpp"
@@ -28,6 +29,59 @@ void checkImpl(bool ok, const char* expression, int line)
 
 #define CHECK(expression) checkImpl((expression), #expression, __LINE__)
 #define TEST(name) currentTest = name
+
+const AssetManifest& testManifest()
+{
+    static const AssetManifest manifest = AssetManifest::parse(R"(
+texture Tex
+  path t.png
+model Stone
+  path stone.gltf
+model Water
+  path water.gltf
+model Glass
+  path glass.gltf
+model Bricks
+  path bricks.gltf
+model Conveyor
+  path conveyor.gltf
+  belt-scroll true
+model Hero
+  path hero.glb
+  geometry skinned
+  material texture Tex
+  role player
+animation Idle
+  path a.glb
+  role player-idle
+animation Move
+  path a.glb
+  role player-move
+animation Push
+  path a.glb
+  role player-push
+tile Wall
+  model Bricks
+tile Rock
+  model Stone
+tile Water
+  model Water
+tile Ice
+  model Glass
+tile Conveyor Up
+  model Conveyor
+tile Conveyor Down
+  model Conveyor
+tile Conveyor Right
+  model Conveyor
+tile Conveyor Left
+  model Conveyor
+tile Player
+  model Hero
+)");
+    return manifest;
+}
+
 
 bool near(float left, float right)
 {
@@ -104,6 +158,9 @@ void testPresentationResetClocksAndFallenTargets()
     });
 
     GameplayPresentation presentation;
+    presentation.setPlayerClips(
+        testManifest().playerMoveAnimation(),
+        testManifest().playerPushAnimation());
     presentation.resetEntities(state);
     CHECK(near(presentation.player().motion.renderPosition.x, 1.0f));
     CHECK(near(presentation.player().motion.renderPosition.y, 2.0f));
@@ -129,6 +186,9 @@ void testPresentationInterpolatesActionsAndClips()
 {
     TEST("presentationInterpolatesActionsAndClips");
     GameplayPresentation presentation;
+    presentation.setPlayerClips(
+        testManifest().playerMoveAnimation(),
+        testManifest().playerPushAnimation());
     GameState before = stateWithPlayer({ 0, 0, 0 });
     before.movables.push_back({
         .type = TileType::Rock,
@@ -150,7 +210,7 @@ void testPresentationInterpolatesActionsAndClips()
     presentation.beginAction(action);
 
     CHECK(presentation.player().motion.moving);
-    CHECK(presentation.player().movingClip == RenderAnimation::RoguePush);
+    CHECK(presentation.player().movingClip == testManifest().playerPushAnimation());
     CHECK(near(presentation.player().clipPlaybackRate, -1.0f));
     CHECK(presentation.player().facingQuarterTurns == 1);
     CHECK(presentation.movables()[0].moving);
@@ -193,6 +253,9 @@ void testGameplayFrameUsesSettingsAndPresentation()
         });
     }
     GameplayPresentation presentation;
+    presentation.setPlayerClips(
+        testManifest().playerMoveAnimation(),
+        testManifest().playerPushAnimation());
     presentation.resetEntities(state);
 
     PresentationSettings settings;
@@ -201,6 +264,7 @@ void testGameplayFrameUsesSettingsAndPresentation()
     settings.setTileScale(TileType::Player, 2.0f);
     GameplaySession::Action action;
     const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
         .level = level,
         .state = state,
         .moving = false,
@@ -221,11 +285,11 @@ void testGameplayFrameUsesSettingsAndPresentation()
     const RenderFrameData::Tile* conveyor = nullptr;
     const RenderFrameData::Tile* rock = nullptr;
     for (const RenderFrameData::Tile& tile : frame.tiles) {
-        if (tile.model == RenderModel::Rogue) {
+        if (tile.model == testManifest().playerModel()) {
             player = &tile;
-        } else if (tile.model == RenderModel::Conveyor) {
+        } else if (tile.model == testManifest().modelIdByName("Conveyor")) {
             conveyor = &tile;
-        } else if (tile.model == RenderModel::Stone) {
+        } else if (tile.model == testManifest().modelIdByName("Stone")) {
             rock = &tile;
         }
     }
@@ -234,7 +298,7 @@ void testGameplayFrameUsesSettingsAndPresentation()
     CHECK(rock != nullptr);
     CHECK(near(player->size.x, 2.0f));
     CHECK(near(player->position.x, -0.5f));
-    CHECK(player->animation == RenderAnimation::RogueIdle);
+    CHECK(player->animation == testManifest().playerIdleAnimation());
     CHECK(near(conveyor->beltScrollOffset, 0.75f));
 }
 

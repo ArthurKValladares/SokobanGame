@@ -241,6 +241,14 @@ void ApplicationDebugUi::draw(const Context& context) const
         if (ImGui::SliderFloat("Music Volume", &musicVolume, 0.0f, 1.0f, "%.2f")) {
             context.audio.setMusicVolume(musicVolume);
         }
+        float footstepVolume = context.audio.footstepVolume();
+        if (ImGui::SliderFloat("Footstep Volume", &footstepVolume, 0.0f, 1.0f, "%.2f")) {
+            context.audio.setFootstepVolume(footstepVolume);
+        }
+        float dragVolume = context.audio.stoneDragVolume();
+        if (ImGui::SliderFloat("Stone Drag Volume", &dragVolume, 0.0f, 1.0f, "%.2f")) {
+            context.audio.setStoneDragVolume(dragVolume);
+        }
         float footstepInterval = context.audio.footstepIntervalSeconds();
         if (ImGui::DragFloat("Footstep Interval", &footstepInterval, 0.005f, 0.05f, 1.0f, "%.3f s")) {
             context.audio.setFootstepIntervalSeconds(footstepInterval);

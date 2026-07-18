@@ -2,6 +2,7 @@
 
 #include "engine/AnimationPreviewDebugUi.hpp"
 #include "engine/ApplicationDebugUi.hpp"
+#include "engine/AssetManifest.hpp"
 #include "engine/AudioSystem.hpp"
 #include "engine/GameplayPresentation.hpp"
 #include "engine/Input.hpp"
@@ -53,6 +54,8 @@ private:
     void preloadUpcomingAssets();
     [[nodiscard]] RenderFrameData buildRenderFrame() const;
 
+    // Declared before the renderer/audio members that hold references to it.
+    AssetManifest assetManifest_;
     Window window_;
     VulkanRenderer renderer_;
     UiContext ui_;

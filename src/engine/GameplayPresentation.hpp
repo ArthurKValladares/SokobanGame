@@ -25,12 +25,14 @@ public:
 
     struct PlayerVisual {
         EntityVisual motion;
-        RenderAnimation movingClip = RenderAnimation::RogueMovement;
+        RenderAnimation movingClip {};
         float clipTimeSeconds = 0.0f;
         float clipPlaybackRate = 1.0f;
         uint32_t facingQuarterTurns = 0;
     };
 
+    // Ids come from the asset manifest; must be set before actions begin.
+    void setPlayerClips(RenderAnimation moveClip, RenderAnimation pushClip);
     void resetEntities(const GameState& state);
     void advanceClocks(float dt, bool reversed);
     void advanceAnimations(float dt);
@@ -48,6 +50,8 @@ private:
 
     PlayerVisual player_;
     std::vector<EntityVisual> movables_;
+    RenderAnimation playerMoveClip_ {};
+    RenderAnimation playerPushClip_ {};
     float worldAnimationTimeSeconds_ = 0.0f;
 };
 

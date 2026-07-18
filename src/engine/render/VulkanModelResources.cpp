@@ -1,7 +1,6 @@
 #include "engine/render/VulkanModelResources.hpp"
 
 #include "engine/TaskSystem.hpp"
-#include "engine/render/GeneratedAssetCatalog.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -26,12 +25,6 @@ uint32_t animationIndexFromUserNumber(uint32_t animationNumber)
     return animationNumber == 0 ? 0 : animationNumber - 1;
 }
 
-template <typename Enum>
-std::size_t enumIndex(Enum value)
-{
-    return static_cast<std::size_t>(value);
-}
-
 template <typename Result>
 bool futureReady(std::future<Result>& future)
 {
@@ -51,7 +44,8 @@ void VulkanModelResources::create(
     VkDevice device,
     VkCommandPool commandPool,
     VkQueue graphicsQueue,
-    std::filesystem::path assetRoot)
+    std::filesystem::path assetRoot,
+    const AssetManifest& manifest)
 {
     destroy();
     physicalDevice_ = physicalDevice;
@@ -59,7 +53,12 @@ void VulkanModelResources::create(
     commandPool_ = commandPool;
     graphicsQueue_ = graphicsQueue;
     assetRoot_ = std::move(assetRoot);
-    textures_.resize(assetCatalog::textures.size());
+    manifest_ = &manifest;
+    models_.resize(manifest.models().size());
+    animations_.resize(manifest.animations().size());
+    textures_.resize(manifest.textures().size());
+    animationController_.configure(
+        manifest.playerModel(), manifest.playerIdleAnimation());
 
     try {
         ImageData fallback {
@@ -92,15 +91,12 @@ void VulkanModelResources::destroy()
         }
     }
 
-    for (ModelSlot& model : models_) {
-        model = {};
-    }
-    for (AnimationSlot& animation : animations_) {
-        animation = {};
-    }
+    models_.clear();
+    animations_.clear();
     textures_.clear();
     fallbackTexture_ = {};
     animationController_.clear();
+    manifest_ = nullptr;
     assetRoot_.clear();
     graphicsQueue_ = VK_NULL_HANDLE;
     commandPool_ = VK_NULL_HANDLE;
@@ -110,14 +106,16 @@ void VulkanModelResources::destroy()
 
 void VulkanModelResources::requestAssets(const RenderAssetRequirements& requirements)
 {
-    for (const ModelAssetDefinition& definition : assetCatalog::models) {
-        if (requirements.contains(definition.model)) {
-            requestModel(definition.model);
+    for (uint32_t i = 0; i < models_.size(); ++i) {
+        const RenderModel model { i + 1 };
+        if (requirements.contains(model)) {
+            requestModel(model);
         }
     }
-    for (const AnimationAssetDefinition& definition : assetCatalog::animations) {
-        if (requirements.contains(definition.animation)) {
-            requestAnimation(definition.animation);
+    for (uint32_t i = 0; i < animations_.size(); ++i) {
+        const RenderAnimation animation { i + 1 };
+        if (requirements.contains(animation)) {
+            requestAnimation(animation);
         }
     }
 }
@@ -126,17 +124,19 @@ bool VulkanModelResources::ensureAssets(const RenderAssetRequirements& requireme
 {
     requestAssets(requirements);
 
-    if (requirements.contains(RenderModel::Rogue)) {
-        (void)publishAnimation(RenderAnimation::RogueIdle, true);
+    if (requirements.contains(manifest_->playerModel())) {
+        (void)publishAnimation(manifest_->playerIdleAnimation(), true);
     }
-    for (const AnimationAssetDefinition& definition : assetCatalog::animations) {
-        if (requirements.contains(definition.animation)) {
-            (void)publishAnimation(definition.animation, true);
+    for (uint32_t i = 0; i < animations_.size(); ++i) {
+        const RenderAnimation animation { i + 1 };
+        if (requirements.contains(animation)) {
+            (void)publishAnimation(animation, true);
         }
     }
-    for (const ModelAssetDefinition& definition : assetCatalog::models) {
-        if (requirements.contains(definition.model)) {
-            (void)publishModel(definition.model, true);
+    for (uint32_t i = 0; i < models_.size(); ++i) {
+        const RenderModel model { i + 1 };
+        if (requirements.contains(model)) {
+            (void)publishModel(model, true);
         }
     }
 
@@ -163,27 +163,29 @@ bool VulkanModelResources::publishReadyAssets(std::size_t maxPublications)
     std::size_t publications = 0;
     bool descriptorsChanged = false;
 
-    for (const AnimationAssetDefinition& definition : assetCatalog::animations) {
+    for (uint32_t i = 0; i < animations_.size(); ++i) {
         if (publications >= maxPublications) {
             return descriptorsChanged;
         }
-        AnimationSlot& slot = animations_[enumIndex(definition.animation)];
+        const RenderAnimation animation { i + 1 };
+        AnimationSlot& slot = animations_[i];
         if (slot.state == LoadState::Loading && futureReady(slot.future) &&
-            publishAnimation(definition.animation, false)) {
+            publishAnimation(animation, false)) {
             ++publications;
         }
     }
 
-    for (const ModelAssetDefinition& definition : assetCatalog::models) {
+    for (uint32_t i = 0; i < models_.size(); ++i) {
         if (publications >= maxPublications) {
             return descriptorsChanged;
         }
-        ModelSlot& slot = models_[enumIndex(definition.model)];
+        const RenderModel model { i + 1 };
+        ModelSlot& slot = models_[i];
         const bool canPublish =
             (slot.state == LoadState::Loading && futureReady(slot.future)) ||
             (slot.state == LoadState::CpuReady &&
-                animationController_.hasClip(RenderAnimation::RogueIdle));
-        if (canPublish && publishModel(definition.model, false)) {
+                animationController_.hasClip(manifest_->playerIdleAnimation()));
+        if (canPublish && publishModel(model, false)) {
             ++publications;
         }
     }
@@ -208,15 +210,19 @@ bool VulkanModelResources::publishReadyAssets(std::size_t maxPublications)
 
 void VulkanModelResources::requestModel(RenderModel model)
 {
-    const ModelAssetDefinition& definition = modelDefinition(model);
-    ModelSlot& slot = models_[enumIndex(model)];
+    const AssetManifest::Model& definition = manifest_->model(model);
+    ModelSlot& slot = models_[model.index()];
     if (slot.state != LoadState::Unrequested) {
-        requestModelDependencies(definition);
+        requestModelDependencies(model);
         return;
     }
 
     const std::filesystem::path path = assetRoot_ / definition.path;
-    const GltfMeshLoadOptions options = definition.loadOptions;
+    const GltfMeshLoadOptions options {
+        .preserveAspectRatio = definition.preserveAspectRatio,
+        .rotateHalfTurn = definition.rotateHalfTurn,
+        .usePrimitiveMaterialTextures = definition.primitiveTextures,
+    };
     const ModelGeometry geometry = definition.geometry;
     slot.future = taskSystem().enqueue([path, options, geometry]() -> PreparedModel {
         if (geometry == ModelGeometry::Skinned) {
@@ -225,7 +231,7 @@ void VulkanModelResources::requestModel(RenderModel model)
         return loadGltfMesh(path, options);
     });
     slot.state = LoadState::Loading;
-    requestModelDependencies(definition);
+    requestModelDependencies(model);
 }
 
 void VulkanModelResources::requestTexture(std::size_t textureIndex)
@@ -239,7 +245,7 @@ void VulkanModelResources::requestTexture(std::size_t textureIndex)
     }
 
     const std::filesystem::path path =
-        assetRoot_ / assetCatalog::textures[textureIndex].path;
+        assetRoot_ / manifest_->textures()[textureIndex].path;
     slot.future = taskSystem().enqueue([path] {
         return loadRgbaImage(path);
     });
@@ -248,43 +254,43 @@ void VulkanModelResources::requestTexture(std::size_t textureIndex)
 
 void VulkanModelResources::requestAnimation(RenderAnimation animation)
 {
-    const AnimationAssetDefinition& definition = animationDefinition(animation);
-    AnimationSlot& slot = animations_[enumIndex(animation)];
+    const AssetManifest::Animation& definition = manifest_->animation(animation);
+    AnimationSlot& slot = animations_[animation.index()];
     if (slot.state != LoadState::Unrequested) {
         return;
     }
 
     const std::filesystem::path path = assetRoot_ / definition.path;
     const uint32_t animationIndex =
-        animationIndexFromUserNumber(definition.animationNumber);
+        animationIndexFromUserNumber(definition.clip);
     slot.future = taskSystem().enqueue([path, animationIndex] {
         return loadGltfAnimationClip(path, animationIndex);
     });
     slot.state = LoadState::Loading;
 }
 
-void VulkanModelResources::requestModelDependencies(
-    const ModelAssetDefinition& definition)
+void VulkanModelResources::requestModelDependencies(RenderModel model)
 {
+    const AssetManifest::Model& definition = manifest_->model(model);
     if (definition.materialMode == ModelMaterialMode::SingleTexture) {
         requestTexture(definition.textureIndex);
     } else if (definition.materialMode == ModelMaterialMode::PrimitiveTextureIndex) {
-        // Primitive material indices address the catalog descriptor array.
+        // Primitive material indices address the manifest descriptor array.
         // Until the manifest records a narrower mask, every slot is a real
         // dependency of this material mode.
         for (std::size_t i = 0; i < textures_.size(); ++i) {
             requestTexture(i);
         }
     }
-    if (definition.model == RenderModel::Rogue) {
-        requestAnimation(RenderAnimation::RogueIdle);
+    if (model == manifest_->playerModel()) {
+        requestAnimation(manifest_->playerIdleAnimation());
     }
 }
 
 bool VulkanModelResources::publishModel(RenderModel model, bool wait)
 {
-    ModelSlot& slot = models_[enumIndex(model)];
-    const ModelAssetDefinition& definition = modelDefinition(model);
+    ModelSlot& slot = models_[model.index()];
+    const AssetManifest::Model& definition = manifest_->model(model);
     if (slot.state == LoadState::Ready) {
         return false;
     }
@@ -344,7 +350,7 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
 {
     TextureSlot& slot = textures_.at(textureIndex);
     const std::filesystem::path path =
-        assetRoot_ / assetCatalog::textures[textureIndex].path;
+        assetRoot_ / manifest_->textures()[textureIndex].path;
     if (slot.state == LoadState::Ready) {
         return false;
     }
@@ -382,8 +388,8 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
 
 bool VulkanModelResources::publishAnimation(RenderAnimation animation, bool wait)
 {
-    AnimationSlot& slot = animations_[enumIndex(animation)];
-    const AnimationAssetDefinition& definition = animationDefinition(animation);
+    AnimationSlot& slot = animations_[animation.index()];
+    const AssetManifest::Animation& definition = manifest_->animation(animation);
     const std::filesystem::path path = assetRoot_ / definition.path;
     if (slot.state == LoadState::Ready) {
         return false;
@@ -421,23 +427,23 @@ bool VulkanModelResources::publishAnimation(RenderAnimation animation, bool wait
 
 void VulkanModelResources::finalizeSkinnedMeshIfReady()
 {
-    ModelSlot& rogue = models_[enumIndex(RenderModel::Rogue)];
-    if (rogue.state != LoadState::CpuReady ||
-        !animationController_.hasClip(RenderAnimation::RogueIdle)) {
+    ModelSlot& player = models_[manifest_->playerModel().index()];
+    if (player.state != LoadState::CpuReady ||
+        !animationController_.hasClip(manifest_->playerIdleAnimation())) {
         return;
     }
-    if (!rogue.prepared ||
-        !std::holds_alternative<SkinnedMeshData>(*rogue.prepared)) {
-        throw std::runtime_error("Rogue catalog entry did not prepare a skinned mesh");
+    if (!player.prepared ||
+        !std::holds_alternative<SkinnedMeshData>(*player.prepared)) {
+        throw std::runtime_error("Player manifest entry did not prepare a skinned mesh");
     }
 
     skinnedMeshUpdater_.create(
         physicalDevice_,
         device_,
-        std::move(std::get<SkinnedMeshData>(*rogue.prepared)),
-        animationController_.clip(RenderAnimation::RogueIdle));
-    rogue.prepared.reset();
-    rogue.state = LoadState::Ready;
+        std::move(std::get<SkinnedMeshData>(*player.prepared)),
+        animationController_.clip(manifest_->playerIdleAnimation()));
+    player.prepared.reset();
+    player.state = LoadState::Ready;
 }
 
 void VulkanModelResources::throwIfFailed(
@@ -463,35 +469,16 @@ void VulkanModelResources::throwIfFailed(
         path.string() + "'");
 }
 
-const ModelAssetDefinition& VulkanModelResources::modelDefinition(RenderModel model) const
-{
-    for (const ModelAssetDefinition& definition : assetCatalog::models) {
-        if (definition.model == model) {
-            return definition;
-        }
-    }
-    throw std::invalid_argument("Render model does not have a catalog asset");
-}
-
-const AnimationAssetDefinition& VulkanModelResources::animationDefinition(
-    RenderAnimation animation) const
-{
-    for (const AnimationAssetDefinition& definition : assetCatalog::animations) {
-        if (definition.animation == animation) {
-            return definition;
-        }
-    }
-    throw std::invalid_argument("Render animation does not have a catalog asset");
-}
-
 std::vector<bool> VulkanModelResources::requiredTextures(
     const RenderAssetRequirements& requirements) const
 {
     std::vector<bool> result(textures_.size(), false);
-    for (const ModelAssetDefinition& definition : assetCatalog::models) {
-        if (!requirements.contains(definition.model)) {
+    for (uint32_t i = 0; i < models_.size(); ++i) {
+        const RenderModel model { i + 1 };
+        if (!requirements.contains(model)) {
             continue;
         }
+        const AssetManifest::Model& definition = manifest_->model(model);
         if (definition.materialMode == ModelMaterialMode::SingleTexture) {
             result.at(definition.textureIndex) = true;
         } else if (definition.materialMode == ModelMaterialMode::PrimitiveTextureIndex) {
@@ -504,15 +491,15 @@ std::vector<bool> VulkanModelResources::requiredTextures(
 bool VulkanModelResources::assetsReady(
     const RenderAssetRequirements& requirements) const
 {
-    for (const ModelAssetDefinition& definition : assetCatalog::models) {
-        if (requirements.contains(definition.model) &&
-            models_[enumIndex(definition.model)].state != LoadState::Ready) {
+    for (uint32_t i = 0; i < models_.size(); ++i) {
+        if (requirements.contains(RenderModel { i + 1 }) &&
+            models_[i].state != LoadState::Ready) {
             return false;
         }
     }
-    for (const AnimationAssetDefinition& definition : assetCatalog::animations) {
-        if (requirements.contains(definition.animation) &&
-            animations_[enumIndex(definition.animation)].state != LoadState::Ready) {
+    for (uint32_t i = 0; i < animations_.size(); ++i) {
+        if (requirements.contains(RenderAnimation { i + 1 }) &&
+            animations_[i].state != LoadState::Ready) {
             return false;
         }
     }
@@ -546,8 +533,8 @@ void VulkanModelResources::updateAnimations(const RenderFrameData& frameData)
 VulkanModelResources::MeshView VulkanModelResources::meshForModel(
     RenderModel model) const
 {
-    if (model == RenderModel::Rogue) {
-        if (models_[enumIndex(model)].state != LoadState::Ready) {
+    if (model == manifest_->playerModel()) {
+        if (models_[model.index()].state != LoadState::Ready) {
             throw std::runtime_error("Skinned model was used before it was ready");
         }
         return skinnedMeshUpdater_.mesh();
@@ -563,7 +550,7 @@ VulkanModelResources::MeshView VulkanModelResources::meshForModel(
 VulkanModelResources::MaterialBinding VulkanModelResources::materialForModel(
     RenderModel model) const
 {
-    const ModelAssetDefinition& definition = modelDefinition(model);
+    const AssetManifest::Model& definition = manifest_->model(model);
     return {
         .mode = definition.materialMode,
         .textureIndex = definition.textureIndex,
@@ -572,8 +559,11 @@ VulkanModelResources::MaterialBinding VulkanModelResources::materialForModel(
 
 std::vector<VulkanModelResources::TextureView> VulkanModelResources::textures() const
 {
+    // Shaders declare a fixed-size texture array (MODEL_TEXTURE_COUNT ==
+    // maxModelTextures), so the view is always padded to that size with the
+    // fallback texture regardless of how many textures the manifest defines.
     std::vector<TextureView> result;
-    result.reserve(textures_.size());
+    result.reserve(maxModelTextures);
     for (const TextureSlot& texture : textures_) {
         const TextureResource& resource = texture.state == LoadState::Ready
             ? texture.gpu
@@ -583,20 +573,26 @@ std::vector<VulkanModelResources::TextureView> VulkanModelResources::textures() 
             .sampler = resource.sampler,
         });
     }
+    while (result.size() < maxModelTextures) {
+        result.push_back({
+            .imageView = fallbackTexture_.image.view,
+            .sampler = fallbackTexture_.sampler,
+        });
+    }
     return result;
 }
 
 uint32_t VulkanModelResources::textureCount() const
 {
-    return static_cast<uint32_t>(textures_.size());
+    return maxModelTextures;
 }
 
 VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
 {
     LoadingStats result {
-        .totalModels = static_cast<uint32_t>(assetCatalog::models.size()),
-        .totalTextures = static_cast<uint32_t>(assetCatalog::textures.size()),
-        .totalAnimations = static_cast<uint32_t>(assetCatalog::animations.size()),
+        .totalModels = static_cast<uint32_t>(models_.size()),
+        .totalTextures = static_cast<uint32_t>(textures_.size()),
+        .totalAnimations = static_cast<uint32_t>(animations_.size()),
     };
     auto countState = [&result](LoadState state, uint32_t& loaded, uint32_t& pending) {
         if (state == LoadState::Ready) {
@@ -607,20 +603,14 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
             ++result.failedAssets;
         }
     };
-    for (const ModelAssetDefinition& definition : assetCatalog::models) {
-        countState(
-            models_[enumIndex(definition.model)].state,
-            result.loadedModels,
-            result.pendingModels);
+    for (const ModelSlot& model : models_) {
+        countState(model.state, result.loadedModels, result.pendingModels);
     }
     for (const TextureSlot& texture : textures_) {
         countState(texture.state, result.loadedTextures, result.pendingTextures);
     }
-    for (const AnimationAssetDefinition& definition : assetCatalog::animations) {
-        countState(
-            animations_[enumIndex(definition.animation)].state,
-            result.loadedAnimations,
-            result.pendingAnimations);
+    for (const AnimationSlot& animation : animations_) {
+        countState(animation.state, result.loadedAnimations, result.pendingAnimations);
     }
     return result;
 }
@@ -859,12 +849,12 @@ void VulkanModelResources::destroyMesh(GpuMesh& mesh) const
 const VulkanModelResources::GpuMesh& VulkanModelResources::gpuMeshForModel(
     RenderModel model) const
 {
-    if (model == RenderModel::Cube ||
-        model == RenderModel::Rogue ||
-        model == RenderModel::Count) {
+    if (model.isCube() ||
+        model == manifest_->playerModel() ||
+        model.index() >= models_.size()) {
         throw std::runtime_error("Render model does not have a static GPU mesh");
     }
-    const ModelSlot& slot = models_[enumIndex(model)];
+    const ModelSlot& slot = models_[model.index()];
     if (slot.state != LoadState::Ready ||
         !slot.gpu.vertexBuffer.buffer ||
         !slot.gpu.indexBuffer.buffer) {

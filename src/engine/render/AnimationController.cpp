@@ -12,9 +12,15 @@ AnimationController::AnimationController(float fadeDurationSeconds)
 {
 }
 
+void AnimationController::configure(RenderModel playerModel, RenderAnimation fallbackClip)
+{
+    playerModel_ = playerModel;
+    fallbackClip_ = fallbackClip;
+}
+
 void AnimationController::clear()
 {
-    clips_ = {};
+    clips_.clear();
     previewClip_ = nullptr;
     previewTimeSeconds_ = 0.0f;
     resetPlayback();
@@ -22,26 +28,31 @@ void AnimationController::clear()
 
 void AnimationController::setClip(RenderAnimation animation, GltfAnimationClip clip)
 {
-    if (animation == RenderAnimation::None || animation == RenderAnimation::Count) {
-        throw std::invalid_argument("Animation clips require a concrete RenderAnimation value");
+    if (animation.isNone()) {
+        throw std::invalid_argument("Animation clips require a concrete animation id");
     }
-    clips_[index(animation)] = std::move(clip);
+    if (clips_.size() <= animation.index()) {
+        clips_.resize(animation.index() + 1);
+    }
+    clips_[animation.index()] = std::move(clip);
 }
 
 bool AnimationController::hasClip(RenderAnimation animation) const
 {
-    if (animation == RenderAnimation::None || animation == RenderAnimation::Count) {
-        return false;
-    }
-    return !clips_[index(animation)].channels.empty();
+    return !animation.isNone() &&
+        animation.index() < clips_.size() &&
+        !clips_[animation.index()].channels.empty();
 }
 
 const GltfAnimationClip& AnimationController::clip(RenderAnimation animation) const
 {
-    if (animation == RenderAnimation::None || animation == RenderAnimation::Count) {
-        animation = RenderAnimation::RogueIdle;
+    if (!hasClip(animation)) {
+        animation = fallbackClip_;
     }
-    return clips_[index(animation)];
+    if (!hasClip(animation)) {
+        throw std::out_of_range("Animation clip requested before it was loaded");
+    }
+    return clips_[animation.index()];
 }
 
 void AnimationController::setPreview(const GltfAnimationClip* clip, float timeSeconds)
@@ -61,8 +72,8 @@ std::optional<AnimationController::SkinningRequest> AnimationController::update(
 
         activePreviewClip_ = previewClip_;
         activePreviewTime_ = previewTimeSeconds_;
-        activeAnimation_ = RenderAnimation::None;
-        fadeFromAnimation_ = RenderAnimation::None;
+        activeAnimation_ = noAnimation;
+        fadeFromAnimation_ = noAnimation;
         return SkinningRequest {
             .toClip = previewClip_,
             .toTimeSeconds = previewTimeSeconds_,
@@ -70,29 +81,29 @@ std::optional<AnimationController::SkinningRequest> AnimationController::update(
     }
     activePreviewClip_ = nullptr;
 
-    RenderAnimation requestedAnimation = RenderAnimation::None;
+    RenderAnimation requestedAnimation = noAnimation;
     float requestedTime = 0.0f;
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
-        if (tile.model == RenderModel::Rogue && tile.animation != RenderAnimation::None) {
+        if (tile.model == playerModel_ && !tile.animation.isNone()) {
             requestedAnimation = tile.animation;
             requestedTime = tile.animationTimeSeconds;
             break;
         }
     }
-    if (requestedAnimation == RenderAnimation::None || !hasClip(requestedAnimation)) {
+    if (requestedAnimation.isNone() || !hasClip(requestedAnimation)) {
         return std::nullopt;
     }
 
-    const float timeDelta = activeAnimation_ == RenderAnimation::None
+    const float timeDelta = activeAnimation_.isNone()
         ? 0.0f
         : requestedTime - activeAnimationTime_;
-    if (requestedAnimation != activeAnimation_ && activeAnimation_ != RenderAnimation::None) {
+    if (!(requestedAnimation == activeAnimation_) && !activeAnimation_.isNone()) {
         fadeFromAnimation_ = activeAnimation_;
         fadeFromTime_ = activeAnimationTime_;
         fadeElapsed_ = 0.0f;
     }
 
-    if (fadeFromAnimation_ == RenderAnimation::None &&
+    if (fadeFromAnimation_.isNone() &&
         requestedAnimation == activeAnimation_ &&
         std::abs(requestedTime - activeAnimationTime_) < timeEpsilon) {
         return std::nullopt;
@@ -102,11 +113,11 @@ std::optional<AnimationController::SkinningRequest> AnimationController::update(
         .toClip = &clip(requestedAnimation),
         .toTimeSeconds = requestedTime,
     };
-    if (fadeFromAnimation_ != RenderAnimation::None) {
+    if (!fadeFromAnimation_.isNone()) {
         fadeFromTime_ += timeDelta;
         fadeElapsed_ += std::abs(timeDelta);
         if (fadeDurationSeconds_ <= 0.0f || fadeElapsed_ >= fadeDurationSeconds_) {
-            fadeFromAnimation_ = RenderAnimation::None;
+            fadeFromAnimation_ = noAnimation;
         } else {
             float blend = fadeElapsed_ / fadeDurationSeconds_;
             blend = blend * blend * (3.0f - 2.0f * blend);
@@ -121,16 +132,11 @@ std::optional<AnimationController::SkinningRequest> AnimationController::update(
     return request;
 }
 
-std::size_t AnimationController::index(RenderAnimation animation)
-{
-    return static_cast<std::size_t>(animation);
-}
-
 void AnimationController::resetPlayback()
 {
-    activeAnimation_ = RenderAnimation::None;
+    activeAnimation_ = noAnimation;
     activeAnimationTime_ = -1.0f;
-    fadeFromAnimation_ = RenderAnimation::None;
+    fadeFromAnimation_ = noAnimation;
     fadeFromTime_ = 0.0f;
     fadeElapsed_ = 0.0f;
     activePreviewClip_ = nullptr;

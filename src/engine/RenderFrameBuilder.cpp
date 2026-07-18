@@ -309,6 +309,7 @@ void appendWaterEdgeFaces(
 template <typename CellAt, typename ScaleForTile>
 void appendStaticTiles(
     RenderFrameData& frame,
+    const AssetManifest& manifest,
     const Level& level,
     CellAt cellAt,
     ScaleForTile scaleForTile)
@@ -337,7 +338,7 @@ void appendStaticTiles(
                     .baseElevation = cell.baseElevation,
                     .height = cell.height,
                     .showGrid = cell.showGrid,
-                    .model = renderModelForTile(cell.tile),
+                    .model = manifest.modelForTile(cell.tile),
                     .modelRotationQuarterTurns = cell.modelRotationQuarterTurns,
                 };
                 applyTileScale(renderTile, scaleForTile(cell.tile));
@@ -434,6 +435,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
         };
     appendStaticTiles(
         frame,
+        input.manifest,
         input.level,
         staticCellAt,
         [&](TileType tile) {
@@ -488,10 +490,10 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             .baseElevation = playerVisual.motion.renderPosition.z,
             .height = 1.0f,
             .showGrid = false,
-            .model = RenderModel::Rogue,
+            .model = input.manifest.playerModel(),
             .animation = playerVisual.motion.moving
                 ? playerVisual.movingClip
-                : RenderAnimation::RogueIdle,
+                : input.manifest.playerIdleAnimation(),
             .animationTimeSeconds = playerVisual.clipTimeSeconds,
             .modelRotationQuarterTurns = playerVisual.facingQuarterTurns,
         };
@@ -531,7 +533,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             .baseElevation = visual.renderPosition.z,
             .height = 1.0f,
             .blurBehind = movable.type == TileType::Ice,
-            .model = renderModelForTile(movable.type),
+            .model = input.manifest.modelForTile(movable.type),
         };
         applyTileScale(
             movableTile,
@@ -540,7 +542,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     }
 
     for (RenderFrameData::Tile& tile : frame.tiles) {
-        if (tile.model == RenderModel::Conveyor) {
+        if (!tile.model.isCube() && input.manifest.model(tile.model).beltScroll) {
             tile.beltScrollOffset = input.conveyorBeltScrollOffset;
         }
     }
@@ -657,10 +659,10 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
                 .blurBehind = tile == TileType::Ice,
                 .showGrid = tile != TileType::Player,
                 .isEditorPreview = preview,
-                .model = renderModelForTile(tile),
+                .model = input.manifest.modelForTile(tile),
                 .animation = tile == TileType::Player
-                    ? RenderAnimation::RogueIdle
-                    : RenderAnimation::None,
+                    ? input.manifest.playerIdleAnimation()
+                    : noAnimation,
                 .animationTimeSeconds = tile == TileType::Player
                     ? input.worldAnimationTimeSeconds
                     : 0.0f,
@@ -782,7 +784,7 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
     }
 
     for (RenderFrameData::Tile& tile : frame.tiles) {
-        if (tile.model == RenderModel::Conveyor) {
+        if (!tile.model.isCube() && input.manifest.model(tile.model).beltScroll) {
             tile.beltScrollOffset = input.conveyorBeltScrollOffset;
         }
     }

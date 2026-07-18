@@ -4,9 +4,9 @@
 #include "engine/render/GltfMesh.hpp"
 #include "engine/render/RenderTypes.hpp"
 
-#include <array>
 #include <cstddef>
 #include <optional>
+#include <vector>
 
 namespace sokoban {
 
@@ -26,6 +26,11 @@ public:
 
     explicit AnimationController(float fadeDurationSeconds = config::playerAnimationFadeSeconds);
 
+    // Identifies the model whose tiles drive clip selection and the clip used
+    // when an invalid animation id is dereferenced. Ids come from the asset
+    // manifest at runtime.
+    void configure(RenderModel playerModel, RenderAnimation fallbackClip);
+
     void clear();
     void setClip(RenderAnimation animation, GltfAnimationClip clip);
     [[nodiscard]] bool hasClip(RenderAnimation animation) const;
@@ -35,14 +40,16 @@ public:
     [[nodiscard]] std::optional<SkinningRequest> update(const RenderFrameData& frameData);
 
 private:
-    [[nodiscard]] static std::size_t index(RenderAnimation animation);
     void resetPlayback();
 
-    std::array<GltfAnimationClip, static_cast<std::size_t>(RenderAnimation::Count)> clips_ {};
+    // Indexed by RenderAnimation::value - 1; grown on demand.
+    std::vector<GltfAnimationClip> clips_;
+    RenderModel playerModel_ {};
+    RenderAnimation fallbackClip_ {};
     float fadeDurationSeconds_ = config::playerAnimationFadeSeconds;
-    RenderAnimation activeAnimation_ = RenderAnimation::None;
+    RenderAnimation activeAnimation_ = noAnimation;
     float activeAnimationTime_ = -1.0f;
-    RenderAnimation fadeFromAnimation_ = RenderAnimation::None;
+    RenderAnimation fadeFromAnimation_ = noAnimation;
     float fadeFromTime_ = 0.0f;
     float fadeElapsed_ = 0.0f;
     const GltfAnimationClip* previewClip_ = nullptr;

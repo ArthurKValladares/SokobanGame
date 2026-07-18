@@ -1,10 +1,10 @@
 // Headless tests for level/frame render asset planning.
 
+#include "engine/AssetManifest.hpp"
 #include "engine/Level.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 
 #include <iostream>
-#include <stdexcept>
 
 namespace {
 
@@ -27,6 +27,54 @@ void checkImpl(bool ok, const char* expression, int line)
 #define CHECK(expression) checkImpl((expression), #expression, __LINE__)
 #define TEST(name) currentTest = name
 
+const AssetManifest& testManifest()
+{
+    static const AssetManifest manifest = AssetManifest::parse(R"(
+model Stone
+  path stone.gltf
+model Water
+  path water.gltf
+model Glass
+  path glass.gltf
+model Bricks
+  path bricks.gltf
+model Conveyor
+  path conveyor.gltf
+model Hero
+  path hero.glb
+  geometry skinned
+  role player
+animation Idle
+  path a.glb
+  role player-idle
+animation Move
+  path a.glb
+  role player-move
+animation Push
+  path a.glb
+  role player-push
+tile Wall
+  model Bricks
+tile Rock
+  model Stone
+tile Water
+  model Water
+tile Ice
+  model Glass
+tile Conveyor Up
+  model Conveyor
+tile Conveyor Down
+  model Conveyor
+tile Conveyor Right
+  model Conveyor
+tile Conveyor Left
+  model Conveyor
+tile Player
+  model Hero
+)");
+    return manifest;
+}
+
 void testLevelRequirementsIncludeDynamicAndStaticAssets()
 {
     TEST("levelRequirementsIncludeDynamicAndStaticAssets");
@@ -35,18 +83,19 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
         { "C#W>RI " },
     }, "asset requirements");
 
+    const AssetManifest& manifest = testManifest();
     const RenderAssetRequirements requirements =
-        renderAssetRequirementsForLevel(level);
-    CHECK(requirements.contains(RenderModel::Rogue));
-    CHECK(requirements.contains(RenderModel::BricksA));
-    CHECK(requirements.contains(RenderModel::Water));
-    CHECK(requirements.contains(RenderModel::Conveyor));
-    CHECK(requirements.contains(RenderModel::Stone));
-    CHECK(requirements.contains(RenderModel::Glass));
-    CHECK(!requirements.contains(RenderModel::Cube));
-    CHECK(requirements.contains(RenderAnimation::RogueIdle));
-    CHECK(requirements.contains(RenderAnimation::RogueMovement));
-    CHECK(requirements.contains(RenderAnimation::RoguePush));
+        renderAssetRequirementsForLevel(level, manifest);
+    CHECK(requirements.contains(manifest.playerModel()));
+    CHECK(requirements.contains(manifest.modelIdByName("Bricks")));
+    CHECK(requirements.contains(manifest.modelIdByName("Water")));
+    CHECK(requirements.contains(manifest.modelIdByName("Conveyor")));
+    CHECK(requirements.contains(manifest.modelIdByName("Stone")));
+    CHECK(requirements.contains(manifest.modelIdByName("Glass")));
+    CHECK(!requirements.contains(cubeModel));
+    CHECK(requirements.contains(manifest.playerIdleAnimation()));
+    CHECK(requirements.contains(manifest.playerMoveAnimation()));
+    CHECK(requirements.contains(manifest.playerPushAnimation()));
     CHECK(requirements.modelCount() == 6);
     CHECK(requirements.animationCount() == 3);
 }
@@ -54,23 +103,24 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
 void testFrameRequirementsOnlyContainReferencedAssets()
 {
     TEST("frameRequirementsOnlyContainReferencedAssets");
+    const AssetManifest& manifest = testManifest();
     RenderFrameData frame;
     frame.tiles = {
-        RenderFrameData::Tile { .model = RenderModel::Cube },
-        RenderFrameData::Tile { .model = RenderModel::Stone },
+        RenderFrameData::Tile { .model = cubeModel },
+        RenderFrameData::Tile { .model = manifest.modelIdByName("Stone") },
         RenderFrameData::Tile {
-            .model = RenderModel::Rogue,
-            .animation = RenderAnimation::RogueMovement,
+            .model = manifest.playerModel(),
+            .animation = manifest.playerMoveAnimation(),
         },
     };
 
     const RenderAssetRequirements requirements =
         renderAssetRequirementsForFrame(frame);
-    CHECK(requirements.contains(RenderModel::Stone));
-    CHECK(requirements.contains(RenderModel::Rogue));
-    CHECK(!requirements.contains(RenderModel::Water));
-    CHECK(requirements.contains(RenderAnimation::RogueMovement));
-    CHECK(!requirements.contains(RenderAnimation::RogueIdle));
+    CHECK(requirements.contains(manifest.modelIdByName("Stone")));
+    CHECK(requirements.contains(manifest.playerModel()));
+    CHECK(!requirements.contains(manifest.modelIdByName("Water")));
+    CHECK(requirements.contains(manifest.playerMoveAnimation()));
+    CHECK(!requirements.contains(manifest.playerIdleAnimation()));
     CHECK(requirements.modelCount() == 2);
     CHECK(requirements.animationCount() == 1);
 }
@@ -78,45 +128,36 @@ void testFrameRequirementsOnlyContainReferencedAssets()
 void testMergeDeduplicatesRequirements()
 {
     TEST("mergeDeduplicatesRequirements");
+    const AssetManifest& manifest = testManifest();
     RenderAssetRequirements first;
-    first.requireModel(RenderModel::Stone);
-    first.requireAnimation(RenderAnimation::RogueIdle);
+    first.requireModel(manifest.modelIdByName("Stone"));
+    first.requireAnimation(manifest.playerIdleAnimation());
 
     RenderAssetRequirements second;
-    second.requireModel(RenderModel::Stone);
-    second.requireModel(RenderModel::Water);
-    second.requireAnimation(RenderAnimation::RoguePush);
+    second.requireModel(manifest.modelIdByName("Stone"));
+    second.requireModel(manifest.modelIdByName("Water"));
+    second.requireAnimation(manifest.playerPushAnimation());
     first.merge(second);
 
     CHECK(first.modelCount() == 2);
     CHECK(first.animationCount() == 2);
-    CHECK(first.contains(RenderModel::Water));
-    CHECK(first.contains(RenderAnimation::RoguePush));
+    CHECK(first.contains(manifest.modelIdByName("Water")));
+    CHECK(first.contains(manifest.playerPushAnimation()));
 }
 
-void testProceduralAndSentinelSemantics()
+void testCubeAndNoneAreNeverRequirements()
 {
-    TEST("proceduralAndSentinelSemantics");
+    TEST("cubeAndNoneAreNeverRequirements");
     RenderAssetRequirements requirements;
-    requirements.requireModel(RenderModel::Cube);
-    requirements.requireAnimation(RenderAnimation::None);
+    requirements.requireModel(cubeModel);
+    requirements.requireAnimation(noAnimation);
     CHECK(requirements.empty());
+    CHECK(!requirements.contains(cubeModel));
+    CHECK(!requirements.contains(noAnimation));
 
-    bool modelThrew = false;
-    try {
-        requirements.requireModel(RenderModel::Count);
-    } catch (const std::invalid_argument&) {
-        modelThrew = true;
-    }
-    CHECK(modelThrew);
-
-    bool animationThrew = false;
-    try {
-        requirements.requireAnimation(RenderAnimation::Count);
-    } catch (const std::invalid_argument&) {
-        animationThrew = true;
-    }
-    CHECK(animationThrew);
+    // Ids beyond anything required are absent, not out-of-bounds errors.
+    CHECK(!requirements.contains(RenderModel { 99 }));
+    CHECK(!requirements.contains(RenderAnimation { 99 }));
 }
 
 } // namespace
@@ -126,7 +167,7 @@ int main()
     testLevelRequirementsIncludeDynamicAndStaticAssets();
     testFrameRequirementsOnlyContainReferencedAssets();
     testMergeDeduplicatesRequirements();
-    testProceduralAndSentinelSemantics();
+    testCubeAndNoneAreNeverRequirements();
 
     if (failures == 0) {
         std::cout << "AssetRequirementsTests: "

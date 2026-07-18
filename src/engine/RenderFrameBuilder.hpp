@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/AssetManifest.hpp"
 #include "engine/GameplayPresentation.hpp"
 #include "engine/Level.hpp"
 #include "engine/LevelEditor.hpp"
@@ -13,6 +14,7 @@ namespace sokoban {
 class RenderFrameBuilder {
 public:
     struct GameplayInput {
+        const AssetManifest& manifest;
         const Level& level;
         const GameState& state;
         bool moving = false;
@@ -23,6 +25,7 @@ public:
     };
 
     struct EditorInput {
+        const AssetManifest& manifest;
         const LevelEditor& editor;
         const PresentationSettings& settings;
         std::optional<GridPosition3> hoverCell;

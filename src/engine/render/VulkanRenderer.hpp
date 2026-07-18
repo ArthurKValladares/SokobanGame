@@ -25,6 +25,8 @@
 
 namespace sokoban {
 
+class AssetManifest;
+
 enum class AntiAliasingMode {
     None,
     Msaa2x,
@@ -34,7 +36,14 @@ enum class AntiAliasingMode {
 
 class VulkanRenderer {
 public:
-    VulkanRenderer(SDL_Window* window, std::filesystem::path assetRoot);
+    // assetRoot holds built runtime assets (shaders); modelAssetRoot is the
+    // source assets directory the manifest's paths are relative to. The
+    // manifest must outlive the renderer.
+    VulkanRenderer(
+        SDL_Window* window,
+        std::filesystem::path assetRoot,
+        std::filesystem::path modelAssetRoot,
+        const AssetManifest& manifest);
     ~VulkanRenderer();
 
     VulkanRenderer(const VulkanRenderer&) = delete;

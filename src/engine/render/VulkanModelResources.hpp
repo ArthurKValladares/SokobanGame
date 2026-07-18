@@ -1,7 +1,7 @@
 #pragma once
 
+#include "engine/AssetManifest.hpp"
 #include "engine/render/ImageData.hpp"
-#include "engine/render/RenderAssetCatalog.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/SkinnedMeshUpdater.hpp"
 
@@ -56,12 +56,15 @@ public:
     VulkanModelResources(const VulkanModelResources&) = delete;
     VulkanModelResources& operator=(const VulkanModelResources&) = delete;
 
+    // The manifest must outlive this object; it defines every model,
+    // texture, and animation slot.
     void create(
         VkPhysicalDevice physicalDevice,
         VkDevice device,
         VkCommandPool commandPool,
         VkQueue graphicsQueue,
-        std::filesystem::path assetRoot);
+        std::filesystem::path assetRoot,
+        const AssetManifest& manifest);
     void destroy();
 
     // Starts independent CPU tasks and returns immediately.
@@ -139,7 +142,7 @@ private:
     void requestModel(RenderModel model);
     void requestTexture(std::size_t textureIndex);
     void requestAnimation(RenderAnimation animation);
-    void requestModelDependencies(const ModelAssetDefinition& definition);
+    void requestModelDependencies(RenderModel model);
 
     [[nodiscard]] bool publishModel(RenderModel model, bool wait);
     [[nodiscard]] bool publishTexture(std::size_t textureIndex, bool wait);
@@ -151,8 +154,6 @@ private:
         const std::filesystem::path& path,
         const char* kind) const;
 
-    [[nodiscard]] const ModelAssetDefinition& modelDefinition(RenderModel model) const;
-    [[nodiscard]] const AnimationAssetDefinition& animationDefinition(RenderAnimation animation) const;
     [[nodiscard]] std::vector<bool> requiredTextures(const RenderAssetRequirements& requirements) const;
     [[nodiscard]] bool assetsReady(const RenderAssetRequirements& requirements) const;
 
@@ -176,9 +177,10 @@ private:
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     std::filesystem::path assetRoot_;
+    const AssetManifest* manifest_ = nullptr;
 
-    std::array<ModelSlot, static_cast<std::size_t>(RenderModel::Count)> models_ {};
-    std::array<AnimationSlot, static_cast<std::size_t>(RenderAnimation::Count)> animations_ {};
+    std::vector<ModelSlot> models_; // indexed by RenderModel::index()
+    std::vector<AnimationSlot> animations_; // indexed by RenderAnimation::index()
     std::vector<TextureSlot> textures_;
     TextureResource fallbackTexture_ {};
     AnimationController animationController_ {};

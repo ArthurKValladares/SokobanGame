@@ -1,5 +1,7 @@
 #include "engine/PresentationSettings.hpp"
 
+#include "engine/AssetManifest.hpp"
+
 #include <algorithm>
 #include <cmath>
 
@@ -18,6 +20,15 @@ float clampedTileScale(float scale)
 }
 
 } // namespace
+
+void PresentationSettings::applyTileScales(const AssetManifest& manifest)
+{
+    for (std::size_t i = 0; i < tileScales_.size(); ++i) {
+        setTileScale(
+            static_cast<TileType>(i),
+            manifest.tileScale(static_cast<TileType>(i)));
+    }
+}
 
 void PresentationSettings::normalize()
 {

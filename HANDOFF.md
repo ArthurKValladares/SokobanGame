@@ -93,7 +93,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
 - `src/engine/RenderFrameBuilder.*`: SDL/Vulkan-free construction of gameplay and editor `RenderFrameData`. Owns tile/model mapping, static geometry, water edges, ladder rungs, editor previews/pick-only cells, dynamic entities, tile scaling, and conveyor texture offsets.
 - `src/engine/ApplicationDebugUi.*`: Debug-only ImGui adapter for engine statistics and tuning. Edits `PresentationSettings` and calls the public `GameplaySession`/`VulkanRenderer` controls instead of storing application logic.
 - `src/engine/AnimationPreviewDebugUi.*`: Debug-only owner of animation asset scanning, clip selection, preview playback state, and renderer preview delegation.
-- `src/engine/AudioSystem.*`: miniaudio-backed sound playback behind a pimpl (`EngineHandle`), so no miniaudio types leak into headers. Preloads the five footstep OGGs (`footstep_concrete_000..004.ogg`, copied by CMake from the Kenney Impact Sounds pack into `build assets/audio/`) with `MA_SOUND_FLAG_DECODE` into a never-reallocated `std::vector<ma_sound>`. `update(dt, playerWalking, pushingStone)` drives the pure `FootstepCadence` struct (first step fires immediately on walk start, then one per `footstepIntervalSeconds`, burst-capped with debt drop after hitches) and plays a random non-repeating footstep. It also edge-detects `pushingStone` (from `player().movingClip == RoguePush && motion.moving`, so undoing a push drags too): push start picks a random non-repeating `stoneDragLoop1..4.ogg` and plays it as a seamless miniaudio loop with a 15 ms fade-in; push end fades it out over 40 ms. The loop assets live in `assets/custom/audio/` and are generated from the Kenney Foley `stoneDrag*` samples by `tools/make_drag_loops.py` (ffmpeg required): silence-trimmed, tail crossfaded into the head for a continuous seam, plus a 1.5 ms edge ramp because Vorbis does not decode file edges exactly (raw whole-file looping would dip/click). Dialog/editor paths call `update(dt, false, false)` so an Escape mid-push stops the loop. `playMusic(name)` streams (`MA_SOUND_FLAG_STREAM`) one looping per-level soundtrack with a 600 ms crossfade on switch; the level-to-track mapping lives in `musicTrackForLevel` in `Application.cpp` (level0 Sad Town, level1 Sad Descent, level2 Mission Plausible, level3 Space Cadet — Kenney Music Loops) and is applied in `loadCurrentScreen`, where re-requesting the playing track is a no-op so screens within a level keep the music running. Music volume (`config::musicVolume`, relative to master) is tunable in Debug UI > Audio. Degrades gracefully (`available()` false, silent) if the device or files are missing. `Application::update` feeds it `presentation_.player().motion.moving` on the normal gameplay path only, so dialogs/editor are silent. Defaults come from `config::masterVolume` / `config::footstepIntervalSeconds`; both are runtime-tunable in Debug UI > Audio (tune Footstep Interval there to match the walk animation).
+- `src/engine/AudioSystem.*`: miniaudio-backed sound playback behind a pimpl (`EngineHandle`), so no miniaudio types leak into headers. Preloads the manifest's `footsteps` and `stone-drag` sound sets straight from the source assets tree (no copying) with `MA_SOUND_FLAG_DECODE` into never-reallocated `std::vector<ma_sound>`s. `update(dt, playerWalking, pushingStone)` drives the pure `FootstepCadence` struct (first step fires immediately on walk start, then one per `footstepIntervalSeconds`, burst-capped with debt drop after hitches) and plays a random non-repeating footstep. It also edge-detects `pushingStone` (from `player().movingClip == RoguePush && motion.moving`, so undoing a push drags too): push start picks a random non-repeating `stoneDragLoop1..4.ogg` and plays it as a seamless miniaudio loop with a 15 ms fade-in; push end fades it out over 40 ms. The loop assets live in `assets/custom/audio/` and are generated from the Kenney Foley `stoneDrag*` samples by `tools/make_drag_loops.py` (ffmpeg required): silence-trimmed, tail crossfaded into the head for a continuous seam, plus a 1.5 ms edge ramp because Vorbis does not decode file edges exactly (raw whole-file looping would dip/click). Dialog/editor paths call `update(dt, false, false)` so an Escape mid-push stops the loop. `playMusicForLevel(level)` streams (`MA_SOUND_FLAG_STREAM`) one looping per-level soundtrack with a 600 ms crossfade on switch; the level-to-track mapping lives in the manifest's `music <level>` sections and is applied in `loadCurrentScreen`, where re-requesting the playing level is a no-op so screens within a level keep the music running. Per-sound volumes relative to master (`config::musicVolume/footstepVolume/stoneDragVolume`) are tunable in Debug UI > Audio alongside the master volume and footstep interval; the drag and music volumes apply live to the playing loop. Degrades gracefully (`available()` false, silent) if the device or files are missing. `Application::update` feeds it `presentation_.player().motion.moving` on the normal gameplay path only, so dialogs/editor are silent. Defaults come from `config::masterVolume` / `config::footstepIntervalSeconds`; both are runtime-tunable in Debug UI > Audio (tune Footstep Interval there to match the walk animation).
 - `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, action history, a branch-safe undo stack, automatic world steps, and the post-undo automatic-motion pause. Emits `Action` snapshots for `Application` to animate. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
 - `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags + slide momentum) plus pure functions in `sokoban::rules` — `step` advances the whole world one discrete step (simultaneous one-tile moves, pushes, ladder climbs, momentum, falls, water, conveyors); `hasPendingMotion` reports whether the world would keep moving without input; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
 - `src/engine/Level.*`: level file parsing, serialization, layered grid storage, walkability/support rules, player/movable extraction. Tested by `tests/LevelTests.cpp` (`sokoban_level_tests`).
@@ -102,11 +102,11 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
 - `src/engine/LevelEditor.*`: headless editor model and command API. Owns document state/history, tile validation, draft construction, level load/save, source/runtime mirroring, browser enumeration, screen/level renumbering, soft-delete/restore, and guarded permanent deletion. It has no SDL, Vulkan, or ImGui dependency and is tested by `tests/LevelEditorTests.cpp` (`sokoban_level_editor_tests`).
 - `src/engine/LevelEditorDebugUi.*`: Debug-only ImGui adapter for `LevelEditor`. Owns widget text buffers and confirmation-modal presentation only; every editor state transition and filesystem action is delegated to the headless API.
 - `src/engine/render/RenderTypes.hpp`: renderer-facing frame contract and model/animation enums, independent of the Vulkan facade.
-- `src/engine/render/RenderAssetCatalog.hpp`: typed model, texture, animation, geometry, and material metadata consumed by the generated asset catalog.
+- `src/engine/AssetManifest.*`: runtime asset manifest - the single source of truth for models, textures, animations, tile visuals (model + render scale per tile type), and sounds. Parses `assets/manifest.txt` (plain text, sections start unindented, properties indented, `#` comments, paths relative to the assets root) at startup with line-numbered errors and full validation (unique names, resolvable material textures, exactly one `role player` skinned model, all three `player-idle/move/push` animation roles, texture count <= `maxModelTextures`). `RenderModel`/`RenderAnimation` are now runtime ids (index+1 into the manifest lists; 0 = cube/none) defined in `RenderTypes.hpp`. Adding an asset, tile visual, or sound is a manifest edit plus relaunch - no CMake, enum, or renderer change. Headless; tested by `tests/AssetManifestTests.cpp` (`sokoban_asset_manifest_tests`).
 - `src/engine/render/RenderAssetRequirements.*`: Vulkan-free model/animation requirement sets plus shared tile-to-model mapping. Computes requirements from a loaded `Level` for prefetching or from `RenderFrameData` as a draw-time safety net. Tested by `tests/AssetRequirementsTests.cpp` (`sokoban_asset_requirements_tests`).
 - `src/engine/render/AnimationController.*`: Vulkan-free owner of gameplay animation clips, Rogue clip selection, preview overrides, deduplication, and crossfade state. It emits immutable skinning requests and is tested by `tests/AnimationControllerTests.cpp` (`sokoban_animation_controller_tests`).
 - `src/engine/render/SkinnedMeshUpdater.*`: owns the Rogue's skinned source mesh and dynamic Vulkan vertex/index buffers. It consumes `AnimationController` requests, performs CPU skinning/blending, and uploads changed vertices.
-- `src/engine/render/VulkanModelResources.*`: owns lazy per-asset load states, TaskSystem futures, static model meshes, texture images/samplers, catalog material bindings, and failure retention. CPU parsing/decoding runs on workers; completed results are published to Vulkan on the render thread. It orchestrates `AnimationController` and `SkinnedMeshUpdater` while exposing lightweight mesh/material/texture views and loading statistics to the renderer.
+- `src/engine/render/VulkanModelResources.*`: owns lazy per-asset load states, TaskSystem futures, static model meshes, texture images/samplers, manifest material bindings, and failure retention. CPU parsing/decoding runs on workers; completed results are published to Vulkan on the render thread. It orchestrates `AnimationController` and `SkinnedMeshUpdater` while exposing lightweight mesh/material/texture views and loading statistics to the renderer.
 - `src/engine/render/VulkanSsaoPass.*`: owns the swapchain-sized R8 ambient-occlusion target and sampler, plus depth/AO transitions and the fullscreen AO/composite recording sequence. Pipelines and scene descriptors are passed in as non-owning handles.
 - `src/engine/render/VulkanShadowPass.*`: owns the fixed-size shadow depth image, sampler, and image-layout state. It records pass setup/transitions while `VulkanRenderer` supplies the scene-specific shadow draw traversal between `begin` and `end`.
 - `src/engine/render/VulkanSwapchainResources.*`: owns the swapchain, image views, MSAA color attachment, scene depth/resolve-depth, scene-color sampling target, acquire/present calls, resize lifecycle, frame attachment transitions, and the ice-blur scene-color copy.
@@ -327,7 +327,7 @@ Model assets currently used:
   with forward kinematics against the Rogue skeleton and numerically verified,
   see ARM_TARGETS in the tool to tweak direction/height). Regenerate with
   `python tools/make_push_animation.py`; used as the player's push animation
-  (`config::playerPushAnimationNumber`, `RenderAnimation::RoguePush`).
+  (manifest animation `RoguePush`, `role player-push`).
 - KayKit Platformer Pack 1.0:
   - `conveyor_4x4x1_blue.gltf`
   - `conveyor_4x4x1_blue.bin`
@@ -341,20 +341,20 @@ Asset path decisions:
   - `assets/KayKit Adventurers 2.0`
   - `assets/KayKit Platformer Pack 1.0`
 - The old folder names `KayKit_BlockBits_1.0_FREE` and `KayKit_Adventurers_2.0_FREE` were replaced in the asset manifest.
+- Model/texture/animation/sound files load directly from the source `assets/` tree (paths in `assets/manifest.txt`); `.bin` glTF sidecars resolve naturally next to their `.gltf`.
 
 CMake asset pipeline:
 
 - Shaders are compiled from `shaders/*.glsl` to `build/assets/shaders/*.spv`.
 - Levels are copied from `levels/` to `build/assets/levels`.
-- `cmake/AssetManifest.cmake` is the single source of truth for model, texture,
-  animation, and support-file source/destination paths plus model loading and
-  material metadata.
-- CMake generates `build/generated/engine/render/GeneratedAssetCatalog.hpp`
-  from `cmake/GeneratedAssetCatalog.hpp.in`; the same manifest drives runtime
-  asset copying and C++ loading metadata.
-- The generated catalog validates duplicate enum entries and texture indices at
-  compile time. Adding a model no longer requires editing renderer loading code
-  or adding individual copy commands to `CMakeLists.txt`.
+- Everything else (models, textures, animations, sounds, tile visuals) is
+  defined in `assets/manifest.txt` and loaded at runtime straight from the
+  source assets tree - CMake is not involved. `AssetManifest::loadFromFile`
+  validates the manifest at startup and throws descriptive errors.
+- Shaders compile with a fixed `MODEL_TEXTURE_COUNT=16`, which must equal
+  `sokoban::maxModelTextures` (`AssetManifest.hpp`); descriptor writes pad the
+  texture array with a fallback texture, so the manifest can define up to 16
+  textures without shader or pipeline changes.
 
 Runtime lazy asset pipeline:
 
@@ -389,22 +389,25 @@ GLTF loader notes:
 
 - `GltfMesh.*` is a small custom loader, not a general-purpose robust GLTF implementation.
 - It supports enough JSON parsing, buffers, accessors, nodes, skins, and animations for the current assets.
-- Static model vertices include `textureIndex`; the catalog declares whether a
-  model uses those primitive indices.
-- Catalog texture order defines the Vulkan descriptor-array indices. The current
-  conveyor asset maps primitive indices 1 and 2 to `Platformer` and
-  `PlatformerThread`; this invariant is documented beside the texture list.
+- Static model vertices include `textureIndex`; the manifest declares whether a
+  model uses those primitive indices (`primitive-textures true`).
+- Manifest texture order defines the Vulkan descriptor-array indices. The
+  current conveyor asset maps primitive indices 1 and 2 to `Platformer` and
+  `PlatformerThread`; this invariant is documented beside the texture list in
+  `assets/manifest.txt`.
 - If adding complex GLTF assets, consider switching to a proven GLTF library or broadening loader support carefully.
 
 Shader notes:
 
 - `model.vert.glsl` accepts position, normal, UV, and texture index.
 - `triangle.frag.glsl` samples the shadow map, resolved scene color, and a
-  catalog-sized model texture descriptor array. CMake passes
-  `MODEL_TEXTURE_COUNT` while compiling shaders.
-- Each model catalog entry declares `Untextured`, `SingleTexture`, or
-  `PrimitiveTextureIndex`; draw code passes that mode and texture index through
-  push constants instead of checking model names or sampler bindings.
+  fixed 16-slot model texture descriptor array (`MODEL_TEXTURE_COUNT`, padded
+  with a fallback texture).
+- Each manifest model declares `material none`, `material texture <Name>`, or
+  `material primitive-texture-index <n>`; draw code passes that mode and
+  texture index through push constants instead of checking model names or
+  sampler bindings. A `belt-scroll true` model scrolls its UVs with the
+  conveyor clock (no hard-coded conveyor special case).
 - Push constants carry transform, lighting, grid, material, and texture options.
 
 ## UI And Text Rendering Rough State
@@ -437,9 +440,11 @@ Major recent additions and fixes:
   fallback use the same tile/model semantics as `RenderFrameBuilder`, with a
   dedicated 26-check regression suite.
 
-- Replaced hard-coded asset and material plumbing with
-  `cmake/AssetManifest.cmake`, generated typed C++ metadata, and a Vulkan model
-  texture descriptor array.
+- Replaced the CMake-generated asset catalog with a runtime asset manifest
+  (`assets/manifest.txt` + headless `AssetManifest`): string-named models,
+  textures, animations (with player roles), per-tile visuals, and sound sets;
+  `RenderModel`/`RenderAnimation` became runtime ids and assets load directly
+  from the source tree.
 - Extracted model mesh/texture/animation lifetime management from
   `VulkanRenderer` into `VulkanModelResources`; `VulkanRenderer.cpp` dropped
   from roughly 4,750 lines to roughly 3,800 lines.
@@ -498,10 +503,8 @@ At the time this handoff was updated:
 - Full Debug and Release builds passed from the clean `out/visual-studio` build
   tree. A Debug Vulkan-validation visual runtime smoke test rendered level 0
   correctly, and the process remained healthy while background tasks completed.
-- All eight CTest suites pass: rules 131 checks, level parsing 42 checks,
-  gameplay session 101 checks, level editor 88 checks, animation controller 40
-  checks, presentation 62 checks, asset requirements 26 checks, and task system
-  11 checks (501 total).
+- All nine CTest suites pass, including the new `asset_manifest` suite
+  (manifest parsing, validation failures, and the shipped manifest file).
 
 Known useful verification commands:
 
@@ -522,9 +525,9 @@ The `rg` command above should return no matches.
 - Store `Player`, `Rock`, and movable `Ice` as dynamic entities extracted from level data rather than static cells.
 - Use character-driven tile definitions as the single source of truth for level parsing/editor palette.
 - Use layered `.scr` text files instead of a binary or JSON format for now.
-- Keep runtime asset selection explicit through `cmake/AssetManifest.cmake` so
-  the build directory contains only needed assets while CMake and C++ consume
-  the same metadata.
+- Keep runtime asset selection explicit through `assets/manifest.txt`; code
+  refers to assets via manifest roles/flags (player model, belt-scroll) or
+  tile mappings, never hard-coded names.
 - Keep runtime asset requirement planning in the Vulkan-free
   `RenderAssetRequirements` layer. CPU file work may use `TaskSystem`, but all
   Vulkan object creation, upload submission, and descriptor mutation must stay
@@ -549,11 +552,11 @@ High-value gameplay/editor work:
 
 Rendering/assets:
 
-- Add an explicit cache budget/eviction policy if the catalog grows enough for
-  lifetime caching to become expensive.
-- Extend generated material metadata with exact primitive-texture dependency
+- Add an explicit cache budget/eviction policy if the manifest grows enough
+  for lifetime caching to become expensive.
+- Extend manifest material metadata with exact primitive-texture dependency
   masks; `PrimitiveTextureIndex` models currently conservatively request every
-  catalog texture.
+  manifest texture.
 - Add timing/history diagnostics for blocking `ensureAssets` calls and
   background CPU preparation if asset stalls become difficult to reproduce.
 - Replace the custom GLTF parsing with a robust library if assets get more complex.
@@ -595,14 +598,13 @@ Engineering:
   - Update `TileType` and `tileTypeDefinitionTable`.
   - Update helper predicates in `TileTypes.cpp`.
   - Update parser/render/gameplay/editor behavior as needed.
-  - Add model/texture files and metadata to `cmake/AssetManifest.cmake` if needed.
+  - Add a `tile <Name>` section (model/scale) to `assets/manifest.txt` if needed.
   - Add editor preview/rendering support.
   - Verify level serialization still maps one-to-one.
 - When adding a model:
-  - Add a `RenderModel` enum if needed.
-  - Add its source/runtime paths, geometry options, material mode, textures,
-    animations, and support files to `cmake/AssetManifest.cmake`.
-  - Set per-tile transform/scale/rotation in `RenderFrameBuilder` and mutable
-    scale defaults in `PresentationSettings`.
-  - Extend material modes only if the model cannot use `Untextured`,
-    `SingleTexture`, or `PrimitiveTextureIndex`.
+  - Add `model`/`texture`/`animation` sections to `assets/manifest.txt` (path,
+    geometry, material, orientation flags) and map tiles to it with `tile`
+    sections; scale defaults live there too.
+  - No enum, CMake, or renderer change is needed; relaunch to apply.
+  - Extend material modes only if the model cannot use `none`,
+    `texture <Name>`, or `primitive-texture-index <n>`.

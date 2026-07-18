@@ -27,6 +27,13 @@ void checkImpl(bool ok, const char* expression, int line)
 #define CHECK(expression) checkImpl((expression), #expression, __LINE__)
 #define TEST(name) currentTest = name
 
+// Runtime ids as an asset manifest would assign them.
+constexpr RenderModel heroModel { 1 };
+constexpr RenderModel stoneModel { 2 };
+constexpr RenderAnimation idleClip { 1 };
+constexpr RenderAnimation moveClip { 2 };
+constexpr RenderAnimation pushClip { 3 };
+
 bool near(float left, float right)
 {
     return std::abs(left - right) < 0.0001f;
@@ -44,7 +51,7 @@ RenderFrameData frameWithAnimation(RenderAnimation animation, float timeSeconds)
 {
     RenderFrameData frame;
     frame.tiles.push_back({
-        .model = RenderModel::Rogue,
+        .model = heroModel,
         .animation = animation,
         .animationTimeSeconds = timeSeconds,
     });
@@ -54,9 +61,10 @@ RenderFrameData frameWithAnimation(RenderAnimation animation, float timeSeconds)
 AnimationController makeController(float fadeSeconds = 0.1f)
 {
     AnimationController controller(fadeSeconds);
-    controller.setClip(RenderAnimation::RogueIdle, makeClip("idle"));
-    controller.setClip(RenderAnimation::RogueMovement, makeClip("movement"));
-    controller.setClip(RenderAnimation::RoguePush, makeClip("push"));
+    controller.configure(heroModel, idleClip);
+    controller.setClip(idleClip, makeClip("idle"));
+    controller.setClip(moveClip, makeClip("movement"));
+    controller.setClip(pushClip, makeClip("push"));
     return controller;
 }
 
@@ -68,18 +76,18 @@ void testSelectsFirstAnimatedRogueAndDeduplicates()
 
     RenderFrameData frame;
     frame.tiles.push_back({
-        .model = RenderModel::Stone,
-        .animation = RenderAnimation::RoguePush,
+        .model = stoneModel,
+        .animation = pushClip,
         .animationTimeSeconds = 8.0f,
     });
     frame.tiles.push_back({
-        .model = RenderModel::Rogue,
-        .animation = RenderAnimation::RogueIdle,
+        .model = heroModel,
+        .animation = idleClip,
         .animationTimeSeconds = 1.0f,
     });
     frame.tiles.push_back({
-        .model = RenderModel::Rogue,
-        .animation = RenderAnimation::RoguePush,
+        .model = heroModel,
+        .animation = pushClip,
         .animationTimeSeconds = 2.0f,
     });
 
@@ -101,9 +109,9 @@ void testCrossfadeProgressesAndCompletes()
 {
     TEST("crossfadeProgressesAndCompletes");
     AnimationController controller = makeController(0.1f);
-    CHECK(controller.update(frameWithAnimation(RenderAnimation::RogueIdle, 1.0f)).has_value());
+    CHECK(controller.update(frameWithAnimation(idleClip, 1.0f)).has_value());
 
-    const auto halfway = controller.update(frameWithAnimation(RenderAnimation::RogueMovement, 1.05f));
+    const auto halfway = controller.update(frameWithAnimation(moveClip, 1.05f));
     CHECK(halfway.has_value());
     CHECK(halfway->blended());
     CHECK(halfway->fromClip->name == "idle");
@@ -111,7 +119,7 @@ void testCrossfadeProgressesAndCompletes()
     CHECK(near(halfway->fromTimeSeconds, 1.05f));
     CHECK(near(halfway->blend, 0.5f));
 
-    const auto complete = controller.update(frameWithAnimation(RenderAnimation::RogueMovement, 1.1f));
+    const auto complete = controller.update(frameWithAnimation(moveClip, 1.1f));
     CHECK(complete.has_value());
     CHECK(!complete->blended());
     CHECK(complete->toClip->name == "movement");
@@ -121,9 +129,9 @@ void testReverseTimeStillAdvancesFade()
 {
     TEST("reverseTimeStillAdvancesFade");
     AnimationController controller = makeController(0.1f);
-    CHECK(controller.update(frameWithAnimation(RenderAnimation::RogueIdle, 1.0f)).has_value());
+    CHECK(controller.update(frameWithAnimation(idleClip, 1.0f)).has_value());
 
-    const auto request = controller.update(frameWithAnimation(RenderAnimation::RoguePush, 0.95f));
+    const auto request = controller.update(frameWithAnimation(pushClip, 0.95f));
     CHECK(request.has_value());
     CHECK(request->blended());
     CHECK(request->fromClip->name == "idle");
@@ -135,21 +143,21 @@ void testPreviewOverridesAndThenReleasesGameplay()
 {
     TEST("previewOverridesAndThenReleasesGameplay");
     AnimationController controller = makeController();
-    CHECK(controller.update(frameWithAnimation(RenderAnimation::RogueIdle, 0.0f)).has_value());
+    CHECK(controller.update(frameWithAnimation(idleClip, 0.0f)).has_value());
 
     GltfAnimationClip preview = makeClip("preview");
     controller.setPreview(&preview, 2.0f);
-    const auto previewRequest = controller.update(frameWithAnimation(RenderAnimation::RoguePush, 4.0f));
+    const auto previewRequest = controller.update(frameWithAnimation(pushClip, 4.0f));
     CHECK(previewRequest.has_value());
     CHECK(!previewRequest->blended());
     CHECK(previewRequest->toClip == &preview);
     CHECK(near(previewRequest->toTimeSeconds, 2.0f));
-    CHECK(!controller.update(frameWithAnimation(RenderAnimation::RoguePush, 4.0f)));
+    CHECK(!controller.update(frameWithAnimation(pushClip, 4.0f)));
 
     controller.setPreview(&preview, 2.25f);
-    CHECK(controller.update(frameWithAnimation(RenderAnimation::RoguePush, 4.0f)).has_value());
+    CHECK(controller.update(frameWithAnimation(pushClip, 4.0f)).has_value());
     controller.setPreview(nullptr, 0.0f);
-    const auto gameplayRequest = controller.update(frameWithAnimation(RenderAnimation::RoguePush, 4.0f));
+    const auto gameplayRequest = controller.update(frameWithAnimation(pushClip, 4.0f));
     CHECK(gameplayRequest.has_value());
     CHECK(!gameplayRequest->blended());
     CHECK(gameplayRequest->toClip->name == "push");
@@ -159,20 +167,20 @@ void testClipValidationAndClear()
 {
     TEST("clipValidationAndClear");
     AnimationController controller = makeController();
-    CHECK(controller.hasClip(RenderAnimation::RogueIdle));
-    CHECK(!controller.hasClip(RenderAnimation::None));
+    CHECK(controller.hasClip(idleClip));
+    CHECK(!controller.hasClip(noAnimation));
 
     bool threw = false;
     try {
-        controller.setClip(RenderAnimation::None, makeClip("invalid"));
+        controller.setClip(noAnimation, makeClip("invalid"));
     } catch (const std::invalid_argument&) {
         threw = true;
     }
     CHECK(threw);
 
     controller.clear();
-    CHECK(!controller.hasClip(RenderAnimation::RogueIdle));
-    CHECK(!controller.update(frameWithAnimation(RenderAnimation::RogueIdle, 1.0f)));
+    CHECK(!controller.hasClip(idleClip));
+    CHECK(!controller.update(frameWithAnimation(idleClip, 1.0f)));
 }
 
 } // namespace

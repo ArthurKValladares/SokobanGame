@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/AssetManifest.hpp"
 #include "engine/Config.hpp"
 
 #include <algorithm>
@@ -57,7 +58,10 @@ private:
 // reports available() == false.
 class AudioSystem {
 public:
-    explicit AudioSystem(std::filesystem::path audioRoot);
+    // audioRoot is the source assets directory; the manifest's "footsteps"
+    // and "stone-drag" sound sets and per-level music entries are loaded
+    // relative to it. The manifest must outlive this object.
+    AudioSystem(std::filesystem::path audioRoot, const AssetManifest& manifest);
     ~AudioSystem();
 
     AudioSystem(const AudioSystem&) = delete;
@@ -69,16 +73,20 @@ public:
     // when the push ends.
     void update(float dt, bool playerWalking, bool pushingStone);
 
-    // Starts the given music track looping, crossfading from the current one.
-    // nullptr (or an unloaded name) fades the music out. Requesting the track
-    // that is already playing is a no-op, so per-screen reloads within a level
-    // keep the soundtrack running seamlessly.
-    void playMusic(const char* fileName);
+    // Starts the level's manifest soundtrack looping, crossfading from the
+    // current track. Levels without music fade out. Re-requesting the level
+    // that is already playing is a no-op, so per-screen reloads within a
+    // level keep the soundtrack running seamlessly.
+    void playMusicForLevel(int level);
 
     void setMasterVolume(float volume);
     [[nodiscard]] float masterVolume() const { return masterVolume_; }
     void setMusicVolume(float volume);
     [[nodiscard]] float musicVolume() const { return musicVolume_; }
+    void setFootstepVolume(float volume);
+    [[nodiscard]] float footstepVolume() const { return footstepVolume_; }
+    void setStoneDragVolume(float volume);
+    [[nodiscard]] float stoneDragVolume() const { return stoneDragVolume_; }
     void setFootstepIntervalSeconds(float seconds);
     [[nodiscard]] float footstepIntervalSeconds() const { return cadence_.intervalSeconds; }
     [[nodiscard]] bool available() const;
@@ -92,10 +100,13 @@ private:
 
     std::unique_ptr<EngineHandle> engine_;
     std::filesystem::path audioRoot_;
+    const AssetManifest* manifest_ = nullptr;
     std::mt19937 random_;
     FootstepCadence cadence_;
     float masterVolume_ = config::masterVolume;
     float musicVolume_ = config::musicVolume;
+    float footstepVolume_ = config::footstepVolume;
+    float stoneDragVolume_ = config::stoneDragVolume;
     int lastFootstepIndex_ = -1;
     int lastDragIndex_ = -1;
     bool pushing_ = false;

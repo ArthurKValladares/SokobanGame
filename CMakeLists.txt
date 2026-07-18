@@ -49,8 +49,6 @@ set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/shaders")
 set(LEVEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/levels")
 set(LEVEL_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/levels")
 
-include(cmake/AssetManifest.cmake)
-
 set(SHADER_SOURCES
     "${SHADER_SOURCE_DIR}/triangle.vert.glsl"
     "${SHADER_SOURCE_DIR}/triangle.frag.glsl"
@@ -77,7 +75,9 @@ foreach(shader_source IN LISTS SHADER_SOURCES)
     add_custom_command(
         OUTPUT "${shader_output}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${SHADER_OUTPUT_DIR}"
-        COMMAND "${GLSLC_EXECUTABLE}" --target-env=vulkan1.4 -DMODEL_TEXTURE_COUNT=${SOKOBAN_MODEL_TEXTURE_COUNT} -fshader-stage=${shader_stage} "${shader_source}" -o "${shader_output}"
+        # MODEL_TEXTURE_COUNT must equal sokoban::maxModelTextures in
+        # src/engine/AssetManifest.hpp; descriptor writes pad to this size.
+        COMMAND "${GLSLC_EXECUTABLE}" --target-env=vulkan1.4 -DMODEL_TEXTURE_COUNT=16 -fshader-stage=${shader_stage} "${shader_source}" -o "${shader_output}"
         DEPENDS "${shader_source}"
         VERBATIM
     )
@@ -87,42 +87,15 @@ add_custom_target(sokoban_shaders DEPENDS ${SHADER_OUTPUTS})
 
 file(GLOB_RECURSE LEVEL_SOURCES CONFIGURE_DEPENDS "${LEVEL_SOURCE_DIR}/*")
 
-set(AUDIO_KENNEY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets/Kenney Game Assets All-in-1 3.5.0/Audio")
-set(AUDIO_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/assets/audio")
-set(SOKOBAN_AUDIO_SOURCE_FILES
-    "${AUDIO_KENNEY_DIR}/Impact Sounds/Audio/footstep_concrete_000.ogg"
-    "${AUDIO_KENNEY_DIR}/Impact Sounds/Audio/footstep_concrete_001.ogg"
-    "${AUDIO_KENNEY_DIR}/Impact Sounds/Audio/footstep_concrete_002.ogg"
-    "${AUDIO_KENNEY_DIR}/Impact Sounds/Audio/footstep_concrete_003.ogg"
-    "${AUDIO_KENNEY_DIR}/Impact Sounds/Audio/footstep_concrete_004.ogg"
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/custom/audio/stoneDragLoop1.ogg"
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/custom/audio/stoneDragLoop2.ogg"
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/custom/audio/stoneDragLoop3.ogg"
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/custom/audio/stoneDragLoop4.ogg"
-    "${AUDIO_KENNEY_DIR}/Music Loops/Loops/Sad Town.ogg"
-    "${AUDIO_KENNEY_DIR}/Music Loops/Loops/Sad Descent.ogg"
-    "${AUDIO_KENNEY_DIR}/Music Loops/Loops/Mission Plausible.ogg"
-    "${AUDIO_KENNEY_DIR}/Music Loops/Loops/Space Cadet.ogg"
-)
-set(SOKOBAN_AUDIO_COPY_COMMANDS)
-set(SOKOBAN_AUDIO_DEPENDENCIES)
-foreach(audio_source IN LISTS SOKOBAN_AUDIO_SOURCE_FILES)
-    get_filename_component(audio_name "${audio_source}" NAME)
-    list(APPEND SOKOBAN_AUDIO_COPY_COMMANDS
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${audio_source}" "${AUDIO_OUTPUT_DIR}/${audio_name}")
-    list(APPEND SOKOBAN_AUDIO_DEPENDENCIES "${audio_source}")
-endforeach()
-
+# Models, textures, animations, and sounds are defined by assets/manifest.txt
+# and loaded directly from the source assets directory at runtime - adding an
+# asset does not touch this file. Only levels and shaders are staged into the
+# build tree.
 add_custom_target(sokoban_assets
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/assets"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${AUDIO_OUTPUT_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E copy_directory "${LEVEL_SOURCE_DIR}" "${LEVEL_OUTPUT_DIR}"
-    ${SOKOBAN_ASSET_COPY_COMMANDS}
-    ${SOKOBAN_AUDIO_COPY_COMMANDS}
     DEPENDS
         ${LEVEL_SOURCES}
-        ${SOKOBAN_ASSET_DEPENDENCIES}
-        ${SOKOBAN_AUDIO_DEPENDENCIES}
     VERBATIM
 )
 
@@ -131,6 +104,7 @@ add_executable(sokoban
     src/engine/AnimationPreviewDebugUi.cpp
     src/engine/Application.cpp
     src/engine/ApplicationDebugUi.cpp
+    src/engine/AssetManifest.cpp
     src/engine/AudioSystem.cpp
     src/engine/BoardLayout.cpp
     src/engine/DebugUi.cpp
@@ -170,7 +144,6 @@ add_dependencies(sokoban sokoban_shaders sokoban_assets)
 
 target_include_directories(sokoban PRIVATE
     src
-    "${CMAKE_CURRENT_BINARY_DIR}/generated"
     third_party/imgui
     third_party/imgui/backends
     third_party/imgui/misc/cpp
@@ -272,6 +245,18 @@ if(SOKOBAN_BUILD_TESTS)
         tests/AnimationControllerTests.cpp
         src/engine/render/AnimationController.cpp
     )
+    add_executable(sokoban_asset_manifest_tests
+        tests/AssetManifestTests.cpp
+        src/engine/AssetManifest.cpp
+        src/engine/TileTypes.cpp
+    )
+    target_include_directories(sokoban_asset_manifest_tests PRIVATE src)
+    if(MSVC)
+        target_compile_options(sokoban_asset_manifest_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_asset_manifest_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME asset_manifest COMMAND sokoban_asset_manifest_tests)
     target_include_directories(sokoban_animation_controller_tests PRIVATE src)
     if(MSVC)
         target_compile_options(sokoban_animation_controller_tests PRIVATE /W4 /permissive-)
@@ -282,6 +267,7 @@ if(SOKOBAN_BUILD_TESTS)
 
     add_executable(sokoban_presentation_tests
         tests/PresentationTests.cpp
+        src/engine/AssetManifest.cpp
         src/engine/GameplayPresentation.cpp
         src/engine/Level.cpp
         src/engine/LevelEditor.cpp
@@ -301,6 +287,7 @@ if(SOKOBAN_BUILD_TESTS)
 
     add_executable(sokoban_asset_requirements_tests
         tests/AssetRequirementsTests.cpp
+        src/engine/AssetManifest.cpp
         src/engine/Level.cpp
         src/engine/TileTypes.cpp
         src/engine/render/RenderAssetRequirements.cpp

@@ -2,13 +2,13 @@
 
 #include "engine/render/RenderTypes.hpp"
 
-#include <array>
 #include <cstddef>
+#include <vector>
 
 namespace sokoban {
 
+class AssetManifest;
 class Level;
-enum class TileType;
 
 class RenderAssetRequirements {
 public:
@@ -23,12 +23,15 @@ public:
     [[nodiscard]] bool empty() const;
 
 private:
-    std::array<bool, static_cast<std::size_t>(RenderModel::Count)> models_ {};
-    std::array<bool, static_cast<std::size_t>(RenderAnimation::Count)> animations_ {};
+    // Indexed by id index (value - 1); grown on demand.
+    std::vector<bool> models_;
+    std::vector<bool> animations_;
 };
 
-[[nodiscard]] RenderModel renderModelForTile(TileType tile);
-[[nodiscard]] RenderAssetRequirements renderAssetRequirementsForLevel(const Level& level);
-[[nodiscard]] RenderAssetRequirements renderAssetRequirementsForFrame(const RenderFrameData& frame);
+[[nodiscard]] RenderAssetRequirements renderAssetRequirementsForLevel(
+    const Level& level,
+    const AssetManifest& manifest);
+[[nodiscard]] RenderAssetRequirements renderAssetRequirementsForFrame(
+    const RenderFrameData& frame);
 
 } // namespace sokoban

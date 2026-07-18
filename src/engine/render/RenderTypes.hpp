@@ -4,6 +4,7 @@
 #include "engine/Math.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -14,24 +15,29 @@ enum class RenderViewMode {
     Isometric3D,
 };
 
-enum class RenderModel {
-    Cube,
-    BricksA,
-    Stone,
-    Water,
-    Glass,
-    Conveyor,
-    Rogue,
-    Count,
+// Runtime model identity: 0 is the built-in untextured unit cube, and any
+// other value addresses entry value-1 of the asset manifest's model list.
+struct RenderModel {
+    uint32_t value = 0;
+
+    [[nodiscard]] constexpr bool isCube() const { return value == 0; }
+    [[nodiscard]] constexpr std::size_t index() const { return value - 1; }
+    friend constexpr bool operator==(RenderModel, RenderModel) = default;
 };
 
-enum class RenderAnimation {
-    None,
-    RogueIdle,
-    RogueMovement,
-    RoguePush,
-    Count,
+inline constexpr RenderModel cubeModel {};
+
+// Runtime animation identity: 0 means "no animation"; any other value
+// addresses entry value-1 of the asset manifest's animation list.
+struct RenderAnimation {
+    uint32_t value = 0;
+
+    [[nodiscard]] constexpr bool isNone() const { return value == 0; }
+    [[nodiscard]] constexpr std::size_t index() const { return value - 1; }
+    friend constexpr bool operator==(RenderAnimation, RenderAnimation) = default;
 };
+
+inline constexpr RenderAnimation noAnimation {};
 
 struct RenderFrameData {
     struct DirectionalLight {
@@ -78,8 +84,8 @@ struct RenderFrameData {
         bool pickOnly = false;
         bool showGrid = true;
         bool isEditorPreview = false;
-        RenderModel model = RenderModel::Cube;
-        RenderAnimation animation = RenderAnimation::None;
+        RenderModel model = cubeModel;
+        RenderAnimation animation = noAnimation;
         float animationTimeSeconds = 0.0f;
         float beltScrollOffset = 0.0f;
         uint32_t modelRotationQuarterTurns = 0;

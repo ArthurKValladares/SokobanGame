@@ -8,6 +8,8 @@
 
 namespace sokoban {
 
+class AssetManifest;
+
 // Mutable presentation tuning initialized from the compile-time defaults in
 // Config.hpp. Debug UI and future settings screens edit this object; frame
 // construction consumes its normalized renderer-facing values.
@@ -46,6 +48,8 @@ public:
     Geometry geometry;
 
     void normalize();
+    // Seeds per-tile render scales from the asset manifest's tile visuals.
+    void applyTileScales(const AssetManifest& manifest);
     void setTileScale(TileType type, float scale);
     [[nodiscard]] float tileScale(TileType type) const;
     [[nodiscard]] Vec3 sunDirection() const;
@@ -53,21 +57,10 @@ public:
     [[nodiscard]] RenderFrameData::GridOverlay renderGridOverlay() const;
 
 private:
+    // Defaults come from the asset manifest via applyTileScales at startup.
     std::array<float, tileTypeCount> tileScales_ {
-        config::airTileScale,
-        config::groundTileScale,
-        config::wallTileScale,
-        config::endTileScale,
-        config::pressurePlateTileScale,
-        config::playerTileScale,
-        config::rockTileScale,
-        config::iceTileScale,
-        config::waterTileScale,
-        config::ladderTileScale,
-        config::conveyorTileScale,
-        config::conveyorTileScale,
-        config::conveyorTileScale,
-        config::conveyorTileScale,
+        1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+        1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
     };
 };
 

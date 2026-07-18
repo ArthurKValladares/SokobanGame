@@ -79,6 +79,15 @@ uint32_t facingQuarterTurns(MoveDirection direction)
 
 } // namespace
 
+void GameplayPresentation::setPlayerClips(RenderAnimation moveClip, RenderAnimation pushClip)
+{
+    playerMoveClip_ = moveClip;
+    playerPushClip_ = pushClip;
+    if (player_.movingClip.isNone()) {
+        player_.movingClip = moveClip;
+    }
+}
+
 void GameplayPresentation::resetEntities(const GameState& state)
 {
     player_ = {};
@@ -152,7 +161,7 @@ void GameplayPresentation::beginAction(const GameplaySession::Action& action)
         entityRenderTarget(action.after.player, action.after.playerDead));
     if (player_.motion.moving) {
         player_.movingClip =
-            action.playerPushing ? RenderAnimation::RoguePush : RenderAnimation::RogueMovement;
+            action.playerPushing ? playerPushClip_ : playerMoveClip_;
         player_.clipPlaybackRate = action.reversed ? -1.0f : 1.0f;
     } else {
         player_.clipPlaybackRate = 1.0f;
