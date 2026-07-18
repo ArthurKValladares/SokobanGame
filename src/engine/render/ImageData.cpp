@@ -1,93 +1,89 @@
 #include "engine/render/ImageData.hpp"
 
-#include <wincodec.h>
-#include <wrl/client.h>
+#define STBI_FAILURE_USERMSG
+#define STBI_NO_STDIO
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
 
+#include <cstring>
+#include <fstream>
+#include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace sokoban {
+namespace {
+
+std::vector<stbi_uc> readImageFile(const std::filesystem::path& path)
+{
+    std::ifstream stream(path, std::ios::binary | std::ios::ate);
+    if (!stream) {
+        throw std::runtime_error("Failed to open image: " + path.string());
+    }
+
+    const std::streamoff fileSize = stream.tellg();
+    if (fileSize <= 0) {
+        throw std::runtime_error("Image file is empty: " + path.string());
+    }
+    if (fileSize > std::numeric_limits<int>::max()) {
+        throw std::runtime_error("Image file is too large to decode: " + path.string());
+    }
+
+    std::vector<stbi_uc> encoded(static_cast<size_t>(fileSize));
+    stream.seekg(0, std::ios::beg);
+    stream.read(
+        reinterpret_cast<char*>(encoded.data()),
+        static_cast<std::streamsize>(encoded.size()));
+    if (!stream) {
+        throw std::runtime_error("Failed to read image: " + path.string());
+    }
+    return encoded;
+}
+
+} // namespace
 
 ImageData loadRgbaImage(const std::filesystem::path& path)
 {
-    using Microsoft::WRL::ComPtr;
+    const std::vector<stbi_uc> encoded = readImageFile(path);
 
-    const HRESULT initializeResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    const bool uninitialize = SUCCEEDED(initializeResult);
-    if (FAILED(initializeResult) && initializeResult != RPC_E_CHANGED_MODE) {
-        throw std::runtime_error("Failed to initialize COM for image loading");
+    int width = 0;
+    int height = 0;
+    int sourceChannels = 0;
+    using StbiPixels = std::unique_ptr<stbi_uc, decltype(&stbi_image_free)>;
+    const StbiPixels pixels(
+        stbi_load_from_memory(
+            encoded.data(),
+            static_cast<int>(encoded.size()),
+            &width,
+            &height,
+            &sourceChannels,
+            STBI_rgb_alpha),
+        &stbi_image_free);
+    if (!pixels) {
+        const char* reason = stbi_failure_reason();
+        throw std::runtime_error(
+            "Failed to decode image '" + path.string() + "': "
+            + (reason != nullptr ? reason : "unknown decoder error"));
+    }
+    if (width <= 0 || height <= 0) {
+        throw std::runtime_error("Invalid image dimensions: " + path.string());
     }
 
-    try {
-        ComPtr<IWICImagingFactory> factory;
-        HRESULT result = CoCreateInstance(
-            CLSID_WICImagingFactory,
-            nullptr,
-            CLSCTX_INPROC_SERVER,
-            IID_PPV_ARGS(&factory));
-        if (FAILED(result)) {
-            throw std::runtime_error("Failed to create WIC imaging factory");
-        }
-
-        ComPtr<IWICBitmapDecoder> decoder;
-        result = factory->CreateDecoderFromFilename(
-            path.c_str(),
-            nullptr,
-            GENERIC_READ,
-            WICDecodeMetadataCacheOnLoad,
-            &decoder);
-        if (FAILED(result)) {
-            throw std::runtime_error("Failed to decode image: " + path.string());
-        }
-
-        ComPtr<IWICBitmapFrameDecode> frame;
-        result = decoder->GetFrame(0, &frame);
-        if (FAILED(result)) {
-            throw std::runtime_error("Failed to read image frame: " + path.string());
-        }
-
-        ComPtr<IWICFormatConverter> converter;
-        result = factory->CreateFormatConverter(&converter);
-        if (FAILED(result)) {
-            throw std::runtime_error("Failed to create WIC format converter");
-        }
-        result = converter->Initialize(
-            frame.Get(),
-            GUID_WICPixelFormat32bppRGBA,
-            WICBitmapDitherTypeNone,
-            nullptr,
-            0.0,
-            WICBitmapPaletteTypeCustom);
-        if (FAILED(result)) {
-            throw std::runtime_error("Failed to convert image to RGBA: " + path.string());
-        }
-
-        ImageData image;
-        result = converter->GetSize(&image.width, &image.height);
-        if (FAILED(result) || image.width == 0 || image.height == 0) {
-            throw std::runtime_error("Invalid image dimensions: " + path.string());
-        }
-        const uint32_t stride = image.width * 4;
-        image.rgba.resize(static_cast<size_t>(stride) * image.height);
-        result = converter->CopyPixels(
-            nullptr,
-            stride,
-            static_cast<uint32_t>(image.rgba.size()),
-            reinterpret_cast<BYTE*>(image.rgba.data()));
-        if (FAILED(result)) {
-            throw std::runtime_error("Failed to copy image pixels: " + path.string());
-        }
-
-        if (uninitialize) {
-            CoUninitialize();
-        }
-        return image;
-    } catch (...) {
-        if (uninitialize) {
-            CoUninitialize();
-        }
-        throw;
+    const size_t imageWidth = static_cast<size_t>(width);
+    const size_t imageHeight = static_cast<size_t>(height);
+    constexpr size_t rgbaChannels = 4;
+    if (imageWidth > std::numeric_limits<size_t>::max() / rgbaChannels / imageHeight) {
+        throw std::runtime_error("Decoded image is too large: " + path.string());
     }
+
+    ImageData image;
+    image.width = static_cast<uint32_t>(width);
+    image.height = static_cast<uint32_t>(height);
+    image.rgba.resize(imageWidth * imageHeight * rgbaChannels);
+    std::memcpy(image.rgba.data(), pixels.get(), image.rgba.size());
+    return image;
 }
 
 } // namespace sokoban

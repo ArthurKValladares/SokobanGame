@@ -35,6 +35,8 @@ Main dependencies:
 - nlohmann/json 3.11.3 is pinned as a vendored single header in
   `third_party/nlohmann`; it parses the runtime asset manifest without any
   configure-time downloads.
+- stb_image 2.30 is pinned in `third_party/stb`; texture files are read through
+  `std::filesystem` and decoded to RGBA from memory without platform APIs.
 
 Common commands:
 
@@ -110,6 +112,15 @@ cmake --build build --config Debug --target sokoban_input_tests
 .\build\Debug\sokoban_input_tests.exe
 ```
 
+Image-data tests cover RGBA decoding, concurrent worker-style loads with
+byte-identical results, and contextual diagnostics for missing or invalid
+files:
+
+```powershell
+cmake --build build --config Debug --target sokoban_image_data_tests
+.\build\Debug\sokoban_image_data_tests.exe
+```
+
 Headless animation-controller tests cover Rogue animation selection,
 deduplication, crossfades, reverse playback, preview overrides, and reset:
 
@@ -178,7 +189,10 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
 - `src/engine/render/VulkanResourceUtils.*`: exception-safe shared Vulkan image allocation, image-view creation, memory-type selection, and destruction used by the focused resource owners. `VulkanRenderConstants.hpp` holds the shared 256-byte push-constant contract.
 - `src/engine/render/VulkanRenderer.*`: top-level Vulkan instance/device/queue and frame orchestration, command buffers/synchronization, debug UI, camera/projection calculations, and scene draw traversal. Resource, pass, pipeline, descriptor, model, and animation ownership is delegated to the focused components above.
 - `src/engine/render/GltfMesh.*`: small custom GLTF/GLB loader, static mesh loading, skinned mesh loading, animation sampling/skinning. `skinGltfMeshBlended` skins with a pose blended between two clips; `SkinnedMeshUpdater` uses it for the player crossfades requested by `AnimationController` over `config::playerAnimationFadeSeconds`.
-- `src/engine/render/ImageData.*`: texture loading through WIC.
+- `src/engine/render/ImageData.*`: platform-independent texture file loading
+  and in-memory RGBA decoding through stb_image. Filesystem ownership stays in
+  the engine, preserving native `std::filesystem::path` handling and allowing
+  independent background loads without COM or other platform initialization.
 - `src/engine/ui/Ui.*`: very small in-game immediate UI used for the quit confirmation, including crude bitmap-glyph text.
 - `shaders/`: GLSL shader sources compiled to SPIR-V by CMake.
 - `levels/`: source `.scr` level files copied into `build/assets/levels`.
@@ -438,7 +452,7 @@ Runtime lazy asset pipeline:
 - After a normal screen load, `Application` scans every screen in the current
   level and every screen in the next level, merges their requirements, and
   calls `VulkanRenderer::preloadAssets`. Level files are small and read on the
-  main thread; model parsing, animation parsing, and WIC image decoding run as
+  main thread; model parsing, animation parsing, and stb_image decoding run as
   independent TaskSystem jobs.
 - `VulkanRenderer::drawFrame` verifies the exact frame requirements and then
   publishes at most one completed preload per frame. Loaded assets remain
@@ -612,7 +626,8 @@ At the time this handoff was updated:
 - Full Debug and Release builds passed from the clean `out/visual-studio` build
   tree. Clean installed Release builds also start and remain healthy without
   access to the source checkout.
-- All thirteen CTest suites pass, including input/gamepad mapping, profile
+- All fourteen CTest suites pass, including concurrent texture decoding,
+  input/gamepad mapping, profile
   migration/recovery, gameplay
   move-count semantics, mandatory validation of the shipped manifest,
   manifest-editor save semantics, and the `content_pipeline` suite.
@@ -633,6 +648,12 @@ At the time this handoff was updated:
   on Windows through SDL's preference-path API. Existing format-1/2/3 profiles
   migrate to format 4; successful screen loading writes the initial or restored
   gameplay checkpoint without leaving a temporary replacement file.
+- Replaced the Windows WIC/COM texture path with vendored stb_image 2.30 and
+  removed `ole32`/`windowscodecs` from the game link. Image files are read with
+  `std::filesystem`, decoded from memory, and covered by concurrent-load and
+  failure-diagnostic tests. Unix builds also link miniaudio's documented `dl`
+  and math dependencies, and package names now reflect the configured CPU
+  architecture instead of always claiming x64.
 
 Known useful verification commands:
 

@@ -16,6 +16,8 @@ A tiny C++20 engine seed for a future Sokoban-like 3D game. The first milestone 
 - A C++20 compiler
 
 SDL 3.4.10 is vendored in `third_party/SDL` and is built statically by the root CMake project.
+stb_image 2.30 is vendored in `third_party/stb` and provides
+platform-independent in-memory texture decoding.
 
 ## Layered Levels
 

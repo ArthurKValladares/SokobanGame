@@ -28,6 +28,11 @@ target_include_directories(sokoban_json SYSTEM INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
 )
 
+add_library(sokoban_stb_image INTERFACE)
+target_include_directories(sokoban_stb_image SYSTEM INTERFACE
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb"
+)
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL/CMakeLists.txt")
     set(SDL_SHARED OFF CACHE BOOL "Build SDL3 as a shared library" FORCE)
     set(SDL_STATIC ON CACHE BOOL "Build SDL3 as a static library" FORCE)
@@ -205,9 +210,12 @@ target_link_libraries(sokoban PRIVATE
     Threads::Threads
     SDL3::SDL3
     sokoban_json
-    ole32
-    windowscodecs
+    sokoban_stb_image
 )
+if(UNIX AND NOT APPLE)
+    # miniaudio dynamically loads native audio backends on Unix-like systems.
+    target_link_libraries(sokoban PRIVATE ${CMAKE_DL_LIBS} m)
+endif()
 
 target_compile_definitions(sokoban PRIVATE
     SDL_MAIN_USE_CALLBACKS=0
@@ -304,6 +312,25 @@ if(SOKOBAN_BUILD_TESTS)
         target_compile_options(sokoban_input_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME input COMMAND sokoban_input_tests)
+
+    add_executable(sokoban_image_data_tests
+        tests/ImageDataTests.cpp
+        src/engine/render/ImageData.cpp
+    )
+    target_include_directories(sokoban_image_data_tests PRIVATE src)
+    target_link_libraries(sokoban_image_data_tests PRIVATE
+        Threads::Threads
+        sokoban_stb_image
+    )
+    target_compile_definitions(sokoban_image_data_tests PRIVATE
+        SOKOBAN_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    )
+    if(MSVC)
+        target_compile_options(sokoban_image_data_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_image_data_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME image_data COMMAND sokoban_image_data_tests)
 
     add_executable(sokoban_level_editor_tests
         tests/LevelEditorTests.cpp
@@ -455,6 +482,12 @@ install(FILES
     RENAME nlohmann-json-LICENSE.txt
     COMPONENT Runtime
 )
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb/LICENSE"
+    DESTINATION licenses
+    RENAME stb-LICENSE.txt
+    COMPONENT Runtime
+)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/LICENSE.txt")
     install(FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/LICENSE.txt"
@@ -467,6 +500,22 @@ endif()
 set(CPACK_GENERATOR ZIP)
 set(CPACK_PACKAGE_NAME "Sokoban3D")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
-set(CPACK_PACKAGE_FILE_NAME "Sokoban3D-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-x64")
+if(CMAKE_GENERATOR_PLATFORM)
+    set(SOKOBAN_PACKAGE_ARCHITECTURE "${CMAKE_GENERATOR_PLATFORM}")
+elseif(CMAKE_SYSTEM_PROCESSOR)
+    set(SOKOBAN_PACKAGE_ARCHITECTURE "${CMAKE_SYSTEM_PROCESSOR}")
+else()
+    set(SOKOBAN_PACKAGE_ARCHITECTURE "unknown")
+endif()
+string(TOLOWER "${SOKOBAN_PACKAGE_ARCHITECTURE}" SOKOBAN_PACKAGE_ARCHITECTURE_LOWER)
+if(SOKOBAN_PACKAGE_ARCHITECTURE_LOWER MATCHES "^(amd64|x86_64)$")
+    set(SOKOBAN_PACKAGE_ARCHITECTURE "x64")
+elseif(SOKOBAN_PACKAGE_ARCHITECTURE_LOWER MATCHES "^(aarch64|arm64)$")
+    set(SOKOBAN_PACKAGE_ARCHITECTURE "arm64")
+endif()
+string(REGEX REPLACE "[^A-Za-z0-9_.-]" "_"
+    SOKOBAN_PACKAGE_ARCHITECTURE "${SOKOBAN_PACKAGE_ARCHITECTURE}")
+set(CPACK_PACKAGE_FILE_NAME
+    "Sokoban3D-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${SOKOBAN_PACKAGE_ARCHITECTURE}")
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
 include(CPack)
