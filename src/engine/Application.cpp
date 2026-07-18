@@ -20,7 +20,7 @@ namespace sokoban {
 Application::Application()
     : window_("Sokoban 3D", 1280, 720)
     , assetRoot_(runtimeContentRoot())
-    , assetManifest_(AssetManifest::loadFromFile(assetRoot_ / "manifest.txt"))
+    , assetManifest_(AssetManifest::loadFromFile(assetRoot_ / "manifest.json"))
     , renderer_(
           window_.nativeHandle(),
           assetRoot_,

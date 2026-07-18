@@ -1,10 +1,16 @@
 #include "engine/AssetManifest.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 
 namespace {
+
+using Json = nlohmann::json;
 
 int failures = 0;
 
@@ -27,68 +33,79 @@ void checkThrows(Fn&& fn, const char* label)
     }
 }
 
-constexpr const char* validManifest = R"(
-# comment
-texture Tex
-  path textures/tex.png
+std::optional<std::filesystem::path> assetsRootFromEnvironment()
+{
+#ifdef _WIN32
+    char* value = nullptr;
+    std::size_t length = 0;
+    if (_dupenv_s(&value, &length, "SOKOBAN_ASSETS") != 0 || value == nullptr) {
+        return std::nullopt;
+    }
+    const std::filesystem::path result(value);
+    std::free(value);
+    return result;
+#else
+    const char* value = std::getenv("SOKOBAN_ASSETS");
+    return value == nullptr
+        ? std::nullopt
+        : std::optional<std::filesystem::path>(value);
+#endif
+}
 
-model Box
-  path models/box.gltf
-  geometry static
-  material none
+constexpr const char* validManifest = R"json(
+{
+  "format": 1,
+  "textures": [
+    { "name": "Tex", "path": "textures/tex.png" }
+  ],
+  "models": [
+    { "name": "Box", "path": "models/box.gltf" },
+    {
+      "name": "Hero",
+      "path": "models/hero.glb",
+      "geometry": "skinned",
+      "material": { "mode": "texture", "texture": "Tex" },
+      "preserveAspectRatio": true,
+      "rotateHalfTurn": true,
+      "role": "player"
+    },
+    {
+      "name": "Belt",
+      "path": "models/belt.gltf",
+      "material": { "mode": "primitive-texture-index", "index": 0 },
+      "beltScroll": true
+    }
+  ],
+  "animations": [
+    { "name": "Idle", "path": "anims/idle.glb", "clip": 8, "role": "player-idle" },
+    { "name": "Move", "path": "anims/move.glb", "clip": 7, "role": "player-move" },
+    { "name": "Push", "path": "anims/push.glb", "clip": 1, "role": "player-push" }
+  ],
+  "tiles": [
+    { "tile": "Wall", "model": "Box", "scale": 1.25 },
+    { "tile": "Player", "model": "Hero", "scale": 1.1 },
+    { "tile": "Ground", "scale": 0.9 }
+  ],
+  "sounds": [
+    {
+      "name": "footsteps",
+      "volume": 0.3,
+      "files": ["audio/step with spaces 1.ogg", "audio/step2.ogg"]
+    }
+  ],
+  "music": [
+    { "level": 0, "file": "audio/track zero.ogg" },
+    { "level": 2, "file": "audio/track two.ogg", "volume": 0.8 }
+  ]
+}
+)json";
 
-model Hero
-  path models/hero.glb # trailing comment
-  geometry skinned
-  material texture Tex
-  preserve-aspect true
-  rotate-half-turn true
-  role player
-
-model Belt
-  path models/belt.gltf
-  material primitive-texture-index 0
-  primitive-textures true
-  belt-scroll true
-
-animation Idle
-  path anims/idle.glb
-  clip 8
-  role player-idle
-
-animation Move
-  path anims/move.glb
-  clip 7
-  role player-move
-
-animation Push
-  path anims/push.glb
-  clip 1
-  role player-push
-
-tile Wall
-  model Box
-  scale 1.25
-
-tile Player
-  model Hero
-  scale 1.1
-
-tile Ground
-  scale 0.9
-
-sound footsteps
-  volume 0.3
-  file audio/step with spaces 1.ogg
-  file audio/step2.ogg
-
-music 0
-  file audio/track zero.ogg
-
-music 2
-  file audio/track two.ogg
-  volume 0.8
-)";
+void checkJsonThrows(const auto& mutate, const char* label)
+{
+    Json json = Json::parse(validManifest);
+    mutate(json);
+    checkThrows([&] { (void)sokoban::AssetManifest::parse(json.dump()); }, label);
+}
 
 void testValidManifest()
 {
@@ -111,6 +128,7 @@ void testValidManifest()
 
     const sokoban::RenderModel belt = manifest.modelIdByName("Belt");
     check(manifest.model(belt).beltScroll, "belt scroll flag");
+    check(manifest.model(belt).primitiveTextures, "primitive texture loading inferred");
     check(manifest.model(belt).materialMode == sokoban::ModelMaterialMode::PrimitiveTextureIndex,
         "belt primitive material");
 
@@ -119,7 +137,7 @@ void testValidManifest()
     check(manifest.playerPushAnimation() == manifest.animationIdByName("Push"), "push role");
     check(manifest.animation(manifest.playerIdleAnimation()).clip == 8, "idle clip");
     check(manifest.animation(manifest.playerIdleAnimation()).path == "anims/idle.glb",
-        "trailing comment stripped from path");
+        "animation path parsed");
 
     check(manifest.modelForTile(sokoban::TileType::Wall) == manifest.modelIdByName("Box"),
         "wall tile model");
@@ -144,52 +162,90 @@ void testValidManifest()
     check(manifest.musicTracks()[1].volume == 0.8f, "music track volume parsed");
 }
 
-void testValidationFailures()
+void testSyntaxAndSchemaFailures()
 {
     using sokoban::AssetManifest;
-    const std::string base = validManifest;
+    checkThrows([&] { (void)AssetManifest::parse("{]"); }, "malformed JSON");
+    checkThrows([&] { (void)AssetManifest::parse("[]"); }, "root must be object");
+    checkThrows([&] { (void)AssetManifest::parse("{}"); }, "format is required");
+    checkThrows([&] { (void)AssetManifest::parse(R"({"format":2})"); }, "unsupported format");
 
-    checkThrows([&] { (void)AssetManifest::parse("bogus Section\n"); }, "unknown section");
-    checkThrows([&] { (void)AssetManifest::parse("path lost/property.png\n"); },
-        "property outside section");
-    checkThrows([&] { (void)AssetManifest::parse(base + "\ntile Wall\n  model Missing\n"); },
-        "unknown tile model");
-    checkThrows([&] { (void)AssetManifest::parse(base + "\ntile Bogus\n  scale 2\n"); },
-        "unknown tile name");
-    checkThrows([&] { (void)AssetManifest::parse(base + "\nmodel Hero2\n  path p.glb\n  role player\n  geometry skinned\n"); },
-        "duplicate player role");
-    checkThrows([&] { (void)AssetManifest::parse(base + "\nmodel Box\n  path q.gltf\n"); },
-        "duplicate model name");
-    checkThrows([&] { (void)AssetManifest::parse(base + "\nmusic 0\n  file again.ogg\n"); },
-        "duplicate music level");
-    checkThrows([&] { (void)AssetManifest::parse(base + "\nsound empty-set\n"); },
-        "sound set without files");
-    checkThrows([&] { (void)AssetManifest::parse(base + "\nsound bad-volume\n  volume -1\n  file f.ogg\n"); },
+    checkJsonThrows([](Json& json) { json["bogus"] = true; }, "unknown root property");
+    checkJsonThrows([](Json& json) { json["textures"] = "wrong"; }, "array type enforced");
+    checkJsonThrows([](Json& json) { json["textures"][0]["path"] = 42; }, "string type enforced");
+    checkJsonThrows([](Json& json) { json["models"][0]["mystery"] = true; },
+        "unknown model property");
+    checkJsonThrows([](Json& json) { json["models"][0]["preserveAspectRatio"] = 1; },
+        "boolean type enforced");
+    checkJsonThrows([](Json& json) { json["animations"][0]["clip"] = -1; },
+        "non-negative clip enforced");
+    checkJsonThrows([](Json& json) { json["music"][0]["level"] = -1; },
+        "non-negative level enforced");
+    checkJsonThrows([](Json& json) {
+        json["models"][0]["material"] = {
+            { "mode", "none" }, { "texture", "Tex" },
+        };
+    }, "material mode fields enforced");
+    checkJsonThrows([](Json& json) {
+        json["models"][0]["material"] = {
+            { "mode", "primitive-texture-index" },
+        };
+    }, "primitive material index required");
+}
+
+void testDomainValidationFailures()
+{
+    checkJsonThrows([](Json& json) {
+        json["tiles"].push_back({ { "tile", "Wall" }, { "model", "Missing" } });
+    }, "unknown tile model");
+    checkJsonThrows([](Json& json) {
+        json["tiles"].push_back({ { "tile", "Bogus" }, { "scale", 2 } });
+    }, "unknown tile name");
+    checkJsonThrows([](Json& json) {
+        json["tiles"].push_back({ { "tile", "Wall" }, { "scale", 2 } });
+    }, "duplicate tile");
+    checkJsonThrows([](Json& json) {
+        json["models"].push_back({
+            { "name", "Hero2" }, { "path", "p.glb" }, { "geometry", "skinned" },
+            { "role", "player" },
+        });
+    }, "duplicate player role");
+    checkJsonThrows([](Json& json) {
+        json["models"].push_back({ { "name", "Box" }, { "path", "q.gltf" } });
+    }, "duplicate model name");
+    checkJsonThrows([](Json& json) {
+        json["music"].push_back({ { "level", 0 }, { "file", "again.ogg" } });
+    }, "duplicate music level");
+    checkJsonThrows([](Json& json) {
+        json["sounds"].push_back({ { "name", "empty-set" }, { "files", Json::array() } });
+    }, "sound set without files");
+    checkJsonThrows([](Json& json) { json["sounds"][0]["volume"] = -1; },
         "negative sound volume");
-    checkThrows([&] { (void)AssetManifest::parse(base + "\nmodel NoTex\n  path p.gltf\n  material texture Ghost\n"); },
-        "unknown material texture");
-    checkThrows([&] { (void)AssetManifest::parse(base + "\nmodel BadIdx\n  path p.gltf\n  material primitive-texture-index 9\n"); },
-        "primitive texture index out of range");
-
-    // A manifest missing any player role must be rejected.
-    checkThrows([&] {
-        (void)AssetManifest::parse(
-            "model Hero\n  path p.glb\n  geometry skinned\n  role player\n"
-            "animation Idle\n  path i.glb\n  role player-idle\n"
-            "animation Move\n  path m.glb\n  role player-move\n");
-    }, "missing player-push role");
-    checkThrows([&] { (void)AssetManifest::parse(""); }, "empty manifest lacks player");
+    checkJsonThrows([](Json& json) {
+        json["models"].push_back({
+            { "name", "NoTex" }, { "path", "p.gltf" },
+            { "material", { { "mode", "texture" }, { "texture", "Ghost" } } },
+        });
+    }, "unknown material texture");
+    checkJsonThrows([](Json& json) {
+        json["models"].push_back({
+            { "name", "BadIdx" }, { "path", "p.gltf" },
+            { "material", { { "mode", "primitive-texture-index" }, { "index", 9 } } },
+        });
+    }, "primitive texture index out of range");
+    checkJsonThrows([](Json& json) { json["animations"].erase(2); },
+        "missing player-push role");
 }
 
 void testRealManifestFile()
 {
-    const char* root = std::getenv("SOKOBAN_ASSETS");
-    if (root == nullptr) {
-        return; // Optional: only checked when the harness provides the path.
+    const std::optional<std::filesystem::path> root = assetsRootFromEnvironment();
+    if (!root.has_value()) {
+        return;
     }
     using sokoban::AssetManifest;
     const AssetManifest manifest =
-        AssetManifest::loadFromFile(std::filesystem::path(root) / "manifest.txt");
+        AssetManifest::loadFromFile(*root / "manifest.json");
     check(!manifest.playerModel().isCube(), "real manifest has a player model");
     check(manifest.soundSet("footsteps").size() == 5, "real manifest footsteps");
     check(manifest.soundSet("stone-drag").size() == 4, "real manifest drags");
@@ -202,7 +258,8 @@ void testRealManifestFile()
 int main()
 {
     testValidManifest();
-    testValidationFailures();
+    testSyntaxAndSchemaFailures();
+    testDomainValidationFailures();
     testRealManifestFile();
 
     if (failures != 0) {

@@ -210,8 +210,8 @@ private:
 
     void addManifestAssets()
     {
-        addFile(roots_.assets, "manifest.txt", "manifest.txt", "asset manifest");
-        const AssetManifest manifest = AssetManifest::loadFromFile(roots_.assets / "manifest.txt");
+        addFile(roots_.assets, "manifest.json", "manifest.json", "asset manifest");
+        const AssetManifest manifest = AssetManifest::loadFromFile(roots_.assets / "manifest.json");
 
         for (const auto& texture : manifest.textures()) {
             addAssetPath(texture.path, "texture '" + texture.name + "'");

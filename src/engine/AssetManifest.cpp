@@ -1,89 +1,210 @@
 #include "engine/AssetManifest.hpp"
 
+#include <nlohmann/json.hpp>
+
+#include <cmath>
 #include <cstddef>
 #include <fstream>
+#include <initializer_list>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 
 namespace sokoban {
 namespace {
 
-struct Line {
-    std::size_t number = 0;
-    std::string_view key;
-    std::string_view rest;
-};
+using Json = nlohmann::json;
 
-[[nodiscard]] std::string_view trim(std::string_view text)
-{
-    while (!text.empty() && (text.front() == ' ' || text.front() == '\t' || text.front() == '\r')) {
-        text.remove_prefix(1);
-    }
-    while (!text.empty() && (text.back() == ' ' || text.back() == '\t' || text.back() == '\r')) {
-        text.remove_suffix(1);
-    }
-    return text;
-}
-
-[[noreturn]] void fail(std::size_t lineNumber, const std::string& message)
+[[noreturn]] void fail(std::string_view context, const std::string& message)
 {
     throw std::runtime_error(
-        "asset manifest line " + std::to_string(lineNumber) + ": " + message);
+        "asset manifest " + std::string(context) + ": " + message);
 }
 
-[[nodiscard]] Line splitLine(std::size_t number, std::string_view text)
+void requireObject(const Json& value, std::string_view context)
 {
-    const std::size_t space = text.find(' ');
-    if (space == std::string_view::npos) {
-        return { number, text, {} };
+    if (!value.is_object()) {
+        fail(context, "expected an object");
     }
-    return { number, text.substr(0, space), trim(text.substr(space + 1)) };
 }
 
-[[nodiscard]] bool parseBool(const Line& line)
+void rejectUnknownProperties(
+    const Json& object,
+    std::initializer_list<std::string_view> allowed,
+    std::string_view context)
 {
-    if (line.rest == "true") {
-        return true;
-    }
-    if (line.rest == "false") {
-        return false;
-    }
-    fail(line.number, "expected true or false, got '" + std::string(line.rest) + "'");
-}
-
-[[nodiscard]] uint32_t parseUint(const Line& line, std::string_view value)
-{
-    uint32_t result = 0;
-    bool any = false;
-    for (char c : value) {
-        if (c < '0' || c > '9') {
-            fail(line.number, "expected a non-negative integer, got '" + std::string(value) + "'");
+    requireObject(object, context);
+    for (const auto& [key, value] : object.items()) {
+        (void)value;
+        bool known = false;
+        for (const std::string_view candidate : allowed) {
+            if (key == candidate) {
+                known = true;
+                break;
+            }
         }
-        result = result * 10 + static_cast<uint32_t>(c - '0');
-        any = true;
+        if (!known) {
+            fail(context, "unknown property '" + key + "'");
+        }
     }
-    if (!any) {
-        fail(line.number, "expected a non-negative integer");
+}
+
+const Json& requiredProperty(
+    const Json& object,
+    std::string_view key,
+    std::string_view context)
+{
+    const auto it = object.find(std::string(key));
+    if (it == object.end()) {
+        fail(context, "missing required property '" + std::string(key) + "'");
+    }
+    return *it;
+}
+
+const Json& optionalArray(
+    const Json& object,
+    std::string_view key,
+    std::string_view context)
+{
+    static const Json empty = Json::array();
+    const auto it = object.find(std::string(key));
+    if (it == object.end()) {
+        return empty;
+    }
+    if (!it->is_array()) {
+        fail(context, "property '" + std::string(key) + "' must be an array");
+    }
+    return *it;
+}
+
+std::string requiredString(
+    const Json& object,
+    std::string_view key,
+    std::string_view context)
+{
+    const Json& value = requiredProperty(object, key, context);
+    if (!value.is_string()) {
+        fail(context, "property '" + std::string(key) + "' must be a string");
+    }
+    const std::string result = value.get<std::string>();
+    if (result.empty()) {
+        fail(context, "property '" + std::string(key) + "' must not be empty");
     }
     return result;
 }
 
-[[nodiscard]] float parseFloat(const Line& line)
+std::optional<std::string> optionalString(
+    const Json& object,
+    std::string_view key,
+    std::string_view context)
 {
-    try {
-        std::size_t consumed = 0;
-        const float result = std::stof(std::string(line.rest), &consumed);
-        if (consumed != line.rest.size()) {
-            throw std::invalid_argument("trailing characters");
-        }
-        return result;
-    } catch (const std::exception&) {
-        fail(line.number, "expected a number, got '" + std::string(line.rest) + "'");
+    const auto it = object.find(std::string(key));
+    if (it == object.end()) {
+        return std::nullopt;
     }
+    if (!it->is_string()) {
+        fail(context, "property '" + std::string(key) + "' must be a string");
+    }
+    const std::string result = it->get<std::string>();
+    if (result.empty()) {
+        fail(context, "property '" + std::string(key) + "' must not be empty");
+    }
+    return result;
 }
 
-[[nodiscard]] std::optional<TileType> tileTypeByName(std::string_view name)
+bool optionalBool(
+    const Json& object,
+    std::string_view key,
+    bool fallback,
+    std::string_view context)
+{
+    const auto it = object.find(std::string(key));
+    if (it == object.end()) {
+        return fallback;
+    }
+    if (!it->is_boolean()) {
+        fail(context, "property '" + std::string(key) + "' must be a boolean");
+    }
+    return it->get<bool>();
+}
+
+float optionalFloat(
+    const Json& object,
+    std::string_view key,
+    float fallback,
+    std::string_view context)
+{
+    const auto it = object.find(std::string(key));
+    if (it == object.end()) {
+        return fallback;
+    }
+    if (!it->is_number()) {
+        fail(context, "property '" + std::string(key) + "' must be a number");
+    }
+    const float result = it->get<float>();
+    if (!std::isfinite(result)) {
+        fail(context, "property '" + std::string(key) + "' must be finite");
+    }
+    return result;
+}
+
+uint32_t optionalUint(
+    const Json& object,
+    std::string_view key,
+    uint32_t fallback,
+    std::string_view context)
+{
+    const auto it = object.find(std::string(key));
+    if (it == object.end()) {
+        return fallback;
+    }
+    if (!it->is_number_integer()) {
+        fail(context, "property '" + std::string(key) + "' must be a non-negative integer");
+    }
+
+    if (it->is_number_unsigned()) {
+        const uint64_t value = it->get<uint64_t>();
+        if (value > std::numeric_limits<uint32_t>::max()) {
+            fail(context, "property '" + std::string(key) + "' is out of range");
+        }
+        return static_cast<uint32_t>(value);
+    }
+
+    const int64_t value = it->get<int64_t>();
+    if (value < 0 || value > static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
+        fail(context, "property '" + std::string(key) + "' must be a non-negative integer");
+    }
+    return static_cast<uint32_t>(value);
+}
+
+int requiredNonNegativeInt(
+    const Json& object,
+    std::string_view key,
+    std::string_view context)
+{
+    const Json& value = requiredProperty(object, key, context);
+    if (!value.is_number_integer()) {
+        fail(context, "property '" + std::string(key) + "' must be a non-negative integer");
+    }
+
+    if (value.is_number_unsigned()) {
+        const uint64_t integer = value.get<uint64_t>();
+        if (integer > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+            fail(context, "property '" + std::string(key) + "' is out of range");
+        }
+        return static_cast<int>(integer);
+    }
+
+    const int64_t integer = value.get<int64_t>();
+    if (integer < 0 || integer > std::numeric_limits<int>::max()) {
+        fail(context, "property '" + std::string(key) + "' must be a non-negative integer");
+    }
+    return static_cast<int>(integer);
+}
+
+std::optional<TileType> tileTypeByName(std::string_view name)
 {
     for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
         if (definition.name == name) {
@@ -93,210 +214,243 @@ struct Line {
     return std::nullopt;
 }
 
+std::string indexedContext(std::string_view array, std::size_t index)
+{
+    return std::string(array) + "[" + std::to_string(index) + "]";
+}
+
 } // namespace
+
+struct AssetManifestJsonParser {
+static void parseTextures(const Json& root, AssetManifest& manifest)
+{
+    const Json& textures = optionalArray(root, "textures", "root");
+    manifest.textures_.reserve(textures.size());
+    for (std::size_t i = 0; i < textures.size(); ++i) {
+        const std::string context = indexedContext("textures", i);
+        const Json& texture = textures[i];
+        rejectUnknownProperties(texture, { "name", "path" }, context);
+        manifest.textures_.push_back({
+            requiredString(texture, "name", context),
+            requiredString(texture, "path", context),
+        });
+    }
+}
+
+static void parseModelMaterial(
+    const Json& modelJson,
+    AssetManifest::Model& model,
+    std::string_view context)
+{
+    const auto materialIt = modelJson.find("material");
+    if (materialIt == modelJson.end()) {
+        return;
+    }
+
+    const std::string materialContext = std::string(context) + ".material";
+    const Json& material = *materialIt;
+    rejectUnknownProperties(material, { "mode", "texture", "index" }, materialContext);
+    const std::string mode = requiredString(material, "mode", materialContext);
+    const bool hasTexture = material.contains("texture");
+    const bool hasIndex = material.contains("index");
+
+    if (mode == "none") {
+        if (hasTexture || hasIndex) {
+            fail(materialContext, "mode 'none' does not accept texture or index");
+        }
+    } else if (mode == "texture") {
+        if (hasIndex) {
+            fail(materialContext, "mode 'texture' does not accept index");
+        }
+        model.materialMode = ModelMaterialMode::SingleTexture;
+        model.materialTextureName = requiredString(material, "texture", materialContext);
+    } else if (mode == "primitive-texture-index") {
+        if (hasTexture) {
+            fail(materialContext, "mode 'primitive-texture-index' does not accept texture");
+        }
+        if (!hasIndex) {
+            fail(materialContext, "mode 'primitive-texture-index' requires index");
+        }
+        model.materialMode = ModelMaterialMode::PrimitiveTextureIndex;
+        model.textureIndex = optionalUint(material, "index", 0, materialContext);
+        model.primitiveTextures = true;
+    } else {
+        fail(materialContext,
+            "mode must be 'none', 'texture', or 'primitive-texture-index'");
+    }
+}
+
+static void parseModels(const Json& root, AssetManifest& manifest)
+{
+    const Json& models = optionalArray(root, "models", "root");
+    manifest.models_.reserve(models.size());
+    for (std::size_t i = 0; i < models.size(); ++i) {
+        const std::string context = indexedContext("models", i);
+        const Json& modelJson = models[i];
+        rejectUnknownProperties(modelJson, {
+            "name", "path", "geometry", "material", "preserveAspectRatio",
+            "rotateHalfTurn", "beltScroll", "role",
+        }, context);
+
+        AssetManifest::Model model;
+        model.name = requiredString(modelJson, "name", context);
+        model.path = requiredString(modelJson, "path", context);
+        const std::string geometry = optionalString(modelJson, "geometry", context).value_or("static");
+        if (geometry == "static") {
+            model.geometry = ModelGeometry::Static;
+        } else if (geometry == "skinned") {
+            model.geometry = ModelGeometry::Skinned;
+        } else {
+            fail(context, "geometry must be 'static' or 'skinned'");
+        }
+
+        model.preserveAspectRatio = optionalBool(
+            modelJson, "preserveAspectRatio", false, context);
+        model.rotateHalfTurn = optionalBool(
+            modelJson, "rotateHalfTurn", false, context);
+        model.beltScroll = optionalBool(modelJson, "beltScroll", false, context);
+        parseModelMaterial(modelJson, model, context);
+
+        const std::optional<std::string> role = optionalString(modelJson, "role", context);
+        if (role) {
+            if (*role != "player") {
+                fail(context, "the only model role is 'player'");
+            }
+            model.playerRole = true;
+        }
+        manifest.models_.push_back(std::move(model));
+    }
+}
+
+static void parseAnimations(const Json& root, AssetManifest& manifest)
+{
+    const Json& animations = optionalArray(root, "animations", "root");
+    manifest.animations_.reserve(animations.size());
+    for (std::size_t i = 0; i < animations.size(); ++i) {
+        const std::string context = indexedContext("animations", i);
+        const Json& animationJson = animations[i];
+        rejectUnknownProperties(animationJson, { "name", "path", "clip", "role" }, context);
+
+        AssetManifest::Animation animation;
+        animation.name = requiredString(animationJson, "name", context);
+        animation.path = requiredString(animationJson, "path", context);
+        animation.clip = optionalUint(animationJson, "clip", 0, context);
+        animation.role = optionalString(animationJson, "role", context).value_or("");
+        if (!animation.role.empty() &&
+            animation.role != "player-idle" &&
+            animation.role != "player-move" &&
+            animation.role != "player-push") {
+            fail(context,
+                "role must be 'player-idle', 'player-move', or 'player-push'");
+        }
+        manifest.animations_.push_back(std::move(animation));
+    }
+}
+
+static void parseTiles(const Json& root, AssetManifest& manifest)
+{
+    const Json& tiles = optionalArray(root, "tiles", "root");
+    std::array<bool, tileTypeCount> configured {};
+    for (std::size_t i = 0; i < tiles.size(); ++i) {
+        const std::string context = indexedContext("tiles", i);
+        const Json& tileJson = tiles[i];
+        rejectUnknownProperties(tileJson, { "tile", "model", "scale" }, context);
+        const std::string tileName = requiredString(tileJson, "tile", context);
+        const std::optional<TileType> type = tileTypeByName(tileName);
+        if (!type) {
+            fail(context, "unknown tile type '" + tileName + "'");
+        }
+        const std::size_t index = static_cast<std::size_t>(*type);
+        if (configured[index]) {
+            fail(context, "duplicate tile type '" + tileName + "'");
+        }
+        configured[index] = true;
+
+        manifest.tileVisuals_[index].scale = optionalFloat(tileJson, "scale", 1.0f, context);
+        manifest.tileModelNames_[index] = optionalString(tileJson, "model", context).value_or("");
+    }
+}
+
+static void parseSounds(const Json& root, AssetManifest& manifest)
+{
+    const Json& sounds = optionalArray(root, "sounds", "root");
+    manifest.sounds_.reserve(sounds.size());
+    for (std::size_t i = 0; i < sounds.size(); ++i) {
+        const std::string context = indexedContext("sounds", i);
+        const Json& soundJson = sounds[i];
+        rejectUnknownProperties(soundJson, { "name", "files", "volume" }, context);
+
+        AssetManifest::SoundSet sound;
+        sound.name = requiredString(soundJson, "name", context);
+        sound.volume = optionalFloat(soundJson, "volume", 1.0f, context);
+        if (sound.volume < 0.0f) {
+            fail(context, "volume must not be negative");
+        }
+        const Json& files = requiredProperty(soundJson, "files", context);
+        if (!files.is_array()) {
+            fail(context, "property 'files' must be an array");
+        }
+        for (std::size_t fileIndex = 0; fileIndex < files.size(); ++fileIndex) {
+            if (!files[fileIndex].is_string() || files[fileIndex].get_ref<const std::string&>().empty()) {
+                fail(context,
+                    "files[" + std::to_string(fileIndex) + "] must be a non-empty string");
+            }
+            sound.files.push_back(files[fileIndex].get<std::string>());
+        }
+        manifest.sounds_.push_back(std::move(sound));
+    }
+}
+
+static void parseMusic(const Json& root, AssetManifest& manifest)
+{
+    const Json& music = optionalArray(root, "music", "root");
+    manifest.music_.reserve(music.size());
+    for (std::size_t i = 0; i < music.size(); ++i) {
+        const std::string context = indexedContext("music", i);
+        const Json& musicJson = music[i];
+        rejectUnknownProperties(musicJson, { "level", "file", "volume" }, context);
+
+        AssetManifest::MusicTrack track;
+        track.level = requiredNonNegativeInt(musicJson, "level", context);
+        track.file = requiredString(musicJson, "file", context);
+        track.volume = optionalFloat(musicJson, "volume", 1.0f, context);
+        if (track.volume < 0.0f) {
+            fail(context, "volume must not be negative");
+        }
+        manifest.music_.push_back(std::move(track));
+    }
+}
+};
 
 AssetManifest AssetManifest::parse(std::string_view text)
 {
-    AssetManifest manifest;
-
-    enum class Section { None, Texture, Model, Animation, Tile, Sound, Music };
-    Section section = Section::None;
-    std::size_t sectionIndex = 0;
-    std::size_t sectionLine = 0;
-
-    std::size_t lineNumber = 0;
-    std::size_t cursor = 0;
-    while (cursor <= text.size()) {
-        const std::size_t end = text.find('\n', cursor);
-        std::string_view raw = text.substr(
-            cursor, end == std::string_view::npos ? text.size() - cursor : end - cursor);
-        cursor = end == std::string_view::npos ? text.size() + 1 : end + 1;
-        ++lineNumber;
-
-        const std::size_t comment = raw.find('#');
-        if (comment != std::string_view::npos) {
-            raw = raw.substr(0, comment);
-        }
-        // Unindented lines start sections; indented lines are properties of
-        // the current section. This keeps section keywords (like "model")
-        // usable as property names.
-        const bool indented = !raw.empty() && (raw.front() == ' ' || raw.front() == '\t');
-        const std::string_view trimmed = trim(raw);
-        if (trimmed.empty()) {
-            continue;
-        }
-        const Line line = splitLine(lineNumber, trimmed);
-
-        if (!indented) {
-            if (line.key != "texture" && line.key != "model" && line.key != "animation" &&
-                line.key != "tile" && line.key != "sound" && line.key != "music") {
-                fail(line.number,
-                    "expected a section (texture/model/animation/tile/sound/music), got '" +
-                    std::string(line.key) + "' - properties must be indented");
-            }
-            if (line.rest.empty()) {
-                fail(line.number, std::string(line.key) + " requires a name");
-            }
-            sectionLine = line.number;
-            if (line.key == "texture") {
-                section = Section::Texture;
-                sectionIndex = manifest.textures_.size();
-                manifest.textures_.push_back({ std::string(line.rest), {} });
-            } else if (line.key == "model") {
-                section = Section::Model;
-                sectionIndex = manifest.models_.size();
-                Model model;
-                model.name = std::string(line.rest);
-                manifest.models_.push_back(std::move(model));
-            } else if (line.key == "animation") {
-                section = Section::Animation;
-                sectionIndex = manifest.animations_.size();
-                Animation animation;
-                animation.name = std::string(line.rest);
-                manifest.animations_.push_back(std::move(animation));
-            } else if (line.key == "tile") {
-                const std::optional<TileType> type = tileTypeByName(line.rest);
-                if (!type) {
-                    fail(line.number, "unknown tile type '" + std::string(line.rest) + "'");
-                }
-                section = Section::Tile;
-                sectionIndex = static_cast<std::size_t>(*type);
-            } else if (line.key == "sound") {
-                section = Section::Sound;
-                sectionIndex = manifest.sounds_.size();
-                manifest.sounds_.push_back({ std::string(line.rest), {} });
-            } else {
-                section = Section::Music;
-                sectionIndex = manifest.music_.size();
-                manifest.music_.push_back(
-                    { static_cast<int>(parseUint(line, line.rest)), {} });
-            }
-            continue;
-        }
-
-        switch (section) {
-        case Section::None:
-            fail(line.number, "property '" + std::string(line.key) + "' outside of any section");
-        case Section::Texture: {
-            Texture& texture = manifest.textures_[sectionIndex];
-            if (line.key == "path") {
-                texture.path = std::string(line.rest);
-            } else {
-                fail(line.number, "unknown texture property '" + std::string(line.key) + "'");
-            }
-            break;
-        }
-        case Section::Model: {
-            Model& model = manifest.models_[sectionIndex];
-            if (line.key == "path") {
-                model.path = std::string(line.rest);
-            } else if (line.key == "geometry") {
-                if (line.rest == "static") {
-                    model.geometry = ModelGeometry::Static;
-                } else if (line.rest == "skinned") {
-                    model.geometry = ModelGeometry::Skinned;
-                } else {
-                    fail(line.number, "geometry must be static or skinned");
-                }
-            } else if (line.key == "material") {
-                const Line material = splitLine(line.number, line.rest);
-                if (material.key == "none") {
-                    model.materialMode = ModelMaterialMode::Untextured;
-                } else if (material.key == "texture") {
-                    model.materialMode = ModelMaterialMode::SingleTexture;
-                    // Resolved to an index in validateAndResolve; stash the name.
-                    model.textureIndex = 0;
-                    if (material.rest.empty()) {
-                        fail(line.number, "material texture requires a texture name");
-                    }
-                    model.materialTextureName = std::string(material.rest);
-                } else if (material.key == "primitive-texture-index") {
-                    model.materialMode = ModelMaterialMode::PrimitiveTextureIndex;
-                    model.textureIndex = parseUint(line, material.rest);
-                } else {
-                    fail(line.number,
-                        "material must be none, texture <name>, or primitive-texture-index <n>");
-                }
-            } else if (line.key == "preserve-aspect") {
-                model.preserveAspectRatio = parseBool(line);
-            } else if (line.key == "rotate-half-turn") {
-                model.rotateHalfTurn = parseBool(line);
-            } else if (line.key == "primitive-textures") {
-                model.primitiveTextures = parseBool(line);
-            } else if (line.key == "belt-scroll") {
-                model.beltScroll = parseBool(line);
-            } else if (line.key == "role") {
-                if (line.rest != "player") {
-                    fail(line.number, "the only model role is 'player'");
-                }
-                model.playerRole = true;
-            } else {
-                fail(line.number, "unknown model property '" + std::string(line.key) + "'");
-            }
-            break;
-        }
-        case Section::Animation: {
-            Animation& animation = manifest.animations_[sectionIndex];
-            if (line.key == "path") {
-                animation.path = std::string(line.rest);
-            } else if (line.key == "clip") {
-                animation.clip = parseUint(line, line.rest);
-            } else if (line.key == "role") {
-                if (line.rest != "player-idle" && line.rest != "player-move" &&
-                    line.rest != "player-push") {
-                    fail(line.number,
-                        "animation role must be player-idle, player-move, or player-push");
-                }
-                animation.role = std::string(line.rest);
-            } else {
-                fail(line.number, "unknown animation property '" + std::string(line.key) + "'");
-            }
-            break;
-        }
-        case Section::Tile: {
-            TileVisual& visual = manifest.tileVisuals_[sectionIndex];
-            if (line.key == "model") {
-                // Resolved to an id in validateAndResolve; stash the name.
-                manifest.tileModelNames_[sectionIndex] = { std::string(line.rest), line.number };
-            } else if (line.key == "scale") {
-                visual.scale = parseFloat(line);
-            } else {
-                fail(line.number, "unknown tile property '" + std::string(line.key) + "'");
-            }
-            break;
-        }
-        case Section::Sound: {
-            SoundSet& set = manifest.sounds_[sectionIndex];
-            if (line.key == "file") {
-                set.files.push_back(std::string(line.rest));
-            } else if (line.key == "volume") {
-                set.volume = parseFloat(line);
-                if (set.volume < 0.0f) {
-                    fail(line.number, "volume must not be negative");
-                }
-            } else {
-                fail(line.number, "unknown sound property '" + std::string(line.key) + "'");
-            }
-            break;
-        }
-        case Section::Music: {
-            MusicTrack& track = manifest.music_[sectionIndex];
-            if (line.key == "file") {
-                track.file = std::string(line.rest);
-            } else if (line.key == "volume") {
-                track.volume = parseFloat(line);
-                if (track.volume < 0.0f) {
-                    fail(line.number, "volume must not be negative");
-                }
-            } else {
-                fail(line.number, "unknown music property '" + std::string(line.key) + "'");
-            }
-            break;
-        }
-        }
-        (void)sectionLine;
+    Json root;
+    try {
+        root = Json::parse(text);
+    } catch (const Json::parse_error& error) {
+        throw std::runtime_error(
+            "asset manifest JSON parse error at byte " +
+            std::to_string(error.byte) + ": " + error.what());
     }
 
+    rejectUnknownProperties(root, {
+        "format", "textures", "models", "animations", "tiles", "sounds", "music",
+    }, "root");
+    const Json& format = requiredProperty(root, "format", "root");
+    const bool formatIsOne = format.is_number_unsigned()
+        ? format.get<uint64_t>() == 1
+        : format.is_number_integer() && format.get<int64_t>() == 1;
+    if (!formatIsOne) {
+        fail("root", "property 'format' must be the integer 1");
+    }
+
+    AssetManifest manifest;
+    AssetManifestJsonParser::parseTextures(root, manifest);
+    AssetManifestJsonParser::parseModels(root, manifest);
+    AssetManifestJsonParser::parseAnimations(root, manifest);
+    AssetManifestJsonParser::parseTiles(root, manifest);
+    AssetManifestJsonParser::parseSounds(root, manifest);
+    AssetManifestJsonParser::parseMusic(root, manifest);
     manifest.validateAndResolve();
     return manifest;
 }
@@ -309,7 +463,11 @@ AssetManifest AssetManifest::loadFromFile(const std::filesystem::path& file)
     }
     std::ostringstream buffer;
     buffer << stream.rdbuf();
-    return parse(buffer.str());
+    try {
+        return parse(buffer.str());
+    } catch (const std::exception& error) {
+        throw std::runtime_error(file.string() + ": " + error.what());
+    }
 }
 
 void AssetManifest::validateAndResolve()
@@ -323,9 +481,6 @@ void AssetManifest::validateAndResolve()
     };
 
     for (const Texture& texture : textures_) {
-        if (texture.path.empty()) {
-            throw std::runtime_error("asset manifest: texture '" + texture.name + "' has no path");
-        }
         if (duplicate(textures_, texture.name)) {
             throw std::runtime_error("asset manifest: duplicate texture '" + texture.name + "'");
         }
@@ -336,9 +491,6 @@ void AssetManifest::validateAndResolve()
     }
 
     for (Model& model : models_) {
-        if (model.path.empty()) {
-            throw std::runtime_error("asset manifest: model '" + model.name + "' has no path");
-        }
         if (duplicate(models_, model.name)) {
             throw std::runtime_error("asset manifest: duplicate model '" + model.name + "'");
         }
@@ -375,10 +527,6 @@ void AssetManifest::validateAndResolve()
     }
 
     for (const Animation& animation : animations_) {
-        if (animation.path.empty()) {
-            throw std::runtime_error(
-                "asset manifest: animation '" + animation.name + "' has no path");
-        }
         if (duplicate(animations_, animation.name)) {
             throw std::runtime_error(
                 "asset manifest: duplicate animation '" + animation.name + "'");
@@ -410,14 +558,16 @@ void AssetManifest::validateAndResolve()
     }
 
     for (std::size_t i = 0; i < tileModelNames_.size(); ++i) {
-        if (tileModelNames_[i].name.empty()) {
+        if (tileModelNames_[i].empty()) {
             continue;
         }
         try {
-            tileVisuals_[i].model = modelIdByName(tileModelNames_[i].name);
+            tileVisuals_[i].model = modelIdByName(tileModelNames_[i]);
         } catch (const std::exception&) {
-            fail(tileModelNames_[i].line,
-                "tile references unknown model '" + tileModelNames_[i].name + "'");
+            throw std::runtime_error(
+                "asset manifest: tile '" +
+                std::string(tileTypeName(static_cast<TileType>(i))) +
+                "' references unknown model '" + tileModelNames_[i] + "'");
         }
     }
 
@@ -431,10 +581,6 @@ void AssetManifest::validateAndResolve()
     }
 
     for (const MusicTrack& track : music_) {
-        if (track.file.empty()) {
-            throw std::runtime_error(
-                "asset manifest: music for level " + std::to_string(track.level) + " has no file");
-        }
         std::size_t count = 0;
         for (const MusicTrack& other : music_) {
             count += other.level == track.level ? 1 : 0;

@@ -23,6 +23,11 @@ option(SOKOBAN_ENABLE_VALIDATION "Enable Vulkan validation layers in debug build
 find_package(Vulkan REQUIRED)
 find_package(Threads REQUIRED)
 
+add_library(sokoban_json INTERFACE)
+target_include_directories(sokoban_json SYSTEM INTERFACE
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
+)
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL/CMakeLists.txt")
     set(SDL_SHARED OFF CACHE BOOL "Build SDL3 as a shared library" FORCE)
     set(SDL_STATIC ON CACHE BOOL "Build SDL3 as a static library" FORCE)
@@ -104,6 +109,7 @@ add_executable(sokoban_content_tool
     src/engine/TileTypes.cpp
 )
 target_include_directories(sokoban_content_tool PRIVATE src)
+target_link_libraries(sokoban_content_tool PRIVATE sokoban_json)
 set_target_properties(sokoban_content_tool PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tools/$<CONFIG>"
 )
@@ -192,6 +198,7 @@ target_link_libraries(sokoban PRIVATE
     Vulkan::Vulkan
     Threads::Threads
     SDL3::SDL3
+    sokoban_json
     ole32
     windowscodecs
 )
@@ -285,6 +292,7 @@ if(SOKOBAN_BUILD_TESTS)
         src/engine/TileTypes.cpp
     )
     target_include_directories(sokoban_asset_manifest_tests PRIVATE src)
+    target_link_libraries(sokoban_asset_manifest_tests PRIVATE sokoban_json)
     if(MSVC)
         target_compile_options(sokoban_asset_manifest_tests PRIVATE /W4 /permissive-)
     else()
@@ -315,6 +323,7 @@ if(SOKOBAN_BUILD_TESTS)
         src/engine/render/RenderAssetRequirements.cpp
     )
     target_include_directories(sokoban_presentation_tests PRIVATE src)
+    target_link_libraries(sokoban_presentation_tests PRIVATE sokoban_json)
     if(MSVC)
         target_compile_options(sokoban_presentation_tests PRIVATE /W4 /permissive-)
     else()
@@ -330,6 +339,7 @@ if(SOKOBAN_BUILD_TESTS)
         src/engine/render/RenderAssetRequirements.cpp
     )
     target_include_directories(sokoban_asset_requirements_tests PRIVATE src)
+    target_link_libraries(sokoban_asset_requirements_tests PRIVATE sokoban_json)
     if(MSVC)
         target_compile_options(sokoban_asset_requirements_tests PRIVATE /W4 /permissive-)
     else()
@@ -358,6 +368,7 @@ if(SOKOBAN_BUILD_TESTS)
         src/engine/TileTypes.cpp
     )
     target_include_directories(sokoban_content_pipeline_tests PRIVATE src)
+    target_link_libraries(sokoban_content_pipeline_tests PRIVATE sokoban_json)
     if(MSVC)
         target_compile_options(sokoban_content_pipeline_tests PRIVATE /W4 /permissive-)
     else()
@@ -382,6 +393,12 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniaudio/LICENSE"
     DESTINATION licenses
     RENAME miniaudio-LICENSE.txt
+    COMPONENT Runtime
+)
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann/LICENSE.MIT"
+    DESTINATION licenses
+    RENAME nlohmann-json-LICENSE.txt
     COMPONENT Runtime
 )
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/LICENSE.txt")

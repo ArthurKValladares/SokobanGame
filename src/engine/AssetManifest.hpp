@@ -12,6 +12,8 @@
 
 namespace sokoban {
 
+struct AssetManifestJsonParser;
+
 // Shader/pipeline cap for the model texture descriptor array. Shaders are
 // compiled with MODEL_TEXTURE_COUNT set to this value (see CMakeLists.txt);
 // the manifest may declare at most this many textures.
@@ -34,10 +36,9 @@ enum class ModelMaterialMode : uint32_t {
 }
 
 // Runtime asset manifest: the single source of truth for model, texture,
-// animation, tile-visual, and sound definitions. Parsed from a plain-text
-// file (assets/manifest.txt) at startup; adding an asset or tile visual is a
-// manifest edit plus relaunch - no CMake, enum, or renderer change. Headless:
-// no SDL/Vulkan/audio dependencies, so it is testable in isolation.
+// animation, tile-visual, and sound definitions. Parsed from versioned JSON in
+// assets/manifest.json; adding an asset or tile visual requires no CMake, enum,
+// or renderer change. Headless and testable in isolation.
 class AssetManifest {
 public:
     struct Texture {
@@ -83,8 +84,8 @@ public:
         float volume = 1.0f; // multiplies the global music volume
     };
 
-    // Throws std::runtime_error with a line-numbered message on any parse or
-    // validation failure.
+    // Throws std::runtime_error with JSON byte/context information on any
+    // syntax, schema, or domain-validation failure.
     [[nodiscard]] static AssetManifest parse(std::string_view text);
     [[nodiscard]] static AssetManifest loadFromFile(const std::filesystem::path& file);
 
@@ -117,15 +118,12 @@ public:
     [[nodiscard]] const std::string* musicForLevel(int level) const;
 
 private:
-    struct TileModelName {
-        std::string name;
-        std::size_t line = 0;
-    };
+    friend struct AssetManifestJsonParser;
 
     void validateAndResolve();
 
     std::vector<Texture> textures_;
-    std::array<TileModelName, tileTypeCount> tileModelNames_ {};
+    std::array<std::string, tileTypeCount> tileModelNames_ {};
     std::vector<Model> models_;
     std::vector<Animation> animations_;
     std::array<TileVisual, tileTypeCount> tileVisuals_ {};

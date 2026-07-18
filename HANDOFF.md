@@ -32,6 +32,9 @@ Main dependencies:
 - SDL3 is vendored in `third_party/SDL` and built statically.
 - ImGui is optional but used in Debug if `third_party/imgui` exists.
 - miniaudio is vendored in `third_party/miniaudio` (header-only; compiled once in `src/engine/MiniaudioImpl.cpp` together with its bundled `extras/stb_vorbis.c` for OGG decoding — that TU builds with warnings disabled and nothing else may define `MINIAUDIO_IMPLEMENTATION`).
+- nlohmann/json 3.11.3 is pinned as a vendored single header in
+  `third_party/nlohmann`; it parses the runtime asset manifest without any
+  configure-time downloads.
 
 Common commands:
 
@@ -44,7 +47,7 @@ cmake --build build --config Debug
 Every normal build runs the manifest-driven content pipeline and stages a
 versioned `assets/` tree beside the executable. The game never reads models,
 audio, shaders, or levels from the source checkout at runtime. To validate and
-refresh content explicitly after editing `assets/manifest.txt` or a level:
+refresh content explicitly after editing `assets/manifest.json` or a level:
 
 ```powershell
 cmake --build build --config Debug --target sokoban_content
@@ -132,7 +135,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
 - `src/engine/LevelEditor.*`: headless editor model and command API. Owns document state/history, tile validation, draft construction, level load/save, source/runtime mirroring, browser enumeration, screen/level renumbering, soft-delete/restore, and guarded permanent deletion. It has no SDL, Vulkan, or ImGui dependency and is tested by `tests/LevelEditorTests.cpp` (`sokoban_level_editor_tests`).
 - `src/engine/LevelEditorDebugUi.*`: Debug-only ImGui adapter for `LevelEditor`. Owns widget text buffers and confirmation-modal presentation only; every editor state transition and filesystem action is delegated to the headless API.
 - `src/engine/render/RenderTypes.hpp`: renderer-facing frame contract and model/animation enums, independent of the Vulkan facade.
-- `src/engine/AssetManifest.*`: runtime asset manifest - the single source of truth for models, textures, animations, tile visuals (model + render scale per tile type), and sounds. Parses `assets/manifest.txt` (plain text, sections start unindented, properties indented, `#` comments, paths relative to the assets root) at startup with line-numbered errors and full validation (unique names, resolvable material textures, exactly one `role player` skinned model, all three `player-idle/move/push` animation roles, texture count <= `maxModelTextures`). `RenderModel`/`RenderAnimation` are now runtime ids (index+1 into the manifest lists; 0 = cube/none) defined in `RenderTypes.hpp`. Adding an asset, tile visual, or sound is a manifest edit plus rebuilding `sokoban_content` and relaunching - no CMake, enum, or renderer change. Headless; tested by `tests/AssetManifestTests.cpp` (`sokoban_asset_manifest_tests`).
+- `src/engine/AssetManifest.*`: runtime asset manifest - the single source of truth for models, textures, animations, tile visuals (model + render scale per tile type), sounds, and music. Parses the versioned `assets/manifest.json` with nlohmann/json, rejects malformed JSON, wrong types, missing/unknown properties, unsupported format versions, and invalid material combinations, then performs domain validation (unique names/tiles/roles, resolvable textures/models, exactly one `role: "player"` skinned model, all three player animation roles, texture count <= `maxModelTextures`). `RenderModel`/`RenderAnimation` are runtime ids (index+1 into the ordered JSON arrays; 0 = cube/none) defined in `RenderTypes.hpp`. Adding an asset, tile visual, or sound is a JSON edit plus rebuilding `sokoban_content` and relaunching - no CMake, enum, or renderer change. Headless; tested by `tests/AssetManifestTests.cpp` (`sokoban_asset_manifest_tests`).
 - `src/engine/ContentPipeline.*` + `tools/ContentTool.cpp`: headless production-content inventory, validation, and staging. Resolves manifest references and external `.gltf` URIs, rejects missing/escaping paths, parses every playable level, requires contiguous level/screen indices, verifies all compiled shaders, includes nearby asset notices, excludes `levels/Deleted`, and atomically replaces the output with only reachable files. Writes `content.index` with format/game version, file count, sizes, and paths. Tested by `tests/ContentPipelineTests.cpp` (`sokoban_content_pipeline_tests`).
 - `src/engine/RuntimeContent.*`: resolves the read-only `assets/` directory beside the executable through `SDL_GetBasePath` and rejects missing, corrupt, unsupported, or game-version-mismatched `content.index` files. `Application`, `VulkanRenderer`, and `AudioSystem` all use this one runtime root.
 - `src/engine/render/RenderAssetRequirements.*`: Vulkan-free model/animation requirement sets plus shared tile-to-model mapping. Computes requirements from a loaded `Level` for prefetching or from `RenderFrameData` as a draw-time safety net. Tested by `tests/AssetRequirementsTests.cpp` (`sokoban_asset_requirements_tests`).
@@ -373,7 +376,7 @@ Asset path decisions:
   - `assets/KayKit Adventurers 2.0`
   - `assets/KayKit Platformer Pack 1.0`
 - The old folder names `KayKit_BlockBits_1.0_FREE` and `KayKit_Adventurers_2.0_FREE` were replaced in the asset manifest.
-- Model/texture/animation/sound files load from the staged executable-relative `assets/` tree; paths remain authored relative to source `assets/manifest.txt` and `.bin` glTF sidecars are discovered automatically.
+- Model/texture/animation/sound files load from the staged executable-relative `assets/` tree; paths remain authored relative to source `assets/manifest.json` and `.bin` glTF sidecars are discovered automatically.
 
 CMake asset pipeline:
 
@@ -385,7 +388,7 @@ CMake asset pipeline:
   tree only after every source validates and copies successfully, preventing
   partial packages and removing stale files from deleted manifest entries.
 - Runtime loads only the staged tree and validates `content.index` format and
-  game version before reading `manifest.txt`.
+  game version before reading `manifest.json`.
 - CMake `install` and CPack ZIP rules consume this same staged tree and include
   SDL, miniaudio, ImGui, and discovered asset license/readme files.
 - Shaders compile with a fixed `MODEL_TEXTURE_COUNT=16`, which must equal
@@ -426,12 +429,14 @@ GLTF loader notes:
 
 - `GltfMesh.*` is a small custom loader, not a general-purpose robust GLTF implementation.
 - It supports enough JSON parsing, buffers, accessors, nodes, skins, and animations for the current assets.
-- Static model vertices include `textureIndex`; the manifest declares whether a
-  model uses those primitive indices (`primitive-textures true`).
+- Static model vertices include `textureIndex`; a model uses those primitive
+  indices when its JSON material mode is `primitive-texture-index`. The parser
+  infers primitive-texture loading from that mode so it cannot disagree with a
+  second boolean flag.
 - Manifest texture order defines the Vulkan descriptor-array indices. The
   current conveyor asset maps primitive indices 1 and 2 to `Platformer` and
   `PlatformerThread`; this invariant is documented beside the texture list in
-  `assets/manifest.txt`.
+  `assets/manifest.json`.
 - If adding complex GLTF assets, consider switching to a proven GLTF library or broadening loader support carefully.
 
 Shader notes:
@@ -487,7 +492,7 @@ Major recent additions and fixes:
   dedicated 26-check regression suite.
 
 - Replaced the CMake-generated asset catalog with a runtime asset manifest
-  (`assets/manifest.txt` + headless `AssetManifest`): string-named models,
+  (`assets/manifest.json` + headless `AssetManifest`): string-named models,
   textures, animations (with player roles), per-tile visuals, and sound sets;
   `RenderModel`/`RenderAnimation` became runtime ids and assets load directly
   from the source tree.
@@ -555,6 +560,10 @@ At the time this handoff was updated:
   `out/visual-studio/Sokoban3D-0.1.0-Windows-x64.zip`. The current staged tree
   contains 53 reachable files (about 4 MB) instead of the roughly 236 MB / 5,964
   files in the source vendor packs.
+- Migrated the asset manifest from the custom indentation-based format to
+  versioned strict JSON parsed by pinned nlohmann/json 3.11.3. The parser now
+  rejects unknown schema properties and wrong JSON types before domain
+  resolution, and all manifest fixtures/content staging use `manifest.json`.
 
 Known useful verification commands:
 
@@ -576,7 +585,7 @@ The `rg` command above should return no matches.
 - Store `Player`, `Rock`, and movable `Ice` as dynamic entities extracted from level data rather than static cells.
 - Use character-driven tile definitions as the single source of truth for level parsing/editor palette.
 - Use layered `.scr` text files instead of a binary or JSON format for now.
-- Keep runtime asset selection explicit through `assets/manifest.txt`; code
+- Keep runtime asset selection explicit through `assets/manifest.json`; code
   refers to assets via manifest roles/flags (player model, belt-scroll) or
   tile mappings, never hard-coded names.
 - Keep runtime asset requirement planning in the Vulkan-free
@@ -656,13 +665,15 @@ Engineering:
   - Update `TileType` and `tileTypeDefinitionTable`.
   - Update helper predicates in `TileTypes.cpp`.
   - Update parser/render/gameplay/editor behavior as needed.
-  - Add a `tile <Name>` section (model/scale) to `assets/manifest.txt` if needed.
+  - Add a `{ "tile": "<Name>", "model": "...", "scale": ... }` entry to
+    the `tiles` array in `assets/manifest.json` if needed.
   - Add editor preview/rendering support.
   - Verify level serialization still maps one-to-one.
 - When adding a model:
-  - Add `model`/`texture`/`animation` sections to `assets/manifest.txt` (path,
-    geometry, material, orientation flags) and map tiles to it with `tile`
-    sections; scale defaults live there too.
+  - Add entries to the ordered `models`, `textures`, and/or `animations` arrays
+    in `assets/manifest.json` (path, geometry, material, orientation flags) and
+    map tiles through the `tiles` array; scale defaults live there too.
   - No enum, CMake, or renderer change is needed; relaunch to apply.
-  - Extend material modes only if the model cannot use `none`,
-    `texture <Name>`, or `primitive-texture-index <n>`.
+  - Extend material modes only if the model cannot use `{ "mode": "none" }`,
+    `{ "mode": "texture", "texture": "<Name>" }`, or
+    `{ "mode": "primitive-texture-index", "index": <n> }`.

@@ -60,27 +60,32 @@ void writeFile(const std::filesystem::path& path, std::string_view contents = "d
 
 std::string manifest(std::string_view texturePath = "textures/hero.png")
 {
-    return
-        "texture HeroTexture\n"
-        "  path " + std::string(texturePath) + "\n"
-        "model Hero\n"
-        "  path models/hero.gltf\n"
-        "  geometry skinned\n"
-        "  material texture HeroTexture\n"
-        "  role player\n"
-        "animation Idle\n"
-        "  path animations/idle.glb\n"
-        "  role player-idle\n"
-        "animation Move\n"
-        "  path animations/move.glb\n"
-        "  role player-move\n"
-        "animation Push\n"
-        "  path animations/push.glb\n"
-        "  role player-push\n"
-        "sound footsteps\n"
-        "  file audio/step.ogg\n"
-        "music 0\n"
-        "  file audio/music.ogg\n";
+    return R"json({
+  "format": 1,
+  "textures": [
+    { "name": "HeroTexture", "path": ")json" + std::string(texturePath) + R"json(" }
+  ],
+  "models": [
+    {
+      "name": "Hero",
+      "path": "models/hero.gltf",
+      "geometry": "skinned",
+      "material": { "mode": "texture", "texture": "HeroTexture" },
+      "role": "player"
+    }
+  ],
+  "animations": [
+    { "name": "Idle", "path": "animations/idle.glb", "role": "player-idle" },
+    { "name": "Move", "path": "animations/move.glb", "role": "player-move" },
+    { "name": "Push", "path": "animations/push.glb", "role": "player-push" }
+  ],
+  "sounds": [
+    { "name": "footsteps", "files": ["audio/step.ogg"] }
+  ],
+  "music": [
+    { "level": 0, "file": "audio/music.ogg" }
+  ]
+})json";
 }
 
 sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root)
@@ -89,7 +94,7 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
     const std::filesystem::path levels = root / "source-levels";
     const std::filesystem::path shaders = root / "compiled-shaders";
 
-    writeFile(assets / "manifest.txt", manifest());
+    writeFile(assets / "manifest.json", manifest());
     writeFile(assets / "textures/hero.png");
     writeFile(assets / "models/hero.gltf", R"({"buffers":[{"uri":"hero.bin"}]})");
     writeFile(assets / "models/hero.bin");
@@ -134,7 +139,7 @@ void testInventoryAndStaging()
     const auto roots = createValidContent(temp.path());
     const sokoban::ContentInventory inventory = sokoban::collectContentInventory(roots);
 
-    check(contains(inventory, "manifest.txt"), "manifest included");
+    check(contains(inventory, "manifest.json"), "manifest included");
     check(contains(inventory, "models/hero.gltf"), "model included");
     check(contains(inventory, "models/hero.bin"), "external glTF buffer included");
     check(contains(inventory, "models/LICENSE.txt"), "nearby asset license included");
@@ -163,9 +168,9 @@ void testValidationFailures()
     checkThrows([&] { (void)sokoban::collectContentInventory(roots); }, "missing manifest file");
     writeFile(roots.assets / "audio/music.ogg");
 
-    writeFile(roots.assets / "manifest.txt", manifest("../outside.png"));
+    writeFile(roots.assets / "manifest.json", manifest("../outside.png"));
     checkThrows([&] { (void)sokoban::collectContentInventory(roots); }, "asset path traversal");
-    writeFile(roots.assets / "manifest.txt", manifest());
+    writeFile(roots.assets / "manifest.json", manifest());
 
     std::filesystem::create_directories(roots.levels / "level2");
     writeFile(roots.levels / "level2/screen0.scr", "@layer 0\n...\n\n@layer 1\n.CE\n");

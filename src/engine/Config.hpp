@@ -9,7 +9,7 @@ namespace sokoban::config {
 inline constexpr float stepDurationSeconds = 0.25f;
 inline constexpr float masterVolume = 0.03f;
 inline constexpr float musicVolume = 0.5f; // relative to master
-// Per-sound-set volumes live in assets/manifest.txt (sound sections).
+// Per-sound-set volumes live in assets/manifest.json (sound entries).
 inline constexpr float footstepIntervalSeconds = 0.2f; // one footstep per tile at the default step duration
 inline constexpr float boardPitchDegrees = 15.0f;
 inline constexpr float perspectiveFovDegrees = 35.0f;
@@ -20,10 +20,10 @@ inline constexpr float surfaceEntityHeight = 0.08f;
 inline constexpr float surfaceEntityWidthDepth = 0.72f;
 inline constexpr float minTileScale = 0.05f;
 inline constexpr float maxTileScale = 3.0f;
-// Per-tile render scales live in assets/manifest.txt (tile sections).
+// Per-tile render scales live in assets/manifest.json (tile entries).
 inline constexpr float conveyorTileHeight = 0.12f;
-// Player clip sources and numbers live in assets/manifest.txt (animation
-// sections with player-idle/move/push roles).
+// Player clip sources and numbers live in assets/manifest.json (animation
+// entries with player-idle/move/push roles).
 inline constexpr float playerAnimationFadeSeconds = 0.12f; // crossfade between idle/walk/push clips
 inline constexpr float sunAzimuthDegrees = -122.5f;
 inline constexpr float sunTiltDegrees = 33.0f;

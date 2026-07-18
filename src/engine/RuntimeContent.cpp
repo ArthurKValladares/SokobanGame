@@ -21,8 +21,8 @@ std::filesystem::path runtimeContentRoot()
         throw std::runtime_error(
             "runtime content is missing or was not staged: " + indexPath.string());
     }
-    if (!std::filesystem::is_regular_file(root / "manifest.txt")) {
-        throw std::runtime_error("runtime asset manifest is missing: " + (root / "manifest.txt").string());
+    if (!std::filesystem::is_regular_file(root / "manifest.json")) {
+        throw std::runtime_error("runtime asset manifest is missing: " + (root / "manifest.json").string());
     }
 
     std::ifstream index(indexPath, std::ios::binary);

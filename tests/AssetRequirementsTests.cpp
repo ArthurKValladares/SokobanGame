@@ -29,49 +29,33 @@ void checkImpl(bool ok, const char* expression, int line)
 
 const AssetManifest& testManifest()
 {
-    static const AssetManifest manifest = AssetManifest::parse(R"(
-model Stone
-  path stone.gltf
-model Water
-  path water.gltf
-model Glass
-  path glass.gltf
-model Bricks
-  path bricks.gltf
-model Conveyor
-  path conveyor.gltf
-model Hero
-  path hero.glb
-  geometry skinned
-  role player
-animation Idle
-  path a.glb
-  role player-idle
-animation Move
-  path a.glb
-  role player-move
-animation Push
-  path a.glb
-  role player-push
-tile Wall
-  model Bricks
-tile Rock
-  model Stone
-tile Water
-  model Water
-tile Ice
-  model Glass
-tile Conveyor Up
-  model Conveyor
-tile Conveyor Down
-  model Conveyor
-tile Conveyor Right
-  model Conveyor
-tile Conveyor Left
-  model Conveyor
-tile Player
-  model Hero
-)");
+    static const AssetManifest manifest = AssetManifest::parse(R"json({
+      "format": 1,
+      "models": [
+        { "name": "Stone", "path": "stone.gltf" },
+        { "name": "Water", "path": "water.gltf" },
+        { "name": "Glass", "path": "glass.gltf" },
+        { "name": "Bricks", "path": "bricks.gltf" },
+        { "name": "Conveyor", "path": "conveyor.gltf" },
+        { "name": "Hero", "path": "hero.glb", "geometry": "skinned", "role": "player" }
+      ],
+      "animations": [
+        { "name": "Idle", "path": "a.glb", "role": "player-idle" },
+        { "name": "Move", "path": "a.glb", "role": "player-move" },
+        { "name": "Push", "path": "a.glb", "role": "player-push" }
+      ],
+      "tiles": [
+        { "tile": "Wall", "model": "Bricks" },
+        { "tile": "Rock", "model": "Stone" },
+        { "tile": "Water", "model": "Water" },
+        { "tile": "Ice", "model": "Glass" },
+        { "tile": "Conveyor Up", "model": "Conveyor" },
+        { "tile": "Conveyor Down", "model": "Conveyor" },
+        { "tile": "Conveyor Right", "model": "Conveyor" },
+        { "tile": "Conveyor Left", "model": "Conveyor" },
+        { "tile": "Player", "model": "Hero" }
+      ]
+    })json");
     return manifest;
 }
 
