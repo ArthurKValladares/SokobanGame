@@ -115,6 +115,61 @@ void testRoundTripAndBests()
     check(decoded.profile == profile, "current profile round-trips");
 }
 
+void testReachedScreensAndProgressReset()
+{
+    sokoban::PlayerProfile profile;
+    profile.unlockedLevel = 1;
+    profile.recordReachedScreen(0, 0);
+    profile.recordReachedScreen(0, 2);
+    profile.recordReachedScreen(0, 1);
+    profile.recordReachedScreen(1, 0);
+    profile.recordReachedScreen(-1, 0);
+    profile.recordReachedScreen(0, -2);
+
+    const sokoban::PlayerProfile::LevelProgress* first = profile.progressForLevel(0);
+    check(first != nullptr && first->reachedScreens == 3, "reached screens track the max");
+    check(first != nullptr && !first->completed, "reaching screens does not complete");
+    const sokoban::PlayerProfile::LevelProgress* second = profile.progressForLevel(1);
+    check(second != nullptr && second->reachedScreens == 1, "second level entry created");
+    check(profile.progressForLevel(-1) == nullptr, "negative level ignored");
+
+    const sokoban::DecodedPlayerProfile decoded =
+        sokoban::decodePlayerProfile(profile.serialize());
+    check(decoded.profile == profile, "reached screens round-trip");
+
+    // Format-7 files (no reachedScreens) decode with zeroed counts.
+    nlohmann::json legacy = nlohmann::json::parse(profile.serialize());
+    legacy["format"] = 7;
+    for (auto& item : legacy["progress"]["levels"]) {
+        item.erase("reachedScreens");
+    }
+    const sokoban::DecodedPlayerProfile migrated =
+        sokoban::decodePlayerProfile(legacy.dump());
+    check(migrated.sourceFormat == 7, "format 7 source reported");
+    const sokoban::PlayerProfile::LevelProgress* migratedFirst =
+        migrated.profile.progressForLevel(0);
+    check(migratedFirst != nullptr && migratedFirst->reachedScreens == 0,
+        "format 7 migration defaults reached screens to zero");
+
+    // Completing without recordBests keeps completion but no records.
+    profile.recordLevelCompletion(1, 12, 5.0, true, false);
+    const sokoban::PlayerProfile::LevelProgress* partial = profile.progressForLevel(1);
+    check(partial != nullptr && partial->completed, "partial run still completes");
+    check(partial != nullptr && !partial->bestMoves && !partial->bestTimeSeconds,
+        "partial run records no bests");
+
+    sokoban::PlayerProfile populated = profile;
+    populated.audio.musicVolume = 0.25f;
+    populated.accessibility.highContrast = true;
+    populated.resetProgress();
+    check(populated.unlockedLevel == 0 && populated.currentLevel == 0 &&
+            populated.currentScreen == 0,
+        "reset clears position");
+    check(populated.levels.empty() && !populated.activeScreen, "reset clears records");
+    check(populated.audio.musicVolume == 0.25f, "reset keeps audio settings");
+    check(populated.accessibility.highContrast, "reset keeps accessibility settings");
+}
+
 void testActiveScreenCheckpointRoundTrip()
 {
     sokoban::PlayerProfile profile;
@@ -515,6 +570,7 @@ void testAsyncSaveDestructorFlushesNewestProfile()
 int main()
 {
     testRoundTripAndBests();
+    testReachedScreensAndProgressReset();
     testActiveScreenCheckpointRoundTrip();
     testNormalizationAndMigration();
     testStoreBackupsAndRecovery();

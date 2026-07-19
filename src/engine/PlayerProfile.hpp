@@ -11,12 +11,16 @@
 
 namespace sokoban {
 
-inline constexpr int currentPlayerProfileFormat = 7;
+inline constexpr int currentPlayerProfileFormat = 8;
 
 struct PlayerProfile {
     struct LevelProgress {
         int level = 0;
         bool completed = false;
+        // Number of screens the player has entered in this level (max screen
+        // index + 1). Completed levels are treated as fully reachable even if
+        // this predates format 8 and reads back as zero.
+        int reachedScreens = 0;
         std::optional<int> bestMoves;
         std::optional<double> bestTimeSeconds;
 
@@ -80,11 +84,19 @@ struct PlayerProfile {
     void normalize();
     void setCurrentLevel(int level);
     void setCurrentScreen(int level, int screen);
+    // Records that the player entered a screen, for level-select unlocking.
+    void recordReachedScreen(int level, int screen);
+    // Clears all progress (levels, unlocks, checkpoint) while keeping audio,
+    // video, input, and accessibility settings.
+    void resetProgress();
+    // recordBests is false for runs that did not start at the level's first
+    // screen (level-select jumps); completion still counts, records do not.
     void recordLevelCompletion(
         int level,
         int moves,
         std::optional<double> completionTimeSeconds,
-        bool unlockNextLevel);
+        bool unlockNextLevel,
+        bool recordBests = true);
 
     [[nodiscard]] const LevelProgress* progressForLevel(int level) const;
     [[nodiscard]] std::string serialize() const;
@@ -98,7 +110,7 @@ struct DecodedPlayerProfile {
 };
 
 // Throws std::runtime_error for malformed, unsupported, or semantically
-// invalid profile data. Formats 1 through 6 migrate into the current model.
+// invalid profile data. Formats 1 through 7 migrate into the current model.
 [[nodiscard]] DecodedPlayerProfile decodePlayerProfile(std::string_view text);
 
 } // namespace sokoban

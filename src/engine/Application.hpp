@@ -20,10 +20,13 @@
 #include "engine/Window.hpp"
 #include "engine/render/VulkanRenderer.hpp"
 #include "engine/ui/FontAtlas.hpp"
+#include "engine/ui/LevelCompleteOverlay.hpp"
 #include "engine/ui/OptionsMenu.hpp"
+#include "engine/ui/TitleScreen.hpp"
 
 #include <filesystem>
 #include <optional>
+#include <vector>
 
 namespace sokoban {
 
@@ -39,6 +42,12 @@ public:
 
 private:
     void loadCurrentScreen();
+    void openTitleScreen();
+    [[nodiscard]] std::vector<TitleLevelInfo> titleLevelInfos() const;
+    void startNewGame();
+    void startLevel(int level, int screen);
+    void resolveLevelComplete(bool toTitle);
+    [[nodiscard]] bool shellMenuOpen() const;
     [[nodiscard]] bool applyLevel(
         Level level,
         const GameplaySession::Snapshot* snapshot = nullptr);
@@ -77,11 +86,18 @@ private:
     VulkanRenderer renderer_;
     UiContext ui_;
     OptionsMenu optionsMenu_;
+    TitleScreen titleScreen_;
+    LevelCompleteOverlay levelCompleteOverlay_;
     AudioSystem audioSystem_;
     Level level_;
     GameplaySession gameplaySession_;
     int currentLevel_ = 0;
     int currentScreen_ = 0;
+    // Next level to load once the level-complete overlay is resolved.
+    std::optional<int> pendingNextLevel_;
+    // False when the current run began at a later screen via level select;
+    // completing such a run does not record best moves/time.
+    bool levelRunFromStart_ = true;
     int completedLevelMoveCount_ = 0;
     double currentLevelElapsedSeconds_ = 0.0;
     double deferredCheckpointAgeSeconds_ = 0.0;

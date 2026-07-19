@@ -81,6 +81,7 @@ Application::Application()
         assetManifest_.playerMoveAnimation(),
         assetManifest_.playerPushAnimation());
     loadCurrentScreen();
+    openTitleScreen();
 
 #if SOKOBAN_ENABLE_DEBUG_UI
     levelEditor_.initialize(
@@ -172,7 +173,7 @@ void Application::run()
 #endif
             const bool allowKeyboardInput =
                 !isKeyboardEvent ||
-                optionsMenu_.isOpen() ||
+                shellMenuOpen() ||
                 !renderer_.wantsKeyboardCapture() ||
                 event.type == SDL_EVENT_KEY_UP ||
                 isEditorEditModifier ||
@@ -181,7 +182,7 @@ void Application::run()
                     InputAction::MenuBack);
             const bool allowMouseInput =
                 !isMouseEvent ||
-                optionsMenu_.isOpen() ||
+                shellMenuOpen() ||
                 !renderer_.wantsMouseCapture() ||
                 event.type == SDL_EVENT_MOUSE_BUTTON_UP;
             if (allowKeyboardInput && allowMouseInput) {
@@ -203,8 +204,16 @@ void Application::run()
 #endif
             if (optionsMenu_.isOpen()) {
                 optionsMenu_.back();
+            } else if (levelCompleteOverlay_.isOpen()) {
+                // The overlay requires an explicit choice.
+            } else if (titleScreen_.isOpen()) {
+                if (titleScreen_.page() == TitleScreen::Page::Main) {
+                    optionsMenu_.open(optionsMenuSettings(), false);
+                } else {
+                    titleScreen_.back();
+                }
             } else {
-                optionsMenu_.open(optionsMenuSettings());
+                optionsMenu_.open(optionsMenuSettings(), true);
             }
         }
 
@@ -235,18 +244,76 @@ void Application::run()
             DebugUi::draw();
         }
         drawDraftExitConfirmation();
+
+        const bool optionsOnTop = optionsMenu_.isOpen();
+        const bool navUp = input_.actionPressed(InputAction::MoveUp);
+        const bool navDown = input_.actionPressed(InputAction::MoveDown);
+        const bool navLeft = input_.actionPressed(InputAction::MoveLeft);
+        const bool navRight = input_.actionPressed(InputAction::MoveRight);
+        const bool navConfirm = input_.actionPressed(InputAction::MenuConfirm);
+
+        const TitleScreenResult titleResult = titleScreen_.draw(
+            ui_, pixelSize,
+            optionsOnTop
+                ? TitleScreenInput {}
+                : TitleScreenInput {
+                    .up = navUp,
+                    .down = navDown,
+                    .left = navLeft,
+                    .right = navRight,
+                    .confirm = navConfirm,
+                });
+        if (titleResult.continueRequested) {
+            titleScreen_.close();
+        }
+        if (titleResult.newGameConfirmed) {
+            startNewGame();
+        }
+        if (titleResult.startRequested) {
+            startLevel(
+                titleResult.startRequested->level,
+                titleResult.startRequested->screen);
+            titleScreen_.close();
+        }
+        if (titleResult.optionsRequested) {
+            optionsMenu_.open(optionsMenuSettings(), false);
+        }
+        if (titleResult.quitRequested) {
+            optionsMenu_.requestQuitConfirmation();
+        }
+
+        const LevelCompleteResult completeResult = levelCompleteOverlay_.draw(
+            ui_, pixelSize,
+            optionsOnTop
+                ? LevelCompleteInput {}
+                : LevelCompleteInput {
+                    .up = navUp,
+                    .down = navDown,
+                    .confirm = navConfirm,
+                });
+        if (completeResult.continueRequested) {
+            resolveLevelComplete(false);
+        }
+        if (completeResult.titleRequested) {
+            resolveLevelComplete(true);
+        }
+
         const OptionsMenuResult menuResult = optionsMenu_.draw(ui_, pixelSize, {
-            .up = input_.actionPressed(InputAction::MoveUp),
-            .down = input_.actionPressed(InputAction::MoveDown),
-            .left = input_.actionPressed(InputAction::MoveLeft),
-            .right = input_.actionPressed(InputAction::MoveRight),
-            .confirm = input_.actionPressed(InputAction::MenuConfirm),
+            .up = navUp,
+            .down = navDown,
+            .left = navLeft,
+            .right = navRight,
+            .confirm = navConfirm,
         });
         if (menuResult.settingsChanged) {
             applyOptionsMenuSettings(optionsMenu_.settings());
         }
         if (menuResult.quitRequested) {
             running_ = false;
+        }
+        if (menuResult.titleRequested) {
+            optionsMenu_.close();
+            openTitleScreen();
         }
         ui_.endFrame();
         renderer_.drawFrame(buildRenderFrame(), ui_.drawData());
@@ -260,7 +327,7 @@ void Application::update(float dt)
         gameplaySession_.activeAction().reversed;
     presentation_.advanceClocks(dt, reversed);
 
-    if (optionsMenu_.isOpen()) {
+    if (shellMenuOpen()) {
         audioSystem_.update(dt, false, false);
         return;
     }
@@ -448,6 +515,7 @@ void Application::loadCurrentScreen()
         playerProfile_.activeScreen.reset();
     }
     playerProfile_.setCurrentScreen(currentLevel_, currentScreen_);
+    playerProfile_.recordReachedScreen(currentLevel_, currentScreen_);
     checkpointCurrentScreen(true);
     audioSystem_.playMusicForLevel(currentLevel_);
     preloadUpcomingAssets();
@@ -483,28 +551,127 @@ void Application::advanceScreen()
     if (screenExists(currentLevel_, currentScreen_ + 1)) {
         completedLevelMoveCount_ = completedMoves;
         ++currentScreen_;
-    } else if (screenExists(currentLevel_ + 1, 0)) {
-        playerProfile_.recordLevelCompletion(
-            currentLevel_,
-            completedMoves,
-            currentLevelElapsedSeconds_,
-            true);
-        ++currentLevel_;
-        currentScreen_ = 0;
-        completedLevelMoveCount_ = 0;
-        currentLevelElapsedSeconds_ = 0.0;
-    } else {
-        playerProfile_.recordLevelCompletion(
-            currentLevel_,
-            completedMoves,
-            currentLevelElapsedSeconds_,
-            false);
-        currentLevel_ = 0;
-        currentScreen_ = 0;
+        playerProfile_.setCurrentScreen(currentLevel_, currentScreen_);
+        loadCurrentScreen();
+        return;
+    }
+
+    // The level is complete: record it, then hold on the finished screen
+    // behind the stats overlay until the player chooses where to go.
+    const bool hasNextLevel = screenExists(currentLevel_ + 1, 0);
+    const PlayerProfile::LevelProgress* progress =
+        playerProfile_.progressForLevel(currentLevel_);
+    const std::optional<int> previousBestMoves =
+        progress ? progress->bestMoves : std::nullopt;
+    const std::optional<double> previousBestTime =
+        progress ? progress->bestTimeSeconds : std::nullopt;
+    const LevelCompleteStats stats {
+        .level = currentLevel_,
+        .moves = completedMoves,
+        .timeSeconds = currentLevelElapsedSeconds_,
+        .previousBestMoves = previousBestMoves,
+        .previousBestTimeSeconds = previousBestTime,
+        .newBestMoves = levelRunFromStart_ &&
+            (!previousBestMoves || completedMoves < *previousBestMoves),
+        .newBestTime = levelRunFromStart_ &&
+            (!previousBestTime || currentLevelElapsedSeconds_ < *previousBestTime),
+        .hasNextLevel = hasNextLevel,
+    };
+    playerProfile_.recordLevelCompletion(
+        currentLevel_,
+        completedMoves,
+        currentLevelElapsedSeconds_,
+        hasNextLevel,
+        levelRunFromStart_);
+    persistProfile(true);
+    pendingNextLevel_ = hasNextLevel ? currentLevel_ + 1 : 0;
+    levelCompleteOverlay_.open(stats);
+}
+
+void Application::resolveLevelComplete(bool toTitle)
+{
+    levelCompleteOverlay_.close();
+    currentLevel_ = pendingNextLevel_.value_or(0);
+    currentScreen_ = 0;
+    pendingNextLevel_.reset();
+    completedLevelMoveCount_ = 0;
+    currentLevelElapsedSeconds_ = 0.0;
+    levelRunFromStart_ = true;
+    playerProfile_.setCurrentScreen(currentLevel_, currentScreen_);
+    loadCurrentScreen();
+    if (toTitle) {
+        openTitleScreen();
+    }
+}
+
+void Application::openTitleScreen()
+{
+    titleScreen_.open(titleLevelInfos());
+}
+
+bool Application::shellMenuOpen() const
+{
+    return optionsMenu_.isOpen() ||
+        titleScreen_.isOpen() ||
+        levelCompleteOverlay_.isOpen();
+}
+
+std::vector<TitleLevelInfo> Application::titleLevelInfos() const
+{
+    std::vector<TitleLevelInfo> result;
+    for (int level = 0; screenExists(level, 0); ++level) {
+        int screens = 0;
+        while (screenExists(level, screens)) {
+            ++screens;
+        }
+        const PlayerProfile::LevelProgress* progress =
+            playerProfile_.progressForLevel(level);
+        int reached = progress ? progress->reachedScreens : 0;
+        if (level == currentLevel_) {
+            reached = std::max(reached, currentScreen_ + 1);
+        }
+        result.push_back({
+            .screenCount = screens,
+            .unlocked = level <= playerProfile_.unlockedLevel,
+            .completed = progress && progress->completed,
+            .reachedScreens = reached,
+            .bestMoves = progress ? progress->bestMoves : std::nullopt,
+            .bestTimeSeconds = progress ? progress->bestTimeSeconds : std::nullopt,
+        });
+    }
+    return result;
+}
+
+void Application::startNewGame()
+{
+    playerProfile_.resetProgress();
+    titleScreen_.close();
+    levelCompleteOverlay_.close();
+    pendingNextLevel_.reset();
+    currentLevel_ = 0;
+    currentScreen_ = 0;
+    completedLevelMoveCount_ = 0;
+    currentLevelElapsedSeconds_ = 0.0;
+    levelRunFromStart_ = true;
+    loadCurrentScreen();
+    persistProfile(true);
+}
+
+void Application::startLevel(int level, int screen)
+{
+    if (!screenExists(level, screen)) {
+        return;
+    }
+    if (level != currentLevel_ || screen != currentScreen_) {
+        // Fresh start at the chosen screen instead of the saved checkpoint.
+        playerProfile_.activeScreen.reset();
         completedLevelMoveCount_ = 0;
         currentLevelElapsedSeconds_ = 0.0;
     }
-    playerProfile_.setCurrentScreen(currentLevel_, currentScreen_);
+    levelRunFromStart_ = screen == 0;
+    currentLevel_ = level;
+    currentScreen_ = screen;
+    playerProfile_.setCurrentScreen(level, screen);
     loadCurrentScreen();
 }
 

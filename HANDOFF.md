@@ -131,6 +131,15 @@ cmake --build build --config Debug --target sokoban_ui_tests
 .\build\Debug\sokoban_ui_tests.exe
 ```
 
+Title-shell tests cover title navigation, new-game confirmation, level/screen
+select locking and screen choice, the level-complete overlay, and the pause
+menu's title-exit row:
+
+```powershell
+cmake --build build --config Debug --target sokoban_title_tests
+.\build\Debug\sokoban_title_tests.exe
+```
+
 Headless animation-controller tests cover Rogue animation selection,
 deduplication, crossfades, reverse playback, preview overrides, and reset:
 
@@ -173,7 +182,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, action history, a branch-safe undo stack, automatic world steps, the post-undo automatic-motion pause, and solution-move snapshots that restore correctly across undo/restart. Its committed-state snapshot/restore API persists the exact player/movable state and usable undo chain; restore rejects disconnected or impossible rules transitions without mutating the live session. `reset` always clears undo state at a screen boundary. Emits `Action` snapshots for `Application` to animate. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
 - `src/engine/InputBindings.*`: platform-neutral semantic action and binding model. Each action owns an ordered list of keyboard, gamepad-button, and signed gamepad-axis bindings, allowing keyboard+D-pad+stick defaults and future replacement/appending by a remapping UI without changing gameplay code.
 - `src/engine/Input.*`: SDL3 device owner and action mapper. Tracks raw keyboard/mouse state for editor tooling, hot-plugs gamepads, selects the most recently used controller, normalizes stick axes with threshold/pressed-edge semantics, clears stuck input on focus loss, reports active-device diagnostics, and converts raw SDL events into typed remapping candidates. `Application` consumes semantic actions only for gameplay. Covered by `tests/InputTests.cpp` (`sokoban_input_tests`).
-- `src/engine/PlayerProfile.*`: current format-7 player progress/settings model and strict JSON codec. Stores unlocked/current level and screen, an active-screen committed gameplay checkpoint with the multi-screen level move/time counters, per-level completion and optional move/time bests, typed keyboard/controller action bindings, audio/video/accessibility settings, window mode/size, MSAA, AO, preset/custom internal render-scale state, with bounded normalization and explicit format-1/2/3/4/5/6 migrations. Headless and covered with `SaveStore` by `tests/PlayerProfileTests.cpp` (`sokoban_profile_tests`).
+- `src/engine/PlayerProfile.*`: current format-8 player progress/settings model and strict JSON codec. Stores unlocked/current level and screen, an active-screen committed gameplay checkpoint with the multi-screen level move/time counters, per-level completion, per-level `reachedScreens` counts (max screen entered + 1, feeding level-select unlocking), optional move/time bests, typed keyboard/controller action bindings, audio/video/accessibility settings, window mode/size, MSAA, AO, preset/custom internal render-scale state, with bounded normalization and explicit format-1..7 migrations (format 7 files decode with zeroed reached counts). `recordReachedScreen` tracks entry, `resetProgress` implements New Game (clears progress/records, keeps every setting), and `recordLevelCompletion(..., recordBests)` skips best records for runs that started past the first screen. Headless and covered with `SaveStore` by `tests/PlayerProfileTests.cpp` (`sokoban_profile_tests`).
 - `src/engine/SaveStore.*`: profile persistence rooted at SDL's platform-appropriate `SDL_GetPrefPath`. Writes validated JSON through same-directory temporary replacement, keeps the previous valid primary as `profile.backup.json`, migrates old versions, archives corrupt primary/backup files for diagnosis, recovers from backup, and restores defaults when both copies are unusable.
 - `src/engine/AsyncSaveStore.*`: dedicated serialized persistence worker around `SaveStore`. Deferred requests coalesce over a configurable window, while JSON encoding, backup rotation, and atomic filesystem replacement always happen off the game thread. Screen transitions and committed settings request immediate worker saves; clean shutdown flushes the newest pending profile. Diagnostics expose request/write/coalescing counts and pending/writing state.
 - `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags + slide momentum) plus pure functions in `sokoban::rules` — `step` advances the whole world one discrete step (simultaneous one-tile moves, pushes, ladder climbs, momentum, falls, water, conveyors); `hasPendingMotion` reports whether the world would keep moving without input; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
@@ -223,7 +232,21 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   tree-based composition for Graphics, Audio, and separated quit confirmation.
   Named row enums replace positional focus indexes. It emits a platform-neutral
   settings snapshot; `Application` applies changes to the window, renderer,
-  presentation, audio, and profile owners.
+  presentation, audio, and profile owners. `open(settings, allowTitleExit)`
+  adds an "Exit To Title" row only when opened as the in-game pause menu.
+- `src/engine/ui/TitleScreen.*`: headless title-screen state (Main with
+  Continue/New Game/Level Select/Options/Quit, a destructive-action New Game
+  confirmation, and a level/screen select). The caller supplies
+  `TitleLevelInfo` rows (screen count, unlocked/completed, reached screens,
+  bests); locked levels render inert, completed levels expose every screen,
+  unfinished levels expose only reached screens, and Left/Right picks the
+  starting screen on the focused row. Emits result flags/requests only -
+  `Application` owns what they mean. Tested by `tests/TitleScreenTests.cpp`
+  (`sokoban_title_tests`).
+- `src/engine/ui/LevelCompleteOverlay.*`: headless end-of-level stats panel
+  showing moves/time against previous bests with NEW BEST highlighting, and
+  Continue ("Next Level"/"Back To Start") or Title Screen choices. Also
+  covered by `tests/TitleScreenTests.cpp`.
 - `shaders/`: GLSL shader sources compiled to SPIR-V by CMake.
 - `levels/`: source `.scr` level files copied into `build/assets/levels`.
 - `assets/`: source KayKit asset packs.
@@ -545,7 +568,16 @@ The custom UI currently provides:
 - A pause/options flow with Graphics (MSAA, internal render-scale presets plus
   a persistent Custom checkbox/25-100% slider and resolved pixel dimensions,
   AO, fullscreen/window sizes), Audio
-  (live master/music sliders), and a visually separated confirmed Quit action.
+  (live master/music sliders), an Exit To Title entry in the pause context,
+  and a visually separated confirmed Quit action.
+- A player-facing game shell: the game boots to a title screen drawn over the
+  loaded checkpoint scene (Continue resumes exactly; New Game confirms and
+  wipes progress but keeps settings; Level Select starts any unlocked
+  level at any reached screen; Options/Quit reuse the shared menus). Level
+  completion pauses on a stats overlay (moves/time vs. bests, NEW BEST
+  highlighting) before continuing or returning to the title. Runs started
+  past a level's first screen complete it without recording best records.
+  Escape at the title opens Options; Escape inside title sub-pages backs out.
 - Semantic W/S or D-pad/stick navigation, Enter/Space or controller South
   confirmation, and Escape/Start back navigation.
 
@@ -557,6 +589,14 @@ these focused modules rather than moving player UI into Debug-only ImGui.
 
 Major recent additions and fixes:
 
+- Added the player-facing game shell: headless `TitleScreen` (main menu,
+  destructive New Game confirmation, level/screen select fed by per-level
+  `TitleLevelInfo`) and `LevelCompleteOverlay` (moves/time vs. bests) drawn
+  through the shared UI stack; `Application` boots into the title over the
+  restored scene, intercepts level completion behind the overlay, tracks
+  per-level reached screens (profile format 8 with `resetProgress` and
+  bests-eligibility for mid-level starts), and the pause menu gained Exit To
+  Title. Covered by `sokoban_title_tests` and extended profile tests.
 - Added format-5 player persistence under `SDL_GetPrefPath`: current/unlocked
   level, current screen, an exact committed screen state and undo stack,
   per-level completion and best move/time records, audio/video/input/
@@ -748,8 +788,10 @@ High-value gameplay/editor work:
 - Add more Sokoban mechanics only after hardening interactions among existing ones.
 - Revisit conveyor edge cases if needed (e.g. conveyor loops/cycles do not rotate; entities in a full cycle stay put).
 - Revisit the exact semantics of water/fallen entities and ice sliding edge cases.
-- Add better level metadata/names and a player-facing level-select screen over
-  the persisted unlock/completion records.
+- Add level metadata/names (a `.scr` header or sidecar) so the title's level
+  select can show real names and par moves instead of "Level N".
+- Add a scroll container to `UiLayout` before the level list outgrows the
+  level-select panel (it currently sizes for roughly six levels).
 
 Rendering/assets:
 

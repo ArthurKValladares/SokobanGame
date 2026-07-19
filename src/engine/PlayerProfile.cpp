@@ -810,6 +810,46 @@ PlayerProfile parseFormat7(const Json& root)
     return profile;
 }
 
+PlayerProfile parseFormat8(const Json& root)
+{
+    rejectUnknownProperties(root, { "format", "progress", "settings" }, "root");
+
+    // Strip the per-level reached-screen counts and let the format-7 chain
+    // parse everything else, then reapply them by level id (normalization may
+    // reorder the list).
+    Json legacyRoot = root;
+    std::vector<std::pair<int, int>> reachedByLevel;
+    if (legacyRoot.contains("progress") &&
+        legacyRoot["progress"].is_object() &&
+        legacyRoot["progress"].contains("levels") &&
+        legacyRoot["progress"]["levels"].is_array()) {
+        Json& levels = legacyRoot["progress"]["levels"];
+        for (std::size_t i = 0; i < levels.size(); ++i) {
+            Json& item = levels[i];
+            if (!item.is_object() || !item.contains("reachedScreens")) {
+                continue;
+            }
+            const std::string context = "progress.levels[" + std::to_string(i) + "]";
+            const int reached =
+                nonNegativeIntegerProperty(item, "reachedScreens", context);
+            const int level = nonNegativeIntegerProperty(item, "level", context);
+            reachedByLevel.emplace_back(level, reached);
+            item.erase("reachedScreens");
+        }
+    }
+
+    PlayerProfile profile = parseFormat7(legacyRoot);
+    for (const auto& [level, reached] : reachedByLevel) {
+        const auto found =
+            std::ranges::find(profile.levels, level, &PlayerProfile::LevelProgress::level);
+        if (found != profile.levels.end()) {
+            found->reachedScreens = reached;
+        }
+    }
+    profile.normalize();
+    return profile;
+}
+
 PlayerProfile parseFormat1(const Json& root)
 {
     rejectUnknownProperties(root, {
@@ -873,6 +913,9 @@ void PlayerProfile::normalize()
         video.customRenderScalePercent);
     video.windowWidth = std::clamp(video.windowWidth, 640, 7680);
     video.windowHeight = std::clamp(video.windowHeight, 480, 4320);
+    for (LevelProgress& level : levels) {
+        level.reachedScreens = std::max(level.reachedScreens, 0);
+    }
     std::ranges::sort(levels, {}, &LevelProgress::level);
     if (activeScreen &&
         (activeScreen->level != currentLevel || activeScreen->screen != currentScreen)) {
@@ -902,7 +945,8 @@ void PlayerProfile::recordLevelCompletion(
     int level,
     int moves,
     std::optional<double> completionTimeSeconds,
-    bool unlockNextLevel)
+    bool unlockNextLevel,
+    bool recordBests)
 {
     if (level < 0 || moves < 0 ||
         (completionTimeSeconds &&
@@ -916,14 +960,38 @@ void PlayerProfile::recordLevelCompletion(
         found = std::prev(levels.end());
     }
     found->completed = true;
-    if (!found->bestMoves || moves < *found->bestMoves) {
+    if (recordBests && (!found->bestMoves || moves < *found->bestMoves)) {
         found->bestMoves = moves;
     }
-    if (completionTimeSeconds &&
+    if (recordBests && completionTimeSeconds &&
         (!found->bestTimeSeconds || *completionTimeSeconds < *found->bestTimeSeconds)) {
         found->bestTimeSeconds = *completionTimeSeconds;
     }
     unlockedLevel = std::max(unlockedLevel, level + (unlockNextLevel ? 1 : 0));
+    normalize();
+}
+
+void PlayerProfile::recordReachedScreen(int level, int screen)
+{
+    if (level < 0 || screen < 0) {
+        return;
+    }
+    auto found = std::ranges::find(levels, level, &LevelProgress::level);
+    if (found == levels.end()) {
+        levels.push_back({ .level = level });
+        found = std::prev(levels.end());
+    }
+    found->reachedScreens = std::max(found->reachedScreens, screen + 1);
+    normalize();
+}
+
+void PlayerProfile::resetProgress()
+{
+    unlockedLevel = 0;
+    currentLevel = 0;
+    currentScreen = 0;
+    levels.clear();
+    activeScreen.reset();
     normalize();
 }
 
@@ -951,6 +1019,7 @@ std::string PlayerProfile::serialize() const
         OrderedJson item = {
             { "level", level.level },
             { "completed", level.completed },
+            { "reachedScreens", level.reachedScreens },
         };
         if (level.bestMoves) {
             item["bestMoves"] = *level.bestMoves;
@@ -1041,8 +1110,11 @@ DecodedPlayerProfile decodePlayerProfile(std::string_view text)
     if (format == 6) {
         return { .profile = parseFormat6(root), .sourceFormat = format };
     }
-    if (format == currentPlayerProfileFormat) {
+    if (format == 7) {
         return { .profile = parseFormat7(root), .sourceFormat = format };
+    }
+    if (format == currentPlayerProfileFormat) {
+        return { .profile = parseFormat8(root), .sourceFormat = format };
     }
     fail("root", "unsupported format " + std::to_string(format));
 }

@@ -170,7 +170,9 @@ add_executable(sokoban
     src/engine/render/VulkanSwapchainResources.cpp
     src/engine/render/VulkanUiResources.cpp
     src/engine/ui/FontAtlas.cpp
+    src/engine/ui/LevelCompleteOverlay.cpp
     src/engine/ui/OptionsMenu.cpp
+    src/engine/ui/TitleScreen.cpp
     src/engine/ui/Ui.cpp
     src/engine/ui/UiControls.cpp
     src/engine/ui/UiLayout.cpp
@@ -360,6 +362,29 @@ if(SOKOBAN_BUILD_TESTS)
         target_compile_options(sokoban_ui_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME ui COMMAND sokoban_ui_tests)
+
+    add_executable(sokoban_title_tests
+        tests/TitleScreenTests.cpp
+        src/engine/ui/FontAtlas.cpp
+        src/engine/ui/LevelCompleteOverlay.cpp
+        src/engine/ui/OptionsMenu.cpp
+        src/engine/ui/TitleScreen.cpp
+        src/engine/ui/Ui.cpp
+        src/engine/ui/UiControls.cpp
+        src/engine/ui/UiLayout.cpp
+        src/engine/render/RenderResolution.cpp
+    )
+    target_include_directories(sokoban_title_tests PRIVATE src)
+    target_link_libraries(sokoban_title_tests PRIVATE sokoban_stb)
+    target_compile_definitions(sokoban_title_tests PRIVATE
+        SOKOBAN_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    )
+    if(MSVC)
+        target_compile_options(sokoban_title_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_title_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME title COMMAND sokoban_title_tests)
 
     add_executable(sokoban_vulkan_device_selection_tests
         tests/VulkanDeviceSelectionTests.cpp

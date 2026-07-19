@@ -18,9 +18,12 @@ namespace {
 using uiControls::ButtonTone;
 using uiControls::ChoiceOption;
 
+// Rows on the main page in order; Title is skipped when the menu is opened
+// from the title screen itself.
 enum class MainRow {
     Graphics,
     Audio,
+    Title,
     Quit,
     Count,
 };
@@ -146,11 +149,15 @@ LabeledControlLayout addLabeledControl(
 }
 
 struct MainPageLayout : MenuPageLayout {
-    explicit MainPageLayout(UiRect panel)
+    MainPageLayout(UiRect panel, bool withTitleExit)
     {
         graphics = tree.item(tree.root(), 62.0f);
         tree.spacer(tree.root(), 18.0f);
         audio = tree.item(tree.root(), 62.0f);
+        if (withTitleExit) {
+            tree.spacer(tree.root(), 18.0f);
+            title = tree.item(tree.root(), 62.0f);
+        }
         tree.flexibleSpacer(tree.root());
         quitDivider = tree.item(tree.root(), 1.0f);
         tree.spacer(tree.root(), 24.0f);
@@ -160,6 +167,7 @@ struct MainPageLayout : MenuPageLayout {
 
     UiLayoutNode graphics {};
     UiLayoutNode audio {};
+    UiLayoutNode title {};
     UiLayoutNode quitDivider {};
     UiLayoutNode quit {};
 };
@@ -285,9 +293,10 @@ bool adjustInt(int& value, bool decrease, bool increase, int step = 1)
 
 } // namespace
 
-void OptionsMenu::open(OptionsMenuSettings settings)
+void OptionsMenu::open(OptionsMenuSettings settings, bool allowTitleExit)
 {
     settings_ = settings;
+    allowTitleExit_ = allowTitleExit;
     open_ = true;
     setPage(Page::Main);
 }
@@ -361,11 +370,17 @@ OptionsMenuResult OptionsMenu::drawMain(
     UiRect panel,
     const OptionsMenuInput& input)
 {
-    navigateRows(input, rowIndex(MainRow::Count));
+    // Without the title-exit entry the Quit row directly follows Audio.
+    const int titleRowIndex = rowIndex(MainRow::Title);
+    const int quitRowIndex = allowTitleExit_
+        ? rowIndex(MainRow::Quit)
+        : rowIndex(MainRow::Title);
+    navigateRows(input, quitRowIndex + 1);
 
-    MainPageLayout layout(panel);
+    MainPageLayout layout(panel, allowTitleExit_);
 
     drawTitle(ui, layout, "OPTIONS");
+    OptionsMenuResult result;
     if (uiControls::button(
             ui, "options.graphics", layout.tree.rect(layout.graphics), "Graphics", {
             .tone = ButtonTone::Accent,
@@ -381,17 +396,25 @@ OptionsMenuResult OptionsMenu::drawMain(
         })) {
         setPage(Page::Audio);
     }
+    if (allowTitleExit_ &&
+        uiControls::button(
+            ui, "options.title", layout.tree.rect(layout.title), "Exit To Title", {
+            .focused = selectedRow_ == titleRowIndex,
+            .activate = input.confirm && selectedRow_ == titleRowIndex,
+        })) {
+        result.titleRequested = true;
+    }
 
     ui.divider(layout.tree.rect(layout.quitDivider));
     if (uiControls::button(
             ui, "options.quit", layout.tree.rect(layout.quit), "Quit Game", {
             .tone = ButtonTone::Danger,
-            .focused = selectedRow_ == rowIndex(MainRow::Quit),
-            .activate = input.confirm && selectedRow_ == rowIndex(MainRow::Quit),
+            .focused = selectedRow_ == quitRowIndex,
+            .activate = input.confirm && selectedRow_ == quitRowIndex,
         })) {
         setPage(Page::QuitConfirmation);
     }
-    return {};
+    return result;
 }
 
 OptionsMenuResult OptionsMenu::drawGraphics(

@@ -33,6 +33,7 @@ struct OptionsMenuInput {
 struct OptionsMenuResult {
     bool settingsChanged = false;
     bool quitRequested = false;
+    bool titleRequested = false;
 };
 
 class OptionsMenu {
@@ -44,7 +45,9 @@ public:
         QuitConfirmation,
     };
 
-    void open(OptionsMenuSettings settings);
+    // allowTitleExit shows an "Exit To Title" entry; enable it when the menu
+    // is opened as the in-game pause menu rather than from the title screen.
+    void open(OptionsMenuSettings settings, bool allowTitleExit = false);
     void close();
     void back();
     void requestQuitConfirmation();
@@ -80,6 +83,7 @@ private:
         const OptionsMenuInput& input);
 
     bool open_ = false;
+    bool allowTitleExit_ = false;
     Page page_ = Page::Main;
     int selectedRow_ = 0;
     bool customRenderScaleDragPending_ = false;
