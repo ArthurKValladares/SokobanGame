@@ -3,6 +3,7 @@
 #include "engine/render/RenderResolution.hpp"
 #include "engine/ui/Ui.hpp"
 #include "engine/ui/UiControls.hpp"
+#include "engine/ui/UiLayout.hpp"
 
 #include <algorithm>
 #include <array>
@@ -15,12 +16,56 @@ namespace sokoban {
 namespace {
 
 using uiControls::ButtonTone;
+using uiControls::ChoiceOption;
 
-constexpr std::array<int, 4> sampleCounts { 1, 2, 4, 8 };
-constexpr std::array<std::string_view, 4> sampleLabels { "Off", "2x", "4x", "8x" };
-constexpr std::array<int, 5> renderScales { 100, 75, 67, 50, 25 };
-constexpr std::array<std::string_view, 5> renderScaleLabels {
-    "100%", "75%", "67%", "50%", "25%",
+enum class MainRow {
+    Graphics,
+    Audio,
+    Quit,
+    Count,
+};
+
+enum class GraphicsRow {
+    AntiAliasing,
+    RenderScalePreset,
+    CustomRenderScale,
+    AmbientOcclusion,
+    Display,
+    Back,
+    Count,
+};
+
+enum class AudioRow {
+    MasterVolume,
+    MusicVolume,
+    Back,
+    Count,
+};
+
+enum class QuitRow {
+    Cancel,
+    Confirm,
+    Count,
+};
+
+template <typename Row>
+constexpr int rowIndex(Row row)
+{
+    return static_cast<int>(row);
+}
+
+constexpr std::array sampleCountChoices {
+    ChoiceOption { 1, "Off" },
+    ChoiceOption { 2, "2x" },
+    ChoiceOption { 4, "4x" },
+    ChoiceOption { 8, "8x" },
+};
+constexpr std::array renderScaleChoices {
+    ChoiceOption { 100, "100%" },
+    ChoiceOption { 75, "75%" },
+    ChoiceOption { 67, "67%" },
+    ChoiceOption { 50, "50%" },
+    ChoiceOption { 25, "25%" },
 };
 
 struct DisplayMode {
@@ -41,20 +86,6 @@ constexpr std::array<DisplayMode, 5> displayModes {
 constexpr std::array<std::string_view, displayModes.size()> displayLabels {
     "Fullscreen", "1920 x 1080", "1600 x 900", "1280 x 720", "1024 x 768",
 };
-
-int sampleIndex(int samples)
-{
-    const auto found = std::find(sampleCounts.begin(), sampleCounts.end(), samples);
-    return found == sampleCounts.end() ? 3 : static_cast<int>(found - sampleCounts.begin());
-}
-
-int renderScaleIndex(int percent)
-{
-    const auto found = std::find(renderScales.begin(), renderScales.end(), percent);
-    return found == renderScales.end()
-        ? 0
-        : static_cast<int>(found - renderScales.begin());
-}
 
 int displayIndex(const OptionsMenuSettings& settings)
 {
@@ -80,19 +111,176 @@ UiRect centeredPanel(Vec2 viewport, float desiredHeight)
     };
 }
 
-UiRect contentRect(UiRect panel, float y, float height)
+struct LabeledControlLayout {
+    UiLayoutNode label;
+    UiLayoutNode control;
+};
+
+struct MenuPageLayout {
+    explicit MenuPageLayout(float afterHeader = 28.0f)
+        : tree(UiLayoutAxis::Vertical, { 42.0f, 30.0f, 42.0f, 40.0f })
+    {
+        title = tree.item(tree.root(), 48.0f);
+        tree.spacer(tree.root(), 14.0f);
+        divider = tree.item(tree.root(), 1.0f);
+        tree.spacer(tree.root(), afterHeader);
+    }
+
+    UiLayoutTree tree;
+    UiLayoutNode title {};
+    UiLayoutNode divider {};
+};
+
+LabeledControlLayout addLabeledControl(
+    UiLayoutTree& tree,
+    UiLayoutNode parent,
+    float controlHeight,
+    float gap = 4.0f)
 {
+    const UiLayoutNode group = tree.column(
+        parent, UiLayoutSize::content(), gap);
     return {
-        { panel.position.x + 42.0f, panel.position.y + y },
-        { panel.size.x - 84.0f, height },
+        .label = tree.item(group, 30.0f),
+        .control = tree.item(group, controlHeight),
     };
 }
 
-void drawTitle(UiContext& ui, UiRect panel, std::string_view title)
+struct MainPageLayout : MenuPageLayout {
+    explicit MainPageLayout(UiRect panel)
+    {
+        graphics = tree.item(tree.root(), 62.0f);
+        tree.spacer(tree.root(), 18.0f);
+        audio = tree.item(tree.root(), 62.0f);
+        tree.flexibleSpacer(tree.root());
+        quitDivider = tree.item(tree.root(), 1.0f);
+        tree.spacer(tree.root(), 24.0f);
+        quit = tree.item(tree.root(), 62.0f);
+        tree.arrange(panel);
+    }
+
+    UiLayoutNode graphics {};
+    UiLayoutNode audio {};
+    UiLayoutNode quitDivider {};
+    UiLayoutNode quit {};
+};
+
+struct GraphicsPageLayout : MenuPageLayout {
+    explicit GraphicsPageLayout(UiRect panel)
+    {
+        antiAliasing = addLabeledControl(tree, tree.root(), 52.0f);
+        tree.spacer(tree.root(), 10.0f);
+        renderScale = addLabeledControl(tree, tree.root(), 48.0f);
+        tree.spacer(tree.root(), 8.0f);
+
+        const UiLayoutNode customGroup = tree.column(
+            tree.root(), UiLayoutSize::content(), 4.0f);
+        customToggle = tree.item(customGroup, 44.0f);
+        customSlider = tree.item(customGroup, 32.0f);
+        internalResolution = tree.item(customGroup, 24.0f);
+
+        tree.spacer(tree.root(), 8.0f);
+        ambientOcclusion = tree.item(tree.root(), 48.0f);
+        tree.spacer(tree.root(), 8.0f);
+        display = addLabeledControl(tree, tree.root(), 54.0f);
+        tree.flexibleSpacer(tree.root());
+        back = tree.item(tree.root(), 52.0f);
+        tree.arrange(panel);
+    }
+
+    LabeledControlLayout antiAliasing {};
+    LabeledControlLayout renderScale {};
+    UiLayoutNode customToggle {};
+    UiLayoutNode customSlider {};
+    UiLayoutNode internalResolution {};
+    UiLayoutNode ambientOcclusion {};
+    LabeledControlLayout display {};
+    UiLayoutNode back {};
+};
+
+struct AudioPageLayout : MenuPageLayout {
+    explicit AudioPageLayout(UiRect panel)
+    {
+        masterVolume = addLabeledControl(tree, tree.root(), 34.0f, 8.0f);
+        tree.spacer(tree.root(), 38.0f);
+        musicVolume = addLabeledControl(tree, tree.root(), 34.0f, 8.0f);
+        tree.flexibleSpacer(tree.root());
+        back = tree.item(tree.root(), 52.0f);
+        tree.arrange(panel);
+    }
+
+    LabeledControlLayout masterVolume {};
+    LabeledControlLayout musicVolume {};
+    UiLayoutNode back {};
+};
+
+struct QuitPageLayout : MenuPageLayout {
+    explicit QuitPageLayout(UiRect panel)
+    {
+        tree.spacer(tree.root(), 20.0f);
+        message = tree.item(tree.root(), 44.0f);
+        tree.spacer(tree.root(), 74.0f);
+        cancel = tree.item(tree.root(), 58.0f);
+        tree.spacer(tree.root(), 20.0f);
+        quit = tree.item(tree.root(), 58.0f);
+        tree.flexibleSpacer(tree.root());
+        tree.arrange(panel);
+    }
+
+    UiLayoutNode message {};
+    UiLayoutNode cancel {};
+    UiLayoutNode quit {};
+};
+
+void drawTitle(
+    UiContext& ui,
+    const MenuPageLayout& layout,
+    std::string_view title)
 {
-    ui.centeredText(contentRect(panel, 30.0f, 48.0f), title,
+    ui.centeredText(layout.tree.rect(layout.title), title,
         { 0.94f, 0.96f, 0.93f, 1.0f }, 36.0f);
-    ui.divider(contentRect(panel, 92.0f, 1.0f));
+    ui.divider(layout.tree.rect(layout.divider));
+}
+
+void drawTrailingText(
+    UiContext& ui,
+    UiRect row,
+    std::string_view text,
+    Vec4 color,
+    float size)
+{
+    const Vec2 measured = ui.measureText(text, size);
+    ui.text({
+        row.position.x + row.size.x - measured.x,
+        row.position.y + (row.size.y - size) * 0.5f,
+    }, text, color, size);
+}
+
+bool cycleIndex(
+    int& value,
+    int count,
+    bool previous,
+    bool next)
+{
+    const int oldValue = value;
+    if (previous) {
+        value = (value + count - 1) % count;
+    }
+    if (next) {
+        value = (value + 1) % count;
+    }
+    return value != oldValue;
+}
+
+bool adjustInt(int& value, bool decrease, bool increase, int step = 1)
+{
+    const int oldValue = value;
+    if (decrease) {
+        value -= step;
+    }
+    if (increase) {
+        value += step;
+    }
+    return value != oldValue;
 }
 
 } // namespace
@@ -173,31 +361,33 @@ OptionsMenuResult OptionsMenu::drawMain(
     UiRect panel,
     const OptionsMenuInput& input)
 {
-    navigateRows(input, 3);
-    drawTitle(ui, panel, "OPTIONS");
+    navigateRows(input, rowIndex(MainRow::Count));
 
-    const UiRect graphics = contentRect(panel, 132.0f, 62.0f);
-    if (uiControls::button(ui, "options.graphics", graphics, "Graphics", {
+    MainPageLayout layout(panel);
+
+    drawTitle(ui, layout, "OPTIONS");
+    if (uiControls::button(
+            ui, "options.graphics", layout.tree.rect(layout.graphics), "Graphics", {
             .tone = ButtonTone::Accent,
-            .focused = selectedRow_ == 0,
-            .activate = input.confirm && selectedRow_ == 0,
+            .focused = selectedRow_ == rowIndex(MainRow::Graphics),
+            .activate = input.confirm && selectedRow_ == rowIndex(MainRow::Graphics),
         })) {
         setPage(Page::Graphics);
     }
-    const UiRect audio = contentRect(panel, 212.0f, 62.0f);
-    if (uiControls::button(ui, "options.audio", audio, "Audio", {
-            .focused = selectedRow_ == 1,
-            .activate = input.confirm && selectedRow_ == 1,
+    if (uiControls::button(
+            ui, "options.audio", layout.tree.rect(layout.audio), "Audio", {
+            .focused = selectedRow_ == rowIndex(MainRow::Audio),
+            .activate = input.confirm && selectedRow_ == rowIndex(MainRow::Audio),
         })) {
         setPage(Page::Audio);
     }
 
-    ui.divider(contentRect(panel, panel.size.y - 156.0f, 1.0f));
-    const UiRect quit = contentRect(panel, panel.size.y - 116.0f, 62.0f);
-    if (uiControls::button(ui, "options.quit", quit, "Quit Game", {
+    ui.divider(layout.tree.rect(layout.quitDivider));
+    if (uiControls::button(
+            ui, "options.quit", layout.tree.rect(layout.quit), "Quit Game", {
             .tone = ButtonTone::Danger,
-            .focused = selectedRow_ == 2,
-            .activate = input.confirm && selectedRow_ == 2,
+            .focused = selectedRow_ == rowIndex(MainRow::Quit),
+            .activate = input.confirm && selectedRow_ == rowIndex(MainRow::Quit),
         })) {
         setPage(Page::QuitConfirmation);
     }
@@ -210,74 +400,61 @@ OptionsMenuResult OptionsMenu::drawGraphics(
     Vec2 viewport,
     const OptionsMenuInput& input)
 {
-    navigateRows(input, 6);
+    navigateRows(input, rowIndex(GraphicsRow::Count));
     OptionsMenuResult result;
     if (customRenderScaleDragPending_ && !ui.mouseDown()) {
         customRenderScaleDragPending_ = false;
         result.settingsChanged = true;
     }
-    drawTitle(ui, panel, "GRAPHICS");
 
-    int samples = sampleIndex(settings_.antiAliasingSamples);
-    if (selectedRow_ == 0 && input.left) {
-        samples = (samples + static_cast<int>(sampleCounts.size()) - 1) % static_cast<int>(sampleCounts.size());
-    }
-    if (selectedRow_ == 0 && input.right) {
-        samples = (samples + 1) % static_cast<int>(sampleCounts.size());
-    }
-    ui.text(contentRect(panel, 122.0f, 30.0f).position, "Anti-aliasing",
+    GraphicsPageLayout layout(panel);
+
+    drawTitle(ui, layout, "GRAPHICS");
+
+    const bool antiAliasingFocused =
+        selectedRow_ == rowIndex(GraphicsRow::AntiAliasing);
+    ui.text(layout.tree.rect(layout.antiAliasing.label).position, "Anti-aliasing",
         { 0.83f, 0.86f, 0.83f, 1.0f }, 22.0f);
     if (uiControls::segmentedControl(
-            ui, "graphics.msaa", contentRect(panel, 158.0f, 52.0f),
-            sampleLabels, samples, selectedRow_ == 0)) {
-        result.settingsChanged = true;
-    }
-    if (settings_.antiAliasingSamples != sampleCounts[static_cast<size_t>(samples)]) {
-        settings_.antiAliasingSamples = sampleCounts[static_cast<size_t>(samples)];
+            ui, "graphics.msaa", layout.tree.rect(layout.antiAliasing.control),
+            sampleCountChoices, settings_.antiAliasingSamples, {
+                .focused = antiAliasingFocused,
+                .selectPrevious = antiAliasingFocused && input.left,
+                .selectNext = antiAliasingFocused && input.right,
+            })) {
         result.settingsChanged = true;
     }
 
-    int renderScale = renderScaleIndex(settings_.renderScalePercent);
-    bool presetChosen = false;
-    if (selectedRow_ == 1 && input.left) {
-        renderScale = (renderScale + static_cast<int>(renderScales.size()) - 1) %
-            static_cast<int>(renderScales.size());
-        presetChosen = true;
-    }
-    if (selectedRow_ == 1 && input.right) {
-        renderScale = (renderScale + 1) % static_cast<int>(renderScales.size());
-        presetChosen = true;
-    }
-    ui.text(contentRect(panel, 220.0f, 30.0f).position, "Render scale",
+    const bool renderScalePresetFocused =
+        selectedRow_ == rowIndex(GraphicsRow::RenderScalePreset);
+    ui.text(layout.tree.rect(layout.renderScale.label).position, "Render scale",
         { 0.83f, 0.86f, 0.83f, 1.0f }, 22.0f);
-    if (uiControls::segmentedControl(
-            ui, "graphics.render-scale", contentRect(panel, 252.0f, 48.0f),
-            renderScaleLabels, renderScale, selectedRow_ == 1)) {
-        presetChosen = true;
+    const bool presetChosen = uiControls::segmentedControl(
+            ui, "graphics.render-scale", layout.tree.rect(layout.renderScale.control),
+            renderScaleChoices, settings_.renderScalePercent, {
+                .focused = renderScalePresetFocused,
+                .selectPrevious = renderScalePresetFocused && input.left,
+                .selectNext = renderScalePresetFocused && input.right,
+            });
+    if (presetChosen) {
         result.settingsChanged = true;
-    }
-    if (settings_.renderScalePercent != renderScales[static_cast<size_t>(renderScale)]) {
-        settings_.renderScalePercent = renderScales[static_cast<size_t>(renderScale)];
-        result.settingsChanged = true;
-    }
-    if (presetChosen && settings_.customRenderScale) {
-        settings_.customRenderScale = false;
-        result.settingsChanged = true;
+        if (settings_.customRenderScale) {
+            settings_.customRenderScale = false;
+        }
     }
 
+    const bool customRenderScaleFocused =
+        selectedRow_ == rowIndex(GraphicsRow::CustomRenderScale);
     if (uiControls::checkbox(
-            ui, "graphics.custom-render-scale", contentRect(panel, 308.0f, 44.0f),
+            ui, "graphics.custom-render-scale", layout.tree.rect(layout.customToggle),
             "Custom", settings_.customRenderScale,
-            selectedRow_ == 2, input.confirm && selectedRow_ == 2)) {
+            customRenderScaleFocused,
+            input.confirm && customRenderScaleFocused)) {
         result.settingsChanged = true;
     }
-    if (settings_.customRenderScale && selectedRow_ == 2 && input.left) {
-        --settings_.customRenderScalePercent;
-        result.settingsChanged = true;
-    }
-    if (settings_.customRenderScale && selectedRow_ == 2 && input.right) {
-        ++settings_.customRenderScalePercent;
-        result.settingsChanged = true;
+    if (settings_.customRenderScale && customRenderScaleFocused) {
+        result.settingsChanged |= adjustInt(
+            settings_.customRenderScalePercent, input.left, input.right);
     }
     settings_.customRenderScalePercent = normalizedRenderScalePercent(
         settings_.customRenderScalePercent);
@@ -285,9 +462,9 @@ OptionsMenuResult OptionsMenu::drawGraphics(
         static_cast<float>(settings_.customRenderScalePercent) / 100.0f;
     if (uiControls::slider(
             ui, "graphics.custom-render-scale-value",
-            contentRect(panel, 354.0f, 32.0f), customRenderScale,
+            layout.tree.rect(layout.customSlider), customRenderScale,
             0.25f, 1.0f,
-            selectedRow_ == 2 && settings_.customRenderScale,
+            customRenderScaleFocused && settings_.customRenderScale,
             settings_.customRenderScale)) {
         settings_.customRenderScalePercent = static_cast<int>(
             std::round(customRenderScale * 100.0f));
@@ -295,7 +472,8 @@ OptionsMenuResult OptionsMenu::drawGraphics(
     }
     const std::string customScaleText =
         std::to_string(settings_.customRenderScalePercent) + "%";
-    ui.text({ panel.position.x + panel.size.x - 82.0f, panel.position.y + 312.0f },
+    drawTrailingText(
+        ui, layout.tree.rect(layout.customToggle),
         customScaleText,
         settings_.customRenderScale
             ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
@@ -312,31 +490,34 @@ OptionsMenuResult OptionsMenu::drawGraphics(
     const std::string internalResolution =
         std::to_string(internalExtent.width) + " x " +
         std::to_string(internalExtent.height) + " internal";
-    ui.text(contentRect(panel, 394.0f, 24.0f).position, internalResolution,
+    ui.text(layout.tree.rect(layout.internalResolution).position, internalResolution,
         { 0.58f, 0.63f, 0.62f, 1.0f }, 18.0f);
 
+    const bool ambientOcclusionFocused =
+        selectedRow_ == rowIndex(GraphicsRow::AmbientOcclusion);
     if (uiControls::checkbox(
-            ui, "graphics.ao", contentRect(panel, 426.0f, 48.0f),
+            ui, "graphics.ao", layout.tree.rect(layout.ambientOcclusion),
             "Ambient occlusion", settings_.ambientOcclusion,
-            selectedRow_ == 3, input.confirm && selectedRow_ == 3)) {
+            ambientOcclusionFocused,
+            input.confirm && ambientOcclusionFocused)) {
         result.settingsChanged = true;
     }
 
-    int display = displayIndex(settings_);
-    if (selectedRow_ == 4 && input.left) {
-        display = (display + static_cast<int>(displayModes.size()) - 1) % static_cast<int>(displayModes.size());
-    }
-    if (selectedRow_ == 4 && input.right) {
-        display = (display + 1) % static_cast<int>(displayModes.size());
-    }
-    ui.text(contentRect(panel, 486.0f, 30.0f).position, "Display",
+    int selectedDisplay = displayIndex(settings_);
+    const bool displayFocused = selectedRow_ == rowIndex(GraphicsRow::Display);
+    (void)cycleIndex(
+        selectedDisplay,
+        static_cast<int>(displayModes.size()),
+        displayFocused && input.left,
+        displayFocused && input.right);
+    ui.text(layout.tree.rect(layout.display.label).position, "Display",
         { 0.83f, 0.86f, 0.83f, 1.0f }, 22.0f);
     if (uiControls::choiceStepper(
-            ui, "graphics.display", contentRect(panel, 518.0f, 54.0f),
-            displayLabels, display, selectedRow_ == 4)) {
+            ui, "graphics.display", layout.tree.rect(layout.display.control),
+            displayLabels, selectedDisplay, displayFocused)) {
         result.settingsChanged = true;
     }
-    const DisplayMode& mode = displayModes[static_cast<size_t>(display)];
+    const DisplayMode& mode = displayModes[static_cast<size_t>(selectedDisplay)];
     if (settings_.fullscreen != mode.fullscreen ||
         (!mode.fullscreen &&
             (settings_.windowWidth != mode.width || settings_.windowHeight != mode.height))) {
@@ -348,10 +529,11 @@ OptionsMenuResult OptionsMenu::drawGraphics(
         result.settingsChanged = true;
     }
 
-    const UiRect backButton = contentRect(panel, panel.size.y - 92.0f, 52.0f);
-    if (uiControls::button(ui, "graphics.back", backButton, "Back", {
-        .focused = selectedRow_ == 5,
-        .activate = input.confirm && selectedRow_ == 5,
+    const bool backFocused = selectedRow_ == rowIndex(GraphicsRow::Back);
+    if (uiControls::button(
+            ui, "graphics.back", layout.tree.rect(layout.back), "Back", {
+        .focused = backFocused,
+        .activate = input.confirm && backFocused,
         })) {
         setPage(Page::Main);
     }
@@ -363,48 +545,58 @@ OptionsMenuResult OptionsMenu::drawAudio(
     UiRect panel,
     const OptionsMenuInput& input)
 {
-    navigateRows(input, 3);
+    navigateRows(input, rowIndex(AudioRow::Count));
     OptionsMenuResult result;
-    drawTitle(ui, panel, "AUDIO");
 
-    auto keyboardAdjust = [&](int row, float& value) {
+    AudioPageLayout layout(panel);
+
+    drawTitle(ui, layout, "AUDIO");
+
+    auto keyboardAdjust = [&](AudioRow row, float& value) {
         const float old = value;
-        if (selectedRow_ == row && input.left) {
+        if (selectedRow_ == rowIndex(row) && input.left) {
             value -= 0.05f;
         }
-        if (selectedRow_ == row && input.right) {
+        if (selectedRow_ == rowIndex(row) && input.right) {
             value += 0.05f;
         }
         value = std::clamp(value, 0.0f, 1.0f);
         return std::abs(value - old) > 0.0001f;
     };
 
-    ui.text(contentRect(panel, 130.0f, 30.0f).position, "Master volume",
+    const bool masterVolumeFocused =
+        selectedRow_ == rowIndex(AudioRow::MasterVolume);
+    ui.text(layout.tree.rect(layout.masterVolume.label).position, "Master volume",
         { 0.83f, 0.86f, 0.83f, 1.0f }, 22.0f);
-    result.settingsChanged |= keyboardAdjust(0, settings_.masterVolume);
+    result.settingsChanged |= keyboardAdjust(
+        AudioRow::MasterVolume, settings_.masterVolume);
     result.settingsChanged |= uiControls::slider(
-        ui, "audio.master", contentRect(panel, 170.0f, 34.0f),
-        settings_.masterVolume, 0.0f, 1.0f, selectedRow_ == 0);
+        ui, "audio.master", layout.tree.rect(layout.masterVolume.control),
+        settings_.masterVolume, 0.0f, 1.0f, masterVolumeFocused);
     const int masterPercent = static_cast<int>(std::round(settings_.masterVolume * 100.0f));
     const std::string masterText = std::to_string(masterPercent) + "%";
-    ui.text({ panel.position.x + panel.size.x - 82.0f, panel.position.y + 126.0f },
+    drawTrailingText(ui, layout.tree.rect(layout.masterVolume.label),
         masterText, { 0.68f, 0.88f, 0.82f, 1.0f }, 20.0f);
 
-    ui.text(contentRect(panel, 250.0f, 30.0f).position, "Music volume",
+    const bool musicVolumeFocused =
+        selectedRow_ == rowIndex(AudioRow::MusicVolume);
+    ui.text(layout.tree.rect(layout.musicVolume.label).position, "Music volume",
         { 0.83f, 0.86f, 0.83f, 1.0f }, 22.0f);
-    result.settingsChanged |= keyboardAdjust(1, settings_.musicVolume);
+    result.settingsChanged |= keyboardAdjust(
+        AudioRow::MusicVolume, settings_.musicVolume);
     result.settingsChanged |= uiControls::slider(
-        ui, "audio.music", contentRect(panel, 290.0f, 34.0f),
-        settings_.musicVolume, 0.0f, 1.0f, selectedRow_ == 1);
+        ui, "audio.music", layout.tree.rect(layout.musicVolume.control),
+        settings_.musicVolume, 0.0f, 1.0f, musicVolumeFocused);
     const int musicPercent = static_cast<int>(std::round(settings_.musicVolume * 100.0f));
     const std::string musicText = std::to_string(musicPercent) + "%";
-    ui.text({ panel.position.x + panel.size.x - 82.0f, panel.position.y + 246.0f },
+    drawTrailingText(ui, layout.tree.rect(layout.musicVolume.label),
         musicText, { 0.68f, 0.88f, 0.82f, 1.0f }, 20.0f);
 
-    const UiRect backButton = contentRect(panel, panel.size.y - 92.0f, 52.0f);
-    if (uiControls::button(ui, "audio.back", backButton, "Back", {
-            .focused = selectedRow_ == 2,
-            .activate = input.confirm && selectedRow_ == 2,
+    const bool backFocused = selectedRow_ == rowIndex(AudioRow::Back);
+    if (uiControls::button(
+            ui, "audio.back", layout.tree.rect(layout.back), "Back", {
+            .focused = backFocused,
+            .activate = input.confirm && backFocused,
         })) {
         setPage(Page::Main);
     }
@@ -416,25 +608,30 @@ OptionsMenuResult OptionsMenu::drawQuitConfirmation(
     UiRect panel,
     const OptionsMenuInput& input)
 {
-    navigateRows(input, 2);
-    drawTitle(ui, panel, "QUIT GAME?");
-    ui.centeredText(contentRect(panel, 150.0f, 44.0f),
+    navigateRows(input, rowIndex(QuitRow::Count));
+
+    QuitPageLayout layout(panel);
+
+    drawTitle(ui, layout, "QUIT GAME?");
+    ui.centeredText(layout.tree.rect(layout.message),
         "Your progress is saved automatically.",
         { 0.72f, 0.76f, 0.74f, 1.0f }, 20.0f);
 
-    const UiRect cancel = contentRect(panel, 260.0f, 58.0f);
-    if (uiControls::button(ui, "quit.cancel", cancel, "Cancel", {
-            .focused = selectedRow_ == 0,
-            .activate = input.confirm && selectedRow_ == 0,
+    const bool cancelFocused = selectedRow_ == rowIndex(QuitRow::Cancel);
+    if (uiControls::button(
+            ui, "quit.cancel", layout.tree.rect(layout.cancel), "Cancel", {
+            .focused = cancelFocused,
+            .activate = input.confirm && cancelFocused,
         })) {
         setPage(Page::Main);
     }
-    const UiRect quit = contentRect(panel, 338.0f, 58.0f);
     OptionsMenuResult result;
-    if (uiControls::button(ui, "quit.confirm", quit, "Quit Game", {
+    const bool quitFocused = selectedRow_ == rowIndex(QuitRow::Confirm);
+    if (uiControls::button(
+            ui, "quit.confirm", layout.tree.rect(layout.quit), "Quit Game", {
             .tone = ButtonTone::Danger,
-            .focused = selectedRow_ == 1,
-            .activate = input.confirm && selectedRow_ == 1,
+            .focused = quitFocused,
+            .activate = input.confirm && quitFocused,
         })) {
         result.quitRequested = true;
     }

@@ -133,30 +133,47 @@ bool segmentedControl(
     UiContext& ui,
     std::string_view id,
     UiRect rect,
-    std::span<const std::string_view> labels,
-    int& selected,
-    bool focused)
+    std::span<const ChoiceOption> choices,
+    int& selectedValue,
+    SegmentedControlOptions options)
 {
-    if (labels.empty()) {
+    if (choices.empty()) {
         return false;
     }
-    const int oldSelected = selected;
-    selected = std::clamp(selected, 0, static_cast<int>(labels.size()) - 1);
-    const float segmentWidth = rect.size.x / static_cast<float>(labels.size());
-    for (size_t index = 0; index < labels.size(); ++index) {
+    const int oldValue = selectedValue;
+    const auto selected = std::ranges::find(
+        choices, selectedValue, &ChoiceOption::value);
+    int selectedIndex = selected == choices.end()
+        ? 0
+        : static_cast<int>(selected - choices.begin());
+    if (options.selectPrevious) {
+        selectedIndex = (selectedIndex + static_cast<int>(choices.size()) - 1) %
+            static_cast<int>(choices.size());
+    }
+    if (options.selectNext) {
+        selectedIndex = (selectedIndex + 1) % static_cast<int>(choices.size());
+    }
+    selectedValue = choices[static_cast<size_t>(selectedIndex)].value;
+
+    const float segmentWidth = rect.size.x / static_cast<float>(choices.size());
+    for (size_t index = 0; index < choices.size(); ++index) {
         const UiRect segment {
             { rect.position.x + segmentWidth * static_cast<float>(index), rect.position.y },
             { segmentWidth, rect.size.y },
         };
         const std::string segmentId = std::string(id) + "." + std::to_string(index);
-        if (button(ui, segmentId, segment, labels[index], {
-                .tone = static_cast<int>(index) == selected ? ButtonTone::Accent : ButtonTone::Normal,
-                .focused = focused && static_cast<int>(index) == selected,
+        if (button(ui, segmentId, segment, choices[index].label, {
+                .tone = static_cast<int>(index) == selectedIndex
+                    ? ButtonTone::Accent
+                    : ButtonTone::Normal,
+                .focused = options.focused &&
+                    static_cast<int>(index) == selectedIndex,
             })) {
-            selected = static_cast<int>(index);
+            selectedIndex = static_cast<int>(index);
+            selectedValue = choices[index].value;
         }
     }
-    return selected != oldSelected;
+    return selectedValue != oldValue;
 }
 
 bool choiceStepper(

@@ -211,11 +211,18 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
 - `src/engine/ui/Ui.*`: immediate draw/input context for solid rectangles,
   textured glyphs, panels, dividers, hit testing, and drag ownership.
 - `src/engine/ui/UiControls.*`: reusable styled buttons, sliders, checkboxes,
-  segmented selectors, and choice steppers with mouse/focus states.
+  segmented selectors, and choice steppers with mouse/focus states. Segmented
+  controls consume typed `{ value, label }` choices and bind directly to the
+  selected value, avoiding parallel value/label arrays and index plumbing.
+- `src/engine/ui/UiLayout.*`: frame-local hierarchical layout tree for nested
+  vertical/horizontal flows, content-sized groups, fixed items, padding/gaps,
+  weighted flexible space, and overflow diagnostics. Controls still consume
+  final `UiRect`s, while callers describe relationships instead of coordinates.
 - `src/engine/ui/OptionsMenu.*`: headless menu page/navigation state and
-  composition for Graphics, Audio, and separated quit confirmation. It emits a
-  platform-neutral settings snapshot; `Application` applies changes to the
-  window, renderer, presentation, audio, and profile owners.
+  tree-based composition for Graphics, Audio, and separated quit confirmation.
+  Named row enums replace positional focus indexes. It emits a platform-neutral
+  settings snapshot; `Application` applies changes to the window, renderer,
+  presentation, audio, and profile owners.
 - `shaders/`: GLSL shader sources compiled to SPIR-V by CMake.
 - `levels/`: source `.scr` level files copied into `build/assets/levels`.
 - `assets/`: source KayKit asset packs.
@@ -531,6 +538,9 @@ The custom UI currently provides:
   measurement, and Vulkan glyph sampling.
 - Reusable buttons, sliders, checkboxes, segmented controls, choice steppers,
   panels, dividers, mouse interaction, and keyboard/gamepad focus styling.
+- Nested row/column layout trees with padding, gaps, content measurement,
+  flexible space, and overflow detection; inserting a component shifts later
+  siblings automatically and bottom actions remain anchored.
 - A pause/options flow with Graphics (MSAA, internal render-scale presets plus
   a persistent Custom checkbox/25-100% slider and resolved pixel dimensions,
   AO, fullscreen/window sizes), Audio
@@ -539,8 +549,8 @@ The custom UI currently provides:
   confirmation, and Escape/Start back navigation.
 
 It still lacks wrapping, kerning, localization, accessibility-driven scaling,
-and a general layout engine; add those within these focused modules rather than
-moving player UI into Debug-only ImGui.
+scroll containers, and constraint-based responsive reflow; add those within
+these focused modules rather than moving player UI into Debug-only ImGui.
 
 ## Recent Work Summary
 
@@ -691,6 +701,8 @@ At the time this handoff was updated:
   plus a persistent 25-100% custom slider; scene attachments are recreated
   without changing the native window/UI resolution. Slider drags update the
   menu immediately but defer the expensive Vulkan recreation until release.
+  Options pages now use `UiLayout` trees and named navigation rows instead of
+  absolute per-control positions and numeric focus indexes.
 
 Known useful verification commands:
 

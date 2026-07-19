@@ -19,6 +19,17 @@ struct ButtonOptions {
     bool activate = false;
 };
 
+struct ChoiceOption {
+    int value = 0;
+    std::string_view label;
+};
+
+struct SegmentedControlOptions {
+    bool focused = false;
+    bool selectPrevious = false;
+    bool selectNext = false;
+};
+
 [[nodiscard]] bool button(
     UiContext& ui,
     std::string_view id,
@@ -46,9 +57,9 @@ struct ButtonOptions {
     UiContext& ui,
     std::string_view id,
     UiRect rect,
-    std::span<const std::string_view> labels,
-    int& selected,
-    bool focused = false);
+    std::span<const ChoiceOption> choices,
+    int& selectedValue,
+    SegmentedControlOptions options = {});
 [[nodiscard]] bool choiceStepper(
     UiContext& ui,
     std::string_view id,

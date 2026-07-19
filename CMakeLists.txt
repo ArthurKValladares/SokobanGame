@@ -173,6 +173,7 @@ add_executable(sokoban
     src/engine/ui/OptionsMenu.cpp
     src/engine/ui/Ui.cpp
     src/engine/ui/UiControls.cpp
+    src/engine/ui/UiLayout.cpp
 )
 foreach(imgui_source IN LISTS SOKOBAN_IMGUI_SOURCES)
     target_sources(sokoban PRIVATE $<$<CONFIG:Debug>:${imgui_source}>)
@@ -345,6 +346,7 @@ if(SOKOBAN_BUILD_TESTS)
         src/engine/ui/OptionsMenu.cpp
         src/engine/ui/Ui.cpp
         src/engine/ui/UiControls.cpp
+        src/engine/ui/UiLayout.cpp
         src/engine/render/RenderResolution.cpp
     )
     target_include_directories(sokoban_ui_tests PRIVATE src)

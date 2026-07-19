@@ -2,8 +2,10 @@
 #include "engine/ui/OptionsMenu.hpp"
 #include "engine/ui/Ui.hpp"
 #include "engine/ui/UiControls.hpp"
+#include "engine/ui/UiLayout.hpp"
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <iostream>
 
@@ -72,12 +74,75 @@ void testReusableControls()
         return command.kind == sokoban::UiDrawKind::Solid && command.color.w < 0.5f;
     }));
 
+    constexpr std::array choices {
+        sokoban::uiControls::ChoiceOption { 10, "Ten" },
+        sokoban::uiControls::ChoiceOption { 20, "Twenty" },
+        sokoban::uiControls::ChoiceOption { 30, "Thirty" },
+    };
+    int selectedChoice = 20;
+    ui.beginFrame({ 400.0f, 200.0f }, {}, false, false);
+    CHECK(sokoban::uiControls::segmentedControl(
+        ui, "choices", { { 10.0f, 110.0f }, { 300.0f, 40.0f } },
+        choices, selectedChoice, { .selectNext = true }));
+    CHECK(selectedChoice == 30);
+
+    ui.beginFrame({ 400.0f, 200.0f }, { 50.0f, 130.0f }, true, true);
+    CHECK(sokoban::uiControls::segmentedControl(
+        ui, "choices", { { 10.0f, 110.0f }, { 300.0f, 40.0f } },
+        choices, selectedChoice));
+    CHECK(selectedChoice == 10);
+
     bool checked = false;
     ui.beginFrame({ 400.0f, 200.0f }, { 20.0f, 135.0f }, true, true);
     CHECK(sokoban::uiControls::checkbox(
         ui, "check", { { 10.0f, 120.0f }, { 180.0f, 48.0f } },
         "Enabled", checked));
     CHECK(checked);
+}
+
+void testLayoutTree()
+{
+    sokoban::UiLayoutTree layout(
+        sokoban::UiLayoutAxis::Vertical,
+        { 10.0f, 10.0f, 10.0f, 10.0f });
+    const sokoban::UiLayoutNode first = layout.item(layout.root(), 20.0f);
+    const sokoban::UiLayoutNode group = layout.column(
+        layout.root(), sokoban::UiLayoutSize::content(), 5.0f);
+    (void)layout.item(group, 10.0f);
+    (void)layout.item(group, 15.0f);
+    const sokoban::UiLayoutNode afterGroup = layout.item(layout.root(), 20.0f);
+    layout.flexibleSpacer(layout.root());
+    const sokoban::UiLayoutNode bottom = layout.item(layout.root(), 30.0f);
+
+    layout.arrange({ { 0.0f, 0.0f }, { 200.0f, 200.0f } });
+    CHECK(!layout.overflowed());
+    CHECK(layout.rect(first).position.y == 10.0f);
+    CHECK(layout.rect(afterGroup).position.y == 60.0f);
+    CHECK(layout.rect(bottom).position.y == 160.0f);
+
+    (void)layout.item(group, 10.0f);
+    layout.arrange({ { 0.0f, 0.0f }, { 200.0f, 200.0f } });
+    CHECK(layout.rect(afterGroup).position.y == 75.0f);
+    CHECK(layout.rect(bottom).position.y == 160.0f);
+
+    sokoban::UiLayoutTree rowLayout(
+        sokoban::UiLayoutAxis::Vertical,
+        { 10.0f, 10.0f, 10.0f, 10.0f });
+    const sokoban::UiLayoutNode row = rowLayout.row(
+        rowLayout.root(), sokoban::UiLayoutSize::fixed(40.0f), 10.0f);
+    const sokoban::UiLayoutNode fixed = rowLayout.item(row, 50.0f);
+    const sokoban::UiLayoutNode fill = rowLayout.item(
+        row, sokoban::UiLayoutSize::fill(), sokoban::UiLayoutSize::fill());
+    rowLayout.arrange({ { 0.0f, 0.0f }, { 200.0f, 80.0f } });
+    CHECK(rowLayout.rect(fixed).size.x == 50.0f);
+    CHECK(rowLayout.rect(fill).position.x == 70.0f);
+    CHECK(rowLayout.rect(fill).size.x == 120.0f);
+
+    sokoban::UiLayoutTree overflowing;
+    (void)overflowing.item(overflowing.root(), 80.0f);
+    (void)overflowing.item(overflowing.root(), 80.0f);
+    overflowing.arrange({ { 0.0f, 0.0f }, { 100.0f, 100.0f } });
+    CHECK(overflowing.overflowed());
 }
 
 void testOptionsNavigationAndSettings()
@@ -161,6 +226,7 @@ int main()
 {
     testFontAtlasAndText();
     testReusableControls();
+    testLayoutTree();
     testOptionsNavigationAndSettings();
 
     if (failures == 0) {
