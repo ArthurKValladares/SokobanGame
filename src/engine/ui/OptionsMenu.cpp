@@ -23,10 +23,36 @@ using uiControls::ChoiceOption;
 enum class MainRow {
     Graphics,
     Audio,
+    Controls,
     Title,
     Quit,
     Count,
 };
+
+// The Controls page lists these remappable gameplay actions in order,
+// followed by Reset To Defaults and Back rows. Menu navigation stays fixed
+// so a bad remap cannot lock the player out of the menus.
+constexpr std::array remappableActions {
+    InputAction::MoveUp,
+    InputAction::MoveDown,
+    InputAction::MoveLeft,
+    InputAction::MoveRight,
+    InputAction::Undo,
+    InputAction::Restart,
+};
+
+constexpr std::array<std::string_view, remappableActions.size()> remappableActionLabels {
+    "Move up",
+    "Move down",
+    "Move left",
+    "Move right",
+    "Undo",
+    "Restart",
+};
+
+constexpr int controlsResetRow = static_cast<int>(remappableActions.size());
+constexpr int controlsBackRow = controlsResetRow + 1;
+constexpr int controlsRowCount = controlsBackRow + 1;
 
 enum class GraphicsRow {
     AntiAliasing,
@@ -154,6 +180,8 @@ struct MainPageLayout : MenuPageLayout {
         graphics = tree.item(tree.root(), 62.0f);
         tree.spacer(tree.root(), 18.0f);
         audio = tree.item(tree.root(), 62.0f);
+        tree.spacer(tree.root(), 18.0f);
+        controls = tree.item(tree.root(), 62.0f);
         if (withTitleExit) {
             tree.spacer(tree.root(), 18.0f);
             title = tree.item(tree.root(), 62.0f);
@@ -167,9 +195,33 @@ struct MainPageLayout : MenuPageLayout {
 
     UiLayoutNode graphics {};
     UiLayoutNode audio {};
+    UiLayoutNode controls {};
     UiLayoutNode title {};
     UiLayoutNode quitDivider {};
     UiLayoutNode quit {};
+};
+
+struct ControlsPageLayout : MenuPageLayout {
+    explicit ControlsPageLayout(UiRect panel)
+        : MenuPageLayout(18.0f)
+    {
+        for (UiLayoutNode& action : actions) {
+            action = tree.item(tree.root(), 46.0f);
+            tree.spacer(tree.root(), 8.0f);
+        }
+        tree.spacer(tree.root(), 6.0f);
+        prompt = tree.item(tree.root(), 26.0f);
+        tree.flexibleSpacer(tree.root());
+        reset = tree.item(tree.root(), 48.0f);
+        tree.spacer(tree.root(), 12.0f);
+        back = tree.item(tree.root(), 48.0f);
+        tree.arrange(panel);
+    }
+
+    std::array<UiLayoutNode, remappableActions.size()> actions {};
+    UiLayoutNode prompt {};
+    UiLayoutNode reset {};
+    UiLayoutNode back {};
 };
 
 struct GraphicsPageLayout : MenuPageLayout {
@@ -312,11 +364,37 @@ void OptionsMenu::back()
     if (!open_) {
         return;
     }
+    if (capturingAction_) {
+        capturingAction_.reset();
+        return;
+    }
     if (page_ == Page::Main) {
         close();
     } else {
         setPage(Page::Main);
     }
+}
+
+void OptionsMenu::provideBindingCandidate(const InputBinding& candidate)
+{
+    if (!capturingAction_) {
+        return;
+    }
+    // Escape stays capturing here and cancels through the caller's MenuBack
+    // routing; Start cancels directly because its raw event is suppressed.
+    // Neither can be bound or stolen from the menus.
+    if (const KeyboardBinding* key = std::get_if<KeyboardBinding>(&candidate);
+        key != nullptr && key->scancode == "Escape") {
+        return;
+    }
+    if (const GamepadButtonBinding* button = std::get_if<GamepadButtonBinding>(&candidate);
+        button != nullptr && button->button == "start") {
+        capturingAction_.reset();
+        return;
+    }
+    assignBinding(settings_.input, *capturingAction_, candidate);
+    capturingAction_.reset();
+    bindingAssigned_ = true;
 }
 
 void OptionsMenu::requestQuitConfirmation()
@@ -335,7 +413,9 @@ OptionsMenuResult OptionsMenu::draw(
     }
 
     ui.rect({ { 0.0f, 0.0f }, viewport }, { 0.015f, 0.020f, 0.021f, 0.78f });
-    const float height = page_ == Page::Graphics ? 740.0f : 540.0f;
+    const float height = page_ == Page::Graphics
+        ? 740.0f
+        : (page_ == Page::Controls ? 700.0f : 540.0f);
     const UiRect panel = centeredPanel(viewport, height);
     ui.panel(panel);
 
@@ -343,6 +423,7 @@ OptionsMenuResult OptionsMenu::draw(
     case Page::Main: return drawMain(ui, panel, input);
     case Page::Graphics: return drawGraphics(ui, panel, viewport, input);
     case Page::Audio: return drawAudio(ui, panel, input);
+    case Page::Controls: return drawControls(ui, panel, input);
     case Page::QuitConfirmation: return drawQuitConfirmation(ui, panel, input);
     }
     return {};
@@ -363,6 +444,7 @@ void OptionsMenu::setPage(Page page)
     page_ = page;
     selectedRow_ = 0;
     customRenderScaleDragPending_ = false;
+    capturingAction_.reset();
 }
 
 OptionsMenuResult OptionsMenu::drawMain(
@@ -375,6 +457,7 @@ OptionsMenuResult OptionsMenu::drawMain(
     const int quitRowIndex = allowTitleExit_
         ? rowIndex(MainRow::Quit)
         : rowIndex(MainRow::Title);
+    // (Controls precedes Title/Quit and is always present.)
     navigateRows(input, quitRowIndex + 1);
 
     MainPageLayout layout(panel, allowTitleExit_);
@@ -395,6 +478,13 @@ OptionsMenuResult OptionsMenu::drawMain(
             .activate = input.confirm && selectedRow_ == rowIndex(MainRow::Audio),
         })) {
         setPage(Page::Audio);
+    }
+    if (uiControls::button(
+            ui, "options.controls", layout.tree.rect(layout.controls), "Controls", {
+            .focused = selectedRow_ == rowIndex(MainRow::Controls),
+            .activate = input.confirm && selectedRow_ == rowIndex(MainRow::Controls),
+        })) {
+        setPage(Page::Controls);
     }
     if (allowTitleExit_ &&
         uiControls::button(
@@ -620,6 +710,85 @@ OptionsMenuResult OptionsMenu::drawAudio(
             ui, "audio.back", layout.tree.rect(layout.back), "Back", {
             .focused = backFocused,
             .activate = input.confirm && backFocused,
+        })) {
+        setPage(Page::Main);
+    }
+    return result;
+}
+
+OptionsMenuResult OptionsMenu::drawControls(
+    UiContext& ui,
+    UiRect panel,
+    const OptionsMenuInput& input)
+{
+    OptionsMenuResult result;
+    if (bindingAssigned_) {
+        bindingAssigned_ = false;
+        result.settingsChanged = true;
+    }
+
+    // Navigation freezes while a capture is pending; Escape/Start cancel via
+    // back() in the caller.
+    if (!capturingAction_) {
+        navigateRows(input, controlsRowCount);
+    }
+
+    ControlsPageLayout layout(panel);
+    drawTitle(ui, layout, "CONTROLS");
+
+    for (std::size_t i = 0; i < remappableActions.size(); ++i) {
+        const InputAction action = remappableActions[i];
+        const bool focused = selectedRow_ == static_cast<int>(i);
+        const bool capturingThis = capturingAction_ == action;
+        const UiRect row = layout.tree.rect(layout.actions[i]);
+        if (uiControls::button(
+                ui, std::string("controls.action-") + std::to_string(i), row,
+                remappableActionLabels[i], {
+                .tone = capturingThis
+                    ? uiControls::ButtonTone::Accent
+                    : uiControls::ButtonTone::Normal,
+                .focused = focused,
+                .activate = input.confirm && focused && !capturingAction_,
+            })) {
+            capturingAction_ = action;
+        }
+        drawTrailingText(
+            ui, row,
+            capturingThis
+                ? "Press a key or button..."
+                : actionBindingsDisplay(settings_.input, action),
+            capturingThis
+                ? Vec4 { 0.98f, 0.84f, 0.42f, 1.0f }
+                : (focused
+                        ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
+                        : Vec4 { 0.62f, 0.67f, 0.65f, 1.0f }),
+            18.0f);
+    }
+
+    ui.centeredText(layout.tree.rect(layout.prompt),
+        capturingAction_
+            ? "Esc or Start cancels. Rebinding steals duplicates."
+            : "Confirm a row to rebind it. Keyboard and pad bindings coexist.",
+        { 0.58f, 0.63f, 0.62f, 1.0f }, 16.0f);
+
+    const bool resetFocused = selectedRow_ == controlsResetRow;
+    if (uiControls::button(
+            ui, "controls.reset", layout.tree.rect(layout.reset),
+            "Reset To Defaults", {
+            .focused = resetFocused,
+            .activate = input.confirm && resetFocused && !capturingAction_,
+        })) {
+        if (!(settings_.input == defaultInputBindings())) {
+            settings_.input = defaultInputBindings();
+            result.settingsChanged = true;
+        }
+    }
+
+    const bool backFocused = selectedRow_ == controlsBackRow;
+    if (uiControls::button(
+            ui, "controls.back", layout.tree.rect(layout.back), "Back", {
+            .focused = backFocused,
+            .activate = input.confirm && backFocused && !capturingAction_,
         })) {
         setPage(Page::Main);
     }

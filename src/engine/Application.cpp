@@ -156,6 +156,17 @@ void Application::run()
         while (SDL_PollEvent(&event)) {
             renderer_.handleEvent(event);
 
+            // While the Controls page listens for a binding, raw key/pad
+            // events become candidates instead of navigation; keys bound to
+            // MenuBack still pass through so Escape can cancel the capture.
+            const bool capturingBinding = optionsMenu_.capturingBinding();
+            if (capturingBinding) {
+                if (const std::optional<InputBinding> candidate =
+                        InputState::bindingCandidate(event)) {
+                    optionsMenu_.provideBindingCandidate(*candidate);
+                }
+            }
+
             const bool isKeyboardEvent =
                 event.type == SDL_EVENT_KEY_DOWN ||
                 event.type == SDL_EVENT_KEY_UP;
@@ -185,7 +196,14 @@ void Application::run()
                 shellMenuOpen() ||
                 !renderer_.wantsMouseCapture() ||
                 event.type == SDL_EVENT_MOUSE_BUTTON_UP;
-            if (allowKeyboardInput && allowMouseInput) {
+            const bool suppressForCapture = capturingBinding &&
+                ((isKeyboardEvent &&
+                     !input_.keyBoundToAction(
+                         event.key.scancode, InputAction::MenuBack)) ||
+                    event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ||
+                    event.type == SDL_EVENT_GAMEPAD_BUTTON_UP ||
+                    event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION);
+            if (!suppressForCapture && allowKeyboardInput && allowMouseInput) {
                 input_.handleEvent(event);
             }
 
@@ -740,6 +758,7 @@ OptionsMenuSettings Application::optionsMenuSettings() const
         .windowHeight = playerProfile_.video.windowHeight,
         .masterVolume = playerProfile_.audio.masterVolume,
         .musicVolume = playerProfile_.audio.musicVolume,
+        .input = playerProfile_.input,
     };
 }
 
@@ -758,6 +777,10 @@ void Application::applyOptionsMenuSettings(const OptionsMenuSettings& settings)
 
     playerProfile_.audio.masterVolume = settings.masterVolume;
     playerProfile_.audio.musicVolume = settings.musicVolume;
+    if (!(playerProfile_.input == settings.input)) {
+        playerProfile_.input = settings.input;
+        input_.setBindings(playerProfile_.input);
+    }
     playerProfile_.normalize();
 
     if (oldVideo.antiAliasingSamples != playerProfile_.video.antiAliasingSamples) {

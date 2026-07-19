@@ -65,7 +65,28 @@ struct InputBindings {
     bool operator==(const InputBindings&) const = default;
 };
 
+enum class BindingDeviceClass {
+    Keyboard,
+    Gamepad,
+};
+
 [[nodiscard]] InputBindings defaultInputBindings();
+[[nodiscard]] BindingDeviceClass bindingDeviceClass(const InputBinding& binding);
+// Short human-readable label, e.g. "W", "Pad dpup", or "Pad lefty-".
+[[nodiscard]] std::string bindingDisplayName(const InputBinding& binding);
+// One display string for every binding of an action, joined with " / ";
+// "Unbound" when empty.
+[[nodiscard]] std::string actionBindingsDisplay(
+    const InputBindings& bindings,
+    InputAction action);
+// Rebinds `action`: bindings identical to `candidate` are removed from every
+// action (no duplicates), and the action's bindings of the candidate's exact
+// kind (keyboard / pad button / pad axis) are replaced by the candidate, so
+// rebinding a d-pad button keeps an existing stick binding and vice versa.
+void assignBinding(
+    InputBindings& bindings,
+    InputAction action,
+    const InputBinding& candidate);
 [[nodiscard]] std::string_view inputActionName(InputAction action);
 [[nodiscard]] InputAction inputActionFromName(std::string_view name);
 [[nodiscard]] std::string_view axisDirectionName(AxisDirection direction);

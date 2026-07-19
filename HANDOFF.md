@@ -106,7 +106,7 @@ cmake --build build --config Debug --target sokoban_profile_tests
 
 Input tests cover keyboard and gamepad action mapping, remapping, button edges,
 stick direction thresholds, invalid-binding diagnostics, and raw SDL event
-capture for a future remapping UI:
+capture for the remapping UI:
 
 ```powershell
 cmake --build build --config Debug --target sokoban_input_tests
@@ -180,8 +180,8 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/AnimationPreviewDebugUi.*`: Debug-only owner of animation asset scanning, clip selection, preview playback state, and renderer preview delegation.
 - `src/engine/AudioSystem.*`: miniaudio-backed sound playback behind a pimpl (`EngineHandle`), so no miniaudio types leak into headers. Preloads the manifest's `footsteps` and `stone-drag` sound sets from the staged runtime content tree with `MA_SOUND_FLAG_DECODE` into never-reallocated `std::vector<ma_sound>`s. `update(dt, playerWalking, pushingStone)` drives the pure `FootstepCadence` struct and plays randomized non-repeating footsteps. Stone dragging uses randomized seamless loops with short fades; music streams one looping track per level with a 600 ms crossfade. Manifest gains remain authored in the Asset Manifest window; profile-backed master, music, and sound-effect bus gains are previewed live and persisted when Debug UI sliders are committed. Audio degrades gracefully (`available()` false, silent) if the device or files are missing.
 - `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, action history, a branch-safe undo stack, automatic world steps, the post-undo automatic-motion pause, and solution-move snapshots that restore correctly across undo/restart. Its committed-state snapshot/restore API persists the exact player/movable state and usable undo chain; restore rejects disconnected or impossible rules transitions without mutating the live session. `reset` always clears undo state at a screen boundary. Emits `Action` snapshots for `Application` to animate. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
-- `src/engine/InputBindings.*`: platform-neutral semantic action and binding model. Each action owns an ordered list of keyboard, gamepad-button, and signed gamepad-axis bindings, allowing keyboard+D-pad+stick defaults and future replacement/appending by a remapping UI without changing gameplay code.
-- `src/engine/Input.*`: SDL3 device owner and action mapper. Tracks raw keyboard/mouse state for editor tooling, hot-plugs gamepads, selects the most recently used controller, normalizes stick axes with threshold/pressed-edge semantics, clears stuck input on focus loss, reports active-device diagnostics, and converts raw SDL events into typed remapping candidates. `Application` consumes semantic actions only for gameplay. Covered by `tests/InputTests.cpp` (`sokoban_input_tests`).
+- `src/engine/InputBindings.*`: platform-neutral semantic action and binding model. Each action owns an ordered list of keyboard, gamepad-button, and signed gamepad-axis bindings, allowing keyboard+D-pad+stick defaults. `assignBinding` implements remapping semantics (removes the identical binding from every action, then replaces only the action's bindings of the same kind, so a d-pad rebind keeps a stick binding); `bindingDisplayName`/`actionBindingsDisplay` provide UI labels.
+- `src/engine/Input.*`: SDL3 device owner and action mapper. Tracks raw keyboard/mouse state for editor tooling, hot-plugs gamepads, selects the most recently used controller, normalizes stick axes with threshold/pressed-edge semantics, clears stuck input on focus loss, reports active-device diagnostics, and converts raw SDL events into typed remapping candidates consumed by the Options > Controls page. `Application` consumes semantic actions only for gameplay. Covered by `tests/InputTests.cpp` (`sokoban_input_tests`).
 - `src/engine/PlayerProfile.*`: current format-8 player progress/settings model and strict JSON codec. Stores unlocked/current level and screen, an active-screen committed gameplay checkpoint with the multi-screen level move/time counters, per-level completion, per-level `reachedScreens` counts (max screen entered + 1, feeding level-select unlocking), optional move/time bests, typed keyboard/controller action bindings, audio/video/accessibility settings, window mode/size, MSAA, AO, preset/custom internal render-scale state, with bounded normalization and explicit format-1..7 migrations (format 7 files decode with zeroed reached counts). `recordReachedScreen` tracks entry, `resetProgress` implements New Game (clears progress/records, keeps every setting), and `recordLevelCompletion(..., recordBests)` skips best records for runs that started past the first screen. Headless and covered with `SaveStore` by `tests/PlayerProfileTests.cpp` (`sokoban_profile_tests`).
 - `src/engine/SaveStore.*`: profile persistence rooted at SDL's platform-appropriate `SDL_GetPrefPath`. Writes validated JSON through same-directory temporary replacement, keeps the previous valid primary as `profile.backup.json`, migrates old versions, archives corrupt primary/backup files for diagnosis, recovers from backup, and restores defaults when both copies are unusable.
 - `src/engine/AsyncSaveStore.*`: dedicated serialized persistence worker around `SaveStore`. Deferred requests coalesce over a configurable window, while JSON encoding, backup rotation, and atomic filesystem replacement always happen off the game thread. Screen transitions and committed settings request immediate worker saves; clean shutdown flushes the newest pending profile. Diagnostics expose request/write/coalescing counts and pending/writing state.
@@ -231,9 +231,17 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/ui/OptionsMenu.*`: headless menu page/navigation state and
   tree-based composition for Graphics, Audio, and separated quit confirmation.
   Named row enums replace positional focus indexes. It emits a platform-neutral
-  settings snapshot; `Application` applies changes to the window, renderer,
-  presentation, audio, and profile owners. `open(settings, allowTitleExit)`
-  adds an "Exit To Title" row only when opened as the in-game pause menu.
+  settings snapshot (which now includes `InputBindings`); `Application` applies
+  changes to the window, renderer, presentation, audio, input, and profile
+  owners. `open(settings, allowTitleExit)` adds an "Exit To Title" row only
+  when opened as the in-game pause menu. The Controls page lists the six
+  remappable gameplay actions (menu navigation is deliberately fixed) with
+  press-to-rebind capture: `capturingBinding()` tells the caller to feed
+  `InputState::bindingCandidate` events into `provideBindingCandidate` and to
+  suppress raw key/pad navigation meanwhile (keys bound to MenuBack still pass
+  so Escape cancels; Start cancels directly). Escape/Start are never bindable,
+  duplicates are stolen from other actions, and Reset To Defaults restores
+  `defaultInputBindings()`.
 - `src/engine/ui/TitleScreen.*`: headless title-screen state (Main with
   Continue/New Game/Level Select/Options/Quit, a destructive-action New Game
   confirmation, and a level/screen select). The caller supplies
@@ -574,8 +582,10 @@ The custom UI currently provides:
 - A pause/options flow with Graphics (MSAA, internal render-scale presets plus
   a persistent Custom checkbox/25-100% slider and resolved pixel dimensions,
   AO, fullscreen/window sizes), Audio
-  (live master/music sliders), an Exit To Title entry in the pause context,
-  and a visually separated confirmed Quit action.
+  (live master/music sliders), Controls (press-to-rebind input remapping with
+  duplicate stealing and reset-to-defaults, persisted to the profile), an
+  Exit To Title entry in the pause context, and a visually separated
+  confirmed Quit action.
 - A player-facing game shell: the game boots to a title screen drawn over the
   loaded checkpoint scene (Continue resumes exactly; New Game confirms and
   wipes progress but keeps settings; Level Select starts any unlocked
@@ -595,6 +605,13 @@ these focused modules rather than moving player UI into Debug-only ImGui.
 
 Major recent additions and fixes:
 
+- Added the Options > Controls input-remapping page: the six gameplay actions
+  render their current keyboard/pad bindings, confirm starts a raw-event
+  capture (fed from `InputState::bindingCandidate` in the SDL loop with
+  navigation suppressed), same-kind bindings are replaced while other-device
+  bindings survive, duplicates are stolen from other actions, Escape/Start
+  cancel and can never be bound, and Reset To Defaults plus profile
+  persistence complete the loop. Covered by new `sokoban_ui_tests` cases.
 - Added the player-facing game shell: headless `TitleScreen` (main menu,
   destructive New Game confirmation, level/screen select fed by per-level
   `TitleLevelInfo`) and `LevelCompleteOverlay` (moves/time vs. bests) drawn
@@ -627,9 +644,9 @@ Major recent additions and fixes:
 - Added a semantic input abstraction and SDL3 gamepad support. Gameplay reads
   actions instead of SDL controls; defaults combine keyboard, D-pad, and left
   stick, with face buttons for undo/restart and Start for menu/back. Controllers
-  hot-plug safely, axis edges use configurable thresholds, format-5 profiles
-  persist typed multi-device bindings, and raw SDL events can be captured as
-  binding candidates by a future remapping screen.
+  hot-plug safely, axis edges use configurable thresholds, profiles persist
+  typed multi-device bindings, and raw SDL events are captured as binding
+  candidates by the Options > Controls remapping page.
 - Added the audio system (miniaudio): randomized non-repeating concrete
   footsteps on a tunable cadence while walking/pushing, a seamlessly looping
   stone-drag sound while a rock is pushed (loop-ready assets generated by

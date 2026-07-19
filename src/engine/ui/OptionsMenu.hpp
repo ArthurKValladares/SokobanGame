@@ -1,6 +1,9 @@
 #pragma once
 
+#include "engine/InputBindings.hpp"
 #include "engine/Math.hpp"
+
+#include <optional>
 
 namespace sokoban {
 
@@ -18,6 +21,7 @@ struct OptionsMenuSettings {
     int windowHeight = 720;
     float masterVolume = 1.0f;
     float musicVolume = 0.5f;
+    InputBindings input = defaultInputBindings();
 
     bool operator==(const OptionsMenuSettings&) const = default;
 };
@@ -42,6 +46,7 @@ public:
         Main,
         Graphics,
         Audio,
+        Controls,
         QuitConfirmation,
     };
 
@@ -61,6 +66,14 @@ public:
         Vec2 viewport,
         const OptionsMenuInput& input);
 
+    // True while the Controls page waits for a raw key/button/axis. The
+    // caller feeds InputState::bindingCandidate results here and suppresses
+    // normal navigation from those raw events meanwhile. Escape / Start
+    // cancel through back().
+    [[nodiscard]] bool capturingBinding() const { return capturingAction_.has_value(); }
+    [[nodiscard]] std::optional<InputAction> capturingAction() const { return capturingAction_; }
+    void provideBindingCandidate(const InputBinding& candidate);
+
 private:
     void navigateRows(const OptionsMenuInput& input, int rowCount);
     void setPage(Page page);
@@ -77,6 +90,10 @@ private:
         UiContext& ui,
         UiRect panel,
         const OptionsMenuInput& input);
+    [[nodiscard]] OptionsMenuResult drawControls(
+        UiContext& ui,
+        UiRect panel,
+        const OptionsMenuInput& input);
     [[nodiscard]] OptionsMenuResult drawQuitConfirmation(
         UiContext& ui,
         UiRect panel,
@@ -87,6 +104,8 @@ private:
     Page page_ = Page::Main;
     int selectedRow_ = 0;
     bool customRenderScaleDragPending_ = false;
+    std::optional<InputAction> capturingAction_;
+    bool bindingAssigned_ = false;
     OptionsMenuSettings settings_ {};
 };
 

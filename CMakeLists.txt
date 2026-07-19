@@ -344,6 +344,7 @@ if(SOKOBAN_BUILD_TESTS)
 
     add_executable(sokoban_ui_tests
         tests/UiTests.cpp
+        src/engine/InputBindings.cpp
         src/engine/ui/FontAtlas.cpp
         src/engine/ui/OptionsMenu.cpp
         src/engine/ui/Ui.cpp
@@ -365,6 +366,7 @@ if(SOKOBAN_BUILD_TESTS)
 
     add_executable(sokoban_title_tests
         tests/TitleScreenTests.cpp
+        src/engine/InputBindings.cpp
         src/engine/ui/FontAtlas.cpp
         src/engine/ui/LevelCompleteOverlay.cpp
         src/engine/ui/OptionsMenu.cpp

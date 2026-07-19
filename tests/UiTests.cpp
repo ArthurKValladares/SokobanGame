@@ -220,6 +220,90 @@ void testOptionsNavigationAndSettings()
     CHECK(menu.page() == sokoban::OptionsMenu::Page::Main);
 }
 
+void testControlsRemapping()
+{
+    const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
+    sokoban::UiContext ui(font);
+    sokoban::OptionsMenu menu;
+    menu.open({});
+
+    auto draw = [&](sokoban::OptionsMenuInput input = {}) {
+        ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
+        const sokoban::OptionsMenuResult result =
+            menu.draw(ui, { 1280.0f, 720.0f }, input);
+        ui.endFrame();
+        return result;
+    };
+
+    draw({ .down = true });
+    draw({ .down = true });
+    draw({ .confirm = true });
+    CHECK(menu.page() == sokoban::OptionsMenu::Page::Controls);
+    CHECK(!menu.capturingBinding());
+
+    // Rebind Move up to P: same-kind keyboard binding replaced, pad kept.
+    draw({ .confirm = true });
+    CHECK(menu.capturingBinding());
+    CHECK(menu.capturingAction() == sokoban::InputAction::MoveUp);
+    menu.provideBindingCandidate(sokoban::KeyboardBinding { "P" });
+    CHECK(!menu.capturingBinding());
+    const sokoban::OptionsMenuResult rebound = draw();
+    CHECK(rebound.settingsChanged);
+    const auto& moveUp = menu.settings().input.forAction(sokoban::InputAction::MoveUp);
+    CHECK(std::ranges::count(moveUp, sokoban::InputBinding {
+        sokoban::KeyboardBinding { "P" } }) == 1);
+    CHECK(std::ranges::count(moveUp, sokoban::InputBinding {
+        sokoban::KeyboardBinding { "W" } }) == 0);
+    CHECK(std::ranges::count(moveUp, sokoban::InputBinding {
+        sokoban::GamepadButtonBinding { "dpup" } }) == 1);
+
+    // Binding P to Move down steals it from Move up.
+    draw({ .down = true });
+    draw({ .confirm = true });
+    menu.provideBindingCandidate(sokoban::KeyboardBinding { "P" });
+    CHECK(draw().settingsChanged);
+    CHECK(std::ranges::count(
+        menu.settings().input.forAction(sokoban::InputAction::MoveDown),
+        sokoban::InputBinding { sokoban::KeyboardBinding { "P" } }) == 1);
+    CHECK(std::ranges::count(
+        menu.settings().input.forAction(sokoban::InputAction::MoveUp),
+        sokoban::InputBinding { sokoban::KeyboardBinding { "P" } }) == 0);
+    CHECK(sokoban::actionBindingsDisplay(
+        menu.settings().input, sokoban::InputAction::MoveUp) ==
+        "Pad dpup / Pad lefty-");
+
+    // Escape is never bound; back() cancels the capture but stays on the page.
+    draw({ .confirm = true });
+    CHECK(menu.capturingBinding());
+    menu.provideBindingCandidate(sokoban::KeyboardBinding { "Escape" });
+    CHECK(menu.capturingBinding());
+    menu.back();
+    CHECK(!menu.capturingBinding());
+    CHECK(menu.page() == sokoban::OptionsMenu::Page::Controls);
+
+    // Start cancels directly without binding.
+    const sokoban::OptionsMenuSettings beforeStart = menu.settings();
+    draw({ .confirm = true });
+    menu.provideBindingCandidate(sokoban::GamepadButtonBinding { "start" });
+    CHECK(!menu.capturingBinding());
+    CHECK(menu.settings() == beforeStart);
+
+    // Navigation freezes during capture.
+    const int rowBefore = menu.selectedRow();
+    draw({ .confirm = true });
+    draw({ .down = true });
+    CHECK(menu.selectedRow() == rowBefore);
+    menu.back();
+
+    // Reset restores the defaults.
+    for (int i = 0; i < 5; ++i) {
+        draw({ .down = true });
+    }
+    const sokoban::OptionsMenuResult reset = draw({ .confirm = true });
+    CHECK(reset.settingsChanged);
+    CHECK(menu.settings().input == sokoban::defaultInputBindings());
+}
+
 } // namespace
 
 int main()
@@ -228,6 +312,7 @@ int main()
     testReusableControls();
     testLayoutTree();
     testOptionsNavigationAndSettings();
+    testControlsRemapping();
 
     if (failures == 0) {
         std::cout << "UiTests: " << checks << " checks passed\n";

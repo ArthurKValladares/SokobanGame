@@ -231,15 +231,17 @@ void testOptionsTitleExitRow()
         return result;
     };
 
-    // Pause context: Graphics, Audio, Exit To Title, Quit.
+    // Pause context: Graphics, Audio, Controls, Exit To Title, Quit.
     menu.open({}, true);
+    draw({ .down = true });
     draw({ .down = true });
     draw({ .down = true });
     const sokoban::OptionsMenuResult exitToTitle = draw({ .confirm = true });
     CHECK(exitToTitle.titleRequested);
 
-    // Title context: the row is absent and the third row is Quit.
+    // Title context: the row is absent and the fourth row is Quit.
     menu.open({}, false);
+    draw({ .down = true });
     draw({ .down = true });
     draw({ .down = true });
     CHECK(!draw({ .confirm = true }).titleRequested);

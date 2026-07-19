@@ -27,6 +27,53 @@ const std::vector<InputBinding>& InputBindings::forAction(InputAction action) co
     return actions[actionIndex(action)];
 }
 
+BindingDeviceClass bindingDeviceClass(const InputBinding& binding)
+{
+    return std::holds_alternative<KeyboardBinding>(binding)
+        ? BindingDeviceClass::Keyboard
+        : BindingDeviceClass::Gamepad;
+}
+
+std::string bindingDisplayName(const InputBinding& binding)
+{
+    if (const KeyboardBinding* key = std::get_if<KeyboardBinding>(&binding)) {
+        return key->scancode;
+    }
+    if (const GamepadButtonBinding* button = std::get_if<GamepadButtonBinding>(&binding)) {
+        return "Pad " + button->button;
+    }
+    const GamepadAxisBinding& axis = std::get<GamepadAxisBinding>(binding);
+    return "Pad " + axis.axis +
+        (axis.direction == AxisDirection::Negative ? "-" : "+");
+}
+
+std::string actionBindingsDisplay(const InputBindings& bindings, InputAction action)
+{
+    std::string result;
+    for (const InputBinding& binding : bindings.forAction(action)) {
+        if (!result.empty()) {
+            result += " / ";
+        }
+        result += bindingDisplayName(binding);
+    }
+    return result.empty() ? "Unbound" : result;
+}
+
+void assignBinding(
+    InputBindings& bindings,
+    InputAction action,
+    const InputBinding& candidate)
+{
+    for (std::vector<InputBinding>& list : bindings.actions) {
+        std::erase(list, candidate);
+    }
+    std::vector<InputBinding>& target = bindings.forAction(action);
+    std::erase_if(target, [&](const InputBinding& existing) {
+        return existing.index() == candidate.index();
+    });
+    target.push_back(candidate);
+}
+
 InputBindings defaultInputBindings()
 {
     InputBindings bindings;
