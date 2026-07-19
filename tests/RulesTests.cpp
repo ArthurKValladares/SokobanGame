@@ -451,18 +451,60 @@ void testLadderClimbBlockedByMovable()
     CHECK(rules::step(level, state, MoveDirection::Left) == state);
 }
 
-void testFallToLowerLayer()
+void testUnsupportedMovesAreBlocked()
 {
-    TEST("fallToLowerLayer");
-    // Documents current behavior: with no support below, entities fall until
-    // they land on something or reach the bottom layer, where they rest.
+    TEST("unsupportedMovesAreBlocked");
+    // Walking into a column with nothing that can hold an entity is refused
+    // outright; entities never rest on air.
     const Level level = makeLevel({
         { ".  " },
         { "C  " },
     });
-    const GameState moved = rules::step(level, rules::initialState(level), MoveDirection::Right);
-    CHECK(moved.player == cell(1, 0, 0));
-    CHECK(!moved.playerDead);
+    const GameState blocked = rules::step(level, rules::initialState(level), MoveDirection::Right);
+    CHECK(blocked.player == cell(0, 0, 1));
+    CHECK(!blocked.playerDead);
+}
+
+void testSupportedDropIsStillAllowed()
+{
+    TEST("supportedDropIsStillAllowed");
+    // Stepping off a raised platform is fine when the landing column has
+    // real support further down.
+    const Level level = makeLevel({
+        { "..." },
+        { ".. " },
+        { "C  " },
+    });
+    GameState state = rules::step(level, rules::initialState(level), MoveDirection::Right);
+    CHECK(state.player == cell(1, 0, 2));
+    state = rules::step(level, state, MoveDirection::Right);
+    CHECK(state.player == cell(2, 0, 1));
+    CHECK(!state.playerDead);
+}
+
+void testPushIntoVoidIsBlocked()
+{
+    TEST("pushIntoVoidIsBlocked");
+    const Level level = makeLevel({
+        { "..  " },
+        { "CR  " },
+    });
+    const GameState after = rules::step(level, rules::initialState(level), MoveDirection::Right);
+    CHECK(after.player == cell(0, 0, 1));
+    CHECK(after.movables[0].cell == cell(1, 0, 1));
+    CHECK(!after.movables[0].fallen);
+}
+
+void testConveyorHoldsRiderAtVoidEdge()
+{
+    TEST("conveyorHoldsRiderAtVoidEdge");
+    const Level level = makeLevel({
+        { "...  " },
+        { "C>R  " },
+    });
+    const GameState after = rules::step(level, rules::initialState(level), std::nullopt);
+    CHECK(after.movables[0].cell == cell(2, 0, 1));
+    CHECK(!after.movables[0].fallen);
 }
 
 void testConveyorCarriesPlayer()
@@ -689,7 +731,10 @@ int main()
     testRockFillsWater();
     testLadderClimb();
     testLadderClimbBlockedByMovable();
-    testFallToLowerLayer();
+    testUnsupportedMovesAreBlocked();
+    testSupportedDropIsStillAllowed();
+    testPushIntoVoidIsBlocked();
+    testConveyorHoldsRiderAtVoidEdge();
     testConveyorCarriesPlayer();
     testFastConveyorRate();
     testFastPlayerRate();

@@ -8,6 +8,10 @@ namespace {
 struct FallResult {
     GridPosition3 cell {};
     bool fallen = false;
+    // False when the fall ran out of layers without hitting anything that can
+    // hold an entity (an all-air column). Moves that would land unsupported
+    // are rejected instead of leaving the entity standing on nothing.
+    bool supported = true;
 };
 
 TileType tileAt(const Level& level, GridPosition3 position)
@@ -76,7 +80,7 @@ FallResult playerFallTarget(const Level& level, const GameState& state, GridPosi
         current = below;
     }
 
-    return { .cell = current, .fallen = false };
+    return { .cell = current, .fallen = false, .supported = false };
 }
 
 FallResult movableFallTarget(const Level& level, const GameState& state, size_t movableIndex, GridPosition3 position)
@@ -111,7 +115,7 @@ FallResult movableFallTarget(const Level& level, const GameState& state, size_t 
         current = below;
     }
 
-    return { .cell = current, .fallen = false };
+    return { .cell = current, .fallen = false, .supported = false };
 }
 
 std::optional<GridPosition3> ladderClimbTarget(
@@ -457,7 +461,8 @@ GameState step(
                     progressed = true;
                     continue;
                 }
-                if (!staticCellAllowsEntity(level, target)) {
+                if (!staticCellAllowsEntity(level, target) ||
+                    !movableFallTarget(level, after, i, target).supported) {
                     after.movables[i].sliding = std::nullopt;
                     movableDone[i] = true;
                     movableResolved[i] = true;
@@ -486,7 +491,8 @@ GameState step(
                     }
                     playerResolved = true;
                     progressed = true;
-                } else if (!staticCellAllowsEntity(level, target)) {
+                } else if (!staticCellAllowsEntity(level, target) ||
+                    !playerFallTarget(level, after, target).supported) {
                     after.playerSliding = std::nullopt;
                     playerDone = true;
                     playerResolved = true;
@@ -500,7 +506,9 @@ GameState step(
                         if (playerInputDriven &&
                             !movedThisMicro[blockerIndex] &&
                             staticCellAllowsEntity(level, pushTarget) &&
-                            !movableBlocksAt(after, pushTarget, blockerIndex)) {
+                            !movableBlocksAt(after, pushTarget, blockerIndex) &&
+                            movableFallTarget(level, after, blockerIndex, pushTarget)
+                                .supported) {
                             applyMovableMove(blockerIndex, direction, pushTarget);
                             movedThisMicro[blockerIndex] = true;
                             movableDone[blockerIndex] = false;

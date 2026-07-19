@@ -332,6 +332,12 @@ Core movement (discrete step system):
 - Ice sliding is momentum stored in `GameState` (`playerSliding`,
   `Movable::sliding`): one tile per step until blocked, fallen, or off
   slippery ground. Slide momentum overrides player input.
+- Moves (walks, pushes, slides, conveyor carries) are refused when the
+  destination column has nothing that can hold the entity - a solid block,
+  another movable, or water somewhere below. Entities can still drop any
+  number of layers onto real support, but never rest on air; falls that
+  reach the bottom with no support mark the move unsupported and block it
+  (`FallResult::supported` in `Rules.cpp`).
 - Steps last `config::stepDurationSeconds` (debug-adjustable); all entities
   interpolate across the same step duration, so chained steps animate as
   continuous motion.
