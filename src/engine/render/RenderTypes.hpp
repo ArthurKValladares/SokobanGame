@@ -126,6 +126,9 @@ struct RenderStats {
     uint32_t swapchainWidth = 0;
     uint32_t swapchainHeight = 0;
     uint32_t swapchainImages = 0;
+    uint32_t renderWidth = 0;
+    uint32_t renderHeight = 0;
+    uint32_t renderScalePercent = 100;
     uint32_t activeSamples = 1;
     bool wireframeEnabled = false;
     float wireframeLineWidth = 1.0f;

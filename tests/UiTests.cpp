@@ -90,6 +90,10 @@ void testOptionsNavigationAndSettings()
     const sokoban::OptionsMenuResult graphicsChange = draw({ .left = true });
     CHECK(graphicsChange.settingsChanged);
     CHECK(menu.settings().antiAliasingSamples == 4);
+    draw({ .down = true });
+    const sokoban::OptionsMenuResult scaleChange = draw({ .right = true });
+    CHECK(scaleChange.settingsChanged);
+    CHECK(menu.settings().renderScalePercent == 67);
     menu.back();
     CHECK(menu.page() == sokoban::OptionsMenu::Page::Main);
 

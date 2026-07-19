@@ -82,6 +82,7 @@ void testRoundTripAndBests()
         .fullscreen = true,
         .vsync = true,
         .antiAliasingSamples = 4,
+        .renderScalePercent = 50,
         .ambientOcclusion = false,
         .windowWidth = 1600,
         .windowHeight = 900,
@@ -175,6 +176,7 @@ void testNormalizationAndMigration()
     profile.currentLevel = 9;
     profile.audio = { .masterVolume = -1.0f, .musicVolume = 3.0f, .soundVolume = 0.5f };
     profile.video.antiAliasingSamples = 3;
+    profile.video.renderScalePercent = 42;
     profile.video.windowWidth = 20;
     profile.video.windowHeight = 30;
     profile.normalize();
@@ -182,6 +184,7 @@ void testNormalizationAndMigration()
     check(profile.audio.masterVolume == 0.0f, "master volume clamps low");
     check(profile.audio.musicVolume == 1.0f, "music volume clamps high");
     check(profile.video.antiAliasingSamples == 8, "invalid MSAA receives default");
+    check(profile.video.renderScalePercent == 100, "invalid render scale receives default");
     check(profile.video.windowWidth == 640, "window width clamps low");
     check(profile.video.windowHeight == 480, "window height clamps low");
 
@@ -217,6 +220,7 @@ void testNormalizationAndMigration()
     format2Root["progress"].erase("activeScreen");
     format2Root["settings"]["input"] = legacyInput;
     format2Root["settings"]["video"].erase("antiAliasingSamples");
+    format2Root["settings"]["video"].erase("renderScalePercent");
     format2Root["settings"]["video"].erase("ambientOcclusion");
     format2Root["settings"]["video"].erase("windowWidth");
     format2Root["settings"]["video"].erase("windowHeight");
@@ -240,6 +244,7 @@ void testNormalizationAndMigration()
     format3Root["format"] = 3;
     format3Root["settings"]["input"] = legacyInput;
     format3Root["settings"]["video"].erase("antiAliasingSamples");
+    format3Root["settings"]["video"].erase("renderScalePercent");
     format3Root["settings"]["video"].erase("ambientOcclusion");
     format3Root["settings"]["video"].erase("windowWidth");
     format3Root["settings"]["video"].erase("windowHeight");
@@ -256,6 +261,7 @@ void testNormalizationAndMigration()
     format4Root["format"] = 4;
     format4Root["settings"]["input"].erase("menuConfirm");
     format4Root["settings"]["video"].erase("antiAliasingSamples");
+    format4Root["settings"]["video"].erase("renderScalePercent");
     format4Root["settings"]["video"].erase("ambientOcclusion");
     format4Root["settings"]["video"].erase("windowWidth");
     format4Root["settings"]["video"].erase("windowHeight");
@@ -270,6 +276,16 @@ void testNormalizationAndMigration()
     check(migratedFormat4.profile.video.windowWidth == 1280 &&
             migratedFormat4.profile.video.windowHeight == 720,
         "format 4 receives window-size defaults");
+
+    nlohmann::json format5Root = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    format5Root["format"] = 5;
+    format5Root["settings"]["video"].erase("renderScalePercent");
+    const sokoban::DecodedPlayerProfile migratedFormat5 =
+        sokoban::decodePlayerProfile(format5Root.dump());
+    check(migratedFormat5.sourceFormat == 5, "format 5 source reported");
+    check(migratedFormat5.profile.video.renderScalePercent == 100,
+        "format 5 receives native render scale");
 
     checkThrows([] {
         (void)sokoban::decodePlayerProfile(R"json({ "format": 99 })json");

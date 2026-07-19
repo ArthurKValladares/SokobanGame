@@ -9,6 +9,7 @@ struct UiRect;
 
 struct OptionsMenuSettings {
     int antiAliasingSamples = 8;
+    int renderScalePercent = 100;
     bool ambientOcclusion = true;
     bool fullscreen = false;
     int windowWidth = 1280;
@@ -65,6 +66,7 @@ private:
     [[nodiscard]] OptionsMenuResult drawGraphics(
         UiContext& ui,
         UiRect panel,
+        Vec2 viewport,
         const OptionsMenuInput& input);
     [[nodiscard]] OptionsMenuResult drawAudio(
         UiContext& ui,

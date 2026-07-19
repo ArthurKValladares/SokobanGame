@@ -11,7 +11,7 @@
 
 namespace sokoban {
 
-inline constexpr int currentPlayerProfileFormat = 5;
+inline constexpr int currentPlayerProfileFormat = 6;
 
 struct PlayerProfile {
     struct LevelProgress {
@@ -36,6 +36,7 @@ struct PlayerProfile {
         // False preserves the engine's mailbox-first presentation behavior.
         bool vsync = false;
         int antiAliasingSamples = 8;
+        int renderScalePercent = 100;
         bool ambientOcclusion = config::ambientOcclusionEnabled;
         int windowWidth = 1280;
         int windowHeight = 720;

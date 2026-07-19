@@ -32,10 +32,13 @@ public:
         SDL_Window* window,
         QueueFamilies queueFamilies,
         VkSampleCountFlagBits sampleCount,
+        int renderScalePercent,
         VkFormat depthFormat,
         bool vsync);
     void recreate();
-    void recreateAttachments(VkSampleCountFlagBits sampleCount);
+    void recreateAttachments(
+        VkSampleCountFlagBits sampleCount,
+        int renderScalePercent);
     void destroy();
 
     [[nodiscard]] bool canRecreate() const;
@@ -50,13 +53,18 @@ public:
     void ensureSceneColorReadable(VkCommandBuffer commandBuffer, RenderStats& stats);
     void copyResolvedSceneColor(
         VkCommandBuffer commandBuffer,
-        VkImage resolvedColorImage,
         RenderStats& stats);
+    void upscaleSceneToSwapchain(
+        VkCommandBuffer commandBuffer,
+        uint32_t imageIndex,
+        RenderStats& stats) const;
 
     [[nodiscard]] VkSwapchainKHR handle() const { return swapchain_; }
     [[nodiscard]] VkFormat colorFormat() const { return colorFormat_; }
     [[nodiscard]] VkFormat depthFormat() const { return depthFormat_; }
     [[nodiscard]] VkExtent2D extent() const { return extent_; }
+    [[nodiscard]] VkExtent2D renderExtent() const { return renderExtent_; }
+    [[nodiscard]] int renderScalePercent() const { return renderScalePercent_; }
     [[nodiscard]] VkPresentModeKHR presentMode() const { return presentMode_; }
     [[nodiscard]] uint32_t imageCount() const { return static_cast<uint32_t>(images_.size()); }
     [[nodiscard]] VkSampleCountFlagBits sampleCount() const { return sampleCount_; }
@@ -69,8 +77,10 @@ public:
     [[nodiscard]] VkImageView sampledDepthView() const;
     [[nodiscard]] VkImage depthSourceImage() const;
     [[nodiscard]] VkImageView resolveDepthView() const { return resolveDepthImage_.view; }
-    [[nodiscard]] VkImageView renderColorView(uint32_t imageIndex) const;
-    [[nodiscard]] VkImageView resolveColorView(uint32_t imageIndex) const;
+    [[nodiscard]] VkImage resolvedColorImage() const { return resolvedColorImage_.image; }
+    [[nodiscard]] VkImageView resolvedColorView() const { return resolvedColorImage_.view; }
+    [[nodiscard]] VkImageView renderColorView() const;
+    [[nodiscard]] VkImageView resolveColorView() const;
 
 private:
     struct SwapchainImage {
@@ -80,6 +90,7 @@ private:
 
     void createSwapchain();
     void createAttachments();
+    void createResolvedColor();
     void createMsaaColor();
     void createDepth();
     void createSceneColor();
@@ -100,10 +111,13 @@ private:
     VkFormat colorFormat_ = VK_FORMAT_UNDEFINED;
     VkFormat depthFormat_ = VK_FORMAT_D32_SFLOAT;
     VkExtent2D extent_ {};
+    VkExtent2D renderExtent_ {};
     VkPresentModeKHR presentMode_ = VK_PRESENT_MODE_FIFO_KHR;
     VkSampleCountFlagBits sampleCount_ = VK_SAMPLE_COUNT_1_BIT;
+    int renderScalePercent_ = 100;
     bool vsync_ = false;
     std::vector<SwapchainImage> images_;
+    vulkanResources::OwnedImage resolvedColorImage_ {};
     vulkanResources::OwnedImage msaaColorImage_ {};
     vulkanResources::OwnedImage depthImage_ {};
     vulkanResources::OwnedImage resolveDepthImage_ {};

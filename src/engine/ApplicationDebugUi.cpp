@@ -403,14 +403,23 @@ void ApplicationDebugUi::draw(const Context& context) const
             renderStats.swapchainWidth,
             renderStats.swapchainHeight,
             renderStats.swapchainImages);
+        ImGui::Text(
+            "Scene %u x %u (%u%%), UI native",
+            renderStats.renderWidth,
+            renderStats.renderHeight,
+            renderStats.renderScalePercent);
         const double megapixels =
             static_cast<double>(renderStats.swapchainWidth) *
             static_cast<double>(renderStats.swapchainHeight) / 1'000'000.0;
         ImGui::Text(
-            "Present %s, %.2f MP (%.1f M sample-pixels)",
+            "Present %s, %.2f output MP",
             context.renderer.presentModeName(),
-            megapixels,
-            megapixels * renderStats.activeSamples);
+            megapixels);
+        ImGui::Text(
+            "Scene workload %.1f M MSAA sample-pixels",
+            static_cast<double>(renderStats.renderWidth) *
+                static_cast<double>(renderStats.renderHeight) /
+                1'000'000.0 * renderStats.activeSamples);
         ImGui::Text("Active samples %ux", renderStats.activeSamples);
         ImGui::Text(
             "Wireframe %s",

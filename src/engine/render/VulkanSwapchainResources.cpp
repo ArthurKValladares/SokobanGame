@@ -1,5 +1,7 @@
 #include "engine/render/VulkanSwapchainResources.hpp"
 
+#include "engine/render/RenderResolution.hpp"
+
 #include <SDL3/SDL_video.h>
 
 #include <algorithm>
@@ -32,6 +34,7 @@ void VulkanSwapchainResources::create(
     SDL_Window* window,
     QueueFamilies queueFamilies,
     VkSampleCountFlagBits sampleCount,
+    int renderScalePercent,
     VkFormat depthFormat,
     bool vsync)
 {
@@ -42,6 +45,7 @@ void VulkanSwapchainResources::create(
     window_ = window;
     queueFamilies_ = queueFamilies;
     sampleCount_ = sampleCount;
+    renderScalePercent_ = normalizedRenderScalePercent(renderScalePercent);
     depthFormat_ = depthFormat;
     vsync_ = vsync;
 
@@ -71,10 +75,13 @@ void VulkanSwapchainResources::recreate()
     createAttachments();
 }
 
-void VulkanSwapchainResources::recreateAttachments(VkSampleCountFlagBits sampleCount)
+void VulkanSwapchainResources::recreateAttachments(
+    VkSampleCountFlagBits sampleCount,
+    int renderScalePercent)
 {
     destroyAttachments();
     sampleCount_ = sampleCount;
+    renderScalePercent_ = normalizedRenderScalePercent(renderScalePercent);
     createAttachments();
 }
 
@@ -94,10 +101,12 @@ void VulkanSwapchainResources::destroy()
     images_.clear();
     swapchain_ = VK_NULL_HANDLE;
     extent_ = {};
+    renderExtent_ = {};
     presentMode_ = VK_PRESENT_MODE_FIFO_KHR;
     colorFormat_ = VK_FORMAT_UNDEFINED;
     depthFormat_ = VK_FORMAT_D32_SFLOAT;
     sampleCount_ = VK_SAMPLE_COUNT_1_BIT;
+    renderScalePercent_ = 100;
     queueFamilies_ = {};
     window_ = nullptr;
     surface_ = VK_NULL_HANDLE;
@@ -152,7 +161,8 @@ void VulkanSwapchainResources::beginFrame(
     uint32_t imageIndex,
     RenderStats& stats)
 {
-    VkImageMemoryBarrier2 swapchainToColor {
+    (void)imageIndex;
+    VkImageMemoryBarrier2 resolvedToColor {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
         .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
         .srcAccessMask = VK_ACCESS_2_NONE,
@@ -162,7 +172,7 @@ void VulkanSwapchainResources::beginFrame(
         .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = image(imageIndex),
+        .image = resolvedColorImage_.image,
         .subresourceRange = {
             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
             .baseMipLevel = 0,
@@ -174,13 +184,13 @@ void VulkanSwapchainResources::beginFrame(
     VkDependencyInfo dependency {
         .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
         .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &swapchainToColor,
+        .pImageMemoryBarriers = &resolvedToColor,
     };
     vkCmdPipelineBarrier2(commandBuffer, &dependency);
     ++stats.imageBarriers;
 
     if (msaaEnabled()) {
-        VkImageMemoryBarrier2 msaaToColor = swapchainToColor;
+        VkImageMemoryBarrier2 msaaToColor = resolvedToColor;
         msaaToColor.image = msaaColorImage_.image;
         dependency.pImageMemoryBarriers = &msaaToColor;
         vkCmdPipelineBarrier2(commandBuffer, &dependency);
@@ -319,7 +329,6 @@ void VulkanSwapchainResources::ensureSceneColorReadable(
 
 void VulkanSwapchainResources::copyResolvedSceneColor(
     VkCommandBuffer commandBuffer,
-    VkImage resolvedColorImage,
     RenderStats& stats)
 {
     VkImageMemoryBarrier2 colorToTransfer {
@@ -332,7 +341,7 @@ void VulkanSwapchainResources::copyResolvedSceneColor(
         .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = resolvedColorImage,
+        .image = resolvedColorImage_.image,
         .subresourceRange = {
             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
             .baseMipLevel = 0,
@@ -375,11 +384,11 @@ void VulkanSwapchainResources::copyResolvedSceneColor(
             .baseArrayLayer = 0,
             .layerCount = 1,
         },
-        .extent = { .width = extent_.width, .height = extent_.height, .depth = 1 },
+        .extent = { .width = renderExtent_.width, .height = renderExtent_.height, .depth = 1 },
     };
     vkCmdCopyImage(
         commandBuffer,
-        resolvedColorImage,
+        resolvedColorImage_.image,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
         sceneColorImage_.image,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -410,6 +419,107 @@ void VulkanSwapchainResources::copyResolvedSceneColor(
     ++stats.imageBarriers;
 }
 
+void VulkanSwapchainResources::upscaleSceneToSwapchain(
+    VkCommandBuffer commandBuffer,
+    uint32_t imageIndex,
+    RenderStats& stats) const
+{
+    VkImageMemoryBarrier2 sceneToTransfer {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+        .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = resolvedColorImage_.image,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+    VkImageMemoryBarrier2 swapchainToTransfer = sceneToTransfer;
+    swapchainToTransfer.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
+    swapchainToTransfer.srcAccessMask = VK_ACCESS_2_NONE;
+    swapchainToTransfer.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    swapchainToTransfer.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    swapchainToTransfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    swapchainToTransfer.image = image(imageIndex);
+
+    std::array<VkImageMemoryBarrier2, 2> toTransfer {
+        sceneToTransfer,
+        swapchainToTransfer,
+    };
+    VkDependencyInfo dependency {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = static_cast<uint32_t>(toTransfer.size()),
+        .pImageMemoryBarriers = toTransfer.data(),
+    };
+    vkCmdPipelineBarrier2(commandBuffer, &dependency);
+    stats.imageBarriers += static_cast<uint32_t>(toTransfer.size());
+
+    VkImageBlit2 region {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2,
+        .srcSubresource = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .srcOffsets = {
+            VkOffset3D { 0, 0, 0 },
+            VkOffset3D {
+                static_cast<int32_t>(renderExtent_.width),
+                static_cast<int32_t>(renderExtent_.height),
+                1,
+            },
+        },
+        .dstSubresource = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .dstOffsets = {
+            VkOffset3D { 0, 0, 0 },
+            VkOffset3D {
+                static_cast<int32_t>(extent_.width),
+                static_cast<int32_t>(extent_.height),
+                1,
+            },
+        },
+    };
+    VkBlitImageInfo2 blitInfo {
+        .sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2,
+        .srcImage = resolvedColorImage_.image,
+        .srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        .dstImage = image(imageIndex),
+        .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .regionCount = 1,
+        .pRegions = &region,
+        .filter = VK_FILTER_LINEAR,
+    };
+    vkCmdBlitImage2(commandBuffer, &blitInfo);
+
+    VkImageMemoryBarrier2 swapchainToColor = swapchainToTransfer;
+    swapchainToColor.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    swapchainToColor.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    swapchainToColor.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    swapchainToColor.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    swapchainToColor.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    swapchainToColor.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    dependency.imageMemoryBarrierCount = 1;
+    dependency.pImageMemoryBarriers = &swapchainToColor;
+    vkCmdPipelineBarrier2(commandBuffer, &dependency);
+    ++stats.imageBarriers;
+}
+
 VkImage VulkanSwapchainResources::image(uint32_t index) const
 {
     return images_.at(index).image;
@@ -430,14 +540,14 @@ VkImage VulkanSwapchainResources::depthSourceImage() const
     return resolveDepthImage_.image ? resolveDepthImage_.image : depthImage_.image;
 }
 
-VkImageView VulkanSwapchainResources::renderColorView(uint32_t imageIndex) const
+VkImageView VulkanSwapchainResources::renderColorView() const
 {
-    return msaaEnabled() ? msaaColorImage_.view : imageView(imageIndex);
+    return msaaEnabled() ? msaaColorImage_.view : resolvedColorImage_.view;
 }
 
-VkImageView VulkanSwapchainResources::resolveColorView(uint32_t imageIndex) const
+VkImageView VulkanSwapchainResources::resolveColorView() const
 {
-    return msaaEnabled() ? imageView(imageIndex) : VK_NULL_HANDLE;
+    return msaaEnabled() ? resolvedColorImage_.view : VK_NULL_HANDLE;
 }
 
 void VulkanSwapchainResources::createSwapchain()
@@ -465,9 +575,9 @@ void VulkanSwapchainResources::createSwapchain()
         "vkGetPhysicalDeviceSurfacePresentModesKHR failed");
 
     const VkSurfaceFormatKHR surfaceFormat = chooseSurfaceFormat(formats);
-    if ((capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0) {
+    if ((capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) == 0) {
         throw std::runtime_error(
-            "Swapchain images do not support transfer source usage required for ice blur");
+            "Swapchain images do not support transfer destination usage required for render scaling");
     }
 
     uint32_t imageCount = capabilities.minImageCount + 1;
@@ -488,7 +598,7 @@ void VulkanSwapchainResources::createSwapchain()
         .imageColorSpace = surfaceFormat.colorSpace,
         .imageExtent = extent_,
         .imageArrayLayers = 1,
-        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         .imageSharingMode = sharedQueues ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE,
         .queueFamilyIndexCount = sharedQueues ? static_cast<uint32_t>(familyIndices.size()) : 0U,
         .pQueueFamilyIndices = sharedQueues ? familyIndices.data() : nullptr,
@@ -516,23 +626,50 @@ void VulkanSwapchainResources::createSwapchain()
 
 void VulkanSwapchainResources::createAttachments()
 {
+    const PixelExtent scaled = scaledRenderExtent(
+        { extent_.width, extent_.height },
+        renderScalePercent_);
+    renderExtent_ = { scaled.width, scaled.height };
     depthLayoutInitialized_ = false;
     sceneColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    createResolvedColor();
     createMsaaColor();
     createDepth();
     createSceneColor();
 }
 
-void VulkanSwapchainResources::createMsaaColor()
+void VulkanSwapchainResources::createResolvedColor()
 {
-    if (!msaaEnabled() || extent_.width == 0 || extent_.height == 0) {
+    if (renderExtent_.width == 0 || renderExtent_.height == 0) {
         return;
     }
     VkImageCreateInfo imageInfo {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = VK_IMAGE_TYPE_2D,
         .format = colorFormat_,
-        .extent = { .width = extent_.width, .height = extent_.height, .depth = 1 },
+        .extent = { .width = renderExtent_.width, .height = renderExtent_.height, .depth = 1 },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    resolvedColorImage_ = vulkanResources::createImage(
+        physicalDevice_, device_, imageInfo, VK_IMAGE_ASPECT_COLOR_BIT);
+}
+
+void VulkanSwapchainResources::createMsaaColor()
+{
+    if (!msaaEnabled() || renderExtent_.width == 0 || renderExtent_.height == 0) {
+        return;
+    }
+    VkImageCreateInfo imageInfo {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = colorFormat_,
+        .extent = { .width = renderExtent_.width, .height = renderExtent_.height, .depth = 1 },
         .mipLevels = 1,
         .arrayLayers = 1,
         .samples = sampleCount_,
@@ -547,14 +684,14 @@ void VulkanSwapchainResources::createMsaaColor()
 
 void VulkanSwapchainResources::createDepth()
 {
-    if (extent_.width == 0 || extent_.height == 0) {
+    if (renderExtent_.width == 0 || renderExtent_.height == 0) {
         return;
     }
     VkImageCreateInfo imageInfo {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = VK_IMAGE_TYPE_2D,
         .format = depthFormat_,
-        .extent = { .width = extent_.width, .height = extent_.height, .depth = 1 },
+        .extent = { .width = renderExtent_.width, .height = renderExtent_.height, .depth = 1 },
         .mipLevels = 1,
         .arrayLayers = 1,
         .samples = sampleCount_,
@@ -574,14 +711,14 @@ void VulkanSwapchainResources::createDepth()
 
 void VulkanSwapchainResources::createSceneColor()
 {
-    if (extent_.width == 0 || extent_.height == 0) {
+    if (renderExtent_.width == 0 || renderExtent_.height == 0) {
         return;
     }
     VkImageCreateInfo imageInfo {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = VK_IMAGE_TYPE_2D,
         .format = colorFormat_,
-        .extent = { .width = extent_.width, .height = extent_.height, .depth = 1 },
+        .extent = { .width = renderExtent_.width, .height = renderExtent_.height, .depth = 1 },
         .mipLevels = 1,
         .arrayLayers = 1,
         .samples = VK_SAMPLE_COUNT_1_BIT,
@@ -624,6 +761,8 @@ void VulkanSwapchainResources::destroyAttachments()
     vulkanResources::destroyImage(device_, resolveDepthImage_);
     vulkanResources::destroyImage(device_, depthImage_);
     vulkanResources::destroyImage(device_, msaaColorImage_);
+    vulkanResources::destroyImage(device_, resolvedColorImage_);
+    renderExtent_ = {};
     sceneColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     depthLayoutInitialized_ = false;
 }

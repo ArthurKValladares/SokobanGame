@@ -1,5 +1,6 @@
 #include "engine/ui/OptionsMenu.hpp"
 
+#include "engine/render/RenderResolution.hpp"
 #include "engine/ui/Ui.hpp"
 #include "engine/ui/UiControls.hpp"
 
@@ -17,6 +18,10 @@ using uiControls::ButtonTone;
 
 constexpr std::array<int, 4> sampleCounts { 1, 2, 4, 8 };
 constexpr std::array<std::string_view, 4> sampleLabels { "Off", "2x", "4x", "8x" };
+constexpr std::array<int, 4> renderScales { 100, 67, 50, 25 };
+constexpr std::array<std::string_view, 4> renderScaleLabels {
+    "100%", "67%", "50%", "25%",
+};
 
 struct DisplayMode {
     std::string_view label;
@@ -41,6 +46,14 @@ int sampleIndex(int samples)
 {
     const auto found = std::find(sampleCounts.begin(), sampleCounts.end(), samples);
     return found == sampleCounts.end() ? 3 : static_cast<int>(found - sampleCounts.begin());
+}
+
+int renderScaleIndex(int percent)
+{
+    const auto found = std::find(renderScales.begin(), renderScales.end(), percent);
+    return found == renderScales.end()
+        ? 0
+        : static_cast<int>(found - renderScales.begin());
 }
 
 int displayIndex(const OptionsMenuSettings& settings)
@@ -125,13 +138,13 @@ OptionsMenuResult OptionsMenu::draw(
     }
 
     ui.rect({ { 0.0f, 0.0f }, viewport }, { 0.015f, 0.020f, 0.021f, 0.78f });
-    const float height = page_ == Page::Graphics ? 620.0f : 540.0f;
+    const float height = page_ == Page::Graphics ? 700.0f : 540.0f;
     const UiRect panel = centeredPanel(viewport, height);
     ui.panel(panel);
 
     switch (page_) {
     case Page::Main: return drawMain(ui, panel, input);
-    case Page::Graphics: return drawGraphics(ui, panel, input);
+    case Page::Graphics: return drawGraphics(ui, panel, viewport, input);
     case Page::Audio: return drawAudio(ui, panel, input);
     case Page::QuitConfirmation: return drawQuitConfirmation(ui, panel, input);
     }
@@ -193,9 +206,10 @@ OptionsMenuResult OptionsMenu::drawMain(
 OptionsMenuResult OptionsMenu::drawGraphics(
     UiContext& ui,
     UiRect panel,
+    Vec2 viewport,
     const OptionsMenuInput& input)
 {
-    navigateRows(input, 4);
+    navigateRows(input, 5);
     OptionsMenuResult result;
     drawTitle(ui, panel, "GRAPHICS");
 
@@ -218,25 +232,54 @@ OptionsMenuResult OptionsMenu::drawGraphics(
         result.settingsChanged = true;
     }
 
+    int renderScale = renderScaleIndex(settings_.renderScalePercent);
+    if (selectedRow_ == 1 && input.left) {
+        renderScale = (renderScale + static_cast<int>(renderScales.size()) - 1) %
+            static_cast<int>(renderScales.size());
+    }
+    if (selectedRow_ == 1 && input.right) {
+        renderScale = (renderScale + 1) % static_cast<int>(renderScales.size());
+    }
+    ui.text(contentRect(panel, 226.0f, 30.0f).position, "Render scale",
+        { 0.83f, 0.86f, 0.83f, 1.0f }, 22.0f);
+    if (uiControls::segmentedControl(
+            ui, "graphics.render-scale", contentRect(panel, 260.0f, 48.0f),
+            renderScaleLabels, renderScale, selectedRow_ == 1)) {
+        result.settingsChanged = true;
+    }
+    if (settings_.renderScalePercent != renderScales[static_cast<size_t>(renderScale)]) {
+        settings_.renderScalePercent = renderScales[static_cast<size_t>(renderScale)];
+        result.settingsChanged = true;
+    }
+    const PixelExtent internalExtent = scaledRenderExtent({
+        .width = static_cast<uint32_t>(std::max(viewport.x, 0.0f)),
+        .height = static_cast<uint32_t>(std::max(viewport.y, 0.0f)),
+    }, settings_.renderScalePercent);
+    const std::string internalResolution =
+        std::to_string(internalExtent.width) + " x " +
+        std::to_string(internalExtent.height) + " internal";
+    ui.text(contentRect(panel, 314.0f, 24.0f).position, internalResolution,
+        { 0.58f, 0.63f, 0.62f, 1.0f }, 18.0f);
+
     if (uiControls::checkbox(
-            ui, "graphics.ao", contentRect(panel, 242.0f, 48.0f),
+            ui, "graphics.ao", contentRect(panel, 354.0f, 48.0f),
             "Ambient occlusion", settings_.ambientOcclusion,
-            selectedRow_ == 1, input.confirm && selectedRow_ == 1)) {
+            selectedRow_ == 2, input.confirm && selectedRow_ == 2)) {
         result.settingsChanged = true;
     }
 
     int display = displayIndex(settings_);
-    if (selectedRow_ == 2 && input.left) {
+    if (selectedRow_ == 3 && input.left) {
         display = (display + static_cast<int>(displayModes.size()) - 1) % static_cast<int>(displayModes.size());
     }
-    if (selectedRow_ == 2 && input.right) {
+    if (selectedRow_ == 3 && input.right) {
         display = (display + 1) % static_cast<int>(displayModes.size());
     }
-    ui.text(contentRect(panel, 320.0f, 30.0f).position, "Display",
+    ui.text(contentRect(panel, 420.0f, 30.0f).position, "Display",
         { 0.83f, 0.86f, 0.83f, 1.0f }, 22.0f);
     if (uiControls::choiceStepper(
-            ui, "graphics.display", contentRect(panel, 356.0f, 54.0f),
-            displayLabels, display, selectedRow_ == 2)) {
+            ui, "graphics.display", contentRect(panel, 454.0f, 54.0f),
+            displayLabels, display, selectedRow_ == 3)) {
         result.settingsChanged = true;
     }
     const DisplayMode& mode = displayModes[static_cast<size_t>(display)];
@@ -253,8 +296,8 @@ OptionsMenuResult OptionsMenu::drawGraphics(
 
     const UiRect backButton = contentRect(panel, panel.size.y - 92.0f, 52.0f);
     if (uiControls::button(ui, "graphics.back", backButton, "Back", {
-            .focused = selectedRow_ == 3,
-            .activate = input.confirm && selectedRow_ == 3,
+        .focused = selectedRow_ == 4,
+        .activate = input.confirm && selectedRow_ == 4,
         })) {
         setPage(Page::Main);
     }

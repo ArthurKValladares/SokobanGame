@@ -262,6 +262,7 @@ VulkanRenderer::VulkanRenderer(
     const AssetManifest& manifest,
     const FontAtlas& uiFont,
     AntiAliasingMode antiAliasingMode,
+    int renderScalePercent,
     bool vsync)
     : window_(window)
     , assetRoot_(std::move(assetRoot))
@@ -280,11 +281,12 @@ VulkanRenderer::VulkanRenderer(
         window_,
         { .graphics = queueFamilies_.graphics, .present = queueFamilies_.present },
         activeSampleCount_,
+        renderScalePercent,
         depthFormat_,
         vsync);
     logRenderConfiguration();
     shadowPass_.create(physicalDevice_, device_, shadowFormat_);
-    ssaoPass_.create(physicalDevice_, device_, swapchainResources_.extent());
+    ssaoPass_.create(physicalDevice_, device_, swapchainResources_.renderExtent());
     createCommandPool();
     uiResources_.create(
         physicalDevice_, device_, commandPool_, graphicsQueue_, uiFont);
@@ -662,9 +664,29 @@ void VulkanRenderer::setAntiAliasingMode(AntiAliasingMode mode)
     activeSampleCount_ = sampleCountForMode(mode);
 
     destroyPipeline();
-    swapchainResources_.recreateAttachments(activeSampleCount_);
+    swapchainResources_.recreateAttachments(
+        activeSampleCount_,
+        swapchainResources_.renderScalePercent());
     sceneDescriptors_.update(descriptorResources());
     createPipeline();
+}
+
+int VulkanRenderer::renderScalePercent() const
+{
+    return swapchainResources_.renderScalePercent();
+}
+
+void VulkanRenderer::setRenderScalePercent(int percent)
+{
+    if (percent == swapchainResources_.renderScalePercent()) {
+        return;
+    }
+
+    waitIdle();
+    swapchainResources_.recreateAttachments(activeSampleCount_, percent);
+    ssaoPass_.recreate(swapchainResources_.renderExtent());
+    sceneDescriptors_.update(descriptorResources());
+    logRenderConfiguration();
 }
 
 void VulkanRenderer::createInstance()
@@ -976,7 +998,7 @@ void VulkanRenderer::recreateSwapchain()
     }
     const VkFormat oldColorFormat = swapchainResources_.colorFormat();
     swapchainResources_.recreate();
-    ssaoPass_.recreate(swapchainResources_.extent());
+    ssaoPass_.recreate(swapchainResources_.renderExtent());
     sceneDescriptors_.update(descriptorResources());
     if (oldColorFormat != swapchainResources_.colorFormat()) {
         destroyPipeline();
@@ -989,12 +1011,17 @@ void VulkanRenderer::recreateSwapchain()
 void VulkanRenderer::logRenderConfiguration() const
 {
     const VkExtent2D extent = swapchainResources_.extent();
-    const uint64_t pixels = static_cast<uint64_t>(extent.width) * extent.height;
+    const VkExtent2D renderExtent = swapchainResources_.renderExtent();
+    const uint64_t pixels =
+        static_cast<uint64_t>(renderExtent.width) * renderExtent.height;
     const uint64_t samplePixels = pixels * sampleCountValue();
     std::cerr << "Vulkan swapchain: " << extent.width << 'x' << extent.height
               << ", " << swapchainResources_.imageCount() << " images, "
               << presentModeName() << ", " << sampleCountValue()
-              << "x MSAA (" << samplePixels / 1'000'000.0
+              << "x MSAA; scene " << renderExtent.width << 'x'
+              << renderExtent.height << " at "
+              << swapchainResources_.renderScalePercent() << "% ("
+              << samplePixels / 1'000'000.0
               << " M sample-pixels)\n";
 }
 
@@ -1005,12 +1032,17 @@ void VulkanRenderer::recordCommandBuffer(
     const UiDrawData& uiDrawData)
 {
     const VkExtent2D extent = swapchainResources_.extent();
+    const VkExtent2D renderExtent = swapchainResources_.renderExtent();
     pendingStats_ = {
         .frameIndex = nextStatsFrameIndex_++,
         .totalTiles = static_cast<uint32_t>(frameData.tiles.size()),
         .swapchainWidth = extent.width,
         .swapchainHeight = extent.height,
         .swapchainImages = swapchainResources_.imageCount(),
+        .renderWidth = renderExtent.width,
+        .renderHeight = renderExtent.height,
+        .renderScalePercent = static_cast<uint32_t>(
+            swapchainResources_.renderScalePercent()),
         .activeSamples = sampleCountValue(),
         .wireframeEnabled = wireframeEnabled_,
         .wireframeLineWidth = wireframeLineWidth_,
@@ -1027,14 +1059,13 @@ void VulkanRenderer::recordCommandBuffer(
 
     recordGameRendering(
         commandBuffer,
-        swapchainResources_.renderColorView(imageIndex),
-        swapchainResources_.resolveColorView(imageIndex),
-        swapchainResources_.image(imageIndex),
+        swapchainResources_.renderColorView(),
+        swapchainResources_.resolveColorView(),
         frameData);
 
     ssaoPass_.record(
         commandBuffer,
-        swapchainResources_.imageView(imageIndex),
+        swapchainResources_.resolvedColorView(),
         swapchainResources_.depthSourceImage(),
         frameData.lighting.ambientOcclusion,
         sceneDescriptors_.set(),
@@ -1044,6 +1075,11 @@ void VulkanRenderer::recordCommandBuffer(
             .composite = pipelines_.ssaoComposite(),
             .visualize = pipelines_.ssaoVisualize(),
         },
+        pendingStats_);
+
+    swapchainResources_.upscaleSceneToSwapchain(
+        commandBuffer,
+        imageIndex,
         pendingStats_);
 
     recordOverlayRendering(
@@ -1135,7 +1171,6 @@ void VulkanRenderer::recordGameRendering(
     VkCommandBuffer commandBuffer,
     VkImageView colorView,
     VkImageView resolveView,
-    VkImage resolvedColorImage,
     const RenderFrameData& frameData)
 {
     ShadowRenderLayout shadowLayout {};
@@ -1167,7 +1202,7 @@ void VulkanRenderer::recordGameRendering(
         return;
     }
 
-    swapchainResources_.copyResolvedSceneColor(commandBuffer, resolvedColorImage, pendingStats_);
+    swapchainResources_.copyResolvedSceneColor(commandBuffer, pendingStats_);
     recordScenePass(
         commandBuffer,
         colorView,
@@ -1228,7 +1263,7 @@ void VulkanRenderer::recordScenePass(
 
     VkRenderingInfo renderingInfo {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-        .renderArea = { .offset = { 0, 0 }, .extent = swapchainResources_.extent() },
+        .renderArea = { .offset = { 0, 0 }, .extent = swapchainResources_.renderExtent() },
         .layerCount = 1,
         .colorAttachmentCount = 1,
         .pColorAttachments = &colorAttachment,
@@ -1240,15 +1275,15 @@ void VulkanRenderer::recordScenePass(
 
     VkViewport viewport {
         .x = 0.0f,
-        .y = static_cast<float>(swapchainResources_.extent().height),
-        .width = static_cast<float>(swapchainResources_.extent().width),
-        .height = -static_cast<float>(swapchainResources_.extent().height),
+        .y = static_cast<float>(swapchainResources_.renderExtent().height),
+        .width = static_cast<float>(swapchainResources_.renderExtent().width),
+        .height = -static_cast<float>(swapchainResources_.renderExtent().height),
         .minDepth = 0.0f,
         .maxDepth = 1.0f,
     };
     VkRect2D scissor {
         .offset = { 0, 0 },
-        .extent = swapchainResources_.extent(),
+        .extent = swapchainResources_.renderExtent(),
     };
 
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.scene());
@@ -1390,13 +1425,13 @@ void VulkanRenderer::recordOverlayRendering(
 VulkanRenderer::TileRenderLayout VulkanRenderer::calculateTileRenderLayout(const RenderFrameData& frameData) const
 {
     const BoardPixelLayout pixelLayout = calculateBoardPixelLayout(
-        { static_cast<float>(swapchainResources_.extent().width), static_cast<float>(swapchainResources_.extent().height) },
+        { static_cast<float>(swapchainResources_.renderExtent().width), static_cast<float>(swapchainResources_.renderExtent().height) },
         frameData.levelWidth,
         frameData.levelHeight);
     const Vec2 tileSize = pixelSizeToClipSpace(pixelLayout.tileSize);
     const Vec2 boardBottomLeft {
-        -1.0f + 2.0f * pixelLayout.bottomLeft.x / static_cast<float>(swapchainResources_.extent().width),
-        1.0f - 2.0f * pixelLayout.bottomLeft.y / static_cast<float>(swapchainResources_.extent().height),
+        -1.0f + 2.0f * pixelLayout.bottomLeft.x / static_cast<float>(swapchainResources_.renderExtent().width),
+        1.0f - 2.0f * pixelLayout.bottomLeft.y / static_cast<float>(swapchainResources_.renderExtent().height),
     };
 
     return {
@@ -1784,7 +1819,7 @@ void VulkanRenderer::drawTopDownGridOverlay(
         return;
     }
 
-    const float tileWidthPixels = std::max(layout.tileSize.x * static_cast<float>(swapchainResources_.extent().width) * 0.5f, 0.001f);
+    const float tileWidthPixels = std::max(layout.tileSize.x * static_cast<float>(swapchainResources_.renderExtent().width) * 0.5f, 0.001f);
     const float lineWidth = std::clamp(frameData.gridOverlay.width / tileWidthPixels, 0.0f, 0.5f);
     if (lineWidth <= 0.0f) {
         return;
@@ -2108,7 +2143,7 @@ Vec3 VulkanRenderer::projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) 
     const float cameraX = dot(relative, layout.cameraRight);
     const float cameraY = dot(relative, layout.cameraUp);
     const float cameraZ = std::max(dot(relative, layout.cameraForward), 0.001f);
-    const float aspect = static_cast<float>(swapchainResources_.extent().width) / static_cast<float>(swapchainResources_.extent().height);
+    const float aspect = static_cast<float>(swapchainResources_.renderExtent().width) / static_cast<float>(swapchainResources_.renderExtent().height);
     const Vec2 projected {
         layout.focalLength * cameraX / (cameraZ * aspect),
         layout.focalLength * cameraY / cameraZ,
@@ -2137,12 +2172,12 @@ Vec4 VulkanRenderer::projectShadowPoint(const ShadowRenderLayout& layout, Vec3 p
 
 Vec2 VulkanRenderer::pixelSizeToClipSpace(float pixelSize) const
 {
-    // Pixel sizes are measured against the swapchain, but shader positions are
+    // Scene pixel sizes are measured against the internal render target, while shader positions are
     // in clip space where the visible width and height each span -1 to +1.
     // Multiplying by 2 converts a screen fraction into that two-unit range.
     return {
-        2.0f * pixelSize / static_cast<float>(swapchainResources_.extent().width),
-        2.0f * pixelSize / static_cast<float>(swapchainResources_.extent().height),
+        2.0f * pixelSize / static_cast<float>(swapchainResources_.renderExtent().width),
+        2.0f * pixelSize / static_cast<float>(swapchainResources_.renderExtent().height),
     };
 }
 

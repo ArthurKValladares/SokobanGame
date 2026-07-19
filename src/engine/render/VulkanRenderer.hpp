@@ -48,6 +48,7 @@ public:
         const AssetManifest& manifest,
         const FontAtlas& uiFont,
         AntiAliasingMode antiAliasingMode = AntiAliasingMode::Msaa8x,
+        int renderScalePercent = 100,
         bool vsync = false);
     ~VulkanRenderer();
 
@@ -71,6 +72,8 @@ public:
     [[nodiscard]] const char* physicalDeviceTypeName() const;
     [[nodiscard]] const char* presentModeName() const;
     void setAntiAliasingMode(AntiAliasingMode mode);
+    [[nodiscard]] int renderScalePercent() const;
+    void setRenderScalePercent(int percent);
     [[nodiscard]] bool wireframeEnabled() const;
     void setWireframeEnabled(bool enabled);
     [[nodiscard]] bool wideLinesSupported() const;
@@ -145,7 +148,7 @@ private:
 
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData, const UiDrawData& uiDrawData);
     void recordShadowMapRendering(VkCommandBuffer commandBuffer, const RenderFrameData& frameData, const ShadowRenderLayout& layout);
-    void recordGameRendering(VkCommandBuffer commandBuffer, VkImageView colorView, VkImageView resolveView, VkImage resolvedColorImage, const RenderFrameData& frameData);
+    void recordGameRendering(VkCommandBuffer commandBuffer, VkImageView colorView, VkImageView resolveView, const RenderFrameData& frameData);
     void recordScenePass(
         VkCommandBuffer commandBuffer,
         VkImageView colorView,

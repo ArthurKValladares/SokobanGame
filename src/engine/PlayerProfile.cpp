@@ -1,5 +1,7 @@
 #include "engine/PlayerProfile.hpp"
 
+#include "engine/render/RenderResolution.hpp"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -755,6 +757,30 @@ PlayerProfile parseFormat5(const Json& root)
     return profile;
 }
 
+PlayerProfile parseFormat6(const Json& root)
+{
+    rejectUnknownProperties(root, { "format", "progress", "settings" }, "root");
+    const Json& settings = requiredProperty(root, "settings", "root");
+    rejectUnknownProperties(
+        settings,
+        { "audio", "video", "input", "accessibility" },
+        "settings");
+    const Json& video = requiredProperty(settings, "video", "settings");
+    rejectUnknownProperties(video, {
+        "fullscreen", "vsync", "antiAliasingSamples", "renderScalePercent",
+        "ambientOcclusion", "windowWidth", "windowHeight",
+    }, "settings.video");
+    const int renderScalePercent = nonNegativeIntegerProperty(
+        video, "renderScalePercent", "settings.video");
+
+    Json legacyRoot = root;
+    legacyRoot["settings"]["video"].erase("renderScalePercent");
+    PlayerProfile profile = parseFormat5(legacyRoot);
+    profile.video.renderScalePercent = renderScalePercent;
+    profile.normalize();
+    return profile;
+}
+
 PlayerProfile parseFormat1(const Json& root)
 {
     rejectUnknownProperties(root, {
@@ -805,6 +831,8 @@ void PlayerProfile::normalize()
         video.antiAliasingSamples != 8) {
         video.antiAliasingSamples = 8;
     }
+    video.renderScalePercent = normalizedRenderScalePercent(
+        video.renderScalePercent);
     video.windowWidth = std::clamp(video.windowWidth, 640, 7680);
     video.windowHeight = std::clamp(video.windowHeight, 480, 4320);
     std::ranges::sort(levels, {}, &LevelProgress::level);
@@ -925,6 +953,7 @@ std::string PlayerProfile::serialize() const
                 { "fullscreen", normalized.video.fullscreen },
                 { "vsync", normalized.video.vsync },
                 { "antiAliasingSamples", normalized.video.antiAliasingSamples },
+                { "renderScalePercent", normalized.video.renderScalePercent },
                 { "ambientOcclusion", normalized.video.ambientOcclusion },
                 { "windowWidth", normalized.video.windowWidth },
                 { "windowHeight", normalized.video.windowHeight },
@@ -966,8 +995,11 @@ DecodedPlayerProfile decodePlayerProfile(std::string_view text)
     if (format == 4) {
         return { .profile = parseFormat4(root), .sourceFormat = 4 };
     }
-    if (format == currentPlayerProfileFormat) {
+    if (format == 5) {
         return { .profile = parseFormat5(root), .sourceFormat = format };
+    }
+    if (format == currentPlayerProfileFormat) {
+        return { .profile = parseFormat6(root), .sourceFormat = format };
     }
     fail("root", "unsupported format " + std::to_string(format));
 }

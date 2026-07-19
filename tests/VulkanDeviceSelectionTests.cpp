@@ -1,4 +1,5 @@
 #include "engine/render/VulkanDeviceSelection.hpp"
+#include "engine/render/RenderResolution.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -54,6 +55,22 @@ int main()
         std::string_view(sokoban::vulkanDeviceTypeName(
             VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)) == "discrete",
         "device type diagnostics are readable");
+    check(
+        sokoban::scaledRenderExtent({ 3840, 2160 }, 50) ==
+            sokoban::PixelExtent { 1920, 1080 },
+        "50 percent maps 4K output to 1080p rendering");
+    check(
+        sokoban::scaledRenderExtent({ 3840, 2160 }, 67) ==
+            sokoban::PixelExtent { 2560, 1440 },
+        "67 percent maps 4K output to 1440p rendering");
+    check(
+        sokoban::scaledRenderExtent({ 1, 1 }, 25) ==
+            sokoban::PixelExtent { 1, 1 },
+        "non-empty output never produces a zero-sized render target");
+    check(
+        sokoban::scaledRenderExtent({ 1920, 1080 }, 42) ==
+            sokoban::PixelExtent { 1920, 1080 },
+        "unsupported scales normalize to native resolution");
 
     std::cout << "Vulkan device selection tests passed\n";
     return 0;

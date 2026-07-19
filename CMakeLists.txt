@@ -158,6 +158,7 @@ add_executable(sokoban
     src/engine/render/GltfMesh.cpp
     src/engine/render/ImageData.cpp
     src/engine/render/RenderAssetRequirements.cpp
+    src/engine/render/RenderResolution.cpp
     src/engine/render/SkinnedMeshUpdater.cpp
     src/engine/render/VulkanDeviceSelection.cpp
     src/engine/render/VulkanModelResources.cpp
@@ -292,6 +293,7 @@ if(SOKOBAN_BUILD_TESTS)
         src/engine/AsyncSaveStore.cpp
         src/engine/InputBindings.cpp
         src/engine/PlayerProfile.cpp
+        src/engine/render/RenderResolution.cpp
         src/engine/SaveStore.cpp
         src/engine/TileTypes.cpp
     )
@@ -343,6 +345,7 @@ if(SOKOBAN_BUILD_TESTS)
         src/engine/ui/OptionsMenu.cpp
         src/engine/ui/Ui.cpp
         src/engine/ui/UiControls.cpp
+        src/engine/render/RenderResolution.cpp
     )
     target_include_directories(sokoban_ui_tests PRIVATE src)
     target_link_libraries(sokoban_ui_tests PRIVATE sokoban_stb)
@@ -359,6 +362,7 @@ if(SOKOBAN_BUILD_TESTS)
     add_executable(sokoban_vulkan_device_selection_tests
         tests/VulkanDeviceSelectionTests.cpp
         src/engine/render/VulkanDeviceSelection.cpp
+        src/engine/render/RenderResolution.cpp
     )
     target_include_directories(sokoban_vulkan_device_selection_tests PRIVATE src)
     target_link_libraries(sokoban_vulkan_device_selection_tests PRIVATE Vulkan::Vulkan)
