@@ -93,10 +93,10 @@ std::string corruptSuffix()
 
 } // namespace
 
-SaveStore::SaveStore(std::filesystem::path root)
+SaveStore::SaveStore(std::filesystem::path root, std::string fileStem)
     : root_(std::move(root))
-    , primaryPath_(root_ / "profile.json")
-    , backupPath_(root_ / "profile.backup.json")
+    , primaryPath_(root_ / (fileStem + ".json"))
+    , backupPath_(root_ / (fileStem + ".backup.json"))
 {
 }
 
@@ -160,17 +160,27 @@ SaveStore::LoadResult SaveStore::load()
             }
         }
 
+        const std::string primaryCorruptPrefix =
+            primaryPath_.filename().string() + ".corrupt-";
+        const std::string backupCorruptPrefix =
+            backupPath_.filename().string() + ".corrupt-";
         const bool resetCorrupt = std::ranges::any_of(
             std::filesystem::directory_iterator(root_),
-            [](const std::filesystem::directory_entry& entry) {
-                return entry.path().filename().string().starts_with("profile.json.corrupt-") ||
-                    entry.path().filename().string().starts_with("profile.backup.json.corrupt-");
+            [&](const std::filesystem::directory_entry& entry) {
+                return entry.path().filename().string().starts_with(primaryCorruptPrefix) ||
+                    entry.path().filename().string().starts_with(backupCorruptPrefix);
             });
         PlayerProfile profile;
-        writePrimary(profile, false);
-        status_ = resetCorrupt
-            ? "Corrupt player saves were archived; defaults were restored."
-            : "Created a new player profile.";
+        if (resetCorrupt) {
+            // There was a save; archive-and-replace is recovery, so a valid
+            // default file takes its place for diagnosis.
+            writePrimary(profile, false);
+            status_ = "Corrupt player saves were archived; defaults were restored.";
+        } else {
+            // A genuinely fresh start writes nothing: no file exists until
+            // the player actually begins a game or changes a setting.
+            status_ = "No player profile found; starting fresh.";
+        }
         return {
             .profile = std::move(profile),
             .disposition = resetCorrupt

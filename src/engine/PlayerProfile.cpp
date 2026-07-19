@@ -995,6 +995,31 @@ void PlayerProfile::resetProgress()
     normalize();
 }
 
+bool PlayerProfile::progressEmpty() const
+{
+    return levels.empty() &&
+        !activeScreen &&
+        unlockedLevel == 0 &&
+        currentLevel == 0 &&
+        currentScreen == 0;
+}
+
+PlayerProfile PlayerProfile::settingsOnly() const
+{
+    PlayerProfile result;
+    result.adoptSettingsFrom(*this);
+    return result;
+}
+
+void PlayerProfile::adoptSettingsFrom(const PlayerProfile& other)
+{
+    audio = other.audio;
+    video = other.video;
+    input = other.input;
+    accessibility = other.accessibility;
+    normalize();
+}
+
 const PlayerProfile::LevelProgress* PlayerProfile::progressForLevel(int level) const
 {
     const auto found = std::ranges::find(levels, level, &LevelProgress::level);

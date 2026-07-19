@@ -24,11 +24,14 @@ enum class MainRow {
     Graphics,
     Audio,
     Controls,
+    LevelSelect,
     Title,
     Quit,
     Count,
 };
 
+// LevelSelect appears only for pause menus on saves that beat the game, and
+// Title only for pause menus.
 // The Controls page lists these remappable gameplay actions in order,
 // followed by Reset To Defaults and Back rows. Menu navigation stays fixed
 // so a bad remap cannot lock the player out of the menus.
@@ -175,13 +178,17 @@ LabeledControlLayout addLabeledControl(
 }
 
 struct MainPageLayout : MenuPageLayout {
-    MainPageLayout(UiRect panel, bool withTitleExit)
+    MainPageLayout(UiRect panel, bool withTitleExit, bool withLevelSelect)
     {
         graphics = tree.item(tree.root(), 62.0f);
         tree.spacer(tree.root(), 18.0f);
         audio = tree.item(tree.root(), 62.0f);
         tree.spacer(tree.root(), 18.0f);
         controls = tree.item(tree.root(), 62.0f);
+        if (withLevelSelect) {
+            tree.spacer(tree.root(), 18.0f);
+            levelSelect = tree.item(tree.root(), 62.0f);
+        }
         if (withTitleExit) {
             tree.spacer(tree.root(), 18.0f);
             title = tree.item(tree.root(), 62.0f);
@@ -196,6 +203,7 @@ struct MainPageLayout : MenuPageLayout {
     UiLayoutNode graphics {};
     UiLayoutNode audio {};
     UiLayoutNode controls {};
+    UiLayoutNode levelSelect {};
     UiLayoutNode title {};
     UiLayoutNode quitDivider {};
     UiLayoutNode quit {};
@@ -345,10 +353,14 @@ bool adjustInt(int& value, bool decrease, bool increase, int step = 1)
 
 } // namespace
 
-void OptionsMenu::open(OptionsMenuSettings settings, bool allowTitleExit)
+void OptionsMenu::open(
+    OptionsMenuSettings settings,
+    bool allowTitleExit,
+    bool allowLevelSelect)
 {
     settings_ = settings;
     allowTitleExit_ = allowTitleExit;
+    allowLevelSelect_ = allowLevelSelect && allowTitleExit;
     open_ = true;
     setPage(Page::Main);
 }
@@ -452,15 +464,14 @@ OptionsMenuResult OptionsMenu::drawMain(
     UiRect panel,
     const OptionsMenuInput& input)
 {
-    // Without the title-exit entry the Quit row directly follows Audio.
-    const int titleRowIndex = rowIndex(MainRow::Title);
-    const int quitRowIndex = allowTitleExit_
-        ? rowIndex(MainRow::Quit)
-        : rowIndex(MainRow::Title);
-    // (Controls precedes Title/Quit and is always present.)
+    // Optional rows shift the later indexes: order is Graphics, Audio,
+    // Controls, [Level Select], [Exit To Title], Quit.
+    const int levelSelectRowIndex = rowIndex(MainRow::LevelSelect);
+    const int titleRowIndex = levelSelectRowIndex + (allowLevelSelect_ ? 1 : 0);
+    const int quitRowIndex = titleRowIndex + (allowTitleExit_ ? 1 : 0);
     navigateRows(input, quitRowIndex + 1);
 
-    MainPageLayout layout(panel, allowTitleExit_);
+    MainPageLayout layout(panel, allowTitleExit_, allowLevelSelect_);
 
     drawTitle(ui, layout, "OPTIONS");
     OptionsMenuResult result;
@@ -485,6 +496,15 @@ OptionsMenuResult OptionsMenu::drawMain(
             .activate = input.confirm && selectedRow_ == rowIndex(MainRow::Controls),
         })) {
         setPage(Page::Controls);
+    }
+    if (allowLevelSelect_ &&
+        uiControls::button(
+            ui, "options.level-select", layout.tree.rect(layout.levelSelect),
+            "Level Select", {
+            .focused = selectedRow_ == levelSelectRowIndex,
+            .activate = input.confirm && selectedRow_ == levelSelectRowIndex,
+        })) {
+        result.levelSelectRequested = true;
     }
     if (allowTitleExit_ &&
         uiControls::button(

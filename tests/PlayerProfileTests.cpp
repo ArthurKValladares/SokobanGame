@@ -161,6 +161,7 @@ void testReachedScreensAndProgressReset()
     sokoban::PlayerProfile populated = profile;
     populated.audio.musicVolume = 0.25f;
     populated.accessibility.highContrast = true;
+    check(!populated.progressEmpty(), "populated profile has progress");
     populated.resetProgress();
     check(populated.unlockedLevel == 0 && populated.currentLevel == 0 &&
             populated.currentScreen == 0,
@@ -168,6 +169,21 @@ void testReachedScreensAndProgressReset()
     check(populated.levels.empty() && !populated.activeScreen, "reset clears records");
     check(populated.audio.musicVolume == 0.25f, "reset keeps audio settings");
     check(populated.accessibility.highContrast, "reset keeps accessibility settings");
+    check(populated.progressEmpty(), "reset profile reads as empty");
+
+    // Settings split: settingsOnly strips progress, adoptSettingsFrom keeps it.
+    const sokoban::PlayerProfile settings = populated.settingsOnly();
+    check(settings.progressEmpty(), "settingsOnly has no progress");
+    check(settings.audio.musicVolume == 0.25f, "settingsOnly keeps audio");
+    check(settings.accessibility.highContrast, "settingsOnly keeps accessibility");
+
+    sokoban::PlayerProfile target = profile;
+    const int levelsBefore = static_cast<int>(target.levels.size());
+    target.adoptSettingsFrom(settings);
+    check(target.audio.musicVolume == 0.25f, "adopt applies audio settings");
+    check(target.accessibility.highContrast, "adopt applies accessibility");
+    check(static_cast<int>(target.levels.size()) == levelsBefore,
+        "adopt keeps progress records");
 }
 
 void testActiveScreenCheckpointRoundTrip()
@@ -426,8 +442,9 @@ void testStoreBackupsAndRecovery()
     sokoban::SaveStore store(temporary.path());
     sokoban::SaveStore::LoadResult created = store.load();
     check(created.disposition == sokoban::SaveStore::LoadDisposition::CreatedDefault,
-        "missing profile creates defaults");
-    check(std::filesystem::is_regular_file(store.primaryPath()), "default primary written");
+        "missing profile returns defaults");
+    check(!std::filesystem::is_regular_file(store.primaryPath()),
+        "fresh start writes no file");
 
     sokoban::PlayerProfile first = created.profile;
     first.unlockedLevel = 1;
@@ -462,6 +479,39 @@ void testStoreBackupsAndRecovery()
             entry.path().filename().string().starts_with("profile.json.corrupt-");
     }
     check(foundCorruptArchive, "corrupt primary archived for diagnostics");
+}
+
+void testSaveSlotStems()
+{
+    TemporaryDirectory directory;
+    sokoban::SaveStore first(directory.path()); // historical "profile" stem
+    sokoban::SaveStore second(directory.path(), "profile-slot2");
+    check(first.primaryPath() != second.primaryPath(),
+        "slot stems use separate primaries");
+    check(first.backupPath() != second.backupPath(),
+        "slot stems use separate backups");
+
+    sokoban::PlayerProfile firstProfile;
+    firstProfile.unlockedLevel = 1;
+    firstProfile.normalize();
+    check(first.save(firstProfile), "slot 1 saves");
+
+    sokoban::PlayerProfile secondProfile;
+    secondProfile.audio.musicVolume = 0.25f;
+    secondProfile.normalize();
+    check(second.save(secondProfile), "slot 2 saves");
+
+    check(first.load().profile == firstProfile, "slot 1 reloads its own data");
+    check(second.load().profile == secondProfile, "slot 2 reloads its own data");
+
+    // A corrupt neighbour slot does not disturb this slot's load.
+    writeFile(second.primaryPath(), "not json");
+    writeFile(second.backupPath(), "also not json");
+    check(first.load().profile == firstProfile,
+        "slot 1 unaffected by corrupt slot 2");
+    const sokoban::SaveStore::LoadResult recovered = second.load();
+    check(recovered.disposition == sokoban::SaveStore::LoadDisposition::ResetCorrupt,
+        "corrupt slot resets independently");
 }
 
 void testMigrationAndDoubleCorruption()
@@ -574,6 +624,7 @@ int main()
     testActiveScreenCheckpointRoundTrip();
     testNormalizationAndMigration();
     testStoreBackupsAndRecovery();
+    testSaveSlotStems();
     testMigrationAndDoubleCorruption();
     testAsyncSaveCoalescingAndFlush();
     testAsyncSaveDestructorFlushesNewestProfile();

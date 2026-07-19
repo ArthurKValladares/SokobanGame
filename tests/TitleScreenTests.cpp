@@ -61,6 +61,11 @@ void testTitleNavigationAndResults()
     const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
     sokoban::UiContext ui(font);
     sokoban::TitleScreen title;
+    title.setSaveSlots({
+        { .empty = false, .currentLevel = 1 },
+        { .empty = true },
+        { .empty = true },
+    }, 0);
     title.open(sampleLevels());
     CHECK(title.isOpen());
     CHECK(title.page() == sokoban::TitleScreen::Page::Main);
@@ -73,25 +78,8 @@ void testTitleNavigationAndResults()
         return result;
     };
 
-    // Row order: Continue, New Game, Level Select, Options, Quit.
+    // Active slot has a save: rows are Continue, Save Slot, Options, Quit.
     CHECK(draw({ .confirm = true }).continueRequested);
-    CHECK(draw({ .down = true }).continueRequested == false);
-    draw({ .confirm = true });
-    CHECK(title.page() == sokoban::TitleScreen::Page::NewGameConfirmation);
-
-    // Cancel returns to Main without confirming.
-    CHECK(!draw({ .confirm = true }).newGameConfirmed);
-    CHECK(title.page() == sokoban::TitleScreen::Page::Main);
-    title.close();
-    title.open(sampleLevels());
-    draw({ .down = true });
-    draw({ .confirm = true });
-    draw({ .down = true });
-    CHECK(draw({ .confirm = true }).newGameConfirmed);
-
-    // Options and quit rows report requests.
-    title.open(sampleLevels());
-    draw({ .down = true });
     draw({ .down = true });
     draw({ .down = true });
     CHECK(draw({ .confirm = true }).optionsRequested);
@@ -102,6 +90,40 @@ void testTitleNavigationAndResults()
     title.open(sampleLevels());
     draw({ .up = true });
     CHECK(draw({ .confirm = true }).quitRequested);
+
+    // Active slot empty but another save exists: New Game starts here.
+    title.setSaveSlots({
+        { .empty = true },
+        { .empty = false, .currentLevel = 0 },
+        { .empty = true },
+    }, 0);
+    title.open(sampleLevels());
+    const sokoban::TitleScreenResult newGame = draw({ .confirm = true });
+    CHECK(newGame.newGameRequested && !newGame.continueRequested);
+    CHECK(title.page() == sokoban::TitleScreen::Page::Main);
+
+    // No saves anywhere: New Game asks for a slot first.
+    title.setSaveSlots({ {}, {}, {} }, 0);
+    title.open(sampleLevels());
+    CHECK(!draw({ .confirm = true }).newGameRequested);
+    CHECK(title.page() == sokoban::TitleScreen::Page::SaveSlots);
+    draw({ .down = true });
+    const sokoban::TitleScreenResult pick = draw({ .confirm = true });
+    CHECK(pick.newGameSlotSelected && *pick.newGameSlotSelected == 1);
+
+    // With no saves, the Save Slot row is hidden: New Game, Options, Quit.
+    title.open(sampleLevels());
+    draw({ .down = true });
+    CHECK(draw({ .confirm = true }).optionsRequested);
+    draw({ .down = true });
+    CHECK(draw({ .confirm = true }).quitRequested);
+
+    // Backing out of the slot pick cancels the new-game intent.
+    title.open(sampleLevels());
+    draw({ .confirm = true });
+    CHECK(title.page() == sokoban::TitleScreen::Page::SaveSlots);
+    title.back();
+    CHECK(title.page() == sokoban::TitleScreen::Page::Main);
 }
 
 void testLevelSelectScreensAndLocking()
@@ -109,7 +131,6 @@ void testLevelSelectScreensAndLocking()
     const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
     sokoban::UiContext ui(font);
     sokoban::TitleScreen title;
-    title.open(sampleLevels());
 
     auto draw = [&](sokoban::TitleScreenInput input = {}) {
         ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
@@ -119,9 +140,8 @@ void testLevelSelectScreensAndLocking()
         return result;
     };
 
-    draw({ .down = true });
-    draw({ .down = true });
-    draw({ .confirm = true });
+    // The main menu has no level-select entry; the page opens directly.
+    title.openLevelSelect(sampleLevels());
     CHECK(title.page() == sokoban::TitleScreen::Page::LevelSelect);
 
     // Completed level: every screen is selectable and choice clamps.
@@ -135,10 +155,7 @@ void testLevelSelectScreensAndLocking()
         startLate.startRequested->screen == 2);
 
     // Screen choice resets when moving to another level.
-    title.open(sampleLevels());
-    draw({ .down = true });
-    draw({ .down = true });
-    draw({ .confirm = true });
+    title.openLevelSelect(sampleLevels());
     draw({ .right = true });
     draw({ .down = true });
     CHECK(title.selectedScreen() == 0);
@@ -153,10 +170,7 @@ void testLevelSelectScreensAndLocking()
         startSecond.startRequested->screen == 1);
 
     // Locked level: confirm does nothing.
-    title.open(sampleLevels());
-    draw({ .down = true });
-    draw({ .down = true });
-    draw({ .confirm = true });
+    title.openLevelSelect(sampleLevels());
     draw({ .down = true });
     draw({ .down = true });
     CHECK(!draw({ .confirm = true }).startRequested);
@@ -166,16 +180,128 @@ void testLevelSelectScreensAndLocking()
     draw({ .confirm = true });
     CHECK(title.page() == sokoban::TitleScreen::Page::Main);
 
-    // back() leaves sub-pages but not Main.
-    draw({ .down = true });
+    // Standalone level select closes on back() instead of showing Main.
+    title.openLevelSelect(sampleLevels());
+    CHECK(title.page() == sokoban::TitleScreen::Page::LevelSelect);
+    title.back();
+    CHECK(!title.isOpen());
+
+    // From the full title, back() leaves sub-pages but not Main.
+    title.setSaveSlots({ { .empty = false }, {}, {} }, 0);
+    title.open(sampleLevels());
     draw({ .down = true });
     draw({ .confirm = true });
-    CHECK(title.page() == sokoban::TitleScreen::Page::LevelSelect);
+    CHECK(title.page() == sokoban::TitleScreen::Page::SaveSlots);
     title.back();
     CHECK(title.page() == sokoban::TitleScreen::Page::Main);
     title.back();
     CHECK(title.page() == sokoban::TitleScreen::Page::Main);
     CHECK(title.isOpen());
+}
+
+void testSaveSlotsPage()
+{
+    const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
+    sokoban::UiContext ui(font);
+    sokoban::TitleScreen title;
+    title.setSaveSlots({
+        { .empty = false, .completed = false, .currentLevel = 2, .completedLevels = 2 },
+        { .empty = true },
+        { .empty = false, .completed = true, .currentLevel = 0, .completedLevels = 4 },
+    }, 0);
+    title.open(sampleLevels());
+
+    auto draw = [&](sokoban::TitleScreenInput input = {}) {
+        ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
+        const sokoban::TitleScreenResult result =
+            title.draw(ui, { 1280.0f, 720.0f }, input);
+        ui.endFrame();
+        return result;
+    };
+
+    // Second main row opens the Save Slots page.
+    draw({ .down = true });
+    draw({ .confirm = true });
+    CHECK(title.page() == sokoban::TitleScreen::Page::SaveSlots);
+
+    // Confirming the active slot just returns to Main.
+    CHECK(!draw({ .confirm = true }).slotSelected);
+    CHECK(title.page() == sokoban::TitleScreen::Page::Main);
+
+    // Selecting another (non-empty) slot reports its index.
+    draw({ .down = true });
+    draw({ .confirm = true });
+    draw({ .down = true });
+    draw({ .down = true });
+    const sokoban::TitleScreenResult third = draw({ .confirm = true });
+    CHECK(third.slotSelected && *third.slotSelected == 2);
+
+    // Deleting: Right focuses the inline Delete button, then a confirmation
+    // page guards the actual request.
+    draw({ .up = true });
+    draw({ .up = true });
+    draw({ .right = true });
+    draw({ .confirm = true });
+    CHECK(title.page() == sokoban::TitleScreen::Page::SlotDeleteConfirmation);
+    draw({ .confirm = true }); // Cancel row
+    CHECK(title.page() == sokoban::TitleScreen::Page::SaveSlots);
+    draw({ .right = true });
+    draw({ .confirm = true });
+    CHECK(title.page() == sokoban::TitleScreen::Page::SlotDeleteConfirmation);
+    title.back();
+    CHECK(title.page() == sokoban::TitleScreen::Page::SaveSlots);
+    draw({ .right = true });
+    draw({ .confirm = true });
+    draw({ .down = true });
+    const sokoban::TitleScreenResult deleted = draw({ .confirm = true });
+    CHECK(deleted.slotDeleteRequested && *deleted.slotDeleteRequested == 0);
+    CHECK(title.page() == sokoban::TitleScreen::Page::SaveSlots);
+
+    // Empty slots have no delete column: Right stays on the slot button.
+    draw({ .down = true });
+    draw({ .right = true });
+    const sokoban::TitleScreenResult empty = draw({ .confirm = true });
+    CHECK(empty.slotSelected && *empty.slotSelected == 1);
+
+    // Back row (after the slots) returns to Main.
+    title.setSaveSlots({ {}, {}, {} }, 0);
+    draw({ .up = true });
+    draw({ .confirm = true });
+    CHECK(title.page() == sokoban::TitleScreen::Page::Main);
+}
+
+void testGameCompleteOverlay()
+{
+    const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
+    sokoban::UiContext ui(font);
+    sokoban::LevelCompleteOverlay overlay;
+    overlay.openGameComplete({
+        { .bestMoves = 30, .bestTimeSeconds = 60.0 },
+        { .bestMoves = 40, .bestTimeSeconds = 90.5 },
+        { .bestMoves = std::nullopt, .bestTimeSeconds = std::nullopt },
+    });
+    CHECK(overlay.isOpen());
+    CHECK(overlay.mode() == sokoban::LevelCompleteOverlay::Mode::Game);
+
+    auto draw = [&](sokoban::LevelCompleteInput input = {}) {
+        ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
+        const sokoban::LevelCompleteResult result =
+            overlay.draw(ui, { 1280.0f, 720.0f }, input);
+        ui.endFrame();
+        return result;
+    };
+
+    // Rows: Level Select, Title Screen. No continue in game-complete mode.
+    const sokoban::LevelCompleteResult select = draw({ .confirm = true });
+    CHECK(select.levelSelectRequested && !select.continueRequested);
+    draw({ .down = true });
+    const sokoban::LevelCompleteResult toTitle = draw({ .confirm = true });
+    CHECK(toTitle.titleRequested && !toTitle.levelSelectRequested);
+
+    // Reopening the per-level mode switches back.
+    overlay.open({ .level = 0, .moves = 5, .timeSeconds = 3.0 });
+    CHECK(overlay.mode() == sokoban::LevelCompleteOverlay::Mode::Level);
+    CHECK(draw({ .confirm = true }).continueRequested);
 }
 
 void testLevelCompleteOverlay()
@@ -246,6 +372,25 @@ void testOptionsTitleExitRow()
     draw({ .down = true });
     CHECK(!draw({ .confirm = true }).titleRequested);
     CHECK(menu.page() == sokoban::OptionsMenu::Page::QuitConfirmation);
+
+    // Pause context after beating the game: Graphics, Audio, Controls,
+    // Level Select, Exit To Title, Quit.
+    menu.open({}, true, true);
+    draw({ .down = true });
+    draw({ .down = true });
+    draw({ .down = true });
+    const sokoban::OptionsMenuResult levelSelect = draw({ .confirm = true });
+    CHECK(levelSelect.levelSelectRequested);
+    draw({ .down = true });
+    CHECK(draw({ .confirm = true }).titleRequested);
+
+    // Level Select never appears outside the pause context.
+    menu.open({}, false, true);
+    draw({ .down = true });
+    draw({ .down = true });
+    draw({ .down = true });
+    CHECK(!draw({ .confirm = true }).levelSelectRequested);
+    CHECK(menu.page() == sokoban::OptionsMenu::Page::QuitConfirmation);
 }
 
 } // namespace
@@ -255,6 +400,8 @@ int main()
     testTitleNavigationAndResults();
     testLevelSelectScreensAndLocking();
     testLevelCompleteOverlay();
+    testSaveSlotsPage();
+    testGameCompleteOverlay();
     testOptionsTitleExitRow();
 
     if (failures == 0) {

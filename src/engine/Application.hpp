@@ -25,6 +25,7 @@
 #include "engine/ui/TitleScreen.hpp"
 
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -43,10 +44,17 @@ public:
 private:
     void loadCurrentScreen();
     void openTitleScreen();
+    [[nodiscard]] std::vector<SaveSlotInfo> saveSlotInfos() const;
+    void switchSaveSlot(int slot);
+    void deleteSaveSlot(int slot);
+    void applyLoadedProfileSettings();
+    void persistSettings(bool immediate);
     [[nodiscard]] std::vector<TitleLevelInfo> titleLevelInfos() const;
     void startNewGame();
     void startLevel(int level, int screen);
     void resolveLevelComplete(bool toTitle);
+    void openStandaloneLevelSelect();
+    [[nodiscard]] bool allLevelsCompleted() const;
     [[nodiscard]] bool shellMenuOpen() const;
     [[nodiscard]] bool applyLevel(
         Level level,
@@ -77,7 +85,12 @@ private:
     [[nodiscard]] RenderFrameData buildRenderFrame() const;
 
     Window window_;
-    AsyncSaveStore saveStore_;
+    std::filesystem::path saveDirectory_;
+    int activeSaveSlot_ = 0; // 0-based
+    // Shared across slots: audio/video/input/accessibility settings.
+    std::unique_ptr<AsyncSaveStore> settingsStore_;
+    // Per-slot progress; recreated when the player switches save slots.
+    std::unique_ptr<AsyncSaveStore> saveStore_;
     PlayerProfile playerProfile_;
     std::filesystem::path assetRoot_;
     // Declared before the renderer/audio members that hold references to it.
@@ -98,6 +111,9 @@ private:
     // False when the current run began at a later screen via level select;
     // completing such a run does not record best moves/time.
     bool levelRunFromStart_ = true;
+    // False until Continue/New Game (or a debug draft) loads the world; the
+    // title screen is up and no level, session, or checkpoint exists yet.
+    bool gameLoaded_ = false;
     int completedLevelMoveCount_ = 0;
     double currentLevelElapsedSeconds_ = 0.0;
     double deferredCheckpointAgeSeconds_ = 0.0;

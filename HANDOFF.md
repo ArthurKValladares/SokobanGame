@@ -183,7 +183,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/InputBindings.*`: platform-neutral semantic action and binding model. Each action owns an ordered list of keyboard, gamepad-button, and signed gamepad-axis bindings, allowing keyboard+D-pad+stick defaults. `assignBinding` implements remapping semantics (removes the identical binding from every action, then replaces only the action's bindings of the same kind, so a d-pad rebind keeps a stick binding); `bindingDisplayName`/`actionBindingsDisplay` provide UI labels.
 - `src/engine/Input.*`: SDL3 device owner and action mapper. Tracks raw keyboard/mouse state for editor tooling, hot-plugs gamepads, selects the most recently used controller, normalizes stick axes with threshold/pressed-edge semantics, clears stuck input on focus loss, reports active-device diagnostics, and converts raw SDL events into typed remapping candidates consumed by the Options > Controls page. `Application` consumes semantic actions only for gameplay. Covered by `tests/InputTests.cpp` (`sokoban_input_tests`).
 - `src/engine/PlayerProfile.*`: current format-8 player progress/settings model and strict JSON codec. Stores unlocked/current level and screen, an active-screen committed gameplay checkpoint with the multi-screen level move/time counters, per-level completion, per-level `reachedScreens` counts (max screen entered + 1, feeding level-select unlocking), optional move/time bests, typed keyboard/controller action bindings, audio/video/accessibility settings, window mode/size, MSAA, AO, preset/custom internal render-scale state, with bounded normalization and explicit format-1..7 migrations (format 7 files decode with zeroed reached counts). `recordReachedScreen` tracks entry, `resetProgress` implements New Game (clears progress/records, keeps every setting), and `recordLevelCompletion(..., recordBests)` skips best records for runs that started past the first screen. Headless and covered with `SaveStore` by `tests/PlayerProfileTests.cpp` (`sokoban_profile_tests`).
-- `src/engine/SaveStore.*`: profile persistence rooted at SDL's platform-appropriate `SDL_GetPrefPath`. Writes validated JSON through same-directory temporary replacement, keeps the previous valid primary as `profile.backup.json`, migrates old versions, archives corrupt primary/backup files for diagnosis, recovers from backup, and restores defaults when both copies are unusable.
+- `src/engine/SaveStore.*`: profile persistence rooted at SDL's platform-appropriate `SDL_GetPrefPath`. A `fileStem` constructor parameter names the slot's files (slot 1 keeps the historical `profile` stem so pre-slot saves remain valid; slots 2/3 use `profile-slot2/3`), and corrupt-archive detection derives its prefixes from those names so slots never interfere. Writes validated JSON through same-directory temporary replacement, keeps the previous valid primary as `<stem>.backup.json`, migrates old versions, archives corrupt primary/backup files for diagnosis, recovers from backup, and restores defaults when both copies are unusable.
 - `src/engine/AsyncSaveStore.*`: dedicated serialized persistence worker around `SaveStore`. Deferred requests coalesce over a configurable window, while JSON encoding, backup rotation, and atomic filesystem replacement always happen off the game thread. Screen transitions and committed settings request immediate worker saves; clean shutdown flushes the newest pending profile. Diagnostics expose request/write/coalescing counts and pending/writing state.
 - `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags + slide momentum) plus pure functions in `sokoban::rules` — `step` advances the whole world one discrete step (simultaneous one-tile moves, pushes, ladder climbs, momentum, falls, water, conveyors); `hasPendingMotion` reports whether the world would keep moving without input; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
 - `src/engine/Level.*`: level file parsing, serialization, layered grid storage, walkability/support rules, player/movable extraction. Tested by `tests/LevelTests.cpp` (`sokoban_level_tests`).
@@ -234,7 +234,10 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   settings snapshot (which now includes `InputBindings`); `Application` applies
   changes to the window, renderer, presentation, audio, input, and profile
   owners. `open(settings, allowTitleExit)` adds an "Exit To Title" row only
-  when opened as the in-game pause menu. The Controls page lists the six
+  when opened as the in-game pause menu, and `allowLevelSelect` adds a
+  "Level Select" row (pause context only; `Application` passes it once every
+  level on disk has a completion record, so it is permanent for that save
+  and cleared by New Game). The Controls page lists the six
   remappable gameplay actions (menu navigation is deliberately fixed) with
   press-to-rebind capture: `capturingBinding()` tells the caller to feed
   `InputState::bindingCandidate` events into `provideBindingCandidate` and to
@@ -242,19 +245,27 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   so Escape cancels; Start cancels directly). Escape/Start are never bindable,
   duplicates are stolen from other actions, and Reset To Defaults restores
   `defaultInputBindings()`.
-- `src/engine/ui/TitleScreen.*`: headless title-screen state (Main with
-  Continue/New Game/Level Select/Options/Quit, a destructive-action New Game
-  confirmation, and a level/screen select). The caller supplies
+- `src/engine/ui/TitleScreen.*`: headless fullscreen title-screen state
+  (Main with Continue/New Game/Options/Quit and a destructive-action New Game
+  confirmation). The world is not loaded while the main menu is up; only the
+  Continue/New Game results make `Application` load it. A level/screen-select
+  page exists but is reachable only through `openLevelSelect` (meant for a
+  future in-game entry point, currently unwired): the caller supplies
   `TitleLevelInfo` rows (screen count, unlocked/completed, reached screens,
   bests); locked levels render inert, completed levels expose every screen,
   unfinished levels expose only reached screens, and Left/Right picks the
   starting screen on the focused row. Emits result flags/requests only -
   `Application` owns what they mean. Tested by `tests/TitleScreenTests.cpp`
-  (`sokoban_title_tests`).
+  (`sokoban_title_tests`). The Save Slots page (third main-menu row, showing
+  the active slot number) lists three slots with summaries (Empty / Level N -
+  K done / Completed!, plus an active marker); confirming the active slot
+  returns to Main, confirming another emits `slotSelected` for the caller.
 - `src/engine/ui/LevelCompleteOverlay.*`: headless end-of-level stats panel
   showing moves/time against previous bests with NEW BEST highlighting, and
-  Continue ("Next Level"/"Back To Start") or Title Screen choices. Also
-  covered by `tests/TitleScreenTests.cpp`.
+  Continue ("Next Level") or Title Screen choices. Finishing the final level
+  opens its game-complete mode instead: a congratulations screen listing
+  every level's best moves/time plus whole-game totals, with Level Select
+  and Title Screen actions. Also covered by `tests/TitleScreenTests.cpp`.
 - `shaders/`: GLSL shader sources compiled to SPIR-V by CMake.
 - `levels/`: source `.scr` level files copied into `build/assets/levels`.
 - `assets/`: source KayKit asset packs.
@@ -586,14 +597,37 @@ The custom UI currently provides:
   duplicate stealing and reset-to-defaults, persisted to the profile), an
   Exit To Title entry in the pause context, and a visually separated
   confirmed Quit action.
-- A player-facing game shell: the game boots to a title screen drawn over the
-  loaded checkpoint scene (Continue resumes exactly; New Game confirms and
-  wipes progress but keeps settings; Level Select starts any unlocked
-  level at any reached screen; Options/Quit reuse the shared menus). Level
-  completion pauses on a stats overlay (moves/time vs. bests, NEW BEST
-  highlighting) before continuing or returning to the title. Runs started
-  past a level's first screen complete it without recording best records.
-  Escape at the title opens Options; Escape inside title sub-pages backs out.
+- A player-facing game shell: the game boots to a fullscreen title screen
+  with no world loaded (`Application::gameLoaded_`). The first main-menu row
+  is data-driven: "Continue" when the active slot has progress, otherwise
+  "New Game" (starting immediately when another save exists, or first asking
+  which slot to begin on when no saves exist anywhere; the "Save Slot N" row
+  is hidden entirely in that no-saves state). Settings
+  (audio/video/input/accessibility) are shared across slots in a
+  `settings.json` written through its own `AsyncSaveStore` (same atomic
+  write/backup/recovery machinery); it bootstraps from the pre-split
+  combined save's settings on first run, and slot files' settings copies are
+  ignored on load. "Has a save" means non-empty progress
+  (`PlayerProfile::progressEmpty`), not file existence; fresh loads return
+  defaults without writing anything, and quitting from the title with no
+  progress also writes nothing. Three save slots are available from the title's
+  Save Slots page: switching flushes the outgoing slot, swaps the progress
+  `AsyncSaveStore` to the new stem, carries the live shared settings over
+  the incoming profile, unloads the world, updates `active-slot.txt`, and
+  returns to the main menu. Each non-empty slot row has an inline Delete
+  button (Right focuses it) behind a confirmation page; deleting the active
+  slot resets the live progress and leaves the file absent until play
+  resumes. Options/Quit reuse the shared menus, and Exit To
+  Title returns to the menu with the world kept loaded for an instant
+  Continue. Level completion pauses on a stats overlay (moves/time vs.
+  bests, NEW BEST highlighting) before continuing or returning to the title.
+  Finishing the final level shows the game-complete screen (all-level bests
+  and whole-game totals) whose Level Select action - and, from then on, a
+  pause-menu Level Select row - opens the standalone level/screen-select
+  page (any unlocked level, any reached screen; such runs skip best
+  records). Standalone level select closes on Back straight into the game.
+  Escape at the title opens Options; Escape inside title sub-pages backs
+  out.
 - Semantic W/S or D-pad/stick navigation, Enter/Space or controller South
   confirmation, and Escape/Start back navigation.
 
@@ -605,6 +639,14 @@ these focused modules rather than moving player UI into Debug-only ImGui.
 
 Major recent additions and fixes:
 
+- Added three save slots: slot-stemmed `SaveStore`/`AsyncSaveStore` files
+  (existing saves become slot 1), an `active-slot.txt` marker, and a
+  title-screen Save Slots page with per-slot summaries, inline confirmed
+  deletion, and a choose-a-slot flow for the first New Game. Settings moved
+  out of the slots into a shared `settings.json`
+  (`PlayerProfile::settingsOnly`/`adoptSettingsFrom`), bootstrapped from the
+  pre-split save. Covered by store-isolation, settings-split, and
+  slots-page tests.
 - Added the Options > Controls input-remapping page: the six gameplay actions
   render their current keyboard/pad bindings, confirm starts a raw-event
   capture (fed from `InputState::bindingCandidate` in the SDL loop with
@@ -746,10 +788,15 @@ At the time this handoff was updated:
   delegates to a headless, tested document API with validated safe saving;
   manifest-backed tile scale and per-sound-set controls were removed from the
   Engine window.
-- Release startup creates or loads `%APPDATA%/Sokoban3D/Sokoban3D/profile.json`
-  on Windows through SDL's preference-path API. Existing format-1/2/3/4 profiles
-  migrate to format 5; successful screen loading writes the initial or restored
-  gameplay checkpoint without leaving a temporary replacement file.
+- Release startup loads `%APPDATA%/Sokoban3D/Sokoban3D/` saves through SDL's
+  preference-path API. A genuinely fresh install writes nothing at boot: no
+  slot file, settings file, or marker exists until the player starts a game
+  (first checkpoint) or changes a setting, so first-run users pick a slot on
+  a completely empty slate. Old-format profiles migrate on load; successful
+  screen loading writes the initial or restored gameplay checkpoint without
+  leaving a temporary replacement file. Corrupt-save recovery
+  (`ResetCorrupt`) still writes a fresh default file, since in that case a
+  save existed.
 - Replaced the Windows WIC/COM texture path with vendored stb_image 2.30 and
   removed `ole32`/`windowscodecs` from the game link. Image files are read with
   `std::filesystem`, decoded from memory, and covered by concurrent-load and

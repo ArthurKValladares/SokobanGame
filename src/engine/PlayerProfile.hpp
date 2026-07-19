@@ -89,6 +89,13 @@ struct PlayerProfile {
     // Clears all progress (levels, unlocks, checkpoint) while keeping audio,
     // video, input, and accessibility settings.
     void resetProgress();
+    // True when the profile carries no progress at all (fresh or reset).
+    [[nodiscard]] bool progressEmpty() const;
+    // A copy with default progress and this profile's settings; the shared
+    // settings file stores exactly this shape.
+    [[nodiscard]] PlayerProfile settingsOnly() const;
+    // Adopts the settings sections of `other`, keeping this progress.
+    void adoptSettingsFrom(const PlayerProfile& other);
     // recordBests is false for runs that did not start at the level's first
     // screen (level-select jumps); completion still counts, records do not.
     void recordLevelCompletion(

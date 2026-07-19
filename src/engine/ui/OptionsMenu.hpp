@@ -38,6 +38,7 @@ struct OptionsMenuResult {
     bool settingsChanged = false;
     bool quitRequested = false;
     bool titleRequested = false;
+    bool levelSelectRequested = false;
 };
 
 class OptionsMenu {
@@ -52,7 +53,12 @@ public:
 
     // allowTitleExit shows an "Exit To Title" entry; enable it when the menu
     // is opened as the in-game pause menu rather than from the title screen.
-    void open(OptionsMenuSettings settings, bool allowTitleExit = false);
+    // allowLevelSelect shows a "Level Select" entry (pause context only,
+    // unlocked once the save has beaten the game).
+    void open(
+        OptionsMenuSettings settings,
+        bool allowTitleExit = false,
+        bool allowLevelSelect = false);
     void close();
     void back();
     void requestQuitConfirmation();
@@ -101,6 +107,7 @@ private:
 
     bool open_ = false;
     bool allowTitleExit_ = false;
+    bool allowLevelSelect_ = false;
     Page page_ = Page::Main;
     int selectedRow_ = 0;
     bool customRenderScaleDragPending_ = false;

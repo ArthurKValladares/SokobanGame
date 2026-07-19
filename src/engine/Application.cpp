@@ -12,13 +12,61 @@
 #endif
 
 #include <algorithm>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <utility>
 
 namespace sokoban {
 namespace {
 
 constexpr double profileAutosaveIntervalSeconds = 2.0;
+constexpr int saveSlotCount = 3;
+
+// Slot 1 keeps the historical stem so existing single-slot saves stay valid.
+std::string saveSlotFileStem(int slot)
+{
+    return slot == 0 ? "profile" : "profile-slot" + std::to_string(slot + 1);
+}
+
+int readActiveSlotMarker(const std::filesystem::path& directory)
+{
+    std::ifstream stream(directory / "active-slot.txt");
+    int slot = 1;
+    stream >> slot;
+    return (slot >= 1 && slot <= saveSlotCount) ? slot - 1 : 0;
+}
+
+// Merges the per-slot progress with the shared settings file. When the
+// settings file is brand new (first run after the split, or wiped), the
+// slot's own settings become the shared ones so nothing the player tuned in
+// the pre-split single-save world is lost.
+PlayerProfile loadInitialProfile(AsyncSaveStore& slotStore, AsyncSaveStore& settingsStore)
+{
+    const SaveStore::LoadResult slot = slotStore.load();
+    PlayerProfile profile = slot.profile;
+    const SaveStore::LoadResult settings = settingsStore.load();
+    if (settings.disposition == SaveStore::LoadDisposition::CreatedDefault) {
+        // Migrate a pre-split combined save's settings into the shared file;
+        // a genuinely fresh install writes nothing anywhere.
+        if (slot.disposition != SaveStore::LoadDisposition::CreatedDefault) {
+            settingsStore.requestSave(
+                profile.settingsOnly(), AsyncSaveStore::Urgency::Immediate);
+        }
+    } else {
+        profile.adoptSettingsFrom(settings.profile);
+    }
+    return profile;
+}
+
+void writeActiveSlotMarker(const std::filesystem::path& directory, int slot)
+{
+    std::error_code error;
+    std::filesystem::create_directories(directory, error);
+    std::ofstream stream(
+        directory / "active-slot.txt", std::ios::binary | std::ios::trunc);
+    stream << (slot + 1) << '\n';
+}
 
 AntiAliasingMode antiAliasingModeForSamples(int samples)
 {
@@ -34,8 +82,17 @@ AntiAliasingMode antiAliasingModeForSamples(int samples)
 
 Application::Application()
     : window_("Sokoban 3D", 1280, 720)
-    , saveStore_(SaveStore::preferencePath("Sokoban3D", "Sokoban3D"))
-    , playerProfile_(saveStore_.load().profile)
+    , saveDirectory_(SaveStore::preferencePath("Sokoban3D", "Sokoban3D"))
+    , activeSaveSlot_(readActiveSlotMarker(saveDirectory_))
+    , settingsStore_(std::make_unique<AsyncSaveStore>(
+          saveDirectory_,
+          std::chrono::seconds(2),
+          "settings"))
+    , saveStore_(std::make_unique<AsyncSaveStore>(
+          saveDirectory_,
+          std::chrono::seconds(2),
+          saveSlotFileStem(activeSaveSlot_)))
+    , playerProfile_(loadInitialProfile(*saveStore_, *settingsStore_))
     , assetRoot_(runtimeContentRoot())
     , assetManifest_(AssetManifest::loadFromFile(assetRoot_ / "manifest.json"))
     , uiFont_(FontAtlas::load(assetRoot_ / config::uiFontPath))
@@ -50,7 +107,7 @@ Application::Application()
     , ui_(uiFont_)
     , audioSystem_(assetRoot_, assetManifest_)
 {
-    std::cerr << saveStore_.status() << '\n';
+    std::cerr << saveStore_->status() << '\n';
     currentLevel_ = playerProfile_.currentLevel;
     currentScreen_ = playerProfile_.currentScreen;
     if (!screenExists(currentLevel_, currentScreen_)) {
@@ -58,30 +115,16 @@ Application::Application()
         currentScreen_ = 0;
         playerProfile_.setCurrentLevel(0);
     }
-    if (playerProfile_.video.fullscreen) {
-        window_.setFullscreen(true);
-    } else {
-        window_.setWindowedSize(
-            playerProfile_.video.windowWidth,
-            playerProfile_.video.windowHeight);
-    }
-    audioSystem_.setMasterVolume(playerProfile_.audio.masterVolume);
-    audioSystem_.setMusicVolume(playerProfile_.audio.musicVolume);
-    audioSystem_.setSoundVolume(playerProfile_.audio.soundVolume);
-    gameplaySession_.setStepDurationSeconds(
-        playerProfile_.accessibility.reducedMotion
-            ? 0.05f
-            : config::stepDurationSeconds);
-    input_.setBindings(playerProfile_.input);
+    applyLoadedProfileSettings();
     presentationSettings_.applyTileScales(assetManifest_);
-    presentationSettings_.lighting.ambientOcclusionEnabled =
-        playerProfile_.video.ambientOcclusion;
     presentationSettings_.normalize();
     presentation_.setPlayerClips(
         assetManifest_.playerMoveAnimation(),
         assetManifest_.playerPushAnimation());
-    loadCurrentScreen();
+    // The world stays unloaded until the title's Continue/New Game, but its
+    // assets warm up in the background so that first load doesn't block.
     openTitleScreen();
+    renderer_.preloadAssets(levelAssetRequirements(currentLevel_));
 
 #if SOKOBAN_ENABLE_DEBUG_UI
     levelEditor_.initialize(
@@ -104,7 +147,7 @@ Application::Application()
             .renderer = renderer_,
             .settings = presentationSettings_,
             .audio = audioSystem_,
-            .saveDiagnostics = saveStore_.diagnostics(),
+            .saveDiagnostics = saveStore_->diagnostics(),
             .audioSettings = playerProfile_.audio,
             .updateAudioSettings = [this](
                 PlayerProfile::AudioSettings settings,
@@ -134,14 +177,18 @@ Application::Application()
 
 Application::~Application()
 {
-    if (!gameplaySession_.moving() && !levelEditor_.playingDraft()) {
+    if (gameLoaded_ && !gameplaySession_.moving() && !levelEditor_.playingDraft()) {
         checkpointCurrentScreen(false);
-    } else {
+    } else if (!playerProfile_.progressEmpty()) {
         persistProfile(true);
     }
-    saveStore_.flush();
-    if (!saveStore_.diagnostics().lastWriteSucceeded) {
-        std::cerr << saveStore_.status() << '\n';
+    saveStore_->flush();
+    settingsStore_->flush();
+    if (!saveStore_->diagnostics().lastWriteSucceeded) {
+        std::cerr << saveStore_->status() << '\n';
+    }
+    if (!settingsStore_->diagnostics().lastWriteSucceeded) {
+        std::cerr << settingsStore_->status() << '\n';
     }
     DebugUi::clearTabs();
     renderer_.waitIdle();
@@ -231,7 +278,8 @@ void Application::run()
                     titleScreen_.back();
                 }
             } else {
-                optionsMenu_.open(optionsMenuSettings(), true);
+                optionsMenu_.open(
+                    optionsMenuSettings(), true, allLevelsCompleted());
             }
         }
 
@@ -282,16 +330,36 @@ void Application::run()
                     .confirm = navConfirm,
                 });
         if (titleResult.continueRequested) {
+            if (!gameLoaded_) {
+                currentLevel_ = playerProfile_.currentLevel;
+                currentScreen_ = playerProfile_.currentScreen;
+                if (!screenExists(currentLevel_, currentScreen_)) {
+                    currentLevel_ = 0;
+                    currentScreen_ = 0;
+                    playerProfile_.setCurrentLevel(0);
+                }
+                loadCurrentScreen();
+            }
             titleScreen_.close();
         }
-        if (titleResult.newGameConfirmed) {
+        if (titleResult.newGameRequested) {
             startNewGame();
+        }
+        if (titleResult.newGameSlotSelected) {
+            switchSaveSlot(*titleResult.newGameSlotSelected);
+            startNewGame();
+        }
+        if (titleResult.slotDeleteRequested) {
+            deleteSaveSlot(*titleResult.slotDeleteRequested);
         }
         if (titleResult.startRequested) {
             startLevel(
                 titleResult.startRequested->level,
                 titleResult.startRequested->screen);
             titleScreen_.close();
+        }
+        if (titleResult.slotSelected) {
+            switchSaveSlot(*titleResult.slotSelected);
         }
         if (titleResult.optionsRequested) {
             optionsMenu_.open(optionsMenuSettings(), false);
@@ -315,6 +383,10 @@ void Application::run()
         if (completeResult.titleRequested) {
             resolveLevelComplete(true);
         }
+        if (completeResult.levelSelectRequested) {
+            resolveLevelComplete(false);
+            openStandaloneLevelSelect();
+        }
 
         const OptionsMenuResult menuResult = optionsMenu_.draw(ui_, pixelSize, {
             .up = navUp,
@@ -332,6 +404,10 @@ void Application::run()
         if (menuResult.titleRequested) {
             optionsMenu_.close();
             openTitleScreen();
+        }
+        if (menuResult.levelSelectRequested) {
+            optionsMenu_.close();
+            openStandaloneLevelSelect();
         }
         ui_.endFrame();
         renderer_.drawFrame(buildRenderFrame(), ui_.drawData());
@@ -559,6 +635,7 @@ bool Application::applyLevel(
         gameplaySession_.reset(level_);
     }
     presentation_.resetEntities(gameplaySession_.state());
+    gameLoaded_ = true;
     return restored;
 }
 
@@ -603,6 +680,22 @@ void Application::advanceScreen()
         levelRunFromStart_);
     persistProfile(true);
     pendingNextLevel_ = hasNextLevel ? currentLevel_ + 1 : 0;
+    if (!hasNextLevel) {
+        // The final level: congratulate with whole-game stats instead of the
+        // per-level screen; Level Select is unlocked from here on.
+        std::vector<GameCompleteLevelStats> levels;
+        for (int level = 0; screenExists(level, 0); ++level) {
+            const PlayerProfile::LevelProgress* levelProgress =
+                playerProfile_.progressForLevel(level);
+            levels.push_back({
+                .bestMoves = levelProgress ? levelProgress->bestMoves : std::nullopt,
+                .bestTimeSeconds =
+                    levelProgress ? levelProgress->bestTimeSeconds : std::nullopt,
+            });
+        }
+        levelCompleteOverlay_.openGameComplete(std::move(levels));
+        return;
+    }
     levelCompleteOverlay_.open(stats);
 }
 
@@ -624,7 +717,186 @@ void Application::resolveLevelComplete(bool toTitle)
 
 void Application::openTitleScreen()
 {
+    titleScreen_.setSaveSlots(saveSlotInfos(), activeSaveSlot_);
     titleScreen_.open(titleLevelInfos());
+}
+
+void Application::applyLoadedProfileSettings()
+{
+    playerProfile_.normalize();
+    if (playerProfile_.video.fullscreen) {
+        window_.setFullscreen(true);
+    } else {
+        window_.setWindowedSize(
+            playerProfile_.video.windowWidth,
+            playerProfile_.video.windowHeight);
+    }
+    audioSystem_.setMasterVolume(playerProfile_.audio.masterVolume);
+    audioSystem_.setMusicVolume(playerProfile_.audio.musicVolume);
+    audioSystem_.setSoundVolume(playerProfile_.audio.soundVolume);
+    gameplaySession_.setStepDurationSeconds(
+        playerProfile_.accessibility.reducedMotion
+            ? 0.05f
+            : config::stepDurationSeconds);
+    input_.setBindings(playerProfile_.input);
+    presentationSettings_.lighting.ambientOcclusionEnabled =
+        playerProfile_.video.ambientOcclusion;
+    presentationSettings_.normalize();
+}
+
+std::vector<SaveSlotInfo> Application::saveSlotInfos() const
+{
+    int levelCount = 0;
+    while (screenExists(levelCount, 0)) {
+        ++levelCount;
+    }
+
+    auto summarize = [&](const PlayerProfile& profile) {
+        SaveSlotInfo info;
+        // Empty means "no progress", not "no file": a deleted or reset slot
+        // must present as empty even while its profile object exists.
+        info.empty = profile.progressEmpty();
+        info.currentLevel = profile.currentLevel;
+        for (const PlayerProfile::LevelProgress& level : profile.levels) {
+            info.completedLevels += level.completed ? 1 : 0;
+        }
+        info.completed = levelCount > 0 && [&] {
+            for (int level = 0; level < levelCount; ++level) {
+                const PlayerProfile::LevelProgress* progress =
+                    profile.progressForLevel(level);
+                if (progress == nullptr || !progress->completed) {
+                    return false;
+                }
+            }
+            return true;
+        }();
+        return info;
+    };
+
+    std::vector<SaveSlotInfo> slots;
+    for (int slot = 0; slot < saveSlotCount; ++slot) {
+        if (slot == activeSaveSlot_) {
+            slots.push_back(summarize(playerProfile_));
+            continue;
+        }
+        const SaveStore store(saveDirectory_, saveSlotFileStem(slot));
+        SaveSlotInfo info;
+        try {
+            if (std::filesystem::is_regular_file(store.primaryPath())) {
+                std::ifstream stream(store.primaryPath(), std::ios::binary);
+                const std::string contents(
+                    (std::istreambuf_iterator<char>(stream)),
+                    std::istreambuf_iterator<char>());
+                info = summarize(decodePlayerProfile(contents).profile);
+            }
+        } catch (const std::exception&) {
+            // Unreadable slots present as empty; switching to one runs the
+            // store's full backup/archival recovery.
+            info = {};
+        }
+        slots.push_back(info);
+    }
+    return slots;
+}
+
+void Application::switchSaveSlot(int slot)
+{
+    if (slot < 0 || slot >= saveSlotCount || slot == activeSaveSlot_) {
+        return;
+    }
+
+    // Settle the outgoing slot on disk first.
+    if (gameLoaded_ && !gameplaySession_.moving() && !levelEditor_.playingDraft()) {
+        checkpointCurrentScreen(true);
+    } else {
+        persistProfile(true);
+    }
+    saveStore_->flush();
+
+    // Settings are shared across slots: carry the live ones over the
+    // incoming slot's stale copies.
+    const PlayerProfile sharedSettings = playerProfile_.settingsOnly();
+    activeSaveSlot_ = slot;
+    writeActiveSlotMarker(saveDirectory_, activeSaveSlot_);
+    saveStore_ = std::make_unique<AsyncSaveStore>(
+        saveDirectory_,
+        std::chrono::seconds(2),
+        saveSlotFileStem(activeSaveSlot_));
+    playerProfile_ = saveStore_->load().profile;
+    playerProfile_.adoptSettingsFrom(sharedSettings);
+    std::cerr << saveStore_->status() << '\n';
+
+    // The new slot's world loads on Continue/New Game, like at boot.
+    gameLoaded_ = false;
+    pendingNextLevel_.reset();
+    levelCompleteOverlay_.close();
+    levelRunFromStart_ = true;
+    completedLevelMoveCount_ = 0;
+    currentLevelElapsedSeconds_ = 0.0;
+    currentLevel_ = playerProfile_.currentLevel;
+    currentScreen_ = playerProfile_.currentScreen;
+    if (!screenExists(currentLevel_, currentScreen_)) {
+        currentLevel_ = 0;
+        currentScreen_ = 0;
+        playerProfile_.setCurrentLevel(0);
+    }
+    renderer_.preloadAssets(levelAssetRequirements(currentLevel_));
+    openTitleScreen();
+}
+
+void Application::deleteSaveSlot(int slot)
+{
+    if (slot < 0 || slot >= saveSlotCount) {
+        return;
+    }
+    if (slot == activeSaveSlot_) {
+        // Drain pending writes, then reset the live profile's progress; the
+        // file stays absent until the player starts playing again.
+        saveStore_->flush();
+        deferredCheckpointPending_ = false;
+        playerProfile_.resetProgress();
+        gameLoaded_ = false;
+        pendingNextLevel_.reset();
+        levelCompleteOverlay_.close();
+        levelRunFromStart_ = true;
+        completedLevelMoveCount_ = 0;
+        currentLevelElapsedSeconds_ = 0.0;
+        currentLevel_ = 0;
+        currentScreen_ = 0;
+    }
+    const SaveStore store(saveDirectory_, saveSlotFileStem(slot));
+    std::error_code error;
+    std::filesystem::remove(store.primaryPath(), error);
+    std::filesystem::remove(store.backupPath(), error);
+    titleScreen_.setSaveSlots(saveSlotInfos(), activeSaveSlot_);
+}
+
+void Application::persistSettings(bool immediate)
+{
+    settingsStore_->requestSave(
+        playerProfile_.settingsOnly(),
+        immediate
+            ? AsyncSaveStore::Urgency::Immediate
+            : AsyncSaveStore::Urgency::Deferred);
+}
+
+void Application::openStandaloneLevelSelect()
+{
+    titleScreen_.openLevelSelect(titleLevelInfos());
+}
+
+bool Application::allLevelsCompleted() const
+{
+    bool anyLevel = false;
+    for (int level = 0; screenExists(level, 0); ++level) {
+        anyLevel = true;
+        const PlayerProfile::LevelProgress* progress =
+            playerProfile_.progressForLevel(level);
+        if (progress == nullptr || !progress->completed) {
+            return false;
+        }
+    }
+    return anyLevel;
 }
 
 bool Application::shellMenuOpen() const
@@ -742,6 +1014,7 @@ void Application::applyAudioSettings(
     audioSystem_.setSoundVolume(playerProfile_.audio.soundVolume);
     if (persist) {
         persistProfile(true);
+        persistSettings(true);
     }
 }
 
@@ -811,11 +1084,17 @@ void Application::applyOptionsMenuSettings(const OptionsMenuSettings& settings)
     audioSystem_.setMasterVolume(playerProfile_.audio.masterVolume);
     audioSystem_.setMusicVolume(playerProfile_.audio.musicVolume);
     persistProfile(false);
+    persistSettings(false);
 }
 
 void Application::persistProfile(bool immediate)
 {
-    saveStore_.requestSave(
+    // Slots with no progress stay off disk entirely (settings persist through
+    // their own shared store), preserving the fresh-install empty slate.
+    if (!gameLoaded_ && playerProfile_.progressEmpty()) {
+        return;
+    }
+    saveStore_->requestSave(
         playerProfile_,
         immediate
             ? AsyncSaveStore::Urgency::Immediate
@@ -1026,6 +1305,11 @@ RenderFrameData Application::buildRenderFrame() const
         });
     }
 #endif
+
+    if (!gameLoaded_) {
+        // Title-only: nothing to draw behind the fullscreen menu.
+        return RenderFrameData {};
+    }
 
     return RenderFrameBuilder::buildGameplay({
         .manifest = assetManifest_,

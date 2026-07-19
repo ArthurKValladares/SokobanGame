@@ -12,6 +12,7 @@ class SaveStore {
 public:
     enum class LoadDisposition {
         Loaded,
+        // Nothing on disk; defaults returned without writing any file.
         CreatedDefault,
         Migrated,
         RecoveredBackup,
@@ -25,7 +26,10 @@ public:
         std::string message;
     };
 
-    explicit SaveStore(std::filesystem::path root);
+    // fileStem names the slot's files inside root (e.g. "profile" ->
+    // profile.json / profile.backup.json). Slot 1 keeps the historical
+    // "profile" stem so existing saves stay valid.
+    explicit SaveStore(std::filesystem::path root, std::string fileStem = "profile");
 
     // SDL must already be initialized. SDL owns the platform-specific choice
     // of roaming/local preference storage.

@@ -32,7 +32,8 @@ public:
 
     explicit AsyncSaveStore(
         std::filesystem::path root,
-        std::chrono::milliseconds writeDelay = std::chrono::seconds(2));
+        std::chrono::milliseconds writeDelay = std::chrono::seconds(2),
+        std::string fileStem = "profile");
     ~AsyncSaveStore();
 
     AsyncSaveStore(const AsyncSaveStore&) = delete;
