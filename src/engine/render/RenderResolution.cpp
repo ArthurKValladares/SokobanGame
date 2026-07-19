@@ -6,7 +6,7 @@
 namespace sokoban {
 namespace {
 
-constexpr std::array supportedScales { 25, 50, 67, 100 };
+constexpr std::array supportedPresets { 25, 50, 67, 75, 100 };
 
 uint32_t scaledDimension(uint32_t value, int percent)
 {
@@ -24,7 +24,13 @@ uint32_t scaledDimension(uint32_t value, int percent)
 
 int normalizedRenderScalePercent(int percent)
 {
-    return std::ranges::find(supportedScales, percent) != supportedScales.end()
+    return std::clamp(
+        percent, minimumRenderScalePercent, maximumRenderScalePercent);
+}
+
+int normalizedRenderScalePresetPercent(int percent)
+{
+    return std::ranges::find(supportedPresets, percent) != supportedPresets.end()
         ? percent
         : 100;
 }

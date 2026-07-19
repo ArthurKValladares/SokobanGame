@@ -10,6 +10,8 @@ struct UiRect;
 struct OptionsMenuSettings {
     int antiAliasingSamples = 8;
     int renderScalePercent = 100;
+    bool customRenderScale = false;
+    int customRenderScalePercent = 100;
     bool ambientOcclusion = true;
     bool fullscreen = false;
     int windowWidth = 1280;
@@ -80,6 +82,7 @@ private:
     bool open_ = false;
     Page page_ = Page::Main;
     int selectedRow_ = 0;
+    bool customRenderScaleDragPending_ = false;
     OptionsMenuSettings settings_ {};
 };
 

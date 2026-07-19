@@ -32,7 +32,8 @@ struct ButtonOptions {
     float& value,
     float minimum,
     float maximum,
-    bool focused = false);
+    bool focused = false,
+    bool enabled = true);
 [[nodiscard]] bool checkbox(
     UiContext& ui,
     std::string_view id,

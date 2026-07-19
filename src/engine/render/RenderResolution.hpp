@@ -11,7 +11,11 @@ struct PixelExtent {
     bool operator==(const PixelExtent&) const = default;
 };
 
+inline constexpr int minimumRenderScalePercent = 25;
+inline constexpr int maximumRenderScalePercent = 100;
+
 [[nodiscard]] int normalizedRenderScalePercent(int percent);
+[[nodiscard]] int normalizedRenderScalePresetPercent(int percent);
 [[nodiscard]] PixelExtent scaledRenderExtent(
     PixelExtent outputExtent,
     int renderScalePercent);

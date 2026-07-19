@@ -64,13 +64,23 @@ int main()
             sokoban::PixelExtent { 2560, 1440 },
         "67 percent maps 4K output to 1440p rendering");
     check(
+        sokoban::scaledRenderExtent({ 3840, 2160 }, 75) ==
+            sokoban::PixelExtent { 2880, 1620 },
+        "75 percent preset scales both dimensions");
+    check(
+        sokoban::scaledRenderExtent({ 1920, 1080 }, 63) ==
+            sokoban::PixelExtent { 1210, 680 },
+        "custom percentages are rounded to the nearest pixel");
+    check(
         sokoban::scaledRenderExtent({ 1, 1 }, 25) ==
             sokoban::PixelExtent { 1, 1 },
         "non-empty output never produces a zero-sized render target");
-    check(
-        sokoban::scaledRenderExtent({ 1920, 1080 }, 42) ==
-            sokoban::PixelExtent { 1920, 1080 },
-        "unsupported scales normalize to native resolution");
+    check(sokoban::normalizedRenderScalePercent(10) == 25,
+        "custom scales clamp to the minimum");
+    check(sokoban::normalizedRenderScalePercent(120) == 100,
+        "custom scales clamp to the maximum");
+    check(sokoban::normalizedRenderScalePresetPercent(42) == 100,
+        "unsupported presets normalize to native resolution");
 
     std::cout << "Vulkan device selection tests passed\n";
     return 0;

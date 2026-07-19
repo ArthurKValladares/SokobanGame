@@ -781,6 +781,35 @@ PlayerProfile parseFormat6(const Json& root)
     return profile;
 }
 
+PlayerProfile parseFormat7(const Json& root)
+{
+    rejectUnknownProperties(root, { "format", "progress", "settings" }, "root");
+    const Json& settings = requiredProperty(root, "settings", "root");
+    rejectUnknownProperties(
+        settings,
+        { "audio", "video", "input", "accessibility" },
+        "settings");
+    const Json& video = requiredProperty(settings, "video", "settings");
+    rejectUnknownProperties(video, {
+        "fullscreen", "vsync", "antiAliasingSamples", "renderScalePercent",
+        "customRenderScale", "customRenderScalePercent", "ambientOcclusion",
+        "windowWidth", "windowHeight",
+    }, "settings.video");
+    const bool customRenderScale = boolProperty(
+        video, "customRenderScale", "settings.video");
+    const int customRenderScalePercent = nonNegativeIntegerProperty(
+        video, "customRenderScalePercent", "settings.video");
+
+    Json legacyRoot = root;
+    legacyRoot["settings"]["video"].erase("customRenderScale");
+    legacyRoot["settings"]["video"].erase("customRenderScalePercent");
+    PlayerProfile profile = parseFormat6(legacyRoot);
+    profile.video.customRenderScale = customRenderScale;
+    profile.video.customRenderScalePercent = customRenderScalePercent;
+    profile.normalize();
+    return profile;
+}
+
 PlayerProfile parseFormat1(const Json& root)
 {
     rejectUnknownProperties(root, {
@@ -817,6 +846,13 @@ PlayerProfile parseFormat1(const Json& root)
 
 } // namespace
 
+int PlayerProfile::VideoSettings::effectiveRenderScalePercent() const
+{
+    return customRenderScale
+        ? normalizedRenderScalePercent(customRenderScalePercent)
+        : normalizedRenderScalePresetPercent(renderScalePercent);
+}
+
 void PlayerProfile::normalize()
 {
     unlockedLevel = std::max(unlockedLevel, 0);
@@ -831,8 +867,10 @@ void PlayerProfile::normalize()
         video.antiAliasingSamples != 8) {
         video.antiAliasingSamples = 8;
     }
-    video.renderScalePercent = normalizedRenderScalePercent(
+    video.renderScalePercent = normalizedRenderScalePresetPercent(
         video.renderScalePercent);
+    video.customRenderScalePercent = normalizedRenderScalePercent(
+        video.customRenderScalePercent);
     video.windowWidth = std::clamp(video.windowWidth, 640, 7680);
     video.windowHeight = std::clamp(video.windowHeight, 480, 4320);
     std::ranges::sort(levels, {}, &LevelProgress::level);
@@ -954,6 +992,8 @@ std::string PlayerProfile::serialize() const
                 { "vsync", normalized.video.vsync },
                 { "antiAliasingSamples", normalized.video.antiAliasingSamples },
                 { "renderScalePercent", normalized.video.renderScalePercent },
+                { "customRenderScale", normalized.video.customRenderScale },
+                { "customRenderScalePercent", normalized.video.customRenderScalePercent },
                 { "ambientOcclusion", normalized.video.ambientOcclusion },
                 { "windowWidth", normalized.video.windowWidth },
                 { "windowHeight", normalized.video.windowHeight },
@@ -998,8 +1038,11 @@ DecodedPlayerProfile decodePlayerProfile(std::string_view text)
     if (format == 5) {
         return { .profile = parseFormat5(root), .sourceFormat = format };
     }
-    if (format == currentPlayerProfileFormat) {
+    if (format == 6) {
         return { .profile = parseFormat6(root), .sourceFormat = format };
+    }
+    if (format == currentPlayerProfileFormat) {
+        return { .profile = parseFormat7(root), .sourceFormat = format };
     }
     fail("root", "unsupported format " + std::to_string(format));
 }

@@ -55,13 +55,14 @@ bool slider(
     float& value,
     float minimum,
     float maximum,
-    bool focused)
+    bool focused,
+    bool enabled)
 {
     if (maximum <= minimum) {
         return false;
     }
     const float oldValue = value;
-    if (ui.drag(id, rect)) {
+    if (enabled && ui.drag(id, rect)) {
         const float fraction = std::clamp(
             (ui.mousePosition().x - rect.position.x) / rect.size.x,
             0.0f,
@@ -74,13 +75,23 @@ bool slider(
         { rect.position.x, rect.position.y + (rect.size.y - 8.0f) * 0.5f },
         { rect.size.x, 8.0f },
     };
-    ui.rect(track, { 0.20f, 0.23f, 0.23f, 1.0f });
-    ui.rect({ track.position, { track.size.x * fraction, track.size.y } }, accentColor);
+    const Vec4 trackColor = enabled
+        ? Vec4 { 0.20f, 0.23f, 0.23f, 1.0f }
+        : Vec4 { 0.20f, 0.22f, 0.22f, 0.45f };
+    const Vec4 fillColor = enabled
+        ? accentColor
+        : Vec4 { 0.34f, 0.38f, 0.37f, 0.45f };
+    ui.rect(track, trackColor);
+    ui.rect({ track.position, { track.size.x * fraction, track.size.y } }, fillColor);
     const float knobX = rect.position.x + rect.size.x * fraction;
     ui.rect({
         { knobX - 8.0f, rect.position.y + 3.0f },
         { 16.0f, rect.size.y - 6.0f },
-    }, focused ? Vec4 { 0.62f, 0.93f, 0.84f, 1.0f } : Vec4 { 0.82f, 0.86f, 0.82f, 1.0f });
+    }, !enabled
+        ? Vec4 { 0.48f, 0.50f, 0.49f, 0.45f }
+        : (focused
+            ? Vec4 { 0.62f, 0.93f, 0.84f, 1.0f }
+            : Vec4 { 0.82f, 0.86f, 0.82f, 1.0f }));
     return std::abs(value - oldValue) > 0.0001f;
 }
 

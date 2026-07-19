@@ -45,7 +45,7 @@ Application::Application()
           assetManifest_,
           uiFont_,
           antiAliasingModeForSamples(playerProfile_.video.antiAliasingSamples),
-          playerProfile_.video.renderScalePercent,
+          playerProfile_.video.effectiveRenderScalePercent(),
           playerProfile_.video.vsync)
     , ui_(uiFont_)
     , audioSystem_(assetRoot_, assetManifest_)
@@ -609,6 +609,8 @@ OptionsMenuSettings Application::optionsMenuSettings() const
     return {
         .antiAliasingSamples = playerProfile_.video.antiAliasingSamples,
         .renderScalePercent = playerProfile_.video.renderScalePercent,
+        .customRenderScale = playerProfile_.video.customRenderScale,
+        .customRenderScalePercent = playerProfile_.video.customRenderScalePercent,
         .ambientOcclusion = playerProfile_.video.ambientOcclusion,
         .fullscreen = playerProfile_.video.fullscreen,
         .windowWidth = playerProfile_.video.windowWidth,
@@ -623,6 +625,9 @@ void Application::applyOptionsMenuSettings(const OptionsMenuSettings& settings)
     const PlayerProfile::VideoSettings oldVideo = playerProfile_.video;
     playerProfile_.video.antiAliasingSamples = settings.antiAliasingSamples;
     playerProfile_.video.renderScalePercent = settings.renderScalePercent;
+    playerProfile_.video.customRenderScale = settings.customRenderScale;
+    playerProfile_.video.customRenderScalePercent =
+        settings.customRenderScalePercent;
     playerProfile_.video.ambientOcclusion = settings.ambientOcclusion;
     playerProfile_.video.fullscreen = settings.fullscreen;
     playerProfile_.video.windowWidth = settings.windowWidth;
@@ -636,9 +641,10 @@ void Application::applyOptionsMenuSettings(const OptionsMenuSettings& settings)
         renderer_.setAntiAliasingMode(
             antiAliasingModeForSamples(playerProfile_.video.antiAliasingSamples));
     }
-    if (oldVideo.renderScalePercent != playerProfile_.video.renderScalePercent) {
+    if (oldVideo.effectiveRenderScalePercent() !=
+        playerProfile_.video.effectiveRenderScalePercent()) {
         renderer_.setRenderScalePercent(
-            playerProfile_.video.renderScalePercent);
+            playerProfile_.video.effectiveRenderScalePercent());
     }
     presentationSettings_.lighting.ambientOcclusionEnabled =
         playerProfile_.video.ambientOcclusion;

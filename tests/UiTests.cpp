@@ -62,6 +62,16 @@ void testReusableControls()
         value, 0.0f, 1.0f));
     CHECK(value > 0.45f && value < 0.55f);
 
+    value = 0.25f;
+    ui.beginFrame({ 400.0f, 200.0f }, { 110.0f, 85.0f }, true, true);
+    CHECK(!sokoban::uiControls::slider(
+        ui, "disabled-slider", { { 10.0f, 70.0f }, { 200.0f, 30.0f } },
+        value, 0.0f, 1.0f, false, false));
+    CHECK(value == 0.25f);
+    CHECK(std::ranges::all_of(ui.drawData().commands, [](const auto& command) {
+        return command.kind == sokoban::UiDrawKind::Solid && command.color.w < 0.5f;
+    }));
+
     bool checked = false;
     ui.beginFrame({ 400.0f, 200.0f }, { 20.0f, 135.0f }, true, true);
     CHECK(sokoban::uiControls::checkbox(
@@ -93,7 +103,39 @@ void testOptionsNavigationAndSettings()
     draw({ .down = true });
     const sokoban::OptionsMenuResult scaleChange = draw({ .right = true });
     CHECK(scaleChange.settingsChanged);
-    CHECK(menu.settings().renderScalePercent == 67);
+    CHECK(menu.settings().renderScalePercent == 75);
+    draw({ .down = true });
+    const sokoban::OptionsMenuResult customEnabled = draw({ .confirm = true });
+    CHECK(customEnabled.settingsChanged);
+    CHECK(menu.settings().customRenderScale);
+
+    ui.beginFrame({ 1280.0f, 720.0f }, { 640.0f, 386.0f }, true, true);
+    const sokoban::OptionsMenuResult customDrag =
+        menu.draw(ui, { 1280.0f, 720.0f }, {});
+    ui.endFrame();
+    CHECK(!customDrag.settingsChanged);
+    CHECK(menu.settings().customRenderScalePercent > 60 &&
+        menu.settings().customRenderScalePercent < 65);
+    ui.beginFrame({ 1280.0f, 720.0f }, { 640.0f, 386.0f }, false, false);
+    const sokoban::OptionsMenuResult customDragCommitted =
+        menu.draw(ui, { 1280.0f, 720.0f }, {});
+    ui.endFrame();
+    CHECK(customDragCommitted.settingsChanged);
+
+    menu.open({
+        .renderScalePercent = 75,
+        .customRenderScale = true,
+        .customRenderScalePercent = 100,
+    });
+    draw({ .confirm = true });
+    draw({ .down = true });
+    draw({ .down = true });
+    const sokoban::OptionsMenuResult customChange = draw({ .left = true });
+    CHECK(customChange.settingsChanged);
+    CHECK(menu.settings().customRenderScalePercent == 99);
+    const sokoban::OptionsMenuResult customDisabled = draw({ .confirm = true });
+    CHECK(customDisabled.settingsChanged);
+    CHECK(!menu.settings().customRenderScale);
     menu.back();
     CHECK(menu.page() == sokoban::OptionsMenu::Page::Main);
 
