@@ -1,87 +1,34 @@
 #include "engine/ui/Ui.hpp"
 
+#include "engine/ui/FontAtlas.hpp"
+
 #include <algorithm>
-#include <array>
-#include <cctype>
 
 namespace sokoban {
-namespace {
 
-using GlyphRows = std::array<const char*, 7>;
-
-GlyphRows glyphRows(char character)
+UiContext::UiContext(const FontAtlas& font)
+    : font_(&font)
 {
-    switch (static_cast<char>(std::toupper(static_cast<unsigned char>(character)))) {
-    case 'A': return { " ### ", "#   #", "#   #", "#####", "#   #", "#   #", "#   #" };
-    case 'C': return { " ####", "#    ", "#    ", "#    ", "#    ", "#    ", " ####" };
-    case 'E': return { "#####", "#    ", "#    ", "#### ", "#    ", "#    ", "#####" };
-    case 'G': return { " ####", "#    ", "#    ", "#  ##", "#   #", "#   #", " ####" };
-    case 'I': return { "#####", "  #  ", "  #  ", "  #  ", "  #  ", "  #  ", "#####" };
-    case 'L': return { "#    ", "#    ", "#    ", "#    ", "#    ", "#    ", "#####" };
-    case 'M': return { "#   #", "## ##", "# # #", "#   #", "#   #", "#   #", "#   #" };
-    case 'N': return { "#   #", "##  #", "# # #", "#  ##", "#   #", "#   #", "#   #" };
-    case 'Q': return { " ### ", "#   #", "#   #", "#   #", "# # #", "#  # ", " ## #" };
-    case 'T': return { "#####", "  #  ", "  #  ", "  #  ", "  #  ", "  #  ", "  #  " };
-    case 'U': return { "#   #", "#   #", "#   #", "#   #", "#   #", "#   #", " ### " };
-    case '?': return { " ### ", "#   #", "    #", "   # ", "  #  ", "     ", "  #  " };
-    default: return { "     ", "     ", "     ", "     ", "     ", "     ", "     " };
-    }
 }
 
-} // namespace
-
-void UiContext::beginFrame(Vec2 viewportSize, Vec2 mousePosition, bool mouseDown, bool mousePressed)
+void UiContext::beginFrame(
+    Vec2 viewportSize,
+    Vec2 mousePosition,
+    bool mouseDown,
+    bool mousePressed)
 {
     drawData_.viewportSize = viewportSize;
     drawData_.commands.clear();
     mousePosition_ = mousePosition;
     mouseDown_ = mouseDown;
     mousePressed_ = mousePressed;
+    if (!mouseDown_) {
+        activeControl_.clear();
+    }
 }
 
 void UiContext::endFrame()
 {
-}
-
-bool UiContext::button(std::string_view, UiRect rect, std::string_view label)
-{
-    const bool hovered = contains(rect, mousePosition_);
-    const Vec4 color = hovered
-        ? (mouseDown_ ? Vec4 { 0.82f, 0.46f, 0.20f, 0.96f } : Vec4 { 0.74f, 0.38f, 0.16f, 0.94f })
-        : Vec4 { 0.50f, 0.22f, 0.10f, 0.92f };
-
-    this->rect(rect, { 0.09f, 0.07f, 0.06f, 0.96f });
-    this->rect({ { rect.position.x + 2.0f, rect.position.y + 2.0f }, { rect.size.x - 4.0f, rect.size.y - 4.0f } }, color);
-
-    constexpr float textScale = 3.0f;
-    const float textWidth = static_cast<float>(label.size()) * 6.0f * textScale;
-    const Vec2 textPosition {
-        rect.position.x + std::max((rect.size.x - textWidth) * 0.5f, 0.0f),
-        rect.position.y + (rect.size.y - 7.0f * textScale) * 0.5f,
-    };
-    text(textPosition, label, { 0.96f, 0.92f, 0.84f, 1.0f }, textScale);
-
-    return hovered && mousePressed_;
-}
-
-void UiContext::panel(UiRect rect)
-{
-    this->rect(rect, { 0.04f, 0.035f, 0.03f, 0.90f });
-    this->rect({ { rect.position.x + 4.0f, rect.position.y + 4.0f }, { rect.size.x - 8.0f, rect.size.y - 8.0f } }, { 0.18f, 0.14f, 0.11f, 0.96f });
-}
-
-void UiContext::text(Vec2 position, std::string_view textValue, Vec4 color, float scale)
-{
-    Vec2 cursor = position;
-    for (char character : textValue) {
-        if (character == ' ') {
-            cursor.x += 6.0f * scale;
-            continue;
-        }
-
-        drawGlyph(cursor, character, color, scale);
-        cursor.x += 6.0f * scale;
-    }
 }
 
 bool UiContext::contains(UiRect rectValue, Vec2 point) const
@@ -92,33 +39,93 @@ bool UiContext::contains(UiRect rectValue, Vec2 point) const
         point.y < rectValue.position.y + rectValue.size.y;
 }
 
+bool UiContext::hovered(UiRect rectValue) const
+{
+    return contains(rectValue, mousePosition_);
+}
+
+bool UiContext::clicked(UiRect rectValue) const
+{
+    return hovered(rectValue) && mousePressed_;
+}
+
+bool UiContext::drag(std::string_view id, UiRect rectValue)
+{
+    if (clicked(rectValue)) {
+        activeControl_ = id;
+    }
+    return mouseDown_ && activeControl_ == id;
+}
+
 void UiContext::rect(UiRect rectValue, Vec4 color)
 {
     if (rectValue.size.x <= 0.0f || rectValue.size.y <= 0.0f || color.w <= 0.0f) {
         return;
     }
-
     drawData_.commands.push_back({
+        .kind = UiDrawKind::Solid,
         .rect = rectValue,
         .color = color,
     });
 }
 
-void UiContext::drawGlyph(Vec2 position, char character, Vec4 color, float scale)
+void UiContext::panel(UiRect rectValue)
 {
-    const GlyphRows rows = glyphRows(character);
-    for (size_t y = 0; y < rows.size(); ++y) {
-        for (size_t x = 0; rows[y][x] != '\0'; ++x) {
-            if (rows[y][x] == ' ') {
-                continue;
-            }
+    rect(rectValue, { 0.055f, 0.065f, 0.070f, 0.97f });
+    rect({
+        { rectValue.position.x + 1.0f, rectValue.position.y + 1.0f },
+        { rectValue.size.x - 2.0f, rectValue.size.y - 2.0f },
+    }, { 0.105f, 0.120f, 0.125f, 0.98f });
+}
 
-            rect({
-                { position.x + static_cast<float>(x) * scale, position.y + static_cast<float>(y) * scale },
-                { scale, scale },
-            }, color);
+void UiContext::divider(UiRect rectValue)
+{
+    rect(rectValue, { 0.30f, 0.33f, 0.33f, 0.72f });
+}
+
+void UiContext::text(Vec2 position, std::string_view value, Vec4 color, float size)
+{
+    const float scale = size / font_->pixelHeight();
+    float cursorX = position.x;
+    float baseline = position.y + font_->ascent() * scale;
+    for (char character : value) {
+        if (character == '\n') {
+            cursorX = position.x;
+            baseline += font_->lineHeight() * scale;
+            continue;
         }
+        const FontGlyph& glyph = font_->glyph(character);
+        if (glyph.size.x > 0.0f && glyph.size.y > 0.0f) {
+            drawData_.commands.push_back({
+                .kind = UiDrawKind::FontGlyph,
+                .rect = {
+                    { cursorX + glyph.offset.x * scale, baseline + glyph.offset.y * scale },
+                    { glyph.size.x * scale, glyph.size.y * scale },
+                },
+                .uvRect = glyph.uv,
+                .color = color,
+            });
+        }
+        cursorX += glyph.advance * scale;
     }
+}
+
+Vec2 UiContext::measureText(std::string_view value, float size) const
+{
+    return font_->measureText(value, size);
+}
+
+void UiContext::centeredText(
+    UiRect rectValue,
+    std::string_view value,
+    Vec4 color,
+    float size)
+{
+    const Vec2 measured = measureText(value, size);
+    text({
+        rectValue.position.x + std::max((rectValue.size.x - measured.x) * 0.5f, 0.0f),
+        rectValue.position.y + std::max((rectValue.size.y - measured.y) * 0.5f, 0.0f),
+    }, value, color, size);
 }
 
 } // namespace sokoban

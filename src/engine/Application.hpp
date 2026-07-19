@@ -19,6 +19,8 @@
 #include "engine/Time.hpp"
 #include "engine/Window.hpp"
 #include "engine/render/VulkanRenderer.hpp"
+#include "engine/ui/FontAtlas.hpp"
+#include "engine/ui/OptionsMenu.hpp"
 
 #include <filesystem>
 #include <optional>
@@ -45,10 +47,11 @@ private:
     void deferCurrentScreenCheckpoint();
     void updateDeferredCheckpoint(float dt);
     void applyAudioSettings(const PlayerProfile::AudioSettings& settings, bool persist);
+    [[nodiscard]] OptionsMenuSettings optionsMenuSettings() const;
+    void applyOptionsMenuSettings(const OptionsMenuSettings& settings);
     void persistProfile(bool immediate);
     void update(float dt);
     void drawEditorModeIndicator();
-    void drawQuitConfirmation();
     void drawDraftExitConfirmation();
     void updateEditorPainting();
     void queuePressedCommands();
@@ -71,8 +74,10 @@ private:
     std::filesystem::path assetRoot_;
     // Declared before the renderer/audio members that hold references to it.
     AssetManifest assetManifest_;
+    FontAtlas uiFont_;
     VulkanRenderer renderer_;
     UiContext ui_;
+    OptionsMenu optionsMenu_;
     AudioSystem audioSystem_;
     Level level_;
     GameplaySession gameplaySession_;
@@ -94,7 +99,6 @@ private:
     AnimationPreviewDebugUi animationPreviewDebugUi_;
     std::optional<GridPosition3> editorHoverCell_;
     bool running_ = true;
-    bool quitConfirmationOpen_ = false;
     bool draftExitConfirmationOpen_ = false;
 };
 

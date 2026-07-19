@@ -62,6 +62,11 @@ InputBindings defaultInputBindings()
         KeyboardBinding { "Escape" },
         GamepadButtonBinding { "start" },
     };
+    bindings.forAction(InputAction::MenuConfirm) = {
+        KeyboardBinding { "Return" },
+        KeyboardBinding { "Space" },
+        GamepadButtonBinding { "south" },
+    };
     return bindings;
 }
 
@@ -75,6 +80,7 @@ std::string_view inputActionName(InputAction action)
     case InputAction::Undo: return "undo";
     case InputAction::Restart: return "restart";
     case InputAction::MenuBack: return "menuBack";
+    case InputAction::MenuConfirm: return "menuConfirm";
     case InputAction::Count: break;
     }
     throw std::invalid_argument("invalid input action");

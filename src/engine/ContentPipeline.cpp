@@ -1,6 +1,7 @@
 #include "engine/ContentPipeline.hpp"
 
 #include "engine/AssetManifest.hpp"
+#include "engine/Config.hpp"
 #include "engine/Level.hpp"
 
 #include <algorithm>
@@ -103,7 +104,7 @@ std::string lowercase(std::string value)
 bool isNoticeFile(const std::filesystem::path& path)
 {
     const std::string name = lowercase(path.filename().string());
-    return name == "license" || name == "license.txt" || name == "copying" ||
+    return name == "license" || name == "license.txt" || name == "ofl.txt" || name == "copying" ||
         name == "copying.txt" || name == "readme" || name == "readme.txt" ||
         name == "readme.html" || name == "copyright" || name == "copyright.txt";
 }
@@ -211,6 +212,7 @@ private:
     void addManifestAssets()
     {
         addFile(roots_.assets, "manifest.json", "manifest.json", "asset manifest");
+        addAssetPath(std::filesystem::path(config::uiFontPath), "UI font");
         const AssetManifest manifest = AssetManifest::loadFromFile(roots_.assets / "manifest.json");
 
         for (const auto& texture : manifest.textures()) {

@@ -20,6 +20,16 @@ namespace {
 
 constexpr double profileAutosaveIntervalSeconds = 2.0;
 
+AntiAliasingMode antiAliasingModeForSamples(int samples)
+{
+    switch (samples) {
+    case 1: return AntiAliasingMode::None;
+    case 2: return AntiAliasingMode::Msaa2x;
+    case 4: return AntiAliasingMode::Msaa4x;
+    default: return AntiAliasingMode::Msaa8x;
+    }
+}
+
 } // namespace
 
 Application::Application()
@@ -28,11 +38,15 @@ Application::Application()
     , playerProfile_(saveStore_.load().profile)
     , assetRoot_(runtimeContentRoot())
     , assetManifest_(AssetManifest::loadFromFile(assetRoot_ / "manifest.json"))
+    , uiFont_(FontAtlas::load(assetRoot_ / config::uiFontPath))
     , renderer_(
           window_.nativeHandle(),
           assetRoot_,
           assetManifest_,
+          uiFont_,
+          antiAliasingModeForSamples(playerProfile_.video.antiAliasingSamples),
           playerProfile_.video.vsync)
+    , ui_(uiFont_)
     , audioSystem_(assetRoot_, assetManifest_)
 {
     std::cerr << saveStore_.status() << '\n';
@@ -45,6 +59,10 @@ Application::Application()
     }
     if (playerProfile_.video.fullscreen) {
         window_.setFullscreen(true);
+    } else {
+        window_.setWindowedSize(
+            playerProfile_.video.windowWidth,
+            playerProfile_.video.windowHeight);
     }
     audioSystem_.setMasterVolume(playerProfile_.audio.masterVolume);
     audioSystem_.setMusicVolume(playerProfile_.audio.musicVolume);
@@ -55,6 +73,8 @@ Application::Application()
             : config::stepDurationSeconds);
     input_.setBindings(playerProfile_.input);
     presentationSettings_.applyTileScales(assetManifest_);
+    presentationSettings_.lighting.ambientOcclusionEnabled =
+        playerProfile_.video.ambientOcclusion;
     presentationSettings_.normalize();
     presentation_.setPlayerClips(
         assetManifest_.playerMoveAnimation(),
@@ -151,6 +171,7 @@ void Application::run()
 #endif
             const bool allowKeyboardInput =
                 !isKeyboardEvent ||
+                optionsMenu_.isOpen() ||
                 !renderer_.wantsKeyboardCapture() ||
                 event.type == SDL_EVENT_KEY_UP ||
                 isEditorEditModifier ||
@@ -159,6 +180,7 @@ void Application::run()
                     InputAction::MenuBack);
             const bool allowMouseInput =
                 !isMouseEvent ||
+                optionsMenu_.isOpen() ||
                 !renderer_.wantsMouseCapture() ||
                 event.type == SDL_EVENT_MOUSE_BUTTON_UP;
             if (allowKeyboardInput && allowMouseInput) {
@@ -166,21 +188,22 @@ void Application::run()
             }
 
             if (event.type == SDL_EVENT_QUIT) {
-                running_ = false;
+                optionsMenu_.requestQuitConfirmation();
             }
         }
 
         if (input_.actionPressed(InputAction::MenuBack)) {
-            if (quitConfirmationOpen_) {
-                quitConfirmationOpen_ = false;
 #if SOKOBAN_ENABLE_DEBUG_UI
-            } else if (draftExitConfirmationOpen_) {
+            if (draftExitConfirmationOpen_) {
                 draftExitConfirmationOpen_ = false;
             } else if (levelEditor_.playingDraft()) {
                 draftExitConfirmationOpen_ = true;
+            } else
 #endif
+            if (optionsMenu_.isOpen()) {
+                optionsMenu_.back();
             } else {
-                quitConfirmationOpen_ = true;
+                optionsMenu_.open(optionsMenuSettings());
             }
         }
 
@@ -207,10 +230,26 @@ void Application::run()
             input_.mouseButtonPressed(SDL_BUTTON_LEFT));
 
         renderer_.beginDebugUiFrame();
-        DebugUi::draw();
-        drawQuitConfirmation();
+        if (!optionsMenu_.isOpen()) {
+            DebugUi::draw();
+        }
         drawDraftExitConfirmation();
-        drawEditorModeIndicator();
+        if (!optionsMenu_.isOpen()) {
+            drawEditorModeIndicator();
+        }
+        const OptionsMenuResult menuResult = optionsMenu_.draw(ui_, pixelSize, {
+            .up = input_.actionPressed(InputAction::MoveUp),
+            .down = input_.actionPressed(InputAction::MoveDown),
+            .left = input_.actionPressed(InputAction::MoveLeft),
+            .right = input_.actionPressed(InputAction::MoveRight),
+            .confirm = input_.actionPressed(InputAction::MenuConfirm),
+        });
+        if (menuResult.settingsChanged) {
+            applyOptionsMenuSettings(optionsMenu_.settings());
+        }
+        if (menuResult.quitRequested) {
+            running_ = false;
+        }
         ui_.endFrame();
         renderer_.drawFrame(buildRenderFrame(), ui_.drawData());
     }
@@ -223,7 +262,7 @@ void Application::update(float dt)
         gameplaySession_.activeAction().reversed;
     presentation_.advanceClocks(dt, reversed);
 
-    if (quitConfirmationOpen_) {
+    if (optionsMenu_.isOpen()) {
         audioSystem_.update(dt, false, false);
         return;
     }
@@ -291,49 +330,6 @@ void Application::drawEditorModeIndicator()
     }
     ImGui::End();
 #endif
-}
-
-void Application::drawQuitConfirmation()
-{
-    if (!quitConfirmationOpen_) {
-        return;
-    }
-
-    const Vec2 viewport = window_.sizeInPixels();
-    const UiRect panel {
-        .position = {
-            (viewport.x - 360.0f) * 0.5f,
-            (viewport.y - 180.0f) * 0.5f,
-        },
-        .size = { 360.0f, 180.0f },
-    };
-
-    ui_.panel(panel);
-    ui_.text(
-        { panel.position.x + 78.0f, panel.position.y + 38.0f },
-        "QUIT GAME?",
-        { 0.96f, 0.88f, 0.72f, 1.0f },
-        4.0f);
-
-    if (ui_.button(
-            "quit_game_confirm",
-            {
-                { panel.position.x + 62.0f, panel.position.y + 108.0f },
-                { 104.0f, 42.0f },
-            },
-            "QUIT")) {
-        running_ = false;
-        quitConfirmationOpen_ = false;
-    }
-    if (ui_.button(
-            "quit_game_cancel",
-            {
-                { panel.position.x + 194.0f, panel.position.y + 108.0f },
-                { 104.0f, 42.0f },
-            },
-            "CANCEL")) {
-        quitConfirmationOpen_ = false;
-    }
 }
 
 void Application::drawDraftExitConfirmation()
@@ -605,6 +601,57 @@ void Application::applyAudioSettings(
     if (persist) {
         persistProfile(true);
     }
+}
+
+OptionsMenuSettings Application::optionsMenuSettings() const
+{
+    return {
+        .antiAliasingSamples = playerProfile_.video.antiAliasingSamples,
+        .ambientOcclusion = playerProfile_.video.ambientOcclusion,
+        .fullscreen = playerProfile_.video.fullscreen,
+        .windowWidth = playerProfile_.video.windowWidth,
+        .windowHeight = playerProfile_.video.windowHeight,
+        .masterVolume = playerProfile_.audio.masterVolume,
+        .musicVolume = playerProfile_.audio.musicVolume,
+    };
+}
+
+void Application::applyOptionsMenuSettings(const OptionsMenuSettings& settings)
+{
+    const PlayerProfile::VideoSettings oldVideo = playerProfile_.video;
+    playerProfile_.video.antiAliasingSamples = settings.antiAliasingSamples;
+    playerProfile_.video.ambientOcclusion = settings.ambientOcclusion;
+    playerProfile_.video.fullscreen = settings.fullscreen;
+    playerProfile_.video.windowWidth = settings.windowWidth;
+    playerProfile_.video.windowHeight = settings.windowHeight;
+
+    playerProfile_.audio.masterVolume = settings.masterVolume;
+    playerProfile_.audio.musicVolume = settings.musicVolume;
+    playerProfile_.normalize();
+
+    if (oldVideo.antiAliasingSamples != playerProfile_.video.antiAliasingSamples) {
+        renderer_.setAntiAliasingMode(
+            antiAliasingModeForSamples(playerProfile_.video.antiAliasingSamples));
+    }
+    presentationSettings_.lighting.ambientOcclusionEnabled =
+        playerProfile_.video.ambientOcclusion;
+
+    if (oldVideo.fullscreen != playerProfile_.video.fullscreen ||
+        (!playerProfile_.video.fullscreen &&
+            (oldVideo.windowWidth != playerProfile_.video.windowWidth ||
+                oldVideo.windowHeight != playerProfile_.video.windowHeight))) {
+        if (playerProfile_.video.fullscreen) {
+            window_.setFullscreen(true);
+        } else {
+            window_.setWindowedSize(
+                playerProfile_.video.windowWidth,
+                playerProfile_.video.windowHeight);
+        }
+    }
+
+    audioSystem_.setMasterVolume(playerProfile_.audio.masterVolume);
+    audioSystem_.setMusicVolume(playerProfile_.audio.musicVolume);
+    persistProfile(false);
 }
 
 void Application::persistProfile(bool immediate)

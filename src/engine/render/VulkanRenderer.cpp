@@ -258,9 +258,12 @@ VulkanRenderer::VulkanRenderer(
     SDL_Window* window,
     std::filesystem::path assetRoot,
     const AssetManifest& manifest,
+    const FontAtlas& uiFont,
+    AntiAliasingMode antiAliasingMode,
     bool vsync)
     : window_(window)
     , assetRoot_(std::move(assetRoot))
+    , antiAliasingMode_(antiAliasingMode)
 {
     createInstance();
     createSurface();
@@ -280,6 +283,8 @@ VulkanRenderer::VulkanRenderer(
     shadowPass_.create(physicalDevice_, device_, shadowFormat_);
     ssaoPass_.create(physicalDevice_, device_, swapchainResources_.extent());
     createCommandPool();
+    uiResources_.create(
+        physicalDevice_, device_, commandPool_, graphicsQueue_, uiFont);
     modelResources_.create(
         physicalDevice_, device_, commandPool_, graphicsQueue_,
         assetRoot_, manifest);
@@ -312,6 +317,7 @@ VulkanRenderer::~VulkanRenderer()
     destroyPipeline();
     sceneDescriptors_.destroy();
     modelResources_.destroy();
+    uiResources_.destroy();
     if (commandPool_) {
         vkDestroyCommandPool(device_, commandPool_, nullptr);
     }
@@ -780,6 +786,10 @@ VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources() const
         .ssao = {
             .sampler = ssaoPass_.sampler(),
             .imageView = ssaoPass_.imageView(),
+        },
+        .uiFont = {
+            .sampler = uiResources_.fontSampler(),
+            .imageView = uiResources_.fontImageView(),
         },
         .modelTextures = modelResources_.textures(),
     };
@@ -1982,12 +1992,51 @@ void VulkanRenderer::drawUiRect(
     const float top = 1.0f - 2.0f * command.rect.position.y / viewportSize.y;
     const float bottom = 1.0f - 2.0f * (command.rect.position.y + command.rect.size.y) / viewportSize.y;
 
-    drawFace(commandBuffer, {
+    const std::array vertices {
         Vec3 { left, top, 0.0f },
         Vec3 { right, top, 0.0f },
         Vec3 { right, bottom, 0.0f },
         Vec3 { left, bottom, 0.0f },
-    }, {}, command.color, {}, lighting);
+    };
+    if (command.kind == UiDrawKind::Solid) {
+        drawFace(commandBuffer, vertices, {}, command.color, {}, lighting);
+        return;
+    }
+
+    ++pendingStats_.visibleFaces;
+    ++pendingStats_.drawCalls;
+    pendingStats_.vertices += 6;
+    pendingStats_.triangles += 2;
+    const TilePushConstants pushConstants {
+        .vertices = {
+            Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, 1.0f },
+            Vec4 { vertices[1].x, vertices[1].y, vertices[1].z, 1.0f },
+            Vec4 { vertices[2].x, vertices[2].y, vertices[2].z, 1.0f },
+            Vec4 { vertices[3].x, vertices[3].y, vertices[3].z, 1.0f },
+        },
+        .color = command.color,
+        .materialOptions = {
+            0.0f,
+            command.uvRect.size.x,
+            command.uvRect.size.y,
+            0.0f,
+        },
+        .gridColor = {
+            command.uvRect.position.x,
+            command.uvRect.position.y,
+            0.0f,
+            0.0f,
+        },
+        .textureOptions = { 3.0f, 0.0f, 0.0f, 1.0f },
+    };
+    vkCmdPushConstants(
+        commandBuffer,
+        pipelines_.layout(),
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        0,
+        sizeof(TilePushConstants),
+        &pushConstants);
+    vkCmdDraw(commandBuffer, 6, 1, 0, 0);
 }
 
 Vec3 VulkanRenderer::projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) const

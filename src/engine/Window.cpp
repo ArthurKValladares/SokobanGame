@@ -16,7 +16,7 @@ Window::Window(const std::string& title, int width, int height)
         title.c_str(),
         width,
         height,
-        SDL_WINDOW_VULKAN | SDL_WINDOW_MAXIMIZED | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+        SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
 
     if (!window_) {
         SDL_Quit();
@@ -53,6 +53,26 @@ void Window::setFullscreen(bool fullscreen)
     if (!SDL_SetWindowFullscreen(window_, fullscreen)) {
         throw std::runtime_error(
             std::string("SDL_SetWindowFullscreen failed: ") + SDL_GetError());
+    }
+}
+
+void Window::setWindowedSize(int width, int height)
+{
+    if (!SDL_SetWindowFullscreen(window_, false)) {
+        throw std::runtime_error(
+            std::string("SDL_SetWindowFullscreen failed: ") + SDL_GetError());
+    }
+    SDL_RestoreWindow(window_);
+    if (!SDL_SetWindowSize(window_, width, height)) {
+        throw std::runtime_error(
+            std::string("SDL_SetWindowSize failed: ") + SDL_GetError());
+    }
+    if (!SDL_SetWindowPosition(
+            window_,
+            SDL_WINDOWPOS_CENTERED,
+            SDL_WINDOWPOS_CENTERED)) {
+        throw std::runtime_error(
+            std::string("SDL_SetWindowPosition failed: ") + SDL_GetError());
     }
 }
 

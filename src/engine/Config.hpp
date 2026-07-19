@@ -3,6 +3,7 @@
 #include "engine/Math.hpp"
 
 #include <cstdint>
+#include <string_view>
 
 namespace sokoban::config {
 
@@ -10,6 +11,7 @@ inline constexpr float stepDurationSeconds = 0.25f;
 // Defaults for a newly created player profile. Runtime values are persisted.
 inline constexpr float masterVolume = 0.03f;
 inline constexpr float musicVolume = 0.5f; // relative to master
+inline constexpr std::string_view uiFontPath = "ui/Karla-Regular.ttf";
 // Per-sound-set volumes live in assets/manifest.json (sound entries).
 inline constexpr float footstepIntervalSeconds = 0.2f; // one footstep per tile at the default step duration
 inline constexpr float boardPitchDegrees = 15.0f;

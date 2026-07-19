@@ -10,6 +10,7 @@
 #include "engine/render/VulkanShadowPass.hpp"
 #include "engine/render/VulkanSsaoPass.hpp"
 #include "engine/render/VulkanSwapchainResources.hpp"
+#include "engine/render/VulkanUiResources.hpp"
 #include "engine/ui/Ui.hpp"
 
 #include <SDL3/SDL_events.h>
@@ -26,6 +27,7 @@
 namespace sokoban {
 
 class AssetManifest;
+class FontAtlas;
 
 enum class AntiAliasingMode {
     None,
@@ -43,6 +45,8 @@ public:
         SDL_Window* window,
         std::filesystem::path assetRoot,
         const AssetManifest& manifest,
+        const FontAtlas& uiFont,
+        AntiAliasingMode antiAliasingMode = AntiAliasingMode::Msaa8x,
         bool vsync = false);
     ~VulkanRenderer();
 
@@ -212,6 +216,7 @@ private:
     VulkanShadowPass shadowPass_;
     VulkanSsaoPass ssaoPass_;
     VulkanSceneDescriptors sceneDescriptors_;
+    VulkanUiResources uiResources_;
 
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VulkanPipelineFactory pipelines_;

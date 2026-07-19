@@ -17,6 +17,7 @@ enum class InputAction {
     Undo,
     Restart,
     MenuBack,
+    MenuConfirm,
     Count,
 };
 

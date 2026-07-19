@@ -66,6 +66,21 @@ void testDefaultKeyboardBindings()
     CHECK(!input.actionDown(sokoban::InputAction::MoveUp));
 }
 
+void testMenuConfirmBindings()
+{
+    sokoban::InputState input(false);
+    input.beginFrame();
+    input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_RETURN));
+    CHECK(input.actionPressed(sokoban::InputAction::MenuConfirm));
+
+    input.beginFrame();
+    input.handleEvent(keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_RETURN));
+    input.handleEvent(gamepadButtonEvent(
+        SDL_EVENT_GAMEPAD_BUTTON_DOWN,
+        SDL_GAMEPAD_BUTTON_SOUTH));
+    CHECK(input.actionPressed(sokoban::InputAction::MenuConfirm));
+}
+
 void testKeyboardRemapping()
 {
     sokoban::InputBindings bindings = sokoban::defaultInputBindings();
@@ -191,6 +206,7 @@ void testFocusLossClearsHeldActions()
 int main()
 {
     testDefaultKeyboardBindings();
+    testMenuConfirmBindings();
     testKeyboardRemapping();
     testGamepadButtonsAndRemapping();
     testStickThresholdAndPressEdges();

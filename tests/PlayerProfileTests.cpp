@@ -78,7 +78,14 @@ void testRoundTripAndBests()
     profile.unlockedLevel = 3;
     profile.setCurrentLevel(2);
     profile.audio = { .masterVolume = 0.8f, .musicVolume = 0.4f, .soundVolume = 0.6f };
-    profile.video = { .fullscreen = true, .vsync = true };
+    profile.video = {
+        .fullscreen = true,
+        .vsync = true,
+        .antiAliasingSamples = 4,
+        .ambientOcclusion = false,
+        .windowWidth = 1600,
+        .windowHeight = 900,
+    };
     profile.input.forAction(sokoban::InputAction::MoveUp) = {
         sokoban::KeyboardBinding { "Up" },
         sokoban::GamepadButtonBinding { "dpup" },
@@ -167,10 +174,16 @@ void testNormalizationAndMigration()
     profile.unlockedLevel = 2;
     profile.currentLevel = 9;
     profile.audio = { .masterVolume = -1.0f, .musicVolume = 3.0f, .soundVolume = 0.5f };
+    profile.video.antiAliasingSamples = 3;
+    profile.video.windowWidth = 20;
+    profile.video.windowHeight = 30;
     profile.normalize();
     check(profile.currentLevel == 2, "current level clamps to unlocked level");
     check(profile.audio.masterVolume == 0.0f, "master volume clamps low");
     check(profile.audio.musicVolume == 1.0f, "music volume clamps high");
+    check(profile.video.antiAliasingSamples == 8, "invalid MSAA receives default");
+    check(profile.video.windowWidth == 640, "window width clamps low");
+    check(profile.video.windowHeight == 480, "window height clamps low");
 
     constexpr std::string_view format1 = R"json({
   "format": 1,
@@ -203,6 +216,10 @@ void testNormalizationAndMigration()
     format2Root["progress"].erase("currentScreen");
     format2Root["progress"].erase("activeScreen");
     format2Root["settings"]["input"] = legacyInput;
+    format2Root["settings"]["video"].erase("antiAliasingSamples");
+    format2Root["settings"]["video"].erase("ambientOcclusion");
+    format2Root["settings"]["video"].erase("windowWidth");
+    format2Root["settings"]["video"].erase("windowHeight");
     const sokoban::DecodedPlayerProfile migratedFormat2 =
         sokoban::decodePlayerProfile(format2Root.dump());
     check(migratedFormat2.sourceFormat == 2, "format 2 source reported");
@@ -222,6 +239,10 @@ void testNormalizationAndMigration()
         sokoban::PlayerProfile {}.serialize());
     format3Root["format"] = 3;
     format3Root["settings"]["input"] = legacyInput;
+    format3Root["settings"]["video"].erase("antiAliasingSamples");
+    format3Root["settings"]["video"].erase("ambientOcclusion");
+    format3Root["settings"]["video"].erase("windowWidth");
+    format3Root["settings"]["video"].erase("windowHeight");
     const sokoban::DecodedPlayerProfile migratedFormat3 =
         sokoban::decodePlayerProfile(format3Root.dump());
     check(migratedFormat3.sourceFormat == 3, "format 3 source reported");
@@ -229,6 +250,26 @@ void testNormalizationAndMigration()
         migratedFormat3.profile.input, sokoban::InputAction::Undo);
     check(migratedKeyboard && migratedKeyboard->scancode == "Backspace",
         "format 3 keyboard binding migrates");
+
+    nlohmann::json format4Root = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    format4Root["format"] = 4;
+    format4Root["settings"]["input"].erase("menuConfirm");
+    format4Root["settings"]["video"].erase("antiAliasingSamples");
+    format4Root["settings"]["video"].erase("ambientOcclusion");
+    format4Root["settings"]["video"].erase("windowWidth");
+    format4Root["settings"]["video"].erase("windowHeight");
+    const sokoban::DecodedPlayerProfile migratedFormat4 =
+        sokoban::decodePlayerProfile(format4Root.dump());
+    check(migratedFormat4.sourceFormat == 4, "format 4 source reported");
+    check(!migratedFormat4.profile.input.forAction(
+            sokoban::InputAction::MenuConfirm).empty(),
+        "format 4 receives menu-confirm defaults");
+    check(migratedFormat4.profile.video.antiAliasingSamples == 8,
+        "format 4 receives MSAA default");
+    check(migratedFormat4.profile.video.windowWidth == 1280 &&
+            migratedFormat4.profile.video.windowHeight == 720,
+        "format 4 receives window-size defaults");
 
     checkThrows([] {
         (void)sokoban::decodePlayerProfile(R"json({ "format": 99 })json");

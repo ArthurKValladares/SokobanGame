@@ -474,14 +474,31 @@ OrderedJson inputBindingToJson(const InputBinding& binding)
     }, binding);
 }
 
-InputBindings inputBindingsFromJson(const Json& value, std::string_view context)
+InputBindings inputBindingsFromJson(
+    const Json& value,
+    std::string_view context,
+    bool includeMenuConfirm = true)
 {
-    rejectUnknownProperties(value, {
-        "moveUp", "moveDown", "moveLeft", "moveRight",
-        "undo", "restart", "menuBack",
-    }, context);
+    if (includeMenuConfirm) {
+        rejectUnknownProperties(value, {
+            "moveUp", "moveDown", "moveLeft", "moveRight",
+            "undo", "restart", "menuBack", "menuConfirm",
+        }, context);
+    } else {
+        rejectUnknownProperties(value, {
+            "moveUp", "moveDown", "moveLeft", "moveRight",
+            "undo", "restart", "menuBack",
+        }, context);
+    }
     InputBindings result;
-    for (std::size_t i = 0; i < inputActionCount; ++i) {
+    if (!includeMenuConfirm) {
+        result.forAction(InputAction::MenuConfirm) =
+            defaultInputBindings().forAction(InputAction::MenuConfirm);
+    }
+    const std::size_t actionCount = includeMenuConfirm
+        ? inputActionCount
+        : static_cast<std::size_t>(InputAction::MenuConfirm);
+    for (std::size_t i = 0; i < actionCount; ++i) {
         const InputAction action = static_cast<InputAction>(i);
         const std::string actionName(inputActionName(action));
         const Json& bindings = requiredProperty(value, actionName, context);
@@ -685,11 +702,54 @@ PlayerProfile parseFormat4(const Json& root)
         "settings");
     const InputBindings input = inputBindingsFromJson(
         requiredProperty(settings, "input", "settings"),
-        "settings.input");
+        "settings.input",
+        false);
 
     Json legacyRoot = root;
     legacyRoot["settings"]["input"] = legacyInputDefaultsJson();
     PlayerProfile profile = parseFormat3(legacyRoot);
+    profile.input = input;
+    profile.normalize();
+    return profile;
+}
+
+PlayerProfile parseFormat5(const Json& root)
+{
+    rejectUnknownProperties(root, { "format", "progress", "settings" }, "root");
+    const Json& settings = requiredProperty(root, "settings", "root");
+    rejectUnknownProperties(
+        settings,
+        { "audio", "video", "input", "accessibility" },
+        "settings");
+
+    const Json& video = requiredProperty(settings, "video", "settings");
+    rejectUnknownProperties(video, {
+        "fullscreen", "vsync", "antiAliasingSamples", "ambientOcclusion",
+        "windowWidth", "windowHeight",
+    }, "settings.video");
+    PlayerProfile::VideoSettings videoSettings;
+    videoSettings.fullscreen = boolProperty(video, "fullscreen", "settings.video");
+    videoSettings.vsync = boolProperty(video, "vsync", "settings.video");
+    videoSettings.antiAliasingSamples = nonNegativeIntegerProperty(
+        video, "antiAliasingSamples", "settings.video");
+    videoSettings.ambientOcclusion = boolProperty(
+        video, "ambientOcclusion", "settings.video");
+    videoSettings.windowWidth = nonNegativeIntegerProperty(
+        video, "windowWidth", "settings.video");
+    videoSettings.windowHeight = nonNegativeIntegerProperty(
+        video, "windowHeight", "settings.video");
+    const InputBindings input = inputBindingsFromJson(
+        requiredProperty(settings, "input", "settings"),
+        "settings.input");
+
+    Json legacyRoot = root;
+    legacyRoot["settings"]["video"].erase("antiAliasingSamples");
+    legacyRoot["settings"]["video"].erase("ambientOcclusion");
+    legacyRoot["settings"]["video"].erase("windowWidth");
+    legacyRoot["settings"]["video"].erase("windowHeight");
+    legacyRoot["settings"]["input"].erase("menuConfirm");
+    PlayerProfile profile = parseFormat4(legacyRoot);
+    profile.video = videoSettings;
     profile.input = input;
     profile.normalize();
     return profile;
@@ -739,6 +799,14 @@ void PlayerProfile::normalize()
     audio.masterVolume = std::clamp(audio.masterVolume, 0.0f, 1.0f);
     audio.musicVolume = std::clamp(audio.musicVolume, 0.0f, 1.0f);
     audio.soundVolume = std::clamp(audio.soundVolume, 0.0f, 1.0f);
+    if (video.antiAliasingSamples != 1 &&
+        video.antiAliasingSamples != 2 &&
+        video.antiAliasingSamples != 4 &&
+        video.antiAliasingSamples != 8) {
+        video.antiAliasingSamples = 8;
+    }
+    video.windowWidth = std::clamp(video.windowWidth, 640, 7680);
+    video.windowHeight = std::clamp(video.windowHeight, 480, 4320);
     std::ranges::sort(levels, {}, &LevelProgress::level);
     if (activeScreen &&
         (activeScreen->level != currentLevel || activeScreen->screen != currentScreen)) {
@@ -856,6 +924,10 @@ std::string PlayerProfile::serialize() const
             { "video", {
                 { "fullscreen", normalized.video.fullscreen },
                 { "vsync", normalized.video.vsync },
+                { "antiAliasingSamples", normalized.video.antiAliasingSamples },
+                { "ambientOcclusion", normalized.video.ambientOcclusion },
+                { "windowWidth", normalized.video.windowWidth },
+                { "windowHeight", normalized.video.windowHeight },
             } },
             { "input", inputBindingsToJson(normalized.input) },
             { "accessibility", {
@@ -891,8 +963,11 @@ DecodedPlayerProfile decodePlayerProfile(std::string_view text)
     if (format == 3) {
         return { .profile = parseFormat3(root), .sourceFormat = 3 };
     }
+    if (format == 4) {
+        return { .profile = parseFormat4(root), .sourceFormat = 4 };
+    }
     if (format == currentPlayerProfileFormat) {
-        return { .profile = parseFormat4(root), .sourceFormat = format };
+        return { .profile = parseFormat5(root), .sourceFormat = format };
     }
     fail("root", "unsupported format " + std::to_string(format));
 }

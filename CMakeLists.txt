@@ -28,8 +28,8 @@ target_include_directories(sokoban_json SYSTEM INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
 )
 
-add_library(sokoban_stb_image INTERFACE)
-target_include_directories(sokoban_stb_image SYSTEM INTERFACE
+add_library(sokoban_stb INTERFACE)
+target_include_directories(sokoban_stb SYSTEM INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb"
 )
 
@@ -166,7 +166,11 @@ add_executable(sokoban
     src/engine/render/VulkanShadowPass.cpp
     src/engine/render/VulkanSsaoPass.cpp
     src/engine/render/VulkanSwapchainResources.cpp
+    src/engine/render/VulkanUiResources.cpp
+    src/engine/ui/FontAtlas.cpp
+    src/engine/ui/OptionsMenu.cpp
     src/engine/ui/Ui.cpp
+    src/engine/ui/UiControls.cpp
 )
 foreach(imgui_source IN LISTS SOKOBAN_IMGUI_SOURCES)
     target_sources(sokoban PRIVATE $<$<CONFIG:Debug>:${imgui_source}>)
@@ -210,7 +214,7 @@ target_link_libraries(sokoban PRIVATE
     Threads::Threads
     SDL3::SDL3
     sokoban_json
-    sokoban_stb_image
+    sokoban_stb
 )
 if(UNIX AND NOT APPLE)
     # miniaudio dynamically loads native audio backends on Unix-like systems.
@@ -320,7 +324,7 @@ if(SOKOBAN_BUILD_TESTS)
     target_include_directories(sokoban_image_data_tests PRIVATE src)
     target_link_libraries(sokoban_image_data_tests PRIVATE
         Threads::Threads
-        sokoban_stb_image
+        sokoban_stb
     )
     target_compile_definitions(sokoban_image_data_tests PRIVATE
         SOKOBAN_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
@@ -331,6 +335,25 @@ if(SOKOBAN_BUILD_TESTS)
         target_compile_options(sokoban_image_data_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME image_data COMMAND sokoban_image_data_tests)
+
+    add_executable(sokoban_ui_tests
+        tests/UiTests.cpp
+        src/engine/ui/FontAtlas.cpp
+        src/engine/ui/OptionsMenu.cpp
+        src/engine/ui/Ui.cpp
+        src/engine/ui/UiControls.cpp
+    )
+    target_include_directories(sokoban_ui_tests PRIVATE src)
+    target_link_libraries(sokoban_ui_tests PRIVATE sokoban_stb)
+    target_compile_definitions(sokoban_ui_tests PRIVATE
+        SOKOBAN_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    )
+    if(MSVC)
+        target_compile_options(sokoban_ui_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_ui_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME ui COMMAND sokoban_ui_tests)
 
     add_executable(sokoban_level_editor_tests
         tests/LevelEditorTests.cpp

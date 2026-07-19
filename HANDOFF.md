@@ -35,8 +35,9 @@ Main dependencies:
 - nlohmann/json 3.11.3 is pinned as a vendored single header in
   `third_party/nlohmann`; it parses the runtime asset manifest without any
   configure-time downloads.
-- stb_image 2.30 is pinned in `third_party/stb`; texture files are read through
-  `std::filesystem` and decoded to RGBA from memory without platform APIs.
+- stb_image 2.30 and stb_truetype are pinned in `third_party/stb`; texture
+  files are decoded without platform APIs and the player UI builds a real TTF
+  atlas from the staged, OFL-licensed Karla font.
 
 Common commands:
 
@@ -93,7 +94,7 @@ cmake --build build --config Debug --target sokoban_gameplay_session_tests
 .\build\Debug\sokoban_gameplay_session_tests.exe
 ```
 
-Player-profile tests cover format-4 round trips, format-1/2/3 migration, exact
+Player-profile tests cover format-5 round trips, format-1/2/3/4 migration, exact
 active-screen/undo checkpoints, completion bests, normalization, atomic writes,
 asynchronous save coalescing/shutdown flushing, prior-save backups,
 corrupt-save archival, backup recovery, and double-corruption default recovery:
@@ -119,6 +120,15 @@ files:
 ```powershell
 cmake --build build --config Debug --target sokoban_image_data_tests
 .\build\Debug\sokoban_image_data_tests.exe
+```
+
+UI tests cover TTF atlas generation, glyph draw data, reusable button/slider/
+checkbox interactions, options-page navigation, graphics changes, audio
+changes, and quit confirmation:
+
+```powershell
+cmake --build build --config Debug --target sokoban_ui_tests
+.\build\Debug\sokoban_ui_tests.exe
 ```
 
 Headless animation-controller tests cover Rogue animation selection,
@@ -162,7 +172,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
 - `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, action history, a branch-safe undo stack, automatic world steps, the post-undo automatic-motion pause, and solution-move snapshots that restore correctly across undo/restart. Its committed-state snapshot/restore API persists the exact player/movable state and usable undo chain; restore rejects disconnected or impossible rules transitions without mutating the live session. `reset` always clears undo state at a screen boundary. Emits `Action` snapshots for `Application` to animate. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
 - `src/engine/InputBindings.*`: platform-neutral semantic action and binding model. Each action owns an ordered list of keyboard, gamepad-button, and signed gamepad-axis bindings, allowing keyboard+D-pad+stick defaults and future replacement/appending by a remapping UI without changing gameplay code.
 - `src/engine/Input.*`: SDL3 device owner and action mapper. Tracks raw keyboard/mouse state for editor tooling, hot-plugs gamepads, selects the most recently used controller, normalizes stick axes with threshold/pressed-edge semantics, clears stuck input on focus loss, reports active-device diagnostics, and converts raw SDL events into typed remapping candidates. `Application` consumes semantic actions only for gameplay. Covered by `tests/InputTests.cpp` (`sokoban_input_tests`).
-- `src/engine/PlayerProfile.*`: current format-4 player progress/settings model and strict JSON codec. Stores unlocked/current level and screen, an active-screen committed gameplay checkpoint with the multi-screen level move/time counters, per-level completion and optional move/time bests, typed keyboard/controller action bindings, audio/video/accessibility settings, bounded normalization, and explicit format-1/2/3 migrations. Headless and covered with `SaveStore` by `tests/PlayerProfileTests.cpp` (`sokoban_profile_tests`).
+- `src/engine/PlayerProfile.*`: current format-5 player progress/settings model and strict JSON codec. Stores unlocked/current level and screen, an active-screen committed gameplay checkpoint with the multi-screen level move/time counters, per-level completion and optional move/time bests, typed keyboard/controller action bindings, audio/video/accessibility settings, window mode/size, MSAA, and AO, with bounded normalization and explicit format-1/2/3/4 migrations. Headless and covered with `SaveStore` by `tests/PlayerProfileTests.cpp` (`sokoban_profile_tests`).
 - `src/engine/SaveStore.*`: profile persistence rooted at SDL's platform-appropriate `SDL_GetPrefPath`. Writes validated JSON through same-directory temporary replacement, keeps the previous valid primary as `profile.backup.json`, migrates old versions, archives corrupt primary/backup files for diagnosis, recovers from backup, and restores defaults when both copies are unusable.
 - `src/engine/AsyncSaveStore.*`: dedicated serialized persistence worker around `SaveStore`. Deferred requests coalesce over a configurable window, while JSON encoding, backup rotation, and atomic filesystem replacement always happen off the game thread. Screen transitions and committed settings request immediate worker saves; clean shutdown flushes the newest pending profile. Diagnostics expose request/write/coalescing counts and pending/writing state.
 - `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags + slide momentum) plus pure functions in `sokoban::rules` — `step` advances the whole world one discrete step (simultaneous one-tile moves, pushes, ladder climbs, momentum, falls, water, conveyors); `hasPendingMotion` reports whether the world would keep moving without input; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
@@ -186,6 +196,8 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
 - `src/engine/render/VulkanSwapchainResources.*`: owns the swapchain, image views, MSAA color attachment, scene depth/resolve-depth, scene-color sampling target, acquire/present calls, resize lifecycle, frame attachment transitions, and the ice-blur scene-color copy. Profile VSync selects guaranteed FIFO; disabled VSync prefers mailbox, then immediate, then FIFO fallback.
 - `src/engine/render/VulkanPipelineFactory.*`: owns the shared pipeline layout and all scene, model, UI, shadow, SSAO, composite, and visualization pipelines. Shader-module loading and graphics-pipeline construction no longer live in `VulkanRenderer`.
 - `src/engine/render/VulkanSceneDescriptors.*`: owns the scene descriptor-set layout, pool, set, and bindings for shadow, copied scene color, model textures, sampled scene depth, and SSAO. Resize/MSAA changes update the same set with new attachment views.
+- `src/engine/render/VulkanUiResources.*`: owns the one-time R8 font-atlas
+  upload and sampler used by the player-facing overlay shader.
 - `src/engine/render/VulkanResourceUtils.*`: exception-safe shared Vulkan image allocation, image-view creation, memory-type selection, and destruction used by the focused resource owners. `VulkanRenderConstants.hpp` holds the shared 256-byte push-constant contract.
 - `src/engine/render/VulkanRenderer.*`: top-level Vulkan instance/device/queue and frame orchestration, command buffers/synchronization, debug UI, camera/projection calculations, and scene draw traversal. Resource, pass, pipeline, descriptor, model, and animation ownership is delegated to the focused components above.
 - `src/engine/render/GltfMesh.*`: small custom GLTF/GLB loader, static mesh loading, skinned mesh loading, animation sampling/skinning. `skinGltfMeshBlended` skins with a pose blended between two clips; `SkinnedMeshUpdater` uses it for the player crossfades requested by `AnimationController` over `config::playerAnimationFadeSeconds`.
@@ -193,7 +205,16 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables ImGui engine cont
   and in-memory RGBA decoding through stb_image. Filesystem ownership stays in
   the engine, preserving native `std::filesystem::path` handling and allowing
   independent background loads without COM or other platform initialization.
-- `src/engine/ui/Ui.*`: very small in-game immediate UI used for the quit confirmation, including crude bitmap-glyph text.
+- `src/engine/ui/FontAtlas.*`: platform-neutral Karla TTF loading, stb_truetype
+  atlas generation, ASCII glyph metrics, and text measurement.
+- `src/engine/ui/Ui.*`: immediate draw/input context for solid rectangles,
+  textured glyphs, panels, dividers, hit testing, and drag ownership.
+- `src/engine/ui/UiControls.*`: reusable styled buttons, sliders, checkboxes,
+  segmented selectors, and choice steppers with mouse/focus states.
+- `src/engine/ui/OptionsMenu.*`: headless menu page/navigation state and
+  composition for Graphics, Audio, and separated quit confirmation. It emits a
+  platform-neutral settings snapshot; `Application` applies changes to the
+  window, renderer, presentation, audio, and profile owners.
 - `shaders/`: GLSL shader sources compiled to SPIR-V by CMake.
 - `levels/`: source `.scr` level files copied into `build/assets/levels`.
 - `assets/`: source KayKit asset packs.
@@ -496,32 +517,36 @@ Shader notes:
   conveyor clock (no hard-coded conveyor special case).
 - Push constants carry transform, lighting, grid, material, and texture options.
 
-## UI And Text Rendering Rough State
+## UI And Text Rendering
 
 There are two UI systems:
 
 - ImGui Debug UI/editor in Debug builds.
-- A tiny custom `UiContext` for in-game overlays such as quit confirmation.
+- A Release-capable custom UI stack for player-facing menus.
 
-The custom UI/text is intentionally primitive:
+The custom UI currently provides:
 
-- Text is rendered with a tiny hard-coded 5x7-ish glyph set.
-- Only a small subset of letters exists.
-- No font asset pipeline.
-- No layout engine.
-- No wrapping, kerning, localization, dynamic sizing, or high-quality button styling.
-- Text rendering should be considered placeholder.
+- A staged Karla TTF with its OFL notice, stb_truetype atlas generation, text
+  measurement, and Vulkan glyph sampling.
+- Reusable buttons, sliders, checkboxes, segmented controls, choice steppers,
+  panels, dividers, mouse interaction, and keyboard/gamepad focus styling.
+- A pause/options flow with Graphics (MSAA, AO, fullscreen/window sizes), Audio
+  (live master/music sliders), and a visually separated confirmed Quit action.
+- Semantic W/S or D-pad/stick navigation, Enter/Space or controller South
+  confirmation, and Escape/Start back navigation.
 
-If making player-facing menus, pause screens, settings, or polished editor UI, plan to replace or expand this system.
+It still lacks wrapping, kerning, localization, accessibility-driven scaling,
+and a general layout engine; add those within these focused modules rather than
+moving player UI into Debug-only ImGui.
 
 ## Recent Work Summary
 
 Major recent additions and fixes:
 
-- Added format-4 player persistence under `SDL_GetPrefPath`: current/unlocked
+- Added format-5 player persistence under `SDL_GetPrefPath`: current/unlocked
   level, current screen, an exact committed screen state and undo stack,
   per-level completion and best move/time records, audio/video/input/
-  accessibility settings, typed keyboard/controller bindings, format-1/2/3
+  accessibility settings, typed keyboard/controller bindings, format-1/2/3/4
   migration, atomic replacement, previous-save
   backups, corrupt-file archival, backup recovery, and default recovery. Level
   completion records successful player moves across multi-screen levels and
@@ -530,7 +555,7 @@ Major recent additions and fixes:
   at most once every two seconds at a committed/idle boundary. Screen entry is
   captured immediately; entering a screen resets its undo stack before that
   checkpoint is queued. Saved
-  fullscreen, VSync, input bindings, reduced motion, and audio buses are applied
+  fullscreen/window size, MSAA, AO, VSync, input bindings, reduced motion, and audio buses are applied
   at runtime. Debug master/music/sound sliders now update the profile instead of
   disappearing at process exit.
 - Moved all runtime profile writes off the game thread through `AsyncSaveStore`.
@@ -542,7 +567,7 @@ Major recent additions and fixes:
 - Added a semantic input abstraction and SDL3 gamepad support. Gameplay reads
   actions instead of SDL controls; defaults combine keyboard, D-pad, and left
   stick, with face buttons for undo/restart and Start for menu/back. Controllers
-  hot-plug safely, axis edges use configurable thresholds, format-4 profiles
+  hot-plug safely, axis edges use configurable thresholds, format-5 profiles
   persist typed multi-device bindings, and raw SDL events can be captured as
   binding candidates by a future remapping screen.
 - Added the audio system (miniaudio): randomized non-repeating concrete
@@ -626,14 +651,14 @@ At the time this handoff was updated:
 - Full Debug and Release builds passed from the clean `out/visual-studio` build
   tree. Clean installed Release builds also start and remain healthy without
   access to the source checkout.
-- All fourteen CTest suites pass, including concurrent texture decoding,
+- All fifteen CTest suites pass, including real-font/options UI, concurrent texture decoding,
   input/gamepad mapping, profile
   migration/recovery, gameplay
   move-count semantics, mandatory validation of the shipped manifest,
   manifest-editor save semantics, and the `content_pipeline` suite.
 - `cmake --build out\visual-studio --config Release --target package` produces
   `out/visual-studio/Sokoban3D-0.1.0-Windows-x64.zip`. The current staged tree
-  contains 53 reachable files (about 4 MB) instead of the roughly 236 MB / 5,964
+  contains 55 reachable files (about 4 MB) instead of the roughly 236 MB / 5,964
   files in the source vendor packs.
 - Migrated the asset manifest from the custom indentation-based format to
   versioned strict JSON parsed by pinned nlohmann/json 3.11.3. The parser now
@@ -645,8 +670,8 @@ At the time this handoff was updated:
   manifest-backed tile scale and per-sound-set controls were removed from the
   Engine window.
 - Release startup creates or loads `%APPDATA%/Sokoban3D/Sokoban3D/profile.json`
-  on Windows through SDL's preference-path API. Existing format-1/2/3 profiles
-  migrate to format 4; successful screen loading writes the initial or restored
+  on Windows through SDL's preference-path API. Existing format-1/2/3/4 profiles
+  migrate to format 5; successful screen loading writes the initial or restored
   gameplay checkpoint without leaving a temporary replacement file.
 - Replaced the Windows WIC/COM texture path with vendored stb_image 2.30 and
   removed `ole32`/`windowscodecs` from the game link. Image files are read with
@@ -654,6 +679,11 @@ At the time this handoff was updated:
   failure-diagnostic tests. Unix builds also link miniaudio's documented `dl`
   and math dependencies, and package names now reflect the configured CPU
   architecture instead of always claiming x64.
+- Replaced the placeholder bitmap-letter quit popup with a modular
+  Release-capable options menu. Karla glyphs render from a dedicated Vulkan
+  atlas; reusable controls live in `UiControls`; `OptionsMenu` owns only
+  page/navigation state; and `Application` applies/persists MSAA, AO,
+  fullscreen/window size, master/music volume, and confirmed quit requests.
 
 Known useful verification commands:
 

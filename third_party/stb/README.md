@@ -1,8 +1,8 @@
-# stb_image
+# stb
 
-This directory vendors `stb_image.h` version 2.30 from the official
-[`nothings/stb`](https://github.com/nothings/stb) repository. The game uses
-the memory-decoding API so filesystem access remains owned by the engine and
-works with `std::filesystem::path` on every supported platform.
+This directory vendors `stb_image.h` version 2.30 and `stb_truetype.h` from
+the official [`nothings/stb`](https://github.com/nothings/stb) repository.
+The game uses them for platform-independent image decoding and TTF font-atlas
+generation while keeping filesystem access inside the engine.
 
 The upstream dual-license text is in `LICENSE`.

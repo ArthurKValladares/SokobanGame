@@ -16,8 +16,9 @@ A tiny C++20 engine seed for a future Sokoban-like 3D game. The first milestone 
 - A C++20 compiler
 
 SDL 3.4.10 is vendored in `third_party/SDL` and is built statically by the root CMake project.
-stb_image 2.30 is vendored in `third_party/stb` and provides
-platform-independent in-memory texture decoding.
+stb_image 2.30 and stb_truetype are vendored in `third_party/stb`; they provide
+platform-independent texture decoding and real-font atlas generation. The
+player-facing UI uses the staged Karla typeface under `assets/ui`.
 
 ## Layered Levels
 

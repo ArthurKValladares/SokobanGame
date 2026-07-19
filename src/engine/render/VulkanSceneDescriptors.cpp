@@ -31,7 +31,7 @@ void VulkanSceneDescriptors::create(VkDevice device, const Resources& resources)
     modelTextureCount_ = static_cast<uint32_t>(resources.modelTextures.size());
 
     try {
-        std::array<VkDescriptorSetLayoutBinding, 5> bindings {
+        std::array<VkDescriptorSetLayoutBinding, 6> bindings {
             VkDescriptorSetLayoutBinding {
                 .binding = 0,
                 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -48,6 +48,12 @@ void VulkanSceneDescriptors::create(VkDevice device, const Resources& resources)
                 .binding = 2,
                 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .descriptorCount = modelTextureCount_,
+                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+            },
+            VkDescriptorSetLayoutBinding {
+                .binding = 3,
+                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
             },
             VkDescriptorSetLayoutBinding {
@@ -73,7 +79,7 @@ void VulkanSceneDescriptors::create(VkDevice device, const Resources& resources)
 
         VkDescriptorPoolSize poolSize {
             .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = modelTextureCount_ + 4,
+            .descriptorCount = modelTextureCount_ + 5,
         };
         VkDescriptorPoolCreateInfo poolInfo {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
@@ -108,6 +114,7 @@ void VulkanSceneDescriptors::update(const Resources& resources) const
         !resources.sceneColor.valid() ||
         !resources.sceneDepth.valid() ||
         !resources.ssao.valid() ||
+        !resources.uiFont.valid() ||
         resources.modelTextures.size() != modelTextureCount_) {
         throw std::runtime_error("Scene descriptor resources are incomplete");
     }
@@ -145,7 +152,20 @@ void VulkanSceneDescriptors::update(const Resources& resources) const
         .imageView = resources.ssao.imageView,
         .imageLayout = resources.ssao.imageLayout,
     };
-    std::array<VkWriteDescriptorSet, 5> writes {
+    const VkDescriptorImageInfo uiFont {
+        .sampler = resources.uiFont.sampler,
+        .imageView = resources.uiFont.imageView,
+        .imageLayout = resources.uiFont.imageLayout,
+    };
+    std::array<VkWriteDescriptorSet, 6> writes {
+        VkWriteDescriptorSet {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = set_,
+            .dstBinding = 3,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &uiFont,
+        },
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = set_,

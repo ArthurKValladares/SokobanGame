@@ -11,7 +11,7 @@
 
 namespace sokoban {
 
-inline constexpr int currentPlayerProfileFormat = 4;
+inline constexpr int currentPlayerProfileFormat = 5;
 
 struct PlayerProfile {
     struct LevelProgress {
@@ -35,6 +35,10 @@ struct PlayerProfile {
         bool fullscreen = false;
         // False preserves the engine's mailbox-first presentation behavior.
         bool vsync = false;
+        int antiAliasingSamples = 8;
+        bool ambientOcclusion = config::ambientOcclusionEnabled;
+        int windowWidth = 1280;
+        int windowHeight = 720;
 
         bool operator==(const VideoSettings&) const = default;
     };
@@ -90,7 +94,7 @@ struct DecodedPlayerProfile {
 };
 
 // Throws std::runtime_error for malformed, unsupported, or semantically
-// invalid profile data. Formats 1 through 3 migrate into the current model.
+// invalid profile data. Formats 1 through 4 migrate into the current model.
 [[nodiscard]] DecodedPlayerProfile decodePlayerProfile(std::string_view text);
 
 } // namespace sokoban
