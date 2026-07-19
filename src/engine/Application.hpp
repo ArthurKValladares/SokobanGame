@@ -51,7 +51,6 @@ private:
     void applyOptionsMenuSettings(const OptionsMenuSettings& settings);
     void persistProfile(bool immediate);
     void update(float dt);
-    void drawEditorModeIndicator();
     void drawDraftExitConfirmation();
     void updateEditorPainting();
     void queuePressedCommands();

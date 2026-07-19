@@ -10,47 +10,50 @@
 namespace sokoban {
 namespace {
 
-struct DebugWindow {
+struct DebugTab {
     std::string name;
     DebugUi::DrawCallback callback;
-    bool startCollapsed = false;
-    bool appliedInitialState = false;
 };
 
-std::vector<DebugWindow>& debugWindows()
+std::vector<DebugTab>& debugTabs()
 {
-    static std::vector<DebugWindow> windows;
-    return windows;
+    static std::vector<DebugTab> tabs;
+    return tabs;
 }
 
 } // namespace
 
-void DebugUi::addWindow(std::string name, DrawCallback callback, bool startCollapsed)
+void DebugUi::addTab(std::string name, DrawCallback callback)
 {
-    debugWindows().push_back({
+    debugTabs().push_back({
         .name = std::move(name),
         .callback = std::move(callback),
-        .startCollapsed = startCollapsed,
     });
 }
 
-void DebugUi::clearWindows()
+void DebugUi::clearTabs()
 {
-    debugWindows().clear();
+    debugTabs().clear();
 }
 
 void DebugUi::draw()
 {
-    for (DebugWindow& window : debugWindows()) {
-        if (!window.appliedInitialState) {
-            ImGui::SetNextWindowCollapsed(window.startCollapsed, ImGuiCond_Once);
-            window.appliedInitialState = true;
+    ImGui::SetNextWindowSize(ImVec2 { 560.0f, 620.0f }, ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Developer Tools")) {
+        constexpr ImGuiTabBarFlags tabFlags =
+            ImGuiTabBarFlags_Reorderable |
+            ImGuiTabBarFlags_FittingPolicyScroll;
+        if (ImGui::BeginTabBar("DeveloperToolsTabs", tabFlags)) {
+            for (DebugTab& tab : debugTabs()) {
+                if (ImGui::BeginTabItem(tab.name.c_str())) {
+                    tab.callback();
+                    ImGui::EndTabItem();
+                }
+            }
+            ImGui::EndTabBar();
         }
-        if (ImGui::Begin(window.name.c_str())) {
-            window.callback();
-        }
-        ImGui::End();
     }
+    ImGui::End();
 }
 
 } // namespace sokoban

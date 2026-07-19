@@ -100,7 +100,6 @@ void LevelEditorDebugUi::draw(LevelEditor& editor, const Callbacks& callbacks)
     if (ImGui::Button("Play Draft")) {
         if (std::optional<Level> level = editor.beginDraftPlayback(); level && callbacks.playDraft) {
             callbacks.playDraft(std::move(*level));
-            ImGui::SetWindowCollapsed(true);
         }
     }
     ImGui::SameLine();
@@ -109,7 +108,6 @@ void LevelEditorDebugUi::draw(LevelEditor& editor, const Callbacks& callbacks)
         if (callbacks.returnToCurrentScreen) {
             callbacks.returnToCurrentScreen();
         }
-        ImGui::SetWindowCollapsed(true);
     }
 
     ImGui::Separator();

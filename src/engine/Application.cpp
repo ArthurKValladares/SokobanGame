@@ -93,7 +93,7 @@ Application::Application()
     assetManifestEditor_.initialize(
         std::filesystem::path(SOKOBAN_SOURCE_ASSET_DIR) / "manifest.json");
 
-    DebugUi::addWindow("Engine", [this] {
+    DebugUi::addTab("Engine", [this] {
         applicationDebugUi_.draw({
             .currentLevel = currentLevel_,
             .currentScreen = currentScreen_,
@@ -112,10 +112,10 @@ Application::Application()
             },
         });
     });
-    DebugUi::addWindow("Asset Manifest", [this] {
+    DebugUi::addTab("Asset Manifest", [this] {
         assetManifestDebugUi_.draw(assetManifestEditor_);
-    }, true);
-    DebugUi::addWindow("Level Editor", [this] {
+    });
+    DebugUi::addTab("Level Editor", [this] {
         levelEditorDebugUi_.draw(levelEditor_, {
             .playDraft = [this](Level level) {
                 (void)applyLevel(std::move(level));
@@ -124,8 +124,8 @@ Application::Application()
                 loadCurrentScreen();
             },
         });
-    }, true);
-    DebugUi::addWindow("Animation Preview", [this] {
+    });
+    DebugUi::addTab("Animation Preview", [this] {
         animationPreviewDebugUi_.draw(renderer_);
     });
 #endif
@@ -142,7 +142,7 @@ Application::~Application()
     if (!saveStore_.diagnostics().lastWriteSucceeded) {
         std::cerr << saveStore_.status() << '\n';
     }
-    DebugUi::clearWindows();
+    DebugUi::clearTabs();
     renderer_.waitIdle();
 }
 
@@ -235,9 +235,6 @@ void Application::run()
             DebugUi::draw();
         }
         drawDraftExitConfirmation();
-        if (!optionsMenu_.isOpen()) {
-            drawEditorModeIndicator();
-        }
         const OptionsMenuResult menuResult = optionsMenu_.draw(ui_, pixelSize, {
             .up = input_.actionPressed(InputAction::MoveUp),
             .down = input_.actionPressed(InputAction::MoveDown),
@@ -290,47 +287,6 @@ void Application::update(float dt)
         playerVisual.motion.moving &&
         playerVisual.movingClip == assetManifest_.playerPushAnimation();
     audioSystem_.update(dt, playerVisual.motion.moving, pushing);
-}
-
-void Application::drawEditorModeIndicator()
-{
-#if SOKOBAN_ENABLE_DEBUG_UI
-    const char* label = nullptr;
-    ImVec4 color {};
-    if (levelEditor_.editingDocument()) {
-        label = "Editing Draft";
-        color = ImVec4(0.24f, 0.58f, 0.95f, 1.0f);
-    } else if (levelEditor_.playingDraft()) {
-        label = "Testing Draft";
-        color = ImVec4(0.20f, 0.72f, 0.38f, 1.0f);
-    }
-    if (!label) {
-        return;
-    }
-
-    constexpr float margin = 12.0f;
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(
-        ImVec2(
-            viewport->WorkPos.x + margin,
-            viewport->WorkPos.y + viewport->WorkSize.y - margin),
-        ImGuiCond_Always,
-        ImVec2(0.0f, 1.0f));
-    ImGui::SetNextWindowBgAlpha(0.82f);
-
-    constexpr ImGuiWindowFlags flags =
-        ImGuiWindowFlags_NoDecoration |
-        ImGuiWindowFlags_AlwaysAutoResize |
-        ImGuiWindowFlags_NoSavedSettings |
-        ImGuiWindowFlags_NoFocusOnAppearing |
-        ImGuiWindowFlags_NoNav |
-        ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoInputs;
-    if (ImGui::Begin("EditorModeIndicator", nullptr, flags)) {
-        ImGui::TextColored(color, "%s", label);
-    }
-    ImGui::End();
-#endif
 }
 
 void Application::drawDraftExitConfirmation()
