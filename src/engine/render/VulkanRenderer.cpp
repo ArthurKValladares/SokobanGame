@@ -2,6 +2,7 @@
 
 #include "engine/BoardLayout.hpp"
 #include "engine/Config.hpp"
+#include "engine/render/VulkanDeviceSelection.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 
 #include <SDL3/SDL.h>
@@ -17,6 +18,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <iostream>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -280,6 +282,7 @@ VulkanRenderer::VulkanRenderer(
         activeSampleCount_,
         depthFormat_,
         vsync);
+    logRenderConfiguration();
     shadowPass_.create(physicalDevice_, device_, shadowFormat_);
     ssaoPass_.create(physicalDevice_, device_, swapchainResources_.extent());
     createCommandPool();
@@ -344,6 +347,12 @@ void VulkanRenderer::drawFrame(const RenderFrameData& frameData, const UiDrawDat
         sceneDescriptors_.update(descriptorResources());
     }
 
+#if SOKOBAN_ENABLE_DEBUG_UI
+    // Finish the ImGui frame even when swapchain acquisition is out of date
+    // and this render frame has to be skipped during a window-mode change.
+    ImGui::Render();
+#endif
+
     auto& frame = frames_[currentFrame_];
     vkCheck(vkWaitForFences(device_, 1, &frame.inFlight, VK_TRUE, UINT64_MAX), "vkWaitForFences failed");
     modelResources_.updateAnimations(frameData);
@@ -360,10 +369,6 @@ void VulkanRenderer::drawFrame(const RenderFrameData& frameData, const UiDrawDat
 
     vkCheck(vkResetFences(device_, 1, &frame.inFlight), "vkResetFences failed");
     vkCheck(vkResetCommandBuffer(frame.commandBuffer, 0), "vkResetCommandBuffer failed");
-
-#if SOKOBAN_ENABLE_DEBUG_UI
-    ImGui::Render();
-#endif
 
     recordCommandBuffer(frame.commandBuffer, imageIndex, frameData, uiDrawData);
 
@@ -587,6 +592,27 @@ VulkanModelResources::LoadingStats VulkanRenderer::assetLoadingStats() const
     return modelResources_.loadingStats();
 }
 
+std::string_view VulkanRenderer::physicalDeviceName() const
+{
+    return physicalDeviceProperties_.deviceName;
+}
+
+const char* VulkanRenderer::physicalDeviceTypeName() const
+{
+    return vulkanDeviceTypeName(physicalDeviceProperties_.deviceType);
+}
+
+const char* VulkanRenderer::presentModeName() const
+{
+    switch (swapchainResources_.presentMode()) {
+    case VK_PRESENT_MODE_IMMEDIATE_KHR: return "Immediate";
+    case VK_PRESENT_MODE_MAILBOX_KHR: return "Mailbox";
+    case VK_PRESENT_MODE_FIFO_KHR: return "FIFO";
+    case VK_PRESENT_MODE_FIFO_RELAXED_KHR: return "FIFO relaxed";
+    default: return "Other";
+    }
+}
+
 bool VulkanRenderer::wireframeEnabled() const
 {
     return wireframeEnabled_;
@@ -695,12 +721,30 @@ void VulkanRenderer::pickPhysicalDevice()
     std::vector<VkPhysicalDevice> devices(deviceCount);
     vkCheck(vkEnumeratePhysicalDevices(instance_, &deviceCount, devices.data()), "vkEnumeratePhysicalDevices failed");
 
+    int bestScore = std::numeric_limits<int>::min();
     for (VkPhysicalDevice device : devices) {
-        if (isDeviceSuitable(device)) {
-            physicalDevice_ = device;
-            queueFamilies_ = findQueueFamilies(device);
-            return;
+        if (!isDeviceSuitable(device)) {
+            continue;
         }
+
+        VkPhysicalDeviceProperties properties {};
+        vkGetPhysicalDeviceProperties(device, &properties);
+        const int score = vulkanDevicePreferenceScore(properties);
+        if (physicalDevice_ == VK_NULL_HANDLE || score > bestScore) {
+            physicalDevice_ = device;
+            bestScore = score;
+        }
+    }
+
+    if (physicalDevice_ != VK_NULL_HANDLE) {
+        queueFamilies_ = findQueueFamilies(physicalDevice_);
+        vkGetPhysicalDeviceProperties(
+            physicalDevice_,
+            &physicalDeviceProperties_);
+        std::cerr << "Vulkan GPU: " << physicalDeviceProperties_.deviceName
+                  << " (" << vulkanDeviceTypeName(
+                      physicalDeviceProperties_.deviceType) << ")\n";
+        return;
     }
 
     throw std::runtime_error("No GPU supports the required Vulkan 1.4 feature set");
@@ -921,10 +965,15 @@ void VulkanRenderer::renderDebugUi(VkCommandBuffer commandBuffer) const
 void VulkanRenderer::recreateSwapchain()
 {
     if (!swapchainResources_.canRecreate()) {
+        ++swapchainRecreationDeferrals_;
         return;
     }
 
     vkDeviceWaitIdle(device_);
+    if (!swapchainResources_.canRecreate()) {
+        ++swapchainRecreationDeferrals_;
+        return;
+    }
     const VkFormat oldColorFormat = swapchainResources_.colorFormat();
     swapchainResources_.recreate();
     ssaoPass_.recreate(swapchainResources_.extent());
@@ -934,6 +983,19 @@ void VulkanRenderer::recreateSwapchain()
         createPipeline();
     }
     ++swapchainRecreations_;
+    logRenderConfiguration();
+}
+
+void VulkanRenderer::logRenderConfiguration() const
+{
+    const VkExtent2D extent = swapchainResources_.extent();
+    const uint64_t pixels = static_cast<uint64_t>(extent.width) * extent.height;
+    const uint64_t samplePixels = pixels * sampleCountValue();
+    std::cerr << "Vulkan swapchain: " << extent.width << 'x' << extent.height
+              << ", " << swapchainResources_.imageCount() << " images, "
+              << presentModeName() << ", " << sampleCountValue()
+              << "x MSAA (" << samplePixels / 1'000'000.0
+              << " M sample-pixels)\n";
 }
 
 void VulkanRenderer::recordCommandBuffer(
@@ -954,6 +1016,7 @@ void VulkanRenderer::recordCommandBuffer(
         .wireframeLineWidth = wireframeLineWidth_,
         .pipelineRebuilds = pipelineRebuilds_,
         .swapchainRecreations = swapchainRecreations_,
+        .swapchainRecreationDeferrals = swapchainRecreationDeferrals_,
     };
 
     VkCommandBufferBeginInfo beginInfo {

@@ -159,6 +159,7 @@ add_executable(sokoban
     src/engine/render/ImageData.cpp
     src/engine/render/RenderAssetRequirements.cpp
     src/engine/render/SkinnedMeshUpdater.cpp
+    src/engine/render/VulkanDeviceSelection.cpp
     src/engine/render/VulkanModelResources.cpp
     src/engine/render/VulkanPipelineFactory.cpp
     src/engine/render/VulkanResourceUtils.cpp
@@ -354,6 +355,19 @@ if(SOKOBAN_BUILD_TESTS)
         target_compile_options(sokoban_ui_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME ui COMMAND sokoban_ui_tests)
+
+    add_executable(sokoban_vulkan_device_selection_tests
+        tests/VulkanDeviceSelectionTests.cpp
+        src/engine/render/VulkanDeviceSelection.cpp
+    )
+    target_include_directories(sokoban_vulkan_device_selection_tests PRIVATE src)
+    target_link_libraries(sokoban_vulkan_device_selection_tests PRIVATE Vulkan::Vulkan)
+    if(MSVC)
+        target_compile_options(sokoban_vulkan_device_selection_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_vulkan_device_selection_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME vulkan_device_selection COMMAND sokoban_vulkan_device_selection_tests)
 
     add_executable(sokoban_level_editor_tests
         tests/LevelEditorTests.cpp

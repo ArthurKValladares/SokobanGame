@@ -131,6 +131,7 @@ struct RenderStats {
     float wireframeLineWidth = 1.0f;
     uint64_t pipelineRebuilds = 0;
     uint64_t swapchainRecreations = 0;
+    uint64_t swapchainRecreationDeferrals = 0;
 };
 
 } // namespace sokoban

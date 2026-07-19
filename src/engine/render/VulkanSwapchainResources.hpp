@@ -57,6 +57,7 @@ public:
     [[nodiscard]] VkFormat colorFormat() const { return colorFormat_; }
     [[nodiscard]] VkFormat depthFormat() const { return depthFormat_; }
     [[nodiscard]] VkExtent2D extent() const { return extent_; }
+    [[nodiscard]] VkPresentModeKHR presentMode() const { return presentMode_; }
     [[nodiscard]] uint32_t imageCount() const { return static_cast<uint32_t>(images_.size()); }
     [[nodiscard]] VkSampleCountFlagBits sampleCount() const { return sampleCount_; }
     [[nodiscard]] bool msaaEnabled() const { return sampleCount_ != VK_SAMPLE_COUNT_1_BIT; }
@@ -99,6 +100,7 @@ private:
     VkFormat colorFormat_ = VK_FORMAT_UNDEFINED;
     VkFormat depthFormat_ = VK_FORMAT_D32_SFLOAT;
     VkExtent2D extent_ {};
+    VkPresentModeKHR presentMode_ = VK_PRESENT_MODE_FIFO_KHR;
     VkSampleCountFlagBits sampleCount_ = VK_SAMPLE_COUNT_1_BIT;
     bool vsync_ = false;
     std::vector<SwapchainImage> images_;

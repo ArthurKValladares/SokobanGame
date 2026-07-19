@@ -94,6 +94,7 @@ void VulkanSwapchainResources::destroy()
     images_.clear();
     swapchain_ = VK_NULL_HANDLE;
     extent_ = {};
+    presentMode_ = VK_PRESENT_MODE_FIFO_KHR;
     colorFormat_ = VK_FORMAT_UNDEFINED;
     depthFormat_ = VK_FORMAT_D32_SFLOAT;
     sampleCount_ = VK_SAMPLE_COUNT_1_BIT;
@@ -106,10 +107,23 @@ void VulkanSwapchainResources::destroy()
 
 bool VulkanSwapchainResources::canRecreate() const
 {
+    if (!window_ || !physicalDevice_ || !surface_) {
+        return false;
+    }
     int width = 0;
     int height = 0;
     SDL_GetWindowSizeInPixels(window_, &width, &height);
-    return width > 0 && height > 0;
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+
+    VkSurfaceCapabilitiesKHR capabilities {};
+    if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+            physicalDevice_, surface_, &capabilities) != VK_SUCCESS) {
+        return false;
+    }
+    return capabilities.currentExtent.width != 0 &&
+        capabilities.currentExtent.height != 0;
 }
 
 VkResult VulkanSwapchainResources::acquire(VkSemaphore available, uint32_t& imageIndex) const
@@ -464,6 +478,7 @@ void VulkanSwapchainResources::createSwapchain()
     const bool sharedQueues = queueFamilies_.graphics != queueFamilies_.present;
     extent_ = chooseExtent(capabilities);
     colorFormat_ = surfaceFormat.format;
+    presentMode_ = choosePresentMode(presentModes);
 
     VkSwapchainCreateInfoKHR createInfo {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -479,7 +494,7 @@ void VulkanSwapchainResources::createSwapchain()
         .pQueueFamilyIndices = sharedQueues ? familyIndices.data() : nullptr,
         .preTransform = capabilities.currentTransform,
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-        .presentMode = choosePresentMode(presentModes),
+        .presentMode = presentMode_,
         .clipped = VK_TRUE,
     };
     vkCheck(vkCreateSwapchainKHR(device_, &createInfo, nullptr, &swapchain_),

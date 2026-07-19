@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace sokoban {
@@ -66,6 +67,9 @@ public:
     [[nodiscard]] VkSampleCountFlagBits activeSampleCount() const;
     [[nodiscard]] RenderStats renderStats() const;
     [[nodiscard]] VulkanModelResources::LoadingStats assetLoadingStats() const;
+    [[nodiscard]] std::string_view physicalDeviceName() const;
+    [[nodiscard]] const char* physicalDeviceTypeName() const;
+    [[nodiscard]] const char* presentModeName() const;
     void setAntiAliasingMode(AntiAliasingMode mode);
     [[nodiscard]] bool wireframeEnabled() const;
     void setWireframeEnabled(bool enabled);
@@ -137,6 +141,7 @@ private:
     void shutdownDebugUi();
     void renderDebugUi(VkCommandBuffer commandBuffer) const;
     void recreateSwapchain();
+    void logRenderConfiguration() const;
 
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData, const UiDrawData& uiDrawData);
     void recordShadowMapRendering(VkCommandBuffer commandBuffer, const RenderFrameData& frameData, const ShadowRenderLayout& layout);
@@ -204,6 +209,7 @@ private:
     VkInstance instance_ = VK_NULL_HANDLE;
     VkSurfaceKHR surface_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
+    VkPhysicalDeviceProperties physicalDeviceProperties_ {};
     VkDevice device_ = VK_NULL_HANDLE;
 
     QueueFamilyIndices queueFamilies_ {};
@@ -236,6 +242,7 @@ private:
     uint64_t nextStatsFrameIndex_ = 1;
     uint64_t pipelineRebuilds_ = 0;
     uint64_t swapchainRecreations_ = 0;
+    uint64_t swapchainRecreationDeferrals_ = 0;
 };
 
 } // namespace sokoban

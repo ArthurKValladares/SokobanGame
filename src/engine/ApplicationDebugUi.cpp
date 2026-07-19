@@ -395,10 +395,22 @@ void ApplicationDebugUi::draw(const Context& context) const
             "Recorded frame %llu",
             static_cast<unsigned long long>(renderStats.frameIndex));
         ImGui::Text(
+            "GPU %s (%s)",
+            context.renderer.physicalDeviceName().data(),
+            context.renderer.physicalDeviceTypeName());
+        ImGui::Text(
             "Swapchain %u x %u, %u images",
             renderStats.swapchainWidth,
             renderStats.swapchainHeight,
             renderStats.swapchainImages);
+        const double megapixels =
+            static_cast<double>(renderStats.swapchainWidth) *
+            static_cast<double>(renderStats.swapchainHeight) / 1'000'000.0;
+        ImGui::Text(
+            "Present %s, %.2f MP (%.1f M sample-pixels)",
+            context.renderer.presentModeName(),
+            megapixels,
+            megapixels * renderStats.activeSamples);
         ImGui::Text("Active samples %ux", renderStats.activeSamples);
         ImGui::Text(
             "Wireframe %s",
@@ -439,6 +451,10 @@ void ApplicationDebugUi::draw(const Context& context) const
             "Swapchain recreations %llu",
             static_cast<unsigned long long>(
                 renderStats.swapchainRecreations));
+        ImGui::Text(
+            "Zero-extent recreation deferrals %llu",
+            static_cast<unsigned long long>(
+                renderStats.swapchainRecreationDeferrals));
     }
 #else
     (void)context;

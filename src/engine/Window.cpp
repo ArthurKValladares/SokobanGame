@@ -5,6 +5,17 @@
 #include <stdexcept>
 
 namespace sokoban {
+namespace {
+
+void syncWindow(SDL_Window* window, const char* operation)
+{
+    if (!SDL_SyncWindow(window)) {
+        throw std::runtime_error(
+            std::string(operation) + " timed out: " + SDL_GetError());
+    }
+}
+
+} // namespace
 
 Window::Window(const std::string& title, int width, int height)
 {
@@ -54,6 +65,7 @@ void Window::setFullscreen(bool fullscreen)
         throw std::runtime_error(
             std::string("SDL_SetWindowFullscreen failed: ") + SDL_GetError());
     }
+    syncWindow(window_, "SDL_SetWindowFullscreen");
 }
 
 void Window::setWindowedSize(int width, int height)
@@ -62,7 +74,10 @@ void Window::setWindowedSize(int width, int height)
         throw std::runtime_error(
             std::string("SDL_SetWindowFullscreen failed: ") + SDL_GetError());
     }
-    SDL_RestoreWindow(window_);
+    if (!SDL_RestoreWindow(window_)) {
+        throw std::runtime_error(
+            std::string("SDL_RestoreWindow failed: ") + SDL_GetError());
+    }
     if (!SDL_SetWindowSize(window_, width, height)) {
         throw std::runtime_error(
             std::string("SDL_SetWindowSize failed: ") + SDL_GetError());
@@ -74,6 +89,7 @@ void Window::setWindowedSize(int width, int height)
         throw std::runtime_error(
             std::string("SDL_SetWindowPosition failed: ") + SDL_GetError());
     }
+    syncWindow(window_, "Windowed size change");
 }
 
 } // namespace sokoban
