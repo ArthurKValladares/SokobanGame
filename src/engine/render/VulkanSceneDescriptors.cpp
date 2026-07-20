@@ -31,7 +31,7 @@ void VulkanSceneDescriptors::create(VkDevice device, const Resources& resources)
     modelTextureCount_ = static_cast<uint32_t>(resources.modelTextures.size());
 
     try {
-        std::array<VkDescriptorSetLayoutBinding, 6> bindings {
+        std::array<VkDescriptorSetLayoutBinding, 7> bindings {
             VkDescriptorSetLayoutBinding {
                 .binding = 0,
                 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -52,6 +52,12 @@ void VulkanSceneDescriptors::create(VkDevice device, const Resources& resources)
             },
             VkDescriptorSetLayoutBinding {
                 .binding = 3,
+                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+            },
+            VkDescriptorSetLayoutBinding {
+                .binding = 4,
                 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -79,7 +85,7 @@ void VulkanSceneDescriptors::create(VkDevice device, const Resources& resources)
 
         VkDescriptorPoolSize poolSize {
             .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = modelTextureCount_ + 5,
+            .descriptorCount = modelTextureCount_ + 6,
         };
         VkDescriptorPoolCreateInfo poolInfo {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
@@ -115,6 +121,7 @@ void VulkanSceneDescriptors::update(const Resources& resources) const
         !resources.sceneDepth.valid() ||
         !resources.ssao.valid() ||
         !resources.uiFont.valid() ||
+        !resources.titleBackground.valid() ||
         resources.modelTextures.size() != modelTextureCount_) {
         throw std::runtime_error("Scene descriptor resources are incomplete");
     }
@@ -157,7 +164,12 @@ void VulkanSceneDescriptors::update(const Resources& resources) const
         .imageView = resources.uiFont.imageView,
         .imageLayout = resources.uiFont.imageLayout,
     };
-    std::array<VkWriteDescriptorSet, 6> writes {
+    const VkDescriptorImageInfo titleBackground {
+        .sampler = resources.titleBackground.sampler,
+        .imageView = resources.titleBackground.imageView,
+        .imageLayout = resources.titleBackground.imageLayout,
+    };
+    std::array<VkWriteDescriptorSet, 7> writes {
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = set_,
@@ -165,6 +177,14 @@ void VulkanSceneDescriptors::update(const Resources& resources) const
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .pImageInfo = &uiFont,
+        },
+        VkWriteDescriptorSet {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = set_,
+            .dstBinding = 4,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &titleBackground,
         },
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,

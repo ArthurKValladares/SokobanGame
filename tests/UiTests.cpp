@@ -47,6 +47,16 @@ void testFontAtlasAndText()
     CHECK(std::ranges::all_of(ui.drawData().commands, [](const auto& command) {
         return command.kind == sokoban::UiDrawKind::FontGlyph;
     }));
+
+    ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
+    ui.image(
+        { { 0.0f, 0.0f }, { 1280.0f, 720.0f } },
+        { { 0.1f, 0.2f }, { 0.8f, 0.6f } });
+    ui.endFrame();
+    CHECK(ui.drawData().commands.size() == 1);
+    CHECK(ui.drawData().commands.front().kind == sokoban::UiDrawKind::Image);
+    CHECK(ui.drawData().commands.front().uvRect.position.x == 0.1f);
+    CHECK(ui.drawData().commands.front().uvRect.size.y == 0.6f);
 }
 
 void testReusableControls()

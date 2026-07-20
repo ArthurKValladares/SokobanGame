@@ -2,6 +2,7 @@
 
 #include "engine/BoardLayout.hpp"
 #include "engine/Config.hpp"
+#include "engine/render/ImageData.hpp"
 #include "engine/render/VulkanDeviceSelection.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 
@@ -289,7 +290,8 @@ VulkanRenderer::VulkanRenderer(
     ssaoPass_.create(physicalDevice_, device_, swapchainResources_.renderExtent());
     createCommandPool();
     uiResources_.create(
-        physicalDevice_, device_, commandPool_, graphicsQueue_, uiFont);
+        physicalDevice_, device_, commandPool_, graphicsQueue_, uiFont,
+        loadRgbaImage(assetRoot_ / config::titleBackgroundPath));
     modelResources_.create(
         physicalDevice_, device_, commandPool_, graphicsQueue_,
         assetRoot_, manifest);
@@ -854,8 +856,12 @@ VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources() const
             .imageView = ssaoPass_.imageView(),
         },
         .uiFont = {
-            .sampler = uiResources_.fontSampler(),
+            .sampler = uiResources_.sampler(),
             .imageView = uiResources_.fontImageView(),
+        },
+        .titleBackground = {
+            .sampler = uiResources_.sampler(),
+            .imageView = uiResources_.titleBackgroundImageView(),
         },
         .modelTextures = modelResources_.textures(),
     };
@@ -2105,6 +2111,7 @@ void VulkanRenderer::drawUiRect(
     ++pendingStats_.drawCalls;
     pendingStats_.vertices += 6;
     pendingStats_.triangles += 2;
+    const float materialMode = command.kind == UiDrawKind::FontGlyph ? 3.0f : 4.0f;
     const TilePushConstants pushConstants {
         .vertices = {
             Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, 1.0f },
@@ -2125,7 +2132,7 @@ void VulkanRenderer::drawUiRect(
             0.0f,
             0.0f,
         },
-        .textureOptions = { 3.0f, 0.0f, 0.0f, 1.0f },
+        .textureOptions = { materialMode, 0.0f, 0.0f, 1.0f },
     };
     vkCmdPushConstants(
         commandBuffer,

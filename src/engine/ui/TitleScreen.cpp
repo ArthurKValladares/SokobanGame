@@ -36,13 +36,37 @@ constexpr int rowIndex(Row row)
     return static_cast<int>(row);
 }
 
-// The title is a fullscreen menu; content lays out inside a centered column
-// spanning the window height.
+constexpr float titleBackgroundAspect = 16.0f / 9.0f;
+
+UiRect aspectFillUv(Vec2 viewport, float imageAspect)
+{
+    if (viewport.x <= 0.0f || viewport.y <= 0.0f || imageAspect <= 0.0f) {
+        return { {}, { 1.0f, 1.0f } };
+    }
+    const float viewportAspect = viewport.x / viewport.y;
+    if (viewportAspect > imageAspect) {
+        const float height = imageAspect / viewportAspect;
+        return { { 0.0f, (1.0f - height) * 0.5f }, { 1.0f, height } };
+    }
+    const float width = viewportAspect / imageAspect;
+    return { { (1.0f - width) * 0.5f, 0.0f }, { width, 1.0f } };
+}
+
 UiRect centeredColumn(Vec2 viewport, float desiredWidth)
 {
-    const float width = std::max(std::min(desiredWidth, viewport.x - 32.0f), 320.0f);
+    const float width = std::min(desiredWidth, std::max(viewport.x - 32.0f, 0.0f));
     return {
         { (viewport.x - width) * 0.5f, 0.0f },
+        { width, viewport.y },
+    };
+}
+
+UiRect leftColumn(Vec2 viewport, float desiredWidth)
+{
+    const float width = std::min(desiredWidth, std::max(viewport.x - 32.0f, 0.0f));
+    const float preferredMargin = std::clamp(viewport.x * 0.055f, 16.0f, 96.0f);
+    return {
+        { std::min(preferredMargin, std::max(viewport.x - width, 0.0f)), 0.0f },
         { width, viewport.y },
     };
 }
@@ -207,10 +231,12 @@ TitleScreenResult TitleScreen::draw(
         return {};
     }
 
-    // Fullscreen: the world behind (if any) is fully covered.
-    ui.rect({ { 0.0f, 0.0f }, viewport }, { 0.015f, 0.020f, 0.021f, 1.0f });
-    const UiRect panel = centeredColumn(
-        viewport, page_ == Page::LevelSelect ? 640.0f : 520.0f);
+    const UiRect fullscreen { { 0.0f, 0.0f }, viewport };
+    ui.image(fullscreen, aspectFillUv(viewport, titleBackgroundAspect));
+    ui.rect(fullscreen, { 0.015f, 0.020f, 0.021f, 0.12f });
+    const UiRect panel = page_ == Page::Main
+        ? leftColumn(viewport, 520.0f)
+        : centeredColumn(viewport, page_ == Page::LevelSelect ? 640.0f : 520.0f);
 
     switch (page_) {
     case Page::Main: return drawMain(ui, panel, input);

@@ -213,6 +213,9 @@ private:
     {
         addFile(roots_.assets, "manifest.json", "manifest.json", "asset manifest");
         addAssetPath(std::filesystem::path(config::uiFontPath), "UI font");
+        addAssetPath(
+            std::filesystem::path(config::titleBackgroundPath),
+            "title background");
         const AssetManifest manifest = AssetManifest::loadFromFile(roots_.assets / "manifest.json");
 
         for (const auto& texture : manifest.textures()) {

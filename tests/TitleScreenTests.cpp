@@ -7,6 +7,7 @@
 #include "engine/ui/TitleScreen.hpp"
 #include "engine/ui/Ui.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <vector>
@@ -77,6 +78,27 @@ void testTitleNavigationAndResults()
         ui.endFrame();
         return result;
     };
+
+    draw();
+    const auto& commands = ui.drawData().commands;
+    CHECK(!commands.empty());
+    CHECK(commands.front().kind == sokoban::UiDrawKind::Image);
+    CHECK(commands.front().rect.size.x == 1280.0f);
+    CHECK(commands.front().rect.size.y == 720.0f);
+    CHECK(commands.front().uvRect.position.x == 0.0f);
+    CHECK(commands.front().uvRect.position.y == 0.0f);
+    CHECK(commands.front().uvRect.size.x == 1.0f);
+    CHECK(commands.front().uvRect.size.y == 1.0f);
+    float rightmostGlyph = 0.0f;
+    for (const auto& command : commands) {
+        if (command.kind == sokoban::UiDrawKind::FontGlyph) {
+            rightmostGlyph = std::max(
+                rightmostGlyph,
+                command.rect.position.x + command.rect.size.x);
+        }
+    }
+    CHECK(rightmostGlyph > 0.0f);
+    CHECK(rightmostGlyph < 640.0f);
 
     // Active slot has a save: rows are Continue, Save Slot, Options, Quit.
     CHECK(draw({ .confirm = true }).continueRequested);

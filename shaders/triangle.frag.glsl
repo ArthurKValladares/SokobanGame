@@ -4,6 +4,7 @@ layout(set = 0, binding = 0) uniform sampler2D shadowMap;
 layout(set = 0, binding = 1) uniform sampler2D sceneColor;
 layout(set = 0, binding = 2) uniform sampler2D modelTextures[MODEL_TEXTURE_COUNT];
 layout(set = 0, binding = 3) uniform sampler2D uiFont;
+layout(set = 0, binding = 4) uniform sampler2D titleBackground;
 
 layout(location = 0) in vec4 inShadowPosition;
 layout(location = 1) in float inFaceCoordU;
@@ -127,6 +128,9 @@ void main()
     if (materialMode == 3) {
         vec2 uv = pc.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
         materialColor.a *= texture(uiFont, uv).r;
+    } else if (materialMode == 4) {
+        vec2 uv = pc.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
+        materialColor *= texture(titleBackground, uv);
     } else if (materialMode == 2) {
         if (inTextureIndex > 1.5) {
             // materialOptions.y carries the belt scroll offset; the belt UVs span

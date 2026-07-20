@@ -18,6 +18,7 @@ struct UiRect {
 enum class UiDrawKind {
     Solid,
     FontGlyph,
+    Image,
 };
 
 struct UiDrawCommand {
@@ -49,6 +50,10 @@ public:
     [[nodiscard]] bool drag(std::string_view id, UiRect rect);
 
     void rect(UiRect rect, Vec4 color);
+    void image(
+        UiRect rect,
+        UiRect uvRect = { {}, { 1.0f, 1.0f } },
+        Vec4 color = { 1.0f, 1.0f, 1.0f, 1.0f });
     void panel(UiRect rect);
     void divider(UiRect rect);
     void text(Vec2 position, std::string_view text, Vec4 color, float size = 24.0f);

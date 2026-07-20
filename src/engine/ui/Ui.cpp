@@ -69,6 +69,19 @@ void UiContext::rect(UiRect rectValue, Vec4 color)
     });
 }
 
+void UiContext::image(UiRect rectValue, UiRect uvRectValue, Vec4 color)
+{
+    if (rectValue.size.x <= 0.0f || rectValue.size.y <= 0.0f || color.w <= 0.0f) {
+        return;
+    }
+    drawData_.commands.push_back({
+        .kind = UiDrawKind::Image,
+        .rect = rectValue,
+        .uvRect = uvRectValue,
+        .color = color,
+    });
+}
+
 void UiContext::panel(UiRect rectValue)
 {
     rect(rectValue, { 0.055f, 0.065f, 0.070f, 0.97f });

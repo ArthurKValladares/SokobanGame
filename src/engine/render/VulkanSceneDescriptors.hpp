@@ -24,6 +24,7 @@ public:
         ImageBinding sceneDepth;
         ImageBinding ssao;
         ImageBinding uiFont;
+        ImageBinding titleBackground;
         std::vector<VulkanModelResources::TextureView> modelTextures;
     };
 

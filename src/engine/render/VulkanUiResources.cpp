@@ -1,8 +1,10 @@
 #include "engine/render/VulkanUiResources.hpp"
 
+#include "engine/render/ImageData.hpp"
 #include "engine/ui/FontAtlas.hpp"
 
 #include <cstring>
+#include <span>
 #include <stdexcept>
 #include <string>
 
@@ -35,10 +37,10 @@ void destroyStaging(VkDevice device, StagingBuffer& staging)
 StagingBuffer createStaging(
     VkPhysicalDevice physicalDevice,
     VkDevice device,
-    const FontAtlas& font)
+    std::span<const std::byte> pixels)
 {
     StagingBuffer staging;
-    const VkDeviceSize size = font.pixels().size();
+    const VkDeviceSize size = static_cast<VkDeviceSize>(pixels.size());
     VkBufferCreateInfo bufferInfo {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size = size,
@@ -64,8 +66,8 @@ StagingBuffer createStaging(
             "vkBindBufferMemory UI font staging failed");
         void* mapped = nullptr;
         vkCheck(vkMapMemory(device, staging.memory, 0, size, 0, &mapped),
-            "vkMapMemory UI font staging failed");
-        std::memcpy(mapped, font.pixels().data(), font.pixels().size());
+            "vkMapMemory UI image staging failed");
+        std::memcpy(mapped, pixels.data(), pixels.size());
         vkUnmapMemory(device, staging.memory);
     } catch (...) {
         destroyStaging(device, staging);
@@ -74,34 +76,26 @@ StagingBuffer createStaging(
     return staging;
 }
 
-} // namespace
-
-VulkanUiResources::~VulkanUiResources()
-{
-    destroy();
-}
-
-void VulkanUiResources::create(
+vulkanResources::OwnedImage uploadImage(
     VkPhysicalDevice physicalDevice,
     VkDevice device,
     VkCommandPool commandPool,
     VkQueue graphicsQueue,
-    const FontAtlas& font)
+    uint32_t width,
+    uint32_t height,
+    VkFormat format,
+    std::span<const std::byte> pixels)
 {
-    destroy();
-    if (font.width() == 0 || font.height() == 0 || font.pixels().empty()) {
-        throw std::runtime_error("UI font atlas contains no pixels");
-    }
-    device_ = device;
     StagingBuffer staging;
+    vulkanResources::OwnedImage image;
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
     try {
-        staging = createStaging(physicalDevice, device_, font);
+        staging = createStaging(physicalDevice, device, pixels);
         const VkImageCreateInfo imageInfo {
             .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
             .imageType = VK_IMAGE_TYPE_2D,
-            .format = VK_FORMAT_R8_UNORM,
-            .extent = { font.width(), font.height(), 1 },
+            .format = format,
+            .extent = { width, height, 1 },
             .mipLevels = 1,
             .arrayLayers = 1,
             .samples = VK_SAMPLE_COUNT_1_BIT,
@@ -110,8 +104,8 @@ void VulkanUiResources::create(
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         };
-        fontImage_ = vulkanResources::createImage(
-            physicalDevice, device_, imageInfo, VK_IMAGE_ASPECT_COLOR_BIT);
+        image = vulkanResources::createImage(
+            physicalDevice, device, imageInfo, VK_IMAGE_ASPECT_COLOR_BIT);
 
         const VkCommandBufferAllocateInfo allocateInfo {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -119,14 +113,14 @@ void VulkanUiResources::create(
             .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
             .commandBufferCount = 1,
         };
-        vkCheck(vkAllocateCommandBuffers(device_, &allocateInfo, &commandBuffer),
-            "vkAllocateCommandBuffers UI font upload failed");
+        vkCheck(vkAllocateCommandBuffers(device, &allocateInfo, &commandBuffer),
+            "vkAllocateCommandBuffers UI image upload failed");
         const VkCommandBufferBeginInfo beginInfo {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         };
         vkCheck(vkBeginCommandBuffer(commandBuffer, &beginInfo),
-            "vkBeginCommandBuffer UI font upload failed");
+            "vkBeginCommandBuffer UI image upload failed");
 
         const VkImageMemoryBarrier2 toTransfer {
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -138,7 +132,7 @@ void VulkanUiResources::create(
             .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = fontImage_.image,
+            .image = image.image,
             .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
         };
         const VkDependencyInfo toTransferDependency {
@@ -150,12 +144,12 @@ void VulkanUiResources::create(
 
         const VkBufferImageCopy copy {
             .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-            .imageExtent = { font.width(), font.height(), 1 },
+            .imageExtent = { width, height, 1 },
         };
         vkCmdCopyBufferToImage(
             commandBuffer,
             staging.buffer,
-            fontImage_.image,
+            image.image,
             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             1,
             &copy);
@@ -170,7 +164,7 @@ void VulkanUiResources::create(
             .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = fontImage_.image,
+            .image = image.image,
             .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
         };
         const VkDependencyInfo toReadDependency {
@@ -180,7 +174,7 @@ void VulkanUiResources::create(
         };
         vkCmdPipelineBarrier2(commandBuffer, &toReadDependency);
         vkCheck(vkEndCommandBuffer(commandBuffer),
-            "vkEndCommandBuffer UI font upload failed");
+            "vkEndCommandBuffer UI image upload failed");
 
         const VkCommandBufferSubmitInfo commandInfo {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
@@ -192,11 +186,67 @@ void VulkanUiResources::create(
             .pCommandBufferInfos = &commandInfo,
         };
         vkCheck(vkQueueSubmit2(graphicsQueue, 1, &submit, VK_NULL_HANDLE),
-            "vkQueueSubmit2 UI font upload failed");
-        vkCheck(vkQueueWaitIdle(graphicsQueue), "vkQueueWaitIdle UI font upload failed");
-        vkFreeCommandBuffers(device_, commandPool, 1, &commandBuffer);
+            "vkQueueSubmit2 UI image upload failed");
+        vkCheck(vkQueueWaitIdle(graphicsQueue), "vkQueueWaitIdle UI image upload failed");
+
+        vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
         commandBuffer = VK_NULL_HANDLE;
-        destroyStaging(device_, staging);
+        destroyStaging(device, staging);
+        return image;
+    } catch (...) {
+        if (commandBuffer) {
+            vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+        }
+        destroyStaging(device, staging);
+        vulkanResources::destroyImage(device, image);
+        throw;
+    }
+}
+
+} // namespace
+
+VulkanUiResources::~VulkanUiResources()
+{
+    destroy();
+}
+
+void VulkanUiResources::create(
+    VkPhysicalDevice physicalDevice,
+    VkDevice device,
+    VkCommandPool commandPool,
+    VkQueue graphicsQueue,
+    const FontAtlas& font,
+    const ImageData& titleBackground)
+{
+    destroy();
+    if (font.width() == 0 || font.height() == 0 || font.pixels().empty()) {
+        throw std::runtime_error("UI font atlas contains no pixels");
+    }
+    if (titleBackground.width == 0 ||
+        titleBackground.height == 0 ||
+        titleBackground.rgba.empty()) {
+        throw std::runtime_error("Title background contains no pixels");
+    }
+    device_ = device;
+    try {
+        fontImage_ = uploadImage(
+            physicalDevice,
+            device_,
+            commandPool,
+            graphicsQueue,
+            font.width(),
+            font.height(),
+            VK_FORMAT_R8_UNORM,
+            font.pixels());
+        titleBackgroundImage_ = uploadImage(
+            physicalDevice,
+            device_,
+            commandPool,
+            graphicsQueue,
+            titleBackground.width,
+            titleBackground.height,
+            VK_FORMAT_R8G8B8A8_SRGB,
+            titleBackground.rgba);
 
         const VkSamplerCreateInfo samplerInfo {
             .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -208,13 +258,9 @@ void VulkanUiResources::create(
             .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
             .maxLod = 0.0f,
         };
-        vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &fontSampler_),
-            "vkCreateSampler UI font failed");
+        vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &sampler_),
+            "vkCreateSampler UI images failed");
     } catch (...) {
-        if (commandBuffer) {
-            vkFreeCommandBuffers(device_, commandPool, 1, &commandBuffer);
-        }
-        destroyStaging(device_, staging);
         destroy();
         throw;
     }
@@ -223,12 +269,14 @@ void VulkanUiResources::create(
 void VulkanUiResources::destroy()
 {
     if (device_) {
-        if (fontSampler_) {
-            vkDestroySampler(device_, fontSampler_, nullptr);
+        if (sampler_) {
+            vkDestroySampler(device_, sampler_, nullptr);
         }
+        vulkanResources::destroyImage(device_, titleBackgroundImage_);
         vulkanResources::destroyImage(device_, fontImage_);
     }
-    fontSampler_ = VK_NULL_HANDLE;
+    sampler_ = VK_NULL_HANDLE;
+    titleBackgroundImage_ = {};
     fontImage_ = {};
     device_ = VK_NULL_HANDLE;
 }

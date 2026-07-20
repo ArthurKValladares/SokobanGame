@@ -7,6 +7,7 @@
 namespace sokoban {
 
 class FontAtlas;
+struct ImageData;
 
 class VulkanUiResources {
 public:
@@ -21,16 +22,22 @@ public:
         VkDevice device,
         VkCommandPool commandPool,
         VkQueue graphicsQueue,
-        const FontAtlas& font);
+        const FontAtlas& font,
+        const ImageData& titleBackground);
     void destroy();
 
     [[nodiscard]] VkImageView fontImageView() const { return fontImage_.view; }
-    [[nodiscard]] VkSampler fontSampler() const { return fontSampler_; }
+    [[nodiscard]] VkImageView titleBackgroundImageView() const
+    {
+        return titleBackgroundImage_.view;
+    }
+    [[nodiscard]] VkSampler sampler() const { return sampler_; }
 
 private:
     VkDevice device_ = VK_NULL_HANDLE;
     vulkanResources::OwnedImage fontImage_ {};
-    VkSampler fontSampler_ = VK_NULL_HANDLE;
+    vulkanResources::OwnedImage titleBackgroundImage_ {};
+    VkSampler sampler_ = VK_NULL_HANDLE;
 };
 
 } // namespace sokoban

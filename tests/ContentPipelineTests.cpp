@@ -98,6 +98,7 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
     writeFile(assets / "textures/hero.png");
     writeFile(assets / "ui/Karla-Regular.ttf");
     writeFile(assets / "ui/OFL.txt", "font license");
+    writeFile(assets / "custom/ui/main-menu-rogue-pushing-rock-4k.png");
     writeFile(assets / "models/hero.gltf", R"({"buffers":[{"uri":"hero.bin"}]})");
     writeFile(assets / "models/hero.bin");
     writeFile(assets / "models/LICENSE.txt", "model license");
@@ -147,6 +148,9 @@ void testInventoryAndStaging()
     check(contains(inventory, "models/LICENSE.txt"), "nearby asset license included");
     check(contains(inventory, "ui/Karla-Regular.ttf"), "UI font included");
     check(contains(inventory, "ui/OFL.txt"), "UI font license included");
+    check(
+        contains(inventory, "custom/ui/main-menu-rogue-pushing-rock-4k.png"),
+        "title background included");
     check(contains(inventory, "levels/level0/screen0.scr"), "playable level included");
     check(!contains(inventory, "levels/Deleted/level9/screen0.scr"), "deleted level excluded");
     check(contains(inventory, "shaders/model.vert.glsl.spv"), "compiled shader included");
