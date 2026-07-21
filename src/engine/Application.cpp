@@ -306,7 +306,7 @@ void Application::run()
             input_.mouseButtonPressed(SDL_BUTTON_LEFT));
 
         renderer_.beginDebugUiFrame();
-        if (!optionsMenu_.isOpen()) {
+        if (!optionsMenu_.isOpen() && !titleScreen_.isOpen()) {
             DebugUi::draw();
         }
         drawDraftExitConfirmation();
