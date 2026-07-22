@@ -3,6 +3,7 @@
 #include "engine/PlayerProfile.hpp"
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -26,6 +27,20 @@ public:
         std::string message;
     };
 
+    enum class InspectionDisposition {
+        Missing,
+        PrimaryValid,
+        BackupValid,
+        Corrupt,
+        StorageUnavailable,
+    };
+
+    struct InspectionResult {
+        std::optional<PlayerProfile> profile;
+        InspectionDisposition disposition = InspectionDisposition::Missing;
+        std::string message;
+    };
+
     // fileStem names the slot's files inside root (e.g. "profile" ->
     // profile.json / profile.backup.json). Slot 1 keeps the historical
     // "profile" stem so existing saves stay valid. `sections` selects which
@@ -43,6 +58,9 @@ public:
         std::string_view application);
 
     [[nodiscard]] LoadResult load();
+    // Examines primary and backup files without migrating, recovering,
+    // archiving, replacing, or creating anything on disk.
+    [[nodiscard]] InspectionResult inspect() const;
     [[nodiscard]] bool save(const PlayerProfile& profile);
 
     [[nodiscard]] const std::filesystem::path& root() const { return root_; }

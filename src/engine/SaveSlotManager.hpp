@@ -2,6 +2,7 @@
 
 #include "engine/AsyncSaveStore.hpp"
 #include "engine/PlayerProfile.hpp"
+#include "engine/SaveSlotState.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -22,9 +23,7 @@ public:
     static constexpr int slotCount = 3;
 
     struct SlotSummary {
-        // "Empty" means no progress (fresh, reset, or deleted); a file may
-        // still exist on disk.
-        bool empty = true;
+        SaveSlotState state = SaveSlotState::Empty;
         bool completed = false; // every level 0..levelCount-1 completed
         int currentLevel = 0; // 0-based
         int completedLevels = 0;
@@ -78,7 +77,7 @@ private:
     [[nodiscard]] static SlotSummary summarize(
         const PlayerProfile& profile,
         int levelCount);
-    [[nodiscard]] SlotSummary decodeSlotSummary(int slot, int levelCount) const;
+    [[nodiscard]] SlotSummary inspectSlotSummary(int slot, int levelCount) const;
     [[nodiscard]] int readActiveSlotMarker() const;
     void writeActiveSlotMarker(int slot) const;
 

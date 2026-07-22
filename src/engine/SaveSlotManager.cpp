@@ -3,7 +3,6 @@
 #include "engine/AtomicFile.hpp"
 
 #include <fstream>
-#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -58,9 +57,9 @@ SaveSlotManager::SlotSummary SaveSlotManager::summarize(
     int levelCount)
 {
     SlotSummary summary;
-    // Empty means "no progress", not "no file": a deleted or reset slot must
-    // present as empty even while its profile object exists.
-    summary.empty = profile.progressEmpty();
+    summary.state = profile.progressEmpty()
+        ? SaveSlotState::Empty
+        : SaveSlotState::Ready;
     summary.currentLevel = profile.currentLevel;
     for (const PlayerProfile::LevelProgress& level : profile.levels) {
         summary.completedLevels += level.completed ? 1 : 0;
@@ -78,24 +77,30 @@ SaveSlotManager::SlotSummary SaveSlotManager::summarize(
     return summary;
 }
 
-SaveSlotManager::SlotSummary SaveSlotManager::decodeSlotSummary(
+SaveSlotManager::SlotSummary SaveSlotManager::inspectSlotSummary(
     int slot,
     int levelCount) const
 {
-    const SaveStore store(directory_, slotFileStem(slot));
-    try {
-        if (std::filesystem::is_regular_file(store.primaryPath())) {
-            std::ifstream stream(store.primaryPath(), std::ios::binary);
-            const std::string contents(
-                (std::istreambuf_iterator<char>(stream)),
-                std::istreambuf_iterator<char>());
-            return summarize(decodePlayerProfile(contents).profile, levelCount);
+    const SaveStore::InspectionResult inspection =
+        SaveStore(directory_, slotFileStem(slot), ProfileSections::ProgressOnly)
+            .inspect();
+    if (inspection.profile) {
+        SlotSummary summary = summarize(*inspection.profile, levelCount);
+        if (inspection.disposition ==
+            SaveStore::InspectionDisposition::BackupValid) {
+            summary.state = SaveSlotState::Recoverable;
         }
-    } catch (const std::exception&) {
-        // Unreadable slots present as empty; switching to one runs the
-        // store's full backup/archival recovery.
+        return summary;
     }
-    return {};
+
+    SlotSummary summary;
+    if (inspection.disposition == SaveStore::InspectionDisposition::Corrupt) {
+        summary.state = SaveSlotState::Corrupt;
+    } else if (inspection.disposition ==
+        SaveStore::InspectionDisposition::StorageUnavailable) {
+        summary.state = SaveSlotState::Unavailable;
+    }
+    return summary;
 }
 
 std::vector<SaveSlotManager::SlotSummary> SaveSlotManager::slotSummaries(
@@ -119,7 +124,7 @@ std::vector<SaveSlotManager::SlotSummary> SaveSlotManager::slotSummaries(
         std::optional<SlotSummary>& cached =
             summaryCache_[static_cast<std::size_t>(slot)];
         if (!cached) {
-            cached = decodeSlotSummary(slot, levelCount);
+            cached = inspectSlotSummary(slot, levelCount);
         }
         slots.push_back(*cached);
     }
@@ -142,7 +147,30 @@ std::optional<PlayerProfile> SaveSlotManager::switchTo(
     // active asynchronous save channel.
     SaveStore incomingStore(
         directory_, incomingStem, ProfileSections::ProgressOnly);
-    PlayerProfile profile = incomingStore.load().profile;
+    const SaveStore::InspectionResult inspection = incomingStore.inspect();
+    if (inspection.disposition ==
+        SaveStore::InspectionDisposition::Corrupt) {
+        throw std::runtime_error(
+            "save slot " + std::to_string(slot + 1) + " is corrupt");
+    }
+    if (inspection.disposition ==
+        SaveStore::InspectionDisposition::StorageUnavailable) {
+        throw std::runtime_error(
+            "save slot " + std::to_string(slot + 1) +
+            " storage is unavailable: " + inspection.message);
+    }
+    SaveStore::LoadResult loaded = incomingStore.load();
+    if (loaded.disposition == SaveStore::LoadDisposition::StorageUnavailable) {
+        throw std::runtime_error(
+            "save slot " + std::to_string(slot + 1) +
+            " could not be loaded: " + loaded.message);
+    }
+    if (loaded.disposition == SaveStore::LoadDisposition::ResetCorrupt) {
+        throw std::runtime_error(
+            "save slot " + std::to_string(slot + 1) +
+            " became corrupt while loading");
+    }
+    PlayerProfile profile = std::move(loaded.profile);
     profile.adoptSettingsFrom(currentProfile);
 
     store_->replaceChannel(

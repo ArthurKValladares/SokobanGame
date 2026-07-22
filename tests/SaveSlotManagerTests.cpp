@@ -126,17 +126,35 @@ void testSummariesSwitchingAndDeletion()
     std::vector<sokoban::SaveSlotManager::SlotSummary> summaries =
         manager.slotSummaries(active, 4);
     check(summaries.size() == 3, "three slot summaries");
-    check(summaries[0].empty, "live empty profile summarizes as empty");
-    check(!summaries[1].empty && summaries[1].currentLevel == 2,
+    check(summaries[0].state == sokoban::SaveSlotState::Empty,
+        "live empty profile summarizes as empty");
+    check(summaries[1].state == sokoban::SaveSlotState::Ready &&
+            summaries[1].currentLevel == 2,
         "on-disk slot summarized from its file");
-    check(summaries[2].empty, "corrupt slot presents as empty");
+    check(summaries[2].state == sokoban::SaveSlotState::Corrupt,
+        "corrupt slot is reported as corrupt");
+
+    bool corruptSwitchRejected = false;
+    try {
+        (void)manager.switchTo(2, active);
+    } catch (const std::runtime_error&) {
+        corruptSwitchRejected = true;
+    }
+    check(corruptSwitchRejected, "corrupt slot cannot be switched into");
+    check(manager.activeSlot() == 0,
+        "rejected corrupt switch keeps active slot");
+    check(std::filesystem::is_regular_file(
+            directory.path() / "profile-slot3.json"),
+        "rejected corrupt switch does not archive the save");
 
     // The regression that shipped: a reset live profile must read as empty.
     active = profileWithProgress(1);
-    check(!manager.slotSummaries(active, 4)[0].empty,
+    check(manager.slotSummaries(active, 4)[0].state ==
+            sokoban::SaveSlotState::Ready,
         "live progress summarizes as non-empty");
     active.resetProgress();
-    check(manager.slotSummaries(active, 4)[0].empty,
+    check(manager.slotSummaries(active, 4)[0].state ==
+            sokoban::SaveSlotState::Empty,
         "reset live profile summarizes as empty again");
 
     // Switching: invalid and same-slot requests are rejected.
@@ -220,7 +238,8 @@ void testSummaryCacheInvalidation()
     check(manager.slotSummaries(*switched, 4)[2].currentLevel == 1,
         "slot 3 primed before delete");
     manager.deleteSlot(2);
-    check(manager.slotSummaries(*switched, 4)[2].empty,
+    check(manager.slotSummaries(*switched, 4)[2].state ==
+            sokoban::SaveSlotState::Empty,
         "delete invalidates the slot's cached summary");
     check(manager.slotSummaries(*switched, 4)[0].currentLevel == 1,
         "delete leaves other cached summaries intact");
@@ -243,6 +262,54 @@ void testSummaryCacheInvalidation()
         "2-level catalog marks the slot complete");
     check(!fresh.slotSummaries(freshActive, 5)[1].completed,
         "5-level catalog re-evaluates completion");
+}
+
+void testSlotInspectionIsNonMutating()
+{
+    TemporaryDirectory directory;
+    {
+        sokoban::SaveStore recoverable(directory.path(), "profile-slot2");
+        check(recoverable.save(profileWithProgress(1)),
+            "recoverable slot initial profile saved");
+        check(recoverable.save(profileWithProgress(2)),
+            "recoverable slot backup created");
+        std::ofstream(recoverable.primaryPath(), std::ios::binary | std::ios::trunc)
+            << "corrupt primary";
+    }
+    const std::filesystem::path unavailable =
+        directory.path() / "profile-slot3.json";
+    std::filesystem::create_directories(unavailable);
+
+    sokoban::SaveSlotManager manager(directory.path(), instantWrites);
+    const sokoban::PlayerProfile active = manager.loadActiveProfile();
+    const std::vector<sokoban::SaveSlotManager::SlotSummary> summaries =
+        manager.slotSummaries(active, 4);
+
+    check(summaries[1].state == sokoban::SaveSlotState::Recoverable,
+        "valid backup is reported as recoverable");
+    check(summaries[1].currentLevel == 1,
+        "recoverable summary comes from backup");
+    check(summaries[2].state == sokoban::SaveSlotState::Unavailable,
+        "non-file save path is reported as unavailable");
+
+    std::ifstream primary(directory.path() / "profile-slot2.json");
+    std::string primaryContents;
+    std::getline(primary, primaryContents);
+    primary.close();
+    check(primaryContents == "corrupt primary",
+        "inspection does not archive corrupt primary");
+    check(std::filesystem::is_regular_file(
+            directory.path() / "profile-slot2.backup.json"),
+        "inspection does not consume recoverable backup");
+
+    const std::optional<sokoban::PlayerProfile> recovered =
+        manager.switchTo(1, active);
+    check(recovered.has_value() && recovered->currentLevel == 1,
+        "explicit switch recovers backup profile");
+    check(sokoban::SaveStore(directory.path(), "profile-slot2").inspect()
+            .disposition ==
+            sokoban::SaveStore::InspectionDisposition::PrimaryValid,
+        "recovered slot has a valid primary after switch");
 }
 
 void testFailedMarkerCommitRollsBackSwitch()
@@ -302,6 +369,7 @@ int main()
     testPreSplitSettingsMigration();
     testSummariesSwitchingAndDeletion();
     testSummaryCacheInvalidation();
+    testSlotInspectionIsNonMutating();
     testFailedMarkerCommitRollsBackSwitch();
 
     if (failures == 0) {

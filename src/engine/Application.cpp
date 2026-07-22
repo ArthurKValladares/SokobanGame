@@ -629,7 +629,7 @@ std::vector<SaveSlotInfo> Application::saveSlotInfos() const
     for (const SaveSlotManager::SlotSummary& summary :
         saveSlots_.slotSummaries(playerProfile_, levelCount())) {
         slots.push_back({
-            .empty = summary.empty,
+            .state = summary.state,
             .completed = summary.completed,
             .currentLevel = summary.currentLevel,
             .completedLevels = summary.completedLevels,

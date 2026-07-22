@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/Math.hpp"
+#include "engine/SaveSlotState.hpp"
 #include "engine/ui/MenuKit.hpp"
 
 #include <optional>
@@ -24,8 +25,7 @@ struct TitleLevelInfo {
 };
 
 struct SaveSlotInfo {
-    // "Empty" means no progress (fresh or deleted); the file may still exist.
-    bool empty = true;
+    SaveSlotState state = SaveSlotState::Empty;
     bool completed = false; // every level has a completion record
     int currentLevel = 0; // 0-based
     int completedLevels = 0;

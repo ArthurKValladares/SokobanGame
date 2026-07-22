@@ -76,9 +76,9 @@ void testTitleNavigationAndResults()
     sokoban::UiContext ui(font);
     sokoban::TitleScreen title;
     title.setSaveSlots({
-        { .empty = false, .currentLevel = 1 },
-        { .empty = true },
-        { .empty = true },
+        { .state = sokoban::SaveSlotState::Ready, .currentLevel = 1 },
+        {},
+        {},
     }, 0);
     title.open(sampleLevels());
     CHECK(title.isOpen());
@@ -128,9 +128,9 @@ void testTitleNavigationAndResults()
 
     // Active slot empty but another save exists: New Game starts here.
     title.setSaveSlots({
-        { .empty = true },
-        { .empty = false, .currentLevel = 0 },
-        { .empty = true },
+        {},
+        { .state = sokoban::SaveSlotState::Ready, .currentLevel = 0 },
+        {},
     }, 0);
     title.open(sampleLevels());
     CHECK(isAction<sokoban::title::NewGame>(draw({ .confirm = true })));
@@ -220,7 +220,9 @@ void testLevelSelectScreensAndLocking()
     CHECK(!title.isOpen());
 
     // From the full title, back() leaves sub-pages but not Main.
-    title.setSaveSlots({ { .empty = false }, {}, {} }, 0);
+    title.setSaveSlots({
+        { .state = sokoban::SaveSlotState::Ready }, {}, {}
+    }, 0);
     title.open(sampleLevels());
     draw({ .down = true });
     draw({ .confirm = true });
@@ -238,9 +240,19 @@ void testSaveSlotsPage()
     sokoban::UiContext ui(font);
     sokoban::TitleScreen title;
     title.setSaveSlots({
-        { .empty = false, .completed = false, .currentLevel = 2, .completedLevels = 2 },
-        { .empty = true },
-        { .empty = false, .completed = true, .currentLevel = 0, .completedLevels = 4 },
+        {
+            .state = sokoban::SaveSlotState::Ready,
+            .completed = false,
+            .currentLevel = 2,
+            .completedLevels = 2,
+        },
+        {},
+        {
+            .state = sokoban::SaveSlotState::Ready,
+            .completed = true,
+            .currentLevel = 0,
+            .completedLevels = 4,
+        },
     }, 0);
     title.open(sampleLevels());
 
@@ -304,6 +316,52 @@ void testSaveSlotsPage()
     draw({ .up = true });
     draw({ .confirm = true });
     CHECK(title.page() == sokoban::TitleScreen::Page::Main);
+}
+
+void testDamagedSaveSlotBehavior()
+{
+    const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
+    sokoban::UiContext ui(font);
+    sokoban::TitleScreen title;
+    title.setSaveSlots({
+        {},
+        { .state = sokoban::SaveSlotState::Corrupt },
+        { .state = sokoban::SaveSlotState::Recoverable, .currentLevel = 2 },
+    }, 0);
+    title.open(sampleLevels());
+
+    auto draw = [&](sokoban::TitleScreenInput input = {}) {
+        ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
+        const std::optional<sokoban::TitleAction> result =
+            title.draw(ui, { 1280.0f, 720.0f }, input);
+        ui.endFrame();
+        return result;
+    };
+
+    // Damaged data counts as stored data: New Game uses the healthy active
+    // slot directly and the Save Slots row remains available for cleanup.
+    CHECK(isAction<sokoban::title::NewGame>(draw({ .confirm = true })));
+    draw({ .down = true });
+    draw({ .confirm = true });
+    CHECK(title.page() == sokoban::TitleScreen::Page::SaveSlots);
+
+    // Corrupt slots cannot be selected, but can still be deleted.
+    draw({ .down = true });
+    CHECK(!draw({ .confirm = true }).has_value());
+    CHECK(title.page() == sokoban::TitleScreen::Page::SaveSlots);
+    draw({ .right = true });
+    draw({ .confirm = true });
+    CHECK(title.page() == sokoban::TitleScreen::Page::SlotDeleteConfirmation);
+    title.back();
+
+    // A valid backup is safe to select; the manager performs recovery only
+    // after this explicit switch action.
+    draw({ .down = true });
+    draw({ .down = true });
+    const auto recoverable = draw({ .confirm = true });
+    const auto* switchSlot =
+        actionAs<sokoban::title::SwitchSlot>(recoverable);
+    CHECK(switchSlot != nullptr && switchSlot->slot == 2);
 }
 
 void testGameCompleteOverlay()
@@ -432,6 +490,7 @@ int main()
     testLevelSelectScreensAndLocking();
     testLevelCompleteOverlay();
     testSaveSlotsPage();
+    testDamagedSaveSlotBehavior();
     testGameCompleteOverlay();
     testOptionsTitleExitRow();
 

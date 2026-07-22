@@ -151,6 +151,79 @@ SaveStore::LoadResult SaveStore::load()
     }
 }
 
+SaveStore::InspectionResult SaveStore::inspect() const
+{
+    try {
+        const bool primaryExists = std::filesystem::exists(primaryPath_);
+        const bool backupExists = std::filesystem::exists(backupPath_);
+        if (!primaryExists && !backupExists) {
+            return {
+                .disposition = InspectionDisposition::Missing,
+                .message = "No player profile found.",
+            };
+        }
+
+        std::string primaryError;
+        if (primaryExists) {
+            if (!std::filesystem::is_regular_file(primaryPath_)) {
+                return {
+                    .disposition = InspectionDisposition::StorageUnavailable,
+                    .message = "Player profile path is not a regular file.",
+                };
+            }
+            try {
+                DecodedPlayerProfile decoded =
+                    decodePlayerProfile(readFile(primaryPath_));
+                return {
+                    .profile = std::move(decoded.profile),
+                    .disposition = InspectionDisposition::PrimaryValid,
+                    .message = "Player profile is ready.",
+                };
+            } catch (const std::exception& error) {
+                primaryError = error.what();
+            }
+        }
+
+        std::string backupError;
+        if (backupExists) {
+            if (!std::filesystem::is_regular_file(backupPath_)) {
+                return {
+                    .disposition = InspectionDisposition::StorageUnavailable,
+                    .message = "Player profile backup path is not a regular file.",
+                };
+            }
+            try {
+                DecodedPlayerProfile decoded =
+                    decodePlayerProfile(readFile(backupPath_));
+                return {
+                    .profile = std::move(decoded.profile),
+                    .disposition = InspectionDisposition::BackupValid,
+                    .message = "Player profile can be recovered from backup.",
+                };
+            } catch (const std::exception& error) {
+                backupError = error.what();
+            }
+        }
+
+        std::string message = "Player profile is corrupt";
+        if (!primaryError.empty()) {
+            message += ": " + primaryError;
+        } else if (!backupError.empty()) {
+            message += ": " + backupError;
+        }
+        return {
+            .disposition = InspectionDisposition::Corrupt,
+            .message = std::move(message),
+        };
+    } catch (const std::exception& error) {
+        return {
+            .disposition = InspectionDisposition::StorageUnavailable,
+            .message = "Player profile storage unavailable: " +
+                std::string(error.what()),
+        };
+    }
+}
+
 bool SaveStore::save(const PlayerProfile& profile)
 {
     try {

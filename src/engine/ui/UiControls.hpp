@@ -17,6 +17,7 @@ struct ButtonOptions {
     ButtonTone tone = ButtonTone::Normal;
     bool focused = false;
     bool activate = false;
+    bool enabled = true;
 };
 
 struct ChoiceOption {

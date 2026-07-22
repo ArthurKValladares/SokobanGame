@@ -34,18 +34,24 @@ bool button(
     std::string_view label,
     ButtonOptions options)
 {
-    const bool hovered = ui.hovered(rect);
+    const bool hovered = options.enabled && ui.hovered(rect);
     const bool pressed = hovered && ui.mouseDown();
-    const Vec4 border = options.focused
-        ? Vec4 { 0.30f, 0.80f, 0.72f, 1.0f }
-        : Vec4 { 0.32f, 0.35f, 0.35f, 0.94f };
+    const Vec4 border = !options.enabled
+        ? Vec4 { 0.24f, 0.26f, 0.26f, 0.65f }
+        : (options.focused
+                ? Vec4 { 0.30f, 0.80f, 0.72f, 1.0f }
+                : Vec4 { 0.32f, 0.35f, 0.35f, 0.94f });
     ui.rect(rect, border);
     ui.rect({
         { rect.position.x + 2.0f, rect.position.y + 2.0f },
         { rect.size.x - 4.0f, rect.size.y - 4.0f },
-    }, buttonColor(options.tone, hovered, pressed));
-    ui.centeredText(rect, label, textColor, 24.0f);
-    return ui.clicked(rect) || options.activate;
+    }, options.enabled
+        ? buttonColor(options.tone, hovered, pressed)
+        : Vec4 { 0.14f, 0.16f, 0.16f, 0.72f });
+    ui.centeredText(rect, label,
+        options.enabled ? textColor : Vec4 { 0.50f, 0.52f, 0.51f, 0.72f },
+        24.0f);
+    return options.enabled && (ui.clicked(rect) || options.activate);
 }
 
 bool slider(

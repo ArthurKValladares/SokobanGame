@@ -128,13 +128,16 @@ bool TitleScreen::activeSlotHasSave() const
 {
     return activeSlot_ >= 0 &&
         activeSlot_ < static_cast<int>(saveSlots_.size()) &&
-        !saveSlots_[static_cast<std::size_t>(activeSlot_)].empty;
+        saveSlots_[static_cast<std::size_t>(activeSlot_)].state ==
+            SaveSlotState::Ready;
 }
 
 bool TitleScreen::anySaveExists() const
 {
     return std::any_of(saveSlots_.begin(), saveSlots_.end(),
-        [](const SaveSlotInfo& slot) { return !slot.empty; });
+        [](const SaveSlotInfo& slot) {
+            return saveSlotHasStoredData(slot.state);
+        });
 }
 
 std::optional<TitleAction> TitleScreen::draw(
@@ -395,7 +398,10 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
         const bool active = static_cast<int>(i) == activeSlot_;
         const bool rowFocused = selectedRow_ == static_cast<int>(i);
         const UiRect row = tree.rect(slotRows[i]);
-        const bool deletable = !slot.empty && !slotPickForNewGame_;
+        const bool deletable = saveSlotHasStoredData(slot.state) &&
+            slot.state != SaveSlotState::Unavailable &&
+            !slotPickForNewGame_;
+        const bool loadable = saveSlotCanLoad(slot.state);
 
         if (rowFocused && deletable) {
             if (input.right) {
@@ -421,6 +427,7 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
                 .tone = active ? ButtonTone::Accent : ButtonTone::Normal,
                 .focused = slotFocused,
                 .activate = input.confirm && slotFocused,
+                .enabled = loadable,
             })) {
             if (slotPickForNewGame_) {
                 action = title::NewGameOnSlot { static_cast<int>(i) };
@@ -448,8 +455,14 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
         }
 
         std::string status;
-        if (slot.empty) {
+        if (slot.state == SaveSlotState::Empty) {
             status = "Empty";
+        } else if (slot.state == SaveSlotState::Recoverable) {
+            status = "Backup available";
+        } else if (slot.state == SaveSlotState::Corrupt) {
+            status = "Corrupt";
+        } else if (slot.state == SaveSlotState::Unavailable) {
+            status = "Unavailable";
         } else if (slot.completed) {
             status = "Completed!";
         } else {
@@ -461,10 +474,14 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
         if (active && !slotPickForNewGame_) {
             status += "  (active)";
         }
+        const bool damaged = slot.state == SaveSlotState::Corrupt ||
+            slot.state == SaveSlotState::Unavailable;
         menuKit::trailingText(ui, slotRect, status,
-            rowFocused
-                ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
-                : Vec4 { 0.62f, 0.67f, 0.65f, 1.0f },
+            damaged
+                ? Vec4 { 0.95f, 0.48f, 0.40f, 1.0f }
+                : (rowFocused
+                        ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
+                        : Vec4 { 0.62f, 0.67f, 0.65f, 1.0f }),
             18.0f, 18.0f);
     }
 
