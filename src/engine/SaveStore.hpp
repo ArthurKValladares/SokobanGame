@@ -28,8 +28,13 @@ public:
 
     // fileStem names the slot's files inside root (e.g. "profile" ->
     // profile.json / profile.backup.json). Slot 1 keeps the historical
-    // "profile" stem so existing saves stay valid.
-    explicit SaveStore(std::filesystem::path root, std::string fileStem = "profile");
+    // "profile" stem so existing saves stay valid. `sections` selects which
+    // profile sections this store writes (slot stores write progress only,
+    // the shared settings store settings only).
+    explicit SaveStore(
+        std::filesystem::path root,
+        std::string fileStem = "profile",
+        ProfileSections sections = ProfileSections::All);
 
     // SDL must already be initialized. SDL owns the platform-specific choice
     // of roaming/local preference storage.
@@ -52,6 +57,7 @@ private:
     std::filesystem::path root_;
     std::filesystem::path primaryPath_;
     std::filesystem::path backupPath_;
+    ProfileSections sections_ = ProfileSections::All;
     std::string status_;
 };
 

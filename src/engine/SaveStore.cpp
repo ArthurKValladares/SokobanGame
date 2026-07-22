@@ -93,10 +93,14 @@ std::string corruptSuffix()
 
 } // namespace
 
-SaveStore::SaveStore(std::filesystem::path root, std::string fileStem)
+SaveStore::SaveStore(
+    std::filesystem::path root,
+    std::string fileStem,
+    ProfileSections sections)
     : root_(std::move(root))
     , primaryPath_(root_ / (fileStem + ".json"))
     , backupPath_(root_ / (fileStem + ".backup.json"))
+    , sections_(sections)
 {
 }
 
@@ -213,7 +217,7 @@ bool SaveStore::save(const PlayerProfile& profile)
 
 void SaveStore::writePrimary(const PlayerProfile& profile, bool updateBackup)
 {
-    const std::string contents = profile.serialize();
+    const std::string contents = profile.serialize(sections_);
     (void)decodePlayerProfile(contents);
 
     if (updateBackup && std::filesystem::is_regular_file(primaryPath_)) {

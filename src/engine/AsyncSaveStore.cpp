@@ -9,8 +9,9 @@ namespace sokoban {
 AsyncSaveStore::AsyncSaveStore(
     std::filesystem::path root,
     std::chrono::milliseconds writeDelay,
-    std::string fileStem)
-    : store_(std::move(root), std::move(fileStem))
+    std::string fileStem,
+    ProfileSections sections)
+    : store_(std::move(root), std::move(fileStem), sections)
     , writeDelay_(std::max(writeDelay, std::chrono::milliseconds::zero()))
     , worker_([this] { workerLoop(); })
 {

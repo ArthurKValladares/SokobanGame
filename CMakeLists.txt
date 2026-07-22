@@ -146,6 +146,7 @@ add_executable(sokoban
     src/engine/MiniaudioImpl.cpp
     src/engine/PresentationSettings.cpp
     src/engine/PlayerProfile.cpp
+    src/engine/PlayerProfileCodec.cpp
     src/engine/RenderFrameBuilder.cpp
     src/engine/Rules.cpp
     src/engine/RuntimeContent.cpp
@@ -299,6 +300,7 @@ if(SOKOBAN_BUILD_TESTS)
         src/engine/AsyncSaveStore.cpp
         src/engine/InputBindings.cpp
         src/engine/PlayerProfile.cpp
+        src/engine/PlayerProfileCodec.cpp
         src/engine/render/RenderResolution.cpp
         src/engine/SaveStore.cpp
         src/engine/TileTypes.cpp
@@ -317,6 +319,7 @@ if(SOKOBAN_BUILD_TESTS)
         src/engine/AsyncSaveStore.cpp
         src/engine/InputBindings.cpp
         src/engine/PlayerProfile.cpp
+        src/engine/PlayerProfileCodec.cpp
         src/engine/render/RenderResolution.cpp
         src/engine/SaveSlotManager.cpp
         src/engine/SaveStore.cpp

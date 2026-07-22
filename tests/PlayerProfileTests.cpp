@@ -186,6 +186,50 @@ void testReachedScreensAndProgressReset()
         "adopt keeps progress records");
 }
 
+void testSectionedSerialization()
+{
+    sokoban::PlayerProfile profile;
+    profile.unlockedLevel = 1;
+    profile.recordReachedScreen(0, 1);
+    profile.recordLevelCompletion(0, 12, 30.0, true);
+    profile.audio.musicVolume = 0.25f;
+    profile.accessibility.highContrast = true;
+    profile.normalize();
+
+    // Progress-only files carry no settings section and decode with default
+    // settings but identical progress.
+    const std::string progressOnly =
+        profile.serialize(sokoban::ProfileSections::ProgressOnly);
+    check(progressOnly.find("\"settings\"") == std::string::npos,
+        "progress-only file has no settings section");
+    const sokoban::PlayerProfile progressDecoded =
+        sokoban::decodePlayerProfile(progressOnly).profile;
+    check(progressDecoded.progressForLevel(0) != nullptr &&
+            progressDecoded.progressForLevel(0)->bestMoves == 12,
+        "progress-only round-trips progress");
+    check(progressDecoded.audio.musicVolume ==
+            sokoban::PlayerProfile {}.audio.musicVolume,
+        "progress-only decodes default settings");
+
+    // Settings-only files carry no progress section.
+    const std::string settingsOnly =
+        profile.serialize(sokoban::ProfileSections::SettingsOnly);
+    check(settingsOnly.find("\"progress\"") == std::string::npos,
+        "settings-only file has no progress section");
+    const sokoban::PlayerProfile settingsDecoded =
+        sokoban::decodePlayerProfile(settingsOnly).profile;
+    check(settingsDecoded.progressEmpty(), "settings-only decodes empty progress");
+    check(settingsDecoded.audio.musicVolume == 0.25f,
+        "settings-only round-trips settings");
+    check(settingsDecoded.accessibility.highContrast,
+        "settings-only round-trips accessibility");
+
+    // A bare format-9 document decodes as a fully default profile.
+    const sokoban::PlayerProfile bare =
+        sokoban::decodePlayerProfile("{\"format\": 9}").profile;
+    check(bare == sokoban::PlayerProfile {}, "sections are optional on read");
+}
+
 void testActiveScreenCheckpointRoundTrip()
 {
     sokoban::PlayerProfile profile;
@@ -621,6 +665,7 @@ int main()
 {
     testRoundTripAndBests();
     testReachedScreensAndProgressReset();
+    testSectionedSerialization();
     testActiveScreenCheckpointRoundTrip();
     testNormalizationAndMigration();
     testStoreBackupsAndRecovery();

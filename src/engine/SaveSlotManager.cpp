@@ -25,9 +25,10 @@ SaveSlotManager::SaveSlotManager(
     , writeDelay_(writeDelay)
     , activeSlot_(readActiveSlotMarker())
     , settingsStore_(std::make_unique<AsyncSaveStore>(
-          directory_, writeDelay_, "settings"))
+          directory_, writeDelay_, "settings", ProfileSections::SettingsOnly))
     , progressStore_(std::make_unique<AsyncSaveStore>(
-          directory_, writeDelay_, slotFileStem(activeSlot_)))
+          directory_, writeDelay_, slotFileStem(activeSlot_),
+          ProfileSections::ProgressOnly))
 {
 }
 
@@ -117,7 +118,8 @@ std::optional<PlayerProfile> SaveSlotManager::switchTo(
     activeSlot_ = slot;
     writeActiveSlotMarker();
     progressStore_ = std::make_unique<AsyncSaveStore>(
-        directory_, writeDelay_, slotFileStem(activeSlot_));
+        directory_, writeDelay_, slotFileStem(activeSlot_),
+        ProfileSections::ProgressOnly);
 
     // Settings are shared across slots: carry the live ones over the
     // incoming slot's stale copies.

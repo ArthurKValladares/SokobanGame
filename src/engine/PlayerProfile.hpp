@@ -11,7 +11,16 @@
 
 namespace sokoban {
 
-inline constexpr int currentPlayerProfileFormat = 8;
+inline constexpr int currentPlayerProfileFormat = 9;
+
+// Which top-level sections serialize() writes. Save-slot files carry only
+// progress and the shared settings file only settings; both sections are
+// optional on read (missing sections decode as defaults).
+enum class ProfileSections {
+    All,
+    ProgressOnly,
+    SettingsOnly,
+};
 
 struct PlayerProfile {
     struct LevelProgress {
@@ -106,7 +115,8 @@ struct PlayerProfile {
         bool recordBests = true);
 
     [[nodiscard]] const LevelProgress* progressForLevel(int level) const;
-    [[nodiscard]] std::string serialize() const;
+    [[nodiscard]] std::string serialize(
+        ProfileSections sections = ProfileSections::All) const;
 
     bool operator==(const PlayerProfile&) const = default;
 };
@@ -117,7 +127,8 @@ struct DecodedPlayerProfile {
 };
 
 // Throws std::runtime_error for malformed, unsupported, or semantically
-// invalid profile data. Formats 1 through 7 migrate into the current model.
+// invalid profile data. Formats 1 through 8 migrate through forward JSON
+// patches followed by one strict current-format parse.
 [[nodiscard]] DecodedPlayerProfile decodePlayerProfile(std::string_view text);
 
 } // namespace sokoban
