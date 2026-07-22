@@ -197,7 +197,7 @@ void Application::run()
             }
 
             if (event.type == SDL_EVENT_QUIT) {
-                optionsMenu_.requestQuitConfirmation();
+                handleShellEvent(ShellCloseRequested {});
             }
         }
 
@@ -209,19 +209,8 @@ void Application::run()
                 draftExitConfirmationOpen_ = true;
             } else
 #endif
-            if (optionsMenu_.isOpen()) {
-                optionsMenu_.back();
-            } else if (levelCompleteOverlay_.isOpen()) {
-                // The overlay requires an explicit choice.
-            } else if (titleScreen_.isOpen()) {
-                if (titleScreen_.page() == TitleScreen::Page::Main) {
-                    optionsMenu_.open(optionsMenuSettings(), false);
-                } else {
-                    titleScreen_.back();
-                }
-            } else {
-                optionsMenu_.open(
-                    optionsMenuSettings(), true, allLevelsCompleted());
+            {
+                handleShellEvent(ShellBackPressed {});
             }
         }
 
@@ -271,44 +260,7 @@ void Application::run()
                     .right = navRight,
                     .confirm = navConfirm,
                 });
-        if (titleResult.continueRequested) {
-            if (!gameLoaded_) {
-                currentLevel_ = playerProfile_.currentLevel;
-                currentScreen_ = playerProfile_.currentScreen;
-                if (!screenExists(currentLevel_, currentScreen_)) {
-                    currentLevel_ = 0;
-                    currentScreen_ = 0;
-                    playerProfile_.setCurrentLevel(0);
-                }
-                loadCurrentScreen();
-            }
-            titleScreen_.close();
-        }
-        if (titleResult.newGameRequested) {
-            startNewGame();
-        }
-        if (titleResult.newGameSlotSelected) {
-            switchSaveSlot(*titleResult.newGameSlotSelected);
-            startNewGame();
-        }
-        if (titleResult.slotDeleteRequested) {
-            deleteSaveSlot(*titleResult.slotDeleteRequested);
-        }
-        if (titleResult.startRequested) {
-            startLevel(
-                titleResult.startRequested->level,
-                titleResult.startRequested->screen);
-            titleScreen_.close();
-        }
-        if (titleResult.slotSelected) {
-            switchSaveSlot(*titleResult.slotSelected);
-        }
-        if (titleResult.optionsRequested) {
-            optionsMenu_.open(optionsMenuSettings(), false);
-        }
-        if (titleResult.quitRequested) {
-            optionsMenu_.requestQuitConfirmation();
-        }
+        handleShellEvent(ShellTitleResult { titleResult });
 
         const LevelCompleteResult completeResult = levelCompleteOverlay_.draw(
             ui_, pixelSize,
@@ -319,16 +271,7 @@ void Application::run()
                     .down = navDown,
                     .confirm = navConfirm,
                 });
-        if (completeResult.continueRequested) {
-            resolveLevelComplete(false);
-        }
-        if (completeResult.titleRequested) {
-            resolveLevelComplete(true);
-        }
-        if (completeResult.levelSelectRequested) {
-            resolveLevelComplete(false);
-            openStandaloneLevelSelect();
-        }
+        handleShellEvent(ShellOverlayResult { completeResult });
 
         const OptionsMenuResult menuResult = optionsMenu_.draw(ui_, pixelSize, {
             .up = navUp,
@@ -337,20 +280,7 @@ void Application::run()
             .right = navRight,
             .confirm = navConfirm,
         });
-        if (menuResult.settingsChanged) {
-            applyOptionsMenuSettings(optionsMenu_.settings());
-        }
-        if (menuResult.quitRequested) {
-            running_ = false;
-        }
-        if (menuResult.titleRequested) {
-            optionsMenu_.close();
-            openTitleScreen();
-        }
-        if (menuResult.levelSelectRequested) {
-            optionsMenu_.close();
-            openStandaloneLevelSelect();
-        }
+        handleShellEvent(ShellOptionsResult { menuResult });
         ui_.endFrame();
         renderer_.drawFrame(buildRenderFrame(), ui_.drawData());
     }
@@ -776,6 +706,73 @@ void Application::persistSettings(bool immediate)
 void Application::openStandaloneLevelSelect()
 {
     titleScreen_.openLevelSelect(titleLevelInfos());
+}
+
+ShellFacts Application::shellFacts() const
+{
+    return {
+        .gameLoaded = gameLoaded_,
+        .optionsOpen = optionsMenu_.isOpen(),
+        .overlayOpen = levelCompleteOverlay_.isOpen(),
+        .titleOpen = titleScreen_.isOpen(),
+        .titleAtMainPage = titleScreen_.page() == TitleScreen::Page::Main,
+        .allLevelsCompleted = allLevelsCompleted(),
+    };
+}
+
+void Application::handleShellEvent(const ShellEvent& event)
+{
+    for (const ShellCommand& command : shellFlow_.handle(event, shellFacts())) {
+        executeShellCommand(command);
+    }
+}
+
+void Application::executeShellCommand(const ShellCommand& command)
+{
+    std::visit(flow::Overloaded {
+        [&](const shell::LoadCurrentScreen&) {
+            currentLevel_ = playerProfile_.currentLevel;
+            currentScreen_ = playerProfile_.currentScreen;
+            if (!screenExists(currentLevel_, currentScreen_)) {
+                currentLevel_ = 0;
+                currentScreen_ = 0;
+                playerProfile_.setCurrentLevel(0);
+            }
+            loadCurrentScreen();
+        },
+        [&](const shell::CloseTitle&) { titleScreen_.close(); },
+        [&](const shell::OpenTitle&) { openTitleScreen(); },
+        [&](const shell::TitleBack&) { titleScreen_.back(); },
+        [&](const shell::StartNewGame&) { startNewGame(); },
+        [&](const shell::SwitchSlot& switchSlot) {
+            switchSaveSlot(switchSlot.slot);
+        },
+        [&](const shell::DeleteSlot& deleteSlot) {
+            deleteSaveSlot(deleteSlot.slot);
+        },
+        [&](const shell::StartLevel& start) {
+            startLevel(start.level, start.screen);
+        },
+        [&](const shell::OpenOptions& open) {
+            optionsMenu_.open(
+                optionsMenuSettings(), open.pauseContext, open.allowLevelSelect);
+        },
+        [&](const shell::CloseOptions&) { optionsMenu_.close(); },
+        [&](const shell::OptionsBack&) { optionsMenu_.back(); },
+        [&](const shell::ApplySettings&) {
+            applyOptionsMenuSettings(optionsMenu_.settings());
+        },
+        [&](const shell::RequestQuitConfirmation&) {
+            optionsMenu_.requestQuitConfirmation();
+        },
+        [&](const shell::Quit&) { running_ = false; },
+        [&](const shell::ResolveLevelComplete& resolve) {
+            resolveLevelComplete(resolve.toTitle);
+        },
+        [&](const shell::OpenStandaloneLevelSelect&) {
+            openStandaloneLevelSelect();
+        },
+    }, command);
 }
 
 bool Application::allLevelsCompleted() const

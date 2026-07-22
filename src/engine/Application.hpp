@@ -3,6 +3,7 @@
 #include "engine/AnimationPreviewDebugUi.hpp"
 #include "engine/ApplicationDebugUi.hpp"
 #include "engine/SaveSlotManager.hpp"
+#include "engine/ShellFlow.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/AssetManifestDebugUi.hpp"
 #include "engine/AssetManifestEditor.hpp"
@@ -54,6 +55,9 @@ private:
     void startLevel(int level, int screen);
     void resolveLevelComplete(bool toTitle);
     void openStandaloneLevelSelect();
+    [[nodiscard]] ShellFacts shellFacts() const;
+    void handleShellEvent(const ShellEvent& event);
+    void executeShellCommand(const ShellCommand& command);
     [[nodiscard]] bool allLevelsCompleted() const;
     [[nodiscard]] bool shellMenuOpen() const;
     [[nodiscard]] bool applyLevel(
@@ -99,6 +103,8 @@ private:
     OptionsMenu optionsMenu_;
     TitleScreen titleScreen_;
     LevelCompleteOverlay levelCompleteOverlay_;
+    // Pure shell routing; Application executes the commands it emits.
+    ShellFlow shellFlow_;
     AudioSystem audioSystem_;
     Level level_;
     GameplaySession gameplaySession_;

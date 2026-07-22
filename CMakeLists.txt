@@ -150,6 +150,7 @@ add_executable(sokoban
     src/engine/Rules.cpp
     src/engine/RuntimeContent.cpp
     src/engine/SaveSlotManager.cpp
+    src/engine/ShellFlow.cpp
     src/engine/SaveStore.cpp
     src/engine/TaskSystem.cpp
     src/engine/TileTypes.cpp
@@ -328,6 +329,19 @@ if(SOKOBAN_BUILD_TESTS)
         target_compile_options(sokoban_save_slot_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME save_slots COMMAND sokoban_save_slot_tests)
+
+    add_executable(sokoban_shell_flow_tests
+        tests/ShellFlowTests.cpp
+        src/engine/InputBindings.cpp
+        src/engine/ShellFlow.cpp
+    )
+    target_include_directories(sokoban_shell_flow_tests PRIVATE src)
+    if(MSVC)
+        target_compile_options(sokoban_shell_flow_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_shell_flow_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME shell_flow COMMAND sokoban_shell_flow_tests)
 
     add_executable(sokoban_input_tests
         tests/InputTests.cpp
