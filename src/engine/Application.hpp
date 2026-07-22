@@ -2,7 +2,7 @@
 
 #include "engine/AnimationPreviewDebugUi.hpp"
 #include "engine/ApplicationDebugUi.hpp"
-#include "engine/AsyncSaveStore.hpp"
+#include "engine/SaveSlotManager.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/AssetManifestDebugUi.hpp"
 #include "engine/AssetManifestEditor.hpp"
@@ -85,12 +85,10 @@ private:
     [[nodiscard]] RenderFrameData buildRenderFrame() const;
 
     Window window_;
-    std::filesystem::path saveDirectory_;
-    int activeSaveSlot_ = 0; // 0-based
-    // Shared across slots: audio/video/input/accessibility settings.
-    std::unique_ptr<AsyncSaveStore> settingsStore_;
-    // Per-slot progress; recreated when the player switches save slots.
-    std::unique_ptr<AsyncSaveStore> saveStore_;
+    // Owns slot stores, the shared settings store, the marker, and every
+    // other disk decision; Application owns the live profile and the
+    // gameplay consequences.
+    SaveSlotManager saveSlots_;
     PlayerProfile playerProfile_;
     std::filesystem::path assetRoot_;
     // Declared before the renderer/audio members that hold references to it.

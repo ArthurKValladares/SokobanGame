@@ -149,6 +149,7 @@ add_executable(sokoban
     src/engine/RenderFrameBuilder.cpp
     src/engine/Rules.cpp
     src/engine/RuntimeContent.cpp
+    src/engine/SaveSlotManager.cpp
     src/engine/SaveStore.cpp
     src/engine/TaskSystem.cpp
     src/engine/TileTypes.cpp
@@ -308,6 +309,25 @@ if(SOKOBAN_BUILD_TESTS)
         target_compile_options(sokoban_profile_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME player_profile COMMAND sokoban_profile_tests)
+
+    add_executable(sokoban_save_slot_tests
+        tests/SaveSlotManagerTests.cpp
+        src/engine/AsyncSaveStore.cpp
+        src/engine/InputBindings.cpp
+        src/engine/PlayerProfile.cpp
+        src/engine/render/RenderResolution.cpp
+        src/engine/SaveSlotManager.cpp
+        src/engine/SaveStore.cpp
+        src/engine/TileTypes.cpp
+    )
+    target_include_directories(sokoban_save_slot_tests PRIVATE src)
+    target_link_libraries(sokoban_save_slot_tests PRIVATE sokoban_json SDL3::SDL3)
+    if(MSVC)
+        target_compile_options(sokoban_save_slot_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(sokoban_save_slot_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME save_slots COMMAND sokoban_save_slot_tests)
 
     add_executable(sokoban_input_tests
         tests/InputTests.cpp

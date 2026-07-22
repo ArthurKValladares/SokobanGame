@@ -12,61 +12,13 @@
 #endif
 
 #include <algorithm>
-#include <fstream>
 #include <iostream>
-#include <iterator>
 #include <utility>
 
 namespace sokoban {
 namespace {
 
 constexpr double profileAutosaveIntervalSeconds = 2.0;
-constexpr int saveSlotCount = 3;
-
-// Slot 1 keeps the historical stem so existing single-slot saves stay valid.
-std::string saveSlotFileStem(int slot)
-{
-    return slot == 0 ? "profile" : "profile-slot" + std::to_string(slot + 1);
-}
-
-int readActiveSlotMarker(const std::filesystem::path& directory)
-{
-    std::ifstream stream(directory / "active-slot.txt");
-    int slot = 1;
-    stream >> slot;
-    return (slot >= 1 && slot <= saveSlotCount) ? slot - 1 : 0;
-}
-
-// Merges the per-slot progress with the shared settings file. When the
-// settings file is brand new (first run after the split, or wiped), the
-// slot's own settings become the shared ones so nothing the player tuned in
-// the pre-split single-save world is lost.
-PlayerProfile loadInitialProfile(AsyncSaveStore& slotStore, AsyncSaveStore& settingsStore)
-{
-    const SaveStore::LoadResult slot = slotStore.load();
-    PlayerProfile profile = slot.profile;
-    const SaveStore::LoadResult settings = settingsStore.load();
-    if (settings.disposition == SaveStore::LoadDisposition::CreatedDefault) {
-        // Migrate a pre-split combined save's settings into the shared file;
-        // a genuinely fresh install writes nothing anywhere.
-        if (slot.disposition != SaveStore::LoadDisposition::CreatedDefault) {
-            settingsStore.requestSave(
-                profile.settingsOnly(), AsyncSaveStore::Urgency::Immediate);
-        }
-    } else {
-        profile.adoptSettingsFrom(settings.profile);
-    }
-    return profile;
-}
-
-void writeActiveSlotMarker(const std::filesystem::path& directory, int slot)
-{
-    std::error_code error;
-    std::filesystem::create_directories(directory, error);
-    std::ofstream stream(
-        directory / "active-slot.txt", std::ios::binary | std::ios::trunc);
-    stream << (slot + 1) << '\n';
-}
 
 AntiAliasingMode antiAliasingModeForSamples(int samples)
 {
@@ -82,17 +34,8 @@ AntiAliasingMode antiAliasingModeForSamples(int samples)
 
 Application::Application()
     : window_("Sokoban 3D", 1280, 720)
-    , saveDirectory_(SaveStore::preferencePath("Sokoban3D", "Sokoban3D"))
-    , activeSaveSlot_(readActiveSlotMarker(saveDirectory_))
-    , settingsStore_(std::make_unique<AsyncSaveStore>(
-          saveDirectory_,
-          std::chrono::seconds(2),
-          "settings"))
-    , saveStore_(std::make_unique<AsyncSaveStore>(
-          saveDirectory_,
-          std::chrono::seconds(2),
-          saveSlotFileStem(activeSaveSlot_)))
-    , playerProfile_(loadInitialProfile(*saveStore_, *settingsStore_))
+    , saveSlots_(SaveStore::preferencePath("Sokoban3D", "Sokoban3D"))
+    , playerProfile_(saveSlots_.loadActiveProfile())
     , assetRoot_(runtimeContentRoot())
     , assetManifest_(AssetManifest::loadFromFile(assetRoot_ / "manifest.json"))
     , uiFont_(FontAtlas::load(assetRoot_ / config::uiFontPath))
@@ -107,7 +50,7 @@ Application::Application()
     , ui_(uiFont_)
     , audioSystem_(assetRoot_, assetManifest_)
 {
-    std::cerr << saveStore_->status() << '\n';
+    std::cerr << saveSlots_.progressStatus() << '\n';
     currentLevel_ = playerProfile_.currentLevel;
     currentScreen_ = playerProfile_.currentScreen;
     if (!screenExists(currentLevel_, currentScreen_)) {
@@ -147,7 +90,7 @@ Application::Application()
             .renderer = renderer_,
             .settings = presentationSettings_,
             .audio = audioSystem_,
-            .saveDiagnostics = saveStore_->diagnostics(),
+            .saveDiagnostics = saveSlots_.progressDiagnostics(),
             .audioSettings = playerProfile_.audio,
             .updateAudioSettings = [this](
                 PlayerProfile::AudioSettings settings,
@@ -182,13 +125,12 @@ Application::~Application()
     } else if (!playerProfile_.progressEmpty()) {
         persistProfile(true);
     }
-    saveStore_->flush();
-    settingsStore_->flush();
-    if (!saveStore_->diagnostics().lastWriteSucceeded) {
-        std::cerr << saveStore_->status() << '\n';
+    saveSlots_.flush();
+    if (!saveSlots_.progressDiagnostics().lastWriteSucceeded) {
+        std::cerr << saveSlots_.progressStatus() << '\n';
     }
-    if (!settingsStore_->diagnostics().lastWriteSucceeded) {
-        std::cerr << settingsStore_->status() << '\n';
+    if (!saveSlots_.settingsDiagnostics().lastWriteSucceeded) {
+        std::cerr << saveSlots_.settingsStatus() << '\n';
     }
     DebugUi::clearTabs();
     renderer_.waitIdle();
@@ -717,7 +659,7 @@ void Application::resolveLevelComplete(bool toTitle)
 
 void Application::openTitleScreen()
 {
-    titleScreen_.setSaveSlots(saveSlotInfos(), activeSaveSlot_);
+    titleScreen_.setSaveSlots(saveSlotInfos(), saveSlots_.activeSlot());
     titleScreen_.open(titleLevelInfos());
 }
 
@@ -751,57 +693,23 @@ std::vector<SaveSlotInfo> Application::saveSlotInfos() const
         ++levelCount;
     }
 
-    auto summarize = [&](const PlayerProfile& profile) {
-        SaveSlotInfo info;
-        // Empty means "no progress", not "no file": a deleted or reset slot
-        // must present as empty even while its profile object exists.
-        info.empty = profile.progressEmpty();
-        info.currentLevel = profile.currentLevel;
-        for (const PlayerProfile::LevelProgress& level : profile.levels) {
-            info.completedLevels += level.completed ? 1 : 0;
-        }
-        info.completed = levelCount > 0 && [&] {
-            for (int level = 0; level < levelCount; ++level) {
-                const PlayerProfile::LevelProgress* progress =
-                    profile.progressForLevel(level);
-                if (progress == nullptr || !progress->completed) {
-                    return false;
-                }
-            }
-            return true;
-        }();
-        return info;
-    };
-
     std::vector<SaveSlotInfo> slots;
-    for (int slot = 0; slot < saveSlotCount; ++slot) {
-        if (slot == activeSaveSlot_) {
-            slots.push_back(summarize(playerProfile_));
-            continue;
-        }
-        const SaveStore store(saveDirectory_, saveSlotFileStem(slot));
-        SaveSlotInfo info;
-        try {
-            if (std::filesystem::is_regular_file(store.primaryPath())) {
-                std::ifstream stream(store.primaryPath(), std::ios::binary);
-                const std::string contents(
-                    (std::istreambuf_iterator<char>(stream)),
-                    std::istreambuf_iterator<char>());
-                info = summarize(decodePlayerProfile(contents).profile);
-            }
-        } catch (const std::exception&) {
-            // Unreadable slots present as empty; switching to one runs the
-            // store's full backup/archival recovery.
-            info = {};
-        }
-        slots.push_back(info);
+    for (const SaveSlotManager::SlotSummary& summary :
+        saveSlots_.slotSummaries(playerProfile_, levelCount)) {
+        slots.push_back({
+            .empty = summary.empty,
+            .completed = summary.completed,
+            .currentLevel = summary.currentLevel,
+            .completedLevels = summary.completedLevels,
+        });
     }
     return slots;
 }
 
 void Application::switchSaveSlot(int slot)
 {
-    if (slot < 0 || slot >= saveSlotCount || slot == activeSaveSlot_) {
+    if (slot < 0 || slot >= SaveSlotManager::slotCount ||
+        slot == saveSlots_.activeSlot()) {
         return;
     }
 
@@ -811,20 +719,14 @@ void Application::switchSaveSlot(int slot)
     } else {
         persistProfile(true);
     }
-    saveStore_->flush();
 
-    // Settings are shared across slots: carry the live ones over the
-    // incoming slot's stale copies.
-    const PlayerProfile sharedSettings = playerProfile_.settingsOnly();
-    activeSaveSlot_ = slot;
-    writeActiveSlotMarker(saveDirectory_, activeSaveSlot_);
-    saveStore_ = std::make_unique<AsyncSaveStore>(
-        saveDirectory_,
-        std::chrono::seconds(2),
-        saveSlotFileStem(activeSaveSlot_));
-    playerProfile_ = saveStore_->load().profile;
-    playerProfile_.adoptSettingsFrom(sharedSettings);
-    std::cerr << saveStore_->status() << '\n';
+    std::optional<PlayerProfile> switched =
+        saveSlots_.switchTo(slot, playerProfile_);
+    if (!switched) {
+        return;
+    }
+    playerProfile_ = std::move(*switched);
+    std::cerr << saveSlots_.progressStatus() << '\n';
 
     // The new slot's world loads on Continue/New Game, like at boot.
     gameLoaded_ = false;
@@ -846,13 +748,11 @@ void Application::switchSaveSlot(int slot)
 
 void Application::deleteSaveSlot(int slot)
 {
-    if (slot < 0 || slot >= saveSlotCount) {
+    if (slot < 0 || slot >= SaveSlotManager::slotCount) {
         return;
     }
-    if (slot == activeSaveSlot_) {
-        // Drain pending writes, then reset the live profile's progress; the
-        // file stays absent until the player starts playing again.
-        saveStore_->flush();
+    if (slot == saveSlots_.activeSlot()) {
+        // The file stays absent until the player starts playing again.
         deferredCheckpointPending_ = false;
         playerProfile_.resetProgress();
         gameLoaded_ = false;
@@ -864,20 +764,13 @@ void Application::deleteSaveSlot(int slot)
         currentLevel_ = 0;
         currentScreen_ = 0;
     }
-    const SaveStore store(saveDirectory_, saveSlotFileStem(slot));
-    std::error_code error;
-    std::filesystem::remove(store.primaryPath(), error);
-    std::filesystem::remove(store.backupPath(), error);
-    titleScreen_.setSaveSlots(saveSlotInfos(), activeSaveSlot_);
+    saveSlots_.deleteSlot(slot);
+    titleScreen_.setSaveSlots(saveSlotInfos(), saveSlots_.activeSlot());
 }
 
 void Application::persistSettings(bool immediate)
 {
-    settingsStore_->requestSave(
-        playerProfile_.settingsOnly(),
-        immediate
-            ? AsyncSaveStore::Urgency::Immediate
-            : AsyncSaveStore::Urgency::Deferred);
+    saveSlots_.saveSettings(playerProfile_, immediate);
 }
 
 void Application::openStandaloneLevelSelect()
@@ -1094,11 +987,7 @@ void Application::persistProfile(bool immediate)
     if (!gameLoaded_ && playerProfile_.progressEmpty()) {
         return;
     }
-    saveStore_->requestSave(
-        playerProfile_,
-        immediate
-            ? AsyncSaveStore::Urgency::Immediate
-            : AsyncSaveStore::Urgency::Deferred);
+    saveSlots_.saveProgress(playerProfile_, immediate);
 }
 
 void Application::queuePressedCommands()
