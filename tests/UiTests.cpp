@@ -8,6 +8,8 @@
 #include <array>
 #include <filesystem>
 #include <iostream>
+#include <optional>
+#include <variant>
 
 namespace {
 
@@ -24,6 +26,12 @@ void checkImpl(bool condition, const char* expression, int line)
 }
 
 #define CHECK(expression) checkImpl((expression), #expression, __LINE__)
+
+[[nodiscard]] bool settingsChanged(const std::optional<sokoban::OptionsAction>& action)
+{
+    return action.has_value() &&
+        std::holds_alternative<sokoban::options::SettingsChanged>(*action);
+}
 
 const std::filesystem::path fontPath =
     std::filesystem::path(SOKOBAN_TEST_ASSET_DIR) / "ui/Karla-Regular.ttf";
@@ -164,7 +172,7 @@ void testOptionsNavigationAndSettings()
 
     auto draw = [&](sokoban::OptionsMenuInput input = {}) {
         ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
-        const sokoban::OptionsMenuResult result =
+        const std::optional<sokoban::OptionsAction> result =
             menu.draw(ui, { 1280.0f, 720.0f }, input);
         ui.endFrame();
         return result;
@@ -172,30 +180,30 @@ void testOptionsNavigationAndSettings()
 
     draw({ .confirm = true });
     CHECK(menu.page() == sokoban::OptionsMenu::Page::Graphics);
-    const sokoban::OptionsMenuResult graphicsChange = draw({ .left = true });
-    CHECK(graphicsChange.settingsChanged);
+    const auto graphicsChange = draw({ .left = true });
+    CHECK(settingsChanged(graphicsChange));
     CHECK(menu.settings().antiAliasingSamples == 4);
     draw({ .down = true });
-    const sokoban::OptionsMenuResult scaleChange = draw({ .right = true });
-    CHECK(scaleChange.settingsChanged);
+    const auto scaleChange = draw({ .right = true });
+    CHECK(settingsChanged(scaleChange));
     CHECK(menu.settings().renderScalePercent == 75);
     draw({ .down = true });
-    const sokoban::OptionsMenuResult customEnabled = draw({ .confirm = true });
-    CHECK(customEnabled.settingsChanged);
+    const auto customEnabled = draw({ .confirm = true });
+    CHECK(settingsChanged(customEnabled));
     CHECK(menu.settings().customRenderScale);
 
     ui.beginFrame({ 1280.0f, 720.0f }, { 640.0f, 386.0f }, true, true);
-    const sokoban::OptionsMenuResult customDrag =
+    const std::optional<sokoban::OptionsAction> customDrag =
         menu.draw(ui, { 1280.0f, 720.0f }, {});
     ui.endFrame();
-    CHECK(!customDrag.settingsChanged);
+    CHECK(!settingsChanged(customDrag));
     CHECK(menu.settings().customRenderScalePercent > 60 &&
         menu.settings().customRenderScalePercent < 65);
     ui.beginFrame({ 1280.0f, 720.0f }, { 640.0f, 386.0f }, false, false);
-    const sokoban::OptionsMenuResult customDragCommitted =
+    const auto customDragCommitted =
         menu.draw(ui, { 1280.0f, 720.0f }, {});
     ui.endFrame();
-    CHECK(customDragCommitted.settingsChanged);
+    CHECK(settingsChanged(customDragCommitted));
 
     menu.open({
         .renderScalePercent = 75,
@@ -205,11 +213,11 @@ void testOptionsNavigationAndSettings()
     draw({ .confirm = true });
     draw({ .down = true });
     draw({ .down = true });
-    const sokoban::OptionsMenuResult customChange = draw({ .left = true });
-    CHECK(customChange.settingsChanged);
+    const auto customChange = draw({ .left = true });
+    CHECK(settingsChanged(customChange));
     CHECK(menu.settings().customRenderScalePercent == 99);
-    const sokoban::OptionsMenuResult customDisabled = draw({ .confirm = true });
-    CHECK(customDisabled.settingsChanged);
+    const auto customDisabled = draw({ .confirm = true });
+    CHECK(settingsChanged(customDisabled));
     CHECK(!menu.settings().customRenderScale);
     menu.back();
     CHECK(menu.page() == sokoban::OptionsMenu::Page::Main);
@@ -218,14 +226,14 @@ void testOptionsNavigationAndSettings()
     draw({ .confirm = true });
     CHECK(menu.page() == sokoban::OptionsMenu::Page::Audio);
     const float oldMaster = menu.settings().masterVolume;
-    const sokoban::OptionsMenuResult audioChange = draw({ .left = true });
-    CHECK(audioChange.settingsChanged);
+    const auto audioChange = draw({ .left = true });
+    CHECK(settingsChanged(audioChange));
     CHECK(menu.settings().masterVolume < oldMaster);
 
     menu.requestQuitConfirmation();
     draw({ .down = true });
-    const sokoban::OptionsMenuResult quit = draw({ .confirm = true });
-    CHECK(quit.quitRequested);
+    const std::optional<sokoban::OptionsAction> quit = draw({ .confirm = true });
+    CHECK(quit.has_value() && std::holds_alternative<sokoban::options::Quit>(*quit));
     menu.back();
     CHECK(menu.page() == sokoban::OptionsMenu::Page::Main);
 }
@@ -239,7 +247,7 @@ void testControlsRemapping()
 
     auto draw = [&](sokoban::OptionsMenuInput input = {}) {
         ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
-        const sokoban::OptionsMenuResult result =
+        const std::optional<sokoban::OptionsAction> result =
             menu.draw(ui, { 1280.0f, 720.0f }, input);
         ui.endFrame();
         return result;
@@ -257,8 +265,8 @@ void testControlsRemapping()
     CHECK(menu.capturingAction() == sokoban::InputAction::MoveUp);
     menu.provideBindingCandidate(sokoban::KeyboardBinding { "P" });
     CHECK(!menu.capturingBinding());
-    const sokoban::OptionsMenuResult rebound = draw();
-    CHECK(rebound.settingsChanged);
+    const auto rebound = draw();
+    CHECK(settingsChanged(rebound));
     const auto& moveUp = menu.settings().input.forAction(sokoban::InputAction::MoveUp);
     CHECK(std::ranges::count(moveUp, sokoban::InputBinding {
         sokoban::KeyboardBinding { "P" } }) == 1);
@@ -271,7 +279,7 @@ void testControlsRemapping()
     draw({ .down = true });
     draw({ .confirm = true });
     menu.provideBindingCandidate(sokoban::KeyboardBinding { "P" });
-    CHECK(draw().settingsChanged);
+    CHECK(settingsChanged(draw()));
     CHECK(std::ranges::count(
         menu.settings().input.forAction(sokoban::InputAction::MoveDown),
         sokoban::InputBinding { sokoban::KeyboardBinding { "P" } }) == 1);
@@ -309,8 +317,8 @@ void testControlsRemapping()
     for (int i = 0; i < 5; ++i) {
         draw({ .down = true });
     }
-    const sokoban::OptionsMenuResult reset = draw({ .confirm = true });
-    CHECK(reset.settingsChanged);
+    const auto reset = draw({ .confirm = true });
+    CHECK(settingsChanged(reset));
     CHECK(menu.settings().input == sokoban::defaultInputBindings());
 }
 

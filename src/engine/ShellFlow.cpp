@@ -28,80 +28,83 @@ void reduceBack(const ShellFacts& facts, std::vector<ShellCommand>& commands)
 }
 
 void reduceTitle(
-    const TitleScreenResult& result,
+    const TitleAction& action,
     const ShellFacts& facts,
     std::vector<ShellCommand>& commands)
 {
-    if (result.continueRequested) {
-        if (!facts.gameLoaded) {
-            commands.push_back(shell::LoadCurrentScreen {});
-        }
-        commands.push_back(shell::CloseTitle {});
-    }
-    if (result.newGameRequested) {
-        commands.push_back(shell::StartNewGame {});
-    }
-    if (result.newGameSlotSelected) {
-        // Switching to the already-active slot no-ops in the executor, so
-        // one command pair covers both first-run cases.
-        commands.push_back(shell::SwitchSlot { *result.newGameSlotSelected });
-        commands.push_back(shell::StartNewGame {});
-    }
-    if (result.slotSelected) {
-        commands.push_back(shell::SwitchSlot { *result.slotSelected });
-    }
-    if (result.slotDeleteRequested) {
-        commands.push_back(shell::DeleteSlot { *result.slotDeleteRequested });
-    }
-    if (result.startRequested) {
-        commands.push_back(shell::StartLevel {
-            result.startRequested->level,
-            result.startRequested->screen,
-        });
-        commands.push_back(shell::CloseTitle {});
-    }
-    if (result.optionsRequested) {
-        commands.push_back(shell::OpenOptions { .pauseContext = false });
-    }
-    if (result.quitRequested) {
-        commands.push_back(shell::RequestQuitConfirmation {});
-    }
+    std::visit(flow::Overloaded {
+        [&](const title::Continue&) {
+            if (!facts.gameLoaded) {
+                commands.push_back(shell::LoadCurrentScreen {});
+            }
+            commands.push_back(shell::CloseTitle {});
+        },
+        [&](const title::NewGame&) {
+            commands.push_back(shell::StartNewGame {});
+        },
+        [&](const title::NewGameOnSlot& newGame) {
+            // Switching to the already-active slot no-ops in the executor,
+            // so one command pair covers both first-run cases.
+            commands.push_back(shell::SwitchSlot { newGame.slot });
+            commands.push_back(shell::StartNewGame {});
+        },
+        [&](const title::SwitchSlot& switchSlot) {
+            commands.push_back(shell::SwitchSlot { switchSlot.slot });
+        },
+        [&](const title::DeleteSlot& deleteSlot) {
+            commands.push_back(shell::DeleteSlot { deleteSlot.slot });
+        },
+        [&](const title::StartLevel& start) {
+            commands.push_back(shell::StartLevel { start.level, start.screen });
+            commands.push_back(shell::CloseTitle {});
+        },
+        [&](const title::OpenOptions&) {
+            commands.push_back(shell::OpenOptions { .pauseContext = false });
+        },
+        [&](const title::Quit&) {
+            commands.push_back(shell::RequestQuitConfirmation {});
+        },
+    }, action);
 }
 
 void reduceOptions(
-    const OptionsMenuResult& result,
+    const OptionsAction& action,
     std::vector<ShellCommand>& commands)
 {
-    if (result.settingsChanged) {
-        commands.push_back(shell::ApplySettings {});
-    }
-    if (result.quitRequested) {
-        commands.push_back(shell::Quit {});
-    }
-    if (result.titleRequested) {
-        commands.push_back(shell::CloseOptions {});
-        commands.push_back(shell::OpenTitle {});
-    }
-    if (result.levelSelectRequested) {
-        commands.push_back(shell::CloseOptions {});
-        commands.push_back(shell::OpenStandaloneLevelSelect {});
-    }
+    std::visit(flow::Overloaded {
+        [&](const options::SettingsChanged&) {
+            commands.push_back(shell::ApplySettings {});
+        },
+        [&](const options::Quit&) {
+            commands.push_back(shell::Quit {});
+        },
+        [&](const options::ExitToTitle&) {
+            commands.push_back(shell::CloseOptions {});
+            commands.push_back(shell::OpenTitle {});
+        },
+        [&](const options::OpenLevelSelect&) {
+            commands.push_back(shell::CloseOptions {});
+            commands.push_back(shell::OpenStandaloneLevelSelect {});
+        },
+    }, action);
 }
 
 void reduceOverlay(
-    const LevelCompleteResult& result,
+    const OverlayAction& action,
     std::vector<ShellCommand>& commands)
 {
-    if (result.continueRequested) {
-        commands.push_back(shell::ResolveLevelComplete { .toTitle = false });
-    }
-    if (result.titleRequested) {
-        commands.push_back(shell::ResolveLevelComplete { .toTitle = true });
-    }
-    if (result.levelSelectRequested) {
-        commands.push_back(shell::ResolveLevelComplete { .toTitle = false });
-        commands.push_back(shell::OpenStandaloneLevelSelect {});
-    }
+    std::visit(flow::Overloaded {
+        [&](const overlay::Continue&) {
+            commands.push_back(shell::ResolveLevelComplete { .toTitle = false });
+        },
+        [&](const overlay::ToTitle&) {
+            commands.push_back(shell::ResolveLevelComplete { .toTitle = true });
+        },
+        [&](const overlay::ToLevelSelect&) {
+            commands.push_back(shell::ResolveLevelComplete { .toTitle = false });
+            commands.push_back(shell::OpenStandaloneLevelSelect {});
+        },
+    }, action);
 }
 
 } // namespace
@@ -117,14 +120,14 @@ void ShellFlow::reduce(
         [&](const ShellCloseRequested&) {
             commands.push_back(shell::RequestQuitConfirmation {});
         },
-        [&](const ShellTitleResult& title) {
-            reduceTitle(title.result, facts, commands);
+        [&](const ShellTitleAction& titleEvent) {
+            reduceTitle(titleEvent.action, facts, commands);
         },
-        [&](const ShellOptionsResult& options) {
-            reduceOptions(options.result, commands);
+        [&](const ShellOptionsAction& optionsEvent) {
+            reduceOptions(optionsEvent.action, commands);
         },
-        [&](const ShellOverlayResult& overlay) {
-            reduceOverlay(overlay.result, commands);
+        [&](const ShellOverlayAction& overlayEvent) {
+            reduceOverlay(overlayEvent.action, commands);
         },
     }, event);
 }

@@ -192,8 +192,8 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   every transition is unit-testable. Conventions are documented in the
   header (intent-named variant structs; empty emission is meaningful).
 - `src/engine/ShellFlow.*`: the game shell's flow built on `flow::Machine`.
-  Events are Back presses, window close requests, and the three menu result
-  structs; facts are a six-bool snapshot (game loaded, which menus are open,
+  Events are Back presses, window close requests, and the three menus'
+  single-action variants; facts are a six-bool snapshot (game loaded, which menus are open,
   title page, game completed); commands are intent structs (`SwitchSlot`,
   `StartLevel`, `OpenOptions{pause, allowLevelSelect}`, ...) executed by
   `Application::executeShellCommand`'s visitor. Owns every menu-precedence
@@ -250,10 +250,12 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   final `UiRect`s, while callers describe relationships instead of coordinates.
 - `src/engine/ui/OptionsMenu.*`: headless menu page/navigation state and
   tree-based composition for Graphics, Audio, and separated quit confirmation.
-  Named row enums replace positional focus indexes. It emits a platform-neutral
-  settings snapshot (which now includes `InputBindings`); `Application` applies
-  changes to the window, renderer, presentation, audio, input, and profile
-  owners. `open(settings, allowTitleExit)` adds an "Exit To Title" row only
+  Named row enums replace positional focus indexes. A frame emits at most
+  one `OptionsAction` (`options::SettingsChanged/Quit/ExitToTitle/
+  OpenLevelSelect`); the platform-neutral settings snapshot itself (which
+  includes `InputBindings`) is read via `settings()` and applied by
+  `Application` to the window, renderer, presentation, audio, input, and
+  profile owners. `open(settings, allowTitleExit)` adds an "Exit To Title" row only
   when opened as the in-game pause menu, and `allowLevelSelect` adds a
   "Level Select" row (pause context only; `Application` passes it once every
   level on disk has a completion record, so it is permanent for that save
@@ -274,8 +276,11 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   `TitleLevelInfo` rows (screen count, unlocked/completed, reached screens,
   bests); locked levels render inert, completed levels expose every screen,
   unfinished levels expose only reached screens, and Left/Right picks the
-  starting screen on the focused row. Emits result flags/requests only -
-  `Application` owns what they mean. Tested by `tests/TitleScreenTests.cpp`
+  starting screen on the focused row. A frame of interaction emits at most
+  one `TitleAction` (a variant of intent structs - `title::Continue`,
+  `title::NewGameOnSlot{slot}`, `title::StartLevel{level, screen}`, ... -
+  so impossible combinations are unrepresentable); `Application` owns what
+  each action means. Tested by `tests/TitleScreenTests.cpp`
   (`sokoban_title_tests`). The Save Slots page (third main-menu row, showing
   the active slot number) lists three slots with summaries (Empty / Level N -
   K done / Completed!, plus an active marker); confirming the active slot
@@ -285,7 +290,9 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   Continue ("Next Level") or Title Screen choices. Finishing the final level
   opens its game-complete mode instead: a congratulations screen listing
   every level's best moves/time plus whole-game totals, with Level Select
-  and Title Screen actions. Also covered by `tests/TitleScreenTests.cpp`.
+  and Title Screen actions. A frame emits at most one `OverlayAction`
+  (`overlay::Continue/ToTitle/ToLevelSelect`). Also covered by
+  `tests/TitleScreenTests.cpp`.
 - `shaders/`: GLSL shader sources compiled to SPIR-V by CMake.
 - `levels/`: source `.scr` level files copied into `build/assets/levels`.
 - `assets/`: source KayKit asset packs.

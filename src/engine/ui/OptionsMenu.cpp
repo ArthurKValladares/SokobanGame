@@ -415,13 +415,13 @@ void OptionsMenu::requestQuitConfirmation()
     setPage(Page::QuitConfirmation);
 }
 
-OptionsMenuResult OptionsMenu::draw(
+std::optional<OptionsAction> OptionsMenu::draw(
     UiContext& ui,
     Vec2 viewport,
     const OptionsMenuInput& input)
 {
     if (!open_) {
-        return {};
+        return std::nullopt;
     }
 
     ui.rect({ { 0.0f, 0.0f }, viewport }, { 0.015f, 0.020f, 0.021f, 0.78f });
@@ -438,7 +438,7 @@ OptionsMenuResult OptionsMenu::draw(
     case Page::Controls: return drawControls(ui, panel, input);
     case Page::QuitConfirmation: return drawQuitConfirmation(ui, panel, input);
     }
-    return {};
+    return std::nullopt;
 }
 
 void OptionsMenu::navigateRows(const OptionsMenuInput& input, int rowCount)
@@ -459,7 +459,7 @@ void OptionsMenu::setPage(Page page)
     capturingAction_.reset();
 }
 
-OptionsMenuResult OptionsMenu::drawMain(
+std::optional<OptionsAction> OptionsMenu::drawMain(
     UiContext& ui,
     UiRect panel,
     const OptionsMenuInput& input)
@@ -474,7 +474,7 @@ OptionsMenuResult OptionsMenu::drawMain(
     MainPageLayout layout(panel, allowTitleExit_, allowLevelSelect_);
 
     drawTitle(ui, layout, "OPTIONS");
-    OptionsMenuResult result;
+    std::optional<OptionsAction> action;
     if (uiControls::button(
             ui, "options.graphics", layout.tree.rect(layout.graphics), "Graphics", {
             .tone = ButtonTone::Accent,
@@ -504,7 +504,7 @@ OptionsMenuResult OptionsMenu::drawMain(
             .focused = selectedRow_ == levelSelectRowIndex,
             .activate = input.confirm && selectedRow_ == levelSelectRowIndex,
         })) {
-        result.levelSelectRequested = true;
+        action = options::OpenLevelSelect {};
     }
     if (allowTitleExit_ &&
         uiControls::button(
@@ -512,7 +512,7 @@ OptionsMenuResult OptionsMenu::drawMain(
             .focused = selectedRow_ == titleRowIndex,
             .activate = input.confirm && selectedRow_ == titleRowIndex,
         })) {
-        result.titleRequested = true;
+        action = options::ExitToTitle {};
     }
 
     ui.divider(layout.tree.rect(layout.quitDivider));
@@ -524,20 +524,20 @@ OptionsMenuResult OptionsMenu::drawMain(
         })) {
         setPage(Page::QuitConfirmation);
     }
-    return result;
+    return action;
 }
 
-OptionsMenuResult OptionsMenu::drawGraphics(
+std::optional<OptionsAction> OptionsMenu::drawGraphics(
     UiContext& ui,
     UiRect panel,
     Vec2 viewport,
     const OptionsMenuInput& input)
 {
     navigateRows(input, rowIndex(GraphicsRow::Count));
-    OptionsMenuResult result;
+    bool changed = false;
     if (customRenderScaleDragPending_ && !ui.mouseDown()) {
         customRenderScaleDragPending_ = false;
-        result.settingsChanged = true;
+        changed = true;
     }
 
     GraphicsPageLayout layout(panel);
@@ -555,7 +555,7 @@ OptionsMenuResult OptionsMenu::drawGraphics(
                 .selectPrevious = antiAliasingFocused && input.left,
                 .selectNext = antiAliasingFocused && input.right,
             })) {
-        result.settingsChanged = true;
+        changed = true;
     }
 
     const bool renderScalePresetFocused =
@@ -570,7 +570,7 @@ OptionsMenuResult OptionsMenu::drawGraphics(
                 .selectNext = renderScalePresetFocused && input.right,
             });
     if (presetChosen) {
-        result.settingsChanged = true;
+        changed = true;
         if (settings_.customRenderScale) {
             settings_.customRenderScale = false;
         }
@@ -583,10 +583,10 @@ OptionsMenuResult OptionsMenu::drawGraphics(
             "Custom", settings_.customRenderScale,
             customRenderScaleFocused,
             input.confirm && customRenderScaleFocused)) {
-        result.settingsChanged = true;
+        changed = true;
     }
     if (settings_.customRenderScale && customRenderScaleFocused) {
-        result.settingsChanged |= adjustInt(
+        changed |= adjustInt(
             settings_.customRenderScalePercent, input.left, input.right);
     }
     settings_.customRenderScalePercent = normalizedRenderScalePercent(
@@ -633,7 +633,7 @@ OptionsMenuResult OptionsMenu::drawGraphics(
             "Ambient occlusion", settings_.ambientOcclusion,
             ambientOcclusionFocused,
             input.confirm && ambientOcclusionFocused)) {
-        result.settingsChanged = true;
+        changed = true;
     }
 
     int selectedDisplay = displayIndex(settings_);
@@ -648,7 +648,7 @@ OptionsMenuResult OptionsMenu::drawGraphics(
     if (uiControls::choiceStepper(
             ui, "graphics.display", layout.tree.rect(layout.display.control),
             displayLabels, selectedDisplay, displayFocused)) {
-        result.settingsChanged = true;
+        changed = true;
     }
     const DisplayMode& mode = displayModes[static_cast<size_t>(selectedDisplay)];
     if (settings_.fullscreen != mode.fullscreen ||
@@ -659,7 +659,7 @@ OptionsMenuResult OptionsMenu::drawGraphics(
             settings_.windowWidth = mode.width;
             settings_.windowHeight = mode.height;
         }
-        result.settingsChanged = true;
+        changed = true;
     }
 
     const bool backFocused = selectedRow_ == rowIndex(GraphicsRow::Back);
@@ -670,16 +670,18 @@ OptionsMenuResult OptionsMenu::drawGraphics(
         })) {
         setPage(Page::Main);
     }
-    return result;
+    return changed
+        ? std::optional<OptionsAction>(options::SettingsChanged {})
+        : std::nullopt;
 }
 
-OptionsMenuResult OptionsMenu::drawAudio(
+std::optional<OptionsAction> OptionsMenu::drawAudio(
     UiContext& ui,
     UiRect panel,
     const OptionsMenuInput& input)
 {
     navigateRows(input, rowIndex(AudioRow::Count));
-    OptionsMenuResult result;
+    bool changed = false;
 
     AudioPageLayout layout(panel);
 
@@ -701,9 +703,9 @@ OptionsMenuResult OptionsMenu::drawAudio(
         selectedRow_ == rowIndex(AudioRow::MasterVolume);
     ui.text(layout.tree.rect(layout.masterVolume.label).position, "Master volume",
         { 0.83f, 0.86f, 0.83f, 1.0f }, 22.0f);
-    result.settingsChanged |= keyboardAdjust(
+    changed |= keyboardAdjust(
         AudioRow::MasterVolume, settings_.masterVolume);
-    result.settingsChanged |= uiControls::slider(
+    changed |= uiControls::slider(
         ui, "audio.master", layout.tree.rect(layout.masterVolume.control),
         settings_.masterVolume, 0.0f, 1.0f, masterVolumeFocused);
     const int masterPercent = static_cast<int>(std::round(settings_.masterVolume * 100.0f));
@@ -715,9 +717,9 @@ OptionsMenuResult OptionsMenu::drawAudio(
         selectedRow_ == rowIndex(AudioRow::MusicVolume);
     ui.text(layout.tree.rect(layout.musicVolume.label).position, "Music volume",
         { 0.83f, 0.86f, 0.83f, 1.0f }, 22.0f);
-    result.settingsChanged |= keyboardAdjust(
+    changed |= keyboardAdjust(
         AudioRow::MusicVolume, settings_.musicVolume);
-    result.settingsChanged |= uiControls::slider(
+    changed |= uiControls::slider(
         ui, "audio.music", layout.tree.rect(layout.musicVolume.control),
         settings_.musicVolume, 0.0f, 1.0f, musicVolumeFocused);
     const int musicPercent = static_cast<int>(std::round(settings_.musicVolume * 100.0f));
@@ -733,18 +735,20 @@ OptionsMenuResult OptionsMenu::drawAudio(
         })) {
         setPage(Page::Main);
     }
-    return result;
+    return changed
+        ? std::optional<OptionsAction>(options::SettingsChanged {})
+        : std::nullopt;
 }
 
-OptionsMenuResult OptionsMenu::drawControls(
+std::optional<OptionsAction> OptionsMenu::drawControls(
     UiContext& ui,
     UiRect panel,
     const OptionsMenuInput& input)
 {
-    OptionsMenuResult result;
+    bool changed = false;
     if (bindingAssigned_) {
         bindingAssigned_ = false;
-        result.settingsChanged = true;
+        changed = true;
     }
 
     // Navigation freezes while a capture is pending; Escape/Start cancel via
@@ -800,7 +804,7 @@ OptionsMenuResult OptionsMenu::drawControls(
         })) {
         if (!(settings_.input == defaultInputBindings())) {
             settings_.input = defaultInputBindings();
-            result.settingsChanged = true;
+            changed = true;
         }
     }
 
@@ -812,10 +816,12 @@ OptionsMenuResult OptionsMenu::drawControls(
         })) {
         setPage(Page::Main);
     }
-    return result;
+    return changed
+        ? std::optional<OptionsAction>(options::SettingsChanged {})
+        : std::nullopt;
 }
 
-OptionsMenuResult OptionsMenu::drawQuitConfirmation(
+std::optional<OptionsAction> OptionsMenu::drawQuitConfirmation(
     UiContext& ui,
     UiRect panel,
     const OptionsMenuInput& input)
@@ -837,7 +843,7 @@ OptionsMenuResult OptionsMenu::drawQuitConfirmation(
         })) {
         setPage(Page::Main);
     }
-    OptionsMenuResult result;
+    std::optional<OptionsAction> action;
     const bool quitFocused = selectedRow_ == rowIndex(QuitRow::Confirm);
     if (uiControls::button(
             ui, "quit.confirm", layout.tree.rect(layout.quit), "Quit Game", {
@@ -845,9 +851,9 @@ OptionsMenuResult OptionsMenu::drawQuitConfirmation(
             .focused = quitFocused,
             .activate = input.confirm && quitFocused,
         })) {
-        result.quitRequested = true;
+        action = options::Quit {};
     }
-    return result;
+    return action;
 }
 
 } // namespace sokoban

@@ -249,38 +249,43 @@ void Application::run()
         const bool navRight = input_.actionPressed(InputAction::MoveRight);
         const bool navConfirm = input_.actionPressed(InputAction::MenuConfirm);
 
-        const TitleScreenResult titleResult = titleScreen_.draw(
-            ui_, pixelSize,
-            optionsOnTop
-                ? TitleScreenInput {}
-                : TitleScreenInput {
+        if (const std::optional<TitleAction> titleAction = titleScreen_.draw(
+                ui_, pixelSize,
+                optionsOnTop
+                    ? TitleScreenInput {}
+                    : TitleScreenInput {
+                        .up = navUp,
+                        .down = navDown,
+                        .left = navLeft,
+                        .right = navRight,
+                        .confirm = navConfirm,
+                    })) {
+            handleShellEvent(ShellTitleAction { *titleAction });
+        }
+
+        if (const std::optional<OverlayAction> overlayAction =
+                levelCompleteOverlay_.draw(
+                    ui_, pixelSize,
+                    optionsOnTop
+                        ? LevelCompleteInput {}
+                        : LevelCompleteInput {
+                            .up = navUp,
+                            .down = navDown,
+                            .confirm = navConfirm,
+                        })) {
+            handleShellEvent(ShellOverlayAction { *overlayAction });
+        }
+
+        if (const std::optional<OptionsAction> optionsAction =
+                optionsMenu_.draw(ui_, pixelSize, {
                     .up = navUp,
                     .down = navDown,
                     .left = navLeft,
                     .right = navRight,
                     .confirm = navConfirm,
-                });
-        handleShellEvent(ShellTitleResult { titleResult });
-
-        const LevelCompleteResult completeResult = levelCompleteOverlay_.draw(
-            ui_, pixelSize,
-            optionsOnTop
-                ? LevelCompleteInput {}
-                : LevelCompleteInput {
-                    .up = navUp,
-                    .down = navDown,
-                    .confirm = navConfirm,
-                });
-        handleShellEvent(ShellOverlayResult { completeResult });
-
-        const OptionsMenuResult menuResult = optionsMenu_.draw(ui_, pixelSize, {
-            .up = navUp,
-            .down = navDown,
-            .left = navLeft,
-            .right = navRight,
-            .confirm = navConfirm,
-        });
-        handleShellEvent(ShellOptionsResult { menuResult });
+                })) {
+            handleShellEvent(ShellOptionsAction { *optionsAction });
+        }
         ui_.endFrame();
         renderer_.drawFrame(buildRenderFrame(), ui_.drawData());
     }

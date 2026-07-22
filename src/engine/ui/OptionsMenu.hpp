@@ -4,6 +4,7 @@
 #include "engine/Math.hpp"
 
 #include <optional>
+#include <variant>
 
 namespace sokoban {
 
@@ -34,12 +35,22 @@ struct OptionsMenuInput {
     bool confirm = false;
 };
 
-struct OptionsMenuResult {
-    bool settingsChanged = false;
-    bool quitRequested = false;
-    bool titleRequested = false;
-    bool levelSelectRequested = false;
-};
+// A frame of options interaction produces at most one action.
+namespace options {
+
+// The settings snapshot changed; apply and persist settings().
+struct SettingsChanged {};
+struct Quit {};
+struct ExitToTitle {};
+struct OpenLevelSelect {};
+
+} // namespace options
+
+using OptionsAction = std::variant<
+    options::SettingsChanged,
+    options::Quit,
+    options::ExitToTitle,
+    options::OpenLevelSelect>;
 
 class OptionsMenu {
 public:
@@ -67,7 +78,7 @@ public:
     [[nodiscard]] int selectedRow() const { return selectedRow_; }
     [[nodiscard]] const OptionsMenuSettings& settings() const { return settings_; }
 
-    [[nodiscard]] OptionsMenuResult draw(
+    [[nodiscard]] std::optional<OptionsAction> draw(
         UiContext& ui,
         Vec2 viewport,
         const OptionsMenuInput& input);
@@ -83,24 +94,24 @@ public:
 private:
     void navigateRows(const OptionsMenuInput& input, int rowCount);
     void setPage(Page page);
-    [[nodiscard]] OptionsMenuResult drawMain(
+    [[nodiscard]] std::optional<OptionsAction> drawMain(
         UiContext& ui,
         UiRect panel,
         const OptionsMenuInput& input);
-    [[nodiscard]] OptionsMenuResult drawGraphics(
+    [[nodiscard]] std::optional<OptionsAction> drawGraphics(
         UiContext& ui,
         UiRect panel,
         Vec2 viewport,
         const OptionsMenuInput& input);
-    [[nodiscard]] OptionsMenuResult drawAudio(
+    [[nodiscard]] std::optional<OptionsAction> drawAudio(
         UiContext& ui,
         UiRect panel,
         const OptionsMenuInput& input);
-    [[nodiscard]] OptionsMenuResult drawControls(
+    [[nodiscard]] std::optional<OptionsAction> drawControls(
         UiContext& ui,
         UiRect panel,
         const OptionsMenuInput& input);
-    [[nodiscard]] OptionsMenuResult drawQuitConfirmation(
+    [[nodiscard]] std::optional<OptionsAction> drawQuitConfirmation(
         UiContext& ui,
         UiRect panel,
         const OptionsMenuInput& input);

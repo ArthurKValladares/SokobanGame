@@ -99,22 +99,22 @@ void testTitleResults()
     // Continue: loads only when the world is not already loaded.
     {
         const std::vector<ShellCommand> commands = flow.handle(
-            sokoban::ShellTitleResult { { .continueRequested = true } },
+            sokoban::ShellTitleAction { sokoban::title::Continue {} },
             { .gameLoaded = false, .titleOpen = true });
         CHECK(commands.size() == 2);
         CHECK(commandAt<sokoban::shell::LoadCurrentScreen>(commands, 0) != nullptr);
         CHECK(commandAt<sokoban::shell::CloseTitle>(commands, 1) != nullptr);
     }
     CHECK(only<sokoban::shell::CloseTitle>(flow.handle(
-        sokoban::ShellTitleResult { { .continueRequested = true } },
+        sokoban::ShellTitleAction { sokoban::title::Continue {} },
         { .gameLoaded = true, .titleOpen = true })));
 
     // New game on the active slot, and the no-saves slot-pick chain.
     CHECK(only<sokoban::shell::StartNewGame>(flow.handle(
-        sokoban::ShellTitleResult { { .newGameRequested = true } }, {})));
+        sokoban::ShellTitleAction { sokoban::title::NewGame {} }, {})));
     {
         const std::vector<ShellCommand> commands = flow.handle(
-            sokoban::ShellTitleResult { { .newGameSlotSelected = 2 } }, {});
+            sokoban::ShellTitleAction { sokoban::title::NewGameOnSlot { 2 } }, {});
         CHECK(commands.size() == 2);
         const auto* switchSlot = commandAt<sokoban::shell::SwitchSlot>(commands, 0);
         CHECK(switchSlot != nullptr && switchSlot->slot == 2);
@@ -124,13 +124,13 @@ void testTitleResults()
     // Slot switching and deletion pass their indexes through.
     {
         const std::vector<ShellCommand> commands = flow.handle(
-            sokoban::ShellTitleResult { { .slotSelected = 1 } }, {});
+            sokoban::ShellTitleAction { sokoban::title::SwitchSlot { 1 } }, {});
         const auto* switchSlot = commandAt<sokoban::shell::SwitchSlot>(commands, 0);
         CHECK(commands.size() == 1 && switchSlot != nullptr && switchSlot->slot == 1);
     }
     {
         const std::vector<ShellCommand> commands = flow.handle(
-            sokoban::ShellTitleResult { { .slotDeleteRequested = 0 } }, {});
+            sokoban::ShellTitleAction { sokoban::title::DeleteSlot { 0 } }, {});
         const auto* deleteSlot = commandAt<sokoban::shell::DeleteSlot>(commands, 0);
         CHECK(commands.size() == 1 && deleteSlot != nullptr && deleteSlot->slot == 0);
     }
@@ -138,9 +138,7 @@ void testTitleResults()
     // Level-select starts close the title behind them.
     {
         const std::vector<ShellCommand> commands = flow.handle(
-            sokoban::ShellTitleResult {
-                { .startRequested = sokoban::TitleStartRequest { 2, 1 } } },
-            {});
+            sokoban::ShellTitleAction { sokoban::title::StartLevel { 2, 1 } }, {});
         CHECK(commands.size() == 2);
         const auto* start = commandAt<sokoban::shell::StartLevel>(commands, 0);
         CHECK(start != nullptr && start->level == 2 && start->screen == 1);
@@ -150,16 +148,13 @@ void testTitleResults()
     // Options from the title never carries pause-only rows.
     {
         const std::vector<ShellCommand> commands = flow.handle(
-            sokoban::ShellTitleResult { { .optionsRequested = true } },
+            sokoban::ShellTitleAction { sokoban::title::OpenOptions {} },
             { .titleOpen = true, .allLevelsCompleted = true });
         const auto* open = commandAt<sokoban::shell::OpenOptions>(commands, 0);
         CHECK(open != nullptr && !open->pauseContext && !open->allowLevelSelect);
     }
     CHECK(only<sokoban::shell::RequestQuitConfirmation>(flow.handle(
-        sokoban::ShellTitleResult { { .quitRequested = true } }, {})));
-
-    // An empty result emits nothing.
-    CHECK(flow.handle(sokoban::ShellTitleResult {}, {}).empty());
+        sokoban::ShellTitleAction { sokoban::title::Quit {} }, {})));
 }
 
 void testOptionsAndOverlayResults()
@@ -167,19 +162,19 @@ void testOptionsAndOverlayResults()
     ShellFlow flow;
 
     CHECK(only<sokoban::shell::ApplySettings>(flow.handle(
-        sokoban::ShellOptionsResult { { .settingsChanged = true } }, {})));
+        sokoban::ShellOptionsAction { sokoban::options::SettingsChanged {} }, {})));
     CHECK(only<sokoban::shell::Quit>(flow.handle(
-        sokoban::ShellOptionsResult { { .quitRequested = true } }, {})));
+        sokoban::ShellOptionsAction { sokoban::options::Quit {} }, {})));
     {
         const std::vector<ShellCommand> commands = flow.handle(
-            sokoban::ShellOptionsResult { { .titleRequested = true } }, {});
+            sokoban::ShellOptionsAction { sokoban::options::ExitToTitle {} }, {});
         CHECK(commands.size() == 2);
         CHECK(commandAt<sokoban::shell::CloseOptions>(commands, 0) != nullptr);
         CHECK(commandAt<sokoban::shell::OpenTitle>(commands, 1) != nullptr);
     }
     {
         const std::vector<ShellCommand> commands = flow.handle(
-            sokoban::ShellOptionsResult { { .levelSelectRequested = true } }, {});
+            sokoban::ShellOptionsAction { sokoban::options::OpenLevelSelect {} }, {});
         CHECK(commands.size() == 2);
         CHECK(commandAt<sokoban::shell::CloseOptions>(commands, 0) != nullptr);
         CHECK(commandAt<sokoban::shell::OpenStandaloneLevelSelect>(commands, 1) != nullptr);
@@ -187,21 +182,21 @@ void testOptionsAndOverlayResults()
 
     {
         const std::vector<ShellCommand> commands = flow.handle(
-            sokoban::ShellOverlayResult { { .continueRequested = true } }, {});
+            sokoban::ShellOverlayAction { sokoban::overlay::Continue {} }, {});
         const auto* resolve =
             commandAt<sokoban::shell::ResolveLevelComplete>(commands, 0);
         CHECK(commands.size() == 1 && resolve != nullptr && !resolve->toTitle);
     }
     {
         const std::vector<ShellCommand> commands = flow.handle(
-            sokoban::ShellOverlayResult { { .titleRequested = true } }, {});
+            sokoban::ShellOverlayAction { sokoban::overlay::ToTitle {} }, {});
         const auto* resolve =
             commandAt<sokoban::shell::ResolveLevelComplete>(commands, 0);
         CHECK(commands.size() == 1 && resolve != nullptr && resolve->toTitle);
     }
     {
         const std::vector<ShellCommand> commands = flow.handle(
-            sokoban::ShellOverlayResult { { .levelSelectRequested = true } }, {});
+            sokoban::ShellOverlayAction { sokoban::overlay::ToLevelSelect {} }, {});
         CHECK(commands.size() == 2);
         const auto* resolve =
             commandAt<sokoban::shell::ResolveLevelComplete>(commands, 0);

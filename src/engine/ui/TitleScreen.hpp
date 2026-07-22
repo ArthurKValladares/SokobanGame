@@ -3,6 +3,7 @@
 #include "engine/Math.hpp"
 
 #include <optional>
+#include <variant>
 #include <vector>
 
 namespace sokoban {
@@ -37,25 +38,43 @@ struct TitleScreenInput {
     bool confirm = false;
 };
 
-struct TitleStartRequest {
+// A frame of title-screen interaction produces at most one action; the
+// variant makes combinations unrepresentable. Slots are 0-based.
+namespace title {
+
+struct Continue {};
+// Start a fresh game on the already-active slot.
+struct NewGame {};
+// Start a fresh game on this slot (no-saves first-run flow).
+struct NewGameOnSlot {
+    int slot = 0;
+};
+// Switch to this existing slot.
+struct SwitchSlot {
+    int slot = 0;
+};
+// Delete this slot's save (already player-confirmed).
+struct DeleteSlot {
+    int slot = 0;
+};
+struct StartLevel {
     int level = 0;
     int screen = 0;
 };
+struct OpenOptions {};
+struct Quit {};
 
-struct TitleScreenResult {
-    bool continueRequested = false;
-    // Start a fresh game on the already-active slot.
-    bool newGameRequested = false;
-    // Start a fresh game on this 0-based slot (no-saves first-run flow).
-    std::optional<int> newGameSlotSelected;
-    // Switch to this existing 0-based slot.
-    std::optional<int> slotSelected;
-    // Delete this 0-based slot's save (already player-confirmed).
-    std::optional<int> slotDeleteRequested;
-    std::optional<TitleStartRequest> startRequested;
-    bool optionsRequested = false;
-    bool quitRequested = false;
-};
+} // namespace title
+
+using TitleAction = std::variant<
+    title::Continue,
+    title::NewGame,
+    title::NewGameOnSlot,
+    title::SwitchSlot,
+    title::DeleteSlot,
+    title::StartLevel,
+    title::OpenOptions,
+    title::Quit>;
 
 // Headless fullscreen title-screen state. The world is not loaded while the
 // main menu is up; only Continue/New Game results make the caller load it.
@@ -89,7 +108,7 @@ public:
     [[nodiscard]] int selectedRow() const { return selectedRow_; }
     [[nodiscard]] int selectedScreen() const { return selectedScreen_; }
 
-    [[nodiscard]] TitleScreenResult draw(
+    [[nodiscard]] std::optional<TitleAction> draw(
         UiContext& ui,
         Vec2 viewport,
         const TitleScreenInput& input);
@@ -100,19 +119,19 @@ private:
     [[nodiscard]] int selectableScreens(const TitleLevelInfo& level) const;
     [[nodiscard]] bool activeSlotHasSave() const;
     [[nodiscard]] bool anySaveExists() const;
-    [[nodiscard]] TitleScreenResult drawMain(
+    [[nodiscard]] std::optional<TitleAction> drawMain(
         UiContext& ui,
         UiRect panel,
         const TitleScreenInput& input);
-    [[nodiscard]] TitleScreenResult drawLevelSelect(
+    [[nodiscard]] std::optional<TitleAction> drawLevelSelect(
         UiContext& ui,
         UiRect panel,
         const TitleScreenInput& input);
-    [[nodiscard]] TitleScreenResult drawSaveSlots(
+    [[nodiscard]] std::optional<TitleAction> drawSaveSlots(
         UiContext& ui,
         UiRect panel,
         const TitleScreenInput& input);
-    [[nodiscard]] TitleScreenResult drawSlotDeleteConfirmation(
+    [[nodiscard]] std::optional<TitleAction> drawSlotDeleteConfirmation(
         UiContext& ui,
         UiRect panel,
         const TitleScreenInput& input);

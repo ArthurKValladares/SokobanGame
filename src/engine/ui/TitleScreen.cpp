@@ -222,13 +222,13 @@ bool TitleScreen::anySaveExists() const
         [](const SaveSlotInfo& slot) { return !slot.empty; });
 }
 
-TitleScreenResult TitleScreen::draw(
+std::optional<TitleAction> TitleScreen::draw(
     UiContext& ui,
     Vec2 viewport,
     const TitleScreenInput& input)
 {
     if (!open_) {
-        return {};
+        return std::nullopt;
     }
 
     const UiRect fullscreen { { 0.0f, 0.0f }, viewport };
@@ -245,10 +245,10 @@ TitleScreenResult TitleScreen::draw(
     case Page::SlotDeleteConfirmation:
         return drawSlotDeleteConfirmation(ui, panel, input);
     }
-    return {};
+    return std::nullopt;
 }
 
-TitleScreenResult TitleScreen::drawMain(
+std::optional<TitleAction> TitleScreen::drawMain(
     UiContext& ui,
     UiRect panel,
     const TitleScreenInput& input)
@@ -282,7 +282,7 @@ TitleScreenResult TitleScreen::drawMain(
         { 0.62f, 0.67f, 0.65f, 1.0f }, 18.0f);
     ui.divider(tree.rect(layout.divider));
 
-    TitleScreenResult result;
+    std::optional<TitleAction> action;
     const bool hasSave = activeSlotHasSave();
     if (uiControls::button(
             ui, "title.primary", tree.rect(primaryRow),
@@ -292,9 +292,9 @@ TitleScreenResult TitleScreen::drawMain(
             .activate = input.confirm && selectedRow_ == rowIndex(MainRow::Primary),
         })) {
         if (hasSave) {
-            result.continueRequested = true;
+            action = title::Continue {};
         } else if (anySaveExists()) {
-            result.newGameRequested = true;
+            action = title::NewGame {};
         } else {
             // First run (or every save deleted): pick the slot to begin on.
             slotPickForNewGame_ = true;
@@ -316,7 +316,7 @@ TitleScreenResult TitleScreen::drawMain(
             .focused = selectedRow_ == optionsRowIndex,
             .activate = input.confirm && selectedRow_ == optionsRowIndex,
         })) {
-        result.optionsRequested = true;
+        action = title::OpenOptions {};
     }
     ui.divider(tree.rect(quitDivider));
     if (uiControls::button(
@@ -325,12 +325,12 @@ TitleScreenResult TitleScreen::drawMain(
             .focused = selectedRow_ == quitRowIndex,
             .activate = input.confirm && selectedRow_ == quitRowIndex,
         })) {
-        result.quitRequested = true;
+        action = title::Quit {};
     }
-    return result;
+    return action;
 }
 
-TitleScreenResult TitleScreen::drawLevelSelect(
+std::optional<TitleAction> TitleScreen::drawLevelSelect(
     UiContext& ui,
     UiRect panel,
     const TitleScreenInput& input)
@@ -357,7 +357,7 @@ TitleScreenResult TitleScreen::drawLevelSelect(
         { 0.62f, 0.67f, 0.65f, 1.0f }, 16.0f);
     ui.divider(tree.rect(layout.divider));
 
-    TitleScreenResult result;
+    std::optional<TitleAction> action;
     for (std::size_t i = 0; i < levels_.size(); ++i) {
         const TitleLevelInfo& level = levels_[i];
         const UiRect row = tree.rect(levelRows[i]);
@@ -393,7 +393,7 @@ TitleScreenResult TitleScreen::drawLevelSelect(
                 .focused = focused,
                 .activate = input.confirm && focused,
             })) {
-            result.startRequested = TitleStartRequest {
+            action = title::StartLevel {
                 .level = static_cast<int>(i),
                 .screen = chosenScreen,
             };
@@ -432,10 +432,10 @@ TitleScreenResult TitleScreen::drawLevelSelect(
             setPage(Page::Main);
         }
     }
-    return result;
+    return action;
 }
 
-TitleScreenResult TitleScreen::drawSaveSlots(
+std::optional<TitleAction> TitleScreen::drawSaveSlots(
     UiContext& ui,
     UiRect panel,
     const TitleScreenInput& input)
@@ -467,7 +467,7 @@ TitleScreenResult TitleScreen::drawSaveSlots(
         { 0.62f, 0.67f, 0.65f, 1.0f }, 16.0f);
     ui.divider(tree.rect(layout.divider));
 
-    TitleScreenResult result;
+    std::optional<TitleAction> action;
     for (std::size_t i = 0; i < saveSlots_.size(); ++i) {
         const SaveSlotInfo& slot = saveSlots_[i];
         const bool active = static_cast<int>(i) == activeSlot_;
@@ -501,11 +501,11 @@ TitleScreenResult TitleScreen::drawSaveSlots(
                 .activate = input.confirm && slotFocused,
             })) {
             if (slotPickForNewGame_) {
-                result.newGameSlotSelected = static_cast<int>(i);
+                action = title::NewGameOnSlot { static_cast<int>(i) };
             } else if (active) {
                 setPage(Page::Main);
             } else {
-                result.slotSelected = static_cast<int>(i);
+                action = title::SwitchSlot { static_cast<int>(i) };
             }
         }
         if (deletable &&
@@ -561,10 +561,10 @@ TitleScreenResult TitleScreen::drawSaveSlots(
         slotPickForNewGame_ = false;
         setPage(Page::Main);
     }
-    return result;
+    return action;
 }
 
-TitleScreenResult TitleScreen::drawSlotDeleteConfirmation(
+std::optional<TitleAction> TitleScreen::drawSlotDeleteConfirmation(
     UiContext& ui,
     UiRect panel,
     const TitleScreenInput& input)
@@ -595,7 +595,7 @@ TitleScreenResult TitleScreen::drawSlotDeleteConfirmation(
         "Its progress and best records will be gone for good.",
         { 0.86f, 0.62f, 0.52f, 1.0f }, 18.0f);
 
-    TitleScreenResult result;
+    std::optional<TitleAction> action;
     const bool cancelFocused = selectedRow_ == rowIndex(DeleteRow::Cancel);
     if (uiControls::button(
             ui, "title.slot-delete.cancel", tree.rect(cancelRow), "Cancel", {
@@ -612,10 +612,10 @@ TitleScreenResult TitleScreen::drawSlotDeleteConfirmation(
             .focused = confirmFocused,
             .activate = input.confirm && confirmFocused,
         })) {
-        result.slotDeleteRequested = pendingDeleteSlot_;
+        action = title::DeleteSlot { pendingDeleteSlot_ };
         setPage(Page::SaveSlots);
     }
-    return result;
+    return action;
 }
 
 } // namespace sokoban

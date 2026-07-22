@@ -72,13 +72,13 @@ void LevelCompleteOverlay::close()
     selectedRow_ = 0;
 }
 
-LevelCompleteResult LevelCompleteOverlay::draw(
+std::optional<OverlayAction> LevelCompleteOverlay::draw(
     UiContext& ui,
     Vec2 viewport,
     const LevelCompleteInput& input)
 {
     if (!open_) {
-        return {};
+        return std::nullopt;
     }
     if (mode_ == Mode::Game) {
         return drawGameComplete(ui, viewport, input);
@@ -86,7 +86,7 @@ LevelCompleteResult LevelCompleteOverlay::draw(
     return drawLevelComplete(ui, viewport, input);
 }
 
-LevelCompleteResult LevelCompleteOverlay::drawLevelComplete(
+std::optional<OverlayAction> LevelCompleteOverlay::drawLevelComplete(
     UiContext& ui,
     Vec2 viewport,
     const LevelCompleteInput& input)
@@ -159,7 +159,7 @@ LevelCompleteResult LevelCompleteOverlay::drawLevelComplete(
         time.position.y,
     }, timeText, stats_.newBestTime ? recordColor : valueColor, 22.0f);
 
-    LevelCompleteResult result;
+    std::optional<OverlayAction> action;
     const bool continueFocused = selectedRow_ == rowIndex(Row::Continue);
     if (uiControls::button(
             ui, "level-complete.continue", tree.rect(continueRow),
@@ -168,7 +168,7 @@ LevelCompleteResult LevelCompleteOverlay::drawLevelComplete(
             .focused = continueFocused,
             .activate = input.confirm && continueFocused,
         })) {
-        result.continueRequested = true;
+        action = overlay::Continue {};
     }
     const bool titleFocused = selectedRow_ == rowIndex(Row::Title);
     if (uiControls::button(
@@ -176,12 +176,12 @@ LevelCompleteResult LevelCompleteOverlay::drawLevelComplete(
             .focused = titleFocused,
             .activate = input.confirm && titleFocused,
         })) {
-        result.titleRequested = true;
+        action = overlay::ToTitle {};
     }
-    return result;
+    return action;
 }
 
-LevelCompleteResult LevelCompleteOverlay::drawGameComplete(
+std::optional<OverlayAction> LevelCompleteOverlay::drawGameComplete(
     UiContext& ui,
     Vec2 viewport,
     const LevelCompleteInput& input)
@@ -279,7 +279,7 @@ LevelCompleteResult LevelCompleteOverlay::drawGameComplete(
         total.position.y,
     }, totalText, { 0.98f, 0.84f, 0.42f, 1.0f }, 22.0f);
 
-    LevelCompleteResult result;
+    std::optional<OverlayAction> action;
     const bool levelSelectFocused = selectedRow_ == rowIndex(GameRow::LevelSelect);
     if (uiControls::button(
             ui, "game-complete.level-select", tree.rect(levelSelectRow),
@@ -288,7 +288,7 @@ LevelCompleteResult LevelCompleteOverlay::drawGameComplete(
             .focused = levelSelectFocused,
             .activate = input.confirm && levelSelectFocused,
         })) {
-        result.levelSelectRequested = true;
+        action = overlay::ToLevelSelect {};
     }
     const bool titleFocused = selectedRow_ == rowIndex(GameRow::Title);
     if (uiControls::button(
@@ -296,9 +296,9 @@ LevelCompleteResult LevelCompleteOverlay::drawGameComplete(
             .focused = titleFocused,
             .activate = input.confirm && titleFocused,
         })) {
-        result.titleRequested = true;
+        action = overlay::ToTitle {};
     }
-    return result;
+    return action;
 }
 
 } // namespace sokoban

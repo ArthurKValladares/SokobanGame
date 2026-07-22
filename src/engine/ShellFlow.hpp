@@ -15,22 +15,22 @@ namespace sokoban {
 struct ShellBackPressed {};
 // The window itself asked to close (e.g. SDL_EVENT_QUIT).
 struct ShellCloseRequested {};
-struct ShellTitleResult {
-    TitleScreenResult result;
+struct ShellTitleAction {
+    TitleAction action;
 };
-struct ShellOptionsResult {
-    OptionsMenuResult result;
+struct ShellOptionsAction {
+    OptionsAction action;
 };
-struct ShellOverlayResult {
-    LevelCompleteResult result;
+struct ShellOverlayAction {
+    OverlayAction action;
 };
 
 using ShellEvent = std::variant<
     ShellBackPressed,
     ShellCloseRequested,
-    ShellTitleResult,
-    ShellOptionsResult,
-    ShellOverlayResult>;
+    ShellTitleAction,
+    ShellOptionsAction,
+    ShellOverlayAction>;
 
 // ---- Facts: a snapshot of the world the flow may consult. ------------------
 
@@ -101,7 +101,7 @@ struct ShellFlowState {
     // results; future flows may hold page-independent state here.
 };
 
-// Pure routing for the game shell: menu results, Back presses, and window
+// Pure routing for the game shell: menu actions, Back presses, and window
 // close requests go in; ordered commands come out. Owns every menu-precedence
 // and context rule (pause vs. title Options, level-select gating, the
 // no-saves new-game slot pick chain), so those rules are unit-tested without
