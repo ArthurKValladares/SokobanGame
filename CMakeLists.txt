@@ -143,6 +143,7 @@ add_executable(sokoban
     src/engine/Level.cpp
     src/engine/LevelEditor.cpp
     src/engine/LevelEditorDebugUi.cpp
+    src/engine/Log.cpp
     src/engine/MiniaudioImpl.cpp
     src/engine/PresentationSettings.cpp
     src/engine/PlayerProfile.cpp
@@ -251,321 +252,215 @@ else()
 endif()
 
 option(SOKOBAN_BUILD_TESTS "Build headless engine tests" ON)
+
+# Declares one headless test executable with the project's include path and
+# warning set, registered with CTest.
+#   sokoban_add_test(
+#       NAME <ctest name> TARGET <executable name>
+#       SOURCES <files...>
+#       [LIBS <libraries...>]
+#       [ASSET_DIR]   # compiles with SOKOBAN_TEST_ASSET_DIR = source assets
+#       [ASSETS_ENV]  # runs with SOKOBAN_ASSETS env var = source assets
+#   )
+function(sokoban_add_test)
+    cmake_parse_arguments(ARG "ASSET_DIR;ASSETS_ENV" "NAME;TARGET" "SOURCES;LIBS" ${ARGN})
+    if(NOT ARG_NAME OR NOT ARG_TARGET OR NOT ARG_SOURCES)
+        message(FATAL_ERROR "sokoban_add_test requires NAME, TARGET, and SOURCES")
+    endif()
+    add_executable(${ARG_TARGET} ${ARG_SOURCES})
+    target_include_directories(${ARG_TARGET} PRIVATE src)
+    if(ARG_LIBS)
+        target_link_libraries(${ARG_TARGET} PRIVATE ${ARG_LIBS})
+    endif()
+    if(ARG_ASSET_DIR)
+        target_compile_definitions(${ARG_TARGET} PRIVATE
+            SOKOBAN_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
+    endif()
+    if(MSVC)
+        target_compile_options(${ARG_TARGET} PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(${ARG_TARGET} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME ${ARG_NAME} COMMAND ${ARG_TARGET})
+    if(ARG_ASSETS_ENV)
+        set_tests_properties(${ARG_NAME} PROPERTIES
+            ENVIRONMENT "SOKOBAN_ASSETS=${CMAKE_CURRENT_SOURCE_DIR}/assets")
+    endif()
+endfunction()
+
 if(SOKOBAN_BUILD_TESTS)
     enable_testing()
-    add_executable(sokoban_rules_tests
-        tests/RulesTests.cpp
-        src/engine/Level.cpp
-        src/engine/Rules.cpp
-        src/engine/TileTypes.cpp
-    )
-    target_include_directories(sokoban_rules_tests PRIVATE src)
-    if(MSVC)
-        target_compile_options(sokoban_rules_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_rules_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME rules COMMAND sokoban_rules_tests)
 
-    add_executable(sokoban_level_tests
-        tests/LevelTests.cpp
-        src/engine/Level.cpp
-        src/engine/TileTypes.cpp
+    sokoban_add_test(NAME rules TARGET sokoban_rules_tests
+        SOURCES
+            tests/RulesTests.cpp
+            src/engine/Level.cpp
+            src/engine/Rules.cpp
+            src/engine/TileTypes.cpp
     )
-    target_include_directories(sokoban_level_tests PRIVATE src)
-    if(MSVC)
-        target_compile_options(sokoban_level_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_level_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME level COMMAND sokoban_level_tests)
-
-    add_executable(sokoban_gameplay_session_tests
-        tests/GameplaySessionTests.cpp
-        src/engine/GameplaySession.cpp
-        src/engine/Level.cpp
-        src/engine/Rules.cpp
-        src/engine/TileTypes.cpp
+    sokoban_add_test(NAME level TARGET sokoban_level_tests
+        SOURCES
+            tests/LevelTests.cpp
+            src/engine/Level.cpp
+            src/engine/TileTypes.cpp
     )
-    target_include_directories(sokoban_gameplay_session_tests PRIVATE src)
-    if(MSVC)
-        target_compile_options(sokoban_gameplay_session_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_gameplay_session_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME gameplay_session COMMAND sokoban_gameplay_session_tests)
-
-    add_executable(sokoban_profile_tests
-        tests/PlayerProfileTests.cpp
-        src/engine/AsyncSaveStore.cpp
-        src/engine/InputBindings.cpp
-        src/engine/PlayerProfile.cpp
-        src/engine/PlayerProfileCodec.cpp
-        src/engine/render/RenderResolution.cpp
-        src/engine/SaveStore.cpp
-        src/engine/TileTypes.cpp
+    sokoban_add_test(NAME gameplay_session TARGET sokoban_gameplay_session_tests
+        SOURCES
+            tests/GameplaySessionTests.cpp
+            src/engine/GameplaySession.cpp
+            src/engine/Level.cpp
+            src/engine/Rules.cpp
+            src/engine/TileTypes.cpp
     )
-    target_include_directories(sokoban_profile_tests PRIVATE src)
-    target_link_libraries(sokoban_profile_tests PRIVATE sokoban_json SDL3::SDL3)
-    if(MSVC)
-        target_compile_options(sokoban_profile_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_profile_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME player_profile COMMAND sokoban_profile_tests)
-
-    add_executable(sokoban_save_slot_tests
-        tests/SaveSlotManagerTests.cpp
-        src/engine/AsyncSaveStore.cpp
-        src/engine/InputBindings.cpp
-        src/engine/PlayerProfile.cpp
-        src/engine/PlayerProfileCodec.cpp
-        src/engine/render/RenderResolution.cpp
-        src/engine/SaveSlotManager.cpp
-        src/engine/SaveStore.cpp
-        src/engine/TileTypes.cpp
+    sokoban_add_test(NAME player_profile TARGET sokoban_profile_tests
+        LIBS sokoban_json SDL3::SDL3
+        SOURCES
+            tests/PlayerProfileTests.cpp
+            src/engine/AsyncSaveStore.cpp
+            src/engine/InputBindings.cpp
+            src/engine/PlayerProfile.cpp
+            src/engine/PlayerProfileCodec.cpp
+            src/engine/render/RenderResolution.cpp
+            src/engine/SaveStore.cpp
+            src/engine/TileTypes.cpp
     )
-    target_include_directories(sokoban_save_slot_tests PRIVATE src)
-    target_link_libraries(sokoban_save_slot_tests PRIVATE sokoban_json SDL3::SDL3)
-    if(MSVC)
-        target_compile_options(sokoban_save_slot_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_save_slot_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME save_slots COMMAND sokoban_save_slot_tests)
-
-    add_executable(sokoban_shell_flow_tests
-        tests/ShellFlowTests.cpp
-        src/engine/InputBindings.cpp
-        src/engine/ShellFlow.cpp
+    sokoban_add_test(NAME save_slots TARGET sokoban_save_slot_tests
+        LIBS sokoban_json SDL3::SDL3
+        SOURCES
+            tests/SaveSlotManagerTests.cpp
+            src/engine/AsyncSaveStore.cpp
+            src/engine/InputBindings.cpp
+            src/engine/PlayerProfile.cpp
+            src/engine/PlayerProfileCodec.cpp
+            src/engine/render/RenderResolution.cpp
+            src/engine/SaveSlotManager.cpp
+            src/engine/SaveStore.cpp
+            src/engine/TileTypes.cpp
     )
-    target_include_directories(sokoban_shell_flow_tests PRIVATE src)
-    if(MSVC)
-        target_compile_options(sokoban_shell_flow_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_shell_flow_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME shell_flow COMMAND sokoban_shell_flow_tests)
-
-    add_executable(sokoban_input_tests
-        tests/InputTests.cpp
-        src/engine/Input.cpp
-        src/engine/InputBindings.cpp
+    sokoban_add_test(NAME shell_flow TARGET sokoban_shell_flow_tests
+        SOURCES
+            tests/ShellFlowTests.cpp
+            src/engine/InputBindings.cpp
+            src/engine/ShellFlow.cpp
     )
-    target_include_directories(sokoban_input_tests PRIVATE src)
-    target_link_libraries(sokoban_input_tests PRIVATE SDL3::SDL3)
-    if(MSVC)
-        target_compile_options(sokoban_input_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_input_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME input COMMAND sokoban_input_tests)
-
-    add_executable(sokoban_image_data_tests
-        tests/ImageDataTests.cpp
-        src/engine/render/ImageData.cpp
+    sokoban_add_test(NAME input TARGET sokoban_input_tests
+        LIBS SDL3::SDL3
+        SOURCES
+            tests/InputTests.cpp
+            src/engine/Input.cpp
+            src/engine/InputBindings.cpp
     )
-    target_include_directories(sokoban_image_data_tests PRIVATE src)
-    target_link_libraries(sokoban_image_data_tests PRIVATE
-        Threads::Threads
-        sokoban_stb
+    sokoban_add_test(NAME image_data TARGET sokoban_image_data_tests
+        LIBS Threads::Threads sokoban_stb
+        ASSET_DIR
+        SOURCES
+            tests/ImageDataTests.cpp
+            src/engine/render/ImageData.cpp
     )
-    target_compile_definitions(sokoban_image_data_tests PRIVATE
-        SOKOBAN_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    sokoban_add_test(NAME ui TARGET sokoban_ui_tests
+        LIBS sokoban_stb
+        ASSET_DIR
+        SOURCES
+            tests/UiTests.cpp
+            src/engine/InputBindings.cpp
+            src/engine/ui/FontAtlas.cpp
+            src/engine/ui/MenuKit.cpp
+            src/engine/ui/OptionsMenu.cpp
+            src/engine/ui/Ui.cpp
+            src/engine/ui/UiControls.cpp
+            src/engine/ui/UiLayout.cpp
+            src/engine/render/RenderResolution.cpp
     )
-    if(MSVC)
-        target_compile_options(sokoban_image_data_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_image_data_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME image_data COMMAND sokoban_image_data_tests)
-
-    add_executable(sokoban_ui_tests
-        tests/UiTests.cpp
-        src/engine/InputBindings.cpp
-        src/engine/ui/FontAtlas.cpp
-        src/engine/ui/MenuKit.cpp
-        src/engine/ui/OptionsMenu.cpp
-        src/engine/ui/Ui.cpp
-        src/engine/ui/UiControls.cpp
-        src/engine/ui/UiLayout.cpp
-        src/engine/render/RenderResolution.cpp
+    sokoban_add_test(NAME title TARGET sokoban_title_tests
+        LIBS sokoban_stb
+        ASSET_DIR
+        SOURCES
+            tests/TitleScreenTests.cpp
+            src/engine/InputBindings.cpp
+            src/engine/ui/FontAtlas.cpp
+            src/engine/ui/LevelCompleteOverlay.cpp
+            src/engine/ui/MenuKit.cpp
+            src/engine/ui/OptionsMenu.cpp
+            src/engine/ui/TitleScreen.cpp
+            src/engine/ui/Ui.cpp
+            src/engine/ui/UiControls.cpp
+            src/engine/ui/UiLayout.cpp
+            src/engine/render/RenderResolution.cpp
     )
-    target_include_directories(sokoban_ui_tests PRIVATE src)
-    target_link_libraries(sokoban_ui_tests PRIVATE sokoban_stb)
-    target_compile_definitions(sokoban_ui_tests PRIVATE
-        SOKOBAN_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    sokoban_add_test(NAME vulkan_device_selection TARGET sokoban_vulkan_device_selection_tests
+        LIBS Vulkan::Vulkan
+        SOURCES
+            tests/VulkanDeviceSelectionTests.cpp
+            src/engine/render/VulkanDeviceSelection.cpp
+            src/engine/render/RenderResolution.cpp
     )
-    if(MSVC)
-        target_compile_options(sokoban_ui_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_ui_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME ui COMMAND sokoban_ui_tests)
-
-    add_executable(sokoban_title_tests
-        tests/TitleScreenTests.cpp
-        src/engine/InputBindings.cpp
-        src/engine/ui/FontAtlas.cpp
-        src/engine/ui/LevelCompleteOverlay.cpp
-        src/engine/ui/MenuKit.cpp
-        src/engine/ui/OptionsMenu.cpp
-        src/engine/ui/TitleScreen.cpp
-        src/engine/ui/Ui.cpp
-        src/engine/ui/UiControls.cpp
-        src/engine/ui/UiLayout.cpp
-        src/engine/render/RenderResolution.cpp
+    sokoban_add_test(NAME level_editor TARGET sokoban_level_editor_tests
+        SOURCES
+            tests/LevelEditorTests.cpp
+            src/engine/LevelEditor.cpp
+            src/engine/Level.cpp
+            src/engine/TileTypes.cpp
     )
-    target_include_directories(sokoban_title_tests PRIVATE src)
-    target_link_libraries(sokoban_title_tests PRIVATE sokoban_stb)
-    target_compile_definitions(sokoban_title_tests PRIVATE
-        SOKOBAN_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    sokoban_add_test(NAME animation_controller TARGET sokoban_animation_controller_tests
+        SOURCES
+            tests/AnimationControllerTests.cpp
+            src/engine/render/AnimationController.cpp
     )
-    if(MSVC)
-        target_compile_options(sokoban_title_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_title_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME title COMMAND sokoban_title_tests)
-
-    add_executable(sokoban_vulkan_device_selection_tests
-        tests/VulkanDeviceSelectionTests.cpp
-        src/engine/render/VulkanDeviceSelection.cpp
-        src/engine/render/RenderResolution.cpp
+    sokoban_add_test(NAME asset_manifest TARGET sokoban_asset_manifest_tests
+        LIBS sokoban_json
+        ASSETS_ENV
+        SOURCES
+            tests/AssetManifestTests.cpp
+            src/engine/AssetManifest.cpp
+            src/engine/TileTypes.cpp
     )
-    target_include_directories(sokoban_vulkan_device_selection_tests PRIVATE src)
-    target_link_libraries(sokoban_vulkan_device_selection_tests PRIVATE Vulkan::Vulkan)
-    if(MSVC)
-        target_compile_options(sokoban_vulkan_device_selection_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_vulkan_device_selection_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME vulkan_device_selection COMMAND sokoban_vulkan_device_selection_tests)
-
-    add_executable(sokoban_level_editor_tests
-        tests/LevelEditorTests.cpp
-        src/engine/LevelEditor.cpp
-        src/engine/Level.cpp
-        src/engine/TileTypes.cpp
+    sokoban_add_test(NAME asset_manifest_editor TARGET sokoban_asset_manifest_editor_tests
+        LIBS sokoban_json
+        ASSETS_ENV
+        SOURCES
+            tests/AssetManifestEditorTests.cpp
+            src/engine/AssetManifest.cpp
+            src/engine/AssetManifestEditor.cpp
+            src/engine/TileTypes.cpp
     )
-    target_include_directories(sokoban_level_editor_tests PRIVATE src)
-    if(MSVC)
-        target_compile_options(sokoban_level_editor_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_level_editor_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME level_editor COMMAND sokoban_level_editor_tests)
-
-    add_executable(sokoban_animation_controller_tests
-        tests/AnimationControllerTests.cpp
-        src/engine/render/AnimationController.cpp
+    sokoban_add_test(NAME presentation TARGET sokoban_presentation_tests
+        LIBS sokoban_json
+        SOURCES
+            tests/PresentationTests.cpp
+            src/engine/AssetManifest.cpp
+            src/engine/GameplayPresentation.cpp
+            src/engine/Level.cpp
+            src/engine/LevelEditor.cpp
+            src/engine/PresentationSettings.cpp
+            src/engine/RenderFrameBuilder.cpp
+            src/engine/Rules.cpp
+            src/engine/TileTypes.cpp
+            src/engine/render/RenderAssetRequirements.cpp
     )
-    add_executable(sokoban_asset_manifest_tests
-        tests/AssetManifestTests.cpp
-        src/engine/AssetManifest.cpp
-        src/engine/TileTypes.cpp
+    sokoban_add_test(NAME asset_requirements TARGET sokoban_asset_requirements_tests
+        LIBS sokoban_json
+        SOURCES
+            tests/AssetRequirementsTests.cpp
+            src/engine/AssetManifest.cpp
+            src/engine/Level.cpp
+            src/engine/TileTypes.cpp
+            src/engine/render/RenderAssetRequirements.cpp
     )
-    target_include_directories(sokoban_asset_manifest_tests PRIVATE src)
-    target_link_libraries(sokoban_asset_manifest_tests PRIVATE sokoban_json)
-    if(MSVC)
-        target_compile_options(sokoban_asset_manifest_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_asset_manifest_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME asset_manifest COMMAND sokoban_asset_manifest_tests)
-    set_tests_properties(asset_manifest PROPERTIES
-        ENVIRONMENT "SOKOBAN_ASSETS=${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    sokoban_add_test(NAME tasks TARGET sokoban_task_tests
+        LIBS Threads::Threads
+        SOURCES
+            tests/TaskSystemTests.cpp
+            src/engine/TaskSystem.cpp
     )
-    add_executable(sokoban_asset_manifest_editor_tests
-        tests/AssetManifestEditorTests.cpp
-        src/engine/AssetManifest.cpp
-        src/engine/AssetManifestEditor.cpp
-        src/engine/TileTypes.cpp
+    sokoban_add_test(NAME content_pipeline TARGET sokoban_content_pipeline_tests
+        LIBS sokoban_json
+        SOURCES
+            tests/ContentPipelineTests.cpp
+            src/engine/AssetManifest.cpp
+            src/engine/ContentPipeline.cpp
+            src/engine/Level.cpp
+            src/engine/TileTypes.cpp
     )
-    target_include_directories(sokoban_asset_manifest_editor_tests PRIVATE src)
-    target_link_libraries(sokoban_asset_manifest_editor_tests PRIVATE sokoban_json)
-    if(MSVC)
-        target_compile_options(sokoban_asset_manifest_editor_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_asset_manifest_editor_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME asset_manifest_editor COMMAND sokoban_asset_manifest_editor_tests)
-    set_tests_properties(asset_manifest_editor PROPERTIES
-        ENVIRONMENT "SOKOBAN_ASSETS=${CMAKE_CURRENT_SOURCE_DIR}/assets"
-    )
-    target_include_directories(sokoban_animation_controller_tests PRIVATE src)
-    if(MSVC)
-        target_compile_options(sokoban_animation_controller_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_animation_controller_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME animation_controller COMMAND sokoban_animation_controller_tests)
-
-    add_executable(sokoban_presentation_tests
-        tests/PresentationTests.cpp
-        src/engine/AssetManifest.cpp
-        src/engine/GameplayPresentation.cpp
-        src/engine/Level.cpp
-        src/engine/LevelEditor.cpp
-        src/engine/PresentationSettings.cpp
-        src/engine/RenderFrameBuilder.cpp
-        src/engine/Rules.cpp
-        src/engine/TileTypes.cpp
-        src/engine/render/RenderAssetRequirements.cpp
-    )
-    target_include_directories(sokoban_presentation_tests PRIVATE src)
-    target_link_libraries(sokoban_presentation_tests PRIVATE sokoban_json)
-    if(MSVC)
-        target_compile_options(sokoban_presentation_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_presentation_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME presentation COMMAND sokoban_presentation_tests)
-
-    add_executable(sokoban_asset_requirements_tests
-        tests/AssetRequirementsTests.cpp
-        src/engine/AssetManifest.cpp
-        src/engine/Level.cpp
-        src/engine/TileTypes.cpp
-        src/engine/render/RenderAssetRequirements.cpp
-    )
-    target_include_directories(sokoban_asset_requirements_tests PRIVATE src)
-    target_link_libraries(sokoban_asset_requirements_tests PRIVATE sokoban_json)
-    if(MSVC)
-        target_compile_options(sokoban_asset_requirements_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_asset_requirements_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME asset_requirements COMMAND sokoban_asset_requirements_tests)
-
-    add_executable(sokoban_task_tests
-        tests/TaskSystemTests.cpp
-        src/engine/TaskSystem.cpp
-    )
-    target_include_directories(sokoban_task_tests PRIVATE src)
-    target_link_libraries(sokoban_task_tests PRIVATE Threads::Threads)
-    if(MSVC)
-        target_compile_options(sokoban_task_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_task_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME tasks COMMAND sokoban_task_tests)
-
-    add_executable(sokoban_content_pipeline_tests
-        tests/ContentPipelineTests.cpp
-        src/engine/AssetManifest.cpp
-        src/engine/ContentPipeline.cpp
-        src/engine/Level.cpp
-        src/engine/TileTypes.cpp
-    )
-    target_include_directories(sokoban_content_pipeline_tests PRIVATE src)
-    target_link_libraries(sokoban_content_pipeline_tests PRIVATE sokoban_json)
-    if(MSVC)
-        target_compile_options(sokoban_content_pipeline_tests PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(sokoban_content_pipeline_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    add_test(NAME content_pipeline COMMAND sokoban_content_pipeline_tests)
 endif()
 
 install(TARGETS sokoban RUNTIME DESTINATION . COMPONENT Runtime)

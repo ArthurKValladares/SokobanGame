@@ -68,6 +68,14 @@ The install contains `sokoban.exe`, its executable-relative `assets/` tree,
 and dependency licenses. MSVC builds use the static C/C++ runtime so the ZIP
 does not require a separately installed Visual C++ Redistributable.
 
+Every test executable is declared with the `sokoban_add_test()` helper at the
+top of the `SOKOBAN_BUILD_TESTS` block (NAME/TARGET/SOURCES, optional LIBS,
+ASSET_DIR for the `SOKOBAN_TEST_ASSET_DIR` define, ASSETS_ENV for the
+`SOKOBAN_ASSETS` run env). It applies the shared `src` include path and the
+per-compiler warning set (`/W4 /permissive-` on MSVC, `-Wall -Wextra
+-Wpedantic` otherwise) and registers the CTest case, so adding a suite is one
+call, not a copy-pasted block.
+
 Headless rules tests (no SDL/Vulkan needed at runtime; built by default via `SOKOBAN_BUILD_TESTS`):
 
 ```powershell
@@ -207,6 +215,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/AsyncSaveStore.*`: dedicated serialized persistence worker around `SaveStore`. Deferred requests coalesce over a configurable window, while JSON encoding, backup rotation, and atomic filesystem replacement always happen off the game thread. Screen transitions and committed settings request immediate worker saves; clean shutdown flushes the newest pending profile. Diagnostics expose request/write/coalescing counts and pending/writing state.
 - `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags + slide momentum) plus pure functions in `sokoban::rules` — `step` advances the whole world one discrete step by delegating to the file-local `MicroStepResolver`, which treats the player and movables as one uniform entity array (movables first, player last, preserving historical resolution order) and runs four named phases per micro-step: deriveIntents (momentum/input/belt against the source's budget), markContested (simultaneous same-destination intents all lose), resolveMoves (multi-pass so vacated cells can be entered; direct input may push a resolved blocker), and settleBlocked (mutually blocked slides cancel). Player and movable falls share one predicate-parameterized `fallTarget` walk differing only in who occupies the cell below. `hasPendingMotion` reports whether the world would keep moving without input; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
 - `src/engine/Level.*`: level file parsing, serialization, layered grid storage, walkability/support rules, player/movable extraction. Tested by `tests/LevelTests.cpp` (`sokoban_level_tests`).
+- `src/engine/Log.*`: leveled logging (Debug/Info/Warning/Error). `log::info() << ...` builds one line through a streaming RAII `Message` that emits `[HH:MM:SS] [LEVEL] <message>` on destruction to stderr and, when configured, an appended file sink; emission is mutex-guarded so render-thread/background/main-thread lines never interleave. `Application` adds a `log.txt` sink in the save directory (so shipped builds leave a diagnostic trail next to the profiles) and lowers the minimum to Debug in Debug builds. All engine `std::cerr` call sites were migrated to this; only `tools/ContentTool.cpp` still writes to stdout/stderr directly, as a CLI tool.
 - `src/engine/TaskSystem.*`: standard-library-only worker pool for task-based parallelism. `taskSystem().enqueue(fn)` returns a future (exceptions propagate on get); `parallelFor(count, minChunk, fn(begin, end))` runs chunked loops with the calling thread participating. Tasks must not block on other tasks (no dependency graph yet). Used by GLTF vertex skinning (`skinWithPoses`) and lazy CPU-side model/texture/animation preparation in `VulkanModelResources`; Vulkan publication stays on the render thread. Tested by `tests/TaskSystemTests.cpp` (`sokoban_task_tests`).
 - `src/engine/TileTypes.*`: tile enum, character mapping, colors, helper predicates such as `tileTypeAllowsEntity`.
 - `src/engine/LevelEditor.*`: headless editor model and command API. Owns document state/history, tile validation, draft construction, level load/save, source/runtime mirroring, browser enumeration, screen/level renumbering, soft-delete/restore, and guarded permanent deletion. It has no SDL, Vulkan, or ImGui dependency and is tested by `tests/LevelEditorTests.cpp` (`sokoban_level_editor_tests`).

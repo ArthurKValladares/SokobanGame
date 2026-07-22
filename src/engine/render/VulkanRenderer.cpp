@@ -1,6 +1,7 @@
 #include "engine/render/VulkanRenderer.hpp"
 
 #include "engine/BoardLayout.hpp"
+#include "engine/Log.hpp"
 #include "engine/Config.hpp"
 #include "engine/render/ImageData.hpp"
 #include "engine/render/VulkanDeviceSelection.hpp"
@@ -19,7 +20,6 @@
 #include <array>
 #include <cmath>
 #include <limits>
-#include <iostream>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -765,9 +765,9 @@ void VulkanRenderer::pickPhysicalDevice()
         vkGetPhysicalDeviceProperties(
             physicalDevice_,
             &physicalDeviceProperties_);
-        std::cerr << "Vulkan GPU: " << physicalDeviceProperties_.deviceName
-                  << " (" << vulkanDeviceTypeName(
-                      physicalDeviceProperties_.deviceType) << ")\n";
+        log::info() << "Vulkan GPU: " << physicalDeviceProperties_.deviceName
+            << " (" << vulkanDeviceTypeName(
+                physicalDeviceProperties_.deviceType) << ")";
         return;
     }
 
@@ -1021,14 +1021,14 @@ void VulkanRenderer::logRenderConfiguration() const
     const uint64_t pixels =
         static_cast<uint64_t>(renderExtent.width) * renderExtent.height;
     const uint64_t samplePixels = pixels * sampleCountValue();
-    std::cerr << "Vulkan swapchain: " << extent.width << 'x' << extent.height
-              << ", " << swapchainResources_.imageCount() << " images, "
-              << presentModeName() << ", " << sampleCountValue()
-              << "x MSAA; scene " << renderExtent.width << 'x'
-              << renderExtent.height << " at "
-              << swapchainResources_.renderScalePercent() << "% ("
-              << samplePixels / 1'000'000.0
-              << " M sample-pixels)\n";
+    log::info() << "Vulkan swapchain: " << extent.width << 'x' << extent.height
+        << ", " << swapchainResources_.imageCount() << " images, "
+        << presentModeName() << ", " << sampleCountValue()
+        << "x MSAA; scene " << renderExtent.width << 'x'
+        << renderExtent.height << " at "
+        << swapchainResources_.renderScalePercent() << "% ("
+        << samplePixels / 1'000'000.0
+        << " M sample-pixels)";
 }
 
 void VulkanRenderer::recordCommandBuffer(

@@ -1,6 +1,7 @@
 #include "engine/Application.hpp"
 
 #include "engine/DebugUi.hpp"
+#include "engine/Log.hpp"
 #include "engine/RenderFrameBuilder.hpp"
 #include "engine/Rules.hpp"
 #include "engine/RuntimeContent.hpp"
@@ -12,7 +13,6 @@
 #endif
 
 #include <algorithm>
-#include <iostream>
 #include <utility>
 
 namespace sokoban {
@@ -50,7 +50,13 @@ Application::Application()
     , ui_(uiFont_)
     , audioSystem_(assetRoot_, assetManifest_)
 {
-    std::cerr << saveSlots_.progressStatus() << '\n';
+    // Leave a diagnostic trail next to the profiles so shipped builds can be
+    // debugged from the save directory; Debug builds also emit debug traces.
+    log::addFileSink(saveSlots_.directory() / "log.txt");
+#if SOKOBAN_ENABLE_DEBUG_UI
+    log::setMinimumLevel(log::Level::Debug);
+#endif
+    log::info() << saveSlots_.progressStatus();
     currentLevel_ = playerProfile_.currentLevel;
     currentScreen_ = playerProfile_.currentScreen;
     if (!screenExists(currentLevel_, currentScreen_)) {
@@ -127,10 +133,10 @@ Application::~Application()
     }
     saveSlots_.flush();
     if (!saveSlots_.progressDiagnostics().lastWriteSucceeded) {
-        std::cerr << saveSlots_.progressStatus() << '\n';
+        log::error() << saveSlots_.progressStatus();
     }
     if (!saveSlots_.settingsDiagnostics().lastWriteSucceeded) {
-        std::cerr << saveSlots_.settingsStatus() << '\n';
+        log::error() << saveSlots_.settingsStatus();
     }
     DebugUi::clearTabs();
     renderer_.waitIdle();
@@ -481,8 +487,8 @@ void Application::loadCurrentScreen()
         Level::loadFromFile(screenPath(currentLevel_, currentScreen_)),
         checkpoint ? &checkpoint->session : nullptr);
     if (checkpoint && !restored) {
-        std::cerr << "Discarded invalid gameplay checkpoint for level "
-                  << currentLevel_ << " screen " << currentScreen_ << '\n';
+        log::warning() << "Discarded invalid gameplay checkpoint for level "
+            << currentLevel_ << " screen " << currentScreen_;
         playerProfile_.activeScreen.reset();
     }
     playerProfile_.setCurrentScreen(currentLevel_, currentScreen_);
@@ -494,11 +500,8 @@ void Application::loadCurrentScreen()
     levelEditor_.setEditingDocument(false);
     editorHoverCell_.reset();
 
-    std::cerr << "player started level "
-              << currentLevel_
-              << " screen "
-              << currentScreen_
-              << '\n';
+    log::debug() << "player started level " << currentLevel_
+        << " screen " << currentScreen_;
 }
 
 bool Application::applyLevel(
@@ -661,7 +664,7 @@ void Application::switchSaveSlot(int slot)
         return;
     }
     playerProfile_ = std::move(*switched);
-    std::cerr << saveSlots_.progressStatus() << '\n';
+    log::info() << saveSlots_.progressStatus();
 
     // The new slot's world loads on Continue/New Game, like at boot.
     gameLoaded_ = false;
@@ -1154,9 +1157,9 @@ RenderAssetRequirements Application::levelAssetRequirements(int levelIndex) cons
                 Level::loadFromFile(screenPath(levelIndex, screenIndex)),
                 assetManifest_));
         } catch (const std::exception& error) {
-            std::cerr << "asset preload skipped "
-                      << screenPath(levelIndex, screenIndex).string()
-                      << ": " << error.what() << '\n';
+            log::warning() << "asset preload skipped "
+                << screenPath(levelIndex, screenIndex).string()
+                << ": " << error.what();
         }
     }
     return requirements;

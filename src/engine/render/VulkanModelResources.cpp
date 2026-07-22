@@ -1,11 +1,11 @@
 #include "engine/render/VulkanModelResources.hpp"
 
+#include "engine/Log.hpp"
 #include "engine/TaskSystem.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <cstring>
-#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -315,8 +315,8 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
             if (wait) {
                 throwIfFailed(slot.state, slot.failure, assetRoot_ / definition.path, "model");
             }
-            std::cerr << "Background model publication failed: "
-                      << (assetRoot_ / definition.path).string() << '\n';
+            log::error() << "Background model publication failed: "
+                << (assetRoot_ / definition.path).string();
         }
         return slot.state == LoadState::Ready || slot.state == LoadState::Failed;
     }
@@ -340,8 +340,8 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
         if (wait) {
             throwIfFailed(slot.state, slot.failure, assetRoot_ / definition.path, "model");
         }
-        std::cerr << "Background model publication failed: "
-                  << (assetRoot_ / definition.path).string() << '\n';
+        log::error() << "Background model publication failed: "
+            << (assetRoot_ / definition.path).string();
     }
     return true;
 }
@@ -380,8 +380,8 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
         if (wait) {
             throwIfFailed(slot.state, slot.failure, path, "texture");
         }
-        std::cerr << "Background texture publication failed: "
-                  << path.string() << '\n';
+        log::error() << "Background texture publication failed: "
+            << path.string();
     }
     return true;
 }
@@ -419,8 +419,8 @@ bool VulkanModelResources::publishAnimation(RenderAnimation animation, bool wait
         if (wait) {
             throwIfFailed(slot.state, slot.failure, path, "animation");
         }
-        std::cerr << "Background animation publication failed: "
-                  << path.string() << '\n';
+        log::error() << "Background animation publication failed: "
+            << path.string();
     }
     return true;
 }

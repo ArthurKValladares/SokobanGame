@@ -1,10 +1,11 @@
 #include "engine/AudioSystem.hpp"
 
+#include "engine/Log.hpp"
+
 #include "miniaudio.h"
 
 #include <algorithm>
 #include <array>
-#include <iostream>
 #include <string_view>
 #include <vector>
 
@@ -60,7 +61,7 @@ void loadSoundSet(
         if (result == MA_SUCCESS) {
             loaded.push_back(static_cast<int>(i));
         } else {
-            std::cerr << "Audio: failed to load " << path.string() << "\n";
+            log::warning() << "Audio: failed to load " << path.string();
         }
     }
 }
@@ -74,7 +75,7 @@ AudioSystem::AudioSystem(std::filesystem::path audioRoot, const AssetManifest& m
     , random_(std::random_device {}())
 {
     if (ma_engine_init(nullptr, &engine_->engine) != MA_SUCCESS) {
-        std::cerr << "Audio disabled: audio engine initialization failed\n";
+        log::warning() << "Audio disabled: audio engine initialization failed";
         return;
     }
     engine_->engineInitialized = true;
@@ -221,7 +222,7 @@ void AudioSystem::playMusicForLevel(int level)
     const auto& loaded = engine_->loadedMusic;
     if (target >= 0 &&
         std::find(loaded.begin(), loaded.end(), target) == loaded.end()) {
-        std::cerr << "Audio: music track not loaded for level " << level << "\n";
+        log::warning() << "Audio: music track not loaded for level " << level;
         target = -1;
     }
 
