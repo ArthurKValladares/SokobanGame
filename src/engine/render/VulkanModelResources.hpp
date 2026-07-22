@@ -48,6 +48,9 @@ public:
         uint32_t pendingAnimations = 0;
         uint32_t totalAnimations = 0;
         uint32_t failedAssets = 0;
+        uint32_t uploadingTextures = 0;
+        uint64_t textureUploadSubmissions = 0;
+        uint64_t textureUploadCompletions = 0;
     };
 
     VulkanModelResources() = default;
@@ -70,11 +73,15 @@ public:
     // Starts independent CPU tasks and returns immediately.
     void requestAssets(const RenderAssetRequirements& requirements);
     // Publishes every required asset, waiting for CPU tasks when necessary.
-    // Returns true when texture descriptors must be refreshed.
+    // Texture uploads are queued but never waited here. Returns true when
+    // frame-local texture descriptors must be refreshed.
     [[nodiscard]] bool ensureAssets(const RenderAssetRequirements& requirements);
     // Publishes up to maxPublications completed background tasks without
     // waiting. Failed preloads are retained and rethrown if later required.
     [[nodiscard]] bool publishReadyAssets(std::size_t maxPublications);
+    // Reclaims upload command buffers and staging resources whose GPU fences
+    // have signaled. This never waits for GPU work.
+    void retireCompletedUploads();
 
     void setAnimationPreview(const GltfAnimationClip* clip, float timeSeconds);
     void updateAnimations(const RenderFrameData& frameData);
@@ -90,6 +97,7 @@ private:
         Unrequested,
         Loading,
         CpuReady,
+        Uploading,
         Ready,
         Failed,
     };
@@ -116,6 +124,13 @@ private:
         VkSampler sampler = VK_NULL_HANDLE;
     };
 
+    struct PendingTextureUpload {
+        OwnedBuffer staging {};
+        VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+        VkFence fence = VK_NULL_HANDLE;
+        bool submitted = false;
+    };
+
     using PreparedModel = std::variant<MeshData, SkinnedMeshData>;
 
     struct ModelSlot {
@@ -129,6 +144,7 @@ private:
     struct TextureSlot {
         LoadState state = LoadState::Unrequested;
         TextureResource gpu {};
+        PendingTextureUpload upload {};
         std::future<ImageData> future;
         std::exception_ptr failure;
     };
@@ -158,7 +174,16 @@ private:
     [[nodiscard]] bool assetsReady(const RenderAssetRequirements& requirements) const;
 
     [[nodiscard]] GpuMesh uploadMesh(const MeshData& mesh) const;
-    void createTexture(const ImageData& image, OwnedImage& gpuImage, VkSampler& sampler);
+    void createTextureBlocking(
+        const ImageData& image,
+        OwnedImage& gpuImage,
+        VkSampler& sampler);
+    void beginTextureUpload(
+        const ImageData& image,
+        OwnedImage& gpuImage,
+        VkSampler& sampler,
+        PendingTextureUpload& upload);
+    void destroyTextureUpload(PendingTextureUpload& upload) const;
     void destroyTexture(OwnedImage& image, VkSampler& sampler);
     void destroyMesh(GpuMesh& mesh) const;
     [[nodiscard]] const GpuMesh& gpuMeshForModel(RenderModel model) const;
@@ -185,6 +210,8 @@ private:
     TextureResource fallbackTexture_ {};
     AnimationController animationController_ {};
     SkinnedMeshUpdater skinnedMeshUpdater_ {};
+    uint64_t textureUploadSubmissions_ = 0;
+    uint64_t textureUploadCompletions_ = 0;
 };
 
 } // namespace sokoban

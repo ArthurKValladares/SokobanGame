@@ -71,7 +71,10 @@ void VulkanModelResources::create(
                 std::byte { 0xff },
             },
         };
-        createTexture(fallback, fallbackTexture_.image, fallbackTexture_.sampler);
+        createTextureBlocking(
+            fallback,
+            fallbackTexture_.image,
+            fallbackTexture_.sampler);
     } catch (...) {
         destroy();
         throw;
@@ -81,8 +84,24 @@ void VulkanModelResources::create(
 void VulkanModelResources::destroy()
 {
     if (device_) {
+        std::vector<VkFence> uploadFences;
+        for (const TextureSlot& texture : textures_) {
+            if (texture.upload.submitted && texture.upload.fence) {
+                uploadFences.push_back(texture.upload.fence);
+            }
+        }
+        if (!uploadFences.empty()) {
+            (void)vkWaitForFences(
+                device_,
+                static_cast<uint32_t>(uploadFences.size()),
+                uploadFences.data(),
+                VK_TRUE,
+                UINT64_MAX);
+        }
+
         skinnedMeshUpdater_.destroy();
         for (auto texture = textures_.rbegin(); texture != textures_.rend(); ++texture) {
+            destroyTextureUpload(texture->upload);
             destroyTexture(texture->gpu.image, texture->gpu.sampler);
         }
         destroyTexture(fallbackTexture_.image, fallbackTexture_.sampler);
@@ -102,6 +121,8 @@ void VulkanModelResources::destroy()
     commandPool_ = VK_NULL_HANDLE;
     device_ = VK_NULL_HANDLE;
     physicalDevice_ = VK_NULL_HANDLE;
+    textureUploadSubmissions_ = 0;
+    textureUploadCompletions_ = 0;
 }
 
 void VulkanModelResources::requestAssets(const RenderAssetRequirements& requirements)
@@ -146,10 +167,10 @@ bool VulkanModelResources::ensureAssets(const RenderAssetRequirements& requireme
         if (!textureRequirements[i]) {
             continue;
         }
-        const bool wasReady = textures_[i].state == LoadState::Ready;
+        const bool wasPublished = textures_[i].gpu.image.view != VK_NULL_HANDLE;
         (void)publishTexture(i, true);
         descriptorsChanged = descriptorsChanged ||
-            (!wasReady && textures_[i].state == LoadState::Ready);
+            (!wasPublished && textures_[i].gpu.image.view != VK_NULL_HANDLE);
     }
 
     if (!assetsReady(requirements)) {
@@ -198,14 +219,32 @@ bool VulkanModelResources::publishReadyAssets(std::size_t maxPublications)
         if (slot.state != LoadState::Loading || !futureReady(slot.future)) {
             continue;
         }
-        const bool wasReady = slot.state == LoadState::Ready;
+        const bool wasPublished = slot.gpu.image.view != VK_NULL_HANDLE;
         if (publishTexture(i, false)) {
             ++publications;
             descriptorsChanged = descriptorsChanged ||
-                (!wasReady && slot.state == LoadState::Ready);
+                (!wasPublished && slot.gpu.image.view != VK_NULL_HANDLE);
         }
     }
     return descriptorsChanged;
+}
+
+void VulkanModelResources::retireCompletedUploads()
+{
+    for (TextureSlot& slot : textures_) {
+        if (slot.state != LoadState::Uploading) {
+            continue;
+        }
+
+        const VkResult status = vkGetFenceStatus(device_, slot.upload.fence);
+        if (status == VK_NOT_READY) {
+            continue;
+        }
+        vkCheck(status, "vkGetFenceStatus texture upload failed");
+        destroyTextureUpload(slot.upload);
+        slot.state = LoadState::Ready;
+        ++textureUploadCompletions_;
+    }
 }
 
 void VulkanModelResources::requestModel(RenderModel model)
@@ -351,7 +390,7 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
     TextureSlot& slot = textures_.at(textureIndex);
     const std::filesystem::path path =
         assetRoot_ / manifest_->textures()[textureIndex].path;
-    if (slot.state == LoadState::Ready) {
+    if (slot.state == LoadState::Uploading || slot.state == LoadState::Ready) {
         return false;
     }
     if (slot.state == LoadState::Failed) {
@@ -372,9 +411,18 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
 
     try {
         const ImageData image = slot.future.get();
-        createTexture(image, slot.gpu.image, slot.gpu.sampler);
-        slot.state = LoadState::Ready;
+        beginTextureUpload(
+            image,
+            slot.gpu.image,
+            slot.gpu.sampler,
+            slot.upload);
+        slot.state = LoadState::Uploading;
+        ++textureUploadSubmissions_;
     } catch (...) {
+        if (!slot.upload.submitted) {
+            destroyTextureUpload(slot.upload);
+            destroyTexture(slot.gpu.image, slot.gpu.sampler);
+        }
         slot.failure = std::current_exception();
         slot.state = LoadState::Failed;
         if (wait) {
@@ -505,7 +553,9 @@ bool VulkanModelResources::assetsReady(
     }
     const std::vector<bool> textureRequirements = requiredTextures(requirements);
     for (std::size_t i = 0; i < textureRequirements.size(); ++i) {
-        if (textureRequirements[i] && textures_[i].state != LoadState::Ready) {
+        if (textureRequirements[i] &&
+            textures_[i].state != LoadState::Uploading &&
+            textures_[i].state != LoadState::Ready) {
             return false;
         }
     }
@@ -565,7 +615,9 @@ std::vector<VulkanModelResources::TextureView> VulkanModelResources::textures() 
     std::vector<TextureView> result;
     result.reserve(maxModelTextures);
     for (const TextureSlot& texture : textures_) {
-        const TextureResource& resource = texture.state == LoadState::Ready
+        const TextureResource& resource =
+            (texture.state == LoadState::Uploading ||
+                texture.state == LoadState::Ready)
             ? texture.gpu
             : fallbackTexture_;
         result.push_back({
@@ -597,7 +649,9 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
     auto countState = [&result](LoadState state, uint32_t& loaded, uint32_t& pending) {
         if (state == LoadState::Ready) {
             ++loaded;
-        } else if (state == LoadState::Loading || state == LoadState::CpuReady) {
+        } else if (state == LoadState::Loading ||
+            state == LoadState::CpuReady ||
+            state == LoadState::Uploading) {
             ++pending;
         } else if (state == LoadState::Failed) {
             ++result.failedAssets;
@@ -608,10 +662,15 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
     }
     for (const TextureSlot& texture : textures_) {
         countState(texture.state, result.loadedTextures, result.pendingTextures);
+        if (texture.state == LoadState::Uploading) {
+            ++result.uploadingTextures;
+        }
     }
     for (const AnimationSlot& animation : animations_) {
         countState(animation.state, result.loadedAnimations, result.pendingAnimations);
     }
+    result.textureUploadSubmissions = textureUploadSubmissions_;
+    result.textureUploadCompletions = textureUploadCompletions_;
     return result;
 }
 
@@ -650,25 +709,48 @@ VulkanModelResources::GpuMesh VulkanModelResources::uploadMesh(
     return result;
 }
 
-void VulkanModelResources::createTexture(
+void VulkanModelResources::createTextureBlocking(
     const ImageData& image,
     OwnedImage& textureImage,
     VkSampler& sampler)
+{
+    PendingTextureUpload upload;
+    try {
+        beginTextureUpload(image, textureImage, sampler, upload);
+        vkCheck(
+            vkWaitForFences(device_, 1, &upload.fence, VK_TRUE, UINT64_MAX),
+            "vkWaitForFences initial texture upload failed");
+        destroyTextureUpload(upload);
+    } catch (...) {
+        if (upload.submitted) {
+            (void)vkDeviceWaitIdle(device_);
+        }
+        destroyTextureUpload(upload);
+        destroyTexture(textureImage, sampler);
+        throw;
+    }
+}
+
+void VulkanModelResources::beginTextureUpload(
+    const ImageData& image,
+    OwnedImage& textureImage,
+    VkSampler& sampler,
+    PendingTextureUpload& upload)
 {
     if (image.width == 0 || image.height == 0 || image.rgba.empty()) {
         throw std::runtime_error("Texture image contains no pixels");
     }
     const VkDeviceSize imageBytes = image.rgba.size();
-    OwnedBuffer staging = createBuffer(
+    upload.staging = createBuffer(
         imageBytes,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
     void* mapped = nullptr;
-    vkCheck(vkMapMemory(device_, staging.memory, 0, imageBytes, 0, &mapped),
+    vkCheck(vkMapMemory(device_, upload.staging.memory, 0, imageBytes, 0, &mapped),
         "vkMapMemory texture staging failed");
     std::memcpy(mapped, image.rgba.data(), image.rgba.size());
-    vkUnmapMemory(device_, staging.memory);
+    vkUnmapMemory(device_, upload.staging.memory);
 
     VkImageCreateInfo imageInfo {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -700,20 +782,40 @@ void VulkanModelResources::createTexture(
     vkCheck(vkBindImageMemory(device_, textureImage.image, textureImage.memory, 0),
         "vkBindImageMemory model texture failed");
 
-    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+    textureImage.view = createImageView(
+        textureImage.image,
+        VK_FORMAT_R8G8B8A8_SRGB,
+        VK_IMAGE_ASPECT_COLOR_BIT);
+    VkSamplerCreateInfo samplerInfo {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_NEAREST,
+        .minFilter = VK_FILTER_NEAREST,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .anisotropyEnable = VK_FALSE,
+        .compareEnable = VK_FALSE,
+        .minLod = 0.0f,
+        .maxLod = 0.0f,
+    };
+    vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &sampler),
+        "vkCreateSampler model texture failed");
+
     VkCommandBufferAllocateInfo commandBufferInfo {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .commandPool = commandPool_,
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = 1,
     };
-    vkCheck(vkAllocateCommandBuffers(device_, &commandBufferInfo, &commandBuffer),
+    vkCheck(vkAllocateCommandBuffers(
+            device_, &commandBufferInfo, &upload.commandBuffer),
         "vkAllocateCommandBuffers texture upload failed");
     VkCommandBufferBeginInfo beginInfo {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     };
-    vkCheck(vkBeginCommandBuffer(commandBuffer, &beginInfo),
+    vkCheck(vkBeginCommandBuffer(upload.commandBuffer, &beginInfo),
         "vkBeginCommandBuffer texture upload failed");
 
     VkImageMemoryBarrier2 toTransfer {
@@ -734,15 +836,15 @@ void VulkanModelResources::createTexture(
         .imageMemoryBarrierCount = 1,
         .pImageMemoryBarriers = &toTransfer,
     };
-    vkCmdPipelineBarrier2(commandBuffer, &toTransferDependency);
+    vkCmdPipelineBarrier2(upload.commandBuffer, &toTransferDependency);
 
     VkBufferImageCopy copyRegion {
         .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
         .imageExtent = { image.width, image.height, 1 },
     };
     vkCmdCopyBufferToImage(
-        commandBuffer,
-        staging.buffer,
+        upload.commandBuffer,
+        upload.staging.buffer,
         textureImage.image,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         1,
@@ -766,45 +868,47 @@ void VulkanModelResources::createTexture(
         .imageMemoryBarrierCount = 1,
         .pImageMemoryBarriers = &toRead,
     };
-    vkCmdPipelineBarrier2(commandBuffer, &toReadDependency);
-    vkCheck(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer texture upload failed");
+    vkCmdPipelineBarrier2(upload.commandBuffer, &toReadDependency);
+    vkCheck(vkEndCommandBuffer(upload.commandBuffer),
+        "vkEndCommandBuffer texture upload failed");
+
+    VkFenceCreateInfo fenceInfo {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+    };
+    vkCheck(vkCreateFence(device_, &fenceInfo, nullptr, &upload.fence),
+        "vkCreateFence texture upload failed");
 
     VkCommandBufferSubmitInfo commandBufferSubmit {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-        .commandBuffer = commandBuffer,
+        .commandBuffer = upload.commandBuffer,
     };
     VkSubmitInfo2 submit {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
         .commandBufferInfoCount = 1,
         .pCommandBufferInfos = &commandBufferSubmit,
     };
-    vkCheck(vkQueueSubmit2(graphicsQueue_, 1, &submit, VK_NULL_HANDLE),
+    vkCheck(vkQueueSubmit2(graphicsQueue_, 1, &submit, upload.fence),
         "vkQueueSubmit2 texture upload failed");
-    vkCheck(vkQueueWaitIdle(graphicsQueue_), "vkQueueWaitIdle texture upload failed");
-    vkFreeCommandBuffers(device_, commandPool_, 1, &commandBuffer);
+    upload.submitted = true;
+}
 
-    vkDestroyBuffer(device_, staging.buffer, nullptr);
-    vkFreeMemory(device_, staging.memory, nullptr);
-    textureImage.view = createImageView(
-        textureImage.image,
-        VK_FORMAT_R8G8B8A8_SRGB,
-        VK_IMAGE_ASPECT_COLOR_BIT);
-
-    VkSamplerCreateInfo samplerInfo {
-        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-        .magFilter = VK_FILTER_NEAREST,
-        .minFilter = VK_FILTER_NEAREST,
-        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
-        .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .anisotropyEnable = VK_FALSE,
-        .compareEnable = VK_FALSE,
-        .minLod = 0.0f,
-        .maxLod = 0.0f,
-    };
-    vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &sampler),
-        "vkCreateSampler model texture failed");
+void VulkanModelResources::destroyTextureUpload(
+    PendingTextureUpload& upload) const
+{
+    if (upload.fence) {
+        vkDestroyFence(device_, upload.fence, nullptr);
+    }
+    if (upload.commandBuffer) {
+        vkFreeCommandBuffers(
+            device_, commandPool_, 1, &upload.commandBuffer);
+    }
+    if (upload.staging.buffer) {
+        vkDestroyBuffer(device_, upload.staging.buffer, nullptr);
+    }
+    if (upload.staging.memory) {
+        vkFreeMemory(device_, upload.staging.memory, nullptr);
+    }
+    upload = {};
 }
 
 void VulkanModelResources::destroyTexture(

@@ -4,6 +4,7 @@
 
 #include <vulkan/vulkan.h>
 
+#include <cstdint>
 #include <vector>
 
 namespace sokoban {
@@ -34,18 +35,22 @@ public:
     VulkanSceneDescriptors(const VulkanSceneDescriptors&) = delete;
     VulkanSceneDescriptors& operator=(const VulkanSceneDescriptors&) = delete;
 
-    void create(VkDevice device, const Resources& resources);
+    void create(
+        VkDevice device,
+        const Resources& resources,
+        uint32_t setCount = 1);
     void update(const Resources& resources) const;
+    void update(uint32_t setIndex, const Resources& resources) const;
     void destroy();
 
     [[nodiscard]] VkDescriptorSetLayout layout() const { return layout_; }
-    [[nodiscard]] const VkDescriptorSet& set() const { return set_; }
+    [[nodiscard]] const VkDescriptorSet& set(uint32_t setIndex = 0) const;
 
 private:
     VkDevice device_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout layout_ = VK_NULL_HANDLE;
     VkDescriptorPool pool_ = VK_NULL_HANDLE;
-    VkDescriptorSet set_ = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> sets_;
     uint32_t modelTextureCount_ = 0;
 };
 

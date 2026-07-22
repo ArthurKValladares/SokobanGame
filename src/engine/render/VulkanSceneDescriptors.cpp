@@ -21,11 +21,17 @@ VulkanSceneDescriptors::~VulkanSceneDescriptors()
     destroy();
 }
 
-void VulkanSceneDescriptors::create(VkDevice device, const Resources& resources)
+void VulkanSceneDescriptors::create(
+    VkDevice device,
+    const Resources& resources,
+    uint32_t setCount)
 {
     destroy();
     if (resources.modelTextures.empty()) {
         throw std::runtime_error("Asset catalog must contain at least one model texture");
+    }
+    if (setCount == 0) {
+        throw std::runtime_error("Scene descriptors require at least one set");
     }
     device_ = device;
     modelTextureCount_ = static_cast<uint32_t>(resources.modelTextures.size());
@@ -85,24 +91,26 @@ void VulkanSceneDescriptors::create(VkDevice device, const Resources& resources)
 
         VkDescriptorPoolSize poolSize {
             .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = modelTextureCount_ + 6,
+            .descriptorCount = (modelTextureCount_ + 6) * setCount,
         };
         VkDescriptorPoolCreateInfo poolInfo {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-            .maxSets = 1,
+            .maxSets = setCount,
             .poolSizeCount = 1,
             .pPoolSizes = &poolSize,
         };
         vkCheck(vkCreateDescriptorPool(device_, &poolInfo, nullptr, &pool_),
             "vkCreateDescriptorPool failed");
 
+        std::vector<VkDescriptorSetLayout> layouts(setCount, layout_);
+        sets_.resize(setCount);
         VkDescriptorSetAllocateInfo allocateInfo {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
             .descriptorPool = pool_,
-            .descriptorSetCount = 1,
-            .pSetLayouts = &layout_,
+            .descriptorSetCount = setCount,
+            .pSetLayouts = layouts.data(),
         };
-        vkCheck(vkAllocateDescriptorSets(device_, &allocateInfo, &set_),
+        vkCheck(vkAllocateDescriptorSets(device_, &allocateInfo, sets_.data()),
             "vkAllocateDescriptorSets failed");
         update(resources);
     } catch (...) {
@@ -113,7 +121,17 @@ void VulkanSceneDescriptors::create(VkDevice device, const Resources& resources)
 
 void VulkanSceneDescriptors::update(const Resources& resources) const
 {
-    if (!set_) {
+    for (uint32_t i = 0; i < static_cast<uint32_t>(sets_.size()); ++i) {
+        update(i, resources);
+    }
+}
+
+void VulkanSceneDescriptors::update(
+    uint32_t setIndex,
+    const Resources& resources) const
+{
+    const VkDescriptorSet descriptorSet = set(setIndex);
+    if (!descriptorSet) {
         throw std::runtime_error("Scene descriptors have not been created");
     }
     if (!resources.shadow.valid() ||
@@ -172,7 +190,7 @@ void VulkanSceneDescriptors::update(const Resources& resources) const
     std::array<VkWriteDescriptorSet, 7> writes {
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = set_,
+            .dstSet = descriptorSet,
             .dstBinding = 3,
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -180,7 +198,7 @@ void VulkanSceneDescriptors::update(const Resources& resources) const
         },
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = set_,
+            .dstSet = descriptorSet,
             .dstBinding = 4,
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -188,7 +206,7 @@ void VulkanSceneDescriptors::update(const Resources& resources) const
         },
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = set_,
+            .dstSet = descriptorSet,
             .dstBinding = 0,
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -196,7 +214,7 @@ void VulkanSceneDescriptors::update(const Resources& resources) const
         },
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = set_,
+            .dstSet = descriptorSet,
             .dstBinding = 1,
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -204,7 +222,7 @@ void VulkanSceneDescriptors::update(const Resources& resources) const
         },
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = set_,
+            .dstSet = descriptorSet,
             .dstBinding = 2,
             .descriptorCount = static_cast<uint32_t>(modelImages.size()),
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -212,7 +230,7 @@ void VulkanSceneDescriptors::update(const Resources& resources) const
         },
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = set_,
+            .dstSet = descriptorSet,
             .dstBinding = 5,
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -220,7 +238,7 @@ void VulkanSceneDescriptors::update(const Resources& resources) const
         },
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = set_,
+            .dstSet = descriptorSet,
             .dstBinding = 6,
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -240,11 +258,20 @@ void VulkanSceneDescriptors::destroy()
             vkDestroyDescriptorSetLayout(device_, layout_, nullptr);
         }
     }
-    set_ = VK_NULL_HANDLE;
+    sets_.clear();
     pool_ = VK_NULL_HANDLE;
     layout_ = VK_NULL_HANDLE;
     modelTextureCount_ = 0;
     device_ = VK_NULL_HANDLE;
+}
+
+const VkDescriptorSet& VulkanSceneDescriptors::set(uint32_t setIndex) const
+{
+    if (setIndex >= sets_.size()) {
+        static const VkDescriptorSet nullSet = VK_NULL_HANDLE;
+        return nullSet;
+    }
+    return sets_[setIndex];
 }
 
 } // namespace sokoban

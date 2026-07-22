@@ -295,7 +295,9 @@ VulkanRenderer::VulkanRenderer(
     modelResources_.create(
         physicalDevice_, device_, commandPool_, graphicsQueue_,
         assetRoot_, manifest);
-    sceneDescriptors_.create(device_, descriptorResources());
+    sceneDescriptors_.create(
+        device_, descriptorResources(), maxFramesInFlight_);
+    descriptorSync_.markAllUpdated();
     createPipeline();
     createFrameResources();
     initializeDebugUi();
@@ -347,9 +349,6 @@ VulkanRenderer::~VulkanRenderer()
 void VulkanRenderer::drawFrame(const RenderFrameData& frameData, const UiDrawData& uiDrawData)
 {
     ensureAssets(renderAssetRequirementsForFrame(frameData));
-    if (modelResources_.publishReadyAssets(1)) {
-        sceneDescriptors_.update(descriptorResources());
-    }
 
 #if SOKOBAN_ENABLE_DEBUG_UI
     // Finish the ImGui frame even when swapchain acquisition is out of date
@@ -359,6 +358,14 @@ void VulkanRenderer::drawFrame(const RenderFrameData& frameData, const UiDrawDat
 
     auto& frame = frames_[currentFrame_];
     vkCheck(vkWaitForFences(device_, 1, &frame.inFlight, VK_TRUE, UINT64_MAX), "vkWaitForFences failed");
+    modelResources_.retireCompletedUploads();
+    if (modelResources_.publishReadyAssets(1)) {
+        descriptorSync_.resourcesChanged();
+    }
+    if (descriptorSync_.needsUpdate(currentFrame_)) {
+        sceneDescriptors_.update(currentFrame_, descriptorResources());
+        descriptorSync_.markUpdated(currentFrame_);
+    }
     modelResources_.updateAnimations(frameData);
 
     uint32_t imageIndex = 0;
@@ -424,7 +431,7 @@ void VulkanRenderer::preloadAssets(const RenderAssetRequirements& requirements)
 void VulkanRenderer::ensureAssets(const RenderAssetRequirements& requirements)
 {
     if (modelResources_.ensureAssets(requirements)) {
-        sceneDescriptors_.update(descriptorResources());
+        descriptorSync_.resourcesChanged();
     }
 }
 
@@ -670,6 +677,7 @@ void VulkanRenderer::setAntiAliasingMode(AntiAliasingMode mode)
         activeSampleCount_,
         swapchainResources_.renderScalePercent());
     sceneDescriptors_.update(descriptorResources());
+    descriptorSync_.markAllUpdated();
     createPipeline();
 }
 
@@ -688,6 +696,7 @@ void VulkanRenderer::setRenderScalePercent(int percent)
     swapchainResources_.recreateAttachments(activeSampleCount_, percent);
     ssaoPass_.recreate(swapchainResources_.renderExtent());
     sceneDescriptors_.update(descriptorResources());
+    descriptorSync_.markAllUpdated();
     logRenderConfiguration();
 }
 
@@ -1006,6 +1015,7 @@ void VulkanRenderer::recreateSwapchain()
     swapchainResources_.recreate();
     ssaoPass_.recreate(swapchainResources_.renderExtent());
     sceneDescriptors_.update(descriptorResources());
+    descriptorSync_.markAllUpdated();
     if (oldColorFormat != swapchainResources_.colorFormat()) {
         destroyPipeline();
         createPipeline();
@@ -1074,7 +1084,7 @@ void VulkanRenderer::recordCommandBuffer(
         swapchainResources_.resolvedColorView(),
         swapchainResources_.depthSourceImage(),
         frameData.lighting.ambientOcclusion,
-        sceneDescriptors_.set(),
+        sceneDescriptors_.set(currentFrame_),
         pipelines_.layout(),
         {
             .occlusion = pipelines_.ssao(),
@@ -1294,8 +1304,8 @@ void VulkanRenderer::recordScenePass(
 
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.scene());
     ++pendingStats_.pipelineBinds;
-    if (sceneDescriptors_.set()) {
-        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.layout(), 0, 1, &sceneDescriptors_.set(), 0, nullptr);
+    if (sceneDescriptors_.set(currentFrame_)) {
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.layout(), 0, 1, &sceneDescriptors_.set(currentFrame_), 0, nullptr);
     }
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
@@ -1403,8 +1413,8 @@ void VulkanRenderer::recordOverlayRendering(
 
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.ui());
         ++pendingStats_.pipelineBinds;
-        if (sceneDescriptors_.set()) {
-            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.layout(), 0, 1, &sceneDescriptors_.set(), 0, nullptr);
+        if (sceneDescriptors_.set(currentFrame_)) {
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines_.layout(), 0, 1, &sceneDescriptors_.set(currentFrame_), 0, nullptr);
         }
         vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);

@@ -446,6 +446,13 @@ void ApplicationDebugUi::draw(const Context& context) const
             assetStats.totalTextures,
             assetStats.pendingTextures);
         ImGui::Text(
+            "GPU texture uploads %u in flight, %llu submitted, %llu retired",
+            assetStats.uploadingTextures,
+            static_cast<unsigned long long>(
+                assetStats.textureUploadSubmissions),
+            static_cast<unsigned long long>(
+                assetStats.textureUploadCompletions));
+        ImGui::Text(
             "Animations %u/%u loaded, %u pending",
             assetStats.loadedAnimations,
             assetStats.totalAnimations,

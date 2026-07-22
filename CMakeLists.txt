@@ -404,6 +404,10 @@ if(SOKOBAN_BUILD_TESTS)
             src/engine/render/VulkanDeviceSelection.cpp
             src/engine/render/RenderResolution.cpp
     )
+    sokoban_add_test(NAME frame_descriptor_sync TARGET sokoban_frame_descriptor_sync_tests
+        SOURCES
+            tests/FrameDescriptorSyncTests.cpp
+    )
     sokoban_add_test(NAME level_editor TARGET sokoban_level_editor_tests
         SOURCES
             tests/LevelEditorTests.cpp

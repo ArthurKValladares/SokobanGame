@@ -3,6 +3,7 @@
 #include "engine/Config.hpp"
 #include "engine/Math.hpp"
 #include "engine/render/GltfMesh.hpp"
+#include "engine/render/FrameDescriptorSync.hpp"
 #include "engine/render/RenderTypes.hpp"
 #include "engine/render/VulkanModelResources.hpp"
 #include "engine/render/VulkanPipelineFactory.hpp"
@@ -233,6 +234,7 @@ private:
 
     static constexpr uint32_t maxFramesInFlight_ = 2;
     std::array<FrameResources, maxFramesInFlight_> frames_ {};
+    FrameDescriptorSync descriptorSync_ { maxFramesInFlight_ };
     uint32_t currentFrame_ = 0;
     AntiAliasingMode antiAliasingMode_ = AntiAliasingMode::Msaa8x;
     VkSampleCountFlagBits activeSampleCount_ = VK_SAMPLE_COUNT_1_BIT;
