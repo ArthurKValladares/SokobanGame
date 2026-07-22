@@ -80,7 +80,7 @@ private:
         int levelCount);
     [[nodiscard]] SlotSummary decodeSlotSummary(int slot, int levelCount) const;
     [[nodiscard]] int readActiveSlotMarker() const;
-    void writeActiveSlotMarker() const;
+    void writeActiveSlotMarker(int slot) const;
 
     std::filesystem::path directory_;
     // Decoded summaries for non-active slots, keyed by slot; nullopt entries

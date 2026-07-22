@@ -125,6 +125,7 @@ else()
 endif()
 
 add_executable(sokoban
+    src/engine/AtomicFile.cpp
     src/engine/AsyncSaveStore.cpp
     src/main.cpp
     src/engine/AnimationPreviewDebugUi.cpp
@@ -322,6 +323,7 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_json SDL3::SDL3
         SOURCES
             tests/PlayerProfileTests.cpp
+            src/engine/AtomicFile.cpp
             src/engine/AsyncSaveStore.cpp
             src/engine/InputBindings.cpp
             src/engine/PlayerProfile.cpp
@@ -334,6 +336,7 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_json SDL3::SDL3
         SOURCES
             tests/SaveSlotManagerTests.cpp
+            src/engine/AtomicFile.cpp
             src/engine/AsyncSaveStore.cpp
             src/engine/InputBindings.cpp
             src/engine/PlayerProfile.cpp
@@ -425,6 +428,7 @@ if(SOKOBAN_BUILD_TESTS)
         ASSETS_ENV
         SOURCES
             tests/AssetManifestEditorTests.cpp
+            src/engine/AtomicFile.cpp
             src/engine/AssetManifest.cpp
             src/engine/AssetManifestEditor.cpp
             src/engine/TileTypes.cpp

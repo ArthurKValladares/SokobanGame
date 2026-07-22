@@ -1,9 +1,10 @@
 #include "engine/AssetManifestEditor.hpp"
 
+#include "engine/AtomicFile.hpp"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
-#include <fstream>
 #include <stdexcept>
 #include <system_error>
 #include <utility>
@@ -73,36 +74,6 @@ void updateItem(std::vector<Item>& items, std::size_t index, Item item)
     items[index] = std::move(item);
 }
 
-void replaceFile(
-    const std::filesystem::path& destination,
-    const std::filesystem::path& temporary)
-{
-    std::error_code error;
-    std::filesystem::rename(temporary, destination, error);
-    if (!error) {
-        return;
-    }
-
-    const std::filesystem::path backup = destination.string() + ".bak";
-    std::filesystem::remove(backup, error);
-    error.clear();
-    std::filesystem::rename(destination, backup, error);
-    if (error) {
-        throw std::runtime_error(
-            "cannot prepare manifest replacement: " + error.message());
-    }
-
-    error.clear();
-    std::filesystem::rename(temporary, destination, error);
-    if (error) {
-        std::error_code rollbackError;
-        std::filesystem::rename(backup, destination, rollbackError);
-        throw std::runtime_error(
-            "cannot replace manifest: " + error.message());
-    }
-    std::filesystem::remove(backup, error);
-}
-
 } // namespace
 
 void AssetManifestEditor::initialize(std::filesystem::path filePath)
@@ -153,7 +124,6 @@ bool AssetManifestEditor::validate()
 
 bool AssetManifestEditor::save()
 {
-    const std::filesystem::path temporary = filePath_.string() + ".tmp";
     try {
         if (filePath_.empty()) {
             throw std::runtime_error("no manifest path is configured");
@@ -161,25 +131,11 @@ bool AssetManifestEditor::save()
         const std::string contents = serialize();
         (void)AssetManifest::parse(contents);
 
-        std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-        if (!stream) {
-            throw std::runtime_error(
-                "cannot open temporary manifest: " + temporary.string());
-        }
-        stream.write(contents.data(), static_cast<std::streamsize>(contents.size()));
-        stream.close();
-        if (!stream) {
-            throw std::runtime_error(
-                "cannot write temporary manifest: " + temporary.string());
-        }
-
-        replaceFile(filePath_, temporary);
+        atomicFile::write(filePath_, contents);
         dirty_ = false;
         status_ = "Saved " + filePath_.string();
         return true;
     } catch (const std::exception& error) {
-        std::error_code cleanupError;
-        std::filesystem::remove(temporary, cleanupError);
         status_ = "Save failed: " + std::string(error.what());
         return false;
     }

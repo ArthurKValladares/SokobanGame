@@ -1,7 +1,10 @@
 #include "engine/SaveSlotManager.hpp"
 
+#include "engine/AtomicFile.hpp"
+
 #include <fstream>
 #include <iterator>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 
@@ -131,19 +134,36 @@ std::optional<PlayerProfile> SaveSlotManager::switchTo(
         return std::nullopt;
     }
 
+    const int previousSlot = activeSlot_;
+    const std::string incomingStem = slotFileStem(slot);
+
+    // Prepare the incoming profile before changing any live state. Loading
+    // may recover a backup or migrate an old profile, but cannot repoint the
+    // active asynchronous save channel.
+    SaveStore incomingStore(
+        directory_, incomingStem, ProfileSections::ProgressOnly);
+    PlayerProfile profile = incomingStore.load().profile;
+    profile.adoptSettingsFrom(currentProfile);
+
+    store_->replaceChannel(
+        progressChannel_, directory_, incomingStem,
+        ProfileSections::ProgressOnly);
+
+    try {
+        // The atomic marker replacement is the commit point. If it cannot be
+        // written, restore the outgoing channel before exposing the failure.
+        writeActiveSlotMarker(slot);
+    } catch (...) {
+        store_->replaceChannel(
+            progressChannel_, directory_, slotFileStem(previousSlot),
+            ProfileSections::ProgressOnly);
+        throw;
+    }
+
+    activeSlot_ = slot;
     // The old-active slot's on-disk summary now matters again, and the
     // new-active one becomes live; drop the whole non-active cache.
     summaryCache_.assign(slotCount, std::nullopt);
-    activeSlot_ = slot;
-    writeActiveSlotMarker();
-    store_->replaceChannel(
-        progressChannel_, directory_, slotFileStem(activeSlot_),
-        ProfileSections::ProgressOnly);
-
-    // Settings are shared across slots: carry the live ones over the
-    // incoming slot's stale copies.
-    PlayerProfile profile = store_->load(progressChannel_).profile;
-    profile.adoptSettingsFrom(currentProfile);
     return profile;
 }
 
@@ -215,13 +235,18 @@ int SaveSlotManager::readActiveSlotMarker() const
     return (slot >= 1 && slot <= slotCount) ? slot - 1 : 0;
 }
 
-void SaveSlotManager::writeActiveSlotMarker() const
+void SaveSlotManager::writeActiveSlotMarker(int slot) const
 {
     std::error_code error;
     std::filesystem::create_directories(directory_, error);
-    std::ofstream stream(
-        directory_ / activeSlotMarkerName, std::ios::binary | std::ios::trunc);
-    stream << (activeSlot_ + 1) << '\n';
+    if (error) {
+        throw std::runtime_error(
+            "cannot create save directory " + directory_.string() + ": " +
+            error.message());
+    }
+    atomicFile::write(
+        directory_ / activeSlotMarkerName,
+        std::to_string(slot + 1) + '\n');
 }
 
 } // namespace sokoban

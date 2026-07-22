@@ -14,6 +14,7 @@
 #endif
 
 #include <algorithm>
+#include <exception>
 #include <utility>
 
 namespace sokoban {
@@ -651,8 +652,14 @@ void Application::switchSaveSlot(int slot)
         persistProfile(true);
     }
 
-    std::optional<PlayerProfile> switched =
-        saveSlots_.switchTo(slot, playerProfile_);
+    std::optional<PlayerProfile> switched;
+    try {
+        switched = saveSlots_.switchTo(slot, playerProfile_);
+    } catch (const std::exception& error) {
+        log::error() << "Could not switch to save slot " << (slot + 1) <<
+            ": " << error.what();
+        return;
+    }
     if (!switched) {
         return;
     }

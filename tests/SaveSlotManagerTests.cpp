@@ -245,6 +245,55 @@ void testSummaryCacheInvalidation()
         "5-level catalog re-evaluates completion");
 }
 
+void testFailedMarkerCommitRollsBackSwitch()
+{
+    TemporaryDirectory directory;
+    {
+        sokoban::SaveStore second(directory.path(), "profile-slot2");
+        check(second.save(profileWithProgress(1)), "slot 2 seeded for rollback");
+        sokoban::SaveStore third(directory.path(), "profile-slot3");
+        check(third.save(profileWithProgress(2)), "slot 3 seeded for rollback");
+    }
+
+    sokoban::SaveSlotManager manager(directory.path(), instantWrites);
+    sokoban::PlayerProfile active = manager.loadActiveProfile();
+    std::optional<sokoban::PlayerProfile> third = manager.switchTo(2, active);
+    check(third.has_value() && manager.activeSlot() == 2,
+        "precondition switch to slot 3 succeeds");
+
+    // A non-empty directory at the temporary path reliably prevents the
+    // marker's atomic writer from creating its temporary file.
+    const std::filesystem::path blockedTemporary =
+        directory.path() / "active-slot.txt.tmp";
+    std::filesystem::create_directories(blockedTemporary);
+    std::ofstream(blockedTemporary / "blocker.txt") << "blocked";
+
+    bool threw = false;
+    try {
+        (void)manager.switchTo(1, *third);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    check(threw, "marker commit failure is reported");
+    check(manager.activeSlot() == 2,
+        "failed switch keeps previous active slot");
+
+    std::ifstream marker(directory.path() / "active-slot.txt");
+    int markedSlot = 0;
+    marker >> markedSlot;
+    check(markedSlot == 3, "failed switch preserves previous marker");
+
+    sokoban::PlayerProfile replacement = profileWithProgress(0);
+    manager.saveProgress(replacement, true);
+    manager.flush();
+    check(sokoban::SaveStore(directory.path(), "profile-slot3").load()
+            .profile.currentLevel == 0,
+        "post-failure saves still target previous slot");
+    check(sokoban::SaveStore(directory.path(), "profile-slot2").load()
+            .profile.currentLevel == 1,
+        "failed destination is not used by later saves");
+}
+
 } // namespace
 
 int main()
@@ -253,6 +302,7 @@ int main()
     testPreSplitSettingsMigration();
     testSummariesSwitchingAndDeletion();
     testSummaryCacheInvalidation();
+    testFailedMarkerCommitRollsBackSwitch();
 
     if (failures == 0) {
         std::cout << "SaveSlotManagerTests: " << checks << " checks passed\n";
