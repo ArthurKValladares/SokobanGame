@@ -173,6 +173,7 @@ add_executable(sokoban
     src/engine/render/VulkanUiResources.cpp
     src/engine/ui/FontAtlas.cpp
     src/engine/ui/LevelCompleteOverlay.cpp
+    src/engine/ui/MenuKit.cpp
     src/engine/ui/OptionsMenu.cpp
     src/engine/ui/TitleScreen.cpp
     src/engine/ui/Ui.cpp
@@ -380,6 +381,7 @@ if(SOKOBAN_BUILD_TESTS)
         tests/UiTests.cpp
         src/engine/InputBindings.cpp
         src/engine/ui/FontAtlas.cpp
+        src/engine/ui/MenuKit.cpp
         src/engine/ui/OptionsMenu.cpp
         src/engine/ui/Ui.cpp
         src/engine/ui/UiControls.cpp
@@ -403,6 +405,7 @@ if(SOKOBAN_BUILD_TESTS)
         src/engine/InputBindings.cpp
         src/engine/ui/FontAtlas.cpp
         src/engine/ui/LevelCompleteOverlay.cpp
+        src/engine/ui/MenuKit.cpp
         src/engine/ui/OptionsMenu.cpp
         src/engine/ui/TitleScreen.cpp
         src/engine/ui/Ui.cpp

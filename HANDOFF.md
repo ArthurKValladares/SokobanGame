@@ -248,6 +248,15 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   vertical/horizontal flows, content-sized groups, fixed items, padding/gaps,
   weighted flexible space, and overflow diagnostics. Controls still consume
   final `UiRect`s, while callers describe relationships instead of coordinates.
+- `src/engine/ui/MenuKit.*`: shared building blocks for the player-facing
+  menus. `RowList` builds a frame's focusable rows (conditionally, via
+  `addIf`) and owns wrap-around navigation, so hand-maintained row enums and
+  shifted-index arithmetic cannot drift from the layout; `MenuPage` is the
+  standard header scaffold (padded tree, title, optional subtitle, divider);
+  `trailingText`, `formatDuration` (one time format with a tenths style -
+  the menus previously had three diverging copies), `centeredPanel`, and
+  `centeredColumn` replace per-menu duplicates. Presentation-only; menus own
+  their state and actions.
 - `src/engine/ui/OptionsMenu.*`: headless menu page/navigation state and
   tree-based composition for Graphics, Audio, and separated quit confirmation.
   Named row enums replace positional focus indexes. A frame emits at most

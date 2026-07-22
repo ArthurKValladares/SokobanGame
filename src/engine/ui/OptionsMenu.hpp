@@ -92,7 +92,6 @@ public:
     void provideBindingCandidate(const InputBinding& candidate);
 
 private:
-    void navigateRows(const OptionsMenuInput& input, int rowCount);
     void setPage(Page page);
     [[nodiscard]] std::optional<OptionsAction> drawMain(
         UiContext& ui,

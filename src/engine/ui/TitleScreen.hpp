@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/Math.hpp"
+#include "engine/ui/MenuKit.hpp"
 
 #include <optional>
 #include <variant>
@@ -115,7 +116,8 @@ public:
 
 private:
     void setPage(Page page);
-    void navigateRows(const TitleScreenInput& input, int rowCount);
+    // Wrap navigation that also resets row-local state on selection change.
+    void navigate(const menuKit::RowList& rows, const TitleScreenInput& input);
     [[nodiscard]] int selectableScreens(const TitleLevelInfo& level) const;
     [[nodiscard]] bool activeSlotHasSave() const;
     [[nodiscard]] bool anySaveExists() const;

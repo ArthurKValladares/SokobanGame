@@ -1,5 +1,6 @@
 #include "engine/ui/OptionsMenu.hpp"
 
+#include "engine/ui/MenuKit.hpp"
 #include "engine/render/RenderResolution.hpp"
 #include "engine/ui/Ui.hpp"
 #include "engine/ui/UiControls.hpp"
@@ -18,20 +19,6 @@ namespace {
 using uiControls::ButtonTone;
 using uiControls::ChoiceOption;
 
-// Rows on the main page in order; Title is skipped when the menu is opened
-// from the title screen itself.
-enum class MainRow {
-    Graphics,
-    Audio,
-    Controls,
-    LevelSelect,
-    Title,
-    Quit,
-    Count,
-};
-
-// LevelSelect appears only for pause menus on saves that beat the game, and
-// Title only for pause menus.
 // The Controls page lists these remappable gameplay actions in order,
 // followed by Reset To Defaults and Back rows. Menu navigation stays fixed
 // so a bad remap cannot lock the player out of the menus.
@@ -133,34 +120,9 @@ int displayIndex(const OptionsMenuSettings& settings)
     return 3;
 }
 
-UiRect centeredPanel(Vec2 viewport, float desiredHeight)
-{
-    const float width = std::max(std::min(560.0f, viewport.x - 32.0f), 320.0f);
-    const float height = std::max(std::min(desiredHeight, viewport.y - 32.0f), 400.0f);
-    return {
-        { (viewport.x - width) * 0.5f, (viewport.y - height) * 0.5f },
-        { width, height },
-    };
-}
-
 struct LabeledControlLayout {
     UiLayoutNode label;
     UiLayoutNode control;
-};
-
-struct MenuPageLayout {
-    explicit MenuPageLayout(float afterHeader = 28.0f)
-        : tree(UiLayoutAxis::Vertical, { 42.0f, 30.0f, 42.0f, 40.0f })
-    {
-        title = tree.item(tree.root(), 48.0f);
-        tree.spacer(tree.root(), 14.0f);
-        divider = tree.item(tree.root(), 1.0f);
-        tree.spacer(tree.root(), afterHeader);
-    }
-
-    UiLayoutTree tree;
-    UiLayoutNode title {};
-    UiLayoutNode divider {};
 };
 
 LabeledControlLayout addLabeledControl(
@@ -177,8 +139,9 @@ LabeledControlLayout addLabeledControl(
     };
 }
 
-struct MainPageLayout : MenuPageLayout {
+struct MainPageLayout : menuKit::MenuPage {
     MainPageLayout(UiRect panel, bool withTitleExit, bool withLevelSelect)
+        : menuKit::MenuPage(28.0f)
     {
         graphics = tree.item(tree.root(), 62.0f);
         tree.spacer(tree.root(), 18.0f);
@@ -209,9 +172,9 @@ struct MainPageLayout : MenuPageLayout {
     UiLayoutNode quit {};
 };
 
-struct ControlsPageLayout : MenuPageLayout {
+struct ControlsPageLayout : menuKit::MenuPage {
     explicit ControlsPageLayout(UiRect panel)
-        : MenuPageLayout(18.0f)
+        : menuKit::MenuPage(18.0f)
     {
         for (UiLayoutNode& action : actions) {
             action = tree.item(tree.root(), 46.0f);
@@ -232,8 +195,9 @@ struct ControlsPageLayout : MenuPageLayout {
     UiLayoutNode back {};
 };
 
-struct GraphicsPageLayout : MenuPageLayout {
+struct GraphicsPageLayout : menuKit::MenuPage {
     explicit GraphicsPageLayout(UiRect panel)
+        : menuKit::MenuPage(28.0f)
     {
         antiAliasing = addLabeledControl(tree, tree.root(), 52.0f);
         tree.spacer(tree.root(), 10.0f);
@@ -265,8 +229,9 @@ struct GraphicsPageLayout : MenuPageLayout {
     UiLayoutNode back {};
 };
 
-struct AudioPageLayout : MenuPageLayout {
+struct AudioPageLayout : menuKit::MenuPage {
     explicit AudioPageLayout(UiRect panel)
+        : menuKit::MenuPage(28.0f)
     {
         masterVolume = addLabeledControl(tree, tree.root(), 34.0f, 8.0f);
         tree.spacer(tree.root(), 38.0f);
@@ -281,8 +246,9 @@ struct AudioPageLayout : MenuPageLayout {
     UiLayoutNode back {};
 };
 
-struct QuitPageLayout : MenuPageLayout {
+struct QuitPageLayout : menuKit::MenuPage {
     explicit QuitPageLayout(UiRect panel)
+        : menuKit::MenuPage(28.0f)
     {
         tree.spacer(tree.root(), 20.0f);
         message = tree.item(tree.root(), 44.0f);
@@ -298,30 +264,6 @@ struct QuitPageLayout : MenuPageLayout {
     UiLayoutNode cancel {};
     UiLayoutNode quit {};
 };
-
-void drawTitle(
-    UiContext& ui,
-    const MenuPageLayout& layout,
-    std::string_view title)
-{
-    ui.centeredText(layout.tree.rect(layout.title), title,
-        { 0.94f, 0.96f, 0.93f, 1.0f }, 36.0f);
-    ui.divider(layout.tree.rect(layout.divider));
-}
-
-void drawTrailingText(
-    UiContext& ui,
-    UiRect row,
-    std::string_view text,
-    Vec4 color,
-    float size)
-{
-    const Vec2 measured = ui.measureText(text, size);
-    ui.text({
-        row.position.x + row.size.x - measured.x,
-        row.position.y + (row.size.y - size) * 0.5f,
-    }, text, color, size);
-}
 
 bool cycleIndex(
     int& value,
@@ -428,7 +370,7 @@ std::optional<OptionsAction> OptionsMenu::draw(
     const float height = page_ == Page::Graphics
         ? 740.0f
         : (page_ == Page::Controls ? 700.0f : 540.0f);
-    const UiRect panel = centeredPanel(viewport, height);
+    const UiRect panel = menuKit::centeredPanel(viewport, 560.0f, height, 400.0f);
     ui.panel(panel);
 
     switch (page_) {
@@ -439,16 +381,6 @@ std::optional<OptionsAction> OptionsMenu::draw(
     case Page::QuitConfirmation: return drawQuitConfirmation(ui, panel, input);
     }
     return std::nullopt;
-}
-
-void OptionsMenu::navigateRows(const OptionsMenuInput& input, int rowCount)
-{
-    if (input.up) {
-        selectedRow_ = (selectedRow_ + rowCount - 1) % rowCount;
-    }
-    if (input.down) {
-        selectedRow_ = (selectedRow_ + 1) % rowCount;
-    }
 }
 
 void OptionsMenu::setPage(Page page)
@@ -464,36 +396,38 @@ std::optional<OptionsAction> OptionsMenu::drawMain(
     UiRect panel,
     const OptionsMenuInput& input)
 {
-    // Optional rows shift the later indexes: order is Graphics, Audio,
-    // Controls, [Level Select], [Exit To Title], Quit.
-    const int levelSelectRowIndex = rowIndex(MainRow::LevelSelect);
-    const int titleRowIndex = levelSelectRowIndex + (allowLevelSelect_ ? 1 : 0);
-    const int quitRowIndex = titleRowIndex + (allowTitleExit_ ? 1 : 0);
-    navigateRows(input, quitRowIndex + 1);
+    menuKit::RowList rows;
+    const int graphicsRowIndex = rows.add();
+    const int audioRowIndex = rows.add();
+    const int controlsRowIndex = rows.add();
+    const int levelSelectRowIndex = rows.addIf(allowLevelSelect_);
+    const int titleRowIndex = rows.addIf(allowTitleExit_);
+    const int quitRowIndex = rows.add();
+    (void)rows.navigate(selectedRow_, input.up, input.down);
 
     MainPageLayout layout(panel, allowTitleExit_, allowLevelSelect_);
 
-    drawTitle(ui, layout, "OPTIONS");
+    layout.drawHeader(ui, "OPTIONS", 36.0f);
     std::optional<OptionsAction> action;
     if (uiControls::button(
             ui, "options.graphics", layout.tree.rect(layout.graphics), "Graphics", {
             .tone = ButtonTone::Accent,
-            .focused = selectedRow_ == rowIndex(MainRow::Graphics),
-            .activate = input.confirm && selectedRow_ == rowIndex(MainRow::Graphics),
+            .focused = selectedRow_ == graphicsRowIndex,
+            .activate = input.confirm && selectedRow_ == graphicsRowIndex,
         })) {
         setPage(Page::Graphics);
     }
     if (uiControls::button(
             ui, "options.audio", layout.tree.rect(layout.audio), "Audio", {
-            .focused = selectedRow_ == rowIndex(MainRow::Audio),
-            .activate = input.confirm && selectedRow_ == rowIndex(MainRow::Audio),
+            .focused = selectedRow_ == audioRowIndex,
+            .activate = input.confirm && selectedRow_ == audioRowIndex,
         })) {
         setPage(Page::Audio);
     }
     if (uiControls::button(
             ui, "options.controls", layout.tree.rect(layout.controls), "Controls", {
-            .focused = selectedRow_ == rowIndex(MainRow::Controls),
-            .activate = input.confirm && selectedRow_ == rowIndex(MainRow::Controls),
+            .focused = selectedRow_ == controlsRowIndex,
+            .activate = input.confirm && selectedRow_ == controlsRowIndex,
         })) {
         setPage(Page::Controls);
     }
@@ -533,7 +467,8 @@ std::optional<OptionsAction> OptionsMenu::drawGraphics(
     Vec2 viewport,
     const OptionsMenuInput& input)
 {
-    navigateRows(input, rowIndex(GraphicsRow::Count));
+    menuKit::RowList::navigateCount(
+        selectedRow_, rowIndex(GraphicsRow::Count), input.up, input.down);
     bool changed = false;
     if (customRenderScaleDragPending_ && !ui.mouseDown()) {
         customRenderScaleDragPending_ = false;
@@ -542,7 +477,7 @@ std::optional<OptionsAction> OptionsMenu::drawGraphics(
 
     GraphicsPageLayout layout(panel);
 
-    drawTitle(ui, layout, "GRAPHICS");
+    layout.drawHeader(ui, "GRAPHICS", 36.0f);
 
     const bool antiAliasingFocused =
         selectedRow_ == rowIndex(GraphicsRow::AntiAliasing);
@@ -605,7 +540,7 @@ std::optional<OptionsAction> OptionsMenu::drawGraphics(
     }
     const std::string customScaleText =
         std::to_string(settings_.customRenderScalePercent) + "%";
-    drawTrailingText(
+    menuKit::trailingText(
         ui, layout.tree.rect(layout.customToggle),
         customScaleText,
         settings_.customRenderScale
@@ -680,12 +615,13 @@ std::optional<OptionsAction> OptionsMenu::drawAudio(
     UiRect panel,
     const OptionsMenuInput& input)
 {
-    navigateRows(input, rowIndex(AudioRow::Count));
+    menuKit::RowList::navigateCount(
+        selectedRow_, rowIndex(AudioRow::Count), input.up, input.down);
     bool changed = false;
 
     AudioPageLayout layout(panel);
 
-    drawTitle(ui, layout, "AUDIO");
+    layout.drawHeader(ui, "AUDIO", 36.0f);
 
     auto keyboardAdjust = [&](AudioRow row, float& value) {
         const float old = value;
@@ -710,7 +646,7 @@ std::optional<OptionsAction> OptionsMenu::drawAudio(
         settings_.masterVolume, 0.0f, 1.0f, masterVolumeFocused);
     const int masterPercent = static_cast<int>(std::round(settings_.masterVolume * 100.0f));
     const std::string masterText = std::to_string(masterPercent) + "%";
-    drawTrailingText(ui, layout.tree.rect(layout.masterVolume.label),
+    menuKit::trailingText(ui, layout.tree.rect(layout.masterVolume.label),
         masterText, { 0.68f, 0.88f, 0.82f, 1.0f }, 20.0f);
 
     const bool musicVolumeFocused =
@@ -724,7 +660,7 @@ std::optional<OptionsAction> OptionsMenu::drawAudio(
         settings_.musicVolume, 0.0f, 1.0f, musicVolumeFocused);
     const int musicPercent = static_cast<int>(std::round(settings_.musicVolume * 100.0f));
     const std::string musicText = std::to_string(musicPercent) + "%";
-    drawTrailingText(ui, layout.tree.rect(layout.musicVolume.label),
+    menuKit::trailingText(ui, layout.tree.rect(layout.musicVolume.label),
         musicText, { 0.68f, 0.88f, 0.82f, 1.0f }, 20.0f);
 
     const bool backFocused = selectedRow_ == rowIndex(AudioRow::Back);
@@ -754,11 +690,12 @@ std::optional<OptionsAction> OptionsMenu::drawControls(
     // Navigation freezes while a capture is pending; Escape/Start cancel via
     // back() in the caller.
     if (!capturingAction_) {
-        navigateRows(input, controlsRowCount);
+        menuKit::RowList::navigateCount(
+            selectedRow_, controlsRowCount, input.up, input.down);
     }
 
     ControlsPageLayout layout(panel);
-    drawTitle(ui, layout, "CONTROLS");
+    layout.drawHeader(ui, "CONTROLS", 36.0f);
 
     for (std::size_t i = 0; i < remappableActions.size(); ++i) {
         const InputAction action = remappableActions[i];
@@ -776,7 +713,7 @@ std::optional<OptionsAction> OptionsMenu::drawControls(
             })) {
             capturingAction_ = action;
         }
-        drawTrailingText(
+        menuKit::trailingText(
             ui, row,
             capturingThis
                 ? "Press a key or button..."
@@ -826,11 +763,12 @@ std::optional<OptionsAction> OptionsMenu::drawQuitConfirmation(
     UiRect panel,
     const OptionsMenuInput& input)
 {
-    navigateRows(input, rowIndex(QuitRow::Count));
+    menuKit::RowList::navigateCount(
+        selectedRow_, rowIndex(QuitRow::Count), input.up, input.down);
 
     QuitPageLayout layout(panel);
 
-    drawTitle(ui, layout, "QUIT GAME?");
+    layout.drawHeader(ui, "QUIT GAME?", 36.0f);
     ui.centeredText(layout.tree.rect(layout.message),
         "Your progress is saved automatically.",
         { 0.72f, 0.76f, 0.74f, 1.0f }, 20.0f);

@@ -1,5 +1,6 @@
 #include "engine/ui/TitleScreen.hpp"
 
+#include "engine/ui/MenuKit.hpp"
 #include "engine/ui/Ui.hpp"
 #include "engine/ui/UiControls.hpp"
 #include "engine/ui/UiLayout.hpp"
@@ -13,28 +14,6 @@ namespace sokoban {
 namespace {
 
 using uiControls::ButtonTone;
-
-// Main-menu rows in order; the Save Slots row is hidden while no save
-// exists anywhere (the New Game flow picks the slot instead).
-enum class MainRow {
-    Primary, // Continue, or New Game when the active slot has no progress
-    SaveSlots,
-    Options,
-    Quit,
-    Count,
-};
-
-enum class DeleteRow {
-    Cancel,
-    Confirm,
-    Count,
-};
-
-template <typename Row>
-constexpr int rowIndex(Row row)
-{
-    return static_cast<int>(row);
-}
 
 constexpr float titleBackgroundAspect = 16.0f / 9.0f;
 
@@ -52,15 +31,6 @@ UiRect aspectFillUv(Vec2 viewport, float imageAspect)
     return { { (1.0f - width) * 0.5f, 0.0f }, { width, 1.0f } };
 }
 
-UiRect centeredColumn(Vec2 viewport, float desiredWidth)
-{
-    const float width = std::min(desiredWidth, std::max(viewport.x - 32.0f, 0.0f));
-    return {
-        { (viewport.x - width) * 0.5f, 0.0f },
-        { width, viewport.y },
-    };
-}
-
 UiRect leftColumn(Vec2 viewport, float desiredWidth)
 {
     const float width = std::min(desiredWidth, std::max(viewport.x - 32.0f, 0.0f));
@@ -70,51 +40,6 @@ UiRect leftColumn(Vec2 viewport, float desiredWidth)
         { width, viewport.y },
     };
 }
-
-void drawTrailingText(
-    UiContext& ui,
-    UiRect row,
-    std::string_view text,
-    Vec4 color,
-    float size,
-    float rightPadding = 18.0f)
-{
-    const Vec2 measured = ui.measureText(text, size);
-    ui.text({
-        row.position.x + row.size.x - measured.x - rightPadding,
-        row.position.y + (row.size.y - size) * 0.5f,
-    }, text, color, size);
-}
-
-std::string formatTimeSeconds(double seconds)
-{
-    const int whole = std::max(0, static_cast<int>(seconds));
-    const int minutes = whole / 60;
-    const int remainder = whole % 60;
-    std::string result = std::to_string(minutes) + ":";
-    if (remainder < 10) {
-        result += '0';
-    }
-    result += std::to_string(remainder);
-    return result;
-}
-
-struct TitlePageLayout {
-    TitlePageLayout()
-        : tree(UiLayoutAxis::Vertical, { 42.0f, 34.0f, 42.0f, 40.0f })
-    {
-        title = tree.item(tree.root(), 58.0f);
-        subtitle = tree.item(tree.root(), 24.0f);
-        tree.spacer(tree.root(), 12.0f);
-        divider = tree.item(tree.root(), 1.0f);
-        tree.spacer(tree.root(), 26.0f);
-    }
-
-    UiLayoutTree tree;
-    UiLayoutNode title {};
-    UiLayoutNode subtitle {};
-    UiLayoutNode divider {};
-};
 
 } // namespace
 
@@ -180,19 +105,9 @@ void TitleScreen::setPage(Page page)
     }
 }
 
-void TitleScreen::navigateRows(const TitleScreenInput& input, int rowCount)
+void TitleScreen::navigate(const menuKit::RowList& rows, const TitleScreenInput& input)
 {
-    if (rowCount <= 0) {
-        return;
-    }
-    const int oldRow = selectedRow_;
-    if (input.up) {
-        selectedRow_ = (selectedRow_ + rowCount - 1) % rowCount;
-    }
-    if (input.down) {
-        selectedRow_ = (selectedRow_ + 1) % rowCount;
-    }
-    if (selectedRow_ != oldRow) {
+    if (rows.navigate(selectedRow_, input.up, input.down)) {
         selectedScreen_ = 0;
         deleteColumnFocused_ = false;
     }
@@ -236,7 +151,8 @@ std::optional<TitleAction> TitleScreen::draw(
     ui.rect(fullscreen, { 0.015f, 0.020f, 0.021f, 0.12f });
     const UiRect panel = page_ == Page::Main
         ? leftColumn(viewport, 520.0f)
-        : centeredColumn(viewport, page_ == Page::LevelSelect ? 640.0f : 520.0f);
+        : menuKit::centeredColumn(
+              viewport, page_ == Page::LevelSelect ? 640.0f : 520.0f);
 
     switch (page_) {
     case Page::Main: return drawMain(ui, panel, input);
@@ -254,13 +170,15 @@ std::optional<TitleAction> TitleScreen::drawMain(
     const TitleScreenInput& input)
 {
     const bool showSaveSlots = anySaveExists();
-    const int saveSlotsRowIndex = rowIndex(MainRow::SaveSlots);
-    const int optionsRowIndex = saveSlotsRowIndex + (showSaveSlots ? 1 : 0);
-    const int quitRowIndex = optionsRowIndex + 1;
-    navigateRows(input, quitRowIndex + 1);
+    menuKit::RowList rows;
+    const int primaryRowIndex = rows.add();
+    const int saveSlotsRowIndex = rows.addIf(showSaveSlots);
+    const int optionsRowIndex = rows.add();
+    const int quitRowIndex = rows.add();
+    navigate(rows, input);
 
-    TitlePageLayout layout;
-    UiLayoutTree& tree = layout.tree;
+    menuKit::MenuPage page(26.0f, true);
+    UiLayoutTree& tree = page.tree;
     tree.spacer(tree.root(), 36.0f);
     const UiLayoutNode primaryRow = tree.item(tree.root(), 58.0f);
     tree.spacer(tree.root(), 14.0f);
@@ -276,11 +194,12 @@ std::optional<TitleAction> TitleScreen::drawMain(
     const UiLayoutNode quitRow = tree.item(tree.root(), 58.0f);
     tree.arrange(panel);
 
-    ui.centeredText(tree.rect(layout.title), "SOKOBAN 3D",
+    // The brand block keeps its custom subtitle size.
+    ui.centeredText(tree.rect(page.title), "SOKOBAN 3D",
         { 0.94f, 0.96f, 0.93f, 1.0f }, 44.0f);
-    ui.centeredText(tree.rect(layout.subtitle), "a tile-pushing puzzle",
+    ui.centeredText(tree.rect(page.subtitle), "a tile-pushing puzzle",
         { 0.62f, 0.67f, 0.65f, 1.0f }, 18.0f);
-    ui.divider(tree.rect(layout.divider));
+    ui.divider(tree.rect(page.divider));
 
     std::optional<TitleAction> action;
     const bool hasSave = activeSlotHasSave();
@@ -288,8 +207,8 @@ std::optional<TitleAction> TitleScreen::drawMain(
             ui, "title.primary", tree.rect(primaryRow),
             hasSave ? "Continue" : "New Game", {
             .tone = ButtonTone::Accent,
-            .focused = selectedRow_ == rowIndex(MainRow::Primary),
-            .activate = input.confirm && selectedRow_ == rowIndex(MainRow::Primary),
+            .focused = selectedRow_ == primaryRowIndex,
+            .activate = input.confirm && selectedRow_ == primaryRowIndex,
         })) {
         if (hasSave) {
             action = title::Continue {};
@@ -335,11 +254,15 @@ std::optional<TitleAction> TitleScreen::drawLevelSelect(
     UiRect panel,
     const TitleScreenInput& input)
 {
-    const int rowCount = static_cast<int>(levels_.size()) + 1; // + Back
-    navigateRows(input, rowCount);
+    menuKit::RowList rows;
+    for (std::size_t i = 0; i < levels_.size(); ++i) {
+        (void)rows.add(); // level rows share their vector index
+    }
+    const int backRowIndex = rows.add();
+    navigate(rows, input);
 
-    TitlePageLayout layout;
-    UiLayoutTree& tree = layout.tree;
+    menuKit::MenuPage page(26.0f, true);
+    UiLayoutTree& tree = page.tree;
     std::vector<UiLayoutNode> levelRows;
     levelRows.reserve(levels_.size());
     for (std::size_t i = 0; i < levels_.size(); ++i) {
@@ -350,12 +273,8 @@ std::optional<TitleAction> TitleScreen::drawLevelSelect(
     const UiLayoutNode backRow = tree.item(tree.root(), 52.0f);
     tree.arrange(panel);
 
-    ui.centeredText(tree.rect(layout.title), "LEVEL SELECT",
-        { 0.94f, 0.96f, 0.93f, 1.0f }, 40.0f);
-    ui.centeredText(tree.rect(layout.subtitle),
-        "Left/Right picks the starting screen",
-        { 0.62f, 0.67f, 0.65f, 1.0f }, 16.0f);
-    ui.divider(tree.rect(layout.divider));
+    page.drawHeader(ui, "LEVEL SELECT", 40.0f,
+        "Left/Right picks the starting screen");
 
     std::optional<TitleAction> action;
     for (std::size_t i = 0; i < levels_.size(); ++i) {
@@ -370,8 +289,8 @@ std::optional<TitleAction> TitleScreen::drawLevelSelect(
                 row.position.x + 18.0f,
                 row.position.y + (row.size.y - 22.0f) * 0.5f,
             }, label, { 0.45f, 0.48f, 0.47f, 0.7f }, 22.0f);
-            drawTrailingText(ui, row, "LOCKED",
-                { 0.45f, 0.48f, 0.47f, 0.7f }, 18.0f);
+            menuKit::trailingText(ui, row, "LOCKED",
+                { 0.45f, 0.48f, 0.47f, 0.7f }, 18.0f, 18.0f);
             continue;
         }
 
@@ -406,21 +325,23 @@ std::optional<TitleAction> TitleScreen::drawLevelSelect(
         } else if (level.completed && level.bestMoves) {
             status = "Best " + std::to_string(*level.bestMoves) + " moves";
             if (level.bestTimeSeconds) {
-                status += " - " + formatTimeSeconds(*level.bestTimeSeconds);
+                status += " - " + menuKit::formatDuration(
+                    *level.bestTimeSeconds,
+                    menuKit::DurationStyle::MinutesSeconds);
             }
         } else if (!level.completed) {
             status = "In progress";
         }
         if (!status.empty()) {
-            drawTrailingText(ui, row, status,
+            menuKit::trailingText(ui, row, status,
                 focused
                     ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
                     : Vec4 { 0.62f, 0.67f, 0.65f, 1.0f },
-                18.0f);
+                18.0f, 18.0f);
         }
     }
 
-    const bool backFocused = selectedRow_ == rowCount - 1;
+    const bool backFocused = selectedRow_ == backRowIndex;
     if (uiControls::button(
             ui, "title.level-select.back", tree.rect(backRow), "Back", {
             .focused = backFocused,
@@ -440,11 +361,15 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
     UiRect panel,
     const TitleScreenInput& input)
 {
-    const int rowCount = static_cast<int>(saveSlots_.size()) + 1; // + Back
-    navigateRows(input, rowCount);
+    menuKit::RowList rows;
+    for (std::size_t i = 0; i < saveSlots_.size(); ++i) {
+        (void)rows.add(); // slot rows share their vector index
+    }
+    const int backRowIndex = rows.add();
+    navigate(rows, input);
 
-    TitlePageLayout layout;
-    UiLayoutTree& tree = layout.tree;
+    menuKit::MenuPage page(26.0f, true);
+    UiLayoutTree& tree = page.tree;
     std::vector<UiLayoutNode> slotRows;
     slotRows.reserve(saveSlots_.size());
     for (std::size_t i = 0; i < saveSlots_.size(); ++i) {
@@ -457,15 +382,12 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
     const UiLayoutNode backRow = tree.item(tree.root(), 52.0f);
     tree.arrange(panel);
 
-    ui.centeredText(tree.rect(layout.title),
+    page.drawHeader(ui,
         slotPickForNewGame_ ? "CHOOSE A SLOT" : "SAVE SLOTS",
-        { 0.94f, 0.96f, 0.93f, 1.0f }, 40.0f);
-    ui.centeredText(tree.rect(layout.subtitle),
+        40.0f,
         slotPickForNewGame_
             ? "Where should the new game live?"
-            : "Progress is per slot; settings are shared",
-        { 0.62f, 0.67f, 0.65f, 1.0f }, 16.0f);
-    ui.divider(tree.rect(layout.divider));
+            : "Progress is per slot; settings are shared");
 
     std::optional<TitleAction> action;
     for (std::size_t i = 0; i < saveSlots_.size(); ++i) {
@@ -539,11 +461,11 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
         if (active && !slotPickForNewGame_) {
             status += "  (active)";
         }
-        drawTrailingText(ui, slotRect, status,
+        menuKit::trailingText(ui, slotRect, status,
             rowFocused
                 ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
                 : Vec4 { 0.62f, 0.67f, 0.65f, 1.0f },
-            18.0f);
+            18.0f, 18.0f);
     }
 
     ui.centeredText(tree.rect(hint),
@@ -552,7 +474,7 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
             : "Right focuses a slot's Delete button",
         { 0.58f, 0.63f, 0.62f, 1.0f }, 15.0f);
 
-    const bool backFocused = selectedRow_ == rowCount - 1;
+    const bool backFocused = selectedRow_ == backRowIndex;
     if (uiControls::button(
             ui, "title.save-slots.back", tree.rect(backRow), "Back", {
             .focused = backFocused,
@@ -569,10 +491,13 @@ std::optional<TitleAction> TitleScreen::drawSlotDeleteConfirmation(
     UiRect panel,
     const TitleScreenInput& input)
 {
-    navigateRows(input, rowIndex(DeleteRow::Count));
+    menuKit::RowList rows;
+    const int cancelRowIndex = rows.add();
+    const int confirmRowIndex = rows.add();
+    navigate(rows, input);
 
-    TitlePageLayout layout;
-    UiLayoutTree& tree = layout.tree;
+    menuKit::MenuPage page(26.0f, true);
+    UiLayoutTree& tree = page.tree;
     tree.spacer(tree.root(), 8.0f);
     const UiLayoutNode message = tree.item(tree.root(), 44.0f);
     const UiLayoutNode detail = tree.item(tree.root(), 30.0f);
@@ -583,11 +508,8 @@ std::optional<TitleAction> TitleScreen::drawSlotDeleteConfirmation(
     tree.flexibleSpacer(tree.root());
     tree.arrange(panel);
 
-    const std::string heading =
-        "DELETE SLOT " + std::to_string(pendingDeleteSlot_ + 1) + "?";
-    ui.centeredText(tree.rect(layout.title), heading,
-        { 0.94f, 0.96f, 0.93f, 1.0f }, 44.0f);
-    ui.divider(tree.rect(layout.divider));
+    page.drawHeader(ui,
+        "DELETE SLOT " + std::to_string(pendingDeleteSlot_ + 1) + "?", 44.0f);
     ui.centeredText(tree.rect(message),
         "Erase this save slot?",
         { 0.83f, 0.86f, 0.83f, 1.0f }, 22.0f);
@@ -596,7 +518,7 @@ std::optional<TitleAction> TitleScreen::drawSlotDeleteConfirmation(
         { 0.86f, 0.62f, 0.52f, 1.0f }, 18.0f);
 
     std::optional<TitleAction> action;
-    const bool cancelFocused = selectedRow_ == rowIndex(DeleteRow::Cancel);
+    const bool cancelFocused = selectedRow_ == cancelRowIndex;
     if (uiControls::button(
             ui, "title.slot-delete.cancel", tree.rect(cancelRow), "Cancel", {
             .focused = cancelFocused,
@@ -604,7 +526,7 @@ std::optional<TitleAction> TitleScreen::drawSlotDeleteConfirmation(
         })) {
         setPage(Page::SaveSlots);
     }
-    const bool confirmFocused = selectedRow_ == rowIndex(DeleteRow::Confirm);
+    const bool confirmFocused = selectedRow_ == confirmRowIndex;
     if (uiControls::button(
             ui, "title.slot-delete.confirm", tree.rect(confirmRow),
             "Delete Save", {
