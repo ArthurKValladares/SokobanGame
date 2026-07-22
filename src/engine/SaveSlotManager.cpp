@@ -24,25 +24,25 @@ SaveSlotManager::SaveSlotManager(
     : directory_(std::move(directory))
     , writeDelay_(writeDelay)
     , activeSlot_(readActiveSlotMarker())
-    , settingsStore_(std::make_unique<AsyncSaveStore>(
+    , store_(std::make_unique<AsyncSaveStore>(
           directory_, writeDelay_, "settings", ProfileSections::SettingsOnly))
-    , progressStore_(std::make_unique<AsyncSaveStore>(
-          directory_, writeDelay_, slotFileStem(activeSlot_),
-          ProfileSections::ProgressOnly))
 {
+    progressChannel_ = store_->addChannel(
+        directory_, slotFileStem(activeSlot_), ProfileSections::ProgressOnly);
 }
 
 PlayerProfile SaveSlotManager::loadActiveProfile()
 {
-    const SaveStore::LoadResult slot = progressStore_->load();
+    const SaveStore::LoadResult slot = store_->load(progressChannel_);
     PlayerProfile profile = slot.profile;
-    const SaveStore::LoadResult settings = settingsStore_->load();
+    const SaveStore::LoadResult settings = store_->load(kSettingsChannel);
     if (settings.disposition == SaveStore::LoadDisposition::CreatedDefault) {
         // Migrate a pre-split combined save's settings into the shared file;
         // a genuinely fresh install writes nothing anywhere.
         if (slot.disposition != SaveStore::LoadDisposition::CreatedDefault) {
-            settingsStore_->requestSave(
-                profile.settingsOnly(), AsyncSaveStore::Urgency::Immediate);
+            store_->requestSave(
+                kSettingsChannel, profile.settingsOnly(),
+                AsyncSaveStore::Urgency::Immediate);
         }
     } else {
         profile.adoptSettingsFrom(settings.profile);
@@ -75,33 +75,50 @@ SaveSlotManager::SlotSummary SaveSlotManager::summarize(
     return summary;
 }
 
+SaveSlotManager::SlotSummary SaveSlotManager::decodeSlotSummary(
+    int slot,
+    int levelCount) const
+{
+    const SaveStore store(directory_, slotFileStem(slot));
+    try {
+        if (std::filesystem::is_regular_file(store.primaryPath())) {
+            std::ifstream stream(store.primaryPath(), std::ios::binary);
+            const std::string contents(
+                (std::istreambuf_iterator<char>(stream)),
+                std::istreambuf_iterator<char>());
+            return summarize(decodePlayerProfile(contents).profile, levelCount);
+        }
+    } catch (const std::exception&) {
+        // Unreadable slots present as empty; switching to one runs the
+        // store's full backup/archival recovery.
+    }
+    return {};
+}
+
 std::vector<SaveSlotManager::SlotSummary> SaveSlotManager::slotSummaries(
     const PlayerProfile& activeProfile,
     int levelCount) const
 {
+    if (summaryCacheLevelCount_ != levelCount) {
+        // A different level set invalidates every cached completed flag.
+        summaryCache_.assign(slotCount, std::nullopt);
+        summaryCacheLevelCount_ = levelCount;
+    }
+
     std::vector<SlotSummary> slots;
     slots.reserve(slotCount);
     for (int slot = 0; slot < slotCount; ++slot) {
         if (slot == activeSlot_) {
+            // The active slot's progress is live and unsaved; never cached.
             slots.push_back(summarize(activeProfile, levelCount));
             continue;
         }
-        const SaveStore store(directory_, slotFileStem(slot));
-        SlotSummary summary;
-        try {
-            if (std::filesystem::is_regular_file(store.primaryPath())) {
-                std::ifstream stream(store.primaryPath(), std::ios::binary);
-                const std::string contents(
-                    (std::istreambuf_iterator<char>(stream)),
-                    std::istreambuf_iterator<char>());
-                summary = summarize(decodePlayerProfile(contents).profile, levelCount);
-            }
-        } catch (const std::exception&) {
-            // Unreadable slots present as empty; switching to one runs the
-            // store's full backup/archival recovery.
-            summary = {};
+        std::optional<SlotSummary>& cached =
+            summaryCache_[static_cast<std::size_t>(slot)];
+        if (!cached) {
+            cached = decodeSlotSummary(slot, levelCount);
         }
-        slots.push_back(summary);
+        slots.push_back(*cached);
     }
     return slots;
 }
@@ -114,16 +131,18 @@ std::optional<PlayerProfile> SaveSlotManager::switchTo(
         return std::nullopt;
     }
 
-    progressStore_->flush();
+    // The old-active slot's on-disk summary now matters again, and the
+    // new-active one becomes live; drop the whole non-active cache.
+    summaryCache_.assign(slotCount, std::nullopt);
     activeSlot_ = slot;
     writeActiveSlotMarker();
-    progressStore_ = std::make_unique<AsyncSaveStore>(
-        directory_, writeDelay_, slotFileStem(activeSlot_),
+    store_->replaceChannel(
+        progressChannel_, directory_, slotFileStem(activeSlot_),
         ProfileSections::ProgressOnly);
 
     // Settings are shared across slots: carry the live ones over the
     // incoming slot's stale copies.
-    PlayerProfile profile = progressStore_->load().profile;
+    PlayerProfile profile = store_->load(progressChannel_).profile;
     profile.adoptSettingsFrom(currentProfile);
     return profile;
 }
@@ -136,18 +155,19 @@ void SaveSlotManager::deleteSlot(int slot)
     if (slot == activeSlot_) {
         // Drain pending writes so an in-flight save cannot resurrect the
         // files after removal.
-        progressStore_->flush();
+        store_->flush();
     }
     const SaveStore store(directory_, slotFileStem(slot));
     std::error_code error;
     std::filesystem::remove(store.primaryPath(), error);
     std::filesystem::remove(store.backupPath(), error);
+    summaryCache_[static_cast<std::size_t>(slot)] = SlotSummary {};
 }
 
 void SaveSlotManager::saveProgress(const PlayerProfile& profile, bool immediate)
 {
-    progressStore_->requestSave(
-        profile,
+    store_->requestSave(
+        progressChannel_, profile,
         immediate
             ? AsyncSaveStore::Urgency::Immediate
             : AsyncSaveStore::Urgency::Deferred);
@@ -155,8 +175,8 @@ void SaveSlotManager::saveProgress(const PlayerProfile& profile, bool immediate)
 
 void SaveSlotManager::saveSettings(const PlayerProfile& profile, bool immediate)
 {
-    settingsStore_->requestSave(
-        profile.settingsOnly(),
+    store_->requestSave(
+        kSettingsChannel, profile.settingsOnly(),
         immediate
             ? AsyncSaveStore::Urgency::Immediate
             : AsyncSaveStore::Urgency::Deferred);
@@ -164,28 +184,27 @@ void SaveSlotManager::saveSettings(const PlayerProfile& profile, bool immediate)
 
 void SaveSlotManager::flush()
 {
-    progressStore_->flush();
-    settingsStore_->flush();
+    store_->flush();
 }
 
 std::string SaveSlotManager::progressStatus() const
 {
-    return progressStore_->status();
+    return store_->status(progressChannel_);
 }
 
 AsyncSaveStore::Diagnostics SaveSlotManager::progressDiagnostics() const
 {
-    return progressStore_->diagnostics();
+    return store_->diagnostics(progressChannel_);
 }
 
 std::string SaveSlotManager::settingsStatus() const
 {
-    return settingsStore_->status();
+    return store_->status(kSettingsChannel);
 }
 
 AsyncSaveStore::Diagnostics SaveSlotManager::settingsDiagnostics() const
 {
-    return settingsStore_->diagnostics();
+    return store_->diagnostics(kSettingsChannel);
 }
 
 int SaveSlotManager::readActiveSlotMarker() const

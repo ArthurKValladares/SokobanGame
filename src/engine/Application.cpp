@@ -70,6 +70,7 @@ Application::Application()
     presentation_.setPlayerClips(
         assetManifest_.playerMoveAnimation(),
         assetManifest_.playerPushAnimation());
+    buildLevelCatalog();
     // The world stays unloaded until the title's Continue/New Game, but its
     // assets warm up in the background so that first load doesn't block.
     openTitleScreen();
@@ -474,6 +475,8 @@ void Application::updateEditorPainting()
 
 void Application::loadCurrentScreen()
 {
+    // Editor draft play or a New Game may have changed the level set.
+    buildLevelCatalog();
     const PlayerProfile::ActiveScreen* checkpoint = nullptr;
     if (playerProfile_.activeScreen &&
         playerProfile_.activeScreen->level == currentLevel_ &&
@@ -626,14 +629,9 @@ void Application::applyLoadedProfileSettings()
 
 std::vector<SaveSlotInfo> Application::saveSlotInfos() const
 {
-    int levelCount = 0;
-    while (screenExists(levelCount, 0)) {
-        ++levelCount;
-    }
-
     std::vector<SaveSlotInfo> slots;
     for (const SaveSlotManager::SlotSummary& summary :
-        saveSlots_.slotSummaries(playerProfile_, levelCount)) {
+        saveSlots_.slotSummaries(playerProfile_, levelCount())) {
         slots.push_back({
             .empty = summary.empty,
             .completed = summary.completed,
@@ -785,16 +783,14 @@ void Application::executeShellCommand(const ShellCommand& command)
 
 bool Application::allLevelsCompleted() const
 {
-    bool anyLevel = false;
-    for (int level = 0; screenExists(level, 0); ++level) {
-        anyLevel = true;
+    for (int level = 0; level < levelCount(); ++level) {
         const PlayerProfile::LevelProgress* progress =
             playerProfile_.progressForLevel(level);
         if (progress == nullptr || !progress->completed) {
             return false;
         }
     }
-    return anyLevel;
+    return levelCount() > 0;
 }
 
 bool Application::shellMenuOpen() const
@@ -807,11 +803,8 @@ bool Application::shellMenuOpen() const
 std::vector<TitleLevelInfo> Application::titleLevelInfos() const
 {
     std::vector<TitleLevelInfo> result;
-    for (int level = 0; screenExists(level, 0); ++level) {
-        int screens = 0;
-        while (screenExists(level, screens)) {
-            ++screens;
-        }
+    for (int level = 0; level < levelCount(); ++level) {
+        const int screens = levelScreenCounts_[static_cast<std::size_t>(level)];
         const PlayerProfile::LevelProgress* progress =
             playerProfile_.progressForLevel(level);
         int reached = progress ? progress->reachedScreens : 0;
@@ -1139,13 +1132,32 @@ std::filesystem::path Application::screenPath(
         ("screen" + std::to_string(screenIndex) + ".scr");
 }
 
+void Application::buildLevelCatalog()
+{
+    levelScreenCounts_.clear();
+    for (int level = 0;; ++level) {
+        int screens = 0;
+        while (std::filesystem::exists(screenPath(level, screens))) {
+            ++screens;
+        }
+        if (screens == 0) {
+            break;
+        }
+        levelScreenCounts_.push_back(screens);
+    }
+}
+
+int Application::levelCount() const
+{
+    return static_cast<int>(levelScreenCounts_.size());
+}
+
 bool Application::screenExists(int levelIndex, int screenIndex) const
 {
-    if (levelIndex < 0 || screenIndex < 0) {
-        return false;
-    }
-    return std::filesystem::exists(
-        screenPath(levelIndex, screenIndex));
+    return levelIndex >= 0 &&
+        levelIndex < static_cast<int>(levelScreenCounts_.size()) &&
+        screenIndex >= 0 &&
+        screenIndex < levelScreenCounts_[static_cast<std::size_t>(levelIndex)];
 }
 
 RenderAssetRequirements Application::levelAssetRequirements(int levelIndex) const

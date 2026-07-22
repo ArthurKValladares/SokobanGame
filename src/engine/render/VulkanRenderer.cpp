@@ -1664,7 +1664,12 @@ void VulkanRenderer::drawIsoFrame(
     const RenderFrameData::Lighting& lighting,
     bool translucentPass) const
 {
-    std::vector<IsoFace> faces;
+    // Reused across frames and passes to avoid a per-frame heap allocation
+    // of what can be thousands of fat IsoFace structs. The renderer runs on a
+    // single thread, so a function-local static is safe; clear() keeps the
+    // grown capacity and reserve() only ever tops it up.
+    static std::vector<IsoFace> faces;
+    faces.clear();
     faces.reserve(frameData.tiles.size() * 5);
 
     auto faceDepth = [&](const std::array<Vec3, 4>& vertices) {

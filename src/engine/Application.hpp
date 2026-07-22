@@ -83,6 +83,12 @@ private:
     [[nodiscard]] std::optional<MoveDirection> heldVerticalDirection() const;
     [[nodiscard]] std::optional<MoveDirection> heldHorizontalDirection() const;
     [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;
+    // Scans levels/ once into levelScreenCounts_; the level set is fixed
+    // staged content, so title/progress queries read the cache instead of
+    // hitting the filesystem per open. Rebuilt on screen loads so the debug
+    // editor's mirrored changes are still reflected.
+    void buildLevelCatalog();
+    [[nodiscard]] int levelCount() const;
     [[nodiscard]] bool screenExists(int levelIndex, int screenIndex) const;
     [[nodiscard]] RenderAssetRequirements levelAssetRequirements(int levelIndex) const;
     void preloadUpcomingAssets();
@@ -108,6 +114,8 @@ private:
     AudioSystem audioSystem_;
     Level level_;
     GameplaySession gameplaySession_;
+    // Screens per level, indexed by level (see buildLevelCatalog).
+    std::vector<int> levelScreenCounts_;
     int currentLevel_ = 0;
     int currentScreen_ = 0;
     // Next level to load once the level-complete overlay is resolved.

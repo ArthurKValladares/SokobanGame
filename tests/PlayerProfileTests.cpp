@@ -661,6 +661,64 @@ void testAsyncSaveDestructorFlushesNewestProfile()
 
 } // namespace
 
+void testAsyncStoreMultipleChannels()
+{
+    TemporaryDirectory temporary;
+    {
+        // Channel 0 = "profile" (progress only); add channel 1 = "settings".
+        sokoban::AsyncSaveStore store(
+            temporary.path(), std::chrono::milliseconds(0), "profile",
+            sokoban::ProfileSections::ProgressOnly);
+        const int settings = store.addChannel(
+            temporary.path(), "settings", sokoban::ProfileSections::SettingsOnly);
+        check(settings == 1, "added channel gets the next id");
+
+        sokoban::PlayerProfile progress;
+        progress.unlockedLevel = 2;
+        progress.setCurrentScreen(2, 0);
+        progress.normalize();
+        sokoban::PlayerProfile config;
+        config.audio.musicVolume = 0.2f;
+        config.normalize();
+
+        store.requestSave(progress);
+        store.requestSave(settings, config);
+        store.flush();
+
+        // One worker wrote both channels to their own files.
+        check(store.diagnostics(0).completedWrites >= 1, "channel 0 wrote");
+        check(store.diagnostics(settings).completedWrites >= 1, "channel 1 wrote");
+        check(std::filesystem::is_regular_file(temporary.path() / "profile.json"),
+            "progress channel wrote its file");
+        check(std::filesystem::is_regular_file(temporary.path() / "settings.json"),
+            "settings channel wrote its own file");
+
+        // Each channel round-trips only its own sections.
+        check(store.load(0).profile.unlockedLevel == 2, "channel 0 has progress");
+        check(store.load(settings).profile.audio.musicVolume == 0.2f,
+            "channel 1 has settings");
+
+        // Repointing a channel drains it then targets a new file.
+        const int repointed = store.addChannel(
+            temporary.path(), "profile-slot2",
+            sokoban::ProfileSections::ProgressOnly);
+        sokoban::PlayerProfile slot2;
+        slot2.unlockedLevel = 5;
+        slot2.setCurrentScreen(5, 0);
+        slot2.normalize();
+        store.requestSave(repointed, slot2);
+        store.flush();
+        check(std::filesystem::is_regular_file(temporary.path() / "profile-slot2.json"),
+            "third channel wrote a distinct file");
+        store.replaceChannel(
+            repointed, temporary.path(), "profile-slot3",
+            sokoban::ProfileSections::ProgressOnly);
+        check(store.load(repointed).profile.progressEmpty(),
+            "replaced channel points at a fresh (empty) store");
+    }
+    // The single worker joined cleanly at destruction with all channels drained.
+}
+
 int main()
 {
     testRoundTripAndBests();
@@ -673,6 +731,7 @@ int main()
     testMigrationAndDoubleCorruption();
     testAsyncSaveCoalescingAndFlush();
     testAsyncSaveDestructorFlushesNewestProfile();
+    testAsyncStoreMultipleChannels();
 
     if (failures != 0) {
         std::cerr << failures << " player profile checks failed\n";

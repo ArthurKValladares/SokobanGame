@@ -177,6 +177,74 @@ void testSummariesSwitchingAndDeletion()
     check(sharedSettings.audio.musicVolume == 0.33f, "settings file has live values");
 }
 
+void testSummaryCacheInvalidation()
+{
+    TemporaryDirectory directory;
+    sokoban::SaveSlotManager manager(directory.path(), instantWrites);
+    sokoban::PlayerProfile active = manager.loadActiveProfile();
+
+    // Seed the two non-active slots on disk before the first read.
+    {
+        sokoban::SaveStore s1(directory.path(), "profile-slot2");
+        check(s1.save(profileWithProgress(2)), "slot 2 seeded");
+        sokoban::SaveStore s2(directory.path(), "profile-slot3");
+        check(s2.save(profileWithProgress(1)), "slot 3 seeded");
+    }
+    check(manager.slotSummaries(active, 4)[1].currentLevel == 2, "slot 2 decoded");
+    check(manager.slotSummaries(active, 4)[2].currentLevel == 1, "slot 3 decoded");
+
+    // An external overwrite of a cached non-active slot is intentionally not
+    // reflected: only this process mutates slots during a run.
+    {
+        sokoban::SaveStore s1(directory.path(), "profile-slot2");
+        check(s1.save(profileWithProgress(3)), "slot 2 overwritten externally");
+    }
+    check(manager.slotSummaries(active, 4)[1].currentLevel == 2, "cache reused");
+
+    // The real update path: write the active slot, then switch away. The
+    // switch invalidates the cache so the now-non-active slot 0 reflects its
+    // saved progress (the behavior the pre-cache code had).
+    active = profileWithProgress(1);
+    active.audio.musicVolume = 0.4f;
+    manager.saveProgress(active, true);
+    manager.flush();
+    std::optional<sokoban::PlayerProfile> switched = manager.switchTo(1, active);
+    check(switched.has_value(), "switch to slot 2");
+    check(manager.slotSummaries(*switched, 4)[0].currentLevel == 1,
+        "switched-away slot reflects its saved progress");
+    // Slot 2 (now the freshly-decoded on-disk value) shows the external write.
+    check(manager.slotSummaries(*switched, 4)[1].currentLevel == 3,
+        "switch invalidation re-decodes each non-active slot");
+
+    // Deleting a non-active slot invalidates just that entry to empty.
+    check(manager.slotSummaries(*switched, 4)[2].currentLevel == 1,
+        "slot 3 primed before delete");
+    manager.deleteSlot(2);
+    check(manager.slotSummaries(*switched, 4)[2].empty,
+        "delete invalidates the slot's cached summary");
+    check(manager.slotSummaries(*switched, 4)[0].currentLevel == 1,
+        "delete leaves other cached summaries intact");
+
+    // A changed level count invalidates completed flags across the board.
+    // Fresh directory so no active-slot marker bleeds in; slot 1 stays
+    // non-active (the cached-decode path).
+    TemporaryDirectory levelCountDir;
+    sokoban::SaveSlotManager fresh(levelCountDir.path(), instantWrites);
+    const sokoban::PlayerProfile freshActive = fresh.loadActiveProfile();
+    {
+        sokoban::PlayerProfile complete;
+        complete.recordLevelCompletion(0, 5, 1.0, true);
+        complete.recordLevelCompletion(1, 5, 1.0, true);
+        complete.normalize();
+        sokoban::SaveStore s(levelCountDir.path(), "profile-slot2");
+        check(s.save(complete), "slot 2 completed 0 and 1");
+    }
+    check(fresh.slotSummaries(freshActive, 2)[1].completed,
+        "2-level catalog marks the slot complete");
+    check(!fresh.slotSummaries(freshActive, 5)[1].completed,
+        "5-level catalog re-evaluates completion");
+}
+
 } // namespace
 
 int main()
@@ -184,6 +252,7 @@ int main()
     testFreshInstallWritesNothing();
     testPreSplitSettingsMigration();
     testSummariesSwitchingAndDeletion();
+    testSummaryCacheInvalidation();
 
     if (failures == 0) {
         std::cout << "SaveSlotManagerTests: " << checks << " checks passed\n";

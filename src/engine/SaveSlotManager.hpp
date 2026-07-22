@@ -43,7 +43,10 @@ public:
     [[nodiscard]] const std::filesystem::path& directory() const { return directory_; }
 
     // One summary per slot; the active slot summarizes `activeProfile`
-    // (live, possibly unsaved), the others decode their files.
+    // (live, possibly unsaved). Non-active slots decode their files once and
+    // are cached - only this process writes them, so the cache is refreshed
+    // solely by switchTo/deleteSlot (which is why saving the active slot
+    // needs no invalidation).
     [[nodiscard]] std::vector<SlotSummary> slotSummaries(
         const PlayerProfile& activeProfile,
         int levelCount) const;
@@ -75,16 +78,23 @@ private:
     [[nodiscard]] static SlotSummary summarize(
         const PlayerProfile& profile,
         int levelCount);
+    [[nodiscard]] SlotSummary decodeSlotSummary(int slot, int levelCount) const;
     [[nodiscard]] int readActiveSlotMarker() const;
     void writeActiveSlotMarker() const;
 
     std::filesystem::path directory_;
+    // Decoded summaries for non-active slots, keyed by slot; nullopt entries
+    // are decoded on demand. Cleared on switchTo/deleteSlot.
+    mutable std::vector<std::optional<SlotSummary>> summaryCache_ =
+        std::vector<std::optional<SlotSummary>>(slotCount);
+    mutable int summaryCacheLevelCount_ = -1;
     std::chrono::milliseconds writeDelay_;
     int activeSlot_ = 0; // 0-based
-    // Shared across slots: audio/video/input/accessibility settings.
-    std::unique_ptr<AsyncSaveStore> settingsStore_;
-    // Per-slot progress; recreated on slot switches.
-    std::unique_ptr<AsyncSaveStore> progressStore_;
+    // One worker serves both channels: settings (0, shared across slots) and
+    // progress (repointed at the active slot's file on switch).
+    std::unique_ptr<AsyncSaveStore> store_;
+    static constexpr int kSettingsChannel = 0;
+    int progressChannel_ = 1;
 };
 
 } // namespace sokoban

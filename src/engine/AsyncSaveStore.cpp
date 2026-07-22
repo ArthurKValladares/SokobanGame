@@ -11,10 +11,11 @@ AsyncSaveStore::AsyncSaveStore(
     std::chrono::milliseconds writeDelay,
     std::string fileStem,
     ProfileSections sections)
-    : store_(std::move(root), std::move(fileStem), sections)
-    , writeDelay_(std::max(writeDelay, std::chrono::milliseconds::zero()))
-    , worker_([this] { workerLoop(); })
+    : writeDelay_(std::max(writeDelay, std::chrono::milliseconds::zero()))
 {
+    channels_.emplace_back(
+        SaveStore(std::move(root), std::move(fileStem), sections));
+    worker_ = std::thread([this] { workerLoop(); });
 }
 
 AsyncSaveStore::~AsyncSaveStore()
@@ -28,35 +29,82 @@ AsyncSaveStore::~AsyncSaveStore()
     worker_.join();
 }
 
-SaveStore::LoadResult AsyncSaveStore::load()
+int AsyncSaveStore::addChannel(
+    std::filesystem::path root,
+    std::string fileStem,
+    ProfileSections sections)
+{
+    const std::scoped_lock lock(mutex_);
+    channels_.emplace_back(
+        SaveStore(std::move(root), std::move(fileStem), sections));
+    return static_cast<int>(channels_.size()) - 1;
+}
+
+AsyncSaveStore::Channel& AsyncSaveStore::channelAt(int channel)
+{
+    return channels_.at(static_cast<std::size_t>(channel));
+}
+
+const AsyncSaveStore::Channel& AsyncSaveStore::channelAt(int channel) const
+{
+    return channels_.at(static_cast<std::size_t>(channel));
+}
+
+bool AsyncSaveStore::anyPendingLocked() const
+{
+    return std::ranges::any_of(channels_, [](const Channel& channel) {
+        return channel.pending.has_value();
+    });
+}
+
+void AsyncSaveStore::replaceChannel(
+    int channel,
+    std::filesystem::path root,
+    std::string fileStem,
+    ProfileSections sections)
+{
+    flush();
+    const std::scoped_lock lock(mutex_);
+    Channel& target = channelAt(channel);
+    // flush() guarantees nothing pending or in flight for this channel.
+    target.store = SaveStore(std::move(root), std::move(fileStem), sections);
+    target.status.clear();
+}
+
+SaveStore::LoadResult AsyncSaveStore::load(int channel)
 {
     {
         const std::scoped_lock lock(mutex_);
-        if (pendingProfile_ || writing_) {
-            throw std::logic_error("player profile cannot be loaded while saves are pending");
+        const Channel& target = channelAt(channel);
+        if (target.pending || target.writing) {
+            throw std::logic_error(
+                "player profile cannot be loaded while saves are pending");
         }
     }
-    SaveStore::LoadResult result = store_.load();
+    // The store is only mutated by the worker while writing (excluded above)
+    // or by replaceChannel (which flushes first), so loading off-lock is safe.
+    SaveStore::LoadResult result = channelAt(channel).store.load();
     {
         const std::scoped_lock lock(mutex_);
-        status_ = result.message;
+        channelAt(channel).status = result.message;
     }
     return result;
 }
 
-void AsyncSaveStore::requestSave(PlayerProfile profile, Urgency urgency)
+void AsyncSaveStore::requestSave(int channel, PlayerProfile profile, Urgency urgency)
 {
     {
         const std::scoped_lock lock(mutex_);
-        ++requestCount_;
-        if (pendingProfile_) {
-            ++coalescedRequestCount_;
+        Channel& target = channelAt(channel);
+        ++target.requestCount;
+        if (target.pending) {
+            ++target.coalescedRequestCount;
         } else {
-            writeDeadline_ = std::chrono::steady_clock::now() + writeDelay_;
+            target.deadline = std::chrono::steady_clock::now() + writeDelay_;
         }
-        pendingProfile_ = std::move(profile);
+        target.pending = std::move(profile);
         if (urgency == Urgency::Immediate) {
-            forceWrite_ = true;
+            target.forceWrite = true;
         }
     }
     condition_.notify_one();
@@ -65,32 +113,43 @@ void AsyncSaveStore::requestSave(PlayerProfile profile, Urgency urgency)
 void AsyncSaveStore::flush()
 {
     std::unique_lock lock(mutex_);
-    if (pendingProfile_) {
-        forceWrite_ = true;
-        condition_.notify_one();
+    for (Channel& channel : channels_) {
+        if (channel.pending) {
+            channel.forceWrite = true;
+        }
     }
+    condition_.notify_all();
     condition_.wait(lock, [this] {
-        return !pendingProfile_ && !writing_;
+        return std::ranges::none_of(channels_, [](const Channel& channel) {
+            return channel.pending.has_value() || channel.writing;
+        });
     });
 }
 
-std::string AsyncSaveStore::status() const
+std::string AsyncSaveStore::status(int channel) const
 {
     const std::scoped_lock lock(mutex_);
-    return status_;
+    return channelAt(channel).status;
 }
 
-AsyncSaveStore::Diagnostics AsyncSaveStore::diagnostics() const
+AsyncSaveStore::Diagnostics AsyncSaveStore::diagnostics(int channel) const
 {
     const std::scoped_lock lock(mutex_);
+    const Channel& target = channelAt(channel);
     return {
-        .requests = requestCount_,
-        .completedWrites = completedWriteCount_,
-        .coalescedRequests = coalescedRequestCount_,
-        .pending = pendingProfile_.has_value(),
-        .writing = writing_,
-        .lastWriteSucceeded = lastWriteSucceeded_,
+        .requests = target.requestCount,
+        .completedWrites = target.completedWriteCount,
+        .coalescedRequests = target.coalescedRequestCount,
+        .pending = target.pending.has_value(),
+        .writing = target.writing,
+        .lastWriteSucceeded = target.lastWriteSucceeded,
     };
+}
+
+const std::filesystem::path& AsyncSaveStore::primaryPath(int channel) const
+{
+    const std::scoped_lock lock(mutex_);
+    return channelAt(channel).store.primaryPath();
 }
 
 void AsyncSaveStore::workerLoop()
@@ -98,38 +157,50 @@ void AsyncSaveStore::workerLoop()
     std::unique_lock lock(mutex_);
     while (true) {
         condition_.wait(lock, [this] {
-            return stopping_ || pendingProfile_.has_value();
+            return stopping_ || anyPendingLocked();
         });
-        if (stopping_ && !pendingProfile_) {
+        if (stopping_ && !anyPendingLocked()) {
             return;
         }
 
-        while (pendingProfile_ && !forceWrite_) {
-            if (condition_.wait_until(lock, writeDeadline_) == std::cv_status::timeout) {
+        // Pick a channel to write: one that is forced, at shutdown, or past
+        // its coalescing deadline. Otherwise sleep until the soonest deadline
+        // and re-evaluate (a new request or stop may arrive meanwhile).
+        const auto now = std::chrono::steady_clock::now();
+        int due = -1;
+        std::chrono::steady_clock::time_point earliest =
+            std::chrono::steady_clock::time_point::max();
+        for (std::size_t i = 0; i < channels_.size(); ++i) {
+            Channel& channel = channels_[i];
+            if (!channel.pending) {
+                continue;
+            }
+            if (stopping_ || channel.forceWrite || now >= channel.deadline) {
+                due = static_cast<int>(i);
                 break;
             }
-            if (stopping_) {
-                forceWrite_ = true;
-            }
+            earliest = std::min(earliest, channel.deadline);
         }
-        if (!pendingProfile_) {
+        if (due < 0) {
+            condition_.wait_until(lock, earliest);
             continue;
         }
 
-        PlayerProfile profile = std::move(*pendingProfile_);
-        pendingProfile_.reset();
-        forceWrite_ = false;
-        writing_ = true;
+        Channel& channel = channels_[static_cast<std::size_t>(due)];
+        PlayerProfile profile = std::move(*channel.pending);
+        channel.pending.reset();
+        channel.forceWrite = false;
+        channel.writing = true;
         lock.unlock();
 
-        const bool succeeded = store_.save(profile);
-        const std::string writeStatus = store_.status();
+        const bool succeeded = channel.store.save(profile);
+        const std::string writeStatus = channel.store.status();
 
         lock.lock();
-        writing_ = false;
-        lastWriteSucceeded_ = succeeded;
-        status_ = writeStatus;
-        ++completedWriteCount_;
+        channel.writing = false;
+        channel.lastWriteSucceeded = succeeded;
+        channel.status = writeStatus;
+        ++channel.completedWriteCount;
         condition_.notify_all();
     }
 }
