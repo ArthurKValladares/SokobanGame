@@ -144,6 +144,7 @@ add_executable(sokoban
     src/engine/Level.cpp
     src/engine/LevelCatalog.cpp
     src/engine/LevelEditor.cpp
+    src/engine/LevelProjectStore.cpp
     src/engine/LevelEditorDebugUi.cpp
     src/engine/Log.cpp
     src/engine/MiniaudioImpl.cpp
@@ -407,6 +408,7 @@ if(SOKOBAN_BUILD_TESTS)
         SOURCES
             tests/LevelEditorTests.cpp
             src/engine/LevelEditor.cpp
+            src/engine/LevelProjectStore.cpp
             src/engine/Level.cpp
             src/engine/TileTypes.cpp
     )
@@ -441,6 +443,7 @@ if(SOKOBAN_BUILD_TESTS)
             src/engine/GameplayPresentation.cpp
             src/engine/Level.cpp
             src/engine/LevelEditor.cpp
+            src/engine/LevelProjectStore.cpp
             src/engine/PresentationSettings.cpp
             src/engine/RenderFrameBuilder.cpp
             src/engine/Rules.cpp

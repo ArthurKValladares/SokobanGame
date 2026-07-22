@@ -10,6 +10,8 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -59,6 +61,36 @@ LevelEditor makeEditor(const TemporaryProject& project)
     LevelEditor editor;
     editor.initialize(project.source, project.runtime, 0, 0);
     return editor;
+}
+
+using TreeSnapshot =
+    std::vector<std::pair<std::filesystem::path, std::string>>;
+
+TreeSnapshot snapshotTree(const std::filesystem::path& root)
+{
+    TreeSnapshot snapshot;
+    if (!std::filesystem::exists(root)) {
+        return snapshot;
+    }
+
+    for (const std::filesystem::directory_entry& entry :
+         std::filesystem::recursive_directory_iterator(root)) {
+        const std::filesystem::path relative =
+            entry.path().lexically_relative(root);
+        if (entry.is_directory()) {
+            snapshot.emplace_back(relative, "<directory>");
+            continue;
+        }
+
+        std::ifstream file(entry.path(), std::ios::binary);
+        snapshot.emplace_back(
+            relative,
+            std::string(
+                std::istreambuf_iterator<char>(file),
+                std::istreambuf_iterator<char>()));
+    }
+    std::ranges::sort(snapshot, {}, &TreeSnapshot::value_type::first);
+    return snapshot;
 }
 
 void testDocumentCommandsAndUndo()
@@ -320,6 +352,38 @@ void testBrowserFiltersJunkAndRejectsForeignDirectories()
     CHECK(editor.status().find("negative") != std::string::npos);
 }
 
+void testFailedRenumberPreservesSourceAndRuntimeTrees()
+{
+    TEST("failedRenumberPreservesSourceAndRuntimeTrees");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.setRequestedSize(4, 3);
+    editor.addLevelAt(0);
+
+    const std::filesystem::path invalidLevel = project.source / "level1";
+    std::filesystem::create_directories(invalidLevel);
+    {
+        std::ofstream file(invalidLevel / "screen0.scr");
+        file << "@layer 0\n....\n\n@layer 1\n????\n";
+    }
+
+    const TreeSnapshot sourceBefore = snapshotTree(project.source);
+    const TreeSnapshot runtimeBefore = snapshotTree(project.runtime);
+
+    editor.addLevelAt(0);
+
+    CHECK(snapshotTree(project.source) == sourceBefore);
+    CHECK(snapshotTree(project.runtime) == runtimeBefore);
+    CHECK(std::filesystem::exists(project.source / "level0" / "screen0.scr"));
+    CHECK(std::filesystem::exists(project.source / "level1" / "screen0.scr"));
+    CHECK(!std::filesystem::exists(project.root / "source.editor-stage"));
+    CHECK(!std::filesystem::exists(project.root / "source.editor-backup"));
+    CHECK(!std::filesystem::exists(project.root / "runtime.editor-stage"));
+    CHECK(!std::filesystem::exists(project.root / "runtime.editor-backup"));
+    CHECK(editor.status().find("original files were preserved") !=
+        std::string::npos);
+}
+
 } // namespace
 
 int main()
@@ -333,6 +397,7 @@ int main()
     testInvalidLoadLeavesDocumentUntouched();
     testAlternateBrowserRootDoesNotMirrorRuntime();
     testBrowserFiltersJunkAndRejectsForeignDirectories();
+    testFailedRenumberPreservesSourceAndRuntimeTrees();
 
     if (failures == 0) {
         std::cout << "LevelEditorTests: " << checks << " checks passed\n";

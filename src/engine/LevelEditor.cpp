@@ -5,6 +5,7 @@
 #include <exception>
 #include <fstream>
 #include <charconv>
+#include <stdexcept>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -67,6 +68,24 @@ std::filesystem::path levelDirectoryPath(const std::filesystem::path& root, int 
 std::filesystem::path screenFilePath(const std::filesystem::path& levelDirectory, int screenIndex)
 {
     return levelDirectory / ("screen" + std::to_string(screenIndex) + ".scr");
+}
+
+void writeScreenRows(
+    const std::filesystem::path& path,
+    const std::vector<std::string>& rows)
+{
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream file(path, std::ios::trunc);
+    if (!file) {
+        throw std::runtime_error("cannot write screen " + path.string());
+    }
+    for (const std::string& row : rows) {
+        file << row << '\n';
+    }
+    file.close();
+    if (!file) {
+        throw std::runtime_error("cannot write screen " + path.string());
+    }
 }
 
 } // namespace
@@ -567,34 +586,35 @@ bool LevelEditor::saveDocument(const std::filesystem::path& path)
 
 void LevelEditor::addLevelAt(int levelIndex)
 {
+    const std::vector<LevelDirectory> levels = collectLevelDirectories();
     if (levelIndex < 0) {
-        document_.status = "Level index cannot be negative.";
+        document_.status = "Cannot add a level at a negative index.";
+        return;
+    }
+    if (levelIndex > static_cast<int>(levels.size())) {
+        document_.status = "Level index must be within the current level list.";
         return;
     }
 
-    std::error_code error;
-    std::filesystem::create_directories(document_.browserRoot, error);
-    if (error) {
-        document_.status = "Failed to create browser root: " + error.message();
-        return;
-    }
-
-    std::vector<LevelDirectory> levels = collectLevelDirectories();
-    for (auto it = levels.rbegin(); it != levels.rend(); ++it) {
-        if (it->index >= levelIndex) {
-            std::filesystem::rename(it->path, levelDirectoryPath(document_.browserRoot, it->index + 1), error);
-            if (error) {
-                document_.status = "Failed to rename level: " + error.message();
-                return;
+    const std::vector<std::string> rows = defaultScreenRows();
+    if (!applyProjectMutation([=](const std::filesystem::path& root) {
+            for (int index = static_cast<int>(levels.size()) - 1;
+                 index >= levelIndex;
+                 --index) {
+                std::filesystem::rename(
+                    levelDirectoryPath(root, index),
+                    levelDirectoryPath(root, index + 1));
             }
-        }
+            writeScreenRows(
+                screenFilePath(levelDirectoryPath(root, levelIndex), 0),
+                rows);
+        })) {
+        return;
     }
 
     const std::filesystem::path newLevelPath = levelDirectoryPath(document_.browserRoot, levelIndex);
     const std::filesystem::path newScreenPath = screenFilePath(newLevelPath, 0);
-    if (!writeScreenFile(newScreenPath, defaultScreenRows()) ||
-        !mirrorBrowserRootToRuntime() ||
-        !loadDocument(newScreenPath)) {
+    if (!loadDocument(newScreenPath)) {
         return;
     }
     document_.status = "Added " + newLevelPath.filename().string() + ".";
@@ -607,33 +627,23 @@ void LevelEditor::deleteLevel(const LevelDirectory& levelToDelete)
         return;
     }
 
-    std::error_code error;
-    const std::filesystem::path deletedRoot = deletedLevelRoot();
-    std::filesystem::create_directories(deletedRoot, error);
-    if (error) {
-        document_.status = "Failed to create Deleted directory: " + error.message();
-        return;
-    }
-
-    const std::filesystem::path deletedPath = uniqueDeletedLevelPath(levelToDelete.path);
-    std::filesystem::rename(levelToDelete.path, deletedPath, error);
-    if (error) {
-        document_.status = "Failed to move level to Deleted: " + error.message();
-        return;
-    }
-
-    std::vector<LevelDirectory> levels = collectLevelDirectories();
-    for (const LevelDirectory& level : levels) {
-        if (level.index > levelToDelete.index) {
-            std::filesystem::rename(level.path, levelDirectoryPath(document_.browserRoot, level.index - 1), error);
-            if (error) {
-                document_.status = "Deleted level, but failed to renumber levels: " + error.message();
-                break;
+    const std::vector<LevelDirectory> levels = collectLevelDirectories();
+    const std::filesystem::path deletedName =
+        uniqueDeletedLevelPath(levelToDelete.path).filename();
+    if (!applyProjectMutation([=](const std::filesystem::path& root) {
+            const std::filesystem::path deletedRoot = root / "Deleted";
+            std::filesystem::create_directories(deletedRoot);
+            std::filesystem::rename(
+                levelDirectoryPath(root, levelToDelete.index),
+                deletedRoot / deletedName);
+            for (int index = levelToDelete.index + 1;
+                 index < static_cast<int>(levels.size());
+                 ++index) {
+                std::filesystem::rename(
+                    levelDirectoryPath(root, index),
+                    levelDirectoryPath(root, index - 1));
             }
-        }
-    }
-
-    if (!mirrorBrowserRootToRuntime()) {
+        })) {
         return;
     }
     loadFirstAvailableScreen();
@@ -642,30 +652,33 @@ void LevelEditor::deleteLevel(const LevelDirectory& levelToDelete)
 
 void LevelEditor::addScreenAt(const LevelDirectory& level, int screenIndex)
 {
-    if (screenIndex < 0) {
-        document_.status = "Screen index cannot be negative.";
-        return;
-    }
     if (!isActiveLevelDirectory(level)) {
         document_.status = "Add screen requires a level from the active browser root.";
         return;
     }
 
-    std::error_code error;
-    for (auto it = level.screens.rbegin(); it != level.screens.rend(); ++it) {
-        if (it->index >= screenIndex) {
-            std::filesystem::rename(it->path, screenFilePath(level.path, it->index + 1), error);
-            if (error) {
-                document_.status = "Failed to rename screen: " + error.message();
-                return;
-            }
-        }
+    if (screenIndex < 0 || screenIndex > static_cast<int>(level.screens.size())) {
+        document_.status = "Screen index must be within the current screen list.";
+        return;
     }
 
+    const std::vector<std::string> rows = defaultScreenRows();
+    if (!applyProjectMutation([=](const std::filesystem::path& root) {
+            const std::filesystem::path levelRoot =
+                levelDirectoryPath(root, level.index);
+            for (int index = static_cast<int>(level.screens.size()) - 1;
+                 index >= screenIndex;
+                 --index) {
+                std::filesystem::rename(
+                    screenFilePath(levelRoot, index),
+                    screenFilePath(levelRoot, index + 1));
+            }
+            writeScreenRows(screenFilePath(levelRoot, screenIndex), rows);
+        })) {
+        return;
+    }
     const std::filesystem::path newScreenPath = screenFilePath(level.path, screenIndex);
-    if (!writeScreenFile(newScreenPath, defaultScreenRows()) ||
-        !mirrorBrowserRootToRuntime() ||
-        !loadDocument(newScreenPath)) {
+    if (!loadDocument(newScreenPath)) {
         return;
     }
     document_.status = "Added " + newScreenPath.filename().string() + ".";
@@ -690,24 +703,21 @@ void LevelEditor::deleteScreen(const LevelDirectory& level, int screenIndex)
         return;
     }
 
-    std::error_code error;
-    std::filesystem::remove(screen->path, error);
-    if (error) {
-        document_.status = "Failed to delete screen: " + error.message();
-        return;
-    }
-
-    for (const ScreenFile& candidate : level.screens) {
-        if (candidate.index > screenIndex) {
-            std::filesystem::rename(candidate.path, screenFilePath(level.path, candidate.index - 1), error);
-            if (error) {
-                document_.status = "Deleted screen, but failed to renumber screens: " + error.message();
-                return;
+    if (!applyProjectMutation([=](const std::filesystem::path& root) {
+            const std::filesystem::path levelRoot =
+                levelDirectoryPath(root, level.index);
+            if (!std::filesystem::remove(
+                    screenFilePath(levelRoot, screenIndex))) {
+                throw std::runtime_error("screen disappeared during deletion");
             }
-        }
-    }
-
-    if (!mirrorBrowserRootToRuntime()) {
+            for (int index = screenIndex + 1;
+                 index < static_cast<int>(level.screens.size());
+                 ++index) {
+                std::filesystem::rename(
+                    screenFilePath(levelRoot, index),
+                    screenFilePath(levelRoot, index - 1));
+            }
+        })) {
         return;
     }
     const int nextScreenIndex = std::min(screenIndex, static_cast<int>(level.screens.size()) - 2);
@@ -728,20 +738,17 @@ void LevelEditor::restoreDeletedLevel(const std::filesystem::path& deletedLevelP
         return;
     }
 
-    std::vector<LevelDirectory> levels = collectLevelDirectories();
+    const std::vector<LevelDirectory> levels = collectLevelDirectories();
     const int restoredIndex = levels.empty() ? 0 : levels.back().index + 1;
+    const std::filesystem::path deletedName = normalizedPath.filename();
+    if (!applyProjectMutation([=](const std::filesystem::path& root) {
+            std::filesystem::rename(
+                root / "Deleted" / deletedName,
+                levelDirectoryPath(root, restoredIndex));
+        })) {
+        return;
+    }
     const std::filesystem::path restoredPath = levelDirectoryPath(document_.browserRoot, restoredIndex);
-
-    std::error_code error;
-    std::filesystem::rename(deletedLevelPath, restoredPath, error);
-    if (error) {
-        document_.status = "Failed to restore deleted level: " + error.message();
-        return;
-    }
-
-    if (!mirrorBrowserRootToRuntime()) {
-        return;
-    }
     const std::filesystem::path firstScreen = screenFilePath(restoredPath, 0);
     if (std::filesystem::exists(firstScreen)) {
         (void)loadDocument(firstScreen);
@@ -765,20 +772,13 @@ bool LevelEditor::permanentlyDelete(const std::filesystem::path& path)
     }
 
     const std::filesystem::path normalizedPath = normalizedAbsolutePath(path);
-    std::error_code error;
-    uintmax_t removedCount = 0;
-    if (std::filesystem::is_directory(normalizedPath, error)) {
-        removedCount = std::filesystem::remove_all(normalizedPath, error);
-    } else {
-        removedCount = std::filesystem::remove(normalizedPath, error) ? 1U : 0U;
-    }
-
-    if (error) {
-        document_.status = "Failed to permanently delete: " + error.message();
-        return false;
-    }
-    if (removedCount == 0) {
-        document_.status = "Failed to permanently delete because the path does not exist.";
+    const std::filesystem::path relative = normalizedPath.lexically_relative(
+        normalizedAbsolutePath(document_.browserRoot));
+    if (!applyProjectMutation([=](const std::filesystem::path& root) {
+            if (std::filesystem::remove_all(root / relative) == 0) {
+                throw std::runtime_error("path does not exist");
+            }
+        })) {
         return false;
     }
 
@@ -1014,62 +1014,26 @@ std::filesystem::path LevelEditor::uniqueDeletedLevelPath(const std::filesystem:
     return candidate;
 }
 
-bool LevelEditor::writeScreenFile(const std::filesystem::path& path, const std::vector<std::string>& rows)
+bool LevelEditor::applyProjectMutation(
+    const LevelProjectStore::Mutation& mutation)
 {
-    std::error_code error;
-    std::filesystem::create_directories(path.parent_path(), error);
-    if (error) {
-        document_.status = "Failed to create screen directory: " + error.message();
-        return false;
+    std::optional<std::filesystem::path> runtimeRoot;
+    if (normalizedAbsolutePath(document_.browserRoot) ==
+        normalizedAbsolutePath(document_.sourceLevelRoot)) {
+        runtimeRoot = document_.runtimeLevelRoot;
     }
 
-    std::ofstream file(path, std::ios::trunc);
-    if (!file) {
-        document_.status = "Failed to write screen: " + path.string();
+    const LevelProjectStore::Result result = LevelProjectStore::transact(
+        document_.browserRoot,
+        runtimeRoot,
+        mutation);
+    if (!result.succeeded) {
+        document_.status = result.originalsPreserved
+            ? "Project change failed; original files were preserved: " +
+                result.message
+            : "Project change failed and rollback was incomplete; backups "
+                "were retained: " + result.message;
         return false;
-    }
-
-    for (const std::string& row : rows) {
-        file << row << '\n';
-    }
-    file.flush();
-    if (!file) {
-        document_.status = "Failed to write screen: " + path.string();
-        return false;
-    }
-    return true;
-}
-
-bool LevelEditor::mirrorBrowserRootToRuntime()
-{
-    const std::filesystem::path normalizedBrowserRoot = normalizedAbsolutePath(document_.browserRoot);
-    const std::filesystem::path normalizedSourceRoot = normalizedAbsolutePath(document_.sourceLevelRoot);
-    if (normalizedBrowserRoot != normalizedSourceRoot) {
-        return true;
-    }
-
-    std::error_code error;
-    std::filesystem::remove_all(document_.runtimeLevelRoot, error);
-    if (error) {
-        document_.status = "Failed to clear runtime level mirror: " + error.message();
-        return false;
-    }
-    std::filesystem::create_directories(document_.runtimeLevelRoot, error);
-    if (error) {
-        document_.status = "Failed to recreate runtime level mirror: " + error.message();
-        return false;
-    }
-
-    for (const LevelDirectory& level : collectLevelDirectories()) {
-        std::filesystem::copy(
-            level.path,
-            document_.runtimeLevelRoot / level.path.filename(),
-            std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing,
-            error);
-        if (error) {
-            document_.status = "Failed to update runtime level mirror: " + error.message();
-            return false;
-        }
     }
     return true;
 }

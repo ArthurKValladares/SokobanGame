@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/Level.hpp"
+#include "engine/LevelProjectStore.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -124,8 +125,8 @@ private:
     [[nodiscard]] bool isActiveLevelDirectory(const LevelDirectory& level) const;
     [[nodiscard]] std::vector<std::string> defaultScreenRows() const;
     [[nodiscard]] std::filesystem::path uniqueDeletedLevelPath(const std::filesystem::path& levelPath) const;
-    [[nodiscard]] bool writeScreenFile(const std::filesystem::path& path, const std::vector<std::string>& rows);
-    [[nodiscard]] bool mirrorBrowserRootToRuntime();
+    [[nodiscard]] bool applyProjectMutation(
+        const LevelProjectStore::Mutation& mutation);
     void loadFirstAvailableScreen();
 
     Document document_;
