@@ -1,6 +1,7 @@
 #include "engine/Application.hpp"
 
 #include "engine/DebugUi.hpp"
+#include "engine/LevelCatalog.hpp"
 #include "engine/Log.hpp"
 #include "engine/RenderFrameBuilder.hpp"
 #include "engine/Rules.hpp"
@@ -57,20 +58,14 @@ Application::Application()
     log::setMinimumLevel(log::Level::Debug);
 #endif
     log::info() << saveSlots_.progressStatus();
-    currentLevel_ = playerProfile_.currentLevel;
-    currentScreen_ = playerProfile_.currentScreen;
-    if (!screenExists(currentLevel_, currentScreen_)) {
-        currentLevel_ = 0;
-        currentScreen_ = 0;
-        playerProfile_.setCurrentLevel(0);
-    }
+    buildLevelCatalog();
+    restoreProfileLocation();
     applyLoadedProfileSettings();
     presentationSettings_.applyTileScales(assetManifest_);
     presentationSettings_.normalize();
     presentation_.setPlayerClips(
         assetManifest_.playerMoveAnimation(),
         assetManifest_.playerPushAnimation());
-    buildLevelCatalog();
     // The world stays unloaded until the title's Continue/New Game, but its
     // assets warm up in the background so that first load doesn't block.
     openTitleScreen();
@@ -671,13 +666,7 @@ void Application::switchSaveSlot(int slot)
     levelRunFromStart_ = true;
     completedLevelMoveCount_ = 0;
     currentLevelElapsedSeconds_ = 0.0;
-    currentLevel_ = playerProfile_.currentLevel;
-    currentScreen_ = playerProfile_.currentScreen;
-    if (!screenExists(currentLevel_, currentScreen_)) {
-        currentLevel_ = 0;
-        currentScreen_ = 0;
-        playerProfile_.setCurrentLevel(0);
-    }
+    restoreProfileLocation();
     renderer_.preloadAssets(levelAssetRequirements(currentLevel_));
     openTitleScreen();
 }
@@ -737,13 +726,7 @@ void Application::executeShellCommand(const ShellCommand& command)
 {
     std::visit(flow::Overloaded {
         [&](const shell::LoadCurrentScreen&) {
-            currentLevel_ = playerProfile_.currentLevel;
-            currentScreen_ = playerProfile_.currentScreen;
-            if (!screenExists(currentLevel_, currentScreen_)) {
-                currentLevel_ = 0;
-                currentScreen_ = 0;
-                playerProfile_.setCurrentLevel(0);
-            }
+            restoreProfileLocation();
             loadCurrentScreen();
         },
         [&](const shell::CloseTitle&) { titleScreen_.close(); },
@@ -1147,6 +1130,24 @@ void Application::buildLevelCatalog()
     }
 }
 
+void Application::restoreProfileLocation()
+{
+    const LevelLocation saved {
+        .level = playerProfile_.currentLevel,
+        .screen = playerProfile_.currentScreen,
+    };
+    const LevelLocation resolved =
+        resolveSavedLevelLocation(levelScreenCounts_, saved);
+
+    currentLevel_ = resolved.level;
+    currentScreen_ = resolved.screen;
+    if (resolved != saved) {
+        log::warning() << "Saved level location " << saved.level << ':' <<
+            saved.screen << " does not exist; falling back to 0:0";
+        playerProfile_.setCurrentScreen(resolved.level, resolved.screen);
+    }
+}
+
 int Application::levelCount() const
 {
     return static_cast<int>(levelScreenCounts_.size());
@@ -1154,10 +1155,9 @@ int Application::levelCount() const
 
 bool Application::screenExists(int levelIndex, int screenIndex) const
 {
-    return levelIndex >= 0 &&
-        levelIndex < static_cast<int>(levelScreenCounts_.size()) &&
-        screenIndex >= 0 &&
-        screenIndex < levelScreenCounts_[static_cast<std::size_t>(levelIndex)];
+    return levelLocationExists(
+        levelScreenCounts_,
+        { .level = levelIndex, .screen = screenIndex });
 }
 
 RenderAssetRequirements Application::levelAssetRequirements(int levelIndex) const

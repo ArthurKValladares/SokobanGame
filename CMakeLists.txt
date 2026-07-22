@@ -141,6 +141,7 @@ add_executable(sokoban
     src/engine/Input.cpp
     src/engine/InputBindings.cpp
     src/engine/Level.cpp
+    src/engine/LevelCatalog.cpp
     src/engine/LevelEditor.cpp
     src/engine/LevelEditorDebugUi.cpp
     src/engine/Log.cpp
@@ -303,6 +304,11 @@ if(SOKOBAN_BUILD_TESTS)
             tests/LevelTests.cpp
             src/engine/Level.cpp
             src/engine/TileTypes.cpp
+    )
+    sokoban_add_test(NAME level_catalog TARGET sokoban_level_catalog_tests
+        SOURCES
+            tests/LevelCatalogTests.cpp
+            src/engine/LevelCatalog.cpp
     )
     sokoban_add_test(NAME gameplay_session TARGET sokoban_gameplay_session_tests
         SOURCES

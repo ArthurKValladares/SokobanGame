@@ -88,6 +88,7 @@ private:
     // hitting the filesystem per open. Rebuilt on screen loads so the debug
     // editor's mirrored changes are still reflected.
     void buildLevelCatalog();
+    void restoreProfileLocation();
     [[nodiscard]] int levelCount() const;
     [[nodiscard]] bool screenExists(int levelIndex, int screenIndex) const;
     [[nodiscard]] RenderAssetRequirements levelAssetRequirements(int levelIndex) const;
