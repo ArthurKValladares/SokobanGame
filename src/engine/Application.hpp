@@ -8,7 +8,10 @@
 #include "engine/AssetManifestDebugUi.hpp"
 #include "engine/AssetManifestEditor.hpp"
 #include "engine/AudioSystem.hpp"
+#include "engine/CampaignSession.hpp"
+#include "engine/GameplayLoop.hpp"
 #include "engine/GameplayPresentation.hpp"
+#include "engine/InputRouter.hpp"
 #include "engine/Input.hpp"
 #include "engine/GameplaySession.hpp"
 #include "engine/Level.hpp"
@@ -17,6 +20,7 @@
 #include "engine/Math.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/PlayerProfile.hpp"
+#include "engine/SettingsCoordinator.hpp"
 #include "engine/Time.hpp"
 #include "engine/Window.hpp"
 #include "engine/render/VulkanRenderer.hpp"
@@ -48,7 +52,6 @@ private:
     [[nodiscard]] std::vector<SaveSlotInfo> saveSlotInfos() const;
     void switchSaveSlot(int slot);
     void deleteSaveSlot(int slot);
-    void applyLoadedProfileSettings();
     void persistSettings(bool immediate);
     [[nodiscard]] std::vector<TitleLevelInfo> titleLevelInfos() const;
     void startNewGame();
@@ -65,35 +68,23 @@ private:
         const GameplaySession::Snapshot* snapshot = nullptr);
     void advanceScreen();
     void checkpointCurrentScreen(bool immediateSave);
-    void deferCurrentScreenCheckpoint();
-    void updateDeferredCheckpoint(float dt);
-    void applyAudioSettings(const PlayerProfile::AudioSettings& settings, bool persist);
-    [[nodiscard]] OptionsMenuSettings optionsMenuSettings() const;
-    void applyOptionsMenuSettings(const OptionsMenuSettings& settings);
+    void applySettingsEffects(const SettingsEffects& effects);
     void persistProfile(bool immediate);
-    void update(float dt);
+    void update(float dt, const InputRouter::Frame& input);
     void drawDraftExitConfirmation();
-    void updateEditorPainting();
-    void queuePressedCommands();
-    void advancePlayerMovement(float dt);
-    [[nodiscard]] bool completeActiveAction();
-    [[nodiscard]] bool tryStartNextMove();
-    [[nodiscard]] std::optional<MoveDirection> pressedVerticalDirection() const;
-    [[nodiscard]] std::optional<MoveDirection> pressedHorizontalDirection() const;
-    [[nodiscard]] std::optional<MoveDirection> heldVerticalDirection() const;
-    [[nodiscard]] std::optional<MoveDirection> heldHorizontalDirection() const;
+    void updateEditorPainting(const InputRouter::EditorInput& input);
+    [[nodiscard]] InputRouter::RoutingContext inputRoutingContext() const;
     [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;
-    // Scans levels/ once into levelScreenCounts_; the level set is fixed
+    // Scans levels/ once into CampaignSession; the level set is fixed
     // staged content, so title/progress queries read the cache instead of
     // hitting the filesystem per open. Rebuilt on screen loads so the debug
     // editor's mirrored changes are still reflected.
     void buildLevelCatalog();
     void restoreProfileLocation();
-    [[nodiscard]] int levelCount() const;
-    [[nodiscard]] bool screenExists(int levelIndex, int screenIndex) const;
     [[nodiscard]] RenderAssetRequirements levelAssetRequirements(int levelIndex) const;
     void preloadUpcomingAssets();
-    [[nodiscard]] RenderFrameData buildRenderFrame() const;
+    [[nodiscard]] RenderFrameData buildRenderFrame(
+        const InputRouter::EditorInput& editorInput) const;
 
     Window window_;
     // Owns slot stores, the shared settings store, the marker, and every
@@ -115,25 +106,12 @@ private:
     AudioSystem audioSystem_;
     Level level_;
     GameplaySession gameplaySession_;
-    // Screens per level, indexed by level (see buildLevelCatalog).
-    std::vector<int> levelScreenCounts_;
-    int currentLevel_ = 0;
-    int currentScreen_ = 0;
-    // Next level to load once the level-complete overlay is resolved.
-    std::optional<int> pendingNextLevel_;
-    // False when the current run began at a later screen via level select;
-    // completing such a run does not record best moves/time.
-    bool levelRunFromStart_ = true;
-    // False until Continue/New Game (or a debug draft) loads the world; the
-    // title screen is up and no level, session, or checkpoint exists yet.
-    bool gameLoaded_ = false;
-    int completedLevelMoveCount_ = 0;
-    double currentLevelElapsedSeconds_ = 0.0;
-    double deferredCheckpointAgeSeconds_ = 0.0;
-    bool deferredCheckpointPending_ = false;
+    CampaignSession campaign_;
     InputState input_;
+    InputRouter inputRouter_;
     FrameTimer frameTimer_;
     PresentationSettings presentationSettings_;
+    SettingsCoordinator settingsCoordinator_;
     GameplayPresentation presentation_;
     ApplicationDebugUi applicationDebugUi_;
     AssetManifestEditor assetManifestEditor_;

@@ -135,12 +135,15 @@ add_executable(sokoban
     src/engine/AssetManifestDebugUi.cpp
     src/engine/AssetManifestEditor.cpp
     src/engine/AudioSystem.cpp
+    src/engine/CampaignSession.cpp
     src/engine/BoardLayout.cpp
     src/engine/DebugUi.cpp
     src/engine/GameplayPresentation.cpp
+    src/engine/GameplayLoop.cpp
     src/engine/GameplaySession.cpp
     src/engine/Input.cpp
     src/engine/InputBindings.cpp
+    src/engine/InputRouter.cpp
     src/engine/Level.cpp
     src/engine/LevelCatalog.cpp
     src/engine/LevelEditor.cpp
@@ -157,6 +160,7 @@ add_executable(sokoban
     src/engine/SaveSlotManager.cpp
     src/engine/ShellFlow.cpp
     src/engine/SaveStore.cpp
+    src/engine/SettingsCoordinator.cpp
     src/engine/TaskSystem.cpp
     src/engine/TileTypes.cpp
     src/engine/Window.cpp
@@ -403,6 +407,46 @@ if(SOKOBAN_BUILD_TESTS)
             tests/VulkanDeviceSelectionTests.cpp
             src/engine/render/VulkanDeviceSelection.cpp
             src/engine/render/RenderResolution.cpp
+    )
+    sokoban_add_test(NAME input_router TARGET sokoban_input_router_tests
+        LIBS SDL3::SDL3
+        SOURCES
+            tests/InputRouterTests.cpp
+            src/engine/Input.cpp
+            src/engine/InputBindings.cpp
+            src/engine/InputRouter.cpp
+    )
+    sokoban_add_test(NAME settings_coordinator TARGET sokoban_settings_coordinator_tests
+        LIBS sokoban_json
+        SOURCES
+            tests/SettingsCoordinatorTests.cpp
+            src/engine/AssetManifest.cpp
+            src/engine/InputBindings.cpp
+            src/engine/PlayerProfile.cpp
+            src/engine/PresentationSettings.cpp
+            src/engine/render/RenderResolution.cpp
+            src/engine/SettingsCoordinator.cpp
+            src/engine/TileTypes.cpp
+    )
+    sokoban_add_test(NAME campaign_session TARGET sokoban_campaign_session_tests
+        SOURCES
+            tests/CampaignSessionTests.cpp
+            src/engine/CampaignSession.cpp
+            src/engine/InputBindings.cpp
+            src/engine/LevelCatalog.cpp
+            src/engine/PlayerProfile.cpp
+            src/engine/render/RenderResolution.cpp
+            src/engine/TileTypes.cpp
+    )
+    sokoban_add_test(NAME gameplay_loop TARGET sokoban_gameplay_loop_tests
+        SOURCES
+            tests/GameplayLoopTests.cpp
+            src/engine/GameplayLoop.cpp
+            src/engine/GameplayPresentation.cpp
+            src/engine/GameplaySession.cpp
+            src/engine/Level.cpp
+            src/engine/Rules.cpp
+            src/engine/TileTypes.cpp
     )
     sokoban_add_test(NAME frame_descriptor_sync TARGET sokoban_frame_descriptor_sync_tests
         SOURCES

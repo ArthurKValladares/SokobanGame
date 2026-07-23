@@ -179,7 +179,11 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 ## Important Source Map
 
 - `src/main.cpp`: process entry point.
-- `src/engine/Application.*`: top-level coordinator for the SDL event loop, profile-backed input translation, level/screen progression and completion recording, gameplay-session scheduling, editor picking/painting, and component lifetime. `buildLevelCatalog()` scans `levels/` once into `levelScreenCounts_` (rebuilt on each screen load so the debug editor's changes are reflected); `screenExists`/`levelCount` and the title/slot queries read that cache instead of stat-ing the filesystem on every title open. Shell/menu routing is not decided here: menu results and Back presses become `ShellFlow` events, and Application only executes the returned commands (each command handler is a thin call into an existing helper). It no longer owns mutable rendering settings, visual interpolation, debug animation-browser state, or render-frame construction.
+- `src/engine/Application.*`: composition root and external-effect executor for component lifetime, the SDL/UI frame, shell commands, file-backed level loading, and calls into Window/Vulkan/audio/save services. Campaign policy lives in `CampaignSession`, gameplay advancement in `GameplayLoop`, input admission/focus routing in `InputRouter`, and profile-to-runtime settings policy in `SettingsCoordinator`. `buildLevelCatalog()` refreshes the campaign's cached screen counts when a screen loads so debug-editor changes remain visible without title queries hitting the filesystem. It no longer owns campaign counters, movement-loop policy, input-routing policy, settings projection/change detection, mutable rendering settings, visual interpolation, debug animation-browser state, or render-frame construction.
+- `src/engine/CampaignSession.*`: headless campaign/run state. Owns the cached level topology, validated current location, cross-screen move/time totals, completion and best-record policy, pending next-level transition, and deferred-checkpoint cadence while mutating only the supplied `PlayerProfile`. Screen advancement returns a type-safe `ScreenAdvanced`/`LevelCompleted`/`GameCompleted` variant; Application performs the resulting UI, audio, persistence, and loading effects. Covered by `tests/CampaignSessionTests.cpp`.
+- `src/engine/GameplayLoop.*`: headless per-frame bridge between semantic button states, `GameplaySession`, and `GameplayPresentation`. Owns opposing-direction resolution, command queueing, action time consumption, presentation begin/finish calls, and solved-screen/draft outcomes. Covered by `tests/GameplayLoopTests.cpp`.
+- `src/engine/InputRouter.*`: testable routing layer between raw `InputState` and context-specific gameplay, title, completion-overlay, options, pointer, and editor frames. Owns SDL event admission around ImGui capture, binding-candidate suppression, modal focus, and draft-exit Back precedence; `Application` only pumps events and executes the resulting intents. Covered by `tests/InputRouterTests.cpp` (`sokoban_input_router_tests`).
+- `src/engine/SettingsTypes.hpp` + `src/engine/SettingsCoordinator.*`: UI-neutral `UserSettings` snapshot plus headless settings policy. The coordinator projects settings from `PlayerProfile`, normalizes edits, updates `PresentationSettings`, detects which external systems actually changed, and emits a data-only `SettingsEffects` plan for window, renderer, audio, input, animation cadence, and persistence. `Application` executes that plan without deciding settings policy. Covered by `tests/SettingsCoordinatorTests.cpp` (`sokoban_settings_coordinator_tests`).
 - `src/engine/PresentationSettings.*`: mutable runtime presentation settings initialized from the immutable defaults in `Config.hpp`. Owns lighting, SSAO/shadow tuning, grid appearance, surface geometry, tile scales, normalization, sun-direction conversion, and renderer-facing lighting/grid values.
 - `src/engine/GameplayPresentation.*`: headless presentation state derived from `GameplaySession::Action` snapshots. Owns player/movable interpolation, fallen render offsets, player clip/facing/playback state, and the shared world/conveyor animation clock without mutating authoritative gameplay state.
 - `src/engine/RenderFrameBuilder.*`: SDL/Vulkan-free construction of gameplay and editor `RenderFrameData`. Owns tile/model mapping, static geometry, water edges, ladder rungs, editor previews/pick-only cells, dynamic entities, tile scaling, and conveyor texture offsets.
@@ -189,7 +193,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/AudioSystem.*`: miniaudio-backed sound playback behind a pimpl (`EngineHandle`), so no miniaudio types leak into headers. Preloads the manifest's `footsteps` and `stone-drag` sound sets from the staged runtime content tree with `MA_SOUND_FLAG_DECODE` into never-reallocated `std::vector<ma_sound>`s. `update(dt, playerWalking, pushingStone)` drives the pure `FootstepCadence` struct and plays randomized non-repeating footsteps. Stone dragging uses randomized seamless loops with short fades; music streams one looping track per level with a 600 ms crossfade. Manifest gains remain authored in the Asset Manifest window; profile-backed master, music, and sound-effect bus gains are previewed live and persisted when Debug UI sliders are committed. Audio degrades gracefully (`available()` false, silent) if the device or files are missing.
 - `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, action history, a branch-safe undo stack, automatic world steps, the post-undo automatic-motion pause, and solution-move snapshots that restore correctly across undo/restart. Its committed-state snapshot/restore API persists the exact player/movable state and usable undo chain; restore rejects disconnected or impossible rules transitions without mutating the live session. `reset` always clears undo state at a screen boundary. Emits `Action` snapshots for `Application` to animate. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
 - `src/engine/InputBindings.*`: platform-neutral semantic action and binding model. Each action owns an ordered list of keyboard, gamepad-button, and signed gamepad-axis bindings, allowing keyboard+D-pad+stick defaults. `assignBinding` implements remapping semantics (removes the identical binding from every action, then replaces only the action's bindings of the same kind, so a d-pad rebind keeps a stick binding); `bindingDisplayName`/`actionBindingsDisplay` provide UI labels.
-- `src/engine/Input.*`: SDL3 device owner and action mapper. Tracks raw keyboard/mouse state for editor tooling, hot-plugs gamepads, selects the most recently used controller, normalizes stick axes with threshold/pressed-edge semantics, clears stuck input on focus loss, reports active-device diagnostics, and converts raw SDL events into typed remapping candidates consumed by the Options > Controls page. `Application` consumes semantic actions only for gameplay. Covered by `tests/InputTests.cpp` (`sokoban_input_tests`).
+- `src/engine/Input.*`: SDL3 device owner and action mapper. Tracks raw keyboard/mouse state for editor tooling, hot-plugs gamepads, selects the most recently used controller, normalizes stick axes with threshold/pressed-edge semantics, clears stuck input on focus loss, reports active-device diagnostics, and converts raw SDL events into typed remapping candidates. `InputRouter` controls event admission and distributes its state to active consumers. Covered by `tests/InputTests.cpp` (`sokoban_input_tests`).
 - `src/engine/PlayerProfile.*` + `src/engine/PlayerProfileCodec.cpp`: current format-9 player progress/settings model (PlayerProfile.cpp, ~150 lines of model methods) with the strict JSON codec and migrations split into PlayerProfileCodec.cpp. Migrations are forward JSON patches (migrate1to2 .. migrate8to9) applied in sequence, then ONE strict current-format parse validates the migrated document - patches only move fields and add defaults, and unknown keys survive them, so schema strictness holds without per-format parsers. Format 9 makes the top-level progress/settings sections each optional: `serialize(ProfileSections)` writes progress-only slot files and a settings-only shared settings.json (section choice flows through `SaveStore`/`AsyncSaveStore` constructor parameters set by `SaveSlotManager`), so slot files no longer carry ignored settings copies. Stores unlocked/current level and screen, an active-screen committed gameplay checkpoint with the multi-screen level move/time counters, per-level completion, per-level `reachedScreens` counts (max screen entered + 1, feeding level-select unlocking), optional move/time bests, typed keyboard/controller action bindings, audio/video/accessibility settings, window mode/size, MSAA, AO, preset/custom internal render-scale state, and bounded normalization. `recordReachedScreen` tracks entry, `resetProgress` implements New Game (clears progress/records, keeps every setting), and `recordLevelCompletion(..., recordBests)` skips best records for runs that started past the first screen. Headless and covered with `SaveStore` by `tests/PlayerProfileTests.cpp` (`sokoban_profile_tests`).
 - `src/engine/Flow.hpp`: minimal generic state-machine toolkit shared by UI
   flows and available to future gameplay flows. `flow::Machine<Derived,
@@ -271,17 +275,17 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   Named row enums replace positional focus indexes. A frame emits at most
   one `OptionsAction` (`options::SettingsChanged/Quit/ExitToTitle/
   OpenLevelSelect`); the platform-neutral settings snapshot itself (which
-  includes `InputBindings`) is read via `settings()` and applied by
-  `Application` to the window, renderer, presentation, audio, input, and
-  profile owners. `open(settings, allowTitleExit)` adds an "Exit To Title" row only
+  includes `InputBindings`) is read via `settings()` and passed to
+  `SettingsCoordinator`; Application executes the returned external-effect
+  plan. `open(settings, allowTitleExit)` adds an "Exit To Title" row only
   when opened as the in-game pause menu, and `allowLevelSelect` adds a
   "Level Select" row (pause context only; `Application` passes it once every
   level on disk has a completion record, so it is permanent for that save
   and cleared by New Game). The Controls page lists the six
   remappable gameplay actions (menu navigation is deliberately fixed) with
-  press-to-rebind capture: `capturingBinding()` tells the caller to feed
-  `InputState::bindingCandidate` events into `provideBindingCandidate` and to
-  suppress raw key/pad navigation meanwhile (keys bound to MenuBack still pass
+  press-to-rebind capture: `capturingBinding()` tells `InputRouter` to return
+  binding candidates for `provideBindingCandidate` and suppress raw key/pad
+  navigation meanwhile (keys bound to MenuBack still pass
   so Escape cancels; Start cancels directly). Escape/Start are never bindable,
   duplicates are stolen from other actions, and Reset To Defaults restores
   `defaultInputBindings()`.
@@ -774,13 +778,14 @@ Major recent additions and fixes:
 - Split application presentation/configuration responsibilities into
   `PresentationSettings`, `GameplayPresentation`, and `RenderFrameBuilder`,
   with `ApplicationDebugUi` and `AnimationPreviewDebugUi` as adapters.
-  `Application.cpp` dropped from roughly 1,900 lines to roughly 620 and now
-  concentrates on event-loop, level progression, gameplay scheduling, editor
-  interaction, and modal orchestration.
+  `Application.cpp` is now roughly 910 lines and concentrates on the event
+  loop, component composition, external effects, editor interaction, and
+  lifecycle orchestration; campaign, gameplay-loop, input-routing, and
+  settings policy are testable components.
 - Split headless gameplay orchestration out of `Application` into
-  `GameplaySession`. `Application` now translates SDL controls and animates
-  session actions, while state/history/undo/restart/action timing are covered
-  by a dedicated headless test executable.
+  `GameplaySession` and `GameplayLoop`; `InputRouter` now translates SDL-backed
+  state into focused consumer frames. State/history/undo/restart/action timing
+  and routing semantics are covered by dedicated test executables.
 - Added layered levels with `@layer N` sections.
 - Added level editor/document browser and draft play flow.
 - Added Debug UI controls for rendering, lighting, runtime audio, grid, and conveyor rate. Authored tile scales and sound/music volumes live in the dedicated Asset Manifest window.
@@ -876,7 +881,7 @@ The `rg` command above should return no matches.
 
 ## Important Design Decisions
 
-- Keep gameplay rules in the headless `Rules` module as pure functions of `(Level, GameState)`. `GameplaySession` owns command/state/history orchestration, `GameplayPresentation` owns visual interpolation/animation state, `Application` coordinates SDL input and component lifetime, and the renderer receives a render-frame description rather than owning game rules.
+- Keep gameplay rules in the headless `Rules` module as pure functions of `(Level, GameState)`. `GameplaySession` owns command/state/history orchestration, `GameplayPresentation` owns visual interpolation/animation state, `InputRouter` owns consumer focus and semantic routing, `Application` pumps SDL and coordinates component lifetime, and the renderer receives a render-frame description rather than owning game rules.
 - When changing or adding mechanics, implement them in `Rules.cpp` and add cases to `tests/RulesTests.cpp`; the tests compile without SDL/Vulkan so they can run anywhere.
 - Store `Player`, `Rock`, and movable `Ice` as dynamic entities extracted from level data rather than static cells.
 - Use character-driven tile definitions as the single source of truth for level parsing/editor palette.
@@ -941,12 +946,13 @@ UI:
 
 Engineering:
 
-- Gameplay rules, gameplay orchestration, presentation, render-frame
-  construction, and editor document behavior now live in headless `Rules`,
-  `GameplaySession`, `GameplayPresentation`, `RenderFrameBuilder`, and
-  `LevelEditor` components with tests. `Application` still owns SDL input
-  translation, editor pointer interaction, level progression, and modal flow;
-  extract one of those only when it gains enough independent policy to test.
+- Gameplay rules, gameplay/campaign orchestration, input routing, settings
+  policy, presentation, render-frame construction, and editor document behavior
+  live in focused `Rules`, `GameplaySession`, `GameplayLoop`, `CampaignSession`,
+  `InputRouter`, `SettingsCoordinator`, `GameplayPresentation`,
+  `RenderFrameBuilder`, and `LevelEditor` components with tests. `Application`
+  remains the lifecycle/composition root and executes platform, rendering,
+  audio, filesystem, UI, and persistence effects requested by those systems.
 - The `TaskSystem` now handles lazy CPU asset preparation as well as skinning.
   Grow it by moving more independent CPU work onto tasks (render-frame building,
   animation updates) and eventually adding task dependencies/graphs when

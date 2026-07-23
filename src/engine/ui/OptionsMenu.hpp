@@ -1,7 +1,7 @@
 #pragma once
 
-#include "engine/InputBindings.hpp"
 #include "engine/Math.hpp"
+#include "engine/SettingsTypes.hpp"
 
 #include <optional>
 #include <variant>
@@ -11,21 +11,7 @@ namespace sokoban {
 class UiContext;
 struct UiRect;
 
-struct OptionsMenuSettings {
-    int antiAliasingSamples = 8;
-    int renderScalePercent = 100;
-    bool customRenderScale = false;
-    int customRenderScalePercent = 100;
-    bool ambientOcclusion = true;
-    bool fullscreen = false;
-    int windowWidth = 1280;
-    int windowHeight = 720;
-    float masterVolume = 1.0f;
-    float musicVolume = 0.5f;
-    InputBindings input = defaultInputBindings();
-
-    bool operator==(const OptionsMenuSettings&) const = default;
-};
+using OptionsMenuSettings = UserSettings;
 
 struct OptionsMenuInput {
     bool up = false;

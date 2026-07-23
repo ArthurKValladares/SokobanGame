@@ -13,7 +13,8 @@ namespace sokoban {
 
 // Headless orchestration for one playable screen. This owns command buffering,
 // authoritative state, action timing, history, undo/restart, and automatic
-// world steps while Application owns input translation and presentation.
+// world steps. GameplayLoop translates semantic input and advances the
+// presentation around its actions.
 class GameplaySession {
 public:
     struct Controls {
