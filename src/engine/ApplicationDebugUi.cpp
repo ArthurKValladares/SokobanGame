@@ -470,6 +470,14 @@ void ApplicationDebugUi::draw(const Context& context) const
             "Pipeline rebuilds %llu",
             static_cast<unsigned long long>(renderStats.pipelineRebuilds));
         ImGui::Text(
+            "Resource reconfigurations %llu, retired %u%s",
+            static_cast<unsigned long long>(
+                renderStats.renderResourceReconfigurations),
+            renderStats.retiredRenderResourceSets,
+            renderStats.rendererReconfigurationPending
+                ? ", pending"
+                : "");
+        ImGui::Text(
             "Swapchain recreations %llu",
             static_cast<unsigned long long>(
                 renderStats.swapchainRecreations));
@@ -477,6 +485,10 @@ void ApplicationDebugUi::draw(const Context& context) const
             "Zero-extent recreation deferrals %llu",
             static_cast<unsigned long long>(
                 renderStats.swapchainRecreationDeferrals));
+        ImGui::Text(
+            "Present-queue retirement waits %llu",
+            static_cast<unsigned long long>(
+                renderStats.presentQueueRetirementWaits));
     }
 #else
     (void)context;

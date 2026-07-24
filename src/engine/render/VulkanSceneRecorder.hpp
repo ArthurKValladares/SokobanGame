@@ -40,6 +40,10 @@ public:
         uint64_t pipelineRebuilds = 0;
         uint64_t swapchainRecreations = 0;
         uint64_t swapchainRecreationDeferrals = 0;
+        uint64_t renderResourceReconfigurations = 0;
+        uint64_t presentQueueRetirementWaits = 0;
+        uint32_t retiredRenderResourceSets = 0;
+        bool rendererReconfigurationPending = false;
     };
 
     [[nodiscard]] RenderStats record(

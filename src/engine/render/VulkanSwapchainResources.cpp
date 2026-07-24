@@ -36,7 +36,8 @@ void VulkanSwapchainResources::create(
     VkSampleCountFlagBits sampleCount,
     int renderScalePercent,
     VkFormat depthFormat,
-    bool vsync)
+    bool vsync,
+    VkSwapchainKHR oldSwapchain)
 {
     destroy();
     physicalDevice_ = physicalDevice;
@@ -50,7 +51,7 @@ void VulkanSwapchainResources::create(
     vsync_ = vsync;
 
     try {
-        createSwapchain();
+        createSwapchain(oldSwapchain);
         createAttachments();
     } catch (...) {
         destroy();
@@ -71,7 +72,7 @@ void VulkanSwapchainResources::recreate()
         vkDestroySwapchainKHR(device_, swapchain_, nullptr);
         swapchain_ = VK_NULL_HANDLE;
     }
-    createSwapchain();
+    createSwapchain(VK_NULL_HANDLE);
     createAttachments();
 }
 
@@ -550,7 +551,8 @@ VkImageView VulkanSwapchainResources::resolveColorView() const
     return msaaEnabled() ? resolvedColorImage_.view : VK_NULL_HANDLE;
 }
 
-void VulkanSwapchainResources::createSwapchain()
+void VulkanSwapchainResources::createSwapchain(
+    VkSwapchainKHR oldSwapchain)
 {
     VkSurfaceCapabilitiesKHR capabilities {};
     vkCheck(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice_, surface_, &capabilities),
@@ -606,6 +608,7 @@ void VulkanSwapchainResources::createSwapchain()
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         .presentMode = presentMode_,
         .clipped = VK_TRUE,
+        .oldSwapchain = oldSwapchain,
     };
     vkCheck(vkCreateSwapchainKHR(device_, &createInfo, nullptr, &swapchain_),
         "vkCreateSwapchainKHR failed");

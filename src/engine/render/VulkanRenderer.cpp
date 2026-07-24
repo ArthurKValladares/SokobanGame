@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <array>
 #include <optional>
+#include <ranges>
 #include <stdexcept>
 #include <utility>
 
@@ -46,36 +47,23 @@ VulkanRenderer::VulkanRenderer(
     : window_(window)
     , assetRoot_(std::move(assetRoot))
     , deviceContext_(window)
-    , antiAliasingMode_(antiAliasingMode)
+    , reconfigurationQueue_({
+          .antiAliasing = antiAliasingMode,
+          .renderScalePercent = renderScalePercent,
+          .wireframe = false,
+      })
+    , vsync_(vsync)
 {
     wireframeLineWidth_ = std::clamp(
         wireframeLineWidth_,
         1.0f,
         deviceContext_.wireframeLineWidthRange()[1]);
     // The default MSAA mode is a request; drop to what the device supports.
-    activeSampleCount_ = sampleCountForMode(antiAliasingMode_);
-    swapchainResources_.create(
-        deviceContext_.physicalDevice(),
-        deviceContext_.device(),
-        deviceContext_.surface(),
-        window_,
-        {
-            .graphics = deviceContext_.queueFamilies().graphics,
-            .present = deviceContext_.queueFamilies().present,
-        },
-        activeSampleCount_,
-        renderScalePercent,
-        depthFormat_,
-        vsync);
-    logRenderConfiguration();
+    activeSampleCount_ = sampleCountForMode(antiAliasingMode);
     shadowPass_.create(
         deviceContext_.physicalDevice(),
         deviceContext_.device(),
         shadowFormat_);
-    ssaoPass_.create(
-        deviceContext_.physicalDevice(),
-        deviceContext_.device(),
-        swapchainResources_.renderExtent());
     uiResources_.create(
         deviceContext_.physicalDevice(),
         deviceContext_.device(),
@@ -89,12 +77,10 @@ VulkanRenderer::VulkanRenderer(
         deviceContext_.commandPool(),
         deviceContext_.graphicsQueue(),
         assetRoot_, manifest);
-    sceneDescriptors_.create(
-        deviceContext_.device(),
-        descriptorResources(),
-        maxFramesInFlight_);
+    activeResources_ = createRenderResources(
+        reconfigurationQueue_.active());
     descriptorSync_.markAllUpdated();
-    createPipeline();
+    logRenderConfiguration();
     createFrameResources();
     initializeDebugUi();
 }
@@ -126,20 +112,19 @@ VulkanRenderer::~VulkanRenderer()
         }
     }
 
-    destroyPipeline();
-    sceneDescriptors_.destroy();
+    retiredResources_.clear();
+    activeResources_ = {};
     modelResources_.destroy();
     uiResources_.destroy();
 
-    ssaoPass_.destroy();
     shadowPass_.destroy();
-    swapchainResources_.destroy();
 }
 
 VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
     RenderFrameData frameData)
 {
-    const VkExtent2D extent = swapchainResources_.renderExtent();
+    const VkExtent2D extent =
+        activeResources_.swapchain->renderExtent();
     const uint32_t scratchIndex = nextPreparedFrameSlot_;
     nextPreparedFrameSlot_ =
         (nextPreparedFrameSlot_ + 1) % preparedFrameSlotCount_;
@@ -204,24 +189,32 @@ void VulkanRenderer::drawFrame(
             VK_TRUE,
             UINT64_MAX),
         "vkWaitForFences failed");
+    completeFrame(currentFrame_);
     modelResources_.retireCompletedUploads();
     if (modelResources_.publishReadyAssets(1)) {
         descriptorSync_.resourcesChanged();
     }
     if (descriptorSync_.needsUpdate(currentFrame_)) {
-        sceneDescriptors_.update(currentFrame_, descriptorResources());
+        activeResources_.sceneDescriptors->update(
+            currentFrame_,
+            descriptorResources(activeResources_));
         descriptorSync_.markUpdated(currentFrame_);
     }
     modelResources_.updateAnimations(frameData);
 
     uint32_t imageIndex = 0;
-    VkResult acquired = swapchainResources_.acquire(frame.imageAvailable, imageIndex);
+    VkResult acquired = activeResources_.swapchain->acquire(
+        frame.imageAvailable, imageIndex);
     if (acquired == VK_ERROR_OUT_OF_DATE_KHR) {
-        recreateSwapchain();
+        swapchainRecreationRequested_ = true;
+        applyPendingReconfiguration();
         return;
     }
     if (acquired != VK_SUCCESS && acquired != VK_SUBOPTIMAL_KHR) {
         vkCheck(acquired, "vkAcquireNextImageKHR failed");
+    }
+    if (acquired == VK_SUBOPTIMAL_KHR) {
+        swapchainRecreationRequested_ = true;
     }
 
     vkCheck(
@@ -232,23 +225,35 @@ void VulkanRenderer::drawFrame(
 
     lastStats_ = sceneRecorder_.record(
         {
-            .swapchain = swapchainResources_,
+            .swapchain = *activeResources_.swapchain,
             .shadowPass = shadowPass_,
-            .ssaoPass = ssaoPass_,
-            .sceneDescriptors = sceneDescriptors_,
-            .pipelines = pipelines_,
+            .ssaoPass = *activeResources_.ssaoPass,
+            .sceneDescriptors =
+                *activeResources_.sceneDescriptors,
+            .pipelines = *activeResources_.pipelines,
             .modelResources = modelResources_,
         },
         {
             .descriptorFrameIndex = currentFrame_,
             .activeSamples = sampleCountValue(),
-            .wireframeEnabled = wireframeEnabled_,
+            .wireframeEnabled =
+                reconfigurationQueue_.active().wireframe,
             .wireframeLineWidth = wireframeLineWidth_,
             .statsFrameIndex = nextStatsFrameIndex_++,
             .pipelineRebuilds = pipelineRebuilds_,
             .swapchainRecreations = swapchainRecreations_,
             .swapchainRecreationDeferrals =
                 swapchainRecreationDeferrals_,
+            .renderResourceReconfigurations =
+                renderResourceReconfigurations_,
+            .presentQueueRetirementWaits =
+                presentQueueRetirementWaits_,
+            .retiredRenderResourceSets =
+                static_cast<uint32_t>(retiredResources_.size()),
+            .rendererReconfigurationPending =
+                reconfigurationQueue_
+                    .plan(swapchainRecreationRequested_)
+                    .has_value(),
         },
         frame.commandBuffer,
         imageIndex,
@@ -290,18 +295,21 @@ void VulkanRenderer::drawFrame(
             &submit,
             frame.inFlight),
         "vkQueueSubmit2 failed");
+    frameResourceTracker_.markSubmitted(
+        currentFrame_, activeResourceGeneration_);
 
-    const VkResult presented = swapchainResources_.present(
+    const VkResult presented = activeResources_.swapchain->present(
         deviceContext_.presentQueue(),
         frame.renderFinished,
         imageIndex);
     if (presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR) {
-        recreateSwapchain();
+        swapchainRecreationRequested_ = true;
     } else {
         vkCheck(presented, "vkQueuePresentKHR failed");
     }
 
     currentFrame_ = (currentFrame_ + 1) % maxFramesInFlight_;
+    applyPendingReconfiguration();
 }
 
 void VulkanRenderer::preloadAssets(const RenderAssetRequirements& requirements)
@@ -361,12 +369,13 @@ std::optional<GridPosition3> VulkanRenderer::pickIsoGridCell(
     if (frameData.viewMode != RenderViewMode::Isometric3D ||
         frameData.levelWidth == 0 ||
         frameData.levelHeight == 0 ||
-        swapchainResources_.extent().width == 0 ||
-        swapchainResources_.extent().height == 0) {
+        activeResources_.swapchain->extent().width == 0 ||
+        activeResources_.swapchain->extent().height == 0) {
         return std::nullopt;
     }
 
-    const VkExtent2D outputExtent = swapchainResources_.extent();
+    const VkExtent2D outputExtent =
+        activeResources_.swapchain->extent();
     return scenePreparer_.pickGridCell(
         prepared.scene,
         pixelPosition,
@@ -385,7 +394,7 @@ void VulkanRenderer::waitIdle() const
 
 AntiAliasingMode VulkanRenderer::antiAliasingMode() const
 {
-    return antiAliasingMode_;
+    return reconfigurationQueue_.requested().antiAliasing;
 }
 
 VkSampleCountFlagBits VulkanRenderer::activeSampleCount() const
@@ -416,7 +425,7 @@ const char* VulkanRenderer::physicalDeviceTypeName() const
 
 const char* VulkanRenderer::presentModeName() const
 {
-    switch (swapchainResources_.presentMode()) {
+    switch (activeResources_.swapchain->presentMode()) {
     case VK_PRESENT_MODE_IMMEDIATE_KHR: return "Immediate";
     case VK_PRESENT_MODE_MAILBOX_KHR: return "Mailbox";
     case VK_PRESENT_MODE_FIFO_KHR: return "FIFO";
@@ -427,19 +436,12 @@ const char* VulkanRenderer::presentModeName() const
 
 bool VulkanRenderer::wireframeEnabled() const
 {
-    return wireframeEnabled_;
+    return reconfigurationQueue_.requested().wireframe;
 }
 
 void VulkanRenderer::setWireframeEnabled(bool enabled)
 {
-    if (enabled == wireframeEnabled_) {
-        return;
-    }
-
-    waitIdle();
-    wireframeEnabled_ = enabled;
-    destroyPipeline();
-    createPipeline();
+    reconfigurationQueue_.requestWireframe(enabled);
 }
 
 bool VulkanRenderer::wideLinesSupported() const
@@ -467,43 +469,21 @@ void VulkanRenderer::setWireframeLineWidth(float lineWidth)
 
 void VulkanRenderer::setAntiAliasingMode(AntiAliasingMode mode)
 {
-    if (mode == antiAliasingMode_) {
-        return;
-    }
-
-    waitIdle();
-    antiAliasingMode_ = mode;
-    activeSampleCount_ = sampleCountForMode(mode);
-
-    destroyPipeline();
-    swapchainResources_.recreateAttachments(
-        activeSampleCount_,
-        swapchainResources_.renderScalePercent());
-    sceneDescriptors_.update(descriptorResources());
-    descriptorSync_.markAllUpdated();
-    createPipeline();
+    reconfigurationQueue_.requestAntiAliasing(mode);
 }
 
 int VulkanRenderer::renderScalePercent() const
 {
-    return swapchainResources_.renderScalePercent();
+    return reconfigurationQueue_.requested().renderScalePercent;
 }
 
 void VulkanRenderer::setRenderScalePercent(int percent)
 {
-    if (percent == swapchainResources_.renderScalePercent()) {
-        return;
-    }
-
-    waitIdle();
-    swapchainResources_.recreateAttachments(activeSampleCount_, percent);
-    ssaoPass_.recreate(swapchainResources_.renderExtent());
-    sceneDescriptors_.update(descriptorResources());
-    descriptorSync_.markAllUpdated();
-    logRenderConfiguration();
+    reconfigurationQueue_.requestRenderScalePercent(percent);
 }
 
-VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources() const
+VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources(
+    const RenderResourceSet& resources) const
 {
     return {
         .shadow = {
@@ -512,16 +492,16 @@ VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources() const
             .imageLayout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
         },
         .sceneColor = {
-            .sampler = swapchainResources_.sceneColorSampler(),
-            .imageView = swapchainResources_.sceneColorView(),
+            .sampler = resources.swapchain->sceneColorSampler(),
+            .imageView = resources.swapchain->sceneColorView(),
         },
         .sceneDepth = {
             .sampler = shadowPass_.sampler(),
-            .imageView = swapchainResources_.sampledDepthView(),
+            .imageView = resources.swapchain->sampledDepthView(),
         },
         .ssao = {
-            .sampler = ssaoPass_.sampler(),
-            .imageView = ssaoPass_.imageView(),
+            .sampler = resources.ssaoPass->sampler(),
+            .imageView = resources.ssaoPass->imageView(),
         },
         .uiFont = {
             .sampler = uiResources_.sampler(),
@@ -540,24 +520,177 @@ void VulkanRenderer::setAnimationPreview(const GltfAnimationClip* clip, float ti
     modelResources_.setAnimationPreview(clip, timeSeconds);
 }
 
-void VulkanRenderer::createPipeline()
+VulkanRenderer::RenderResourceSet
+VulkanRenderer::createRenderResources(
+    const RendererSettingsSnapshot& settings)
 {
-    pipelines_.create({
-        .device = deviceContext_.device(),
-        .assetRoot = assetRoot_,
-        .descriptorSetLayout = sceneDescriptors_.layout(),
-        .colorFormat = swapchainResources_.colorFormat(),
-        .depthFormat = depthFormat_,
-        .shadowFormat = shadowFormat_,
-        .sampleCount = activeSampleCount_,
-        .wireframe = wireframeEnabled_,
-    });
-    ++pipelineRebuilds_;
+    RenderResourceSet resources;
+    const VkSampleCountFlagBits sampleCount =
+        sampleCountForMode(settings.antiAliasing);
+    resources.swapchain =
+        std::make_unique<VulkanSwapchainResources>();
+    resources.swapchain->create(
+        deviceContext_.physicalDevice(),
+        deviceContext_.device(),
+        deviceContext_.surface(),
+        window_,
+        {
+            .graphics = deviceContext_.queueFamilies().graphics,
+            .present = deviceContext_.queueFamilies().present,
+        },
+        sampleCount,
+        settings.renderScalePercent,
+        depthFormat_,
+        vsync_,
+        activeResources_.swapchain
+            ? activeResources_.swapchain->handle()
+            : VK_NULL_HANDLE);
+    resources.ssaoPass = std::make_unique<VulkanSsaoPass>();
+    resources.ssaoPass->create(
+        deviceContext_.physicalDevice(),
+        deviceContext_.device(),
+        resources.swapchain->renderExtent());
+    resources.sceneDescriptors =
+        std::make_unique<VulkanSceneDescriptors>();
+    resources.sceneDescriptors->create(
+        deviceContext_.device(),
+        descriptorResources(resources),
+        maxFramesInFlight_);
+    resources.pipelines = createPipelines(resources, settings);
+    return resources;
 }
 
-void VulkanRenderer::destroyPipeline()
+std::unique_ptr<VulkanPipelineFactory>
+VulkanRenderer::createPipelines(
+    const RenderResourceSet& resources,
+    const RendererSettingsSnapshot& settings)
 {
-    pipelines_.destroy();
+    auto pipelines = std::make_unique<VulkanPipelineFactory>();
+    pipelines->create({
+        .device = deviceContext_.device(),
+        .assetRoot = assetRoot_,
+        .descriptorSetLayout =
+            resources.sceneDescriptors->layout(),
+        .colorFormat = resources.swapchain->colorFormat(),
+        .depthFormat = depthFormat_,
+        .shadowFormat = shadowFormat_,
+        .sampleCount =
+            sampleCountForMode(settings.antiAliasing),
+        .wireframe = settings.wireframe,
+    });
+    ++pipelineRebuilds_;
+    return pipelines;
+}
+
+uint32_t VulkanRenderer::pendingFrameMask() const
+{
+    return frameResourceTracker_.pendingMask();
+}
+
+uint32_t VulkanRenderer::pendingFrameMaskForGeneration(
+    uint64_t generation) const
+{
+    return frameResourceTracker_.pendingMaskForGeneration(
+        generation);
+}
+
+void VulkanRenderer::retireResources(
+    RenderResourceSet resources,
+    uint32_t pendingFrameMask)
+{
+    retiredResources_.push_back({
+        .resources = std::move(resources),
+        .pendingFrameMask = pendingFrameMask,
+    });
+    destroyCompletedRetirements();
+}
+
+void VulkanRenderer::destroyCompletedRetirements()
+{
+    const bool hasCompletedSwapchain =
+        std::ranges::any_of(
+            retiredResources_,
+            [](const RetiredRenderResources& retired) {
+                return retired.pendingFrameMask == 0 &&
+                    retired.resources.swapchain != nullptr;
+            });
+    if (hasCompletedSwapchain) {
+        // Render fences do not cover presentation completion. Wait only the
+        // present queue once the old swapchain has no in-flight render users.
+        vkCheck(
+            vkQueueWaitIdle(deviceContext_.presentQueue()),
+            "vkQueueWaitIdle failed while retiring swapchain");
+        ++presentQueueRetirementWaits_;
+    }
+    std::erase_if(
+        retiredResources_,
+        [](const RetiredRenderResources& retired) {
+            return retired.pendingFrameMask == 0;
+        });
+}
+
+void VulkanRenderer::completeFrame(uint32_t frameIndex)
+{
+    if (!frameResourceTracker_.complete(frameIndex)) {
+        return;
+    }
+    const uint32_t completedBit = ~(1U << frameIndex);
+    for (RetiredRenderResources& retired : retiredResources_) {
+        retired.pendingFrameMask &= completedBit;
+    }
+    destroyCompletedRetirements();
+}
+
+void VulkanRenderer::applyPendingReconfiguration()
+{
+    const std::optional<RendererReconfigurationPlan> plan =
+        reconfigurationQueue_.plan(
+            swapchainRecreationRequested_);
+    if (!plan) {
+        return;
+    }
+
+    const uint64_t oldGeneration = activeResourceGeneration_;
+    if (plan->rebuildRenderResources) {
+        if (!activeResources_.swapchain->canRecreate()) {
+            if (swapchainRecreationRequested_) {
+                ++swapchainRecreationDeferrals_;
+            }
+            return;
+        }
+
+        RenderResourceSet replacement =
+            createRenderResources(plan->settings);
+        RenderResourceSet retired = std::move(activeResources_);
+        activeResources_ = std::move(replacement);
+        activeSampleCount_ = sampleCountForMode(
+            plan->settings.antiAliasing);
+        ++activeResourceGeneration_;
+        reconfigurationQueue_.commit(*plan);
+        descriptorSync_.markAllUpdated();
+        // Attachments and descriptors are shared across pipeline generations,
+        // so the full replacement follows every currently submitted frame.
+        retireResources(std::move(retired), pendingFrameMask());
+        ++renderResourceReconfigurations_;
+        if (swapchainRecreationRequested_) {
+            ++swapchainRecreations_;
+        }
+        swapchainRecreationRequested_ = false;
+        logRenderConfiguration();
+        return;
+    }
+
+    std::unique_ptr<VulkanPipelineFactory> replacement =
+        createPipelines(activeResources_, plan->settings);
+    RenderResourceSet retired;
+    retired.pipelines = std::move(activeResources_.pipelines);
+    activeResources_.pipelines = std::move(replacement);
+    ++activeResourceGeneration_;
+    reconfigurationQueue_.commit(*plan);
+    retireResources(
+        std::move(retired),
+        pendingFrameMaskForGeneration(oldGeneration));
+    ++renderResourceReconfigurations_;
 }
 
 void VulkanRenderer::createFrameResources()
@@ -623,7 +756,8 @@ void VulkanRenderer::initializeDebugUi()
         throw std::runtime_error("ImGui_ImplSDL3_InitForVulkan failed");
     }
 
-    const VkFormat colorAttachmentFormat = swapchainResources_.colorFormat();
+    const VkFormat colorAttachmentFormat =
+        activeResources_.swapchain->colorFormat();
     VkPipelineRenderingCreateInfoKHR pipelineRendering {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
         .colorAttachmentCount = 1,
@@ -639,7 +773,8 @@ void VulkanRenderer::initializeDebugUi()
     initInfo.Queue = deviceContext_.graphicsQueue();
     initInfo.DescriptorPoolSize = 64;
     initInfo.MinImageCount = 2;
-    initInfo.ImageCount = std::max(2U, swapchainResources_.imageCount());
+    initInfo.ImageCount = std::max(
+        2U, activeResources_.swapchain->imageCount());
     initInfo.PipelineInfoMain.PipelineRenderingCreateInfo = pipelineRendering;
     initInfo.UseDynamicRendering = true;
     initInfo.MinAllocationSize = 1024 * 1024;
@@ -661,44 +796,23 @@ void VulkanRenderer::shutdownDebugUi()
 #endif
 }
 
-void VulkanRenderer::recreateSwapchain()
-{
-    if (!swapchainResources_.canRecreate()) {
-        ++swapchainRecreationDeferrals_;
-        return;
-    }
-
-    deviceContext_.waitIdle();
-    if (!swapchainResources_.canRecreate()) {
-        ++swapchainRecreationDeferrals_;
-        return;
-    }
-    const VkFormat oldColorFormat = swapchainResources_.colorFormat();
-    swapchainResources_.recreate();
-    ssaoPass_.recreate(swapchainResources_.renderExtent());
-    sceneDescriptors_.update(descriptorResources());
-    descriptorSync_.markAllUpdated();
-    if (oldColorFormat != swapchainResources_.colorFormat()) {
-        destroyPipeline();
-        createPipeline();
-    }
-    ++swapchainRecreations_;
-    logRenderConfiguration();
-}
-
 void VulkanRenderer::logRenderConfiguration() const
 {
-    const VkExtent2D extent = swapchainResources_.extent();
-    const VkExtent2D renderExtent = swapchainResources_.renderExtent();
+    const VkExtent2D extent =
+        activeResources_.swapchain->extent();
+    const VkExtent2D renderExtent =
+        activeResources_.swapchain->renderExtent();
     const uint64_t pixels =
         static_cast<uint64_t>(renderExtent.width) * renderExtent.height;
     const uint64_t samplePixels = pixels * sampleCountValue();
     log::info() << "Vulkan swapchain: " << extent.width << 'x' << extent.height
-        << ", " << swapchainResources_.imageCount() << " images, "
+        << ", " << activeResources_.swapchain->imageCount()
+        << " images, "
         << presentModeName() << ", " << sampleCountValue()
         << "x MSAA; scene " << renderExtent.width << 'x'
         << renderExtent.height << " at "
-        << swapchainResources_.renderScalePercent() << "% ("
+        << activeResources_.swapchain->renderScalePercent()
+        << "% ("
         << samplePixels / 1'000'000.0
         << " M sample-pixels)";
 }

@@ -4,7 +4,9 @@
 #include "engine/Math.hpp"
 #include "engine/render/GltfMesh.hpp"
 #include "engine/render/FrameDescriptorSync.hpp"
+#include "engine/render/FrameResourceTracker.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
+#include "engine/render/RendererReconfiguration.hpp"
 #include "engine/render/RenderTypes.hpp"
 #include "engine/render/VulkanDeviceContext.hpp"
 #include "engine/render/VulkanModelResources.hpp"
@@ -24,6 +26,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -33,13 +36,6 @@ namespace sokoban {
 
 class AssetManifest;
 class FontAtlas;
-
-enum class AntiAliasingMode {
-    None,
-    Msaa2x,
-    Msaa4x,
-    Msaa8x,
-};
 
 class VulkanRenderer {
 public:
@@ -118,15 +114,39 @@ private:
         uint64_t generation = 0;
     };
 
+    struct RenderResourceSet {
+        std::unique_ptr<VulkanSwapchainResources> swapchain;
+        std::unique_ptr<VulkanSsaoPass> ssaoPass;
+        std::unique_ptr<VulkanSceneDescriptors> sceneDescriptors;
+        std::unique_ptr<VulkanPipelineFactory> pipelines;
+    };
+
+    struct RetiredRenderResources {
+        RenderResourceSet resources;
+        uint32_t pendingFrameMask = 0;
+    };
+
     [[nodiscard]] const PreparedFrameScratch& resolvePreparedFrame(
         const PreparedFrame& frame) const;
-    [[nodiscard]] VulkanSceneDescriptors::Resources descriptorResources() const;
-    void createPipeline();
-    void destroyPipeline();
+    [[nodiscard]] VulkanSceneDescriptors::Resources descriptorResources(
+        const RenderResourceSet& resources) const;
+    [[nodiscard]] RenderResourceSet createRenderResources(
+        const RendererSettingsSnapshot& settings);
+    [[nodiscard]] std::unique_ptr<VulkanPipelineFactory> createPipelines(
+        const RenderResourceSet& resources,
+        const RendererSettingsSnapshot& settings);
+    void applyPendingReconfiguration();
+    void completeFrame(uint32_t frameIndex);
+    void retireResources(
+        RenderResourceSet resources,
+        uint32_t pendingFrameMask);
+    void destroyCompletedRetirements();
+    [[nodiscard]] uint32_t pendingFrameMask() const;
+    [[nodiscard]] uint32_t pendingFrameMaskForGeneration(
+        uint64_t generation) const;
     void createFrameResources();
     void initializeDebugUi();
     void shutdownDebugUi();
-    void recreateSwapchain();
     void logRenderConfiguration() const;
     [[nodiscard]] VkSampleCountFlagBits sampleCountForMode(AntiAliasingMode mode) const;
     [[nodiscard]] uint32_t sampleCountValue() const;
@@ -137,19 +157,20 @@ private:
 
     VkFormat depthFormat_ = VK_FORMAT_D32_SFLOAT;
     VkFormat shadowFormat_ = VK_FORMAT_D32_SFLOAT;
-    VulkanSwapchainResources swapchainResources_;
     VulkanShadowPass shadowPass_;
-    VulkanSsaoPass ssaoPass_;
-    VulkanSceneDescriptors sceneDescriptors_;
     VulkanUiResources uiResources_;
 
-    VulkanPipelineFactory pipelines_;
     VulkanModelResources modelResources_;
     VulkanSceneRecorder sceneRecorder_;
+    RendererReconfigurationQueue reconfigurationQueue_;
+    RenderResourceSet activeResources_;
+    std::vector<RetiredRenderResources> retiredResources_;
 
     static constexpr uint32_t maxFramesInFlight_ = 2;
     static constexpr uint32_t preparedFrameSlotCount_ = 2;
     std::array<FrameResources, maxFramesInFlight_> frames_ {};
+    FrameResourceTracker frameResourceTracker_ {
+        maxFramesInFlight_ };
     std::array<PreparedFrameScratch, preparedFrameSlotCount_>
         preparedFrameScratch_ {};
     IsoScenePreparer scenePreparer_;
@@ -157,15 +178,18 @@ private:
     uint32_t currentFrame_ = 0;
     uint32_t nextPreparedFrameSlot_ = 0;
     uint64_t nextPreparedFrameGeneration_ = 1;
-    AntiAliasingMode antiAliasingMode_ = AntiAliasingMode::Msaa8x;
     VkSampleCountFlagBits activeSampleCount_ = VK_SAMPLE_COUNT_1_BIT;
-    bool wireframeEnabled_ = false;
     float wireframeLineWidth_ = 1.0f;
+    uint64_t activeResourceGeneration_ = 1;
+    bool swapchainRecreationRequested_ = false;
+    bool vsync_ = false;
     RenderStats lastStats_ {};
     uint64_t nextStatsFrameIndex_ = 1;
     uint64_t pipelineRebuilds_ = 0;
     uint64_t swapchainRecreations_ = 0;
     uint64_t swapchainRecreationDeferrals_ = 0;
+    uint64_t renderResourceReconfigurations_ = 0;
+    uint64_t presentQueueRetirementWaits_ = 0;
 };
 
 } // namespace sokoban

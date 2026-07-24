@@ -172,6 +172,14 @@ public:
                 configuration_.swapchainRecreations,
             .swapchainRecreationDeferrals =
                 configuration_.swapchainRecreationDeferrals,
+            .renderResourceReconfigurations =
+                configuration_.renderResourceReconfigurations,
+            .presentQueueRetirementWaits =
+                configuration_.presentQueueRetirementWaits,
+            .retiredRenderResourceSets =
+                configuration_.retiredRenderResourceSets,
+            .rendererReconfigurationPending =
+                configuration_.rendererReconfigurationPending,
         };
 
         const VkCommandBufferBeginInfo beginInfo {

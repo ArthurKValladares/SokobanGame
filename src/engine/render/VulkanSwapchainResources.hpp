@@ -34,7 +34,8 @@ public:
         VkSampleCountFlagBits sampleCount,
         int renderScalePercent,
         VkFormat depthFormat,
-        bool vsync);
+        bool vsync,
+        VkSwapchainKHR oldSwapchain = VK_NULL_HANDLE);
     void recreate();
     void recreateAttachments(
         VkSampleCountFlagBits sampleCount,
@@ -88,7 +89,7 @@ private:
         VkImageView view = VK_NULL_HANDLE;
     };
 
-    void createSwapchain();
+    void createSwapchain(VkSwapchainKHR oldSwapchain);
     void createAttachments();
     void createResolvedColor();
     void createMsaaColor();

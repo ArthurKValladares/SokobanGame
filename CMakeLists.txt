@@ -167,9 +167,11 @@ add_executable(sokoban
     src/engine/render/VulkanRenderer.cpp
     src/engine/render/AnimationController.cpp
     src/engine/render/GltfMesh.cpp
+    src/engine/render/FrameResourceTracker.cpp
     src/engine/render/ImageData.cpp
     src/engine/render/RenderAssetRequirements.cpp
     src/engine/render/RenderResolution.cpp
+    src/engine/render/RendererReconfiguration.cpp
     src/engine/render/IsoScenePreparer.cpp
     src/engine/render/SkinnedMeshUpdater.cpp
     src/engine/render/VulkanDeviceContext.cpp
@@ -454,6 +456,17 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME frame_descriptor_sync TARGET sokoban_frame_descriptor_sync_tests
         SOURCES
             tests/FrameDescriptorSyncTests.cpp
+    )
+    sokoban_add_test(NAME frame_resource_tracker TARGET sokoban_frame_resource_tracker_tests
+        SOURCES
+            tests/FrameResourceTrackerTests.cpp
+            src/engine/render/FrameResourceTracker.cpp
+    )
+    sokoban_add_test(NAME renderer_reconfiguration TARGET sokoban_renderer_reconfiguration_tests
+        SOURCES
+            tests/RendererReconfigurationTests.cpp
+            src/engine/render/RendererReconfiguration.cpp
+            src/engine/render/RenderResolution.cpp
     )
     sokoban_add_test(NAME iso_scene_preparer TARGET sokoban_iso_scene_preparer_tests
         SOURCES
