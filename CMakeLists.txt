@@ -108,13 +108,8 @@ add_custom_target(sokoban_shaders DEPENDS ${SHADER_OUTPUTS})
 
 add_executable(sokoban_content_tool
     tools/ContentTool.cpp
-    src/engine/AssetManifest.cpp
-    src/engine/ContentPipeline.cpp
-    src/engine/Level.cpp
-    src/engine/TileTypes.cpp
 )
 target_include_directories(sokoban_content_tool PRIVATE src)
-target_link_libraries(sokoban_content_tool PRIVATE sokoban_json)
 set_target_properties(sokoban_content_tool PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tools/$<CONFIG>"
 )
@@ -124,31 +119,32 @@ else()
     target_compile_options(sokoban_content_tool PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-add_executable(sokoban
+function(sokoban_enable_warnings target)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endfunction()
+
+add_library(sokoban_core STATIC
     src/engine/AtomicFile.cpp
     src/engine/AsyncSaveStore.cpp
-    src/main.cpp
-    src/engine/AnimationPreviewDebugUi.cpp
-    src/engine/Application.cpp
-    src/engine/ApplicationDebugUi.cpp
     src/engine/AssetManifest.cpp
-    src/engine/AssetManifestDebugUi.cpp
     src/engine/AssetManifestEditor.cpp
     src/engine/AudioSystem.cpp
     src/engine/CampaignSession.cpp
     src/engine/BoardLayout.cpp
-    src/engine/DebugUi.cpp
+    src/engine/ContentPipeline.cpp
     src/engine/GameplayPresentation.cpp
     src/engine/GameplayLoop.cpp
     src/engine/GameplaySession.cpp
     src/engine/Input.cpp
     src/engine/InputBindings.cpp
-    src/engine/InputRouter.cpp
     src/engine/Level.cpp
     src/engine/LevelCatalog.cpp
     src/engine/LevelEditor.cpp
     src/engine/LevelProjectStore.cpp
-    src/engine/LevelEditorDebugUi.cpp
     src/engine/Log.cpp
     src/engine/LogQueue.cpp
     src/engine/MiniaudioImpl.cpp
@@ -159,14 +155,12 @@ add_executable(sokoban
     src/engine/Rules.cpp
     src/engine/RuntimeContent.cpp
     src/engine/SaveSlotManager.cpp
-    src/engine/ShellFlow.cpp
     src/engine/SaveStore.cpp
     src/engine/SettingsCoordinator.cpp
     src/engine/SettingsTypes.cpp
     src/engine/TaskSystem.cpp
     src/engine/TileTypes.cpp
     src/engine/Window.cpp
-    src/engine/render/VulkanRenderer.cpp
     src/engine/render/AnimationController.cpp
     src/engine/render/GltfMesh.cpp
     src/engine/render/FrameResourceTracker.cpp
@@ -175,6 +169,45 @@ add_executable(sokoban
     src/engine/render/RenderResolution.cpp
     src/engine/render/RendererReconfiguration.cpp
     src/engine/render/IsoScenePreparer.cpp
+)
+add_library(Sokoban::core ALIAS sokoban_core)
+target_include_directories(sokoban_core PUBLIC src)
+target_include_directories(sokoban_core PRIVATE third_party/miniaudio)
+target_link_libraries(sokoban_core
+    PUBLIC SDL3::SDL3
+    PRIVATE Threads::Threads sokoban_json sokoban_stb
+)
+target_compile_definitions(sokoban_core PRIVATE
+    SOKOBAN_GAME_VERSION="${PROJECT_VERSION}"
+)
+if(UNIX AND NOT APPLE)
+    # miniaudio dynamically loads native audio backends on Unix-like systems.
+    target_link_libraries(sokoban_core PRIVATE ${CMAKE_DL_LIBS} m)
+endif()
+sokoban_enable_warnings(sokoban_core)
+
+add_library(sokoban_ui STATIC
+    src/engine/InputRouter.cpp
+    src/engine/ShellFlow.cpp
+    src/engine/ui/FontAtlas.cpp
+    src/engine/ui/LevelCompleteOverlay.cpp
+    src/engine/ui/MenuKit.cpp
+    src/engine/ui/OptionsMenu.cpp
+    src/engine/ui/TitleScreen.cpp
+    src/engine/ui/Ui.cpp
+    src/engine/ui/UiControls.cpp
+    src/engine/ui/UiLayout.cpp
+)
+add_library(Sokoban::ui ALIAS sokoban_ui)
+target_include_directories(sokoban_ui PUBLIC src)
+target_link_libraries(sokoban_ui
+    PUBLIC sokoban_core
+    PRIVATE sokoban_stb
+)
+sokoban_enable_warnings(sokoban_ui)
+
+add_library(sokoban_render_vulkan STATIC
+    src/engine/render/VulkanRenderer.cpp
     src/engine/render/SkinnedMeshUpdater.cpp
     src/engine/render/VulkanDeviceContext.cpp
     src/engine/render/VulkanDeviceSelection.cpp
@@ -187,18 +220,48 @@ add_executable(sokoban
     src/engine/render/VulkanSsaoPass.cpp
     src/engine/render/VulkanSwapchainResources.cpp
     src/engine/render/VulkanUiResources.cpp
-    src/engine/ui/FontAtlas.cpp
-    src/engine/ui/LevelCompleteOverlay.cpp
-    src/engine/ui/MenuKit.cpp
-    src/engine/ui/OptionsMenu.cpp
-    src/engine/ui/TitleScreen.cpp
-    src/engine/ui/Ui.cpp
-    src/engine/ui/UiControls.cpp
-    src/engine/ui/UiLayout.cpp
 )
+add_library(Sokoban::render_vulkan ALIAS sokoban_render_vulkan)
 foreach(imgui_source IN LISTS SOKOBAN_IMGUI_SOURCES)
-    target_sources(sokoban PRIVATE $<$<CONFIG:Debug>:${imgui_source}>)
+    target_sources(sokoban_render_vulkan PRIVATE $<$<CONFIG:Debug>:${imgui_source}>)
 endforeach()
+target_include_directories(sokoban_render_vulkan
+    PUBLIC src
+    PRIVATE
+        third_party/imgui
+        third_party/imgui/backends
+        third_party/imgui/misc/cpp
+)
+target_link_libraries(sokoban_render_vulkan
+    PUBLIC
+        sokoban_core
+        sokoban_ui
+        Vulkan::Vulkan
+        SDL3::SDL3
+)
+target_compile_definitions(sokoban_render_vulkan PRIVATE
+    $<$<CONFIG:Debug>:SOKOBAN_ENABLE_DEBUG_UI=1>
+)
+if(SOKOBAN_ENABLE_VALIDATION)
+    target_compile_definitions(
+        sokoban_render_vulkan PRIVATE SOKOBAN_ENABLE_VALIDATION=1)
+else()
+    target_compile_definitions(
+        sokoban_render_vulkan PRIVATE SOKOBAN_ENABLE_VALIDATION=0)
+endif()
+sokoban_enable_warnings(sokoban_render_vulkan)
+
+target_link_libraries(sokoban_content_tool PRIVATE sokoban_core)
+
+add_executable(sokoban
+    src/main.cpp
+    src/engine/AnimationPreviewDebugUi.cpp
+    src/engine/Application.cpp
+    src/engine/ApplicationDebugUi.cpp
+    src/engine/AssetManifestDebugUi.cpp
+    src/engine/DebugUi.cpp
+    src/engine/LevelEditorDebugUi.cpp
+)
 
 set_target_properties(sokoban PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
@@ -226,7 +289,6 @@ target_include_directories(sokoban PRIVATE
     third_party/imgui
     third_party/imgui/backends
     third_party/imgui/misc/cpp
-    third_party/miniaudio
 )
 if(MSVC)
     set_source_files_properties(src/engine/MiniaudioImpl.cpp PROPERTIES COMPILE_OPTIONS /W0)
@@ -234,16 +296,10 @@ else()
     set_source_files_properties(src/engine/MiniaudioImpl.cpp PROPERTIES COMPILE_OPTIONS -w)
 endif()
 target_link_libraries(sokoban PRIVATE
-    Vulkan::Vulkan
-    Threads::Threads
-    SDL3::SDL3
-    sokoban_json
-    sokoban_stb
+    sokoban_core
+    sokoban_ui
+    sokoban_render_vulkan
 )
-if(UNIX AND NOT APPLE)
-    # miniaudio dynamically loads native audio backends on Unix-like systems.
-    target_link_libraries(sokoban PRIVATE ${CMAKE_DL_LIBS} m)
-endif()
 
 target_compile_definitions(sokoban PRIVATE
     SDL_MAIN_USE_CALLBACKS=0
@@ -253,17 +309,7 @@ target_compile_definitions(sokoban PRIVATE
     $<$<CONFIG:Debug>:SOKOBAN_ENABLE_DEBUG_UI=1>
 )
 
-if(SOKOBAN_ENABLE_VALIDATION)
-    target_compile_definitions(sokoban PRIVATE SOKOBAN_ENABLE_VALIDATION=1)
-else()
-    target_compile_definitions(sokoban PRIVATE SOKOBAN_ENABLE_VALIDATION=0)
-endif()
-
-if(MSVC)
-    target_compile_options(sokoban PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(sokoban PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+sokoban_enable_warnings(sokoban)
 
 option(SOKOBAN_BUILD_TESTS "Build headless engine tests" ON)
 
@@ -281,6 +327,13 @@ function(sokoban_add_test)
     if(NOT ARG_NAME OR NOT ARG_TARGET OR NOT ARG_SOURCES)
         message(FATAL_ERROR "sokoban_add_test requires NAME, TARGET, and SOURCES")
     endif()
+    foreach(test_source IN LISTS ARG_SOURCES)
+        if(test_source MATCHES "(^|[/\\\\])src[/\\\\]")
+            message(FATAL_ERROR
+                "${ARG_TARGET} compiles production source ${test_source}; "
+                "link its owning Sokoban library instead")
+        endif()
+    endforeach()
     add_executable(${ARG_TARGET} ${ARG_SOURCES})
     target_include_directories(${ARG_TARGET} PRIVATE src)
     if(ARG_LIBS)
@@ -306,258 +359,125 @@ if(SOKOBAN_BUILD_TESTS)
     enable_testing()
 
     sokoban_add_test(NAME rules TARGET sokoban_rules_tests
-        SOURCES
-            tests/RulesTests.cpp
-            src/engine/Level.cpp
-            src/engine/Rules.cpp
-            src/engine/TileTypes.cpp
+        LIBS sokoban_core
+        SOURCES tests/RulesTests.cpp
     )
     sokoban_add_test(NAME level TARGET sokoban_level_tests
-        SOURCES
-            tests/LevelTests.cpp
-            src/engine/Level.cpp
-            src/engine/TileTypes.cpp
+        LIBS sokoban_core
+        SOURCES tests/LevelTests.cpp
     )
     sokoban_add_test(NAME level_catalog TARGET sokoban_level_catalog_tests
-        SOURCES
-            tests/LevelCatalogTests.cpp
-            src/engine/LevelCatalog.cpp
+        LIBS sokoban_core
+        SOURCES tests/LevelCatalogTests.cpp
     )
     sokoban_add_test(NAME gameplay_session TARGET sokoban_gameplay_session_tests
-        SOURCES
-            tests/GameplaySessionTests.cpp
-            src/engine/GameplaySession.cpp
-            src/engine/Level.cpp
-            src/engine/Rules.cpp
-            src/engine/TileTypes.cpp
+        LIBS sokoban_core
+        SOURCES tests/GameplaySessionTests.cpp
     )
     sokoban_add_test(NAME player_profile TARGET sokoban_profile_tests
-        LIBS sokoban_json SDL3::SDL3
-        SOURCES
-            tests/PlayerProfileTests.cpp
-            src/engine/AtomicFile.cpp
-            src/engine/AsyncSaveStore.cpp
-            src/engine/InputBindings.cpp
-            src/engine/PlayerProfile.cpp
-            src/engine/PlayerProfileCodec.cpp
-            src/engine/render/RenderResolution.cpp
-            src/engine/SaveStore.cpp
-            src/engine/SettingsTypes.cpp
-            src/engine/TileTypes.cpp
+        LIBS sokoban_core sokoban_json
+        SOURCES tests/PlayerProfileTests.cpp
     )
     sokoban_add_test(NAME save_slots TARGET sokoban_save_slot_tests
-        LIBS sokoban_json SDL3::SDL3
-        SOURCES
-            tests/SaveSlotManagerTests.cpp
-            src/engine/AtomicFile.cpp
-            src/engine/AsyncSaveStore.cpp
-            src/engine/InputBindings.cpp
-            src/engine/PlayerProfile.cpp
-            src/engine/PlayerProfileCodec.cpp
-            src/engine/render/RenderResolution.cpp
-            src/engine/SaveSlotManager.cpp
-            src/engine/SaveStore.cpp
-            src/engine/SettingsTypes.cpp
-            src/engine/TileTypes.cpp
+        LIBS sokoban_core sokoban_json
+        SOURCES tests/SaveSlotManagerTests.cpp
     )
     sokoban_add_test(NAME shell_flow TARGET sokoban_shell_flow_tests
-        SOURCES
-            tests/ShellFlowTests.cpp
-            src/engine/InputBindings.cpp
-            src/engine/ShellFlow.cpp
+        LIBS sokoban_ui
+        SOURCES tests/ShellFlowTests.cpp
     )
     sokoban_add_test(NAME input TARGET sokoban_input_tests
-        LIBS SDL3::SDL3
-        SOURCES
-            tests/InputTests.cpp
-            src/engine/Input.cpp
-            src/engine/InputBindings.cpp
+        LIBS sokoban_core
+        SOURCES tests/InputTests.cpp
     )
     sokoban_add_test(NAME image_data TARGET sokoban_image_data_tests
-        LIBS Threads::Threads sokoban_stb
+        LIBS sokoban_core
         ASSET_DIR
-        SOURCES
-            tests/ImageDataTests.cpp
-            src/engine/render/ImageData.cpp
+        SOURCES tests/ImageDataTests.cpp
     )
     sokoban_add_test(NAME ui TARGET sokoban_ui_tests
-        LIBS sokoban_stb
+        LIBS sokoban_ui
         ASSET_DIR
-        SOURCES
-            tests/UiTests.cpp
-            src/engine/InputBindings.cpp
-            src/engine/ui/FontAtlas.cpp
-            src/engine/ui/MenuKit.cpp
-            src/engine/ui/OptionsMenu.cpp
-            src/engine/ui/Ui.cpp
-            src/engine/ui/UiControls.cpp
-            src/engine/ui/UiLayout.cpp
-            src/engine/render/RenderResolution.cpp
-            src/engine/SettingsTypes.cpp
+        SOURCES tests/UiTests.cpp
     )
     sokoban_add_test(NAME title TARGET sokoban_title_tests
-        LIBS sokoban_stb
+        LIBS sokoban_ui
         ASSET_DIR
-        SOURCES
-            tests/TitleScreenTests.cpp
-            src/engine/InputBindings.cpp
-            src/engine/ui/FontAtlas.cpp
-            src/engine/ui/LevelCompleteOverlay.cpp
-            src/engine/ui/MenuKit.cpp
-            src/engine/ui/OptionsMenu.cpp
-            src/engine/ui/TitleScreen.cpp
-            src/engine/ui/Ui.cpp
-            src/engine/ui/UiControls.cpp
-            src/engine/ui/UiLayout.cpp
-            src/engine/render/RenderResolution.cpp
-            src/engine/SettingsTypes.cpp
+        SOURCES tests/TitleScreenTests.cpp
     )
     sokoban_add_test(NAME vulkan_device_selection TARGET sokoban_vulkan_device_selection_tests
-        LIBS Vulkan::Vulkan
-        SOURCES
-            tests/VulkanDeviceSelectionTests.cpp
-            src/engine/render/VulkanDeviceSelection.cpp
-            src/engine/render/RenderResolution.cpp
+        LIBS sokoban_render_vulkan
+        SOURCES tests/VulkanDeviceSelectionTests.cpp
     )
     sokoban_add_test(NAME input_router TARGET sokoban_input_router_tests
-        LIBS SDL3::SDL3
-        SOURCES
-            tests/InputRouterTests.cpp
-            src/engine/Input.cpp
-            src/engine/InputBindings.cpp
-            src/engine/InputRouter.cpp
+        LIBS sokoban_ui
+        SOURCES tests/InputRouterTests.cpp
     )
     sokoban_add_test(NAME settings_coordinator TARGET sokoban_settings_coordinator_tests
-        LIBS sokoban_json
-        SOURCES
-            tests/SettingsCoordinatorTests.cpp
-            src/engine/AssetManifest.cpp
-            src/engine/InputBindings.cpp
-            src/engine/PlayerProfile.cpp
-            src/engine/PresentationSettings.cpp
-            src/engine/render/RenderResolution.cpp
-            src/engine/SettingsCoordinator.cpp
-            src/engine/SettingsTypes.cpp
-            src/engine/TileTypes.cpp
+        LIBS sokoban_core
+        SOURCES tests/SettingsCoordinatorTests.cpp
     )
     sokoban_add_test(NAME campaign_session TARGET sokoban_campaign_session_tests
-        SOURCES
-            tests/CampaignSessionTests.cpp
-            src/engine/CampaignSession.cpp
-            src/engine/InputBindings.cpp
-            src/engine/LevelCatalog.cpp
-            src/engine/PlayerProfile.cpp
-            src/engine/render/RenderResolution.cpp
-            src/engine/SettingsTypes.cpp
-            src/engine/TileTypes.cpp
+        LIBS sokoban_core
+        SOURCES tests/CampaignSessionTests.cpp
     )
     sokoban_add_test(NAME gameplay_loop TARGET sokoban_gameplay_loop_tests
-        SOURCES
-            tests/GameplayLoopTests.cpp
-            src/engine/GameplayLoop.cpp
-            src/engine/GameplayPresentation.cpp
-            src/engine/GameplaySession.cpp
-            src/engine/Level.cpp
-            src/engine/Rules.cpp
-            src/engine/TileTypes.cpp
+        LIBS sokoban_core
+        SOURCES tests/GameplayLoopTests.cpp
     )
     sokoban_add_test(NAME frame_descriptor_sync TARGET sokoban_frame_descriptor_sync_tests
-        SOURCES
-            tests/FrameDescriptorSyncTests.cpp
+        LIBS sokoban_render_vulkan
+        SOURCES tests/FrameDescriptorSyncTests.cpp
     )
     sokoban_add_test(NAME frame_resource_tracker TARGET sokoban_frame_resource_tracker_tests
-        SOURCES
-            tests/FrameResourceTrackerTests.cpp
-            src/engine/render/FrameResourceTracker.cpp
+        LIBS sokoban_core
+        SOURCES tests/FrameResourceTrackerTests.cpp
     )
     sokoban_add_test(NAME renderer_reconfiguration TARGET sokoban_renderer_reconfiguration_tests
-        SOURCES
-            tests/RendererReconfigurationTests.cpp
-            src/engine/render/RendererReconfiguration.cpp
-            src/engine/render/RenderResolution.cpp
+        LIBS sokoban_core
+        SOURCES tests/RendererReconfigurationTests.cpp
     )
     sokoban_add_test(NAME iso_scene_preparer TARGET sokoban_iso_scene_preparer_tests
-        SOURCES
-            tests/IsoScenePreparerTests.cpp
-            src/engine/BoardLayout.cpp
-            src/engine/render/IsoScenePreparer.cpp
+        LIBS sokoban_core
+        SOURCES tests/IsoScenePreparerTests.cpp
     )
     sokoban_add_test(NAME level_editor TARGET sokoban_level_editor_tests
-        SOURCES
-            tests/LevelEditorTests.cpp
-            src/engine/LevelEditor.cpp
-            src/engine/LevelProjectStore.cpp
-            src/engine/Level.cpp
-            src/engine/TileTypes.cpp
+        LIBS sokoban_core
+        SOURCES tests/LevelEditorTests.cpp
     )
     sokoban_add_test(NAME animation_controller TARGET sokoban_animation_controller_tests
-        SOURCES
-            tests/AnimationControllerTests.cpp
-            src/engine/render/AnimationController.cpp
+        LIBS sokoban_core
+        SOURCES tests/AnimationControllerTests.cpp
     )
     sokoban_add_test(NAME asset_manifest TARGET sokoban_asset_manifest_tests
-        LIBS sokoban_json
+        LIBS sokoban_core sokoban_json
         ASSETS_ENV
-        SOURCES
-            tests/AssetManifestTests.cpp
-            src/engine/AssetManifest.cpp
-            src/engine/TileTypes.cpp
+        SOURCES tests/AssetManifestTests.cpp
     )
     sokoban_add_test(NAME asset_manifest_editor TARGET sokoban_asset_manifest_editor_tests
-        LIBS sokoban_json
+        LIBS sokoban_core
         ASSETS_ENV
-        SOURCES
-            tests/AssetManifestEditorTests.cpp
-            src/engine/AtomicFile.cpp
-            src/engine/AssetManifest.cpp
-            src/engine/AssetManifestEditor.cpp
-            src/engine/TileTypes.cpp
+        SOURCES tests/AssetManifestEditorTests.cpp
     )
     sokoban_add_test(NAME presentation TARGET sokoban_presentation_tests
-        LIBS sokoban_json
-        SOURCES
-            tests/PresentationTests.cpp
-            src/engine/AssetManifest.cpp
-            src/engine/GameplayPresentation.cpp
-            src/engine/Level.cpp
-            src/engine/LevelEditor.cpp
-            src/engine/LevelProjectStore.cpp
-            src/engine/PresentationSettings.cpp
-            src/engine/RenderFrameBuilder.cpp
-            src/engine/Rules.cpp
-            src/engine/TileTypes.cpp
-            src/engine/render/RenderAssetRequirements.cpp
+        LIBS sokoban_core
+        SOURCES tests/PresentationTests.cpp
     )
     sokoban_add_test(NAME asset_requirements TARGET sokoban_asset_requirements_tests
-        LIBS sokoban_json
-        SOURCES
-            tests/AssetRequirementsTests.cpp
-            src/engine/AssetManifest.cpp
-            src/engine/Level.cpp
-            src/engine/TileTypes.cpp
-            src/engine/render/RenderAssetRequirements.cpp
+        LIBS sokoban_core
+        SOURCES tests/AssetRequirementsTests.cpp
     )
     sokoban_add_test(NAME tasks TARGET sokoban_task_tests
-        LIBS Threads::Threads
-        SOURCES
-            tests/TaskSystemTests.cpp
-            src/engine/TaskSystem.cpp
+        LIBS sokoban_core
+        SOURCES tests/TaskSystemTests.cpp
     )
     sokoban_add_test(NAME logging TARGET sokoban_log_tests
-        LIBS Threads::Threads
-        SOURCES
-            tests/LogTests.cpp
-            src/engine/Log.cpp
-            src/engine/LogQueue.cpp
+        LIBS sokoban_core
+        SOURCES tests/LogTests.cpp
     )
     sokoban_add_test(NAME content_pipeline TARGET sokoban_content_pipeline_tests
-        LIBS sokoban_json
-        SOURCES
-            tests/ContentPipelineTests.cpp
-            src/engine/AssetManifest.cpp
-            src/engine/ContentPipeline.cpp
-            src/engine/Level.cpp
-            src/engine/TileTypes.cpp
+        LIBS sokoban_core
+        SOURCES tests/ContentPipelineTests.cpp
     )
 endif()
 

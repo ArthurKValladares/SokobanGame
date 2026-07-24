@@ -74,7 +74,10 @@ ASSET_DIR for the `SOKOBAN_TEST_ASSET_DIR` define, ASSETS_ENV for the
 `SOKOBAN_ASSETS` run env). It applies the shared `src` include path and the
 per-compiler warning set (`/W4 /permissive-` on MSVC, `-Wall -Wextra
 -Wpedantic` otherwise) and registers the CTest case, so adding a suite is one
-call, not a copy-pasted block.
+call, not a copy-pasted block. Production sources compile once into
+`sokoban_core`, `sokoban_ui`, or `sokoban_render_vulkan`; tests link the owning
+library and compile only their test `.cpp`. The helper rejects `src/` entries
+at configure time to prevent target-definition drift from returning.
 
 Headless rules tests (no SDL/Vulkan needed at runtime; built by default via `SOKOBAN_BUILD_TESTS`):
 
@@ -178,6 +181,15 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 
 ## Important Source Map
 
+- `CMakeLists.txt`: defines three reusable static libraries with
+  `Sokoban::core`, `Sokoban::ui`, and `Sokoban::render_vulkan` aliases.
+  `sokoban_core` owns gameplay, persistence, platform services, content, and
+  Vulkan-free render data/preparation; `sokoban_ui` owns player-facing UI plus
+  the UI-dependent `InputRouter`/`ShellFlow`; `sokoban_render_vulkan` owns
+  Vulkan resources, recording, and the renderer facade. The executable keeps
+  only `Application`, `main`, and Debug ImGui adapters as composition code.
+  The content tool and every test consume these libraries rather than
+  recompiling production translation units.
 - `src/main.cpp`: process entry point.
 - `src/engine/Application.*`: composition root and external-effect executor for component lifetime, the SDL/UI frame, shell commands, file-backed level loading, and calls into Window/Vulkan/audio/save services. Campaign policy lives in `CampaignSession`, gameplay advancement in `GameplayLoop`, input admission/focus routing in `InputRouter`, and profile-to-runtime settings policy in `SettingsCoordinator`. It builds one logical `RenderFrameData` per frame, asks `VulkanRenderer` to prepare it once, and retains the lightweight prepared-frame handle so editor picking can reuse the previous submitted scene. `buildLevelCatalog()` refreshes the campaign's cached screen counts when a screen loads so debug-editor changes remain visible without title queries hitting the filesystem. It no longer owns campaign counters, movement-loop policy, input-routing policy, settings projection/change detection, mutable rendering settings, visual interpolation, debug animation-browser state, or render-frame construction.
 - `src/engine/CampaignSession.*`: headless campaign/run state. Owns the cached level topology, validated current location, cross-screen move/time totals, completion and best-record policy, pending next-level transition, and deferred-checkpoint cadence while mutating only the supplied `PlayerProfile`. Screen advancement returns a type-safe `ScreenAdvanced`/`LevelCompleted`/`GameCompleted` variant; Application performs the resulting UI, audio, persistence, and loading effects. Covered by `tests/CampaignSessionTests.cpp`.
@@ -823,6 +835,11 @@ Major recent additions and fixes:
   categories, periodic and immediate-error flushing, explicit process-exit
   draining, error-preserving overflow policy, synthetic drop reports, Debug UI
   queue/drop diagnostics, and a focused concurrent logger regression suite.
+- Replaced per-test production-source lists with reusable `sokoban_core`,
+  `sokoban_ui`, and `sokoban_render_vulkan` static libraries. The game,
+  content tool, and all 29 test executables now share one set of production
+  compile definitions and link dependencies; tests compile only their own
+  source, and the CMake helper rejects future `src/` entries.
 - Split application presentation/configuration responsibilities into
   `PresentationSettings`, `GameplayPresentation`, and `RenderFrameBuilder`,
   with `ApplicationDebugUi` and `AnimationPreviewDebugUi` as adapters.
