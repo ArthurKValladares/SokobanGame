@@ -19,80 +19,60 @@ SettingsEffects SettingsCoordinator::initialize()
 
     SettingsEffects effects;
     effects.window = SettingsEffects::WindowState {
-        .fullscreen = profile_.video.fullscreen,
-        .width = profile_.video.windowWidth,
-        .height = profile_.video.windowHeight,
+        .fullscreen = profile_.settings.video.fullscreen,
+        .width = profile_.settings.video.windowWidth,
+        .height = profile_.settings.video.windowHeight,
     };
-    effects.audio = profile_.audio;
-    effects.input = profile_.input;
-    effects.stepDurationSeconds = profile_.accessibility.reducedMotion
+    effects.audio = profile_.settings.audio;
+    effects.input = profile_.settings.input;
+    effects.stepDurationSeconds = profile_.settings.accessibility.reducedMotion
         ? 0.05f
         : config::stepDurationSeconds;
     return effects;
 }
 
-UserSettings SettingsCoordinator::userSettings() const
+const UserSettings& SettingsCoordinator::userSettings() const
 {
-    return {
-        .antiAliasingSamples = profile_.video.antiAliasingSamples,
-        .renderScalePercent = profile_.video.renderScalePercent,
-        .customRenderScale = profile_.video.customRenderScale,
-        .customRenderScalePercent = profile_.video.customRenderScalePercent,
-        .ambientOcclusion = profile_.video.ambientOcclusion,
-        .fullscreen = profile_.video.fullscreen,
-        .windowWidth = profile_.video.windowWidth,
-        .windowHeight = profile_.video.windowHeight,
-        .masterVolume = profile_.audio.masterVolume,
-        .musicVolume = profile_.audio.musicVolume,
-        .input = profile_.input,
-    };
+    return profile_.settings;
 }
 
 SettingsEffects SettingsCoordinator::applyUserSettings(
     const UserSettings& settings)
 {
-    const PlayerProfile::VideoSettings oldVideo = profile_.video;
-    const PlayerProfile::AudioSettings oldAudio = profile_.audio;
-    const InputBindings oldInput = profile_.input;
-
-    profile_.video.antiAliasingSamples = settings.antiAliasingSamples;
-    profile_.video.renderScalePercent = settings.renderScalePercent;
-    profile_.video.customRenderScale = settings.customRenderScale;
-    profile_.video.customRenderScalePercent = settings.customRenderScalePercent;
-    profile_.video.ambientOcclusion = settings.ambientOcclusion;
-    profile_.video.fullscreen = settings.fullscreen;
-    profile_.video.windowWidth = settings.windowWidth;
-    profile_.video.windowHeight = settings.windowHeight;
-    profile_.audio.masterVolume = settings.masterVolume;
-    profile_.audio.musicVolume = settings.musicVolume;
-    profile_.input = settings.input;
+    const UserSettings oldSettings = profile_.settings;
+    profile_.settings = settings;
     profile_.normalize();
     updatePresentationSettings();
 
     SettingsEffects effects;
-    if (oldVideo.antiAliasingSamples != profile_.video.antiAliasingSamples) {
-        effects.antiAliasingSamples = profile_.video.antiAliasingSamples;
+    if (oldSettings.video.antiAliasingSamples !=
+        profile_.settings.video.antiAliasingSamples) {
+        effects.antiAliasingSamples =
+            profile_.settings.video.antiAliasingSamples;
     }
-    if (oldVideo.effectiveRenderScalePercent() !=
-        profile_.video.effectiveRenderScalePercent()) {
+    if (oldSettings.video.effectiveRenderScalePercent() !=
+        profile_.settings.video.effectiveRenderScalePercent()) {
         effects.renderScalePercent =
-            profile_.video.effectiveRenderScalePercent();
+            profile_.settings.video.effectiveRenderScalePercent();
     }
-    if (oldVideo.fullscreen != profile_.video.fullscreen ||
-        (!profile_.video.fullscreen &&
-            (oldVideo.windowWidth != profile_.video.windowWidth ||
-                oldVideo.windowHeight != profile_.video.windowHeight))) {
+    if (oldSettings.video.fullscreen !=
+            profile_.settings.video.fullscreen ||
+        (!profile_.settings.video.fullscreen &&
+            (oldSettings.video.windowWidth !=
+                    profile_.settings.video.windowWidth ||
+                oldSettings.video.windowHeight !=
+                    profile_.settings.video.windowHeight))) {
         effects.window = SettingsEffects::WindowState {
-            .fullscreen = profile_.video.fullscreen,
-            .width = profile_.video.windowWidth,
-            .height = profile_.video.windowHeight,
+            .fullscreen = profile_.settings.video.fullscreen,
+            .width = profile_.settings.video.windowWidth,
+            .height = profile_.settings.video.windowHeight,
         };
     }
-    if (!(oldAudio == profile_.audio)) {
-        effects.audio = profile_.audio;
+    if (!(oldSettings.audio == profile_.settings.audio)) {
+        effects.audio = profile_.settings.audio;
     }
-    if (!(oldInput == profile_.input)) {
-        effects.input = profile_.input;
+    if (!(oldSettings.input == profile_.settings.input)) {
+        effects.input = profile_.settings.input;
     }
     effects.saveProgress = true;
     effects.saveSettings = true;
@@ -103,11 +83,11 @@ SettingsEffects SettingsCoordinator::applyAudioSettings(
     const PlayerProfile::AudioSettings& settings,
     bool persist)
 {
-    profile_.audio = settings;
+    profile_.settings.audio = settings;
     profile_.normalize();
 
     SettingsEffects effects;
-    effects.audio = profile_.audio;
+    effects.audio = profile_.settings.audio;
     effects.saveProgress = persist;
     effects.saveSettings = persist;
     effects.immediatePersistence = persist;
@@ -117,7 +97,7 @@ SettingsEffects SettingsCoordinator::applyAudioSettings(
 void SettingsCoordinator::updatePresentationSettings()
 {
     presentationSettings_.lighting.ambientOcclusionEnabled =
-        profile_.video.ambientOcclusion;
+        profile_.settings.video.ambientOcclusion;
     presentationSettings_.normalize();
 }
 

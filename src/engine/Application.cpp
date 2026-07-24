@@ -42,9 +42,10 @@ Application::Application()
           assetRoot_,
           assetManifest_,
           uiFont_,
-          antiAliasingModeForSamples(playerProfile_.video.antiAliasingSamples),
-          playerProfile_.video.effectiveRenderScalePercent(),
-          playerProfile_.video.vsync)
+          antiAliasingModeForSamples(
+              playerProfile_.settings.video.antiAliasingSamples),
+          playerProfile_.settings.video.effectiveRenderScalePercent(),
+          playerProfile_.settings.video.vsync)
     , ui_(uiFont_)
     , audioSystem_(assetRoot_, assetManifest_)
     , settingsCoordinator_(playerProfile_, presentationSettings_)
@@ -92,7 +93,7 @@ Application::Application()
             .settings = presentationSettings_,
             .audio = audioSystem_,
             .saveDiagnostics = saveSlots_.progressDiagnostics(),
-            .audioSettings = playerProfile_.audio,
+            .audioSettings = playerProfile_.settings.audio,
             .updateAudioSettings = [this](
                 PlayerProfile::AudioSettings settings,
                 bool persist) {
@@ -160,8 +161,12 @@ void Application::run()
             const InputRouter::EventResult routedEvent =
                 inputRouter_.routeEvent(event, input_, eventContext);
             if (routedEvent.bindingCandidate) {
-                optionsMenu_.provideBindingCandidate(
-                    *routedEvent.bindingCandidate);
+                if (const std::optional<OptionsAction> action =
+                        optionsMenu_.provideBindingCandidate(
+                            settingsCoordinator_.userSettings(),
+                            *routedEvent.bindingCandidate)) {
+                    handleShellEvent(ShellOptionsAction { *action });
+                }
             }
             if (routedEvent.closeRequested) {
                 handleShellEvent(ShellCloseRequested {});
@@ -227,8 +232,23 @@ void Application::run()
         }
 
         if (const std::optional<OptionsAction> optionsAction =
-                optionsMenu_.draw(ui_, pixelSize, routedInput.options)) {
+                optionsMenu_.handleInput(
+                    settingsCoordinator_.userSettings(),
+                    routedInput.options)) {
             handleShellEvent(ShellOptionsAction { *optionsAction });
+        }
+        if (const std::optional<OptionsMenuIntent> intent =
+                optionsMenuView_.draw(
+                    ui_,
+                    pixelSize,
+                    optionsMenu_.state(),
+                    settingsCoordinator_.userSettings())) {
+            if (const std::optional<OptionsAction> optionsAction =
+                    optionsMenu_.dispatch(
+                        settingsCoordinator_.userSettings(),
+                        *intent)) {
+                handleShellEvent(ShellOptionsAction { *optionsAction });
+            }
         }
         ui_.endFrame();
         preparedRenderFrame_ = renderer_.prepareFrame(
@@ -661,16 +681,15 @@ void Application::executeShellCommand(const ShellCommand& command)
         },
         [&](const shell::OpenOptions& open) {
             optionsMenu_.open(
-                settingsCoordinator_.userSettings(),
                 open.pauseContext,
                 open.allowLevelSelect);
         },
         [&](const shell::CloseOptions&) { optionsMenu_.close(); },
         [&](const shell::OptionsBack&) { optionsMenu_.back(); },
-        [&](const shell::ApplySettings&) {
+        [&](const shell::ApplySettings& apply) {
             applySettingsEffects(
                 settingsCoordinator_.applyUserSettings(
-                    optionsMenu_.settings()));
+                    apply.settings));
         },
         [&](const shell::RequestQuitConfirmation&) {
             optionsMenu_.requestQuitConfirmation();

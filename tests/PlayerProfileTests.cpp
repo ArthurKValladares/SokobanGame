@@ -77,8 +77,8 @@ void testRoundTripAndBests()
     sokoban::PlayerProfile profile;
     profile.unlockedLevel = 3;
     profile.setCurrentLevel(2);
-    profile.audio = { .masterVolume = 0.8f, .musicVolume = 0.4f, .soundVolume = 0.6f };
-    profile.video = {
+    profile.settings.audio = { .masterVolume = 0.8f, .musicVolume = 0.4f, .soundVolume = 0.6f };
+    profile.settings.video = {
         .fullscreen = true,
         .vsync = true,
         .antiAliasingSamples = 4,
@@ -89,18 +89,18 @@ void testRoundTripAndBests()
         .windowWidth = 1600,
         .windowHeight = 900,
     };
-    profile.input.forAction(sokoban::InputAction::MoveUp) = {
+    profile.settings.input.forAction(sokoban::InputAction::MoveUp) = {
         sokoban::KeyboardBinding { "Up" },
         sokoban::GamepadButtonBinding { "dpup" },
         sokoban::GamepadAxisBinding {
             "lefty", sokoban::AxisDirection::Negative, 0.6f },
     };
-    profile.input.forAction(sokoban::InputAction::Undo) = {
+    profile.settings.input.forAction(sokoban::InputAction::Undo) = {
         sokoban::KeyboardBinding { "Backspace" },
         sokoban::GamepadButtonBinding { "south" },
     };
-    profile.accessibility.reducedMotion = true;
-    profile.accessibility.highContrast = true;
+    profile.settings.accessibility.reducedMotion = true;
+    profile.settings.accessibility.highContrast = true;
     profile.recordLevelCompletion(0, 30, 48.5, true);
     profile.recordLevelCompletion(0, 35, 40.0, true);
 
@@ -159,29 +159,29 @@ void testReachedScreensAndProgressReset()
         "partial run records no bests");
 
     sokoban::PlayerProfile populated = profile;
-    populated.audio.musicVolume = 0.25f;
-    populated.accessibility.highContrast = true;
+    populated.settings.audio.musicVolume = 0.25f;
+    populated.settings.accessibility.highContrast = true;
     check(!populated.progressEmpty(), "populated profile has progress");
     populated.resetProgress();
     check(populated.unlockedLevel == 0 && populated.currentLevel == 0 &&
             populated.currentScreen == 0,
         "reset clears position");
     check(populated.levels.empty() && !populated.activeScreen, "reset clears records");
-    check(populated.audio.musicVolume == 0.25f, "reset keeps audio settings");
-    check(populated.accessibility.highContrast, "reset keeps accessibility settings");
+    check(populated.settings.audio.musicVolume == 0.25f, "reset keeps audio settings");
+    check(populated.settings.accessibility.highContrast, "reset keeps accessibility settings");
     check(populated.progressEmpty(), "reset profile reads as empty");
 
     // Settings split: settingsOnly strips progress, adoptSettingsFrom keeps it.
     const sokoban::PlayerProfile settings = populated.settingsOnly();
     check(settings.progressEmpty(), "settingsOnly has no progress");
-    check(settings.audio.musicVolume == 0.25f, "settingsOnly keeps audio");
-    check(settings.accessibility.highContrast, "settingsOnly keeps accessibility");
+    check(settings.settings.audio.musicVolume == 0.25f, "settingsOnly keeps audio");
+    check(settings.settings.accessibility.highContrast, "settingsOnly keeps accessibility");
 
     sokoban::PlayerProfile target = profile;
     const int levelsBefore = static_cast<int>(target.levels.size());
     target.adoptSettingsFrom(settings);
-    check(target.audio.musicVolume == 0.25f, "adopt applies audio settings");
-    check(target.accessibility.highContrast, "adopt applies accessibility");
+    check(target.settings.audio.musicVolume == 0.25f, "adopt applies audio settings");
+    check(target.settings.accessibility.highContrast, "adopt applies accessibility");
     check(static_cast<int>(target.levels.size()) == levelsBefore,
         "adopt keeps progress records");
 }
@@ -192,8 +192,8 @@ void testSectionedSerialization()
     profile.unlockedLevel = 1;
     profile.recordReachedScreen(0, 1);
     profile.recordLevelCompletion(0, 12, 30.0, true);
-    profile.audio.musicVolume = 0.25f;
-    profile.accessibility.highContrast = true;
+    profile.settings.audio.musicVolume = 0.25f;
+    profile.settings.accessibility.highContrast = true;
     profile.normalize();
 
     // Progress-only files carry no settings section and decode with default
@@ -207,8 +207,8 @@ void testSectionedSerialization()
     check(progressDecoded.progressForLevel(0) != nullptr &&
             progressDecoded.progressForLevel(0)->bestMoves == 12,
         "progress-only round-trips progress");
-    check(progressDecoded.audio.musicVolume ==
-            sokoban::PlayerProfile {}.audio.musicVolume,
+    check(progressDecoded.settings.audio.musicVolume ==
+            sokoban::PlayerProfile {}.settings.audio.musicVolume,
         "progress-only decodes default settings");
 
     // Settings-only files carry no progress section.
@@ -219,9 +219,9 @@ void testSectionedSerialization()
     const sokoban::PlayerProfile settingsDecoded =
         sokoban::decodePlayerProfile(settingsOnly).profile;
     check(settingsDecoded.progressEmpty(), "settings-only decodes empty progress");
-    check(settingsDecoded.audio.musicVolume == 0.25f,
+    check(settingsDecoded.settings.audio.musicVolume == 0.25f,
         "settings-only round-trips settings");
-    check(settingsDecoded.accessibility.highContrast,
+    check(settingsDecoded.settings.accessibility.highContrast,
         "settings-only round-trips accessibility");
 
     // A bare format-9 document decodes as a fully default profile.
@@ -291,25 +291,25 @@ void testNormalizationAndMigration()
     sokoban::PlayerProfile profile;
     profile.unlockedLevel = 2;
     profile.currentLevel = 9;
-    profile.audio = { .masterVolume = -1.0f, .musicVolume = 3.0f, .soundVolume = 0.5f };
-    profile.video.antiAliasingSamples = 3;
-    profile.video.renderScalePercent = 42;
-    profile.video.customRenderScale = true;
-    profile.video.customRenderScalePercent = 10;
-    profile.video.windowWidth = 20;
-    profile.video.windowHeight = 30;
+    profile.settings.audio = { .masterVolume = -1.0f, .musicVolume = 3.0f, .soundVolume = 0.5f };
+    profile.settings.video.antiAliasingSamples = 3;
+    profile.settings.video.renderScalePercent = 42;
+    profile.settings.video.customRenderScale = true;
+    profile.settings.video.customRenderScalePercent = 10;
+    profile.settings.video.windowWidth = 20;
+    profile.settings.video.windowHeight = 30;
     profile.normalize();
     check(profile.currentLevel == 2, "current level clamps to unlocked level");
-    check(profile.audio.masterVolume == 0.0f, "master volume clamps low");
-    check(profile.audio.musicVolume == 1.0f, "music volume clamps high");
-    check(profile.video.antiAliasingSamples == 8, "invalid MSAA receives default");
-    check(profile.video.renderScalePercent == 100, "invalid render scale receives default");
-    check(profile.video.customRenderScalePercent == 25,
+    check(profile.settings.audio.masterVolume == 0.0f, "master volume clamps low");
+    check(profile.settings.audio.musicVolume == 1.0f, "music volume clamps high");
+    check(profile.settings.video.antiAliasingSamples == 8, "invalid MSAA receives default");
+    check(profile.settings.video.renderScalePercent == 100, "invalid render scale receives default");
+    check(profile.settings.video.customRenderScalePercent == 25,
         "custom render scale clamps to its minimum");
-    check(profile.video.effectiveRenderScalePercent() == 25,
+    check(profile.settings.video.effectiveRenderScalePercent() == 25,
         "enabled custom render scale is effective");
-    check(profile.video.windowWidth == 640, "window width clamps low");
-    check(profile.video.windowHeight == 480, "window height clamps low");
+    check(profile.settings.video.windowWidth == 640, "window width clamps low");
+    check(profile.settings.video.windowHeight == 480, "window height clamps low");
 
     constexpr std::string_view format1 = R"json({
   "format": 1,
@@ -323,7 +323,7 @@ void testNormalizationAndMigration()
     check(migrated.sourceFormat == 1, "format 1 source reported");
     check(migrated.profile.currentLevel == 2, "format 1 current level migrated");
     check(migrated.profile.progressForLevel(0) != nullptr, "format 1 completion migrated");
-    check(migrated.profile.audio.soundVolume == 1.0f, "new setting receives migration default");
+    check(migrated.profile.settings.audio.soundVolume == 1.0f, "new setting receives migration default");
     check(sokoban::decodePlayerProfile(migrated.profile.serialize()).sourceFormat ==
             sokoban::currentPlayerProfileFormat,
         "migrated profile serializes as current format");
@@ -357,10 +357,10 @@ void testNormalizationAndMigration()
     check(!migratedFormat2.profile.activeScreen,
         "format 2 receives no gameplay checkpoint");
     const sokoban::KeyboardBinding* migratedKeyboard = keyboardBinding(
-        migratedFormat2.profile.input, sokoban::InputAction::MoveUp);
+        migratedFormat2.profile.settings.input, sokoban::InputAction::MoveUp);
     check(migratedKeyboard && migratedKeyboard->scancode == "Up",
         "format 2 keyboard binding migrates");
-    check(migratedFormat2.profile.input.forAction(
+    check(migratedFormat2.profile.settings.input.forAction(
             sokoban::InputAction::MoveUp).size() == 3,
         "format 2 migration adds controller defaults");
 
@@ -379,7 +379,7 @@ void testNormalizationAndMigration()
         sokoban::decodePlayerProfile(format3Root.dump());
     check(migratedFormat3.sourceFormat == 3, "format 3 source reported");
     migratedKeyboard = keyboardBinding(
-        migratedFormat3.profile.input, sokoban::InputAction::Undo);
+        migratedFormat3.profile.settings.input, sokoban::InputAction::Undo);
     check(migratedKeyboard && migratedKeyboard->scancode == "Backspace",
         "format 3 keyboard binding migrates");
 
@@ -397,13 +397,13 @@ void testNormalizationAndMigration()
     const sokoban::DecodedPlayerProfile migratedFormat4 =
         sokoban::decodePlayerProfile(format4Root.dump());
     check(migratedFormat4.sourceFormat == 4, "format 4 source reported");
-    check(!migratedFormat4.profile.input.forAction(
+    check(!migratedFormat4.profile.settings.input.forAction(
             sokoban::InputAction::MenuConfirm).empty(),
         "format 4 receives menu-confirm defaults");
-    check(migratedFormat4.profile.video.antiAliasingSamples == 8,
+    check(migratedFormat4.profile.settings.video.antiAliasingSamples == 8,
         "format 4 receives MSAA default");
-    check(migratedFormat4.profile.video.windowWidth == 1280 &&
-            migratedFormat4.profile.video.windowHeight == 720,
+    check(migratedFormat4.profile.settings.video.windowWidth == 1280 &&
+            migratedFormat4.profile.settings.video.windowHeight == 720,
         "format 4 receives window-size defaults");
 
     nlohmann::json format5Root = nlohmann::json::parse(
@@ -415,7 +415,7 @@ void testNormalizationAndMigration()
     const sokoban::DecodedPlayerProfile migratedFormat5 =
         sokoban::decodePlayerProfile(format5Root.dump());
     check(migratedFormat5.sourceFormat == 5, "format 5 source reported");
-    check(migratedFormat5.profile.video.renderScalePercent == 100,
+    check(migratedFormat5.profile.settings.video.renderScalePercent == 100,
         "format 5 receives native render scale");
 
     nlohmann::json format6Root = nlohmann::json::parse(
@@ -426,9 +426,9 @@ void testNormalizationAndMigration()
     const sokoban::DecodedPlayerProfile migratedFormat6 =
         sokoban::decodePlayerProfile(format6Root.dump());
     check(migratedFormat6.sourceFormat == 6, "format 6 source reported");
-    check(!migratedFormat6.profile.video.customRenderScale,
+    check(!migratedFormat6.profile.settings.video.customRenderScale,
         "format 6 defaults to preset render scale");
-    check(migratedFormat6.profile.video.customRenderScalePercent == 100,
+    check(migratedFormat6.profile.settings.video.customRenderScalePercent == 100,
         "format 6 receives a native custom value");
 
     checkThrows([] {
@@ -493,11 +493,11 @@ void testStoreBackupsAndRecovery()
     sokoban::PlayerProfile first = created.profile;
     first.unlockedLevel = 1;
     first.setCurrentLevel(1);
-    first.audio.musicVolume = 0.25f;
+    first.settings.audio.musicVolume = 0.25f;
     check(store.save(first), "first profile saves");
 
     sokoban::PlayerProfile second = first;
-    second.audio.musicVolume = 0.75f;
+    second.settings.audio.musicVolume = 0.75f;
     check(store.save(second), "second profile saves");
     check(std::filesystem::is_regular_file(store.backupPath()), "backup written");
     check(sokoban::decodePlayerProfile(
@@ -506,14 +506,14 @@ void testStoreBackupsAndRecovery()
             return std::string(
                 std::istreambuf_iterator<char>(stream),
                 std::istreambuf_iterator<char>());
-        }()).profile.audio.musicVolume == 0.25f,
+        }()).profile.settings.audio.musicVolume == 0.25f,
         "backup contains prior valid profile");
 
     writeFile(store.primaryPath(), "{ definitely not json");
     const sokoban::SaveStore::LoadResult recovered = store.load();
     check(recovered.disposition == sokoban::SaveStore::LoadDisposition::RecoveredBackup,
         "corrupt primary recovers backup");
-    check(recovered.profile.audio.musicVolume == 0.25f, "recovered backup data returned");
+    check(recovered.profile.settings.audio.musicVolume == 0.25f, "recovered backup data returned");
     check(!std::filesystem::exists(store.primaryPath().string() + ".tmp"),
         "recovery leaves no temporary primary");
 
@@ -541,7 +541,7 @@ void testSaveSlotStems()
     check(first.save(firstProfile), "slot 1 saves");
 
     sokoban::PlayerProfile secondProfile;
-    secondProfile.audio.musicVolume = 0.25f;
+    secondProfile.settings.audio.musicVolume = 0.25f;
     secondProfile.normalize();
     check(second.save(secondProfile), "slot 2 saves");
 
@@ -608,9 +608,9 @@ void testAsyncSaveCoalescingAndFlush()
     sokoban::SaveStore::LoadResult created = store.load();
 
     sokoban::PlayerProfile first = created.profile;
-    first.audio.musicVolume = 0.25f;
+    first.settings.audio.musicVolume = 0.25f;
     sokoban::PlayerProfile latest = first;
-    latest.audio.musicVolume = 0.75f;
+    latest.settings.audio.musicVolume = 0.75f;
 
     store.requestSave(first);
     store.requestSave(latest);
@@ -630,10 +630,10 @@ void testAsyncSaveCoalescingAndFlush()
         std::istreambuf_iterator<char>(stream),
         std::istreambuf_iterator<char> {}
     };
-    check(sokoban::decodePlayerProfile(contents).profile.audio.musicVolume == 0.75f,
+    check(sokoban::decodePlayerProfile(contents).profile.settings.audio.musicVolume == 0.75f,
         "coalesced save writes newest profile");
 
-    latest.audio.musicVolume = 0.5f;
+    latest.settings.audio.musicVolume = 0.5f;
     store.requestSave(latest, sokoban::AsyncSaveStore::Urgency::Immediate);
     store.flush();
     check(store.diagnostics().completedWrites == 2,
@@ -646,7 +646,7 @@ void testAsyncSaveDestructorFlushesNewestProfile()
     {
         sokoban::AsyncSaveStore store(temporary.path(), std::chrono::hours(1));
         sokoban::PlayerProfile profile = store.load().profile;
-        profile.audio.soundVolume = 0.35f;
+        profile.settings.audio.soundVolume = 0.35f;
         store.requestSave(profile);
     }
 
@@ -655,7 +655,7 @@ void testAsyncSaveDestructorFlushesNewestProfile()
         std::istreambuf_iterator<char>(stream),
         std::istreambuf_iterator<char> {}
     };
-    check(sokoban::decodePlayerProfile(contents).profile.audio.soundVolume == 0.35f,
+    check(sokoban::decodePlayerProfile(contents).profile.settings.audio.soundVolume == 0.35f,
         "async store destructor flushes newest profile");
 }
 
@@ -678,7 +678,7 @@ void testAsyncStoreMultipleChannels()
         progress.setCurrentScreen(2, 0);
         progress.normalize();
         sokoban::PlayerProfile config;
-        config.audio.musicVolume = 0.2f;
+        config.settings.audio.musicVolume = 0.2f;
         config.normalize();
 
         store.requestSave(progress);
@@ -695,7 +695,7 @@ void testAsyncStoreMultipleChannels()
 
         // Each channel round-trips only its own sections.
         check(store.load(0).profile.unlockedLevel == 2, "channel 0 has progress");
-        check(store.load(settings).profile.audio.musicVolume == 0.2f,
+        check(store.load(settings).profile.settings.audio.musicVolume == 0.2f,
             "channel 1 has settings");
 
         // Repointing a channel drains it then targets a new file.

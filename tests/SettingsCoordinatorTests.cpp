@@ -21,10 +21,10 @@ void checkImpl(bool condition, const char* expression, int line)
 void testInitializationProducesAllStartupEffects()
 {
     sokoban::PlayerProfile profile;
-    profile.video.fullscreen = true;
-    profile.audio.masterVolume = 0.7f;
-    profile.accessibility.reducedMotion = true;
-    profile.video.ambientOcclusion = false;
+    profile.settings.video.fullscreen = true;
+    profile.settings.audio.masterVolume = 0.7f;
+    profile.settings.accessibility.reducedMotion = true;
+    profile.settings.video.ambientOcclusion = false;
     sokoban::PresentationSettings presentation;
     sokoban::SettingsCoordinator coordinator(profile, presentation);
 
@@ -51,13 +51,14 @@ void testMenuProjectionAndChangePlan()
     (void)coordinator.initialize();
 
     sokoban::UserSettings settings = coordinator.userSettings();
-    settings.antiAliasingSamples = 4;
-    settings.customRenderScale = true;
-    settings.customRenderScalePercent = 50;
-    settings.ambientOcclusion = !settings.ambientOcclusion;
-    settings.windowWidth = 1600;
-    settings.windowHeight = 900;
-    settings.masterVolume = 0.4f;
+    settings.video.antiAliasingSamples = 4;
+    settings.video.customRenderScale = true;
+    settings.video.customRenderScalePercent = 50;
+    settings.video.ambientOcclusion =
+        !settings.video.ambientOcclusion;
+    settings.video.windowWidth = 1600;
+    settings.video.windowHeight = 900;
+    settings.audio.masterVolume = 0.4f;
     settings.input.forAction(sokoban::InputAction::Undo) = {
         sokoban::KeyboardBinding { "Backspace" },
     };
@@ -76,9 +77,10 @@ void testMenuProjectionAndChangePlan()
     CHECK(effects.saveProgress);
     CHECK(effects.saveSettings);
     CHECK(!effects.immediatePersistence);
-    CHECK(profile.video.effectiveRenderScalePercent() == 50);
+    CHECK(
+        profile.settings.video.effectiveRenderScalePercent() == 50);
     CHECK(presentation.lighting.ambientOcclusionEnabled ==
-        settings.ambientOcclusion);
+        settings.video.ambientOcclusion);
     CHECK(coordinator.userSettings() == settings);
 }
 
@@ -90,7 +92,8 @@ void testUnchangedDomainsDoNotProduceRuntimeEffects()
     (void)coordinator.initialize();
 
     sokoban::UserSettings settings = coordinator.userSettings();
-    settings.ambientOcclusion = !settings.ambientOcclusion;
+    settings.video.ambientOcclusion =
+        !settings.video.ambientOcclusion;
     const sokoban::SettingsEffects effects =
         coordinator.applyUserSettings(settings);
 
@@ -102,7 +105,7 @@ void testUnchangedDomainsDoNotProduceRuntimeEffects()
     CHECK(effects.saveProgress);
     CHECK(effects.saveSettings);
     CHECK(presentation.lighting.ambientOcclusionEnabled ==
-        settings.ambientOcclusion);
+        settings.video.ambientOcclusion);
 }
 
 void testAudioPersistencePolicy()
@@ -111,7 +114,8 @@ void testAudioPersistencePolicy()
     sokoban::PresentationSettings presentation;
     sokoban::SettingsCoordinator coordinator(profile, presentation);
 
-    sokoban::PlayerProfile::AudioSettings audio = profile.audio;
+    sokoban::PlayerProfile::AudioSettings audio =
+        profile.settings.audio;
     audio.soundVolume = 0.25f;
     sokoban::SettingsEffects effects =
         coordinator.applyAudioSettings(audio, false);

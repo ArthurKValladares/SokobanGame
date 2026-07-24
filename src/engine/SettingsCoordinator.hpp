@@ -38,7 +38,7 @@ public:
         PresentationSettings& presentationSettings);
 
     [[nodiscard]] SettingsEffects initialize();
-    [[nodiscard]] UserSettings userSettings() const;
+    [[nodiscard]] const UserSettings& userSettings() const;
     [[nodiscard]] SettingsEffects applyUserSettings(
         const UserSettings& settings);
     [[nodiscard]] SettingsEffects applyAudioSettings(

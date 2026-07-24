@@ -104,6 +104,7 @@ private:
     VulkanRenderer renderer_;
     UiContext ui_;
     OptionsMenu optionsMenu_;
+    OptionsMenuView optionsMenuView_;
     TitleScreen titleScreen_;
     LevelCompleteOverlay levelCompleteOverlay_;
     // Pure shell routing; Application executes the commands it emits.

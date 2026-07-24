@@ -161,6 +161,7 @@ add_executable(sokoban
     src/engine/ShellFlow.cpp
     src/engine/SaveStore.cpp
     src/engine/SettingsCoordinator.cpp
+    src/engine/SettingsTypes.cpp
     src/engine/TaskSystem.cpp
     src/engine/TileTypes.cpp
     src/engine/Window.cpp
@@ -340,6 +341,7 @@ if(SOKOBAN_BUILD_TESTS)
             src/engine/PlayerProfileCodec.cpp
             src/engine/render/RenderResolution.cpp
             src/engine/SaveStore.cpp
+            src/engine/SettingsTypes.cpp
             src/engine/TileTypes.cpp
     )
     sokoban_add_test(NAME save_slots TARGET sokoban_save_slot_tests
@@ -354,6 +356,7 @@ if(SOKOBAN_BUILD_TESTS)
             src/engine/render/RenderResolution.cpp
             src/engine/SaveSlotManager.cpp
             src/engine/SaveStore.cpp
+            src/engine/SettingsTypes.cpp
             src/engine/TileTypes.cpp
     )
     sokoban_add_test(NAME shell_flow TARGET sokoban_shell_flow_tests
@@ -389,6 +392,7 @@ if(SOKOBAN_BUILD_TESTS)
             src/engine/ui/UiControls.cpp
             src/engine/ui/UiLayout.cpp
             src/engine/render/RenderResolution.cpp
+            src/engine/SettingsTypes.cpp
     )
     sokoban_add_test(NAME title TARGET sokoban_title_tests
         LIBS sokoban_stb
@@ -405,6 +409,7 @@ if(SOKOBAN_BUILD_TESTS)
             src/engine/ui/UiControls.cpp
             src/engine/ui/UiLayout.cpp
             src/engine/render/RenderResolution.cpp
+            src/engine/SettingsTypes.cpp
     )
     sokoban_add_test(NAME vulkan_device_selection TARGET sokoban_vulkan_device_selection_tests
         LIBS Vulkan::Vulkan
@@ -431,6 +436,7 @@ if(SOKOBAN_BUILD_TESTS)
             src/engine/PresentationSettings.cpp
             src/engine/render/RenderResolution.cpp
             src/engine/SettingsCoordinator.cpp
+            src/engine/SettingsTypes.cpp
             src/engine/TileTypes.cpp
     )
     sokoban_add_test(NAME campaign_session TARGET sokoban_campaign_session_tests
@@ -441,6 +447,7 @@ if(SOKOBAN_BUILD_TESTS)
             src/engine/LevelCatalog.cpp
             src/engine/PlayerProfile.cpp
             src/engine/render/RenderResolution.cpp
+            src/engine/SettingsTypes.cpp
             src/engine/TileTypes.cpp
     )
     sokoban_add_test(NAME gameplay_loop TARGET sokoban_gameplay_loop_tests

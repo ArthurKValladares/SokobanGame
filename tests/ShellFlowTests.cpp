@@ -161,8 +161,19 @@ void testOptionsAndOverlayResults()
 {
     ShellFlow flow;
 
-    CHECK(only<sokoban::shell::ApplySettings>(flow.handle(
-        sokoban::ShellOptionsAction { sokoban::options::SettingsChanged {} }, {})));
+    {
+        sokoban::UserSettings settings;
+        settings.audio.masterVolume = 0.35f;
+        const std::vector<ShellCommand> commands = flow.handle(
+            sokoban::ShellOptionsAction {
+                sokoban::options::SettingsChanged { settings } },
+            {});
+        const auto* apply =
+            commandAt<sokoban::shell::ApplySettings>(commands, 0);
+        CHECK(commands.size() == 1);
+        CHECK(apply != nullptr);
+        CHECK(apply && apply->settings == settings);
+    }
     CHECK(only<sokoban::shell::Quit>(flow.handle(
         sokoban::ShellOptionsAction { sokoban::options::Quit {} }, {})));
     {

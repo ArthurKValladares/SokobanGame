@@ -72,8 +72,9 @@ void reduceOptions(
     std::vector<ShellCommand>& commands)
 {
     std::visit(flow::Overloaded {
-        [&](const options::SettingsChanged&) {
-            commands.push_back(shell::ApplySettings {});
+        [&](const options::SettingsChanged& changed) {
+            commands.push_back(shell::ApplySettings {
+                changed.settings });
         },
         [&](const options::Quit&) {
             commands.push_back(shell::Quit {});

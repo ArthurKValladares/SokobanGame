@@ -816,9 +816,12 @@ void parseSettingsSection(PlayerProfile& profile, const Json& settings)
         audio,
         { "masterVolume", "musicVolume", "soundVolume" },
         "settings.audio");
-    profile.audio.masterVolume = floatProperty(audio, "masterVolume", "settings.audio");
-    profile.audio.musicVolume = floatProperty(audio, "musicVolume", "settings.audio");
-    profile.audio.soundVolume = floatProperty(audio, "soundVolume", "settings.audio");
+    profile.settings.audio.masterVolume =
+        floatProperty(audio, "masterVolume", "settings.audio");
+    profile.settings.audio.musicVolume =
+        floatProperty(audio, "musicVolume", "settings.audio");
+    profile.settings.audio.soundVolume =
+        floatProperty(audio, "soundVolume", "settings.audio");
 
     const Json& video = requiredProperty(settings, "video", "settings");
     rejectUnknownProperties(video, {
@@ -826,24 +829,26 @@ void parseSettingsSection(PlayerProfile& profile, const Json& settings)
         "customRenderScale", "customRenderScalePercent", "ambientOcclusion",
         "windowWidth", "windowHeight",
     }, "settings.video");
-    profile.video.fullscreen = boolProperty(video, "fullscreen", "settings.video");
-    profile.video.vsync = boolProperty(video, "vsync", "settings.video");
-    profile.video.antiAliasingSamples = nonNegativeIntegerProperty(
+    profile.settings.video.fullscreen =
+        boolProperty(video, "fullscreen", "settings.video");
+    profile.settings.video.vsync =
+        boolProperty(video, "vsync", "settings.video");
+    profile.settings.video.antiAliasingSamples = nonNegativeIntegerProperty(
         video, "antiAliasingSamples", "settings.video");
-    profile.video.renderScalePercent = nonNegativeIntegerProperty(
+    profile.settings.video.renderScalePercent = nonNegativeIntegerProperty(
         video, "renderScalePercent", "settings.video");
-    profile.video.customRenderScale = boolProperty(
+    profile.settings.video.customRenderScale = boolProperty(
         video, "customRenderScale", "settings.video");
-    profile.video.customRenderScalePercent = nonNegativeIntegerProperty(
+    profile.settings.video.customRenderScalePercent = nonNegativeIntegerProperty(
         video, "customRenderScalePercent", "settings.video");
-    profile.video.ambientOcclusion = boolProperty(
+    profile.settings.video.ambientOcclusion = boolProperty(
         video, "ambientOcclusion", "settings.video");
-    profile.video.windowWidth = nonNegativeIntegerProperty(
+    profile.settings.video.windowWidth = nonNegativeIntegerProperty(
         video, "windowWidth", "settings.video");
-    profile.video.windowHeight = nonNegativeIntegerProperty(
+    profile.settings.video.windowHeight = nonNegativeIntegerProperty(
         video, "windowHeight", "settings.video");
 
-    profile.input = inputBindingsFromJson(
+    profile.settings.input = inputBindingsFromJson(
         requiredProperty(settings, "input", "settings"),
         "settings.input");
 
@@ -852,15 +857,15 @@ void parseSettingsSection(PlayerProfile& profile, const Json& settings)
         accessibility,
         { "reducedMotion", "highContrast", "largeText", "subtitles", "screenShake" },
         "settings.accessibility");
-    profile.accessibility.reducedMotion =
+    profile.settings.accessibility.reducedMotion =
         boolProperty(accessibility, "reducedMotion", "settings.accessibility");
-    profile.accessibility.highContrast =
+    profile.settings.accessibility.highContrast =
         boolProperty(accessibility, "highContrast", "settings.accessibility");
-    profile.accessibility.largeText =
+    profile.settings.accessibility.largeText =
         boolProperty(accessibility, "largeText", "settings.accessibility");
-    profile.accessibility.subtitles =
+    profile.settings.accessibility.subtitles =
         boolProperty(accessibility, "subtitles", "settings.accessibility");
-    profile.accessibility.screenShake =
+    profile.settings.accessibility.screenShake =
         boolProperty(accessibility, "screenShake", "settings.accessibility");
 }
 
@@ -939,28 +944,28 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
     if (sections != ProfileSections::ProgressOnly) {
         root["settings"] = {
             { "audio", {
-                { "masterVolume", normalized.audio.masterVolume },
-                { "musicVolume", normalized.audio.musicVolume },
-                { "soundVolume", normalized.audio.soundVolume },
+                { "masterVolume", normalized.settings.audio.masterVolume },
+                { "musicVolume", normalized.settings.audio.musicVolume },
+                { "soundVolume", normalized.settings.audio.soundVolume },
             } },
             { "video", {
-                { "fullscreen", normalized.video.fullscreen },
-                { "vsync", normalized.video.vsync },
-                { "antiAliasingSamples", normalized.video.antiAliasingSamples },
-                { "renderScalePercent", normalized.video.renderScalePercent },
-                { "customRenderScale", normalized.video.customRenderScale },
-                { "customRenderScalePercent", normalized.video.customRenderScalePercent },
-                { "ambientOcclusion", normalized.video.ambientOcclusion },
-                { "windowWidth", normalized.video.windowWidth },
-                { "windowHeight", normalized.video.windowHeight },
+                { "fullscreen", normalized.settings.video.fullscreen },
+                { "vsync", normalized.settings.video.vsync },
+                { "antiAliasingSamples", normalized.settings.video.antiAliasingSamples },
+                { "renderScalePercent", normalized.settings.video.renderScalePercent },
+                { "customRenderScale", normalized.settings.video.customRenderScale },
+                { "customRenderScalePercent", normalized.settings.video.customRenderScalePercent },
+                { "ambientOcclusion", normalized.settings.video.ambientOcclusion },
+                { "windowWidth", normalized.settings.video.windowWidth },
+                { "windowHeight", normalized.settings.video.windowHeight },
             } },
-            { "input", inputBindingsToJson(normalized.input) },
+            { "input", inputBindingsToJson(normalized.settings.input) },
             { "accessibility", {
-                { "reducedMotion", normalized.accessibility.reducedMotion },
-                { "highContrast", normalized.accessibility.highContrast },
-                { "largeText", normalized.accessibility.largeText },
-                { "subtitles", normalized.accessibility.subtitles },
-                { "screenShake", normalized.accessibility.screenShake },
+                { "reducedMotion", normalized.settings.accessibility.reducedMotion },
+                { "highContrast", normalized.settings.accessibility.highContrast },
+                { "largeText", normalized.settings.accessibility.largeText },
+                { "subtitles", normalized.settings.accessibility.subtitles },
+                { "screenShake", normalized.settings.accessibility.screenShake },
             } },
         };
     }

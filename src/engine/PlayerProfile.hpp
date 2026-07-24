@@ -2,7 +2,7 @@
 
 #include "engine/Config.hpp"
 #include "engine/GameplaySession.hpp"
-#include "engine/InputBindings.hpp"
+#include "engine/SettingsTypes.hpp"
 
 #include <optional>
 #include <string>
@@ -36,39 +36,9 @@ struct PlayerProfile {
         bool operator==(const LevelProgress&) const = default;
     };
 
-    struct AudioSettings {
-        float masterVolume = config::masterVolume;
-        float musicVolume = config::musicVolume;
-        float soundVolume = 1.0f;
-
-        bool operator==(const AudioSettings&) const = default;
-    };
-
-    struct VideoSettings {
-        bool fullscreen = false;
-        // False preserves the engine's mailbox-first presentation behavior.
-        bool vsync = false;
-        int antiAliasingSamples = 8;
-        int renderScalePercent = 100;
-        bool customRenderScale = false;
-        int customRenderScalePercent = 100;
-        bool ambientOcclusion = config::ambientOcclusionEnabled;
-        int windowWidth = 1280;
-        int windowHeight = 720;
-
-        [[nodiscard]] int effectiveRenderScalePercent() const;
-        bool operator==(const VideoSettings&) const = default;
-    };
-
-    struct AccessibilitySettings {
-        bool reducedMotion = false;
-        bool highContrast = false;
-        bool largeText = false;
-        bool subtitles = true;
-        bool screenShake = true;
-
-        bool operator==(const AccessibilitySettings&) const = default;
-    };
+    using AudioSettings = UserSettings::Audio;
+    using VideoSettings = UserSettings::Video;
+    using AccessibilitySettings = UserSettings::Accessibility;
 
     struct ActiveScreen {
         int level = 0;
@@ -85,10 +55,7 @@ struct PlayerProfile {
     int currentScreen = 0;
     std::vector<LevelProgress> levels;
     std::optional<ActiveScreen> activeScreen;
-    AudioSettings audio;
-    VideoSettings video;
-    InputBindings input = defaultInputBindings();
-    AccessibilitySettings accessibility;
+    UserSettings settings;
 
     void normalize();
     void setCurrentLevel(int level);

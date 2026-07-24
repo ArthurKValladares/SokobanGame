@@ -82,14 +82,14 @@ void testPreSplitSettingsMigration()
         // A pre-split combined save: progress and tuned settings together.
         sokoban::SaveStore legacy(directory.path());
         sokoban::PlayerProfile combined = profileWithProgress(1);
-        combined.audio.musicVolume = 0.25f;
-        combined.accessibility.highContrast = true;
+        combined.settings.audio.musicVolume = 0.25f;
+        combined.settings.accessibility.highContrast = true;
         check(legacy.save(combined), "legacy combined save written");
     }
 
     sokoban::SaveSlotManager manager(directory.path(), instantWrites);
     const sokoban::PlayerProfile profile = manager.loadActiveProfile();
-    check(profile.audio.musicVolume == 0.25f, "migrated settings adopted");
+    check(profile.settings.audio.musicVolume == 0.25f, "migrated settings adopted");
     check(profile.unlockedLevel == 1, "progress preserved through migration");
     manager.flush();
     check(std::filesystem::is_regular_file(directory.path() / "settings.json"),
@@ -98,13 +98,13 @@ void testPreSplitSettingsMigration()
     // The shared file is now authoritative over slot copies.
     sokoban::SaveStore settings(directory.path(), "settings");
     sokoban::PlayerProfile shared = settings.load().profile;
-    check(shared.audio.musicVolume == 0.25f, "bootstrapped settings persisted");
-    shared.audio.musicVolume = 0.9f;
+    check(shared.settings.audio.musicVolume == 0.25f, "bootstrapped settings persisted");
+    shared.settings.audio.musicVolume = 0.9f;
     check(settings.save(shared), "shared settings updated");
 
     sokoban::SaveSlotManager reloaded(directory.path(), instantWrites);
     const sokoban::PlayerProfile merged = reloaded.loadActiveProfile();
-    check(merged.audio.musicVolume == 0.9f, "shared settings win over slot copy");
+    check(merged.settings.audio.musicVolume == 0.9f, "shared settings win over slot copy");
     check(merged.unlockedLevel == 1, "slot progress still intact");
 }
 
@@ -162,12 +162,12 @@ void testSummariesSwitchingAndDeletion()
     check(!manager.switchTo(3, active), "out-of-range slot rejected");
     check(!manager.switchTo(0, active), "same slot rejected");
 
-    active.audio.musicVolume = 0.33f;
+    active.settings.audio.musicVolume = 0.33f;
     std::optional<sokoban::PlayerProfile> switched = manager.switchTo(1, active);
     check(switched.has_value(), "switch to slot 2 succeeds");
     check(manager.activeSlot() == 1, "active slot updated");
     check(switched->unlockedLevel == 2, "slot 2 progress loaded");
-    check(switched->audio.musicVolume == 0.33f, "live settings carried over");
+    check(switched->settings.audio.musicVolume == 0.33f, "live settings carried over");
 
     // The marker survives into a new manager instance.
     {
@@ -192,7 +192,7 @@ void testSummariesSwitchingAndDeletion()
     sokoban::SaveStore settings(directory.path(), "settings");
     const sokoban::PlayerProfile sharedSettings = settings.load().profile;
     check(sharedSettings.progressEmpty(), "settings file carries no progress");
-    check(sharedSettings.audio.musicVolume == 0.33f, "settings file has live values");
+    check(sharedSettings.settings.audio.musicVolume == 0.33f, "settings file has live values");
 }
 
 void testSummaryCacheInvalidation()
@@ -223,7 +223,7 @@ void testSummaryCacheInvalidation()
     // switch invalidates the cache so the now-non-active slot 0 reflects its
     // saved progress (the behavior the pre-cache code had).
     active = profileWithProgress(1);
-    active.audio.musicVolume = 0.4f;
+    active.settings.audio.musicVolume = 0.4f;
     manager.saveProgress(active, true);
     manager.flush();
     std::optional<sokoban::PlayerProfile> switched = manager.switchTo(1, active);

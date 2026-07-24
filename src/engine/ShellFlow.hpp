@@ -68,7 +68,9 @@ struct OpenOptions {
 };
 struct CloseOptions {};
 struct OptionsBack {};
-struct ApplySettings {};
+struct ApplySettings {
+    UserSettings settings;
+};
 struct RequestQuitConfirmation {};
 struct Quit {};
 struct ResolveLevelComplete {

@@ -439,24 +439,32 @@ void testOptionsTitleExitRow()
     const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
     sokoban::UiContext ui(font);
     sokoban::OptionsMenu menu;
+    sokoban::UserSettings settings;
 
     auto draw = [&](sokoban::OptionsMenuInput input = {}) {
         ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
         const std::optional<sokoban::OptionsAction> result =
-            menu.draw(ui, { 1280.0f, 720.0f }, input);
+            menu.handleInput(settings, input);
+        if (result) {
+            if (const auto* changed =
+                    std::get_if<sokoban::options::SettingsChanged>(
+                        &*result)) {
+                settings = changed->settings;
+            }
+        }
         ui.endFrame();
         return result;
     };
 
     // Pause context: Graphics, Audio, Controls, Exit To Title, Quit.
-    menu.open({}, true);
+    menu.open(true);
     draw({ .down = true });
     draw({ .down = true });
     draw({ .down = true });
     CHECK(isAction<sokoban::options::ExitToTitle>(draw({ .confirm = true })));
 
     // Title context: the row is absent and the fourth row is Quit.
-    menu.open({}, false);
+    menu.open(false);
     draw({ .down = true });
     draw({ .down = true });
     draw({ .down = true });
@@ -465,7 +473,7 @@ void testOptionsTitleExitRow()
 
     // Pause context after beating the game: Graphics, Audio, Controls,
     // Level Select, Exit To Title, Quit.
-    menu.open({}, true, true);
+    menu.open(true, true);
     draw({ .down = true });
     draw({ .down = true });
     draw({ .down = true });
@@ -474,7 +482,7 @@ void testOptionsTitleExitRow()
     CHECK(isAction<sokoban::options::ExitToTitle>(draw({ .confirm = true })));
 
     // Level Select never appears outside the pause context.
-    menu.open({}, false, true);
+    menu.open(false, true);
     draw({ .down = true });
     draw({ .down = true });
     draw({ .down = true });
