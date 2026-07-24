@@ -266,7 +266,7 @@ void VulkanDeviceContext::pickPhysicalDevice()
     queueFamilies_ = findQueueFamilies(physicalDevice_);
     vkGetPhysicalDeviceProperties(
         physicalDevice_, &physicalDeviceProperties_);
-    log::info() << "Vulkan GPU: "
+    log::info(log::Category::Rendering) << "Vulkan GPU: "
         << physicalDeviceProperties_.deviceName << " ("
         << vulkanDeviceTypeName(physicalDeviceProperties_.deviceType)
         << ")";

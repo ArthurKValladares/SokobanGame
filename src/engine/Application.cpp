@@ -56,7 +56,8 @@ Application::Application()
 #if SOKOBAN_ENABLE_DEBUG_UI
     log::setMinimumLevel(log::Level::Debug);
 #endif
-    log::info() << saveSlots_.progressStatus();
+    log::info(log::Category::Persistence)
+        << saveSlots_.progressStatus();
     buildLevelCatalog();
     restoreProfileLocation();
     applySettingsEffects(settingsCoordinator_.initialize());
@@ -132,10 +133,12 @@ Application::~Application()
     }
     saveSlots_.flush();
     if (!saveSlots_.progressDiagnostics().lastWriteSucceeded) {
-        log::error() << saveSlots_.progressStatus();
+        log::error(log::Category::Persistence)
+            << saveSlots_.progressStatus();
     }
     if (!saveSlots_.settingsDiagnostics().lastWriteSucceeded) {
-        log::error() << saveSlots_.settingsStatus();
+        log::error(log::Category::Persistence)
+            << saveSlots_.settingsStatus();
     }
     DebugUi::clearTabs();
     renderer_.waitIdle();
@@ -470,7 +473,8 @@ void Application::loadCurrentScreen()
             campaign_.currentLevel(), campaign_.currentScreen())),
         restore.snapshot ? &*restore.snapshot : nullptr);
     if (restore.checkpointMatched && !restored) {
-        log::warning() << "Discarded invalid gameplay checkpoint for level "
+        log::warning(log::Category::Persistence)
+            << "Discarded invalid gameplay checkpoint for level "
             << campaign_.currentLevel() << " screen "
             << campaign_.currentScreen();
         playerProfile_.activeScreen.reset();
@@ -483,7 +487,8 @@ void Application::loadCurrentScreen()
     levelEditor_.setEditingDocument(false);
     editorHoverCell_.reset();
 
-    log::debug() << "player started level " << campaign_.currentLevel()
+    log::debug(log::Category::Gameplay)
+        << "player started level " << campaign_.currentLevel()
         << " screen " << campaign_.currentScreen();
 }
 
@@ -597,7 +602,8 @@ void Application::switchSaveSlot(int slot)
     try {
         switched = saveSlots_.switchTo(slot, playerProfile_);
     } catch (const std::exception& error) {
-        log::error() << "Could not switch to save slot " << (slot + 1) <<
+        log::error(log::Category::Persistence)
+            << "Could not switch to save slot " << (slot + 1) <<
             ": " << error.what();
         return;
     }
@@ -605,7 +611,8 @@ void Application::switchSaveSlot(int slot)
         return;
     }
     playerProfile_ = std::move(*switched);
-    log::info() << saveSlots_.progressStatus();
+    log::info(log::Category::Persistence)
+        << saveSlots_.progressStatus();
 
     // The new slot's world loads on Continue/New Game, like at boot.
     levelCompleteOverlay_.close();
@@ -857,7 +864,8 @@ void Application::restoreProfileLocation()
         .screen = playerProfile_.currentScreen,
     };
     if (!campaign_.restoreProfileLocation(playerProfile_)) {
-        log::warning() << "Saved level location " << saved.level << ':' <<
+        log::warning(log::Category::Persistence)
+            << "Saved level location " << saved.level << ':' <<
             saved.screen << " does not exist; falling back to 0:0";
     }
 }
@@ -873,7 +881,8 @@ RenderAssetRequirements Application::levelAssetRequirements(int levelIndex) cons
                 Level::loadFromFile(screenPath(levelIndex, screenIndex)),
                 assetManifest_));
         } catch (const std::exception& error) {
-            log::warning() << "asset preload skipped "
+            log::warning(log::Category::Assets)
+                << "asset preload skipped "
                 << screenPath(levelIndex, screenIndex).string()
                 << ": " << error.what();
         }

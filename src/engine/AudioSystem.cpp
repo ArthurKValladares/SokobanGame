@@ -61,7 +61,8 @@ void loadSoundSet(
         if (result == MA_SUCCESS) {
             loaded.push_back(static_cast<int>(i));
         } else {
-            log::warning() << "Audio: failed to load " << path.string();
+            log::warning(log::Category::Audio)
+                << "Audio: failed to load " << path.string();
         }
     }
 }
@@ -75,7 +76,8 @@ AudioSystem::AudioSystem(std::filesystem::path audioRoot, const AssetManifest& m
     , random_(std::random_device {}())
 {
     if (ma_engine_init(nullptr, &engine_->engine) != MA_SUCCESS) {
-        log::warning() << "Audio disabled: audio engine initialization failed";
+        log::warning(log::Category::Audio)
+            << "Audio disabled: audio engine initialization failed";
         return;
     }
     engine_->engineInitialized = true;
@@ -222,7 +224,8 @@ void AudioSystem::playMusicForLevel(int level)
     const auto& loaded = engine_->loadedMusic;
     if (target >= 0 &&
         std::find(loaded.begin(), loaded.end(), target) == loaded.end()) {
-        log::warning() << "Audio: music track not loaded for level " << level;
+        log::warning(log::Category::Audio)
+            << "Audio: music track not loaded for level " << level;
         target = -1;
     }
 

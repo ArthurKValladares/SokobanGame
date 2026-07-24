@@ -354,7 +354,8 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
             if (wait) {
                 throwIfFailed(slot.state, slot.failure, assetRoot_ / definition.path, "model");
             }
-            log::error() << "Background model publication failed: "
+            log::error(log::Category::Assets)
+                << "Background model publication failed: "
                 << (assetRoot_ / definition.path).string();
         }
         return slot.state == LoadState::Ready || slot.state == LoadState::Failed;
@@ -379,7 +380,8 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
         if (wait) {
             throwIfFailed(slot.state, slot.failure, assetRoot_ / definition.path, "model");
         }
-        log::error() << "Background model publication failed: "
+        log::error(log::Category::Assets)
+            << "Background model publication failed: "
             << (assetRoot_ / definition.path).string();
     }
     return true;
@@ -428,7 +430,8 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
         if (wait) {
             throwIfFailed(slot.state, slot.failure, path, "texture");
         }
-        log::error() << "Background texture publication failed: "
+        log::error(log::Category::Assets)
+            << "Background texture publication failed: "
             << path.string();
     }
     return true;
@@ -467,7 +470,8 @@ bool VulkanModelResources::publishAnimation(RenderAnimation animation, bool wait
         if (wait) {
             throwIfFailed(slot.state, slot.failure, path, "animation");
         }
-        log::error() << "Background animation publication failed: "
+        log::error(log::Category::Assets)
+            << "Background animation publication failed: "
             << path.string();
     }
     return true;

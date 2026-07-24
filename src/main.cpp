@@ -1,17 +1,19 @@
 #include "engine/Application.hpp"
+#include "engine/Log.hpp"
 
 #include <exception>
-#include <iostream>
 
 int main(int, char**)
 {
+    int exitCode = 0;
     try {
         sokoban::Application app;
         app.run();
     } catch (const std::exception& error) {
-        std::cerr << "Fatal error: " << error.what() << '\n';
-        return 1;
+        sokoban::log::error(sokoban::log::Category::Application)
+            << "Fatal error: " << error.what();
+        exitCode = 1;
     }
-
-    return 0;
+    sokoban::log::shutdown();
+    return exitCode;
 }

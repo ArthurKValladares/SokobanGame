@@ -805,7 +805,8 @@ void VulkanRenderer::logRenderConfiguration() const
     const uint64_t pixels =
         static_cast<uint64_t>(renderExtent.width) * renderExtent.height;
     const uint64_t samplePixels = pixels * sampleCountValue();
-    log::info() << "Vulkan swapchain: " << extent.width << 'x' << extent.height
+    log::info(log::Category::Rendering)
+        << "Vulkan swapchain: " << extent.width << 'x' << extent.height
         << ", " << activeResources_.swapchain->imageCount()
         << " images, "
         << presentModeName() << ", " << sampleCountValue()

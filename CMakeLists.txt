@@ -150,6 +150,7 @@ add_executable(sokoban
     src/engine/LevelProjectStore.cpp
     src/engine/LevelEditorDebugUi.cpp
     src/engine/Log.cpp
+    src/engine/LogQueue.cpp
     src/engine/MiniaudioImpl.cpp
     src/engine/PresentationSettings.cpp
     src/engine/PlayerProfile.cpp
@@ -541,6 +542,13 @@ if(SOKOBAN_BUILD_TESTS)
         SOURCES
             tests/TaskSystemTests.cpp
             src/engine/TaskSystem.cpp
+    )
+    sokoban_add_test(NAME logging TARGET sokoban_log_tests
+        LIBS Threads::Threads
+        SOURCES
+            tests/LogTests.cpp
+            src/engine/Log.cpp
+            src/engine/LogQueue.cpp
     )
     sokoban_add_test(NAME content_pipeline TARGET sokoban_content_pipeline_tests
         LIBS sokoban_json

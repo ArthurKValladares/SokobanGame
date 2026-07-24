@@ -3,6 +3,7 @@
 #include "engine/AudioSystem.hpp"
 
 #include "engine/Config.hpp"
+#include "engine/Log.hpp"
 #include "engine/Rules.hpp"
 #include "engine/TaskSystem.hpp"
 
@@ -124,6 +125,25 @@ void ApplicationDebugUi::draw(const Context& context) const
         context.saveDiagnostics.writing
             ? " - writing"
             : (context.saveDiagnostics.pending ? " - pending" : ""));
+    const log::Diagnostics logDiagnostics = log::diagnostics();
+    ImGui::Text(
+        "Log %llu written, %zu / %zu queued, %llu flushes%s",
+        static_cast<unsigned long long>(
+            logDiagnostics.writtenMessages),
+        logDiagnostics.queuedMessages,
+        logDiagnostics.queueCapacity,
+        static_cast<unsigned long long>(logDiagnostics.flushes),
+        logDiagnostics.writerActive ? " - writing" : "");
+    if (logDiagnostics.droppedMessages != 0 ||
+        logDiagnostics.fileSinkFailures != 0) {
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.65f, 0.30f, 1.0f),
+            "Log dropped %llu, sink failures %llu",
+            static_cast<unsigned long long>(
+                logDiagnostics.droppedMessages),
+            static_cast<unsigned long long>(
+                logDiagnostics.fileSinkFailures));
+    }
     ImGui::Separator();
 
     constexpr const char* antiAliasingLabels[] {
