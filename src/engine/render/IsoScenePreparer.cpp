@@ -433,18 +433,22 @@ void IsoScenePreparer::prepare(
     scene.tileLayout = calculateTileLayout(frameData, scene.renderExtent);
     scene.isoLayout = calculateIsoLayout(frameData, scene.renderExtent);
     scene.shadowLayout = calculateShadowLayout(frameData);
-    scene.hasBlurredTiles =
+    scene.hasTranslucentContent =
         frameData.viewMode == RenderViewMode::Isometric3D &&
-        std::ranges::any_of(
-            frameData.tiles,
-            [](const RenderFrameData::Tile& tile) {
-                return tile.blurBehind;
-            });
+        (!frameData.waterSurfaces.empty() ||
+            std::ranges::any_of(
+                frameData.tiles,
+                [](const RenderFrameData::Tile& tile) {
+                    return tile.blurBehind;
+                }));
 
-    scene.isoFaces.reserve(frameData.tiles.size() * 5);
+    scene.isoFaces.reserve(
+        frameData.tiles.size() * 5 + frameData.waterSurfaces.size());
     scene.opaqueFaceIndices.reserve(frameData.tiles.size() * 3);
-    scene.translucentFaceIndices.reserve(frameData.tiles.size());
-    scene.pickFaceIndices.reserve(frameData.tiles.size() * 3);
+    scene.translucentFaceIndices.reserve(
+        frameData.tiles.size() + frameData.waterSurfaces.size());
+    scene.pickFaceIndices.reserve(
+        frameData.tiles.size() * 3 + frameData.waterSurfaces.size());
     scene.shadowFaces.reserve(frameData.tiles.size() * 5);
 
     auto appendIsoFace = [&](
@@ -458,7 +462,8 @@ void IsoScenePreparer::prepare(
                              bool editorPreview,
                              bool pickable,
                              bool drawable,
-                             Vec2 gridSize) {
+                             Vec2 gridSize,
+                             PreparedSurfaceMaterial material) {
         if (!faceVisible(scene.isoLayout, vertices, normal)) {
             return;
         }
@@ -472,6 +477,11 @@ void IsoScenePreparer::prepare(
             .isEditorPreview = editorPreview,
             .pickable = pickable,
             .gridSize = gridSize,
+            .worldOrigin = {
+                vertices[0].x,
+                vertices[0].y,
+            },
+            .material = material,
             .depth = faceDepth(scene.isoLayout, vertices),
         };
         for (std::size_t i = 0; i < vertices.size(); ++i) {
@@ -483,7 +493,7 @@ void IsoScenePreparer::prepare(
         const std::size_t index = scene.isoFaces.size();
         scene.isoFaces.push_back(face);
         if (drawable) {
-            (blurBehind
+            (blurBehind || material == PreparedSurfaceMaterial::Water
                     ? scene.translucentFaceIndices
                     : scene.opaqueFaceIndices)
                 .push_back(index);
@@ -532,7 +542,8 @@ void IsoScenePreparer::prepare(
                     tile.isEditorPreview,
                     pickable,
                     drawCube,
-                    { width, depth });
+                    { width, depth },
+                    PreparedSurfaceMaterial::Standard);
             } else {
                 appendIsoFace(
                     { corners[0], corners[1], corners[5], corners[4] },
@@ -545,7 +556,8 @@ void IsoScenePreparer::prepare(
                     tile.isEditorPreview,
                     pickable,
                     drawCube,
-                    { width, height });
+                    { width, height },
+                    PreparedSurfaceMaterial::Standard);
                 appendIsoFace(
                     { corners[1], corners[2], corners[6], corners[5] },
                     { 1.0f, 0.0f, 0.0f },
@@ -557,7 +569,8 @@ void IsoScenePreparer::prepare(
                     tile.isEditorPreview,
                     pickable,
                     drawCube,
-                    { depth, height });
+                    { depth, height },
+                    PreparedSurfaceMaterial::Standard);
                 appendIsoFace(
                     { corners[2], corners[3], corners[7], corners[6] },
                     { 0.0f, 1.0f, 0.0f },
@@ -569,7 +582,8 @@ void IsoScenePreparer::prepare(
                     tile.isEditorPreview,
                     pickable,
                     drawCube,
-                    { width, height });
+                    { width, height },
+                    PreparedSurfaceMaterial::Standard);
                 appendIsoFace(
                     { corners[3], corners[0], corners[4], corners[7] },
                     { -1.0f, 0.0f, 0.0f },
@@ -581,7 +595,8 @@ void IsoScenePreparer::prepare(
                     tile.isEditorPreview,
                     pickable,
                     drawCube,
-                    { depth, height });
+                    { depth, height },
+                    PreparedSurfaceMaterial::Standard);
                 appendIsoFace(
                     { corners[4], corners[5], corners[6], corners[7] },
                     { 0.0f, 0.0f, 1.0f },
@@ -593,7 +608,8 @@ void IsoScenePreparer::prepare(
                     tile.isEditorPreview,
                     pickable,
                     drawCube,
-                    { width, depth });
+                    { width, depth },
+                    PreparedSurfaceMaterial::Standard);
             }
 
             if (!tile.model.isCube() && !tile.pickOnly) {
@@ -602,6 +618,35 @@ void IsoScenePreparer::prepare(
                         : scene.opaqueModelIndices)
                     .push_back(tileIndex);
             }
+        }
+
+        for (const RenderFrameData::WaterSurface& water :
+             frameData.waterSurfaces) {
+            const float left = water.position.x;
+            const float top = water.position.y;
+            const float right = left + water.size.x;
+            const float bottom = top + water.size.y;
+            appendIsoFace(
+                {
+                    Vec3 { left, top, water.elevation },
+                    Vec3 { right, top, water.elevation },
+                    Vec3 { right, bottom, water.elevation },
+                    Vec3 { left, bottom, water.elevation },
+                },
+                { 0.0f, 0.0f, 1.0f },
+                water.color,
+                water.cell,
+                {
+                    static_cast<int>(std::floor(left + 0.0001f)),
+                    static_cast<int>(std::floor(top + 0.0001f)),
+                },
+                false,
+                false,
+                water.isEditorPreview,
+                !water.isEditorPreview,
+                true,
+                water.size,
+                PreparedSurfaceMaterial::Water);
         }
 
         for (const RenderFrameData::IsoFace& source : frameData.isoFaces) {

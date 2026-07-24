@@ -83,19 +83,16 @@ StaticRenderCell staticRenderCellFor(
         .positionOffset = surfaceEntity
             ? Vec2 { centeredOffset, centeredOffset }
             : Vec2 {},
-        .baseElevation = static_cast<float>(z) +
-            (tile == TileType::Water ? 1.0f - 2.0f * config::waterDepthBelowGround : 0.0f) -
+        .baseElevation = static_cast<float>(z) -
             (submergedEntity ? config::waterDepthBelowGround : 0.0f),
         .height = surfaceEntity
             ? surfaceEntityHeight
-            : (tile == TileType::Water
-                    ? config::waterDepthBelowGround
-                    : (conveyor
-                            ? config::conveyorTileHeight
-                            : (tileTypeIsSolidBlock(tile) ||
-                                      tileTypeOccupiesLevelCell(tile)
-                                    ? 1.0f
-                                    : 0.0f))),
+            : (conveyor
+                    ? config::conveyorTileHeight
+                    : (tileTypeIsSolidBlock(tile) ||
+                              tileTypeOccupiesLevelCell(tile)
+                            ? 1.0f
+                            : 0.0f)),
         .modelRotationQuarterTurns = tile == TileType::Player
             ? playerFacingQuarterTurns
             : (rules::conveyorDirectionForTile(tile)
@@ -306,6 +303,31 @@ void appendWaterEdgeFaces(
     }
 }
 
+void appendWaterSurface(
+    RenderFrameData& frame,
+    uint32_t x,
+    uint32_t y,
+    uint32_t z,
+    bool editorPreview = false)
+{
+    frame.waterSurfaces.push_back({
+        .cell = {
+            static_cast<int>(x),
+            static_cast<int>(y),
+            static_cast<int>(z),
+        },
+        .position = {
+            static_cast<float>(x),
+            static_cast<float>(y),
+        },
+        .color = config::waterSurfaceColor,
+        .elevation = static_cast<float>(z) + 1.0f -
+            config::waterDepthBelowGround +
+            (editorPreview ? 0.02f : 0.0f),
+        .isEditorPreview = editorPreview,
+    });
+}
+
 template <typename CellAt, typename ScaleForTile>
 void appendStaticTiles(
     RenderFrameData& frame,
@@ -318,7 +340,9 @@ void appendStaticTiles(
         for (uint32_t y = 0; y < level.height(); ++y) {
             for (uint32_t x = 0; x < level.width(); ++x) {
                 const StaticRenderCell cell = cellAt(x, y, z);
-                if (cell.tile == TileType::Air || cell.tile == TileType::Ladder) {
+                if (cell.tile == TileType::Air ||
+                    cell.tile == TileType::Ladder ||
+                    cell.tile == TileType::Water) {
                     continue;
                 }
                 RenderFrameData::Tile renderTile {
@@ -362,6 +386,8 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     frame.levelWidth = input.level.width();
     frame.levelHeight = input.level.height();
     frame.levelDepth = input.level.depth();
+    frame.waterAnimationTimeSeconds =
+        input.presentation.worldAnimationTimeSeconds();
     frame.playerPosition = {
         playerVisual.motion.renderPosition.x,
         playerVisual.motion.renderPosition.y,
@@ -441,6 +467,20 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
         [&](TileType tile) {
             return input.settings.tileScale(tile);
         });
+
+    for (uint32_t z = 0; z < input.level.depth(); ++z) {
+        for (uint32_t y = 0; y < input.level.height(); ++y) {
+            for (uint32_t x = 0; x < input.level.width(); ++x) {
+                if (rules::isUnfilledWater(input.level, state, {
+                        static_cast<int>(x),
+                        static_cast<int>(y),
+                        static_cast<int>(z) + 1,
+                    })) {
+                    appendWaterSurface(frame, x, y, z);
+                }
+            }
+        }
+    }
 
     auto levelTileAt = [&](GridPosition3 position) {
         if (!input.level.inBounds(position)) {
@@ -557,6 +597,7 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
     frame.gridOverlay = input.settings.renderGridOverlay();
     frame.levelWidth = input.editor.documentWidth();
     frame.levelHeight = input.editor.documentHeight();
+    frame.waterAnimationTimeSeconds = input.worldAnimationTimeSeconds;
 
     const Level::LayerRows& layers = input.editor.documentLayers();
     const uint32_t activeLayer = input.editor.activeLayer();
@@ -590,6 +631,10 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
     auto appendEditorTile =
         [&](uint32_t x, uint32_t y, uint32_t z, TileType tile, bool preview) {
             if (tile == TileType::Air) {
+                return;
+            }
+            if (tile == TileType::Water) {
+                appendWaterSurface(frame, x, y, z, preview);
                 return;
             }
             if (tile == TileType::Ladder) {
@@ -641,21 +686,16 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
                 },
                 .size = { tileSize, tileSize },
                 .color = color,
-                .baseElevation = static_cast<float>(z) +
-                    (tile == TileType::Water
-                            ? 1.0f - 2.0f * config::waterDepthBelowGround
-                            : 0.0f) +
-                    previewOffset,
+                .baseElevation =
+                    static_cast<float>(z) + previewOffset,
                 .height = surfaceEntity
                     ? input.settings.geometry.surfaceEntityHeight
-                    : (tile == TileType::Water
-                            ? config::waterDepthBelowGround
-                            : (conveyor
-                                    ? config::conveyorTileHeight
-                                    : (tileTypeIsSolidBlock(tile) ||
-                                              tileTypeOccupiesLevelCell(tile)
-                                            ? 1.0f
-                                            : 0.0f))),
+                    : (conveyor
+                            ? config::conveyorTileHeight
+                            : (tileTypeIsSolidBlock(tile) ||
+                                      tileTypeOccupiesLevelCell(tile)
+                                    ? 1.0f
+                                    : 0.0f)),
                 .blurBehind = tile == TileType::Ice,
                 .showGrid = tile != TileType::Player,
                 .isEditorPreview = preview,

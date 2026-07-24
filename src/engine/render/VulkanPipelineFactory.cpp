@@ -63,7 +63,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
     vkCheck(vkCreatePipelineLayout(device_, &layoutInfo, nullptr, &layout_),
         "vkCreatePipelineLayout failed");
 
-    std::array<VkShaderModule, 8> shaders {};
+    std::array<VkShaderModule, 9> shaders {};
     try {
         shaders[0] = createShaderModule(createInfo.assetRoot / "shaders/triangle.vert.glsl.spv");
         shaders[1] = createShaderModule(createInfo.assetRoot / "shaders/triangle.frag.glsl.spv");
@@ -73,9 +73,13 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         shaders[5] = createShaderModule(createInfo.assetRoot / "shaders/fullscreen.vert.glsl.spv");
         shaders[6] = createShaderModule(createInfo.assetRoot / "shaders/ssao.frag.glsl.spv");
         shaders[7] = createShaderModule(createInfo.assetRoot / "shaders/ssao_composite.frag.glsl.spv");
+        shaders[8] = createShaderModule(createInfo.assetRoot / "shaders/water.frag.glsl.spv");
 
         scene_ = createScenePipeline(
             shaders[0], shaders[1], VertexLayout::None,
+            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
+        water_ = createScenePipeline(
+            shaders[0], shaders[8], VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
         ui_ = createScenePipeline(
             shaders[0], shaders[1], VertexLayout::None,
@@ -109,7 +113,7 @@ void VulkanPipelineFactory::destroy()
 {
     if (device_) {
         const std::array pipelines {
-            scene_, ui_, model_, shadow_, modelShadow_,
+            scene_, water_, ui_, model_, shadow_, modelShadow_,
             ssao_, ssaoComposite_, ssaoVisualize_,
         };
         for (VkPipeline pipeline : pipelines) {
@@ -122,6 +126,7 @@ void VulkanPipelineFactory::destroy()
         }
     }
     scene_ = VK_NULL_HANDLE;
+    water_ = VK_NULL_HANDLE;
     ui_ = VK_NULL_HANDLE;
     model_ = VK_NULL_HANDLE;
     shadow_ = VK_NULL_HANDLE;

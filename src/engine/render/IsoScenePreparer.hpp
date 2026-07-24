@@ -38,6 +38,11 @@ struct ShadowRenderLayout {
     float farthestDepth = 1.0f;
 };
 
+enum class PreparedSurfaceMaterial {
+    Standard,
+    Water,
+};
+
 struct PreparedIsoFace {
     std::array<Vec3, 4> vertices {};
     std::array<Vec4, 4> shadowVertices {};
@@ -50,6 +55,8 @@ struct PreparedIsoFace {
     bool isEditorPreview = false;
     bool pickable = false;
     Vec2 gridSize {};
+    Vec2 worldOrigin {};
+    PreparedSurfaceMaterial material = PreparedSurfaceMaterial::Standard;
     float depth = 0.0f;
 };
 
@@ -61,7 +68,7 @@ struct PreparedRenderScene {
     TileRenderLayout tileLayout;
     IsoRenderLayout isoLayout;
     ShadowRenderLayout shadowLayout;
-    bool hasBlurredTiles = false;
+    bool hasTranslucentContent = false;
     std::vector<PreparedIsoFace> isoFaces;
     std::vector<std::size_t> opaqueFaceIndices;
     std::vector<std::size_t> translucentFaceIndices;

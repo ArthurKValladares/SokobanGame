@@ -72,7 +72,7 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
         renderAssetRequirementsForLevel(level, manifest);
     CHECK(requirements.contains(manifest.playerModel()));
     CHECK(requirements.contains(manifest.modelIdByName("Bricks")));
-    CHECK(requirements.contains(manifest.modelIdByName("Water")));
+    CHECK(!requirements.contains(manifest.modelIdByName("Water")));
     CHECK(requirements.contains(manifest.modelIdByName("Conveyor")));
     CHECK(requirements.contains(manifest.modelIdByName("Stone")));
     CHECK(requirements.contains(manifest.modelIdByName("Glass")));
@@ -80,7 +80,7 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     CHECK(requirements.contains(manifest.playerIdleAnimation()));
     CHECK(requirements.contains(manifest.playerMoveAnimation()));
     CHECK(requirements.contains(manifest.playerPushAnimation()));
-    CHECK(requirements.modelCount() == 6);
+    CHECK(requirements.modelCount() == 5);
     CHECK(requirements.animationCount() == 3);
 }
 

@@ -65,6 +65,12 @@ sokoban::RenderFrameData sceneFrame()
     frame.tiles[2].model = { 1 };
     frame.tiles[3].pickOnly = true;
     frame.tiles[4].isEditorPreview = true;
+    frame.waterSurfaces.push_back({
+        .cell = { 1, 2, 0 },
+        .position = { 1.0f, 2.0f },
+        .color = { 0.05f, 0.38f, 0.72f, 0.64f },
+        .elevation = 0.82f,
+    });
     frame.isoFaces.push_back({
         .vertices = {
             sokoban::Vec3 { 0.0f, 2.0f, 0.0f },
@@ -95,7 +101,7 @@ void testPreparationCategorizesOneSharedFacePool()
     const sokoban::PreparedRenderScene scene =
         prepareScene(frame, { 1920.0f, 1080.0f });
 
-    CHECK(scene.hasBlurredTiles);
+    CHECK(scene.hasTranslucentContent);
     CHECK(!scene.opaqueFaceIndices.empty());
     CHECK(!scene.translucentFaceIndices.empty());
     CHECK(scene.opaqueModelIndices.size() == 1);
@@ -113,8 +119,24 @@ void testPreparationCategorizesOneSharedFacePool()
     }
     for (std::size_t index : scene.translucentFaceIndices) {
         CHECK(index < scene.isoFaces.size());
-        CHECK(scene.isoFaces[index].blurBehind);
+        CHECK(
+            scene.isoFaces[index].blurBehind ||
+            scene.isoFaces[index].material ==
+                sokoban::PreparedSurfaceMaterial::Water);
         CHECK(drawFaces.insert(index).second);
+    }
+    const auto waterFace = std::ranges::find_if(
+        scene.isoFaces,
+        [](const sokoban::PreparedIsoFace& face) {
+            return face.material ==
+                sokoban::PreparedSurfaceMaterial::Water;
+        });
+    CHECK(waterFace != scene.isoFaces.end());
+    if (waterFace != scene.isoFaces.end()) {
+        CHECK(waterFace->worldOrigin.x == 1.0f);
+        CHECK(waterFace->worldOrigin.y == 2.0f);
+        CHECK(waterFace->gridSize.x == 1.0f);
+        CHECK(waterFace->gridSize.y == 1.0f);
     }
 
     CHECK(containsCell(scene, { 0, 0, 0 }));
@@ -122,6 +144,7 @@ void testPreparationCategorizesOneSharedFacePool()
     CHECK(containsCell(scene, { 2, 0, 0 }));
     CHECK(containsCell(scene, { 3, 0, 0 }));
     CHECK(!containsCell(scene, { 0, 1, 0 }));
+    CHECK(containsCell(scene, { 1, 2, 0 }));
 }
 
 void testPassListsAreDepthSorted()
@@ -194,7 +217,7 @@ void testTopDownPreparationSkipsIsoWork()
     CHECK(scene.renderExtent.y == 1.0f);
     CHECK(scene.tileLayout.tileSize.x > 0.0f);
     CHECK(scene.tileLayout.tileSize.y > 0.0f);
-    CHECK(!scene.hasBlurredTiles);
+    CHECK(!scene.hasTranslucentContent);
     CHECK(scene.isoFaces.empty());
     CHECK(scene.opaqueFaceIndices.empty());
     CHECK(scene.translucentFaceIndices.empty());

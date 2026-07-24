@@ -30,6 +30,7 @@ public:
 
     [[nodiscard]] VkPipelineLayout layout() const { return layout_; }
     [[nodiscard]] VkPipeline scene() const { return scene_; }
+    [[nodiscard]] VkPipeline water() const { return water_; }
     [[nodiscard]] VkPipeline ui() const { return ui_; }
     [[nodiscard]] VkPipeline model() const { return model_; }
     [[nodiscard]] VkPipeline shadow() const { return shadow_; }
@@ -67,6 +68,7 @@ private:
     VkFormat shadowFormat_ = VK_FORMAT_UNDEFINED;
     VkPipelineLayout layout_ = VK_NULL_HANDLE;
     VkPipeline scene_ = VK_NULL_HANDLE;
+    VkPipeline water_ = VK_NULL_HANDLE;
     VkPipeline ui_ = VK_NULL_HANDLE;
     VkPipeline model_ = VK_NULL_HANDLE;
     VkPipeline shadow_ = VK_NULL_HANDLE;

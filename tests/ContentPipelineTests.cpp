@@ -113,6 +113,7 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
     constexpr const char* shaderNames[] {
         "triangle.vert.glsl.spv",
         "triangle.frag.glsl.spv",
+        "water.frag.glsl.spv",
         "shadow.vert.glsl.spv",
         "model.vert.glsl.spv",
         "model_shadow.vert.glsl.spv",

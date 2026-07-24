@@ -97,6 +97,15 @@ struct RenderFrameData {
         Vec4 color {};
     };
 
+    struct WaterSurface {
+        GridPosition3 cell {};
+        Vec2 position {};
+        Vec2 size { 1.0f, 1.0f };
+        Vec4 color { config::waterSurfaceColor };
+        float elevation = 0.0f;
+        bool isEditorPreview = false;
+    };
+
     struct GridOverlay {
         Vec4 color { config::tileGridLineColor };
         float width = config::tileGridLineWidth;
@@ -110,7 +119,9 @@ struct RenderFrameData {
     uint32_t levelDepth = 1;
     Vec2 playerPosition {};
     std::vector<Tile> tiles;
+    std::vector<WaterSurface> waterSurfaces;
     std::vector<IsoFace> isoFaces;
+    float waterAnimationTimeSeconds = 0.0f;
 };
 
 struct RenderStats {

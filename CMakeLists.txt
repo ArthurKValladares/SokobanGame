@@ -73,6 +73,7 @@ set(LEVEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/levels")
 set(SHADER_SOURCES
     "${SHADER_SOURCE_DIR}/triangle.vert.glsl"
     "${SHADER_SOURCE_DIR}/triangle.frag.glsl"
+    "${SHADER_SOURCE_DIR}/water.frag.glsl"
     "${SHADER_SOURCE_DIR}/shadow.vert.glsl"
     "${SHADER_SOURCE_DIR}/model.vert.glsl"
     "${SHADER_SOURCE_DIR}/model_shadow.vert.glsl"

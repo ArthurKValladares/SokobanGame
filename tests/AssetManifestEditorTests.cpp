@@ -81,9 +81,9 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
 
     check(!editor.dirty(), "loaded editor starts clean");
     check(editor.textures().size() == 3, "textures loaded");
-    check(editor.models().size() == 6, "models loaded");
+    check(editor.models().size() == 5, "models loaded");
     check(editor.animations().size() == 3, "animations loaded");
-    check(editor.tileEntries().size() == 9, "authored tile entries loaded");
+    check(editor.tileEntries().size() == 8, "authored tile entries loaded");
     check(editor.soundSets().size() == 2, "sound sets loaded");
     check(editor.musicTracks().size() == 4, "music tracks loaded");
     check(editor.validate(), "unchanged document validates");

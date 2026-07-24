@@ -144,8 +144,8 @@ public:
         const VkExtent2D renderExtent = swapchain_.renderExtent();
         stats_ = {
             .frameIndex = configuration_.statsFrameIndex,
-            .totalTiles =
-                static_cast<uint32_t>(frameData.tiles.size()),
+            .totalTiles = static_cast<uint32_t>(
+                frameData.tiles.size() + frameData.waterSurfaces.size()),
             .scenePreparations = 1,
             .preparedIsoFaces =
                 static_cast<uint32_t>(scene.isoFaces.size()),
@@ -293,10 +293,10 @@ private:
             scene,
             false,
             false,
-            scene.hasBlurredTiles || !resolveView,
+            scene.hasTranslucentContent || !resolveView,
             false,
             true);
-        if (!scene.hasBlurredTiles) {
+        if (!scene.hasTranslucentContent) {
             return;
         }
         swapchain_.copyResolvedSceneColor(
@@ -627,23 +627,47 @@ private:
             translucentPass
             ? scene.translucentFaceIndices
             : scene.opaqueFaceIndices;
+        VkPipeline boundFacePipeline = pipelines_.scene();
         for (std::size_t faceIndex : faceIndices) {
             const PreparedIsoFace& face =
                 scene.isoFaces[faceIndex];
-            drawFace(
-                commandBuffer,
-                face.vertices,
-                face.shadowVertices,
-                face.color,
-                face.normal,
-                frameData.lighting,
-                face.blurBehind,
-                face.showGrid
-                    ? frameData.gridOverlay.color
-                    : Vec4 {},
-                face.gridSize,
-                frameData.gridOverlay.width,
-                face.isEditorPreview);
+            const VkPipeline desiredPipeline =
+                face.material == PreparedSurfaceMaterial::Water
+                ? pipelines_.water()
+                : pipelines_.scene();
+            if (desiredPipeline != boundFacePipeline) {
+                vkCmdBindPipeline(
+                    commandBuffer,
+                    VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    desiredPipeline);
+                ++stats_.pipelineBinds;
+                boundFacePipeline = desiredPipeline;
+            }
+            if (face.material == PreparedSurfaceMaterial::Water) {
+                drawWaterFace(
+                    commandBuffer,
+                    face.vertices,
+                    face.color,
+                    face.worldOrigin,
+                    face.gridSize,
+                    frameData.waterAnimationTimeSeconds,
+                    face.isEditorPreview);
+            } else {
+                drawFace(
+                    commandBuffer,
+                    face.vertices,
+                    face.shadowVertices,
+                    face.color,
+                    face.normal,
+                    frameData.lighting,
+                    face.blurBehind,
+                    face.showGrid
+                        ? frameData.gridOverlay.color
+                        : Vec4 {},
+                    face.gridSize,
+                    frameData.gridOverlay.width,
+                    face.isEditorPreview);
+            }
         }
 
         bool pipelineBound = false;
@@ -854,6 +878,61 @@ private:
                 0.0f,
                 std::max(lighting.specularStrength, 0.0f),
                 std::max(lighting.specularPower, 1.0f),
+            },
+        };
+        vkCmdPushConstants(
+            commandBuffer,
+            pipelines_.layout(),
+            VK_SHADER_STAGE_VERTEX_BIT |
+                VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            sizeof(TilePushConstants),
+            &constants);
+        vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+    }
+
+    void drawWaterFace(
+        VkCommandBuffer commandBuffer,
+        const std::array<Vec3, 4>& vertices,
+        Vec4 color,
+        Vec2 worldOrigin,
+        Vec2 size,
+        float animationTimeSeconds,
+        bool isEditorPreview)
+    {
+        vkCmdSetPrimitiveTopology(
+            commandBuffer,
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+        ++stats_.visibleFaces;
+        ++stats_.drawCalls;
+        stats_.vertices += 6;
+        stats_.triangles += 2;
+
+        const TilePushConstants constants {
+            .vertices = {
+                Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, 1.0f },
+                Vec4 { vertices[1].x, vertices[1].y, vertices[1].z, 1.0f },
+                Vec4 { vertices[2].x, vertices[2].y, vertices[2].z, 1.0f },
+                Vec4 { vertices[3].x, vertices[3].y, vertices[3].z, 1.0f },
+            },
+            .color = color,
+            .materialOptions = {
+                0.0f,
+                size.x,
+                size.y,
+                isEditorPreview ? -1.0f : 1.0f,
+            },
+            .gridColor = {
+                worldOrigin.x,
+                worldOrigin.y,
+                animationTimeSeconds,
+                0.0f,
+            },
+            .textureOptions = {
+                config::waterRippleSpatialFrequency,
+                config::waterRippleSpeed,
+                config::waterRefractionStrength,
+                0.0f,
             },
         };
         vkCmdPushConstants(

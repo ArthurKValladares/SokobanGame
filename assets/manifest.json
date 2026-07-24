@@ -24,10 +24,6 @@
       "path": "KayKit Block Bits 1.0/Assets/gltf/stone.gltf"
     },
     {
-      "name": "Water",
-      "path": "KayKit Block Bits 1.0/Assets/gltf/water.gltf"
-    },
-    {
       "name": "Glass",
       "path": "KayKit Block Bits 1.0/Assets/gltf/glass.gltf"
     },
@@ -76,7 +72,6 @@
   "tiles": [
     { "tile": "Wall", "model": "BricksA", "scale": 1.1 },
     { "tile": "Rock", "model": "Stone" },
-    { "tile": "Water", "model": "Water" },
     { "tile": "Ice", "model": "Glass" },
     { "tile": "Conveyor Up", "model": "Conveyor" },
     { "tile": "Conveyor Down", "model": "Conveyor" },

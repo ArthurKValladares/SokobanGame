@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <ranges>
 
 namespace {
 
@@ -39,7 +40,6 @@ const AssetManifest& testManifest()
       ],
       "models": [
         { "name": "Stone", "path": "stone.gltf" },
-        { "name": "Water", "path": "water.gltf" },
         { "name": "Glass", "path": "glass.gltf" },
         { "name": "Bricks", "path": "bricks.gltf" },
         { "name": "Conveyor", "path": "conveyor.gltf", "beltScroll": true },
@@ -59,7 +59,6 @@ const AssetManifest& testManifest()
       "tiles": [
         { "tile": "Wall", "model": "Bricks" },
         { "tile": "Rock", "model": "Stone" },
-        { "tile": "Water", "model": "Water" },
         { "tile": "Ice", "model": "Glass" },
         { "tile": "Conveyor Up", "model": "Conveyor" },
         { "tile": "Conveyor Down", "model": "Conveyor" },
@@ -291,6 +290,70 @@ void testGameplayFrameUsesSettingsAndPresentation()
     CHECK(near(conveyor->beltScrollOffset, 0.75f));
 }
 
+void testGameplayFrameBuildsProceduralWaterSurface()
+{
+    TEST("gameplayFrameBuildsProceduralWaterSurface");
+    const Level level = Level::loadFromLayers({
+        { ".W." },
+        { "C  " },
+    }, "procedural water frame");
+    GameState state = stateWithPlayer(level.playerStart());
+
+    GameplayPresentation presentation;
+    presentation.setPlayerClips(
+        testManifest().playerMoveAnimation(),
+        testManifest().playerPushAnimation());
+    presentation.resetEntities(state);
+    presentation.advanceClocks(0.75f, false);
+
+    const PresentationSettings settings;
+    const GameplaySession::Action action;
+    const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = state,
+        .moving = false,
+        .activeAction = action,
+        .presentation = presentation,
+        .settings = settings,
+    });
+
+    CHECK(frame.waterSurfaces.size() == 1);
+    if (!frame.waterSurfaces.empty()) {
+        const RenderFrameData::WaterSurface& water =
+            frame.waterSurfaces.front();
+        CHECK((water.cell == GridPosition3 { 1, 0, 0 }));
+        CHECK(near(water.position.x, 1.0f));
+        CHECK(near(water.position.y, 0.0f));
+        CHECK(near(
+            water.elevation,
+            1.0f - config::waterDepthBelowGround));
+        CHECK(near(water.color.w, config::waterSurfaceColor.w));
+    }
+    CHECK(near(frame.waterAnimationTimeSeconds, 0.75f));
+    CHECK(std::ranges::none_of(
+        frame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { 1, 0, 0 };
+        }));
+
+    state.movables.push_back({
+        .type = TileType::Rock,
+        .cell = { 1, 0, 1 },
+        .fallen = true,
+    });
+    const RenderFrameData filledFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = state,
+        .moving = false,
+        .activeAction = action,
+        .presentation = presentation,
+        .settings = settings,
+    });
+    CHECK(filledFrame.waterSurfaces.empty());
+}
+
 } // namespace
 
 int main()
@@ -299,6 +362,7 @@ int main()
     testPresentationResetClocksAndFallenTargets();
     testPresentationInterpolatesActionsAndClips();
     testGameplayFrameUsesSettingsAndPresentation();
+    testGameplayFrameBuildsProceduralWaterSurface();
 
     if (failures == 0) {
         std::cout << "PresentationTests: "
