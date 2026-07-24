@@ -179,7 +179,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 ## Important Source Map
 
 - `src/main.cpp`: process entry point.
-- `src/engine/Application.*`: composition root and external-effect executor for component lifetime, the SDL/UI frame, shell commands, file-backed level loading, and calls into Window/Vulkan/audio/save services. Campaign policy lives in `CampaignSession`, gameplay advancement in `GameplayLoop`, input admission/focus routing in `InputRouter`, and profile-to-runtime settings policy in `SettingsCoordinator`. `buildLevelCatalog()` refreshes the campaign's cached screen counts when a screen loads so debug-editor changes remain visible without title queries hitting the filesystem. It no longer owns campaign counters, movement-loop policy, input-routing policy, settings projection/change detection, mutable rendering settings, visual interpolation, debug animation-browser state, or render-frame construction.
+- `src/engine/Application.*`: composition root and external-effect executor for component lifetime, the SDL/UI frame, shell commands, file-backed level loading, and calls into Window/Vulkan/audio/save services. Campaign policy lives in `CampaignSession`, gameplay advancement in `GameplayLoop`, input admission/focus routing in `InputRouter`, and profile-to-runtime settings policy in `SettingsCoordinator`. It builds one logical `RenderFrameData` per frame, asks `VulkanRenderer` to prepare it once, and retains the lightweight prepared-frame handle so editor picking can reuse the previous submitted scene. `buildLevelCatalog()` refreshes the campaign's cached screen counts when a screen loads so debug-editor changes remain visible without title queries hitting the filesystem. It no longer owns campaign counters, movement-loop policy, input-routing policy, settings projection/change detection, mutable rendering settings, visual interpolation, debug animation-browser state, or render-frame construction.
 - `src/engine/CampaignSession.*`: headless campaign/run state. Owns the cached level topology, validated current location, cross-screen move/time totals, completion and best-record policy, pending next-level transition, and deferred-checkpoint cadence while mutating only the supplied `PlayerProfile`. Screen advancement returns a type-safe `ScreenAdvanced`/`LevelCompleted`/`GameCompleted` variant; Application performs the resulting UI, audio, persistence, and loading effects. Covered by `tests/CampaignSessionTests.cpp`.
 - `src/engine/GameplayLoop.*`: headless per-frame bridge between semantic button states, `GameplaySession`, and `GameplayPresentation`. Owns opposing-direction resolution, command queueing, action time consumption, presentation begin/finish calls, and solved-screen/draft outcomes. Covered by `tests/GameplayLoopTests.cpp`.
 - `src/engine/InputRouter.*`: testable routing layer between raw `InputState` and context-specific gameplay, title, completion-overlay, options, pointer, and editor frames. Owns SDL event admission around ImGui capture, binding-candidate suppression, modal focus, and draft-exit Back precedence; `Application` only pumps events and executes the resulting intents. Covered by `tests/InputRouterTests.cpp` (`sokoban_input_router_tests`).
@@ -187,6 +187,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/PresentationSettings.*`: mutable runtime presentation settings initialized from the immutable defaults in `Config.hpp`. Owns lighting, SSAO/shadow tuning, grid appearance, surface geometry, tile scales, normalization, sun-direction conversion, and renderer-facing lighting/grid values.
 - `src/engine/GameplayPresentation.*`: headless presentation state derived from `GameplaySession::Action` snapshots. Owns player/movable interpolation, fallen render offsets, player clip/facing/playback state, and the shared world/conveyor animation clock without mutating authoritative gameplay state.
 - `src/engine/RenderFrameBuilder.*`: SDL/Vulkan-free construction of gameplay and editor `RenderFrameData`. Owns tile/model mapping, static geometry, water edges, ladder rungs, editor previews/pick-only cells, dynamic entities, tile scaling, and conveyor texture offsets.
+- `src/engine/render/IsoScenePreparer.*`: Vulkan-free once-per-frame scene preparation and picking. Computes top-down, isometric-camera, and shadow layouts; creates one projected/cull-tested face pool; and emits depth-sorted opaque/translucent face indices plus model, shadow, and picking lists. It fills reusable renderer-owned frame scratch rather than using function-static storage. Covered by `tests/IsoScenePreparerTests.cpp` (`sokoban_iso_scene_preparer_tests`).
 - `src/engine/ApplicationDebugUi.*`: Debug-only ImGui adapter for engine statistics and tuning. Edits `PresentationSettings` and calls the public `GameplaySession`/`VulkanRenderer` controls instead of storing application logic.
 - `src/engine/DebugUi.*`: Debug-only registry and presentation owner for the single Developer Tools window. Feature adapters register content callbacks as reorderable, scrolling tabs instead of creating independent windows.
 - `src/engine/AnimationPreviewDebugUi.*`: Debug-only owner of animation asset scanning, clip selection, preview playback state, and renderer preview delegation.
@@ -236,14 +237,16 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/render/SkinnedMeshUpdater.*`: owns the Rogue's skinned source mesh and dynamic Vulkan vertex/index buffers. It consumes `AnimationController` requests, performs CPU skinning/blending, and uploads changed vertices.
 - `src/engine/render/VulkanModelResources.*`: owns lazy per-asset load states, TaskSystem futures, static model meshes, texture images/samplers, manifest material bindings, and failure retention. CPU parsing/decoding runs on workers; completed results are published to Vulkan on the render thread. It orchestrates `AnimationController` and `SkinnedMeshUpdater` while exposing lightweight mesh/material/texture views and loading statistics to the renderer.
 - `src/engine/render/VulkanSsaoPass.*`: owns the scene-sized R8 ambient-occlusion target and sampler, plus depth/AO transitions and the fullscreen AO/composite recording sequence. Pipelines and scene descriptors are passed in as non-owning handles.
-- `src/engine/render/VulkanShadowPass.*`: owns the fixed-size shadow depth image, sampler, and image-layout state. It records pass setup/transitions while `VulkanRenderer` supplies the scene-specific shadow draw traversal between `begin` and `end`.
+- `src/engine/render/VulkanShadowPass.*`: owns the fixed-size shadow depth image, sampler, and image-layout state. It records pass setup/transitions while `VulkanSceneRecorder` supplies the scene-specific shadow draw traversal between `begin` and `end`.
 - `src/engine/render/VulkanSwapchainResources.*`: owns the native-resolution swapchain/image views, scaled scene color/MSAA/depth/resolve-depth attachments, acquire/present calls, resize lifecycle, frame attachment transitions, the ice-blur scene-color copy, and the final linear upscale into the swapchain before native-resolution player/debug UI. Profile VSync selects guaranteed FIFO; disabled VSync prefers mailbox, then immediate, then FIFO fallback.
 - `src/engine/render/VulkanPipelineFactory.*`: owns the shared pipeline layout and all scene, model, UI, shadow, SSAO, composite, and visualization pipelines. Shader-module loading and graphics-pipeline construction no longer live in `VulkanRenderer`.
 - `src/engine/render/VulkanSceneDescriptors.*`: owns the scene descriptor-set layout, pool, set, and bindings for shadow, copied scene color, model textures, sampled scene depth, and SSAO. Resize/MSAA changes update the same set with new attachment views.
 - `src/engine/render/VulkanUiResources.*`: owns the one-time R8 font-atlas
   upload and sampler used by the player-facing overlay shader.
 - `src/engine/render/VulkanResourceUtils.*`: exception-safe shared Vulkan image allocation, image-view creation, memory-type selection, and destruction used by the focused resource owners. `VulkanRenderConstants.hpp` holds the shared 256-byte push-constant contract.
-- `src/engine/render/VulkanRenderer.*`: top-level Vulkan instance/device/queue and frame orchestration, command buffers/synchronization, debug UI, camera/projection calculations, and scene draw traversal. Resource, pass, pipeline, descriptor, model, and animation ownership is delegated to the focused components above.
+- `src/engine/render/VulkanDeviceContext.*`: RAII owner of the Vulkan instance, SDL surface, selected physical/logical device, graphics/present queues, queue-family capabilities, and graphics command pool. It also owns device suitability checks and sample/line capability queries.
+- `src/engine/render/VulkanSceneRecorder.*`: non-owning command encoder for shadow, opaque, translucent, SSAO/composite, upscale, game UI, and Debug UI work. It owns pass ordering, barriers, draw traversal, pipeline/descriptor binding, push constants, and per-recording render statistics.
+- `src/engine/render/VulkanRenderer.*`: top-level frame orchestrator for synchronization, asset publication, descriptor refresh, swapchain recovery, submission, and presentation. Its checked `PreparedFrame` handle refers to one of two renderer-owned CPU scratch slots, retaining capacity between uses and rejecting stale generations. Device, resource, pass, pipeline, descriptor, model, animation, projection/picking, and command-recording ownership is delegated to focused components.
 - `src/engine/render/GltfMesh.*`: small custom GLTF/GLB loader, static mesh loading, skinned mesh loading, animation sampling/skinning. `skinGltfMeshBlended` skins with a pose blended between two clips; `SkinnedMeshUpdater` uses it for the player crossfades requested by `AnimationController` over `config::playerAnimationFadeSeconds`.
 - `src/engine/render/ImageData.*`: platform-independent texture file loading
   and in-memory RGBA decoding through stb_image. Filesystem ownership stays in
@@ -516,7 +519,7 @@ Renderer:
 - Supports MSAA modes (default is MSAA 8x, automatically falling back to the highest count the device's color+depth framebuffers support; the Debug UI combo shows the requested mode, Rendering Stats shows the active sample count), internal render-scale presets of 100%, 75%, 67% (exact two-thirds), 50%, and 25%, plus custom percentages from 25-100%, wireframe, line width controls, lighting controls, grid overlay, and render stats in Debug UI. The 3D scene renders into scaled offscreen attachments and is linearly upscaled to the native swapchain before player/debug UI, so a 4K window can render the scene at exact 1440p or 1080p while UI remains crisp.
 - Screen-space ambient occlusion (SSAO) applies to all geometry, tiles and GLTF models alike. `VulkanSwapchainResources` provides sampled or resolved scene depth, and `VulkanSsaoPass` records the fullscreen depth-only AO pass (12-tap golden-angle spiral, range falloff to avoid halos, `config::ssaoRadiusPixels/DepthRange`) into an R8 target before multiply-compositing the blurred result onto the lit image. Descriptor bindings 5 (scene depth) and 6 (AO) live in `VulkanSceneDescriptors`. Toggle, strength, and raw-AO visualization are mutable `PresentationSettings` edited by Debug UI > Lighting.
 - Renders simple tile faces procedurally and GLTF models for certain tiles/entities.
-- `drawIsoFrame` reuses a function-local static `IsoFace` scratch buffer (cleared, not reallocated) across frames and passes; the renderer is single-threaded, so the per-frame allocation of what can be thousands of fat face structs is avoided without any ownership change.
+- `IsoScenePreparer` fills two renderer-owned `PreparedFrameScratch` slots. Their vectors are cleared without releasing capacity, so current rendering and previous-frame editor picking can coexist without function-static mutable state or repeated large allocations.
 
 Model assets currently used:
 
@@ -582,9 +585,16 @@ Runtime lazy asset pipeline:
   calls `VulkanRenderer::preloadAssets`. Level files are small and read on the
   main thread; model parsing, animation parsing, and stb_image decoding run as
   independent TaskSystem jobs.
-- `VulkanRenderer::drawFrame` verifies the exact frame requirements and then
-  publishes at most one completed preload per frame. Loaded assets remain
-  cached for the process lifetime; there is no eviction policy yet.
+- `Application` builds one `RenderFrameData` and calls
+  `VulkanRenderer::prepareFrame` once per frame. The resulting camera/shadow
+  layouts, projected faces, depth-sorted pass lists, model lists, and shadow
+  geometry are shared by every pass; editor picking uses the previous prepared
+  frame instead of rebuilding the current scene. Prepared frames are checked
+  handles over two renderer-owned reusable scratch slots; stale generations
+  fail explicitly. `drawFrame` verifies exact
+  asset requirements and publishes at most one completed preload per frame.
+  Loaded assets remain cached for the process lifetime; there is no eviction
+  policy yet.
 - Static/skinned Vulkan buffers, texture images, upload command buffers, queue
   submission, and descriptor updates all happen on the render thread. Texture
   uploads use the existing graphics queue and command pool and wait for that
@@ -593,9 +603,11 @@ Runtime lazy asset pipeline:
 - Background failures are retained in the asset slot, counted in Debug UI, and
   reported without interrupting the current level. If that asset later becomes
   required, `ensureAssets` throws a contextual path/kind error.
-- Debug UI > Rendering Stats reports loaded/pending model, texture, and
-  animation counts plus failures. Unrequested assets are the difference between
-  total, loaded, pending, and failed counts.
+- Debug UI > Rendering Stats reports the scene-preparation count and prepared
+  iso/shadow/model counts alongside loaded/pending model, texture, and
+  animation counts plus failures. A submitted frame reports exactly one scene
+  preparation. Unrequested assets are the difference between total, loaded,
+  pending, and failed counts.
 
 GLTF loader notes:
 
@@ -775,6 +787,17 @@ Major recent additions and fixes:
   allocation in `VulkanResourceUtils`. `VulkanRenderer.cpp` is now roughly
   2,150 lines and retains orchestration and scene traversal instead of owning
   those resource lifetimes and construction details.
+- Added Vulkan-free `IsoScenePreparer` and made `PreparedFrame` the
+  renderer entry contract. Camera/shadow layout, face projection/culling,
+  opaque/translucent sorting, model categorization, shadow geometry, and pick
+  geometry are prepared once and shared across all passes; Application also
+  stopped rebuilding the editor frame separately for picking.
+- Extracted `VulkanDeviceContext` as the RAII owner of instance, surface,
+  device, queues, capabilities, and command pool. Extracted
+  `VulkanSceneRecorder` as the owner of pass/draw command encoding and render
+  statistics. `VulkanRenderer` now coordinates frame synchronization, asset
+  publication, descriptor refresh, submission, and presentation, while two
+  checked CPU scratch slots retain prepared-scene vector capacity.
 - Split application presentation/configuration responsibilities into
   `PresentationSettings`, `GameplayPresentation`, and `RenderFrameBuilder`,
   with `ApplicationDebugUi` and `AnimationPreviewDebugUi` as adapters.
@@ -926,9 +949,11 @@ Rendering/assets:
 - Replace the custom GLTF parsing with a robust library if assets get more complex.
 - Improve visual consistency between procedural tiles and GLTF assets.
 - Verify model orientation/scale whenever a new asset is added.
-- Keep `VulkanRenderer` as the frame orchestrator. If its remaining scene
-  traversal grows, extract a scene recorder or projection/layout component
-  around a concrete need rather than moving Vulkan ownership back into it.
+- Keep `VulkanRenderer` as the frame orchestrator,
+  `VulkanDeviceContext` as the device-lifetime root, `IsoScenePreparer` as the
+  Vulkan-free projection/picking boundary, and `VulkanSceneRecorder` as the
+  command-encoding owner. Add a dedicated synchronization owner only if frame
+  pacing or additional queues make the current two-frame orchestration grow.
 
 Audio:
 

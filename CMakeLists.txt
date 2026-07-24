@@ -170,11 +170,14 @@ add_executable(sokoban
     src/engine/render/ImageData.cpp
     src/engine/render/RenderAssetRequirements.cpp
     src/engine/render/RenderResolution.cpp
+    src/engine/render/IsoScenePreparer.cpp
     src/engine/render/SkinnedMeshUpdater.cpp
+    src/engine/render/VulkanDeviceContext.cpp
     src/engine/render/VulkanDeviceSelection.cpp
     src/engine/render/VulkanModelResources.cpp
     src/engine/render/VulkanPipelineFactory.cpp
     src/engine/render/VulkanResourceUtils.cpp
+    src/engine/render/VulkanSceneRecorder.cpp
     src/engine/render/VulkanSceneDescriptors.cpp
     src/engine/render/VulkanShadowPass.cpp
     src/engine/render/VulkanSsaoPass.cpp
@@ -451,6 +454,12 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME frame_descriptor_sync TARGET sokoban_frame_descriptor_sync_tests
         SOURCES
             tests/FrameDescriptorSyncTests.cpp
+    )
+    sokoban_add_test(NAME iso_scene_preparer TARGET sokoban_iso_scene_preparer_tests
+        SOURCES
+            tests/IsoScenePreparerTests.cpp
+            src/engine/BoardLayout.cpp
+            src/engine/render/IsoScenePreparer.cpp
     )
     sokoban_add_test(NAME level_editor TARGET sokoban_level_editor_tests
         SOURCES

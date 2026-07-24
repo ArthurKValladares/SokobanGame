@@ -185,7 +185,10 @@ void Application::run()
         const InputRouter::Frame routedInput =
             inputRouter_.routeFrame(input_, inputRoutingContext());
         const float dt = frameTimer_.tick();
-        update(dt, routedInput);
+        update(
+            dt,
+            routedInput,
+            preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
         animationPreviewDebugUi_.update(dt, renderer_);
 
         const Vec2 windowSize = window_.size();
@@ -228,13 +231,21 @@ void Application::run()
             handleShellEvent(ShellOptionsAction { *optionsAction });
         }
         ui_.endFrame();
-        renderer_.drawFrame(
-            buildRenderFrame(routedInput.editor), ui_.drawData());
+        preparedRenderFrame_ = renderer_.prepareFrame(
+            buildRenderFrame(routedInput.editor));
+        renderer_.drawFrame(*preparedRenderFrame_, ui_.drawData());
     }
 }
 
-void Application::update(float dt, const InputRouter::Frame& input)
+void Application::update(
+    float dt,
+    const InputRouter::Frame& input,
+    const VulkanRenderer::PreparedFrame* previousRenderFrame)
 {
+#if !SOKOBAN_ENABLE_DEBUG_UI
+    (void)previousRenderFrame;
+#endif
+
     const bool reversed =
         gameplaySession_.moving() &&
         gameplaySession_.activeAction().reversed;
@@ -252,7 +263,7 @@ void Application::update(float dt, const InputRouter::Frame& input)
     }
     if (levelEditor_.editingDocument()) {
         audioSystem_.update(dt, false, false);
-        updateEditorPainting(input.editor);
+        updateEditorPainting(input.editor, previousRenderFrame);
         return;
     }
 #endif
@@ -328,9 +339,12 @@ void Application::drawDraftExitConfirmation()
 #endif
 }
 
-void Application::updateEditorPainting(const InputRouter::EditorInput& input)
+void Application::updateEditorPainting(
+    const InputRouter::EditorInput& input,
+    const VulkanRenderer::PreparedFrame* previousRenderFrame)
 {
     (void)input;
+    (void)previousRenderFrame;
 #if SOKOBAN_ENABLE_DEBUG_UI
     editorHoverCell_.reset();
     if (input.undoPressed) {
@@ -339,6 +353,9 @@ void Application::updateEditorPainting(const InputRouter::EditorInput& input)
         return;
     }
     if (input.pointerCaptured) {
+        return;
+    }
+    if (!previousRenderFrame) {
         return;
     }
 
@@ -362,20 +379,13 @@ void Application::updateEditorPainting(const InputRouter::EditorInput& input)
         mouse.x * pixelSize.x / windowSize.x,
         mouse.y * pixelSize.y / windowSize.y,
     };
-    const RenderFrameData editorFrame = RenderFrameBuilder::buildEditor({
-        .manifest = assetManifest_,
-        .editor = levelEditor_,
-        .settings = presentationSettings_,
-        .hoverCell = editorHoverCell_,
-        .deleting = input.deleting,
-        .worldAnimationTimeSeconds =
-            presentation_.worldAnimationTimeSeconds(),
-        .conveyorBeltScrollOffset =
-            presentation_.conveyorBeltScrollOffset(
-                gameplaySession_.stepDurationSeconds()),
-    });
+    if (previousRenderFrame->levelWidth != documentWidth ||
+        previousRenderFrame->levelHeight != documentHeight) {
+        return;
+    }
     if (const std::optional<GridPosition3> clicked =
-            renderer_.pickIsoGridCell(editorFrame, mousePixels)) {
+            renderer_.pickIsoGridCell(
+                *previousRenderFrame, mousePixels)) {
         GridPosition3 target = *clicked;
         const bool deleting = input.deleting;
         auto topmostOccupiedLayer =

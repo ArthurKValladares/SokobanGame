@@ -4,9 +4,12 @@
 #include "engine/Math.hpp"
 #include "engine/render/GltfMesh.hpp"
 #include "engine/render/FrameDescriptorSync.hpp"
+#include "engine/render/IsoScenePreparer.hpp"
 #include "engine/render/RenderTypes.hpp"
+#include "engine/render/VulkanDeviceContext.hpp"
 #include "engine/render/VulkanModelResources.hpp"
 #include "engine/render/VulkanPipelineFactory.hpp"
+#include "engine/render/VulkanSceneRecorder.hpp"
 #include "engine/render/VulkanSceneDescriptors.hpp"
 #include "engine/render/VulkanShadowPass.hpp"
 #include "engine/render/VulkanSsaoPass.hpp"
@@ -40,6 +43,16 @@ enum class AntiAliasingMode {
 
 class VulkanRenderer {
 public:
+    struct PreparedFrame {
+        uint32_t levelWidth = 0;
+        uint32_t levelHeight = 0;
+
+    private:
+        friend class VulkanRenderer;
+        uint32_t scratchIndex = 0;
+        uint64_t generation = 0;
+    };
+
     // assetRoot is the staged runtime content directory containing shaders
     // and every manifest-relative asset. The manifest must outlive the
     // renderer.
@@ -56,14 +69,19 @@ public:
     VulkanRenderer(const VulkanRenderer&) = delete;
     VulkanRenderer& operator=(const VulkanRenderer&) = delete;
 
-    void drawFrame(const RenderFrameData& frameData, const UiDrawData& uiDrawData);
+    [[nodiscard]] PreparedFrame prepareFrame(RenderFrameData frameData);
+    void drawFrame(
+        const PreparedFrame& frame,
+        const UiDrawData& uiDrawData);
     void preloadAssets(const RenderAssetRequirements& requirements);
     void ensureAssets(const RenderAssetRequirements& requirements);
     void handleEvent(const SDL_Event& event);
     void beginDebugUiFrame();
     [[nodiscard]] bool wantsKeyboardCapture() const;
     [[nodiscard]] bool wantsMouseCapture() const;
-    [[nodiscard]] std::optional<GridPosition3> pickIsoGridCell(const RenderFrameData& frameData, Vec2 pixelPosition) const;
+    [[nodiscard]] std::optional<GridPosition3> pickIsoGridCell(
+        const PreparedFrame& frame,
+        Vec2 pixelPosition) const;
     void waitIdle() const;
     [[nodiscard]] AntiAliasingMode antiAliasingMode() const;
     [[nodiscard]] VkSampleCountFlagBits activeSampleCount() const;
@@ -87,16 +105,6 @@ public:
     void setAnimationPreview(const GltfAnimationClip* clip, float timeSeconds);
 
 private:
-    struct QueueFamilyIndices {
-        uint32_t graphics = UINT32_MAX;
-        uint32_t present = UINT32_MAX;
-
-        [[nodiscard]] bool complete() const
-        {
-            return graphics != UINT32_MAX && present != UINT32_MAX;
-        }
-    };
-
     struct FrameResources {
         VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
         VkSemaphore imageAvailable = VK_NULL_HANDLE;
@@ -104,121 +112,28 @@ private:
         VkFence inFlight = VK_NULL_HANDLE;
     };
 
-    struct TileRenderLayout {
-        Vec2 boardBottomLeft {};
-        Vec2 tileSize {};
+    struct PreparedFrameScratch {
+        RenderFrameData frameData;
+        PreparedRenderScene scene;
+        uint64_t generation = 0;
     };
 
-    struct IsoRenderLayout {
-        Vec3 cameraPosition {};
-        Vec3 cameraRight {};
-        Vec3 cameraUp {};
-        Vec3 cameraForward {};
-        Vec2 projectedCenter {};
-        float focalLength = 1.0f;
-        float fitScale = 1.0f;
-        float nearestDepth = 0.0f;
-        float farthestDepth = 1.0f;
-    };
-
-    struct ShadowRenderLayout {
-        Vec3 lightRight {};
-        Vec3 lightUp {};
-        Vec3 lightForward {};
-        Vec3 center {};
-        float halfWidth = 1.0f;
-        float halfHeight = 1.0f;
-        float nearestDepth = 0.0f;
-        float farthestDepth = 1.0f;
-    };
-
-    void createInstance();
-    void createSurface();
-    void pickPhysicalDevice();
-    void createDevice();
+    [[nodiscard]] const PreparedFrameScratch& resolvePreparedFrame(
+        const PreparedFrame& frame) const;
     [[nodiscard]] VulkanSceneDescriptors::Resources descriptorResources() const;
-    void createCommandPool();
     void createPipeline();
     void destroyPipeline();
     void createFrameResources();
     void initializeDebugUi();
     void shutdownDebugUi();
-    void renderDebugUi(VkCommandBuffer commandBuffer) const;
     void recreateSwapchain();
     void logRenderConfiguration() const;
-
-    void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, const RenderFrameData& frameData, const UiDrawData& uiDrawData);
-    void recordShadowMapRendering(VkCommandBuffer commandBuffer, const RenderFrameData& frameData, const ShadowRenderLayout& layout);
-    void recordGameRendering(VkCommandBuffer commandBuffer, VkImageView colorView, VkImageView resolveView, const RenderFrameData& frameData);
-    void recordScenePass(
-        VkCommandBuffer commandBuffer,
-        VkImageView colorView,
-        VkImageView resolveView,
-        const RenderFrameData& frameData,
-        const ShadowRenderLayout& shadowLayout,
-        bool translucentPass,
-        bool loadColor,
-        bool storeColor,
-        bool loadDepth,
-        bool writeDepth);
-    void recordOverlayRendering(
-        VkCommandBuffer commandBuffer,
-        VkImage colorImage,
-        VkImageView colorView,
-        const UiDrawData& uiDrawData);
-    [[nodiscard]] TileRenderLayout calculateTileRenderLayout(const RenderFrameData& frameData) const;
-    [[nodiscard]] IsoRenderLayout calculateIsoRenderLayout(const RenderFrameData& frameData) const;
-    [[nodiscard]] ShadowRenderLayout calculateShadowRenderLayout(const RenderFrameData& frameData) const;
-    void drawTile(VkCommandBuffer commandBuffer, const TileRenderLayout& layout, const RenderFrameData::Tile& tile, const RenderFrameData::Lighting& lighting) const;
-    void drawIsoFrame(VkCommandBuffer commandBuffer, const IsoRenderLayout& layout, const ShadowRenderLayout& shadowLayout, const RenderFrameData& frameData, const RenderFrameData::Lighting& lighting, bool translucentPass) const;
-    void drawTopDownGridOverlay(VkCommandBuffer commandBuffer, const TileRenderLayout& layout, const RenderFrameData& frameData) const;
-    void drawFace(
-        VkCommandBuffer commandBuffer,
-        const std::array<Vec3, 4>& vertices,
-        const std::array<Vec4, 4>& shadowVertices,
-        Vec4 color,
-        Vec3 normal,
-        const RenderFrameData::Lighting& lighting,
-        bool blurBehind = false,
-        Vec4 gridColor = {},
-        Vec2 gridSize = {},
-        float gridLineWidth = 0.0f,
-        bool isEditorPreview = false) const;
-    void drawShadowFace(VkCommandBuffer commandBuffer, const std::array<Vec4, 4>& shadowVertices) const;
-
-    void drawModel(
-        VkCommandBuffer commandBuffer,
-        const IsoRenderLayout& layout,
-        const ShadowRenderLayout& shadowLayout,
-        const RenderFrameData::Tile& tile,
-        const RenderFrameData::Lighting& lighting) const;
-    void drawModelShadow(
-        VkCommandBuffer commandBuffer,
-        const ShadowRenderLayout& layout,
-        const RenderFrameData::Tile& tile) const;
-    void drawUiRect(VkCommandBuffer commandBuffer, const UiDrawCommand& command, Vec2 viewportSize, const RenderFrameData::Lighting& lighting) const;
-    [[nodiscard]] Vec3 projectIsoPoint(const IsoRenderLayout& layout, Vec3 point) const;
-    [[nodiscard]] Vec4 projectShadowPoint(const ShadowRenderLayout& layout, Vec3 point) const;
-    [[nodiscard]] Vec2 pixelSizeToClipSpace(float pixelSize) const;
-
-    [[nodiscard]] QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
-    [[nodiscard]] bool isDeviceSuitable(VkPhysicalDevice device) const;
     [[nodiscard]] VkSampleCountFlagBits sampleCountForMode(AntiAliasingMode mode) const;
-    [[nodiscard]] bool msaaEnabled() const;
     [[nodiscard]] uint32_t sampleCountValue() const;
 
     SDL_Window* window_ = nullptr;
     std::filesystem::path assetRoot_;
-
-    VkInstance instance_ = VK_NULL_HANDLE;
-    VkSurfaceKHR surface_ = VK_NULL_HANDLE;
-    VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
-    VkPhysicalDeviceProperties physicalDeviceProperties_ {};
-    VkDevice device_ = VK_NULL_HANDLE;
-
-    QueueFamilyIndices queueFamilies_ {};
-    VkQueue graphicsQueue_ = VK_NULL_HANDLE;
-    VkQueue presentQueue_ = VK_NULL_HANDLE;
+    VulkanDeviceContext deviceContext_;
 
     VkFormat depthFormat_ = VK_FORMAT_D32_SFLOAT;
     VkFormat shadowFormat_ = VK_FORMAT_D32_SFLOAT;
@@ -228,21 +143,24 @@ private:
     VulkanSceneDescriptors sceneDescriptors_;
     VulkanUiResources uiResources_;
 
-    VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VulkanPipelineFactory pipelines_;
     VulkanModelResources modelResources_;
+    VulkanSceneRecorder sceneRecorder_;
 
     static constexpr uint32_t maxFramesInFlight_ = 2;
+    static constexpr uint32_t preparedFrameSlotCount_ = 2;
     std::array<FrameResources, maxFramesInFlight_> frames_ {};
+    std::array<PreparedFrameScratch, preparedFrameSlotCount_>
+        preparedFrameScratch_ {};
+    IsoScenePreparer scenePreparer_;
     FrameDescriptorSync descriptorSync_ { maxFramesInFlight_ };
     uint32_t currentFrame_ = 0;
+    uint32_t nextPreparedFrameSlot_ = 0;
+    uint64_t nextPreparedFrameGeneration_ = 1;
     AntiAliasingMode antiAliasingMode_ = AntiAliasingMode::Msaa8x;
     VkSampleCountFlagBits activeSampleCount_ = VK_SAMPLE_COUNT_1_BIT;
     bool wireframeEnabled_ = false;
-    bool wideLinesSupported_ = false;
     float wireframeLineWidth_ = 1.0f;
-    std::array<float, 2> wireframeLineWidthRange_ { 1.0f, 1.0f };
-    mutable RenderStats pendingStats_ {};
     RenderStats lastStats_ {};
     uint64_t nextStatsFrameIndex_ = 1;
     uint64_t pipelineRebuilds_ = 0;

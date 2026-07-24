@@ -428,6 +428,12 @@ void ApplicationDebugUi::draw(const Context& context) const
             "Wireframe line width %.1f",
             renderStats.wireframeLineWidth);
         ImGui::Text("Render tiles %u", renderStats.totalTiles);
+        ImGui::Text(
+            "Scene preparations %u (iso %u, shadow %u, models %u)",
+            renderStats.scenePreparations,
+            renderStats.preparedIsoFaces,
+            renderStats.preparedShadowFaces,
+            renderStats.preparedModels);
         ImGui::Text("Visible faces %u", renderStats.visibleFaces);
         ImGui::Text("Draw calls %u", renderStats.drawCalls);
         ImGui::Text("Triangles %u", renderStats.triangles);

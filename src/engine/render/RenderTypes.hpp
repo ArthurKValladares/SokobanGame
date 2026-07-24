@@ -116,6 +116,10 @@ struct RenderFrameData {
 struct RenderStats {
     uint64_t frameIndex = 0;
     uint32_t totalTiles = 0;
+    uint32_t scenePreparations = 0;
+    uint32_t preparedIsoFaces = 0;
+    uint32_t preparedShadowFaces = 0;
+    uint32_t preparedModels = 0;
     uint32_t visibleFaces = 0;
     uint32_t drawCalls = 0;
     uint32_t vertices = 0;

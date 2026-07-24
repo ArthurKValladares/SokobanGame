@@ -70,9 +70,14 @@ private:
     void checkpointCurrentScreen(bool immediateSave);
     void applySettingsEffects(const SettingsEffects& effects);
     void persistProfile(bool immediate);
-    void update(float dt, const InputRouter::Frame& input);
+    void update(
+        float dt,
+        const InputRouter::Frame& input,
+        const VulkanRenderer::PreparedFrame* previousRenderFrame);
     void drawDraftExitConfirmation();
-    void updateEditorPainting(const InputRouter::EditorInput& input);
+    void updateEditorPainting(
+        const InputRouter::EditorInput& input,
+        const VulkanRenderer::PreparedFrame* previousRenderFrame);
     [[nodiscard]] InputRouter::RoutingContext inputRoutingContext() const;
     [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;
     // Scans levels/ once into CampaignSession; the level set is fixed
@@ -119,6 +124,7 @@ private:
     LevelEditor levelEditor_;
     LevelEditorDebugUi levelEditorDebugUi_;
     AnimationPreviewDebugUi animationPreviewDebugUi_;
+    std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;
     std::optional<GridPosition3> editorHoverCell_;
     bool running_ = true;
     bool draftExitConfirmationOpen_ = false;
