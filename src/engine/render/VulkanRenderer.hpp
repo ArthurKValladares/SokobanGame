@@ -1,6 +1,5 @@
 #pragma once
 
-#include "engine/Config.hpp"
 #include "engine/Math.hpp"
 #include "engine/render/GltfMesh.hpp"
 #include "engine/render/FrameDescriptorSync.hpp"

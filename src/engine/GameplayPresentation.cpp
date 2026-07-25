@@ -1,6 +1,6 @@
 #include "engine/GameplayPresentation.hpp"
 
-#include "engine/Config.hpp"
+#include "engine/render/WaterConfig.hpp"
 
 #include <algorithm>
 #include <cmath>

@@ -1,6 +1,6 @@
 #include "engine/SettingsCoordinator.hpp"
 
-#include "engine/Config.hpp"
+#include "engine/GameplayConfig.hpp"
 
 namespace sokoban {
 

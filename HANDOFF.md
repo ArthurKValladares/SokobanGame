@@ -196,7 +196,17 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/GameplayLoop.*`: headless per-frame bridge between semantic button states, `GameplaySession`, and `GameplayPresentation`. Owns opposing-direction resolution, command queueing, action time consumption, presentation begin/finish calls, and solved-screen/draft outcomes. Covered by `tests/GameplayLoopTests.cpp`.
 - `src/engine/InputRouter.*`: testable routing layer between raw `InputState` and context-specific gameplay, title, completion-overlay, options, pointer, and editor frames. Owns SDL event admission around ImGui capture, binding-candidate suppression, modal focus, and draft-exit Back precedence; `Application` only pumps events and executes the resulting intents. Covered by `tests/InputRouterTests.cpp` (`sokoban_input_router_tests`).
 - `src/engine/SettingsTypes.*` + `src/engine/SettingsCoordinator.*`: the UI-neutral, authoritative `UserSettings` value (`audio`, `video`, `input`, and `accessibility`) plus headless runtime-effect policy. `PlayerProfile` owns one `UserSettings`; menus, persistence, and the coordinator no longer maintain parallel field sets. The coordinator normalizes a replacement value, updates `PresentationSettings`, detects which external systems actually changed, and emits a data-only `SettingsEffects` plan for window, renderer, audio, input, animation cadence, and persistence. `Application` executes that plan without deciding settings policy. Covered by `tests/SettingsCoordinatorTests.cpp` (`sokoban_settings_coordinator_tests`).
-- `src/engine/PresentationSettings.*`: mutable runtime presentation settings initialized from the immutable defaults in `Config.hpp`. Owns lighting, SSAO/shadow tuning, grid appearance, surface geometry, tile scales, normalization, sun-direction conversion, and renderer-facing lighting/grid values.
+- Focused configuration headers replace the former `Config.hpp` umbrella:
+  `AudioConfig.hpp`, `GameplayConfig.hpp`, `UserSettingsConfig.hpp`,
+  `ui/UiConfig.hpp`, and the render-owned `AnimationConfig.hpp`,
+  `CameraConfig.hpp`, `LightingConfig.hpp`, `RendererConfig.hpp`,
+  `SceneConfig.hpp`, and `WaterConfig.hpp`. Consumers include only the owner
+  they use; foundational `RenderTypes`, `PresentationSettings`,
+  `PlayerProfile`, and `VulkanRenderer` headers no longer transitively expose
+  unrelated art/runtime tuning. The focused files also own normalization
+  bounds, video defaults, audio cadence limits, font-atlas sizing, and camera
+  fit policy that were previously hard-coded at their call sites.
+- `src/engine/PresentationSettings.*`: mutable runtime presentation settings initialized from the immutable defaults in the focused render config headers. Owns lighting, SSAO/shadow tuning, grid appearance, surface geometry, tile scales, normalization, sun-direction conversion, and renderer-facing lighting/grid values.
 - `src/engine/GameplayPresentation.*`: headless presentation state derived from `GameplaySession::Action` snapshots. Owns player/movable interpolation, fallen render offsets, player clip/facing/playback state, and the shared world/conveyor animation clock without mutating authoritative gameplay state.
 - `src/engine/RenderFrameBuilder.*`: SDL/Vulkan-free construction of gameplay and editor `RenderFrameData`. Owns tile/model mapping, static geometry, procedural open-water planes/shore edges, ladder rungs, editor previews/pick-only cells, dynamic entities, tile scaling, and conveyor texture offsets. Water is emitted as `WaterSurface` data rather than a manifest model; filled cells omit the surface. Level-wide water adds a one-cell shoreline ring and four large non-pickable continuation surfaces outside the board without changing the frame's authored dimensions.
 - `src/engine/render/IsoScenePreparer.*`: Vulkan-free once-per-frame scene preparation and picking. Computes top-down, isometric-camera, and shadow layouts; creates one projected/cull-tested face pool; and emits depth-sorted opaque/translucent face indices plus model, shadow, and picking lists. It fills reusable renderer-owned frame scratch rather than using function-static storage. Covered by `tests/IsoScenePreparerTests.cpp` (`sokoban_iso_scene_preparer_tests`).
@@ -743,19 +753,29 @@ these focused modules rather than moving player UI into Debug-only ImGui.
 
 Major recent additions and fixes:
 
+- Replaced the high-fan-out `Config.hpp` with focused gameplay, audio, user
+  settings, UI, animation, camera, lighting, renderer, scene, and water config
+  headers. Removed configuration includes from foundational renderer/profile
+  headers where possible, retained aggregate settings compatibility, and made
+  normalization and Debug UI use the same configurable bounds. Changing water
+  art tuning now rebuilds only direct water consumers instead of the broader
+  settings, profile, application, and renderer-interface graph. An incremental
+  MSBuild check after touching only `WaterConfig.hpp` compiled
+  `GameplayPresentation.cpp`, `RenderFrameBuilder.cpp`,
+  `VulkanSceneRecorder.cpp`, and `PresentationTests.cpp` only.
 - Changed the rotated secondary ripple from a dark-blue blend, which became
   indistinguishable from the two-tone body's dark regions, to its own
   configurable muted cyan tint and low opacity. It now reads as a translucent
   echo of the primary crest, matching the reference while remaining below the
   crisp white layer. The secondary field now has an independent configurable
   thickness scale and favors its narrow crest over its halo, preventing it
-  from reading as a second set of heavy bands. `Config.hpp` also exposes the
-  shared ripple crest width, halo width, and primary crest/halo strengths.
+  from reading as a second set of heavy bands. `WaterConfig.hpp` also exposes
+  the shared ripple crest width, halo width, and primary crest/halo strengths.
 - Added a separate low-frequency two-tone field to the water body, matching the
   reference's broad alternating color regions beneath the ripple network. A
   dominant coarse value-noise octave plus light detail is thresholded around
   its midpoint for a roughly even split and gently warped/drifted in world
-  space. `Config.hpp` exposes tone frequency, dark/light multipliers,
+  space. `WaterConfig.hpp` exposes tone frequency, dark/light multipliers,
   transition width, and animation speed; previously unused water push-constant
   fields carry them to the shader.
 - Replaced the open-water sine contour field, whose lines could connect into
@@ -1060,8 +1080,9 @@ The `rg` command above should return no matches.
   on the render thread unless the queue/command-pool architecture is redesigned
   and validated as a separate change.
 - Keep editor behavior in the headless `LevelEditor` API. ImGui and any future player-facing editor UI should be adapters that call it rather than owning document or filesystem logic.
-- Keep compile-time constants/defaults in `Config.hpp`, mutable presentation
-  tuning in `PresentationSettings`, authoritative gameplay tuning/state in
+- Keep compile-time constants/defaults in their owning focused config header;
+  do not recreate an umbrella include. Keep mutable presentation tuning in
+  `PresentationSettings`, authoritative gameplay tuning/state in
   `GameplaySession`, and renderer-facing frame assembly in `RenderFrameBuilder`.
   UI layers may edit/call those APIs but should not duplicate their state.
 - Preserve existing code style and avoid broad abstractions unless a mechanic really needs them.
@@ -1105,8 +1126,8 @@ Audio:
 
 - Add sounds for more events (undo, restart, level completion, falling into
   water, conveyor hum) as manifest sound sets.
-- Consider a mixer section in the manifest if global master/music gains should
-  move out of `Config.hpp`.
+- Consider a mixer section in the manifest if compile-time audio defaults and
+  bus policy should move out of `AudioConfig.hpp`.
 
 UI:
 

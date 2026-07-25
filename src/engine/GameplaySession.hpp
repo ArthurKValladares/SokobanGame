@@ -1,6 +1,6 @@
 #pragma once
 
-#include "engine/Config.hpp"
+#include "engine/GameplayConfig.hpp"
 #include "engine/Level.hpp"
 #include "engine/Rules.hpp"
 

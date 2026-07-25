@@ -1,11 +1,14 @@
 #include "engine/ApplicationDebugUi.hpp"
 
+#include "engine/AudioConfig.hpp"
 #include "engine/AudioSystem.hpp"
 
-#include "engine/Config.hpp"
+#include "engine/GameplayConfig.hpp"
 #include "engine/Log.hpp"
 #include "engine/Rules.hpp"
 #include "engine/TaskSystem.hpp"
+#include "engine/render/LightingConfig.hpp"
+#include "engine/render/SceneConfig.hpp"
 
 #if SOKOBAN_ENABLE_DEBUG_UI
 #include <imgui.h>
@@ -203,8 +206,8 @@ void ApplicationDebugUi::draw(const Context& context) const
             "Grid Width",
             &settings.grid.lineWidth,
             0.05f,
-            0.0f,
-            12.0f,
+            config::minimumTileGridLineWidth,
+            config::maximumTileGridLineWidth,
             "%.2f px");
     }
 
@@ -215,11 +218,14 @@ void ApplicationDebugUi::draw(const Context& context) const
             "Step Duration",
             &stepDurationSeconds,
             0.005f,
-            0.05f,
-            1.0f,
+            config::minimumStepDurationSeconds,
+            config::maximumStepDurationSeconds,
             "%.3f s");
         context.gameplaySession.setStepDurationSeconds(
-            std::clamp(stepDurationSeconds, 0.05f, 1.0f));
+            std::clamp(
+                stepDurationSeconds,
+                config::minimumStepDurationSeconds,
+                config::maximumStepDurationSeconds));
 
         if (ImGui::TreeNode("Step Rates (tiles/step)")) {
             rules::StepRates stepRates =
@@ -236,15 +242,15 @@ void ApplicationDebugUi::draw(const Context& context) const
             "Surface Entity Height",
             &settings.geometry.surfaceEntityHeight,
             0.005f,
-            0.01f,
-            0.5f,
+            config::minimumSurfaceEntityHeight,
+            config::maximumSurfaceEntityHeight,
             "%.3f");
         ImGui::DragFloat(
             "Surface Entity Width / Depth",
             &settings.geometry.surfaceEntityWidthDepth,
             0.01f,
-            0.1f,
-            1.0f,
+            config::minimumSurfaceEntityWidthDepth,
+            config::maximumSurfaceEntityWidthDepth,
             "%.2f");
         ImGui::TextDisabled("End and pressure plate geometry");
 
@@ -255,21 +261,39 @@ void ApplicationDebugUi::draw(const Context& context) const
         bool settingsChanged = false;
         bool settingsCommitted = false;
         settingsChanged = ImGui::SliderFloat(
-            "Master Volume", &audioSettings.masterVolume, 0.0f, 1.0f, "%.2f");
+            "Master Volume",
+            &audioSettings.masterVolume,
+            config::minimumVolume,
+            config::maximumVolume,
+            "%.2f");
         settingsCommitted = ImGui::IsItemDeactivatedAfterEdit();
         settingsChanged = ImGui::SliderFloat(
-            "Music Volume", &audioSettings.musicVolume, 0.0f, 1.0f, "%.2f") ||
+            "Music Volume",
+            &audioSettings.musicVolume,
+            config::minimumVolume,
+            config::maximumVolume,
+            "%.2f") ||
             settingsChanged;
         settingsCommitted = ImGui::IsItemDeactivatedAfterEdit() || settingsCommitted;
         settingsChanged = ImGui::SliderFloat(
-            "Sound Volume", &audioSettings.soundVolume, 0.0f, 1.0f, "%.2f") ||
+            "Sound Volume",
+            &audioSettings.soundVolume,
+            config::minimumVolume,
+            config::maximumVolume,
+            "%.2f") ||
             settingsChanged;
         settingsCommitted = ImGui::IsItemDeactivatedAfterEdit() || settingsCommitted;
         if ((settingsChanged || settingsCommitted) && context.updateAudioSettings) {
             context.updateAudioSettings(audioSettings, settingsCommitted);
         }
         float footstepInterval = context.audio.footstepIntervalSeconds();
-        if (ImGui::DragFloat("Footstep Interval", &footstepInterval, 0.005f, 0.05f, 1.0f, "%.3f s")) {
+        if (ImGui::DragFloat(
+                "Footstep Interval",
+                &footstepInterval,
+                0.005f,
+                config::minimumFootstepIntervalSeconds,
+                config::maximumFootstepIntervalSeconds,
+                "%.3f s")) {
             context.audio.setFootstepIntervalSeconds(footstepInterval);
         }
         ImGui::TextDisabled("Footsteps while walking; a looping stone drag while pushing.");
@@ -284,15 +308,15 @@ void ApplicationDebugUi::draw(const Context& context) const
             "Sun Azimuth",
             &lighting.sunAzimuthDegrees,
             0.5f,
-            -180.0f,
-            180.0f,
+            config::minimumSunAzimuthDegrees,
+            config::maximumSunAzimuthDegrees,
             "%.1f deg");
         ImGui::DragFloat(
             "Sun Tilt",
             &lighting.sunTiltDegrees,
             0.5f,
-            -90.0f,
-            90.0f,
+            config::minimumSunTiltDegrees,
+            config::maximumSunTiltDegrees,
             "%.1f deg");
 
         const Vec3 sunDirection = settings.sunDirection();
@@ -320,7 +344,7 @@ void ApplicationDebugUi::draw(const Context& context) const
             &lighting.sunIntensity,
             0.02f,
             0.0f,
-            4.0f,
+            config::maximumSunIntensity,
             "%.2f");
 
         float ambientColor[3] {
@@ -340,28 +364,28 @@ void ApplicationDebugUi::draw(const Context& context) const
             &lighting.ambientIntensity,
             0.01f,
             0.0f,
-            2.0f,
+            config::maximumAmbientLightIntensity,
             "%.2f");
         ImGui::DragFloat(
             "Specular Strength",
             &lighting.specularStrength,
             0.01f,
             0.0f,
-            1.0f,
+            config::maximumSpecularStrength,
             "%.2f");
         ImGui::DragFloat(
             "Specular Power",
             &lighting.specularPower,
             0.5f,
-            1.0f,
-            128.0f,
+            config::minimumSpecularPower,
+            config::maximumSpecularPower,
             "%.1f");
         ImGui::DragFloat(
             "Model Shadow Receive",
             &lighting.modelShadowReceive,
             0.01f,
             0.0f,
-            1.0f,
+            config::maximumModelShadowReceive,
             "%.2f");
         ImGui::TextDisabled(
             "Lower model shadow receive reduces harsh self-shadowing.");
@@ -375,7 +399,7 @@ void ApplicationDebugUi::draw(const Context& context) const
             &lighting.ambientOcclusionStrength,
             0.01f,
             0.0f,
-            1.0f,
+            config::maximumAmbientOcclusionStrength,
             "%.2f");
         ImGui::Checkbox(
             "Visualize SSAO",
@@ -389,14 +413,14 @@ void ApplicationDebugUi::draw(const Context& context) const
             &lighting.shadowOpacity,
             0.01f,
             0.0f,
-            0.85f,
+            config::maximumShadowOpacity,
             "%.2f");
         ImGui::DragFloat(
             "Shadow Bias",
             &lighting.shadowBias,
             0.0005f,
             0.0f,
-            0.05f,
+            config::maximumShadowBias,
             "%.4f");
         ImGui::EndDisabled();
     }

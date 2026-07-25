@@ -1,5 +1,7 @@
 #include "engine/SettingsTypes.hpp"
 
+#include "engine/AudioConfig.hpp"
+#include "engine/UserSettingsConfig.hpp"
 #include "engine/render/RenderResolution.hpp"
 
 #include <algorithm>
@@ -15,21 +17,31 @@ int UserSettings::Video::effectiveRenderScalePercent() const
 
 void UserSettings::normalize()
 {
-    audio.masterVolume = std::clamp(audio.masterVolume, 0.0f, 1.0f);
-    audio.musicVolume = std::clamp(audio.musicVolume, 0.0f, 1.0f);
-    audio.soundVolume = std::clamp(audio.soundVolume, 0.0f, 1.0f);
-    if (video.antiAliasingSamples != 1 &&
-        video.antiAliasingSamples != 2 &&
-        video.antiAliasingSamples != 4 &&
-        video.antiAliasingSamples != 8) {
-        video.antiAliasingSamples = 8;
+    audio.masterVolume = std::clamp(
+        audio.masterVolume, config::minimumVolume, config::maximumVolume);
+    audio.musicVolume = std::clamp(
+        audio.musicVolume, config::minimumVolume, config::maximumVolume);
+    audio.soundVolume = std::clamp(
+        audio.soundVolume, config::minimumVolume, config::maximumVolume);
+    if (std::find(
+            config::antiAliasingSampleOptions.begin(),
+            config::antiAliasingSampleOptions.end(),
+            video.antiAliasingSamples) ==
+        config::antiAliasingSampleOptions.end()) {
+        video.antiAliasingSamples = config::antiAliasingSamples;
     }
     video.renderScalePercent = normalizedRenderScalePresetPercent(
         video.renderScalePercent);
     video.customRenderScalePercent = normalizedRenderScalePercent(
         video.customRenderScalePercent);
-    video.windowWidth = std::clamp(video.windowWidth, 640, 7680);
-    video.windowHeight = std::clamp(video.windowHeight, 480, 4320);
+    video.windowWidth = std::clamp(
+        video.windowWidth,
+        config::minimumWindowWidth,
+        config::maximumWindowWidth);
+    video.windowHeight = std::clamp(
+        video.windowHeight,
+        config::minimumWindowHeight,
+        config::maximumWindowHeight);
 }
 
 } // namespace sokoban

@@ -4,6 +4,8 @@
 #include "engine/AssetManifest.hpp"
 #include "engine/GameplayPresentation.hpp"
 #include "engine/PresentationSettings.hpp"
+#include "engine/render/SceneConfig.hpp"
+#include "engine/render/WaterConfig.hpp"
 #include "engine/RenderFrameBuilder.hpp"
 
 #include <cmath>

@@ -1,6 +1,8 @@
 #include "engine/PresentationSettings.hpp"
 
 #include "engine/AssetManifest.hpp"
+#include "engine/render/LightingConfig.hpp"
+#include "engine/render/SceneConfig.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -21,6 +23,35 @@ float clampedTileScale(float scale)
 
 } // namespace
 
+PresentationSettings::PresentationSettings()
+    : lighting {
+          .sunAzimuthDegrees = config::sunAzimuthDegrees,
+          .sunTiltDegrees = config::sunTiltDegrees,
+          .sunColor = config::sunColor,
+          .sunIntensity = config::sunIntensity,
+          .ambientColor = config::ambientLightColor,
+          .ambientIntensity = config::ambientLightIntensity,
+          .specularStrength = config::specularStrength,
+          .specularPower = config::specularPower,
+          .modelShadowReceive = config::modelShadowReceive,
+          .ambientOcclusionEnabled = config::ambientOcclusionEnabled,
+          .ambientOcclusionStrength = config::ambientOcclusionStrength,
+          .ambientOcclusionVisualize = false,
+          .shadowsEnabled = config::shadowsEnabled,
+          .shadowOpacity = config::shadowOpacity,
+          .shadowBias = config::shadowBias,
+      }
+    , grid {
+          .color = config::tileGridLineColor,
+          .lineWidth = config::tileGridLineWidth,
+      }
+    , geometry {
+          .surfaceEntityHeight = config::surfaceEntityHeight,
+          .surfaceEntityWidthDepth = config::surfaceEntityWidthDepth,
+      }
+{
+}
+
 void PresentationSettings::applyTileScales(const AssetManifest& manifest)
 {
     for (std::size_t i = 0; i < tileScales_.size(); ++i) {
@@ -32,24 +63,55 @@ void PresentationSettings::applyTileScales(const AssetManifest& manifest)
 
 void PresentationSettings::normalize()
 {
-    lighting.sunAzimuthDegrees = std::clamp(lighting.sunAzimuthDegrees, -180.0f, 180.0f);
-    lighting.sunTiltDegrees = std::clamp(lighting.sunTiltDegrees, -90.0f, 90.0f);
-    lighting.sunIntensity = std::clamp(lighting.sunIntensity, 0.0f, 4.0f);
-    lighting.ambientIntensity = std::clamp(lighting.ambientIntensity, 0.0f, 2.0f);
-    lighting.specularStrength = std::clamp(lighting.specularStrength, 0.0f, 1.0f);
-    lighting.specularPower = std::clamp(lighting.specularPower, 1.0f, 128.0f);
-    lighting.modelShadowReceive = std::clamp(lighting.modelShadowReceive, 0.0f, 1.0f);
+    lighting.sunAzimuthDegrees = std::clamp(
+        lighting.sunAzimuthDegrees,
+        config::minimumSunAzimuthDegrees,
+        config::maximumSunAzimuthDegrees);
+    lighting.sunTiltDegrees = std::clamp(
+        lighting.sunTiltDegrees,
+        config::minimumSunTiltDegrees,
+        config::maximumSunTiltDegrees);
+    lighting.sunIntensity = std::clamp(
+        lighting.sunIntensity, 0.0f, config::maximumSunIntensity);
+    lighting.ambientIntensity = std::clamp(
+        lighting.ambientIntensity,
+        0.0f,
+        config::maximumAmbientLightIntensity);
+    lighting.specularStrength = std::clamp(
+        lighting.specularStrength, 0.0f, config::maximumSpecularStrength);
+    lighting.specularPower = std::clamp(
+        lighting.specularPower,
+        config::minimumSpecularPower,
+        config::maximumSpecularPower);
+    lighting.modelShadowReceive = std::clamp(
+        lighting.modelShadowReceive,
+        0.0f,
+        config::maximumModelShadowReceive);
     lighting.ambientOcclusionStrength =
-        std::clamp(lighting.ambientOcclusionStrength, 0.0f, 1.0f);
-    lighting.shadowOpacity = std::clamp(lighting.shadowOpacity, 0.0f, 0.85f);
-    lighting.shadowBias = std::clamp(lighting.shadowBias, 0.0f, 0.05f);
+        std::clamp(
+            lighting.ambientOcclusionStrength,
+            0.0f,
+            config::maximumAmbientOcclusionStrength);
+    lighting.shadowOpacity = std::clamp(
+        lighting.shadowOpacity, 0.0f, config::maximumShadowOpacity);
+    lighting.shadowBias = std::clamp(
+        lighting.shadowBias, 0.0f, config::maximumShadowBias);
 
     grid.color.w = std::clamp(grid.color.w, 0.0f, 1.0f);
-    grid.lineWidth = std::clamp(grid.lineWidth, 0.0f, 12.0f);
+    grid.lineWidth = std::clamp(
+        grid.lineWidth,
+        config::minimumTileGridLineWidth,
+        config::maximumTileGridLineWidth);
     geometry.surfaceEntityHeight =
-        std::clamp(geometry.surfaceEntityHeight, 0.01f, 0.5f);
+        std::clamp(
+            geometry.surfaceEntityHeight,
+            config::minimumSurfaceEntityHeight,
+            config::maximumSurfaceEntityHeight);
     geometry.surfaceEntityWidthDepth =
-        std::clamp(geometry.surfaceEntityWidthDepth, 0.1f, 1.0f);
+        std::clamp(
+            geometry.surfaceEntityWidthDepth,
+            config::minimumSurfaceEntityWidthDepth,
+            config::maximumSurfaceEntityWidthDepth);
 
     for (float& scale : tileScales_) {
         scale = clampedTileScale(scale);

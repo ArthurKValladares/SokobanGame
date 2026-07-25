@@ -1,6 +1,5 @@
 #pragma once
 
-#include "engine/Config.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/render/RenderTypes.hpp"
 
@@ -10,38 +9,40 @@ namespace sokoban {
 
 class AssetManifest;
 
-// Mutable presentation tuning initialized from the compile-time defaults in
-// Config.hpp. Debug UI and future settings screens edit this object; frame
+// Mutable presentation tuning initialized from focused render configuration.
+// Debug UI and future settings screens edit this object; frame
 // construction consumes its normalized renderer-facing values.
 class PresentationSettings {
 public:
     struct Lighting {
-        float sunAzimuthDegrees = config::sunAzimuthDegrees;
-        float sunTiltDegrees = config::sunTiltDegrees;
-        Vec3 sunColor { config::sunColor };
-        float sunIntensity = config::sunIntensity;
-        Vec3 ambientColor { config::ambientLightColor };
-        float ambientIntensity = config::ambientLightIntensity;
-        float specularStrength = config::specularStrength;
-        float specularPower = config::specularPower;
-        float modelShadowReceive = config::modelShadowReceive;
-        bool ambientOcclusionEnabled = config::ambientOcclusionEnabled;
-        float ambientOcclusionStrength = config::ambientOcclusionStrength;
+        float sunAzimuthDegrees = 0.0f;
+        float sunTiltDegrees = 0.0f;
+        Vec3 sunColor {};
+        float sunIntensity = 0.0f;
+        Vec3 ambientColor {};
+        float ambientIntensity = 0.0f;
+        float specularStrength = 0.0f;
+        float specularPower = 1.0f;
+        float modelShadowReceive = 0.0f;
+        bool ambientOcclusionEnabled = false;
+        float ambientOcclusionStrength = 0.0f;
         bool ambientOcclusionVisualize = false;
-        bool shadowsEnabled = config::shadowsEnabled;
-        float shadowOpacity = config::shadowOpacity;
-        float shadowBias = config::shadowBias;
+        bool shadowsEnabled = false;
+        float shadowOpacity = 0.0f;
+        float shadowBias = 0.0f;
     };
 
     struct Grid {
-        Vec4 color { config::tileGridLineColor };
-        float lineWidth = config::tileGridLineWidth;
+        Vec4 color {};
+        float lineWidth = 0.0f;
     };
 
     struct Geometry {
-        float surfaceEntityHeight = config::surfaceEntityHeight;
-        float surfaceEntityWidthDepth = config::surfaceEntityWidthDepth;
+        float surfaceEntityHeight = 0.0f;
+        float surfaceEntityWidthDepth = 0.0f;
     };
+
+    PresentationSettings();
 
     Lighting lighting;
     Grid grid;

@@ -1,6 +1,6 @@
 #include "engine/render/VulkanShadowPass.hpp"
 
-#include "engine/Config.hpp"
+#include "engine/render/LightingConfig.hpp"
 
 #include <stdexcept>
 #include <string>

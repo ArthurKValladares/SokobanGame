@@ -1,8 +1,8 @@
 #include "engine/ContentPipeline.hpp"
 
 #include "engine/AssetManifest.hpp"
-#include "engine/Config.hpp"
 #include "engine/Level.hpp"
+#include "engine/ui/UiConfig.hpp"
 
 #include <algorithm>
 #include <array>

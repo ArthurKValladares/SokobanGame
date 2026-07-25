@@ -1,6 +1,6 @@
 #include "engine/render/VulkanSsaoPass.hpp"
 
-#include "engine/Config.hpp"
+#include "engine/render/LightingConfig.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 
 #include <array>

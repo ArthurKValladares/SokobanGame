@@ -1,7 +1,8 @@
 #pragma once
 
-#include "engine/Config.hpp"
+#include "engine/AudioConfig.hpp"
 #include "engine/InputBindings.hpp"
+#include "engine/UserSettingsConfig.hpp"
 
 namespace sokoban {
 
@@ -9,33 +10,32 @@ struct UserSettings {
     struct Audio {
         float masterVolume = config::masterVolume;
         float musicVolume = config::musicVolume;
-        float soundVolume = 1.0f;
+        float soundVolume = config::soundVolume;
 
         bool operator==(const Audio&) const = default;
     };
 
     struct Video {
-        bool fullscreen = false;
-        // False preserves the engine's mailbox-first presentation behavior.
-        bool vsync = false;
-        int antiAliasingSamples = 8;
-        int renderScalePercent = 100;
-        bool customRenderScale = false;
-        int customRenderScalePercent = 100;
-        bool ambientOcclusion = config::ambientOcclusionEnabled;
-        int windowWidth = 1280;
-        int windowHeight = 720;
+        bool fullscreen = config::fullscreen;
+        bool vsync = config::vsync;
+        int antiAliasingSamples = config::antiAliasingSamples;
+        int renderScalePercent = config::renderScalePercent;
+        bool customRenderScale = config::customRenderScale;
+        int customRenderScalePercent = config::customRenderScalePercent;
+        bool ambientOcclusion = config::ambientOcclusion;
+        int windowWidth = config::windowWidth;
+        int windowHeight = config::windowHeight;
 
         [[nodiscard]] int effectiveRenderScalePercent() const;
         bool operator==(const Video&) const = default;
     };
 
     struct Accessibility {
-        bool reducedMotion = false;
-        bool highContrast = false;
-        bool largeText = false;
-        bool subtitles = true;
-        bool screenShake = true;
+        bool reducedMotion = config::reducedMotion;
+        bool highContrast = config::highContrast;
+        bool largeText = config::largeText;
+        bool subtitles = config::subtitles;
+        bool screenShake = config::screenShake;
 
         bool operator==(const Accessibility&) const = default;
     };

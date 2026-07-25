@@ -1,6 +1,5 @@
 #pragma once
 
-#include "engine/Config.hpp"
 #include "engine/Math.hpp"
 
 #include <array>
@@ -68,25 +67,25 @@ inline constexpr RenderAnimation noAnimation {};
 struct RenderFrameData {
     struct DirectionalLight {
         Vec3 direction { 0.0f, 0.0f, 1.0f };
-        Vec3 color { config::sunColor };
-        float intensity = config::sunIntensity;
+        Vec3 color { 1.0f, 1.0f, 1.0f };
+        float intensity = 1.0f;
     };
 
     struct AmbientLight {
-        Vec3 color { config::ambientLightColor };
-        float intensity = config::ambientLightIntensity;
+        Vec3 color {};
+        float intensity = 0.0f;
     };
 
     struct Lighting {
         struct Shadows {
-            bool enabled = config::shadowsEnabled;
-            float opacity = config::shadowOpacity;
-            float bias = config::shadowBias;
+            bool enabled = false;
+            float opacity = 0.0f;
+            float bias = 0.0f;
         };
 
         struct AmbientOcclusion {
-            bool enabled = config::ambientOcclusionEnabled;
-            float strength = config::ambientOcclusionStrength;
+            bool enabled = false;
+            float strength = 0.0f;
             bool visualize = false;
         };
 
@@ -94,9 +93,9 @@ struct RenderFrameData {
         AmbientLight ambient {};
         Shadows shadows {};
         AmbientOcclusion ambientOcclusion {};
-        float specularStrength = config::specularStrength;
-        float specularPower = config::specularPower;
-        float modelShadowReceive = config::modelShadowReceive;
+        float specularStrength = 0.0f;
+        float specularPower = 1.0f;
+        float modelShadowReceive = 0.0f;
     };
 
     struct Tile {
@@ -129,7 +128,7 @@ struct RenderFrameData {
         GridPosition3 cell {};
         Vec2 position {};
         Vec2 size { 1.0f, 1.0f };
-        Vec4 color { config::waterSurfaceColor };
+        Vec4 color {};
         float elevation = 0.0f;
         uint32_t shorelineMask = 0;
         bool isEditorPreview = false;
@@ -137,8 +136,8 @@ struct RenderFrameData {
     };
 
     struct GridOverlay {
-        Vec4 color { config::tileGridLineColor };
-        float width = config::tileGridLineWidth;
+        Vec4 color {};
+        float width = 0.0f;
     };
 
     RenderViewMode viewMode = RenderViewMode::TopDown2D;

@@ -1,9 +1,9 @@
 #include "engine/render/VulkanRenderer.hpp"
 
 #include "engine/Log.hpp"
-#include "engine/Config.hpp"
 #include "engine/render/ImageData.hpp"
 #include "engine/render/VulkanDeviceSelection.hpp"
+#include "engine/ui/UiConfig.hpp"
 
 #include <SDL3/SDL.h>
 

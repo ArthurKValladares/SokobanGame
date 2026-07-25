@@ -1,6 +1,5 @@
 #pragma once
 
-#include "engine/Config.hpp"
 #include "engine/GameplaySession.hpp"
 #include "engine/SettingsTypes.hpp"
 

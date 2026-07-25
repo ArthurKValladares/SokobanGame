@@ -4,6 +4,8 @@
 #include "engine/Log.hpp"
 #include "engine/RenderFrameBuilder.hpp"
 #include "engine/RuntimeContent.hpp"
+#include "engine/UserSettingsConfig.hpp"
+#include "engine/ui/UiConfig.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -31,12 +33,18 @@ AntiAliasingMode antiAliasingModeForSamples(int samples)
 } // namespace
 
 Application::Application()
-    : window_("Sokoban 3D", 1280, 720)
+    : window_(
+          "Sokoban 3D",
+          config::windowWidth,
+          config::windowHeight)
     , saveSlots_(SaveStore::preferencePath("Sokoban3D", "Sokoban3D"))
     , playerProfile_(saveSlots_.loadActiveProfile())
     , assetRoot_(runtimeContentRoot())
     , assetManifest_(AssetManifest::loadFromFile(assetRoot_ / "manifest.json"))
-    , uiFont_(FontAtlas::load(assetRoot_ / config::uiFontPath))
+    , uiFont_(FontAtlas::load(
+          assetRoot_ / config::uiFontPath,
+          config::uiFontPixelHeight,
+          config::uiFontAtlasSize))
     , renderer_(
           window_.nativeHandle(),
           assetRoot_,

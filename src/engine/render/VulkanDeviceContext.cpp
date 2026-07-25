@@ -1,6 +1,6 @@
 #include "engine/render/VulkanDeviceContext.hpp"
 
-#include "engine/Config.hpp"
+#include "engine/render/RendererConfig.hpp"
 #include "engine/Log.hpp"
 #include "engine/render/VulkanDeviceSelection.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"

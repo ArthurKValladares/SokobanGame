@@ -1,6 +1,6 @@
 #pragma once
 
-#include "engine/Config.hpp"
+#include "engine/render/AnimationConfig.hpp"
 #include "engine/render/GltfMesh.hpp"
 #include "engine/render/RenderTypes.hpp"
 

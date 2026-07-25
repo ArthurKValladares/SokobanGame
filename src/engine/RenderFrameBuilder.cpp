@@ -1,9 +1,10 @@
 #include "engine/RenderFrameBuilder.hpp"
 
-#include "engine/Config.hpp"
 #include "engine/Rules.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
+#include "engine/render/SceneConfig.hpp"
+#include "engine/render/WaterConfig.hpp"
 
 #include <algorithm>
 #include <array>

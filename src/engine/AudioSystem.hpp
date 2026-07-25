@@ -1,7 +1,7 @@
 #pragma once
 
 #include "engine/AssetManifest.hpp"
-#include "engine/Config.hpp"
+#include "engine/AudioConfig.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -26,7 +26,9 @@ struct FootstepCadence {
             return 0;
         }
 
-        const float interval = std::max(intervalSeconds, 0.01f);
+        const float interval = std::max(
+            intervalSeconds,
+            config::minimumFootstepIntervalSeconds);
         if (!walking_) {
             walking_ = true;
             timer_ = interval;
@@ -35,7 +37,8 @@ struct FootstepCadence {
 
         timer_ -= dt;
         int due = 0;
-        while (timer_ <= 0.0f && due < 4) {
+        while (timer_ <= 0.0f &&
+            due < config::maximumFootstepsPerUpdate) {
             ++due;
             timer_ += interval;
         }
@@ -107,7 +110,7 @@ private:
     FootstepCadence cadence_;
     float masterVolume_ = config::masterVolume;
     float musicVolume_ = config::musicVolume;
-    float soundVolume_ = 1.0f;
+    float soundVolume_ = config::soundVolume;
     // Seeded from the manifest's sound-set volumes in the constructor.
     float footstepVolume_ = 1.0f;
     float stoneDragVolume_ = 1.0f;

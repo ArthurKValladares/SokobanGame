@@ -1,7 +1,8 @@
 #include "engine/render/IsoScenePreparer.hpp"
 
 #include "engine/BoardLayout.hpp"
-#include "engine/Config.hpp"
+#include "engine/render/CameraConfig.hpp"
+#include "engine/render/LightingConfig.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -201,7 +202,8 @@ IsoRenderLayout calculateIsoLayout(
         (minPoint.y + maxPoint.y) * 0.5f,
     };
     layout.fitScale =
-        1.82f * std::min(1.0f / sceneSize.x, 1.0f / sceneSize.y);
+        config::perspectiveCameraFitScale *
+        std::min(1.0f / sceneSize.x, 1.0f / sceneSize.y);
     layout.nearestDepth = nearestDepth;
     layout.farthestDepth =
         std::max(farthestDepth, nearestDepth + 0.001f);

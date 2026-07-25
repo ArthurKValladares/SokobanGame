@@ -664,6 +664,7 @@ void migrate3to4(Json& root)
 // Format 5 added window/AA video settings and menu bindings.
 void migrate4to5(Json& root)
 {
+    const UserSettings defaultSettings;
     Json& settings = root["settings"];
     if (!settings.is_object()) {
         return;
@@ -671,16 +672,18 @@ void migrate4to5(Json& root)
     Json& video = settings["video"];
     if (video.is_object()) {
         if (!video.contains("antiAliasingSamples")) {
-            video["antiAliasingSamples"] = 8;
+            video["antiAliasingSamples"] =
+                defaultSettings.video.antiAliasingSamples;
         }
         if (!video.contains("ambientOcclusion")) {
-            video["ambientOcclusion"] = config::ambientOcclusionEnabled;
+            video["ambientOcclusion"] =
+                defaultSettings.video.ambientOcclusion;
         }
         if (!video.contains("windowWidth")) {
-            video["windowWidth"] = 1280;
+            video["windowWidth"] = defaultSettings.video.windowWidth;
         }
         if (!video.contains("windowHeight")) {
-            video["windowHeight"] = 720;
+            video["windowHeight"] = defaultSettings.video.windowHeight;
         }
     }
     Json& input = settings["input"];

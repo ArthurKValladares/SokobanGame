@@ -1,6 +1,7 @@
 #include "engine/render/VulkanSceneRecorder.hpp"
 
-#include "engine/Config.hpp"
+#include "engine/render/SceneConfig.hpp"
+#include "engine/render/WaterConfig.hpp"
 #include "engine/render/VulkanModelResources.hpp"
 #include "engine/render/VulkanPipelineFactory.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
