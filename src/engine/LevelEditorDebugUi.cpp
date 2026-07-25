@@ -133,6 +133,20 @@ void LevelEditorDebugUi::draw(LevelEditor& editor, const Callbacks& callbacks)
     if (ImGui::SliderInt("Current Layer", &selectedLayer, 0, std::max(static_cast<int>(editor.documentDepth()) - 1, 0))) {
         editor.setActiveLayer(selectedLayer);
     }
+    bool waterOnCurrentLayer =
+        editor.waterLayer() == editor.activeLayer();
+    if (ImGui::Checkbox("Water On This Layer", &waterOnCurrentLayer)) {
+        editor.setWaterLayer(
+            waterOnCurrentLayer
+                ? std::optional<uint32_t>(editor.activeLayer())
+                : std::nullopt);
+    }
+    if (editor.waterLayer() &&
+        editor.waterLayer() != editor.activeLayer()) {
+        ImGui::TextDisabled(
+            "Water is on layer %d.",
+            static_cast<int>(*editor.waterLayer()) + 1);
+    }
     bool layerLocked = editor.layerLocked();
     if (ImGui::Checkbox("Lock Edits To Current Layer", &layerLocked)) {
         editor.setLayerLocked(layerLocked);
@@ -172,6 +186,9 @@ void LevelEditorDebugUi::drawTilePalette(LevelEditor& editor)
 #if SOKOBAN_ENABLE_DEBUG_UI
     ImGui::Text("Paint");
     for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
+        if (definition.type == TileType::Water) {
+            continue;
+        }
         if (drawPaintButton(definition, editor.selectedTile())) {
             editor.setSelectedTile(definition.type);
         }

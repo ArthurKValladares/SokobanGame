@@ -16,6 +16,13 @@ class Level {
 public:
     using LayerRows = std::vector<std::vector<std::string>>;
 
+    struct Definition {
+        LayerRows layers;
+        std::optional<uint32_t> waterLayer;
+
+        bool operator==(const Definition&) const = default;
+    };
+
     struct MovableTile {
         TileType type = TileType::Rock;
         GridPosition3 position {};
@@ -23,7 +30,16 @@ public:
 
     static Level loadFromFile(const std::filesystem::path& path);
     static Level loadFromLines(const std::vector<std::string>& lines, std::string_view sourceName);
-    static Level loadFromLayers(const LayerRows& layers, std::string_view sourceName);
+    static Level loadFromDefinition(const Definition& definition, std::string_view sourceName);
+    static Level loadFromLayers(
+        const LayerRows& layers,
+        std::string_view sourceName,
+        std::optional<uint32_t> waterLayer = std::nullopt);
+    [[nodiscard]] static Definition parseDefinition(
+        const std::vector<std::string>& lines,
+        std::string_view sourceName);
+    [[nodiscard]] static std::vector<std::string> serializeDefinition(
+        const Definition& definition);
     [[nodiscard]] static LayerRows parseLayerRows(const std::vector<std::string>& lines, std::string_view sourceName);
     [[nodiscard]] static std::vector<std::string> serializeLayerRows(const LayerRows& layers);
 
@@ -33,6 +49,8 @@ public:
     [[nodiscard]] GridPosition3 playerStart() const { return playerStart_; }
     [[nodiscard]] const std::vector<MovableTile>& movableTiles() const { return movableTiles_; }
     [[nodiscard]] const std::vector<GridPosition3>& pressurePlates() const { return pressurePlates_; }
+    [[nodiscard]] std::optional<uint32_t> waterLayer() const { return waterLayer_; }
+    [[nodiscard]] TileType authoredTileAt(uint32_t x, uint32_t y, uint32_t z = 0) const;
     [[nodiscard]] TileType tileAt(uint32_t x, uint32_t y, uint32_t z = 0) const;
     [[nodiscard]] std::optional<TileType> supportingTileAt(GridPosition3 position) const;
     [[nodiscard]] bool inBounds(GridPosition3 position) const;
@@ -47,6 +65,7 @@ private:
     std::vector<MovableTile> movableTiles_;
     std::vector<GridPosition3> pressurePlates_;
     std::vector<TileType> tiles_;
+    std::optional<uint32_t> waterLayer_;
 };
 
 } // namespace sokoban

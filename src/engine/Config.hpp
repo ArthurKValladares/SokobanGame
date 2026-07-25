@@ -21,6 +21,8 @@ inline constexpr float perspectiveFovDegrees = 35.0f;
 inline constexpr float perspectiveCameraDistanceScale = 2.2f;
 inline constexpr float maxWireframeLineWidth = 16.0f;
 inline constexpr float waterDepthBelowGround = 0.18f;
+inline constexpr float waterExteriorMarginScale = 2.0f;
+inline constexpr float waterExteriorMinimumMarginTiles = 4.0f;
 inline constexpr float drownedPlayerDepthBelowGround = 1.0f;
 inline constexpr Vec4 waterSurfaceColor { 0.03f, 0.34f, 0.68f, 0.72f };
 inline constexpr float waterRippleSpatialFrequency = 8.5f;

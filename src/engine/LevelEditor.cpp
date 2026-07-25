@@ -166,6 +166,25 @@ void LevelEditor::setActiveLayer(int layer)
     document_.activeLayer = std::clamp(layer, 0, lastLayer);
 }
 
+void LevelEditor::setWaterLayer(std::optional<uint32_t> layer)
+{
+    if (layer && *layer >= document_.layers.size()) {
+        document_.status = "Water layer must refer to an existing layer.";
+        return;
+    }
+    if (document_.waterLayer == layer) {
+        return;
+    }
+
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    document_.waterLayer = layer;
+    document_.dirty = true;
+    document_.status = layer
+        ? "Water enabled on layer " + std::to_string(*layer + 1) + "."
+        : "Water disabled.";
+    recordDocumentChange(before);
+}
+
 void LevelEditor::setLayerLocked(bool locked)
 {
     document_.layerLocked = locked;
@@ -325,6 +344,11 @@ uint32_t LevelEditor::activeLayer() const
     return static_cast<uint32_t>(std::max(document_.activeLayer, 0));
 }
 
+std::optional<uint32_t> LevelEditor::waterLayer() const
+{
+    return document_.waterLayer;
+}
+
 bool LevelEditor::layerLocked() const
 {
     return document_.layerLocked;
@@ -380,6 +404,7 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
             std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Air))),
     };
     document_.layers[1].front().front() = tileTypeToChar(TileType::Player);
+    document_.waterLayer.reset();
     document_.requestedWidth = width;
     document_.requestedHeight = height;
     document_.activeLayer = 1;
@@ -429,6 +454,10 @@ void LevelEditor::addLayer()
     const int height = std::max(document_.requestedHeight, 1);
     const auto insertionPoint = document_.layers.begin() +
         std::min(document_.activeLayer + 1, static_cast<int>(document_.layers.size()));
+    if (document_.waterLayer &&
+        *document_.waterLayer > static_cast<uint32_t>(document_.activeLayer)) {
+        ++*document_.waterLayer;
+    }
     document_.layers.insert(
         insertionPoint,
         std::vector<std::string>(
@@ -448,6 +477,14 @@ void LevelEditor::deleteActiveLayer()
     }
 
     const DocumentSnapshot before = captureDocumentSnapshot();
+    const uint32_t deletedLayer =
+        static_cast<uint32_t>(document_.activeLayer);
+    if (document_.waterLayer == deletedLayer) {
+        document_.waterLayer.reset();
+    } else if (document_.waterLayer &&
+               *document_.waterLayer > deletedLayer) {
+        --*document_.waterLayer;
+    }
     document_.layers.erase(document_.layers.begin() + document_.activeLayer);
     document_.activeLayer = std::min(
         document_.activeLayer,
@@ -475,10 +512,10 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
         rows.push_back(line);
     }
 
-    Level::LayerRows layers;
+    Level::Definition definition;
     try {
-        layers = Level::parseLayerRows(rows, path.string());
-        Level::loadFromLayers(layers, path.string());
+        definition = Level::parseDefinition(rows, path.string());
+        Level::loadFromDefinition(definition, path.string());
     } catch (const std::exception& error) {
         document_.status = error.what();
         return false;
@@ -486,22 +523,27 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
 
     uint32_t width = 0;
     uint32_t height = 0;
-    for (const std::vector<std::string>& layer : layers) {
+    for (const std::vector<std::string>& layer : definition.layers) {
         height = std::max(height, static_cast<uint32_t>(layer.size()));
         for (const std::string& row : layer) {
             width = std::max(width, static_cast<uint32_t>(row.size()));
         }
     }
 
-    for (size_t layerIndex = 0; layerIndex < layers.size(); ++layerIndex) {
+    for (size_t layerIndex = 0;
+         layerIndex < definition.layers.size();
+         ++layerIndex) {
         const char fill = tileTypeToChar(TileType::Air);
-        layers[layerIndex].resize(height, std::string(width, fill));
-        for (std::string& row : layers[layerIndex]) {
+        definition.layers[layerIndex].resize(
+            height,
+            std::string(width, fill));
+        for (std::string& row : definition.layers[layerIndex]) {
             row.resize(width, fill);
         }
     }
 
-    document_.layers = std::move(layers);
+    document_.layers = std::move(definition.layers);
+    document_.waterLayer = definition.waterLayer;
     document_.filePath = path;
     document_.requestedHeight = static_cast<int>(height);
     document_.requestedWidth = static_cast<int>(width);
@@ -539,7 +581,11 @@ bool LevelEditor::saveDocument(const std::filesystem::path& path)
         return false;
     }
 
-    const std::vector<std::string> serialized = Level::serializeLayerRows(document_.layers);
+    const std::vector<std::string> serialized =
+        Level::serializeDefinition({
+            .layers = document_.layers,
+            .waterLayer = document_.waterLayer,
+        });
     for (const std::string& line : serialized) {
         file << line << '\n';
     }
@@ -790,6 +836,7 @@ void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
 {
     const DocumentSnapshot after = captureDocumentSnapshot();
     if (before.layers == after.layers &&
+        before.waterLayer == after.waterLayer &&
         before.filePath == after.filePath &&
         before.requestedWidth == after.requestedWidth &&
         before.requestedHeight == after.requestedHeight &&
@@ -807,6 +854,7 @@ void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
 void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
 {
     document_.layers = snapshot.layers;
+    document_.waterLayer = snapshot.waterLayer;
     document_.filePath = snapshot.filePath;
     document_.requestedWidth = snapshot.requestedWidth;
     document_.requestedHeight = snapshot.requestedHeight;
@@ -818,7 +866,10 @@ void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
 
 Level LevelEditor::documentToLevel() const
 {
-    return Level::loadFromLayers(document_.layers, "level editor draft");
+    return Level::loadFromLayers(
+        document_.layers,
+        "level editor draft",
+        document_.waterLayer);
 }
 
 std::optional<Level> LevelEditor::beginDraftPlayback()
@@ -838,6 +889,7 @@ LevelEditor::DocumentSnapshot LevelEditor::captureDocumentSnapshot() const
 {
     return {
         .layers = document_.layers,
+        .waterLayer = document_.waterLayer,
         .filePath = document_.filePath,
         .requestedWidth = document_.requestedWidth,
         .requestedHeight = document_.requestedHeight,

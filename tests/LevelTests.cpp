@@ -84,6 +84,36 @@ void testSerializationRoundTrip()
     CHECK(Level::parseLayerRows(serialized, "round trip") == layered);
 }
 
+void testWaterLayerMetadataAndTileResolution()
+{
+    TEST("waterLayerMetadataAndTileResolution");
+    const std::vector<std::string> lines {
+        "@water 0",
+        "",
+        "@layer 0",
+        " . ",
+        "",
+        "@layer 1",
+        "C  ",
+    };
+    const Level::Definition definition =
+        Level::parseDefinition(lines, "water metadata");
+    CHECK(definition.waterLayer == 0U);
+    CHECK(definition.layers.size() == 2);
+    CHECK(Level::serializeDefinition(definition) == lines);
+
+    const Level level =
+        Level::loadFromDefinition(definition, "water metadata");
+    CHECK(level.waterLayer() == 0U);
+    CHECK(level.authoredTileAt(0, 0, 0) == TileType::Air);
+    CHECK(level.tileAt(0, 0, 0) == TileType::Water);
+    CHECK(level.tileAt(1, 0, 0) == TileType::Ground);
+    CHECK(level.tileAt(2, 0, 0) == TileType::Water);
+    CHECK(level.width() == 3);
+    CHECK(level.height() == 1);
+    CHECK(level.isWalkable({ 0, 0, 1 }));
+}
+
 void testParserRejectsMalformedStructure()
 {
     TEST("parserRejectsMalformedStructure");
@@ -100,6 +130,29 @@ void testParserRejectsMalformedStructure()
     checkThrowsContaining([] {
         (void)Level::parseLayerRows({ "@layer 0", "C", "@layer 1", "" }, "empty layer");
     }, "Every layer");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition({ "@water 0", "C" }, "water legacy");
+    }, "requires explicit");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            { "@water nope", "@layer 0", "C" },
+            "bad water");
+    }, "expected '@water N'");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            { "@water 0", "@water 0", "@layer 0", "C" },
+            "duplicate water");
+    }, "more than one");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            { "@water 1", "@layer 0", "C" },
+            "missing water layer");
+    }, "existing layer");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            { "@layer 0", "C", "@water 0" },
+            "late water");
+    }, "before '@layer 0'");
 }
 
 void testLevelValidationErrors()
@@ -192,6 +245,7 @@ int main()
 {
     testLegacyAndLayeredParsing();
     testSerializationRoundTrip();
+    testWaterLayerMetadataAndTileResolution();
     testParserRejectsMalformedStructure();
     testLevelValidationErrors();
     testRaggedLayersNormalizeToAir();

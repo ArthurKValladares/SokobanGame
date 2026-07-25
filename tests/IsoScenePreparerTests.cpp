@@ -265,6 +265,93 @@ void testPreparationReusesOutputWithoutStaleLists()
     CHECK(scene.opaqueFaceIndices.capacity() >= opaqueCapacity);
 }
 
+void testExteriorWaterDoesNotAffectCameraFitOrPicking()
+{
+    const sokoban::RenderFrameData baseFrame = sceneFrame();
+    const sokoban::PreparedRenderScene baseScene =
+        prepareScene(baseFrame, { 1920.0f, 1080.0f });
+
+    sokoban::RenderFrameData exteriorFrame = baseFrame;
+    exteriorFrame.waterSurfaces.push_back({
+        .cell = { -64, -64, 0 },
+        .position = { -64.0f, -64.0f },
+        .size = { 63.0f, 131.0f },
+        .color = { 0.05f, 0.38f, 0.72f, 0.64f },
+        .elevation = 0.82f,
+        .pickable = false,
+    });
+    const sokoban::PreparedRenderScene exteriorScene =
+        prepareScene(exteriorFrame, { 1920.0f, 1080.0f });
+
+    CHECK(exteriorScene.isoLayout.cameraPosition.x ==
+        baseScene.isoLayout.cameraPosition.x);
+    CHECK(exteriorScene.isoLayout.cameraPosition.y ==
+        baseScene.isoLayout.cameraPosition.y);
+    CHECK(exteriorScene.isoLayout.cameraPosition.z ==
+        baseScene.isoLayout.cameraPosition.z);
+    CHECK(exteriorScene.isoLayout.projectedCenter.x ==
+        baseScene.isoLayout.projectedCenter.x);
+    CHECK(exteriorScene.isoLayout.projectedCenter.y ==
+        baseScene.isoLayout.projectedCenter.y);
+    CHECK(exteriorScene.isoLayout.fitScale ==
+        baseScene.isoLayout.fitScale);
+    CHECK(exteriorScene.pickFaceIndices.size() ==
+        baseScene.pickFaceIndices.size());
+}
+
+void testAdjacentWaterFacesSharePerspectiveCoordinates()
+{
+    sokoban::RenderFrameData frame;
+    frame.viewMode = sokoban::RenderViewMode::Isometric3D;
+    frame.levelWidth = 4;
+    frame.levelHeight = 3;
+    frame.levelDepth = 1;
+    frame.waterSurfaces = {
+        {
+            .cell = { 0, 0, 0 },
+            .position = { 0.0f, 0.0f },
+            .size = { 1.0f, 1.0f },
+            .elevation = 0.82f,
+        },
+        {
+            .cell = { 1, 0, 0 },
+            .position = { 1.0f, 0.0f },
+            .size = { 7.0f, 1.0f },
+            .elevation = 0.82f,
+            .pickable = false,
+        },
+    };
+
+    const sokoban::PreparedRenderScene scene =
+        prepareScene(frame, { 1920.0f, 1080.0f });
+    const auto first = std::ranges::find_if(
+        scene.isoFaces,
+        [](const sokoban::PreparedIsoFace& face) {
+            return face.material ==
+                    sokoban::PreparedSurfaceMaterial::Water &&
+                face.worldOrigin.x == 0.0f;
+        });
+    const auto second = std::ranges::find_if(
+        scene.isoFaces,
+        [](const sokoban::PreparedIsoFace& face) {
+            return face.material ==
+                    sokoban::PreparedSurfaceMaterial::Water &&
+                face.worldOrigin.x == 1.0f;
+        });
+    CHECK(first != scene.isoFaces.end());
+    CHECK(second != scene.isoFaces.end());
+    if (first != scene.isoFaces.end() &&
+        second != scene.isoFaces.end()) {
+        CHECK(first->clipW[1] == second->clipW[0]);
+        CHECK(first->clipW[2] == second->clipW[3]);
+        CHECK(first->clipW[0] != first->clipW[3]);
+        CHECK(first->vertices[1].x == second->vertices[0].x);
+        CHECK(first->vertices[1].y == second->vertices[0].y);
+        CHECK(first->vertices[2].x == second->vertices[3].x);
+        CHECK(first->vertices[2].y == second->vertices[3].y);
+    }
+}
+
 } // namespace
 
 int main()
@@ -274,6 +361,8 @@ int main()
     testPickingConsumesPreparedFaces();
     testTopDownPreparationSkipsIsoWork();
     testPreparationReusesOutputWithoutStaleLists();
+    testExteriorWaterDoesNotAffectCameraFitOrPicking();
+    testAdjacentWaterFacesSharePerspectiveCoordinates();
 
     if (failures == 0) {
         std::cout << "IsoScenePreparerTests: " << checks

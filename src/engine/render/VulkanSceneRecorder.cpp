@@ -647,6 +647,7 @@ private:
                 drawWaterFace(
                     commandBuffer,
                     face.vertices,
+                    face.clipW,
                     face.color,
                     face.worldOrigin,
                     face.gridSize,
@@ -895,6 +896,7 @@ private:
     void drawWaterFace(
         VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
+        const std::array<float, 4>& clipW,
         Vec4 color,
         Vec2 worldOrigin,
         Vec2 size,
@@ -912,10 +914,30 @@ private:
 
         const TilePushConstants constants {
             .vertices = {
-                Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, 1.0f },
-                Vec4 { vertices[1].x, vertices[1].y, vertices[1].z, 1.0f },
-                Vec4 { vertices[2].x, vertices[2].y, vertices[2].z, 1.0f },
-                Vec4 { vertices[3].x, vertices[3].y, vertices[3].z, 1.0f },
+                Vec4 {
+                    vertices[0].x * clipW[0],
+                    vertices[0].y * clipW[0],
+                    vertices[0].z * clipW[0],
+                    clipW[0],
+                },
+                Vec4 {
+                    vertices[1].x * clipW[1],
+                    vertices[1].y * clipW[1],
+                    vertices[1].z * clipW[1],
+                    clipW[1],
+                },
+                Vec4 {
+                    vertices[2].x * clipW[2],
+                    vertices[2].y * clipW[2],
+                    vertices[2].z * clipW[2],
+                    clipW[2],
+                },
+                Vec4 {
+                    vertices[3].x * clipW[3],
+                    vertices[3].y * clipW[3],
+                    vertices[3].z * clipW[3],
+                    clipW[3],
+                },
             },
             .color = color,
             .normalAndAmbientRed = {

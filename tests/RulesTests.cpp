@@ -377,10 +377,13 @@ void testPlayerOnPlateUnlocks()
 void testPlayerDrownsInWater()
 {
     TEST("playerDrownsInWater");
-    const Level level = makeLevel({
-        { ".W" },
-        { "C " },
-    });
+    const Level level = Level::loadFromLayers(
+        {
+            { ". " },
+            { "C " },
+        },
+        "water-layer drowning",
+        0U);
     const GameState state = rules::initialState(level);
     CHECK(rules::isUnfilledWater(level, state, cell(1, 0, 1)));
 

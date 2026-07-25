@@ -198,7 +198,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/SettingsTypes.*` + `src/engine/SettingsCoordinator.*`: the UI-neutral, authoritative `UserSettings` value (`audio`, `video`, `input`, and `accessibility`) plus headless runtime-effect policy. `PlayerProfile` owns one `UserSettings`; menus, persistence, and the coordinator no longer maintain parallel field sets. The coordinator normalizes a replacement value, updates `PresentationSettings`, detects which external systems actually changed, and emits a data-only `SettingsEffects` plan for window, renderer, audio, input, animation cadence, and persistence. `Application` executes that plan without deciding settings policy. Covered by `tests/SettingsCoordinatorTests.cpp` (`sokoban_settings_coordinator_tests`).
 - `src/engine/PresentationSettings.*`: mutable runtime presentation settings initialized from the immutable defaults in `Config.hpp`. Owns lighting, SSAO/shadow tuning, grid appearance, surface geometry, tile scales, normalization, sun-direction conversion, and renderer-facing lighting/grid values.
 - `src/engine/GameplayPresentation.*`: headless presentation state derived from `GameplaySession::Action` snapshots. Owns player/movable interpolation, fallen render offsets, player clip/facing/playback state, and the shared world/conveyor animation clock without mutating authoritative gameplay state.
-- `src/engine/RenderFrameBuilder.*`: SDL/Vulkan-free construction of gameplay and editor `RenderFrameData`. Owns tile/model mapping, static geometry, procedural open-water planes/shore edges, ladder rungs, editor previews/pick-only cells, dynamic entities, tile scaling, and conveyor texture offsets. Water is emitted as `WaterSurface` data rather than a manifest model; filled/drowned cells omit the surface.
+- `src/engine/RenderFrameBuilder.*`: SDL/Vulkan-free construction of gameplay and editor `RenderFrameData`. Owns tile/model mapping, static geometry, procedural open-water planes/shore edges, ladder rungs, editor previews/pick-only cells, dynamic entities, tile scaling, and conveyor texture offsets. Water is emitted as `WaterSurface` data rather than a manifest model; filled cells omit the surface. Level-wide water adds a one-cell shoreline ring and four large non-pickable continuation surfaces outside the board without changing the frame's authored dimensions.
 - `src/engine/render/IsoScenePreparer.*`: Vulkan-free once-per-frame scene preparation and picking. Computes top-down, isometric-camera, and shadow layouts; creates one projected/cull-tested face pool; and emits depth-sorted opaque/translucent face indices plus model, shadow, and picking lists. It fills reusable renderer-owned frame scratch rather than using function-static storage. Covered by `tests/IsoScenePreparerTests.cpp` (`sokoban_iso_scene_preparer_tests`).
 - `src/engine/ApplicationDebugUi.*`: Debug-only ImGui adapter for engine statistics and tuning. Edits `PresentationSettings` and calls the public `GameplaySession`/`VulkanRenderer` controls instead of storing application logic.
 - `src/engine/DebugUi.*`: Debug-only registry and presentation owner for the single Developer Tools window. Feature adapters register content callbacks as reorderable, scrolling tabs instead of creating independent windows.
@@ -231,11 +231,11 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/SaveStore.*`: profile persistence rooted at SDL's platform-appropriate `SDL_GetPrefPath`. A `fileStem` constructor parameter names the slot's files (slot 1 keeps the historical `profile` stem so pre-slot saves remain valid; slots 2/3 use `profile-slot2/3`), and corrupt-archive detection derives its prefixes from those names so slots never interfere. Writes validated JSON through same-directory temporary replacement, keeps the previous valid primary as `<stem>.backup.json`, migrates old versions, archives corrupt primary/backup files for diagnosis, recovers from backup, and restores defaults when both copies are unusable.
 - `src/engine/AsyncSaveStore.*`: single serialized persistence worker serving one or more independent channels (each its own `SaveStore` + pending profile + per-channel deadline/diagnostics). The channel-less overloads target channel 0, preserving the original single-store API; `addChannel` and `replaceChannel` (drain-then-repoint, used on slot switch) support several destinations on one thread, so `SaveSlotManager` runs its progress and settings stores without a thread each. Deferred requests coalesce per channel over a configurable window, while JSON encoding, backup rotation, and atomic filesystem replacement happen off the game thread. Screen transitions and committed settings request immediate saves; clean shutdown flushes every channel. Multi-channel behavior is covered in `tests/PlayerProfileTests.cpp`.
 - `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags + slide momentum) plus pure functions in `sokoban::rules` — `step` advances the whole world one discrete step by delegating to the file-local `MicroStepResolver`, which treats the player and movables as one uniform entity array (movables first, player last, preserving historical resolution order) and runs four named phases per micro-step: deriveIntents (momentum/input/belt against the source's budget), markContested (simultaneous same-destination intents all lose), resolveMoves (multi-pass so vacated cells can be entered; direct input may push a resolved blocker), and settleBlocked (mutually blocked slides cancel). Player and movable falls share one predicate-parameterized `fallTarget` walk differing only in who occupies the cell below. `hasPendingMotion` reports whether the world would keep moving without input; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
-- `src/engine/Level.*`: level file parsing, serialization, layered grid storage, walkability/support rules, player/movable extraction. Tested by `tests/LevelTests.cpp` (`sokoban_level_tests`).
+- `src/engine/Level.*`: level file parsing, serialization, layered grid storage, optional `@water N` metadata, walkability/support rules, player/movable extraction. Air on the configured water layer resolves to Water at runtime while the authored tile remains queryable. Tested by `tests/LevelTests.cpp` (`sokoban_level_tests`).
 - `src/engine/Log.*` + `src/engine/LogQueue.*`: categorized asynchronous logging with Debug/Info/Warning/Error levels. RAII `Message` objects format only their payload on the producer, then enqueue timestamp/category/message records into a bounded 4,096-entry queue; one writer owns stderr, the append-only file, timestamp formatting, and flushing. Normal traffic flushes every second, errors flush immediately, explicit `flush`/`shutdown` drain and join at process exit, and errors displace the oldest lower-severity entry when a full queue permits. Overflow is aggregated into synthetic `[WARN] [LOG] Dropped N...` records and exposed through queue/write/flush/drop/per-category diagnostics in Debug UI. Output is `[HH:MM:SS.mmm] [LEVEL] [CATEGORY] message`. `Application` adds `log.txt` beside profiles and Debug builds admit Debug messages. Covered by `tests/LogTests.cpp` (`sokoban_log_tests`) including bounded policy, concurrent producers, periodic/error flushing, category output, filtering, and shutdown/reset behavior.
 - `src/engine/TaskSystem.*`: standard-library-only worker pool for task-based parallelism. `taskSystem().enqueue(fn)` returns a future (exceptions propagate on get); `parallelFor(count, minChunk, fn(begin, end))` runs chunked loops with the calling thread participating. Tasks must not block on other tasks (no dependency graph yet). Used by GLTF vertex skinning (`skinWithPoses`) and lazy CPU-side model/texture/animation preparation in `VulkanModelResources`; Vulkan publication stays on the render thread. Tested by `tests/TaskSystemTests.cpp` (`sokoban_task_tests`).
 - `src/engine/TileTypes.*`: tile enum, character mapping, colors, helper predicates such as `tileTypeAllowsEntity`.
-- `src/engine/LevelEditor.*`: headless editor model and command API. Owns document state/history, tile validation, draft construction, level load/save, source/runtime mirroring, browser enumeration, screen/level renumbering, soft-delete/restore, and guarded permanent deletion. It has no SDL, Vulkan, or ImGui dependency and is tested by `tests/LevelEditorTests.cpp` (`sokoban_level_editor_tests`).
+- `src/engine/LevelEditor.*`: headless editor model and command API. Owns document state/history, water-layer selection and layer-index maintenance, tile validation, draft construction, level load/save, source/runtime mirroring, browser enumeration, screen/level renumbering, soft-delete/restore, and guarded permanent deletion. It has no SDL, Vulkan, or ImGui dependency and is tested by `tests/LevelEditorTests.cpp` (`sokoban_level_editor_tests`).
 - `src/engine/LevelEditorDebugUi.*`: Debug-only ImGui adapter for `LevelEditor`. Owns widget text buffers and confirmation-modal presentation only; every editor state transition and filesystem action is delegated to the headless API.
 - `src/engine/render/RenderTypes.hpp`: renderer-facing frame contract and model/animation enums, independent of the Vulkan facade. `WaterSurface` carries world bounds, lowered elevation, tint/opacity, and editor-preview state; the frame carries one shared water animation clock so adjacent cells remain phase-continuous.
 - `src/engine/render/RenderResolution.*`: Vulkan-free internal-resolution policy. Validates the supported 100/75/67/50/25 presets, clamps custom percentages to 25-100, and computes rounded, non-zero scene extents; 67% deliberately means exact two-thirds so 3840x2160 becomes 2560x1440. Covered by `sokoban_vulkan_device_selection_tests` alongside the headless device-selection policy.
@@ -354,7 +354,7 @@ Tile character mappings are defined in `src/engine/TileTypes.hpp`.
 'C'  Player start
 'R'  Rock / movable block
 'I'  Ice / movable ice block and ice floor
-'W'  Water
+'W'  Water (legacy explicit tile)
 'L'  Ladder
 '^'  Conveyor up
 'v'  Conveyor down
@@ -375,12 +375,14 @@ Important tile behavior:
 
 Level screens are plain text `.scr` files under `levels/levelN/screenM.scr`.
 
-The modern format uses sequential layers:
+The modern format uses sequential layers and may declare one water layer:
 
 ```text
+@water 0
+
 @layer 0
 .........
-.........
+.... ....
 .........
 
 @layer 1
@@ -393,15 +395,23 @@ The modern format uses sequential layers:
 Rules:
 
 - Layer headers must be exactly sequential starting with `@layer 0`.
+- `@water N` is optional, must appear before `@layer 0`, and must refer to an
+  existing layer.
+- Every authored Air cell on the water layer resolves to Water. Solid or other
+  explicit tiles on that layer remain unchanged.
 - Empty lines between layers are allowed.
 - All layers are normalized to the max width/height found in the file; missing cells become Air.
-- Single-layer legacy files without `@layer` are still accepted.
+- Single-layer legacy files without `@layer` are still accepted when they do
+  not use metadata.
+- Explicit `W` tiles remain loadable for backward compatibility, but the
+  editor authors new water through the layer setting.
 - There must be exactly one player start tile `C`.
 - Ladders are validated at load time: every `L` must be adjacent to a Ground tile `.` on the same layer.
 
 Typical layer usage:
 
-- Layer 0: floor/support tiles such as Ground or Water.
+- Layer 0: floor/support tiles such as Ground, optionally with `@water 0`
+  filling the Air between and beyond them.
 - Layer 1: gameplay layer with player, walls, goals, plates, rocks, ladders, conveyors.
 - Higher layers: elevated floors/walls/entities.
 
@@ -467,6 +477,10 @@ Water and falling:
 
 - Entities can fall through unsupported cells.
 - Water can catch/fill with fallen entities.
+- An optional `@water N` level directive turns all Air on layer N into Water.
+  The renderer continues that water beyond all four board edges, but exterior
+  surfaces are non-pickable and excluded from authored dimensions, camera fit,
+  level bounds, and gameplay.
 - Open water renders as a slightly transparent plane at
   `ground top - waterDepthBelowGround`; world-space crossing waves drive
   seamless ripples, crest highlights, and subtle scene-color refraction.
@@ -724,6 +738,21 @@ these focused modules rather than moving player UI into Debug-only ImGui.
 
 Major recent additions and fixes:
 
+- Replaced authored per-cell water for shipped levels with optional
+  `@water N` level metadata. Air on that layer now resolves to Water while
+  explicit solid cells preserve island/shore shapes. `Level::Definition`
+  parses and serializes the metadata; `LevelEditor` owns toggling, undo,
+  insertion/deletion index maintenance, draft construction, and persistence,
+  with ImGui reduced to a thin checkbox adapter. Rendering keeps interactive
+  water inside the board and adds a non-pickable exterior ring plus four
+  world-space continuation strips, so water fills the viewport without
+  changing camera fit or gameplay bounds. Shipped level 2 water screens were
+  migrated, and parser/editor/presentation/scene-preparer regressions cover
+  the contract. Exterior neighbors bypass the bounded legacy edge-face gate,
+  so no bank is drawn at the authored rectangle. Prepared water faces also
+  retain camera-depth clip W per vertex; the water draw reconstructs clip-space
+  positions from it so shader coordinates interpolate perspective-correctly
+  across cell, ring, and large continuation quads without ripple phase seams.
 - Added three save slots: slot-stemmed `SaveStore`/`AsyncSaveStore` files
   (existing saves become slot 1), an `active-slot.txt` marker, and a
   title-screen Save Slots page with per-slot summaries, inline confirmed

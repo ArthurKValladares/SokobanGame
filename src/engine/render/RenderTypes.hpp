@@ -133,6 +133,7 @@ struct RenderFrameData {
         float elevation = 0.0f;
         uint32_t shorelineMask = 0;
         bool isEditorPreview = false;
+        bool pickable = true;
     };
 
     struct GridOverlay {

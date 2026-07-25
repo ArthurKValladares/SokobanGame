@@ -42,6 +42,7 @@ public:
     [[nodiscard]] int requestedWidth() const;
     [[nodiscard]] int requestedHeight() const;
     void setActiveLayer(int layer);
+    void setWaterLayer(std::optional<uint32_t> layer);
     void setLayerLocked(bool locked);
     void setSelectedTile(TileType tile);
     void selectDocument(const std::filesystem::path& path);
@@ -75,6 +76,7 @@ public:
     [[nodiscard]] uint32_t documentHeight() const;
     [[nodiscard]] uint32_t documentDepth() const;
     [[nodiscard]] uint32_t activeLayer() const;
+    [[nodiscard]] std::optional<uint32_t> waterLayer() const;
     [[nodiscard]] bool layerLocked() const;
     [[nodiscard]] bool dirty() const;
     [[nodiscard]] const std::vector<std::string>& documentRows() const;
@@ -87,6 +89,7 @@ public:
 private:
     struct Document {
         Level::LayerRows layers;
+        std::optional<uint32_t> waterLayer;
         std::filesystem::path filePath;
         std::filesystem::path browserRoot;
         std::filesystem::path sourceLevelRoot;
@@ -104,6 +107,7 @@ private:
 
     struct DocumentSnapshot {
         Level::LayerRows layers;
+        std::optional<uint32_t> waterLayer;
         std::filesystem::path filePath;
         int requestedWidth = 12;
         int requestedHeight = 8;

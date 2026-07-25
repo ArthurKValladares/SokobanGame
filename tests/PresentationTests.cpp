@@ -361,6 +361,89 @@ void testGameplayFrameBuildsProceduralWaterSurface()
     CHECK(filledFrame.waterSurfaces.empty());
 }
 
+void testWaterLayerBuildsUnboundedNonPickableExterior()
+{
+    TEST("waterLayerBuildsUnboundedNonPickableExterior");
+    const Level level = Level::loadFromLayers(
+        {
+            { " . " },
+            { "C  " },
+        },
+        "unbounded water frame",
+        0U);
+    const GameState state = stateWithPlayer(level.playerStart());
+    GameplayPresentation presentation;
+    presentation.setPlayerClips(
+        testManifest().playerMoveAnimation(),
+        testManifest().playerPushAnimation());
+    presentation.resetEntities(state);
+
+    const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = state,
+        .moving = false,
+        .activeAction = {},
+        .presentation = presentation,
+        .settings = {},
+    });
+
+    CHECK(frame.levelWidth == 3);
+    CHECK(frame.levelHeight == 1);
+    CHECK(frame.levelDepth == 2);
+    CHECK(frame.waterSurfaces.size() == 18);
+    CHECK(std::ranges::count_if(
+              frame.waterSurfaces,
+              [](const RenderFrameData::WaterSurface& water) {
+                  return water.pickable;
+              }) == 2);
+    CHECK(std::ranges::count_if(
+              frame.waterSurfaces,
+              [](const RenderFrameData::WaterSurface& water) {
+                  return water.size.x > 1.0f ||
+                      water.size.y > 1.0f;
+              }) == 4);
+
+    const auto exteriorAboveGround = std::ranges::find_if(
+        frame.waterSurfaces,
+        [](const RenderFrameData::WaterSurface& water) {
+            return water.cell == GridPosition3 { 1, -1, 0 };
+        });
+    CHECK(exteriorAboveGround != frame.waterSurfaces.end());
+    if (exteriorAboveGround != frame.waterSurfaces.end()) {
+        CHECK(!exteriorAboveGround->pickable);
+        CHECK(
+            (exteriorAboveGround->shorelineMask &
+             waterShorelineBit(WaterShorelineEdge::PositiveY)) != 0);
+    }
+
+    const Level allWaterLevel = Level::loadFromLayers(
+        {
+            { "  " },
+            { "C " },
+        },
+        "unbounded water without banks",
+        0U);
+    const GameState allWaterState =
+        stateWithPlayer(allWaterLevel.playerStart());
+    GameplayPresentation allWaterPresentation;
+    allWaterPresentation.setPlayerClips(
+        testManifest().playerMoveAnimation(),
+        testManifest().playerPushAnimation());
+    allWaterPresentation.resetEntities(allWaterState);
+    const RenderFrameData allWaterFrame =
+        RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(),
+            .level = allWaterLevel,
+            .state = allWaterState,
+            .moving = false,
+            .activeAction = {},
+            .presentation = allWaterPresentation,
+            .settings = {},
+        });
+    CHECK(allWaterFrame.isoFaces.empty());
+}
+
 void testFilledWaterUpdatesEdgesAndRoundedCornerCaps()
 {
     TEST("filledWaterUpdatesEdgesAndRoundedCornerCaps");
@@ -608,6 +691,7 @@ int main()
     testPresentationInterpolatesActionsAndClips();
     testGameplayFrameUsesSettingsAndPresentation();
     testGameplayFrameBuildsProceduralWaterSurface();
+    testWaterLayerBuildsUnboundedNonPickableExterior();
     testFilledWaterUpdatesEdgesAndRoundedCornerCaps();
     testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition();
 

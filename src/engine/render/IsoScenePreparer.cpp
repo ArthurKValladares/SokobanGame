@@ -489,6 +489,11 @@ void IsoScenePreparer::prepare(
         for (std::size_t i = 0; i < vertices.size(); ++i) {
             face.vertices[i] = projectIsoPoint(
                 scene.isoLayout, scene.renderExtent, vertices[i]);
+            face.clipW[i] = std::max(
+                dot(
+                    subtract(vertices[i], scene.isoLayout.cameraPosition),
+                    scene.isoLayout.cameraForward),
+                0.001f);
             face.shadowVertices[i] =
                 projectShadowPoint(scene.shadowLayout, vertices[i]);
         }
@@ -651,7 +656,7 @@ void IsoScenePreparer::prepare(
                 false,
                 false,
                 water.isEditorPreview,
-                !water.isEditorPreview,
+                water.pickable && !water.isEditorPreview,
                 true,
                 water.size,
                 PreparedSurfaceMaterial::Water,

@@ -45,6 +45,7 @@ enum class PreparedSurfaceMaterial {
 
 struct PreparedIsoFace {
     std::array<Vec3, 4> vertices {};
+    std::array<float, 4> clipW { 1.0f, 1.0f, 1.0f, 1.0f };
     std::array<Vec4, 4> shadowVertices {};
     Vec3 normal {};
     Vec4 color {};

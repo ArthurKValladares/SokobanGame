@@ -12,6 +12,7 @@ namespace sokoban {
 namespace {
 
 constexpr std::string_view layerPrefix = "@layer ";
+constexpr std::string_view waterPrefix = "@water ";
 
 std::runtime_error unknownLevelCharacter(char value)
 {
@@ -26,6 +27,22 @@ std::optional<uint32_t> parseLayerHeader(std::string_view line)
 
     uint32_t layer = 0;
     const char* begin = line.data() + layerPrefix.size();
+    const char* end = line.data() + line.size();
+    const auto result = std::from_chars(begin, end, layer);
+    if (result.ec != std::errc {} || result.ptr != end) {
+        return std::nullopt;
+    }
+    return layer;
+}
+
+std::optional<uint32_t> parseWaterHeader(std::string_view line)
+{
+    if (!line.starts_with(waterPrefix)) {
+        return std::nullopt;
+    }
+
+    uint32_t layer = 0;
+    const char* begin = line.data() + waterPrefix.size();
     const char* end = line.data() + line.size();
     const auto result = std::from_chars(begin, end, layer);
     if (result.ec != std::errc {} || result.ptr != end) {
@@ -89,7 +106,9 @@ Level Level::loadFromFile(const std::filesystem::path& path)
     return loadFromLines(lines, path.string());
 }
 
-Level::LayerRows Level::parseLayerRows(const std::vector<std::string>& lines, std::string_view sourceName)
+Level::Definition Level::parseDefinition(
+    const std::vector<std::string>& lines,
+    std::string_view sourceName)
 {
     const std::string source(sourceName);
     if (lines.empty()) {
@@ -100,19 +119,44 @@ Level::LayerRows Level::parseLayerRows(const std::vector<std::string>& lines, st
         return line.starts_with(layerPrefix);
     });
     if (!layered) {
-        return { lines };
+        if (std::ranges::any_of(lines, [](const std::string& line) {
+                return line.starts_with(waterPrefix);
+            })) {
+            throw std::runtime_error(
+                "Water metadata requires explicit '@layer 0' sections: " + source);
+        }
+        return { .layers = { lines } };
     }
 
-    LayerRows layers;
+    Definition definition;
     std::optional<uint32_t> currentLayer;
     for (const std::string& line : lines) {
+        if (line.starts_with(waterPrefix)) {
+            if (currentLayer) {
+                throw std::runtime_error(
+                    "Water metadata must appear before '@layer 0': " + source);
+            }
+            const std::optional<uint32_t> waterLayer =
+                parseWaterHeader(line);
+            if (!waterLayer) {
+                throw std::runtime_error(
+                    "Invalid water layer metadata; expected '@water N': " + source);
+            }
+            if (definition.waterLayer) {
+                throw std::runtime_error(
+                    "Level contains more than one '@water' directive: " + source);
+            }
+            definition.waterLayer = waterLayer;
+            continue;
+        }
+
         if (line.starts_with(layerPrefix)) {
             const std::optional<uint32_t> layer = parseLayerHeader(line);
-            if (!layer || *layer != layers.size()) {
+            if (!layer || *layer != definition.layers.size()) {
                 throw std::runtime_error(
                     "Layer headers must be sequential, starting with '@layer 0': " + source);
             }
-            layers.emplace_back();
+            definition.layers.emplace_back();
             currentLayer = *layer;
             continue;
         }
@@ -127,42 +171,86 @@ Level::LayerRows Level::parseLayerRows(const std::vector<std::string>& lines, st
         if (line.empty()) {
             continue;
         }
-        layers[*currentLayer].push_back(line);
+        definition.layers[*currentLayer].push_back(line);
     }
 
-    if (layers.empty()) {
+    if (definition.layers.empty()) {
         throw std::runtime_error("Level contains no layers: " + source);
     }
-    if (std::ranges::any_of(layers, [](const std::vector<std::string>& layer) { return layer.empty(); })) {
+    if (std::ranges::any_of(
+            definition.layers,
+            [](const std::vector<std::string>& layer) {
+                return layer.empty();
+            })) {
         throw std::runtime_error("Every layer must contain at least one row: " + source);
     }
+    if (definition.waterLayer &&
+        *definition.waterLayer >= definition.layers.size()) {
+        throw std::runtime_error(
+            "Water layer must refer to an existing layer: " + source);
+    }
 
-    return layers;
+    return definition;
 }
 
-std::vector<std::string> Level::serializeLayerRows(const LayerRows& layers)
+Level::LayerRows Level::parseLayerRows(
+    const std::vector<std::string>& lines,
+    std::string_view sourceName)
 {
-    if (layers.size() == 1) {
-        return layers.front();
+    return parseDefinition(lines, sourceName).layers;
+}
+
+std::vector<std::string> Level::serializeDefinition(
+    const Definition& definition)
+{
+    if (definition.layers.size() == 1 && !definition.waterLayer) {
+        return definition.layers.front();
     }
 
     std::vector<std::string> lines;
-    for (size_t layer = 0; layer < layers.size(); ++layer) {
+    if (definition.waterLayer) {
+        lines.push_back(
+            std::string(waterPrefix) +
+            std::to_string(*definition.waterLayer));
+        lines.emplace_back();
+    }
+    for (size_t layer = 0; layer < definition.layers.size(); ++layer) {
         if (layer > 0) {
             lines.emplace_back();
         }
         lines.push_back(std::string(layerPrefix) + std::to_string(layer));
-        lines.insert(lines.end(), layers[layer].begin(), layers[layer].end());
+        lines.insert(
+            lines.end(),
+            definition.layers[layer].begin(),
+            definition.layers[layer].end());
     }
     return lines;
 }
 
-Level Level::loadFromLines(const std::vector<std::string>& lines, std::string_view sourceName)
+std::vector<std::string> Level::serializeLayerRows(const LayerRows& layers)
 {
-    return loadFromLayers(parseLayerRows(lines, sourceName), sourceName);
+    return serializeDefinition({ .layers = layers });
 }
 
-Level Level::loadFromLayers(const LayerRows& sourceLayers, std::string_view sourceName)
+Level Level::loadFromLines(const std::vector<std::string>& lines, std::string_view sourceName)
+{
+    return loadFromDefinition(parseDefinition(lines, sourceName), sourceName);
+}
+
+Level Level::loadFromDefinition(
+    const Definition& definition,
+    std::string_view sourceName)
+{
+    return loadFromLayers(
+        definition.layers,
+        sourceName,
+        definition.waterLayer);
+}
+
+Level Level::loadFromLayers(
+    const LayerRows& sourceLayers,
+    std::string_view sourceName,
+    std::optional<uint32_t> waterLayer)
 {
     const std::string source(sourceName);
     if (sourceLayers.empty()) {
@@ -171,6 +259,11 @@ Level Level::loadFromLayers(const LayerRows& sourceLayers, std::string_view sour
 
     Level level;
     level.depth_ = static_cast<uint32_t>(sourceLayers.size());
+    if (waterLayer && *waterLayer >= level.depth_) {
+        throw std::runtime_error(
+            "Water layer must refer to an existing layer: " + source);
+    }
+    level.waterLayer_ = waterLayer;
     for (const auto& layer : sourceLayers) {
         level.height_ = std::max(level.height_, static_cast<uint32_t>(layer.size()));
         for (const std::string& row : layer) {
@@ -255,6 +348,17 @@ Level Level::loadFromLayers(const LayerRows& sourceLayers, std::string_view sour
 }
 
 TileType Level::tileAt(uint32_t x, uint32_t y, uint32_t z) const
+{
+    const TileType authored = authoredTileAt(x, y, z);
+    if (authored == TileType::Air &&
+        waterLayer_ &&
+        z == *waterLayer_) {
+        return TileType::Water;
+    }
+    return authored;
+}
+
+TileType Level::authoredTileAt(uint32_t x, uint32_t y, uint32_t z) const
 {
     return tiles_[tileIndex(x, y, z, width_, height_)];
 }

@@ -22,12 +22,18 @@ player-facing UI uses the staged Karla typeface under `assets/ui`.
 
 ## Layered Levels
 
-Screens use sequential `@layer N` sections in the same `.scr` file. Ground and water normally occupy layer 0, while walls, goals, pressure plates, the player, and movable blocks occupy layer 1:
+Screens use sequential `@layer N` sections in the same `.scr` file. An optional
+`@water N` directive makes every Air cell on that layer water and continues the
+water beyond every side of the authored board. Ground normally occupies the
+water layer, while walls, goals, pressure plates, the player, and movable blocks
+occupy the layer above:
 
 ```text
+@water 0
+
 @layer 0
 .....
-..W..
+.. ..
 .....
 
 @layer 1
@@ -36,7 +42,13 @@ Screens use sequential `@layer N` sections in the same `.scr` file. Ground and w
 #####
 ```
 
-`.` is a solid Ground block. A space is Air and produces no geometry. Entities move through open cells supported by Ground, walls, or water directly beneath them; unsupported air is not walkable. In the editor, new documents start with a Ground layer and an Air/gameplay layer, and selecting a layer shows that layer plus the layers beneath it.
+`.` is a solid Ground block. A space is normally Air and produces no geometry;
+on the configured water layer it resolves to Water instead. Entities move
+through open cells supported by Ground, walls, or water directly beneath them;
+unsupported air is not walkable. The legacy `W` tile is still accepted when
+loading older screens, but new water layouts should use `@water N`. In the
+editor, new documents start with a Ground layer and an Air/gameplay layer, and
+selecting a layer shows that layer plus the layers beneath it.
 
 ## Build
 

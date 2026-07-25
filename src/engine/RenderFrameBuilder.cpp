@@ -246,11 +246,7 @@ void appendWaterEdgeFaces(
         });
     };
     auto neighborIsOpenWater = [&](GridPosition position) {
-        return position.x >= 0 &&
-            position.y >= 0 &&
-            position.x < static_cast<int>(width) &&
-            position.y < static_cast<int>(height) &&
-            isUnfilledWaterAt(position);
+        return isUnfilledWaterAt(position);
     };
 
     for (uint32_t y = 0; y < height; ++y) {
@@ -305,29 +301,45 @@ void appendWaterEdgeFaces(
 
 void appendWaterSurface(
     RenderFrameData& frame,
-    uint32_t x,
-    uint32_t y,
-    uint32_t z,
+    GridPosition3 cell,
+    Vec2 position,
+    Vec2 size,
     bool editorPreview = false,
-    uint32_t shorelineMask = 0)
+    uint32_t shorelineMask = 0,
+    bool pickable = true)
 {
     frame.waterSurfaces.push_back({
-        .cell = {
-            static_cast<int>(x),
-            static_cast<int>(y),
-            static_cast<int>(z),
-        },
-        .position = {
-            static_cast<float>(x),
-            static_cast<float>(y),
-        },
+        .cell = cell,
+        .position = position,
+        .size = size,
         .color = config::waterSurfaceColor,
-        .elevation = static_cast<float>(z) + 1.0f -
+        .elevation = static_cast<float>(cell.z) + 1.0f -
             config::waterDepthBelowGround +
             (editorPreview ? 0.02f : 0.0f),
         .shorelineMask = shorelineMask,
         .isEditorPreview = editorPreview,
+        .pickable = pickable,
     });
+}
+
+void appendWaterCellSurface(
+    RenderFrameData& frame,
+    GridPosition3 cell,
+    bool editorPreview = false,
+    uint32_t shorelineMask = 0,
+    bool pickable = true)
+{
+    appendWaterSurface(
+        frame,
+        cell,
+        {
+            static_cast<float>(cell.x),
+            static_cast<float>(cell.y),
+        },
+        { 1.0f, 1.0f },
+        editorPreview,
+        shorelineMask,
+        pickable);
 }
 
 uint32_t shorelineMaskForWaterCell(
@@ -404,6 +416,71 @@ uint32_t shorelineMaskForWaterCell(
         }
     }
     return mask;
+}
+
+void appendUnboundedWaterExterior(
+    RenderFrameData& frame,
+    uint32_t width,
+    uint32_t height,
+    uint32_t waterLayer,
+    bool editorPreview,
+    const auto& isShorelineAt)
+{
+    const int right = static_cast<int>(width);
+    const int bottom = static_cast<int>(height);
+    const int z = static_cast<int>(waterLayer);
+    auto appendExteriorCell = [&](int x, int y) {
+        const GridPosition3 cell { x, y, z };
+        appendWaterCellSurface(
+            frame,
+            cell,
+            editorPreview,
+            shorelineMaskForWaterCell(cell, isShorelineAt),
+            false);
+    };
+
+    for (int x = -1; x <= right; ++x) {
+        appendExteriorCell(x, -1);
+        appendExteriorCell(x, bottom);
+    }
+    for (int y = 0; y < bottom; ++y) {
+        appendExteriorCell(-1, y);
+        appendExteriorCell(right, y);
+    }
+
+    const float boardWidth = static_cast<float>(width);
+    const float boardHeight = static_cast<float>(height);
+    const float margin = std::max(
+        std::max(boardWidth, boardHeight) *
+            config::waterExteriorMarginScale,
+        config::waterExteriorMinimumMarginTiles);
+    const float continuation = std::max(margin - 1.0f, 0.0f);
+    static_assert(config::waterExteriorMinimumMarginTiles > 1.0f);
+
+    auto appendContinuation = [&](Vec2 position, Vec2 size) {
+        appendWaterSurface(
+            frame,
+            { static_cast<int>(position.x),
+              static_cast<int>(position.y),
+              z },
+            position,
+            size,
+            editorPreview,
+            0,
+            false);
+    };
+    appendContinuation(
+        { -margin, -margin },
+        { continuation, boardHeight + margin * 2.0f });
+    appendContinuation(
+        { boardWidth + 1.0f, -margin },
+        { continuation, boardHeight + margin * 2.0f });
+    appendContinuation(
+        { -1.0f, -margin },
+        { boardWidth + 2.0f, continuation });
+    appendContinuation(
+        { -1.0f, boardHeight + 1.0f },
+        { boardWidth + 2.0f, continuation });
 }
 
 template <typename CellAt, typename ScaleForTile>
@@ -579,11 +656,9 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
                         static_cast<int>(y),
                         static_cast<int>(z),
                     };
-                    appendWaterSurface(
+                    appendWaterCellSurface(
                         frame,
-                        x,
-                        y,
-                        z,
+                        waterCell,
                         false,
                         shorelineMaskForWaterCell(
                             waterCell,
@@ -591,6 +666,15 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
                 }
             }
         }
+    }
+    if (input.level.waterLayer()) {
+        appendUnboundedWaterExterior(
+            frame,
+            input.level.width(),
+            input.level.height(),
+            *input.level.waterLayer(),
+            false,
+            gameplayShorelineAt);
     }
 
     for (uint32_t z = 0; z < input.level.depth(); ++z) {
@@ -614,6 +698,13 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             input.level.height(),
             static_cast<float>(z) + 1.0f,
             [&, z](GridPosition position) {
+                if (input.level.waterLayer() == z &&
+                    (position.x < 0 ||
+                     position.y < 0 ||
+                     position.x >= static_cast<int>(input.level.width()) ||
+                     position.y >= static_cast<int>(input.level.height()))) {
+                    return true;
+                }
                 return rules::isUnfilledWater(input.level, state, {
                     position.x,
                     position.y,
@@ -717,6 +808,8 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
     const Level::LayerRows& layers = input.editor.documentLayers();
     const uint32_t activeLayer = input.editor.activeLayer();
     const uint32_t layerCount = static_cast<uint32_t>(layers.size());
+    const std::optional<uint32_t> waterLayer =
+        input.editor.waterLayer();
     const bool layerLocked = input.editor.layerLocked();
     frame.levelDepth = std::max(layerCount, 1U);
     frame.tiles.reserve(
@@ -732,7 +825,13 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
             x >= layers[z][y].size()) {
             return TileType::Air;
         }
-        return charToTileType(layers[z][y][x]).value_or(TileType::Air);
+        const TileType authored =
+            charToTileType(layers[z][y][x]).value_or(TileType::Air);
+        if (authored == TileType::Air &&
+            waterLayer == z) {
+            return TileType::Water;
+        }
+        return authored;
     };
     auto documentTileAtPosition = [&](GridPosition3 position) {
         if (position.x < 0 || position.y < 0 || position.z < 0) {
@@ -754,11 +853,9 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
                     static_cast<int>(y),
                     static_cast<int>(z),
                 };
-                appendWaterSurface(
+                appendWaterCellSurface(
                     frame,
-                    x,
-                    y,
-                    z,
+                    waterCell,
                     preview,
                     shorelineMaskForWaterCell(
                         waterCell,
@@ -905,13 +1002,26 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
             }
         }
     }
+    if (waterLayer &&
+        (!layerLocked || *waterLayer == activeLayer)) {
+        appendUnboundedWaterExterior(
+            frame,
+            frame.levelWidth,
+            frame.levelHeight,
+            *waterLayer,
+            false,
+            [&](GridPosition3 position) {
+                return tileTypeIsSolidBlock(
+                    documentTileAtPosition(position));
+            });
+    }
 
     auto documentHasOpenWater = [&](GridPosition position, uint32_t z) {
         if (position.x < 0 ||
             position.y < 0 ||
             position.x >= static_cast<int>(frame.levelWidth) ||
             position.y >= static_cast<int>(frame.levelHeight)) {
-            return false;
+            return waterLayer == z;
         }
         return documentTileAt(
                    static_cast<uint32_t>(position.x),

@@ -177,6 +177,45 @@ void testSaveLoadAndRuntimeMirror()
     CHECK(!editor.editingDocument());
 }
 
+void testWaterLayerEditingPersistenceAndLayerRenumbering()
+{
+    TEST("waterLayerEditingPersistenceAndLayerRenumbering");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(4, 3, false);
+
+    editor.setWaterLayer(0);
+    CHECK(editor.waterLayer() == 0U);
+    CHECK(editor.dirty());
+    CHECK(editor.documentToLevel().tileAt(3, 2, 0) == TileType::Ground);
+
+    editor.setCell({ 3, 2, 0 }, TileType::Air);
+    CHECK(editor.documentToLevel().tileAt(3, 2, 0) == TileType::Water);
+
+    editor.setActiveLayer(0);
+    editor.addLayer();
+    CHECK(editor.waterLayer() == 0U);
+    editor.setWaterLayer(1);
+    editor.setActiveLayer(0);
+    editor.addLayer();
+    CHECK(editor.waterLayer() == 2U);
+    editor.deleteActiveLayer();
+    CHECK(editor.waterLayer() == 1U);
+    editor.setActiveLayer(1);
+    editor.deleteActiveLayer();
+    CHECK(!editor.waterLayer());
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.waterLayer() == 1U);
+
+    const std::filesystem::path sourcePath =
+        project.source / "level0" / "screen0.scr";
+    CHECK(editor.saveDocument(sourcePath));
+    LevelEditor loaded = makeEditor(project);
+    CHECK(loaded.loadDocument(sourcePath));
+    CHECK(loaded.waterLayer() == 1U);
+    CHECK(loaded.documentToLevel().waterLayer() == 1U);
+}
+
 void testProjectRenumberDeleteAndRestore()
 {
     TEST("projectRenumberDeleteAndRestore");
@@ -391,6 +430,7 @@ int main()
     testDocumentCommandsAndUndo();
     testTileValidationAndPlayerUniqueness();
     testSaveLoadAndRuntimeMirror();
+    testWaterLayerEditingPersistenceAndLayerRenumbering();
     testProjectRenumberDeleteAndRestore();
     testUndoAfterNewEditDoesNotReplayAbandonedBranch();
     testResizePreservesOverlapAndUsesLayerFill();
