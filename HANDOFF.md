@@ -498,7 +498,10 @@ Water and falling:
   refraction. Beneath those ripples, broad warped value noise divides the water
   body approximately evenly between configurable dark and light tones. Every
   field is evaluated in world space so it remains seamless across water
-  surfaces.
+  surfaces. A separate subtle animated line follows every integer tile border,
+  with configurable width, color/opacity, warp amplitude/frequency, and speed;
+  it is fully visible inside authored board bounds and fades smoothly through
+  nearby generated exterior water. Shoreline foam is layered over it.
   Ground-colored edge faces remain around exposed shorelines. Water does not
   cast shadows or require a GLTF/model asset.
 - Moving out of water is handled specially to render transitions.
@@ -753,6 +756,17 @@ these focused modules rather than moving player UI into Debug-only ImGui.
 
 Major recent additions and fixes:
 
+- Added subtle animated water tile-border lines inspired by the supplied
+  Order of the Sinking Star reference. The shader warps both axes of an
+  integer world-space grid with independent two-frequency waves, keeping tile
+  boundaries gently ripple-shaped while remaining phase-continuous across
+  adjacent cells and large exterior water surfaces. `WaterConfig.hpp` owns
+  border color/opacity, width, warp amplitude, frequency, speed, and exterior
+  fade distance. Authored board dimensions attenuate the mask by radial
+  distance outside the board, so generated ocean tiles lose the grid without a
+  rectangular cutoff. Water-only unused shadow-transform push slots carry
+  those controls without extending the Vulkan push-constant layout; shoreline
+  foam remains the top layer.
 - Replaced the high-fan-out `Config.hpp` with focused gameplay, audio, user
   settings, UI, animation, camera, lighting, renderer, scene, and water config
   headers. Removed configuration includes from foundational renderer/profile

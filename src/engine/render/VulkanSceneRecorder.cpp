@@ -652,6 +652,10 @@ private:
                     face.color,
                     face.worldOrigin,
                     face.gridSize,
+                    Vec2 {
+                        static_cast<float>(frameData.levelWidth),
+                        static_cast<float>(frameData.levelHeight),
+                    },
                     frameData.waterAnimationTimeSeconds,
                     face.shorelineMask,
                     face.isEditorPreview);
@@ -901,6 +905,7 @@ private:
         Vec4 color,
         Vec2 worldOrigin,
         Vec2 size,
+        Vec2 boardSize,
         float animationTimeSeconds,
         uint32_t shorelineMask,
         bool isEditorPreview)
@@ -938,6 +943,21 @@ private:
                     vertices[3].y * clipW[3],
                     vertices[3].z * clipW[3],
                     clipW[3],
+                },
+            },
+            .shadowVertices = {
+                config::waterTileBorderColor,
+                Vec4 {
+                    config::waterTileBorderWidth,
+                    config::waterTileBorderWarpAmplitude,
+                    config::waterTileBorderWarpFrequency,
+                    config::waterTileBorderSpeed,
+                },
+                Vec4 {
+                    boardSize.x,
+                    boardSize.y,
+                    config::waterTileBorderExteriorFadeDistance,
+                    0.0f,
                 },
             },
             .color = color,

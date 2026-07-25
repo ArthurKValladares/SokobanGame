@@ -98,6 +98,54 @@ float broadWaterTone(
         toneNoise);
 }
 
+float waterTileBorderMask(
+    vec2 worldPosition,
+    float animationTime,
+    float lineWidth,
+    float warpAmplitude,
+    float warpFrequency,
+    float speed)
+{
+    float frequency = max(warpFrequency, 0.01);
+    float phase = animationTime * speed;
+    vec2 warpedPosition = worldPosition;
+    warpedPosition.x += warpAmplitude * (
+        sin(worldPosition.y * frequency + phase) * 0.68 +
+        sin(
+            worldPosition.y * frequency * 2.17 -
+            phase * 0.61 +
+            1.30) * 0.32);
+    warpedPosition.y += warpAmplitude * (
+        sin(worldPosition.x * frequency * 0.93 - phase * 0.87) * 0.68 +
+        sin(
+            worldPosition.x * frequency * 2.03 +
+            phase * 0.53 -
+            0.80) * 0.32);
+
+    vec2 distanceToGrid = abs(
+        fract(warpedPosition + vec2(0.5)) - vec2(0.5));
+    float distanceToBorder = min(distanceToGrid.x, distanceToGrid.y);
+    float antialiasWidth = max(fwidth(distanceToBorder) * 1.10, 0.00075);
+    return 1.0 - smoothstep(
+        max(lineWidth - antialiasWidth, 0.0),
+        lineWidth + antialiasWidth,
+        distanceToBorder);
+}
+
+float waterTileBorderBoardFade(
+    vec2 worldPosition,
+    vec2 boardSize,
+    float fadeDistance)
+{
+    vec2 distanceOutside = max(
+        max(-worldPosition, worldPosition - boardSize),
+        vec2(0.0));
+    return 1.0 - smoothstep(
+        0.0,
+        max(fadeDistance, 0.001),
+        length(distanceOutside));
+}
+
 vec2 triangularLatticeCoordinates(vec2 position)
 {
     float row = position.y * 1.1547005;
@@ -528,6 +576,21 @@ void main()
 
     vec3 finalWaterColor =
         mix(waterWithSecondaryRipples, rippleColor, rippleStrength);
+    float tileBorder = waterTileBorderMask(
+        worldPosition,
+        pc.gridColor.z,
+        max(pc.shadowVertices[1].x, 0.0),
+        max(pc.shadowVertices[1].y, 0.0),
+        max(pc.shadowVertices[1].z, 0.01),
+        pc.shadowVertices[1].w);
+    tileBorder *= waterTileBorderBoardFade(
+        worldPosition,
+        max(pc.shadowVertices[2].xy, vec2(0.0)),
+        pc.shadowVertices[2].z);
+    finalWaterColor = mix(
+        finalWaterColor,
+        pc.shadowVertices[0].rgb,
+        tileBorder * clamp(pc.shadowVertices[0].a, 0.0, 1.0));
     uint shorelineMask =
         uint(max(pc.textureOptions.w, 0.0) + 0.5);
     vec2 foamLayers = shorelineFoam(

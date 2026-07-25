@@ -31,9 +31,28 @@ inline constexpr float waterRippleHaloStrength = 0.08f;
 inline constexpr float waterRippleCrestStrength = 0.50f;
 inline constexpr float waterSecondaryRippleThicknessScale = 0.48f;
 
+inline constexpr Vec4 waterTileBorderColor {
+    0.52f,
+    0.72f,
+    0.84f,
+    0.24f,
+};
+inline constexpr float waterTileBorderWidth = 0.014f;
+inline constexpr float waterTileBorderWarpAmplitude = 0.035f;
+inline constexpr float waterTileBorderWarpFrequency = 4.2f;
+inline constexpr float waterTileBorderSpeed = 0.85f;
+inline constexpr float waterTileBorderExteriorFadeDistance = 0.25f;
+
 inline constexpr float waterShorelineNearDistance = 0.055f;
 inline constexpr float waterShorelineFarDistance = 0.090f;
 inline constexpr float waterShorelineFarOpacity = 0.55f;
 inline constexpr float waterShorelineFarThickness = 0.010f;
+
+static_assert(
+    waterTileBorderWidth > 0.0f && waterTileBorderWidth < 0.5f);
+static_assert(
+    waterTileBorderWarpAmplitude >= 0.0f &&
+    waterTileBorderWarpAmplitude < 0.5f);
+static_assert(waterTileBorderExteriorFadeDistance > 0.0f);
 
 } // namespace sokoban::config
