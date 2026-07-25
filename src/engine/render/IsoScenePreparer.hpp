@@ -57,6 +57,7 @@ struct PreparedIsoFace {
     Vec2 gridSize {};
     Vec2 worldOrigin {};
     PreparedSurfaceMaterial material = PreparedSurfaceMaterial::Standard;
+    uint32_t shorelineMask = 0;
     float depth = 0.0f;
 };
 

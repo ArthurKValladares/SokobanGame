@@ -863,10 +863,20 @@ Major recent additions and fixes:
 - Added water/falling behavior and water edge rendering.
 - Replaced the KayKit water mesh with Vulkan-free procedural water-surface
   frame data and a dedicated translucent Vulkan shader. Open cells now render
-  lowered, world-space phase-continuous ripple planes with subtle refraction
-  and crest highlights; filled cells omit the plane, shoreline edges remain,
-  editor preview/picking still work, and the water GLTF is no longer requested
-  or staged.
+  lowered, world-space phase-continuous ripple planes with subtle refraction.
+  The surface uses a layered world-space contour field rather than Voronoi
+  cells, producing round, irregular animated bands with a broad cyan falloff
+  and restrained pale cores for a softer cartoon-caustic style. Layered detail
+  warping adds small-scale noise while keeping every ripple continuous. A
+  second evaluation of the same field is rotated 90 degrees and phase-offset,
+  then composited as a dark-blue ripple layer beneath the pale layer. Water
+  surfaces carry a four-edge solid-neighbor mask; the shader uses it to add two
+  continuous animated foam levels where water meets Ground or Wall. The
+  configurable near level fills solid white from its moving crest to the tile
+  boundary, while a configurable farther band can overlap it and has separate
+  configurable opacity and thickness. Filled cells omit the plane, shoreline
+  edges remain, editor preview/picking still work, and the water GLTF is no
+  longer requested or staged.
 - Added ice sliding and translucent/blurred ice rendering.
 - Added ladder tile `L`.
   - Placement/load validation requires adjacent same-layer Ground.

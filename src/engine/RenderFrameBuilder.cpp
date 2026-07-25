@@ -308,7 +308,8 @@ void appendWaterSurface(
     uint32_t x,
     uint32_t y,
     uint32_t z,
-    bool editorPreview = false)
+    bool editorPreview = false,
+    uint32_t shorelineMask = 0)
 {
     frame.waterSurfaces.push_back({
         .cell = {
@@ -324,8 +325,38 @@ void appendWaterSurface(
         .elevation = static_cast<float>(z) + 1.0f -
             config::waterDepthBelowGround +
             (editorPreview ? 0.02f : 0.0f),
+        .shorelineMask = shorelineMask,
         .isEditorPreview = editorPreview,
     });
+}
+
+uint32_t shorelineMaskForWaterCell(
+    GridPosition3 cell,
+    const auto& tileAt)
+{
+    struct Neighbor {
+        GridPosition offset;
+        WaterShorelineEdge edge;
+    };
+    constexpr std::array<Neighbor, 4> neighbors {
+        Neighbor { { 0, -1 }, WaterShorelineEdge::NegativeY },
+        Neighbor { { 1, 0 }, WaterShorelineEdge::PositiveX },
+        Neighbor { { 0, 1 }, WaterShorelineEdge::PositiveY },
+        Neighbor { { -1, 0 }, WaterShorelineEdge::NegativeX },
+    };
+
+    uint32_t mask = 0;
+    for (const Neighbor& neighbor : neighbors) {
+        const TileType tile = tileAt({
+            cell.x + neighbor.offset.x,
+            cell.y + neighbor.offset.y,
+            cell.z,
+        });
+        if (tileTypeIsSolidBlock(tile)) {
+            mask |= waterShorelineBit(neighbor.edge);
+        }
+    }
+    return mask;
 }
 
 template <typename CellAt, typename ScaleForTile>
@@ -468,20 +499,6 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             return input.settings.tileScale(tile);
         });
 
-    for (uint32_t z = 0; z < input.level.depth(); ++z) {
-        for (uint32_t y = 0; y < input.level.height(); ++y) {
-            for (uint32_t x = 0; x < input.level.width(); ++x) {
-                if (rules::isUnfilledWater(input.level, state, {
-                        static_cast<int>(x),
-                        static_cast<int>(y),
-                        static_cast<int>(z) + 1,
-                    })) {
-                    appendWaterSurface(frame, x, y, z);
-                }
-            }
-        }
-    }
-
     auto levelTileAt = [&](GridPosition3 position) {
         if (!input.level.inBounds(position)) {
             return TileType::Air;
@@ -491,6 +508,33 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             static_cast<uint32_t>(position.y),
             static_cast<uint32_t>(position.z));
     };
+    for (uint32_t z = 0; z < input.level.depth(); ++z) {
+        for (uint32_t y = 0; y < input.level.height(); ++y) {
+            for (uint32_t x = 0; x < input.level.width(); ++x) {
+                if (rules::isUnfilledWater(input.level, state, {
+                        static_cast<int>(x),
+                        static_cast<int>(y),
+                        static_cast<int>(z) + 1,
+                    })) {
+                    const GridPosition3 waterCell {
+                        static_cast<int>(x),
+                        static_cast<int>(y),
+                        static_cast<int>(z),
+                    };
+                    appendWaterSurface(
+                        frame,
+                        x,
+                        y,
+                        z,
+                        false,
+                        shorelineMaskForWaterCell(
+                            waterCell,
+                            levelTileAt));
+                }
+            }
+        }
+    }
+
     for (uint32_t z = 0; z < input.level.depth(); ++z) {
         for (uint32_t y = 0; y < input.level.height(); ++y) {
             for (uint32_t x = 0; x < input.level.width(); ++x) {
@@ -634,7 +678,20 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
                 return;
             }
             if (tile == TileType::Water) {
-                appendWaterSurface(frame, x, y, z, preview);
+                const GridPosition3 waterCell {
+                    static_cast<int>(x),
+                    static_cast<int>(y),
+                    static_cast<int>(z),
+                };
+                appendWaterSurface(
+                    frame,
+                    x,
+                    y,
+                    z,
+                    preview,
+                    shorelineMaskForWaterCell(
+                        waterCell,
+                        documentTileAtPosition));
                 return;
             }
             if (tile == TileType::Ladder) {

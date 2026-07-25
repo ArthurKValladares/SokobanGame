@@ -15,6 +15,19 @@ enum class RenderViewMode {
     Isometric3D,
 };
 
+enum class WaterShorelineEdge : uint32_t {
+    NegativeY = 1U << 0,
+    PositiveX = 1U << 1,
+    PositiveY = 1U << 2,
+    NegativeX = 1U << 3,
+};
+
+[[nodiscard]] constexpr uint32_t waterShorelineBit(
+    WaterShorelineEdge edge)
+{
+    return static_cast<uint32_t>(edge);
+}
+
 // Runtime model identity: 0 is the built-in untextured unit cube, and any
 // other value addresses entry value-1 of the asset manifest's model list.
 struct RenderModel {
@@ -103,6 +116,7 @@ struct RenderFrameData {
         Vec2 size { 1.0f, 1.0f };
         Vec4 color { config::waterSurfaceColor };
         float elevation = 0.0f;
+        uint32_t shorelineMask = 0;
         bool isEditorPreview = false;
     };
 

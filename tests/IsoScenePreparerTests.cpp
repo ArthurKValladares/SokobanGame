@@ -70,6 +70,11 @@ sokoban::RenderFrameData sceneFrame()
         .position = { 1.0f, 2.0f },
         .color = { 0.05f, 0.38f, 0.72f, 0.64f },
         .elevation = 0.82f,
+        .shorelineMask =
+            sokoban::waterShorelineBit(
+                sokoban::WaterShorelineEdge::NegativeY) |
+            sokoban::waterShorelineBit(
+                sokoban::WaterShorelineEdge::PositiveX),
     });
     frame.isoFaces.push_back({
         .vertices = {
@@ -137,6 +142,12 @@ void testPreparationCategorizesOneSharedFacePool()
         CHECK(waterFace->worldOrigin.y == 2.0f);
         CHECK(waterFace->gridSize.x == 1.0f);
         CHECK(waterFace->gridSize.y == 1.0f);
+        CHECK(
+            waterFace->shorelineMask ==
+            (sokoban::waterShorelineBit(
+                 sokoban::WaterShorelineEdge::NegativeY) |
+                sokoban::waterShorelineBit(
+                    sokoban::WaterShorelineEdge::PositiveX)));
     }
 
     CHECK(containsCell(scene, { 0, 0, 0 }));

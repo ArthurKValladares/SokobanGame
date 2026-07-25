@@ -651,6 +651,7 @@ private:
                     face.worldOrigin,
                     face.gridSize,
                     frameData.waterAnimationTimeSeconds,
+                    face.shorelineMask,
                     face.isEditorPreview);
             } else {
                 drawFace(
@@ -898,6 +899,7 @@ private:
         Vec2 worldOrigin,
         Vec2 size,
         float animationTimeSeconds,
+        uint32_t shorelineMask,
         bool isEditorPreview)
     {
         vkCmdSetPrimitiveTopology(
@@ -916,8 +918,14 @@ private:
                 Vec4 { vertices[3].x, vertices[3].y, vertices[3].z, 1.0f },
             },
             .color = color,
-            .materialOptions = {
+            .normalAndAmbientRed = {
+                config::waterShorelineFarThickness,
+                config::waterShorelineFarOpacity,
                 0.0f,
+                0.0f,
+            },
+            .materialOptions = {
+                config::waterShorelineNearDistance,
                 size.x,
                 size.y,
                 isEditorPreview ? -1.0f : 1.0f,
@@ -926,13 +934,13 @@ private:
                 worldOrigin.x,
                 worldOrigin.y,
                 animationTimeSeconds,
-                0.0f,
+                config::waterShorelineFarDistance,
             },
             .textureOptions = {
                 config::waterRippleSpatialFrequency,
                 config::waterRippleSpeed,
                 config::waterRefractionStrength,
-                0.0f,
+                static_cast<float>(shorelineMask),
             },
         };
         vkCmdPushConstants(

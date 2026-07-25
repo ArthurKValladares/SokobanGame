@@ -463,7 +463,8 @@ void IsoScenePreparer::prepare(
                              bool pickable,
                              bool drawable,
                              Vec2 gridSize,
-                             PreparedSurfaceMaterial material) {
+                             PreparedSurfaceMaterial material,
+                             uint32_t shorelineMask) {
         if (!faceVisible(scene.isoLayout, vertices, normal)) {
             return;
         }
@@ -482,6 +483,7 @@ void IsoScenePreparer::prepare(
                 vertices[0].y,
             },
             .material = material,
+            .shorelineMask = shorelineMask,
             .depth = faceDepth(scene.isoLayout, vertices),
         };
         for (std::size_t i = 0; i < vertices.size(); ++i) {
@@ -543,7 +545,8 @@ void IsoScenePreparer::prepare(
                     pickable,
                     drawCube,
                     { width, depth },
-                    PreparedSurfaceMaterial::Standard);
+                    PreparedSurfaceMaterial::Standard,
+                    0);
             } else {
                 appendIsoFace(
                     { corners[0], corners[1], corners[5], corners[4] },
@@ -557,7 +560,8 @@ void IsoScenePreparer::prepare(
                     pickable,
                     drawCube,
                     { width, height },
-                    PreparedSurfaceMaterial::Standard);
+                    PreparedSurfaceMaterial::Standard,
+                    0);
                 appendIsoFace(
                     { corners[1], corners[2], corners[6], corners[5] },
                     { 1.0f, 0.0f, 0.0f },
@@ -570,7 +574,8 @@ void IsoScenePreparer::prepare(
                     pickable,
                     drawCube,
                     { depth, height },
-                    PreparedSurfaceMaterial::Standard);
+                    PreparedSurfaceMaterial::Standard,
+                    0);
                 appendIsoFace(
                     { corners[2], corners[3], corners[7], corners[6] },
                     { 0.0f, 1.0f, 0.0f },
@@ -583,7 +588,8 @@ void IsoScenePreparer::prepare(
                     pickable,
                     drawCube,
                     { width, height },
-                    PreparedSurfaceMaterial::Standard);
+                    PreparedSurfaceMaterial::Standard,
+                    0);
                 appendIsoFace(
                     { corners[3], corners[0], corners[4], corners[7] },
                     { -1.0f, 0.0f, 0.0f },
@@ -596,7 +602,8 @@ void IsoScenePreparer::prepare(
                     pickable,
                     drawCube,
                     { depth, height },
-                    PreparedSurfaceMaterial::Standard);
+                    PreparedSurfaceMaterial::Standard,
+                    0);
                 appendIsoFace(
                     { corners[4], corners[5], corners[6], corners[7] },
                     { 0.0f, 0.0f, 1.0f },
@@ -609,7 +616,8 @@ void IsoScenePreparer::prepare(
                     pickable,
                     drawCube,
                     { width, depth },
-                    PreparedSurfaceMaterial::Standard);
+                    PreparedSurfaceMaterial::Standard,
+                    0);
             }
 
             if (!tile.model.isCube() && !tile.pickOnly) {
@@ -646,7 +654,8 @@ void IsoScenePreparer::prepare(
                 !water.isEditorPreview,
                 true,
                 water.size,
-                PreparedSurfaceMaterial::Water);
+                PreparedSurfaceMaterial::Water,
+                water.shorelineMask);
         }
 
         for (const RenderFrameData::IsoFace& source : frameData.isoFaces) {

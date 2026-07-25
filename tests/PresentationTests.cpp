@@ -294,7 +294,7 @@ void testGameplayFrameBuildsProceduralWaterSurface()
 {
     TEST("gameplayFrameBuildsProceduralWaterSurface");
     const Level level = Level::loadFromLayers({
-        { ".W." },
+        { ".W#" },
         { "C  " },
     }, "procedural water frame");
     GameState state = stateWithPlayer(level.playerStart());
@@ -329,6 +329,10 @@ void testGameplayFrameBuildsProceduralWaterSurface()
             water.elevation,
             1.0f - config::waterDepthBelowGround));
         CHECK(near(water.color.w, config::waterSurfaceColor.w));
+        const uint32_t expectedShorelineMask =
+            waterShorelineBit(WaterShorelineEdge::NegativeX) |
+            waterShorelineBit(WaterShorelineEdge::PositiveX);
+        CHECK(water.shorelineMask == expectedShorelineMask);
     }
     CHECK(near(frame.waterAnimationTimeSeconds, 0.75f));
     CHECK(std::ranges::none_of(
