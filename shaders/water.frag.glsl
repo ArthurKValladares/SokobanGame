@@ -35,41 +35,210 @@ float bayer8x8(ivec2 pixel)
     return (thresholds[wrapped.y * 8 + wrapped.x] + 0.5) / 64.0;
 }
 
-vec2 organicRippleBands(vec2 position, float time)
+vec2 hash22(vec2 value)
 {
-    vec2 primaryWarp = vec2(
-        sin(position.y * 0.83 + time * 0.72) +
-            sin((position.x + position.y) * 0.41 - time * 0.37) * 0.50,
-        cos(position.x * 0.79 - time * 0.65) +
-            cos((position.x - position.y) * 0.47 + time * 0.42) * 0.50);
-    vec2 detailWarp = vec2(
-        sin(position.x * 2.17 - position.y * 1.43 + time * 1.03),
-        cos(position.x * 1.61 + position.y * 2.31 - time * 0.91));
-    vec2 warpedPosition =
-        position + primaryWarp * 0.32 + detailWarp * 0.085;
+    vec3 value3 =
+        fract(vec3(value.xyx) * vec3(0.1031, 0.1030, 0.0973));
+    value3 += dot(value3, value3.yxz + 33.33);
+    return fract((value3.xx + value3.yz) * value3.zy);
+}
 
-    float waveA = sin(
-        warpedPosition.x * 1.18 +
-        sin(warpedPosition.y * 0.72 + time * 0.31) * 1.05);
-    float waveB = sin(
-        warpedPosition.y * 1.26 +
-        cos(warpedPosition.x * 0.67 - time * 0.29) * 1.10);
-    float waveC = sin(
-        (warpedPosition.x + warpedPosition.y) * 0.63 +
+float smoothValueNoise(vec2 position)
+{
+    vec2 cell = floor(position);
+    vec2 local = fract(position);
+    vec2 blend =
+        local * local * local *
+        (local * (local * 6.0 - 15.0) + 10.0);
+    float negativeXNegativeY = hash22(cell).x;
+    float positiveXNegativeY =
+        hash22(cell + vec2(1.0, 0.0)).x;
+    float negativeXPositiveY =
+        hash22(cell + vec2(0.0, 1.0)).x;
+    float positiveXPositiveY =
+        hash22(cell + vec2(1.0, 1.0)).x;
+    return mix(
+        mix(
+            negativeXNegativeY,
+            positiveXNegativeY,
+            blend.x),
+        mix(
+            negativeXPositiveY,
+            positiveXPositiveY,
+            blend.x),
+        blend.y);
+}
+
+float broadWaterTone(
+    vec2 worldPosition,
+    float animationTime,
+    float spatialFrequency,
+    float transitionWidth,
+    float speed)
+{
+    vec2 rotatedPosition = vec2(
+        dot(worldPosition, vec2(0.82, -0.57)),
+        dot(worldPosition, vec2(0.57, 0.82)));
+    vec2 tonePosition =
+        rotatedPosition * max(spatialFrequency, 0.01) +
+        vec2(animationTime * speed, -animationTime * speed * 0.71);
+    tonePosition += vec2(
+        sin(tonePosition.y * 0.83 + animationTime * speed) * 0.34,
+        cos(tonePosition.x * 0.77 - animationTime * speed) * 0.34);
+    float coarseNoise = smoothValueNoise(tonePosition);
+    float detailNoise = smoothValueNoise(
+        tonePosition * 2.03 + vec2(13.71, -8.29));
+    float toneNoise = mix(coarseNoise, detailNoise, 0.24);
+    float antialiasWidth = max(
+        fwidth(toneNoise) * 1.25,
+        max(transitionWidth, 0.001));
+    return smoothstep(
+        0.5 - antialiasWidth,
+        0.5 + antialiasWidth,
+        toneNoise);
+}
+
+vec2 triangularLatticeCoordinates(vec2 position)
+{
+    float row = position.y * 1.1547005;
+    return vec2(position.x - row * 0.5, row);
+}
+
+vec2 irregularCellPoint(vec2 cell)
+{
+    vec2 latticePoint = vec2(
+        cell.x + cell.y * 0.5,
+        cell.y * 0.8660254);
+    vec2 jitter = hash22(cell) - vec2(0.5);
+    return latticePoint + vec2(
+        jitter.x * 0.68 + jitter.y * 0.12,
+        jitter.y * 0.58 - jitter.x * 0.10);
+}
+
+float cellDistanceWeight(vec2 cell)
+{
+    return mix(
+        0.72,
+        1.34,
+        hash22(cell + vec2(19.17, 7.43)).x);
+}
+
+float irregularDistanceSquared(vec2 vectorToPoint, vec2 cell)
+{
+    vec2 randomAxis =
+        hash22(cell + vec2(41.73, 23.19)) * 2.0 - vec2(1.0);
+    randomAxis *= inversesqrt(
+        max(dot(randomAxis, randomAxis), 0.001));
+    vec2 perpendicular =
+        vec2(-randomAxis.y, randomAxis.x);
+    float aspect = mix(
+        0.62,
+        1.48,
+        hash22(cell + vec2(3.11, 57.29)).y);
+    vec2 oriented = vec2(
+        dot(vectorToPoint, randomAxis) * aspect,
+        dot(vectorToPoint, perpendicular) / aspect);
+    return dot(oriented, oriented) *
+        cellDistanceWeight(cell);
+}
+
+vec2 cellularRippleBands(
+    vec2 position,
+    float time,
+    float crestHalfWidth,
+    float haloWidth)
+{
+    vec2 firstWarp = vec2(
+        sin(dot(position, vec2(0.52, 0.81)) + time * 0.22) +
+            sin(dot(position, vec2(-0.91, 0.37)) - time * 0.16) * 0.58,
+        cos(dot(position, vec2(0.76, -0.43)) - time * 0.19) +
+            cos(dot(position, vec2(0.31, 0.94)) + time * 0.14) * 0.58);
+    vec2 warpedOnce = position + firstWarp * 0.27;
+    vec2 secondWarp = vec2(
         sin(
-            (warpedPosition.x - warpedPosition.y) * 0.54 +
-            time * 0.23));
-    float contourField = waveA * 0.72 + waveB * 0.68 + waveC * 0.48;
-    float distanceFromRipple = abs(contourField);
-    float antialiasWidth = max(fwidth(contourField), 0.012);
+            dot(warpedOnce, vec2(2.37, -1.61)) +
+            sin(dot(warpedOnce, vec2(0.83, 1.19)) - time * 0.24) *
+                0.72 +
+            time * 0.31),
+        cos(
+            dot(warpedOnce, vec2(1.47, 2.53)) +
+            cos(dot(warpedOnce, vec2(-1.13, 0.71)) + time * 0.21) *
+                0.68 -
+            time * 0.27));
+    vec2 warpedTwice =
+        warpedOnce + secondWarp * 0.15;
+    vec2 rippleWarp = vec2(
+        sin(
+            dot(warpedTwice, vec2(5.13, 2.27)) +
+            sin(
+                dot(warpedTwice, vec2(-2.11, 3.07)) -
+                time * 0.34) *
+                1.05 +
+            time * 0.43),
+        cos(
+            dot(warpedTwice, vec2(-2.53, 5.37)) +
+            cos(
+                dot(warpedTwice, vec2(3.23, 1.79)) +
+                time * 0.29) *
+                0.98 -
+            time * 0.39));
+    vec2 samplePosition =
+        warpedTwice + rippleWarp * 0.12;
+    vec2 baseCell =
+        floor(
+            triangularLatticeCoordinates(samplePosition) +
+            vec2(0.5));
+
+    float nearestDistanceSquared = 1e20;
+    float secondDistanceSquared = 1e20;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            vec2 cell = baseCell + vec2(x, y);
+            vec2 vectorToPoint =
+                irregularCellPoint(cell) - samplePosition;
+            float distanceSquared =
+                irregularDistanceSquared(vectorToPoint, cell);
+            if (distanceSquared < nearestDistanceSquared) {
+                secondDistanceSquared = nearestDistanceSquared;
+                nearestDistanceSquared = distanceSquared;
+            } else if (distanceSquared < secondDistanceSquared) {
+                secondDistanceSquared = distanceSquared;
+            }
+        }
+    }
+
+    float distanceToBoundary = 0.5 * max(
+        sqrt(secondDistanceSquared) -
+            sqrt(nearestDistanceSquared),
+        0.0);
+    float antialiasWidth = clamp(
+        fwidth(distanceToBoundary) * 0.90,
+        0.003,
+        0.012);
+    float widthVariation = mix(
+        0.72,
+        1.28,
+        sin(
+            samplePosition.x * 1.73 -
+            samplePosition.y * 1.21 +
+            time * 0.18) *
+                0.5 +
+            0.5);
+    float variedCrestHalfWidth =
+        max(crestHalfWidth, 0.001) * widthVariation;
+    float variedHaloWidth =
+        max(haloWidth, crestHalfWidth) * widthVariation;
+    float haloInnerWidth = min(
+        variedCrestHalfWidth * 0.80,
+        variedHaloWidth * 0.45);
     float softHalo = 1.0 - smoothstep(
-        0.035 - antialiasWidth,
-        0.300 + antialiasWidth,
-        distanceFromRipple);
+        haloInnerWidth - antialiasWidth,
+        variedHaloWidth + antialiasWidth,
+        distanceToBoundary);
     float brightCenter = 1.0 - smoothstep(
-        0.015 - antialiasWidth,
-        0.095 + antialiasWidth,
-        distanceFromRipple);
+        variedCrestHalfWidth - antialiasWidth,
+        variedCrestHalfWidth + antialiasWidth,
+        distanceToBoundary);
     return vec2(softHalo, brightCenter);
 }
 
@@ -273,17 +442,30 @@ void main()
     vec2 worldPosition = pc.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
     float frequency = max(pc.textureOptions.x, 0.01);
     float time = pc.gridColor.z * pc.textureOptions.y;
+    float rippleCrestHalfWidth =
+        max(pc.normalAndAmbientRed.z, 0.001);
+    float rippleHaloWidth =
+        max(pc.normalAndAmbientRed.w, rippleCrestHalfWidth);
 
     vec2 basePatternPosition = worldPosition * frequency;
     vec2 patternPosition =
         basePatternPosition +
         vec2(time * 0.10, -time * 0.075);
-    vec2 caustics = organicRippleBands(patternPosition, time);
-    vec2 darkPatternPosition =
+    vec2 caustics = cellularRippleBands(
+        patternPosition,
+        time,
+        rippleCrestHalfWidth,
+        rippleHaloWidth);
+    vec2 secondaryPatternPosition =
         vec2(-patternPosition.y, patternPosition.x) +
         vec2(2.31, -1.73);
-    vec2 darkCaustics =
-        organicRippleBands(darkPatternPosition, time + 1.40);
+    float secondaryThicknessScale =
+        max(pc.sunRadianceAndAmbientBlue.w, 0.05);
+    vec2 secondaryCaustics = cellularRippleBands(
+        secondaryPatternPosition,
+        time + 1.40,
+        rippleCrestHalfWidth * secondaryThicknessScale,
+        rippleHaloWidth * secondaryThicknessScale);
 
     vec2 refractionFlow = 0.5 * vec2(
         sin(patternPosition.y * 1.13 + time) +
@@ -300,36 +482,52 @@ void main()
         sceneColor,
         clamp(sceneUv + refractionOffset, vec2(0.001), vec2(0.999))).rgb;
 
-    float bodyVariation =
-        sin(patternPosition.x * 0.61 + time * 0.23) *
-        cos(patternPosition.y * 0.73 - time * 0.19);
-    vec3 waterTint = pc.color.rgb * mix(0.84, 1.08, bodyVariation * 0.5 + 0.5);
+    float bodyTone = broadWaterTone(
+        worldPosition,
+        pc.gridColor.z,
+        pc.sunDirectionAndAmbientGreen.x,
+        pc.sunDirectionAndAmbientGreen.w,
+        pc.sunRadianceAndAmbientBlue.x);
+    float bodyToneMultiplier = mix(
+        pc.sunDirectionAndAmbientGreen.y,
+        pc.sunDirectionAndAmbientGreen.z,
+        bodyTone);
+    vec3 waterTint =
+        pc.color.rgb * bodyToneMultiplier;
     vec3 waterColor = mix(
         refractedScene,
         waterTint,
         clamp(pc.color.a, 0.0, 0.95));
 
-    float darkRippleStrength = clamp(
-        darkCaustics.x * 0.34 + darkCaustics.y * 0.10,
+    float secondaryRippleCoverage = clamp(
+        secondaryCaustics.x * 0.12 +
+            secondaryCaustics.y * 0.88,
         0.0,
-        0.44);
-    vec3 darkRippleColor = pc.color.rgb * 0.58;
-    vec3 waterWithDarkRipples = mix(
+        1.0);
+    float secondaryRippleStrength =
+        secondaryRippleCoverage *
+        clamp(pc.shadowOptions.a, 0.0, 1.0);
+    vec3 waterWithSecondaryRipples = mix(
         waterColor,
-        darkRippleColor,
-        darkRippleStrength);
+        pc.shadowOptions.rgb,
+        secondaryRippleStrength);
 
     vec3 rippleColor = mix(
         vec3(0.22, 0.62, 0.80),
         vec3(0.70, 0.88, 0.94),
         caustics.y);
+    float rippleHaloStrength =
+        max(pc.sunRadianceAndAmbientBlue.y, 0.0);
+    float rippleCrestStrength =
+        max(pc.sunRadianceAndAmbientBlue.z, 0.0);
     float rippleStrength = clamp(
-        caustics.x * 0.42 + caustics.y * 0.12,
+        caustics.x * rippleHaloStrength +
+            caustics.y * rippleCrestStrength,
         0.0,
-        0.54);
+        min(rippleHaloStrength + rippleCrestStrength, 1.0));
 
     vec3 finalWaterColor =
-        mix(waterWithDarkRipples, rippleColor, rippleStrength);
+        mix(waterWithSecondaryRipples, rippleColor, rippleStrength);
     uint shorelineMask =
         uint(max(pc.textureOptions.w, 0.0) + 0.5);
     vec2 foamLayers = shorelineFoam(

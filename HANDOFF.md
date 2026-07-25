@@ -482,8 +482,13 @@ Water and falling:
   surfaces are non-pickable and excluded from authored dimensions, camera fit,
   level bounds, and gameplay.
 - Open water renders as a slightly transparent plane at
-  `ground top - waterDepthBelowGround`; world-space crossing waves drive
-  seamless ripples, crest highlights, and subtle scene-color refraction.
+  `ground top - waterDepthBelowGround`; a warped cellular field produces
+  small, rounded, irregular honeycomb-like ripple cells, with a rotated muted
+  translucent cyan layer beneath the bright crests and subtle scene-color
+  refraction. Beneath those ripples, broad warped value noise divides the water
+  body approximately evenly between configurable dark and light tones. Every
+  field is evaluated in world space so it remains seamless across water
+  surfaces.
   Ground-colored edge faces remain around exposed shorelines. Water does not
   cast shadows or require a GLTF/model asset.
 - Moving out of water is handled specially to render transitions.
@@ -738,6 +743,36 @@ these focused modules rather than moving player UI into Debug-only ImGui.
 
 Major recent additions and fixes:
 
+- Changed the rotated secondary ripple from a dark-blue blend, which became
+  indistinguishable from the two-tone body's dark regions, to its own
+  configurable muted cyan tint and low opacity. It now reads as a translucent
+  echo of the primary crest, matching the reference while remaining below the
+  crisp white layer. The secondary field now has an independent configurable
+  thickness scale and favors its narrow crest over its halo, preventing it
+  from reading as a second set of heavy bands. `Config.hpp` also exposes the
+  shared ripple crest width, halo width, and primary crest/halo strengths.
+- Added a separate low-frequency two-tone field to the water body, matching the
+  reference's broad alternating color regions beneath the ripple network. A
+  dominant coarse value-noise octave plus light detail is thresholded around
+  its midpoint for a roughly even split and gently warped/drifted in world
+  space. `Config.hpp` exposes tone frequency, dark/light multipliers,
+  transition width, and animation speed; previously unused water push-constant
+  fields carry them to the shader.
+- Replaced the open-water sine contour field, whose lines could connect into
+  map-spanning paths, with a warped cellular ridge field. Nearest/second-nearest
+  feature distances produce small closed irregular cells; a strongly jittered
+  triangular lattice, asymmetric displacement, randomly oriented anisotropic
+  distance metrics, per-cell weights, cell-scale nested warping, and varying
+  crest width prevent a polygonal or overly regular pattern. The centered
+  lattice search keeps its candidate set stable across cell boundaries. The
+  final coordinate pass adds crossed, nested sub-cell waves with controlled
+  lateral displacement, making each crest meander without folding the field
+  into disconnected rings. Bright crests use a narrow, tightly antialiased
+  core with only a faint supporting halo, avoiding cloudy gradients and white
+  blooms where several boundaries meet. The secondary translucent layer
+  evaluates the same field after a 90-degree rotation. The implementation uses a nine-sample
+  neighborhood and arithmetic hash rather than an exact 34-sample Voronoi edge
+  search, keeping fullscreen fragment cost bounded.
 - Replaced authored per-cell water for shipped levels with optional
   `@water N` level metadata. Air on that layer now resolves to Water while
   explicit solid cells preserve island/shore shapes. `Level::Definition`
@@ -906,12 +941,11 @@ Major recent additions and fixes:
 - Replaced the KayKit water mesh with Vulkan-free procedural water-surface
   frame data and a dedicated translucent Vulkan shader. Open cells now render
   lowered, world-space phase-continuous ripple planes with subtle refraction.
-  The surface uses a layered world-space contour field rather than Voronoi
-  cells, producing round, irregular animated bands with a broad cyan falloff
-  and restrained pale cores for a softer cartoon-caustic style. Layered detail
-  warping adds small-scale noise while keeping every ripple continuous. A
-  second evaluation of the same field is rotated 90 degrees and phase-offset,
-  then composited as a dark-blue ripple layer beneath the pale layer. Water
+  The surface uses an irregular weighted cellular field with nested
+  world-space warping, producing rounded animated cells with defined pale
+  crests. A second evaluation is rotated 90 degrees and phase-offset, then
+  composited as a muted translucent cyan echo beneath the primary layer.
+  Broad warped noise independently divides the body between two tones. Water
   surfaces carry dynamic four-edge and four-corner shoreline masks; gameplay
   recomputes them from static Ground/Wall cells and water currently filled by
   fallen rocks or ice. The shader uses them to add two continuous animated foam

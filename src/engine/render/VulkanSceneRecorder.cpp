@@ -943,9 +943,23 @@ private:
             .normalAndAmbientRed = {
                 config::waterShorelineFarThickness,
                 config::waterShorelineFarOpacity,
-                0.0f,
-                0.0f,
+                config::waterRippleCrestHalfWidth,
+                config::waterRippleHaloWidth,
             },
+            .sunDirectionAndAmbientGreen = {
+                config::waterToneSpatialFrequency,
+                config::waterDarkToneMultiplier,
+                config::waterLightToneMultiplier,
+                config::waterToneTransitionWidth,
+            },
+            .sunRadianceAndAmbientBlue = {
+                config::waterToneSpeed,
+                config::waterRippleHaloStrength,
+                config::waterRippleCrestStrength,
+                config::waterSecondaryRippleThicknessScale,
+            },
+            .shadowOptions =
+                config::waterSecondaryRippleColor,
             .materialOptions = {
                 config::waterShorelineNearDistance,
                 size.x,
