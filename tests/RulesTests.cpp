@@ -388,7 +388,7 @@ void testPlayerDrownsInWater()
     CHECK(drowned.player == cell(1, 0, 1));
     CHECK(drowned.playerDead);
     CHECK(!drowned.playerSliding);
-    CHECK(!rules::isUnfilledWater(level, drowned, cell(1, 0, 1)));
+    CHECK(rules::isUnfilledWater(level, drowned, cell(1, 0, 1)));
 
     // Dead players ignore input; the drowned world is inert.
     CHECK(rules::step(level, drowned, MoveDirection::Left) == drowned);

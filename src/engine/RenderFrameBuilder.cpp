@@ -460,7 +460,6 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
                 }
             }
 
-            std::optional<TileType> fallenTile;
             if (const GameState::Movable* fallenMovable =
                     rules::fallenMovableAt(state, position)) {
                 if (!fallenMovableIsMoving(fallenMovable)) {
@@ -472,11 +471,6 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
                         .height = 1.0f,
                     };
                 }
-            } else if (
-                state.playerDead &&
-                !playerMovingOutOfWater &&
-                position == state.player) {
-                fallenTile = TileType::Player;
             }
 
             return staticRenderCellFor(
@@ -485,7 +479,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
                 y,
                 z,
                 endUnlocked,
-                fallenTile,
+                std::nullopt,
                 input.settings.geometry.surfaceEntityHeight,
                 input.settings.geometry.surfaceEntityWidthDepth,
                 playerVisual.facingQuarterTurns);
@@ -564,28 +558,41 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             });
     }
 
-    if (!state.playerDead || playerMovingOutOfWater) {
-        RenderFrameData::Tile playerTile {
-            .position = {
-                playerVisual.motion.renderPosition.x,
-                playerVisual.motion.renderPosition.y,
-            },
-            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
-            .baseElevation = playerVisual.motion.renderPosition.z,
-            .height = 1.0f,
-            .showGrid = false,
-            .model = input.manifest.playerModel(),
-            .animation = playerVisual.motion.moving
-                ? playerVisual.movingClip
-                : input.manifest.playerIdleAnimation(),
-            .animationTimeSeconds = playerVisual.clipTimeSeconds,
-            .modelRotationQuarterTurns = playerVisual.facingQuarterTurns,
-        };
-        applyTileScale(
-            playerTile,
-            input.settings.tileScale(TileType::Player));
-        frame.tiles.push_back(playerTile);
+    RenderAnimation playerAnimation = input.manifest.playerIdleAnimation();
+    RenderAnimation playerAnimationFallback = noAnimation;
+    bool playerAnimationLoops = true;
+    if (state.playerDead && !playerMovingOutOfWater) {
+        if (playerVisual.deathTransitionPlaying) {
+            playerAnimation = input.manifest.playerDeathAnimation();
+            playerAnimationFallback = input.manifest.playerDeadIdleAnimation();
+            playerAnimationLoops = false;
+        } else {
+            playerAnimation = input.manifest.playerDeadIdleAnimation();
+        }
+    } else if (playerVisual.motion.moving) {
+        playerAnimation = playerVisual.movingClip;
     }
+
+    RenderFrameData::Tile playerTile {
+        .position = {
+            playerVisual.motion.renderPosition.x,
+            playerVisual.motion.renderPosition.y,
+        },
+        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+        .baseElevation = playerVisual.motion.renderPosition.z,
+        .height = 1.0f,
+        .showGrid = false,
+        .model = input.manifest.playerModel(),
+        .animation = playerAnimation,
+        .animationFallback = playerAnimationFallback,
+        .animationLoops = playerAnimationLoops,
+        .animationTimeSeconds = playerVisual.clipTimeSeconds,
+        .modelRotationQuarterTurns = playerVisual.facingQuarterTurns,
+    };
+    applyTileScale(
+        playerTile,
+        input.settings.tileScale(TileType::Player));
+    frame.tiles.push_back(playerTile);
 
     for (std::size_t movableIndex = 0;
          movableIndex < state.movables.size() &&

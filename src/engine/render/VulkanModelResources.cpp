@@ -20,11 +20,6 @@ void vkCheck(VkResult result, const char* message)
     }
 }
 
-uint32_t animationIndexFromUserNumber(uint32_t animationNumber)
-{
-    return animationNumber == 0 ? 0 : animationNumber - 1;
-}
-
 template <typename Result>
 bool futureReady(std::future<Result>& future)
 {
@@ -301,7 +296,7 @@ void VulkanModelResources::requestAnimation(RenderAnimation animation)
 
     const std::filesystem::path path = assetRoot_ / definition.path;
     const uint32_t animationIndex =
-        animationIndexFromUserNumber(definition.clip);
+        animationIndexFromManifestClip(definition.clip);
     slot.future = taskSystem().enqueue([path, animationIndex] {
         return loadGltfAnimationClip(path, animationIndex);
     });

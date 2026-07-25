@@ -21,6 +21,7 @@ inline constexpr float perspectiveFovDegrees = 35.0f;
 inline constexpr float perspectiveCameraDistanceScale = 2.2f;
 inline constexpr float maxWireframeLineWidth = 16.0f;
 inline constexpr float waterDepthBelowGround = 0.18f;
+inline constexpr float drownedPlayerDepthBelowGround = 1.0f;
 inline constexpr Vec4 waterSurfaceColor { 0.03f, 0.34f, 0.68f, 0.72f };
 inline constexpr float waterRippleSpatialFrequency = 8.5f;
 inline constexpr float waterRippleSpeed = 1.15f;
@@ -36,7 +37,7 @@ inline constexpr float maxTileScale = 3.0f;
 // Per-tile render scales live in assets/manifest.json (tile entries).
 inline constexpr float conveyorTileHeight = 0.12f;
 // Player clip sources and numbers live in assets/manifest.json (animation
-// entries with player-idle/move/push roles).
+// entries with the player animation roles).
 inline constexpr float playerAnimationFadeSeconds = 0.12f; // crossfade between idle/walk/push clips
 inline constexpr float sunAzimuthDegrees = -122.5f;
 inline constexpr float sunTiltDegrees = 33.0f;

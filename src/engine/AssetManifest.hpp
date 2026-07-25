@@ -14,6 +14,13 @@ namespace sokoban {
 
 struct AssetManifestJsonParser;
 
+// Manifest animation clips use the one-based numbering shown by asset tools.
+// Zero remains an alias for the first animation for older/default entries.
+[[nodiscard]] constexpr uint32_t animationIndexFromManifestClip(uint32_t clipNumber)
+{
+    return clipNumber == 0 ? 0 : clipNumber - 1;
+}
+
 // Shader/pipeline cap for the model texture descriptor array. Shaders are
 // compiled with MODEL_TEXTURE_COUNT set to this value (see CMakeLists.txt);
 // the manifest may declare at most this many textures.
@@ -63,8 +70,10 @@ public:
     struct Animation {
         std::string name;
         std::string path; // relative to the assets root
-        uint32_t clip = 0; // animation index inside the source file
-        std::string role; // "", "player-idle", "player-move", "player-push"
+        uint32_t clip = 0; // one-based animation number inside the source file
+        // "", "player-idle", "player-move", "player-push", "player-death",
+        // or "player-dead-idle"
+        std::string role;
     };
 
     struct TileVisual {
@@ -116,6 +125,8 @@ public:
     [[nodiscard]] RenderAnimation playerIdleAnimation() const { return playerIdle_; }
     [[nodiscard]] RenderAnimation playerMoveAnimation() const { return playerMove_; }
     [[nodiscard]] RenderAnimation playerPushAnimation() const { return playerPush_; }
+    [[nodiscard]] RenderAnimation playerDeathAnimation() const { return playerDeath_; }
+    [[nodiscard]] RenderAnimation playerDeadIdleAnimation() const { return playerDeadIdle_; }
 
     // Returns an empty list for unknown set names.
     [[nodiscard]] const std::vector<std::string>& soundSet(std::string_view name) const;
@@ -141,6 +152,8 @@ private:
     RenderAnimation playerIdle_ {};
     RenderAnimation playerMove_ {};
     RenderAnimation playerPush_ {};
+    RenderAnimation playerDeath_ {};
+    RenderAnimation playerDeadIdle_ {};
 };
 
 } // namespace sokoban

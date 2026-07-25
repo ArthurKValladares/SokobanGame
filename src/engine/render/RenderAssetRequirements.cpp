@@ -90,6 +90,8 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
     requirements.requireAnimation(manifest.playerIdleAnimation());
     requirements.requireAnimation(manifest.playerMoveAnimation());
     requirements.requireAnimation(manifest.playerPushAnimation());
+    requirements.requireAnimation(manifest.playerDeathAnimation());
+    requirements.requireAnimation(manifest.playerDeadIdleAnimation());
 
     for (uint32_t z = 0; z < level.depth(); ++z) {
         for (uint32_t y = 0; y < level.height(); ++y) {
@@ -114,6 +116,7 @@ RenderAssetRequirements renderAssetRequirementsForFrame(const RenderFrameData& f
     for (const RenderFrameData::Tile& tile : frame.tiles) {
         requirements.requireModel(tile.model);
         requirements.requireAnimation(tile.animation);
+        requirements.requireAnimation(tile.animationFallback);
     }
     return requirements;
 }

@@ -861,6 +861,19 @@ Major recent additions and fixes:
 - Added animated Rogue player rendering.
 - Added rocks/movables, undo, restart, pressure plates, and screen progression.
 - Added water/falling behavior and water edge rendering.
+- Drowned players now remain a dynamic rendered entity instead of becoming a
+  static replacement tile: they descend one full cell to the basin floor while
+  the procedural water surface remains above them. Entering the dead state
+  plays the manifest's `player-death` clip once, then
+  `AnimationController` switches at the loaded clip duration to the looping
+  `player-dead-idle` clip. Restored dead checkpoints start directly in the dead
+  idle pose, and undo clears the death transition. The shipped roles use
+  `Rig_Medium_General.glb` Animation 3 (`Death_B`, manifest clip 3) and
+  Animation 4 (`Death_B_Pose`, manifest clip 4). Manifest clip values use the
+  one-based numbering shown by asset tools. The one-shot-to-pose handoff
+  intentionally bypasses generic clip crossfading so sampling the completed
+  death clip cannot wrap to its starting pose for one frame. Both clips
+  participate in lazy level preloading and frame fallback requirements.
 - Replaced the KayKit water mesh with Vulkan-free procedural water-surface
   frame data and a dedicated translucent Vulkan shader. Open cells now render
   lowered, world-space phase-continuous ripple planes with subtle refraction.
@@ -909,7 +922,8 @@ At the time this handoff was updated:
   input/gamepad mapping, profile
   migration/recovery, gameplay
   move-count semantics, mandatory validation of the shipped manifest,
-  manifest-editor save semantics, and the `content_pipeline` suite.
+  manifest-editor save semantics, drowned-player rendering/death-animation
+  transitions, and the `content_pipeline` suite.
 - `cmake --build out\visual-studio --config Release --target package` produces
   `out/visual-studio/Sokoban3D-0.1.0-Windows-x64.zip`. The current staged tree
   contains 55 reachable files (about 4 MB) instead of the roughly 236 MB / 5,964

@@ -79,7 +79,8 @@ struct StepRates {
 [[nodiscard]] const GameState::Movable* movableAt(const GameState& state, GridPosition3 position);
 [[nodiscard]] const GameState::Movable* fallenMovableAt(const GameState& state, GridPosition3 position);
 
-// Water that has not been filled by a fallen movable (or the drowned player).
+// Water that has not been filled by a fallen movable. A drowned player remains
+// below the water surface and does not displace it.
 [[nodiscard]] bool isUnfilledWater(const Level& level, const GameState& state, GridPosition3 position);
 
 [[nodiscard]] bool isEndUnlocked(const Level& level, const GameState& state);

@@ -42,7 +42,9 @@ const AssetManifest& testManifest()
       "animations": [
         { "name": "Idle", "path": "a.glb", "role": "player-idle" },
         { "name": "Move", "path": "a.glb", "role": "player-move" },
-        { "name": "Push", "path": "a.glb", "role": "player-push" }
+        { "name": "Push", "path": "a.glb", "role": "player-push" },
+        { "name": "Death", "path": "a.glb", "role": "player-death" },
+        { "name": "DeadIdle", "path": "a.glb", "role": "player-dead-idle" }
       ],
       "tiles": [
         { "tile": "Wall", "model": "Bricks" },
@@ -80,8 +82,10 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     CHECK(requirements.contains(manifest.playerIdleAnimation()));
     CHECK(requirements.contains(manifest.playerMoveAnimation()));
     CHECK(requirements.contains(manifest.playerPushAnimation()));
+    CHECK(requirements.contains(manifest.playerDeathAnimation()));
+    CHECK(requirements.contains(manifest.playerDeadIdleAnimation()));
     CHECK(requirements.modelCount() == 5);
-    CHECK(requirements.animationCount() == 3);
+    CHECK(requirements.animationCount() == 5);
 }
 
 void testFrameRequirementsOnlyContainReferencedAssets()
@@ -95,6 +99,7 @@ void testFrameRequirementsOnlyContainReferencedAssets()
         RenderFrameData::Tile {
             .model = manifest.playerModel(),
             .animation = manifest.playerMoveAnimation(),
+            .animationFallback = manifest.playerDeadIdleAnimation(),
         },
     };
 
@@ -104,9 +109,10 @@ void testFrameRequirementsOnlyContainReferencedAssets()
     CHECK(requirements.contains(manifest.playerModel()));
     CHECK(!requirements.contains(manifest.modelIdByName("Water")));
     CHECK(requirements.contains(manifest.playerMoveAnimation()));
+    CHECK(requirements.contains(manifest.playerDeadIdleAnimation()));
     CHECK(!requirements.contains(manifest.playerIdleAnimation()));
     CHECK(requirements.modelCount() == 2);
-    CHECK(requirements.animationCount() == 1);
+    CHECK(requirements.animationCount() == 2);
 }
 
 void testMergeDeduplicatesRequirements()

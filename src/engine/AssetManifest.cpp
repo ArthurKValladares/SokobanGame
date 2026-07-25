@@ -339,9 +339,12 @@ static void parseAnimations(const Json& root, AssetManifest& manifest)
         if (!animation.role.empty() &&
             animation.role != "player-idle" &&
             animation.role != "player-move" &&
-            animation.role != "player-push") {
+            animation.role != "player-push" &&
+            animation.role != "player-death" &&
+            animation.role != "player-dead-idle") {
             fail(context,
-                "role must be 'player-idle', 'player-move', or 'player-push'");
+                "role must be 'player-idle', 'player-move', 'player-push', "
+                "'player-death', or 'player-dead-idle'");
         }
         manifest.animations_.push_back(std::move(animation));
     }
@@ -543,6 +546,10 @@ void AssetManifest::validateAndResolve()
             role = &playerMove_;
         } else if (animation.role == "player-push") {
             role = &playerPush_;
+        } else if (animation.role == "player-death") {
+            role = &playerDeath_;
+        } else if (animation.role == "player-dead-idle") {
+            role = &playerDeadIdle_;
         }
         if (role != nullptr) {
             if (!role->isNone()) {
@@ -556,10 +563,14 @@ void AssetManifest::validateAndResolve()
     if (playerModel_.isCube()) {
         throw std::runtime_error("asset manifest: no model has role player");
     }
-    if (playerIdle_.isNone() || playerMove_.isNone() || playerPush_.isNone()) {
+    if (playerIdle_.isNone() ||
+        playerMove_.isNone() ||
+        playerPush_.isNone() ||
+        playerDeath_.isNone() ||
+        playerDeadIdle_.isNone()) {
         throw std::runtime_error(
-            "asset manifest: animations with roles player-idle, player-move, and "
-            "player-push are all required");
+            "asset manifest: animations with roles player-idle, player-move, "
+            "player-push, player-death, and player-dead-idle are all required");
     }
 
     for (std::size_t i = 0; i < tileModelNames_.size(); ++i) {

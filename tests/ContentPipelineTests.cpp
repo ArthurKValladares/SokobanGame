@@ -77,7 +77,9 @@ std::string manifest(std::string_view texturePath = "textures/hero.png")
   "animations": [
     { "name": "Idle", "path": "animations/idle.glb", "role": "player-idle" },
     { "name": "Move", "path": "animations/move.glb", "role": "player-move" },
-    { "name": "Push", "path": "animations/push.glb", "role": "player-push" }
+    { "name": "Push", "path": "animations/push.glb", "role": "player-push" },
+    { "name": "Death", "path": "animations/death.glb", "role": "player-death" },
+    { "name": "DeadIdle", "path": "animations/dead.glb", "role": "player-dead-idle" }
   ],
   "sounds": [
     { "name": "footsteps", "files": ["audio/step.ogg"] }
@@ -105,6 +107,8 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
     writeFile(assets / "animations/idle.glb");
     writeFile(assets / "animations/move.glb");
     writeFile(assets / "animations/push.glb");
+    writeFile(assets / "animations/death.glb");
+    writeFile(assets / "animations/dead.glb");
     writeFile(assets / "audio/step.ogg");
     writeFile(assets / "audio/music.ogg");
     writeFile(levels / "level0/screen0.scr", "@layer 0\n...\n\n@layer 1\n.CE\n");

@@ -17,11 +17,20 @@ Vec3 toVec3(GridPosition3 position)
     };
 }
 
-Vec3 entityRenderTarget(GridPosition3 position, bool fallen)
+Vec3 movableRenderTarget(GridPosition3 position, bool fallen)
 {
     Vec3 target = toVec3(position);
     if (fallen) {
         target.z -= config::waterDepthBelowGround;
+    }
+    return target;
+}
+
+Vec3 playerRenderTarget(GridPosition3 position, bool dead)
+{
+    Vec3 target = toVec3(position);
+    if (dead) {
+        target.z -= config::drownedPlayerDepthBelowGround;
     }
     return target;
 }
@@ -91,7 +100,7 @@ void GameplayPresentation::setPlayerClips(RenderAnimation moveClip, RenderAnimat
 void GameplayPresentation::resetEntities(const GameState& state)
 {
     player_ = {};
-    setImmediatePosition(player_.motion, entityRenderTarget(state.player, state.playerDead));
+    setImmediatePosition(player_.motion, playerRenderTarget(state.player, state.playerDead));
     player_.facingQuarterTurns = facingQuarterTurns(MoveDirection::Down);
 
     movables_.clear();
@@ -99,7 +108,7 @@ void GameplayPresentation::resetEntities(const GameState& state)
     for (std::size_t i = 0; i < state.movables.size(); ++i) {
         setImmediatePosition(
             movables_[i],
-            entityRenderTarget(state.movables[i].cell, state.movables[i].fallen));
+            movableRenderTarget(state.movables[i].cell, state.movables[i].fallen));
     }
 }
 
@@ -156,9 +165,17 @@ void GameplayPresentation::beginAction(const GameplaySession::Action& action)
     if (action.facingDirection) {
         player_.facingQuarterTurns = facingQuarterTurns(*action.facingDirection);
     }
+    if (!action.before.playerDead && action.after.playerDead) {
+        player_.deathTransitionPlaying = true;
+        player_.clipTimeSeconds = 0.0f;
+        player_.clipPlaybackRate = 1.0f;
+    } else if (action.before.playerDead && !action.after.playerDead) {
+        player_.deathTransitionPlaying = false;
+        player_.clipTimeSeconds = 0.0f;
+    }
     beginMotion(
         player_.motion,
-        entityRenderTarget(action.after.player, action.after.playerDead));
+        playerRenderTarget(action.after.player, action.after.playerDead));
     if (player_.motion.moving) {
         player_.movingClip =
             action.playerPushing ? playerPushClip_ : playerMoveClip_;
@@ -172,7 +189,7 @@ void GameplayPresentation::beginAction(const GameplaySession::Action& action)
     for (std::size_t i = 0; i < movableCount && i < movables_.size(); ++i) {
         beginMotion(
             movables_[i],
-            entityRenderTarget(action.after.movables[i].cell, action.after.movables[i].fallen));
+            movableRenderTarget(action.after.movables[i].cell, action.after.movables[i].fallen));
     }
 }
 
@@ -187,13 +204,13 @@ void GameplayPresentation::syncToGameState(const GameState& state)
     if (!player_.motion.moving) {
         setImmediatePosition(
             player_.motion,
-            entityRenderTarget(state.player, state.playerDead));
+            playerRenderTarget(state.player, state.playerDead));
     }
     for (std::size_t i = 0; i < movables_.size() && i < state.movables.size(); ++i) {
         if (!movables_[i].moving) {
             setImmediatePosition(
                 movables_[i],
-                entityRenderTarget(state.movables[i].cell, state.movables[i].fallen));
+                movableRenderTarget(state.movables[i].cell, state.movables[i].fallen));
         }
     }
 }

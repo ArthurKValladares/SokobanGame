@@ -1,4 +1,5 @@
 #include "engine/AssetManifest.hpp"
+#include "engine/render/GltfMesh.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -79,7 +80,9 @@ constexpr const char* validManifest = R"json(
   "animations": [
     { "name": "Idle", "path": "anims/idle.glb", "clip": 8, "role": "player-idle" },
     { "name": "Move", "path": "anims/move.glb", "clip": 7, "role": "player-move" },
-    { "name": "Push", "path": "anims/push.glb", "clip": 1, "role": "player-push" }
+    { "name": "Push", "path": "anims/push.glb", "clip": 1, "role": "player-push" },
+    { "name": "Death", "path": "anims/death.glb", "clip": 3, "role": "player-death" },
+    { "name": "DeadIdle", "path": "anims/death.glb", "clip": 4, "role": "player-dead-idle" }
   ],
   "tiles": [
     { "tile": "Wall", "model": "Box", "scale": 1.25 },
@@ -114,7 +117,7 @@ void testValidManifest()
 
     check(manifest.textures().size() == 1, "one texture");
     check(manifest.models().size() == 3, "three models");
-    check(manifest.animations().size() == 3, "three animations");
+    check(manifest.animations().size() == 5, "five animations");
 
     const sokoban::RenderModel hero = manifest.modelIdByName("Hero");
     check(!hero.isCube(), "hero id valid");
@@ -135,6 +138,12 @@ void testValidManifest()
     check(manifest.playerIdleAnimation() == manifest.animationIdByName("Idle"), "idle role");
     check(manifest.playerMoveAnimation() == manifest.animationIdByName("Move"), "move role");
     check(manifest.playerPushAnimation() == manifest.animationIdByName("Push"), "push role");
+    check(manifest.playerDeathAnimation() == manifest.animationIdByName("Death"), "death role");
+    check(manifest.playerDeadIdleAnimation() == manifest.animationIdByName("DeadIdle"),
+        "dead idle role");
+    check(manifest.animation(manifest.playerDeathAnimation()).clip == 3, "death clip number");
+    check(manifest.animation(manifest.playerDeadIdleAnimation()).clip == 4,
+        "dead idle clip number");
     check(manifest.animation(manifest.playerIdleAnimation()).clip == 8, "idle clip");
     check(manifest.animation(manifest.playerIdleAnimation()).path == "anims/idle.glb",
         "animation path parsed");
@@ -236,6 +245,10 @@ void testDomainValidationFailures()
     }, "primitive texture index out of range");
     checkJsonThrows([](Json& json) { json["animations"].erase(2); },
         "missing player-push role");
+    checkJsonThrows([](Json& json) { json["animations"].erase(3); },
+        "missing player-death role");
+    checkJsonThrows([](Json& json) { json["animations"].erase(4); },
+        "missing player-dead-idle role");
 }
 
 void testRealManifestFile()
@@ -252,6 +265,27 @@ void testRealManifestFile()
     check(manifest.soundSet("stone-drag").size() == 4, "real manifest drags");
     check(manifest.musicForLevel(3) != nullptr, "real manifest level 3 music");
     check(!manifest.modelForTile(sokoban::TileType::Wall).isCube(), "real manifest wall model");
+
+    const AssetManifest::Animation& death =
+        manifest.animation(manifest.playerDeathAnimation());
+    const uint32_t deathIndex =
+        sokoban::animationIndexFromManifestClip(death.clip);
+    const sokoban::GltfAnimationClip deathClip =
+        sokoban::loadGltfAnimationClip(*root / death.path, deathIndex);
+    check(
+        deathClip.name == "Death_B",
+        "real manifest death role resolves to Death_B");
+    check(deathClip.durationSeconds > 0.0f, "real death clip has a duration");
+
+    const AssetManifest::Animation& deadIdle =
+        manifest.animation(manifest.playerDeadIdleAnimation());
+    const uint32_t deadIdleIndex =
+        sokoban::animationIndexFromManifestClip(deadIdle.clip);
+    const sokoban::GltfAnimationClip deadIdleClip =
+        sokoban::loadGltfAnimationClip(*root / deadIdle.path, deadIdleIndex);
+    check(
+        deadIdleClip.name == "Death_B_Pose",
+        "real manifest dead idle role resolves to Death_B_Pose");
 }
 
 } // namespace

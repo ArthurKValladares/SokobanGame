@@ -66,7 +66,14 @@ bool drawTextureReference(
 
 bool drawAnimationRole(std::string& role)
 {
-    constexpr std::array values { "", "player-idle", "player-move", "player-push" };
+    constexpr std::array values {
+        "",
+        "player-idle",
+        "player-move",
+        "player-push",
+        "player-death",
+        "player-dead-idle",
+    };
     constexpr std::array labels { "None", "Player Idle", "Player Move", "Player Push" };
     int selected = 0;
     for (std::size_t i = 1; i < values.size(); ++i) {

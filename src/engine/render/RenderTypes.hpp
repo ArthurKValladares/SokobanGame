@@ -99,6 +99,8 @@ struct RenderFrameData {
         bool isEditorPreview = false;
         RenderModel model = cubeModel;
         RenderAnimation animation = noAnimation;
+        RenderAnimation animationFallback = noAnimation;
+        bool animationLoops = true;
         float animationTimeSeconds = 0.0f;
         float beltScrollOffset = 0.0f;
         uint32_t modelRotationQuarterTurns = 0;

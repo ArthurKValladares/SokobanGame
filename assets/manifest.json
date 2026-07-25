@@ -67,6 +67,18 @@
       "path": "custom/Rig_Medium_Push.glb",
       "clip": 1,
       "role": "player-push"
+    },
+    {
+      "name": "RogueDeath",
+      "path": "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/Rig_Medium_General.glb",
+      "clip": 3,
+      "role": "player-death"
+    },
+    {
+      "name": "RogueDeadIdle",
+      "path": "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/Rig_Medium_General.glb",
+      "clip": 4,
+      "role": "player-dead-idle"
     }
   ],
   "tiles": [

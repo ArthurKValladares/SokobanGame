@@ -266,8 +266,7 @@ bool isUnfilledWater(const Level& level, const GameState& state, GridPosition3 p
     }
 
     return level.supportingTileAt(position) == TileType::Water &&
-        fallenMovableAt(state, position) == nullptr &&
-        !(state.playerDead && state.player == position);
+        fallenMovableAt(state, position) == nullptr;
 }
 
 bool isEndUnlocked(const Level& level, const GameState& state)

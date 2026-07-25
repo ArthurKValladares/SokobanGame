@@ -54,7 +54,9 @@ const AssetManifest& testManifest()
       "animations": [
         { "name": "Idle", "path": "a.glb", "role": "player-idle" },
         { "name": "Move", "path": "a.glb", "role": "player-move" },
-        { "name": "Push", "path": "a.glb", "role": "player-push" }
+        { "name": "Push", "path": "a.glb", "role": "player-push" },
+        { "name": "Death", "path": "a.glb", "role": "player-death" },
+        { "name": "DeadIdle", "path": "a.glb", "role": "player-dead-idle" }
       ],
       "tiles": [
         { "tile": "Wall", "model": "Bricks" },
@@ -154,7 +156,8 @@ void testPresentationResetClocksAndFallenTargets()
     CHECK(near(presentation.player().motion.renderPosition.y, 2.0f));
     CHECK(near(
         presentation.player().motion.renderPosition.z,
-        3.0f - config::waterDepthBelowGround));
+        3.0f - config::drownedPlayerDepthBelowGround));
+    CHECK(!presentation.player().deathTransitionPlaying);
     CHECK(presentation.movables().size() == 1);
     CHECK(near(
         presentation.movables()[0].renderPosition.z,
@@ -358,6 +361,83 @@ void testGameplayFrameBuildsProceduralWaterSurface()
     CHECK(filledFrame.waterSurfaces.empty());
 }
 
+void testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition()
+{
+    TEST("drownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition");
+    const Level level = Level::loadFromLayers({
+        { ".W#" },
+        { "C  " },
+    }, "drowned player frame");
+    const GameState before = stateWithPlayer(level.playerStart());
+    GameState drowned = before;
+    drowned.player = { 1, 0, 1 };
+    drowned.playerDead = true;
+
+    GameplayPresentation presentation;
+    presentation.setPlayerClips(
+        testManifest().playerMoveAnimation(),
+        testManifest().playerPushAnimation());
+    presentation.resetEntities(before);
+    const GameplaySession::Action action {
+        .before = before,
+        .after = drowned,
+        .durationSeconds = 1.0f,
+        .facingDirection = MoveDirection::Right,
+    };
+    presentation.beginAction(action);
+    presentation.advanceAnimations(1.0f);
+
+    CHECK(presentation.player().deathTransitionPlaying);
+    CHECK(near(presentation.player().motion.renderPosition.z, 0.0f));
+
+    const PresentationSettings settings;
+    const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = drowned,
+        .moving = false,
+        .activeAction = action,
+        .presentation = presentation,
+        .settings = settings,
+    });
+    CHECK(frame.waterSurfaces.size() == 1);
+
+    const auto player = std::ranges::find_if(
+        frame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.model == testManifest().playerModel();
+        });
+    CHECK(player != frame.tiles.end());
+    if (player != frame.tiles.end()) {
+        CHECK(near(player->baseElevation, 0.0f));
+        CHECK(player->animation == testManifest().playerDeathAnimation());
+        CHECK(player->animationFallback == testManifest().playerDeadIdleAnimation());
+        CHECK(!player->animationLoops);
+    }
+
+    presentation.resetEntities(drowned);
+    const RenderFrameData restoredFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = drowned,
+        .moving = false,
+        .activeAction = {},
+        .presentation = presentation,
+        .settings = settings,
+    });
+    const auto restoredPlayer = std::ranges::find_if(
+        restoredFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.model == testManifest().playerModel();
+        });
+    CHECK(restoredPlayer != restoredFrame.tiles.end());
+    if (restoredPlayer != restoredFrame.tiles.end()) {
+        CHECK(restoredPlayer->animation == testManifest().playerDeadIdleAnimation());
+        CHECK(restoredPlayer->animationFallback.isNone());
+        CHECK(restoredPlayer->animationLoops);
+    }
+}
+
 } // namespace
 
 int main()
@@ -367,6 +447,7 @@ int main()
     testPresentationInterpolatesActionsAndClips();
     testGameplayFrameUsesSettingsAndPresentation();
     testGameplayFrameBuildsProceduralWaterSurface();
+    testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition();
 
     if (failures == 0) {
         std::cout << "PresentationTests: "

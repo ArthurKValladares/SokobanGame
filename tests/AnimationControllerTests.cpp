@@ -33,16 +33,19 @@ constexpr RenderModel stoneModel { 2 };
 constexpr RenderAnimation idleClip { 1 };
 constexpr RenderAnimation moveClip { 2 };
 constexpr RenderAnimation pushClip { 3 };
+constexpr RenderAnimation deathClip { 4 };
+constexpr RenderAnimation deadIdleClip { 5 };
 
 bool near(float left, float right)
 {
     return std::abs(left - right) < 0.0001f;
 }
 
-GltfAnimationClip makeClip(std::string name)
+GltfAnimationClip makeClip(std::string name, float durationSeconds = 0.0f)
 {
     GltfAnimationClip clip;
     clip.name = std::move(name);
+    clip.durationSeconds = durationSeconds;
     clip.channels.emplace_back();
     return clip;
 }
@@ -65,6 +68,8 @@ AnimationController makeController(float fadeSeconds = 0.1f)
     controller.setClip(idleClip, makeClip("idle"));
     controller.setClip(moveClip, makeClip("movement"));
     controller.setClip(pushClip, makeClip("push"));
+    controller.setClip(deathClip, makeClip("death", 1.0f));
+    controller.setClip(deadIdleClip, makeClip("dead idle", 2.0f));
     return controller;
 }
 
@@ -163,6 +168,26 @@ void testPreviewOverridesAndThenReleasesGameplay()
     CHECK(gameplayRequest->toClip->name == "push");
 }
 
+void testNonLoopingAnimationFallsBackAtClipDuration()
+{
+    TEST("nonLoopingAnimationFallsBackAtClipDuration");
+    AnimationController controller = makeController(0.1f);
+    RenderFrameData frame = frameWithAnimation(deathClip, 0.99f);
+    frame.tiles.front().animationFallback = deadIdleClip;
+    frame.tiles.front().animationLoops = false;
+
+    const auto death = controller.update(frame);
+    CHECK(death.has_value());
+    CHECK(death->toClip->name == "death");
+
+    frame.tiles.front().animationTimeSeconds = 1.0f;
+    const auto deadIdle = controller.update(frame);
+    CHECK(deadIdle.has_value());
+    CHECK(!deadIdle->blended());
+    CHECK(deadIdle->toClip->name == "dead idle");
+    CHECK(near(deadIdle->toTimeSeconds, 1.0f));
+}
+
 void testClipValidationAndClear()
 {
     TEST("clipValidationAndClear");
@@ -191,6 +216,7 @@ int main()
     testCrossfadeProgressesAndCompletes();
     testReverseTimeStillAdvancesFade();
     testPreviewOverridesAndThenReleasesGameplay();
+    testNonLoopingAnimationFallsBackAtClipDuration();
     testClipValidationAndClear();
 
     if (failures == 0) {

@@ -83,10 +83,19 @@ std::optional<AnimationController::SkinningRequest> AnimationController::update(
 
     RenderAnimation requestedAnimation = noAnimation;
     float requestedTime = 0.0f;
+    bool resolvedNonLoopingFallback = false;
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
         if (tile.model == playerModel_ && !tile.animation.isNone()) {
             requestedAnimation = tile.animation;
             requestedTime = tile.animationTimeSeconds;
+            if (!tile.animationLoops &&
+                !tile.animationFallback.isNone() &&
+                hasClip(requestedAnimation) &&
+                hasClip(tile.animationFallback) &&
+                requestedTime >= clip(requestedAnimation).durationSeconds) {
+                requestedAnimation = tile.animationFallback;
+                resolvedNonLoopingFallback = true;
+            }
             break;
         }
     }
@@ -97,7 +106,13 @@ std::optional<AnimationController::SkinningRequest> AnimationController::update(
     const float timeDelta = activeAnimation_.isNone()
         ? 0.0f
         : requestedTime - activeAnimationTime_;
-    if (!(requestedAnimation == activeAnimation_) && !activeAnimation_.isNone()) {
+    if (resolvedNonLoopingFallback) {
+        // The fallback is authored as the terminal pose of the one-shot clip.
+        // A generic crossfade would sample the completed source at its exact
+        // duration, which looping samplers wrap back to the starting pose.
+        fadeFromAnimation_ = noAnimation;
+        fadeElapsed_ = 0.0f;
+    } else if (!(requestedAnimation == activeAnimation_) && !activeAnimation_.isNone()) {
         fadeFromAnimation_ = activeAnimation_;
         fadeFromTime_ = activeAnimationTime_;
         fadeElapsed_ = 0.0f;

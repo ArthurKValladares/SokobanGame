@@ -29,6 +29,7 @@ public:
         float clipTimeSeconds = 0.0f;
         float clipPlaybackRate = 1.0f;
         uint32_t facingQuarterTurns = 0;
+        bool deathTransitionPlaying = false;
     };
 
     // Ids come from the asset manifest; must be set before actions begin.
