@@ -111,6 +111,37 @@ vec2 shorelineWave(
     return clamp(vec2(nearFill, farBand), 0.0, 1.0);
 }
 
+vec2 shorelineCornerWave(
+    vec2 localPosition,
+    vec2 cornerPosition,
+    vec2 cornerWorldPosition,
+    float time,
+    float firstPhase,
+    float secondPhase,
+    float nearDistance,
+    float farDistance,
+    float farThickness)
+{
+    float distanceToCorner = length(localPosition - cornerPosition);
+    return max(
+        shorelineWave(
+            distanceToCorner,
+            cornerWorldPosition.x,
+            time,
+            firstPhase,
+            nearDistance,
+            farDistance,
+            farThickness),
+        shorelineWave(
+            distanceToCorner,
+            cornerWorldPosition.y,
+            time,
+            secondPhase,
+            nearDistance,
+            farDistance,
+            farThickness));
+}
+
 vec2 shorelineFoam(
     uint shorelineMask,
     vec2 localPosition,
@@ -122,6 +153,7 @@ vec2 shorelineFoam(
     float farThickness)
 {
     vec2 foam = vec2(0.0);
+    vec2 worldOrigin = worldPosition - localPosition;
     if ((shorelineMask & 1u) != 0u) {
         foam = max(
             foam,
@@ -165,6 +197,62 @@ vec2 shorelineFoam(
                 localPosition.x,
                 worldPosition.y,
                 time,
+                5.1,
+                nearDistance,
+                farDistance,
+                farThickness));
+    }
+    if ((shorelineMask & 16u) != 0u) {
+        foam = max(
+            foam,
+            shorelineCornerWave(
+                localPosition,
+                vec2(0.0),
+                worldOrigin,
+                time,
+                0.0,
+                5.1,
+                nearDistance,
+                farDistance,
+                farThickness));
+    }
+    if ((shorelineMask & 32u) != 0u) {
+        foam = max(
+            foam,
+            shorelineCornerWave(
+                localPosition,
+                vec2(surfaceSize.x, 0.0),
+                worldOrigin + vec2(surfaceSize.x, 0.0),
+                time,
+                0.0,
+                1.7,
+                nearDistance,
+                farDistance,
+                farThickness));
+    }
+    if ((shorelineMask & 64u) != 0u) {
+        foam = max(
+            foam,
+            shorelineCornerWave(
+                localPosition,
+                surfaceSize,
+                worldOrigin + surfaceSize,
+                time,
+                3.4,
+                1.7,
+                nearDistance,
+                farDistance,
+                farThickness));
+    }
+    if ((shorelineMask & 128u) != 0u) {
+        foam = max(
+            foam,
+            shorelineCornerWave(
+                localPosition,
+                vec2(0.0, surfaceSize.y),
+                worldOrigin + vec2(0.0, surfaceSize.y),
+                time,
+                3.4,
                 5.1,
                 nearDistance,
                 farDistance,

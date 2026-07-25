@@ -332,7 +332,7 @@ void appendWaterSurface(
 
 uint32_t shorelineMaskForWaterCell(
     GridPosition3 cell,
-    const auto& tileAt)
+    const auto& isShorelineAt)
 {
     struct Neighbor {
         GridPosition offset;
@@ -346,14 +346,61 @@ uint32_t shorelineMaskForWaterCell(
     };
 
     uint32_t mask = 0;
+    std::array<bool, 4> shorelineEdges {};
+    std::size_t neighborIndex = 0;
     for (const Neighbor& neighbor : neighbors) {
-        const TileType tile = tileAt({
+        const bool shoreline = isShorelineAt({
             cell.x + neighbor.offset.x,
             cell.y + neighbor.offset.y,
             cell.z,
         });
-        if (tileTypeIsSolidBlock(tile)) {
+        shorelineEdges[neighborIndex++] = shoreline;
+        if (shoreline) {
             mask |= waterShorelineBit(neighbor.edge);
+        }
+    }
+
+    struct Corner {
+        GridPosition offset;
+        std::size_t firstEdge;
+        std::size_t secondEdge;
+        WaterShorelineCorner corner;
+    };
+    constexpr std::array<Corner, 4> corners {
+        Corner {
+            { -1, -1 },
+            3,
+            0,
+            WaterShorelineCorner::NegativeXNegativeY,
+        },
+        Corner {
+            { 1, -1 },
+            1,
+            0,
+            WaterShorelineCorner::PositiveXNegativeY,
+        },
+        Corner {
+            { 1, 1 },
+            1,
+            2,
+            WaterShorelineCorner::PositiveXPositiveY,
+        },
+        Corner {
+            { -1, 1 },
+            3,
+            2,
+            WaterShorelineCorner::NegativeXPositiveY,
+        },
+    };
+    for (const Corner& corner : corners) {
+        if (!shorelineEdges[corner.firstEdge] &&
+            !shorelineEdges[corner.secondEdge] &&
+            isShorelineAt({
+                cell.x + corner.offset.x,
+                cell.y + corner.offset.y,
+                cell.z,
+            })) {
+            mask |= waterShorelineBit(corner.corner);
         }
     }
     return mask;
@@ -502,6 +549,23 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             static_cast<uint32_t>(position.y),
             static_cast<uint32_t>(position.z));
     };
+    auto gameplayShorelineAt = [&](GridPosition3 position) {
+        if (!input.level.inBounds(position)) {
+            return false;
+        }
+        const TileType tile = levelTileAt(position);
+        if (tileTypeIsSolidBlock(tile)) {
+            return true;
+        }
+        if (tile != TileType::Water) {
+            return false;
+        }
+        return !rules::isUnfilledWater(input.level, state, {
+            position.x,
+            position.y,
+            position.z + 1,
+        });
+    };
     for (uint32_t z = 0; z < input.level.depth(); ++z) {
         for (uint32_t y = 0; y < input.level.height(); ++y) {
             for (uint32_t x = 0; x < input.level.width(); ++x) {
@@ -523,7 +587,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
                         false,
                         shorelineMaskForWaterCell(
                             waterCell,
-                            levelTileAt));
+                            gameplayShorelineAt));
                 }
             }
         }
@@ -698,7 +762,10 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
                     preview,
                     shorelineMaskForWaterCell(
                         waterCell,
-                        documentTileAtPosition));
+                        [&](GridPosition3 position) {
+                            return tileTypeIsSolidBlock(
+                                documentTileAtPosition(position));
+                        }));
                 return;
             }
             if (tile == TileType::Ladder) {

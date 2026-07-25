@@ -22,10 +22,23 @@ enum class WaterShorelineEdge : uint32_t {
     NegativeX = 1U << 3,
 };
 
+enum class WaterShorelineCorner : uint32_t {
+    NegativeXNegativeY = 1U << 4,
+    PositiveXNegativeY = 1U << 5,
+    PositiveXPositiveY = 1U << 6,
+    NegativeXPositiveY = 1U << 7,
+};
+
 [[nodiscard]] constexpr uint32_t waterShorelineBit(
     WaterShorelineEdge edge)
 {
     return static_cast<uint32_t>(edge);
+}
+
+[[nodiscard]] constexpr uint32_t waterShorelineBit(
+    WaterShorelineCorner corner)
+{
+    return static_cast<uint32_t>(corner);
 }
 
 // Runtime model identity: 0 is the built-in untextured unit cube, and any

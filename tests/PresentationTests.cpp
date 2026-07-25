@@ -361,6 +361,167 @@ void testGameplayFrameBuildsProceduralWaterSurface()
     CHECK(filledFrame.waterSurfaces.empty());
 }
 
+void testFilledWaterUpdatesEdgesAndRoundedCornerCaps()
+{
+    TEST("filledWaterUpdatesEdgesAndRoundedCornerCaps");
+    const Level level = Level::loadFromLayers({
+        {
+            "WWWW..",
+            "WWWW..",
+            "WWWW..",
+        },
+        {
+            "     C",
+            "      ",
+            "      ",
+        },
+    }, "dynamic water shoreline");
+    GameState state = stateWithPlayer(level.playerStart());
+
+    GameplayPresentation presentation;
+    presentation.setPlayerClips(
+        testManifest().playerMoveAnimation(),
+        testManifest().playerPushAnimation());
+    presentation.resetEntities(state);
+    const PresentationSettings settings;
+
+    auto buildFrame = [&] {
+        return RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(),
+            .level = level,
+            .state = state,
+            .moving = false,
+            .activeAction = {},
+            .presentation = presentation,
+            .settings = settings,
+        });
+    };
+    const RenderFrameData openFrame = buildFrame();
+    CHECK(openFrame.waterSurfaces.size() == 12);
+
+    state.movables.push_back({
+        .type = TileType::Rock,
+        .cell = { 1, 1, 1 },
+        .fallen = true,
+    });
+    presentation.resetEntities(state);
+    const RenderFrameData filledFrame = buildFrame();
+    CHECK(filledFrame.waterSurfaces.size() == 11);
+
+    auto waterAt = [&](int x, int y) {
+        return std::ranges::find_if(
+            filledFrame.waterSurfaces,
+            [&](const RenderFrameData::WaterSurface& water) {
+                return water.cell == GridPosition3 { x, y, 0 };
+            });
+    };
+    auto hasEdge = [](const RenderFrameData::WaterSurface& water,
+                       WaterShorelineEdge edge) {
+        return (water.shorelineMask & waterShorelineBit(edge)) != 0;
+    };
+    auto hasCorner = [](const RenderFrameData::WaterSurface& water,
+                         WaterShorelineCorner corner) {
+        return (water.shorelineMask & waterShorelineBit(corner)) != 0;
+    };
+
+    const auto north = waterAt(1, 0);
+    const auto east = waterAt(2, 1);
+    const auto south = waterAt(1, 2);
+    const auto west = waterAt(0, 1);
+    CHECK(north != filledFrame.waterSurfaces.end());
+    CHECK(east != filledFrame.waterSurfaces.end());
+    CHECK(south != filledFrame.waterSurfaces.end());
+    CHECK(west != filledFrame.waterSurfaces.end());
+    if (north != filledFrame.waterSurfaces.end()) {
+        CHECK(hasEdge(*north, WaterShorelineEdge::PositiveY));
+    }
+    if (east != filledFrame.waterSurfaces.end()) {
+        CHECK(hasEdge(*east, WaterShorelineEdge::NegativeX));
+    }
+    if (south != filledFrame.waterSurfaces.end()) {
+        CHECK(hasEdge(*south, WaterShorelineEdge::NegativeY));
+    }
+    if (west != filledFrame.waterSurfaces.end()) {
+        CHECK(hasEdge(*west, WaterShorelineEdge::PositiveX));
+    }
+
+    const auto northWest = waterAt(0, 0);
+    const auto northEast = waterAt(2, 0);
+    const auto southEast = waterAt(2, 2);
+    const auto southWest = waterAt(0, 2);
+    CHECK(northWest != filledFrame.waterSurfaces.end());
+    CHECK(northEast != filledFrame.waterSurfaces.end());
+    CHECK(southEast != filledFrame.waterSurfaces.end());
+    CHECK(southWest != filledFrame.waterSurfaces.end());
+    if (northWest != filledFrame.waterSurfaces.end()) {
+        CHECK(hasCorner(
+            *northWest,
+            WaterShorelineCorner::PositiveXPositiveY));
+    }
+    if (northEast != filledFrame.waterSurfaces.end()) {
+        CHECK(hasCorner(
+            *northEast,
+            WaterShorelineCorner::NegativeXPositiveY));
+    }
+    if (southEast != filledFrame.waterSurfaces.end()) {
+        CHECK(hasCorner(
+            *southEast,
+            WaterShorelineCorner::NegativeXNegativeY));
+    }
+    if (southWest != filledFrame.waterSurfaces.end()) {
+        CHECK(hasCorner(
+            *southWest,
+            WaterShorelineCorner::PositiveXNegativeY));
+    }
+
+    state.movables.push_back({
+        .type = TileType::Ice,
+        .cell = { 2, 1, 1 },
+        .fallen = true,
+    });
+    presentation.resetEntities(state);
+    const RenderFrameData joinedFrame = buildFrame();
+    CHECK(joinedFrame.waterSurfaces.size() == 10);
+
+    auto joinedWaterAt = [&](int x, int y) {
+        return std::ranges::find_if(
+            joinedFrame.waterSurfaces,
+            [&](const RenderFrameData::WaterSurface& water) {
+                return water.cell == GridPosition3 { x, y, 0 };
+            });
+    };
+    const auto aboveFirst = joinedWaterAt(1, 0);
+    const auto aboveSecond = joinedWaterAt(2, 0);
+    const auto outerNorthWest = joinedWaterAt(0, 0);
+    const auto outerNorthEast = joinedWaterAt(3, 0);
+    CHECK(aboveFirst != joinedFrame.waterSurfaces.end());
+    CHECK(aboveSecond != joinedFrame.waterSurfaces.end());
+    CHECK(outerNorthWest != joinedFrame.waterSurfaces.end());
+    CHECK(outerNorthEast != joinedFrame.waterSurfaces.end());
+    if (aboveFirst != joinedFrame.waterSurfaces.end()) {
+        CHECK(hasEdge(*aboveFirst, WaterShorelineEdge::PositiveY));
+        CHECK(!hasCorner(
+            *aboveFirst,
+            WaterShorelineCorner::PositiveXPositiveY));
+    }
+    if (aboveSecond != joinedFrame.waterSurfaces.end()) {
+        CHECK(hasEdge(*aboveSecond, WaterShorelineEdge::PositiveY));
+        CHECK(!hasCorner(
+            *aboveSecond,
+            WaterShorelineCorner::NegativeXPositiveY));
+    }
+    if (outerNorthWest != joinedFrame.waterSurfaces.end()) {
+        CHECK(hasCorner(
+            *outerNorthWest,
+            WaterShorelineCorner::PositiveXPositiveY));
+    }
+    if (outerNorthEast != joinedFrame.waterSurfaces.end()) {
+        CHECK(hasCorner(
+            *outerNorthEast,
+            WaterShorelineCorner::NegativeXPositiveY));
+    }
+}
+
 void testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition()
 {
     TEST("drownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition");
@@ -447,6 +608,7 @@ int main()
     testPresentationInterpolatesActionsAndClips();
     testGameplayFrameUsesSettingsAndPresentation();
     testGameplayFrameBuildsProceduralWaterSurface();
+    testFilledWaterUpdatesEdgesAndRoundedCornerCaps();
     testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition();
 
     if (failures == 0) {

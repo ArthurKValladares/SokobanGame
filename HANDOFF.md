@@ -883,8 +883,12 @@ Major recent additions and fixes:
   warping adds small-scale noise while keeping every ripple continuous. A
   second evaluation of the same field is rotated 90 degrees and phase-offset,
   then composited as a dark-blue ripple layer beneath the pale layer. Water
-  surfaces carry a four-edge solid-neighbor mask; the shader uses it to add two
-  continuous animated foam levels where water meets Ground or Wall. The
+  surfaces carry dynamic four-edge and four-corner shoreline masks; gameplay
+  recomputes them from static Ground/Wall cells and water currently filled by
+  fallen rocks or ice. The shader uses them to add two continuous animated foam
+  levels around the resulting shoreline island. Diagonal-only contact emits a
+  rounded quarter-circle cap that shares crest phases with its adjoining edge
+  directions; adjacent filled cells suppress caps at their internal seam. The
   configurable near level fills solid white from its moving crest to the tile
   boundary, while a configurable farther band can overlap it and has separate
   configurable opacity and thickness. Filled cells omit the plane, shoreline
