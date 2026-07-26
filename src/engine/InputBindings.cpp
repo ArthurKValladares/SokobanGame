@@ -98,11 +98,11 @@ InputBindings defaultInputBindings()
         GamepadAxisBinding { "leftx", AxisDirection::Positive },
     };
     bindings.forAction(InputAction::Mirror) = {
-        KeyboardBinding { "Z" },
+        KeyboardBinding { "F" },
         GamepadButtonBinding { "east" },
     };
     bindings.forAction(InputAction::Undo) = {
-        KeyboardBinding { "X" },
+        KeyboardBinding { "Z" },
         GamepadButtonBinding { "west" },
     };
     bindings.forAction(InputAction::Restart) = {

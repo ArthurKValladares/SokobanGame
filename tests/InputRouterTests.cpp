@@ -78,7 +78,7 @@ void testModalFrameRouting()
     sokoban::InputState input(false);
     input.beginFrame();
     pressKey(router, input, SDL_SCANCODE_W);
-    pressKey(router, input, SDL_SCANCODE_Z);
+    pressKey(router, input, SDL_SCANCODE_F);
     pressKey(router, input, SDL_SCANCODE_RETURN);
 
     sokoban::InputRouter::Frame frame = router.routeFrame(

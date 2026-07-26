@@ -444,12 +444,47 @@ void testNormalizationAndMigration()
     check(migratedFormat9.sourceFormat == 9, "format 9 source reported");
     migratedKeyboard = keyboardBinding(
         migratedFormat9.profile.settings.input, sokoban::InputAction::Mirror);
-    check(migratedKeyboard && migratedKeyboard->scancode == "Z",
+    check(migratedKeyboard && migratedKeyboard->scancode == "F",
         "format 9 receives mirror default");
     migratedKeyboard = keyboardBinding(
         migratedFormat9.profile.settings.input, sokoban::InputAction::Undo);
-    check(migratedKeyboard && migratedKeyboard->scancode == "X",
-        "format 9 old default undo moves to X");
+    check(migratedKeyboard && migratedKeyboard->scancode == "Z",
+        "format 9 keeps the original undo default");
+
+    nlohmann::json format10Root = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    format10Root["format"] = 10;
+    format10Root["settings"]["input"]["mirror"] = nlohmann::json::array({
+        nlohmann::json { { "type", "keyboard" }, { "control", "Z" } },
+        nlohmann::json { { "type", "gamepadButton" }, { "control", "east" } },
+    });
+    format10Root["settings"]["input"]["undo"] = nlohmann::json::array({
+        nlohmann::json { { "type", "keyboard" }, { "control", "X" } },
+        nlohmann::json { { "type", "gamepadButton" }, { "control", "west" } },
+    });
+    const sokoban::DecodedPlayerProfile migratedFormat10 =
+        sokoban::decodePlayerProfile(format10Root.dump());
+    check(migratedFormat10.sourceFormat == 10, "format 10 source reported");
+    migratedKeyboard = keyboardBinding(
+        migratedFormat10.profile.settings.input, sokoban::InputAction::Mirror);
+    check(migratedKeyboard && migratedKeyboard->scancode == "F",
+        "format 10 default mirror moves to F");
+    migratedKeyboard = keyboardBinding(
+        migratedFormat10.profile.settings.input, sokoban::InputAction::Undo);
+    check(migratedKeyboard && migratedKeyboard->scancode == "Z",
+        "format 10 default undo returns to Z");
+
+    format10Root["settings"]["input"]["mirror"] = nlohmann::json::array({
+        nlohmann::json { { "type", "keyboard" }, { "control", "G" } },
+        nlohmann::json { { "type", "gamepadButton" }, { "control", "east" } },
+    });
+    const sokoban::DecodedPlayerProfile migratedCustomFormat10 =
+        sokoban::decodePlayerProfile(format10Root.dump());
+    migratedKeyboard = keyboardBinding(
+        migratedCustomFormat10.profile.settings.input,
+        sokoban::InputAction::Mirror);
+    check(migratedKeyboard && migratedKeyboard->scancode == "G",
+        "format 10 custom mirror binding is preserved");
 
     checkThrows([] {
         (void)sokoban::decodePlayerProfile(R"json({ "format": 99 })json");

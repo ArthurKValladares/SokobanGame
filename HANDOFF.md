@@ -1260,6 +1260,10 @@ UI:
 
 Engineering:
 
+- Default keyboard bindings are `Z` for Undo and `F` for the Mirror action.
+  Player-profile format 11 migrates only the exact accidental format-10
+  defaults (`Mirror=Z`, `Undo=X`) and preserves customized controls.
+
 - Gameplay rules, gameplay/campaign orchestration, input routing, settings
   policy, presentation, render-frame construction, and editor document behavior
   live in focused `Rules`, `GameplaySession`, `GameplayLoop`, `CampaignSession`,

@@ -17,14 +17,15 @@
 // itself lives in PlayerProfile.cpp.
 //
 // Migration strategy: old formats are upgraded by forward JSON patches
-// (migrate1to2 .. migrate9to10) applied in sequence, then a single strict
-// format-10 parse validates the fully migrated document. Patches only move
+// (migrate1to2 .. migrate10to11) applied in sequence, then a single strict
+// current-format parse validates the fully migrated document. Patches only move
 // fields and add defaults; unknown keys survive them and are rejected by the
 // final parse, so schema strictness is preserved without every historical
 // format keeping its own parser.
 //
 // Format 9 introduced optional top-level "progress" and "settings" sections.
-// Format 10 adds Mirror bindings and migrates the old default Undo key.
+// Format 10 added Mirror bindings and temporarily moved the default Undo key.
+// Format 11 restores Undo to Z and moves the default Mirror action to F.
 // Save-slot files carry only progress and the shared settings.json
 // carries only settings (ProfileSections selects the shape at serialize
 // time); pre-split combined files simply contain both.
@@ -774,6 +775,79 @@ void migrate9to10(Json& root)
     input["mirror"] = mirrorDefaults;
 }
 
+void migrate10to11(Json& root)
+{
+    if (!root.contains("settings")) {
+        return;
+    }
+    Json& settings = root["settings"];
+    if (!settings.is_object() || !settings.contains("input") ||
+        !settings["input"].is_object()) {
+        return;
+    }
+
+    Json& input = settings["input"];
+    const Json oldDefaultMirror = Json::array({
+        Json { { "type", "keyboard" }, { "control", "Z" } },
+        Json { { "type", "gamepadButton" }, { "control", "east" } },
+    });
+    const Json oldDefaultUndo = Json::array({
+        Json { { "type", "keyboard" }, { "control", "X" } },
+        Json { { "type", "gamepadButton" }, { "control", "west" } },
+    });
+    const bool migrateMirror =
+        input.contains("mirror") && input["mirror"] == oldDefaultMirror;
+    const bool migrateUndo =
+        input.contains("undo") && input["undo"] == oldDefaultUndo;
+    if (!migrateMirror && !migrateUndo) {
+        return;
+    }
+
+    InputBindings bindings =
+        inputBindingsFromJson(input, "settings.input");
+    if (migrateMirror) {
+        bindings.forAction(InputAction::Mirror) = {
+            GamepadButtonBinding { "east" },
+        };
+    }
+    if (migrateUndo) {
+        bindings.forAction(InputAction::Undo) = {
+            GamepadButtonBinding { "west" },
+        };
+    }
+
+    auto bindingUsedOutside = [&bindings](
+                                  InputAction action,
+                                  const InputBinding& candidate) {
+        for (std::size_t i = 0; i < inputActionCount; ++i) {
+            if (static_cast<InputAction>(i) == action) {
+                continue;
+            }
+            const auto& actionBindings = bindings.actions[i];
+            if (std::ranges::find(actionBindings, candidate) !=
+                actionBindings.end()) {
+                return true;
+            }
+        }
+        return false;
+    };
+    if (migrateMirror) {
+        const InputBinding key = KeyboardBinding { "F" };
+        if (!bindingUsedOutside(InputAction::Mirror, key)) {
+            bindings.forAction(InputAction::Mirror).insert(
+                bindings.forAction(InputAction::Mirror).begin(), key);
+        }
+    }
+    if (migrateUndo) {
+        const InputBinding key = KeyboardBinding { "Z" };
+        if (!bindingUsedOutside(InputAction::Undo, key)) {
+            bindings.forAction(InputAction::Undo).insert(
+                bindings.forAction(InputAction::Undo).begin(), key);
+        }
+    }
+    input = inputBindingsToJson(bindings);
+}
+
 // ---- Strict current-format parse -------------------------------------------
 
 void parseProgressSection(PlayerProfile& profile, const Json& progress)
@@ -1043,6 +1117,7 @@ DecodedPlayerProfile decodePlayerProfile(std::string_view text)
         migrate7to8,
         migrate8to9,
         migrate9to10,
+        migrate10to11,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 
