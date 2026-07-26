@@ -304,7 +304,7 @@ void appendWaterEdgeFaces(
 }
 
 template <typename TileAt>
-std::optional<RenderFrameData::CameraExtent> cameraExtentForTiles(
+std::optional<RenderFrameData::CameraExtent> gameplayExtentForTiles(
     uint32_t width,
     uint32_t height,
     uint32_t depth,
@@ -344,7 +344,7 @@ void includeCameraCell(
 }
 
 template <typename TileAt>
-std::optional<RenderFrameData::CameraExtent> cameraExtentForTiles(
+std::optional<RenderFrameData::CameraExtent> gameplayExtentForTiles(
     uint32_t width,
     uint32_t height,
     uint32_t depth,
@@ -367,6 +367,20 @@ std::optional<RenderFrameData::CameraExtent> cameraExtentForTiles(
         }
     }
     return extent;
+}
+
+RenderFrameData::WaterGridBounds waterGridBoundsFor(
+    const std::optional<RenderFrameData::CameraExtent>& gameplayExtent)
+{
+    if (!gameplayExtent) {
+        return {};
+    }
+    return {
+        .originX = gameplayExtent->originX,
+        .originY = gameplayExtent->originY,
+        .width = gameplayExtent->width,
+        .height = gameplayExtent->height,
+    };
 }
 
 struct MirrorRenderSegment {
@@ -708,14 +722,17 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     frame.levelWidth = input.level.width();
     frame.levelHeight = input.level.height();
     frame.levelDepth = input.level.depth();
-    std::optional<RenderFrameData::CameraExtent> cameraExtent =
-        cameraExtentForTiles(
+    const std::optional<RenderFrameData::CameraExtent> gameplayExtent =
+        gameplayExtentForTiles(
         input.level.width(),
         input.level.height(),
         input.level.depth(),
         [&](uint32_t x, uint32_t y, uint32_t z) {
             return input.level.tileAt(x, y, z);
         });
+    frame.waterGridBounds = waterGridBoundsFor(gameplayExtent);
+    std::optional<RenderFrameData::CameraExtent> cameraExtent =
+        gameplayExtent;
     includeCameraCell(cameraExtent, state.player);
     for (const GameState::Movable& movable : state.movables) {
         includeCameraCell(cameraExtent, movable.cell);
@@ -1258,13 +1275,17 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
         }
         return authored;
     };
-    frame.cameraExtent = cameraExtentForTiles(
+    const std::optional<RenderFrameData::CameraExtent> gameplayExtent =
+        gameplayExtentForTiles(
         frame.levelWidth,
         frame.levelHeight,
         layerCount,
         [&](uint32_t x, uint32_t y, uint32_t z) {
             return documentTileAt(x, y, z);
-        }).value_or(RenderFrameData::CameraExtent {});
+        });
+    frame.cameraExtent = gameplayExtent.value_or(
+        RenderFrameData::CameraExtent {});
+    frame.waterGridBounds = waterGridBoundsFor(gameplayExtent);
     auto documentTileAtPosition = [&](GridPosition3 position) {
         if (position.x < 0 || position.y < 0 || position.z < 0) {
             return TileType::Air;

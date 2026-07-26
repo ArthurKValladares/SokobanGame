@@ -389,6 +389,10 @@ void testDecorativeTileRendersWithoutChangingCameraExtent()
         CHECK(frame.cameraExtent->height == 1);
         CHECK(frame.cameraExtent->depth == 2);
     }
+    CHECK(frame.waterGridBounds.originX == 0);
+    CHECK(frame.waterGridBounds.originY == 0);
+    CHECK(frame.waterGridBounds.width == 3);
+    CHECK(frame.waterGridBounds.height == 1);
     const auto decorative = std::ranges::find_if(
         frame.tiles,
         [](const RenderFrameData::Tile& tile) {
@@ -456,6 +460,10 @@ void testEditorFrameProvidesInvisibleExpansionBorderAndPreview()
         CHECK(expandedFrame.cameraExtent->width == 2);
         CHECK(expandedFrame.cameraExtent->height == 2);
     }
+    CHECK(expandedFrame.waterGridBounds.originX == 1);
+    CHECK(expandedFrame.waterGridBounds.originY == 0);
+    CHECK(expandedFrame.waterGridBounds.width == 2);
+    CHECK(expandedFrame.waterGridBounds.height == 2);
     const auto expandedDecoration = std::ranges::find_if(
         expandedFrame.tiles,
         [](const RenderFrameData::Tile& tile) {

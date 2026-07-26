@@ -92,6 +92,13 @@ struct RenderFrameData {
         uint32_t depth = 1;
     };
 
+    struct WaterGridBounds {
+        int32_t originX = 0;
+        int32_t originY = 0;
+        uint32_t width = 0;
+        uint32_t height = 0;
+    };
+
     struct DirectionalLight {
         Vec3 direction { 0.0f, 0.0f, 1.0f };
         Vec3 color { 1.0f, 1.0f, 1.0f };
@@ -189,6 +196,7 @@ struct RenderFrameData {
     uint32_t levelDepth = 1;
     uint32_t gridPickBorder = 0;
     std::optional<CameraExtent> cameraExtent;
+    WaterGridBounds waterGridBounds;
     Vec2 playerPosition {};
     std::vector<Tile> tiles;
     std::vector<WaterSurface> waterSurfaces;

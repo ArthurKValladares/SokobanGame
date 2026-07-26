@@ -134,11 +134,16 @@ float waterTileBorderMask(
 
 float waterTileBorderBoardFade(
     vec2 worldPosition,
+    vec2 boardOrigin,
     vec2 boardSize,
     float fadeDistance)
 {
+    if (any(lessThanEqual(boardSize, vec2(0.0)))) {
+        return 0.0;
+    }
+    vec2 boardPosition = worldPosition - boardOrigin;
     vec2 distanceOutside = max(
-        max(-worldPosition, worldPosition - boardSize),
+        max(-boardPosition, boardPosition - boardSize),
         vec2(0.0));
     return 1.0 - smoothstep(
         0.0,
@@ -586,8 +591,9 @@ void main()
         pc.shadowVertices[1].w);
     tileBorder *= waterTileBorderBoardFade(
         worldPosition,
-        max(pc.shadowVertices[2].xy, vec2(0.0)),
-        pc.shadowVertices[2].z);
+        pc.shadowVertices[2].xy,
+        max(pc.shadowVertices[2].zw, vec2(0.0)),
+        max(pc.normalAndAmbientRed.y, 0.0));
     finalWaterColor = mix(
         finalWaterColor,
         pc.shadowVertices[0].rgb,

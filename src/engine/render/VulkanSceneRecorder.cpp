@@ -681,8 +681,16 @@ private:
                     face.worldOrigin,
                     face.gridSize,
                     Vec2 {
-                        static_cast<float>(frameData.levelWidth),
-                        static_cast<float>(frameData.levelHeight),
+                        static_cast<float>(
+                            frameData.waterGridBounds.originX),
+                        static_cast<float>(
+                            frameData.waterGridBounds.originY),
+                    },
+                    Vec2 {
+                        static_cast<float>(
+                            frameData.waterGridBounds.width),
+                        static_cast<float>(
+                            frameData.waterGridBounds.height),
                     },
                     frameData.waterAnimationTimeSeconds,
                     face.shorelineMask,
@@ -1097,6 +1105,7 @@ private:
         Vec4 color,
         Vec2 worldOrigin,
         Vec2 size,
+        Vec2 boardOrigin,
         Vec2 boardSize,
         float animationTimeSeconds,
         uint32_t shorelineMask,
@@ -1151,10 +1160,10 @@ private:
                     config::waterTileBorderSpeed,
                 },
                 Vec4 {
+                    boardOrigin.x,
+                    boardOrigin.y,
                     boardSize.x,
                     boardSize.y,
-                    config::waterTileBorderExteriorFadeDistance,
-                    0.0f,
                 },
                 Vec4 {
                     config::waterPrimaryRippleOpacity,
@@ -1166,7 +1175,7 @@ private:
             .color = color,
             .normalAndAmbientRed = {
                 config::waterShorelineFarThickness,
-                0.0f,
+                config::waterTileBorderExteriorFadeDistance,
                 config::waterRippleCrestHalfWidth,
                 config::waterRippleHaloWidth,
             },

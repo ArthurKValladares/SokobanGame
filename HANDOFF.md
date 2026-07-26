@@ -1268,6 +1268,12 @@ Engineering:
   camera extent, and decorative tiles are excluded from both that extent and
   projected fit points, so scenery outside or above the playable footprint
   cannot change camera target, distance, or zoom.
+- Render frames also carry stable, origin-aware water-grid bounds calculated
+  from authored gameplay-relevant tiles. The water shader uses these bounds
+  instead of the serialized level dimensions, so air and decorative scenery
+  cannot extend the tile-border visualization. Keep these bounds separate from
+  the camera extent after dynamic players/movables are included; movement must
+  not make the water grid grow or shift.
 - Editor frames provide a symmetric, invisible one-cell picking border around
   the document. Painting there automatically grows every layer; north/west
   growth prepends rows or columns and shifts all authored tiles together,
