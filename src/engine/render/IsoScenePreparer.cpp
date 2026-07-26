@@ -223,9 +223,12 @@ IsoRenderLayout calculateIsoLayout(
     layout.fitScale =
         config::cameraFitScale *
         std::min(1.0f / sceneSize.x, 1.0f / sceneSize.y);
-    layout.nearestDepth = nearestDepth;
+    layout.nearestDepth =
+        nearestDepth - config::cameraDepthPaddingTiles;
     layout.farthestDepth =
-        std::max(farthestDepth, nearestDepth + 0.001f);
+        std::max(
+            farthestDepth + config::cameraDepthPaddingTiles,
+            layout.nearestDepth + 0.001f);
     return layout;
 }
 

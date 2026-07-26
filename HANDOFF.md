@@ -1270,7 +1270,10 @@ Engineering:
   excluded. When an explicit camera extent is present, `IsoScenePreparer`
   treats it as authoritative for target, distance, projected center, and fit;
   transient models, mirror ghosts, beams, and other procedural faces cannot
-  move or zoom the camera during play.
+  move or zoom the camera during play. The authored volume's normalized depth
+  range has a configurable guard band (`cameraDepthPaddingTiles` in
+  `CameraConfig.hpp`) because GLTF meshes can protrude past their logical tile
+  transform; this prevents near/far clipping without changing framing.
 - Render frames also carry stable, origin-aware water-grid bounds calculated
   from authored gameplay-relevant tiles. The water shader uses these bounds
   instead of the serialized level dimensions, so air and decorative scenery

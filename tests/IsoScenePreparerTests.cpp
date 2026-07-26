@@ -525,6 +525,41 @@ void testExplicitCameraExtentOwnsEntireProjectedLayout()
         baseScene.isoLayout.fitScale));
 }
 
+void testExplicitCameraExtentLeavesDepthGuardBand()
+{
+    sokoban::RenderFrameData frame = sceneFrame();
+    frame.cameraExtent = sokoban::RenderFrameData::CameraExtent {
+        .originX = 2,
+        .originY = 3,
+        .originZ = 1,
+        .width = 5,
+        .height = 4,
+        .depth = 2,
+    };
+    const sokoban::PreparedRenderScene scene =
+        prepareScene(frame, { 1920.0f, 1080.0f });
+
+    const std::array<sokoban::Vec3, 8> extentCorners {
+        sokoban::Vec3 { 2.0f, 3.0f, 1.0f },
+        sokoban::Vec3 { 7.0f, 3.0f, 1.0f },
+        sokoban::Vec3 { 7.0f, 7.0f, 1.0f },
+        sokoban::Vec3 { 2.0f, 7.0f, 1.0f },
+        sokoban::Vec3 { 2.0f, 3.0f, 3.0f },
+        sokoban::Vec3 { 7.0f, 3.0f, 3.0f },
+        sokoban::Vec3 { 7.0f, 7.0f, 3.0f },
+        sokoban::Vec3 { 2.0f, 7.0f, 3.0f },
+    };
+    for (const sokoban::Vec3 corner : extentCorners) {
+        const sokoban::Vec3 projected =
+            sokoban::IsoScenePreparer::projectIsoPoint(
+                scene.isoLayout,
+                { 1920.0f, 1080.0f },
+                corner);
+        CHECK(projected.z > 0.0f);
+        CHECK(projected.z < 1.0f);
+    }
+}
+
 void testAdjacentWaterFacesSharePerspectiveCoordinates()
 {
     sokoban::RenderFrameData frame;
@@ -683,6 +718,7 @@ int main()
     testExteriorWaterDoesNotAffectCameraFitOrPicking();
     testDecorativeTileDoesNotAffectCameraFit();
     testExplicitCameraExtentOwnsEntireProjectedLayout();
+    testExplicitCameraExtentLeavesDepthGuardBand();
     testAdjacentWaterFacesSharePerspectiveCoordinates();
     testMirrorEnergyIsTranslucentNonPickableAndShadowless();
     testParticlesBecomeSortedTranslucentBillboardsOnly();
