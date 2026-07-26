@@ -16,12 +16,13 @@ inline constexpr float waterLightToneMultiplier = 1.08f;
 inline constexpr float waterToneTransitionWidth = 0.035f;
 inline constexpr float waterToneSpeed = 0.08f;
 
-inline constexpr Vec4 waterSecondaryRippleColor {
+inline constexpr Vec3 waterSecondaryRippleColor {
     0.34f,
     0.64f,
     0.80f,
-    0.20f,
 };
+inline constexpr float waterPrimaryRippleOpacity = 1.0f;
+inline constexpr float waterSecondaryRippleOpacity = 0.20f;
 inline constexpr float waterRippleSpatialFrequency = 1.5f;
 inline constexpr float waterRippleSpeed = 1.15f;
 inline constexpr float waterRefractionStrength = 0.0020f;
@@ -31,12 +32,12 @@ inline constexpr float waterRippleHaloStrength = 0.08f;
 inline constexpr float waterRippleCrestStrength = 0.50f;
 inline constexpr float waterSecondaryRippleThicknessScale = 0.48f;
 
-inline constexpr Vec4 waterTileBorderColor {
+inline constexpr Vec3 waterTileBorderColor {
     0.52f,
     0.72f,
     0.84f,
-    0.24f,
 };
+inline constexpr float waterGridLineOpacity = 0.24f;
 inline constexpr float waterTileBorderWidth = 0.014f;
 inline constexpr float waterTileBorderWarpAmplitude = 0.035f;
 inline constexpr float waterTileBorderWarpFrequency = 4.2f;
@@ -45,8 +46,24 @@ inline constexpr float waterTileBorderExteriorFadeDistance = 0.25f;
 
 inline constexpr float waterShorelineNearDistance = 0.055f;
 inline constexpr float waterShorelineFarDistance = 0.090f;
-inline constexpr float waterShorelineFarOpacity = 0.55f;
+inline constexpr float waterPrimaryShorelineOpacity = 1.0f;
+inline constexpr float waterSecondaryShorelineOpacity = 0.55f;
 inline constexpr float waterShorelineFarThickness = 0.010f;
+
+static_assert(
+    waterPrimaryRippleOpacity >= 0.0f &&
+    waterPrimaryRippleOpacity <= 1.0f);
+static_assert(
+    waterSecondaryRippleOpacity >= 0.0f &&
+    waterSecondaryRippleOpacity <= 1.0f);
+static_assert(
+    waterPrimaryShorelineOpacity >= 0.0f &&
+    waterPrimaryShorelineOpacity <= 1.0f);
+static_assert(
+    waterSecondaryShorelineOpacity >= 0.0f &&
+    waterSecondaryShorelineOpacity <= 1.0f);
+static_assert(
+    waterGridLineOpacity >= 0.0f && waterGridLineOpacity <= 1.0f);
 
 static_assert(
     waterTileBorderWidth > 0.0f && waterTileBorderWidth < 0.5f);

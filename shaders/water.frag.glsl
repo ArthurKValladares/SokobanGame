@@ -573,6 +573,7 @@ void main()
             caustics.y * rippleCrestStrength,
         0.0,
         min(rippleHaloStrength + rippleCrestStrength, 1.0));
+    rippleStrength *= clamp(pc.shadowVertices[3].x, 0.0, 1.0);
 
     vec3 finalWaterColor =
         mix(waterWithSecondaryRipples, rippleColor, rippleStrength);
@@ -602,10 +603,14 @@ void main()
         max(pc.materialOptions.x, 0.0),
         max(pc.gridColor.w, 0.0),
         max(pc.normalAndAmbientRed.x, 0.0));
+    float nearFoamOpacity =
+        clamp(pc.shadowVertices[3].y, 0.0, 1.0);
     float farFoamOpacity =
-        clamp(pc.normalAndAmbientRed.y, 0.0, 1.0);
+        clamp(pc.shadowVertices[3].z, 0.0, 1.0);
     float foamStrength =
-        max(foamLayers.x, foamLayers.y * farFoamOpacity);
+        max(
+            foamLayers.x * nearFoamOpacity,
+            foamLayers.y * farFoamOpacity);
     finalWaterColor = mix(
         finalWaterColor,
         vec3(0.94, 0.98, 1.00),

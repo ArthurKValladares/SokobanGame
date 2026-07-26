@@ -1138,7 +1138,12 @@ private:
                 },
             },
             .shadowVertices = {
-                config::waterTileBorderColor,
+                Vec4 {
+                    config::waterTileBorderColor.x,
+                    config::waterTileBorderColor.y,
+                    config::waterTileBorderColor.z,
+                    config::waterGridLineOpacity,
+                },
                 Vec4 {
                     config::waterTileBorderWidth,
                     config::waterTileBorderWarpAmplitude,
@@ -1151,11 +1156,17 @@ private:
                     config::waterTileBorderExteriorFadeDistance,
                     0.0f,
                 },
+                Vec4 {
+                    config::waterPrimaryRippleOpacity,
+                    config::waterPrimaryShorelineOpacity,
+                    config::waterSecondaryShorelineOpacity,
+                    0.0f,
+                },
             },
             .color = color,
             .normalAndAmbientRed = {
                 config::waterShorelineFarThickness,
-                config::waterShorelineFarOpacity,
+                0.0f,
                 config::waterRippleCrestHalfWidth,
                 config::waterRippleHaloWidth,
             },
@@ -1171,8 +1182,12 @@ private:
                 config::waterRippleCrestStrength,
                 config::waterSecondaryRippleThicknessScale,
             },
-            .shadowOptions =
-                config::waterSecondaryRippleColor,
+            .shadowOptions = {
+                config::waterSecondaryRippleColor.x,
+                config::waterSecondaryRippleColor.y,
+                config::waterSecondaryRippleColor.z,
+                config::waterSecondaryRippleOpacity,
+            },
             .materialOptions = {
                 config::waterShorelineNearDistance,
                 size.x,

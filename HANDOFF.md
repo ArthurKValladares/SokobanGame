@@ -1215,6 +1215,12 @@ High-value gameplay/editor work:
 
 Rendering/assets:
 
+- Water overlay visibility is independently tunable in `WaterConfig.hpp`
+  through `waterPrimaryRippleOpacity`, `waterSecondaryRippleOpacity`,
+  `waterPrimaryShorelineOpacity`, `waterSecondaryShorelineOpacity`, and
+  `waterGridLineOpacity`. These multiply final blend weights without changing
+  the procedural masks, widths, or animation.
+
 - Add an explicit cache budget/eviction policy if the manifest grows enough
   for lifetime caching to become expensive.
 - Extend manifest material metadata with exact primitive-texture dependency
