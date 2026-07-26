@@ -109,19 +109,22 @@ IsoRenderLayout calculateIsoLayout(
 
     constexpr float radiansPerDegree =
         3.14159265358979323846f / 180.0f;
-    const float pitch = config::boardPitchDegrees * radiansPerDegree;
+    const float pitch = config::cameraPitchDegrees * radiansPerDegree;
+    const float yaw = config::cameraYawDegrees * radiansPerDegree;
     const float cameraDistance = std::max(
         static_cast<float>(
             std::max(frameData.levelWidth, frameData.levelHeight)),
-        1.0f) * config::perspectiveCameraDistanceScale;
+        1.0f) * config::cameraDistanceScale;
     const Vec3 target {
         static_cast<float>(frameData.levelWidth) * 0.5f,
         static_cast<float>(frameData.levelHeight) * 0.5f,
         static_cast<float>(std::max(frameData.levelDepth, 1U) - 1U) * 0.5f,
     };
+    const float horizontalDistance =
+        std::sin(pitch) * cameraDistance;
     const Vec3 cameraPosition {
-        target.x,
-        target.y + std::sin(pitch) * cameraDistance,
+        target.x + std::sin(yaw) * horizontalDistance,
+        target.y + std::cos(yaw) * horizontalDistance,
         target.z + std::cos(pitch) * cameraDistance,
     };
     const Vec3 cameraForward = normalize(subtract(target, cameraPosition));
@@ -135,7 +138,7 @@ IsoRenderLayout calculateIsoLayout(
         .cameraUp = cameraUp,
         .cameraForward = cameraForward,
         .focalLength = 1.0f / std::tan(
-            config::perspectiveFovDegrees * radiansPerDegree * 0.5f),
+            config::cameraVerticalFovDegrees * radiansPerDegree * 0.5f),
     };
 
     Vec2 minPoint {
@@ -202,7 +205,7 @@ IsoRenderLayout calculateIsoLayout(
         (minPoint.y + maxPoint.y) * 0.5f,
     };
     layout.fitScale =
-        config::perspectiveCameraFitScale *
+        config::cameraFitScale *
         std::min(1.0f / sceneSize.x, 1.0f / sceneSize.y);
     layout.nearestDepth = nearestDepth;
     layout.farthestDepth =

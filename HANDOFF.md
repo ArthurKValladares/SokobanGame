@@ -1215,6 +1215,11 @@ High-value gameplay/editor work:
 
 Rendering/assets:
 
+- Isometric camera tuning lives in `CameraConfig.hpp`. `cameraPitchDegrees`
+  controls the angle away from straight down, `cameraYawDegrees` controls the
+  heading around the board, and FOV, board-relative distance, and final
+  fit/zoom have adjacent controls. The `15` degree pitch and `0` degree yaw
+  preserve the established view.
 - Water overlay visibility is independently tunable in `WaterConfig.hpp`
   through `waterPrimaryRippleOpacity`, `waterSecondaryRippleOpacity`,
   `waterPrimaryShorelineOpacity`, `waterSecondaryShorelineOpacity`, and

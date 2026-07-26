@@ -1,6 +1,8 @@
 #include "engine/render/IsoScenePreparer.hpp"
+#include "engine/render/CameraConfig.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <ranges>
 #include <unordered_set>
@@ -20,6 +22,11 @@ void checkImpl(bool condition, const char* expression, int line)
 }
 
 #define CHECK(expression) checkImpl((expression), #expression, __LINE__)
+
+bool near(float left, float right)
+{
+    return std::abs(left - right) < 0.0001f;
+}
 
 sokoban::PreparedRenderScene prepareScene(
     const sokoban::RenderFrameData& frame,
@@ -87,6 +94,41 @@ sokoban::RenderFrameData sceneFrame()
         .color = { 0.5f, 0.5f, 0.5f, 1.0f },
     });
     return frame;
+}
+
+void testCameraLayoutUsesConfiguredAngles()
+{
+    using namespace sokoban;
+
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 4;
+    frame.levelHeight = 2;
+    frame.levelDepth = 1;
+
+    const PreparedRenderScene scene =
+        prepareScene(frame, { 1920.0f, 1080.0f });
+    constexpr float radiansPerDegree =
+        3.14159265358979323846f / 180.0f;
+    const float pitch = config::cameraPitchDegrees * radiansPerDegree;
+    const float yaw = config::cameraYawDegrees * radiansPerDegree;
+    const float distance = 4.0f * config::cameraDistanceScale;
+    const float horizontalDistance = std::sin(pitch) * distance;
+
+    CHECK(near(
+        scene.isoLayout.cameraPosition.x,
+        2.0f + std::sin(yaw) * horizontalDistance));
+    CHECK(near(
+        scene.isoLayout.cameraPosition.y,
+        1.0f + std::cos(yaw) * horizontalDistance));
+    CHECK(near(
+        scene.isoLayout.cameraPosition.z,
+        std::cos(pitch) * distance));
+    CHECK(near(
+        scene.isoLayout.focalLength,
+        1.0f / std::tan(
+            config::cameraVerticalFovDegrees *
+            radiansPerDegree * 0.5f)));
 }
 
 bool containsCell(
@@ -446,6 +488,7 @@ void testParticlesBecomeSortedTranslucentBillboardsOnly()
 
 int main()
 {
+    testCameraLayoutUsesConfiguredAngles();
     testPreparationCategorizesOneSharedFacePool();
     testPassListsAreDepthSorted();
     testPickingConsumesPreparedFaces();
