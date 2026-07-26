@@ -1299,11 +1299,32 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
             static_cast<uint32_t>(position.z));
     };
     auto appendEditorTile =
-        [&](int x, int y, int z, TileType tile, bool preview) {
+        [&](int x,
+            int y,
+            int z,
+            TileType tile,
+            bool preview,
+            bool pickOnly = false) {
             if (tile == TileType::Air) {
                 return;
             }
             if (tile == TileType::Water) {
+                if (pickOnly) {
+                    frame.tiles.push_back({
+                        .cell = { x, y, z },
+                        .position = {
+                            static_cast<float>(x),
+                            static_cast<float>(y),
+                        },
+                        .baseElevation =
+                            static_cast<float>(z) + 1.0f -
+                            config::waterDepthBelowGround,
+                        .pickOnly = true,
+                        .showGrid = false,
+                        .affectsCameraFit = false,
+                    });
+                    return;
+                }
                 const GridPosition3 waterCell {
                     x,
                     y,
@@ -1322,6 +1343,20 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
                 return;
             }
             if (tile == TileType::Ladder) {
+                if (pickOnly) {
+                    frame.tiles.push_back({
+                        .cell = { x, y, z },
+                        .position = {
+                            static_cast<float>(x),
+                            static_cast<float>(y),
+                        },
+                        .baseElevation = static_cast<float>(z) + 1.0f,
+                        .pickOnly = true,
+                        .showGrid = false,
+                        .affectsCameraFit = false,
+                    });
+                    return;
+                }
                 auto tileAtForLadder = [&](GridPosition3 position) {
                     if (preview &&
                         position.x == x &&
@@ -1383,6 +1418,7 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
                                     ? 1.0f
                                     : 0.0f)),
                 .blurBehind = tile == TileType::Ice,
+                .pickOnly = pickOnly,
                 .showGrid = tile != TileType::Player,
                 .isEditorPreview = preview,
                 .affectsCameraFit = tileTypeAffectsCameraFit(tile),
@@ -1472,7 +1508,20 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
                         continue;
                     }
                 }
-                appendEditorTile(x, y, z, tile, false);
+                const bool deletePreviewTarget =
+                    input.deleting && input.hoverCell &&
+                    *input.hoverCell == GridPosition3 {
+                        static_cast<int>(x),
+                        static_cast<int>(y),
+                        static_cast<int>(z),
+                    };
+                appendEditorTile(
+                    x,
+                    y,
+                    z,
+                    tile,
+                    false,
+                    deletePreviewTarget);
             }
         }
     }
@@ -1534,7 +1583,8 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
             input.hoverCell->y,
             input.hoverCell->z,
             previewTile,
-            true);
+            true,
+            false);
     }
 
     for (RenderFrameData::Tile& tile : frame.tiles) {

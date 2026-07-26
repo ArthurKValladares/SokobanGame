@@ -559,6 +559,34 @@ void testEditorFrameProvidesInvisibleExpansionBorderAndPreview()
         });
     CHECK(stableOccupiedTile != replacementFrame.tiles.end());
     CHECK(replacementPreview != replacementFrame.tiles.end());
+
+    const RenderFrameData deletionFrame = RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(),
+        .editor = editor,
+        .settings = {},
+        .hoverCell = occupiedHover,
+        .deleting = true,
+    });
+    const auto deletionPickProxy = std::ranges::find_if(
+        deletionFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.cell == occupiedHover && tile.pickOnly &&
+                !tile.isEditorPreview;
+        });
+    const auto deletionPreview = std::ranges::find_if(
+        deletionFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.cell == occupiedHover && tile.isEditorPreview;
+        });
+    const auto drawableDeletedTile = std::ranges::find_if(
+        deletionFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.cell == occupiedHover && !tile.pickOnly &&
+                !tile.isEditorPreview;
+        });
+    CHECK(deletionPickProxy != deletionFrame.tiles.end());
+    CHECK(deletionPreview != deletionFrame.tiles.end());
+    CHECK(drawableDeletedTile == deletionFrame.tiles.end());
 }
 
 void testMirrorTilesUseTheirModelAndOrientation()
