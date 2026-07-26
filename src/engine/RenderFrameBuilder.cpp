@@ -633,6 +633,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     const auto& movableVisuals = input.presentation.movables();
     RenderFrameData frame;
     frame.viewMode = RenderViewMode::Isometric3D;
+    frame.cameraPitchDegrees = input.cameraPitchDegrees;
     frame.lighting = input.settings.renderLighting();
     frame.gridOverlay = input.settings.renderGridOverlay();
     frame.levelWidth = input.level.width();

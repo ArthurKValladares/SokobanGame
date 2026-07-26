@@ -17,6 +17,7 @@ enum class InputAction {
     Mirror,
     Undo,
     Restart,
+    ShowTopDownView,
     MenuBack,
     MenuConfirm,
     Count,

@@ -109,6 +109,9 @@ InputBindings defaultInputBindings()
         KeyboardBinding { "R" },
         GamepadButtonBinding { "north" },
     };
+    bindings.forAction(InputAction::ShowTopDownView) = {
+        KeyboardBinding { "T" },
+    };
     bindings.forAction(InputAction::MenuBack) = {
         KeyboardBinding { "Escape" },
         GamepadButtonBinding { "start" },
@@ -131,6 +134,7 @@ std::string_view inputActionName(InputAction action)
     case InputAction::Mirror: return "mirror";
     case InputAction::Undo: return "undo";
     case InputAction::Restart: return "restart";
+    case InputAction::ShowTopDownView: return "showTopDownView";
     case InputAction::MenuBack: return "menuBack";
     case InputAction::MenuConfirm: return "menuConfirm";
     case InputAction::Count: break;

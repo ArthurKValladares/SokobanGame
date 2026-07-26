@@ -1,5 +1,6 @@
 #include "engine/GameplayPresentation.hpp"
 
+#include "engine/render/CameraConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
 
 #include <algorithm>
@@ -88,6 +89,13 @@ uint32_t facingQuarterTurns(MoveDirection direction)
 
 } // namespace
 
+GameplayPresentation::GameplayPresentation()
+    : cameraPitchDegrees_(config::cameraPitchDegrees)
+    , cameraPitchStartDegrees_(config::cameraPitchDegrees)
+    , cameraPitchTargetDegrees_(config::cameraPitchDegrees)
+{
+}
+
 void GameplayPresentation::setPlayerClips(RenderAnimation moveClip, RenderAnimation pushClip)
 {
     playerMoveClip_ = moveClip;
@@ -116,6 +124,35 @@ void GameplayPresentation::advanceClocks(float dt, bool reversed)
 {
     worldAnimationTimeSeconds_ += reversed ? -dt : dt;
     player_.clipTimeSeconds += dt * player_.clipPlaybackRate;
+}
+
+void GameplayPresentation::updateCameraPitch(
+    float targetDegrees,
+    float dt,
+    float transitionSeconds)
+{
+    targetDegrees = std::clamp(targetDegrees, 0.0f, 89.0f);
+    dt = std::max(dt, 0.0f);
+    transitionSeconds = std::max(transitionSeconds, 0.0f);
+
+    if (std::abs(targetDegrees - cameraPitchTargetDegrees_) > 0.0001f) {
+        cameraPitchStartDegrees_ = cameraPitchDegrees_;
+        cameraPitchTargetDegrees_ = targetDegrees;
+        cameraPitchTransitionElapsed_ = 0.0f;
+    }
+    if (transitionSeconds <= 0.0f) {
+        cameraPitchDegrees_ = cameraPitchTargetDegrees_;
+        cameraPitchTransitionElapsed_ = 0.0f;
+        return;
+    }
+
+    cameraPitchTransitionElapsed_ = std::min(
+        cameraPitchTransitionElapsed_ + dt,
+        transitionSeconds);
+    const float progress = cameraPitchTransitionElapsed_ / transitionSeconds;
+    const float eased = progress * progress * (3.0f - 2.0f * progress);
+    cameraPitchDegrees_ = cameraPitchStartDegrees_ +
+        (cameraPitchTargetDegrees_ - cameraPitchStartDegrees_) * eased;
 }
 
 void GameplayPresentation::advanceAnimations(float dt)

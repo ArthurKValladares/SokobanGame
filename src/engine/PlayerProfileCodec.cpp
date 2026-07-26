@@ -17,7 +17,7 @@
 // itself lives in PlayerProfile.cpp.
 //
 // Migration strategy: old formats are upgraded by forward JSON patches
-// (migrate1to2 .. migrate10to11) applied in sequence, then a single strict
+// (migrate1to2 .. migrate11to12) applied in sequence, then a single strict
 // current-format parse validates the fully migrated document. Patches only move
 // fields and add defaults; unknown keys survive them and are rejected by the
 // final parse, so schema strictness is preserved without every historical
@@ -501,12 +501,13 @@ InputBindings inputBindingsFromJson(
     if (includeMenuConfirm) {
         rejectUnknownProperties(value, {
             "moveUp", "moveDown", "moveLeft", "moveRight",
-            "mirror", "undo", "restart", "menuBack", "menuConfirm",
+            "mirror", "undo", "restart", "showTopDownView",
+            "menuBack", "menuConfirm",
         }, context);
     } else {
         rejectUnknownProperties(value, {
             "moveUp", "moveDown", "moveLeft", "moveRight",
-            "mirror", "undo", "restart", "menuBack",
+            "mirror", "undo", "restart", "showTopDownView", "menuBack",
         }, context);
     }
     InputBindings result;
@@ -803,6 +804,12 @@ void migrate10to11(Json& root)
         return;
     }
 
+    const OrderedJson defaults = inputBindingsToJson(defaultInputBindings());
+    if (!input.contains("showTopDownView")) {
+        input["showTopDownView"] =
+            Json::parse(defaults.at("showTopDownView").dump());
+    }
+
     InputBindings bindings =
         inputBindingsFromJson(input, "settings.input");
     if (migrateMirror) {
@@ -846,6 +853,45 @@ void migrate10to11(Json& root)
         }
     }
     input = inputBindingsToJson(bindings);
+}
+
+void migrate11to12(Json& root)
+{
+    if (!root.contains("settings")) {
+        return;
+    }
+    Json& settings = root["settings"];
+    if (!settings.is_object() || !settings.contains("input") ||
+        !settings["input"].is_object()) {
+        return;
+    }
+
+    Json& input = settings["input"];
+    if (input.contains("showTopDownView")) {
+        return;
+    }
+
+    const OrderedJson defaults = inputBindingsToJson(defaultInputBindings());
+    const Json topDownDefaults =
+        Json::parse(defaults.at("showTopDownView").dump());
+
+    // A physical control drives only one action. The newly introduced
+    // default owns T, while any action emptied by that transfer recovers its
+    // own defaults.
+    for (auto& [action, bindings] : input.items()) {
+        if (!bindings.is_array()) {
+            continue;
+        }
+        for (const Json& topDownBinding : topDownDefaults) {
+            bindings.erase(
+                std::remove(bindings.begin(), bindings.end(), topDownBinding),
+                bindings.end());
+        }
+        if (bindings.empty() && defaults.contains(action)) {
+            bindings = Json::parse(defaults.at(action).dump());
+        }
+    }
+    input["showTopDownView"] = topDownDefaults;
 }
 
 // ---- Strict current-format parse -------------------------------------------
@@ -1118,6 +1164,7 @@ DecodedPlayerProfile decodePlayerProfile(std::string_view text)
         migrate8to9,
         migrate9to10,
         migrate10to11,
+        migrate11to12,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

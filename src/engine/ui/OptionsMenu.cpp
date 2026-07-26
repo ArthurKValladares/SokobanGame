@@ -68,6 +68,11 @@ constexpr std::array bindingRows {
     BindingRow { OptionsMenuRowId::Mirror, InputAction::Mirror, "Activate mirrors" },
     BindingRow { OptionsMenuRowId::Undo, InputAction::Undo, "Undo" },
     BindingRow { OptionsMenuRowId::Restart, InputAction::Restart, "Restart" },
+    BindingRow {
+        OptionsMenuRowId::ShowTopDownView,
+        InputAction::ShowTopDownView,
+        "Show Top-Down View",
+    },
 };
 
 int displayIndex(const UserSettings& settings)
@@ -202,6 +207,7 @@ std::optional<OptionsAction> activateRow(
     case OptionsMenuRowId::Mirror:
     case OptionsMenuRowId::Undo:
     case OptionsMenuRowId::Restart:
+    case OptionsMenuRowId::ShowTopDownView:
         state.capturingAction = actionForRow(row);
         break;
     case OptionsMenuRowId::ResetBindings:
@@ -290,7 +296,7 @@ float pageHeight(OptionsMenuPage page)
 {
     switch (page) {
     case OptionsMenuPage::Graphics: return 740.0f;
-    case OptionsMenuPage::Controls: return 700.0f;
+    case OptionsMenuPage::Controls: return 720.0f;
     default: return 540.0f;
     }
 }
@@ -323,6 +329,58 @@ struct RowLayout {
 bool hasNode(UiLayoutNode node)
 {
     return node != 0;
+}
+
+float fittedTextSize(
+    const UiContext& ui,
+    std::string_view text,
+    float preferredSize,
+    float availableWidth)
+{
+    const float measuredWidth = ui.measureText(text, preferredSize).x;
+    if (measuredWidth <= availableWidth || measuredWidth <= 0.0f) {
+        return preferredSize;
+    }
+    return preferredSize * availableWidth / measuredWidth;
+}
+
+void drawBindingRowText(
+    UiContext& ui,
+    UiRect row,
+    std::string_view label,
+    std::string_view binding,
+    Vec4 bindingColor)
+{
+    constexpr float horizontalPadding = 16.0f;
+    constexpr float columnGap = 12.0f;
+    const float contentWidth = std::max(
+        row.size.x - horizontalPadding * 2.0f - columnGap,
+        0.0f);
+    const float labelWidth = contentWidth * 0.43f;
+    const float bindingWidth = contentWidth - labelWidth;
+    const UiRect labelRect {
+        { row.position.x + horizontalPadding, row.position.y },
+        { labelWidth, row.size.y },
+    };
+    const UiRect bindingRect {
+        { labelRect.position.x + labelWidth + columnGap, row.position.y },
+        { bindingWidth, row.size.y },
+    };
+
+    const float labelSize = fittedTextSize(ui, label, 20.0f, labelRect.size.x);
+    const Vec2 labelMeasure = ui.measureText(label, labelSize);
+    ui.text({
+        labelRect.position.x,
+        labelRect.position.y + (labelRect.size.y - labelMeasure.y) * 0.5f,
+    }, label, { 0.92f, 0.94f, 0.92f, 1.0f }, labelSize);
+
+    const float bindingSize = fittedTextSize(
+        ui, binding, 16.0f, bindingRect.size.x);
+    const Vec2 bindingMeasure = ui.measureText(binding, bindingSize);
+    ui.text({
+        bindingRect.position.x + bindingRect.size.x - bindingMeasure.x,
+        bindingRect.position.y + (bindingRect.size.y - bindingMeasure.y) * 0.5f,
+    }, binding, bindingColor, bindingSize);
 }
 
 } // namespace
@@ -747,7 +805,8 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
 
     const std::vector<OptionsMenuRow> rows =
         optionsMenuRows(state, settings);
-    menuKit::MenuPage layout(28.0f);
+    menuKit::MenuPage layout(
+        state.page == OptionsMenuPage::Controls ? 16.0f : 28.0f);
     std::vector<RowLayout> rowLayouts(rows.size());
     UiLayoutNode message {};
     UiLayoutNode controlsPrompt {};
@@ -763,8 +822,8 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             if (state.page == OptionsMenuPage::Controls &&
                 row.id == OptionsMenuRowId::ResetBindings) {
                 controlsPrompt = layout.tree.item(
-                    layout.tree.root(), 26.0f);
-                layout.tree.spacer(layout.tree.root(), 6.0f);
+                    layout.tree.root(), 22.0f);
+                layout.tree.spacer(layout.tree.root(), 4.0f);
             }
             layout.tree.flexibleSpacer(layout.tree.root());
         }
@@ -799,14 +858,16 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
         case OptionsMenuRowKind::Binding:
             rowLayout.primary = layout.tree.item(
                 layout.tree.root(),
-                state.page == OptionsMenuPage::Controls ? 46.0f : 52.0f);
+                state.page == OptionsMenuPage::Controls ? 42.0f : 52.0f);
             break;
         }
         if (index + 1 < rows.size() &&
             !rows[index + 1].flexibleSpaceBefore) {
             layout.tree.spacer(
                 layout.tree.root(),
-                state.page == OptionsMenuPage::Main ? 16.0f : 10.0f);
+                state.page == OptionsMenuPage::Main
+                    ? 16.0f
+                    : (state.page == OptionsMenuPage::Controls ? 6.0f : 10.0f));
         }
     }
     layout.tree.arrange(panel);
@@ -1007,11 +1068,12 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
         case OptionsMenuRowKind::Binding: {
             const std::optional<InputAction> action =
                 actionForRow(row.id);
+            const UiRect bindingRow = layout.tree.rect(rowLayout.primary);
             if (uiControls::button(
                     ui,
                     controlId,
-                    layout.tree.rect(rowLayout.primary),
-                    row.label,
+                    bindingRow,
+                    "",
                     {
                         .tone = buttonTone(row.tone),
                         .focused = focused,
@@ -1020,9 +1082,10 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             }
             const bool capturing = action &&
                 state.capturingAction == action;
-            menuKit::trailingText(
+            drawBindingRowText(
                 ui,
-                layout.tree.rect(rowLayout.primary),
+                bindingRow,
+                row.label,
                 capturing
                     ? "Press a key or button..."
                     : actionBindingsDisplay(settings.input, *action),
@@ -1030,8 +1093,7 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
                     ? Vec4 { 0.98f, 0.84f, 0.42f, 1.0f }
                     : (focused
                             ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
-                            : Vec4 { 0.62f, 0.67f, 0.65f, 1.0f }),
-                18.0f);
+                            : Vec4 { 0.62f, 0.67f, 0.65f, 1.0f }));
             break;
         }
         }

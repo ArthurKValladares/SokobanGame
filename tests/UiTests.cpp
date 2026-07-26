@@ -292,6 +292,24 @@ void testControlsRemapping()
     CHECK(menu.page() == sokoban::OptionsMenu::Page::Controls);
     CHECK(!menu.capturingBinding());
 
+    ui.beginFrame({ 580.0f, 718.0f }, {}, false, false);
+    (void)view.draw(ui, { 580.0f, 718.0f }, menu.state(), settings);
+    ui.endFrame();
+    CHECK(std::ranges::all_of(
+        ui.drawData().commands,
+        [](const sokoban::UiDrawCommand& command) {
+            if (command.kind != sokoban::UiDrawKind::FontGlyph) {
+                return true;
+            }
+            constexpr float tolerance = 0.01f;
+            return command.rect.position.x >= -tolerance &&
+                command.rect.position.y >= -tolerance &&
+                command.rect.position.x + command.rect.size.x <=
+                    580.0f + tolerance &&
+                command.rect.position.y + command.rect.size.y <=
+                    718.0f + tolerance;
+        }));
+
     // Rebind Move up to P: same-kind keyboard binding replaced, pad kept.
     draw({ .confirm = true });
     CHECK(menu.capturingBinding());
@@ -353,7 +371,7 @@ void testControlsRemapping()
     menu.back();
 
     // Reset restores the defaults.
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 7; ++i) {
         draw({ .down = true });
     }
     const auto reset = draw({ .confirm = true });

@@ -101,6 +101,8 @@ InputRouter::Frame InputRouter::routeFrame(
 
     Frame frame;
     if (gameplayActive) {
+        frame.showTopDownView =
+            input.actionDown(InputAction::ShowTopDownView);
         frame.gameplay = {
             .up = buttonState(input, InputAction::MoveUp),
             .down = buttonState(input, InputAction::MoveDown),

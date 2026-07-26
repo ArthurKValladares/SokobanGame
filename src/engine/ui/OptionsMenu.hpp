@@ -42,6 +42,7 @@ enum class OptionsMenuRowId {
     Mirror,
     Undo,
     Restart,
+    ShowTopDownView,
     ResetBindings,
     Back,
     CancelQuit,

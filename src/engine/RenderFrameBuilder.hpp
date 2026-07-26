@@ -22,6 +22,7 @@ public:
         const GameplayPresentation& presentation;
         const PresentationSettings& settings;
         float conveyorBeltScrollOffset = 0.0f;
+        std::optional<float> cameraPitchDegrees;
     };
 
     struct EditorInput {

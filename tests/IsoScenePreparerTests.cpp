@@ -129,6 +129,17 @@ void testCameraLayoutUsesConfiguredAngles()
         1.0f / std::tan(
             config::cameraVerticalFovDegrees *
             radiansPerDegree * 0.5f)));
+
+    frame.cameraPitchDegrees = 0.0f;
+    const PreparedRenderScene overhead =
+        prepareScene(frame, { 1920.0f, 1080.0f });
+    CHECK(near(overhead.isoLayout.cameraPosition.x, 2.0f));
+    CHECK(near(overhead.isoLayout.cameraPosition.y, 1.0f));
+    CHECK(near(overhead.isoLayout.cameraPosition.z, distance));
+    CHECK(near(overhead.isoLayout.cameraRight.x, std::cos(yaw)));
+    CHECK(near(overhead.isoLayout.cameraRight.y, -std::sin(yaw)));
+    CHECK(near(overhead.isoLayout.cameraUp.x, -std::sin(yaw)));
+    CHECK(near(overhead.isoLayout.cameraUp.y, -std::cos(yaw)));
 }
 
 bool containsCell(

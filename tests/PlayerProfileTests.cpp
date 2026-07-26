@@ -435,6 +435,7 @@ void testNormalizationAndMigration()
         sokoban::PlayerProfile {}.serialize());
     format9Root["format"] = 9;
     format9Root["settings"]["input"].erase("mirror");
+    format9Root["settings"]["input"].erase("showTopDownView");
     format9Root["settings"]["input"]["undo"] = nlohmann::json::array({
         nlohmann::json { { "type", "keyboard" }, { "control", "Z" } },
         nlohmann::json { { "type", "gamepadButton" }, { "control", "west" } },
@@ -454,6 +455,7 @@ void testNormalizationAndMigration()
     nlohmann::json format10Root = nlohmann::json::parse(
         sokoban::PlayerProfile {}.serialize());
     format10Root["format"] = 10;
+    format10Root["settings"]["input"].erase("showTopDownView");
     format10Root["settings"]["input"]["mirror"] = nlohmann::json::array({
         nlohmann::json { { "type", "keyboard" }, { "control", "Z" } },
         nlohmann::json { { "type", "gamepadButton" }, { "control", "east" } },
@@ -485,6 +487,26 @@ void testNormalizationAndMigration()
         sokoban::InputAction::Mirror);
     check(migratedKeyboard && migratedKeyboard->scancode == "G",
         "format 10 custom mirror binding is preserved");
+
+    nlohmann::json format11Root = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    format11Root["format"] = 11;
+    format11Root["settings"]["input"].erase("showTopDownView");
+    format11Root["settings"]["input"]["undo"] = nlohmann::json::array({
+        nlohmann::json { { "type", "keyboard" }, { "control", "T" } },
+    });
+    const sokoban::DecodedPlayerProfile migratedFormat11 =
+        sokoban::decodePlayerProfile(format11Root.dump());
+    check(migratedFormat11.sourceFormat == 11, "format 11 source reported");
+    migratedKeyboard = keyboardBinding(
+        migratedFormat11.profile.settings.input,
+        sokoban::InputAction::ShowTopDownView);
+    check(migratedKeyboard && migratedKeyboard->scancode == "T",
+        "format 11 receives top-down view default");
+    migratedKeyboard = keyboardBinding(
+        migratedFormat11.profile.settings.input, sokoban::InputAction::Undo);
+    check(migratedKeyboard && migratedKeyboard->scancode == "Z",
+        "format 11 binding displaced by T recovers its default");
 
     checkThrows([] {
         (void)sokoban::decodePlayerProfile(R"json({ "format": 99 })json");

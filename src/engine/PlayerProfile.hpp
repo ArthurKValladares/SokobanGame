@@ -10,7 +10,7 @@
 
 namespace sokoban {
 
-inline constexpr int currentPlayerProfileFormat = 11;
+inline constexpr int currentPlayerProfileFormat = 12;
 
 // Which top-level sections serialize() writes. Save-slot files carry only
 // progress and the shared settings file only settings; both sections are
@@ -93,7 +93,7 @@ struct DecodedPlayerProfile {
 };
 
 // Throws std::runtime_error for malformed, unsupported, or semantically
-// invalid profile data. Formats 1 through 9 migrate through forward JSON
+// invalid profile data. Older formats migrate through forward JSON
 // patches followed by one strict current-format parse.
 [[nodiscard]] DecodedPlayerProfile decodePlayerProfile(std::string_view text);
 

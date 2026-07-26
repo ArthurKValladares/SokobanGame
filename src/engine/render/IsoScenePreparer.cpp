@@ -109,7 +109,8 @@ IsoRenderLayout calculateIsoLayout(
 
     constexpr float radiansPerDegree =
         3.14159265358979323846f / 180.0f;
-    const float pitch = config::cameraPitchDegrees * radiansPerDegree;
+    const float pitch = frameData.cameraPitchDegrees.value_or(
+        config::cameraPitchDegrees) * radiansPerDegree;
     const float yaw = config::cameraYawDegrees * radiansPerDegree;
     const float cameraDistance = std::max(
         static_cast<float>(
@@ -128,8 +129,9 @@ IsoRenderLayout calculateIsoLayout(
         target.z + std::cos(pitch) * cameraDistance,
     };
     const Vec3 cameraForward = normalize(subtract(target, cameraPosition));
-    const Vec3 cameraRight =
-        normalize(cross({ 0.0f, 0.0f, 1.0f }, cameraForward));
+    const Vec3 cameraRight = std::abs(horizontalDistance) > 0.0001f
+        ? normalize(cross({ 0.0f, 0.0f, 1.0f }, cameraForward))
+        : Vec3 { std::cos(yaw), -std::sin(yaw), 0.0f };
     const Vec3 cameraUp = normalize(cross(cameraForward, cameraRight));
 
     IsoRenderLayout layout {

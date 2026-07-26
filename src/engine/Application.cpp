@@ -1,6 +1,7 @@
 #include "engine/Application.hpp"
 
 #include "engine/ParticleConfig.hpp"
+#include "engine/render/CameraConfig.hpp"
 
 #include "engine/DebugUi.hpp"
 #include "engine/Log.hpp"
@@ -285,6 +286,10 @@ void Application::update(
         gameplaySession_.moving() &&
         gameplaySession_.activeAction().reversed;
     presentation_.advanceClocks(dt, reversed);
+    presentation_.updateCameraPitch(
+        input.showTopDownView ? 0.0f : config::cameraPitchDegrees,
+        dt,
+        config::cameraPitchTransitionSeconds);
 
     if (shellMenuOpen()) {
         audioSystem_.update(dt, false, false);
@@ -970,6 +975,7 @@ RenderFrameData Application::buildRenderFrame(
         .presentation = presentation_,
         .settings = presentationSettings_,
         .conveyorBeltScrollOffset = beltScrollOffset,
+        .cameraPitchDegrees = presentation_.cameraPitchDegrees(),
     });
     particleSystem_.appendRenderData(frame);
     return frame;

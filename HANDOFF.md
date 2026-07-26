@@ -1263,6 +1263,17 @@ Engineering:
 - Default keyboard bindings are `Z` for Undo and `F` for the Mirror action.
   Player-profile format 11 migrates only the exact accidental format-10
   defaults (`Mirror=Z`, `Undo=X`) and preserves customized controls.
+- `Show Top-Down View` is a remappable hold action, defaulted to `T`. It is
+  routed only while gameplay is active and smoothly moves the regular 3D
+  camera pitch between `config::cameraPitchDegrees` and zero; it does not use
+  the legacy `TopDown2D` renderer path. The smoothstep transition duration is
+  `config::cameraPitchTransitionSeconds` (0.15 seconds by default), and the
+  zero-pitch camera basis has an explicit non-degenerate orientation.
+  Player-profile format 12 adds the binding to existing profiles while
+  preserving the one-control/one-action invariant.
+  The controls menu now uses compact rows with separate fitted label/binding
+  columns, preventing long gamepad binding strings from overlapping or
+  escaping narrow 580x718-class layouts.
 
 - Gameplay rules, gameplay/campaign orchestration, input routing, settings
   policy, presentation, render-frame construction, and editor document behavior

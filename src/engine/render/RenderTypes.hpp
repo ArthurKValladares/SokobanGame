@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace sokoban {
@@ -170,6 +171,7 @@ struct RenderFrameData {
     };
 
     RenderViewMode viewMode = RenderViewMode::TopDown2D;
+    std::optional<float> cameraPitchDegrees;
     Lighting lighting {};
     GridOverlay gridOverlay {};
     uint32_t levelWidth = 0;

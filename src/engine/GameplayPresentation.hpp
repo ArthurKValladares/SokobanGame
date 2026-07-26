@@ -13,6 +13,8 @@ namespace sokoban {
 // never mutates authoritative gameplay state.
 class GameplayPresentation {
 public:
+    GameplayPresentation();
+
     struct EntityVisual {
         Vec3 renderPosition {};
         Vec3 animationStart {};
@@ -36,6 +38,10 @@ public:
     void setPlayerClips(RenderAnimation moveClip, RenderAnimation pushClip);
     void resetEntities(const GameState& state);
     void advanceClocks(float dt, bool reversed);
+    void updateCameraPitch(
+        float targetDegrees,
+        float dt,
+        float transitionSeconds);
     void advanceAnimations(float dt);
     void beginAction(const GameplaySession::Action& action);
     void finishAction(const GameState& state);
@@ -43,6 +49,7 @@ public:
 
     [[nodiscard]] float conveyorBeltScrollOffset(float stepDurationSeconds) const;
     [[nodiscard]] float worldAnimationTimeSeconds() const { return worldAnimationTimeSeconds_; }
+    [[nodiscard]] float cameraPitchDegrees() const { return cameraPitchDegrees_; }
     [[nodiscard]] const PlayerVisual& player() const { return player_; }
     [[nodiscard]] const std::vector<EntityVisual>& movables() const { return movables_; }
 
@@ -54,6 +61,10 @@ private:
     RenderAnimation playerMoveClip_ {};
     RenderAnimation playerPushClip_ {};
     float worldAnimationTimeSeconds_ = 0.0f;
+    float cameraPitchDegrees_ = 0.0f;
+    float cameraPitchStartDegrees_ = 0.0f;
+    float cameraPitchTargetDegrees_ = 0.0f;
+    float cameraPitchTransitionElapsed_ = 0.0f;
 };
 
 } // namespace sokoban

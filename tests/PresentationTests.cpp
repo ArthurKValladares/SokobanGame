@@ -8,6 +8,7 @@
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
 #include "engine/RenderFrameBuilder.hpp"
+#include "engine/render/CameraConfig.hpp"
 #include "engine/render/MirrorConfig.hpp"
 
 #include <cmath>
@@ -92,6 +93,46 @@ GameState stateWithPlayer(GridPosition3 player)
     GameState state;
     state.player = player;
     return state;
+}
+
+void testCameraPitchTransition()
+{
+    TEST("cameraPitchTransition");
+    GameplayPresentation presentation;
+    CHECK(near(
+        presentation.cameraPitchDegrees(),
+        config::cameraPitchDegrees));
+
+    presentation.updateCameraPitch(
+        0.0f,
+        config::cameraPitchTransitionSeconds * 0.5f,
+        config::cameraPitchTransitionSeconds);
+    CHECK(near(
+        presentation.cameraPitchDegrees(),
+        config::cameraPitchDegrees * 0.5f));
+    presentation.updateCameraPitch(
+        0.0f,
+        config::cameraPitchTransitionSeconds * 0.5f,
+        config::cameraPitchTransitionSeconds);
+    CHECK(near(presentation.cameraPitchDegrees(), 0.0f));
+
+    presentation.updateCameraPitch(
+        config::cameraPitchDegrees,
+        config::cameraPitchTransitionSeconds * 0.5f,
+        config::cameraPitchTransitionSeconds);
+    CHECK(near(
+        presentation.cameraPitchDegrees(),
+        config::cameraPitchDegrees * 0.5f));
+    presentation.updateCameraPitch(
+        config::cameraPitchDegrees,
+        config::cameraPitchTransitionSeconds * 0.5f,
+        config::cameraPitchTransitionSeconds);
+    CHECK(near(
+        presentation.cameraPitchDegrees(),
+        config::cameraPitchDegrees));
+
+    presentation.updateCameraPitch(0.0f, 0.0f, 0.0f);
+    CHECK(near(presentation.cameraPitchDegrees(), 0.0f));
 }
 
 void testSettingsNormalizeAndConvert()
@@ -275,6 +316,18 @@ void testGameplayFrameUsesSettingsAndPresentation()
     });
 
     CHECK(frame.viewMode == RenderViewMode::Isometric3D);
+    const RenderFrameData overheadFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = state,
+        .moving = false,
+        .activeAction = action,
+        .presentation = presentation,
+        .settings = settings,
+        .cameraPitchDegrees = 0.0f,
+    });
+    CHECK(overheadFrame.viewMode == RenderViewMode::Isometric3D);
+    CHECK(overheadFrame.cameraPitchDegrees == 0.0f);
     CHECK(frame.levelWidth == 3);
     CHECK(frame.levelHeight == 1);
     CHECK(frame.levelDepth == 2);
@@ -944,6 +997,7 @@ void testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition()
 
 int main()
 {
+    testCameraPitchTransition();
     testSettingsNormalizeAndConvert();
     testPresentationResetClocksAndFallenTargets();
     testPresentationInterpolatesActionsAndClips();
