@@ -24,6 +24,10 @@ enum class TileType {
     ConveyorDown,
     ConveyorRight,
     ConveyorLeft,
+    MirrorNorthWest,
+    MirrorNorthEast,
+    MirrorSouthWest,
+    MirrorSouthEast,
     Count,
 };
 
@@ -51,6 +55,10 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::ConveyorDown, 'v', "Conveyor Down", { 0.22f, 0.56f, 0.95f, 1.0f } },
     TileTypeDefinition { TileType::ConveyorRight, '>', "Conveyor Right", { 0.22f, 0.56f, 0.95f, 1.0f } },
     TileTypeDefinition { TileType::ConveyorLeft, '<', "Conveyor Left", { 0.22f, 0.56f, 0.95f, 1.0f } },
+    TileTypeDefinition { TileType::MirrorNorthWest, '1', "Mirror North-West", { 0.72f, 0.90f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::MirrorNorthEast, '2', "Mirror North-East", { 0.72f, 0.90f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::MirrorSouthWest, '3', "Mirror South-West", { 0.72f, 0.90f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::MirrorSouthEast, '4', "Mirror South-East", { 0.72f, 0.90f, 1.0f, 1.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -63,6 +71,9 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] bool tileTypeAllowsEntity(TileType type);
 [[nodiscard]] bool tileTypeIsSurfaceEntity(TileType type);
 [[nodiscard]] bool tileTypeIsConveyor(TileType type);
+[[nodiscard]] bool tileTypeIsMirror(TileType type);
+// Clockwise quarter-turns from the north-west-facing model orientation.
+[[nodiscard]] std::optional<uint32_t> mirrorOrientationQuarterTurns(TileType type);
 [[nodiscard]] Vec4 tileColor(TileType type, bool isActive = true);
 
 [[nodiscard]] constexpr bool tileTypeDefinitionsContainCharacter(char character)

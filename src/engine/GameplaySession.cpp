@@ -38,6 +38,14 @@ bool matchesForwardTransition(
         return true;
     }
 
+    if (const std::optional<GameState> reflected =
+            rules::activateMirrors(level, action.before)) {
+        if (*reflected == action.after &&
+            action.playerMoveCountAfter == action.playerMoveCountBefore) {
+            return true;
+        }
+    }
+
     constexpr std::array<std::optional<MoveDirection>, 5> inputs {
         std::nullopt,
         MoveDirection::Up,
@@ -66,6 +74,8 @@ void GameplaySession::reset(const Level& level)
     activeAction_ = {};
     moveElapsed_ = 0.0f;
     playerMoveCount_ = 0;
+    mirrorActivationSequence_ = 0;
+    lastMirrorSwapDestinations_.clear();
     moving_ = false;
     autoMotionPaused_ = false;
 }
@@ -118,6 +128,8 @@ bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
     activeAction_ = {};
     moveElapsed_ = 0.0f;
     playerMoveCount_ = snapshot.playerMoveCount;
+    mirrorActivationSequence_ = 0;
+    lastMirrorSwapDestinations_.clear();
     moving_ = false;
     autoMotionPaused_ = snapshot.automaticMotionPaused;
     return true;
@@ -126,6 +138,11 @@ bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
 void GameplaySession::queueMove(MoveDirection direction)
 {
     pendingCommands_.push_back({ .type = CommandType::Move, .direction = direction });
+}
+
+void GameplaySession::queueMirror()
+{
+    pendingCommands_.push_back({ .type = CommandType::Mirror });
 }
 
 void GameplaySession::queueUndo()
@@ -165,6 +182,10 @@ bool GameplaySession::tryStartNextAction(const Level& level, const Controls& con
         }
 
         if (command.type == CommandType::Restart && tryStartRestart(level)) {
+            return true;
+        }
+
+        if (command.type == CommandType::Mirror && tryStartMirrorAction(level)) {
             return true;
         }
 
@@ -280,6 +301,31 @@ bool GameplaySession::tryStartWorldStep(const Level& level, std::optional<MoveDi
         action.facingDirection = movementDirection(action.before.player, action.after.player);
     }
     beginAction(std::move(action));
+    return true;
+}
+
+bool GameplaySession::tryStartMirrorAction(const Level& level)
+{
+    std::optional<rules::MirrorActivationPreview> activation =
+        rules::previewMirrorActivation(level, state_);
+    if (!activation) {
+        return false;
+    }
+
+    autoMotionPaused_ = false;
+    lastMirrorSwapDestinations_.clear();
+    lastMirrorSwapDestinations_.reserve(activation->entities.size());
+    for (const rules::MirrorEntityPreview& entity : activation->entities) {
+        lastMirrorSwapDestinations_.push_back(entity.destination);
+    }
+    ++mirrorActivationSequence_;
+    beginAction({
+        .before = state_,
+        .after = std::move(activation->after),
+        .durationSeconds = 0.0f,
+        .playerMoveCountBefore = playerMoveCount_,
+        .playerMoveCountAfter = playerMoveCount_,
+    });
     return true;
 }
 

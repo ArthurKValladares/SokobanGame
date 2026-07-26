@@ -506,6 +506,34 @@ void testInvalidSnapshotIsRejectedWithoutMutation()
     CHECK(target.snapshot() == beforeRestore);
 }
 
+void testMirrorActionIsInstantUndoableAndRestorable()
+{
+    TEST("mirrorActionIsInstantUndoableAndRestorable");
+    const Level level = makeLevel({
+        { ".....", ".....", ".....", ".....", "....." },
+        { "     ", "     ", "  3  ", "     ", "  C  " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    const GameState initial = session.state();
+
+    session.queueMirror();
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeActionDuration() == 0.0f);
+    CHECK(session.activeAction().after.player == cell(0, 2, 1));
+    finishAction(session);
+    CHECK(session.playerMoveCount() == 0);
+    CHECK(session.undoCount() == 1);
+
+    GameplaySession restored;
+    CHECK(restored.restore(level, session.snapshot()));
+    CHECK(restored.state() == session.state());
+    restored.queueUndo();
+    CHECK(restored.tryStartNextAction(level, {}));
+    finishAction(restored);
+    CHECK(restored.state() == initial);
+}
+
 } // namespace
 
 int main()
@@ -527,6 +555,7 @@ int main()
     testResetClearsUndoStackForNewScreen();
     testSnapshotRestoreAcceptsRestartHistory();
     testInvalidSnapshotIsRejectedWithoutMutation();
+    testMirrorActionIsInstantUndoableAndRestorable();
 
     if (failures == 0) {
         std::cout << "GameplaySessionTests: " << checks << " checks passed\n";

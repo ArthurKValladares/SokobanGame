@@ -1,5 +1,7 @@
 #include "engine/Application.hpp"
 
+#include "engine/ParticleConfig.hpp"
+
 #include "engine/DebugUi.hpp"
 #include "engine/Log.hpp"
 #include "engine/RenderFrameBuilder.hpp"
@@ -56,6 +58,8 @@ Application::Application()
           playerProfile_.settings.video.vsync)
     , ui_(uiFont_)
     , audioSystem_(assetRoot_, assetManifest_)
+    , mirrorSwapParticleEffect_(
+          makeMirrorSwapParticleEffect(assetManifest_))
     , settingsCoordinator_(playerProfile_, presentationSettings_)
 {
     // Leave a diagnostic trail next to the profiles so shipped builds can be
@@ -300,6 +304,7 @@ void Application::update(
 #endif
 
     campaign_.addElapsedTime(dt);
+    particleSystem_.update(dt);
     const GameplayLoop::UpdateResult gameplayResult = GameplayLoop::update(
         level_,
         gameplaySession_,
@@ -307,6 +312,20 @@ void Application::update(
         input.gameplay,
         dt,
         levelEditor_.playingDraft());
+    if (gameplayResult.mirrorActivated) {
+        audioSystem_.playOneShot("mirror-swap");
+        for (GridPosition3 destination :
+             gameplayResult.mirrorSwapDestinations) {
+            particleSystem_.emit(
+                {
+                    static_cast<float>(destination.x) + 0.5f,
+                    static_cast<float>(destination.y) + 0.5f,
+                    static_cast<float>(destination.z) +
+                        config::mirrorSwapSmokeElevation,
+                },
+                mirrorSwapParticleEffect_);
+        }
+    }
     if (gameplayResult.draftSolved) {
         levelEditor_.markDraftSolved();
     }
@@ -511,6 +530,7 @@ bool Application::applyLevel(
         gameplaySession_.reset(level_);
     }
     presentation_.resetEntities(gameplaySession_.state());
+    particleSystem_.reset();
     campaign_.markWorldLoaded();
     return restored;
 }
@@ -941,7 +961,7 @@ RenderFrameData Application::buildRenderFrame(
         return RenderFrameData {};
     }
 
-    return RenderFrameBuilder::buildGameplay({
+    RenderFrameData frame = RenderFrameBuilder::buildGameplay({
         .manifest = assetManifest_,
         .level = level_,
         .state = gameplaySession_.state(),
@@ -951,6 +971,8 @@ RenderFrameData Application::buildRenderFrame(
         .settings = presentationSettings_,
         .conveyorBeltScrollOffset = beltScrollOffset,
     });
+    particleSystem_.appendRenderData(frame);
+    return frame;
 }
 
 } // namespace sokoban

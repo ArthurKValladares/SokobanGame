@@ -709,6 +709,136 @@ void testEveryPressurePlateMustHaveLiveOccupant()
     CHECK(rules::isEndUnlocked(noPlates, rules::initialState(noPlates)));
 }
 
+void testEveryMirrorOrientationReflectsBothWays()
+{
+    TEST("everyMirrorOrientationReflectsBothWays");
+    struct Case {
+        char mirror;
+        GridPosition3 first;
+        GridPosition3 firstExpected;
+        GridPosition3 second;
+        GridPosition3 secondExpected;
+    };
+    const std::vector<Case> cases {
+        { '1', cell(2, 0, 1), cell(0, 2, 1), cell(0, 2, 1), cell(2, 0, 1) },
+        { '2', cell(2, 0, 1), cell(4, 2, 1), cell(4, 2, 1), cell(2, 0, 1) },
+        { '3', cell(2, 4, 1), cell(0, 2, 1), cell(0, 2, 1), cell(2, 4, 1) },
+        { '4', cell(2, 4, 1), cell(4, 2, 1), cell(4, 2, 1), cell(2, 4, 1) },
+    };
+
+    for (const Case& test : cases) {
+        std::vector<std::string> mirrorLayer(5, "     ");
+        mirrorLayer[2][2] = test.mirror;
+        mirrorLayer[static_cast<std::size_t>(test.first.y)]
+            [static_cast<std::size_t>(test.first.x)] = 'C';
+        const Level level = makeLevel({
+            { ".....", ".....", ".....", ".....", "....." },
+            mirrorLayer,
+        });
+        GameState state = rules::initialState(level);
+        const GameState original = state;
+        const std::optional<GameState> first = rules::activateMirrors(level, state);
+        CHECK(first.has_value());
+        CHECK(first && first->player == test.firstExpected);
+        CHECK(state == original);
+
+        state.player = test.second;
+        const std::optional<GameState> second = rules::activateMirrors(level, state);
+        CHECK(second.has_value());
+        CHECK(second && second->player == test.secondExpected);
+    }
+}
+
+void testMirrorReflectsMovablesAndStopsAtNearestEntity()
+{
+    TEST("mirrorReflectsMovablesAndStopsAtNearestEntity");
+    const Level level = makeLevel({
+        { ".....", ".....", ".....", ".....", "....." },
+        { "C    ", "     ", "  3  ", "  R  ", "  I  " },
+    });
+    const GameState state = rules::initialState(level);
+    const std::optional<GameState> after = rules::activateMirrors(level, state);
+
+    CHECK(after.has_value());
+    CHECK(after && after->player == state.player);
+    CHECK(after && after->movables[0].type == TileType::Rock);
+    CHECK(after && after->movables[0].cell == cell(1, 2, 1));
+    // The nearer rock occludes the ice on the same input ray.
+    CHECK(after && after->movables[1].cell == cell(2, 4, 1));
+}
+
+void testMirrorChainsWithoutReusingAMirror()
+{
+    TEST("mirrorChainsWithoutReusingAMirror");
+    const Level level = makeLevel({
+        { ".....", ".....", ".....", ".....", "....." },
+        { "  3  ", "     ", "    3", "     ", "    C" },
+    });
+    const GameState state = rules::initialState(level);
+    const std::optional<rules::MirrorActivationPreview> preview =
+        rules::previewMirrorActivation(level, state);
+    CHECK(preview.has_value());
+    CHECK(preview && preview->entities.size() == 1);
+    CHECK(preview && preview->entities[0].player);
+    CHECK(preview && preview->entities[0].start == cell(4, 4, 1));
+    CHECK(preview && preview->entities[0].destination == cell(0, 0, 1));
+    CHECK(preview && preview->entities[0].beamSegments.size() == 4);
+    if (preview && preview->entities[0].beamSegments.size() == 4) {
+        CHECK(preview->entities[0].beamSegments[0] ==
+            (rules::MirrorBeamSegment { cell(4, 4, 1), cell(4, 2, 1) }));
+        CHECK(preview->entities[0].beamSegments[1] ==
+            (rules::MirrorBeamSegment { cell(4, 2, 1), cell(2, 2, 1) }));
+        CHECK(preview->entities[0].beamSegments[2] ==
+            (rules::MirrorBeamSegment { cell(2, 2, 1), cell(2, 0, 1) }));
+        CHECK(preview->entities[0].beamSegments[3] ==
+            (rules::MirrorBeamSegment { cell(2, 0, 1), cell(0, 0, 1) }));
+    }
+    const std::optional<GameState> after = rules::activateMirrors(level, state);
+    CHECK(after.has_value());
+    CHECK(after && after->player == cell(0, 0, 1));
+    CHECK(preview && after && preview->after == *after);
+}
+
+void testInvalidMirrorOutputRejectsWholeActivation()
+{
+    TEST("invalidMirrorOutputRejectsWholeActivation");
+    const Level level = makeLevel({
+        { ".....", ".....", ".....", ".....", "....." },
+        { "     ", "     ", " #3  ", "     ", "  C  " },
+    });
+    const GameState state = rules::initialState(level);
+    CHECK(!rules::activateMirrors(level, state));
+    CHECK(state.player == cell(2, 4, 1));
+}
+
+void testMirrorCanTeleportPlayerIntoWater()
+{
+    TEST("mirrorCanTeleportPlayerIntoWater");
+    const Level level = makeLevel({
+        { ".....", ".....", "W....", ".....", "....." },
+        { "     ", "     ", "  3  ", "     ", "  C  " },
+    });
+    const std::optional<GameState> after =
+        rules::activateMirrors(level, rules::initialState(level));
+    CHECK(after.has_value());
+    CHECK(after && after->player == cell(0, 2, 1));
+    CHECK(after && after->playerDead);
+
+    const std::optional<rules::MirrorActivationPreview> preview =
+        rules::previewMirrorActivation(level, rules::initialState(level));
+    CHECK(preview && preview->entities[0].fallen);
+}
+
+void testMirrorNoVisibilityIsNoOp()
+{
+    TEST("mirrorNoVisibilityIsNoOp");
+    const Level level = makeLevel({
+        { ".....", ".....", ".....", ".....", "....." },
+        { "C    ", "     ", "  3  ", "     ", "     " },
+    });
+    CHECK(!rules::activateMirrors(level, rules::initialState(level)));
+}
+
 } // namespace
 
 int main()
@@ -748,6 +878,12 @@ int main()
     testConveyorChainMovesIntoVacatedCells();
     testHeadOnSlidesStopWithoutOverlap();
     testEveryPressurePlateMustHaveLiveOccupant();
+    testEveryMirrorOrientationReflectsBothWays();
+    testMirrorReflectsMovablesAndStopsAtNearestEntity();
+    testMirrorChainsWithoutReusingAMirror();
+    testInvalidMirrorOutputRejectsWholeActivation();
+    testMirrorCanTeleportPlayerIntoWater();
+    testMirrorNoVisibilityIsNoOp();
 
     if (failures == 0) {
         std::cout << "All " << checks << " checks passed.\n";

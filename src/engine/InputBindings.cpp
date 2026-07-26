@@ -97,8 +97,12 @@ InputBindings defaultInputBindings()
         GamepadButtonBinding { "dpright" },
         GamepadAxisBinding { "leftx", AxisDirection::Positive },
     };
-    bindings.forAction(InputAction::Undo) = {
+    bindings.forAction(InputAction::Mirror) = {
         KeyboardBinding { "Z" },
+        GamepadButtonBinding { "east" },
+    };
+    bindings.forAction(InputAction::Undo) = {
+        KeyboardBinding { "X" },
         GamepadButtonBinding { "west" },
     };
     bindings.forAction(InputAction::Restart) = {
@@ -124,6 +128,7 @@ std::string_view inputActionName(InputAction action)
     case InputAction::MoveDown: return "moveDown";
     case InputAction::MoveLeft: return "moveLeft";
     case InputAction::MoveRight: return "moveRight";
+    case InputAction::Mirror: return "mirror";
     case InputAction::Undo: return "undo";
     case InputAction::Restart: return "restart";
     case InputAction::MenuBack: return "menuBack";

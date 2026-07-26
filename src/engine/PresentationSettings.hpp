@@ -59,10 +59,7 @@ public:
 
 private:
     // Defaults come from the asset manifest via applyTileScales at startup.
-    std::array<float, tileTypeCount> tileScales_ {
-        1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
-        1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
-    };
+    std::array<float, tileTypeCount> tileScales_;
 };
 
 } // namespace sokoban

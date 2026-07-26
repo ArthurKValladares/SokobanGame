@@ -4,9 +4,11 @@
 #include "engine/AssetManifest.hpp"
 #include "engine/GameplayPresentation.hpp"
 #include "engine/PresentationSettings.hpp"
+#include "engine/Rules.hpp"
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
 #include "engine/RenderFrameBuilder.hpp"
+#include "engine/render/MirrorConfig.hpp"
 
 #include <cmath>
 #include <iostream>
@@ -45,6 +47,7 @@ const AssetManifest& testManifest()
         { "name": "Glass", "path": "glass.gltf" },
         { "name": "Bricks", "path": "bricks.gltf" },
         { "name": "Conveyor", "path": "conveyor.gltf", "beltScroll": true },
+        { "name": "Mirror", "path": "mirror.gltf" },
         {
           "name": "Hero",
           "path": "hero.glb",
@@ -68,6 +71,10 @@ const AssetManifest& testManifest()
         { "tile": "Conveyor Down", "model": "Conveyor" },
         { "tile": "Conveyor Right", "model": "Conveyor" },
         { "tile": "Conveyor Left", "model": "Conveyor" },
+        { "tile": "Mirror North-West", "model": "Mirror" },
+        { "tile": "Mirror North-East", "model": "Mirror" },
+        { "tile": "Mirror South-West", "model": "Mirror" },
+        { "tile": "Mirror South-East", "model": "Mirror" },
         { "tile": "Player", "model": "Hero" }
       ]
     })json");
@@ -293,6 +300,255 @@ void testGameplayFrameUsesSettingsAndPresentation()
     CHECK(near(player->position.x, -0.5f));
     CHECK(player->animation == testManifest().playerIdleAnimation());
     CHECK(near(conveyor->beltScrollOffset, 0.75f));
+}
+
+void testMirrorTilesUseTheirModelAndOrientation()
+{
+    TEST("mirrorTilesUseTheirModelAndOrientation");
+    const Level level = Level::loadFromLayers({
+        { "....." },
+        { "C1234" },
+    }, "mirror presentation frame");
+    const GameState state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+    const PresentationSettings settings;
+
+    const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = state,
+        .moving = false,
+        .activeAction = {},
+        .presentation = presentation,
+        .settings = settings,
+    });
+
+    std::array<const RenderFrameData::Tile*, 4> mirrors {};
+    for (const RenderFrameData::Tile& tile : frame.tiles) {
+        if (tile.model == testManifest().modelIdByName("Mirror") &&
+            tile.cell.x >= 1 && tile.cell.x <= 4) {
+            mirrors[static_cast<std::size_t>(tile.cell.x - 1)] = &tile;
+        }
+    }
+    constexpr std::array<uint32_t, 4> expectedRotations { 0, 1, 3, 2 };
+    for (std::size_t i = 0; i < mirrors.size(); ++i) {
+        CHECK(mirrors[i] != nullptr);
+        if (mirrors[i]) {
+            CHECK(near(mirrors[i]->height, 1.0f));
+            CHECK(mirrors[i]->modelRotationQuarterTurns == expectedRotations[i]);
+            CHECK(near(
+                mirrors[i]->modelRotationOffsetRadians,
+                config::mirrorModelRotationOffsetRadians));
+        }
+    }
+}
+
+void testMirrorActivationBuildsBeamAndDestinationGhost()
+{
+    TEST("mirrorActivationBuildsBeamAndDestinationGhost");
+    const Level level = Level::loadFromLayers({
+        {
+            ".....",
+            ".....",
+            ".....",
+            ".....",
+            ".....",
+        },
+        {
+            "     ",
+            "     ",
+            "  3  ",
+            "     ",
+            "  C  ",
+        },
+    }, "mirror visualization");
+    const GameState state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.setPlayerClips(
+        testManifest().playerMoveAnimation(),
+        testManifest().playerPushAnimation());
+    presentation.resetEntities(state);
+    presentation.advanceClocks(0.75f, false);
+
+    auto buildFrame = [&](bool moving) {
+        return RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(),
+            .level = level,
+            .state = state,
+            .moving = moving,
+            .activeAction = {},
+            .presentation = presentation,
+            .settings = {},
+        });
+    };
+    const RenderFrameData frame = buildFrame(false);
+    CHECK(near(frame.effectAnimationTimeSeconds, 0.75f));
+    auto sameColor = [](Vec4 left, Vec4 right) {
+        return near(left.x, right.x) &&
+            near(left.y, right.y) &&
+            near(left.z, right.z) &&
+            near(left.w, right.w);
+    };
+
+    const auto ghost = std::ranges::find_if(
+        frame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.effect == RenderSurfaceEffect::MirrorEnergy;
+        });
+    CHECK(ghost != frame.tiles.end());
+    if (ghost != frame.tiles.end()) {
+        CHECK(ghost->cell == (GridPosition3 { 0, 2, 1 }));
+        CHECK(near(ghost->position.x, 0.0f));
+        CHECK(near(ghost->position.y, 2.0f));
+        CHECK(ghost->model == testManifest().playerModel());
+        CHECK(ghost->animation == testManifest().playerIdleAnimation());
+        CHECK(sameColor(ghost->color, config::mirrorGhostColor));
+    }
+
+    const std::size_t energyFaceCount = std::ranges::count_if(
+        frame.isoFaces,
+        [&](const RenderFrameData::IsoFace& face) {
+            return face.effect == RenderSurfaceEffect::MirrorEnergy;
+        });
+    // Two reflection legs, each represented by a halo and core five-face prism.
+    CHECK(energyFaceCount == 20);
+    CHECK(std::ranges::any_of(
+        frame.isoFaces,
+        [&](const RenderFrameData::IsoFace& face) {
+            return face.effect == RenderSurfaceEffect::MirrorEnergy &&
+                sameColor(face.color, config::mirrorBeamHaloColor);
+        }));
+    CHECK(std::ranges::any_of(
+        frame.isoFaces,
+        [&](const RenderFrameData::IsoFace& face) {
+            return face.effect == RenderSurfaceEffect::MirrorEnergy &&
+                sameColor(face.color, config::mirrorBeamCoreColor);
+        }));
+
+    GameState moved = state;
+    moved.player = { 2, 3, 1 };
+    const GameplaySession::Action moveAction {
+        .before = state,
+        .after = moved,
+        .durationSeconds = 1.0f,
+        .facingDirection = MoveDirection::Up,
+    };
+    presentation.beginAction(moveAction);
+    presentation.advanceAnimations(0.5f);
+    const RenderFrameData movingFrame =
+        RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(),
+            .level = level,
+            .state = state,
+            .moving = true,
+            .activeAction = moveAction,
+            .presentation = presentation,
+            .settings = {},
+        });
+    const auto movingGhost = std::ranges::find_if(
+        movingFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.effect == RenderSurfaceEffect::MirrorEnergy;
+        });
+    CHECK(movingGhost != movingFrame.tiles.end());
+    if (movingGhost != movingFrame.tiles.end()) {
+        CHECK(near(movingGhost->position.x, 0.5f));
+        CHECK(near(movingGhost->position.y, 2.0f));
+    }
+    CHECK(std::ranges::any_of(
+        movingFrame.isoFaces,
+        [](const RenderFrameData::IsoFace& face) {
+            return face.effect == RenderSurfaceEffect::MirrorEnergy;
+        }));
+
+    presentation.resetEntities(state);
+    GameState movedSideways = state;
+    movedSideways.player = { 3, 4, 1 };
+    const GameplaySession::Action sidewaysAction {
+        .before = state,
+        .after = movedSideways,
+        .durationSeconds = 1.0f,
+        .facingDirection = MoveDirection::Right,
+    };
+    presentation.beginAction(sidewaysAction);
+    presentation.advanceAnimations(0.1f);
+    const RenderFrameData sidewaysFrame =
+        RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(),
+            .level = level,
+            .state = state,
+            .moving = true,
+            .activeAction = sidewaysAction,
+            .presentation = presentation,
+            .settings = {},
+        });
+    const auto sidewaysGhost = std::ranges::find_if(
+        sidewaysFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.effect == RenderSurfaceEffect::MirrorEnergy;
+        });
+    CHECK(sidewaysGhost != sidewaysFrame.tiles.end());
+    if (sidewaysGhost != sidewaysFrame.tiles.end()) {
+        CHECK(near(sidewaysGhost->position.x, 0.0f));
+        CHECK(near(sidewaysGhost->position.y, 2.0f));
+        CHECK(sidewaysGhost->color.w > 0.0f);
+        CHECK(sidewaysGhost->color.w < config::mirrorGhostColor.w);
+    }
+
+    const auto verticalBeam = std::ranges::find_if(
+        sidewaysFrame.isoFaces,
+        [&](const RenderFrameData::IsoFace& face) {
+            if (face.effect != RenderSurfaceEffect::MirrorEnergy ||
+                !near(face.color.x, config::mirrorBeamCoreColor.x) ||
+                !near(face.color.y, config::mirrorBeamCoreColor.y) ||
+                !near(face.color.z, config::mirrorBeamCoreColor.z) ||
+                face.color.w <= 0.0f ||
+                face.color.w >= config::mirrorBeamCoreColor.w) {
+                return false;
+            }
+            float minX = face.vertices[0].x;
+            float maxX = face.vertices[0].x;
+            float minY = face.vertices[0].y;
+            float maxY = face.vertices[0].y;
+            for (Vec3 vertex : face.vertices) {
+                minX = std::min(minX, vertex.x);
+                maxX = std::max(maxX, vertex.x);
+                minY = std::min(minY, vertex.y);
+                maxY = std::max(maxY, vertex.y);
+            }
+            return maxY - minY > 1.0f && maxX - minX < 0.2f;
+        });
+    CHECK(verticalBeam != sidewaysFrame.isoFaces.end());
+    if (verticalBeam != sidewaysFrame.isoFaces.end()) {
+        float centerX = 0.0f;
+        for (Vec3 vertex : verticalBeam->vertices) {
+            centerX += vertex.x;
+        }
+        CHECK(near(centerX * 0.25f, 2.5f));
+    }
+
+    presentation.advanceAnimations(0.4f);
+    const RenderFrameData fadedOutFrame =
+        RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(),
+            .level = level,
+            .state = state,
+            .moving = true,
+            .activeAction = sidewaysAction,
+            .presentation = presentation,
+            .settings = {},
+        });
+    CHECK(std::ranges::none_of(
+        fadedOutFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.effect == RenderSurfaceEffect::MirrorEnergy;
+        }));
+    CHECK(std::ranges::none_of(
+        fadedOutFrame.isoFaces,
+        [](const RenderFrameData::IsoFace& face) {
+            return face.effect == RenderSurfaceEffect::MirrorEnergy;
+        }));
 }
 
 void testGameplayFrameBuildsProceduralWaterSurface()
@@ -692,6 +948,8 @@ int main()
     testPresentationResetClocksAndFallenTargets();
     testPresentationInterpolatesActionsAndClips();
     testGameplayFrameUsesSettingsAndPresentation();
+    testMirrorTilesUseTheirModelAndOrientation();
+    testMirrorActivationBuildsBeamAndDestinationGhost();
     testGameplayFrameBuildsProceduralWaterSurface();
     testWaterLayerBuildsUnboundedNonPickableExterior();
     testFilledWaterUpdatesEdgesAndRoundedCornerCaps();

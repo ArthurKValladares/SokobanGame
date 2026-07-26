@@ -14,6 +14,7 @@ enum class InputAction {
     MoveDown,
     MoveLeft,
     MoveRight,
+    Mirror,
     Undo,
     Restart,
     MenuBack,

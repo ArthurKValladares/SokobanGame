@@ -3,6 +3,7 @@
 #include "engine/Rules.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
+#include "engine/render/MirrorConfig.hpp"
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
 
@@ -91,14 +92,15 @@ StaticRenderCell staticRenderCellFor(
             : (conveyor
                     ? config::conveyorTileHeight
                     : (tileTypeIsSolidBlock(tile) ||
-                              tileTypeOccupiesLevelCell(tile)
+                              tileTypeOccupiesLevelCell(tile) ||
+                              tileTypeIsMirror(tile)
                             ? 1.0f
                             : 0.0f)),
         .modelRotationQuarterTurns = tile == TileType::Player
             ? playerFacingQuarterTurns
             : (rules::conveyorDirectionForTile(tile)
                     ? facingQuarterTurns(*rules::conveyorDirectionForTile(tile))
-                    : 0),
+                    : mirrorOrientationQuarterTurns(tile).value_or(0)),
     };
 }
 
@@ -298,6 +300,96 @@ void appendWaterEdgeFaces(
             }
         }
     }
+}
+
+struct MirrorRenderSegment {
+    Vec3 from {};
+    Vec3 to {};
+    float opacity = 1.0f;
+};
+
+Vec3 toRenderPoint(GridPosition3 point)
+{
+    return {
+        static_cast<float>(point.x),
+        static_cast<float>(point.y),
+        static_cast<float>(point.z),
+    };
+}
+
+Vec3 interpolate(Vec3 from, Vec3 to, float amount)
+{
+    return {
+        from.x + (to.x - from.x) * amount,
+        from.y + (to.y - from.y) * amount,
+        from.z + (to.z - from.z) * amount,
+    };
+}
+
+void appendMirrorBeamPrism(
+    RenderFrameData& frame,
+    const MirrorRenderSegment& segment,
+    float width,
+    Vec4 color)
+{
+    const Vec2 from {
+        segment.from.x + 0.5f,
+        segment.from.y + 0.5f,
+    };
+    const Vec2 to {
+        segment.to.x + 0.5f,
+        segment.to.y + 0.5f,
+    };
+    const Vec2 delta { to.x - from.x, to.y - from.y };
+    const float length = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+    if (length <= 0.0001f) {
+        return;
+    }
+
+    const Vec2 perpendicular {
+        -delta.y / length * width * 0.5f,
+        delta.x / length * width * 0.5f,
+    };
+    const float bottom = segment.from.z +
+        config::mirrorBeamElevation - config::mirrorBeamThickness * 0.5f;
+    const float top = bottom + config::mirrorBeamThickness;
+    const std::array<Vec3, 8> corners {
+        Vec3 { from.x - perpendicular.x, from.y - perpendicular.y, bottom },
+        Vec3 { from.x + perpendicular.x, from.y + perpendicular.y, bottom },
+        Vec3 { to.x + perpendicular.x, to.y + perpendicular.y, bottom },
+        Vec3 { to.x - perpendicular.x, to.y - perpendicular.y, bottom },
+        Vec3 { from.x - perpendicular.x, from.y - perpendicular.y, top },
+        Vec3 { from.x + perpendicular.x, from.y + perpendicular.y, top },
+        Vec3 { to.x + perpendicular.x, to.y + perpendicular.y, top },
+        Vec3 { to.x - perpendicular.x, to.y - perpendicular.y, top },
+    };
+    auto appendFace = [&](std::array<Vec3, 4> vertices) {
+        frame.isoFaces.push_back({
+            .vertices = vertices,
+            .color = color,
+            .effect = RenderSurfaceEffect::MirrorEnergy,
+        });
+    };
+    appendFace({ corners[4], corners[7], corners[6], corners[5] });
+    appendFace({ corners[0], corners[4], corners[5], corners[1] });
+    appendFace({ corners[3], corners[2], corners[6], corners[7] });
+    appendFace({ corners[0], corners[3], corners[7], corners[4] });
+    appendFace({ corners[1], corners[5], corners[6], corners[2] });
+}
+
+bool sameUndirectedSegment(
+    const MirrorRenderSegment& left,
+    const MirrorRenderSegment& right)
+{
+    auto samePoint = [](Vec3 first, Vec3 second) {
+        return std::abs(first.x - second.x) < 0.0001f &&
+            std::abs(first.y - second.y) < 0.0001f &&
+            std::abs(first.z - second.z) < 0.0001f;
+    };
+    return (samePoint(left.from, right.from) &&
+               samePoint(left.to, right.to)) ||
+        (samePoint(left.from, right.to) &&
+            samePoint(left.to, right.from));
 }
 
 void appendWaterSurface(
@@ -520,6 +612,10 @@ void appendStaticTiles(
                     .showGrid = cell.showGrid,
                     .model = manifest.modelForTile(cell.tile),
                     .modelRotationQuarterTurns = cell.modelRotationQuarterTurns,
+                    .modelRotationOffsetRadians =
+                        tileTypeIsMirror(cell.tile)
+                        ? config::mirrorModelRotationOffsetRadians
+                        : 0.0f,
                 };
                 applyTileScale(renderTile, scaleForTile(cell.tile));
                 frame.tiles.push_back(renderTile);
@@ -543,6 +639,8 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     frame.levelHeight = input.level.height();
     frame.levelDepth = input.level.depth();
     frame.waterAnimationTimeSeconds =
+        input.presentation.worldAnimationTimeSeconds();
+    frame.effectAnimationTimeSeconds =
         input.presentation.worldAnimationTimeSeconds();
     frame.playerPosition = {
         playerVisual.motion.renderPosition.x,
@@ -788,6 +886,247 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
         frame.tiles.push_back(movableTile);
     }
 
+    if (!state.playerDead) {
+        std::optional<rules::MirrorActivationPreview> mirrorPreview =
+            rules::previewMirrorActivation(input.level, state);
+        std::optional<rules::MirrorActivationPreview> actionEndPreview;
+        if (input.moving && !input.activeAction.after.playerDead) {
+            actionEndPreview = rules::previewMirrorActivation(
+                input.level, input.activeAction.after);
+        }
+        if (mirrorPreview) {
+            std::vector<MirrorRenderSegment> beamSegments;
+            for (const rules::MirrorEntityPreview& entity :
+                 mirrorPreview->entities) {
+                const rules::MirrorEntityPreview* matchingEndEntity = nullptr;
+                if (actionEndPreview) {
+                    const auto match = std::ranges::find_if(
+                        actionEndPreview->entities,
+                        [&](const rules::MirrorEntityPreview& candidate) {
+                            return candidate.player == entity.player &&
+                                (entity.player ||
+                                    candidate.movableIndex ==
+                                        entity.movableIndex);
+                        });
+                    if (match != actionEndPreview->entities.end()) {
+                        matchingEndEntity = &*match;
+                    }
+                }
+                const bool hasMatchingEndEntity =
+                    matchingEndEntity != nullptr;
+
+                const GameplayPresentation::EntityVisual* visual =
+                    entity.player
+                    ? &playerVisual.motion
+                    : (entity.movableIndex < movableVisuals.size()
+                            ? &movableVisuals[entity.movableIndex]
+                            : nullptr);
+                const float progress =
+                    visual && visual->animationDuration > 0.0001f
+                    ? std::clamp(
+                          visual->animationElapsed /
+                              visual->animationDuration,
+                          0.0f,
+                          1.0f)
+                    : 0.0f;
+
+                std::vector<MirrorRenderSegment> entitySegments;
+                entitySegments.reserve(entity.beamSegments.size());
+                const bool sameMirrorPath =
+                    hasMatchingEndEntity &&
+                    matchingEndEntity->beamSegments.size() ==
+                        entity.beamSegments.size() &&
+                    [&] {
+                        for (std::size_t segmentIndex = 0;
+                             segmentIndex < entity.beamSegments.size();
+                             segmentIndex += 2) {
+                            if (!(entity.beamSegments[segmentIndex].to ==
+                                    matchingEndEntity
+                                        ->beamSegments[segmentIndex].to)) {
+                                return false;
+                            }
+                        }
+                        return true;
+                    }();
+                const bool visualOnIncomingSightline =
+                    visual && !entity.beamSegments.empty() &&
+                    [&] {
+                        const GridPosition3 start =
+                            entity.beamSegments.front().from;
+                        const GridPosition3 mirror =
+                            entity.beamSegments.front().to;
+                        const Vec3 position = visual->renderPosition;
+                        if (std::abs(
+                                position.z -
+                                static_cast<float>(start.z)) > 0.0001f) {
+                            return false;
+                        }
+                        if (start.x == mirror.x) {
+                            const float mirrorToStart =
+                                static_cast<float>(start.y - mirror.y);
+                            const float mirrorToPosition =
+                                position.y - static_cast<float>(mirror.y);
+                            return std::abs(
+                                       position.x -
+                                       static_cast<float>(start.x)) <
+                                    0.0001f &&
+                                mirrorToStart * mirrorToPosition >= 0.0f;
+                        }
+                        const float mirrorToStart =
+                            static_cast<float>(start.x - mirror.x);
+                        const float mirrorToPosition =
+                            position.x - static_cast<float>(mirror.x);
+                        return std::abs(
+                                   position.y -
+                                   static_cast<float>(start.y)) <
+                                0.0001f &&
+                            mirrorToStart * mirrorToPosition >= 0.0f;
+                    }();
+                const bool animatePreview =
+                    sameMirrorPath && visualOnIncomingSightline;
+                float previewOpacity = 1.0f;
+                if (input.moving && !animatePreview) {
+                    const float fadeProgress = std::clamp(
+                        progress /
+                            std::max(
+                                config::mirrorPreviewExitFadeProgress,
+                                0.0001f),
+                        0.0f,
+                        1.0f);
+                    const float smoothFade =
+                        fadeProgress * fadeProgress *
+                        (3.0f - 2.0f * fadeProgress);
+                    previewOpacity = 1.0f - smoothFade;
+                }
+                if (previewOpacity <= 0.001f) {
+                    continue;
+                }
+                for (std::size_t segmentIndex = 0;
+                     segmentIndex < entity.beamSegments.size();
+                     ++segmentIndex) {
+                    MirrorRenderSegment segment {
+                        .from = toRenderPoint(
+                            entity.beamSegments[segmentIndex].from),
+                        .to = toRenderPoint(
+                            entity.beamSegments[segmentIndex].to),
+                        .opacity = previewOpacity,
+                    };
+                    if (animatePreview) {
+                        segment.from = interpolate(
+                            segment.from,
+                            toRenderPoint(
+                                matchingEndEntity
+                                    ->beamSegments[segmentIndex].from),
+                            progress);
+                        segment.to = interpolate(
+                            segment.to,
+                            toRenderPoint(
+                                matchingEndEntity
+                                    ->beamSegments[segmentIndex].to),
+                            progress);
+                    }
+                    entitySegments.push_back(segment);
+                }
+                if (animatePreview && !entitySegments.empty()) {
+                    entitySegments.front().from = visual->renderPosition;
+                }
+                for (const MirrorRenderSegment& segment : entitySegments) {
+                    const auto existing = std::ranges::find_if(
+                        beamSegments,
+                        [&](const MirrorRenderSegment& candidate) {
+                            return sameUndirectedSegment(
+                                candidate, segment);
+                        });
+                    if (existing == beamSegments.end()) {
+                        beamSegments.push_back(segment);
+                    } else {
+                        existing->opacity = std::max(
+                            existing->opacity, segment.opacity);
+                    }
+                }
+
+                auto ghostRenderPosition =
+                    [](const rules::MirrorEntityPreview& preview) {
+                        Vec3 result = toRenderPoint(preview.destination);
+                        if (preview.fallen) {
+                            result.z -= preview.player
+                                ? config::drownedPlayerDepthBelowGround
+                                : config::waterDepthBelowGround;
+                        }
+                        return result;
+                    };
+                Vec3 ghostPosition = ghostRenderPosition(entity);
+                bool ghostFallen = entity.fallen;
+                GridPosition3 ghostCell = entity.destination;
+                if (animatePreview) {
+                    ghostPosition = interpolate(
+                        ghostPosition,
+                        ghostRenderPosition(*matchingEndEntity),
+                        progress);
+                    if (progress >= 0.5f) {
+                        ghostFallen = matchingEndEntity->fallen;
+                        ghostCell = matchingEndEntity->destination;
+                    }
+                }
+                RenderFrameData::Tile ghost {
+                    .cell = ghostCell,
+                    .position = {
+                        ghostPosition.x,
+                        ghostPosition.y,
+                    },
+                    .color = {
+                        config::mirrorGhostColor.x,
+                        config::mirrorGhostColor.y,
+                        config::mirrorGhostColor.z,
+                        config::mirrorGhostColor.w * previewOpacity,
+                    },
+                    .baseElevation = ghostPosition.z,
+                    .height = 1.0f,
+                    .showGrid = false,
+                    .model = entity.player
+                        ? input.manifest.playerModel()
+                        : input.manifest.modelForTile(
+                              state.movables[entity.movableIndex].type),
+                    .animation = entity.player
+                        ? (ghostFallen
+                                ? input.manifest.playerDeadIdleAnimation()
+                                : input.manifest.playerIdleAnimation())
+                        : noAnimation,
+                    .animationLoops = true,
+                    .animationTimeSeconds = playerVisual.clipTimeSeconds,
+                    .modelRotationQuarterTurns = entity.player
+                        ? playerVisual.facingQuarterTurns
+                        : 0U,
+                    .effect = RenderSurfaceEffect::MirrorEnergy,
+                };
+                applyTileScale(
+                    ghost,
+                    input.settings.tileScale(
+                        entity.player
+                            ? TileType::Player
+                            : state.movables[entity.movableIndex].type));
+                frame.tiles.push_back(ghost);
+            }
+
+            for (const MirrorRenderSegment& segment : beamSegments) {
+                Vec4 haloColor = config::mirrorBeamHaloColor;
+                haloColor.w *= segment.opacity;
+                appendMirrorBeamPrism(
+                    frame,
+                    segment,
+                    config::mirrorBeamHaloWidth,
+                    haloColor);
+                Vec4 coreColor = config::mirrorBeamCoreColor;
+                coreColor.w *= segment.opacity;
+                appendMirrorBeamPrism(
+                    frame,
+                    segment,
+                    config::mirrorBeamCoreWidth,
+                    coreColor);
+            }
+        }
+    }
+
     for (RenderFrameData::Tile& tile : frame.tiles) {
         if (!tile.model.isCube() && input.manifest.model(tile.model).beltScroll) {
             tile.beltScrollOffset = input.conveyorBeltScrollOffset;
@@ -922,7 +1261,8 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
                     : (conveyor
                             ? config::conveyorTileHeight
                             : (tileTypeIsSolidBlock(tile) ||
-                                      tileTypeOccupiesLevelCell(tile)
+                                      tileTypeOccupiesLevelCell(tile) ||
+                                      tileTypeIsMirror(tile)
                                     ? 1.0f
                                     : 0.0f)),
                 .blurBehind = tile == TileType::Ice,
@@ -938,7 +1278,10 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
                 .modelRotationQuarterTurns =
                     rules::conveyorDirectionForTile(tile)
                     ? facingQuarterTurns(*rules::conveyorDirectionForTile(tile))
-                    : 0,
+                    : mirrorOrientationQuarterTurns(tile).value_or(0),
+                .modelRotationOffsetRadians = tileTypeIsMirror(tile)
+                    ? config::mirrorModelRotationOffsetRadians
+                    : 0.0f,
             };
             applyTileScale(renderTile, input.settings.tileScale(tile));
             frame.tiles.push_back(renderTile);

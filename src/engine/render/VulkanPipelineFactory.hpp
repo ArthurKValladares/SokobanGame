@@ -31,8 +31,12 @@ public:
     [[nodiscard]] VkPipelineLayout layout() const { return layout_; }
     [[nodiscard]] VkPipeline scene() const { return scene_; }
     [[nodiscard]] VkPipeline water() const { return water_; }
+    [[nodiscard]] VkPipeline mirrorEnergy() const { return mirrorEnergy_; }
     [[nodiscard]] VkPipeline ui() const { return ui_; }
     [[nodiscard]] VkPipeline model() const { return model_; }
+    [[nodiscard]] VkPipeline mirrorEnergyModel() const {
+        return mirrorEnergyModel_;
+    }
     [[nodiscard]] VkPipeline shadow() const { return shadow_; }
     [[nodiscard]] VkPipeline modelShadow() const { return modelShadow_; }
     [[nodiscard]] VkPipeline ssao() const { return ssao_; }
@@ -69,8 +73,10 @@ private:
     VkPipelineLayout layout_ = VK_NULL_HANDLE;
     VkPipeline scene_ = VK_NULL_HANDLE;
     VkPipeline water_ = VK_NULL_HANDLE;
+    VkPipeline mirrorEnergy_ = VK_NULL_HANDLE;
     VkPipeline ui_ = VK_NULL_HANDLE;
     VkPipeline model_ = VK_NULL_HANDLE;
+    VkPipeline mirrorEnergyModel_ = VK_NULL_HANDLE;
     VkPipeline shadow_ = VK_NULL_HANDLE;
     VkPipeline modelShadow_ = VK_NULL_HANDLE;
     VkPipeline ssao_ = VK_NULL_HANDLE;

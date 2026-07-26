@@ -12,6 +12,50 @@
     {
       "name": "PlatformerThread",
       "path": "KayKit Platformer Pack 1.0/Assets/gltf/blue/threads.png"
+    },
+    {
+      "name": "FurnitureBits",
+      "path": "KayKit Furniture Bits 1.0/Assets/gltf/furniturebits_texture.png"
+    },
+    {
+      "name": "Smoke01",
+      "path": "kenney_particle-pack/PNG (Transparent)/smoke_01.png"
+    },
+    {
+      "name": "Smoke02",
+      "path": "kenney_particle-pack/PNG (Transparent)/smoke_02.png"
+    },
+    {
+      "name": "Smoke03",
+      "path": "kenney_particle-pack/PNG (Transparent)/smoke_03.png"
+    },
+    {
+      "name": "Smoke04",
+      "path": "kenney_particle-pack/PNG (Transparent)/smoke_04.png"
+    },
+    {
+      "name": "Smoke05",
+      "path": "kenney_particle-pack/PNG (Transparent)/smoke_05.png"
+    },
+    {
+      "name": "Smoke06",
+      "path": "kenney_particle-pack/PNG (Transparent)/smoke_06.png"
+    },
+    {
+      "name": "Smoke07",
+      "path": "kenney_particle-pack/PNG (Transparent)/smoke_07.png"
+    },
+    {
+      "name": "Smoke08",
+      "path": "kenney_particle-pack/PNG (Transparent)/smoke_08.png"
+    },
+    {
+      "name": "Smoke09",
+      "path": "kenney_particle-pack/PNG (Transparent)/smoke_09.png"
+    },
+    {
+      "name": "Smoke10",
+      "path": "kenney_particle-pack/PNG (Transparent)/smoke_10.png"
     }
   ],
   "models": [
@@ -47,6 +91,15 @@
       "preserveAspectRatio": true,
       "rotateHalfTurn": true,
       "role": "player"
+    },
+    {
+      "name": "PictureFrameLargeA",
+      "path": "KayKit Furniture Bits 1.0/Assets/gltf/pictureframe_large_A.gltf",
+      "material": {
+        "mode": "texture",
+        "texture": "FurnitureBits"
+      },
+      "preserveAspectRatio": true
     }
   ],
   "animations": [
@@ -89,6 +142,10 @@
     { "tile": "Conveyor Down", "model": "Conveyor" },
     { "tile": "Conveyor Right", "model": "Conveyor" },
     { "tile": "Conveyor Left", "model": "Conveyor" },
+    { "tile": "Mirror North-West", "model": "PictureFrameLargeA" },
+    { "tile": "Mirror North-East", "model": "PictureFrameLargeA" },
+    { "tile": "Mirror South-West", "model": "PictureFrameLargeA" },
+    { "tile": "Mirror South-East", "model": "PictureFrameLargeA" },
     { "tile": "Player", "model": "Rogue", "scale": 1.1 }
   ],
   "sounds": [
@@ -111,6 +168,13 @@
         "custom/audio/stoneDragLoop2.ogg",
         "custom/audio/stoneDragLoop3.ogg",
         "custom/audio/stoneDragLoop4.ogg"
+      ]
+    },
+    {
+      "name": "mirror-swap",
+      "volume": 0.8,
+      "files": [
+        "Kenney Game Assets All-in-1 3.5.0/Audio/Foley Sounds/Audio/Woosh/woosh1.ogg"
       ]
     }
   ],

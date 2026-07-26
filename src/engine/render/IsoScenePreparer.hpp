@@ -41,6 +41,7 @@ struct ShadowRenderLayout {
 enum class PreparedSurfaceMaterial {
     Standard,
     Water,
+    MirrorEnergy,
 };
 
 struct PreparedIsoFace {
@@ -62,6 +63,14 @@ struct PreparedIsoFace {
     float depth = 0.0f;
 };
 
+struct PreparedParticle {
+    std::array<Vec3, 4> vertices {};
+    Vec4 color {};
+    RenderTexture texture = noTexture;
+    float depth = 0.0f;
+    bool drawOnTop = false;
+};
+
 // CPU scene work shared by every pass in one submitted frame.
 // Index lists point into the source RenderFrameData or the face pool and keep
 // pass recording free of geometry regeneration, culling, and sorting.
@@ -77,6 +86,7 @@ struct PreparedRenderScene {
     std::vector<std::size_t> pickFaceIndices;
     std::vector<std::size_t> opaqueModelIndices;
     std::vector<std::size_t> translucentModelIndices;
+    std::vector<PreparedParticle> particles;
     std::vector<std::array<Vec4, 4>> shadowFaces;
     std::vector<std::size_t> shadowModelIndices;
 };

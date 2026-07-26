@@ -45,6 +45,9 @@ GameplayLoop::UpdateResult GameplayLoop::update(
     float dt,
     bool playingDraft)
 {
+    if (input.mirrorPressed) {
+        session.queueMirror();
+    }
     if (input.undoPressed) {
         session.queueUndo();
     }
@@ -63,6 +66,8 @@ GameplayLoop::UpdateResult GameplayLoop::update(
     presentation.advanceAnimations(dt);
     float remainingTime = dt;
     UpdateResult result;
+    std::size_t observedMirrorActivation =
+        session.mirrorActivationSequence();
     while (remainingTime > 0.0f) {
         if (!session.moving()) {
             const GameplaySession::Controls controls {
@@ -72,6 +77,13 @@ GameplayLoop::UpdateResult GameplayLoop::update(
             };
             if (!session.tryStartNextAction(level, controls)) {
                 return result;
+            }
+            if (session.mirrorActivationSequence() !=
+                observedMirrorActivation) {
+                observedMirrorActivation = session.mirrorActivationSequence();
+                result.mirrorActivated = true;
+                result.mirrorSwapDestinations =
+                    session.lastMirrorSwapDestinations();
             }
             presentation.beginAction(session.activeAction());
         }

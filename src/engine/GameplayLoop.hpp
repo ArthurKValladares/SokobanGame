@@ -5,6 +5,7 @@
 #include "engine\Level.hpp"
 
 #include <optional>
+#include <vector>
 
 namespace sokoban {
 
@@ -23,6 +24,7 @@ public:
         ButtonState down;
         ButtonState left;
         ButtonState right;
+        bool mirrorPressed = false;
         bool undoPressed = false;
         bool undoDown = false;
         bool restartPressed = false;
@@ -32,6 +34,8 @@ public:
         bool stateCommitted = false;
         bool screenSolved = false;
         bool draftSolved = false;
+        bool mirrorActivated = false;
+        std::vector<GridPosition3> mirrorSwapDestinations;
     };
 
     [[nodiscard]] static UpdateResult update(

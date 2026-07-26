@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -21,6 +22,14 @@ constexpr unsigned int musicCrossfadeMilliseconds = 600;
 } // namespace
 
 struct AudioSystem::EngineHandle {
+    struct OneShotSoundSet {
+        std::string name;
+        float volume = 1.0f;
+        std::vector<ma_sound> sounds;
+        std::vector<int> loaded;
+        int lastPlayed = -1;
+    };
+
     ma_engine engine {};
     bool engineInitialized = false;
     // Fully decoded at load; addresses must stay stable after init, so the
@@ -30,6 +39,7 @@ struct AudioSystem::EngineHandle {
     std::vector<ma_sound> stoneDragSounds;
     std::vector<int> loadedStoneDrags;
     int activeStoneDrag = -1;
+    std::vector<OneShotSoundSet> oneShotSoundSets;
     std::vector<ma_sound> musicSounds;
     std::vector<int> loadedMusic;
     int activeMusic = -1;
@@ -95,6 +105,23 @@ AudioSystem::AudioSystem(std::filesystem::path audioRoot, const AssetManifest& m
         manifest.soundSet("stone-drag"),
         engine_->stoneDragSounds, engine_->loadedStoneDrags,
         MA_SOUND_FLAG_DECODE);
+    engine_->oneShotSoundSets.reserve(manifest.soundSets().size());
+    for (const AssetManifest::SoundSet& set : manifest.soundSets()) {
+        if (set.name == "footsteps" || set.name == "stone-drag") {
+            continue;
+        }
+        EngineHandle::OneShotSoundSet& oneShot =
+            engine_->oneShotSoundSets.emplace_back();
+        oneShot.name = set.name;
+        oneShot.volume = std::clamp(set.volume, 0.0f, 1.0f);
+        loadSoundSet(
+            engine_->engine,
+            audioRoot_,
+            set.files,
+            oneShot.sounds,
+            oneShot.loaded,
+            MA_SOUND_FLAG_DECODE);
+    }
     // Music is streamed rather than fully decoded; tracks are long and only
     // one plays at a time. Slot i mirrors manifest.musicTracks()[i].
     std::vector<std::string> musicFiles;
@@ -119,6 +146,11 @@ AudioSystem::~AudioSystem()
     }
     for (int index : engine_->loadedStoneDrags) {
         ma_sound_uninit(&engine_->stoneDragSounds[static_cast<size_t>(index)]);
+    }
+    for (EngineHandle::OneShotSoundSet& set : engine_->oneShotSoundSets) {
+        for (int index : set.loaded) {
+            ma_sound_uninit(&set.sounds[static_cast<size_t>(index)]);
+        }
     }
     for (int index : engine_->loadedMusic) {
         ma_sound_uninit(&engine_->musicSounds[static_cast<size_t>(index)]);
@@ -148,6 +180,36 @@ void AudioSystem::update(float dt, bool playerWalking, bool pushingStone)
             stopStoneDrag();
         }
     }
+}
+
+void AudioSystem::playOneShot(std::string_view soundSetName)
+{
+    if (!engine_->engineInitialized) {
+        return;
+    }
+
+    const auto found = std::ranges::find_if(
+        engine_->oneShotSoundSets,
+        [&](const EngineHandle::OneShotSoundSet& set) {
+            return set.name == soundSetName;
+        });
+    if (found == engine_->oneShotSoundSets.end() || found->loaded.empty()) {
+        return;
+    }
+
+    int pick = found->loaded[random_() % found->loaded.size()];
+    if (found->loaded.size() > 1) {
+        while (pick == found->lastPlayed) {
+            pick = found->loaded[random_() % found->loaded.size()];
+        }
+    }
+    found->lastPlayed = pick;
+
+    ma_sound& sound = found->sounds[static_cast<size_t>(pick)];
+    ma_sound_set_looping(&sound, MA_FALSE);
+    ma_sound_set_volume(&sound, soundVolume_ * found->volume);
+    ma_sound_seek_to_pcm_frame(&sound, 0);
+    ma_sound_start(&sound);
 }
 
 void AudioSystem::playFootstep()
@@ -275,6 +337,15 @@ void AudioSystem::setSoundVolume(float volume)
         ma_sound_set_volume(
             &engine_->stoneDragSounds[static_cast<size_t>(engine_->activeStoneDrag)],
             soundVolume_ * stoneDragVolume_);
+    }
+    if (engine_->engineInitialized) {
+        for (EngineHandle::OneShotSoundSet& set : engine_->oneShotSoundSets) {
+            for (int index : set.loaded) {
+                ma_sound_set_volume(
+                    &set.sounds[static_cast<size_t>(index)],
+                    soundVolume_ * set.volume);
+            }
+        }
     }
 }
 

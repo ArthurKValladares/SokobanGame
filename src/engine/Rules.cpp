@@ -1,7 +1,10 @@
 #include "engine/Rules.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
+#include <cstdlib>
+#include <utility>
 #include <vector>
 
 namespace sokoban::rules {
@@ -292,6 +295,342 @@ bool hasPendingMotion(const Level& level, const GameState& state)
         return !movable.fallen &&
             (movable.sliding || conveyorDirectionAt(level, movable.cell).has_value());
     });
+}
+
+namespace {
+
+struct MirrorRays {
+    GridPosition first {};
+    GridPosition second {};
+};
+
+struct MirrorHit {
+    GridPosition3 cell {};
+    GridPosition output {};
+    int distance = 0;
+};
+
+std::optional<MirrorRays> mirrorRays(TileType tile)
+{
+    switch (tile) {
+    case TileType::MirrorNorthWest:
+        return MirrorRays { { 0, -1 }, { -1, 0 } };
+    case TileType::MirrorNorthEast:
+        return MirrorRays { { 0, -1 }, { 1, 0 } };
+    case TileType::MirrorSouthWest:
+        return MirrorRays { { 0, 1 }, { -1, 0 } };
+    case TileType::MirrorSouthEast:
+        return MirrorRays { { 0, 1 }, { 1, 0 } };
+    default:
+        return std::nullopt;
+    }
+}
+
+GridPosition3 rayCell(GridPosition3 origin, GridPosition ray, int distance)
+{
+    return {
+        origin.x + ray.x * distance,
+        origin.y + ray.y * distance,
+        origin.z,
+    };
+}
+
+std::optional<int> distanceAlongRay(
+    GridPosition3 origin,
+    GridPosition3 target,
+    GridPosition ray)
+{
+    if (origin.z != target.z) {
+        return std::nullopt;
+    }
+    const int dx = target.x - origin.x;
+    const int dy = target.y - origin.y;
+    if (ray.x != 0 && dy == 0 && dx * ray.x > 0) {
+        return std::abs(dx);
+    }
+    if (ray.y != 0 && dx == 0 && dy * ray.y > 0) {
+        return std::abs(dy);
+    }
+    return std::nullopt;
+}
+
+bool entityBlocksSight(
+    const GameState& state,
+    GridPosition3 cell,
+    std::size_t ignoredEntity)
+{
+    const std::size_t playerIndex = state.movables.size();
+    if (ignoredEntity != playerIndex && !state.playerDead && state.player == cell) {
+        return true;
+    }
+    for (std::size_t i = 0; i < state.movables.size(); ++i) {
+        if (i != ignoredEntity && !state.movables[i].fallen &&
+            state.movables[i].cell == cell) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool inputRayIsClear(
+    const Level& level,
+    const GameState& state,
+    GridPosition3 mirror,
+    GridPosition ray,
+    int distance,
+    std::size_t entityIndex)
+{
+    for (int step = 1; step < distance; ++step) {
+        const GridPosition3 cell = rayCell(mirror, ray, step);
+        if (!staticCellAllowsEntity(level, cell) ||
+            entityBlocksSight(state, cell, entityIndex)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool outputRayIsClear(
+    const Level& level,
+    GridPosition3 mirror,
+    GridPosition ray,
+    int distance)
+{
+    for (int step = 1; step <= distance; ++step) {
+        if (!staticCellAllowsEntity(level, rayCell(mirror, ray, step))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::optional<MirrorHit> nearestMirror(
+    const Level& level,
+    const GameState& state,
+    GridPosition3 entityCell,
+    std::size_t entityIndex,
+    const std::vector<GridPosition3>& usedMirrors,
+    bool& ambiguous)
+{
+    std::optional<MirrorHit> nearest;
+    ambiguous = false;
+    if (entityCell.z < 0 || entityCell.z >= static_cast<int>(level.depth())) {
+        return std::nullopt;
+    }
+
+    for (uint32_t y = 0; y < level.height(); ++y) {
+        for (uint32_t x = 0; x < level.width(); ++x) {
+            const GridPosition3 mirror {
+                static_cast<int>(x),
+                static_cast<int>(y),
+                entityCell.z,
+            };
+            if (std::ranges::find(usedMirrors, mirror) != usedMirrors.end()) {
+                continue;
+            }
+            const std::optional<MirrorRays> rays = mirrorRays(tileAt(level, mirror));
+            if (!rays) {
+                continue;
+            }
+
+            const std::array pairs {
+                std::pair { rays->first, rays->second },
+                std::pair { rays->second, rays->first },
+            };
+            for (const auto& [input, output] : pairs) {
+                const std::optional<int> distance =
+                    distanceAlongRay(mirror, entityCell, input);
+                if (!distance ||
+                    !inputRayIsClear(
+                        level, state, mirror, input, *distance, entityIndex)) {
+                    continue;
+                }
+                if (!nearest || *distance < nearest->distance) {
+                    nearest = MirrorHit { mirror, output, *distance };
+                    ambiguous = false;
+                } else if (*distance == nearest->distance &&
+                    !(nearest->cell == mirror)) {
+                    ambiguous = true;
+                }
+            }
+        }
+    }
+    return nearest;
+}
+
+struct ReflectedCell {
+    GridPosition3 cell {};
+    bool reflected = false;
+    bool valid = true;
+    std::vector<MirrorBeamSegment> beamSegments;
+};
+
+ReflectedCell reflectedCellForEntity(
+    const Level& level,
+    const GameState& state,
+    GridPosition3 start,
+    std::size_t entityIndex)
+{
+    GridPosition3 current = start;
+    std::vector<GridPosition3> usedMirrors;
+    std::vector<MirrorBeamSegment> beamSegments;
+    const std::size_t maximumChain =
+        static_cast<std::size_t>(level.width()) * level.height();
+
+    for (std::size_t link = 0; link < maximumChain; ++link) {
+        bool ambiguous = false;
+        const std::optional<MirrorHit> hit = nearestMirror(
+            level, state, current, entityIndex, usedMirrors, ambiguous);
+        if (ambiguous) {
+            return { .cell = start, .valid = false };
+        }
+        if (!hit) {
+            return {
+                .cell = current,
+                .reflected = !usedMirrors.empty(),
+                .beamSegments = std::move(beamSegments),
+            };
+        }
+        if (!outputRayIsClear(level, hit->cell, hit->output, hit->distance)) {
+            return { .cell = start, .valid = false };
+        }
+
+        const GridPosition3 destination =
+            rayCell(hit->cell, hit->output, hit->distance);
+        usedMirrors.push_back(hit->cell);
+        beamSegments.push_back({ current, hit->cell });
+        beamSegments.push_back({ hit->cell, destination });
+        current = destination;
+    }
+
+    return { .cell = start, .valid = false };
+}
+
+bool liveCellsAreUnique(const GameState& state)
+{
+    std::vector<GridPosition3> occupied;
+    if (!state.playerDead) {
+        occupied.push_back(state.player);
+    }
+    for (const GameState::Movable& movable : state.movables) {
+        if (movable.fallen) {
+            continue;
+        }
+        if (std::ranges::find(occupied, movable.cell) != occupied.end()) {
+            return false;
+        }
+        occupied.push_back(movable.cell);
+    }
+    return true;
+}
+
+} // namespace
+
+std::optional<MirrorActivationPreview> previewMirrorActivation(
+    const Level& level,
+    const GameState& state)
+{
+    GameState after = state;
+    std::vector<MirrorEntityPreview> entities;
+    bool anyReflected = false;
+    const std::size_t playerIndex = state.movables.size();
+    std::vector<bool> movableReflected(state.movables.size(), false);
+
+    if (!state.playerDead) {
+        ReflectedCell reflected = reflectedCellForEntity(
+            level, state, state.player, playerIndex);
+        if (!reflected.valid) {
+            return std::nullopt;
+        }
+        if (reflected.reflected) {
+            after.player = reflected.cell;
+            after.playerSliding.reset();
+            entities.push_back({
+                .player = true,
+                .start = state.player,
+                .destination = reflected.cell,
+                .beamSegments = std::move(reflected.beamSegments),
+            });
+            anyReflected = true;
+        }
+    }
+
+    for (std::size_t i = 0; i < state.movables.size(); ++i) {
+        if (state.movables[i].fallen) {
+            continue;
+        }
+        ReflectedCell reflected = reflectedCellForEntity(
+            level, state, state.movables[i].cell, i);
+        if (!reflected.valid) {
+            return std::nullopt;
+        }
+        if (reflected.reflected) {
+            after.movables[i].cell = reflected.cell;
+            after.movables[i].sliding.reset();
+            movableReflected[i] = true;
+            entities.push_back({
+                .movableIndex = i,
+                .start = state.movables[i].cell,
+                .destination = reflected.cell,
+                .beamSegments = std::move(reflected.beamSegments),
+            });
+            anyReflected = true;
+        }
+    }
+
+    if (!anyReflected || !liveCellsAreUnique(after)) {
+        return std::nullopt;
+    }
+
+    if (!state.playerDead && !(after.player == state.player)) {
+        const FallResult fall = playerFallTarget(level, after, after.player);
+        if (!fall.supported) {
+            return std::nullopt;
+        }
+        after.player = fall.cell;
+        after.playerDead = fall.fallen;
+    }
+    for (std::size_t i = 0; i < after.movables.size(); ++i) {
+        if (!movableReflected[i]) {
+            continue;
+        }
+        const FallResult fall = movableFallTarget(
+            level, after, i, after.movables[i].cell);
+        if (!fall.supported) {
+            return std::nullopt;
+        }
+        after.movables[i].cell = fall.cell;
+        after.movables[i].fallen = fall.fallen;
+    }
+
+    if (!liveCellsAreUnique(after) || after == state) {
+        return std::nullopt;
+    }
+    for (MirrorEntityPreview& entity : entities) {
+        if (entity.player) {
+            entity.destination = after.player;
+            entity.fallen = after.playerDead;
+        } else {
+            entity.destination = after.movables[entity.movableIndex].cell;
+            entity.fallen = after.movables[entity.movableIndex].fallen;
+        }
+    }
+    return MirrorActivationPreview {
+        .after = std::move(after),
+        .entities = std::move(entities),
+    };
+}
+
+std::optional<GameState> activateMirrors(
+    const Level& level,
+    const GameState& state)
+{
+    std::optional<MirrorActivationPreview> preview =
+        previewMirrorActivation(level, state);
+    if (!preview) {
+        return std::nullopt;
+    }
+    return std::move(preview->after);
 }
 
 namespace {

@@ -65,6 +65,7 @@ constexpr std::array bindingRows {
     BindingRow { OptionsMenuRowId::MoveDown, InputAction::MoveDown, "Move down" },
     BindingRow { OptionsMenuRowId::MoveLeft, InputAction::MoveLeft, "Move left" },
     BindingRow { OptionsMenuRowId::MoveRight, InputAction::MoveRight, "Move right" },
+    BindingRow { OptionsMenuRowId::Mirror, InputAction::Mirror, "Activate mirrors" },
     BindingRow { OptionsMenuRowId::Undo, InputAction::Undo, "Undo" },
     BindingRow { OptionsMenuRowId::Restart, InputAction::Restart, "Restart" },
 };
@@ -198,6 +199,7 @@ std::optional<OptionsAction> activateRow(
     case OptionsMenuRowId::MoveDown:
     case OptionsMenuRowId::MoveLeft:
     case OptionsMenuRowId::MoveRight:
+    case OptionsMenuRowId::Mirror:
     case OptionsMenuRowId::Undo:
     case OptionsMenuRowId::Restart:
         state.capturingAction = actionForRow(row);

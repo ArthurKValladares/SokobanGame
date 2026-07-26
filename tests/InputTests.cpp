@@ -52,6 +52,9 @@ void testDefaultKeyboardBindings()
     sokoban::InputState input(false);
     CHECK(input.invalidBindingCount() == 0);
     CHECK(input.keyBoundToAction(SDL_SCANCODE_W, sokoban::InputAction::MoveUp));
+    CHECK(input.keyBoundToAction(SDL_SCANCODE_Z, sokoban::InputAction::Mirror));
+    CHECK(input.keyBoundToAction(SDL_SCANCODE_X, sokoban::InputAction::Undo));
+    CHECK(!input.keyBoundToAction(SDL_SCANCODE_Z, sokoban::InputAction::Undo));
 
     input.beginFrame();
     input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_W));
@@ -64,6 +67,10 @@ void testDefaultKeyboardBindings()
     CHECK(input.actionDown(sokoban::InputAction::MoveUp));
     input.handleEvent(keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_W));
     CHECK(!input.actionDown(sokoban::InputAction::MoveUp));
+
+    input.beginFrame();
+    input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_Z));
+    CHECK(input.actionPressed(sokoban::InputAction::Mirror));
 }
 
 void testMenuConfirmBindings()

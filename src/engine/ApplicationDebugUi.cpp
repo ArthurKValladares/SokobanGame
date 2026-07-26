@@ -473,11 +473,12 @@ void ApplicationDebugUi::draw(const Context& context) const
             renderStats.wireframeLineWidth);
         ImGui::Text("Render tiles %u", renderStats.totalTiles);
         ImGui::Text(
-            "Scene preparations %u (iso %u, shadow %u, models %u)",
+            "Scene preparations %u (iso %u, shadow %u, models %u, particles %u)",
             renderStats.scenePreparations,
             renderStats.preparedIsoFaces,
             renderStats.preparedShadowFaces,
-            renderStats.preparedModels);
+            renderStats.preparedModels,
+            renderStats.preparedParticles);
         ImGui::Text("Visible faces %u", renderStats.visibleFaces);
         ImGui::Text("Draw calls %u", renderStats.drawCalls);
         ImGui::Text("Triangles %u", renderStats.triangles);

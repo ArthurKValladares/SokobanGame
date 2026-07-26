@@ -77,6 +77,25 @@ bool tileTypeIsConveyor(TileType type)
         type == TileType::ConveyorLeft;
 }
 
+bool tileTypeIsMirror(TileType type)
+{
+    return type == TileType::MirrorNorthWest ||
+        type == TileType::MirrorNorthEast ||
+        type == TileType::MirrorSouthWest ||
+        type == TileType::MirrorSouthEast;
+}
+
+std::optional<uint32_t> mirrorOrientationQuarterTurns(TileType type)
+{
+    switch (type) {
+    case TileType::MirrorNorthWest: return 0;
+    case TileType::MirrorNorthEast: return 1;
+    case TileType::MirrorSouthEast: return 2;
+    case TileType::MirrorSouthWest: return 3;
+    default: return std::nullopt;
+    }
+}
+
 Vec4 tileColor(TileType type, bool isActive)
 {
     for (const TileTypeDefinition& definition : tileTypeDefinitionTable) {

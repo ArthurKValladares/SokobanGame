@@ -8,6 +8,8 @@
 #include "engine/AssetManifestDebugUi.hpp"
 #include "engine/AssetManifestEditor.hpp"
 #include "engine/AudioSystem.hpp"
+#include "engine/MirrorParticleEffect.hpp"
+#include "engine/ParticleSystem.hpp"
 #include "engine/CampaignSession.hpp"
 #include "engine/GameplayLoop.hpp"
 #include "engine/GameplayPresentation.hpp"
@@ -110,6 +112,8 @@ private:
     // Pure shell routing; Application executes the commands it emits.
     ShellFlow shellFlow_;
     AudioSystem audioSystem_;
+    ParticleSystem particleSystem_;
+    ParticleEffectDefinition mirrorSwapParticleEffect_;
     Level level_;
     GameplaySession gameplaySession_;
     CampaignSession campaign_;

@@ -2,6 +2,7 @@
 
 #include "engine/AssetManifest.hpp"
 #include "engine/Level.hpp"
+#include "engine/ParticleConfig.hpp"
 #include "engine/TileTypes.hpp"
 
 #include <algorithm>
@@ -40,6 +41,13 @@ void RenderAssetRequirements::requireAnimation(RenderAnimation animation)
     require(animations_, animation.index());
 }
 
+void RenderAssetRequirements::requireTexture(RenderTexture texture)
+{
+    if (!texture.isNone()) {
+        require(textures_, texture.index());
+    }
+}
+
 void RenderAssetRequirements::merge(const RenderAssetRequirements& other)
 {
     models_.resize(std::max(models_.size(), other.models_.size()), false);
@@ -49,6 +57,10 @@ void RenderAssetRequirements::merge(const RenderAssetRequirements& other)
     animations_.resize(std::max(animations_.size(), other.animations_.size()), false);
     for (std::size_t i = 0; i < other.animations_.size(); ++i) {
         animations_[i] = animations_[i] || other.animations_[i];
+    }
+    textures_.resize(std::max(textures_.size(), other.textures_.size()), false);
+    for (std::size_t i = 0; i < other.textures_.size(); ++i) {
+        textures_[i] = textures_[i] || other.textures_[i];
     }
 }
 
@@ -62,6 +74,11 @@ bool RenderAssetRequirements::contains(RenderAnimation animation) const
     return !animation.isNone() && containsIndex(animations_, animation.index());
 }
 
+bool RenderAssetRequirements::contains(RenderTexture texture) const
+{
+    return !texture.isNone() && containsIndex(textures_, texture.index());
+}
+
 std::size_t RenderAssetRequirements::modelCount() const
 {
     return static_cast<std::size_t>(std::count(models_.begin(), models_.end(), true));
@@ -73,9 +90,15 @@ std::size_t RenderAssetRequirements::animationCount() const
         std::count(animations_.begin(), animations_.end(), true));
 }
 
+std::size_t RenderAssetRequirements::textureCount() const
+{
+    return static_cast<std::size_t>(
+        std::count(textures_.begin(), textures_.end(), true));
+}
+
 bool RenderAssetRequirements::empty() const
 {
-    return modelCount() == 0 && animationCount() == 0;
+    return modelCount() == 0 && animationCount() == 0 && textureCount() == 0;
 }
 
 RenderAssetRequirements renderAssetRequirementsForLevel(
@@ -104,6 +127,24 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
             }
         }
     }
+    bool containsMirror = false;
+    for (uint32_t z = 0; z < level.depth() && !containsMirror; ++z) {
+        for (uint32_t y = 0; y < level.height() && !containsMirror; ++y) {
+            for (uint32_t x = 0; x < level.width(); ++x) {
+                if (tileTypeIsMirror(level.tileAt(x, y, z))) {
+                    containsMirror = true;
+                    break;
+                }
+            }
+        }
+    }
+    if (containsMirror) {
+        for (std::string_view textureName :
+             config::mirrorSwapSmokeTextureNames) {
+            requirements.requireTexture(
+                manifest.textureIdByName(textureName));
+        }
+    }
     for (const Level::MovableTile& movable : level.movableTiles()) {
         requirements.requireModel(manifest.modelForTile(movable.type));
     }
@@ -117,6 +158,9 @@ RenderAssetRequirements renderAssetRequirementsForFrame(const RenderFrameData& f
         requirements.requireModel(tile.model);
         requirements.requireAnimation(tile.animation);
         requirements.requireAnimation(tile.animationFallback);
+    }
+    for (const RenderFrameData::Particle& particle : frame.particles) {
+        requirements.requireTexture(particle.texture);
     }
     return requirements;
 }

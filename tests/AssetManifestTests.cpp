@@ -263,6 +263,13 @@ void testRealManifestFile()
     check(!manifest.playerModel().isCube(), "real manifest has a player model");
     check(manifest.soundSet("footsteps").size() == 5, "real manifest footsteps");
     check(manifest.soundSet("stone-drag").size() == 4, "real manifest drags");
+    check(manifest.soundSet("mirror-swap").size() == 1, "real manifest mirror swap");
+    check(manifest.soundSet("mirror-swap")[0].ends_with("Woosh/woosh1.ogg"),
+        "real manifest mirror swap uses woosh1");
+    check(!manifest.textureIdByName("Smoke01").isNone(),
+        "real manifest has first mirror smoke texture");
+    check(!manifest.textureIdByName("Smoke10").isNone(),
+        "real manifest has last mirror smoke texture");
     check(manifest.musicForLevel(3) != nullptr, "real manifest level 3 music");
     check(!manifest.modelForTile(sokoban::TileType::Wall).isCube(), "real manifest wall model");
 

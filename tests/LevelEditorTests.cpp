@@ -5,6 +5,7 @@
 #include "engine/TileTypes.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -111,6 +112,19 @@ void testDocumentCommandsAndUndo()
     CHECK(editor.documentLayers()[1][1][2] == tileTypeToChar(TileType::Wall));
     CHECK(editor.tryUndoEdit());
     CHECK(editor.documentLayers()[1][1][2] == tileTypeToChar(TileType::Air));
+
+    const std::array mirrorTypes {
+        TileType::MirrorNorthWest,
+        TileType::MirrorNorthEast,
+        TileType::MirrorSouthWest,
+        TileType::MirrorSouthEast,
+    };
+    for (std::size_t x = 0; x < mirrorTypes.size(); ++x) {
+        editor.setSelectedTile(mirrorTypes[x]);
+        editor.paintCell({ static_cast<int>(x), 0, 1 });
+        CHECK(editor.documentLayers()[1][0][x] ==
+            tileTypeToChar(mirrorTypes[x]));
+    }
 
     editor.setActiveLayer(100);
     CHECK(editor.activeLayer() == editor.documentDepth() - 1);

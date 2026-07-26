@@ -63,7 +63,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
     vkCheck(vkCreatePipelineLayout(device_, &layoutInfo, nullptr, &layout_),
         "vkCreatePipelineLayout failed");
 
-    std::array<VkShaderModule, 9> shaders {};
+    std::array<VkShaderModule, 10> shaders {};
     try {
         shaders[0] = createShaderModule(createInfo.assetRoot / "shaders/triangle.vert.glsl.spv");
         shaders[1] = createShaderModule(createInfo.assetRoot / "shaders/triangle.frag.glsl.spv");
@@ -74,6 +74,8 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         shaders[6] = createShaderModule(createInfo.assetRoot / "shaders/ssao.frag.glsl.spv");
         shaders[7] = createShaderModule(createInfo.assetRoot / "shaders/ssao_composite.frag.glsl.spv");
         shaders[8] = createShaderModule(createInfo.assetRoot / "shaders/water.frag.glsl.spv");
+        shaders[9] = createShaderModule(
+            createInfo.assetRoot / "shaders/mirror_energy.frag.glsl.spv");
 
         scene_ = createScenePipeline(
             shaders[0], shaders[1], VertexLayout::None,
@@ -81,11 +83,17 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         water_ = createScenePipeline(
             shaders[0], shaders[8], VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
+        mirrorEnergy_ = createScenePipeline(
+            shaders[0], shaders[9], VertexLayout::None,
+            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
         ui_ = createScenePipeline(
             shaders[0], shaders[1], VertexLayout::None,
             VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_UNDEFINED, createInfo.wireframe);
         model_ = createScenePipeline(
             shaders[3], shaders[1], VertexLayout::Mesh,
+            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
+        mirrorEnergyModel_ = createScenePipeline(
+            shaders[3], shaders[9], VertexLayout::Mesh,
             createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
         shadow_ = createShadowPipeline(shaders[2], VertexLayout::None);
         modelShadow_ = createShadowPipeline(shaders[4], VertexLayout::MeshPosition);
@@ -113,7 +121,8 @@ void VulkanPipelineFactory::destroy()
 {
     if (device_) {
         const std::array pipelines {
-            scene_, water_, ui_, model_, shadow_, modelShadow_,
+            scene_, water_, mirrorEnergy_, ui_, model_, mirrorEnergyModel_,
+            shadow_, modelShadow_,
             ssao_, ssaoComposite_, ssaoVisualize_,
         };
         for (VkPipeline pipeline : pipelines) {
@@ -127,8 +136,10 @@ void VulkanPipelineFactory::destroy()
     }
     scene_ = VK_NULL_HANDLE;
     water_ = VK_NULL_HANDLE;
+    mirrorEnergy_ = VK_NULL_HANDLE;
     ui_ = VK_NULL_HANDLE;
     model_ = VK_NULL_HANDLE;
+    mirrorEnergyModel_ = VK_NULL_HANDLE;
     shadow_ = VK_NULL_HANDLE;
     modelShadow_ = VK_NULL_HANDLE;
     ssao_ = VK_NULL_HANDLE;

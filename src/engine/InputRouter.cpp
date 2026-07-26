@@ -106,6 +106,7 @@ InputRouter::Frame InputRouter::routeFrame(
             .down = buttonState(input, InputAction::MoveDown),
             .left = buttonState(input, InputAction::MoveLeft),
             .right = buttonState(input, InputAction::MoveRight),
+            .mirrorPressed = input.actionPressed(InputAction::Mirror),
             .undoPressed = input.actionPressed(InputAction::Undo),
             .undoDown = input.actionDown(InputAction::Undo),
             .restartPressed = input.actionPressed(InputAction::Restart),

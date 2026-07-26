@@ -431,6 +431,26 @@ void testNormalizationAndMigration()
     check(migratedFormat6.profile.settings.video.customRenderScalePercent == 100,
         "format 6 receives a native custom value");
 
+    nlohmann::json format9Root = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    format9Root["format"] = 9;
+    format9Root["settings"]["input"].erase("mirror");
+    format9Root["settings"]["input"]["undo"] = nlohmann::json::array({
+        nlohmann::json { { "type", "keyboard" }, { "control", "Z" } },
+        nlohmann::json { { "type", "gamepadButton" }, { "control", "west" } },
+    });
+    const sokoban::DecodedPlayerProfile migratedFormat9 =
+        sokoban::decodePlayerProfile(format9Root.dump());
+    check(migratedFormat9.sourceFormat == 9, "format 9 source reported");
+    migratedKeyboard = keyboardBinding(
+        migratedFormat9.profile.settings.input, sokoban::InputAction::Mirror);
+    check(migratedKeyboard && migratedKeyboard->scancode == "Z",
+        "format 9 receives mirror default");
+    migratedKeyboard = keyboardBinding(
+        migratedFormat9.profile.settings.input, sokoban::InputAction::Undo);
+    check(migratedKeyboard && migratedKeyboard->scancode == "X",
+        "format 9 old default undo moves to X");
+
     checkThrows([] {
         (void)sokoban::decodePlayerProfile(R"json({ "format": 99 })json");
     }, "unsupported profile format rejected");
@@ -721,17 +741,23 @@ void testAsyncStoreMultipleChannels()
 
 int main()
 {
-    testRoundTripAndBests();
-    testReachedScreensAndProgressReset();
-    testSectionedSerialization();
-    testActiveScreenCheckpointRoundTrip();
-    testNormalizationAndMigration();
-    testStoreBackupsAndRecovery();
-    testSaveSlotStems();
-    testMigrationAndDoubleCorruption();
-    testAsyncSaveCoalescingAndFlush();
-    testAsyncSaveDestructorFlushesNewestProfile();
-    testAsyncStoreMultipleChannels();
+    try {
+        testRoundTripAndBests();
+        testReachedScreensAndProgressReset();
+        testSectionedSerialization();
+        testActiveScreenCheckpointRoundTrip();
+        testNormalizationAndMigration();
+        testStoreBackupsAndRecovery();
+        testSaveSlotStems();
+        testMigrationAndDoubleCorruption();
+        testAsyncSaveCoalescingAndFlush();
+        testAsyncSaveDestructorFlushesNewestProfile();
+        testAsyncStoreMultipleChannels();
+    } catch (const std::exception& error) {
+        std::cerr << "Unexpected player profile test exception: "
+                  << error.what() << '\n';
+        return 2;
+    }
 
     if (failures != 0) {
         std::cerr << failures << " player profile checks failed\n";

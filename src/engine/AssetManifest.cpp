@@ -649,6 +649,17 @@ const AssetManifest::TileVisual& AssetManifest::tileVisual(TileType type) const
     return tileVisuals_[static_cast<std::size_t>(type)];
 }
 
+RenderTexture AssetManifest::textureIdByName(std::string_view name) const
+{
+    for (std::size_t i = 0; i < textures_.size(); ++i) {
+        if (textures_[i].name == name) {
+            return RenderTexture { static_cast<uint32_t>(i + 1) };
+        }
+    }
+    throw std::runtime_error(
+        "asset manifest: unknown texture '" + std::string(name) + "'");
+}
+
 const std::vector<std::string>& AssetManifest::soundSet(std::string_view name) const
 {
     static const std::vector<std::string> empty;

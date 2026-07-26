@@ -27,6 +27,8 @@ layout(push_constant) uniform PushConstants
     vec4 textureOptions;
 } pc;
 
+const int MATERIAL_MODE_PROCEDURAL_TEXTURE = 5;
+
 vec3 gaussianBlurredScene(vec2 uv)
 {
     const float weights[5] = float[5](1.0, 4.0, 6.0, 4.0, 1.0);
@@ -141,8 +143,20 @@ void main()
             int textureIndex = clamp(int(inTextureIndex + pc.materialOptions.z + 0.5), 0, MODEL_TEXTURE_COUNT - 1);
             materialColor *= texture(modelTextures[textureIndex], vec2(inFaceCoordU, inFaceCoordV));
         }
+    } else if (materialMode == MATERIAL_MODE_PROCEDURAL_TEXTURE) {
+        // Procedural quads use a one-based texture handle because zero means
+        // that no runtime texture was resolved.
+        float selectedTexture = pc.textureOptions.y - 1.0;
+        int textureIndex = clamp(
+            int(selectedTexture + 0.5),
+            0,
+            MODEL_TEXTURE_COUNT - 1);
+        materialColor *= texture(modelTextures[textureIndex], vec2(inFaceCoordU, inFaceCoordV));
     } else if (materialMode == 1) {
-        int textureIndex = clamp(int(pc.materialOptions.z + 0.5), 0, MODEL_TEXTURE_COUNT - 1);
+        int textureIndex = clamp(
+            int(pc.materialOptions.z + 0.5),
+            0,
+            MODEL_TEXTURE_COUNT - 1);
         materialColor *= texture(modelTextures[textureIndex], vec2(inFaceCoordU, inFaceCoordV));
     }
     vec3 color = mix(materialColor.rgb, pc.gridColor.rgb, gridMask());

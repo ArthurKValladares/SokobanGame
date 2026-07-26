@@ -19,10 +19,11 @@
 namespace sokoban {
 namespace {
 
-constexpr std::array<std::string_view, 9> requiredShaders {
+constexpr std::array<std::string_view, 10> requiredShaders {
     "triangle.vert.glsl.spv",
     "triangle.frag.glsl.spv",
     "water.frag.glsl.spv",
+    "mirror_energy.frag.glsl.spv",
     "shadow.vert.glsl.spv",
     "model.vert.glsl.spv",
     "model_shadow.vert.glsl.spv",

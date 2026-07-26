@@ -52,6 +52,7 @@ public:
     [[nodiscard]] bool restore(const Level& level, const Snapshot& snapshot);
 
     void queueMove(MoveDirection direction);
+    void queueMirror();
     void queueUndo();
     void queueRestart();
 
@@ -67,6 +68,15 @@ public:
     [[nodiscard]] bool activeActionComplete() const;
     [[nodiscard]] std::size_t historySize() const { return moveHistory_.size(); }
     [[nodiscard]] std::size_t undoCount() const { return undoHistory_.size(); }
+    [[nodiscard]] std::size_t mirrorActivationSequence() const
+    {
+        return mirrorActivationSequence_;
+    }
+    [[nodiscard]] const std::vector<GridPosition3>&
+        lastMirrorSwapDestinations() const
+    {
+        return lastMirrorSwapDestinations_;
+    }
     [[nodiscard]] int playerMoveCount() const { return playerMoveCount_; }
     [[nodiscard]] float stepDurationSeconds() const { return stepDurationSeconds_; }
     [[nodiscard]] const rules::StepRates& stepRates() const { return stepRates_; }
@@ -77,6 +87,7 @@ public:
 private:
     enum class CommandType {
         Move,
+        Mirror,
         Undo,
         Restart,
     };
@@ -88,6 +99,7 @@ private:
 
     [[nodiscard]] bool tryStartHeldMove(const Level& level, const Controls& controls);
     [[nodiscard]] bool tryStartWorldStep(const Level& level, std::optional<MoveDirection> playerInput);
+    [[nodiscard]] bool tryStartMirrorAction(const Level& level);
     [[nodiscard]] bool tryStartUndoMove();
     [[nodiscard]] bool tryStartRestart(const Level& level);
     [[nodiscard]] bool tryStartHeldDirection(
@@ -108,6 +120,9 @@ private:
     float moveElapsed_ = 0.0f;
     float stepDurationSeconds_ = config::stepDurationSeconds;
     int playerMoveCount_ = 0;
+    // Transient event sequence; intentionally excluded from save snapshots.
+    std::size_t mirrorActivationSequence_ = 0;
+    std::vector<GridPosition3> lastMirrorSwapDestinations_;
     rules::StepRates stepRates_ {};
     bool moving_ = false;
     // Rewinding freezes pending slides and conveyors until the next

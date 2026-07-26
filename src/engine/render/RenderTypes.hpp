@@ -14,6 +14,11 @@ enum class RenderViewMode {
     Isometric3D,
 };
 
+enum class RenderSurfaceEffect {
+    Standard,
+    MirrorEnergy,
+};
+
 enum class WaterShorelineEdge : uint32_t {
     NegativeY = 1U << 0,
     PositiveX = 1U << 1,
@@ -63,6 +68,18 @@ struct RenderAnimation {
 };
 
 inline constexpr RenderAnimation noAnimation {};
+
+// Runtime texture identity: 0 means no texture; any other value addresses
+// entry value-1 of the asset manifest's descriptor texture list.
+struct RenderTexture {
+    uint32_t value = 0;
+
+    [[nodiscard]] constexpr bool isNone() const { return value == 0; }
+    [[nodiscard]] constexpr std::size_t index() const { return value - 1; }
+    friend constexpr bool operator==(RenderTexture, RenderTexture) = default;
+};
+
+inline constexpr RenderTexture noTexture {};
 
 struct RenderFrameData {
     struct DirectionalLight {
@@ -116,12 +133,15 @@ struct RenderFrameData {
         float animationTimeSeconds = 0.0f;
         float beltScrollOffset = 0.0f;
         uint32_t modelRotationQuarterTurns = 0;
+        float modelRotationOffsetRadians = 0.0f;
+        RenderSurfaceEffect effect = RenderSurfaceEffect::Standard;
     };
 
     struct IsoFace {
         std::array<Vec3, 4> vertices {};
         Vec3 normal {};
         Vec4 color {};
+        RenderSurfaceEffect effect = RenderSurfaceEffect::Standard;
     };
 
     struct WaterSurface {
@@ -133,6 +153,15 @@ struct RenderFrameData {
         uint32_t shorelineMask = 0;
         bool isEditorPreview = false;
         bool pickable = true;
+    };
+
+    struct Particle {
+        Vec3 position {};
+        Vec2 size { 1.0f, 1.0f };
+        float rotationRadians = 0.0f;
+        Vec4 color {};
+        RenderTexture texture = noTexture;
+        bool drawOnTop = false;
     };
 
     struct GridOverlay {
@@ -150,7 +179,9 @@ struct RenderFrameData {
     std::vector<Tile> tiles;
     std::vector<WaterSurface> waterSurfaces;
     std::vector<IsoFace> isoFaces;
+    std::vector<Particle> particles;
     float waterAnimationTimeSeconds = 0.0f;
+    float effectAnimationTimeSeconds = 0.0f;
 };
 
 struct RenderStats {
@@ -160,6 +191,7 @@ struct RenderStats {
     uint32_t preparedIsoFaces = 0;
     uint32_t preparedShadowFaces = 0;
     uint32_t preparedModels = 0;
+    uint32_t preparedParticles = 0;
     uint32_t visibleFaces = 0;
     uint32_t drawCalls = 0;
     uint32_t vertices = 0;

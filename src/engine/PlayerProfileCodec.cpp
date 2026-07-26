@@ -17,14 +17,15 @@
 // itself lives in PlayerProfile.cpp.
 //
 // Migration strategy: old formats are upgraded by forward JSON patches
-// (migrate1to2 .. migrate8to9) applied in sequence, then a single strict
-// format-9 parse validates the fully migrated document. Patches only move
+// (migrate1to2 .. migrate9to10) applied in sequence, then a single strict
+// format-10 parse validates the fully migrated document. Patches only move
 // fields and add defaults; unknown keys survive them and are rejected by the
 // final parse, so schema strictness is preserved without every historical
 // format keeping its own parser.
 //
-// Format 9: the top-level "progress" and "settings" sections are each
-// optional. Save-slot files carry only progress and the shared settings.json
+// Format 9 introduced optional top-level "progress" and "settings" sections.
+// Format 10 adds Mirror bindings and migrates the old default Undo key.
+// Save-slot files carry only progress and the shared settings.json
 // carries only settings (ProfileSections selects the shape at serialize
 // time); pre-split combined files simply contain both.
 
@@ -499,12 +500,12 @@ InputBindings inputBindingsFromJson(
     if (includeMenuConfirm) {
         rejectUnknownProperties(value, {
             "moveUp", "moveDown", "moveLeft", "moveRight",
-            "undo", "restart", "menuBack", "menuConfirm",
+            "mirror", "undo", "restart", "menuBack", "menuConfirm",
         }, context);
     } else {
         rejectUnknownProperties(value, {
             "moveUp", "moveDown", "moveLeft", "moveRight",
-            "undo", "restart", "menuBack",
+            "mirror", "undo", "restart", "menuBack",
         }, context);
     }
     InputBindings result;
@@ -732,6 +733,45 @@ void migrate8to9(Json&)
 {
     // Format 9 made the progress/settings sections optional; a combined
     // format-8 document is already a valid format-9 document.
+}
+
+void migrate9to10(Json& root)
+{
+    if (!root.contains("settings")) {
+        return;
+    }
+    Json& settings = root["settings"];
+    if (!settings.is_object() || !settings.contains("input") ||
+        !settings["input"].is_object()) {
+        return;
+    }
+
+    Json& input = settings["input"];
+    const OrderedJson defaults = inputBindingsToJson(defaultInputBindings());
+    const Json oldDefaultUndo = Json::array({
+        Json { { "type", "keyboard" }, { "control", "Z" } },
+        Json { { "type", "gamepadButton" }, { "control", "west" } },
+    });
+    if (input.contains("undo") && input["undo"] == oldDefaultUndo) {
+        input["undo"] = Json::parse(defaults.at("undo").dump());
+    }
+
+    // Keep the one-binding/one-action invariant when introducing the new
+    // defaults into profiles whose bindings may have been customized.
+    const Json mirrorDefaults = Json::parse(defaults.at("mirror").dump());
+    for (auto& [action, bindings] : input.items()) {
+        if (action == "mirror" || !bindings.is_array()) {
+            continue;
+        }
+        for (const Json& mirrorBinding : mirrorDefaults) {
+            bindings.erase(std::remove(bindings.begin(), bindings.end(), mirrorBinding),
+                bindings.end());
+        }
+        if (bindings.empty() && defaults.contains(action)) {
+            bindings = Json::parse(defaults.at(action).dump());
+        }
+    }
+    input["mirror"] = mirrorDefaults;
 }
 
 // ---- Strict current-format parse -------------------------------------------
@@ -1002,6 +1042,7 @@ DecodedPlayerProfile decodePlayerProfile(std::string_view text)
         migrate6to7,
         migrate7to8,
         migrate8to9,
+        migrate9to10,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

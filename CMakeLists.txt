@@ -74,6 +74,7 @@ set(SHADER_SOURCES
     "${SHADER_SOURCE_DIR}/triangle.vert.glsl"
     "${SHADER_SOURCE_DIR}/triangle.frag.glsl"
     "${SHADER_SOURCE_DIR}/water.frag.glsl"
+    "${SHADER_SOURCE_DIR}/mirror_energy.frag.glsl"
     "${SHADER_SOURCE_DIR}/shadow.vert.glsl"
     "${SHADER_SOURCE_DIR}/model.vert.glsl"
     "${SHADER_SOURCE_DIR}/model_shadow.vert.glsl"
@@ -148,7 +149,9 @@ add_library(sokoban_core STATIC
     src/engine/LevelProjectStore.cpp
     src/engine/Log.cpp
     src/engine/LogQueue.cpp
+    src/engine/MirrorParticleEffect.cpp
     src/engine/MiniaudioImpl.cpp
+    src/engine/ParticleSystem.cpp
     src/engine/PresentationSettings.cpp
     src/engine/PlayerProfile.cpp
     src/engine/PlayerProfileCodec.cpp
@@ -463,6 +466,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME presentation TARGET sokoban_presentation_tests
         LIBS sokoban_core
         SOURCES tests/PresentationTests.cpp
+    )
+    sokoban_add_test(NAME particles TARGET sokoban_particle_tests
+        LIBS sokoban_core
+        SOURCES tests/ParticleSystemTests.cpp
     )
     sokoban_add_test(NAME asset_requirements TARGET sokoban_asset_requirements_tests
         LIBS sokoban_core

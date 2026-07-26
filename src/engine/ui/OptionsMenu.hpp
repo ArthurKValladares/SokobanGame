@@ -39,6 +39,7 @@ enum class OptionsMenuRowId {
     MoveDown,
     MoveLeft,
     MoveRight,
+    Mirror,
     Undo,
     Restart,
     ResetBindings,

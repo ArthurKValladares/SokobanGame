@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <memory>
 #include <random>
+#include <string_view>
 
 namespace sokoban {
 
@@ -61,9 +62,9 @@ private:
 // reports available() == false.
 class AudioSystem {
 public:
-    // audioRoot is the staged runtime content directory; the manifest's "footsteps"
-    // and "stone-drag" sound sets and per-level music entries are loaded
-    // relative to it. The manifest must outlive this object.
+    // audioRoot is the staged runtime content directory. Manifest sound sets
+    // and per-level music entries are loaded relative to it. The manifest must
+    // outlive this object.
     AudioSystem(std::filesystem::path audioRoot, const AssetManifest& manifest);
     ~AudioSystem();
 
@@ -75,6 +76,10 @@ public:
     // pushed, a randomly chosen stone-drag loop plays seamlessly and fades out
     // when the push ends.
     void update(float dt, bool playerWalking, bool pushingStone);
+
+    // Plays a decoded, non-looping variation from a manifest sound set. Sets
+    // used by the footstep and stone-drag orchestrators are reserved.
+    void playOneShot(std::string_view soundSetName);
 
     // Starts the level's manifest soundtrack looping, crossfading from the
     // current track. Levels without music fade out. Re-requesting the level

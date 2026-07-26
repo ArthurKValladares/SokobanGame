@@ -1,5 +1,6 @@
 #include "engine/render/VulkanSceneRecorder.hpp"
 
+#include "engine/render/MirrorConfig.hpp"
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
 #include "engine/render/VulkanModelResources.hpp"
@@ -17,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -27,6 +29,8 @@
 
 namespace sokoban {
 namespace {
+
+constexpr float particleTextureMaterialMode = 5.0f;
 
 void vkCheck(VkResult result, const char* message)
 {
@@ -101,6 +105,21 @@ ModelTransformPoints modelTransformPoints(
         result.yPoint = { x + width, y + depth, z };
         break;
     }
+    if (std::abs(tile.modelRotationOffsetRadians) > 0.0001f) {
+        const float centerX = x + width * 0.5f;
+        const float centerY = y + depth * 0.5f;
+        const float cosine = std::cos(tile.modelRotationOffsetRadians);
+        const float sine = std::sin(tile.modelRotationOffsetRadians);
+        auto rotateAroundCenter = [&](Vec3& point) {
+            const float offsetX = point.x - centerX;
+            const float offsetY = point.y - centerY;
+            point.x = centerX + cosine * offsetX - sine * offsetY;
+            point.y = centerY + sine * offsetX + cosine * offsetY;
+        };
+        rotateAroundCenter(result.origin);
+        rotateAroundCenter(result.xPoint);
+        rotateAroundCenter(result.yPoint);
+    }
     result.zPoint = {
         result.origin.x,
         result.origin.y,
@@ -155,6 +174,8 @@ public:
             .preparedModels = static_cast<uint32_t>(
                 scene.opaqueModelIndices.size() +
                 scene.translucentModelIndices.size()),
+            .preparedParticles =
+                static_cast<uint32_t>(scene.particles.size()),
             .swapchainWidth = extent.width,
             .swapchainHeight = extent.height,
             .swapchainImages = swapchain_.imageCount(),
@@ -632,10 +653,17 @@ private:
         for (std::size_t faceIndex : faceIndices) {
             const PreparedIsoFace& face =
                 scene.isoFaces[faceIndex];
-            const VkPipeline desiredPipeline =
-                face.material == PreparedSurfaceMaterial::Water
-                ? pipelines_.water()
-                : pipelines_.scene();
+            const VkPipeline desiredPipeline = [&] {
+                switch (face.material) {
+                case PreparedSurfaceMaterial::Water:
+                    return pipelines_.water();
+                case PreparedSurfaceMaterial::MirrorEnergy:
+                    return pipelines_.mirrorEnergy();
+                case PreparedSurfaceMaterial::Standard:
+                    return pipelines_.scene();
+                }
+                return pipelines_.scene();
+            }();
             if (desiredPipeline != boundFacePipeline) {
                 vkCmdBindPipeline(
                     commandBuffer,
@@ -659,6 +687,14 @@ private:
                     frameData.waterAnimationTimeSeconds,
                     face.shorelineMask,
                     face.isEditorPreview);
+            } else if (
+                face.material == PreparedSurfaceMaterial::MirrorEnergy) {
+                drawMirrorEnergyFace(
+                    commandBuffer,
+                    face.vertices,
+                    face.color,
+                    face.normal,
+                    frameData.effectAnimationTimeSeconds);
             } else {
                 drawFace(
                     commandBuffer,
@@ -677,26 +713,76 @@ private:
             }
         }
 
-        bool pipelineBound = false;
+        VkPipeline boundModelPipeline = VK_NULL_HANDLE;
         const std::vector<std::size_t>& modelIndices =
             translucentPass
             ? scene.translucentModelIndices
             : scene.opaqueModelIndices;
+        bool mirrorGhostState = false;
         for (std::size_t tileIndex : modelIndices) {
-            if (!pipelineBound) {
+            const RenderFrameData::Tile& tile =
+                frameData.tiles[tileIndex];
+            const bool mirrorGhost =
+                tile.effect == RenderSurfaceEffect::MirrorEnergy;
+            if (mirrorGhost != mirrorGhostState) {
+                vkCmdSetDepthWriteEnable(
+                    commandBuffer,
+                    mirrorGhost && swapchain_.depthView()
+                        ? VK_TRUE
+                        : VK_FALSE);
+                vkCmdSetCullMode(
+                    commandBuffer,
+                    mirrorGhost
+                        ? VK_CULL_MODE_BACK_BIT
+                        : VK_CULL_MODE_NONE);
+                mirrorGhostState = mirrorGhost;
+            }
+            const VkPipeline desiredPipeline =
+                mirrorGhost
+                ? pipelines_.mirrorEnergyModel()
+                : pipelines_.model();
+            if (boundModelPipeline != desiredPipeline) {
                 vkCmdBindPipeline(
                     commandBuffer,
                     VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    pipelines_.model());
+                    desiredPipeline);
                 ++stats_.pipelineBinds;
-                pipelineBound = true;
+                boundModelPipeline = desiredPipeline;
             }
             drawModel(
                 commandBuffer,
                 scene.isoLayout,
                 scene.shadowLayout,
-                frameData.tiles[tileIndex],
-                frameData.lighting);
+                tile,
+                frameData.lighting,
+                frameData.effectAnimationTimeSeconds);
+        }
+        if (mirrorGhostState) {
+            vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
+            vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
+        }
+        if (translucentPass && !scene.particles.empty()) {
+            vkCmdBindPipeline(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                pipelines_.scene());
+            ++stats_.pipelineBinds;
+            bool depthTestEnabled = swapchain_.depthView() != VK_NULL_HANDLE;
+            for (const PreparedParticle& particle : scene.particles) {
+                const bool desiredDepthTest =
+                    !particle.drawOnTop &&
+                    swapchain_.depthView() != VK_NULL_HANDLE;
+                if (desiredDepthTest != depthTestEnabled) {
+                    vkCmdSetDepthTestEnable(
+                        commandBuffer,
+                        desiredDepthTest ? VK_TRUE : VK_FALSE);
+                    depthTestEnabled = desiredDepthTest;
+                }
+                drawParticle(commandBuffer, particle);
+            }
+            if (!depthTestEnabled && swapchain_.depthView()) {
+                vkCmdSetDepthTestEnable(commandBuffer, VK_TRUE);
+            }
         }
     }
 
@@ -780,6 +866,112 @@ private:
                 std::clamp(
                     center + halfLineWidth, 0.0f, levelHeight));
         }
+    }
+
+    void drawMirrorEnergyFace(
+        VkCommandBuffer commandBuffer,
+        const std::array<Vec3, 4>& vertices,
+        Vec4 color,
+        Vec3 normal,
+        float animationTimeSeconds)
+    {
+        vkCmdSetPrimitiveTopology(
+            commandBuffer,
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+        ++stats_.visibleFaces;
+        ++stats_.drawCalls;
+        stats_.vertices += 6;
+        stats_.triangles += 2;
+
+        const TilePushConstants constants {
+            .vertices = {
+                Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, 1.0f },
+                Vec4 { vertices[1].x, vertices[1].y, vertices[1].z, 1.0f },
+                Vec4 { vertices[2].x, vertices[2].y, vertices[2].z, 1.0f },
+                Vec4 { vertices[3].x, vertices[3].y, vertices[3].z, 1.0f },
+            },
+            .color = color,
+            .normalAndAmbientRed = {
+                normal.x, normal.y, normal.z, 0.0f },
+            .shadowOptions = {
+                config::mirrorEnergyScanlineFrequency,
+                config::mirrorEnergyScanlineSpeed,
+                config::mirrorEnergyScanlineStrength,
+                config::mirrorGhostTextureInfluence,
+            },
+            .materialOptions = {
+                0.0f, 1.0f, 1.0f, animationTimeSeconds },
+            .gridColor = {
+                config::mirrorGhostRimPower,
+                config::mirrorGhostRimStrength,
+                config::mirrorEnergyPulseSpeed,
+                config::mirrorEnergyPulseStrength,
+            },
+        };
+        vkCmdPushConstants(
+            commandBuffer,
+            pipelines_.layout(),
+            VK_SHADER_STAGE_VERTEX_BIT |
+                VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            sizeof(TilePushConstants),
+            &constants);
+        vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+    }
+
+    void drawParticle(
+        VkCommandBuffer commandBuffer,
+        const PreparedParticle& particle)
+    {
+        vkCmdSetPrimitiveTopology(
+            commandBuffer,
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+        ++stats_.visibleFaces;
+        ++stats_.drawCalls;
+        stats_.vertices += 6;
+        stats_.triangles += 2;
+
+        const TilePushConstants constants {
+            .vertices = {
+                Vec4 {
+                    particle.vertices[0].x,
+                    particle.vertices[0].y,
+                    particle.vertices[0].z,
+                    1.0f },
+                Vec4 {
+                    particle.vertices[1].x,
+                    particle.vertices[1].y,
+                    particle.vertices[1].z,
+                    1.0f },
+                Vec4 {
+                    particle.vertices[2].x,
+                    particle.vertices[2].y,
+                    particle.vertices[2].z,
+                    1.0f },
+                Vec4 {
+                    particle.vertices[3].x,
+                    particle.vertices[3].y,
+                    particle.vertices[3].z,
+                    1.0f },
+            },
+            .color = particle.color,
+            .materialOptions = { 0.0f, 1.0f, 1.0f, 0.0f },
+            .textureOptions = {
+                particleTextureMaterialMode,
+                static_cast<float>(particle.texture.value),
+                0.0f,
+                1.0f,
+            },
+        };
+        vkCmdPushConstants(
+            commandBuffer,
+            pipelines_.layout(),
+            VK_SHADER_STAGE_VERTEX_BIT |
+                VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            sizeof(TilePushConstants),
+            &constants);
+        vkCmdDraw(commandBuffer, 6, 1, 0, 0);
     }
 
     void drawFace(
@@ -1034,7 +1226,8 @@ private:
         const IsoRenderLayout& layout,
         const ShadowRenderLayout& shadowLayout,
         const RenderFrameData::Tile& tile,
-        const RenderFrameData::Lighting& lighting)
+        const RenderFrameData::Lighting& lighting,
+        float effectAnimationTimeSeconds)
     {
         const VulkanModelResources::MeshView mesh =
             models_.meshForModel(tile.model);
@@ -1072,6 +1265,8 @@ private:
             lighting.ambient.color.z *
                 lighting.ambient.intensity,
         };
+        const bool mirrorEnergy =
+            tile.effect == RenderSurfaceEffect::MirrorEnergy;
         const TilePushConstants constants {
             .vertices = affineTransformColumns(
                 isoPoint(transform.origin),
@@ -1103,30 +1298,50 @@ private:
                 ambientRadiance.z,
             },
             .shadowOptions = {
-                lighting.shadows.enabled ? 1.0f : 0.0f,
-                std::clamp(
-                    lighting.shadows.opacity *
-                        std::clamp(
-                            lighting.modelShadowReceive,
-                            0.0f,
-                            1.0f),
-                    0.0f,
-                    1.0f),
-                std::max(lighting.shadows.bias, 0.0f),
-                0.0f,
+                mirrorEnergy
+                    ? config::mirrorEnergyScanlineFrequency
+                    : (lighting.shadows.enabled ? 1.0f : 0.0f),
+                mirrorEnergy
+                    ? config::mirrorEnergyScanlineSpeed
+                    : std::clamp(
+                          lighting.shadows.opacity *
+                              std::clamp(
+                                  lighting.modelShadowReceive,
+                                  0.0f,
+                                  1.0f),
+                          0.0f,
+                          1.0f),
+                mirrorEnergy
+                    ? config::mirrorEnergyScanlineStrength
+                    : std::max(lighting.shadows.bias, 0.0f),
+                mirrorEnergy
+                    ? config::mirrorGhostTextureInfluence
+                    : 0.0f,
             },
             .materialOptions = {
                 tile.blurBehind ? 1.0f : 0.0f,
                 tile.beltScrollOffset,
                 static_cast<float>(material.textureIndex),
-                tile.isEditorPreview
-                    ? -config::iceBlurRadiusPixels
-                    : config::iceBlurRadiusPixels,
+                mirrorEnergy
+                    ? effectAnimationTimeSeconds
+                    : (tile.isEditorPreview
+                            ? -config::iceBlurRadiusPixels
+                            : config::iceBlurRadiusPixels),
             },
+            .gridColor = mirrorEnergy
+                ? Vec4 {
+                      config::mirrorGhostRimPower,
+                      config::mirrorGhostRimStrength,
+                      config::mirrorEnergyPulseSpeed,
+                      config::mirrorEnergyPulseStrength,
+                  }
+                : Vec4 {},
             .textureOptions = {
                 shaderValue(material.mode),
                 static_cast<float>(
-                    tile.modelRotationQuarterTurns % 4),
+                    tile.modelRotationQuarterTurns % 4) *
+                        1.57079632679f +
+                    tile.modelRotationOffsetRadians,
                 std::max(lighting.specularStrength, 0.0f),
                 std::max(lighting.specularPower, 1.0f),
             },

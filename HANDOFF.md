@@ -20,7 +20,8 @@ The core loop is classic Sokoban-inspired:
 - Movable objects can be pushed.
 - The goal/end unlocks when all pressure plates are occupied.
 - Levels can contain multiple screens and multiple vertical layers.
-- Additional mechanics include ice/sliding, water/falling, ladders, and conveyors.
+- Additional mechanics include ice/sliding, water/falling, ladders,
+  conveyors, and directional mirrors.
 
 ## Build And Run
 
@@ -161,11 +162,19 @@ cmake --build build --config Debug --target sokoban_animation_controller_tests
 
 Headless presentation tests cover mutable settings normalization, lighting/grid
 conversion, entity interpolation, clip/facing behavior, fallen offsets, and
-gameplay render-frame construction:
+gameplay render-frame construction, including valid mirror beam/ghost previews:
 
 ```powershell
 cmake --build build --config Debug --target sokoban_presentation_tests
 .\build\Debug\sokoban_presentation_tests.exe
+```
+
+Headless particle tests cover deterministic burst emission, texture selection,
+movement, expansion, alpha fading, expiry, empty definitions, and reset:
+
+```powershell
+cmake --build build --config Debug --target sokoban_particle_tests
+.\build\Debug\sokoban_particle_tests.exe
 ```
 
 Headless content-pipeline tests cover manifest/file validation, path
@@ -208,16 +217,25 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   fit policy that were previously hard-coded at their call sites.
 - `src/engine/PresentationSettings.*`: mutable runtime presentation settings initialized from the immutable defaults in the focused render config headers. Owns lighting, SSAO/shadow tuning, grid appearance, surface geometry, tile scales, normalization, sun-direction conversion, and renderer-facing lighting/grid values.
 - `src/engine/GameplayPresentation.*`: headless presentation state derived from `GameplaySession::Action` snapshots. Owns player/movable interpolation, fallen render offsets, player clip/facing/playback state, and the shared world/conveyor animation clock without mutating authoritative gameplay state.
+- `src/engine/ParticleSystem.*`: Vulkan-free reusable particle simulation. Effect definitions provide texture choices, tint, burst count, lifetime/size ranges, spawn radius, and velocity/rotation ranges; live particles own randomized state and emit renderer-facing billboards with smooth lifetime fading. `MirrorParticleEffect.*` resolves the ten code-configured smoke texture names through the manifest and builds the cyan mirror-swap effect. Covered by `sokoban_particle_tests`.
 - `src/engine/RenderFrameBuilder.*`: SDL/Vulkan-free construction of gameplay and editor `RenderFrameData`. Owns tile/model mapping, static geometry, procedural open-water planes/shore edges, ladder rungs, editor previews/pick-only cells, dynamic entities, tile scaling, and conveyor texture offsets. Water is emitted as `WaterSurface` data rather than a manifest model; filled cells omit the surface. Level-wide water adds a one-cell shoreline ring and four large non-pickable continuation surfaces outside the board without changing the frame's authored dimensions.
-- `src/engine/render/IsoScenePreparer.*`: Vulkan-free once-per-frame scene preparation and picking. Computes top-down, isometric-camera, and shadow layouts; creates one projected/cull-tested face pool; and emits depth-sorted opaque/translucent face indices plus model, shadow, and picking lists. It fills reusable renderer-owned frame scratch rather than using function-static storage. Covered by `tests/IsoScenePreparerTests.cpp` (`sokoban_iso_scene_preparer_tests`).
+- `src/engine/render/IsoScenePreparer.*`: Vulkan-free once-per-frame scene preparation and picking. Computes top-down, isometric-camera, and shadow layouts; creates one projected/cull-tested face pool; and emits depth-sorted opaque/translucent face indices plus model, shadow, picking, and camera-facing particle billboard lists. Particles are translucent-only, shadowless, and non-pickable. It fills reusable renderer-owned frame scratch rather than using function-static storage. Covered by `tests/IsoScenePreparerTests.cpp` (`sokoban_iso_scene_preparer_tests`).
 - `src/engine/ApplicationDebugUi.*`: Debug-only ImGui adapter for engine statistics and tuning. Edits `PresentationSettings` and calls the public `GameplaySession`/`VulkanRenderer` controls instead of storing application logic.
 - `src/engine/DebugUi.*`: Debug-only registry and presentation owner for the single Developer Tools window. Feature adapters register content callbacks as reorderable, scrolling tabs instead of creating independent windows.
 - `src/engine/AnimationPreviewDebugUi.*`: Debug-only owner of animation asset scanning, clip selection, preview playback state, and renderer preview delegation.
-- `src/engine/AudioSystem.*`: miniaudio-backed sound playback behind a pimpl (`EngineHandle`), so no miniaudio types leak into headers. Preloads the manifest's `footsteps` and `stone-drag` sound sets from the staged runtime content tree with `MA_SOUND_FLAG_DECODE` into never-reallocated `std::vector<ma_sound>`s. `update(dt, playerWalking, pushingStone)` drives the pure `FootstepCadence` struct and plays randomized non-repeating footsteps. Stone dragging uses randomized seamless loops with short fades; music streams one looping track per level with a 600 ms crossfade. Manifest gains remain authored in the Asset Manifest window; profile-backed master, music, and sound-effect bus gains are previewed live and persisted when Debug UI sliders are committed. Audio degrades gracefully (`available()` false, silent) if the device or files are missing.
+- `src/engine/AudioSystem.*`: miniaudio-backed sound playback behind a pimpl (`EngineHandle`), so no miniaudio types leak into headers. Preloads manifest sound sets from the staged runtime content tree with `MA_SOUND_FLAG_DECODE` into stable `std::vector<ma_sound>` storage. `playOneShot(name)` handles reusable randomized effects; `update(dt, playerWalking, pushingStone)` retains specialized footstep cadence and seamless stone-drag loops with short fades. Music streams one looping track per level with a 600 ms crossfade. Manifest gains remain authored in the Asset Manifest window; profile-backed master, music, and sound-effect bus gains are previewed live and persisted when Debug UI sliders are committed. Audio degrades gracefully to silence if the device or files are missing.
 - `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, action history, a branch-safe undo stack, automatic world steps, the post-undo automatic-motion pause, and solution-move snapshots that restore correctly across undo/restart. Its committed-state snapshot/restore API persists the exact player/movable state and usable undo chain; restore rejects disconnected or impossible rules transitions without mutating the live session. `reset` always clears undo state at a screen boundary. Emits `Action` snapshots for `Application` to animate. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
 - `src/engine/InputBindings.*`: platform-neutral semantic action and binding model. Each action owns an ordered list of keyboard, gamepad-button, and signed gamepad-axis bindings, allowing keyboard+D-pad+stick defaults. `assignBinding` implements remapping semantics (removes the identical binding from every action, then replaces only the action's bindings of the same kind, so a d-pad rebind keeps a stick binding); `bindingDisplayName`/`actionBindingsDisplay` provide UI labels.
 - `src/engine/Input.*`: SDL3 device owner and action mapper. Tracks raw keyboard/mouse state for editor tooling, hot-plugs gamepads, selects the most recently used controller, normalizes stick axes with threshold/pressed-edge semantics, clears stuck input on focus loss, reports active-device diagnostics, and converts raw SDL events into typed remapping candidates. `InputRouter` controls event admission and distributes its state to active consumers. Covered by `tests/InputTests.cpp` (`sokoban_input_tests`).
-- `src/engine/PlayerProfile.*` + `src/engine/PlayerProfileCodec.cpp`: current format-9 player progress model plus one owned `UserSettings` value, with the strict JSON codec and migrations split into PlayerProfileCodec.cpp. Migrations are forward JSON patches (migrate1to2 .. migrate8to9) applied in sequence, then ONE strict current-format parse validates the migrated document - patches only move fields and add defaults, and unknown keys survive them, so schema strictness holds without per-format parsers. Format 9 makes the top-level progress/settings sections each optional: `serialize(ProfileSections)` writes progress-only slot files and a settings-only shared settings.json (section choice flows through `SaveStore`/`AsyncSaveStore` constructor parameters set by `SaveSlotManager`), so slot files no longer carry ignored settings copies. Stores unlocked/current level and screen, an active-screen committed gameplay checkpoint with the multi-screen level move/time counters, per-level completion, per-level `reachedScreens` counts (max screen entered + 1, feeding level-select unlocking), optional move/time bests, typed keyboard/controller action bindings, audio/video/accessibility settings, window mode/size, MSAA, AO, preset/custom internal render-scale state, and bounded normalization. `recordReachedScreen` tracks entry, `resetProgress` implements New Game (clears progress/records, keeps every setting), and `recordLevelCompletion(..., recordBests)` skips best records for runs that started past the first screen. Headless and covered with `SaveStore` by `tests/PlayerProfileTests.cpp` (`sokoban_profile_tests`).
+- `src/engine/PlayerProfile.*` + `src/engine/PlayerProfileCodec.cpp`:
+  current format-10 player progress model plus one owned `UserSettings` value.
+  Forward JSON patches (`migrate1to2` through `migrate9to10`) feed one strict
+  current-format parse. Format 9 made progress/settings independently optional
+  for split slot and shared-settings files; format 10 adds persisted Mirror
+  bindings and migrates the old default Undo key. Stores exact active-screen
+  gameplay/undo state, progress, bests, reached screens, typed input bindings,
+  audio/video/accessibility settings, and normalized display/render settings.
+  Covered with `SaveStore` by `tests/PlayerProfileTests.cpp`.
 - `src/engine/Flow.hpp`: minimal generic state-machine toolkit shared by UI
   flows and available to future gameplay flows. `flow::Machine<Derived,
   State, Event, Command, Facts>` (CRTP) owns a State and turns events plus a
@@ -254,7 +272,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/AssetManifestDebugUi.*`: Debug-only ImGui adapter for `AssetManifestEditor`. Provides the Asset Manifest tab and owns only widget/modal presentation; all document and filesystem behavior stays reusable by a future non-debug editor UI.
 - `src/engine/ContentPipeline.*` + `tools/ContentTool.cpp`: headless production-content inventory, validation, and staging. Resolves manifest references and external `.gltf` URIs, rejects missing/escaping paths, parses every playable level, requires contiguous level/screen indices, verifies all compiled shaders, includes nearby asset notices, excludes `levels/Deleted`, and atomically replaces the output with only reachable files. Writes `content.index` with format/game version, file count, sizes, and paths. Tested by `tests/ContentPipelineTests.cpp` (`sokoban_content_pipeline_tests`).
 - `src/engine/RuntimeContent.*`: resolves the read-only `assets/` directory beside the executable through `SDL_GetBasePath` and rejects missing, corrupt, unsupported, or game-version-mismatched `content.index` files. `Application`, `VulkanRenderer`, and `AudioSystem` all use this one runtime root.
-- `src/engine/render/RenderAssetRequirements.*`: Vulkan-free model/animation requirement sets plus shared tile-to-model mapping. Computes requirements from a loaded `Level` for prefetching or from `RenderFrameData` as a draw-time safety net. Procedural water is explicitly excluded, so no obsolete water mesh can enter lazy loading. Tested by `tests/AssetRequirementsTests.cpp` (`sokoban_asset_requirements_tests`).
+- `src/engine/render/RenderAssetRequirements.*`: Vulkan-free model/animation/texture requirement sets plus shared tile-to-model mapping. Computes requirements from a loaded `Level` for prefetching or from `RenderFrameData` as a draw-time safety net. Mirror-bearing levels preload the ten smoke sprites; active particles explicitly require their selected textures. Procedural water is excluded, so no obsolete water mesh can enter lazy loading. Tested by `tests/AssetRequirementsTests.cpp` (`sokoban_asset_requirements_tests`).
 - `src/engine/render/AnimationController.*`: Vulkan-free owner of gameplay animation clips, Rogue clip selection, preview overrides, deduplication, and crossfade state. It emits immutable skinning requests and is tested by `tests/AnimationControllerTests.cpp` (`sokoban_animation_controller_tests`).
 - `src/engine/render/SkinnedMeshUpdater.*`: owns the Rogue's skinned source mesh and dynamic Vulkan vertex/index buffers. It consumes `AnimationController` requests, performs CPU skinning/blending, and uploads changed vertices.
 - `src/engine/render/VulkanModelResources.*`: owns lazy per-asset load states, TaskSystem futures, static model meshes, texture images/samplers, manifest material bindings, and failure retention. CPU parsing/decoding runs on workers; completed results are published to Vulkan on the render thread. It orchestrates `AnimationController` and `SkinnedMeshUpdater` while exposing lightweight mesh/material/texture views and loading statistics to the renderer.
@@ -370,6 +388,10 @@ Tile character mappings are defined in `src/engine/TileTypes.hpp`.
 'v'  Conveyor down
 '>'  Conveyor right
 '<'  Conveyor left
+'1'  Mirror north-west
+'2'  Mirror north-east
+'3'  Mirror south-west
+'4'  Mirror south-east
 ```
 
 Important tile behavior:
@@ -380,6 +402,9 @@ Important tile behavior:
 - `End` and `PressurePlate` are surface entities rendered as thin tiles.
 - `Ladder` and conveyors allow entities in their own cell.
 - Conveyors are passable cells that apply automatic movement.
+- Mirrors are non-passable static cells and use the `pictureframe_large_A`
+  KayKit Furniture Bits model in four rotations plus a model-space 45-degree
+  counter-clockwise correction for the asset's authored forward axis.
 
 ## Level File Format
 
@@ -522,6 +547,70 @@ Conveyors:
 - Belt surfaces scroll one texture cycle per step, matching rider speed.
 - Conveyor-started movement uses the conveyor interval as animation duration, so chained conveyor motion appears continuous.
 - Conveyor rendering uses primitive material texture indices from the GLTF so the blue body, dark belt, and white arrows show correctly.
+
+Mirrors:
+
+- `1`, `2`, `3`, and `4` pair the north-west, north-east, south-west, and
+  south-east orthogonal rays. Reflection is bidirectional between each pair;
+  distance from the mirror is preserved.
+- The configurable `Mirror` action defaults to keyboard `Z` and gamepad East.
+  Undo now defaults to keyboard `X` and gamepad West. Profile format 10
+  migrates format-9 bindings while preserving the one-binding/one-action rule.
+- `rules::activateMirrors` is pure and transactional. It reflects the player,
+  rocks, and ice; the nearest entity occludes entities behind it; chains may
+  use each mirror once; ambiguous, obstructed, unsupported, and overlapping
+  outcomes reject the entire activation. A valid destination over Water still
+  runs normal fall/death/fill rules.
+- `rules::previewMirrorActivation` is the shared source for both activation
+  and rendering. It returns the exact committed candidate state, affected
+  entity identities, fall outcomes, and every input/output beam leg in a
+  chained reflection; the visualization cannot disagree with gameplay rules.
+- While gameplay is idle and the player is alive, `RenderFrameBuilder`
+  deduplicates shared beam legs, emits configurable cyan core/halo prisms, and
+  adds translucent destination copies for every affected player/rock/ice.
+  During an active action it evaluates both endpoint states, interpolates
+  beam paths and ghost destinations only when both endpoints use the same
+  mirror chain and the entity remains collinear on the incoming ray. The first
+  leg is anchored to the rendered entity only in that case. Sideways exits and
+  transitions between different mirrors retain the previous straight geometry
+  but quickly smooth-fade the beam and ghost over the configurable initial
+  fraction of the action, avoiding bent rays, stale full-strength previews, and
+  geometry passing behind a different mirror. Invalid transactions still emit
+  no preview.
+- Successful forward mirror activations emit
+  `GameplayLoop::UpdateResult::mirrorActivated`; `Application` maps that event
+  to the manifest-backed `mirror-swap` one-shot set using Kenney's
+  `Woosh/woosh1.ogg`. Rejected activations and previews stay silent.
+  `AudioSystem::playOneShot` supports arbitrary non-reserved manifest sound
+  sets while footsteps and stone dragging keep their cadence/loop handling.
+- The same successful event carries every affected entity's final cell.
+  `Application` emits a configurable cyan smoke burst above each destination;
+  each burst randomizes seven expanding/rising billboards across Kenney
+  `smoke_01.png` through `smoke_10.png`. Effects reset at screen boundaries,
+  pause with gameplay, and never enter authoritative rules/save state. The
+  whole effect can be resized without changing its variation ranges through
+  `config::mirrorSwapSmokeScale` in `ParticleConfig.hpp`. Mirror smoke opts
+  into the particle system's explicit `drawOnTop` mode, which keeps ordinary
+  particles depth-tested while rendering the swap burst over its entity.
+  Procedural textured quads use material mode `5` and pass a one-based
+  descriptor handle in `textureOptions.y`; model material mode `1` retains its
+  descriptor index in `materialOptions.z`. Keeping these paths explicit avoids
+  colliding with `model.vert.glsl`, where `textureOptions.y` stores rotation.
+- Mirror preview geometry carries `RenderSurfaceEffect::MirrorEnergy`.
+  `IsoScenePreparer` routes it exclusively to translucent face/model lists
+  and excludes it from picking and shadow passes. Dedicated procedural-face
+  and model Vulkan pipelines share `mirror_energy.frag.glsl`, which preserves
+  enough model texture detail to identify the ghost while adding an emissive
+  rim, pulse, and moving scanline. Ghost model draws back-face cull and write
+  depth for their own translucent shell, preventing interior/back triangles
+  from blending over the visible surface; the recorder restores non-writing,
+  double-sided state afterward. `MirrorConfig.hpp` owns beam dimensions,
+  colors/alpha, ghost tint, rim, pulse, scanline, and texture-detail tuning.
+- Activation is an instantaneous normal `GameplaySession` action. It does not
+  increase the walking move count, is undoable, and survives exact checkpoint
+  save/restore validation.
+- The editor palette comes from tile definitions, so all four orientations can
+  be painted, undone, saved, and loaded without ImGui-owned editor policy.
 
 ## Level Editor
 
@@ -756,6 +845,15 @@ these focused modules rather than moving player UI into Debug-only ImGui.
 
 Major recent additions and fixes:
 
+- Added a live mirror activation preview backed by the exact pure rules
+  transaction. Valid idle reflections now show a two-layer animated energy
+  beam through every chained mirror leg and a translucent textured ghost of
+  each affected entity at its final destination, including submerged
+  destinations. The dedicated mirror-energy face/model pipelines are
+  translucent, shadowless, and non-pickable; the content pipeline packages the
+  new shader. Rules, presentation, scene-preparation, and packaging regressions
+  cover chain paths, final state agreement, frame emission, pass ownership, and
+  shader staging.
 - Added subtle animated water tile-border lines inspired by the supplied
   Order of the Sinking Star reference. The shader warps both axes of an
   integer world-space grid with independent two-frequency waves, keeping tile
@@ -1024,7 +1122,8 @@ At the time this handoff was updated:
   migration/recovery, gameplay
   move-count semantics, mandatory validation of the shipped manifest,
   manifest-editor save semantics, drowned-player rendering/death-animation
-  transitions, and the `content_pipeline` suite.
+  transitions, mirror transaction/visualization ownership, and the
+  `content_pipeline` suite.
 - `cmake --build out\visual-studio --config Release --target package` produces
   `out/visual-studio/Sokoban3D-0.1.0-Windows-x64.zip`. The current staged tree
   contains 55 reachable files (about 4 MB) instead of the roughly 236 MB / 5,964

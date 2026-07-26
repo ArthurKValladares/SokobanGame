@@ -352,6 +352,96 @@ void testAdjacentWaterFacesSharePerspectiveCoordinates()
     }
 }
 
+void testMirrorEnergyIsTranslucentNonPickableAndShadowless()
+{
+    sokoban::RenderFrameData frame;
+    frame.viewMode = sokoban::RenderViewMode::Isometric3D;
+    frame.levelWidth = 3;
+    frame.levelHeight = 3;
+    frame.levelDepth = 1;
+    frame.tiles.push_back({
+        .cell = { 2, 2, 0 },
+        .position = { 2.0f, 2.0f },
+        .color = { 0.6f, 0.9f, 1.0f, 0.5f },
+        .height = 1.0f,
+        .model = { 1 },
+        .effect = sokoban::RenderSurfaceEffect::MirrorEnergy,
+    });
+    frame.isoFaces.push_back({
+        .vertices = {
+            sokoban::Vec3 { 0.0f, 0.0f, 0.5f },
+            sokoban::Vec3 { 1.0f, 0.0f, 0.5f },
+            sokoban::Vec3 { 1.0f, 0.2f, 0.5f },
+            sokoban::Vec3 { 0.0f, 0.2f, 0.5f },
+        },
+        .color = { 0.7f, 0.95f, 1.0f, 0.7f },
+        .effect = sokoban::RenderSurfaceEffect::MirrorEnergy,
+    });
+
+    const sokoban::PreparedRenderScene scene =
+        prepareScene(frame, { 1280.0f, 720.0f });
+    CHECK(scene.hasTranslucentContent);
+    CHECK(scene.opaqueModelIndices.empty());
+    CHECK(scene.translucentModelIndices.size() == 1);
+    CHECK(scene.translucentModelIndices[0] == 0);
+    CHECK(scene.shadowModelIndices.empty());
+    CHECK(scene.shadowFaces.empty());
+    CHECK(scene.pickFaceIndices.empty());
+
+    const auto energyFaceIndex = std::ranges::find_if(
+        scene.translucentFaceIndices,
+        [&](std::size_t index) {
+            return scene.isoFaces[index].material ==
+                sokoban::PreparedSurfaceMaterial::MirrorEnergy;
+        });
+    CHECK(energyFaceIndex != scene.translucentFaceIndices.end());
+    if (energyFaceIndex != scene.translucentFaceIndices.end()) {
+        CHECK(std::ranges::find(
+            scene.opaqueFaceIndices, *energyFaceIndex) ==
+            scene.opaqueFaceIndices.end());
+    }
+}
+
+void testParticlesBecomeSortedTranslucentBillboardsOnly()
+{
+    using namespace sokoban;
+
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 3;
+    frame.levelHeight = 3;
+    frame.levelDepth = 1;
+    frame.particles = {
+        RenderFrameData::Particle {
+            .position = { 1.5f, 1.5f, 1.0f },
+            .size = { 0.8f, 0.8f },
+            .rotationRadians = 0.3f,
+            .color = { 0.7f, 0.9f, 1.0f, 0.6f },
+            .texture = RenderTexture { 5 },
+            .drawOnTop = true,
+        },
+        RenderFrameData::Particle {
+            .position = { 0.5f, 0.5f, 0.8f },
+            .size = { 0.5f, 0.5f },
+            .color = { 0.7f, 0.9f, 1.0f, 0.4f },
+            .texture = RenderTexture { 6 },
+        },
+    };
+
+    const PreparedRenderScene scene = prepareScene(frame, { 1280.0f, 720.0f });
+    CHECK(scene.hasTranslucentContent);
+    CHECK(scene.particles.size() == 2);
+    CHECK(!scene.particles[0].drawOnTop);
+    CHECK(scene.particles[1].drawOnTop);
+    CHECK(scene.particles[0].vertices[0].x !=
+        scene.particles[0].vertices[2].x);
+    CHECK(scene.particles[0].vertices[0].y !=
+        scene.particles[0].vertices[2].y);
+    CHECK(scene.pickFaceIndices.empty());
+    CHECK(scene.shadowFaces.empty());
+    CHECK(scene.shadowModelIndices.empty());
+}
+
 } // namespace
 
 int main()
@@ -363,6 +453,8 @@ int main()
     testPreparationReusesOutputWithoutStaleLists();
     testExteriorWaterDoesNotAffectCameraFitOrPicking();
     testAdjacentWaterFacesSharePerspectiveCoordinates();
+    testMirrorEnergyIsTranslucentNonPickableAndShadowless();
+    testParticlesBecomeSortedTranslucentBillboardsOnly();
 
     if (failures == 0) {
         std::cout << "IsoScenePreparerTests: " << checks

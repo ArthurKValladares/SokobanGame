@@ -426,6 +426,7 @@ void IsoScenePreparer::prepare(
     scene.pickFaceIndices.clear();
     scene.opaqueModelIndices.clear();
     scene.translucentModelIndices.clear();
+    scene.particles.clear();
     scene.shadowFaces.clear();
     scene.shadowModelIndices.clear();
     scene.renderExtent = {
@@ -438,10 +439,18 @@ void IsoScenePreparer::prepare(
     scene.hasTranslucentContent =
         frameData.viewMode == RenderViewMode::Isometric3D &&
         (!frameData.waterSurfaces.empty() ||
+            !frameData.particles.empty() ||
             std::ranges::any_of(
                 frameData.tiles,
                 [](const RenderFrameData::Tile& tile) {
-                    return tile.blurBehind;
+                    return tile.blurBehind ||
+                        tile.effect == RenderSurfaceEffect::MirrorEnergy;
+                }) ||
+            std::ranges::any_of(
+                frameData.isoFaces,
+                [](const RenderFrameData::IsoFace& face) {
+                    return face.effect ==
+                        RenderSurfaceEffect::MirrorEnergy;
                 }));
 
     scene.isoFaces.reserve(
@@ -452,6 +461,7 @@ void IsoScenePreparer::prepare(
     scene.pickFaceIndices.reserve(
         frameData.tiles.size() * 3 + frameData.waterSurfaces.size());
     scene.shadowFaces.reserve(frameData.tiles.size() * 5);
+    scene.particles.reserve(frameData.particles.size());
 
     auto appendIsoFace = [&](
                              const std::array<Vec3, 4>& vertices,
@@ -502,7 +512,9 @@ void IsoScenePreparer::prepare(
         const std::size_t index = scene.isoFaces.size();
         scene.isoFaces.push_back(face);
         if (drawable) {
-            (blurBehind || material == PreparedSurfaceMaterial::Water
+            (blurBehind ||
+                    material == PreparedSurfaceMaterial::Water ||
+                    material == PreparedSurfaceMaterial::MirrorEnergy
                     ? scene.translucentFaceIndices
                     : scene.opaqueFaceIndices)
                 .push_back(index);
@@ -531,7 +543,13 @@ void IsoScenePreparer::prepare(
             const float depth = tile.size.y;
             const float height = std::max(tile.height, 0.0f);
             const bool drawCube = tile.model.isCube() && !tile.pickOnly;
-            const bool pickable = !tile.isEditorPreview;
+            const bool pickable =
+                !tile.isEditorPreview &&
+                tile.effect != RenderSurfaceEffect::MirrorEnergy;
+            const PreparedSurfaceMaterial tileMaterial =
+                tile.effect == RenderSurfaceEffect::MirrorEnergy
+                ? PreparedSurfaceMaterial::MirrorEnergy
+                : PreparedSurfaceMaterial::Standard;
             const GridPosition pickBoundsCell {
                 static_cast<int>(
                     std::floor(tile.position.x + 0.0001f)),
@@ -552,7 +570,7 @@ void IsoScenePreparer::prepare(
                     pickable,
                     drawCube,
                     { width, depth },
-                    PreparedSurfaceMaterial::Standard,
+                    tileMaterial,
                     0);
             } else {
                 appendIsoFace(
@@ -567,7 +585,7 @@ void IsoScenePreparer::prepare(
                     pickable,
                     drawCube,
                     { width, height },
-                    PreparedSurfaceMaterial::Standard,
+                    tileMaterial,
                     0);
                 appendIsoFace(
                     { corners[1], corners[2], corners[6], corners[5] },
@@ -581,7 +599,7 @@ void IsoScenePreparer::prepare(
                     pickable,
                     drawCube,
                     { depth, height },
-                    PreparedSurfaceMaterial::Standard,
+                    tileMaterial,
                     0);
                 appendIsoFace(
                     { corners[2], corners[3], corners[7], corners[6] },
@@ -595,7 +613,7 @@ void IsoScenePreparer::prepare(
                     pickable,
                     drawCube,
                     { width, height },
-                    PreparedSurfaceMaterial::Standard,
+                    tileMaterial,
                     0);
                 appendIsoFace(
                     { corners[3], corners[0], corners[4], corners[7] },
@@ -609,7 +627,7 @@ void IsoScenePreparer::prepare(
                     pickable,
                     drawCube,
                     { depth, height },
-                    PreparedSurfaceMaterial::Standard,
+                    tileMaterial,
                     0);
                 appendIsoFace(
                     { corners[4], corners[5], corners[6], corners[7] },
@@ -628,7 +646,8 @@ void IsoScenePreparer::prepare(
             }
 
             if (!tile.model.isCube() && !tile.pickOnly) {
-                (tile.blurBehind
+                (tile.blurBehind ||
+                        tile.effect == RenderSurfaceEffect::MirrorEnergy
                         ? scene.translucentModelIndices
                         : scene.opaqueModelIndices)
                     .push_back(tileIndex);
@@ -672,6 +691,10 @@ void IsoScenePreparer::prepare(
             PreparedIsoFace face {
                 .normal = normal,
                 .color = source.color,
+                .material =
+                    source.effect == RenderSurfaceEffect::MirrorEnergy
+                    ? PreparedSurfaceMaterial::MirrorEnergy
+                    : PreparedSurfaceMaterial::Standard,
                 .depth = faceDepth(scene.isoLayout, source.vertices),
             };
             for (std::size_t i = 0; i < source.vertices.size(); ++i) {
@@ -680,7 +703,10 @@ void IsoScenePreparer::prepare(
                 face.shadowVertices[i] =
                     projectShadowPoint(scene.shadowLayout, source.vertices[i]);
             }
-            scene.opaqueFaceIndices.push_back(scene.isoFaces.size());
+            (face.material == PreparedSurfaceMaterial::MirrorEnergy
+                    ? scene.translucentFaceIndices
+                    : scene.opaqueFaceIndices)
+                .push_back(scene.isoFaces.size());
             scene.isoFaces.push_back(face);
         }
 
@@ -689,13 +715,68 @@ void IsoScenePreparer::prepare(
         };
         std::ranges::sort(scene.opaqueFaceIndices, fartherFirst);
         std::ranges::sort(scene.translucentFaceIndices, fartherFirst);
+
+        for (const RenderFrameData::Particle& source : frameData.particles) {
+            if (source.texture.isNone() || source.color.w <= 0.0f ||
+                source.size.x <= 0.0f || source.size.y <= 0.0f) {
+                continue;
+            }
+            const float cosine = std::cos(source.rotationRadians);
+            const float sine = std::sin(source.rotationRadians);
+            const Vec3 right = add(
+                multiply(
+                    scene.isoLayout.cameraRight,
+                    cosine * source.size.x * 0.5f),
+                multiply(
+                    scene.isoLayout.cameraUp,
+                    sine * source.size.x * 0.5f));
+            const Vec3 up = add(
+                multiply(
+                    scene.isoLayout.cameraUp,
+                    cosine * source.size.y * 0.5f),
+                multiply(
+                    scene.isoLayout.cameraRight,
+                    -sine * source.size.y * 0.5f));
+            const std::array worldVertices {
+                subtract(source.position, add(right, up)),
+                add(subtract(source.position, up), right),
+                add(source.position, add(right, up)),
+                add(subtract(source.position, right), up),
+            };
+            PreparedParticle particle {
+                .color = source.color,
+                .texture = source.texture,
+                .depth = dot(
+                    subtract(
+                        source.position,
+                        scene.isoLayout.cameraPosition),
+                    scene.isoLayout.cameraForward),
+                .drawOnTop = source.drawOnTop,
+            };
+            for (std::size_t i = 0; i < worldVertices.size(); ++i) {
+                particle.vertices[i] = projectIsoPoint(
+                    scene.isoLayout,
+                    scene.renderExtent,
+                    worldVertices[i]);
+            }
+            scene.particles.push_back(particle);
+        }
+        std::ranges::sort(
+            scene.particles,
+            [](const PreparedParticle& left, const PreparedParticle& right) {
+                if (left.drawOnTop != right.drawOnTop) {
+                    return !left.drawOnTop;
+                }
+                return left.depth > right.depth;
+            });
     }
 
     for (std::size_t tileIndex = 0;
          tileIndex < frameData.tiles.size();
          ++tileIndex) {
         const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
-        if (tile.isEditorPreview || tile.pickOnly) {
+        if (tile.isEditorPreview || tile.pickOnly ||
+            tile.effect == RenderSurfaceEffect::MirrorEnergy) {
             continue;
         }
         if (!tile.model.isCube()) {
@@ -721,7 +802,9 @@ void IsoScenePreparer::prepare(
             { corners[4], corners[5], corners[6], corners[7] });
     }
     for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
-        appendShadowFace(face.vertices);
+        if (face.effect != RenderSurfaceEffect::MirrorEnergy) {
+            appendShadowFace(face.vertices);
+        }
     }
 
 }

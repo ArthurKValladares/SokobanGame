@@ -90,6 +90,44 @@ struct StepRates {
 // entity has slide momentum or stands on a conveyor.
 [[nodiscard]] bool hasPendingMotion(const Level& level, const GameState& state);
 
+struct MirrorBeamSegment {
+    GridPosition3 from {};
+    GridPosition3 to {};
+
+    bool operator==(const MirrorBeamSegment&) const = default;
+};
+
+struct MirrorEntityPreview {
+    bool player = false;
+    std::size_t movableIndex = 0;
+    GridPosition3 start {};
+    GridPosition3 destination {};
+    bool fallen = false;
+    std::vector<MirrorBeamSegment> beamSegments;
+
+    bool operator==(const MirrorEntityPreview&) const = default;
+};
+
+struct MirrorActivationPreview {
+    GameState after;
+    std::vector<MirrorEntityPreview> entities;
+
+    bool operator==(const MirrorActivationPreview&) const = default;
+};
+
+// Describes the exact valid transaction activation would commit, including
+// every input/output leg used to visualize chained reflections.
+[[nodiscard]] std::optional<MirrorActivationPreview> previewMirrorActivation(
+    const Level& level,
+    const GameState& state);
+
+// Reflects every visible, non-fallen movable entity through mirrors as one
+// atomic transaction. Returns no state when nothing is reflected or any
+// reflected destination/chain is invalid.
+[[nodiscard]] std::optional<GameState> activateMirrors(
+    const Level& level,
+    const GameState& state);
+
 // Advances the world one discrete step and returns the resulting state
 // (unchanged if nothing can move). Movement intents per entity:
 //   - slide momentum first (it overrides player input),

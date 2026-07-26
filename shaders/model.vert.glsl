@@ -43,14 +43,11 @@ void main()
     outFaceCoordU = inUv.x;
     outFaceCoordV = inUv.y;
     outTextureIndex = inTextureIndex;
-    int quarterTurns = int(pc.textureOptions.y + 0.5) & 3;
-    if (quarterTurns == 1) {
-        outNormal = vec3(-inNormal.y, inNormal.x, inNormal.z);
-    } else if (quarterTurns == 2) {
-        outNormal = vec3(-inNormal.x, -inNormal.y, inNormal.z);
-    } else if (quarterTurns == 3) {
-        outNormal = vec3(inNormal.y, -inNormal.x, inNormal.z);
-    } else {
-        outNormal = inNormal;
-    }
+    float rotation = pc.textureOptions.y;
+    float cosine = cos(rotation);
+    float sine = sin(rotation);
+    outNormal = vec3(
+        cosine * inNormal.x - sine * inNormal.y,
+        sine * inNormal.x + cosine * inNormal.y,
+        inNormal.z);
 }

@@ -114,6 +114,7 @@ public:
     // Id lookups. Ids address the manifest lists (value-1); see RenderTypes.
     [[nodiscard]] RenderModel modelIdByName(std::string_view name) const; // throws if unknown
     [[nodiscard]] RenderAnimation animationIdByName(std::string_view name) const; // throws if unknown
+    [[nodiscard]] RenderTexture textureIdByName(std::string_view name) const; // throws if unknown
     [[nodiscard]] const Model& model(RenderModel id) const; // throws for cube/out of range
     [[nodiscard]] const Animation& animation(RenderAnimation id) const; // throws for none/out of range
 

@@ -31,6 +31,18 @@ const AssetManifest& testManifest()
 {
     static const AssetManifest manifest = AssetManifest::parse(R"json({
       "format": 1,
+      "textures": [
+        { "name": "Smoke01", "path": "smoke01.png" },
+        { "name": "Smoke02", "path": "smoke02.png" },
+        { "name": "Smoke03", "path": "smoke03.png" },
+        { "name": "Smoke04", "path": "smoke04.png" },
+        { "name": "Smoke05", "path": "smoke05.png" },
+        { "name": "Smoke06", "path": "smoke06.png" },
+        { "name": "Smoke07", "path": "smoke07.png" },
+        { "name": "Smoke08", "path": "smoke08.png" },
+        { "name": "Smoke09", "path": "smoke09.png" },
+        { "name": "Smoke10", "path": "smoke10.png" }
+      ],
       "models": [
         { "name": "Stone", "path": "stone.gltf" },
         { "name": "Water", "path": "water.gltf" },
@@ -86,6 +98,19 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     CHECK(requirements.contains(manifest.playerDeadIdleAnimation()));
     CHECK(requirements.modelCount() == 5);
     CHECK(requirements.animationCount() == 5);
+    CHECK(requirements.textureCount() == 0);
+
+    const Level mirrorLevel = Level::loadFromLayers({
+        { ".....", ".....", ".....", ".....", "....." },
+        { "C    ", "     ", "  3  ", "     ", "     " },
+    }, "mirror particle requirements");
+    const RenderAssetRequirements mirrorRequirements =
+        renderAssetRequirementsForLevel(mirrorLevel, manifest);
+    CHECK(mirrorRequirements.textureCount() == 10);
+    CHECK(mirrorRequirements.contains(
+        manifest.textureIdByName("Smoke01")));
+    CHECK(mirrorRequirements.contains(
+        manifest.textureIdByName("Smoke10")));
 }
 
 void testFrameRequirementsOnlyContainReferencedAssets()
@@ -102,6 +127,9 @@ void testFrameRequirementsOnlyContainReferencedAssets()
             .animationFallback = manifest.playerDeadIdleAnimation(),
         },
     };
+    frame.particles.push_back({
+        .texture = manifest.textureIdByName("Smoke03"),
+    });
 
     const RenderAssetRequirements requirements =
         renderAssetRequirementsForFrame(frame);
@@ -113,6 +141,8 @@ void testFrameRequirementsOnlyContainReferencedAssets()
     CHECK(!requirements.contains(manifest.playerIdleAnimation()));
     CHECK(requirements.modelCount() == 2);
     CHECK(requirements.animationCount() == 2);
+    CHECK(requirements.textureCount() == 1);
+    CHECK(requirements.contains(manifest.textureIdByName("Smoke03")));
 }
 
 void testMergeDeduplicatesRequirements()
@@ -122,17 +152,22 @@ void testMergeDeduplicatesRequirements()
     RenderAssetRequirements first;
     first.requireModel(manifest.modelIdByName("Stone"));
     first.requireAnimation(manifest.playerIdleAnimation());
+    first.requireTexture(manifest.textureIdByName("Smoke01"));
 
     RenderAssetRequirements second;
     second.requireModel(manifest.modelIdByName("Stone"));
     second.requireModel(manifest.modelIdByName("Water"));
     second.requireAnimation(manifest.playerPushAnimation());
+    second.requireTexture(manifest.textureIdByName("Smoke01"));
+    second.requireTexture(manifest.textureIdByName("Smoke02"));
     first.merge(second);
 
     CHECK(first.modelCount() == 2);
     CHECK(first.animationCount() == 2);
+    CHECK(first.textureCount() == 2);
     CHECK(first.contains(manifest.modelIdByName("Water")));
     CHECK(first.contains(manifest.playerPushAnimation()));
+    CHECK(first.contains(manifest.textureIdByName("Smoke02")));
 }
 
 void testCubeAndNoneAreNeverRequirements()
@@ -141,13 +176,16 @@ void testCubeAndNoneAreNeverRequirements()
     RenderAssetRequirements requirements;
     requirements.requireModel(cubeModel);
     requirements.requireAnimation(noAnimation);
+    requirements.requireTexture(noTexture);
     CHECK(requirements.empty());
     CHECK(!requirements.contains(cubeModel));
     CHECK(!requirements.contains(noAnimation));
+    CHECK(!requirements.contains(noTexture));
 
     // Ids beyond anything required are absent, not out-of-bounds errors.
     CHECK(!requirements.contains(RenderModel { 99 }));
     CHECK(!requirements.contains(RenderAnimation { 99 }));
+    CHECK(!requirements.contains(RenderTexture { 99 }));
 }
 
 } // namespace

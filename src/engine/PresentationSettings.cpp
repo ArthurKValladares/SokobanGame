@@ -50,6 +50,7 @@ PresentationSettings::PresentationSettings()
           .surfaceEntityWidthDepth = config::surfaceEntityWidthDepth,
       }
 {
+    tileScales_.fill(1.0f);
 }
 
 void PresentationSettings::applyTileScales(const AssetManifest& manifest)

@@ -70,8 +70,66 @@ void testMoveAdvancesSessionAndPresentation()
         false);
     CHECK(result.stateCommitted);
     CHECK(!result.screenSolved);
+    CHECK(!result.mirrorActivated);
     CHECK(session.state().player == (GridPosition3 { 1, 0, 1 }));
     CHECK(session.playerMoveCount() == 1);
+}
+
+void testMirrorInputCommitsAnInstantAction()
+{
+    TEST("mirrorInputCommitsAnInstantAction");
+    const Level level = makeLevel({
+        { ".....", ".....", ".....", ".....", "....." },
+        { "     ", "     ", "  3  ", "     ", "  C  " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+
+    const GameplayLoop::UpdateResult result = GameplayLoop::update(
+        level,
+        session,
+        presentation,
+        { .mirrorPressed = true },
+        0.01f,
+        false);
+    CHECK(result.stateCommitted);
+    CHECK(result.mirrorActivated);
+    const std::vector<GridPosition3> expectedDestinations {
+        GridPosition3 { 0, 2, 1 },
+    };
+    CHECK(result.mirrorSwapDestinations == expectedDestinations);
+    CHECK(session.state().player == (GridPosition3 { 0, 2, 1 }));
+    CHECK(session.playerMoveCount() == 0);
+    CHECK(session.undoCount() == 1);
+}
+
+void testRejectedMirrorInputDoesNotEmitActivation()
+{
+    TEST("rejectedMirrorInputDoesNotEmitActivation");
+    const Level level = makeLevel({
+        { ".....", ".....", ".....", ".....", "....." },
+        { "C    ", "     ", "  3  ", "     ", "     " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+
+    const GameplayLoop::UpdateResult result = GameplayLoop::update(
+        level,
+        session,
+        presentation,
+        { .mirrorPressed = true },
+        0.01f,
+        false);
+
+    CHECK(!result.mirrorActivated);
+    CHECK(result.mirrorSwapDestinations.empty());
+    CHECK(!result.stateCommitted);
+    CHECK(session.state().player == (GridPosition3 { 0, 0, 1 }));
+    CHECK(session.undoCount() == 0);
 }
 
 void testSolvedScreenAndDraftOutcomesDiffer()
@@ -114,6 +172,8 @@ int main()
 {
     testOpposingDirectionsAreNeutral();
     testMoveAdvancesSessionAndPresentation();
+    testMirrorInputCommitsAnInstantAction();
+    testRejectedMirrorInputDoesNotEmitActivation();
     testSolvedScreenAndDraftOutcomesDiffer();
 
     if (failures == 0) {

@@ -134,6 +134,11 @@ void VulkanModelResources::requestAssets(const RenderAssetRequirements& requirem
             requestAnimation(animation);
         }
     }
+    for (uint32_t i = 0; i < textures_.size(); ++i) {
+        if (requirements.contains(RenderTexture { i + 1 })) {
+            requestTexture(i);
+        }
+    }
 }
 
 bool VulkanModelResources::ensureAssets(const RenderAssetRequirements& requirements)
@@ -520,6 +525,9 @@ std::vector<bool> VulkanModelResources::requiredTextures(
     const RenderAssetRequirements& requirements) const
 {
     std::vector<bool> result(textures_.size(), false);
+    for (uint32_t i = 0; i < textures_.size(); ++i) {
+        result[i] = requirements.contains(RenderTexture { i + 1 });
+    }
     for (uint32_t i = 0; i < models_.size(); ++i) {
         const RenderModel model { i + 1 };
         if (!requirements.contains(model)) {
