@@ -50,7 +50,8 @@ public:
 
     void newDocument(int width, int height, bool recordHistory = true);
     void resizeDocument(int width, int height, bool recordHistory = true);
-    void addLayer();
+    void addLayerAbove();
+    void addLayerBelow();
     void deleteActiveLayer();
     [[nodiscard]] bool loadDocument(const std::filesystem::path& path, bool recordHistory = true);
     [[nodiscard]] bool saveDocument(const std::filesystem::path& path);
@@ -60,6 +61,10 @@ public:
     void paintCell(GridPosition3 position);
     void eraseCell(GridPosition3 position);
     void setCell(GridPosition3 position, TileType tile);
+    [[nodiscard]] GridPosition3 resolveEditTarget(
+        GridPosition3 pickedCell,
+        bool deleting,
+        bool replaceLayer) const;
     [[nodiscard]] bool tryUndoEdit();
 
     void addLevelAt(int levelIndex);
@@ -121,6 +126,7 @@ private:
     };
 
     void recordDocumentChange(const DocumentSnapshot& before);
+    void insertLayerAt(int insertionIndex, const char* status);
     void applyDocumentSnapshot(const DocumentSnapshot& snapshot);
     [[nodiscard]] DocumentSnapshot captureDocumentSnapshot() const;
     [[nodiscard]] EditActionRecord invertEditActionRecord(const EditActionRecord& record) const;

@@ -83,6 +83,15 @@ struct RenderTexture {
 inline constexpr RenderTexture noTexture {};
 
 struct RenderFrameData {
+    struct CameraExtent {
+        int32_t originX = 0;
+        int32_t originY = 0;
+        int32_t originZ = 0;
+        uint32_t width = 1;
+        uint32_t height = 1;
+        uint32_t depth = 1;
+    };
+
     struct DirectionalLight {
         Vec3 direction { 0.0f, 0.0f, 1.0f };
         Vec3 color { 1.0f, 1.0f, 1.0f };
@@ -127,6 +136,7 @@ struct RenderFrameData {
         bool pickOnly = false;
         bool showGrid = true;
         bool isEditorPreview = false;
+        bool affectsCameraFit = true;
         RenderModel model = cubeModel;
         RenderAnimation animation = noAnimation;
         RenderAnimation animationFallback = noAnimation;
@@ -177,6 +187,8 @@ struct RenderFrameData {
     uint32_t levelWidth = 0;
     uint32_t levelHeight = 0;
     uint32_t levelDepth = 1;
+    uint32_t gridPickBorder = 0;
+    std::optional<CameraExtent> cameraExtent;
     Vec2 playerPosition {};
     std::vector<Tile> tiles;
     std::vector<WaterSurface> waterSurfaces;

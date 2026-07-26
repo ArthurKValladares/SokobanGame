@@ -113,6 +113,13 @@ void testDocumentCommandsAndUndo()
     CHECK(editor.tryUndoEdit());
     CHECK(editor.documentLayers()[1][1][2] == tileTypeToChar(TileType::Air));
 
+    editor.setSelectedTile(TileType::Decorative);
+    editor.paintCell({ 3, 1, 1 });
+    CHECK(editor.documentLayers()[1][1][3] ==
+        tileTypeToChar(TileType::Decorative));
+    CHECK(editor.documentToLevel().tileAt(3, 1, 1) ==
+        TileType::Decorative);
+
     const std::array mirrorTypes {
         TileType::MirrorNorthWest,
         TileType::MirrorNorthEast,
@@ -131,7 +138,7 @@ void testDocumentCommandsAndUndo()
     editor.setLayerLocked(true);
     CHECK(editor.layerLocked());
 
-    editor.addLayer();
+    editor.addLayerAbove();
     CHECK(editor.documentDepth() == 3);
     CHECK(editor.activeLayer() == 2);
     editor.deleteActiveLayer();
@@ -162,6 +169,37 @@ void testTileValidationAndPlayerUniqueness()
     }
     CHECK(playerCount == 1);
     CHECK(editor.documentLayers()[1][2][3] == tileTypeToChar(TileType::Player));
+}
+
+void testAddLayerBelowShiftsContentAndWaterAndIsUndoable()
+{
+    TEST("addLayerBelowShiftsContentAndWaterAndIsUndoable");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(2, 2, false);
+    editor.setActiveLayer(0);
+    editor.setWaterLayer(0);
+
+    editor.addLayerBelow();
+    CHECK(editor.documentDepth() == 3);
+    CHECK(editor.activeLayer() == 0);
+    CHECK(editor.waterLayer() == 1U);
+    CHECK(editor.documentLayers()[0][0][0] ==
+        tileTypeToChar(TileType::Air));
+    CHECK(editor.documentLayers()[1][0][0] ==
+        tileTypeToChar(TileType::Ground));
+    CHECK(editor.documentLayers()[2][0][0] ==
+        tileTypeToChar(TileType::Player));
+    CHECK(editor.status() == "Added layer below.");
+
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentDepth() == 2);
+    CHECK(editor.activeLayer() == 0);
+    CHECK(editor.waterLayer() == 0U);
+    CHECK(editor.documentLayers()[0][0][0] ==
+        tileTypeToChar(TileType::Ground));
+    CHECK(editor.documentLayers()[1][0][0] ==
+        tileTypeToChar(TileType::Player));
 }
 
 void testSaveLoadAndRuntimeMirror()
@@ -207,11 +245,11 @@ void testWaterLayerEditingPersistenceAndLayerRenumbering()
     CHECK(editor.documentToLevel().tileAt(3, 2, 0) == TileType::Water);
 
     editor.setActiveLayer(0);
-    editor.addLayer();
+    editor.addLayerAbove();
     CHECK(editor.waterLayer() == 0U);
     editor.setWaterLayer(1);
     editor.setActiveLayer(0);
-    editor.addLayer();
+    editor.addLayerAbove();
     CHECK(editor.waterLayer() == 2U);
     editor.deleteActiveLayer();
     CHECK(editor.waterLayer() == 1U);
@@ -329,6 +367,66 @@ void testResizePreservesOverlapAndUsesLayerFill()
     CHECK(editor.documentLayers()[1][0][0] == tileTypeToChar(TileType::Player));
 }
 
+void testPaintingOutsideExpandsAndShiftsDocumentAtomically()
+{
+    TEST("paintingOutsideExpandsAndShiftsDocumentAtomically");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(2, 2, false);
+    editor.setCell({ 1, 1, 1 }, TileType::Wall);
+
+    CHECK((editor.resolveEditTarget({ -1, -1, 0 }, false, false) ==
+        GridPosition3 { -1, -1, 0 }));
+    CHECK((editor.resolveEditTarget({ -1, -1, 0 }, false, true) ==
+        GridPosition3 { -1, -1, 0 }));
+    CHECK((editor.resolveEditTarget({ -1, -1, 0 }, true, false) ==
+        GridPosition3 { -1, -1, 0 }));
+    CHECK((editor.resolveEditTarget({ 0, 0, 0 }, false, false) ==
+        GridPosition3 { 0, 0, 2 }));
+    editor.setLayerLocked(true);
+    CHECK((editor.resolveEditTarget({ -1, 0, 0 }, false, false) ==
+        GridPosition3 { -1, 0, 1 }));
+    editor.setLayerLocked(false);
+
+    editor.setCell({ -1, -1, 0 }, TileType::Decorative);
+    CHECK(editor.documentWidth() == 3);
+    CHECK(editor.documentHeight() == 3);
+    CHECK(editor.requestedWidth() == 3);
+    CHECK(editor.requestedHeight() == 3);
+    CHECK(editor.documentLayers()[0][0][0] ==
+        tileTypeToChar(TileType::Decorative));
+    CHECK(editor.documentLayers()[1][1][1] ==
+        tileTypeToChar(TileType::Player));
+    CHECK(editor.documentLayers()[1][2][2] ==
+        tileTypeToChar(TileType::Wall));
+    CHECK(editor.documentLayers()[0][0][1] ==
+        tileTypeToChar(TileType::Air));
+    CHECK(editor.status().find("Expanded level to 3 x 3") !=
+        std::string::npos);
+
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentWidth() == 2);
+    CHECK(editor.documentHeight() == 2);
+    CHECK(editor.documentLayers()[1][0][0] ==
+        tileTypeToChar(TileType::Player));
+    CHECK(editor.documentLayers()[1][1][1] ==
+        tileTypeToChar(TileType::Wall));
+
+    editor.setCell({ 3, 2, 0 }, TileType::Decorative);
+    CHECK(editor.documentWidth() == 4);
+    CHECK(editor.documentHeight() == 3);
+    CHECK(editor.documentLayers()[0][2][2] ==
+        tileTypeToChar(TileType::Air));
+    CHECK(editor.documentLayers()[1][0][0] ==
+        tileTypeToChar(TileType::Player));
+    CHECK(editor.documentLayers()[0][2][3] ==
+        tileTypeToChar(TileType::Decorative));
+
+    editor.eraseCell({ -1, 0, 1 });
+    CHECK(editor.documentWidth() == 4);
+    CHECK(editor.documentHeight() == 3);
+}
+
 void testInvalidLoadLeavesDocumentUntouched()
 {
     TEST("invalidLoadLeavesDocumentUntouched");
@@ -443,11 +541,13 @@ int main()
 {
     testDocumentCommandsAndUndo();
     testTileValidationAndPlayerUniqueness();
+    testAddLayerBelowShiftsContentAndWaterAndIsUndoable();
     testSaveLoadAndRuntimeMirror();
     testWaterLayerEditingPersistenceAndLayerRenumbering();
     testProjectRenumberDeleteAndRestore();
     testUndoAfterNewEditDoesNotReplayAbandonedBranch();
     testResizePreservesOverlapAndUsesLayerFill();
+    testPaintingOutsideExpandsAndShiftsDocumentAtomically();
     testInvalidLoadLeavesDocumentUntouched();
     testAlternateBrowserRootDoesNotMirrorRuntime();
     testBrowserFiltersJunkAndRejectsForeignDirectories();

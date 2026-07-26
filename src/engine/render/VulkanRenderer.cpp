@@ -384,7 +384,8 @@ std::optional<GridPosition3> VulkanRenderer::pickIsoGridCell(
             static_cast<float>(outputExtent.height),
         },
         frameData.levelWidth,
-        frameData.levelHeight);
+        frameData.levelHeight,
+        frameData.gridPickBorder);
 }
 
 void VulkanRenderer::waitIdle() const

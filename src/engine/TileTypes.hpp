@@ -28,6 +28,7 @@ enum class TileType {
     MirrorNorthEast,
     MirrorSouthWest,
     MirrorSouthEast,
+    Decorative,
     Count,
 };
 
@@ -59,6 +60,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::MirrorNorthEast, '2', "Mirror North-East", { 0.72f, 0.90f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::MirrorSouthWest, '3', "Mirror South-West", { 0.72f, 0.90f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::MirrorSouthEast, '4', "Mirror South-East", { 0.72f, 0.90f, 1.0f, 1.0f } },
+    TileTypeDefinition { TileType::Decorative, 'D', "Decorative Block", { 0.32f, 0.58f, 0.48f, 1.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();
@@ -72,6 +74,8 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
 [[nodiscard]] bool tileTypeIsSurfaceEntity(TileType type);
 [[nodiscard]] bool tileTypeIsConveyor(TileType type);
 [[nodiscard]] bool tileTypeIsMirror(TileType type);
+[[nodiscard]] bool tileTypeIsDecorative(TileType type);
+[[nodiscard]] bool tileTypeAffectsCameraFit(TileType type);
 // Clockwise quarter-turns from the north-west-facing model orientation.
 [[nodiscard]] std::optional<uint32_t> mirrorOrientationQuarterTurns(TileType type);
 [[nodiscard]] Vec4 tileColor(TileType type, bool isActive = true);

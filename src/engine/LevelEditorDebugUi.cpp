@@ -154,8 +154,12 @@ void LevelEditorDebugUi::draw(LevelEditor& editor, const Callbacks& callbacks)
     if (!editor.layerLocked()) {
         ImGui::TextDisabled("Click: add above   R + click: replace   D + click: delete");
     }
+    if (ImGui::Button("+ Layer Below")) {
+        editor.addLayerBelow();
+    }
+    ImGui::SameLine();
     if (ImGui::Button("+ Layer Above")) {
-        editor.addLayer();
+        editor.addLayerAbove();
     }
     ImGui::SameLine();
     if (ImGui::Button("Delete Layer")) {

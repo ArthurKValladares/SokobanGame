@@ -58,6 +58,7 @@ bool tileTypeSupportsEntity(TileType type)
 bool tileTypeAllowsEntity(TileType type)
 {
     return type == TileType::Air ||
+        type == TileType::Decorative ||
         type == TileType::Ladder ||
         tileTypeIsConveyor(type) ||
         type == TileType::End ||
@@ -83,6 +84,18 @@ bool tileTypeIsMirror(TileType type)
         type == TileType::MirrorNorthEast ||
         type == TileType::MirrorSouthWest ||
         type == TileType::MirrorSouthEast;
+}
+
+bool tileTypeIsDecorative(TileType type)
+{
+    return type == TileType::Decorative;
+}
+
+bool tileTypeAffectsCameraFit(TileType type)
+{
+    return type != TileType::Air &&
+        type != TileType::Water &&
+        !tileTypeIsDecorative(type);
 }
 
 std::optional<uint32_t> mirrorOrientationQuarterTurns(TileType type)

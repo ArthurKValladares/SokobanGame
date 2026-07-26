@@ -225,20 +225,86 @@ void LevelEditor::eraseCell(GridPosition3 position)
     setCell(position, TileType::Air);
 }
 
+GridPosition3 LevelEditor::resolveEditTarget(
+    GridPosition3 pickedCell,
+    bool deleting,
+    bool replaceLayer) const
+{
+    if (document_.layerLocked) {
+        pickedCell.z = document_.activeLayer;
+        return pickedCell;
+    }
+
+    auto topmostOccupiedLayer = [&]() -> std::optional<int> {
+        for (int z = static_cast<int>(document_.layers.size()) - 1;
+             z >= 0;
+             --z) {
+            if (pickedCell.y < 0 || pickedCell.x < 0 ||
+                pickedCell.y >= static_cast<int>(
+                    document_.layers[static_cast<size_t>(z)].size()) ||
+                pickedCell.x >= static_cast<int>(
+                    document_.layers[static_cast<size_t>(z)]
+                        [static_cast<size_t>(pickedCell.y)].size())) {
+                continue;
+            }
+            if (charToTileType(
+                    document_.layers[static_cast<size_t>(z)]
+                        [static_cast<size_t>(pickedCell.y)]
+                        [static_cast<size_t>(pickedCell.x)])
+                    .value_or(TileType::Air) != TileType::Air) {
+                return z;
+            }
+        }
+        return std::nullopt;
+    };
+
+    if (deleting) {
+        pickedCell.z = topmostOccupiedLayer().value_or(pickedCell.z);
+        return pickedCell;
+    }
+    if (replaceLayer) {
+        return pickedCell;
+    }
+
+    const bool outsideDocument =
+        pickedCell.x < 0 || pickedCell.y < 0 ||
+        pickedCell.x >= static_cast<int>(documentWidth()) ||
+        pickedCell.y >= static_cast<int>(documentHeight());
+    if (outsideDocument) {
+        pickedCell.z = 0;
+        return pickedCell;
+    }
+
+    const std::optional<int> occupied = topmostOccupiedLayer();
+    pickedCell.z = occupied ? *occupied + 1 : 0;
+    return pickedCell;
+}
+
 void LevelEditor::setCell(GridPosition3 position, TileType tile)
 {
     if (document_.layers.empty() || position.z < 0) {
         return;
     }
 
-    const int height = static_cast<int>(documentHeight());
-    const int width = static_cast<int>(documentWidth());
-    if (position.y < 0 ||
-        position.x < 0 ||
-        position.y >= height ||
-        position.x >= width) {
+    const int oldHeight = static_cast<int>(documentHeight());
+    const int oldWidth = static_cast<int>(documentWidth());
+    const int prependColumns = std::max(-position.x, 0);
+    const int prependRows = std::max(-position.y, 0);
+    const int appendColumns = std::max(position.x - oldWidth + 1, 0);
+    const int appendRows = std::max(position.y - oldHeight + 1, 0);
+    const bool expandsDocument =
+        prependColumns > 0 || prependRows > 0 ||
+        appendColumns > 0 || appendRows > 0;
+    if (tile == TileType::Air && expandsDocument) {
         return;
     }
+    const int width = oldWidth + prependColumns + appendColumns;
+    const int height = oldHeight + prependRows + appendRows;
+    GridPosition3 translatedPosition {
+        position.x + prependColumns,
+        position.y + prependRows,
+        position.z,
+    };
 
     auto documentTileAt = [&](GridPosition3 cell) {
         if (cell.x < 0 ||
@@ -249,10 +315,15 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
             cell.z >= static_cast<int>(document_.layers.size())) {
             return TileType::Air;
         }
+        const int oldX = cell.x - prependColumns;
+        const int oldY = cell.y - prependRows;
+        if (oldX < 0 || oldY < 0 || oldX >= oldWidth || oldY >= oldHeight) {
+            return cell.z == 0 ? TileType::Ground : TileType::Air;
+        }
         return charToTileType(
             document_.layers[static_cast<size_t>(cell.z)]
-                [static_cast<size_t>(cell.y)]
-                [static_cast<size_t>(cell.x)]).value_or(TileType::Air);
+                [static_cast<size_t>(oldY)]
+                [static_cast<size_t>(oldX)]).value_or(TileType::Air);
     };
 
     if (tile == TileType::Ladder) {
@@ -264,9 +335,9 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
         };
         const bool adjacentGround = std::ranges::any_of(offsets, [&](GridPosition offset) {
             return documentTileAt({
-                position.x + offset.x,
-                position.y + offset.y,
-                position.z,
+                translatedPosition.x + offset.x,
+                translatedPosition.y + offset.y,
+                translatedPosition.z,
             }) == TileType::Ground;
         });
         if (!adjacentGround) {
@@ -277,16 +348,41 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
 
     const char character = tileTypeToChar(tile);
     if (tile == TileType::Air &&
-        position.z >= static_cast<int>(document_.layers.size())) {
+        translatedPosition.z >= static_cast<int>(document_.layers.size())) {
         return;
     }
-    if (position.z < static_cast<int>(document_.layers.size()) &&
-        document_.layers[static_cast<size_t>(position.z)][static_cast<size_t>(position.y)][static_cast<size_t>(position.x)] == character) {
+    if (!expandsDocument &&
+        translatedPosition.z < static_cast<int>(document_.layers.size()) &&
+        document_.layers[static_cast<size_t>(translatedPosition.z)]
+            [static_cast<size_t>(translatedPosition.y)]
+            [static_cast<size_t>(translatedPosition.x)] == character) {
         return;
     }
 
     const DocumentSnapshot before = captureDocumentSnapshot();
-    while (position.z >= static_cast<int>(document_.layers.size())) {
+    if (expandsDocument) {
+        for (size_t layerIndex = 0;
+             layerIndex < document_.layers.size();
+             ++layerIndex) {
+            std::vector<std::string> expanded(
+                static_cast<size_t>(height),
+                std::string(
+                    static_cast<size_t>(width),
+                    tileTypeToChar(TileType::Air)));
+            for (size_t y = 0; y < document_.layers[layerIndex].size(); ++y) {
+                std::copy(
+                    document_.layers[layerIndex][y].begin(),
+                    document_.layers[layerIndex][y].end(),
+                    expanded[y + static_cast<size_t>(prependRows)].begin() +
+                        prependColumns);
+            }
+            document_.layers[layerIndex] = std::move(expanded);
+        }
+        document_.requestedWidth = width;
+        document_.requestedHeight = height;
+    }
+
+    while (translatedPosition.z >= static_cast<int>(document_.layers.size())) {
         document_.layers.emplace_back(
             static_cast<size_t>(height),
             std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Air)));
@@ -300,12 +396,23 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
         }
     }
 
-    document_.layers[static_cast<size_t>(position.z)][static_cast<size_t>(position.y)][static_cast<size_t>(position.x)] = character;
-    document_.activeLayer = position.z;
+    document_.layers[static_cast<size_t>(translatedPosition.z)]
+        [static_cast<size_t>(translatedPosition.y)]
+        [static_cast<size_t>(translatedPosition.x)] = character;
+    document_.activeLayer = translatedPosition.z;
     document_.dirty = true;
-    document_.status = tile == TileType::Air
-        ? "Deleted tile from layer " + std::to_string(position.z + 1) + "."
-        : "Painted layer " + std::to_string(position.z + 1) + ".";
+    if (expandsDocument) {
+        document_.status =
+            "Expanded level to " + std::to_string(width) + " x " +
+            std::to_string(height) + " and painted layer " +
+            std::to_string(translatedPosition.z + 1) + ".";
+    } else {
+        document_.status = tile == TileType::Air
+            ? "Deleted tile from layer " +
+                std::to_string(translatedPosition.z + 1) + "."
+            : "Painted layer " +
+                std::to_string(translatedPosition.z + 1) + ".";
+    }
     recordDocumentChange(before);
 }
 
@@ -447,25 +554,37 @@ void LevelEditor::resizeDocument(int width, int height, bool recordHistory)
     }
 }
 
-void LevelEditor::addLayer()
+void LevelEditor::addLayerAbove()
+{
+    insertLayerAt(document_.activeLayer + 1, "Added layer above.");
+}
+
+void LevelEditor::addLayerBelow()
+{
+    insertLayerAt(document_.activeLayer, "Added layer below.");
+}
+
+void LevelEditor::insertLayerAt(int insertionIndex, const char* status)
 {
     const DocumentSnapshot before = captureDocumentSnapshot();
     const int width = std::max(document_.requestedWidth, 1);
     const int height = std::max(document_.requestedHeight, 1);
-    const auto insertionPoint = document_.layers.begin() +
-        std::min(document_.activeLayer + 1, static_cast<int>(document_.layers.size()));
+    insertionIndex = std::clamp(
+        insertionIndex,
+        0,
+        static_cast<int>(document_.layers.size()));
     if (document_.waterLayer &&
-        *document_.waterLayer > static_cast<uint32_t>(document_.activeLayer)) {
+        *document_.waterLayer >= static_cast<uint32_t>(insertionIndex)) {
         ++*document_.waterLayer;
     }
     document_.layers.insert(
-        insertionPoint,
+        document_.layers.begin() + insertionIndex,
         std::vector<std::string>(
             static_cast<size_t>(height),
             std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Air))));
-    ++document_.activeLayer;
+    document_.activeLayer = insertionIndex;
     document_.dirty = true;
-    document_.status = "Added layer.";
+    document_.status = status;
     recordDocumentChange(before);
 }
 

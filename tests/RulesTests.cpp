@@ -92,6 +92,21 @@ void testStepMovesPlayer()
     CHECK(rules::step(level, state) == state);
 }
 
+void testDecorativeTileDoesNotBlockMovement()
+{
+    TEST("decorativeTileDoesNotBlockMovement");
+    const Level level = makeLevel({
+        { "..." },
+        { "CD " },
+    });
+    const GameState state = rules::initialState(level);
+
+    const GameState moved = rules::step(level, state, MoveDirection::Right);
+    CHECK(moved.player == cell(1, 0, 1));
+    CHECK(level.tileAt(1, 0, 1) == TileType::Decorative);
+    CHECK(moved.movables.empty());
+}
+
 void testStepIsPure()
 {
     TEST("stepIsPure");
@@ -845,6 +860,7 @@ int main()
 {
     testInitialState();
     testStepMovesPlayer();
+    testDecorativeTileDoesNotBlockMovement();
     testStepIsPure();
     testPushRock();
     testPushBlocked();

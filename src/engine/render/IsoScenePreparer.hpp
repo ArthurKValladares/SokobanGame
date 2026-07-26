@@ -106,7 +106,8 @@ public:
         Vec2 pixelPosition,
         Vec2 outputExtent,
         uint32_t levelWidth,
-        uint32_t levelHeight) const;
+        uint32_t levelHeight,
+        uint32_t gridPickBorder = 0) const;
 
     [[nodiscard]] static Vec3 projectIsoPoint(
         const IsoRenderLayout& layout,

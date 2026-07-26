@@ -112,14 +112,23 @@ IsoRenderLayout calculateIsoLayout(
     const float pitch = frameData.cameraPitchDegrees.value_or(
         config::cameraPitchDegrees) * radiansPerDegree;
     const float yaw = config::cameraYawDegrees * radiansPerDegree;
+    const RenderFrameData::CameraExtent cameraExtent =
+        frameData.cameraExtent.value_or(RenderFrameData::CameraExtent {
+            .width = frameData.levelWidth,
+            .height = frameData.levelHeight,
+            .depth = frameData.levelDepth,
+        });
     const float cameraDistance = std::max(
         static_cast<float>(
-            std::max(frameData.levelWidth, frameData.levelHeight)),
+            std::max(cameraExtent.width, cameraExtent.height)),
         1.0f) * config::cameraDistanceScale;
     const Vec3 target {
-        static_cast<float>(frameData.levelWidth) * 0.5f,
-        static_cast<float>(frameData.levelHeight) * 0.5f,
-        static_cast<float>(std::max(frameData.levelDepth, 1U) - 1U) * 0.5f,
+        static_cast<float>(cameraExtent.originX) +
+            static_cast<float>(cameraExtent.width) * 0.5f,
+        static_cast<float>(cameraExtent.originY) +
+            static_cast<float>(cameraExtent.height) * 0.5f,
+        static_cast<float>(cameraExtent.originZ) +
+            static_cast<float>(std::max(cameraExtent.depth, 1U) - 1U) * 0.5f,
     };
     const float horizontalDistance =
         std::sin(pitch) * cameraDistance;
@@ -169,24 +178,27 @@ IsoRenderLayout calculateIsoLayout(
         farthestDepth = std::max(farthestDepth, cameraDepth);
     };
 
-    const float width = static_cast<float>(frameData.levelWidth);
-    const float height = static_cast<float>(frameData.levelHeight);
-    const float top =
-        static_cast<float>(std::max(frameData.levelDepth, 1U));
+    const float left = static_cast<float>(cameraExtent.originX);
+    const float nearY = static_cast<float>(cameraExtent.originY);
+    const float right = left + static_cast<float>(cameraExtent.width);
+    const float farY = nearY + static_cast<float>(cameraExtent.height);
+    const float bottom = static_cast<float>(cameraExtent.originZ);
+    const float top = bottom +
+        static_cast<float>(std::max(cameraExtent.depth, 1U));
     for (Vec3 point : std::array<Vec3, 8> {
-             Vec3 { 0.0f, 0.0f, 0.0f },
-             Vec3 { width, 0.0f, 0.0f },
-             Vec3 { width, height, 0.0f },
-             Vec3 { 0.0f, height, 0.0f },
-             Vec3 { 0.0f, 0.0f, top },
-             Vec3 { width, 0.0f, top },
-             Vec3 { width, height, top },
-             Vec3 { 0.0f, height, top },
+             Vec3 { left, nearY, bottom },
+             Vec3 { right, nearY, bottom },
+             Vec3 { right, farY, bottom },
+             Vec3 { left, farY, bottom },
+             Vec3 { left, nearY, top },
+             Vec3 { right, nearY, top },
+             Vec3 { right, farY, top },
+             Vec3 { left, farY, top },
          }) {
         includePoint(point);
     }
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
-        if (!tile.isEditorPreview) {
+        if (!tile.isEditorPreview && tile.affectsCameraFit) {
             for (Vec3 point : tileCorners(tile)) {
                 includePoint(point);
             }
@@ -819,7 +831,8 @@ std::optional<GridPosition3> IsoScenePreparer::pickGridCell(
     Vec2 pixelPosition,
     Vec2 outputExtent,
     uint32_t levelWidth,
-    uint32_t levelHeight) const
+    uint32_t levelHeight,
+    uint32_t gridPickBorder) const
 {
     if (outputExtent.x <= 0.0f || outputExtent.y <= 0.0f) {
         return std::nullopt;
@@ -854,11 +867,14 @@ std::optional<GridPosition3> IsoScenePreparer::pickGridCell(
         }
         const std::optional<float> depth =
             pointDepthInQuad(pixelPosition, pixelQuad);
+        const int pickBorder = static_cast<int>(gridPickBorder);
         if (!depth || *depth >= pickedDepth ||
-            face.pickBoundsCell.x < 0 ||
-            face.pickBoundsCell.y < 0 ||
-            face.pickBoundsCell.x >= static_cast<int>(levelWidth) ||
-            face.pickBoundsCell.y >= static_cast<int>(levelHeight)) {
+            face.pickBoundsCell.x < -pickBorder ||
+            face.pickBoundsCell.y < -pickBorder ||
+            face.pickBoundsCell.x >=
+                static_cast<int>(levelWidth) + pickBorder ||
+            face.pickBoundsCell.y >=
+                static_cast<int>(levelHeight) + pickBorder) {
             continue;
         }
         picked = face.cell;

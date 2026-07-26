@@ -443,43 +443,10 @@ void Application::updateEditorPainting(
                 *previousRenderFrame, mousePixels)) {
         GridPosition3 target = *clicked;
         const bool deleting = input.deleting;
-        auto topmostOccupiedLayer =
-            [&](GridPosition3 position) -> std::optional<int> {
-                const Level::LayerRows& layers =
-                    levelEditor_.documentLayers();
-                for (int z = static_cast<int>(layers.size()) - 1;
-                     z >= 0;
-                     --z) {
-                    if (position.y < 0 ||
-                        position.x < 0 ||
-                        position.y >= static_cast<int>(
-                            layers[static_cast<std::size_t>(z)].size()) ||
-                        position.x >= static_cast<int>(
-                            layers[static_cast<std::size_t>(z)]
-                                [static_cast<std::size_t>(position.y)]
-                                    .size())) {
-                        continue;
-                    }
-                    if (charToTileType(
-                            layers[static_cast<std::size_t>(z)]
-                                [static_cast<std::size_t>(position.y)]
-                                [static_cast<std::size_t>(position.x)])
-                            .value_or(TileType::Air) != TileType::Air) {
-                        return z;
-                    }
-                }
-                return std::nullopt;
-            };
-
-        if (levelEditor_.layerLocked()) {
-            target.z = static_cast<int>(levelEditor_.activeLayer());
-        } else if (deleting) {
-            target.z = topmostOccupiedLayer(target).value_or(target.z);
-        } else if (!input.replaceLayer) {
-            const std::optional<int> occupied =
-                topmostOccupiedLayer(target);
-            target.z = occupied ? *occupied + 1 : 0;
-        }
+        target = levelEditor_.resolveEditTarget(
+            target,
+            deleting,
+            input.replaceLayer);
 
         editorHoverCell_ = target;
         if (input.primaryPressed) {

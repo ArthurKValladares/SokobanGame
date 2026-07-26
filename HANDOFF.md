@@ -1260,6 +1260,37 @@ UI:
 
 Engineering:
 
+- `Decorative Block` is a first-class tile (`D`) for authored world geometry
+  that has no gameplay semantics. Entities, movement, falling, mirrors, and
+  occupancy treat it like air, while presentation renders it as a full-height
+  model and includes it in normal lighting/shadows. It is available in the
+  level-editor palette and asset manifest. Render frames carry a gameplay-only
+  camera extent, and decorative tiles are excluded from both that extent and
+  projected fit points, so scenery outside or above the playable footprint
+  cannot change camera target, distance, or zoom.
+- Editor frames provide a symmetric, invisible one-cell picking border around
+  the document. Painting there automatically grows every layer; north/west
+  growth prepends rows or columns and shifts all authored tiles together,
+  while south/east growth appends them. The resize and paint are one undoable
+  document transaction and updates the requested dimensions. Unlike manual
+  resize, paint-driven growth initializes every new cell as air and an ordinary
+  exterior click targets layer 0, so placing decoration creates only that one
+  decorative tile. Camera extents are origin-aware and exclude both air and
+  decoration, preventing sparse north/west or south/east growth from changing
+  gameplay framing. Replace mode and layer lock retain their explicit behavior.
+- The editor exposes `+ Layer Below` and `+ Layer Above` as separate headless
+  document commands. Both select the inserted air layer and are undoable;
+  insertion below shifts existing layers and renumbers the configured water
+  layer when necessary.
+- Editor hover previews are layered over the original tile or empty-cell pick
+  surface. Never remove that underlying pick geometry while hovered: previews
+  are intentionally non-pickable, and doing so creates a frame-to-frame loop
+  where selection alternates between adjacent cells or selected/unselected.
+- Invisible editor pick surfaces for air and the one-cell expansion border are
+  projected at the top of their logical cell (`z + 1`), not its base. This
+  keeps the pick quad coincident with a full-height preview block's top under
+  perspective; using `z` creates parallax that grows toward the far side of
+  the board. `IsoScenePreparerTests` covers the projected-face invariant.
 - Default keyboard bindings are `Z` for Undo and `F` for the Mirror action.
   Player-profile format 11 migrates only the exact accidental format-10
   defaults (`Mirror=Z`, `Undo=X`) and preserves customized controls.

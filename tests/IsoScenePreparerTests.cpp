@@ -268,6 +268,107 @@ void testPickingConsumesPreparedFaces()
     CHECK((picked == sokoban::GridPosition3 { 3, 0, 0 }));
 }
 
+void testPickingHonorsConfiguredGridBorder()
+{
+    sokoban::RenderFrameData frame;
+    frame.viewMode = sokoban::RenderViewMode::Isometric3D;
+    frame.levelWidth = 2;
+    frame.levelHeight = 2;
+    frame.levelDepth = 1;
+    sokoban::RenderFrameData::Tile borderCell = cube(-1, 0);
+    borderCell.height = 0.0f;
+    borderCell.pickOnly = true;
+    borderCell.affectsCameraFit = false;
+    frame.tiles.push_back(borderCell);
+
+    const sokoban::Vec2 extent { 1600.0f, 900.0f };
+    const sokoban::PreparedRenderScene scene = prepareScene(frame, extent);
+    const auto iterator = std::ranges::find_if(
+        scene.pickFaceIndices,
+        [&](std::size_t index) {
+            return scene.isoFaces[index].cell ==
+                sokoban::GridPosition3 { -1, 0, 0 };
+        });
+    CHECK(iterator != scene.pickFaceIndices.end());
+    if (iterator == scene.pickFaceIndices.end()) {
+        return;
+    }
+
+    sokoban::Vec2 center {};
+    for (sokoban::Vec3 vertex : scene.isoFaces[*iterator].vertices) {
+        center.x += (vertex.x + 1.0f) * 0.5f * extent.x;
+        center.y += (1.0f - vertex.y) * 0.5f * extent.y;
+    }
+    center.x *= 0.25f;
+    center.y *= 0.25f;
+
+    const sokoban::IsoScenePreparer preparer;
+    CHECK(!preparer.pickGridCell(
+        scene, center, extent, frame.levelWidth, frame.levelHeight));
+    CHECK((preparer.pickGridCell(
+        scene,
+        center,
+        extent,
+        frame.levelWidth,
+        frame.levelHeight,
+        1) == sokoban::GridPosition3 { -1, 0, 0 }));
+}
+
+void testVirtualPickPlaneMatchesPreviewTopUnderPerspective()
+{
+    sokoban::RenderFrameData frame;
+    frame.viewMode = sokoban::RenderViewMode::Isometric3D;
+    frame.levelWidth = 8;
+    frame.levelHeight = 8;
+    frame.levelDepth = 1;
+
+    sokoban::RenderFrameData::Tile pickPlane = cube(7, 7);
+    pickPlane.baseElevation = 1.0f;
+    pickPlane.height = 0.0f;
+    pickPlane.pickOnly = true;
+    sokoban::RenderFrameData::Tile preview = cube(7, 7);
+    preview.isEditorPreview = true;
+    frame.tiles = { pickPlane, preview };
+
+    const sokoban::Vec2 extent { 1600.0f, 900.0f };
+    const sokoban::PreparedRenderScene scene = prepareScene(frame, extent);
+    const auto pickFace = std::ranges::find_if(
+        scene.isoFaces,
+        [](const sokoban::PreparedIsoFace& face) {
+            return face.pickable && face.normal.z > 0.5f;
+        });
+    const auto previewTop = std::ranges::find_if(
+        scene.isoFaces,
+        [](const sokoban::PreparedIsoFace& face) {
+            return face.isEditorPreview && face.normal.z > 0.5f;
+        });
+    CHECK(pickFace != scene.isoFaces.end());
+    CHECK(previewTop != scene.isoFaces.end());
+    if (pickFace == scene.isoFaces.end() ||
+        previewTop == scene.isoFaces.end()) {
+        return;
+    }
+
+    for (std::size_t i = 0; i < pickFace->vertices.size(); ++i) {
+        CHECK(near(pickFace->vertices[i].x, previewTop->vertices[i].x));
+        CHECK(near(pickFace->vertices[i].y, previewTop->vertices[i].y));
+    }
+
+    sokoban::Vec2 center {};
+    for (sokoban::Vec3 vertex : pickFace->vertices) {
+        center.x += (vertex.x + 1.0f) * 0.5f * extent.x;
+        center.y += (1.0f - vertex.y) * 0.5f * extent.y;
+    }
+    center.x *= 0.25f;
+    center.y *= 0.25f;
+    CHECK((sokoban::IsoScenePreparer {}.pickGridCell(
+        scene,
+        center,
+        extent,
+        frame.levelWidth,
+        frame.levelHeight) == sokoban::GridPosition3 { 7, 7, 0 }));
+}
+
 void testTopDownPreparationSkipsIsoWork()
 {
     sokoban::RenderFrameData frame;
@@ -350,6 +451,35 @@ void testExteriorWaterDoesNotAffectCameraFitOrPicking()
         baseScene.isoLayout.fitScale);
     CHECK(exteriorScene.pickFaceIndices.size() ==
         baseScene.pickFaceIndices.size());
+}
+
+void testDecorativeTileDoesNotAffectCameraFit()
+{
+    const sokoban::RenderFrameData baseFrame = sceneFrame();
+    const sokoban::PreparedRenderScene baseScene =
+        prepareScene(baseFrame, { 1920.0f, 1080.0f });
+
+    sokoban::RenderFrameData decorativeFrame = baseFrame;
+    sokoban::RenderFrameData::Tile decoration = cube(1, 1);
+    decoration.baseElevation = 12.0f;
+    decoration.affectsCameraFit = false;
+    decorativeFrame.tiles.push_back(decoration);
+    const sokoban::PreparedRenderScene decorativeScene =
+        prepareScene(decorativeFrame, { 1920.0f, 1080.0f });
+
+    CHECK(decorativeScene.isoLayout.cameraPosition.x ==
+        baseScene.isoLayout.cameraPosition.x);
+    CHECK(decorativeScene.isoLayout.cameraPosition.y ==
+        baseScene.isoLayout.cameraPosition.y);
+    CHECK(decorativeScene.isoLayout.cameraPosition.z ==
+        baseScene.isoLayout.cameraPosition.z);
+    CHECK(decorativeScene.isoLayout.projectedCenter.x ==
+        baseScene.isoLayout.projectedCenter.x);
+    CHECK(decorativeScene.isoLayout.projectedCenter.y ==
+        baseScene.isoLayout.projectedCenter.y);
+    CHECK(decorativeScene.isoLayout.fitScale ==
+        baseScene.isoLayout.fitScale);
+    CHECK(decorativeScene.isoFaces.size() > baseScene.isoFaces.size());
 }
 
 void testAdjacentWaterFacesSharePerspectiveCoordinates()
@@ -503,9 +633,12 @@ int main()
     testPreparationCategorizesOneSharedFacePool();
     testPassListsAreDepthSorted();
     testPickingConsumesPreparedFaces();
+    testPickingHonorsConfiguredGridBorder();
+    testVirtualPickPlaneMatchesPreviewTopUnderPerspective();
     testTopDownPreparationSkipsIsoWork();
     testPreparationReusesOutputWithoutStaleLists();
     testExteriorWaterDoesNotAffectCameraFitOrPicking();
+    testDecorativeTileDoesNotAffectCameraFit();
     testAdjacentWaterFacesSharePerspectiveCoordinates();
     testMirrorEnergyIsTranslucentNonPickableAndShadowless();
     testParticlesBecomeSortedTranslucentBillboardsOnly();

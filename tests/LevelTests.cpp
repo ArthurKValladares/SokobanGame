@@ -202,6 +202,29 @@ void testRaggedLayersNormalizeToAir()
     CHECK(!level.supportingTileAt({ 0, 0, 0 }));
 }
 
+void testDecorativeTileIsSerializedAndGameplayTransparent()
+{
+    TEST("decorativeTileIsSerializedAndGameplayTransparent");
+    CHECK(tileTypeToChar(TileType::Decorative) == 'D');
+    CHECK(charToTileType('D') == TileType::Decorative);
+    CHECK(tileTypeName(TileType::Decorative) == "Decorative Block");
+    CHECK(tileTypeAllowsEntity(TileType::Decorative));
+    CHECK(!tileTypeIsSolidBlock(TileType::Decorative));
+    CHECK(!tileTypeSupportsEntity(TileType::Decorative));
+    CHECK(!tileTypeOccupiesLevelCell(TileType::Decorative));
+    CHECK(!tileTypeAffectsCameraFit(TileType::Decorative));
+
+    const Level::LayerRows layers {
+        { "..." },
+        { "CD " },
+    };
+    const Level level = Level::loadFromLayers(layers, "decorative tile");
+    CHECK(level.tileAt(1, 0, 1) == TileType::Decorative);
+    CHECK(level.isWalkable({ 1, 0, 1 }));
+    CHECK(Level::parseLayerRows(
+        Level::serializeLayerRows(layers), "decorative round trip") == layers);
+}
+
 void testLadderRequiresSameLayerGround()
 {
     TEST("ladderRequiresSameLayerGround");
@@ -249,6 +272,7 @@ int main()
     testParserRejectsMalformedStructure();
     testLevelValidationErrors();
     testRaggedLayersNormalizeToAir();
+    testDecorativeTileIsSerializedAndGameplayTransparent();
     testLadderRequiresSameLayerGround();
     testFileLoadingHandlesCrLfAndMissingFiles();
 

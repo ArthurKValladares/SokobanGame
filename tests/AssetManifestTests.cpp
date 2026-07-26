@@ -272,6 +272,8 @@ void testRealManifestFile()
         "real manifest has last mirror smoke texture");
     check(manifest.musicForLevel(3) != nullptr, "real manifest level 3 music");
     check(!manifest.modelForTile(sokoban::TileType::Wall).isCube(), "real manifest wall model");
+    check(manifest.modelForTile(sokoban::TileType::Decorative).isCube(),
+        "real manifest decorative block defaults to procedural cube");
 
     const AssetManifest::Animation& death =
         manifest.animation(manifest.playerDeathAnimation());

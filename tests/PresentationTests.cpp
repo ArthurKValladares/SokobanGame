@@ -355,6 +355,167 @@ void testGameplayFrameUsesSettingsAndPresentation()
     CHECK(near(conveyor->beltScrollOffset, 0.75f));
 }
 
+void testDecorativeTileRendersWithoutChangingCameraExtent()
+{
+    TEST("decorativeTileRendersWithoutChangingCameraExtent");
+    const Level level = Level::loadFromLayers({
+        { "...  " },
+        { "C    " },
+        { "     " },
+        { "    D" },
+    }, "decorative presentation");
+    const GameState state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+
+    const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = state,
+        .moving = false,
+        .activeAction = {},
+        .presentation = presentation,
+        .settings = {},
+    });
+
+    CHECK(frame.levelWidth == 5);
+    CHECK(frame.levelDepth == 4);
+    CHECK(frame.cameraExtent.has_value());
+    if (frame.cameraExtent) {
+        CHECK(frame.cameraExtent->originX == 0);
+        CHECK(frame.cameraExtent->originY == 0);
+        CHECK(frame.cameraExtent->originZ == 0);
+        CHECK(frame.cameraExtent->width == 3);
+        CHECK(frame.cameraExtent->height == 1);
+        CHECK(frame.cameraExtent->depth == 2);
+    }
+    const auto decorative = std::ranges::find_if(
+        frame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { 4, 0, 3 };
+        });
+    CHECK(decorative != frame.tiles.end());
+    if (decorative != frame.tiles.end()) {
+        CHECK(near(decorative->height, 1.0f));
+        CHECK(!decorative->affectsCameraFit);
+    }
+}
+
+void testEditorFrameProvidesInvisibleExpansionBorderAndPreview()
+{
+    TEST("editorFrameProvidesInvisibleExpansionBorderAndPreview");
+    LevelEditor editor;
+    editor.newDocument(2, 2, false);
+    editor.setSelectedTile(TileType::Decorative);
+
+    const RenderFrameData frame = RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(),
+        .editor = editor,
+        .settings = {},
+        .hoverCell = GridPosition3 { -1, 0, 0 },
+    });
+
+    CHECK(frame.levelWidth == 2);
+    CHECK(frame.levelHeight == 2);
+    CHECK(frame.gridPickBorder == 1);
+    const auto pickCell = std::ranges::find_if(
+        frame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { -1, 0, 0 } &&
+                tile.pickOnly;
+        });
+    CHECK(pickCell != frame.tiles.end());
+    if (pickCell != frame.tiles.end()) {
+        CHECK(pickCell->affectsCameraFit);
+        CHECK(near(pickCell->baseElevation, 1.0f));
+    }
+
+    const auto preview = std::ranges::find_if(
+        frame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { -1, 0, 0 } &&
+                tile.isEditorPreview;
+        });
+    CHECK(preview != frame.tiles.end());
+    if (preview != frame.tiles.end()) {
+        CHECK(preview->model == testManifest().modelForTile(
+            TileType::Decorative));
+    }
+
+    editor.setCell({ -1, 0, 0 }, TileType::Decorative);
+    const RenderFrameData expandedFrame = RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(),
+        .editor = editor,
+        .settings = {},
+    });
+    CHECK(expandedFrame.levelWidth == 3);
+    CHECK(expandedFrame.cameraExtent.has_value());
+    if (expandedFrame.cameraExtent) {
+        CHECK(expandedFrame.cameraExtent->originX == 1);
+        CHECK(expandedFrame.cameraExtent->originY == 0);
+        CHECK(expandedFrame.cameraExtent->width == 2);
+        CHECK(expandedFrame.cameraExtent->height == 2);
+    }
+    const auto expandedDecoration = std::ranges::find_if(
+        expandedFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { 0, 0, 0 } &&
+                !tile.isEditorPreview && !tile.pickOnly;
+        });
+    CHECK(expandedDecoration != expandedFrame.tiles.end());
+    if (expandedDecoration != expandedFrame.tiles.end()) {
+        CHECK(!expandedDecoration->affectsCameraFit);
+    }
+
+    editor.setActiveLayer(1);
+    editor.setLayerLocked(true);
+    const GridPosition3 emptyHover { 2, 1, 1 };
+    const RenderFrameData lockedFrame = RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(),
+        .editor = editor,
+        .settings = {},
+        .hoverCell = emptyHover,
+    });
+    const auto stablePickSurface = std::ranges::find_if(
+        lockedFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.cell == emptyHover && tile.pickOnly &&
+                !tile.isEditorPreview;
+        });
+    const auto lockedPreview = std::ranges::find_if(
+        lockedFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.cell == emptyHover && tile.isEditorPreview;
+        });
+    CHECK(stablePickSurface != lockedFrame.tiles.end());
+    CHECK(lockedPreview != lockedFrame.tiles.end());
+    if (stablePickSurface != lockedFrame.tiles.end()) {
+        CHECK(near(stablePickSurface->baseElevation, 2.0f));
+    }
+
+    editor.setActiveLayer(0);
+    const GridPosition3 occupiedHover { 1, 0, 0 };
+    const RenderFrameData replacementFrame = RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(),
+        .editor = editor,
+        .settings = {},
+        .hoverCell = occupiedHover,
+    });
+    const auto stableOccupiedTile = std::ranges::find_if(
+        replacementFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.cell == occupiedHover && !tile.pickOnly &&
+                !tile.isEditorPreview;
+        });
+    const auto replacementPreview = std::ranges::find_if(
+        replacementFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.cell == occupiedHover && tile.isEditorPreview;
+        });
+    CHECK(stableOccupiedTile != replacementFrame.tiles.end());
+    CHECK(replacementPreview != replacementFrame.tiles.end());
+}
+
 void testMirrorTilesUseTheirModelAndOrientation()
 {
     TEST("mirrorTilesUseTheirModelAndOrientation");
@@ -1002,6 +1163,8 @@ int main()
     testPresentationResetClocksAndFallenTargets();
     testPresentationInterpolatesActionsAndClips();
     testGameplayFrameUsesSettingsAndPresentation();
+    testDecorativeTileRendersWithoutChangingCameraExtent();
+    testEditorFrameProvidesInvisibleExpansionBorderAndPreview();
     testMirrorTilesUseTheirModelAndOrientation();
     testMirrorActivationBuildsBeamAndDestinationGhost();
     testGameplayFrameBuildsProceduralWaterSurface();

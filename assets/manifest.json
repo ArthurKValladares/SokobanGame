@@ -146,6 +146,7 @@
     { "tile": "Mirror North-East", "model": "PictureFrameLargeA" },
     { "tile": "Mirror South-West", "model": "PictureFrameLargeA" },
     { "tile": "Mirror South-East", "model": "PictureFrameLargeA" },
+    { "tile": "Decorative Block" },
     { "tile": "Player", "model": "Rogue", "scale": 1.1 }
   ],
   "sounds": [
