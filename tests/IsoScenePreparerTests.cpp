@@ -482,6 +482,49 @@ void testDecorativeTileDoesNotAffectCameraFit()
     CHECK(decorativeScene.isoFaces.size() > baseScene.isoFaces.size());
 }
 
+void testExplicitCameraExtentOwnsEntireProjectedLayout()
+{
+    sokoban::RenderFrameData baseFrame = sceneFrame();
+    baseFrame.cameraExtent = sokoban::RenderFrameData::CameraExtent {
+        .originX = 0,
+        .originY = 0,
+        .originZ = 0,
+        .width = 4,
+        .height = 3,
+        .depth = 1,
+    };
+    const sokoban::PreparedRenderScene baseScene =
+        prepareScene(baseFrame, { 1920.0f, 1080.0f });
+
+    sokoban::RenderFrameData transientFrame = baseFrame;
+    transientFrame.tiles.front().position = { 50.0f, 30.0f };
+    transientFrame.tiles.front().baseElevation = 12.0f;
+    transientFrame.isoFaces.push_back({
+        .vertices = {
+            sokoban::Vec3 { 80.0f, 40.0f, 15.0f },
+            sokoban::Vec3 { 81.0f, 40.0f, 15.0f },
+            sokoban::Vec3 { 81.0f, 41.0f, 15.0f },
+            sokoban::Vec3 { 80.0f, 41.0f, 15.0f },
+        },
+        .normal = { 0.0f, 0.0f, 1.0f },
+    });
+    const sokoban::PreparedRenderScene transientScene =
+        prepareScene(transientFrame, { 1920.0f, 1080.0f });
+
+    CHECK(near(transientScene.isoLayout.cameraPosition.x,
+        baseScene.isoLayout.cameraPosition.x));
+    CHECK(near(transientScene.isoLayout.cameraPosition.y,
+        baseScene.isoLayout.cameraPosition.y));
+    CHECK(near(transientScene.isoLayout.cameraPosition.z,
+        baseScene.isoLayout.cameraPosition.z));
+    CHECK(near(transientScene.isoLayout.projectedCenter.x,
+        baseScene.isoLayout.projectedCenter.x));
+    CHECK(near(transientScene.isoLayout.projectedCenter.y,
+        baseScene.isoLayout.projectedCenter.y));
+    CHECK(near(transientScene.isoLayout.fitScale,
+        baseScene.isoLayout.fitScale));
+}
+
 void testAdjacentWaterFacesSharePerspectiveCoordinates()
 {
     sokoban::RenderFrameData frame;
@@ -639,6 +682,7 @@ int main()
     testPreparationReusesOutputWithoutStaleLists();
     testExteriorWaterDoesNotAffectCameraFitOrPicking();
     testDecorativeTileDoesNotAffectCameraFit();
+    testExplicitCameraExtentOwnsEntireProjectedLayout();
     testAdjacentWaterFacesSharePerspectiveCoordinates();
     testMirrorEnergyIsTranslucentNonPickableAndShadowless();
     testParticlesBecomeSortedTranslucentBillboardsOnly();

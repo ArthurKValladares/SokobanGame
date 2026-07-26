@@ -197,16 +197,18 @@ IsoRenderLayout calculateIsoLayout(
          }) {
         includePoint(point);
     }
-    for (const RenderFrameData::Tile& tile : frameData.tiles) {
-        if (!tile.isEditorPreview && tile.affectsCameraFit) {
-            for (Vec3 point : tileCorners(tile)) {
-                includePoint(point);
+    if (!frameData.cameraExtent) {
+        for (const RenderFrameData::Tile& tile : frameData.tiles) {
+            if (!tile.isEditorPreview && tile.affectsCameraFit) {
+                for (Vec3 point : tileCorners(tile)) {
+                    includePoint(point);
+                }
             }
         }
-    }
-    for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
-        for (Vec3 point : face.vertices) {
-            includePoint(point);
+        for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
+            for (Vec3 point : face.vertices) {
+                includePoint(point);
+            }
         }
     }
 

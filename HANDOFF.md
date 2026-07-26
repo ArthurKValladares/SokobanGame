@@ -1265,15 +1265,17 @@ Engineering:
   occupancy treat it like air, while presentation renders it as a full-height
   model and includes it in normal lighting/shadows. It is available in the
   level-editor palette and asset manifest. Render frames carry a gameplay-only
-  camera extent, and decorative tiles are excluded from both that extent and
-  projected fit points, so scenery outside or above the playable footprint
-  cannot change camera target, distance, or zoom.
+  camera extent calculated from authored gameplay tiles and immutable player
+  and movable starts. Decorative tiles and runtime entity positions are
+  excluded. When an explicit camera extent is present, `IsoScenePreparer`
+  treats it as authoritative for target, distance, projected center, and fit;
+  transient models, mirror ghosts, beams, and other procedural faces cannot
+  move or zoom the camera during play.
 - Render frames also carry stable, origin-aware water-grid bounds calculated
   from authored gameplay-relevant tiles. The water shader uses these bounds
   instead of the serialized level dimensions, so air and decorative scenery
-  cannot extend the tile-border visualization. Keep these bounds separate from
-  the camera extent after dynamic players/movables are included; movement must
-  not make the water grid grow or shift.
+  cannot extend the tile-border visualization. Runtime movement must not make
+  either the water grid or camera framing grow or shift.
 - Editor frames provide a symmetric, invisible one-cell picking border around
   the document. Painting there automatically grows every layer; north/west
   growth prepends rows or columns and shifts all authored tiles together,

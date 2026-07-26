@@ -405,6 +405,43 @@ void testDecorativeTileRendersWithoutChangingCameraExtent()
     }
 }
 
+void testGameplayCameraExtentComesOnlyFromAuthoredLayout()
+{
+    TEST("gameplayCameraExtentComesOnlyFromAuthoredLayout");
+    const Level level = Level::loadFromLayers({
+        { "...." },
+        { "CR  " },
+    }, "stable authored camera extent");
+    GameState state = rules::initialState(level);
+    state.player = { 40, 20, 8 };
+    CHECK(!state.movables.empty());
+    if (!state.movables.empty()) {
+        state.movables.front().cell = { 60, 30, 12 };
+    }
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+
+    const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = state,
+        .moving = false,
+        .activeAction = {},
+        .presentation = presentation,
+        .settings = {},
+    });
+
+    CHECK(frame.cameraExtent.has_value());
+    if (frame.cameraExtent) {
+        CHECK(frame.cameraExtent->originX == 0);
+        CHECK(frame.cameraExtent->originY == 0);
+        CHECK(frame.cameraExtent->originZ == 0);
+        CHECK(frame.cameraExtent->width == 4);
+        CHECK(frame.cameraExtent->height == 1);
+        CHECK(frame.cameraExtent->depth == 2);
+    }
+}
+
 void testEditorFrameProvidesInvisibleExpansionBorderAndPreview()
 {
     TEST("editorFrameProvidesInvisibleExpansionBorderAndPreview");
@@ -1172,6 +1209,7 @@ int main()
     testPresentationInterpolatesActionsAndClips();
     testGameplayFrameUsesSettingsAndPresentation();
     testDecorativeTileRendersWithoutChangingCameraExtent();
+    testGameplayCameraExtentComesOnlyFromAuthoredLayout();
     testEditorFrameProvidesInvisibleExpansionBorderAndPreview();
     testMirrorTilesUseTheirModelAndOrientation();
     testMirrorActivationBuildsBeamAndDestinationGhost();

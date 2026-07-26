@@ -728,16 +728,16 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
         input.level.height(),
         input.level.depth(),
         [&](uint32_t x, uint32_t y, uint32_t z) {
-            return input.level.tileAt(x, y, z);
+            return input.level.authoredTileAt(x, y, z);
         });
-    frame.waterGridBounds = waterGridBoundsFor(gameplayExtent);
-    std::optional<RenderFrameData::CameraExtent> cameraExtent =
+    std::optional<RenderFrameData::CameraExtent> authoredGameplayExtent =
         gameplayExtent;
-    includeCameraCell(cameraExtent, state.player);
-    for (const GameState::Movable& movable : state.movables) {
-        includeCameraCell(cameraExtent, movable.cell);
+    includeCameraCell(authoredGameplayExtent, input.level.playerStart());
+    for (const Level::MovableTile& movable : input.level.movableTiles()) {
+        includeCameraCell(authoredGameplayExtent, movable.position);
     }
-    frame.cameraExtent = cameraExtent.value_or(
+    frame.waterGridBounds = waterGridBoundsFor(authoredGameplayExtent);
+    frame.cameraExtent = authoredGameplayExtent.value_or(
         RenderFrameData::CameraExtent {});
     frame.waterAnimationTimeSeconds =
         input.presentation.worldAnimationTimeSeconds();
@@ -937,6 +937,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
         .baseElevation = playerVisual.motion.renderPosition.z,
         .height = 1.0f,
         .showGrid = false,
+        .affectsCameraFit = false,
         .model = input.manifest.playerModel(),
         .animation = playerAnimation,
         .animationFallback = playerAnimationFallback,
@@ -979,6 +980,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             .baseElevation = visual.renderPosition.z,
             .height = 1.0f,
             .blurBehind = movable.type == TileType::Ice,
+            .affectsCameraFit = false,
             .model = input.manifest.modelForTile(movable.type),
         };
         applyTileScale(
@@ -1184,6 +1186,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
                     .baseElevation = ghostPosition.z,
                     .height = 1.0f,
                     .showGrid = false,
+                    .affectsCameraFit = false,
                     .model = entity.player
                         ? input.manifest.playerModel()
                         : input.manifest.modelForTile(
