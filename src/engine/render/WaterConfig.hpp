@@ -21,8 +21,8 @@ inline constexpr Vec3 waterSecondaryRippleColor {
     0.64f,
     0.80f,
 };
-inline constexpr float waterPrimaryRippleOpacity = 1.0f;
-inline constexpr float waterSecondaryRippleOpacity = 0.20f;
+inline constexpr float waterPrimaryRippleOpacity = 0.5f;
+inline constexpr float waterSecondaryRippleOpacity = 0.10f;
 inline constexpr float waterRippleSpatialFrequency = 1.5f;
 inline constexpr float waterRippleSpeed = 1.15f;
 inline constexpr float waterRefractionStrength = 0.0020f;
@@ -46,8 +46,8 @@ inline constexpr float waterTileBorderExteriorFadeDistance = 0.25f;
 
 inline constexpr float waterShorelineNearDistance = 0.055f;
 inline constexpr float waterShorelineFarDistance = 0.090f;
-inline constexpr float waterPrimaryShorelineOpacity = 1.0f;
-inline constexpr float waterSecondaryShorelineOpacity = 0.55f;
+inline constexpr float waterPrimaryShorelineOpacity = 0.7f;
+inline constexpr float waterSecondaryShorelineOpacity = 0.35f;
 inline constexpr float waterShorelineFarThickness = 0.010f;
 
 static_assert(
