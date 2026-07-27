@@ -61,6 +61,74 @@ std::optional<LevelLocation> levelLocationFromScreenPath(
     return LevelLocation { .level = *level, .screen = *screen };
 }
 
+CreatedSplatMap createBlankSplatMap(
+    LevelLocation location,
+    uint32_t boardTilesWide,
+    uint32_t boardTilesHigh,
+    const std::filesystem::path& sourceAssetRoot,
+    const std::filesystem::path& runtimeAssetRoot)
+{
+    CreatedSplatMap result;
+    result.relativePath = groundSplatMapAssetPathForScreen(location);
+    if (boardTilesWide == 0 || boardTilesHigh == 0) {
+        result.message = "That document has no board to make a map for.";
+        return result;
+    }
+
+    const std::filesystem::path sourcePath =
+        sourceAssetRoot / result.relativePath;
+    std::error_code error;
+    if (std::filesystem::exists(sourcePath, error)) {
+        // Never clobber an existing map - it may be painted. The caller wants
+        // the entry to exist, and it already does.
+        result.created = true;
+        result.message =
+            "Using the existing " + sourcePath.filename().string() + ".";
+        return result;
+    }
+
+    const SplatCanvas blank =
+        SplatCanvas::createForBoard(boardTilesWide, boardTilesHigh);
+    try {
+        std::filesystem::create_directories(sourcePath.parent_path(), error);
+        writeGrayscalePng(
+            sourcePath, blank.width(), blank.height(), blank.weights());
+    } catch (const std::exception& failure) {
+        result.message =
+            "Could not create the splat map: " + std::string(failure.what());
+        log::error(log::Category::Assets)
+            << "Splat map creation failed for " << sourcePath.string()
+            << ": " << failure.what();
+        return result;
+    }
+
+    // The running game reads the staged tree, so without this copy the new map
+    // would not load until the content pipeline ran again.
+    if (!runtimeAssetRoot.empty()) {
+        const std::filesystem::path runtimePath =
+            runtimeAssetRoot / result.relativePath;
+        try {
+            std::filesystem::create_directories(
+                runtimePath.parent_path(), error);
+            writeGrayscalePng(
+                runtimePath, blank.width(), blank.height(), blank.weights());
+        } catch (const std::exception& failure) {
+            result.message = "Created the splat map but could not stage it: " +
+                std::string(failure.what());
+            log::warning(log::Category::Assets)
+                << "Could not stage new splat map " << runtimePath.string()
+                << ": " << failure.what();
+            return result;
+        }
+    }
+
+    result.created = true;
+    result.message = "Created a blank " + sourcePath.filename().string() +
+        " (" + std::to_string(boardTilesWide) + "x" +
+        std::to_string(boardTilesHigh) + " tiles).";
+    return result;
+}
+
 bool SplatPainter::open(
     const OpenRequest& request, const AssetManifest& manifest)
 {
@@ -110,21 +178,27 @@ bool SplatPainter::open(
         }
     }
 
+    // Set when the in-memory map no longer matches what is on disk, so the
+    // session starts dirty and a save is needed to keep the change.
+    bool resized = false;
     if (loaded) {
         canvas_ = *loaded;
-        // A map whose size disagrees with the board would paint offset from
-        // the cursor, because the shader derives coverage from the texture's
-        // own dimensions. Resizing a board is the usual cause.
+        // A map whose size disagrees with the board covers the wrong extent,
+        // because the shader derives coverage from the texture's own
+        // dimensions - the board's extra tiles would just repeat the clamped
+        // edge. Resizing the board in the editor is the usual cause, so grow
+        // or crop to match and keep what was already painted.
         const Vec2 tiles = canvas_.boardTiles();
         const auto coveredWide = static_cast<uint32_t>(tiles.x);
         const auto coveredHigh = static_cast<uint32_t>(tiles.y);
-        if (coveredWide != request.boardTilesWide ||
-            coveredHigh != request.boardTilesHigh) {
-            status_ = "Splat map covers " + std::to_string(coveredWide) + "x" +
-                std::to_string(coveredHigh) + " tiles but the board is " +
+        if (canvas_.resizeToBoard(
+                request.boardTilesWide, request.boardTilesHigh)) {
+            resized = true;
+            status_ = "Resized splat map from " + std::to_string(coveredWide) +
+                "x" + std::to_string(coveredHigh) + " to " +
                 std::to_string(request.boardTilesWide) + "x" +
                 std::to_string(request.boardTilesHigh) +
-                "; re-run tools/make_ground_textures.py. Painting anyway.";
+                " tiles to match the board; save to keep it.";
         } else {
             status_ = "Painting " + textureName + ".";
         }
@@ -135,7 +209,9 @@ bool SplatPainter::open(
     }
 
     active_ = true;
-    dirty_ = false;
+    // A resize already diverged from the file on disk, so the session opens
+    // dirty rather than pretending it is saved.
+    dirty_ = resized;
     location_ = location;
     texture_ = texture;
     ++revision_;
@@ -226,6 +302,32 @@ void SplatPainter::recordUndoSnapshot()
     if (undoHistory_.size() > maxUndoSteps) {
         undoHistory_.erase(undoHistory_.begin());
     }
+}
+
+bool SplatPainter::followBoardResize(
+    uint32_t boardTilesWide, uint32_t boardTilesHigh)
+{
+    if (!active_ || boardTilesWide == 0 || boardTilesHigh == 0) {
+        return false;
+    }
+    if (!canvas_.resizeToBoard(boardTilesWide, boardTilesHigh)) {
+        return false;
+    }
+
+    // Undo entries are whole-canvas copies sized for the old board, so they
+    // can no longer be restored. Dropping them is better than leaving entries
+    // that would silently fail, or resizing history to a state that never
+    // existed.
+    undoHistory_.clear();
+    strokeSnapshot_.clear();
+    strokeActive_ = false;
+    strokeChanged_ = false;
+    dirty_ = true;
+    ++revision_;
+    status_ = "Board resized to " + std::to_string(boardTilesWide) + "x" +
+        std::to_string(boardTilesHigh) +
+        "; splat map followed it. Paint history was cleared.";
+    return true;
 }
 
 bool SplatPainter::undo()

@@ -134,6 +134,17 @@ public:
     [[nodiscard]] static AssetManifest loadFromFile(const std::filesystem::path& file);
 
     [[nodiscard]] const std::vector<Texture>& textures() const { return textures_; }
+
+    // Appends a texture to the live manifest, for the level editor creating a
+    // splat map for a screen that has none yet. Returns the new id, or
+    // `noTexture` when the name is already taken, the name or path is empty,
+    // or the descriptor array is full - the same rules parsing enforces.
+    //
+    // Ids are indices into this list, so appending only ever adds a new id and
+    // never disturbs an existing one. Callers must still grow any parallel
+    // per-texture state (see VulkanModelResources::syncManifestTextures) and
+    // persist the entry, or it is lost on restart.
+    [[nodiscard]] RenderTexture addTexture(Texture texture);
     [[nodiscard]] const std::vector<Model>& models() const { return models_; }
     [[nodiscard]] const std::vector<Animation>& animations() const { return animations_; }
     [[nodiscard]] const std::vector<TileEntry>& tileEntries() const { return tiles_; }

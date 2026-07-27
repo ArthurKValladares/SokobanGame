@@ -87,7 +87,16 @@ public:
     [[nodiscard]] const std::vector<std::string>& documentRows() const;
     [[nodiscard]] const Level::LayerRows& documentLayers() const;
     [[nodiscard]] TileType selectedTile() const;
+    // The path shown in the UI, which the file browser changes on a single
+    // click. It is a *selection*: the document in memory is unchanged until
+    // the selection is actually loaded.
     [[nodiscard]] const std::filesystem::path& documentPath() const;
+    // The path the in-memory document actually came from, empty for a new
+    // document that has never been saved. Anything deriving from the document
+    // itself - such as which screen's ground splat map belongs to it - must
+    // use this, not documentPath(), or merely browsing the file list changes
+    // what is rendered.
+    [[nodiscard]] const std::filesystem::path& loadedDocumentPath() const;
     [[nodiscard]] const std::filesystem::path& browserRoot() const;
     [[nodiscard]] const std::string& status() const;
 
@@ -95,7 +104,11 @@ private:
     struct Document {
         Level::LayerRows layers;
         std::optional<uint32_t> waterLayer;
+        // Selected path (browser clicks move this).
         std::filesystem::path filePath;
+        // Where `layers` was actually read from or written to. Empty for an
+        // unsaved new document.
+        std::filesystem::path loadedPath;
         std::filesystem::path browserRoot;
         std::filesystem::path sourceLevelRoot;
         std::filesystem::path runtimeLevelRoot;
@@ -114,6 +127,9 @@ private:
         Level::LayerRows layers;
         std::optional<uint32_t> waterLayer;
         std::filesystem::path filePath;
+        // Undoing a load has to restore where the document came from too, or
+        // the restored contents would be attributed to the wrong screen.
+        std::filesystem::path loadedPath;
         int requestedWidth = 12;
         int requestedHeight = 8;
         int activeLayer = 0;

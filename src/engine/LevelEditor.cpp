@@ -486,6 +486,11 @@ const std::filesystem::path& LevelEditor::documentPath() const
     return document_.filePath;
 }
 
+const std::filesystem::path& LevelEditor::loadedDocumentPath() const
+{
+    return document_.loadedPath;
+}
+
 const std::filesystem::path& LevelEditor::browserRoot() const
 {
     return document_.browserRoot;
@@ -512,6 +517,9 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
     };
     document_.layers[1].front().front() = tileTypeToChar(TileType::Player);
     document_.waterLayer.reset();
+    // A new document belongs to no screen until it is saved as one, so it has
+    // no splat map of its own and previews the shared fallback.
+    document_.loadedPath.clear();
     document_.requestedWidth = width;
     document_.requestedHeight = height;
     document_.activeLayer = 1;
@@ -664,6 +672,9 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     document_.layers = std::move(definition.layers);
     document_.waterLayer = definition.waterLayer;
     document_.filePath = path;
+    // This is the one place the in-memory document takes on a new origin by
+    // reading; a browser selection deliberately does not.
+    document_.loadedPath = path;
     document_.requestedHeight = static_cast<int>(height);
     document_.requestedWidth = static_cast<int>(width);
     document_.activeLayer = 0;
@@ -742,6 +753,9 @@ bool LevelEditor::saveDocument(const std::filesystem::path& path)
     }
 
     document_.filePath = sourcePath;
+    // Saving a scratch document into levels/level<N>/screen<M>.scr makes it
+    // that screen, so it gains that screen's splat map from here on.
+    document_.loadedPath = sourcePath;
     document_.dirty = false;
     document_.status = mirrorPath.empty()
         ? "Saved " + sourcePath.string()
@@ -975,6 +989,7 @@ void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
     document_.layers = snapshot.layers;
     document_.waterLayer = snapshot.waterLayer;
     document_.filePath = snapshot.filePath;
+    document_.loadedPath = snapshot.loadedPath;
     document_.requestedWidth = snapshot.requestedWidth;
     document_.requestedHeight = snapshot.requestedHeight;
     document_.activeLayer = snapshot.activeLayer;
@@ -1010,6 +1025,7 @@ LevelEditor::DocumentSnapshot LevelEditor::captureDocumentSnapshot() const
         .layers = document_.layers,
         .waterLayer = document_.waterLayer,
         .filePath = document_.filePath,
+        .loadedPath = document_.loadedPath,
         .requestedWidth = document_.requestedWidth,
         .requestedHeight = document_.requestedHeight,
         .activeLayer = document_.activeLayer,

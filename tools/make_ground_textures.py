@@ -38,12 +38,18 @@ Tweakable knobs live in the CONSTANTS block below:
   (SPLAT_CONTRAST 1.0 = smooth gradient, higher = crisper rock patches).
 
 Run from the repository root:  python tools/make_ground_textures.py
+
+Existing splat maps are never overwritten: once a map exists it may have been
+painted in the level editor, and generated and painted bytes are
+indistinguishable. Pass --force to regenerate them anyway (destroying painted
+work), and --prune to delete maps whose screen no longer exists.
 Outputs are committed assets; re-run only when a knob changes or a screen is
 added, then rebuild so the content pipeline re-stages them.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import pathlib
@@ -325,7 +331,27 @@ def board_size(path: pathlib.Path) -> tuple[int, int]:
     return width, height
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Generate the ground splatting textures.")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Regenerate splat maps that already exist. WITHOUT this flag "
+             "existing maps are left alone, because they may have been "
+             "painted in the level editor and regenerating destroys that work.",
+    )
+    parser.add_argument(
+        "--prune",
+        action="store_true",
+        help="Delete maps whose screen no longer exists. Off by default: a "
+             "screen removed by accident would otherwise take its painted map "
+             "with it.",
+    )
+    arguments = parser.parse_args(argv)
+
+    # The two material layers are pure functions of the constants above - there
+    # is nothing user-authored in them - so they are always rewritten.
     grass = generate_material(
         TEXTURE_SIZE,
         GRASS_OCTAVES,
@@ -349,19 +375,18 @@ def main() -> int:
     write_png(OUTPUT_DIRECTORY / "ground_rock.png", rock, TEXTURE_SIZE, TEXTURE_SIZE)
 
     written = ["ground_grass.png", "ground_rock.png"]
+    kept = 0
 
     # The shared map is the fallback for any screen without one of its own, and
     # the only map the level editor previews when the document is not a screen.
     # It has no board, so it uses the default square size; the shader derives
     # coverage from the map's dimensions either way.
-    splat = generate_splat(SPLAT_SIZE, SPLAT_SIZE, SPLAT_SEED)
-    write_png(
-        OUTPUT_DIRECTORY / "ground_splat.png",
-        splat,
-        SPLAT_SIZE,
-        SPLAT_SIZE,
-        grayscale=True,
-    )
+    shared = OUTPUT_DIRECTORY / "ground_splat.png"
+    if arguments.force or not shared.is_file():
+        splat = generate_splat(SPLAT_SIZE, SPLAT_SIZE, SPLAT_SEED)
+        write_png(shared, splat, SPLAT_SIZE, SPLAT_SIZE, grayscale=True)
+    else:
+        kept += 1
     written.append("ground_splat.png")
 
     screens = discover_screens(LEVEL_DIRECTORY)
@@ -372,6 +397,18 @@ def main() -> int:
             file=sys.stderr,
         )
     for level, screen in screens:
+        name = f"ground_splat_level{level}_screen{screen}.png"
+        written.append(name)
+        destination = OUTPUT_DIRECTORY / name
+
+        # Existing maps are left alone. Once a map exists it may have been
+        # painted in the level editor, and there is no way to tell painted
+        # bytes from generated ones - so the safe default is to never
+        # regenerate, and to make destroying that work an explicit --force.
+        if destination.is_file() and not arguments.force:
+            kept += 1
+            continue
+
         source = LEVEL_DIRECTORY / f"level{level}" / f"screen{screen}.scr"
         tiles_wide, tiles_high = board_size(source)
         # The shader divides the map's own dimensions by this constant to
@@ -383,18 +420,26 @@ def main() -> int:
             height,
             SPLAT_SEED + LEVEL_SEED_STRIDE * (level + 1) + screen + 1,
         )
-        name = f"ground_splat_level{level}_screen{screen}.png"
-        write_png(OUTPUT_DIRECTORY / name, screen_splat, width, height, grayscale=True)
-        written.append(name)
-        print(f"  {name}: {tiles_wide}x{tiles_high} tiles -> {width}x{height}px")
+        write_png(destination, screen_splat, width, height, grayscale=True)
+        print(f"  wrote {name}: {tiles_wide}x{tiles_high} tiles -> {width}x{height}px")
 
-    # Screens come and go; leave no orphaned maps behind for the manifest to
-    # point at (the content pipeline would fail on a missing path, but a stale
-    # extra file is just as confusing).
-    for stale in OUTPUT_DIRECTORY.glob("ground_splat_level*.png"):
-        if stale.name not in written:
-            stale.unlink()
-            print(f"removed stale {stale}")
+    if kept:
+        print(f"kept {kept} existing splat map(s); pass --force to regenerate "
+              "(this discards anything painted in the level editor)")
+
+    # Screens come and go. A map whose screen is gone is orphaned, but deleting
+    # it by default would throw away painted work the moment a screen is
+    # removed by accident, so say so and let --prune do it.
+    stale = sorted(
+        path for path in OUTPUT_DIRECTORY.glob("ground_splat_level*.png")
+        if path.name not in written)
+    for path in stale:
+        if arguments.prune:
+            path.unlink()
+            print(f"pruned {path} (no such screen)")
+        else:
+            print(f"note: {path} has no matching screen; pass --prune to delete",
+                  file=sys.stderr)
 
     for name in written:
         path = OUTPUT_DIRECTORY / name

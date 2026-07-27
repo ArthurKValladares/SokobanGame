@@ -84,6 +84,8 @@ public:
         Vec2 pixelPosition) const;
     // Uploads freshly painted pixels over a resident texture.
     bool updateTexture(RenderTexture texture, const ImageData& image);
+    // Picks up textures appended to the manifest after startup.
+    void syncManifestTextures();
     // World point -> pixel position, using the frame's own camera. Lets the
     // debug UI draw overlays that sit correctly on the 3D board (the brush
     // preview ring) without duplicating the projection.

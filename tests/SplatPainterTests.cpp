@@ -202,31 +202,6 @@ void testOpenLoadsAnExistingMap()
     CHECK(!painter.dirty());
 }
 
-void testOpenWarnsWhenTheMapDoesNotMatchTheBoard()
-{
-    TEST("openWarnsWhenTheMapDoesNotMatchTheBoard");
-    const TemporaryDirectory directory;
-    const std::filesystem::path file = directory.path() / "assets" /
-        "custom" / "textures" / "ground_splat_level2_screen1.png";
-    std::filesystem::create_directories(file.parent_path());
-
-    // A map sized for a 4x4 board, opened against a 13x7 one - what happens
-    // after a board is resized. The shader would map it across the whole
-    // board, so strokes land scaled; the editor should say so and still let
-    // you work.
-    const uint32_t width = 4 * SplatCanvas::texelsPerTile;
-    const uint32_t height = 4 * SplatCanvas::texelsPerTile;
-    writeGrayscalePng(file, width, height,
-        std::vector<uint8_t>(static_cast<std::size_t>(width) * height, 5));
-
-    SplatPainter painter;
-    CHECK(painter.open(
-        requestFor(directory, "level2/screen1.scr"), testManifest()));
-    CHECK(painter.active());
-    CHECK(painter.status().find("4x4") != std::string::npos);
-    CHECK(painter.status().find("13x7") != std::string::npos);
-}
-
 void testStrokesPaintAndMarkDirty()
 {
     TEST("strokesPaintAndMarkDirty");
@@ -407,6 +382,182 @@ void testSaveWritesBothTrees()
     CHECK(reopened.canvas().weights() == painter.canvas().weights());
 }
 
+void testOpenResizesAMapThatNoLongerMatchesTheBoard()
+{
+    TEST("openResizesAMapThatNoLongerMatchesTheBoard");
+    const TemporaryDirectory directory;
+    const std::filesystem::path file = directory.path() / "assets" /
+        "custom" / "textures" / "ground_splat_level2_screen1.png";
+    std::filesystem::create_directories(file.parent_path());
+
+    // A map sized for a 4x4 board, opened against a 13x7 one - exactly what a
+    // board resize in the editor leaves behind. The shader derives coverage
+    // from the texture's dimensions, so leaving it alone means the map covers
+    // only the first 4x4 tiles and the rest repeats the clamped edge.
+    const uint32_t width = 4 * SplatCanvas::texelsPerTile;
+    const uint32_t height = 4 * SplatCanvas::texelsPerTile;
+    writeGrayscalePng(file, width, height,
+        std::vector<uint8_t>(static_cast<std::size_t>(width) * height, 200));
+
+    SplatPainter painter;
+    CHECK(painter.open(
+        requestFor(directory, "level2/screen1.scr"), testManifest()));
+    CHECK(painter.active());
+    CHECK(painter.canvas().width() == 13 * SplatCanvas::texelsPerTile);
+    CHECK(painter.canvas().height() == 7 * SplatCanvas::texelsPerTile);
+    // Existing paint survives where the boards overlap...
+    CHECK(painter.canvas().weightAt(0, 0) == 200);
+    // ...and the newly exposed area is base material, not smeared edge.
+    CHECK(painter.canvas().weightAt(
+        12 * SplatCanvas::texelsPerTile, 6 * SplatCanvas::texelsPerTile) == 0);
+    // Dirty, because the on-disk map still has the old size.
+    CHECK(painter.dirty());
+    CHECK(painter.status().find("4x4") != std::string::npos);
+    CHECK(painter.status().find("13x7") != std::string::npos);
+
+    // Saving writes the resized map, so reopening is a clean no-op.
+    CHECK(painter.save());
+    SplatPainter reopened;
+    CHECK(reopened.open(
+        requestFor(directory, "level2/screen1.scr"), testManifest()));
+    CHECK(!reopened.dirty());
+    CHECK(reopened.canvas().width() == 13 * SplatCanvas::texelsPerTile);
+}
+
+void testFollowBoardResizeDuringASession()
+{
+    TEST("followBoardResizeDuringASession");
+    const TemporaryDirectory directory;
+    SplatPainter painter;
+    CHECK(painter.open(
+        requestFor(directory, "level2/screen1.scr"), testManifest()));
+    painter.brush() = solidWhite;
+    painter.beginStroke({ 2.0f, 2.0f });
+    painter.endStroke();
+    CHECK(painter.undoDepth() == 1);
+    const uint64_t before = painter.revision();
+
+    // Resizing the board while painting must take the map with it.
+    CHECK(painter.followBoardResize(20, 12));
+    CHECK(painter.canvas().width() == 20 * SplatCanvas::texelsPerTile);
+    CHECK(painter.canvas().height() == 12 * SplatCanvas::texelsPerTile);
+    CHECK(painter.revision() > before);
+    CHECK(painter.dirty());
+    // Paint inside the old extent survives.
+    CHECK(painter.canvas().weightAt(
+        2 * SplatCanvas::texelsPerTile, 2 * SplatCanvas::texelsPerTile) == 255);
+    // Undo history was sized for the old canvas, so it is dropped rather than
+    // left to fail silently on restore.
+    CHECK(painter.undoDepth() == 0);
+    CHECK(!painter.undo());
+
+    // Painting the newly exposed area works.
+    CHECK(painter.beginStroke({ 18.0f, 10.0f }));
+    painter.endStroke();
+    CHECK(painter.canvas().weightAt(
+        18 * SplatCanvas::texelsPerTile,
+        10 * SplatCanvas::texelsPerTile) == 255);
+
+    // No-ops: same size, degenerate size, and no open session.
+    CHECK(!painter.followBoardResize(20, 12));
+    CHECK(!painter.followBoardResize(0, 5));
+    SplatPainter closed;
+    CHECK(!closed.followBoardResize(4, 4));
+}
+
+void testCreateBlankSplatMapWritesBothTrees()
+{
+    TEST("createBlankSplatMapWritesBothTrees");
+    const TemporaryDirectory directory;
+    const std::filesystem::path source = directory.path() / "assets";
+    const std::filesystem::path staged = directory.path() / "staged";
+
+    const CreatedSplatMap created = createBlankSplatMap(
+        { .level = 3, .screen = 3 }, 10, 6, source, staged);
+    CHECK(created.created);
+    CHECK(created.relativePath ==
+        "custom/textures/ground_splat_level3_screen3.png");
+    CHECK(std::filesystem::exists(source / created.relativePath));
+    // The staged copy is what the running game reads, so a map created in the
+    // editor has to appear there too or it would not load until the content
+    // pipeline reran.
+    CHECK(std::filesystem::exists(staged / created.relativePath));
+
+    // Board-sized at the shared density, and blank (all base material), which
+    // is the predictable starting point for painting.
+    const ImageData image = loadRgbaImage(source / created.relativePath);
+    CHECK(image.width == 10 * SplatCanvas::texelsPerTile);
+    CHECK(image.height == 6 * SplatCanvas::texelsPerTile);
+    CHECK(image.rgba[0] == static_cast<std::byte>(0));
+}
+
+void testCreateBlankSplatMapNeverOverwrites()
+{
+    TEST("createBlankSplatMapNeverOverwrites");
+    const TemporaryDirectory directory;
+    const std::filesystem::path source = directory.path() / "assets";
+    const std::filesystem::path relative =
+        "custom/textures/ground_splat_level3_screen3.png";
+    std::filesystem::create_directories((source / relative).parent_path());
+
+    // Stand in for a painted map: distinctive content at a different size.
+    const uint32_t width = 4 * SplatCanvas::texelsPerTile;
+    const uint32_t height = 4 * SplatCanvas::texelsPerTile;
+    writeGrayscalePng(source / relative, width, height,
+        std::vector<uint8_t>(static_cast<std::size_t>(width) * height, 199));
+
+    // Pressing the button on a screen that already has a map must report
+    // success - the caller only needs the entry to exist - without touching a
+    // single byte of what is there.
+    const CreatedSplatMap created = createBlankSplatMap(
+        { .level = 3, .screen = 3 }, 10, 6, source, {});
+    CHECK(created.created);
+    CHECK(created.relativePath == relative);
+    const ImageData image = loadRgbaImage(source / relative);
+    CHECK(image.width == width);
+    CHECK(image.height == height);
+    CHECK(image.rgba[0] == static_cast<std::byte>(199));
+}
+
+void testCreateBlankSplatMapRejectsAnEmptyBoard()
+{
+    TEST("createBlankSplatMapRejectsAnEmptyBoard");
+    const TemporaryDirectory directory;
+    const CreatedSplatMap created = createBlankSplatMap(
+        { .level = 0, .screen = 0 }, 0, 0, directory.path() / "assets", {});
+    CHECK(!created.created);
+    CHECK(!created.message.empty());
+    CHECK(!std::filesystem::exists(
+        directory.path() / "assets" / created.relativePath));
+}
+
+void testCreatedMapIsImmediatelyPaintable()
+{
+    TEST("createdMapIsImmediatelyPaintable");
+    // End to end: create the map, then open it exactly as the button does
+    // once the manifest entry exists. This is the workflow that previously
+    // required running the Python generator and restarting.
+    const TemporaryDirectory directory;
+    const CreatedSplatMap created = createBlankSplatMap(
+        { .level = 2, .screen = 1 },
+        13,
+        7,
+        directory.path() / "assets",
+        directory.path() / "staged");
+    CHECK(created.created);
+
+    SplatPainter painter;
+    CHECK(painter.open(
+        requestFor(directory, "level2/screen1.scr"), testManifest()));
+    CHECK(painter.active());
+    CHECK(!painter.dirty());
+    CHECK(painter.canvas().width() == 13 * SplatCanvas::texelsPerTile);
+    painter.brush() = solidWhite;
+    CHECK(painter.beginStroke({ 6.0f, 3.0f }));
+    painter.endStroke();
+    CHECK(painter.save());
+}
+
 void testCloseResetsEverything()
 {
     TEST("closeResetsEverything");
@@ -441,7 +592,6 @@ int main()
     testOpenReportsAMissingManifestEntry();
     testOpenCreatesABlankMapWhenTheFileIsMissing();
     testOpenLoadsAnExistingMap();
-    testOpenWarnsWhenTheMapDoesNotMatchTheBoard();
     testStrokesPaintAndMarkDirty();
     testUndoRevertsWholeStrokesNotSamples();
     testNoOpStrokesLeaveNoUndoStep();
@@ -449,6 +599,12 @@ int main()
     testInterruptedStrokeStillRecordsUndo();
     testPaintingRequiresAnOpenSessionAndAStroke();
     testSaveWritesBothTrees();
+    testOpenResizesAMapThatNoLongerMatchesTheBoard();
+    testFollowBoardResizeDuringASession();
+    testCreateBlankSplatMapWritesBothTrees();
+    testCreateBlankSplatMapNeverOverwrites();
+    testCreateBlankSplatMapRejectsAnEmptyBoard();
+    testCreatedMapIsImmediatelyPaintable();
     testCloseResetsEverything();
 
     if (failures == 0) {

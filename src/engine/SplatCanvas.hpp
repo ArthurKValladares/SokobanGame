@@ -80,6 +80,19 @@ public:
     // drag paints a continuous line rather than a dotted one.
     bool stampLine(Vec2 fromTiles, Vec2 toTiles, const Brush& brush);
 
+    // Rescales the canvas to cover a different board, keeping what is already
+    // painted anchored at the origin: growing fills the new strip with
+    // `fill`, shrinking crops. Returns false when the size is unchanged or
+    // degenerate.
+    //
+    // A resized board otherwise leaves the map covering the old extent, and
+    // because the shader derives coverage from the texture's dimensions, the
+    // extra tiles just repeat the clamped edge.
+    bool resizeToBoard(
+        uint32_t boardTilesWide,
+        uint32_t boardTilesHigh,
+        uint8_t fill = 0);
+
     // Whole-canvas snapshot/restore, used for stroke-level undo.
     [[nodiscard]] std::vector<uint8_t> snapshot() const { return weights_; }
     bool restore(const std::vector<uint8_t>& snapshot);

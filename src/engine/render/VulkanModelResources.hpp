@@ -77,11 +77,25 @@ public:
     // frame-local texture descriptors must be refreshed.
     [[nodiscard]] bool ensureAssets(const RenderAssetRequirements& requirements);
 
-    // Replaces a published texture's pixels in place, for maps painted in the
-    // level editor. Returns false when the texture is not resident or the
-    // image does not match its dimensions; descriptors are untouched either
-    // way, since the image, view and sampler are all reused.
-    bool updateTexture(RenderTexture texture, const ImageData& image);
+    // Grows the per-texture slots to match a manifest that gained entries at
+    // runtime (the level editor creating a splat map). Returns true when it
+    // grew. New slots start unrequested and load from disk on the next
+    // ensureAssets; existing slots and their ids are untouched, because ids
+    // are indices and the manifest only ever appends.
+    bool syncManifestTextures();
+
+    struct TextureUpdate {
+        bool updated = false;
+        // True when the image had to be recreated (a size change), which
+        // invalidates the view every descriptor set points at.
+        bool descriptorsChanged = false;
+    };
+    // Replaces a published texture's pixels, for maps painted in the level
+    // editor. Same-size updates write into the existing image and leave
+    // descriptors valid; a size change - the board was resized - recreates the
+    // image and requires the caller to refresh descriptors. Returns
+    // `updated = false` when the texture is not resident.
+    TextureUpdate updateTexture(RenderTexture texture, const ImageData& image);
     // Publishes up to maxPublications completed background tasks without
     // waiting. Failed preloads are retained and rethrown if later required.
     [[nodiscard]] bool publishReadyAssets(std::size_t maxPublications);

@@ -91,6 +91,15 @@ private:
         Vec2 pointerPixels);
     // Opens the splat map belonging to the document currently being edited.
     bool openGroundPainting();
+    // Creates and registers a splat map for the edited screen, then opens it
+    // for painting. Lets a screen added in the editor be painted without
+    // re-running tools/make_ground_textures.py or restarting.
+    bool createGroundSplatMap();
+    // Appends a texture entry to the source manifest (through the manifest
+    // editor, so its tab stays in sync) and to the staged copy the running
+    // build loads.
+    void persistManifestTexture(
+        const std::string& name, const std::string& relativePath);
     void pushPaintedSplatMap();
     [[nodiscard]] InputRouter::RoutingContext inputRoutingContext() const;
     [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;

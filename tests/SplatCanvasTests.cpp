@@ -267,6 +267,57 @@ void testSnapshotRestoreRoundTrips()
     CHECK(canvas.width() == 4 * texelsPerTile);
 }
 
+void testResizeToBoardKeepsPaintAnchoredAtTheOrigin()
+{
+    TEST("resizeToBoardKeepsPaintAnchoredAtTheOrigin");
+    SplatCanvas canvas = SplatCanvas::createForBoard(4, 4, 0);
+    const SplatCanvas::Brush brush {
+        .radiusTiles = 0.4f,
+        .hardness = 1.0f,
+        .opacity = 1.0f,
+        .color = SplatCanvas::BrushColor::White,
+    };
+    canvas.stamp({ 0.5f, 0.5f }, brush);
+    canvas.stamp({ 3.5f, 3.5f }, brush);
+
+    // Growing keeps everything and fills the new strip with base material.
+    CHECK(canvas.resizeToBoard(6, 5));
+    CHECK(canvas.width() == 6 * texelsPerTile);
+    CHECK(canvas.height() == 5 * texelsPerTile);
+    CHECK(std::abs(canvas.boardTiles().x - 6.0f) < 0.001f);
+    // Both original marks are still where they were, in the same tiles.
+    CHECK(canvas.weightAt(
+        static_cast<uint32_t>(0.5f * texelsPerTile),
+        static_cast<uint32_t>(0.5f * texelsPerTile)) == 255);
+    CHECK(canvas.weightAt(
+        static_cast<uint32_t>(3.5f * texelsPerTile),
+        static_cast<uint32_t>(3.5f * texelsPerTile)) == 255);
+    // New area is blank rather than a smear of the old edge.
+    CHECK(canvas.weightAt(5 * texelsPerTile, 4 * texelsPerTile) == 0);
+
+    // Shrinking crops; the surviving corner is untouched.
+    CHECK(canvas.resizeToBoard(2, 2));
+    CHECK(canvas.width() == 2 * texelsPerTile);
+    CHECK(canvas.height() == 2 * texelsPerTile);
+    CHECK(canvas.weightAt(
+        static_cast<uint32_t>(0.5f * texelsPerTile),
+        static_cast<uint32_t>(0.5f * texelsPerTile)) == 255);
+    CHECK(canvas.weights().size() ==
+        static_cast<std::size_t>(canvas.width()) * canvas.height());
+
+    // Same size is not a change, and a degenerate board is refused.
+    CHECK(!canvas.resizeToBoard(2, 2));
+    CHECK(!canvas.resizeToBoard(0, 4));
+    CHECK(!canvas.resizeToBoard(4, 0));
+    CHECK(canvas.width() == 2 * texelsPerTile);
+
+    // Painting still works, and lands correctly, after a resize.
+    CHECK(canvas.stamp({ 1.5f, 1.5f }, brush));
+    CHECK(canvas.weightAt(
+        static_cast<uint32_t>(1.5f * texelsPerTile),
+        static_cast<uint32_t>(1.5f * texelsPerTile)) == 255);
+}
+
 void testImageRoundTrip()
 {
     TEST("imageRoundTrip");
@@ -338,6 +389,7 @@ int main()
     testStrokesClipAtTheBoardEdge();
     testDegenerateBrushesAreRejected();
     testSnapshotRestoreRoundTrips();
+    testResizeToBoardKeepsPaintAnchoredAtTheOrigin();
     testImageRoundTrip();
     testFromImageRejectsUnusableInput();
 

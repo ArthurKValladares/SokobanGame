@@ -229,6 +229,79 @@ void testSaveLoadAndRuntimeMirror()
     CHECK(!editor.editingDocument());
 }
 
+void testSelectedPathIsSeparateFromTheLoadedDocument()
+{
+    TEST("selectedPathIsSeparateFromTheLoadedDocument");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+
+    const std::filesystem::path first =
+        project.source / "level0" / "screen0.scr";
+    const std::filesystem::path second =
+        project.source / "level0" / "screen1.scr";
+    editor.newDocument(5, 4, false);
+    editor.setCell({ 2, 2, 1 }, TileType::Wall);
+    CHECK(editor.saveDocument(first));
+    editor.newDocument(6, 5, false);
+    CHECK(editor.saveDocument(second));
+    CHECK(editor.loadDocument(first));
+
+    // Baseline: a loaded document reports the file it came from.
+    CHECK(editor.documentPath() == first);
+    CHECK(editor.loadedDocumentPath() == first);
+
+    // Clicking a different screen in the browser only *selects* it. The
+    // document in memory is untouched, so anything derived from the document -
+    // notably which screen's ground splat map belongs to it - must keep
+    // pointing at the loaded file. Keying that off documentPath() made merely
+    // browsing swap the rendered splat map onto the wrong screen.
+    editor.selectDocument(second);
+    CHECK(editor.documentPath() == second);
+    CHECK(editor.loadedDocumentPath() == first);
+    CHECK(editor.documentWidth() == 5);
+
+    // Actually loading it moves both.
+    CHECK(editor.loadDocument(second));
+    CHECK(editor.documentPath() == second);
+    CHECK(editor.loadedDocumentPath() == second);
+
+    // A new document belongs to no file until saved, so it has no screen and
+    // must not inherit the previous document's map.
+    editor.newDocument(4, 4, false);
+    CHECK(editor.loadedDocumentPath().empty());
+
+    // Saving it into a screen path makes it that screen.
+    CHECK(editor.saveDocument(first));
+    CHECK(editor.loadedDocumentPath() == first);
+}
+
+void testUndoRestoresTheLoadedDocumentPath()
+{
+    TEST("undoRestoresTheLoadedDocumentPath");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+
+    const std::filesystem::path first =
+        project.source / "level0" / "screen0.scr";
+    const std::filesystem::path second =
+        project.source / "level0" / "screen1.scr";
+    editor.newDocument(5, 4, false);
+    CHECK(editor.saveDocument(first));
+    editor.newDocument(6, 5, false);
+    CHECK(editor.saveDocument(second));
+
+    CHECK(editor.loadDocument(first));
+    CHECK(editor.loadDocument(second));
+    CHECK(editor.loadedDocumentPath() == second);
+
+    // Undoing a load restores the previous contents, so it has to restore
+    // where they came from too - otherwise the old board would be attributed
+    // to the newer screen.
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.loadedDocumentPath() == first);
+    CHECK(editor.documentWidth() == 5);
+}
+
 void testWaterLayerEditingPersistenceAndLayerRenumbering()
 {
     TEST("waterLayerEditingPersistenceAndLayerRenumbering");
@@ -543,6 +616,8 @@ int main()
     testTileValidationAndPlayerUniqueness();
     testAddLayerBelowShiftsContentAndWaterAndIsUndoable();
     testSaveLoadAndRuntimeMirror();
+    testSelectedPathIsSeparateFromTheLoadedDocument();
+    testUndoRestoresTheLoadedDocumentPath();
     testWaterLayerEditingPersistenceAndLayerRenumbering();
     testProjectRenumberDeleteAndRestore();
     testUndoAfterNewEditDoesNotReplayAbandonedBranch();

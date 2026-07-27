@@ -324,12 +324,28 @@ void VulkanRenderer::ensureAssets(const RenderAssetRequirements& requirements)
     }
 }
 
+void VulkanRenderer::syncManifestTextures()
+{
+    if (modelResources_.syncManifestTextures()) {
+        // The descriptor array is padded to maxModelTextures with the fallback
+        // texture, so the new slot already has something valid bound; the
+        // rewrite is what points it at the real image once it publishes.
+        descriptorSync_.resourcesChanged();
+    }
+}
+
 bool VulkanRenderer::updateTexture(
     RenderTexture texture, const ImageData& image)
 {
-    // The image, view and sampler are reused, so no descriptor rewrite is
-    // needed and descriptorSync_ is deliberately left alone.
-    return modelResources_.updateTexture(texture, image);
+    const VulkanModelResources::TextureUpdate result =
+        modelResources_.updateTexture(texture, image);
+    // A same-size repaint reuses the image, view and sampler, so descriptors
+    // stay valid. A resize recreates them, and every set pointing at the old
+    // view has to be rewritten or the ground samples a destroyed image.
+    if (result.descriptorsChanged) {
+        descriptorSync_.resourcesChanged();
+    }
+    return result.updated;
 }
 
 void VulkanRenderer::handleEvent(const SDL_Event& event)

@@ -197,6 +197,14 @@ void LevelEditorDebugUi::drawGroundPaintTab(
             (void)callbacks.openGroundPainting();
         }
         ImGui::SameLine();
+        // A screen added in the editor has no map and no manifest entry yet.
+        // This does both, so that never means leaving the game to re-run the
+        // generator; it will not overwrite an existing map.
+        if (ImGui::Button("Create Splat Map") &&
+            callbacks.createGroundSplatMap) {
+            (void)callbacks.createGroundSplatMap();
+        }
+        ImGui::SameLine();
         ImGui::TextDisabled("(edits this screen's splat map)");
         if (!painter.status().empty()) {
             ImGui::TextWrapped("%s", painter.status().c_str());

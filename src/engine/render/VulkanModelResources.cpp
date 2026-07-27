@@ -937,34 +937,56 @@ void VulkanModelResources::recordTextureCopy(
     upload.submitted = true;
 }
 
-bool VulkanModelResources::updateTexture(
+bool VulkanModelResources::syncManifestTextures()
+{
+    if (manifest_ == nullptr ||
+        textures_.size() >= manifest_->textures().size()) {
+        return false;
+    }
+    textures_.resize(manifest_->textures().size());
+    return true;
+}
+
+VulkanModelResources::TextureUpdate VulkanModelResources::updateTexture(
     RenderTexture texture, const ImageData& image)
 {
     if (texture.isNone() || texture.index() >= textures_.size()) {
-        return false;
+        return {};
     }
     TextureSlot& slot = textures_[texture.index()];
     // Only a published texture has an image to write into. An unpublished one
     // will pick the painted map up from disk when it is first loaded.
     if (slot.state != LoadState::Ready ||
         slot.gpu.image.image == VK_NULL_HANDLE) {
-        return false;
+        return {};
     }
     if (image.width == 0 || image.height == 0 || image.rgba.empty()) {
-        return false;
-    }
-    // The image was sized for its board when created; a differently sized map
-    // needs a new image and a descriptor rewrite, which is not what this
-    // in-place path is for.
-    if (image.width != slot.gpu.width || image.height != slot.gpu.height) {
-        return false;
+        return {};
     }
 
     // Frames in flight may still be sampling this texture. Painting happens
-    // only in the editor and only when a stroke changed something, so a full
+    // only in the editor and only when something actually changed, so a full
     // idle here is far simpler than per-frame staging rings and costs nothing
     // during normal play.
     vkDeviceWaitIdle(device_);
+
+    const bool sizeChanged =
+        image.width != slot.gpu.width || image.height != slot.gpu.height;
+    if (sizeChanged) {
+        // A resized board needs a differently sized image. The old view and
+        // sampler go with it, so descriptor sets pointing at them must be
+        // rewritten - reported back rather than done here, because this class
+        // does not own the descriptor sets.
+        destroyTexture(slot.gpu.image, slot.gpu.sampler);
+        createTextureBlocking(
+            image,
+            slot.gpu.image,
+            slot.gpu.sampler,
+            samplingFor(manifest_->textures()[texture.index()]));
+        slot.gpu.width = image.width;
+        slot.gpu.height = image.height;
+        return { .updated = true, .descriptorsChanged = true };
+    }
 
     PendingTextureUpload upload;
     try {
@@ -983,7 +1005,7 @@ bool VulkanModelResources::updateTexture(
         destroyTextureUpload(upload);
         throw;
     }
-    return true;
+    return { .updated = true, .descriptorsChanged = false };
 }
 
 void VulkanModelResources::destroyTextureUpload(

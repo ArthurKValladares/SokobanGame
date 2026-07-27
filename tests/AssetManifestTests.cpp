@@ -309,6 +309,56 @@ bool splatMapSamplingIsCorrect(
         texture.colorSpace == sokoban::TextureColorSpace::Linear;
 }
 
+void testRuntimeTextureRegistration()
+{
+    using sokoban::AssetManifest;
+    AssetManifest manifest = AssetManifest::parse(validManifest);
+    const std::size_t original = manifest.textures().size();
+
+    // Appending yields a fresh id and leaves existing ids alone, which is what
+    // makes runtime registration safe: ids are indices into this list.
+    const sokoban::RenderTexture existing =
+        manifest.findTextureIdByName(manifest.textures()[0].name);
+    const sokoban::RenderTexture added = manifest.addTexture({
+        .name = "GroundSplatMap7_2",
+        .path = "custom/textures/ground_splat_level7_screen2.png",
+        .filter = sokoban::TextureFilter::Linear,
+        .colorSpace = sokoban::TextureColorSpace::Linear,
+    });
+    check(!added.isNone(), "runtime texture registered");
+    check(manifest.textures().size() == original + 1, "texture list grew");
+    check(manifest.findTextureIdByName("GroundSplatMap7_2") == added,
+        "registered texture resolves by name");
+    check(manifest.findTextureIdByName(manifest.textures()[0].name) == existing,
+        "existing texture ids are undisturbed");
+    check(manifest.textures()[added.index()].colorSpace ==
+            sokoban::TextureColorSpace::Linear,
+        "registered sampling options are kept");
+
+    // The same rules parsing enforces, since these would otherwise surface as
+    // a duplicate name or an out-of-bounds descriptor index at draw time.
+    check(manifest.addTexture({ .name = "GroundSplatMap7_2", .path = "x.png" })
+              .isNone(),
+        "duplicate texture name rejected");
+    check(manifest.addTexture({ .name = "", .path = "x.png" }).isNone(),
+        "empty texture name rejected");
+    check(manifest.addTexture({ .name = "NoPath", .path = "" }).isNone(),
+        "empty texture path rejected");
+
+    while (manifest.textures().size() < sokoban::maxModelTextures) {
+        const sokoban::RenderTexture filler = manifest.addTexture({
+            .name = "Filler" + std::to_string(manifest.textures().size()),
+            .path = "filler.png",
+        });
+        check(!filler.isNone(), "filler texture registered");
+    }
+    check(manifest.textures().size() == sokoban::maxModelTextures,
+        "texture list filled to the cap");
+    check(manifest.addTexture({ .name = "OneTooMany", .path = "x.png" })
+              .isNone(),
+        "registration stops at the descriptor array cap");
+}
+
 void testRealManifestFile()
 {
     const std::optional<std::filesystem::path> root = assetsRootFromEnvironment();
@@ -359,15 +409,21 @@ void testRealManifestFile()
             if (id.isNone()) {
                 break;
             }
+            const sokoban::LevelLocation location {
+                .level = levelIndex,
+                .screen = screenIndex,
+            };
             check(
                 splatMapSamplingIsCorrect(
                     manifest,
-                    sokoban::groundSplatMapTextureNameForScreen(
-                        sokoban::LevelLocation {
-                            .level = levelIndex,
-                            .screen = screenIndex,
-                        })),
+                    sokoban::groundSplatMapTextureNameForScreen(location)),
                 "real manifest per-screen splat map samples as clamped linear data");
+            // The editor builds this path when creating a map in-game, and the
+            // generator builds the same name in Python. If they drift, the two
+            // write different files for one screen.
+            check(manifest.textures()[id.index()].path ==
+                    sokoban::groundSplatMapAssetPathForScreen(location),
+                "per-screen splat map path matches the shared convention");
             ++screensForLevel;
         }
         if (screensForLevel == 0) {
@@ -414,6 +470,7 @@ int main()
     testValidManifest();
     testSyntaxAndSchemaFailures();
     testDomainValidationFailures();
+    testRuntimeTextureRegistration();
     testRealManifestFile();
 
     if (failures != 0) {

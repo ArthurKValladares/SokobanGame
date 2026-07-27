@@ -887,13 +887,32 @@ Per-screen splat maps:
   planner as the optional third argument to `renderAssetRequirementsForLevel`,
   both `std::optional<LevelLocation>` and both defaulting to unset, i.e. the
   shared map.
-- Adding a screen: create `levels/level<N>/screen<M>.scr`, re-run
-  `python tools/make_ground_textures.py` (it discovers screens from the tree
-  rather than taking a count, and deletes maps for screens that no longer
-  exist), and add the matching `GroundSplatMap<N>_<M>` manifest entry with
-  `"tiling": true`. The script exits non-zero and names the missing entry if
-  you skip that last step, because a missing entry is otherwise silent - the
-  screen just renders with the shared map.
+- Adding a screen: the level editor's "Create Splat Map" button does the whole
+  job in-game - writes a blank board-sized map into both asset trees,
+  registers the texture in the live manifest, persists it to the source and
+  staged `manifest.json`, and drops straight into paint mode. No generator run
+  and no restart.
+- Or from the command line: create `levels/level<N>/screen<M>.scr`, re-run
+  `python tools/make_ground_textures.py` (it discovers screens from the tree),
+  and add the matching `GroundSplatMap<N>_<M>` manifest entry. The script
+  exits non-zero and names the missing entry if you skip that last step,
+  because a missing entry is otherwise silent - the screen just renders with
+  the shared map.
+- **The generator never overwrites an existing splat map.** Once a map exists
+  it may have been painted, and painted bytes are indistinguishable from
+  generated ones, so re-running the script only fills in missing maps.
+  `--force` regenerates everything (destroying painted work) and `--prune`
+  deletes maps whose screen is gone; both are opt-in for the same reason.
+- Runtime texture registration: `AssetManifest::addTexture` appends to the
+  live manifest, which is safe because ids are indices and appending never
+  disturbs an existing one. Anything holding parallel per-texture state has to
+  grow with it - `VulkanModelResources::syncManifestTextures` does that for
+  the GPU slots, and the renderer refreshes descriptors. The entry must also
+  be written to both `manifest.json` copies or it is gone on restart.
+- The file name lives in two languages, so
+  `groundSplatMapAssetPathForScreen` (C++) and the generator's f-string
+  (Python) must agree; `AssetManifestTests` pins the shipped manifest's paths
+  against the C++ helper.
 - Maps are board-sized: `boardTiles * 32` pixels, so brush detail is the same
   on every screen. The generator reads board dimensions straight out of the
   `.scr`, mirroring `Level::loadFromLayers` (tallest layer, longest row).
@@ -933,6 +952,23 @@ Painting splat maps in the editor (Debug builds only):
     down (correct for placing one tile per click); `primaryDown` is the held
     state. Driving strokes from the edge ends them a frame after they start,
     so dragging is impossible.
+- **Use `loadedDocumentPath()`, never `documentPath()`,** to work out which
+  screen a document is. `documentPath()` is the browser *selection* and moves
+  on a single click without loading anything; `loadedDocumentPath()` is where
+  the in-memory document actually came from, and is empty for an unsaved new
+  document. Keying the splat map off the selection meant clicking a screen in
+  the browser swapped the rendered map onto the loaded screen, and "Paint
+  Ground" opened the selected screen's map while the view showed the loaded
+  one (which at startup is whatever screen the save file is on).
+- A board resized in the editor takes its splat map with it:
+  `SplatCanvas::resizeToBoard` grows or crops anchored at the board origin, on
+  open and mid-session (`SplatPainter::followBoardResize`). Without it the map
+  keeps covering the old extent and the extra tiles repeat the clamped edge,
+  because coverage comes from the texture's dimensions. A resize drops paint
+  undo history, since those snapshots are sized for the old canvas, and it is
+  the one case where `updateTexture` recreates the image rather than writing
+  in place - so it reports `descriptorsChanged` and the renderer refreshes
+  descriptor sets.
 - `pickGroundPoint` returns a `Vec3`: x/y are the board tile position, z is the
   world height of the surface that was hit. Painting only uses x/y, but the
   preview ring is drawn by projecting world points, so it needs the real

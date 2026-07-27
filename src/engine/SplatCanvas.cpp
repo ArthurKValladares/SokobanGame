@@ -195,6 +195,41 @@ bool SplatCanvas::stampLine(Vec2 fromTiles, Vec2 toTiles, const Brush& brush)
     return changed;
 }
 
+bool SplatCanvas::resizeToBoard(
+    uint32_t boardTilesWide, uint32_t boardTilesHigh, uint8_t fill)
+{
+    const uint32_t width = boardTilesWide * texelsPerTile;
+    const uint32_t height = boardTilesHigh * texelsPerTile;
+    if (width == 0 || height == 0) {
+        return false;
+    }
+    if (width == width_ && height == height_) {
+        return false;
+    }
+
+    std::vector<uint8_t> resized(
+        static_cast<std::size_t>(width) * height, fill);
+    // Anchored at the origin, which is where the board's origin is: tile
+    // (0,0) keeps its paint whichever way the board grew or shrank.
+    const uint32_t copyWidth = std::min(width, width_);
+    const uint32_t copyHeight = std::min(height, height_);
+    for (uint32_t y = 0; y < copyHeight; ++y) {
+        const auto source = weights_.begin() +
+            static_cast<std::ptrdiff_t>(static_cast<std::size_t>(y) * width_);
+        std::copy(
+            source,
+            source + static_cast<std::ptrdiff_t>(copyWidth),
+            resized.begin() +
+                static_cast<std::ptrdiff_t>(
+                    static_cast<std::size_t>(y) * width));
+    }
+
+    width_ = width;
+    height_ = height;
+    weights_ = std::move(resized);
+    return true;
+}
+
 bool SplatCanvas::restore(const std::vector<uint8_t>& snapshot)
 {
     if (snapshot.size() != weights_.size()) {

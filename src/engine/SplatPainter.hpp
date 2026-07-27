@@ -76,6 +76,11 @@ public:
     void endStroke();
     [[nodiscard]] bool strokeInProgress() const { return strokeActive_; }
 
+    // Grows or crops the canvas to a board that changed size underneath the
+    // session, keeping existing paint anchored at the origin. Returns true
+    // when it actually changed, which also marks the map dirty.
+    bool followBoardResize(uint32_t boardTilesWide, uint32_t boardTilesHigh);
+
     // Reverts the most recent completed stroke. Returns false when there is
     // nothing to undo.
     bool undo();
@@ -110,5 +115,27 @@ private:
 // the path does not follow that convention.
 [[nodiscard]] std::optional<LevelLocation> levelLocationFromScreenPath(
     const std::filesystem::path& documentPath);
+
+struct CreatedSplatMap {
+    bool created = false;
+    // Manifest-relative path, ready to become a texture entry.
+    std::string relativePath;
+    std::string message;
+};
+
+// Writes a blank board-sized splat map for `location` into the source assets
+// tree, mirroring into the staged tree when one is given.
+//
+// Blank means all base material (grass), which is the predictable starting
+// point for painting - unlike the generator, which fills new maps with noise.
+// Refuses to overwrite an existing file, so this can never destroy painted
+// work; that case still reports the path, since the caller only needs the
+// entry to exist.
+[[nodiscard]] CreatedSplatMap createBlankSplatMap(
+    LevelLocation location,
+    uint32_t boardTilesWide,
+    uint32_t boardTilesHigh,
+    const std::filesystem::path& sourceAssetRoot,
+    const std::filesystem::path& runtimeAssetRoot);
 
 } // namespace sokoban

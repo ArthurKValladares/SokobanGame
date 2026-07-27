@@ -20,6 +20,8 @@ public:
         // Opens the splat map for the document being edited. Returns false
         // when it has none; the painter's status says why.
         std::function<bool()> openGroundPainting;
+        // Creates and registers one for a screen that has none, then opens it.
+        std::function<bool()> createGroundSplatMap;
     };
 
     void initialize(const LevelEditor& editor);

@@ -3,6 +3,7 @@
 #include "engine/ParticleConfig.hpp"
 #include "engine/render/CameraConfig.hpp"
 
+#include "engine/AtomicFile.hpp"
 #include "engine/DebugUi.hpp"
 #include "engine/Log.hpp"
 #include "engine/RenderFrameBuilder.hpp"
@@ -136,6 +137,7 @@ Application::Application()
                 loadCurrentScreen();
             },
             .openGroundPainting = [this] { return openGroundPainting(); },
+            .createGroundSplatMap = [this] { return createGroundSplatMap(); },
         });
     });
     DebugUi::addTab("Animation Preview", [this] {
@@ -569,10 +571,16 @@ bool Application::updateGroundPainting(
     // The file browser can load a different document while a session is open.
     // Painting on would edit one screen's map while looking at another's
     // board, so the session ends with the document it belongs to.
-    if (levelLocationFromScreenPath(levelEditor_.documentPath()) !=
+    if (levelLocationFromScreenPath(levelEditor_.loadedDocumentPath()) !=
         splatPainter_.location()) {
         splatPainter_.close();
         return false;
+    }
+    // The board can also be resized underneath an open session; the map has
+    // to follow or it would cover the wrong extent.
+    if (splatPainter_.followBoardResize(
+            levelEditor_.documentWidth(), levelEditor_.documentHeight())) {
+        pushPaintedSplatMap();
     }
 
     // Sub-tile precision: a brush lands where the pointer is, not at a cell
@@ -626,7 +634,7 @@ bool Application::openGroundPainting()
 
     const bool opened = splatPainter_.open(
         {
-            .documentPath = levelEditor_.documentPath(),
+            .documentPath = levelEditor_.loadedDocumentPath(),
             .boardTilesWide = levelEditor_.documentWidth(),
             .boardTilesHigh = levelEditor_.documentHeight(),
             .sourceAssetRoot = SOKOBAN_SOURCE_ASSET_DIR,
@@ -642,14 +650,115 @@ bool Application::openGroundPainting()
         requirements.requireTexture(splatPainter_.texture());
         renderer_.ensureAssets(requirements);
         uploadedSplatRevision_ = splatPainter_.revision();
-    } else {
-        // Nothing to paint, so do not strand the editor in a view the user
-        // did not ask for.
-        levelEditor_.setEditingDocument(false);
     }
+    // On failure the editor deliberately stays on its document. Dropping back
+    // to the current-screen view would yank the user out of the editor
+    // entirely, which reads as "the button teleported me somewhere" rather
+    // than "that screen has no map"; the reason is in the painter's status.
     return opened;
 #else
     return false;
+#endif
+}
+
+bool Application::createGroundSplatMap()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    const std::optional<LevelLocation> location =
+        levelLocationFromScreenPath(levelEditor_.loadedDocumentPath());
+    if (!location) {
+        log::warning(log::Category::Assets)
+            << "Ground painting needs a saved screen; save the document as "
+               "levels/level<N>/screen<M>.scr first.";
+        return false;
+    }
+
+    // 1. The file, in both trees. Refuses to overwrite, so this is safe to
+    //    press on a screen that already has a map.
+    const CreatedSplatMap created = createBlankSplatMap(
+        *location,
+        levelEditor_.documentWidth(),
+        levelEditor_.documentHeight(),
+        SOKOBAN_SOURCE_ASSET_DIR,
+        assetRoot_);
+    log::info(log::Category::Assets) << created.message;
+    if (!created.created) {
+        return false;
+    }
+
+    // 2. The live manifest, so the map resolves to an id this session.
+    const std::string textureName =
+        groundSplatMapTextureNameForScreen(*location);
+    if (assetManifest_.findTextureIdByName(textureName).isNone()) {
+        const RenderTexture added = assetManifest_.addTexture({
+            .name = textureName,
+            .path = created.relativePath,
+            // Weight data covering the board once: clamped, smooth, and not
+            // sRGB. Must match what the generator's manifest entries use.
+            .tiling = false,
+            .filter = TextureFilter::Linear,
+            .colorSpace = TextureColorSpace::Linear,
+        });
+        if (added.isNone()) {
+            log::error(log::Category::Assets)
+                << "Could not register " << textureName
+                << "; the texture descriptor array is full (max "
+                << maxModelTextures << ").";
+            return false;
+        }
+        // Per-texture GPU state is sized from the manifest, so it has to grow
+        // with it before anything requires the new id.
+        renderer_.syncManifestTextures();
+
+        // 3. Persist, or the entry is gone on restart. The editor writes the
+        //    source manifest; the staged copy is what this build loads.
+        persistManifestTexture(textureName, created.relativePath);
+    }
+
+    return openGroundPainting();
+#else
+    return false;
+#endif
+}
+
+void Application::persistManifestTexture(
+    const std::string& name, const std::string& relativePath)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    const AssetManifest::Texture entry {
+        .name = name,
+        .path = relativePath,
+        .tiling = false,
+        .filter = TextureFilter::Linear,
+        .colorSpace = TextureColorSpace::Linear,
+    };
+
+    // Going through the manifest editor keeps the Asset Manifest tab showing
+    // the same list, rather than a stale one that would clobber this entry on
+    // its next save.
+    assetManifestEditor_.addTexture();
+    assetManifestEditor_.updateTexture(
+        assetManifestEditor_.textures().size() - 1, entry);
+    if (!assetManifestEditor_.save()) {
+        log::error(log::Category::Assets)
+            << "Could not write " << name << " to the source manifest: "
+            << assetManifestEditor_.status();
+        return;
+    }
+
+    // The staged manifest is what this build actually loaded, so without this
+    // the entry would vanish on restart until the content pipeline reran.
+    try {
+        atomicFile::write(
+            assetRoot_ / "manifest.json", assetManifestEditor_.serialize());
+    } catch (const std::exception& error) {
+        log::warning(log::Category::Assets)
+            << "Saved " << name << " to the source manifest but could not "
+            << "update the staged copy: " << error.what();
+    }
+#else
+    (void)name;
+    (void)relativePath;
 #endif
 }
 
@@ -1147,7 +1256,7 @@ RenderFrameData Application::buildRenderFrame(
                 presentation_.worldAnimationTimeSeconds(),
             .conveyorBeltScrollOffset = beltScrollOffset,
             .levelLocation =
-                levelLocationFromScreenPath(levelEditor_.documentPath()),
+                levelLocationFromScreenPath(levelEditor_.loadedDocumentPath()),
         });
     }
 #endif

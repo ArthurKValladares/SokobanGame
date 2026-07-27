@@ -140,6 +140,12 @@
       "path": "custom/textures/ground_splat_level3_screen2.png",
       "filter": "linear",
       "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMap3_3",
+      "path": "custom/textures/ground_splat_level3_screen3.png",
+      "filter": "linear",
+      "colorSpace": "linear"
     }
   ],
   "models": [

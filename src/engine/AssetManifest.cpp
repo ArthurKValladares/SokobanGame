@@ -668,6 +668,23 @@ const AssetManifest::TileVisual& AssetManifest::tileVisual(TileType type) const
     return tileVisuals_[static_cast<std::size_t>(type)];
 }
 
+RenderTexture AssetManifest::addTexture(Texture texture)
+{
+    if (texture.name.empty() || texture.path.empty()) {
+        return noTexture;
+    }
+    if (!findTextureIdByName(texture.name).isNone()) {
+        return noTexture;
+    }
+    // The same cap parsing enforces: ids index the shader's descriptor array,
+    // so one past the end would sample out of bounds rather than fail loudly.
+    if (textures_.size() >= maxModelTextures) {
+        return noTexture;
+    }
+    textures_.push_back(std::move(texture));
+    return RenderTexture { static_cast<uint32_t>(textures_.size()) };
+}
+
 RenderTexture AssetManifest::textureIdByName(std::string_view name) const
 {
     const RenderTexture found = findTextureIdByName(name);

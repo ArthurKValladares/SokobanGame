@@ -105,6 +105,18 @@ inline constexpr std::string_view groundSplatMapTextureName = "GroundSplatMap";
         std::to_string(location.level) + '_' + std::to_string(location.screen);
 }
 
+// Manifest-relative asset path for a screen's map. Must match the file name
+// tools/make_ground_textures.py writes, or the generator and the editor would
+// create two different files for the same screen. AssetManifestTests pins the
+// shipped manifest's paths against this.
+[[nodiscard]] inline std::string groundSplatMapAssetPathForScreen(
+    LevelLocation location)
+{
+    return "custom/textures/ground_splat_level" +
+        std::to_string(location.level) + "_screen" +
+        std::to_string(location.screen) + ".png";
+}
+
 // Textures blended on splatted ground tops. Unset ids fall back to the flat
 // tile color, so a manifest without these entries still renders.
 struct GroundSplatTextures {
