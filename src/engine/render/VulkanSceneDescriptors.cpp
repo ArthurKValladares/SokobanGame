@@ -1,5 +1,7 @@
 #include "engine/render/VulkanSceneDescriptors.hpp"
 
+#include "engine/render/VulkanRenderConstants.hpp"
+
 #include <array>
 #include <stdexcept>
 #include <string>
@@ -37,7 +39,8 @@ void VulkanSceneDescriptors::create(
     modelTextureCount_ = static_cast<uint32_t>(resources.modelTextures.size());
 
     try {
-        std::array<VkDescriptorSetLayoutBinding, 7> bindings {
+        std::array<VkDescriptorSetLayoutBinding, sceneSingleImageBindings + 1>
+            bindings {
             VkDescriptorSetLayoutBinding {
                 .binding = 0,
                 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -91,7 +94,8 @@ void VulkanSceneDescriptors::create(
 
         VkDescriptorPoolSize poolSize {
             .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = (modelTextureCount_ + 6) * setCount,
+            .descriptorCount =
+                (modelTextureCount_ + sceneSingleImageBindings) * setCount,
         };
         VkDescriptorPoolCreateInfo poolInfo {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,

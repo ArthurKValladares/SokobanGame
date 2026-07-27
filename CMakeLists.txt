@@ -66,6 +66,24 @@ find_program(GLSLC_EXECUTABLE glslc
     REQUIRED
 )
 
+# The model texture descriptor array size lives in exactly one place:
+# sokoban::maxModelTextures. Read it back out here instead of repeating the
+# number, so growing the array is a one-line header edit and the shaders can
+# never disagree with the C++ side. CMAKE_CONFIGURE_DEPENDS re-runs configure
+# when that header changes, so the shaders are rebuilt with the new size.
+set(ASSET_MANIFEST_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/AssetManifest.hpp")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ASSET_MANIFEST_HEADER}")
+file(READ "${ASSET_MANIFEST_HEADER}" ASSET_MANIFEST_HEADER_TEXT)
+string(REGEX MATCH "maxModelTextures[ \t]*=[ \t]*([0-9]+)"
+    MODEL_TEXTURE_COUNT_MATCH "${ASSET_MANIFEST_HEADER_TEXT}")
+if(NOT CMAKE_MATCH_1)
+    message(FATAL_ERROR
+        "Could not read sokoban::maxModelTextures from ${ASSET_MANIFEST_HEADER}. "
+        "Shaders would be compiled with the wrong descriptor array size.")
+endif()
+set(MODEL_TEXTURE_COUNT ${CMAKE_MATCH_1})
+message(STATUS "Model texture descriptor array: ${MODEL_TEXTURE_COUNT} slots")
+
 set(SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders")
 set(LEVEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/levels")
@@ -75,6 +93,7 @@ set(SHADER_SOURCES
     "${SHADER_SOURCE_DIR}/triangle.frag.glsl"
     "${SHADER_SOURCE_DIR}/water.frag.glsl"
     "${SHADER_SOURCE_DIR}/mirror_energy.frag.glsl"
+    "${SHADER_SOURCE_DIR}/ground_splat.frag.glsl"
     "${SHADER_SOURCE_DIR}/shadow.vert.glsl"
     "${SHADER_SOURCE_DIR}/model.vert.glsl"
     "${SHADER_SOURCE_DIR}/model_shadow.vert.glsl"
@@ -98,9 +117,9 @@ foreach(shader_source IN LISTS SHADER_SOURCES)
     add_custom_command(
         OUTPUT "${shader_output}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${SHADER_OUTPUT_DIR}"
-        # MODEL_TEXTURE_COUNT must equal sokoban::maxModelTextures in
-        # src/engine/AssetManifest.hpp; descriptor writes pad to this size.
-        COMMAND "${GLSLC_EXECUTABLE}" --target-env=vulkan1.4 -DMODEL_TEXTURE_COUNT=16 -fshader-stage=${shader_stage} "${shader_source}" -o "${shader_output}"
+        # MODEL_TEXTURE_COUNT is read from sokoban::maxModelTextures above;
+        # descriptor writes pad to this size.
+        COMMAND "${GLSLC_EXECUTABLE}" --target-env=vulkan1.4 -DMODEL_TEXTURE_COUNT=${MODEL_TEXTURE_COUNT} -fshader-stage=${shader_stage} "${shader_source}" -o "${shader_output}"
         DEPENDS "${shader_source}"
         VERBATIM
     )
@@ -162,6 +181,8 @@ add_library(sokoban_core STATIC
     src/engine/SaveStore.cpp
     src/engine/SettingsCoordinator.cpp
     src/engine/SettingsTypes.cpp
+    src/engine/SplatCanvas.cpp
+    src/engine/SplatPainter.cpp
     src/engine/TaskSystem.cpp
     src/engine/TileTypes.cpp
     src/engine/Window.cpp
@@ -169,6 +190,7 @@ add_library(sokoban_core STATIC
     src/engine/render/GltfMesh.cpp
     src/engine/render/FrameResourceTracker.cpp
     src/engine/render/ImageData.cpp
+    src/engine/render/PngWriter.cpp
     src/engine/render/RenderAssetRequirements.cpp
     src/engine/render/RenderResolution.cpp
     src/engine/render/RendererReconfiguration.cpp
@@ -486,6 +508,22 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME content_pipeline TARGET sokoban_content_pipeline_tests
         LIBS sokoban_core
         SOURCES tests/ContentPipelineTests.cpp
+    )
+    sokoban_add_test(NAME splat_canvas TARGET sokoban_splat_canvas_tests
+        LIBS sokoban_core
+        SOURCES tests/SplatCanvasTests.cpp
+    )
+    sokoban_add_test(NAME splat_painter TARGET sokoban_splat_painter_tests
+        LIBS sokoban_core
+        SOURCES tests/SplatPainterTests.cpp
+    )
+    sokoban_add_test(NAME png_writer TARGET sokoban_png_writer_tests
+        LIBS sokoban_core
+        SOURCES tests/PngWriterTests.cpp
+    )
+    sokoban_add_test(NAME ground_pick TARGET sokoban_ground_pick_tests
+        LIBS sokoban_core
+        SOURCES tests/GroundPickTests.cpp
     )
 endif()
 

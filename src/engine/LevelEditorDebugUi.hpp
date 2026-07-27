@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/LevelEditor.hpp"
+#include "engine/SplatPainter.hpp"
 
 #include <filesystem>
 #include <functional>
@@ -16,13 +17,20 @@ public:
     struct Callbacks {
         std::function<void(Level)> playDraft;
         std::function<void()> returnToCurrentScreen;
+        // Opens the splat map for the document being edited. Returns false
+        // when it has none; the painter's status says why.
+        std::function<bool()> openGroundPainting;
     };
 
     void initialize(const LevelEditor& editor);
-    void draw(LevelEditor& editor, const Callbacks& callbacks);
+    void draw(
+        LevelEditor& editor,
+        SplatPainter& painter,
+        const Callbacks& callbacks);
 
 private:
     void syncDocumentPath(const LevelEditor& editor);
+    void drawGroundPaintTab(SplatPainter& painter, const Callbacks& callbacks);
     void drawTilePalette(LevelEditor& editor);
     void drawFileBrowser(LevelEditor& editor);
     void drawActiveLevelsTab(LevelEditor& editor);

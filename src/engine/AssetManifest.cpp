@@ -229,10 +229,29 @@ static void parseTextures(const Json& root, AssetManifest& manifest)
     for (std::size_t i = 0; i < textures.size(); ++i) {
         const std::string context = indexedContext("textures", i);
         const Json& texture = textures[i];
-        rejectUnknownProperties(texture, { "name", "path" }, context);
+        rejectUnknownProperties(
+            texture,
+            { "name", "path", "tiling", "filter", "colorSpace" },
+            context);
+
+        const std::string filter =
+            optionalString(texture, "filter", context).value_or("nearest");
+        const std::string colorSpace =
+            optionalString(texture, "colorSpace", context).value_or("srgb");
+        if (filter != "nearest" && filter != "linear") {
+            fail(context, "property 'filter' must be 'nearest' or 'linear'");
+        }
+        if (colorSpace != "srgb" && colorSpace != "linear") {
+            fail(context, "property 'colorSpace' must be 'srgb' or 'linear'");
+        }
+
         manifest.textures_.push_back({
             requiredString(texture, "name", context),
             requiredString(texture, "path", context),
+            optionalBool(texture, "tiling", false, context),
+            filter == "linear" ? TextureFilter::Linear : TextureFilter::Nearest,
+            colorSpace == "linear" ? TextureColorSpace::Linear
+                                   : TextureColorSpace::Srgb,
         });
     }
 }
@@ -651,13 +670,22 @@ const AssetManifest::TileVisual& AssetManifest::tileVisual(TileType type) const
 
 RenderTexture AssetManifest::textureIdByName(std::string_view name) const
 {
+    const RenderTexture found = findTextureIdByName(name);
+    if (found.isNone()) {
+        throw std::runtime_error(
+            "asset manifest: unknown texture '" + std::string(name) + "'");
+    }
+    return found;
+}
+
+RenderTexture AssetManifest::findTextureIdByName(std::string_view name) const
+{
     for (std::size_t i = 0; i < textures_.size(); ++i) {
         if (textures_[i].name == name) {
             return RenderTexture { static_cast<uint32_t>(i + 1) };
         }
     }
-    throw std::runtime_error(
-        "asset manifest: unknown texture '" + std::string(name) + "'");
+    return noTexture;
 }
 
 const std::vector<std::string>& AssetManifest::soundSet(std::string_view name) const

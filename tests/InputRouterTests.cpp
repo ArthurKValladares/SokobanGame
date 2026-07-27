@@ -145,6 +145,41 @@ void testEditorFrameUsesRawControls()
     CHECK(!frame.gameplay.undoPressed);
 }
 
+void testEditorPointerExposesPressAndHold()
+{
+    sokoban::InputRouter router;
+    sokoban::InputState input(false);
+    input.beginFrame();
+
+    SDL_Event press {};
+    press.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    press.button.button = SDL_BUTTON_LEFT;
+    (void)router.routeEvent(press, input, {});
+
+    // On the press frame both are set.
+    sokoban::InputRouter::Frame frame =
+        router.routeFrame(input, { .editorEditing = true });
+    CHECK(frame.editor.primaryPressed);
+    CHECK(frame.editor.primaryDown);
+
+    // On the next frame the button is still held but no longer newly pressed.
+    // Brush strokes key off the held state: driving them from primaryPressed
+    // ends every stroke one frame after it starts, so dragging is impossible
+    // and a click paints at most a single dot.
+    input.beginFrame();
+    frame = router.routeFrame(input, { .editorEditing = true });
+    CHECK(!frame.editor.primaryPressed);
+    CHECK(frame.editor.primaryDown);
+
+    SDL_Event release {};
+    release.type = SDL_EVENT_MOUSE_BUTTON_UP;
+    release.button.button = SDL_BUTTON_LEFT;
+    (void)router.routeEvent(release, input, {});
+    frame = router.routeFrame(input, { .editorEditing = true });
+    CHECK(!frame.editor.primaryPressed);
+    CHECK(!frame.editor.primaryDown);
+}
+
 } // namespace
 
 int main()
@@ -153,6 +188,7 @@ int main()
     testModalFrameRouting();
     testBackPriority();
     testEditorFrameUsesRawControls();
+    testEditorPointerExposesPressAndHold();
 
     if (failures == 0) {
         std::cout << "InputRouterTests: " << checks << " checks passed\n";

@@ -116,6 +116,40 @@ void testValidManifest()
     const AssetManifest manifest = AssetManifest::parse(validManifest);
 
     check(manifest.textures().size() == 1, "one texture");
+    check(!manifest.textures()[0].tiling, "textures clamp unless marked tiling");
+    check(manifest.textures()[0].filter == sokoban::TextureFilter::Nearest,
+        "textures point sample unless asked for linear");
+    check(manifest.textures()[0].colorSpace == sokoban::TextureColorSpace::Srgb,
+        "textures are colour unless declared linear data");
+
+    // Address mode, filtering, and colour space are independent: the splat
+    // map wants clamped + linear + linear-data, which no single flag covers.
+    const AssetManifest sampled = AssetManifest::parse(R"({
+  "format": 1,
+  "textures": [
+    { "name": "Tex", "path": "t.png", "tiling": true, "filter": "linear" },
+    { "name": "Data", "path": "d.png", "filter": "linear", "colorSpace": "linear" }
+  ],
+  "models": [ { "name": "Hero", "path": "h.glb", "geometry": "skinned", "role": "player" } ],
+  "animations": [
+    { "name": "Idle", "path": "a.glb", "role": "player-idle" },
+    { "name": "Move", "path": "a.glb", "role": "player-move" },
+    { "name": "Push", "path": "a.glb", "role": "player-push" },
+    { "name": "Death", "path": "a.glb", "role": "player-death" },
+    { "name": "DeadIdle", "path": "a.glb", "role": "player-dead-idle" }
+  ]
+})");
+    check(sampled.textures()[0].tiling, "tiling flag parsed");
+    check(sampled.textures()[0].filter == sokoban::TextureFilter::Linear,
+        "linear filter parsed");
+    check(sampled.textures()[0].colorSpace == sokoban::TextureColorSpace::Srgb,
+        "tiling does not imply linear colour space");
+    check(!sampled.textures()[1].tiling,
+        "linear filtering does not imply repeat addressing");
+    check(sampled.textures()[1].filter == sokoban::TextureFilter::Linear,
+        "linear filter parsed on data texture");
+    check(sampled.textures()[1].colorSpace == sokoban::TextureColorSpace::Linear,
+        "linear colour space parsed");
     check(manifest.models().size() == 3, "three models");
     check(manifest.animations().size() == 5, "five animations");
 
@@ -182,6 +216,11 @@ void testSyntaxAndSchemaFailures()
 
     checkJsonThrows([](Json& json) { json["bogus"] = true; }, "unknown root property");
     checkJsonThrows([](Json& json) { json["textures"] = "wrong"; }, "array type enforced");
+    // A typo in these must not silently fall back to the default sampling.
+    checkJsonThrows([](Json& json) { json["textures"][0]["filter"] = "bilinear"; },
+        "unknown texture filter");
+    checkJsonThrows([](Json& json) { json["textures"][0]["colorSpace"] = "rec709"; },
+        "unknown texture colour space");
     checkJsonThrows([](Json& json) { json["textures"][0]["path"] = 42; }, "string type enforced");
     checkJsonThrows([](Json& json) { json["models"][0]["mystery"] = true; },
         "unknown model property");
@@ -251,6 +290,25 @@ void testDomainValidationFailures()
         "missing player-dead-idle role");
 }
 
+// A splat map is weight data covering the board once, so all three sampling
+// options differ from a normal colour atlas. Getting any one wrong is visible
+// but easy to misdiagnose: repeat echoes painted spots across the board,
+// nearest makes brush edges blocky, and sRGB silently skews every weight.
+bool splatMapSamplingIsCorrect(
+    const sokoban::AssetManifest& manifest,
+    std::string_view name)
+{
+    const sokoban::RenderTexture id = manifest.findTextureIdByName(name);
+    if (id.isNone()) {
+        return false;
+    }
+    const sokoban::AssetManifest::Texture& texture =
+        manifest.textures()[id.index()];
+    return !texture.tiling &&
+        texture.filter == sokoban::TextureFilter::Linear &&
+        texture.colorSpace == sokoban::TextureColorSpace::Linear;
+}
+
 void testRealManifestFile()
 {
     const std::optional<std::filesystem::path> root = assetsRootFromEnvironment();
@@ -266,6 +324,58 @@ void testRealManifestFile()
     check(manifest.soundSet("mirror-swap").size() == 1, "real manifest mirror swap");
     check(manifest.soundSet("mirror-swap")[0].ends_with("Woosh/woosh1.ogg"),
         "real manifest mirror swap uses woosh1");
+    // The material layers are sampled in world-tile UVs that leave 0..1, so
+    // they must repeat; without it the ground is smeared edge texels.
+    for (std::string_view name : {
+             sokoban::groundSplatBaseTextureName,
+             sokoban::groundSplatDetailTextureName,
+         }) {
+        const sokoban::RenderTexture id = manifest.findTextureIdByName(name);
+        check(!id.isNone(), "real manifest declares the ground material layer");
+        const AssetManifest::Texture& texture = manifest.textures()[id.index()];
+        check(texture.tiling, "real manifest ground material layer tiles");
+        check(texture.filter == sokoban::TextureFilter::Linear,
+            "real manifest ground material layer filters smoothly");
+    }
+    // Splat maps are the opposite: weight data spanning the board once. They
+    // must NOT repeat (a painted spot would echo across the board) and must
+    // NOT be sRGB (a painted 0.5 has to reach the shader as a 0.5 weight).
+    check(splatMapSamplingIsCorrect(
+              manifest, sokoban::groundSplatMapTextureName),
+        "real manifest shared splat map samples as clamped linear data");
+    // Dropping the per-screen maps from the manifest is otherwise silent:
+    // every screen just falls back to the shared map and still renders, so
+    // assert at least one survives.
+    int screenSplatMaps = 0;
+    for (int levelIndex = 0;; ++levelIndex) {
+        int screensForLevel = 0;
+        for (int screenIndex = 0;; ++screenIndex) {
+            const sokoban::RenderTexture id = manifest.findTextureIdByName(
+                sokoban::groundSplatMapTextureNameForScreen(
+                    sokoban::LevelLocation {
+                        .level = levelIndex,
+                        .screen = screenIndex,
+                    }));
+            if (id.isNone()) {
+                break;
+            }
+            check(
+                splatMapSamplingIsCorrect(
+                    manifest,
+                    sokoban::groundSplatMapTextureNameForScreen(
+                        sokoban::LevelLocation {
+                            .level = levelIndex,
+                            .screen = screenIndex,
+                        })),
+                "real manifest per-screen splat map samples as clamped linear data");
+            ++screensForLevel;
+        }
+        if (screensForLevel == 0) {
+            break;
+        }
+        screenSplatMaps += screensForLevel;
+    }
+    check(screenSplatMaps > 0, "real manifest declares per-screen splat maps");
     check(!manifest.textureIdByName("Smoke01").isNone(),
         "real manifest has first mirror smoke texture");
     check(!manifest.textureIdByName("Smoke10").isNone(),

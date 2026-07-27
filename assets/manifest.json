@@ -56,6 +56,90 @@
     {
       "name": "Smoke10",
       "path": "kenney_particle-pack/PNG (Transparent)/smoke_10.png"
+    },
+    {
+      "name": "GroundGrass",
+      "path": "custom/textures/ground_grass.png",
+      "tiling": true,
+      "filter": "linear"
+    },
+    {
+      "name": "GroundRock",
+      "path": "custom/textures/ground_rock.png",
+      "tiling": true,
+      "filter": "linear"
+    },
+    {
+      "name": "GroundSplatMap",
+      "path": "custom/textures/ground_splat.png",
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMap0_0",
+      "path": "custom/textures/ground_splat_level0_screen0.png",
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMap0_1",
+      "path": "custom/textures/ground_splat_level0_screen1.png",
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMap1_0",
+      "path": "custom/textures/ground_splat_level1_screen0.png",
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMap1_1",
+      "path": "custom/textures/ground_splat_level1_screen1.png",
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMap1_2",
+      "path": "custom/textures/ground_splat_level1_screen2.png",
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMap2_0",
+      "path": "custom/textures/ground_splat_level2_screen0.png",
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMap2_1",
+      "path": "custom/textures/ground_splat_level2_screen1.png",
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMap2_2",
+      "path": "custom/textures/ground_splat_level2_screen2.png",
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMap3_0",
+      "path": "custom/textures/ground_splat_level3_screen0.png",
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMap3_1",
+      "path": "custom/textures/ground_splat_level3_screen1.png",
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
+      "name": "GroundSplatMap3_2",
+      "path": "custom/textures/ground_splat_level3_screen2.png",
+      "filter": "linear",
+      "colorSpace": "linear"
     }
   ],
   "models": [
@@ -135,19 +219,59 @@
     }
   ],
   "tiles": [
-    { "tile": "Wall", "model": "BricksA", "scale": 1.1 },
-    { "tile": "Rock", "model": "Stone" },
-    { "tile": "Ice", "model": "Glass" },
-    { "tile": "Conveyor Up", "model": "Conveyor" },
-    { "tile": "Conveyor Down", "model": "Conveyor" },
-    { "tile": "Conveyor Right", "model": "Conveyor" },
-    { "tile": "Conveyor Left", "model": "Conveyor" },
-    { "tile": "Mirror North-West", "model": "PictureFrameLargeA" },
-    { "tile": "Mirror North-East", "model": "PictureFrameLargeA" },
-    { "tile": "Mirror South-West", "model": "PictureFrameLargeA" },
-    { "tile": "Mirror South-East", "model": "PictureFrameLargeA" },
-    { "tile": "Decorative Block" },
-    { "tile": "Player", "model": "Rogue", "scale": 1.1 }
+    {
+      "tile": "Wall",
+      "model": "BricksA",
+      "scale": 1.1
+    },
+    {
+      "tile": "Rock",
+      "model": "Stone"
+    },
+    {
+      "tile": "Ice",
+      "model": "Glass"
+    },
+    {
+      "tile": "Conveyor Up",
+      "model": "Conveyor"
+    },
+    {
+      "tile": "Conveyor Down",
+      "model": "Conveyor"
+    },
+    {
+      "tile": "Conveyor Right",
+      "model": "Conveyor"
+    },
+    {
+      "tile": "Conveyor Left",
+      "model": "Conveyor"
+    },
+    {
+      "tile": "Mirror North-West",
+      "model": "PictureFrameLargeA"
+    },
+    {
+      "tile": "Mirror North-East",
+      "model": "PictureFrameLargeA"
+    },
+    {
+      "tile": "Mirror South-West",
+      "model": "PictureFrameLargeA"
+    },
+    {
+      "tile": "Mirror South-East",
+      "model": "PictureFrameLargeA"
+    },
+    {
+      "tile": "Decorative Block"
+    },
+    {
+      "tile": "Player",
+      "model": "Rogue",
+      "scale": 1.1
+    }
   ],
   "sounds": [
     {

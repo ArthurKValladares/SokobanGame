@@ -659,6 +659,12 @@ private:
                     return pipelines_.water();
                 case PreparedSurfaceMaterial::MirrorEnergy:
                     return pipelines_.mirrorEnergy();
+                case PreparedSurfaceMaterial::GroundSplat:
+                    // Falls back to the flat tile shader when the manifest
+                    // does not provide the ground textures.
+                    return frameData.groundSplat.valid()
+                        ? pipelines_.groundSplat()
+                        : pipelines_.scene();
                 case PreparedSurfaceMaterial::Standard:
                     return pipelines_.scene();
                 }
@@ -703,6 +709,24 @@ private:
                     face.color,
                     face.normal,
                     frameData.effectAnimationTimeSeconds);
+            } else if (
+                face.material == PreparedSurfaceMaterial::GroundSplat &&
+                frameData.groundSplat.valid()) {
+                drawGroundSplatFace(
+                    commandBuffer,
+                    face.vertices,
+                    face.shadowVertices,
+                    face.color,
+                    face.normal,
+                    frameData.lighting,
+                    face.worldOrigin,
+                    face.gridSize,
+                    face.showGrid
+                        ? frameData.gridOverlay.color
+                        : Vec4 {},
+                    frameData.gridOverlay.width,
+                    face.isEditorPreview,
+                    frameData.groundSplat);
             } else {
                 drawFace(
                     commandBuffer,
@@ -1085,6 +1109,108 @@ private:
                 0.0f,
                 std::max(lighting.specularStrength, 0.0f),
                 std::max(lighting.specularPower, 1.0f),
+            },
+        };
+        vkCmdPushConstants(
+            commandBuffer,
+            pipelines_.layout(),
+            VK_SHADER_STAGE_VERTEX_BIT |
+                VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            sizeof(TilePushConstants),
+            &constants);
+        vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+    }
+
+    // Ground tops blended from two textures via a splat map. Lighting,
+    // shadowing, grid, and dithering match drawFace exactly; only the free
+    // push-constant slots differ: materialOptions.x carries the face's world
+    // origin X (opaque ground never blurs) and textureOptions carries the
+    // three one-based texture handles plus world origin Y.
+    void drawGroundSplatFace(
+        VkCommandBuffer commandBuffer,
+        const std::array<Vec3, 4>& vertices,
+        const std::array<Vec4, 4>& shadowVertices,
+        Vec4 color,
+        Vec3 normal,
+        const RenderFrameData::Lighting& lighting,
+        Vec2 worldOrigin,
+        Vec2 gridSize,
+        Vec4 gridColor,
+        float gridLineWidth,
+        bool isEditorPreview,
+        const GroundSplatTextures& textures)
+    {
+        vkCmdSetPrimitiveTopology(
+            commandBuffer,
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+        ++stats_.visibleFaces;
+        ++stats_.drawCalls;
+        stats_.vertices += 6;
+        stats_.triangles += 2;
+
+        const Vec3 sunRadiance {
+            lighting.sun.color.x * lighting.sun.intensity,
+            lighting.sun.color.y * lighting.sun.intensity,
+            lighting.sun.color.z * lighting.sun.intensity,
+        };
+        const Vec3 ambientRadiance {
+            lighting.ambient.color.x * lighting.ambient.intensity,
+            lighting.ambient.color.y * lighting.ambient.intensity,
+            lighting.ambient.color.z * lighting.ambient.intensity,
+        };
+        const TilePushConstants constants {
+            .vertices = {
+                Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, 1.0f },
+                Vec4 { vertices[1].x, vertices[1].y, vertices[1].z, 1.0f },
+                Vec4 { vertices[2].x, vertices[2].y, vertices[2].z, 1.0f },
+                Vec4 { vertices[3].x, vertices[3].y, vertices[3].z, 1.0f },
+            },
+            .shadowVertices = shadowVertices,
+            .color = color,
+            .normalAndAmbientRed = {
+                normal.x,
+                normal.y,
+                normal.z,
+                ambientRadiance.x,
+            },
+            .sunDirectionAndAmbientGreen = {
+                lighting.sun.direction.x,
+                lighting.sun.direction.y,
+                lighting.sun.direction.z,
+                ambientRadiance.y,
+            },
+            .sunRadianceAndAmbientBlue = {
+                sunRadiance.x,
+                sunRadiance.y,
+                sunRadiance.z,
+                ambientRadiance.z,
+            },
+            .shadowOptions = {
+                lighting.shadows.enabled ? 1.0f : 0.0f,
+                std::clamp(lighting.shadows.opacity, 0.0f, 1.0f),
+                std::max(lighting.shadows.bias, 0.0f),
+                gridColor.w > 0.0f &&
+                        gridLineWidth > 0.0f &&
+                        gridSize.x > 0.0f &&
+                        gridSize.y > 0.0f
+                    ? gridLineWidth
+                    : 0.0f,
+            },
+            .materialOptions = {
+                worldOrigin.x,
+                gridSize.x,
+                gridSize.y,
+                isEditorPreview
+                    ? -config::iceBlurRadiusPixels
+                    : config::iceBlurRadiusPixels,
+            },
+            .gridColor = gridColor,
+            .textureOptions = {
+                static_cast<float>(textures.base.value),
+                static_cast<float>(textures.detail.value),
+                static_cast<float>(textures.splatMap.value),
+                worldOrigin.y,
             },
         };
         vkCmdPushConstants(

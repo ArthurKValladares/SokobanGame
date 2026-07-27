@@ -80,7 +80,10 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
     editor.initialize(temporary.file());
 
     check(!editor.dirty(), "loaded editor starts clean");
-    check(editor.textures().size() == 14, "textures loaded");
+    // 10 mirror smoke + 3 model textures + 3 ground splat textures.
+    // 14 asset-pack textures, grass + rock, the shared splat map, and one
+    // splat map per screen.
+    check(editor.textures().size() == 28, "textures loaded");
     check(editor.models().size() == 6, "models loaded");
     check(editor.animations().size() == 5, "animations loaded");
     check(editor.tileEntries().size() == 13, "authored tile entries loaded");

@@ -21,14 +21,31 @@ struct AssetManifestJsonParser;
     return clipNumber == 0 ? 0 : clipNumber - 1;
 }
 
-// Shader/pipeline cap for the model texture descriptor array. Shaders are
-// compiled with MODEL_TEXTURE_COUNT set to this value (see CMakeLists.txt);
-// the manifest may declare at most this many textures.
-inline constexpr uint32_t maxModelTextures = 16;
+// Shader/pipeline cap for the model texture descriptor array, and the single
+// source of truth for its size: CMakeLists.txt parses this line and compiles
+// every shader with MODEL_TEXTURE_COUNT set to it, so the two cannot drift.
+// To grow the array, edit this number and re-run CMake configure.
+//
+// Every screen costs a slot, because each one declares its own ground splat
+// map. Exceeding the cap throws while loading the manifest, so a campaign that
+// outgrows the array fails loudly at startup rather than rendering wrong, and
+// `VulkanDeviceContext` rejects any device whose per-stage sampled-image limit
+// cannot hold this many.
+inline constexpr uint32_t maxModelTextures = 64;
 
 enum class ModelGeometry {
     Static,
     Skinned,
+};
+
+enum class TextureFilter {
+    Nearest,
+    Linear,
+};
+
+enum class TextureColorSpace {
+    Srgb,
+    Linear,
 };
 
 enum class ModelMaterialMode : uint32_t {
@@ -51,6 +68,18 @@ public:
     struct Texture {
         std::string name;
         std::string path; // relative to the assets root
+        // Sample with repeat addressing instead of clamp-to-edge. Required
+        // by textures whose UVs leave 0..1 (the tiling ground material
+        // layers); clamping those smears the edge texel into streaks.
+        bool tiling = false;
+        // Interpolate between texels instead of point sampling. Wanted by
+        // anything magnified across whole tiles; the pixel-art UI and model
+        // atlases stay nearest so they keep their crisp texel edges.
+        TextureFilter filter = TextureFilter::Nearest;
+        // sRGB textures are color and get decoded to linear on read. Data
+        // textures (the ground splat weight map) must not be: a painted 50%
+        // grey has to arrive at the shader as a 0.5 blend weight, not 0.21.
+        TextureColorSpace colorSpace = TextureColorSpace::Srgb;
     };
 
     struct Model {
@@ -115,6 +144,9 @@ public:
     [[nodiscard]] RenderModel modelIdByName(std::string_view name) const; // throws if unknown
     [[nodiscard]] RenderAnimation animationIdByName(std::string_view name) const; // throws if unknown
     [[nodiscard]] RenderTexture textureIdByName(std::string_view name) const; // throws if unknown
+    // Optional lookup for textures a feature can render without; returns
+    // noTexture when the manifest does not declare `name`.
+    [[nodiscard]] RenderTexture findTextureIdByName(std::string_view name) const;
     [[nodiscard]] const Model& model(RenderModel id) const; // throws for cube/out of range
     [[nodiscard]] const Animation& animation(RenderAnimation id) const; // throws for none/out of range
 

@@ -3,6 +3,7 @@
 #include "engine/render/RenderTypes.hpp"
 
 #include <cstddef>
+#include <optional>
 #include <vector>
 
 namespace sokoban {
@@ -32,9 +33,12 @@ private:
     std::vector<bool> textures_;
 };
 
+// `location` picks that screen's ground splat map; leave it unset to preload
+// the shared map instead (a screen with no map of its own uses it anyway).
 [[nodiscard]] RenderAssetRequirements renderAssetRequirementsForLevel(
     const Level& level,
-    const AssetManifest& manifest);
+    const AssetManifest& manifest,
+    std::optional<LevelLocation> location = std::nullopt);
 [[nodiscard]] RenderAssetRequirements renderAssetRequirementsForFrame(
     const RenderFrameData& frame);
 

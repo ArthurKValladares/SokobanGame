@@ -148,10 +148,25 @@ std::string AssetManifestEditor::serialize() const
 
     root["textures"] = Json::array();
     for (const AssetManifest::Texture& texture : textures_) {
-        root["textures"].push_back({
+        Json entry {
             { "name", texture.name },
             { "path", texture.path },
-        });
+        };
+        // Only written when set, so manifests that never tile stay unchanged;
+        // dropping it here would silently un-tile ground splatting on save.
+        // Only write non-defaults, so unrelated manifests round-trip byte for
+        // byte. Dropping any of these silently changes how the texture is
+        // sampled, which is why they survive an editor save at all.
+        if (texture.tiling) {
+            entry["tiling"] = true;
+        }
+        if (texture.filter == TextureFilter::Linear) {
+            entry["filter"] = "linear";
+        }
+        if (texture.colorSpace == TextureColorSpace::Linear) {
+            entry["colorSpace"] = "linear";
+        }
+        root["textures"].push_back(std::move(entry));
     }
 
     root["models"] = Json::array();

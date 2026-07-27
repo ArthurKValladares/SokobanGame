@@ -390,6 +390,77 @@ std::optional<float> pointDepthInQuad(
     return pointDepthInTriangle(point, quad[0], quad[2], quad[3]);
 }
 
+// Screen-space barycentric weights of `point` within a triangle, or nothing
+// when the point is outside it or the triangle is degenerate.
+std::optional<Vec3> triangleWeights(Vec2 point, Vec2 a, Vec2 b, Vec2 c)
+{
+    constexpr float epsilon = 0.00001f;
+    const float area = cross2D(subtract(b, a), subtract(c, a));
+    if (std::abs(area) <= epsilon) {
+        return std::nullopt;
+    }
+    const float weightA =
+        cross2D(subtract(b, point), subtract(c, point)) / area;
+    const float weightB =
+        cross2D(subtract(c, point), subtract(a, point)) / area;
+    const float weightC = 1.0f - weightA - weightB;
+    if (weightA < -epsilon || weightB < -epsilon || weightC < -epsilon) {
+        return std::nullopt;
+    }
+    return Vec3 { weightA, weightB, weightC };
+}
+
+// Face-local coordinates of the four quad corners, matching the faceCoords
+// table in triangle.vert.glsl. Painting has to agree with the shader about
+// which corner is the origin, or strokes land mirrored.
+constexpr std::array<Vec2, 4> faceCornerCoords {
+    Vec2 { 0.0f, 0.0f },
+    Vec2 { 1.0f, 0.0f },
+    Vec2 { 1.0f, 1.0f },
+    Vec2 { 0.0f, 1.0f },
+};
+
+// Face-local coordinate under `point`, perspective-corrected using the stored
+// clip w of each corner. Affine interpolation would bias every stroke toward
+// the corner nearest the camera.
+std::optional<Vec2> faceCoordInQuad(
+    Vec2 point,
+    const std::array<Vec2, 4>& pixelQuad,
+    const std::array<float, 4>& clipW)
+{
+    constexpr std::array<std::array<std::size_t, 3>, 2> triangles {
+        std::array<std::size_t, 3> { 0, 1, 2 },
+        std::array<std::size_t, 3> { 0, 2, 3 },
+    };
+    for (const auto& triangle : triangles) {
+        const std::optional<Vec3> weights = triangleWeights(
+            point,
+            pixelQuad[triangle[0]],
+            pixelQuad[triangle[1]],
+            pixelQuad[triangle[2]]);
+        if (!weights) {
+            continue;
+        }
+        const std::array<float, 3> screenWeights {
+            weights->x, weights->y, weights->z,
+        };
+        float total = 0.0f;
+        Vec2 accumulated {};
+        for (std::size_t i = 0; i < triangle.size(); ++i) {
+            const std::size_t corner = triangle[i];
+            const float w = screenWeights[i] / std::max(clipW[corner], 0.001f);
+            total += w;
+            accumulated.x += faceCornerCoords[corner].x * w;
+            accumulated.y += faceCornerCoords[corner].y * w;
+        }
+        if (std::abs(total) <= 0.00001f) {
+            continue;
+        }
+        return Vec2 { accumulated.x / total, accumulated.y / total };
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 Vec3 IsoScenePreparer::projectIsoPoint(
@@ -516,6 +587,7 @@ void IsoScenePreparer::prepare(
                 vertices[0].x,
                 vertices[0].y,
             },
+            .worldHeight = vertices[0].z,
             .material = material,
             .shorelineMask = shorelineMask,
             .depth = faceDepth(scene.isoLayout, vertices),
@@ -572,6 +644,12 @@ void IsoScenePreparer::prepare(
                 tile.effect == RenderSurfaceEffect::MirrorEnergy
                 ? PreparedSurfaceMaterial::MirrorEnergy
                 : PreparedSurfaceMaterial::Standard;
+            // Splatting is a top-surface treatment: the sides of a ground
+            // block keep the flat tile material.
+            const PreparedSurfaceMaterial topMaterial =
+                tile.effect == RenderSurfaceEffect::GroundSplat && drawCube
+                ? PreparedSurfaceMaterial::GroundSplat
+                : tileMaterial;
             const GridPosition pickBoundsCell {
                 static_cast<int>(
                     std::floor(tile.position.x + 0.0001f)),
@@ -592,7 +670,7 @@ void IsoScenePreparer::prepare(
                     pickable,
                     drawCube,
                     { width, depth },
-                    tileMaterial,
+                    topMaterial,
                     0);
             } else {
                 appendIsoFace(
@@ -663,7 +741,7 @@ void IsoScenePreparer::prepare(
                     pickable,
                     drawCube,
                     { width, depth },
-                    PreparedSurfaceMaterial::Standard,
+                    topMaterial,
                     0);
             }
 
@@ -883,6 +961,65 @@ std::optional<GridPosition3> IsoScenePreparer::pickGridCell(
             continue;
         }
         picked = face.cell;
+        pickedDepth = *depth;
+    }
+    return picked;
+}
+
+std::optional<Vec3> IsoScenePreparer::pickGroundPoint(
+    const PreparedRenderScene& scene,
+    Vec2 pixelPosition,
+    Vec2 outputExtent) const
+{
+    if (outputExtent.x <= 0.0f || outputExtent.y <= 0.0f) {
+        return std::nullopt;
+    }
+
+    std::optional<Vec3> picked;
+    float pickedDepth = std::numeric_limits<float>::max();
+    // Every face, not just scene.pickFaceIndices: that list excludes editor
+    // previews, which is right for tile editing but wrong here. Ground on a
+    // layer other than the active one is drawn as a preview, and painting its
+    // texture has nothing to do with which tile layer is being edited - the
+    // ground you can see is the ground you can paint.
+    for (const PreparedIsoFace& face : scene.isoFaces) {
+        // Only splattable tops are paintable. Block sides, non-ground tiles
+        // and the editor's invisible pick planes all carry a different
+        // material, and a brush stroke on them has nowhere to go.
+        if (face.material != PreparedSurfaceMaterial::GroundSplat) {
+            continue;
+        }
+
+        std::array<Vec3, 4> pixelQuad {};
+        std::array<Vec2, 4> pixelQuad2D {};
+        for (std::size_t i = 0; i < face.vertices.size(); ++i) {
+            const Vec3 clip = face.vertices[i];
+            pixelQuad[i] = {
+                (clip.x + 1.0f) * 0.5f * outputExtent.x,
+                (1.0f - clip.y) * 0.5f * outputExtent.y,
+                clip.z,
+            };
+            pixelQuad2D[i] = { pixelQuad[i].x, pixelQuad[i].y };
+        }
+
+        const std::optional<float> depth =
+            pointDepthInQuad(pixelPosition, pixelQuad);
+        if (!depth || *depth >= pickedDepth) {
+            continue;
+        }
+        const std::optional<Vec2> faceCoord =
+            faceCoordInQuad(pixelPosition, pixelQuad2D, face.clipW);
+        if (!faceCoord) {
+            continue;
+        }
+
+        // Same reconstruction the shader performs, so the painted texel is the
+        // one under the cursor.
+        picked = Vec3 {
+            face.worldOrigin.x + faceCoord->x * face.gridSize.x,
+            face.worldOrigin.y + faceCoord->y * face.gridSize.y,
+            face.worldHeight,
+        };
         pickedDepth = *depth;
     }
     return picked;

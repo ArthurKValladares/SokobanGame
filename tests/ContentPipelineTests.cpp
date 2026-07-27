@@ -119,6 +119,7 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
         "triangle.frag.glsl.spv",
         "water.frag.glsl.spv",
         "mirror_energy.frag.glsl.spv",
+        "ground_splat.frag.glsl.spv",
         "shadow.vert.glsl.spv",
         "model.vert.glsl.spv",
         "model_shadow.vert.glsl.spv",

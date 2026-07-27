@@ -17,8 +17,11 @@
 #endif
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
+#include <numbers>
 #include <utility>
+#include <vector>
 
 namespace sokoban {
 namespace {
@@ -120,13 +123,19 @@ Application::Application()
         assetManifestDebugUi_.draw(assetManifestEditor_);
     });
     DebugUi::addTab("Level Editor", [this] {
-        levelEditorDebugUi_.draw(levelEditor_, {
+        levelEditorDebugUi_.draw(levelEditor_, splatPainter_, {
             .playDraft = [this](Level level) {
+                // Playing a draft leaves the document view; a half-finished
+                // paint session would otherwise keep painting on the level
+                // being played.
+                splatPainter_.close();
                 (void)applyLevel(std::move(level));
             },
             .returnToCurrentScreen = [this] {
+                splatPainter_.close();
                 loadCurrentScreen();
             },
+            .openGroundPainting = [this] { return openGroundPainting(); },
         });
     });
     DebugUi::addTab("Animation Preview", [this] {
@@ -235,6 +244,7 @@ void Application::run()
             DebugUi::draw();
         }
         drawDraftExitConfirmation();
+        drawBrushPreview();
 
         if (const std::optional<TitleAction> titleAction = titleScreen_.draw(
                 ui_, pixelSize, routedInput.title)) {
@@ -354,6 +364,81 @@ void Application::update(
     audioSystem_.update(dt, playerVisual.motion.moving, pushing);
 }
 
+void Application::drawBrushPreview()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (!splatPainter_.active() || !editorBrushPoint_ ||
+        !preparedRenderFrame_) {
+        return;
+    }
+
+    // The ring is built from world points and projected one by one, so it
+    // follows the board's perspective instead of being a flat screen-space
+    // circle that would only be right at the centre of the view.
+    //
+    // This projects through the previous frame's camera, which is the same
+    // one that produced editorBrushPoint_ in updateEditorPainting. Using the
+    // frame currently being built would put the ring somewhere the pointer
+    // was never tested against.
+    constexpr int segments = 48;
+    const auto ringPoints = [&](float radiusTiles)
+        -> std::optional<std::vector<ImVec2>> {
+        std::vector<ImVec2> points;
+        points.reserve(segments);
+        for (int i = 0; i < segments; ++i) {
+            const float angle = static_cast<float>(i) *
+                (2.0f * std::numbers::pi_v<float>) /
+                static_cast<float>(segments);
+            const Vec3 world {
+                editorBrushPoint_->x + std::cos(angle) * radiusTiles,
+                editorBrushPoint_->y + std::sin(angle) * radiusTiles,
+                // The height the pick actually landed on. Assuming a height
+                // here (ground is not always at z=0: editor previews are
+                // nudged up, and raised blocks are a whole unit higher) puts
+                // the ring visibly below the paint, by more the further the
+                // surface is from the camera.
+                editorBrushPoint_->z,
+            };
+            const std::optional<Vec2> pixel =
+                renderer_.projectToPixels(*preparedRenderFrame_, world);
+            if (!pixel) {
+                return std::nullopt;
+            }
+            points.push_back(ImVec2(pixel->x, pixel->y));
+        }
+        return points;
+    };
+
+    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
+    const SplatCanvas::Brush& brush = splatPainter_.brush();
+    // White paints rock, black paints grass: tint the ring to match, so the
+    // preview says what the stroke will do as well as where.
+    const ImU32 outerColor = brush.color == SplatCanvas::BrushColor::White
+        ? IM_COL32(255, 255, 255, 220)
+        : IM_COL32(20, 20, 20, 220);
+    if (const auto outer = ringPoints(brush.radiusTiles)) {
+        drawList->AddPolyline(
+            outer->data(),
+            static_cast<int>(outer->size()),
+            outerColor,
+            ImDrawFlags_Closed,
+            2.0f);
+    }
+    // Inner ring marks where falloff begins, which is what hardness controls.
+    // A fully hard brush has no falloff band, so there is nothing to show.
+    if (brush.hardness < 0.999f && brush.hardness > 0.001f) {
+        if (const auto inner = ringPoints(brush.radiusTiles * brush.hardness)) {
+            drawList->AddPolyline(
+                inner->data(),
+                static_cast<int>(inner->size()),
+                IM_COL32(255, 200, 60, 150),
+                ImDrawFlags_Closed,
+                1.0f);
+        }
+    }
+#endif
+}
+
 void Application::drawDraftExitConfirmation()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -402,12 +487,21 @@ void Application::updateEditorPainting(
     (void)previousRenderFrame;
 #if SOKOBAN_ENABLE_DEBUG_UI
     editorHoverCell_.reset();
+    editorBrushPoint_.reset();
     if (input.undoPressed) {
-        const bool undone = levelEditor_.tryUndoEdit();
+        // While painting, Ctrl+Z belongs to the brush: tile edits and paint
+        // strokes are separate histories, and the visible one should win.
+        const bool undone = splatPainter_.active()
+            ? splatPainter_.undo()
+            : levelEditor_.tryUndoEdit();
         (void)undone;
+        pushPaintedSplatMap();
         return;
     }
     if (input.pointerCaptured) {
+        // The pointer is over an ImGui window. Release any stroke in progress
+        // so dragging onto a panel does not keep painting underneath it.
+        splatPainter_.endStroke();
         return;
     }
     if (!previousRenderFrame) {
@@ -438,6 +532,9 @@ void Application::updateEditorPainting(
         previousRenderFrame->levelHeight != documentHeight) {
         return;
     }
+    if (updateGroundPainting(input, previousRenderFrame, mousePixels)) {
+        return;
+    }
     if (const std::optional<GridPosition3> clicked =
             renderer_.pickIsoGridCell(
                 *previousRenderFrame, mousePixels)) {
@@ -456,6 +553,122 @@ void Application::updateEditorPainting(
                 levelEditor_.paintCell(target);
             }
         }
+    }
+#endif
+}
+
+bool Application::updateGroundPainting(
+    const InputRouter::EditorInput& input,
+    const VulkanRenderer::PreparedFrame* previousRenderFrame,
+    Vec2 pointerPixels)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (!splatPainter_.active()) {
+        return false;
+    }
+    // The file browser can load a different document while a session is open.
+    // Painting on would edit one screen's map while looking at another's
+    // board, so the session ends with the document it belongs to.
+    if (levelLocationFromScreenPath(levelEditor_.documentPath()) !=
+        splatPainter_.location()) {
+        splatPainter_.close();
+        return false;
+    }
+
+    // Sub-tile precision: a brush lands where the pointer is, not at a cell
+    // centre, so this is a different query from tile picking.
+    const std::optional<Vec3> groundPoint =
+        renderer_.pickIsoGroundPoint(*previousRenderFrame, pointerPixels);
+    editorBrushPoint_ = groundPoint;
+
+    // primaryDown, not primaryPressed: the latter is only true on the frame
+    // the button goes down, which would end every stroke one frame after it
+    // began and make dragging impossible.
+    if (!input.primaryDown) {
+        splatPainter_.endStroke();
+        pushPaintedSplatMap();
+        return true;
+    }
+    if (!groundPoint) {
+        // Dragging off the board pauses the stroke rather than ending it, so
+        // sweeping out and back in stays one undo step.
+        return true;
+    }
+
+    // Painting is flat: only the tile position matters, not the height it was
+    // picked at.
+    const Vec2 brushTile { groundPoint->x, groundPoint->y };
+    if (splatPainter_.strokeInProgress()) {
+        (void)splatPainter_.paintTo(brushTile);
+    } else {
+        (void)splatPainter_.beginStroke(brushTile);
+    }
+    pushPaintedSplatMap();
+    return true;
+#else
+    (void)input;
+    (void)previousRenderFrame;
+    (void)pointerPixels;
+    return false;
+#endif
+}
+
+bool Application::openGroundPainting()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    // Editor pointer input is only routed, and updateEditorPainting only
+    // runs, while the editor is showing its document (see
+    // InputRouter::RoutingContext::editorEditing). Opening a paint session
+    // from the "current screen" view would otherwise appear to do nothing at
+    // all: no preview, no strokes, no error. Painting edits the document's
+    // screen, so switching to that view is also what the user means.
+    levelEditor_.setEditingDocument(true);
+
+    const bool opened = splatPainter_.open(
+        {
+            .documentPath = levelEditor_.documentPath(),
+            .boardTilesWide = levelEditor_.documentWidth(),
+            .boardTilesHigh = levelEditor_.documentHeight(),
+            .sourceAssetRoot = SOKOBAN_SOURCE_ASSET_DIR,
+            // Mirrored into the staged tree so a painted map survives a
+            // restart without re-running the content pipeline.
+            .runtimeAssetRoot = assetRoot_,
+        },
+        assetManifest_);
+    if (opened) {
+        // The map may not be resident: the editor previews documents that are
+        // not the screen being played, and only played screens are preloaded.
+        RenderAssetRequirements requirements;
+        requirements.requireTexture(splatPainter_.texture());
+        renderer_.ensureAssets(requirements);
+        uploadedSplatRevision_ = splatPainter_.revision();
+    } else {
+        // Nothing to paint, so do not strand the editor in a view the user
+        // did not ask for.
+        levelEditor_.setEditingDocument(false);
+    }
+    return opened;
+#else
+    return false;
+#endif
+}
+
+void Application::pushPaintedSplatMap()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    // At most one upload per frame, and none while nothing changed: a stroke
+    // that paints white on white must not stall the device.
+    if (!splatPainter_.active() ||
+        splatPainter_.revision() == uploadedSplatRevision_) {
+        return;
+    }
+    uploadedSplatRevision_ = splatPainter_.revision();
+    try {
+        (void)renderer_.updateTexture(
+            splatPainter_.texture(), splatPainter_.canvas().toImage());
+    } catch (const std::exception& error) {
+        log::error(log::Category::Assets)
+            << "Could not upload the painted splat map: " << error.what();
     }
 #endif
 }
@@ -495,7 +708,15 @@ bool Application::applyLevel(
     Level level,
     const GameplaySession::Snapshot* snapshot)
 {
-    renderer_.ensureAssets(renderAssetRequirementsForLevel(level, assetManifest_));
+    // Same location the render frame will use, so the splat map this screen
+    // draws with is the one guaranteed resident here.
+    renderer_.ensureAssets(renderAssetRequirementsForLevel(
+        level,
+        assetManifest_,
+        LevelLocation {
+            .level = campaign_.currentLevel(),
+            .screen = campaign_.currentScreen(),
+        }));
     level_ = std::move(level);
     const bool restored = snapshot && gameplaySession_.restore(level_, *snapshot);
     if (!restored) {
@@ -879,7 +1100,8 @@ RenderAssetRequirements Application::levelAssetRequirements(int levelIndex) cons
         try {
             requirements.merge(renderAssetRequirementsForLevel(
                 Level::loadFromFile(screenPath(levelIndex, screenIndex)),
-                assetManifest_));
+                assetManifest_,
+                LevelLocation { .level = levelIndex, .screen = screenIndex }));
         } catch (const std::exception& error) {
             log::warning(log::Category::Assets)
                 << "asset preload skipped "
@@ -924,6 +1146,8 @@ RenderFrameData Application::buildRenderFrame(
             .worldAnimationTimeSeconds =
                 presentation_.worldAnimationTimeSeconds(),
             .conveyorBeltScrollOffset = beltScrollOffset,
+            .levelLocation =
+                levelLocationFromScreenPath(levelEditor_.documentPath()),
         });
     }
 #endif
@@ -943,6 +1167,10 @@ RenderFrameData Application::buildRenderFrame(
         .settings = presentationSettings_,
         .conveyorBeltScrollOffset = beltScrollOffset,
         .cameraPitchDegrees = presentation_.cameraPitchDegrees(),
+        .levelLocation = LevelLocation {
+            .level = campaign_.currentLevel(),
+            .screen = campaign_.currentScreen(),
+        },
     });
     particleSystem_.appendRenderData(frame);
     return frame;

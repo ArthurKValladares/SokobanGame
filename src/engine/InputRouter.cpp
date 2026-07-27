@@ -133,6 +133,7 @@ InputRouter::Frame InputRouter::routeFrame(
         frame.editor = {
             .pointerPosition = input.mousePosition(),
             .primaryPressed = input.mouseButtonPressed(SDL_BUTTON_LEFT),
+            .primaryDown = input.mouseButtonDown(SDL_BUTTON_LEFT),
             .undoPressed = input.keyPressed(SDL_SCANCODE_Z),
             .deleting = input.keyDown(SDL_SCANCODE_D),
             .replaceLayer = input.keyDown(SDL_SCANCODE_R),

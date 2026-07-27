@@ -1,5 +1,6 @@
 #include "engine/render/VulkanDeviceContext.hpp"
 
+#include "engine/AssetManifest.hpp"
 #include "engine/render/RendererConfig.hpp"
 #include "engine/Log.hpp"
 #include "engine/render/VulkanDeviceSelection.hpp"
@@ -412,7 +413,13 @@ bool VulkanDeviceContext::isDeviceSuitable(VkPhysicalDevice device) const
         (VK_API_VERSION_MAJOR(properties.apiVersion) == 1 &&
          VK_API_VERSION_MINOR(properties.apiVersion) < 4) ||
         properties.limits.maxPushConstantsSize <
-            sizeof(TilePushConstants)) {
+            sizeof(TilePushConstants) ||
+        // The scene descriptor set binds maxModelTextures samplers in one
+        // array plus a handful of single-image bindings. Growing that array
+        // is a one-line edit in AssetManifest.hpp, so check it here rather
+        // than discovering the overflow as validation-layer noise.
+        properties.limits.maxPerStageDescriptorSampledImages <
+            maxModelTextures + sceneSingleImageBindings) {
         return false;
     }
 

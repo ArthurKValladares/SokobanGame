@@ -23,6 +23,10 @@ public:
         const PresentationSettings& settings;
         float conveyorBeltScrollOffset = 0.0f;
         std::optional<float> cameraPitchDegrees;
+        // Selects this screen's ground splat map. Unset falls back to the
+        // shared map, which is also what draft playback outside a campaign
+        // gets.
+        std::optional<LevelLocation> levelLocation;
     };
 
     struct EditorInput {
@@ -33,6 +37,10 @@ public:
         bool deleting = false;
         float worldAnimationTimeSeconds = 0.0f;
         float conveyorBeltScrollOffset = 0.0f;
+        // The screen this document belongs to, when it is one. Set so the
+        // editor previews (and paints on) that screen's own splat map rather
+        // than the shared fallback; unset for scratch documents.
+        std::optional<LevelLocation> levelLocation;
     };
 
     [[nodiscard]] static RenderFrameData buildGameplay(const GameplayInput& input);

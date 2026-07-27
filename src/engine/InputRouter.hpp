@@ -55,7 +55,12 @@ public:
 
     struct EditorInput {
         Vec2 pointerPosition;
+        // Edge: true only on the frame the button goes down. Tile placement
+        // wants this, so one click places one tile.
         bool primaryPressed = false;
+        // Level: true for as long as the button is held. Brush strokes want
+        // this, so a drag keeps painting instead of stopping after one frame.
+        bool primaryDown = false;
         bool undoPressed = false;
         bool deleting = false;
         bool replaceLayer = false;

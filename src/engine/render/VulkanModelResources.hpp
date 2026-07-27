@@ -76,6 +76,12 @@ public:
     // Texture uploads are queued but never waited here. Returns true when
     // frame-local texture descriptors must be refreshed.
     [[nodiscard]] bool ensureAssets(const RenderAssetRequirements& requirements);
+
+    // Replaces a published texture's pixels in place, for maps painted in the
+    // level editor. Returns false when the texture is not resident or the
+    // image does not match its dimensions; descriptors are untouched either
+    // way, since the image, view and sampler are all reused.
+    bool updateTexture(RenderTexture texture, const ImageData& image);
     // Publishes up to maxPublications completed background tasks without
     // waiting. Failed preloads are retained and rethrown if later required.
     [[nodiscard]] bool publishReadyAssets(std::size_t maxPublications);
@@ -122,6 +128,10 @@ private:
     struct TextureResource {
         OwnedImage image {};
         VkSampler sampler = VK_NULL_HANDLE;
+        // Kept so an in-place update can refuse a differently sized image,
+        // which would need a new image and a descriptor rewrite.
+        uint32_t width = 0;
+        uint32_t height = 0;
     };
 
     struct PendingTextureUpload {
@@ -174,14 +184,31 @@ private:
     [[nodiscard]] bool assetsReady(const RenderAssetRequirements& requirements) const;
 
     [[nodiscard]] GpuMesh uploadMesh(const MeshData& mesh) const;
+    // Address mode, filtering, and colour space all come from the manifest
+    // (see AssetManifest::Texture); the defaults match a plain sRGB atlas.
+    struct TextureSampling {
+        bool tiling = false;
+        TextureFilter filter = TextureFilter::Nearest;
+        TextureColorSpace colorSpace = TextureColorSpace::Srgb;
+    };
+    [[nodiscard]] static TextureSampling samplingFor(
+        const AssetManifest::Texture& texture);
     void createTextureBlocking(
         const ImageData& image,
         OwnedImage& gpuImage,
-        VkSampler& sampler);
+        VkSampler& sampler,
+        TextureSampling sampling = {});
     void beginTextureUpload(
         const ImageData& image,
         OwnedImage& gpuImage,
         VkSampler& sampler,
+        PendingTextureUpload& upload,
+        TextureSampling sampling = {});
+    // Stages `image` and records the copy into an image that already exists,
+    // leaving it shader-readable. Shared by first upload and repaint.
+    void recordTextureCopy(
+        const ImageData& image,
+        OwnedImage& gpuImage,
         PendingTextureUpload& upload);
     void destroyTextureUpload(PendingTextureUpload& upload) const;
     void destroyTexture(OwnedImage& image, VkSampler& sampler);

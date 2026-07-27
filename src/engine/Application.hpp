@@ -23,6 +23,7 @@
 #include "engine/PresentationSettings.hpp"
 #include "engine/PlayerProfile.hpp"
 #include "engine/SettingsCoordinator.hpp"
+#include "engine/SplatPainter.hpp"
 #include "engine/Time.hpp"
 #include "engine/Window.hpp"
 #include "engine/render/VulkanRenderer.hpp"
@@ -77,9 +78,20 @@ private:
         const InputRouter::Frame& input,
         const VulkanRenderer::PreparedFrame* previousRenderFrame);
     void drawDraftExitConfirmation();
+    // Ring showing where and how large the ground brush will paint.
+    void drawBrushPreview();
     void updateEditorPainting(
         const InputRouter::EditorInput& input,
         const VulkanRenderer::PreparedFrame* previousRenderFrame);
+    // Ground-splat brush painting, which replaces tile painting while a paint
+    // session is open. Returns true when it handled the pointer.
+    bool updateGroundPainting(
+        const InputRouter::EditorInput& input,
+        const VulkanRenderer::PreparedFrame* previousRenderFrame,
+        Vec2 pointerPixels);
+    // Opens the splat map belonging to the document currently being edited.
+    bool openGroundPainting();
+    void pushPaintedSplatMap();
     [[nodiscard]] InputRouter::RoutingContext inputRoutingContext() const;
     [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;
     // Scans levels/ once into CampaignSession; the level set is fixed
@@ -131,6 +143,15 @@ private:
     AnimationPreviewDebugUi animationPreviewDebugUi_;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;
     std::optional<GridPosition3> editorHoverCell_;
+    SplatPainter splatPainter_;
+    // World position of the brush under the pointer, for the preview ring:
+    // x/y are board tiles, z is the height of the surface it landed on.
+    // Empty when the pointer is not over paintable ground.
+    std::optional<Vec3> editorBrushPoint_;
+    // Last painted state pushed to the GPU. Comparing against the painter's
+    // revision keeps re-uploads to at most one per frame, and none at all
+    // while the brush is not changing anything.
+    uint64_t uploadedSplatRevision_ = 0;
     bool running_ = true;
     bool draftExitConfirmationOpen_ = false;
 };

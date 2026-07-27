@@ -42,6 +42,9 @@ enum class PreparedSurfaceMaterial {
     Standard,
     Water,
     MirrorEnergy,
+    // Splat-mapped ground: only the upward-facing top of a ground tile uses
+    // it, so the sides keep the flat tile color.
+    GroundSplat,
 };
 
 struct PreparedIsoFace {
@@ -58,6 +61,10 @@ struct PreparedIsoFace {
     bool pickable = false;
     Vec2 gridSize {};
     Vec2 worldOrigin {};
+    // World Z of the face's plane. Tile tops are flat, so one value covers
+    // the whole face. Needed to draw overlays that sit on the surface rather
+    // than at an assumed height.
+    float worldHeight = 0.0f;
     PreparedSurfaceMaterial material = PreparedSurfaceMaterial::Standard;
     uint32_t shorelineMask = 0;
     float depth = 0.0f;
@@ -108,6 +115,23 @@ public:
         uint32_t levelWidth,
         uint32_t levelHeight,
         uint32_t gridPickBorder = 0) const;
+
+    // Continuous world-tile position under the pointer on a splattable ground
+    // top, for brush painting. Unlike pickGridCell this resolves *within* a
+    // tile - a brush has to land where the pointer is, not at a cell centre -
+    // and is perspective-correct, so a stroke does not drift toward the far
+    // edge of a tile under the isometric projection.
+    //
+    // Returns nothing when the pointer is not over paintable ground.
+    //
+    // The result carries the surface's world Z as well as its tile position.
+    // Painting only needs x/y, but an overlay drawn at an assumed height sits
+    // visibly off the surface under an isometric projection, and the error
+    // grows with distance from the camera.
+    [[nodiscard]] std::optional<Vec3> pickGroundPoint(
+        const PreparedRenderScene& scene,
+        Vec2 pixelPosition,
+        Vec2 outputExtent) const;
 
     [[nodiscard]] static Vec3 projectIsoPoint(
         const IsoRenderLayout& layout,

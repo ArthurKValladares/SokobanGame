@@ -657,6 +657,20 @@ void appendUnboundedWaterExterior(
         { boardWidth + 2.0f, continuation });
 }
 
+// Ground splat textures are optional: a manifest without them leaves the ids
+// unset and ground falls back to the flat tile color. `location` selects that
+// screen's splat map; an empty location (the editor) takes the shared map.
+[[nodiscard]] GroundSplatTextures groundSplatTextures(
+    const AssetManifest& manifest,
+    std::optional<LevelLocation> location)
+{
+    return groundSplatTexturesForScreen(
+        [&manifest](std::string_view name) {
+            return manifest.findTextureIdByName(name);
+        },
+        location);
+}
+
 template <typename CellAt, typename ScaleForTile>
 void appendStaticTiles(
     RenderFrameData& frame,
@@ -699,6 +713,11 @@ void appendStaticTiles(
                         tileTypeIsMirror(cell.tile)
                         ? config::mirrorModelRotationOffsetRadians
                         : 0.0f,
+                    // Procedural ground tops blend grass/rock through the
+                    // splat map; modelled tiles keep their own materials.
+                    .effect = cell.tile == TileType::Ground
+                        ? RenderSurfaceEffect::GroundSplat
+                        : RenderSurfaceEffect::Standard,
                 };
                 applyTileScale(renderTile, scaleForTile(cell.tile));
                 frame.tiles.push_back(renderTile);
@@ -739,6 +758,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     frame.waterGridBounds = waterGridBoundsFor(authoredGameplayExtent);
     frame.cameraExtent = authoredGameplayExtent.value_or(
         RenderFrameData::CameraExtent {});
+    frame.groundSplat = groundSplatTextures(input.manifest, input.levelLocation);
     frame.waterAnimationTimeSeconds =
         input.presentation.worldAnimationTimeSeconds();
     frame.effectAnimationTimeSeconds =
@@ -1248,6 +1268,10 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
     frame.levelWidth = input.editor.documentWidth();
     frame.levelHeight = input.editor.documentHeight();
     frame.gridPickBorder = 1;
+    // Previews the edited screen's own map, so what the brush paints is what
+    // is on screen. A scratch document belongs to no screen and falls back to
+    // the shared map.
+    frame.groundSplat = groundSplatTextures(input.manifest, input.levelLocation);
     frame.waterAnimationTimeSeconds = input.worldAnimationTimeSeconds;
 
     const Level::LayerRows& layers = input.editor.documentLayers();
@@ -1436,6 +1460,10 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
                 .modelRotationOffsetRadians = tileTypeIsMirror(tile)
                     ? config::mirrorModelRotationOffsetRadians
                     : 0.0f,
+                // Match gameplay so the editor previews the real ground look.
+                .effect = tile == TileType::Ground
+                    ? RenderSurfaceEffect::GroundSplat
+                    : RenderSurfaceEffect::Standard,
             };
             applyTileScale(renderTile, input.settings.tileScale(tile));
             frame.tiles.push_back(renderTile);

@@ -77,6 +77,19 @@ public:
     [[nodiscard]] std::optional<GridPosition3> pickIsoGridCell(
         const PreparedFrame& frame,
         Vec2 pixelPosition) const;
+    // Continuous world-tile position on splattable ground, for brush painting.
+    // Z is the surface's world height, so overlays can sit on it.
+    [[nodiscard]] std::optional<Vec3> pickIsoGroundPoint(
+        const PreparedFrame& frame,
+        Vec2 pixelPosition) const;
+    // Uploads freshly painted pixels over a resident texture.
+    bool updateTexture(RenderTexture texture, const ImageData& image);
+    // World point -> pixel position, using the frame's own camera. Lets the
+    // debug UI draw overlays that sit correctly on the 3D board (the brush
+    // preview ring) without duplicating the projection.
+    [[nodiscard]] std::optional<Vec2> projectToPixels(
+        const PreparedFrame& frame,
+        Vec3 worldPoint) const;
     void waitIdle() const;
     [[nodiscard]] AntiAliasingMode antiAliasingMode() const;
     [[nodiscard]] VkSampleCountFlagBits activeSampleCount() const;

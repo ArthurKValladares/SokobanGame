@@ -228,11 +228,12 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/InputBindings.*`: platform-neutral semantic action and binding model. Each action owns an ordered list of keyboard, gamepad-button, and signed gamepad-axis bindings, allowing keyboard+D-pad+stick defaults. `assignBinding` implements remapping semantics (removes the identical binding from every action, then replaces only the action's bindings of the same kind, so a d-pad rebind keeps a stick binding); `bindingDisplayName`/`actionBindingsDisplay` provide UI labels.
 - `src/engine/Input.*`: SDL3 device owner and action mapper. Tracks raw keyboard/mouse state for editor tooling, hot-plugs gamepads, selects the most recently used controller, normalizes stick axes with threshold/pressed-edge semantics, clears stuck input on focus loss, reports active-device diagnostics, and converts raw SDL events into typed remapping candidates. `InputRouter` controls event admission and distributes its state to active consumers. Covered by `tests/InputTests.cpp` (`sokoban_input_tests`).
 - `src/engine/PlayerProfile.*` + `src/engine/PlayerProfileCodec.cpp`:
-  current format-10 player progress model plus one owned `UserSettings` value.
-  Forward JSON patches (`migrate1to2` through `migrate9to10`) feed one strict
+  current format-12 player progress model plus one owned `UserSettings` value.
+  Forward JSON patches (`migrate1to2` through `migrate11to12`) feed one strict
   current-format parse. Format 9 made progress/settings independently optional
-  for split slot and shared-settings files; format 10 adds persisted Mirror
-  bindings and migrates the old default Undo key. Stores exact active-screen
+  for split slot and shared-settings files; format 10 added Mirror bindings,
+  format 11 restored the intended `Z` Undo / `F` Mirror defaults, and format 12
+  added the remappable Show Top-Down View action. Stores exact active-screen
   gameplay/undo state, progress, bests, reached screens, typed input bindings,
   audio/video/accessibility settings, and normalized display/render settings.
   Covered with `SaveStore` by `tests/PlayerProfileTests.cpp`.
@@ -331,7 +332,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   `allowLevelSelect` adds a
   "Level Select" row (pause context only; `Application` passes it once every
   level on disk has a completion record, so it is permanent for that save
-  and cleared by New Game). The Controls page lists the six
+  and cleared by New Game). The Controls page lists the eight
   remappable gameplay actions (menu navigation is deliberately fixed) with
   press-to-rebind capture: `capturingBinding()` tells `InputRouter` to return
   binding candidates for `provideBindingCandidate` and suppress raw key/pad
@@ -343,8 +344,8 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   (Main with Continue/New Game/Options/Quit and a destructive-action New Game
   confirmation). The world is not loaded while the main menu is up; only the
   Continue/New Game results make `Application` load it. A level/screen-select
-  page exists but is reachable only through `openLevelSelect` (meant for a
-  future in-game entry point, currently unwired): the caller supplies
+  page is opened as a standalone flow from the pause/options or completion
+  UI once shell policy allows level selection. The caller supplies
   `TitleLevelInfo` rows (screen count, unlocked/completed, reached screens,
   bests); locked levels render inert, completed levels expose every screen,
   unfinished levels expose only reached screens, and Left/Right picks the
@@ -483,9 +484,12 @@ Core movement (discrete step system):
   in the Debug UI under Tile Geometry > Step Rates.
 - WASD moves the player by default (one tile per step; held keys step repeatedly).
 - `Z` undoes one step by default; undoing pauses pending world motion until the
-  next input-driven step. `R` restarts by default. These six gameplay bindings
-  are loaded from `PlayerProfile::settings.input`. Gamepads use D-pad or left stick for
-  movement, west/X for undo, north/Y for restart, and Start for menu/back.
+  next input-driven step. `R` restarts, `F` activates mirrors, and holding `T`
+  animates the camera to a straight-down pitch. These eight gameplay bindings
+  are loaded from `PlayerProfile::settings.input`. Gamepads use D-pad or left
+  stick for movement, east/B for mirrors, west/X for undo, north/Y for restart,
+  and Start for menu/back; the top-down action is remappable but has no default
+  gamepad binding.
 - `GameplaySession` stores one action record per completed step for undo; the
   authoritative state commits only after `Application` finishes animating the
   action.
@@ -620,7 +624,7 @@ Editor capabilities:
 
 - Load/save `.scr` files.
 - New/resize documents.
-- Add/delete layers.
+- Insert layers above or below the active layer, and delete layers.
 - Paint tile types from a palette.
 - Delete tiles.
 - Undo editor operations.
@@ -641,8 +645,13 @@ Important editor behavior:
 - The active layer is shown with lower layers underneath.
 - "Lock edits to current layer" changes paint targeting behavior.
 - Clicking usually adds above; `R + click` replaces; `D + click` deletes.
-- Deletion preview now dithers the selected tile instead of hiding it completely.
+- Deletion preview dithers the selected tile while replacing its normal draw
+  with an invisible pick-only proxy. Discarded pixels therefore reveal the
+  actual scene instead of an identical copy of the tile, while top/side hover
+  selection remains stable.
 - Addition preview also uses dithered preview geometry.
+- Painting one cell beyond any document edge grows every layer in the same
+  undoable transaction; north/west growth shifts existing authored cells.
 - Picking logic was fixed so top/side wall faces are selected more reliably instead of accidentally selecting the ground below.
 - Placing a ladder in the editor validates same-layer adjacent Ground.
 
@@ -710,10 +719,13 @@ CMake asset pipeline:
   game version before reading `manifest.json`.
 - CMake `install` and CPack ZIP rules consume this same staged tree and include
   SDL, miniaudio, ImGui, and discovered asset license/readme files.
-- Shaders compile with a fixed `MODEL_TEXTURE_COUNT=16`, which must equal
-  `sokoban::maxModelTextures` (`AssetManifest.hpp`); descriptor writes pad the
-  texture array with a fallback texture, so the manifest can define up to 16
-  textures without shader or pipeline changes.
+- Shaders compile with `MODEL_TEXTURE_COUNT` read out of
+  `sokoban::maxModelTextures` (`AssetManifest.hpp`) at configure time, so the
+  two cannot drift; descriptor writes pad the texture array with a fallback
+  texture, so the manifest can define up to that many textures without shader
+  or pipeline changes. Growing it is a one-line edit to that constant followed
+  by a CMake re-configure (which happens automatically - the header is in
+  `CMAKE_CONFIGURE_DEPENDS`).
 
 Runtime lazy asset pipeline:
 
@@ -771,14 +783,202 @@ Shader notes:
 
 - `model.vert.glsl` accepts position, normal, UV, and texture index.
 - `triangle.frag.glsl` samples the shadow map, resolved scene color, and a
-  fixed 16-slot model texture descriptor array (`MODEL_TEXTURE_COUNT`, padded
-  with a fallback texture).
+  model texture descriptor array (`MODEL_TEXTURE_COUNT`, padded with a
+  fallback texture). That count is compiled into every shader from
+  `CMakeLists.txt`, which reads it out of `sokoban::maxModelTextures` in
+  `AssetManifest.hpp`; the manifest rejects more textures than the cap, and
+  device selection rejects GPUs that cannot bind that many sampled images.
 - Each manifest model declares `material none`, `material texture <Name>`, or
   `material primitive-texture-index <n>`; draw code passes that mode and
   texture index through push constants instead of checking model names or
   sampler bindings. A `belt-scroll true` model scrolls its UVs with the
   conveyor clock (no hard-coded conveyor special case).
 - Push constants carry transform, lighting, grid, material, and texture options.
+- `ground_splat.frag.glsl` blends two ground textures through a splat map on
+  ground tile tops. It reuses the standard tile lighting, shadowing, grid
+  overlay, and editor-preview dither so splatted ground matches neighbouring
+  surfaces exactly. `TilePushConstants` is already at the guaranteed 256-byte
+  limit, so the pass reuses slots the ground path leaves free rather than
+  growing the block: `materialOptions.x` carries world-origin X (opaque
+  ground never blurs) and `textureOptions` carries the three one-based
+  texture handles plus world-origin Y. Handles are one-based because zero
+  means "unresolved", which falls back to the flat tile color.
+
+Ground splatting:
+
+- Textures are generated, not authored: `python tools/make_ground_textures.py`
+  writes seamless tiling `ground_grass.png`, `ground_rock.png`, the greyscale
+  `ground_splat.png`, and one `ground_splat_level<N>_screen<M>.png` per screen
+  into `assets/custom/textures/`. The script uses
+  only the standard library (PNGs are encoded by hand with `zlib`), is
+  deterministic for a fixed seed, and documents its knobs (resolution, layer
+  colors, noise octaves/frequency, splat patch scale and contrast) at the top.
+  Seamlessness matters because the UVs wrap across tiles - any seam would show
+  as a grid line across the board.
+- The manifest declares them as ordinary textures (`GroundGrass`,
+  `GroundRock`, `GroundSplatMap`; names live in `RenderTypes.hpp` as
+  `groundSplat*TextureName` so the builder and the requirement planner cannot
+  drift). They are optional: `RenderFrameBuilder` resolves them with the
+  non-throwing `AssetManifest::findTextureIdByName`, and when any is missing
+  the ground falls back to the flat tile color and the standard pipeline, so
+  a trimmed manifest still renders.
+- Resolving an id is not enough to make a texture usable: textures are only
+  uploaded into the descriptor array when something *requires* them, so
+  `RenderAssetRequirements` requires all three both per level (preload) and
+  per frame (draw-time safety net). Skipping that step leaves those slots
+  holding the 1x1 white fallback and the ground renders flat - the failure
+  mode is silent, so `tests/AssetRequirementsTests.cpp` locks it with a
+  regression case.
+- `RenderFrameBuilder` marks Ground tiles with
+  `RenderSurfaceEffect::GroundSplat` (both the gameplay and editor paths, so
+  the editor previews the real look). `IsoScenePreparer` maps that to
+  `PreparedSurfaceMaterial::GroundSplat` for the upward-facing top face only -
+  block sides keep the flat tile material - and `VulkanSceneRecorder` binds
+  the dedicated pipeline and calls `drawGroundSplatFace`.
+- The two material layers use world-grid UVs: face-local coordinates are
+  scaled by the face's size in tiles and offset by the face's world origin, so
+  the grain is continuous across adjacent tiles and stable as the camera
+  moves, rather than stamping the same texture per tile. `GROUND_UV_TILES`
+  (repeat span, in tiles) is a constant at the top of the shader.
+- The splat map is the opposite: it does **not** tile. One map covers one
+  screen's board exactly, which is what makes it paintable - a repeating map
+  would echo every brush stroke across the board. Its coverage is not pushed
+  per face (the 256-byte push-constant block is completely full); instead the
+  shader divides `textureSize()` by `GROUND_SPLAT_TEXELS_PER_TILE` to recover
+  the board size. That constant must stay equal to
+  `SplatCanvas::texelsPerTile` and `SPLAT_TEXELS_PER_TILE` in
+  `tools/make_ground_textures.py`, or every stroke lands offset and rescaled.
+- Texture sampling is three independent manifest options, because the ground
+  needs three different combinations:
+  - `"tiling": true` - repeat addressing instead of clamp-to-edge. The
+    material layers need it (their UVs leave 0..1); the splat map must not
+    have it.
+  - `"filter": "linear"` - interpolate instead of point sample. All three
+    ground textures want it; the pixel-art atlases do not.
+  - `"colorSpace": "linear"` - upload as UNORM instead of SRGB. The splat map
+    needs it: it is weight data, and an sRGB decode turns a painted 0.5 into
+    a 0.21 blend weight.
+  All three default to the plain-colour-atlas behaviour, so every other
+  texture is unaffected, and `AssetManifestEditor` re-serializes them so a
+  save from the in-game manifest editor cannot silently change how the ground
+  is sampled.
+
+Per-screen splat maps:
+
+- Every screen gets its own blend map, so screens differ in where rock shows
+  through the grass - not just levels. The convention is the texture name
+  `GroundSplatMap<level>_<screen>` (`groundSplatMapTextureNameForScreen` in
+  `RenderTypes.hpp`), backed by
+  `custom/textures/ground_splat_level<N>_screen<M>.png`. Both indices are
+  zero-based, matching `levels/level<N>/screen<M>.scr`. The separator matters:
+  without it, level 1 screen 23 and level 12 screen 3 would collide on the
+  same name.
+- A screen with no map of its own falls back to the shared `GroundSplatMap`.
+  That fallback is deliberate: adding a screen and forgetting to regenerate
+  gives the old look rather than untextured ground. It is also what the level
+  editor uses, since a document belongs to no screen.
+- `groundSplatTexturesForScreen` in `RenderTypes.hpp` is the single definition
+  of that selection-and-fallback rule. `RenderFrameBuilder` and
+  `RenderAssetRequirements` both go through it, because a preloader that
+  fetched a different map than the drawing code would leave the screen
+  sampling an unpublished slot - the same silent flat-ground failure as
+  forgetting to require the texture at all.
+- The location reaches the builder as `GameplayInput::levelLocation` and the
+  planner as the optional third argument to `renderAssetRequirementsForLevel`,
+  both `std::optional<LevelLocation>` and both defaulting to unset, i.e. the
+  shared map.
+- Adding a screen: create `levels/level<N>/screen<M>.scr`, re-run
+  `python tools/make_ground_textures.py` (it discovers screens from the tree
+  rather than taking a count, and deletes maps for screens that no longer
+  exist), and add the matching `GroundSplatMap<N>_<M>` manifest entry with
+  `"tiling": true`. The script exits non-zero and names the missing entry if
+  you skip that last step, because a missing entry is otherwise silent - the
+  screen just renders with the shared map.
+- Maps are board-sized: `boardTiles * 32` pixels, so brush detail is the same
+  on every screen. The generator reads board dimensions straight out of the
+  `.scr`, mirroring `Level::loadFromLayers` (tallest layer, longest row).
+- Budget: each screen costs one slot in the model texture descriptor array,
+  sized by `sokoban::maxModelTextures` (currently 64, 28 in use). That
+  constant is the single source of truth: `CMakeLists.txt` parses it out of
+  `AssetManifest.hpp` at configure time and compiles every shader with
+  `MODEL_TEXTURE_COUNT` set to it, so growing the array is a one-line header
+  edit plus a re-configure. Overflowing throws while parsing the manifest, and
+  `VulkanDeviceContext::isDeviceSuitable` rejects any device whose
+  `maxPerStageDescriptorSampledImages` cannot hold the array, so both failure
+  modes are loud. Far past that point the right fix is a layered texture
+  indexed by screen, not a bigger array.
+
+Painting splat maps in the editor (Debug builds only):
+
+- The Level Editor panel has a "Ground Paint" section. "Paint Ground" opens
+  the splat map for the document being edited; from then on the pointer paints
+  instead of placing tiles, and Ctrl+Z undoes strokes rather than tile edits.
+- Three constraints make painting dead-silent if they are not respected, and
+  all three were bugs in the first version - worth knowing before touching
+  this code:
+  - **Editor input only exists in document-editing mode.** `InputRouter` fills
+    `frame.editor` only when `RoutingContext::editorEditing` is set, and
+    `Application::update` only calls `updateEditorPainting` when
+    `levelEditor_.editingDocument()`. Opening a paint session therefore also
+    switches the editor into that view; from the "current screen" view there
+    is no editor pointer input at all, so nothing happens and nothing reports
+    an error.
+  - **Painting must not use the tile pick list.** `scene.pickFaceIndices`
+    excludes editor previews, and every layer except the active one is a
+    preview. Ground normally lives on layer 0 while the active layer is above
+    it, so keying off that list makes the brush dead in the common case.
+    `pickGroundPoint` scans all faces and filters by material instead.
+  - **Strokes key off the held button, not the pressed edge.**
+    `EditorInput::primaryPressed` is true only on the frame the button goes
+    down (correct for placing one tile per click); `primaryDown` is the held
+    state. Driving strokes from the edge ends them a frame after they start,
+    so dragging is impossible.
+- `pickGroundPoint` returns a `Vec3`: x/y are the board tile position, z is the
+  world height of the surface that was hit. Painting only uses x/y, but the
+  preview ring is drawn by projecting world points, so it needs the real
+  height. Ground is often not at z=0 - editor previews are nudged up slightly,
+  and raised blocks are a whole unit higher - and assuming a height puts the
+  ring below the paint, by more the further the surface is from the camera.
+- The pieces, and why they are split this way:
+  - `SplatCanvas` (`src/engine/SplatCanvas.*`) - the weight buffer and the
+    round brush (radius in board tiles, hardness, opacity, black/white).
+    Entirely headless, which is where nearly all of the behaviour is pinned
+    down: `tests/SplatCanvasTests.cpp`.
+  - `SplatPainter` (`src/engine/SplatPainter.*`) - one paint session: which
+    screen, load/save, stroke-level undo, dirty tracking. Also headless;
+    `tests/SplatPainterTests.cpp`.
+  - `IsoScenePreparer::pickGroundPoint` - pointer to a continuous world-tile
+    position. Unlike `pickGridCell` it resolves *within* a tile and is
+    perspective-correct via the stored per-corner clip w.
+    `tests/GroundPickTests.cpp` round-trips world -> pixel -> world.
+  - `VulkanModelResources::updateTexture` - re-uploads painted pixels into the
+    existing image, so the view, sampler and every descriptor pointing at it
+    stay valid and no descriptor rewrite is needed.
+  - `encodeGrayscalePng` (`src/engine/render/PngWriter.*`) - saving. The engine
+    otherwise only reads images; this is a small self-contained encoder
+    (fixed-Huffman deflate, adaptive filters) rather than a vendored
+    dependency, verified by round-tripping through stb_image in
+    `tests/PngWriterTests.cpp`.
+- Brush radius is in **board tiles**, not pixels or texels, so a brush keeps
+  its physical size on the ground whatever the board size or camera distance.
+- A stroke is one press-drag-release and one undo step, however many pointer
+  samples it contains. `stampLine` interpolates between samples so a fast drag
+  paints a continuous line rather than a row of discs. Strokes that change
+  nothing record no undo step, so Ctrl+Z never appears to do nothing.
+- Saving is explicit ("Save Map"), and writes to the source `assets/` tree and
+  mirrors into the staged tree beside the executable, so a painted map is both
+  committed and live without re-running the content pipeline.
+- The preview ring is projected from world points through the *previous*
+  frame's camera - the same one that produced the brush position - and drawn
+  with ImGui's background draw list. It deliberately needs no shader or
+  descriptor changes; the tile push-constant block has no room left.
+- Re-uploads are throttled by comparing `SplatPainter::revision()` against the
+  last uploaded value, so a stroke that changes nothing does not stall the
+  device (the upload path does a full `vkDeviceWaitIdle`, which is acceptable
+  only because it is editor-only and skipped when idle).
+- The session closes itself if the document changes underneath it, so loading
+  another screen from the file browser cannot paint screen A's map while
+  showing screen B's board.
 
 ## UI And Text Rendering
 
@@ -928,7 +1128,7 @@ Major recent additions and fixes:
   (`PlayerProfile::settingsOnly`/`adoptSettingsFrom`), bootstrapped from the
   pre-split save. Covered by store-isolation, settings-split, and
   slots-page tests.
-- Added the Options > Controls input-remapping page: the six gameplay actions
+- Added the Options > Controls input-remapping page: the eight gameplay actions
   render their current keyboard/pad bindings, confirm starts a raw-event
   capture (fed from `InputState::bindingCandidate` in the SDL loop with
   navigation suppressed), same-kind bindings are replaced while other-device
@@ -1036,7 +1236,7 @@ Major recent additions and fixes:
   queue/drop diagnostics, and a focused concurrent logger regression suite.
 - Replaced per-test production-source lists with reusable `sokoban_core`,
   `sokoban_ui`, and `sokoban_render_vulkan` static libraries. The game,
-  content tool, and all 29 test executables now share one set of production
+  content tool, and all 30 test executables now share one set of production
   compile definitions and link dependencies; tests compile only their own
   source, and the CMake helper rejects future `src/` entries.
 - Split application presentation/configuration responsibilities into
@@ -1097,6 +1297,9 @@ Major recent additions and fixes:
   - Climbing is blocked when the attached tile is occupied.
 - Fixed editor deletion picking so elevated/wall tiles are selected more accurately.
 - Changed deletion preview to dither the selected tile instead of hiding it.
+  The original tile now remains only as pick geometry during deletion preview,
+  preventing the ordinary tile underneath from visually filling every dither
+  hole while preserving stable hover selection.
 - Fixed addition preview picking for adding on top of top-wall faces.
 - Added conveyor tiles `^`, `v`, `>`, `<`.
   - Uses Platformer Pack conveyor asset.
@@ -1117,7 +1320,7 @@ At the time this handoff was updated:
 - Full Debug and Release builds passed from the clean `out/visual-studio` build
   tree. Clean installed Release builds also start and remain healthy without
   access to the source checkout.
-- All 29 CTest suites pass, including real-font/options UI, concurrent texture decoding,
+- All 30 CTest suites pass, including real-font/options UI, concurrent texture decoding,
   input/gamepad mapping, profile
   migration/recovery, gameplay
   move-count semantics, mandatory validation of the shipped manifest,
@@ -1125,9 +1328,9 @@ At the time this handoff was updated:
   transitions, mirror transaction/visualization ownership, and the
   `content_pipeline` suite.
 - `cmake --build out\visual-studio --config Release --target package` produces
-  `out/visual-studio/Sokoban3D-0.1.0-Windows-x64.zip`. The current staged tree
-  contains 55 reachable files (about 4 MB) instead of the roughly 236 MB / 5,964
-  files in the source vendor packs.
+  `out/visual-studio/Sokoban3D-0.1.0-Windows-x64.zip`. The latest verified
+  Debug content stage contains 73 reachable files (about 23.3 MB) instead of
+  copying the complete source vendor packs.
 - Migrated the asset manifest from the custom indentation-based format to
   versioned strict JSON parsed by pinned nlohmann/json 3.11.3. The parser now
   rejects unknown schema properties and wrong JSON types before domain
@@ -1218,8 +1421,8 @@ Rendering/assets:
 - Isometric camera tuning lives in `CameraConfig.hpp`. `cameraPitchDegrees`
   controls the angle away from straight down, `cameraYawDegrees` controls the
   heading around the board, and FOV, board-relative distance, and final
-  fit/zoom have adjacent controls. The `15` degree pitch and `0` degree yaw
-  preserve the established view.
+  fit/zoom have adjacent controls. The current default pitch is `30` degrees
+  and the default yaw is `0` degrees.
 - Water overlay visibility is independently tunable in `WaterConfig.hpp`
   through `waterPrimaryRippleOpacity`, `waterSecondaryRippleOpacity`,
   `waterPrimaryShorelineOpacity`, `waterSecondaryShorelineOpacity`, and
@@ -1293,10 +1496,14 @@ Engineering:
   document commands. Both select the inserted air layer and are undoable;
   insertion below shifts existing layers and renumbers the configured water
   layer when necessary.
-- Editor hover previews are layered over the original tile or empty-cell pick
-  surface. Never remove that underlying pick geometry while hovered: previews
-  are intentionally non-pickable, and doing so creates a frame-to-frame loop
-  where selection alternates between adjacent cells or selected/unselected.
+- Editor hover previews are layered over stable underlying pick geometry.
+  Addition/replacement previews retain the ordinary underlying tile or
+  empty-cell pick surface. Deletion previews replace the ordinary tile draw
+  with a shape-equivalent `pickOnly` proxy so dithering reveals the real scene
+  without destabilizing selection. Never remove the underlying pick geometry:
+  previews are intentionally non-pickable, and doing so creates a
+  frame-to-frame loop where selection alternates between adjacent cells or
+  selected/unselected.
 - Invisible editor pick surfaces for air and the one-cell expansion border are
   projected at the top of their logical cell (`z + 1`), not its base. This
   keeps the pick quad coincident with a full-height preview block's top under

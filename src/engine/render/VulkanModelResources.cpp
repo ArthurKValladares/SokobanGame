@@ -417,7 +417,10 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
             image,
             slot.gpu.image,
             slot.gpu.sampler,
-            slot.upload);
+            slot.upload,
+            samplingFor(manifest_->textures()[textureIndex]));
+        slot.gpu.width = image.width;
+        slot.gpu.height = image.height;
         slot.state = LoadState::Uploading;
         ++textureUploadSubmissions_;
     } catch (...) {
@@ -716,14 +719,25 @@ VulkanModelResources::GpuMesh VulkanModelResources::uploadMesh(
     return result;
 }
 
+VulkanModelResources::TextureSampling VulkanModelResources::samplingFor(
+    const AssetManifest::Texture& texture)
+{
+    return {
+        .tiling = texture.tiling,
+        .filter = texture.filter,
+        .colorSpace = texture.colorSpace,
+    };
+}
+
 void VulkanModelResources::createTextureBlocking(
     const ImageData& image,
     OwnedImage& textureImage,
-    VkSampler& sampler)
+    VkSampler& sampler,
+    TextureSampling sampling)
 {
     PendingTextureUpload upload;
     try {
-        beginTextureUpload(image, textureImage, sampler, upload);
+        beginTextureUpload(image, textureImage, sampler, upload, sampling);
         vkCheck(
             vkWaitForFences(device_, 1, &upload.fence, VK_TRUE, UINT64_MAX),
             "vkWaitForFences initial texture upload failed");
@@ -742,27 +756,22 @@ void VulkanModelResources::beginTextureUpload(
     const ImageData& image,
     OwnedImage& textureImage,
     VkSampler& sampler,
-    PendingTextureUpload& upload)
+    PendingTextureUpload& upload,
+    TextureSampling sampling)
 {
     if (image.width == 0 || image.height == 0 || image.rgba.empty()) {
         throw std::runtime_error("Texture image contains no pixels");
     }
-    const VkDeviceSize imageBytes = image.rgba.size();
-    upload.staging = createBuffer(
-        imageBytes,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-    void* mapped = nullptr;
-    vkCheck(vkMapMemory(device_, upload.staging.memory, 0, imageBytes, 0, &mapped),
-        "vkMapMemory texture staging failed");
-    std::memcpy(mapped, image.rgba.data(), image.rgba.size());
-    vkUnmapMemory(device_, upload.staging.memory);
-
+    // Colour textures decode sRGB on read; data textures (the splat weight
+    // map) must not, or a painted 0.5 arrives at the shader as 0.21.
+    const VkFormat textureFormat =
+        sampling.colorSpace == TextureColorSpace::Linear
+        ? VK_FORMAT_R8G8B8A8_UNORM
+        : VK_FORMAT_R8G8B8A8_SRGB;
     VkImageCreateInfo imageInfo {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = VK_IMAGE_TYPE_2D,
-        .format = VK_FORMAT_R8G8B8A8_SRGB,
+        .format = textureFormat,
         .extent = { image.width, image.height, 1 },
         .mipLevels = 1,
         .arrayLayers = 1,
@@ -791,16 +800,25 @@ void VulkanModelResources::beginTextureUpload(
 
     textureImage.view = createImageView(
         textureImage.image,
-        VK_FORMAT_R8G8B8A8_SRGB,
+        textureFormat,
         VK_IMAGE_ASPECT_COLOR_BIT);
+    // Address mode and filtering are independent: the ground material layers
+    // repeat and filter smoothly, the splat map clamps but still filters
+    // smoothly (it spans the board once), and atlases do neither.
+    const VkSamplerAddressMode addressMode = sampling.tiling
+        ? VK_SAMPLER_ADDRESS_MODE_REPEAT
+        : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    const VkFilter filter = sampling.filter == TextureFilter::Linear
+        ? VK_FILTER_LINEAR
+        : VK_FILTER_NEAREST;
     VkSamplerCreateInfo samplerInfo {
         .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-        .magFilter = VK_FILTER_NEAREST,
-        .minFilter = VK_FILTER_NEAREST,
+        .magFilter = filter,
+        .minFilter = filter,
         .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
-        .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeU = addressMode,
+        .addressModeV = addressMode,
+        .addressModeW = addressMode,
         .anisotropyEnable = VK_FALSE,
         .compareEnable = VK_FALSE,
         .minLod = 0.0f,
@@ -808,6 +826,26 @@ void VulkanModelResources::beginTextureUpload(
     };
     vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &sampler),
         "vkCreateSampler model texture failed");
+
+    recordTextureCopy(image, textureImage, upload);
+}
+
+void VulkanModelResources::recordTextureCopy(
+    const ImageData& image,
+    OwnedImage& textureImage,
+    PendingTextureUpload& upload)
+{
+    const VkDeviceSize imageBytes = image.rgba.size();
+    upload.staging = createBuffer(
+        imageBytes,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    void* mapped = nullptr;
+    vkCheck(vkMapMemory(device_, upload.staging.memory, 0, imageBytes, 0, &mapped),
+        "vkMapMemory texture staging failed");
+    std::memcpy(mapped, image.rgba.data(), image.rgba.size());
+    vkUnmapMemory(device_, upload.staging.memory);
 
     VkCommandBufferAllocateInfo commandBufferInfo {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -897,6 +935,55 @@ void VulkanModelResources::beginTextureUpload(
     vkCheck(vkQueueSubmit2(graphicsQueue_, 1, &submit, upload.fence),
         "vkQueueSubmit2 texture upload failed");
     upload.submitted = true;
+}
+
+bool VulkanModelResources::updateTexture(
+    RenderTexture texture, const ImageData& image)
+{
+    if (texture.isNone() || texture.index() >= textures_.size()) {
+        return false;
+    }
+    TextureSlot& slot = textures_[texture.index()];
+    // Only a published texture has an image to write into. An unpublished one
+    // will pick the painted map up from disk when it is first loaded.
+    if (slot.state != LoadState::Ready ||
+        slot.gpu.image.image == VK_NULL_HANDLE) {
+        return false;
+    }
+    if (image.width == 0 || image.height == 0 || image.rgba.empty()) {
+        return false;
+    }
+    // The image was sized for its board when created; a differently sized map
+    // needs a new image and a descriptor rewrite, which is not what this
+    // in-place path is for.
+    if (image.width != slot.gpu.width || image.height != slot.gpu.height) {
+        return false;
+    }
+
+    // Frames in flight may still be sampling this texture. Painting happens
+    // only in the editor and only when a stroke changed something, so a full
+    // idle here is far simpler than per-frame staging rings and costs nothing
+    // during normal play.
+    vkDeviceWaitIdle(device_);
+
+    PendingTextureUpload upload;
+    try {
+        // Reuses the existing image, view and sampler, so every descriptor
+        // that already points at this texture stays valid and no descriptor
+        // rewrite is needed.
+        recordTextureCopy(image, slot.gpu.image, upload);
+        vkCheck(
+            vkWaitForFences(device_, 1, &upload.fence, VK_TRUE, UINT64_MAX),
+            "vkWaitForFences painted texture update failed");
+        destroyTextureUpload(upload);
+    } catch (...) {
+        if (upload.submitted) {
+            (void)vkDeviceWaitIdle(device_);
+        }
+        destroyTextureUpload(upload);
+        throw;
+    }
+    return true;
 }
 
 void VulkanModelResources::destroyTextureUpload(

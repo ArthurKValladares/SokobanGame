@@ -324,6 +324,14 @@ void VulkanRenderer::ensureAssets(const RenderAssetRequirements& requirements)
     }
 }
 
+bool VulkanRenderer::updateTexture(
+    RenderTexture texture, const ImageData& image)
+{
+    // The image, view and sampler are reused, so no descriptor rewrite is
+    // needed and descriptorSync_ is deliberately left alone.
+    return modelResources_.updateTexture(texture, image);
+}
+
 void VulkanRenderer::handleEvent(const SDL_Event& event)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -386,6 +394,48 @@ std::optional<GridPosition3> VulkanRenderer::pickIsoGridCell(
         frameData.levelWidth,
         frameData.levelHeight,
         frameData.gridPickBorder);
+}
+
+std::optional<Vec3> VulkanRenderer::pickIsoGroundPoint(
+    const PreparedFrame& frame,
+    Vec2 pixelPosition) const
+{
+    const PreparedFrameScratch& prepared = resolvePreparedFrame(frame);
+    const RenderFrameData& frameData = prepared.frameData;
+    if (frameData.viewMode != RenderViewMode::Isometric3D ||
+        activeResources_.swapchain->extent().width == 0 ||
+        activeResources_.swapchain->extent().height == 0) {
+        return std::nullopt;
+    }
+
+    const VkExtent2D outputExtent = activeResources_.swapchain->extent();
+    return scenePreparer_.pickGroundPoint(
+        prepared.scene,
+        pixelPosition,
+        {
+            static_cast<float>(outputExtent.width),
+            static_cast<float>(outputExtent.height),
+        });
+}
+
+std::optional<Vec2> VulkanRenderer::projectToPixels(
+    const PreparedFrame& frame,
+    Vec3 worldPoint) const
+{
+    const PreparedFrameScratch& prepared = resolvePreparedFrame(frame);
+    if (prepared.frameData.viewMode != RenderViewMode::Isometric3D) {
+        return std::nullopt;
+    }
+    const VkExtent2D outputExtent = activeResources_.swapchain->extent();
+    if (outputExtent.width == 0 || outputExtent.height == 0) {
+        return std::nullopt;
+    }
+    const Vec3 clip = IsoScenePreparer::projectIsoPoint(
+        prepared.scene.isoLayout, prepared.scene.renderExtent, worldPoint);
+    return Vec2 {
+        (clip.x + 1.0f) * 0.5f * static_cast<float>(outputExtent.width),
+        (1.0f - clip.y) * 0.5f * static_cast<float>(outputExtent.height),
+    };
 }
 
 void VulkanRenderer::waitIdle() const

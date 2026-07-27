@@ -6,6 +6,7 @@
 #include "engine/TileTypes.hpp"
 
 #include <algorithm>
+#include <string_view>
 
 namespace sokoban {
 namespace {
@@ -103,7 +104,8 @@ bool RenderAssetRequirements::empty() const
 
 RenderAssetRequirements renderAssetRequirementsForLevel(
     const Level& level,
-    const AssetManifest& manifest)
+    const AssetManifest& manifest,
+    std::optional<LevelLocation> location)
 {
     RenderAssetRequirements requirements;
 
@@ -115,6 +117,19 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
     requirements.requireAnimation(manifest.playerPushAnimation());
     requirements.requireAnimation(manifest.playerDeathAnimation());
     requirements.requireAnimation(manifest.playerDeadIdleAnimation());
+
+    // Ground splatting samples these directly from the descriptor array, so
+    // they must be required like any model texture; unset ids are ignored.
+    // Resolved through the same helper the frame builder uses, so preloading
+    // cannot fetch a different screen's map than the one that gets drawn.
+    const GroundSplatTextures splat = groundSplatTexturesForScreen(
+        [&manifest](std::string_view name) {
+            return manifest.findTextureIdByName(name);
+        },
+        location);
+    requirements.requireTexture(splat.base);
+    requirements.requireTexture(splat.detail);
+    requirements.requireTexture(splat.splatMap);
 
     for (uint32_t z = 0; z < level.depth(); ++z) {
         for (uint32_t y = 0; y < level.height(); ++y) {
@@ -162,6 +177,9 @@ RenderAssetRequirements renderAssetRequirementsForFrame(const RenderFrameData& f
     for (const RenderFrameData::Particle& particle : frame.particles) {
         requirements.requireTexture(particle.texture);
     }
+    requirements.requireTexture(frame.groundSplat.base);
+    requirements.requireTexture(frame.groundSplat.detail);
+    requirements.requireTexture(frame.groundSplat.splatMap);
     return requirements;
 }
 } // namespace sokoban

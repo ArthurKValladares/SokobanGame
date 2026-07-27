@@ -1,11 +1,14 @@
 #pragma once
 
+#include "engine/LevelCatalog.hpp"
 #include "engine/Math.hpp"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace sokoban {
@@ -18,6 +21,9 @@ enum class RenderViewMode {
 enum class RenderSurfaceEffect {
     Standard,
     MirrorEnergy,
+    // Ground tops blend two ground textures through a splat map; see
+    // shaders/ground_splat.frag.glsl.
+    GroundSplat,
 };
 
 enum class WaterShorelineEdge : uint32_t {
@@ -81,6 +87,58 @@ struct RenderTexture {
 };
 
 inline constexpr RenderTexture noTexture {};
+
+// Manifest texture names for ground splatting. Declared here so the frame
+// builder and the asset-requirement planner cannot drift apart: a texture
+// that is resolved but never required would silently sample the fallback.
+inline constexpr std::string_view groundSplatBaseTextureName = "GroundGrass";
+inline constexpr std::string_view groundSplatDetailTextureName = "GroundRock";
+inline constexpr std::string_view groundSplatMapTextureName = "GroundSplatMap";
+
+// Each screen may declare its own splat map as "GroundSplatMap<level>_<screen>".
+// Screens without one share `groundSplatMapTextureName`, which is also what the
+// editor uses: it edits a document, which belongs to no screen.
+[[nodiscard]] inline std::string groundSplatMapTextureNameForScreen(
+    LevelLocation location)
+{
+    return std::string(groundSplatMapTextureName) +
+        std::to_string(location.level) + '_' + std::to_string(location.screen);
+}
+
+// Textures blended on splatted ground tops. Unset ids fall back to the flat
+// tile color, so a manifest without these entries still renders.
+struct GroundSplatTextures {
+    RenderTexture base = noTexture;
+    RenderTexture detail = noTexture;
+    RenderTexture splatMap = noTexture;
+
+    [[nodiscard]] constexpr bool valid() const
+    {
+        return !base.isNone() && !detail.isNone() && !splatMap.isNone();
+    }
+};
+
+// Single definition of "which textures does splatted ground sample", shared by
+// the frame builder and the requirement planner so the two cannot disagree
+// about which screen's map to use. `findTextureByName` takes a name and returns
+// a RenderTexture (`noTexture` when the manifest has no such entry); it is a
+// template so this header stays independent of AssetManifest.
+template <typename FindTextureByName>
+[[nodiscard]] GroundSplatTextures groundSplatTexturesForScreen(
+    FindTextureByName findTextureByName,
+    std::optional<LevelLocation> location)
+{
+    const RenderTexture screenMap = location
+        ? findTextureByName(groundSplatMapTextureNameForScreen(*location))
+        : noTexture;
+    return {
+        .base = findTextureByName(groundSplatBaseTextureName),
+        .detail = findTextureByName(groundSplatDetailTextureName),
+        .splatMap = screenMap.isNone()
+            ? findTextureByName(groundSplatMapTextureName)
+            : screenMap,
+    };
+}
 
 struct RenderFrameData {
     struct CameraExtent {
@@ -202,6 +260,7 @@ struct RenderFrameData {
     std::vector<WaterSurface> waterSurfaces;
     std::vector<IsoFace> isoFaces;
     std::vector<Particle> particles;
+    GroundSplatTextures groundSplat {};
     float waterAnimationTimeSeconds = 0.0f;
     float effectAnimationTimeSeconds = 0.0f;
 };

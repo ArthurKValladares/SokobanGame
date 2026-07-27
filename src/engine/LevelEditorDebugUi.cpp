@@ -77,7 +77,10 @@ void LevelEditorDebugUi::initialize(const LevelEditor& editor)
     requestedHeight_ = editor.requestedHeight();
 }
 
-void LevelEditorDebugUi::draw(LevelEditor& editor, const Callbacks& callbacks)
+void LevelEditorDebugUi::draw(
+    LevelEditor& editor,
+    SplatPainter& painter,
+    const Callbacks& callbacks)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     ImGui::Text("Document");
@@ -168,6 +171,8 @@ void LevelEditorDebugUi::draw(LevelEditor& editor, const Callbacks& callbacks)
 
     drawTilePalette(editor);
     ImGui::Separator();
+    drawGroundPaintTab(painter, callbacks);
+    ImGui::Separator();
     drawFileBrowser(editor);
 
     if (!editor.status().empty()) {
@@ -176,6 +181,70 @@ void LevelEditorDebugUi::draw(LevelEditor& editor, const Callbacks& callbacks)
     }
 #else
     (void)editor;
+    (void)painter;
+    (void)callbacks;
+#endif
+}
+
+void LevelEditorDebugUi::drawGroundPaintTab(
+    SplatPainter& painter, const Callbacks& callbacks)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    ImGui::Text("Ground Paint");
+
+    if (!painter.active()) {
+        if (ImGui::Button("Paint Ground") && callbacks.openGroundPainting) {
+            (void)callbacks.openGroundPainting();
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("(edits this screen's splat map)");
+        if (!painter.status().empty()) {
+            ImGui::TextWrapped("%s", painter.status().c_str());
+        }
+        return;
+    }
+
+    if (ImGui::Button("Stop Painting")) {
+        painter.close();
+        return;
+    }
+    ImGui::SameLine();
+    // Saving is explicit: a mis-stroke should never reach disk on its own.
+    if (ImGui::Button("Save Map")) {
+        (void)painter.save();
+    }
+    ImGui::SameLine();
+    ImGui::TextUnformatted(painter.dirty() ? "unsaved" : "saved");
+
+    SplatCanvas::Brush& brush = painter.brush();
+    // Radius is in board tiles, so the brush keeps its size on the ground
+    // regardless of camera distance or board dimensions.
+    ImGui::SliderFloat("Size (tiles)", &brush.radiusTiles, 0.1f, 8.0f, "%.2f");
+    ImGui::SliderFloat("Hardness", &brush.hardness, 0.0f, 1.0f, "%.2f");
+    ImGui::SliderFloat("Opacity", &brush.opacity, 0.01f, 1.0f, "%.2f");
+
+    int color = brush.color == SplatCanvas::BrushColor::White ? 0 : 1;
+    ImGui::TextUnformatted("Color");
+    ImGui::SameLine();
+    // White adds the detail layer (rock), black returns to the base (grass).
+    ImGui::RadioButton("White (rock)", &color, 0);
+    ImGui::SameLine();
+    ImGui::RadioButton("Black (grass)", &color, 1);
+    brush.color = color == 0
+        ? SplatCanvas::BrushColor::White
+        : SplatCanvas::BrushColor::Black;
+
+    if (ImGui::Button("Undo Stroke")) {
+        (void)painter.undo();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("%zu stroke(s) undoable", painter.undoDepth());
+
+    if (!painter.status().empty()) {
+        ImGui::TextWrapped("%s", painter.status().c_str());
+    }
+#else
+    (void)painter;
     (void)callbacks;
 #endif
 }

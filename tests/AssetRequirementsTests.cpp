@@ -41,7 +41,13 @@ const AssetManifest& testManifest()
         { "name": "Smoke07", "path": "smoke07.png" },
         { "name": "Smoke08", "path": "smoke08.png" },
         { "name": "Smoke09", "path": "smoke09.png" },
-        { "name": "Smoke10", "path": "smoke10.png" }
+        { "name": "Smoke10", "path": "smoke10.png" },
+        { "name": "GroundGrass", "path": "grass.png" },
+        { "name": "GroundRock", "path": "rock.png" },
+        { "name": "GroundSplatMap", "path": "splat.png" },
+        { "name": "GroundSplatMap0_0", "path": "splat0_0.png" },
+        { "name": "GroundSplatMap0_1", "path": "splat0_1.png" },
+        { "name": "GroundSplatMap2_0", "path": "splat2_0.png" }
       ],
       "models": [
         { "name": "Stone", "path": "stone.gltf" },
@@ -98,7 +104,8 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     CHECK(requirements.contains(manifest.playerDeadIdleAnimation()));
     CHECK(requirements.modelCount() == 5);
     CHECK(requirements.animationCount() == 5);
-    CHECK(requirements.textureCount() == 0);
+    // The three ground splat textures are always required.
+    CHECK(requirements.textureCount() == 3);
 
     const Level mirrorLevel = Level::loadFromLayers({
         { ".....", ".....", ".....", ".....", "....." },
@@ -106,7 +113,8 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     }, "mirror particle requirements");
     const RenderAssetRequirements mirrorRequirements =
         renderAssetRequirementsForLevel(mirrorLevel, manifest);
-    CHECK(mirrorRequirements.textureCount() == 10);
+    // Ten smoke textures plus the three ground splat textures.
+    CHECK(mirrorRequirements.textureCount() == 13);
     CHECK(mirrorRequirements.contains(
         manifest.textureIdByName("Smoke01")));
     CHECK(mirrorRequirements.contains(
@@ -190,12 +198,120 @@ void testCubeAndNoneAreNeverRequirements()
 
 } // namespace
 
+void testGroundSplatTexturesAreRequired()
+{
+    TEST("groundSplatTexturesAreRequired");
+    const AssetManifest& manifest = testManifest();
+    const Level level = Level::loadFromLayers({
+        { "..." },
+        { "C.." },
+    }, "ground splat requirements");
+
+    // Regression: splat textures are sampled straight from the descriptor
+    // array, so failing to require them leaves those slots holding the 1x1
+    // fallback and the ground renders flat.
+    const RenderAssetRequirements levelRequirements =
+        renderAssetRequirementsForLevel(level, manifest);
+    CHECK(levelRequirements.contains(
+        manifest.textureIdByName(groundSplatBaseTextureName)));
+    CHECK(levelRequirements.contains(
+        manifest.textureIdByName(groundSplatDetailTextureName)));
+    CHECK(levelRequirements.contains(
+        manifest.textureIdByName(groundSplatMapTextureName)));
+
+    RenderFrameData frame;
+    frame.groundSplat = {
+        .base = manifest.textureIdByName(groundSplatBaseTextureName),
+        .detail = manifest.textureIdByName(groundSplatDetailTextureName),
+        .splatMap = manifest.textureIdByName(groundSplatMapTextureName),
+    };
+    const RenderAssetRequirements frameRequirements =
+        renderAssetRequirementsForFrame(frame);
+    CHECK(frameRequirements.contains(frame.groundSplat.base));
+    CHECK(frameRequirements.contains(frame.groundSplat.detail));
+    CHECK(frameRequirements.contains(frame.groundSplat.splatMap));
+
+    // Unset ids stay absent, so a manifest without the textures is fine.
+    const RenderAssetRequirements empty =
+        renderAssetRequirementsForFrame(RenderFrameData {});
+    CHECK(!empty.contains(frame.groundSplat.base));
+}
+
+void testPerScreenSplatMapsAreSelectedAndFallBack()
+{
+    TEST("perScreenSplatMapsAreSelectedAndFallBack");
+    const AssetManifest& manifest = testManifest();
+    const Level level = Level::loadFromLayers({
+        { "..." },
+        { "C.." },
+    }, "per-screen splat requirements");
+
+    // The fixture declares maps for screens 0:0, 0:1 and 2:0 but deliberately
+    // not 1:0, so both the per-screen path and the shared fallback are covered.
+    const RenderTexture shared =
+        manifest.textureIdByName(groundSplatMapTextureName);
+    const RenderTexture screen00 =
+        manifest.textureIdByName("GroundSplatMap0_0");
+    const RenderTexture screen01 =
+        manifest.textureIdByName("GroundSplatMap0_1");
+    const RenderTexture screen20 =
+        manifest.textureIdByName("GroundSplatMap2_0");
+    CHECK(screen00 != shared);
+
+    // Screens of the same level get different maps - the whole point of
+    // keying on the screen rather than the level.
+    CHECK(screen00 != screen01);
+
+    // A screen preloads its own map and only its own map: pulling in every
+    // screen's map would defeat the point of requirement-driven residency.
+    const RenderAssetRequirements first =
+        renderAssetRequirementsForLevel(level, manifest, LevelLocation { 0, 0 });
+    CHECK(first.contains(screen00));
+    CHECK(!first.contains(screen01));
+    CHECK(!first.contains(shared));
+    CHECK(!first.contains(screen20));
+
+    const RenderAssetRequirements second =
+        renderAssetRequirementsForLevel(level, manifest, LevelLocation { 0, 1 });
+    CHECK(second.contains(screen01));
+    CHECK(!second.contains(screen00));
+
+    // Screen 1:0 has no map of its own, so it shares the fallback rather than
+    // rendering without one. Note this is not level 1 falling back as a whole:
+    // the fallback is per screen.
+    const RenderAssetRequirements missing =
+        renderAssetRequirementsForLevel(level, manifest, LevelLocation { 1, 0 });
+    CHECK(missing.contains(shared));
+    CHECK(!missing.contains(screen00));
+
+    // An unset location (the editor, and any caller that predates per-screen
+    // maps) also lands on the shared map.
+    const RenderAssetRequirements unlocated =
+        renderAssetRequirementsForLevel(level, manifest);
+    CHECK(unlocated.contains(shared));
+
+    // Exactly one splat map either way: base + detail + one map.
+    CHECK(first.textureCount() == 3);
+    CHECK(missing.textureCount() == 3);
+
+    // The name helper is what ties manifest entries to screens; if it drifts,
+    // every screen silently falls back to the shared map.
+    CHECK(groundSplatMapTextureNameForScreen({ 0, 0 }) == "GroundSplatMap0_0");
+    CHECK(groundSplatMapTextureNameForScreen({ 12, 3 }) == "GroundSplatMap12_3");
+    // Level/screen must not be ambiguous once concatenated: 1:23 and 12:3 are
+    // different screens and must not resolve to the same texture name.
+    CHECK(groundSplatMapTextureNameForScreen({ 1, 23 }) !=
+        groundSplatMapTextureNameForScreen({ 12, 3 }));
+}
+
 int main()
 {
     testLevelRequirementsIncludeDynamicAndStaticAssets();
     testFrameRequirementsOnlyContainReferencedAssets();
     testMergeDeduplicatesRequirements();
     testCubeAndNoneAreNeverRequirements();
+    testGroundSplatTexturesAreRequired();
+    testPerScreenSplatMapsAreSelectedAndFallBack();
 
     if (failures == 0) {
         std::cout << "AssetRequirementsTests: "

@@ -63,7 +63,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
     vkCheck(vkCreatePipelineLayout(device_, &layoutInfo, nullptr, &layout_),
         "vkCreatePipelineLayout failed");
 
-    std::array<VkShaderModule, 10> shaders {};
+    std::array<VkShaderModule, 11> shaders {};
     try {
         shaders[0] = createShaderModule(createInfo.assetRoot / "shaders/triangle.vert.glsl.spv");
         shaders[1] = createShaderModule(createInfo.assetRoot / "shaders/triangle.frag.glsl.spv");
@@ -76,6 +76,8 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         shaders[8] = createShaderModule(createInfo.assetRoot / "shaders/water.frag.glsl.spv");
         shaders[9] = createShaderModule(
             createInfo.assetRoot / "shaders/mirror_energy.frag.glsl.spv");
+        shaders[10] = createShaderModule(
+            createInfo.assetRoot / "shaders/ground_splat.frag.glsl.spv");
 
         scene_ = createScenePipeline(
             shaders[0], shaders[1], VertexLayout::None,
@@ -85,6 +87,9 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
         mirrorEnergy_ = createScenePipeline(
             shaders[0], shaders[9], VertexLayout::None,
+            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
+        groundSplat_ = createScenePipeline(
+            shaders[0], shaders[10], VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
         ui_ = createScenePipeline(
             shaders[0], shaders[1], VertexLayout::None,
@@ -121,7 +126,8 @@ void VulkanPipelineFactory::destroy()
 {
     if (device_) {
         const std::array pipelines {
-            scene_, water_, mirrorEnergy_, ui_, model_, mirrorEnergyModel_,
+            scene_, water_, mirrorEnergy_, groundSplat_, ui_, model_,
+            mirrorEnergyModel_,
             shadow_, modelShadow_,
             ssao_, ssaoComposite_, ssaoVisualize_,
         };
@@ -137,6 +143,7 @@ void VulkanPipelineFactory::destroy()
     scene_ = VK_NULL_HANDLE;
     water_ = VK_NULL_HANDLE;
     mirrorEnergy_ = VK_NULL_HANDLE;
+    groundSplat_ = VK_NULL_HANDLE;
     ui_ = VK_NULL_HANDLE;
     model_ = VK_NULL_HANDLE;
     mirrorEnergyModel_ = VK_NULL_HANDLE;
