@@ -111,6 +111,19 @@ ImageData SplatCanvas::toImage() const
     return image;
 }
 
+float SplatCanvas::coverageAt(float distanceTiles, const Brush& brush)
+{
+    if (brush.radiusTiles <= 0.0f) {
+        return 0.0f;
+    }
+    // Computed in texels, exactly as stamping does, so the rim's anti-aliasing
+    // width is the same in the preview as on the canvas.
+    const float scale = static_cast<float>(texelsPerTile);
+    const float falloff = brushFalloff(
+        distanceTiles * scale, brush.radiusTiles * scale, brush.hardness);
+    return falloff * std::clamp(brush.opacity, 0.0f, 1.0f);
+}
+
 void SplatCanvas::beginStroke()
 {
     if (empty()) {

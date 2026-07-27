@@ -195,6 +195,54 @@ void testHardnessSurvivesAHeldClick()
               4 * texelsPerTile] == 255);
 }
 
+void testCoverageAtMatchesWhatStampingWrites()
+{
+    TEST("coverageAtMatchesWhatStampingWrites");
+    // The editor's brush preview is drawn from coverageAt. If it ever drifts
+    // from what stamping does, the preview would look authoritative and be
+    // wrong - worse than not having one - so pin them to each other.
+    for (const float hardness : { 1.0f, 0.5f, 0.25f, 0.05f, 0.0f }) {
+        for (const float opacity : { 1.0f, 0.5f, 0.125f }) {
+            const SplatCanvas::Brush brush {
+                .radiusTiles = 2.0f,
+                .hardness = hardness,
+                .opacity = opacity,
+                .color = SplatCanvas::BrushColor::White,
+            };
+            SplatCanvas canvas = SplatCanvas::createForBoard(8, 8, 0);
+            canvas.stamp({ 4.0f, 4.0f }, brush);
+
+            for (const float offset : { 0.0f, 0.5f, 1.0f, 1.5f, 1.9f, 2.5f }) {
+                const auto x = static_cast<uint32_t>(
+                    (4.0f + offset) * texelsPerTile);
+                const uint32_t y = 4 * texelsPerTile;
+                // Stamping measures from the texel's centre in both axes, so
+                // the sample is a hypotenuse: the row is also half a texel
+                // below the brush centre, not exactly level with it.
+                const float dx =
+                    (static_cast<float>(x) + 0.5f) / texelsPerTile - 4.0f;
+                const float dy =
+                    (static_cast<float>(y) + 0.5f) / texelsPerTile - 4.0f;
+                const float sampled = std::sqrt(dx * dx + dy * dy);
+
+                const uint8_t painted = canvas.weightAt(x, y);
+                const auto expected = static_cast<uint8_t>(std::clamp(
+                    std::lround(SplatCanvas::coverageAt(sampled, brush) * 255.0f),
+                    0L, 255L));
+                CHECK(painted == expected);
+            }
+        }
+    }
+
+    // Degenerate brushes cover nothing, so the preview draws nothing.
+    CHECK(SplatCanvas::coverageAt(0.0f, { .radiusTiles = 0.0f }) == 0.0f);
+    CHECK(SplatCanvas::coverageAt(5.0f, { .radiusTiles = 1.0f }) == 0.0f);
+    // Coverage never exceeds the brush's opacity, which is what makes the
+    // preview's alpha meaningful.
+    CHECK(SplatCanvas::coverageAt(0.0f, {
+        .radiusTiles = 2.0f, .hardness = 1.0f, .opacity = 0.4f }) <= 0.4f + 1e-5f);
+}
+
 void testOverlappingStampsInOneStrokeDoNotDarken()
 {
     TEST("overlappingStampsInOneStrokeDoNotDarken");
@@ -480,6 +528,7 @@ int main()
     testHardnessControlsTheEdgeFalloff();
     testOpacityBuildsUpAcrossStrokesNotWithinOne();
     testHardnessSurvivesAHeldClick();
+    testCoverageAtMatchesWhatStampingWrites();
     testOverlappingStampsInOneStrokeDoNotDarken();
     testBlackAndWhitePaintInOppositeDirections();
     testStampLineIsContinuous();

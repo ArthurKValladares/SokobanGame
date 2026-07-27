@@ -87,6 +87,16 @@ public:
     void endStroke();
     [[nodiscard]] bool strokeActive() const { return strokeActive_; }
 
+    // Coverage the brush applies at `distanceTiles` from its centre, in 0..1 -
+    // the same value a stamp would write there.
+    //
+    // Exposed so the editor's preview can be drawn from the real brush profile
+    // instead of an approximation of it. An independently written preview
+    // would drift from what painting actually does, which is worse than no
+    // preview: it would look correct and be wrong.
+    [[nodiscard]] static float coverageAt(
+        float distanceTiles, const Brush& brush);
+
     // Stamps the brush centred on a board-tile position. Returns true when any
     // texel actually changed, so callers can skip re-uploading and skip
     // recording an undo step for a no-op stroke. Outside a stroke this behaves

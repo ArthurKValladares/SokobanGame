@@ -1019,10 +1019,18 @@ Painting splat maps in the editor (Debug builds only):
 - Saving is explicit ("Save Map"), and writes to the source `assets/` tree and
   mirrors into the staged tree beside the executable, so a painted map is both
   committed and live without re-running the content pipeline.
-- The preview ring is projected from world points through the *previous*
-  frame's camera - the same one that produced the brush position - and drawn
-  with ImGui's background draw list. It deliberately needs no shader or
-  descriptor changes; the tile push-constant block has no room left.
+- The brush preview is a disc of concentric rings whose per-vertex alpha comes
+  from `SplatCanvas::coverageAt` - the same function stamping uses - so it
+  shows hardness and opacity rather than merely outlining them. Drawing it
+  from an independently written profile would be worse than having no preview:
+  it would look authoritative and be wrong, so `SplatCanvasTests` pins
+  `coverageAt` against what stamping actually writes.
+- Every preview vertex is a world point projected individually through the
+  *previous* frame's camera - the same one that produced the brush position -
+  and written into ImGui's background draw list. It deliberately needs no
+  shader or descriptor changes; the tile push-constant block has no room left.
+  The indices are written by hand, so the fill is skipped rather than wrapped
+  if the draw list is near the 16-bit `ImDrawIdx` limit.
 - Re-uploads are throttled by comparing `SplatPainter::revision()` against the
   last uploaded value, so a stroke that changes nothing does not stall the
   device (the upload path does a full `vkDeviceWaitIdle`, which is acceptable

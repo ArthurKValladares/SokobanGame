@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cmath>
 #include <exception>
+#include <limits>
 #include <numbers>
 #include <utility>
 #include <vector>
@@ -374,70 +375,119 @@ void Application::drawBrushPreview()
         return;
     }
 
-    // The ring is built from world points and projected one by one, so it
-    // follows the board's perspective instead of being a flat screen-space
-    // circle that would only be right at the centre of the view.
+    const SplatCanvas::Brush& brush = splatPainter_.brush();
+    if (brush.radiusTiles <= 0.0f) {
+        return;
+    }
+
+    // The preview is a disc of concentric rings whose alpha is sampled from
+    // SplatCanvas::coverageAt - the very function stamping uses - so hardness
+    // and opacity are shown rather than described. An outline alone said
+    // nothing about either.
     //
-    // This projects through the previous frame's camera, which is the same
-    // one that produced editorBrushPoint_ in updateEditorPainting. Using the
-    // frame currently being built would put the ring somewhere the pointer
-    // was never tested against.
+    // Every vertex is a world point projected individually, so the disc sits
+    // on the board in perspective instead of being a flat screen-space circle.
+    // It projects through the previous frame's camera, the same one that
+    // produced editorBrushPoint_ in updateEditorPainting; the frame being
+    // built now would put the preview somewhere the pointer was never tested
+    // against.
     constexpr int segments = 48;
-    const auto ringPoints = [&](float radiusTiles)
-        -> std::optional<std::vector<ImVec2>> {
-        std::vector<ImVec2> points;
-        points.reserve(segments);
-        for (int i = 0; i < segments; ++i) {
-            const float angle = static_cast<float>(i) *
-                (2.0f * std::numbers::pi_v<float>) /
-                static_cast<float>(segments);
-            const Vec3 world {
-                editorBrushPoint_->x + std::cos(angle) * radiusTiles,
-                editorBrushPoint_->y + std::sin(angle) * radiusTiles,
-                // The height the pick actually landed on. Assuming a height
-                // here (ground is not always at z=0: editor previews are
-                // nudged up, and raised blocks are a whole unit higher) puts
-                // the ring visibly below the paint, by more the further the
-                // surface is from the camera.
-                editorBrushPoint_->z,
-            };
-            const std::optional<Vec2> pixel =
-                renderer_.projectToPixels(*preparedRenderFrame_, world);
-            if (!pixel) {
-                return std::nullopt;
-            }
-            points.push_back(ImVec2(pixel->x, pixel->y));
-        }
-        return points;
+    constexpr int rings = 12;
+
+    const auto projected = [&](float radiusTiles, int segment) {
+        const float angle = static_cast<float>(segment) *
+            (2.0f * std::numbers::pi_v<float>) /
+            static_cast<float>(segments);
+        const Vec3 world {
+            editorBrushPoint_->x + std::cos(angle) * radiusTiles,
+            editorBrushPoint_->y + std::sin(angle) * radiusTiles,
+            // The height the pick actually landed on. Ground is not always at
+            // z=0 - editor previews are nudged up and raised blocks are a
+            // whole unit higher - and assuming one puts the preview below the
+            // paint, by more the further it is from the camera.
+            editorBrushPoint_->z,
+        };
+        const std::optional<Vec2> pixel =
+            renderer_.projectToPixels(*preparedRenderFrame_, world);
+        return pixel ? ImVec2(pixel->x, pixel->y) : ImVec2(0.0f, 0.0f);
     };
 
+    // Painting white pushes the ground toward the detail layer, black back
+    // toward the base, so the fill is tinted to say which.
+    const bool white = brush.color == SplatCanvas::BrushColor::White;
+    const ImU32 tint = white ? IM_COL32(255, 255, 255, 0) : IM_COL32(15, 15, 15, 0);
+    // Scaled down a little so the ground stays readable underneath; the
+    // *relative* shape is what conveys hardness and opacity.
+    constexpr float previewAlpha = 0.72f;
+
     ImDrawList* drawList = ImGui::GetBackgroundDrawList();
-    const SplatCanvas::Brush& brush = splatPainter_.brush();
-    // White paints rock, black paints grass: tint the ring to match, so the
-    // preview says what the stroke will do as well as where.
-    const ImU32 outerColor = brush.color == SplatCanvas::BrushColor::White
-        ? IM_COL32(255, 255, 255, 220)
-        : IM_COL32(20, 20, 20, 220);
-    if (const auto outer = ringPoints(brush.radiusTiles)) {
-        drawList->AddPolyline(
-            outer->data(),
-            static_cast<int>(outer->size()),
-            outerColor,
-            ImDrawFlags_Closed,
-            2.0f);
+    // The public accessor, not drawList->_Data->TexUvWhitePixel:
+    // ImDrawListSharedData is only forward-declared in imgui.h, so reaching
+    // through it would drag in imgui_internal.h for one UV.
+    const ImVec2 uv = ImGui::GetFontTexUvWhitePixel();
+    const int vertexCount = (rings + 1) * segments;
+    const int indexCount = rings * segments * 6;
+
+    // ImDrawIdx is 16-bit by default, and these indices are written by hand
+    // rather than through the helpers that would split a draw list. Skipping
+    // the fill is far better than emitting wrapped indices, which would draw
+    // garbage triangles across the screen.
+    const std::size_t indexLimit =
+        static_cast<std::size_t>(std::numeric_limits<ImDrawIdx>::max());
+    if (static_cast<std::size_t>(drawList->_VtxCurrentIdx) + vertexCount >
+        indexLimit) {
+        return;
     }
-    // Inner ring marks where falloff begins, which is what hardness controls.
-    // A fully hard brush has no falloff band, so there is nothing to show.
-    if (brush.hardness < 0.999f && brush.hardness > 0.001f) {
-        if (const auto inner = ringPoints(brush.radiusTiles * brush.hardness)) {
-            drawList->AddPolyline(
-                inner->data(),
-                static_cast<int>(inner->size()),
-                IM_COL32(255, 200, 60, 150),
-                ImDrawFlags_Closed,
-                1.0f);
+    const auto base = static_cast<ImDrawIdx>(drawList->_VtxCurrentIdx);
+    drawList->PrimReserve(indexCount, vertexCount);
+
+    for (int ring = 0; ring <= rings; ++ring) {
+        const float t =
+            static_cast<float>(ring) / static_cast<float>(rings);
+        const float radius = brush.radiusTiles * t;
+        const float coverage = SplatCanvas::coverageAt(radius, brush);
+        const auto alpha = static_cast<ImU32>(std::clamp(
+            std::lround(coverage * previewAlpha * 255.0f), 0L, 255L));
+        const ImU32 color = (tint & ~IM_COL32_A_MASK) |
+            (alpha << IM_COL32_A_SHIFT);
+        for (int segment = 0; segment < segments; ++segment) {
+            drawList->PrimWriteVtx(projected(radius, segment), uv, color);
         }
     }
+
+    for (int ring = 0; ring < rings; ++ring) {
+        for (int segment = 0; segment < segments; ++segment) {
+            const int next = (segment + 1) % segments;
+            const auto inner = static_cast<ImDrawIdx>(ring * segments);
+            const auto outer = static_cast<ImDrawIdx>((ring + 1) * segments);
+            drawList->PrimWriteIdx(
+                static_cast<ImDrawIdx>(base + inner + segment));
+            drawList->PrimWriteIdx(
+                static_cast<ImDrawIdx>(base + inner + next));
+            drawList->PrimWriteIdx(
+                static_cast<ImDrawIdx>(base + outer + next));
+            drawList->PrimWriteIdx(
+                static_cast<ImDrawIdx>(base + inner + segment));
+            drawList->PrimWriteIdx(
+                static_cast<ImDrawIdx>(base + outer + next));
+            drawList->PrimWriteIdx(
+                static_cast<ImDrawIdx>(base + outer + segment));
+        }
+    }
+
+    // A thin outline at the rim: the gradient fades out by design, so without
+    // this a very soft brush has no visible extent to aim with.
+    std::vector<ImVec2> rim;
+    rim.reserve(segments);
+    for (int segment = 0; segment < segments; ++segment) {
+        rim.push_back(projected(brush.radiusTiles, segment));
+    }
+    drawList->AddPolyline(
+        rim.data(),
+        static_cast<int>(rim.size()),
+        white ? IM_COL32(255, 255, 255, 130) : IM_COL32(0, 0, 0, 150),
+        ImDrawFlags_Closed,
+        1.5f);
 #endif
 }
 
