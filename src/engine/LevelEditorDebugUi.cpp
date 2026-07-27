@@ -186,6 +186,48 @@ void LevelEditorDebugUi::draw(
 #endif
 }
 
+#if SOKOBAN_ENABLE_DEBUG_UI
+namespace {
+
+// A slider for quick adjustment plus a box for typing an exact value.
+//
+// `sliderMaximum` is the comfortable range to drag within; `hardMaximum` is
+// the real limit typing may reach, so the slider can stay usefully fine
+// without capping what can be entered. Values are only clamped once the box
+// is no longer being edited, otherwise clamping would fight the user
+// mid-keystroke (typing "0.5" passes through "0").
+void drawBrushValue(
+    const char* label,
+    float& value,
+    float minimum,
+    float sliderMaximum,
+    float hardMaximum)
+{
+    constexpr float inputWidth = 78.0f;
+    ImGui::PushID(label);
+
+    const float available = ImGui::GetContentRegionAvail().x;
+    ImGui::SetNextItemWidth(std::max(available * 0.45f, 60.0f));
+    ImGui::SliderFloat("##slider", &value, minimum, sliderMaximum, "%.3f");
+    const bool sliderActive = ImGui::IsItemActive();
+
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(inputWidth);
+    ImGui::InputFloat("##input", &value, 0.0f, 0.0f, "%.3f");
+    const bool inputActive = ImGui::IsItemActive();
+
+    ImGui::SameLine();
+    ImGui::TextUnformatted(label);
+
+    if (!sliderActive && !inputActive) {
+        value = std::clamp(value, minimum, hardMaximum);
+    }
+    ImGui::PopID();
+}
+
+} // namespace
+#endif
+
 void LevelEditorDebugUi::drawGroundPaintTab(
     SplatPainter& painter, const Callbacks& callbacks)
 {
@@ -227,9 +269,9 @@ void LevelEditorDebugUi::drawGroundPaintTab(
     SplatCanvas::Brush& brush = painter.brush();
     // Radius is in board tiles, so the brush keeps its size on the ground
     // regardless of camera distance or board dimensions.
-    ImGui::SliderFloat("Size (tiles)", &brush.radiusTiles, 0.1f, 8.0f, "%.2f");
-    ImGui::SliderFloat("Hardness", &brush.hardness, 0.0f, 1.0f, "%.2f");
-    ImGui::SliderFloat("Opacity", &brush.opacity, 0.01f, 1.0f, "%.2f");
+    drawBrushValue("Size (tiles)", brush.radiusTiles, 0.1f, 8.0f, 64.0f);
+    drawBrushValue("Hardness", brush.hardness, 0.0f, 1.0f, 1.0f);
+    drawBrushValue("Opacity", brush.opacity, 0.01f, 1.0f, 1.0f);
 
     int color = brush.color == SplatCanvas::BrushColor::White ? 0 : 1;
     ImGui::TextUnformatted("Color");

@@ -283,13 +283,25 @@ void testNoOpStrokesLeaveNoUndoStep()
     CHECK(painter.undoDepth() == 0);
     CHECK(!painter.dirty());
 
-    // Painting white over already-white ground is likewise a no-op.
+    // A stroke that does land records exactly one step.
     painter.beginStroke({ 6.0f, 3.0f });
     painter.endStroke();
     CHECK(painter.undoDepth() == 1);
+
+    // Repeating it leaves the fully covered interior alone - that part is
+    // already saturated. The anti-aliased rim keeps creeping toward the target
+    // across strokes, which is ordinary paint build-up rather than a bug, so
+    // this is deliberately not asserted to be a whole-stamp no-op.
+    const std::vector<uint8_t> before = painter.canvas().snapshot();
     painter.beginStroke({ 6.0f, 3.0f });
     painter.endStroke();
-    CHECK(painter.undoDepth() == 1);
+    const uint32_t centre = 6 * SplatCanvas::texelsPerTile;
+    const uint32_t row = 3 * SplatCanvas::texelsPerTile;
+    CHECK(painter.canvas().weightAt(centre, row) == 255);
+    CHECK(before[static_cast<std::size_t>(row) * painter.canvas().width() +
+              centre] == 255);
+    // Ground well outside the brush is untouched by either stroke.
+    CHECK(painter.canvas().weightAt(0, 0) == 0);
 }
 
 void testUndoHistoryIsCapped()

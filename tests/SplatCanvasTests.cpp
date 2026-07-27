@@ -106,9 +106,9 @@ void testHardnessControlsTheEdgeFalloff()
     CHECK(weightAtRadiusFraction(0.0f, 1.1f) == 0);
 }
 
-void testOpacityBuildsUpOverRepeatedStamps()
+void testOpacityBuildsUpAcrossStrokesNotWithinOne()
 {
-    TEST("opacityBuildsUpOverRepeatedStamps");
+    TEST("opacityBuildsUpAcrossStrokesNotWithinOne");
     SplatCanvas canvas = SplatCanvas::createForBoard(4, 4, 0);
     const SplatCanvas::Brush brush {
         .radiusTiles = 1.0f,
@@ -119,21 +119,108 @@ void testOpacityBuildsUpOverRepeatedStamps()
     const uint32_t x = 2 * texelsPerTile;
     const uint32_t y = 2 * texelsPerTile;
 
+    // The pointer is sampled every frame, so holding the button re-stamps the
+    // same spot many times for one click. Within a stroke that must not build
+    // up, or opacity would creep to full and hardness would harden.
+    canvas.beginStroke();
     CHECK(canvas.stamp({ 2.0f, 2.0f }, brush));
     const uint8_t first = canvas.weightAt(x, y);
     CHECK(first > 120 && first < 135);
+    for (int i = 0; i < 30; ++i) {
+        // No further change: nothing to re-upload, nothing to see.
+        CHECK(!canvas.stamp({ 2.0f, 2.0f }, brush));
+    }
+    CHECK(canvas.weightAt(x, y) == first);
+    canvas.endStroke();
 
-    // Each further stamp closes half the remaining distance, so it approaches
-    // full strength without a single stamp ever slamming to 255.
+    // A second stroke does build on the first, which is how repeated dabs are
+    // expected to darken.
+    canvas.beginStroke();
     CHECK(canvas.stamp({ 2.0f, 2.0f }, brush));
+    canvas.endStroke();
     const uint8_t second = canvas.weightAt(x, y);
     CHECK(second > first);
     CHECK(second < 255);
 
     for (int i = 0; i < 20; ++i) {
+        canvas.beginStroke();
         canvas.stamp({ 2.0f, 2.0f }, brush);
+        canvas.endStroke();
     }
     CHECK(canvas.weightAt(x, y) == 255);
+}
+
+void testHardnessSurvivesAHeldClick()
+{
+    TEST("hardnessSurvivesAHeldClick");
+    // Regression: a click held for a handful of frames used to composite the
+    // brush onto its own output every frame, driving 1-(1-f)^N to full. Soft
+    // brushes turned into hard discs and every hardness looked alike, while
+    // opacity merely saturated - which is exactly how it looked on screen.
+    const auto profileAfter = [](int frames, float hardness) {
+        SplatCanvas canvas = SplatCanvas::createForBoard(8, 8, 0);
+        canvas.beginStroke();
+        for (int i = 0; i < frames; ++i) {
+            // A held click with no movement: from == to, every frame.
+            canvas.stampLine({ 4.0f, 4.0f }, { 4.0f, 4.0f }, {
+                .radiusTiles = 2.0f,
+                .hardness = hardness,
+                .opacity = 1.0f,
+                .color = SplatCanvas::BrushColor::White,
+            });
+        }
+        canvas.endStroke();
+        return canvas.weights();
+    };
+
+    for (const float hardness : { 1.0f, 0.5f, 0.25f, 0.125f, 0.05f }) {
+        // Holding longer must change nothing at all.
+        CHECK(profileAfter(1, hardness) == profileAfter(8, hardness));
+        CHECK(profileAfter(1, hardness) == profileAfter(60, hardness));
+    }
+
+    // And the hardness settings must stay clearly distinct after a held click.
+    const auto midRadius = [&](float hardness) {
+        const std::vector<uint8_t> weights = profileAfter(8, hardness);
+        const uint32_t x = static_cast<uint32_t>(5.0f * texelsPerTile);
+        const uint32_t y = 4 * texelsPerTile;
+        return weights[static_cast<std::size_t>(y) * 8 * texelsPerTile + x];
+    };
+    CHECK(midRadius(1.0f) == 255);
+    CHECK(midRadius(0.25f) < 220);
+    CHECK(midRadius(0.05f) < midRadius(0.25f));
+    // A soft brush is still solid dead centre.
+    const std::vector<uint8_t> soft = profileAfter(8, 0.05f);
+    CHECK(soft[static_cast<std::size_t>(4 * texelsPerTile) * 8 * texelsPerTile +
+              4 * texelsPerTile] == 255);
+}
+
+void testOverlappingStampsInOneStrokeDoNotDarken()
+{
+    TEST("overlappingStampsInOneStrokeDoNotDarken");
+    // Dragging back and forth over the same ground, or the heavy overlap
+    // between consecutive stamps along a line, must paint at brush strength
+    // rather than compounding into a darker streak.
+    SplatCanvas canvas = SplatCanvas::createForBoard(8, 4, 0);
+    const SplatCanvas::Brush brush {
+        .radiusTiles = 1.0f,
+        .hardness = 1.0f,
+        .opacity = 0.4f,
+        .color = SplatCanvas::BrushColor::White,
+    };
+    canvas.beginStroke();
+    canvas.stampLine({ 1.0f, 2.0f }, { 7.0f, 2.0f }, brush);
+    const uint8_t single = canvas.weightAt(4 * texelsPerTile, 2 * texelsPerTile);
+    canvas.stampLine({ 7.0f, 2.0f }, { 1.0f, 2.0f }, brush);
+    canvas.stampLine({ 1.0f, 2.0f }, { 7.0f, 2.0f }, brush);
+    canvas.endStroke();
+    CHECK(canvas.weightAt(4 * texelsPerTile, 2 * texelsPerTile) == single);
+
+    // The line is also even along its length rather than darker where stamps
+    // piled up.
+    for (uint32_t tile = 2; tile <= 6; ++tile) {
+        CHECK(canvas.weightAt(tile * texelsPerTile, 2 * texelsPerTile) == single);
+    }
 }
 
 void testBlackAndWhitePaintInOppositeDirections()
@@ -160,14 +247,23 @@ void testBlackAndWhitePaintInOppositeDirections()
     }));
     CHECK(canvas.weightAt(x, y) == 255);
 
-    // Painting white on an already-white spot changes nothing, so the editor
-    // can skip the re-upload and the undo entry.
-    CHECK(!canvas.stamp({ 2.0f, 2.0f }, {
+    // Painting white over an already-white spot leaves the covered interior
+    // untouched. The anti-aliased rim is only partially covered, so it keeps
+    // converging for a few strokes before settling - at which point the whole
+    // stamp is a genuine no-op and the editor can skip the re-upload and the
+    // undo entry.
+    const SplatCanvas::Brush white {
         .radiusTiles = 1.0f,
         .hardness = 1.0f,
         .opacity = 1.0f,
         .color = SplatCanvas::BrushColor::White,
-    }));
+    };
+    bool settled = false;
+    for (int i = 0; i < 20 && !settled; ++i) {
+        settled = !canvas.stamp({ 2.0f, 2.0f }, white);
+        CHECK(canvas.weightAt(x, y) == 255);
+    }
+    CHECK(settled);
 }
 
 void testStampLineIsContinuous()
@@ -382,7 +478,9 @@ int main()
     testBoardSizingMatchesTheShaderConvention();
     testStampPaintsARoundSpotAtTheRightPlace();
     testHardnessControlsTheEdgeFalloff();
-    testOpacityBuildsUpOverRepeatedStamps();
+    testOpacityBuildsUpAcrossStrokesNotWithinOne();
+    testHardnessSurvivesAHeldClick();
+    testOverlappingStampsInOneStrokeDoNotDarken();
     testBlackAndWhitePaintInOppositeDirections();
     testStampLineIsContinuous();
     testZeroLengthLineStillPaints();

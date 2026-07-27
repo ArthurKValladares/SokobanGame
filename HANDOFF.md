@@ -1001,6 +1001,21 @@ Painting splat maps in the editor (Debug builds only):
   samples it contains. `stampLine` interpolates between samples so a fast drag
   paints a continuous line rather than a row of discs. Strokes that change
   nothing record no undo step, so Ctrl+Z never appears to do nothing.
+- **Within a stroke the canvas accumulates coverage, not colour.** Each texel
+  keeps the strongest `falloff * opacity` it has seen and is composited once
+  against the state the stroke started from - never against its own output.
+  This matters because the pointer is sampled every frame: holding a click for
+  8 frames re-stamps the same spot 8 times, and compositing repeatedly drives
+  `1 - (1 - f)^N` toward full. That turned every soft brush into a hard disc
+  (all hardness settings looked alike after one click) while opacity merely
+  saturated. It also keeps overlapping passes of one drag from painting a
+  darker streak where stamps pile up. Separate strokes still build up, which
+  is how repeated dabs are expected to darken.
+- The outer texel of the brush always feathers slightly, even at hardness 1,
+  so a hard edge is smooth rather than stair-stepped. One consequence: a
+  repeated identical stroke is not a whole-stamp no-op, because the partially
+  covered rim keeps creeping toward the target. The covered interior is
+  saturated after the first stroke.
 - Saving is explicit ("Save Map"), and writes to the source `assets/` tree and
   mirrors into the staged tree beside the executable, so a painted map is both
   committed and live without re-running the content pipeline.

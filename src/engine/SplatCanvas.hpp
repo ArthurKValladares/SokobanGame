@@ -71,9 +71,26 @@ public:
     // map stays readable as greyscale in any image viewer.
     [[nodiscard]] ImageData toImage() const;
 
+    // A stroke is one press-drag-release. Within it, each texel accumulates
+    // the *strongest* brush coverage it has seen, composited once against the
+    // state the stroke started from - it does not composite onto its own
+    // output.
+    //
+    // This is what makes hardness and opacity mean what they look like. The
+    // pointer is sampled every frame, so holding the button still re-stamps
+    // the same spot; compositing repeatedly would drive `1-(1-f)^N` toward
+    // full strength and turn any soft brush into a hard disc after a few
+    // frames, while opacity merely saturated. Overlapping passes within one
+    // stroke are likewise flat, and releasing and pressing again builds up,
+    // which is how painting tools generally behave.
+    void beginStroke();
+    void endStroke();
+    [[nodiscard]] bool strokeActive() const { return strokeActive_; }
+
     // Stamps the brush centred on a board-tile position. Returns true when any
     // texel actually changed, so callers can skip re-uploading and skip
-    // recording an undo step for a no-op stroke.
+    // recording an undo step for a no-op stroke. Outside a stroke this behaves
+    // as a stroke containing a single stamp.
     bool stamp(Vec2 centerTiles, const Brush& brush);
 
     // Stamps along a segment, spacing stamps closely enough that a fast mouse
@@ -101,6 +118,11 @@ private:
     uint32_t width_ = 0;
     uint32_t height_ = 0;
     std::vector<uint8_t> weights_;
+    // Stroke state: the canvas as the stroke found it, and the strongest
+    // coverage applied to each texel so far during it.
+    bool strokeActive_ = false;
+    std::vector<uint8_t> strokeBase_;
+    std::vector<uint8_t> strokeCoverage_;
 };
 
 } // namespace sokoban

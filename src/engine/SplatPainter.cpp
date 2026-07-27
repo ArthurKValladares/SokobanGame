@@ -253,6 +253,10 @@ bool SplatPainter::beginStroke(Vec2 worldTile)
     // Captured before the first stamp, so undo restores the state the stroke
     // started from however many samples the drag produces.
     strokeSnapshot_ = canvas_.snapshot();
+    // The canvas needs to know too: it composites the whole stroke against
+    // this state rather than against its own output, which is what keeps
+    // hardness and opacity from creeping while the button is held.
+    canvas_.beginStroke();
     strokeActive_ = true;
     strokeChanged_ = false;
     lastPosition_ = worldTile;
@@ -286,6 +290,7 @@ void SplatPainter::endStroke()
         return;
     }
     strokeActive_ = false;
+    canvas_.endStroke();
     // A stroke that changed nothing (painting white on white, or a click off
     // the board) leaves no undo step; otherwise Ctrl+Z would appear to do
     // nothing while silently consuming history.

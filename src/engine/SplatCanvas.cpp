@@ -16,25 +16,27 @@ constexpr float strokeSpacingFraction = 0.25f;
 // stamps in one frame (for example if the pointer jumps after an alt-tab).
 constexpr int maxStampsPerSegment = 512;
 
+// Brush profile at `distance` texels from the centre, in 0..1.
+//
+// hardness 1 is a flat disc, hardness 0 feathers all the way from the centre.
+// The outermost texel always feathers a little regardless, so a hard brush has
+// a smooth boundary instead of a stair-stepped one.
 [[nodiscard]] float brushFalloff(float distance, float radius, float hardness)
 {
-    if (radius <= 0.0f) {
+    if (radius <= 0.0f || distance >= radius) {
         return 0.0f;
     }
-    const float normalized = distance / radius;
-    if (normalized >= 1.0f) {
-        return 0.0f;
-    }
-    // hardness 1 -> flat disc, hardness 0 -> smooth falloff from the centre.
-    const float solid = std::clamp(hardness, 0.0f, 1.0f);
-    if (normalized <= solid) {
+    const float rim = std::min(1.0f, radius * 0.5f);
+    const float solid = std::clamp(hardness, 0.0f, 1.0f) * radius;
+    const float featherStart = std::min(solid, radius - rim);
+    if (distance <= featherStart) {
         return 1.0f;
     }
-    const float feather = 1.0f - solid;
+    const float feather = radius - featherStart;
     if (feather <= 0.0f) {
         return 1.0f;
     }
-    const float t = (normalized - solid) / feather;
+    const float t = (distance - featherStart) / feather;
     // Smoothstep, so the edge has no visible banding where it meets the
     // untouched map.
     return 1.0f - (t * t * (3.0f - 2.0f * t));
@@ -109,10 +111,36 @@ ImageData SplatCanvas::toImage() const
     return image;
 }
 
+void SplatCanvas::beginStroke()
+{
+    if (empty()) {
+        return;
+    }
+    strokeBase_ = weights_;
+    strokeCoverage_.assign(weights_.size(), 0);
+    strokeActive_ = true;
+}
+
+void SplatCanvas::endStroke()
+{
+    strokeActive_ = false;
+    strokeBase_.clear();
+    strokeBase_.shrink_to_fit();
+    strokeCoverage_.clear();
+    strokeCoverage_.shrink_to_fit();
+}
+
 bool SplatCanvas::stamp(Vec2 centerTiles, const Brush& brush)
 {
     if (empty() || brush.radiusTiles <= 0.0f || brush.opacity <= 0.0f) {
         return false;
+    }
+
+    // A stamp outside a stroke is a stroke of exactly one stamp, so callers
+    // that only want a single dab need not manage the lifecycle.
+    const bool implicitStroke = !strokeActive_;
+    if (implicitStroke) {
+        beginStroke();
     }
 
     const float scale = static_cast<float>(texelsPerTile);
@@ -133,6 +161,9 @@ bool SplatCanvas::stamp(Vec2 centerTiles, const Brush& brush)
         static_cast<int>(height_) - 1,
         static_cast<int>(std::ceil(centerY + radius)));
     if (minX > maxX || minY > maxY) {
+        if (implicitStroke) {
+            endStroke();
+        }
         return false;
     }
 
@@ -156,9 +187,22 @@ bool SplatCanvas::stamp(Vec2 centerTiles, const Brush& brush)
 
             const std::size_t index =
                 static_cast<std::size_t>(y) * width_ + static_cast<std::size_t>(x);
-            const float current = static_cast<float>(weights_[index]);
-            const float blended =
-                current + (target - current) * falloff * opacity;
+
+            // Strongest coverage wins, rather than accumulating: this is what
+            // keeps a soft brush soft when the same spot is stamped on every
+            // frame the button is held.
+            const auto coverage = static_cast<uint8_t>(std::clamp(
+                std::lround(falloff * opacity * 255.0f), 0L, 255L));
+            if (coverage <= strokeCoverage_[index]) {
+                continue;
+            }
+            strokeCoverage_[index] = coverage;
+
+            // Composited against where the stroke started, never against its
+            // own output.
+            const float base = static_cast<float>(strokeBase_[index]);
+            const float blended = base +
+                (target - base) * (static_cast<float>(coverage) / 255.0f);
             const auto updated = static_cast<uint8_t>(
                 std::clamp(std::lround(blended), 0L, 255L));
             if (updated != weights_[index]) {
@@ -167,6 +211,10 @@ bool SplatCanvas::stamp(Vec2 centerTiles, const Brush& brush)
             }
         }
     }
+
+    if (implicitStroke) {
+        endStroke();
+    }
     return changed;
 }
 
@@ -174,6 +222,14 @@ bool SplatCanvas::stampLine(Vec2 fromTiles, Vec2 toTiles, const Brush& brush)
 {
     if (empty() || brush.radiusTiles <= 0.0f) {
         return false;
+    }
+
+    // The stamps along a segment overlap heavily by design, so they have to
+    // share one stroke's coverage or the line would paint darker than the
+    // brush wherever they overlap.
+    const bool implicitStroke = !strokeActive_;
+    if (implicitStroke) {
+        beginStroke();
     }
 
     const float dx = toTiles.x - fromTiles.x;
@@ -192,6 +248,9 @@ bool SplatCanvas::stampLine(Vec2 fromTiles, Vec2 toTiles, const Brush& brush)
         changed |= stamp({ fromTiles.x + dx * t, fromTiles.y + dy * t }, brush);
     }
     changed |= stamp(toTiles, brush);
+    if (implicitStroke) {
+        endStroke();
+    }
     return changed;
 }
 
@@ -227,6 +286,9 @@ bool SplatCanvas::resizeToBoard(
     width_ = width;
     height_ = height;
     weights_ = std::move(resized);
+    // Stroke buffers are sized for the old canvas; continuing to composite
+    // against them would index out of bounds.
+    endStroke();
     return true;
 }
 
@@ -236,6 +298,9 @@ bool SplatCanvas::restore(const std::vector<uint8_t>& snapshot)
         return false;
     }
     weights_ = snapshot;
+    // Any stroke in progress was composited against the state just replaced,
+    // so it cannot meaningfully continue.
+    endStroke();
     return true;
 }
 
