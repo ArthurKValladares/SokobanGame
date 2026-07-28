@@ -7,6 +7,8 @@
 #include "engine/DebugUi.hpp"
 #include "engine/Log.hpp"
 #include "engine/RenderFrameBuilder.hpp"
+#include "engine/TileThumbnailBake.hpp"
+#include "engine/render/PngWriter.hpp"
 #include "engine/RuntimeContent.hpp"
 #include "engine/UserSettingsConfig.hpp"
 #include "engine/ui/UiConfig.hpp"
@@ -139,6 +141,20 @@ Application::Application()
             },
             .openGroundPainting = [this] { return openGroundPainting(); },
             .createGroundSplatMap = [this] { return createGroundSplatMap(); },
+            .tileThumbnail = [this](TileType tile) {
+                // VkDescriptorSet is what ImGui's Vulkan backend uses as a
+                // texture id; null means "no thumbnail, draw the swatch".
+                return reinterpret_cast<uint64_t>(
+                    renderer_.tileThumbnail(tile));
+            },
+            .bakeTileThumbnails = [this] {
+                // Deferred, not run here: this callback executes inside the
+                // debug UI's ImGui frame, and the bake begins ImGui and UI
+                // frames of its own. Nesting them would trip ImGui's
+                // frame-scope assertion.
+                bakeThumbnailsRequested_ = true;
+                return true;
+            },
         });
     });
     DebugUi::addTab("Animation Preview", [this] {
@@ -169,9 +185,117 @@ Application::~Application()
     renderer_.waitIdle();
 }
 
+bool Application::bakeTileThumbnails()
+{
+    namespace bake = tileThumbnails;
+
+    // Warm every asset first: a tile drawn before its model is resident would
+    // bake as an empty square, and the bake gets one shot per tile.
+    RenderAssetRequirements requirements;
+    for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
+        requirements.requireModel(
+            assetManifest_.modelForTile(definition.type));
+    }
+    requirements.requireTexture(
+        assetManifest_.findTextureIdByName(groundSplatBaseTextureName));
+    requirements.requireTexture(
+        assetManifest_.findTextureIdByName(groundSplatDetailTextureName));
+    requirements.requireTexture(
+        assetManifest_.findTextureIdByName(groundSplatMapTextureName));
+    renderer_.ensureAssets(requirements);
+
+    const std::filesystem::path sourceRoot = SOKOBAN_SOURCE_ASSET_DIR;
+    bool allSucceeded = true;
+    int baked = 0;
+
+    for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
+        if (!bake::shouldBake(definition.type)) {
+            continue;
+        }
+
+        try {
+            // Two frames: the first can still be publishing assets or settling
+            // descriptor updates, and only the second is guaranteed to show
+            // the finished tile.
+            for (int warmup = 0; warmup < 2; ++warmup) {
+                SDL_PumpEvents();
+                ui_.beginFrame(window_.sizeInPixels(), {}, false, false);
+                // An empty ImGui frame: begun so that the ImGui::Render()
+                // inside drawFrame has a matching NewFrame, but deliberately
+                // never populated. The debug UI is drawn into the same pass
+                // that resolves into the image being captured, so any panel
+                // left open would end up baked into the thumbnails.
+                renderer_.beginDebugUiFrame();
+                renderer_.drawFrame(
+                    renderer_.prepareFrame(
+                        bake::buildBakeFrame(
+                            definition.type,
+                            assetManifest_,
+                            presentationSettings_)),
+                    ui_.drawData());
+            }
+
+            const VkExtent2D extent = renderer_.renderExtent();
+            const bake::CropRect crop = bake::cropFor(
+                bake::buildBakeFrame(
+                    definition.type, assetManifest_, presentationSettings_),
+                extent.width,
+                extent.height);
+            const ImageData captured = renderer_.captureRenderedFrame(
+                VkRect2D {
+                    .offset = { crop.x, crop.y },
+                    .extent = { crop.width, crop.height },
+                });
+
+            const std::string relative = bake::assetPathFor(definition.type);
+            std::vector<uint8_t> pixels(captured.rgba.size());
+            for (std::size_t i = 0; i < pixels.size(); ++i) {
+                pixels[i] = static_cast<uint8_t>(captured.rgba[i]);
+            }
+
+            // Both trees, exactly as painted splat maps are written: the
+            // source copy is the committed asset, the staged copy is what this
+            // build loads.
+            for (const std::filesystem::path& root : { sourceRoot, assetRoot_ }) {
+                const std::filesystem::path file = root / relative;
+                std::error_code error;
+                std::filesystem::create_directories(file.parent_path(), error);
+                writeRgbaPng(
+                    file, captured.width, captured.height, pixels);
+            }
+            ++baked;
+            log::info(log::Category::Assets)
+                << "Baked " << relative << " (" << captured.width << "x"
+                << captured.height << ")";
+        } catch (const std::exception& error) {
+            allSucceeded = false;
+            log::error(log::Category::Assets)
+                << "Could not bake a thumbnail for "
+                << tileTypeName(definition.type) << ": " << error.what();
+        }
+    }
+
+    log::info(log::Category::Assets)
+        << "Baked " << baked << " tile thumbnail(s) into "
+        << (sourceRoot / "custom/thumbnails").string();
+    renderer_.waitIdle();
+    return allSucceeded;
+}
+
 void Application::run()
 {
     while (running_) {
+#if SOKOBAN_ENABLE_DEBUG_UI
+        // Serviced here, between frames, where no ImGui or UI frame is open.
+        if (bakeThumbnailsRequested_) {
+            bakeThumbnailsRequested_ = false;
+            (void)bakeTileThumbnails();
+            // The files on disk changed, so drop what the palette already
+            // loaded; it would otherwise keep showing the old pictures until
+            // the next launch.
+            renderer_.invalidateTileThumbnails();
+        }
+#endif
         input_.beginFrame();
 
         SDL_Event event {};

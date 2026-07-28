@@ -2,6 +2,8 @@
 
 #include "engine/AssetManifest.hpp"
 #include "engine/Level.hpp"
+#include "engine/TileThumbnailBake.hpp"
+#include "engine/TileTypes.hpp"
 #include "engine/ui/UiConfig.hpp"
 
 #include <algorithm>
@@ -149,6 +151,7 @@ public:
     ContentInventory build()
     {
         addManifestAssets();
+        addTileThumbnails();
         addLevels();
         addShaders();
 
@@ -237,6 +240,38 @@ private:
         }
         for (const auto& music : manifest.musicTracks()) {
             addAssetPath(music.file, "music for level " + std::to_string(music.level));
+        }
+    }
+
+    // Baked tile palette thumbnails.
+    //
+    // Nothing in the manifest names these - they are pictures for the editor,
+    // not assets the game loads - so without this they were silently dropped:
+    // staging wipes the output root and copies only what it was told about. A
+    // bake writes into both the source tree and the staged root, so the palette
+    // looked right until the next launch re-staged and removed them, and the
+    // editor fell back to coloured squares even though the files were sitting
+    // in assets/custom/thumbnails.
+    //
+    // Missing files are skipped rather than fatal, unlike manifest assets:
+    // before the first bake there is nothing to copy, and a thumbnail that is
+    // not there costs the palette a picture rather than breaking the game.
+    // Notices are not collected for the same reason - these are files the bake
+    // generates, not third-party content that arrives with a licence.
+    void addTileThumbnails()
+    {
+        for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
+            if (!tileThumbnails::shouldBake(definition.type)) {
+                continue;
+            }
+            const std::filesystem::path relative =
+                tileThumbnails::assetPathFor(definition.type);
+            std::error_code error;
+            if (!std::filesystem::is_regular_file(
+                    roots_.assets / relative, error)) {
+                continue;
+            }
+            addFile(roots_.assets, relative, relative, "tile thumbnail", false);
         }
     }
 

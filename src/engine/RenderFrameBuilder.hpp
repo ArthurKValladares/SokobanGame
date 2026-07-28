@@ -11,6 +11,22 @@
 
 namespace sokoban {
 
+// How a tile type looks: footprint, height, colour, model, rotation and scale.
+//
+// The single definition of that, shared by the editor and the thumbnail bake.
+// It exists because the bake originally re-derived these rules and quietly got
+// them wrong - conveyors lost their rotation and their height, so all four
+// baked identically and squashed. Anything that needs to draw a lone tile
+// should come through here rather than restating the branches.
+//
+// Callers own placement: `baseElevation` is set from the cell, and preview or
+// pick-only flags are theirs to apply afterwards.
+[[nodiscard]] RenderFrameData::Tile tileVisual(
+    TileType tile,
+    GridPosition3 cell,
+    const AssetManifest& manifest,
+    const PresentationSettings& settings);
+
 class RenderFrameBuilder {
 public:
     struct GameplayInput {

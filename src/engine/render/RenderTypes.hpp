@@ -259,6 +259,16 @@ struct RenderFrameData {
 
     RenderViewMode viewMode = RenderViewMode::TopDown2D;
     std::optional<float> cameraPitchDegrees;
+    // Pulls the camera back without changing what is framed. The fit rescales
+    // to compensate, so this picks a lens rather than a zoom: a larger value is
+    // a longer lens with less perspective divergence, and the subject stays the
+    // same size on screen.
+    //
+    // Camera distance is otherwise derived from the size of the fitted area,
+    // which is fine for a board but not for a single tile - the thumbnail
+    // bake's 3x3 bed put the camera so close that a tile's vertical edges
+    // visibly splayed. Unset means the ordinary fitted distance.
+    std::optional<float> cameraDistanceMultiplier;
     Lighting lighting {};
     GridOverlay gridOverlay {};
     uint32_t levelWidth = 0;

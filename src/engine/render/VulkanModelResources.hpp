@@ -37,6 +37,15 @@ public:
         uint32_t textureIndex = 0;
     };
 
+    // Axis-aligned extent of a model's mesh in its own space. Needed to frame
+    // a model on its own (palette thumbnails); the scene never needs it,
+    // because tiles are drawn at a known grid size.
+    struct ModelBounds {
+        Vec3 minimum {};
+        Vec3 maximum {};
+        bool valid = false;
+    };
+
     struct LoadingStats {
         uint32_t loadedModels = 0;
         uint32_t pendingModels = 0;
@@ -108,6 +117,11 @@ public:
 
     [[nodiscard]] MeshView meshForModel(RenderModel model) const;
     [[nodiscard]] MaterialBinding materialForModel(RenderModel model) const;
+    // Invalid until the model has finished uploading.
+    [[nodiscard]] ModelBounds boundsForModel(RenderModel model) const;
+    // True once the model's mesh is on the GPU and safe to draw.
+    [[nodiscard]] bool modelReady(RenderModel model) const;
+    [[nodiscard]] const AssetManifest& manifest() const { return *manifest_; }
     [[nodiscard]] std::vector<TextureView> textures() const;
     [[nodiscard]] uint32_t textureCount() const;
     [[nodiscard]] LoadingStats loadingStats() const;
@@ -163,6 +177,9 @@ private:
         std::future<PreparedModel> future;
         std::optional<PreparedModel> prepared;
         std::exception_ptr failure;
+        // Captured at upload, because the CPU mesh is released immediately
+        // afterwards and nothing else keeps it.
+        ModelBounds bounds {};
     };
 
     struct TextureSlot {
@@ -197,9 +214,13 @@ private:
     [[nodiscard]] std::vector<bool> requiredTextures(const RenderAssetRequirements& requirements) const;
     [[nodiscard]] bool assetsReady(const RenderAssetRequirements& requirements) const;
 
+    [[nodiscard]] static ModelBounds boundsOf(
+        const std::vector<MeshVertex>& vertices);
     [[nodiscard]] GpuMesh uploadMesh(const MeshData& mesh) const;
     // Address mode, filtering, and colour space all come from the manifest
-    // (see AssetManifest::Texture); the defaults match a plain sRGB atlas.
+    // (see AssetManifest::Texture). Passed explicitly rather than defaulted:
+    // a nested type's default member initializers are not usable in a default
+    // argument of the enclosing class (MSVC allows it, GCC and Clang do not).
     struct TextureSampling {
         bool tiling = false;
         TextureFilter filter = TextureFilter::Nearest;
@@ -211,13 +232,13 @@ private:
         const ImageData& image,
         OwnedImage& gpuImage,
         VkSampler& sampler,
-        TextureSampling sampling = {});
+        TextureSampling sampling);
     void beginTextureUpload(
         const ImageData& image,
         OwnedImage& gpuImage,
         VkSampler& sampler,
         PendingTextureUpload& upload,
-        TextureSampling sampling = {});
+        TextureSampling sampling);
     // Stages `image` and records the copy into an image that already exists,
     // leaving it shader-readable. Shared by first upload and repaint.
     void recordTextureCopy(

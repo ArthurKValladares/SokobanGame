@@ -283,9 +283,12 @@ constexpr std::size_t hashSize = 1u << 15;
 // of near-zero deltas. Each row picks the filter with the smallest sum of
 // absolute differences, the heuristic the PNG spec itself recommends.
 [[nodiscard]] std::vector<uint8_t> filterScanlines(
-    uint32_t width, uint32_t height, const std::vector<uint8_t>& pixels)
+    uint32_t width,
+    uint32_t height,
+    uint32_t channels,
+    const std::vector<uint8_t>& pixels)
 {
-    const std::size_t stride = width;
+    const std::size_t stride = static_cast<std::size_t>(width) * channels;
     std::vector<uint8_t> filtered;
     filtered.reserve((stride + 1) * height);
 
@@ -302,10 +305,12 @@ constexpr std::size_t hashSize = 1u << 15;
         std::size_t bestScore = std::numeric_limits<std::size_t>::max();
         for (uint8_t type = 0; type <= 4; ++type) {
             for (std::size_t x = 0; x < stride; ++x) {
-                // One byte per pixel, so the "left" neighbour is x-1.
-                const uint8_t left = x >= 1 ? row[x - 1] : 0;
+                // The "left" neighbour is one whole pixel back, which is
+                // `channels` bytes, not one.
+                const uint8_t left = x >= channels ? row[x - channels] : 0;
                 const uint8_t up = previous[x];
-                const uint8_t upLeft = x >= 1 ? previous[x - 1] : 0;
+                const uint8_t upLeft =
+                    x >= channels ? previous[x - channels] : 0;
                 uint8_t value = 0;
                 switch (type) {
                 case 0: value = row[x]; break;
@@ -370,18 +375,22 @@ void appendChunk(
 
 } // namespace
 
-std::vector<std::byte> encodeGrayscalePng(
+namespace {
+
+[[nodiscard]] std::vector<std::byte> encodePng(
     uint32_t width,
     uint32_t height,
+    uint32_t channels,
     const std::vector<uint8_t>& pixels)
 {
     if (width == 0 || height == 0) {
         throw std::runtime_error("Cannot encode a PNG with zero dimensions");
     }
-    if (pixels.size() != static_cast<std::size_t>(width) * height) {
+    if (pixels.size() !=
+        static_cast<std::size_t>(width) * height * channels) {
         throw std::runtime_error(
             "PNG pixel count does not match " + std::to_string(width) + "x" +
-            std::to_string(height));
+            std::to_string(height) + "x" + std::to_string(channels));
     }
 
     std::vector<std::byte> png {
@@ -394,14 +403,16 @@ std::vector<std::byte> encodeGrayscalePng(
     appendUint32(header, width);
     appendUint32(header, height);
     header.push_back(std::byte { 8 }); // bit depth
-    header.push_back(std::byte { 0 }); // colour type: greyscale
+    // Colour type 0 = greyscale, 6 = RGBA.
+    header.push_back(
+        static_cast<std::byte>(channels == 1 ? 0 : 6));
     header.push_back(std::byte { 0 }); // compression: deflate
     header.push_back(std::byte { 0 }); // filter method: adaptive
     header.push_back(std::byte { 0 }); // interlace: none
     appendChunk(png, "IHDR", header);
 
     const std::vector<uint8_t> compressed =
-        zlibCompress(filterScanlines(width, height, pixels));
+        zlibCompress(filterScanlines(width, height, channels, pixels));
     std::vector<std::byte> data(compressed.size());
     std::memcpy(data.data(), compressed.data(), compressed.size());
     appendChunk(png, "IDAT", data);
@@ -410,13 +421,15 @@ std::vector<std::byte> encodeGrayscalePng(
     return png;
 }
 
-void writeGrayscalePng(
+void writePng(
     const std::filesystem::path& path,
     uint32_t width,
     uint32_t height,
+    uint32_t channels,
     const std::vector<uint8_t>& pixels)
 {
-    const std::vector<std::byte> png = encodeGrayscalePng(width, height, pixels);
+    const std::vector<std::byte> png =
+        encodePng(width, height, channels, pixels);
 
     std::filesystem::path temporary = path;
     temporary += ".tmp";
@@ -434,6 +447,38 @@ void writeGrayscalePng(
         }
     }
     atomicFile::replace(path, temporary);
+}
+
+} // namespace
+
+std::vector<std::byte> encodeGrayscalePng(
+    uint32_t width, uint32_t height, const std::vector<uint8_t>& pixels)
+{
+    return encodePng(width, height, 1, pixels);
+}
+
+std::vector<std::byte> encodeRgbaPng(
+    uint32_t width, uint32_t height, const std::vector<uint8_t>& pixels)
+{
+    return encodePng(width, height, 4, pixels);
+}
+
+void writeGrayscalePng(
+    const std::filesystem::path& path,
+    uint32_t width,
+    uint32_t height,
+    const std::vector<uint8_t>& pixels)
+{
+    writePng(path, width, height, 1, pixels);
+}
+
+void writeRgbaPng(
+    const std::filesystem::path& path,
+    uint32_t width,
+    uint32_t height,
+    const std::vector<uint8_t>& pixels)
+{
+    writePng(path, width, height, 4, pixels);
 }
 
 } // namespace sokoban

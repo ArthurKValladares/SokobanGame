@@ -1402,70 +1402,20 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
                 return;
             }
 
-            const bool surfaceEntity = tileTypeIsSurfaceEntity(tile);
-            const bool conveyor = tileTypeIsConveyor(tile);
-            const float tileSize = surfaceEntity
-                ? input.settings.geometry.surfaceEntityWidthDepth
-                : 1.0f;
-            const float centeredOffset = (1.0f - tileSize) * 0.5f;
-            Vec4 color = tileColor(tile);
-            if (tile == TileType::Player) {
-                color = { 1.0f, 1.0f, 1.0f, 1.0f };
-            }
-            if (tile == TileType::Ice) {
-                color.w = config::iceTintAlpha;
-            }
-
-            const float previewOffset = preview ? 0.02f : 0.0f;
-            RenderFrameData::Tile renderTile {
-                .cell = {
-                    x,
-                    y,
-                    z,
-                },
-                .position = {
-                    static_cast<float>(x) + centeredOffset,
-                    static_cast<float>(y) + centeredOffset,
-                },
-                .size = { tileSize, tileSize },
-                .color = color,
-                .baseElevation =
-                    static_cast<float>(z) + previewOffset,
-                .height = surfaceEntity
-                    ? input.settings.geometry.surfaceEntityHeight
-                    : (conveyor
-                            ? config::conveyorTileHeight
-                            : (tileTypeIsSolidBlock(tile) ||
-                                      tileTypeOccupiesLevelCell(tile) ||
-                                      tileTypeIsMirror(tile) ||
-                                      tileTypeIsDecorative(tile)
-                                    ? 1.0f
-                                    : 0.0f)),
-                .blurBehind = tile == TileType::Ice,
-                .pickOnly = pickOnly,
-                .showGrid = tile != TileType::Player,
-                .isEditorPreview = preview,
-                .affectsCameraFit = tileTypeAffectsCameraFit(tile),
-                .model = input.manifest.modelForTile(tile),
-                .animation = tile == TileType::Player
-                    ? input.manifest.playerIdleAnimation()
-                    : noAnimation,
-                .animationTimeSeconds = tile == TileType::Player
-                    ? input.worldAnimationTimeSeconds
-                    : 0.0f,
-                .modelRotationQuarterTurns =
-                    rules::conveyorDirectionForTile(tile)
-                    ? facingQuarterTurns(*rules::conveyorDirectionForTile(tile))
-                    : mirrorOrientationQuarterTurns(tile).value_or(0),
-                .modelRotationOffsetRadians = tileTypeIsMirror(tile)
-                    ? config::mirrorModelRotationOffsetRadians
-                    : 0.0f,
-                // Match gameplay so the editor previews the real ground look.
-                .effect = tile == TileType::Ground
-                    ? RenderSurfaceEffect::GroundSplat
-                    : RenderSurfaceEffect::Standard,
-            };
-            applyTileScale(renderTile, input.settings.tileScale(tile));
+            // Shared with the thumbnail bake, so a palette icon cannot end up
+            // looking different from the tile the editor draws.
+            RenderFrameData::Tile renderTile = tileVisual(
+                tile, { x, y, z }, input.manifest, input.settings);
+            // Lift previews clear of the tile they are hovering over.
+            renderTile.baseElevation += preview ? 0.02f : 0.0f;
+            renderTile.pickOnly = pickOnly;
+            renderTile.isEditorPreview = preview;
+            renderTile.animation = tile == TileType::Player
+                ? input.manifest.playerIdleAnimation()
+                : noAnimation;
+            renderTile.animationTimeSeconds = tile == TileType::Player
+                ? input.worldAnimationTimeSeconds
+                : 0.0f;
             frame.tiles.push_back(renderTile);
         };
 
@@ -1621,6 +1571,71 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
         }
     }
     return frame;
+}
+
+RenderFrameData::Tile tileVisual(
+    TileType tile,
+    GridPosition3 cell,
+    const AssetManifest& manifest,
+    const PresentationSettings& settings)
+{
+    const bool surfaceEntity = tileTypeIsSurfaceEntity(tile);
+    const bool conveyor = tileTypeIsConveyor(tile);
+    const float tileSize = surfaceEntity
+        ? settings.geometry.surfaceEntityWidthDepth
+        : 1.0f;
+    const float centeredOffset = (1.0f - tileSize) * 0.5f;
+
+    Vec4 color = tileColor(tile);
+    if (tile == TileType::Player) {
+        color = { 1.0f, 1.0f, 1.0f, 1.0f };
+    }
+    if (tile == TileType::Ice) {
+        color.w = config::iceTintAlpha;
+    }
+
+    RenderFrameData::Tile visual {
+        .cell = cell,
+        .position = {
+            static_cast<float>(cell.x) + centeredOffset,
+            static_cast<float>(cell.y) + centeredOffset,
+        },
+        .size = { tileSize, tileSize },
+        .color = color,
+        .baseElevation = static_cast<float>(cell.z),
+        // Conveyors are the reason this is shared: they are neither a surface
+        // entity nor a solid block, so anything that only tests those two ends
+        // up drawing them flat.
+        .height = surfaceEntity
+            ? settings.geometry.surfaceEntityHeight
+            : (conveyor
+                    ? config::conveyorTileHeight
+                    : (tileTypeIsSolidBlock(tile) ||
+                              tileTypeOccupiesLevelCell(tile) ||
+                              tileTypeIsMirror(tile) ||
+                              tileTypeIsDecorative(tile)
+                            ? 1.0f
+                            : 0.0f)),
+        .blurBehind = tile == TileType::Ice,
+        .showGrid = tile != TileType::Player,
+        .affectsCameraFit = tileTypeAffectsCameraFit(tile),
+        .model = manifest.modelForTile(tile),
+        // Conveyors carry their direction in the tile type; mirrors carry an
+        // orientation. Both are rotations of one shared model, so dropping
+        // either collapses a whole family into identical-looking tiles.
+        .modelRotationQuarterTurns =
+            rules::conveyorDirectionForTile(tile)
+            ? facingQuarterTurns(*rules::conveyorDirectionForTile(tile))
+            : mirrorOrientationQuarterTurns(tile).value_or(0),
+        .modelRotationOffsetRadians = tileTypeIsMirror(tile)
+            ? config::mirrorModelRotationOffsetRadians
+            : 0.0f,
+        .effect = tile == TileType::Ground
+            ? RenderSurfaceEffect::GroundSplat
+            : RenderSurfaceEffect::Standard,
+    };
+    applyTileScale(visual, settings.tileScale(tile));
+    return visual;
 }
 
 } // namespace sokoban

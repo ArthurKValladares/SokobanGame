@@ -48,6 +48,10 @@ public:
     Application& operator=(const Application&) = delete;
 
     void run();
+    // Renders each tile type through the normal frame path and writes the
+    // captured result to the source and staged asset trees. Returns false if
+    // any tile failed. Blocking; the process is expected to exit afterwards.
+    [[nodiscard]] bool bakeTileThumbnails();
 
 private:
     void loadCurrentScreen();
@@ -163,6 +167,9 @@ private:
     uint64_t uploadedSplatRevision_ = 0;
     bool running_ = true;
     bool draftExitConfirmationOpen_ = false;
+    // Set by the editor's re-bake button and serviced between frames, because
+    // the bake drives frames of its own.
+    bool bakeThumbnailsRequested_ = false;
 };
 
 } // namespace sokoban

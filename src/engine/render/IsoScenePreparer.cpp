@@ -121,7 +121,8 @@ IsoRenderLayout calculateIsoLayout(
     const float cameraDistance = std::max(
         static_cast<float>(
             std::max(cameraExtent.width, cameraExtent.height)),
-        1.0f) * config::cameraDistanceScale;
+        1.0f) * config::cameraDistanceScale *
+        std::max(frameData.cameraDistanceMultiplier.value_or(1.0f), 0.01f);
     const Vec3 target {
         static_cast<float>(cameraExtent.originX) +
             static_cast<float>(cameraExtent.width) * 0.5f,

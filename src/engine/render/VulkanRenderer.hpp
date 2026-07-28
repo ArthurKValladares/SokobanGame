@@ -15,6 +15,7 @@
 #include "engine/render/VulkanShadowPass.hpp"
 #include "engine/render/VulkanSsaoPass.hpp"
 #include "engine/render/VulkanSwapchainResources.hpp"
+#include "engine/render/VulkanThumbnailPass.hpp"
 #include "engine/render/VulkanUiResources.hpp"
 #include "engine/ui/Ui.hpp"
 
@@ -86,6 +87,19 @@ public:
     bool updateTexture(RenderTexture texture, const ImageData& image);
     // Picks up textures appended to the manifest after startup.
     void syncManifestTextures();
+    // Reads the last drawn frame back as RGBA. The whole render extent when
+    // `region` is empty, otherwise that rectangle of it. Blocking; used by the
+    // offline thumbnail bake, which needs the real render rather than a
+    // re-creation of it.
+    [[nodiscard]] ImageData captureRenderedFrame(
+        std::optional<VkRect2D> region = std::nullopt);
+    [[nodiscard]] VkExtent2D renderExtent() const;
+    // Rendered preview of a tile type for the editor palette, or nullptr when
+    // thumbnails are unavailable or the tile has no model of its own (the
+    // caller should fall back to a swatch).
+    [[nodiscard]] VkDescriptorSet tileThumbnail(TileType tile);
+    // Drops loaded thumbnails so a re-bake is picked up without restarting.
+    void invalidateTileThumbnails();
     // World point -> pixel position, using the frame's own camera. Lets the
     // debug UI draw overlays that sit correctly on the 3D board (the brush
     // preview ring) without duplicating the projection.
@@ -172,6 +186,7 @@ private:
     VkFormat depthFormat_ = VK_FORMAT_D32_SFLOAT;
     VkFormat shadowFormat_ = VK_FORMAT_D32_SFLOAT;
     VulkanShadowPass shadowPass_;
+    VulkanThumbnailPass thumbnailPass_;
     VulkanUiResources uiResources_;
 
     VulkanModelResources modelResources_;

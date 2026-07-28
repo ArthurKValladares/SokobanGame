@@ -31,4 +31,17 @@ void writeGrayscalePng(
     uint32_t height,
     const std::vector<uint8_t>& pixels);
 
+// The same encoder at 8-bit RGBA, for baked tile thumbnails: those are
+// screenshots of the real render, so they are colour and carry alpha.
+// `pixels` is width * height * 4 bytes, straight (non-premultiplied) alpha.
+[[nodiscard]] std::vector<std::byte> encodeRgbaPng(
+    uint32_t width,
+    uint32_t height,
+    const std::vector<uint8_t>& pixels);
+void writeRgbaPng(
+    const std::filesystem::path& path,
+    uint32_t width,
+    uint32_t height,
+    const std::vector<uint8_t>& pixels);
+
 } // namespace sokoban

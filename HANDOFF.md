@@ -1039,6 +1039,144 @@ Painting splat maps in the editor (Debug builds only):
   another screen from the file browser cannot paint screen A's map while
   showing screen B's board.
 
+Tile palette thumbnails:
+
+- The level editor's palette shows a picture of each tile, and those pictures
+  are **baked offline by screenshotting the real game render**. Run:
+
+  ```powershell
+  .\build\Debug\sokoban.exe --bake-tile-thumbnails
+  ```
+
+  It renders each tile through the normal frame path - same shaders, lighting,
+  shadows, SSAO and MSAA - captures the result, and writes
+  `assets/custom/thumbnails/tile_<name>.png` into both the source and staged
+  trees, then exits. Re-run it after changing tile models, materials or
+  lighting.
+
+  The same work is on a "Re-bake Tile Pictures" button in the Level Editor
+  panel, which is usually easier: the command line flag is easy to forget and
+  awkward to pass when launching from an IDE. Both paths log which mode the
+  process started in, because "I passed the flag and it just opened the game"
+  is otherwise indistinguishable from the flag never arriving.
+- The button only *requests* a bake; it runs between frames in `run()`. The
+  callback fires inside the debug UI's ImGui frame, and the bake begins ImGui
+  and UI frames of its own - nesting them trips ImGui's frame-scope assertion.
+- The bake begins an empty ImGui frame per captured frame and never draws the
+  debug UI into it. That is not cosmetic: the debug UI is recorded into the
+  same pass that resolves into the image being captured, so any panel left
+  open would be baked into the thumbnails. It also gives the `ImGui::Render()`
+  inside `drawFrame` a matching `NewFrame`.
+- Consequences worth keeping: a thumbnail cannot drift from how the board
+  actually looks, because it *is* how the board looks; and the files can be
+  opened and checked outside the game.
+- `TileThumbnailBake` owns the scene and the crop rectangle, so the bake and
+  its tests agree on where the tile lands. It is headless and tested
+  (`tests/TileThumbnailBakeTests.cpp`); the rendering itself is the game's own.
+- **The subject stands on a 3x3 bed of neutral grey ground, and the whole bed
+  drives the camera fit.** That is not only for looks: fitting the camera to
+  the subject alone framed every tile differently - a flat tile filled the
+  view while a tall one was pushed back - so no two thumbnails shared a scale.
+  With a fixed bed every tile gets an identical camera, and the crop comes out
+  the same rectangle for all of them. The bed also gives shadows and ambient
+  occlusion somewhere to land, so tiles read as sitting on ground rather than
+  floating in a void.
+- The bed is drawn as plain cubes rather than Ground tiles, so a screen's
+  splat map cannot change what the thumbnails look like. Ground itself
+  replaces the centre bed cell instead of stacking on it, which would z-fight.
+- **The subject tile is built by `tileVisual` (`RenderFrameBuilder.hpp`), which
+  the editor also uses.** That function is the single definition of how a tile
+  type looks - footprint, height, colour, model, rotation, manifest scale. It
+  exists because the bake originally restated those rules and quietly dropped
+  branches: conveyors are neither a surface entity nor a solid block, so they
+  baked at height 0, and their rotation lives in
+  `rules::conveyorDirectionForTile` rather than `mirrorOrientationQuarterTurns`,
+  so all four directions baked as one identical flat picture. Anything that
+  needs to draw a lone tile should call `tileVisual` rather than re-deriving it.
+  `tests/TileThumbnailBakeTests.cpp` pins the bake's subject to `tileVisual`
+  field by field, so a future copy of the rules fails the suite.
+- **Settings must be passed in** (the live `PresentationSettings`). They carry
+  both the lighting - `RenderFrameData::Lighting`'s defaults have shadows *and*
+  ambient occlusion switched off, so a bake using them silently produces flat,
+  contact-less pictures - and the per-tile manifest scales that `tileVisual`
+  applies.
+- **The bake uses a long lens** (`RenderFrameData::cameraDistanceMultiplier`,
+  4x). Camera distance is derived from the size of the area being framed, so a
+  camera fitted to a 3x3 bed sits roughly four times closer than one fitted to
+  a board, and the perspective was strong enough to see - a tile's vertical
+  edges splayed by nearly 4% of the picture width, which reads as the tile
+  leaning or bulging. The multiplier pulls the camera back while the fit
+  rescales to compensate, so the subject stays the same size on screen and only
+  the divergence changes; it is a lens choice, not a zoom. 4x puts the splay
+  between what a 9-wide and a 13-wide board produce. Much further would
+  approach an orthographic view, which is *less* like the game.
+  `tests/TileThumbnailBakeTests.cpp` measures the splay directly rather than
+  asserting the constant, and checks that removing the multiplier breaks it.
+- The crop is derived by projecting the centre cell through the frame's own
+  camera rather than taking a fixed fraction of the extent, so it follows the
+  subject if the camera or the bed ever changes.
+- **The content pipeline stages thumbnails explicitly**
+  (`ContentPipeline::addTileThumbnails`). Nothing in the manifest names them -
+  they are editor pictures, not assets the game loads - and staging wipes the
+  output root and copies only what it was told about. The `sokoban_content`
+  target is `ALL`, so it re-stages on every build: a bake wrote into both the
+  source tree and the runtime root, so the palette looked right until the next
+  build removed the staged copies, and the editor then showed coloured squares
+  on every launch while the files sat untouched in `assets/custom/thumbnails`.
+  Missing thumbnails are skipped rather than fatal, since before the first bake
+  there is nothing to copy.
+- **Baked thumbnails upload as `VK_FORMAT_R8G8B8A8_SRGB`.** The capture holds
+  display-ready, sRGB-*encoded* bytes, which is why the PNGs look right in an
+  image viewer. The swapchain is sRGB, so the hardware encodes linear->sRGB
+  when ImGui writes. Uploading as UNORM hands the shader those already-encoded
+  bytes as if they were linear and they get encoded a second time - byte 60
+  displays as 133, byte 200 as 229 - which is the washed-out, overexposed look
+  the palette had. SRGB decodes on sample so the write round-trips exactly, and
+  it matches how the game uploads its own colour textures. Note this assumes an
+  sRGB swapchain; `chooseSurfaceFormat` prefers one but falls back to
+  `formats.front()`, and on that fallback every colour texture in the game
+  would be wrong together, not just thumbnails.
+- `VulkanFrameCapture` reads a region of the resolved scene colour image back
+  to the CPU. That image is already single-sampled and `TRANSFER_SRC`, so the
+  capture needs no changes to the render targets - it just moves the layout to
+  transfer-source and puts it back. Swapchain formats are often BGRA, so the
+  channel order is fixed up during the copy out.
+- `VulkanThumbnailPass` now only *loads* those PNGs and hands them to ImGui.
+  An earlier version rendered the models here in a bespoke pipeline; it had no
+  shadows or SSAO and its material handling had to be kept in step with
+  `triangle.frag.glsl` by hand, and it looked wrong. Loading a screenshot is
+  both simpler and exact by construction.
+- Thumbnails are loaded lazily and cached, including the misses, so a tile with
+  no baked file does not hit the filesystem every frame. A missing file just
+  means the palette keeps its colour swatch for that tile.
+- The images are uploaded as UNORM, not SRGB: a capture already holds the
+  shaded, display-ready pixels the game presented, and decoding them again
+  would wash the palette out relative to the board.
+
+## Building the render layer outside Visual Studio
+
+Most of `src/engine/render` and the debug UI can be type-checked on a machine
+without the Vulkan SDK, which matters because these files are otherwise only
+ever compiled by a full Windows build:
+
+- Vulkan headers are vendored inside SDL at
+  `third_party/SDL/src/video/khronos` (add that directory to the include path).
+  It predates `VK_API_VERSION_1_4`, so define it to `VK_API_VERSION_1_3` for a
+  syntax-only check.
+- ImGui needs `third_party/imgui`, `third_party/imgui/backends` and
+  `third_party/imgui/misc/cpp` on the include path.
+- `Application.cpp` additionally wants `SOKOBAN_SOURCE_ASSET_DIR`,
+  `SOKOBAN_SOURCE_LEVEL_DIR`, `SOKOBAN_GAME_VERSION` and
+  `SOKOBAN_ENABLE_DEBUG_UI=1`.
+- A few headers use backslash include paths (`engine\Level.hpp`), which MSVC
+  accepts and other compilers do not; a shim directory containing files with
+  those literal names works around it.
+
+Note that MSVC also accepts a nested type's default member initializers inside
+a default argument of the enclosing class, which GCC and Clang reject - see
+`VulkanModelResources::createTextureBlocking`, where the sampling argument is
+passed explicitly for that reason.
+
 ## UI And Text Rendering
 
 There are two UI systems:

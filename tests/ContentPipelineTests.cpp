@@ -1,4 +1,6 @@
 #include "engine/ContentPipeline.hpp"
+#include "engine/TileThumbnailBake.hpp"
+#include "engine/TileTypes.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -174,6 +176,66 @@ void testInventoryAndStaging()
     check(!std::filesystem::exists(output / "stale.file"), "stale output removed");
 }
 
+void testBakedThumbnailsAreStaged()
+{
+    TempDirectory temp;
+    const auto roots = createValidContent(temp.path());
+
+    // Nothing declares thumbnails - they are editor pictures, not manifest
+    // assets - so they used to be dropped. Staging wipes the output root and
+    // copies only what it was told about, and every build re-stages, so a bake
+    // survived until the next build and the palette then fell back to coloured
+    // squares while the files sat untouched in the source tree.
+    const std::string wall =
+        sokoban::tileThumbnails::assetPathFor(sokoban::TileType::Wall);
+    const std::string player =
+        sokoban::tileThumbnails::assetPathFor(sokoban::TileType::Player);
+    writeFile(roots.assets / wall, "png");
+    writeFile(roots.assets / player, "png");
+
+    const sokoban::ContentInventory inventory =
+        sokoban::collectContentInventory(roots);
+    check(contains(inventory, wall), "baked thumbnail included");
+    check(contains(inventory, player), "second baked thumbnail included");
+
+    const std::filesystem::path output = temp.path() / "thumbnails/assets";
+    (void)sokoban::stageContent(roots, output, "1.2.3");
+    check(
+        std::filesystem::is_regular_file(output / wall),
+        "baked thumbnail staged to the runtime root");
+}
+
+void testMissingThumbnailsAreNotFatal()
+{
+    TempDirectory temp;
+    const auto roots = createValidContent(temp.path());
+
+    // Before the first bake there is nothing to copy. Unlike a manifest asset,
+    // a thumbnail that is not there must cost the palette a picture rather
+    // than refuse to stage the game at all.
+    const sokoban::ContentInventory inventory =
+        sokoban::collectContentInventory(roots);
+    check(
+        !contains(
+            inventory,
+            sokoban::tileThumbnails::assetPathFor(sokoban::TileType::Wall)),
+        "absent thumbnail is not staged");
+    check(contains(inventory, "manifest.json"), "staging still succeeds");
+
+    // A partial bake is normal too: one tile present must not drag in the rest.
+    const std::string wall =
+        sokoban::tileThumbnails::assetPathFor(sokoban::TileType::Wall);
+    writeFile(roots.assets / wall, "png");
+    const sokoban::ContentInventory partial =
+        sokoban::collectContentInventory(roots);
+    check(contains(partial, wall), "the one baked thumbnail is staged");
+    check(
+        !contains(
+            partial,
+            sokoban::tileThumbnails::assetPathFor(sokoban::TileType::Player)),
+        "the tiles never baked are still skipped");
+}
+
 void testValidationFailures()
 {
     TempDirectory temp;
@@ -201,6 +263,8 @@ void testValidationFailures()
 int main()
 {
     testInventoryAndStaging();
+    testBakedThumbnailsAreStaged();
+    testMissingThumbnailsAreNotFatal();
     testValidationFailures();
 
     if (failures != 0) {

@@ -183,6 +183,7 @@ add_library(sokoban_core STATIC
     src/engine/SettingsTypes.cpp
     src/engine/SplatCanvas.cpp
     src/engine/SplatPainter.cpp
+    src/engine/TileThumbnailBake.cpp
     src/engine/TaskSystem.cpp
     src/engine/TileTypes.cpp
     src/engine/Window.cpp
@@ -243,6 +244,8 @@ add_library(sokoban_render_vulkan STATIC
     src/engine/render/VulkanSceneRecorder.cpp
     src/engine/render/VulkanSceneDescriptors.cpp
     src/engine/render/VulkanShadowPass.cpp
+    src/engine/render/VulkanFrameCapture.cpp
+    src/engine/render/VulkanThumbnailPass.cpp
     src/engine/render/VulkanSsaoPass.cpp
     src/engine/render/VulkanSwapchainResources.cpp
     src/engine/render/VulkanUiResources.cpp
@@ -524,6 +527,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME ground_pick TARGET sokoban_ground_pick_tests
         LIBS sokoban_core
         SOURCES tests/GroundPickTests.cpp
+    )
+    sokoban_add_test(NAME tile_thumbnail_bake TARGET sokoban_tile_thumbnail_bake_tests
+        LIBS sokoban_core
+        SOURCES tests/TileThumbnailBakeTests.cpp
     )
 endif()
 

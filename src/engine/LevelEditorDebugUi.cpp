@@ -20,22 +20,66 @@ namespace sokoban {
 namespace {
 
 #if SOKOBAN_ENABLE_DEBUG_UI
-bool drawPaintButton(const TileTypeDefinition& definition, TileType selectedTile)
+// Large enough to actually read a model in. Baked thumbnails come out around
+// 330px square, so there is plenty of detail to enlarge into.
+constexpr ImVec2 paletteButtonSize { 93.6f, 83.2f };
+
+// Laying the row out is the caller's job: at this size the palette no longer
+// fits on one line and has to wrap.
+bool drawPaintButton(
+    const TileTypeDefinition& definition,
+    TileType selectedTile,
+    ImTextureID thumbnail)
 {
-    ImGui::SameLine();
     const bool selected = selectedTile == definition.type;
     if (selected) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.50f, 0.85f, 1.0f));
     }
 
     ImGui::PushID(static_cast<int>(definition.type));
-    const bool clicked = ImGui::Button("##paint_tile", ImVec2(32.0f, 28.0f));
+    const bool clicked = ImGui::Button("##paint_tile", paletteButtonSize);
     const ImVec2 buttonMin = ImGui::GetItemRectMin();
     const ImVec2 buttonMax = ImGui::GetItemRectMax();
     const Vec4 color = tileColor(definition.type);
-    const ImVec2 swatchMin { buttonMin.x + 8.0f, buttonMin.y + 6.0f };
-    const ImVec2 swatchMax { buttonMax.x - 8.0f, buttonMax.y - 6.0f };
+    const float insetX = paletteButtonSize.x * 0.22f;
+    const float insetY = paletteButtonSize.y * 0.20f;
+    const ImVec2 swatchMin { buttonMin.x + insetX, buttonMin.y + insetY };
+    const ImVec2 swatchMax { buttonMax.x - insetX, buttonMax.y - insetY };
     ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+    if (thumbnail != 0) {
+        // A rendered preview of the real asset, drawn over the whole button
+        // rather than the swatch inset because a model needs the room, and
+        // with straight alpha so only the silhouette shows.
+        //
+        // The thumbnail is square and the button is not, so it is centred at
+        // its own aspect rather than stretched to fill.
+        const float side = std::min(
+            paletteButtonSize.x, paletteButtonSize.y) - 2.0f;
+        const ImVec2 centre {
+            (buttonMin.x + buttonMax.x) * 0.5f,
+            (buttonMin.y + buttonMax.y) * 0.5f,
+        };
+        drawList->AddImage(
+            thumbnail,
+            ImVec2(centre.x - side * 0.5f, centre.y - side * 0.5f),
+            ImVec2(centre.x + side * 0.5f, centre.y + side * 0.5f));
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "%.*s",
+                static_cast<int>(definition.name.size()),
+                definition.name.data());
+        }
+        ImGui::PopID();
+        if (selected) {
+            ImGui::PopStyleColor();
+        }
+        return clicked;
+    }
+
+    // No thumbnail: either thumbnails are unavailable, the asset is still
+    // loading, or this tile is a procedural cube with no model - for which a
+    // flat colour swatch is an honest depiction anyway.
     drawList->AddRectFilled(
         swatchMin,
         swatchMax,
@@ -169,7 +213,7 @@ void LevelEditorDebugUi::draw(
         editor.deleteActiveLayer();
     }
 
-    drawTilePalette(editor);
+    drawTilePalette(editor, callbacks);
     ImGui::Separator();
     drawGroundPaintTab(painter, callbacks);
     ImGui::Separator();
@@ -304,21 +348,51 @@ void LevelEditorDebugUi::syncDocumentPath(const LevelEditor& editor)
     filePathBuffer_ = editor.documentPath().string();
 }
 
-void LevelEditorDebugUi::drawTilePalette(LevelEditor& editor)
+void LevelEditorDebugUi::drawTilePalette(
+    LevelEditor& editor, const Callbacks& callbacks)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     ImGui::Text("Paint");
+    // Wrap to the panel width instead of one long row, which these buttons are
+    // far too wide for.
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    const float available = ImGui::GetContentRegionAvail().x;
+    const int perRow = std::max(
+        1,
+        static_cast<int>(
+            (available + spacing) / (paletteButtonSize.x + spacing)));
+    int column = 0;
     for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
         if (definition.type == TileType::Water) {
             continue;
         }
-        if (drawPaintButton(definition, editor.selectedTile())) {
+        if (column % perRow != 0) {
+            ImGui::SameLine();
+        }
+        const auto thumbnail = static_cast<ImTextureID>(
+            callbacks.tileThumbnail
+                ? callbacks.tileThumbnail(definition.type)
+                : 0);
+        if (drawPaintButton(definition, editor.selectedTile(), thumbnail)) {
             editor.setSelectedTile(definition.type);
         }
+        ++column;
     }
 
     const std::string_view selectedName = tileTypeName(editor.selectedTile());
     ImGui::Text("Selected: %.*s", static_cast<int>(selectedName.size()), selectedName.data());
+
+    // These pictures are screenshots of the real render, so they go stale when
+    // models, materials or lighting change.
+    if (ImGui::Button("Re-bake Tile Pictures") && callbacks.bakeTileThumbnails) {
+        (void)callbacks.bakeTileThumbnails();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Renders every tile through the normal game path and saves the "
+            "results to assets/custom/thumbnails. Takes a moment and the "
+            "window will flicker through each tile.");
+    }
 #else
     (void)editor;
 #endif

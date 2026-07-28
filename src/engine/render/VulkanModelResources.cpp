@@ -29,6 +29,45 @@ bool futureReady(std::future<Result>& future)
 
 } // namespace
 
+VulkanModelResources::ModelBounds VulkanModelResources::boundsOf(
+    const std::vector<MeshVertex>& vertices)
+{
+    if (vertices.empty()) {
+        return {};
+    }
+    ModelBounds bounds {
+        .minimum = vertices.front().position,
+        .maximum = vertices.front().position,
+        .valid = true,
+    };
+    for (const MeshVertex& vertex : vertices) {
+        bounds.minimum.x = std::min(bounds.minimum.x, vertex.position.x);
+        bounds.minimum.y = std::min(bounds.minimum.y, vertex.position.y);
+        bounds.minimum.z = std::min(bounds.minimum.z, vertex.position.z);
+        bounds.maximum.x = std::max(bounds.maximum.x, vertex.position.x);
+        bounds.maximum.y = std::max(bounds.maximum.y, vertex.position.y);
+        bounds.maximum.z = std::max(bounds.maximum.z, vertex.position.z);
+    }
+    return bounds;
+}
+
+VulkanModelResources::ModelBounds VulkanModelResources::boundsForModel(
+    RenderModel model) const
+{
+    if (model.isCube() || model.index() >= models_.size()) {
+        return {};
+    }
+    return models_[model.index()].bounds;
+}
+
+bool VulkanModelResources::modelReady(RenderModel model) const
+{
+    if (model.isCube() || model.index() >= models_.size()) {
+        return false;
+    }
+    return models_[model.index()].state == LoadState::Ready;
+}
+
 VulkanModelResources::~VulkanModelResources()
 {
     destroy();
@@ -69,7 +108,8 @@ void VulkanModelResources::create(
         createTextureBlocking(
             fallback,
             fallbackTexture_.image,
-            fallbackTexture_.sampler);
+            fallbackTexture_.sampler,
+            TextureSampling {});
     } catch (...) {
         destroy();
         throw;
@@ -368,10 +408,23 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
         slot.prepared = slot.future.get();
         slot.state = LoadState::CpuReady;
         if (std::holds_alternative<MeshData>(*slot.prepared)) {
-            slot.gpu = uploadMesh(std::get<MeshData>(*slot.prepared));
+            const MeshData& mesh = std::get<MeshData>(*slot.prepared);
+            // Last chance: prepared is released on the next line.
+            slot.bounds = boundsOf(mesh.vertices);
+            slot.gpu = uploadMesh(mesh);
             slot.prepared.reset();
             slot.state = LoadState::Ready;
         } else {
+            // Skinned meshes keep their own source extent, and take a
+            // different path to Ready - without this the player would never
+            // get bounds and so never get a palette thumbnail.
+            const SkinnedMeshData& skinned =
+                std::get<SkinnedMeshData>(*slot.prepared);
+            slot.bounds = {
+                .minimum = skinned.sourceMinimum,
+                .maximum = skinned.sourceMaximum,
+                .valid = true,
+            };
             finalizeSkinnedMeshIfReady();
         }
     } catch (...) {

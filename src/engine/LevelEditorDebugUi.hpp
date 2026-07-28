@@ -1,8 +1,10 @@
 #pragma once
 
 #include "engine/LevelEditor.hpp"
+#include "engine/TileTypes.hpp"
 #include "engine/SplatPainter.hpp"
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -22,6 +24,15 @@ public:
         std::function<bool()> openGroundPainting;
         // Creates and registers one for a screen that has none, then opens it.
         std::function<bool()> createGroundSplatMap;
+        // Rendered preview of a tile type for the palette, or 0 when there is
+        // none to show (still loading, no model, or thumbnails unavailable).
+        // An ImGui ImTextureID, typed as uint64_t so this header does not
+        // require imgui.h - which non-debug builds compile without.
+        std::function<uint64_t(TileType)> tileThumbnail;
+        // Re-bakes the palette pictures. Same work as the
+        // --bake-tile-thumbnails command line, offered here because that flag
+        // is easy to forget and awkward to pass when launching from an IDE.
+        std::function<bool()> bakeTileThumbnails;
     };
 
     void initialize(const LevelEditor& editor);
@@ -33,7 +44,7 @@ public:
 private:
     void syncDocumentPath(const LevelEditor& editor);
     void drawGroundPaintTab(SplatPainter& painter, const Callbacks& callbacks);
-    void drawTilePalette(LevelEditor& editor);
+    void drawTilePalette(LevelEditor& editor, const Callbacks& callbacks);
     void drawFileBrowser(LevelEditor& editor);
     void drawActiveLevelsTab(LevelEditor& editor);
     void drawDeletedLevelsTab(LevelEditor& editor);

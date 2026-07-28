@@ -234,6 +234,63 @@ void testInvalidInputIsRejected()
     CHECK(throws([] { return encodeGrayscalePng(4, 4, std::vector<uint8_t>(17)); }));
 }
 
+void testRgbaRoundTrips()
+{
+    TEST("rgbaRoundTrips");
+    const TemporaryDirectory directory;
+    constexpr uint32_t width = 53; // deliberately not a power of two
+    constexpr uint32_t height = 31;
+
+    // Colour, an alpha ramp, and per-channel variation: baked thumbnails are
+    // screenshots, so all four channels carry real data and the filter's
+    // "left neighbour" must step a whole pixel rather than one byte.
+    std::vector<uint8_t> pixels(
+        static_cast<std::size_t>(width) * height * 4);
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            const std::size_t at =
+                (static_cast<std::size_t>(y) * width + x) * 4;
+            pixels[at + 0] = static_cast<uint8_t>(x * 5);
+            pixels[at + 1] = static_cast<uint8_t>(y * 7);
+            pixels[at + 2] = static_cast<uint8_t>((x + y) * 3);
+            pixels[at + 3] = static_cast<uint8_t>(x < width / 2 ? 255 : x * 4);
+        }
+    }
+
+    const std::filesystem::path file = directory.path() / "rgba.png";
+    writeRgbaPng(file, width, height, pixels);
+    const ImageData decoded = loadRgbaImage(file);
+    CHECK(decoded.width == width);
+    CHECK(decoded.height == height);
+    CHECK(decoded.rgba.size() == pixels.size());
+
+    bool identical = decoded.rgba.size() == pixels.size();
+    for (std::size_t i = 0; identical && i < pixels.size(); ++i) {
+        identical = static_cast<uint8_t>(decoded.rgba[i]) == pixels[i];
+    }
+    CHECK(identical);
+
+    // Transparency survives, which is what lets a thumbnail sit on the button
+    // background instead of in a filled rectangle.
+    const std::vector<uint8_t> transparent(16 * 16 * 4, 0);
+    const std::filesystem::path clearFile = directory.path() / "clear.png";
+    writeRgbaPng(clearFile, 16, 16, transparent);
+    const ImageData clear = loadRgbaImage(clearFile);
+    CHECK(clear.rgba[3] == static_cast<std::byte>(0));
+
+    // Wrong buffer size is rejected rather than read out of bounds.
+    const auto throws = [](auto&& call) {
+        try {
+            (void)call();
+        } catch (const std::exception&) {
+            return true;
+        }
+        return false;
+    };
+    CHECK(throws([] { return encodeRgbaPng(4, 4, std::vector<uint8_t>(4 * 4)); }));
+    CHECK(throws([] { return encodeRgbaPng(4, 4, std::vector<uint8_t>(4 * 4 * 4 - 1)); }));
+}
+
 void testWriteIsAtomicallyReplaced()
 {
     TEST("writeIsAtomicallyReplaced");
@@ -270,6 +327,7 @@ int main()
     testSplatLikeContentCompressesWell();
     testEdgeSizesRoundTrip();
     testInvalidInputIsRejected();
+    testRgbaRoundTrips();
     testWriteIsAtomicallyReplaced();
 
     if (failures == 0) {

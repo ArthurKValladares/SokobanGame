@@ -3,6 +3,7 @@
 #include "engine/Log.hpp"
 #include "engine/render/ImageData.hpp"
 #include "engine/render/VulkanDeviceSelection.hpp"
+#include "engine/render/VulkanFrameCapture.hpp"
 #include "engine/ui/UiConfig.hpp"
 
 #include <SDL3/SDL.h>
@@ -83,6 +84,17 @@ VulkanRenderer::VulkanRenderer(
     logRenderConfiguration();
     createFrameResources();
     initializeDebugUi();
+#if SOKOBAN_ENABLE_DEBUG_UI
+    // After initializeDebugUi: registering a thumbnail with ImGui needs the
+    // Vulkan backend to exist. Failure here only costs the editor its
+    // thumbnails, so it is not fatal.
+    thumbnailPass_.create(
+        deviceContext_.physicalDevice(),
+        deviceContext_.device(),
+        deviceContext_.commandPool(),
+        deviceContext_.graphicsQueue(),
+        assetRoot_);
+#endif
 }
 
 VulkanRenderer::~VulkanRenderer()
@@ -322,6 +334,55 @@ void VulkanRenderer::ensureAssets(const RenderAssetRequirements& requirements)
     if (modelResources_.ensureAssets(requirements)) {
         descriptorSync_.resourcesChanged();
     }
+}
+
+VkDescriptorSet VulkanRenderer::tileThumbnail(TileType tile)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    return thumbnailPass_.thumbnailFor(tile);
+#else
+    (void)tile;
+    return VK_NULL_HANDLE;
+#endif
+}
+
+void VulkanRenderer::invalidateTileThumbnails()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    thumbnailPass_.invalidate();
+#endif
+}
+
+VkExtent2D VulkanRenderer::renderExtent() const
+{
+    return activeResources_.swapchain
+        ? activeResources_.swapchain->renderExtent()
+        : VkExtent2D { 0, 0 };
+}
+
+ImageData VulkanRenderer::captureRenderedFrame(std::optional<VkRect2D> region)
+{
+    if (!activeResources_.swapchain) {
+        throw std::runtime_error("No swapchain to capture from");
+    }
+    const VkExtent2D full = activeResources_.swapchain->renderExtent();
+    const VkRect2D rect =
+        region.value_or(VkRect2D { .offset = { 0, 0 }, .extent = full });
+
+    // Everything submitted must have landed before the copy reads the image.
+    deviceContext_.waitIdle();
+    return captureImageRegion(
+        deviceContext_.physicalDevice(),
+        deviceContext_.device(),
+        deviceContext_.commandPool(),
+        deviceContext_.graphicsQueue(),
+        activeResources_.swapchain->resolvedColorImage(),
+        activeResources_.swapchain->colorFormat(),
+        // The scene pass leaves the resolve target readable by shaders; the
+        // capture moves it to transfer-source and puts it back.
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        rect.offset,
+        rect.extent);
 }
 
 void VulkanRenderer::syncManifestTextures()
