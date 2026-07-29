@@ -65,69 +65,6 @@ std::array<Vec4, 4> affineTransformColumns(
     };
 }
 
-struct ModelTransformPoints {
-    Vec3 origin {};
-    Vec3 xPoint {};
-    Vec3 yPoint {};
-    Vec3 zPoint {};
-};
-
-ModelTransformPoints modelTransformPoints(
-    const RenderFrameData::Tile& tile)
-{
-    const float x = tile.position.x;
-    const float y = tile.position.y;
-    const float z = tile.baseElevation;
-    const float width = tile.size.x;
-    const float depth = tile.size.y;
-    const float height = std::max(tile.height, 0.0f);
-
-    ModelTransformPoints result;
-    switch (tile.modelRotationQuarterTurns % 4) {
-    case 0:
-        result.origin = { x, y, z };
-        result.xPoint = { x + width, y, z };
-        result.yPoint = { x, y + depth, z };
-        break;
-    case 1:
-        result.origin = { x + width, y, z };
-        result.xPoint = { x + width, y + depth, z };
-        result.yPoint = { x, y, z };
-        break;
-    case 2:
-        result.origin = { x + width, y + depth, z };
-        result.xPoint = { x, y + depth, z };
-        result.yPoint = { x + width, y, z };
-        break;
-    case 3:
-        result.origin = { x, y + depth, z };
-        result.xPoint = { x, y, z };
-        result.yPoint = { x + width, y + depth, z };
-        break;
-    }
-    if (std::abs(tile.modelRotationOffsetRadians) > 0.0001f) {
-        const float centerX = x + width * 0.5f;
-        const float centerY = y + depth * 0.5f;
-        const float cosine = std::cos(tile.modelRotationOffsetRadians);
-        const float sine = std::sin(tile.modelRotationOffsetRadians);
-        auto rotateAroundCenter = [&](Vec3& point) {
-            const float offsetX = point.x - centerX;
-            const float offsetY = point.y - centerY;
-            point.x = centerX + cosine * offsetX - sine * offsetY;
-            point.y = centerY + sine * offsetX + cosine * offsetY;
-        };
-        rotateAroundCenter(result.origin);
-        rotateAroundCenter(result.xPoint);
-        rotateAroundCenter(result.yPoint);
-    }
-    result.zPoint = {
-        result.origin.x,
-        result.origin.y,
-        z + height,
-    };
-    return result;
-}
-
 void renderDebugUi(VkCommandBuffer commandBuffer)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -1384,23 +1321,11 @@ private:
         const VulkanModelResources::MaterialBinding material =
             models_.materialForModel(tile.model);
         const ModelTransformPoints transform =
-            modelTransformPoints(tile);
+            IsoScenePreparer::modelTransformPoints(tile);
         const VkExtent2D extent = swapchain_.renderExtent();
-        auto isoPoint = [&](Vec3 point) {
-            const Vec3 projected =
-                IsoScenePreparer::projectIsoPoint(
-                    layout,
-                    {
-                        static_cast<float>(extent.width),
-                        static_cast<float>(extent.height),
-                    },
-                    point);
-            return Vec4 {
-                projected.x,
-                projected.y,
-                projected.z,
-                1.0f,
-            };
+        const Vec2 renderExtent {
+            static_cast<float>(extent.width),
+            static_cast<float>(extent.height),
         };
         const Vec3 sunRadiance {
             lighting.sun.color.x * lighting.sun.intensity,
@@ -1418,11 +1343,8 @@ private:
         const bool mirrorEnergy =
             tile.effect == RenderSurfaceEffect::MirrorEnergy;
         const TilePushConstants constants {
-            .vertices = affineTransformColumns(
-                isoPoint(transform.origin),
-                isoPoint(transform.xPoint),
-                isoPoint(transform.yPoint),
-                isoPoint(transform.zPoint)),
+            .vertices = IsoScenePreparer::modelClipTransform(
+                layout, renderExtent, tile),
             .shadowVertices = affineTransformColumns(
                 IsoScenePreparer::projectShadowPoint(
                     shadowLayout, transform.origin),
@@ -1529,7 +1451,7 @@ private:
         const VulkanModelResources::MeshView mesh =
             models_.meshForModel(tile.model);
         const ModelTransformPoints transform =
-            modelTransformPoints(tile);
+            IsoScenePreparer::modelTransformPoints(tile);
         const TilePushConstants constants {
             .shadowVertices = affineTransformColumns(
                 IsoScenePreparer::projectShadowPoint(

@@ -238,9 +238,9 @@ void testConveyorsBakeRotatedAndAtBeltHeight()
     for (const TileType conveyor : {
              TileType::ConveyorUp, TileType::ConveyorDown,
              TileType::ConveyorLeft, TileType::ConveyorRight }) {
-        const RenderFrameData::Tile& subject =
-            tileThumbnails::buildBakeFrame(
-                conveyor, testManifest(), testSettings()).tiles.back();
+        const RenderFrameData frame = tileThumbnails::buildBakeFrame(
+            conveyor, testManifest(), testSettings());
+        const RenderFrameData::Tile& subject = frame.tiles.back();
         turns.insert(subject.modelRotationQuarterTurns);
         // A belt, not a floor decal and not a full cube.
         CHECK(subject.height > 0.0f);
@@ -260,9 +260,9 @@ void testSubjectMatchesTheTileTheEditorDraws()
         if (!tileThumbnails::shouldBake(definition.type)) {
             continue;
         }
-        const RenderFrameData::Tile& subject =
-            tileThumbnails::buildBakeFrame(
-                definition.type, testManifest(), testSettings()).tiles.back();
+        const RenderFrameData frame = tileThumbnails::buildBakeFrame(
+            definition.type, testManifest(), testSettings());
+        const RenderFrameData::Tile& subject = frame.tiles.back();
         const RenderFrameData::Tile expected = tileVisual(
             definition.type,
             {

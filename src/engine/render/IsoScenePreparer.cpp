@@ -57,6 +57,38 @@ Vec3 normalize(Vec3 value)
     return length <= 0.0001f ? Vec3 {} : multiply(value, 1.0f / length);
 }
 
+Vec4 projectIsoPointToClip(
+    const IsoRenderLayout& layout,
+    Vec2 renderExtent,
+    Vec3 point)
+{
+    const Vec3 relative = subtract(point, layout.cameraPosition);
+    const float cameraX = dot(relative, layout.cameraRight);
+    const float cameraY = dot(relative, layout.cameraUp);
+    const float cameraZ =
+        std::max(dot(relative, layout.cameraForward), 0.001f);
+    const float aspect =
+        std::max(renderExtent.x, 1.0f) /
+        std::max(renderExtent.y, 1.0f);
+    const float nearDepth = std::max(layout.nearestDepth, 0.001f);
+    const float farDepth =
+        std::max(layout.farthestDepth, nearDepth + 0.001f);
+    const float depthRange = farDepth - nearDepth;
+
+    // Keep perspective division in the GPU. Reconstructing a model matrix
+    // from points that have already been divided cannot preserve shared edges.
+    return {
+        layout.fitScale *
+            (layout.focalLength * cameraX / aspect -
+                layout.projectedCenter.x * cameraZ),
+        layout.fitScale *
+            (layout.focalLength * cameraY -
+                layout.projectedCenter.y * cameraZ),
+        farDepth * (cameraZ - nearDepth) / depthRange,
+        cameraZ,
+    };
+}
+
 std::array<Vec3, 8> tileCorners(const RenderFrameData::Tile& tile)
 {
     const float x = tile.position.x;
@@ -469,26 +501,98 @@ Vec3 IsoScenePreparer::projectIsoPoint(
     Vec2 renderExtent,
     Vec3 point)
 {
-    const Vec3 relative = subtract(point, layout.cameraPosition);
-    const float cameraX = dot(relative, layout.cameraRight);
-    const float cameraY = dot(relative, layout.cameraUp);
-    const float cameraZ =
-        std::max(dot(relative, layout.cameraForward), 0.001f);
-    const float aspect =
-        std::max(renderExtent.x, 1.0f) /
-        std::max(renderExtent.y, 1.0f);
-    const Vec2 projected {
-        layout.focalLength * cameraX / (cameraZ * aspect),
-        layout.focalLength * cameraY / cameraZ,
-    };
-    const float depthRange =
-        std::max(layout.farthestDepth - layout.nearestDepth, 0.001f);
-    const float normalizedDepth = std::clamp(
-        (cameraZ - layout.nearestDepth) / depthRange, 0.0f, 1.0f);
+    const Vec4 clip = projectIsoPointToClip(layout, renderExtent, point);
     return {
-        (projected.x - layout.projectedCenter.x) * layout.fitScale,
-        (projected.y - layout.projectedCenter.y) * layout.fitScale,
-        normalizedDepth,
+        clip.x / clip.w,
+        clip.y / clip.w,
+        std::clamp(clip.z / clip.w, 0.0f, 1.0f),
+    };
+}
+
+ModelTransformPoints IsoScenePreparer::modelTransformPoints(
+    const RenderFrameData::Tile& tile)
+{
+    const float x = tile.position.x;
+    const float y = tile.position.y;
+    const float z = tile.baseElevation;
+    const float width = tile.size.x;
+    const float depth = tile.size.y;
+    const float height = std::max(tile.height, 0.0f);
+
+    ModelTransformPoints result;
+    switch (tile.modelRotationQuarterTurns % 4) {
+    case 0:
+        result.origin = { x, y, z };
+        result.xPoint = { x + width, y, z };
+        result.yPoint = { x, y + depth, z };
+        break;
+    case 1:
+        result.origin = { x + width, y, z };
+        result.xPoint = { x + width, y + depth, z };
+        result.yPoint = { x, y, z };
+        break;
+    case 2:
+        result.origin = { x + width, y + depth, z };
+        result.xPoint = { x, y + depth, z };
+        result.yPoint = { x + width, y, z };
+        break;
+    case 3:
+        result.origin = { x, y + depth, z };
+        result.xPoint = { x, y, z };
+        result.yPoint = { x + width, y + depth, z };
+        break;
+    }
+    if (std::abs(tile.modelRotationOffsetRadians) > 0.0001f) {
+        const float centerX = x + width * 0.5f;
+        const float centerY = y + depth * 0.5f;
+        const float cosine = std::cos(tile.modelRotationOffsetRadians);
+        const float sine = std::sin(tile.modelRotationOffsetRadians);
+        auto rotateAroundCenter = [&](Vec3& modelPoint) {
+            const float offsetX = modelPoint.x - centerX;
+            const float offsetY = modelPoint.y - centerY;
+            modelPoint.x = centerX + cosine * offsetX - sine * offsetY;
+            modelPoint.y = centerY + sine * offsetX + cosine * offsetY;
+        };
+        rotateAroundCenter(result.origin);
+        rotateAroundCenter(result.xPoint);
+        rotateAroundCenter(result.yPoint);
+    }
+    result.zPoint = {
+        result.origin.x,
+        result.origin.y,
+        z + height,
+    };
+    return result;
+}
+
+std::array<Vec4, 4> IsoScenePreparer::modelClipTransform(
+    const IsoRenderLayout& layout,
+    Vec2 renderExtent,
+    const RenderFrameData::Tile& tile)
+{
+    const ModelTransformPoints points = modelTransformPoints(tile);
+    auto difference = [](Vec4 left, Vec4 right) {
+        return Vec4 {
+            left.x - right.x,
+            left.y - right.y,
+            left.z - right.z,
+            left.w - right.w,
+        };
+    };
+
+    const Vec4 origin =
+        projectIsoPointToClip(layout, renderExtent, points.origin);
+    return {
+        difference(
+            projectIsoPointToClip(layout, renderExtent, points.xPoint),
+            origin),
+        difference(
+            projectIsoPointToClip(layout, renderExtent, points.yPoint),
+            origin),
+        difference(
+            projectIsoPointToClip(layout, renderExtent, points.zPoint),
+            origin),
+        origin,
     };
 }
 

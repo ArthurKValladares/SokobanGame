@@ -38,6 +38,13 @@ struct ShadowRenderLayout {
     float farthestDepth = 1.0f;
 };
 
+struct ModelTransformPoints {
+    Vec3 origin {};
+    Vec3 xPoint {};
+    Vec3 yPoint {};
+    Vec3 zPoint {};
+};
+
 enum class PreparedSurfaceMaterial {
     Standard,
     Water,
@@ -137,6 +144,12 @@ public:
         const IsoRenderLayout& layout,
         Vec2 renderExtent,
         Vec3 point);
+    [[nodiscard]] static ModelTransformPoints modelTransformPoints(
+        const RenderFrameData::Tile& tile);
+    [[nodiscard]] static std::array<Vec4, 4> modelClipTransform(
+        const IsoRenderLayout& layout,
+        Vec2 renderExtent,
+        const RenderFrameData::Tile& tile);
     [[nodiscard]] static Vec4 projectShadowPoint(
         const ShadowRenderLayout& layout,
         Vec3 point);

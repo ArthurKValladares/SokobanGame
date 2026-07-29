@@ -28,6 +28,30 @@ bool near(float left, float right)
     return std::abs(left - right) < 0.0001f;
 }
 
+sokoban::Vec4 transformPoint(
+    const std::array<sokoban::Vec4, 4>& columns,
+    sokoban::Vec3 point)
+{
+    return {
+        columns[0].x * point.x + columns[1].x * point.y +
+            columns[2].x * point.z + columns[3].x,
+        columns[0].y * point.x + columns[1].y * point.y +
+            columns[2].y * point.z + columns[3].y,
+        columns[0].z * point.x + columns[1].z * point.y +
+            columns[2].z * point.z + columns[3].z,
+        columns[0].w * point.x + columns[1].w * point.y +
+            columns[2].w * point.z + columns[3].w,
+    };
+}
+
+void checkNear(sokoban::Vec4 left, sokoban::Vec4 right)
+{
+    CHECK(near(left.x, right.x));
+    CHECK(near(left.y, right.y));
+    CHECK(near(left.z, right.z));
+    CHECK(near(left.w, right.w));
+}
+
 sokoban::PreparedRenderScene prepareScene(
     const sokoban::RenderFrameData& frame,
     sokoban::Vec2 renderExtent)
@@ -613,6 +637,62 @@ void testAdjacentWaterFacesSharePerspectiveCoordinates()
     }
 }
 
+void testAdjacentModelsShareProjectiveCoordinates()
+{
+    using namespace sokoban;
+
+    constexpr Vec2 renderExtent { 1920.0f, 1080.0f };
+    const PreparedRenderScene scene =
+        prepareScene(sceneFrame(), renderExtent);
+
+    const RenderFrameData::Tile left = cube(0, 0);
+    const RenderFrameData::Tile right = cube(1, 0);
+    const auto leftTransform = IsoScenePreparer::modelClipTransform(
+        scene.isoLayout, renderExtent, left);
+    const auto rightTransform = IsoScenePreparer::modelClipTransform(
+        scene.isoLayout, renderExtent, right);
+
+    const Vec4 leftSharedCorner =
+        transformPoint(leftTransform, { 1.0f, 1.0f, 1.0f });
+    const Vec4 rightSharedCorner =
+        transformPoint(rightTransform, { 0.0f, 1.0f, 1.0f });
+    checkNear(leftSharedCorner, rightSharedCorner);
+    CHECK(!near(leftSharedCorner.w, 1.0f));
+
+    RenderFrameData::Tile scaledLeft = left;
+    scaledLeft.position = { -0.05f, -0.05f };
+    scaledLeft.size = { 1.1f, 1.1f };
+    scaledLeft.height = 1.1f;
+    RenderFrameData::Tile scaledRight = scaledLeft;
+    scaledRight.position.x = 0.95f;
+
+    const auto scaledLeftTransform =
+        IsoScenePreparer::modelClipTransform(
+            scene.isoLayout, renderExtent, scaledLeft);
+    const auto scaledRightTransform =
+        IsoScenePreparer::modelClipTransform(
+            scene.isoLayout, renderExtent, scaledRight);
+    constexpr float leftLocalX = 1.05f / 1.1f;
+    constexpr float rightLocalX = 0.05f / 1.1f;
+    const Vec4 scaledLeftShared = transformPoint(
+        scaledLeftTransform, { leftLocalX, 1.0f, 1.0f });
+    const Vec4 scaledRightShared = transformPoint(
+        scaledRightTransform, { rightLocalX, 1.0f, 1.0f });
+    checkNear(scaledLeftShared, scaledRightShared);
+
+    const Vec3 directlyProjected = IsoScenePreparer::projectIsoPoint(
+        scene.isoLayout, renderExtent, { 1.0f, 1.05f, 1.1f });
+    CHECK(near(
+        scaledLeftShared.x / scaledLeftShared.w,
+        directlyProjected.x));
+    CHECK(near(
+        scaledLeftShared.y / scaledLeftShared.w,
+        directlyProjected.y));
+    CHECK(near(
+        scaledLeftShared.z / scaledLeftShared.w,
+        directlyProjected.z));
+}
+
 void testMirrorEnergyIsTranslucentNonPickableAndShadowless()
 {
     sokoban::RenderFrameData frame;
@@ -720,6 +800,7 @@ int main()
     testExplicitCameraExtentOwnsEntireProjectedLayout();
     testExplicitCameraExtentLeavesDepthGuardBand();
     testAdjacentWaterFacesSharePerspectiveCoordinates();
+    testAdjacentModelsShareProjectiveCoordinates();
     testMirrorEnergyIsTranslucentNonPickableAndShadowless();
     testParticlesBecomeSortedTranslucentBillboardsOnly();
 
