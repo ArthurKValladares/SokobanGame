@@ -98,6 +98,8 @@ void SettingsCoordinator::updatePresentationSettings()
 {
     presentationSettings_.lighting.ambientOcclusionEnabled =
         profile_.settings.video.ambientOcclusion;
+    presentationSettings_.lighting.ambientOcclusionStrength =
+        profile_.settings.video.ambientOcclusionStrength;
     presentationSettings_.normalize();
 }
 

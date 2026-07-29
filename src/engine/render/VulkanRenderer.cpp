@@ -916,6 +916,10 @@ void VulkanRenderer::initializeDebugUi()
 void VulkanRenderer::shutdownDebugUi()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
+    // Thumbnail descriptor sets are allocated by the ImGui Vulkan backend.
+    // Release them while its descriptor pool and backend state still exist.
+    thumbnailPass_.destroy();
+
     if (ImGui::GetCurrentContext()) {
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplSDL3_Shutdown();

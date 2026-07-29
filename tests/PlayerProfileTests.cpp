@@ -86,6 +86,7 @@ void testRoundTripAndBests()
         .customRenderScale = true,
         .customRenderScalePercent = 63,
         .ambientOcclusion = false,
+        .ambientOcclusionStrength = 0.35f,
         .windowWidth = 1600,
         .windowHeight = 900,
     };
@@ -507,6 +508,18 @@ void testNormalizationAndMigration()
         migratedFormat11.profile.settings.input, sokoban::InputAction::Undo);
     check(migratedKeyboard && migratedKeyboard->scancode == "Z",
         "format 11 binding displaced by T recovers its default");
+
+    nlohmann::json format12Root = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    format12Root["format"] = 12;
+    format12Root["settings"]["video"].erase("ambientOcclusionStrength");
+    const sokoban::DecodedPlayerProfile migratedFormat12 =
+        sokoban::decodePlayerProfile(format12Root.dump());
+    check(migratedFormat12.sourceFormat == 12,
+        "format 12 source reported");
+    check(migratedFormat12.profile.settings.video.ambientOcclusionStrength ==
+            sokoban::UserSettings {}.video.ambientOcclusionStrength,
+        "format 12 receives AO strength default");
 
     checkThrows([] {
         (void)sokoban::decodePlayerProfile(R"json({ "format": 99 })json");

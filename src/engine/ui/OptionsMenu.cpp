@@ -224,6 +224,7 @@ std::optional<OptionsAction> activateRow(
         return options::Quit {};
     case OptionsMenuRowId::AntiAliasing:
     case OptionsMenuRowId::RenderScalePreset:
+    case OptionsMenuRowId::AmbientOcclusionStrength:
     case OptionsMenuRowId::Display:
     case OptionsMenuRowId::MasterVolume:
     case OptionsMenuRowId::MusicVolume:
@@ -273,6 +274,13 @@ std::optional<OptionsAction> adjustRow(
         break;
     case OptionsMenuRowId::MusicVolume:
         settings.audio.musicVolume += direction < 0 ? -0.05f : 0.05f;
+        break;
+    case OptionsMenuRowId::AmbientOcclusionStrength:
+        if (!settings.video.ambientOcclusion) {
+            return std::nullopt;
+        }
+        settings.video.ambientOcclusionStrength +=
+            direction < 0 ? -0.05f : 0.05f;
         break;
     default:
         return std::nullopt;
@@ -462,6 +470,14 @@ std::vector<OptionsMenuRow> optionsMenuRows(
                 .kind = OptionsMenuRowKind::Toggle,
                 .label = "Ambient occlusion",
                 .toggleValue = settings.video.ambientOcclusion,
+            },
+            {
+                .id = OptionsMenuRowId::AmbientOcclusionStrength,
+                .kind = OptionsMenuRowKind::Slider,
+                .label = "AO strength",
+                .sliderValue =
+                    settings.video.ambientOcclusionStrength,
+                .enabled = settings.video.ambientOcclusion,
             },
             {
                 .id = OptionsMenuRowId::Display,
@@ -674,6 +690,12 @@ OptionsMenuReduction reduceOptionsMenu(
             case OptionsMenuRowId::MusicVolume:
                 settings.audio.musicVolume = slider.value;
                 break;
+            case OptionsMenuRowId::AmbientOcclusionStrength:
+                if (!settings.video.ambientOcclusion) {
+                    return;
+                }
+                settings.video.ambientOcclusionStrength = slider.value;
+                break;
             default:
                 return;
             }
@@ -805,8 +827,12 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
 
     const std::vector<OptionsMenuRow> rows =
         optionsMenuRows(state, settings);
+    const bool compactGraphics =
+        state.page == OptionsMenuPage::Graphics;
     menuKit::MenuPage layout(
-        state.page == OptionsMenuPage::Controls ? 16.0f : 28.0f);
+        state.page == OptionsMenuPage::Controls
+            ? 16.0f
+            : (compactGraphics ? 16.0f : 28.0f));
     std::vector<RowLayout> rowLayouts(rows.size());
     UiLayoutNode message {};
     UiLayoutNode controlsPrompt {};
@@ -838,19 +864,27 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
         case OptionsMenuRowKind::Slider: {
             const UiLayoutNode group = layout.tree.column(
                 layout.tree.root(), UiLayoutSize::content(),
-                row.kind == OptionsMenuRowKind::Slider ? 8.0f : 4.0f);
-            rowLayout.primary = layout.tree.item(group, 30.0f);
+                row.kind == OptionsMenuRowKind::Slider
+                    ? (compactGraphics ? 4.0f : 8.0f)
+                    : 4.0f);
+            rowLayout.primary = layout.tree.item(
+                group, compactGraphics ? 24.0f : 30.0f);
             rowLayout.control = layout.tree.item(
                 group,
-                row.kind == OptionsMenuRowKind::Slider ? 34.0f : 52.0f);
+                row.kind == OptionsMenuRowKind::Slider
+                    ? (compactGraphics ? 28.0f : 34.0f)
+                    : (compactGraphics ? 44.0f : 52.0f));
             break;
         }
         case OptionsMenuRowKind::CustomRenderScale: {
             const UiLayoutNode group = layout.tree.column(
                 layout.tree.root(), UiLayoutSize::content(), 4.0f);
-            rowLayout.primary = layout.tree.item(group, 44.0f);
-            rowLayout.control = layout.tree.item(group, 32.0f);
-            rowLayout.detail = layout.tree.item(group, 24.0f);
+            rowLayout.primary = layout.tree.item(
+                group, compactGraphics ? 40.0f : 44.0f);
+            rowLayout.control = layout.tree.item(
+                group, compactGraphics ? 28.0f : 32.0f);
+            rowLayout.detail = layout.tree.item(
+                group, compactGraphics ? 20.0f : 24.0f);
             break;
         }
         case OptionsMenuRowKind::Button:
@@ -858,7 +892,9 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
         case OptionsMenuRowKind::Binding:
             rowLayout.primary = layout.tree.item(
                 layout.tree.root(),
-                state.page == OptionsMenuPage::Controls ? 42.0f : 52.0f);
+                state.page == OptionsMenuPage::Controls
+                    ? 42.0f
+                    : (compactGraphics ? 44.0f : 52.0f));
             break;
         }
         if (index + 1 < rows.size() &&
@@ -867,7 +903,9 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
                 layout.tree.root(),
                 state.page == OptionsMenuPage::Main
                     ? 16.0f
-                    : (state.page == OptionsMenuPage::Controls ? 6.0f : 10.0f));
+                    : (state.page == OptionsMenuPage::Controls
+                            ? 6.0f
+                            : (compactGraphics ? 6.0f : 10.0f)));
         }
     }
     layout.tree.arrange(panel);
@@ -975,10 +1013,13 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             break;
         }
         case OptionsMenuRowKind::Slider: {
+            const Vec4 labelColor = row.enabled
+                ? Vec4 { 0.83f, 0.86f, 0.83f, 1.0f }
+                : Vec4 { 0.50f, 0.52f, 0.51f, 0.55f };
             ui.text(
                 layout.tree.rect(rowLayout.primary).position,
                 row.label,
-                { 0.83f, 0.86f, 0.83f, 1.0f },
+                labelColor,
                 22.0f);
             float value = row.sliderValue;
             if (uiControls::slider(
@@ -988,7 +1029,8 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
                     value,
                     0.0f,
                     1.0f,
-                    focused)) {
+                    focused && row.enabled,
+                    row.enabled)) {
                 intent = options::intent::SetSlider {
                     row.id, value, true };
             }
@@ -998,7 +1040,9 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
                 ui,
                 layout.tree.rect(rowLayout.primary),
                 percent,
-                { 0.68f, 0.88f, 0.82f, 1.0f },
+                row.enabled
+                    ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
+                    : Vec4 { 0.50f, 0.52f, 0.51f, 0.45f },
                 20.0f);
             break;
         }

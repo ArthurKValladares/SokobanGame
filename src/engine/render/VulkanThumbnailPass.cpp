@@ -4,6 +4,7 @@
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/render/ImageData.hpp"
 
+#include <imgui.h>
 #include <imgui_impl_vulkan.h>
 
 #include <cstring>
@@ -57,10 +58,14 @@ void VulkanThumbnailPass::destroy()
     assetRoot_.clear();
 }
 
-void VulkanThumbnailPass::destroyThumbnail(Thumbnail& thumbnail)
+void VulkanThumbnailPass::destroyThumbnail(
+    Thumbnail& thumbnail,
+    bool releaseImGuiDescriptor)
 {
     if (thumbnail.imguiTexture) {
-        ImGui_ImplVulkan_RemoveTexture(thumbnail.imguiTexture);
+        if (releaseImGuiDescriptor) {
+            ImGui_ImplVulkan_RemoveTexture(thumbnail.imguiTexture);
+        }
         thumbnail.imguiTexture = VK_NULL_HANDLE;
     }
     vulkanResources::destroyImage(device_, thumbnail.image);
@@ -75,8 +80,19 @@ void VulkanThumbnailPass::invalidate()
     // The descriptor sets may still be referenced by an in-flight frame's
     // ImGui draw data.
     vkDeviceWaitIdle(device_);
+    const bool imguiBackendAvailable =
+        ImGui::GetCurrentContext() != nullptr &&
+        ImGui::GetIO().BackendRendererUserData != nullptr;
+    bool reportedLateDestruction = false;
     for (auto& [tile, thumbnail] : cache_) {
-        destroyThumbnail(thumbnail);
+        if (thumbnail.imguiTexture && !imguiBackendAvailable &&
+            !reportedLateDestruction) {
+            log::error(log::Category::Rendering)
+                << "Level-editor thumbnail descriptors outlived the ImGui "
+                   "Vulkan backend; discarding stale handles";
+            reportedLateDestruction = true;
+        }
+        destroyThumbnail(thumbnail, imguiBackendAvailable);
     }
     cache_.clear();
 }

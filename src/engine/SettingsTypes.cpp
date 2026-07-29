@@ -34,6 +34,10 @@ void UserSettings::normalize()
         video.renderScalePercent);
     video.customRenderScalePercent = normalizedRenderScalePercent(
         video.customRenderScalePercent);
+    video.ambientOcclusionStrength = std::clamp(
+        video.ambientOcclusionStrength,
+        config::minimumUserAmbientOcclusionStrength,
+        config::maximumUserAmbientOcclusionStrength);
     video.windowWidth = std::clamp(
         video.windowWidth,
         config::minimumWindowWidth,

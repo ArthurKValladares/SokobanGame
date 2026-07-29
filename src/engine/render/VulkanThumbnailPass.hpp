@@ -66,7 +66,9 @@ private:
     };
 
     [[nodiscard]] bool loadThumbnail(TileType tile, Thumbnail& target);
-    void destroyThumbnail(Thumbnail& thumbnail);
+    void destroyThumbnail(
+        Thumbnail& thumbnail,
+        bool releaseImGuiDescriptor = true);
 
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkDevice device_ = VK_NULL_HANDLE;

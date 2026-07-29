@@ -25,6 +25,7 @@ void testInitializationProducesAllStartupEffects()
     profile.settings.audio.masterVolume = 0.7f;
     profile.settings.accessibility.reducedMotion = true;
     profile.settings.video.ambientOcclusion = false;
+    profile.settings.video.ambientOcclusionStrength = 0.35f;
     sokoban::PresentationSettings presentation;
     sokoban::SettingsCoordinator coordinator(profile, presentation);
 
@@ -41,6 +42,7 @@ void testInitializationProducesAllStartupEffects()
     CHECK(!effects.saveProgress);
     CHECK(!effects.saveSettings);
     CHECK(!presentation.lighting.ambientOcclusionEnabled);
+    CHECK(presentation.lighting.ambientOcclusionStrength == 0.35f);
 }
 
 void testMenuProjectionAndChangePlan()
@@ -56,6 +58,7 @@ void testMenuProjectionAndChangePlan()
     settings.video.customRenderScalePercent = 50;
     settings.video.ambientOcclusion =
         !settings.video.ambientOcclusion;
+    settings.video.ambientOcclusionStrength = 0.8f;
     settings.video.windowWidth = 1600;
     settings.video.windowHeight = 900;
     settings.audio.masterVolume = 0.4f;
@@ -81,6 +84,7 @@ void testMenuProjectionAndChangePlan()
         profile.settings.video.effectiveRenderScalePercent() == 50);
     CHECK(presentation.lighting.ambientOcclusionEnabled ==
         settings.video.ambientOcclusion);
+    CHECK(presentation.lighting.ambientOcclusionStrength == 0.8f);
     CHECK(coordinator.userSettings() == settings);
 }
 
@@ -94,6 +98,7 @@ void testUnchangedDomainsDoNotProduceRuntimeEffects()
     sokoban::UserSettings settings = coordinator.userSettings();
     settings.video.ambientOcclusion =
         !settings.video.ambientOcclusion;
+    settings.video.ambientOcclusionStrength = 0.25f;
     const sokoban::SettingsEffects effects =
         coordinator.applyUserSettings(settings);
 
@@ -106,6 +111,7 @@ void testUnchangedDomainsDoNotProduceRuntimeEffects()
     CHECK(effects.saveSettings);
     CHECK(presentation.lighting.ambientOcclusionEnabled ==
         settings.video.ambientOcclusion);
+    CHECK(presentation.lighting.ambientOcclusionStrength == 0.25f);
 }
 
 void testAudioPersistencePolicy()

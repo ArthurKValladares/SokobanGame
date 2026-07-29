@@ -23,6 +23,8 @@ struct UserSettings {
         bool customRenderScale = config::customRenderScale;
         int customRenderScalePercent = config::customRenderScalePercent;
         bool ambientOcclusion = config::ambientOcclusion;
+        float ambientOcclusionStrength =
+            config::userAmbientOcclusionStrength;
         int windowWidth = config::windowWidth;
         int windowHeight = config::windowHeight;
 

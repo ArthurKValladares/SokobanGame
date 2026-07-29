@@ -894,6 +894,18 @@ void migrate11to12(Json& root)
     input["showTopDownView"] = topDownDefaults;
 }
 
+void migrate12to13(Json& root)
+{
+    if (!root.contains("settings") || !root["settings"].is_object()) {
+        return;
+    }
+    Json& video = root["settings"]["video"];
+    if (video.is_object() && !video.contains("ambientOcclusionStrength")) {
+        video["ambientOcclusionStrength"] =
+            UserSettings {}.video.ambientOcclusionStrength;
+    }
+}
+
 // ---- Strict current-format parse -------------------------------------------
 
 void parseProgressSection(PlayerProfile& profile, const Json& progress)
@@ -990,7 +1002,7 @@ void parseSettingsSection(PlayerProfile& profile, const Json& settings)
     rejectUnknownProperties(video, {
         "fullscreen", "vsync", "antiAliasingSamples", "renderScalePercent",
         "customRenderScale", "customRenderScalePercent", "ambientOcclusion",
-        "windowWidth", "windowHeight",
+        "ambientOcclusionStrength", "windowWidth", "windowHeight",
     }, "settings.video");
     profile.settings.video.fullscreen =
         boolProperty(video, "fullscreen", "settings.video");
@@ -1006,6 +1018,8 @@ void parseSettingsSection(PlayerProfile& profile, const Json& settings)
         video, "customRenderScalePercent", "settings.video");
     profile.settings.video.ambientOcclusion = boolProperty(
         video, "ambientOcclusion", "settings.video");
+    profile.settings.video.ambientOcclusionStrength = floatProperty(
+        video, "ambientOcclusionStrength", "settings.video");
     profile.settings.video.windowWidth = nonNegativeIntegerProperty(
         video, "windowWidth", "settings.video");
     profile.settings.video.windowHeight = nonNegativeIntegerProperty(
@@ -1119,6 +1133,7 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
                 { "customRenderScale", normalized.settings.video.customRenderScale },
                 { "customRenderScalePercent", normalized.settings.video.customRenderScalePercent },
                 { "ambientOcclusion", normalized.settings.video.ambientOcclusion },
+                { "ambientOcclusionStrength", normalized.settings.video.ambientOcclusionStrength },
                 { "windowWidth", normalized.settings.video.windowWidth },
                 { "windowHeight", normalized.settings.video.windowHeight },
             } },
@@ -1165,6 +1180,7 @@ DecodedPlayerProfile decodePlayerProfile(std::string_view text)
         migrate9to10,
         migrate10to11,
         migrate11to12,
+        migrate12to13,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

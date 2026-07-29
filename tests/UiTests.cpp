@@ -210,6 +210,20 @@ void testOptionsNavigationAndSettings()
 
     draw({ .confirm = true });
     CHECK(menu.page() == sokoban::OptionsMenu::Page::Graphics);
+    CHECK(std::ranges::all_of(
+        ui.drawData().commands,
+        [](const sokoban::UiDrawCommand& command) {
+            if (command.kind != sokoban::UiDrawKind::FontGlyph) {
+                return true;
+            }
+            constexpr float tolerance = 0.01f;
+            return command.rect.position.x >= -tolerance &&
+                command.rect.position.y >= -tolerance &&
+                command.rect.position.x + command.rect.size.x <=
+                    1280.0f + tolerance &&
+                command.rect.position.y + command.rect.size.y <=
+                    720.0f + tolerance;
+        }));
     const auto graphicsChange = draw({ .left = true });
     CHECK(settingsChanged(graphicsChange));
     CHECK(settings.video.antiAliasingSamples == 4);
@@ -408,6 +422,14 @@ void testOptionsReducerAndDeclarativeRows()
             sokoban::OptionsMenuRowId::Graphics });
     state = reduction.state;
     CHECK(state.page == sokoban::OptionsMenuPage::Graphics);
+    const std::vector<sokoban::OptionsMenuRow> graphicsRows =
+        sokoban::optionsMenuRows(state, settings);
+    CHECK(graphicsRows.size() == 7);
+    CHECK(graphicsRows[3].id ==
+        sokoban::OptionsMenuRowId::AmbientOcclusion);
+    CHECK(graphicsRows[4].id ==
+        sokoban::OptionsMenuRowId::AmbientOcclusionStrength);
+    CHECK(graphicsRows[4].enabled);
 
     reduction = sokoban::reduceOptionsMenu(
         state,
@@ -480,6 +502,44 @@ void testOptionsReducerDraftAndBindingSemantics()
             true,
         });
     CHECK(!noOp.action.has_value());
+
+    reduction = sokoban::reduceOptionsMenu(
+        graphics,
+        settings,
+        sokoban::options::intent::SetSlider {
+            sokoban::OptionsMenuRowId::AmbientOcclusionStrength,
+            0.8f,
+            true,
+        });
+    changed = std::get_if<sokoban::options::SettingsChanged>(
+        &*reduction.action);
+    CHECK(changed != nullptr);
+    CHECK(changed->settings.video.ambientOcclusionStrength == 0.8f);
+
+    graphics.selectedRow = 4;
+    reduction = sokoban::reduceOptionsMenu(
+        graphics,
+        settings,
+        sokoban::options::intent::AdjustSelected { -1 });
+    changed = std::get_if<sokoban::options::SettingsChanged>(
+        &*reduction.action);
+    CHECK(changed != nullptr);
+    CHECK(std::abs(
+        changed->settings.video.ambientOcclusionStrength - 0.5f) < 0.0001f);
+
+    settings.video.ambientOcclusion = false;
+    const std::vector<sokoban::OptionsMenuRow> disabledRows =
+        sokoban::optionsMenuRows(graphics, settings);
+    CHECK(!disabledRows[4].enabled);
+    const auto disabledStrength = sokoban::reduceOptionsMenu(
+        graphics,
+        settings,
+        sokoban::options::intent::SetSlider {
+            sokoban::OptionsMenuRowId::AmbientOcclusionStrength,
+            0.2f,
+            true,
+        });
+    CHECK(!disabledStrength.action.has_value());
 
     sokoban::OptionsMenuState controls {
         .open = true,

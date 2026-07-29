@@ -32,6 +32,7 @@ enum class OptionsMenuRowId {
     RenderScalePreset,
     CustomRenderScale,
     AmbientOcclusion,
+    AmbientOcclusionStrength,
     Display,
     MasterVolume,
     MusicVolume,
