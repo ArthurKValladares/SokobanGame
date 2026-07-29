@@ -94,9 +94,20 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
                     texture.name.find('_') != std::string::npos;
             }));
     check(perScreenSplatMaps > 0, "per-screen splat maps present");
-    check(editor.textures().size() == 17 + perScreenSplatMaps,
+    check(editor.textures().size() >= 18 + perScreenSplatMaps,
         "textures loaded");
-    check(editor.models().size() == 6, "models loaded");
+    check(std::ranges::any_of(
+        editor.textures(),
+        [](const sokoban::AssetManifest::Texture& texture) {
+            return texture.name == "PlatformerYellow";
+        }), "decoration texture loaded");
+    check(editor.models().size() >= 6, "models loaded");
+    check(std::ranges::any_of(
+        editor.models(),
+        [](const sokoban::AssetManifest::Model& model) {
+            return model.name == "Decoration_desk" &&
+                model.preserveSourceScale;
+        }), "authored-scale decoration model loaded");
     check(editor.animations().size() == 5, "animations loaded");
     check(editor.tileEntries().size() == 13, "authored tile entries loaded");
     check(editor.soundSets().size() == 3, "sound sets loaded");

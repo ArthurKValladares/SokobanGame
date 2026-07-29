@@ -51,6 +51,7 @@ struct SkinnedMeshData {
     Vec3 sourceMinimum {};
     Vec3 sourceMaximum {};
     bool preserveAspectRatio = false;
+    bool preserveSourceScale = false;
     bool rotateHalfTurn = false;
 };
 
@@ -79,6 +80,7 @@ struct GltfAnimationClip {
 
 struct GltfMeshLoadOptions {
     bool preserveAspectRatio = false;
+    bool preserveSourceScale = false;
     bool rotateHalfTurn = false;
     bool usePrimitiveMaterialTextures = false;
 };

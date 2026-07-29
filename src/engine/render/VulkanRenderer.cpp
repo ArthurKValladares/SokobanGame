@@ -395,6 +395,11 @@ void VulkanRenderer::syncManifestTextures()
     }
 }
 
+void VulkanRenderer::syncManifestModels()
+{
+    (void)modelResources_.syncManifestModels();
+}
+
 bool VulkanRenderer::updateTexture(
     RenderTexture texture, const ImageData& image)
 {

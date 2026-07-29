@@ -87,6 +87,8 @@ public:
     bool updateTexture(RenderTexture texture, const ImageData& image);
     // Picks up textures appended to the manifest after startup.
     void syncManifestTextures();
+    // Picks up static models appended by Debug decoration authoring.
+    void syncManifestModels();
     // Reads the last drawn frame back as RGBA. The whole render extent when
     // `region` is empty, otherwise that rectangle of it. Blocking; used by the
     // offline thumbnail bake, which needs the real render rather than a

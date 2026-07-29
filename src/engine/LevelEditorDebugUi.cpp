@@ -443,6 +443,7 @@ void LevelEditorDebugUi::drawDecorationPalette(
         "Filter mesh files",
         &decorationFilter_);
 
+    std::optional<std::filesystem::path> meshToRegister;
     if (callbacks.decorationMeshes) {
         const auto& meshes = callbacks.decorationMeshes();
         if (ImGui::BeginChild(
@@ -457,31 +458,47 @@ void LevelEditorDebugUi::drawDecorationPalette(
                 }
                 ImGui::PushID(path.c_str());
                 const bool registered = mesh.registered();
-                if (!registered) {
-                    ImGui::BeginDisabled();
-                }
                 const bool selected = registered &&
                     editor.selectedDecorationModel() == mesh.modelName;
                 const std::string label = registered
                     ? mesh.modelName
-                    : path + " (not in manifest)";
-                if (ImGui::Selectable(label.c_str(), selected) && registered) {
-                    editor.setSelectedDecorationModel(mesh.modelName);
+                    : path + " (add to manifest)";
+                if (ImGui::Selectable(label.c_str(), selected)) {
+                    if (registered) {
+                        editor.setSelectedDecorationModel(mesh.modelName);
+                        decorationRegistrationStatus_.clear();
+                    } else if (callbacks.registerDecorationMesh) {
+                        meshToRegister = mesh.relativePath;
+                    }
                 }
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("%s", path.c_str());
-                }
-                if (!registered) {
-                    ImGui::EndDisabled();
                 }
                 ImGui::PopID();
             }
         }
         ImGui::EndChild();
     }
+    // Registration refreshes the catalog, so perform it only after the list
+    // iteration has released all Entry references.
+    if (meshToRegister && callbacks.registerDecorationMesh) {
+        const std::optional<std::string> modelName =
+            callbacks.registerDecorationMesh(*meshToRegister);
+        if (modelName) {
+            editor.setSelectedDecorationModel(*modelName);
+            decorationRegistrationStatus_ =
+                "Registered as " + *modelName + ".";
+        } else {
+            decorationRegistrationStatus_ =
+                "Registration failed; see the asset log.";
+        }
+    }
     if (callbacks.decorationMeshStatus) {
         ImGui::TextDisabled(
             "%s", callbacks.decorationMeshStatus().c_str());
+    }
+    if (!decorationRegistrationStatus_.empty()) {
+        ImGui::TextWrapped("%s", decorationRegistrationStatus_.c_str());
     }
 
     ImGui::Separator();

@@ -733,6 +733,10 @@ RenderFrameData::Tile decorationVisual(
 {
     constexpr float radiansPerDegree =
         3.14159265358979323846f / 180.0f;
+    const RenderModel model = manifest.modelIdByName(decoration.model);
+    const Vec3 pivot = manifest.model(model).preserveSourceScale
+        ? Vec3 { 0.0f, 0.0f, 0.0f }
+        : Vec3 { 0.5f, 0.5f, 0.0f };
     return {
         .cell = {
             static_cast<int>(std::floor(decoration.position.x)),
@@ -751,7 +755,7 @@ RenderFrameData::Tile decorationVisual(
         .showGrid = false,
         .isEditorPreview = preview,
         .affectsCameraFit = false,
-        .model = manifest.modelIdByName(decoration.model),
+        .model = model,
         .modelTransform = RenderFrameData::ModelTransform {
             .translation = decoration.position,
             .rotationRadians = {
@@ -760,6 +764,7 @@ RenderFrameData::Tile decorationVisual(
                 decoration.rotationDegrees.z * radiansPerDegree,
             },
             .scale = decoration.scale,
+            .pivot = pivot,
         },
     };
 }

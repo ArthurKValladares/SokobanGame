@@ -299,6 +299,7 @@ void VulkanModelResources::requestModel(RenderModel model)
     const std::filesystem::path path = assetRoot_ / definition.path;
     const GltfMeshLoadOptions options {
         .preserveAspectRatio = definition.preserveAspectRatio,
+        .preserveSourceScale = definition.preserveSourceScale,
         .rotateHalfTurn = definition.rotateHalfTurn,
         .usePrimitiveMaterialTextures = definition.primitiveTextures,
     };
@@ -997,6 +998,16 @@ bool VulkanModelResources::syncManifestTextures()
         return false;
     }
     textures_.resize(manifest_->textures().size());
+    return true;
+}
+
+bool VulkanModelResources::syncManifestModels()
+{
+    if (manifest_ == nullptr ||
+        models_.size() >= manifest_->models().size()) {
+        return false;
+    }
+    models_.resize(manifest_->models().size());
     return true;
 }
 

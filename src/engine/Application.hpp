@@ -20,6 +20,7 @@
 #include "engine/LevelEditor.hpp"
 #include "engine/LevelEditorDebugUi.hpp"
 #include "engine/DecorationMeshCatalog.hpp"
+#include "engine/DecorationAssetRegistry.hpp"
 #include "engine/Math.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/PlayerProfile.hpp"
@@ -105,6 +106,8 @@ private:
     // build loads.
     void persistManifestTexture(
         const std::string& name, const std::string& relativePath);
+    [[nodiscard]] std::optional<std::string> registerDecorationMesh(
+        const std::filesystem::path& relativePath);
     void pushPaintedSplatMap();
     [[nodiscard]] InputRouter::RoutingContext inputRoutingContext() const;
     [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;

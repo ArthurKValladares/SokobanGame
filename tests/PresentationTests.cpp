@@ -50,6 +50,11 @@ const AssetManifest& testManifest()
         { "name": "Conveyor", "path": "conveyor.gltf", "beltScroll": true },
         { "name": "Mirror", "path": "mirror.gltf" },
         {
+          "name": "Decoration",
+          "path": "decoration.gltf",
+          "preserveSourceScale": true
+        },
+        {
           "name": "Hero",
           "path": "hero.glb",
           "geometry": "skinned",
@@ -1239,7 +1244,7 @@ void testGameplayFrameBuildsManifestDecorationInstances()
         std::nullopt,
         {
             Level::Decoration {
-                .model = "Stone",
+                .model = "Decoration",
                 .position = { 1.5f, 0.5f, 1.0f },
                 .rotationDegrees = { 10.0f, 20.0f, 90.0f },
                 .scale = { 0.5f, 1.5f, 2.0f },
@@ -1258,11 +1263,13 @@ void testGameplayFrameBuildsManifestDecorationInstances()
         .settings = PresentationSettings {},
     });
 
-    const RenderModel stone = testManifest().modelIdByName("Stone");
+    const RenderModel decoration =
+        testManifest().modelIdByName("Decoration");
     const auto found = std::ranges::find_if(
         frame.tiles,
-        [stone](const RenderFrameData::Tile& tile) {
-            return tile.model == stone && tile.modelTransform.has_value();
+        [decoration](const RenderFrameData::Tile& tile) {
+            return tile.model == decoration &&
+                tile.modelTransform.has_value();
         });
     CHECK(found != frame.tiles.end());
     if (found != frame.tiles.end()) {
@@ -1271,6 +1278,8 @@ void testGameplayFrameBuildsManifestDecorationInstances()
         CHECK(!found->showGrid);
         CHECK(near(found->modelTransform->translation.x, 1.5f));
         CHECK(near(found->modelTransform->scale.y, 1.5f));
+        CHECK(near(found->modelTransform->pivot.x, 0.0f));
+        CHECK(near(found->modelTransform->pivot.y, 0.0f));
         CHECK(near(
             found->modelTransform->rotationRadians.z,
             1.57079632679f));

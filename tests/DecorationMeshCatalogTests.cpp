@@ -1,4 +1,5 @@
 #include "engine/DecorationMeshCatalog.hpp"
+#include "engine/DecorationAssetRegistry.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -45,24 +46,26 @@ void touch(const std::filesystem::path& path)
     std::ofstream(path) << "{}";
 }
 
+constexpr std::string_view manifestJson = R"json({
+  "format": 1,
+  "textures": [],
+  "models": [
+    { "name": "Registered", "path": "registered.gltf" },
+    { "name": "Hero", "path": "hero.glb", "geometry": "skinned", "role": "player" }
+  ],
+  "animations": [
+    { "name": "Idle", "path": "hero.glb", "role": "player-idle" },
+    { "name": "Move", "path": "hero.glb", "role": "player-move" },
+    { "name": "Push", "path": "hero.glb", "role": "player-push" },
+    { "name": "Death", "path": "hero.glb", "role": "player-death" },
+    { "name": "Dead", "path": "hero.glb", "role": "player-dead-idle" }
+  ],
+  "tiles": []
+})json";
+
 sokoban::AssetManifest manifest()
 {
-    return sokoban::AssetManifest::parse(R"json({
-      "format": 1,
-      "textures": [],
-      "models": [
-        { "name": "Registered", "path": "registered.gltf" },
-        { "name": "Hero", "path": "hero.glb", "geometry": "skinned", "role": "player" }
-      ],
-      "animations": [
-        { "name": "Idle", "path": "hero.glb", "role": "player-idle" },
-        { "name": "Move", "path": "hero.glb", "role": "player-move" },
-        { "name": "Push", "path": "hero.glb", "role": "player-push" },
-        { "name": "Death", "path": "hero.glb", "role": "player-death" },
-        { "name": "Dead", "path": "hero.glb", "role": "player-dead-idle" }
-      ],
-      "tiles": []
-    })json");
+    return sokoban::AssetManifest::parse(manifestJson);
 }
 
 void testCatalogScansSupportedFilesAndResolvesManifestModels()
@@ -96,12 +99,91 @@ void testMissingRootFailsWithoutStaleEntries()
     CHECK(catalog.status().find("unavailable") != std::string::npos);
 }
 
+void testRegistrationPopulatesManifestsAndStagesGltfDependencies()
+{
+    TemporaryDirectory directory;
+    const std::filesystem::path source = directory.path / "source";
+    const std::filesystem::path runtime = directory.path / "runtime";
+    std::filesystem::create_directories(source / "models/textures");
+    std::filesystem::create_directories(runtime);
+    std::ofstream(source / "manifest.json") << manifestJson;
+    std::ofstream(source / "models/tree.gltf") << R"json({
+      "buffers": [{ "uri": "tree.bin" }],
+      "images": [{ "uri": "textures/tree.png" }],
+      "textures": [{ "source": 0 }],
+      "materials": [{
+        "pbrMetallicRoughness": {
+          "baseColorTexture": { "index": 0 }
+        }
+      }]
+    })json";
+    touch(source / "models/tree.bin");
+    touch(source / "models/textures/tree.png");
+
+    sokoban::AssetManifest live = manifest();
+    sokoban::AssetManifestEditor editor;
+    editor.initialize(source / "manifest.json");
+    const sokoban::DecorationAssetRegistry::Result added =
+        sokoban::DecorationAssetRegistry::registerMesh({
+            .sourceAssetRoot = source,
+            .runtimeAssetRoot = runtime,
+            .relativeMeshPath = "models/tree.gltf",
+            .runtimeManifest = live,
+            .manifestEditor = editor,
+        });
+
+    CHECK(added.succeeded);
+    CHECK(added.added);
+    CHECK(added.modelName == "Decoration_tree");
+    CHECK(live.models().size() == 3);
+    CHECK(live.textures().size() == 1);
+    CHECK(live.modelIdByName(added.modelName).value == 3);
+    const sokoban::AssetManifest::Model& liveModel =
+        live.model(live.modelIdByName(added.modelName));
+    CHECK(liveModel.preserveSourceScale);
+    CHECK(liveModel.materialMode ==
+        sokoban::ModelMaterialMode::SingleTexture);
+    CHECK(liveModel.materialTextureName ==
+        "DecorationTexture_tree");
+    CHECK(live.textures().front().path ==
+        "models/textures/tree.png");
+    CHECK(std::filesystem::exists(runtime / "models/tree.gltf"));
+    CHECK(std::filesystem::exists(runtime / "models/tree.bin"));
+    CHECK(std::filesystem::exists(runtime / "models/textures/tree.png"));
+
+    const sokoban::AssetManifest sourceManifest =
+        sokoban::AssetManifest::loadFromFile(source / "manifest.json");
+    const sokoban::AssetManifest runtimeManifest =
+        sokoban::AssetManifest::loadFromFile(runtime / "manifest.json");
+    CHECK(sourceManifest.modelIdByName(added.modelName).value == 3);
+    CHECK(runtimeManifest.modelIdByName(added.modelName).value == 3);
+    CHECK(sourceManifest.model(
+        sourceManifest.modelIdByName(added.modelName)).preserveSourceScale);
+    CHECK(sourceManifest.textures().size() == 1);
+    CHECK(runtimeManifest.textures().size() == 1);
+
+    const sokoban::DecorationAssetRegistry::Result repeated =
+        sokoban::DecorationAssetRegistry::registerMesh({
+            .sourceAssetRoot = source,
+            .runtimeAssetRoot = runtime,
+            .relativeMeshPath = "models/tree.gltf",
+            .runtimeManifest = live,
+            .manifestEditor = editor,
+        });
+    CHECK(repeated.succeeded);
+    CHECK(!repeated.added);
+    CHECK(repeated.modelName == added.modelName);
+    CHECK(live.models().size() == 3);
+    CHECK(live.textures().size() == 1);
+}
+
 } // namespace
 
 int main()
 {
     testCatalogScansSupportedFilesAndResolvesManifestModels();
     testMissingRootFailsWithoutStaleEntries();
+    testRegistrationPopulatesManifestsAndStagesGltfDependencies();
 
     if (failures == 0) {
         std::cout << "DecorationMeshCatalogTests: " << checks

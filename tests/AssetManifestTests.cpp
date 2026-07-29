@@ -60,7 +60,11 @@ constexpr const char* validManifest = R"json(
     { "name": "Tex", "path": "textures/tex.png" }
   ],
   "models": [
-    { "name": "Box", "path": "models/box.gltf" },
+    {
+      "name": "Box",
+      "path": "models/box.gltf",
+      "preserveSourceScale": true
+    },
     {
       "name": "Hero",
       "path": "models/hero.glb",
@@ -153,6 +157,10 @@ void testValidManifest()
     check(manifest.models().size() == 3, "three models");
     check(manifest.animations().size() == 5, "five animations");
 
+    const sokoban::RenderModel box = manifest.modelIdByName("Box");
+    check(manifest.model(box).preserveSourceScale,
+        "box preserves authored source scale");
+
     const sokoban::RenderModel hero = manifest.modelIdByName("Hero");
     check(!hero.isCube(), "hero id valid");
     check(manifest.playerModel() == hero, "player role resolved");
@@ -226,6 +234,8 @@ void testSyntaxAndSchemaFailures()
         "unknown model property");
     checkJsonThrows([](Json& json) { json["models"][0]["preserveAspectRatio"] = 1; },
         "boolean type enforced");
+    checkJsonThrows([](Json& json) { json["models"][0]["preserveSourceScale"] = 1; },
+        "source scale boolean type enforced");
     checkJsonThrows([](Json& json) { json["animations"][0]["clip"] = -1; },
         "non-negative clip enforced");
     checkJsonThrows([](Json& json) { json["music"][0]["level"] = -1; },
@@ -359,6 +369,75 @@ void testRuntimeTextureRegistration()
         "registration stops at the descriptor array cap");
 }
 
+void testRuntimeDecorationModelRegistration()
+{
+    using sokoban::AssetManifest;
+    AssetManifest manifest = AssetManifest::parse(validManifest);
+    const std::size_t original = manifest.models().size();
+    const sokoban::RenderModel existing =
+        manifest.modelIdByName(manifest.models().front().name);
+
+    const sokoban::RenderModel added = manifest.addModel({
+        .name = "Decoration_Tree",
+        .path = "scenery/tree.gltf",
+        .preserveSourceScale = true,
+    });
+    check(!added.isCube(), "runtime decoration model registered");
+    check(manifest.models().size() == original + 1, "model list grew");
+    check(manifest.modelIdByName("Decoration_Tree") == added,
+        "registered model resolves by name");
+    check(manifest.model(added).preserveSourceScale,
+        "runtime decoration retains authored scale policy");
+    check(manifest.modelIdByName(manifest.models().front().name) == existing,
+        "existing model ids are undisturbed");
+    check(manifest.addModel({
+              .name = "Decoration_Tree",
+              .path = "other.gltf",
+          }).isCube(),
+        "duplicate runtime model name rejected");
+    check(manifest.addModel({ .name = "", .path = "x.gltf" }).isCube(),
+        "empty runtime model name rejected");
+    check(manifest.addModel({ .name = "NoPath", .path = "" }).isCube(),
+        "empty runtime model path rejected");
+}
+
+void testDecorationMeshCanPreserveAuthoredScale()
+{
+    const std::optional<std::filesystem::path> root =
+        assetsRootFromEnvironment();
+    if (!root.has_value()) {
+        return;
+    }
+
+    const std::filesystem::path desk =
+        *root / "KayKit Furniture Bits 1.0/Assets/gltf/desk.gltf";
+    const sokoban::MeshData normalized = sokoban::loadGltfMesh(desk);
+    const sokoban::MeshData authored = sokoban::loadGltfMesh(
+        desk,
+        {
+            .preserveSourceScale = true,
+        });
+
+    bool normalizedInsideUnitCube = true;
+    for (const sokoban::MeshVertex& vertex : normalized.vertices) {
+        normalizedInsideUnitCube =
+            normalizedInsideUnitCube &&
+            vertex.position.x >= -0.0001f && vertex.position.x <= 1.0001f &&
+            vertex.position.y >= -0.0001f && vertex.position.y <= 1.0001f &&
+            vertex.position.z >= -0.0001f && vertex.position.z <= 1.0001f;
+    }
+    bool authoredKeepsWideBounds = false;
+    for (const sokoban::MeshVertex& vertex : authored.vertices) {
+        authoredKeepsWideBounds =
+            authoredKeepsWideBounds ||
+            vertex.position.x < -1.0f || vertex.position.x > 1.0f;
+    }
+    check(normalizedInsideUnitCube,
+        "default mesh loading still normalizes into one tile");
+    check(authoredKeepsWideBounds,
+        "decoration mesh loading retains authored dimensions");
+}
+
 void testRealManifestFile()
 {
     const std::optional<std::filesystem::path> root = assetsRootFromEnvironment();
@@ -471,6 +550,8 @@ int main()
     testSyntaxAndSchemaFailures();
     testDomainValidationFailures();
     testRuntimeTextureRegistration();
+    testRuntimeDecorationModelRegistration();
+    testDecorationMeshCanPreserveAuthoredScale();
     testRealManifestFile();
 
     if (failures != 0) {

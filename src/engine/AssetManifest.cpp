@@ -308,7 +308,7 @@ static void parseModels(const Json& root, AssetManifest& manifest)
         const Json& modelJson = models[i];
         rejectUnknownProperties(modelJson, {
             "name", "path", "geometry", "material", "preserveAspectRatio",
-            "rotateHalfTurn", "beltScroll", "role",
+            "preserveSourceScale", "rotateHalfTurn", "beltScroll", "role",
         }, context);
 
         AssetManifest::Model model;
@@ -325,6 +325,8 @@ static void parseModels(const Json& root, AssetManifest& manifest)
 
         model.preserveAspectRatio = optionalBool(
             modelJson, "preserveAspectRatio", false, context);
+        model.preserveSourceScale = optionalBool(
+            modelJson, "preserveSourceScale", false, context);
         model.rotateHalfTurn = optionalBool(
             modelJson, "rotateHalfTurn", false, context);
         model.beltScroll = optionalBool(modelJson, "beltScroll", false, context);
@@ -683,6 +685,33 @@ RenderTexture AssetManifest::addTexture(Texture texture)
     }
     textures_.push_back(std::move(texture));
     return RenderTexture { static_cast<uint32_t>(textures_.size()) };
+}
+
+RenderModel AssetManifest::addModel(Model model)
+{
+    if (model.name.empty() || model.path.empty() || model.playerRole ||
+        model.geometry != ModelGeometry::Static) {
+        return cubeModel;
+    }
+    for (const Model& existing : models_) {
+        if (existing.name == model.name) {
+            return cubeModel;
+        }
+    }
+    if (model.materialMode == ModelMaterialMode::SingleTexture) {
+        const RenderTexture texture =
+            findTextureIdByName(model.materialTextureName);
+        if (texture.isNone()) {
+            return cubeModel;
+        }
+        model.textureIndex = static_cast<uint32_t>(texture.index());
+    } else if (model.materialMode ==
+                   ModelMaterialMode::PrimitiveTextureIndex &&
+               model.textureIndex >= textures_.size()) {
+        return cubeModel;
+    }
+    models_.push_back(std::move(model));
+    return RenderModel { static_cast<uint32_t>(models_.size()) };
 }
 
 RenderTexture AssetManifest::textureIdByName(std::string_view name) const

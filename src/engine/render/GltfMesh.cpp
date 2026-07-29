@@ -827,7 +827,13 @@ MeshVertex normalizedVertex(
     };
 
     MeshVertex vertex;
-    if (options.preserveAspectRatio) {
+    if (options.preserveSourceScale) {
+        vertex.position = {
+            position.x,
+            -position.z,
+            position.y,
+        };
+    } else if (options.preserveAspectRatio) {
         vertex.position = {
             0.5f + (position.x - center.x) / sourceHeight,
             0.5f - (position.z - center.z) / sourceHeight,
@@ -846,8 +852,13 @@ MeshVertex normalizedVertex(
         normal.y,
     });
     if (options.rotateHalfTurn) {
-        vertex.position.x = 1.0f - vertex.position.x;
-        vertex.position.y = 1.0f - vertex.position.y;
+        if (options.preserveSourceScale) {
+            vertex.position.x = -vertex.position.x;
+            vertex.position.y = -vertex.position.y;
+        } else {
+            vertex.position.x = 1.0f - vertex.position.x;
+            vertex.position.y = 1.0f - vertex.position.y;
+        }
         vertex.normal.x = -vertex.normal.x;
         vertex.normal.y = -vertex.normal.y;
     }
@@ -1079,7 +1090,13 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
     };
 
     for (MeshVertex& vertex : mesh.vertices) {
-        if (options.preserveAspectRatio) {
+        if (options.preserveSourceScale) {
+            vertex.position = {
+                vertex.position.x,
+                -vertex.position.z,
+                vertex.position.y,
+            };
+        } else if (options.preserveAspectRatio) {
             vertex.position = {
                 0.5f + (vertex.position.x - center.x) / sourceHeight,
                 0.5f - (vertex.position.z - center.z) / sourceHeight,
@@ -1098,8 +1115,13 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
             vertex.normal.y,
         });
         if (options.rotateHalfTurn) {
-            vertex.position.x = 1.0f - vertex.position.x;
-            vertex.position.y = 1.0f - vertex.position.y;
+            if (options.preserveSourceScale) {
+                vertex.position.x = -vertex.position.x;
+                vertex.position.y = -vertex.position.y;
+            } else {
+                vertex.position.x = 1.0f - vertex.position.x;
+                vertex.position.y = 1.0f - vertex.position.y;
+            }
             vertex.normal.x = -vertex.normal.x;
             vertex.normal.y = -vertex.normal.y;
         }
@@ -1127,6 +1149,7 @@ SkinnedMeshData loadGltfSkinnedMesh(const std::filesystem::path& path, GltfMeshL
 
     SkinnedMeshData mesh;
     mesh.preserveAspectRatio = options.preserveAspectRatio;
+    mesh.preserveSourceScale = options.preserveSourceScale;
     mesh.rotateHalfTurn = options.rotateHalfTurn;
     mesh.nodes.reserve(sourceNodes.size());
     for (size_t i = 0; i < sourceNodes.size(); ++i) {
@@ -1469,6 +1492,7 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
     bounds.maximum = mesh.sourceMaximum;
     GltfMeshLoadOptions options {
         .preserveAspectRatio = mesh.preserveAspectRatio,
+        .preserveSourceScale = mesh.preserveSourceScale,
         .rotateHalfTurn = mesh.rotateHalfTurn,
     };
 

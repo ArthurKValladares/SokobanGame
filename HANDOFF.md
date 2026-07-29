@@ -265,7 +265,8 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/TaskSystem.*`: standard-library-only worker pool for task-based parallelism. `taskSystem().enqueue(fn)` returns a future (exceptions propagate on get); `parallelFor(count, minChunk, fn(begin, end))` runs chunked loops with the calling thread participating. Tasks must not block on other tasks (no dependency graph yet). Used by GLTF vertex skinning (`skinWithPoses`) and lazy CPU-side model/texture/animation preparation in `VulkanModelResources`; Vulkan publication stays on the render thread. Tested by `tests/TaskSystemTests.cpp` (`sokoban_task_tests`).
 - `src/engine/TileTypes.*`: tile enum, character mapping, colors, helper predicates such as `tileTypeAllowsEntity`.
 - `src/engine/LevelEditor.*`: headless editor model and command API. Owns document state/history, water-layer selection and layer-index maintenance, tile and mesh-decoration commands, decoration selection/transform validation, draft construction, level load/save, source/runtime mirroring, browser enumeration, screen/level renumbering, soft-delete/restore, and guarded permanent deletion. Map and layer insertion shift authored decoration coordinates in the same undoable transaction. It has no SDL, Vulkan, or ImGui dependency and is tested by `tests/LevelEditorTests.cpp` (`sokoban_level_editor_tests`).
-- `src/engine/DecorationMeshCatalog.*`: headless source-tree `.gltf`/`.glb` discovery for Debug authoring. It matches relative source paths to manifest model entries, sorts registered assets first, and exposes unregistered meshes as disabled diagnostics. Release application paths neither scan nor embed the source asset root. Tested by `tests/DecorationMeshCatalogTests.cpp` (`sokoban_decoration_mesh_catalog_tests`).
+- `src/engine/DecorationMeshCatalog.*`: headless source-tree `.gltf`/`.glb` discovery for Debug authoring. It matches relative source paths to manifest model entries and sorts registered assets first. Release application paths neither scan nor embed the source asset root.
+- `src/engine/DecorationAssetRegistry.*`: headless first-use registration for arbitrary catalog meshes. It validates asset-relative paths and external glTF URIs, mirrors the mesh plus buffer/image dependencies into staged runtime assets, generates a unique readable model name, resolves a single external glTF base-color atlas, reuses textures by normalized path or registers a new texture, and atomically saves the source/staged manifests before appending live texture/model ids. Generated decorations set `preserveSourceScale`, retaining authored units and origin instead of normalizing into a tile; old generated entries are upgraded when re-registered. The renderer grows texture slots before model slots. Multi-atlas and embedded-image materials still require explicit manifest authoring. Covered with the catalog by `tests/DecorationMeshCatalogTests.cpp` (`sokoban_decoration_mesh_catalog_tests`).
 - `src/engine/LevelEditorDebugUi.*`: Debug-only ImGui adapter for `LevelEditor`. Owns widget text buffers, the source-mesh browser, transform controls, and confirmation-modal presentation only; every editor state transition and filesystem action is delegated to the headless API.
 - `src/engine/render/RenderTypes.hpp`: renderer-facing frame contract and model/animation enums, independent of the Vulkan facade. `WaterSurface` carries world bounds, lowered elevation, tint/opacity, and editor-preview state; model instances may carry an authored translation/pivot, XYZ rotation, and non-uniform scale; the frame carries one shared water animation clock so adjacent cells remain phase-continuous.
 - `src/engine/render/RenderResolution.*`: Vulkan-free internal-resolution policy. Validates the supported 100/75/67/50/25 presets, clamps custom percentages to 25-100, and computes rounded, non-zero scene extents; 67% deliberately means exact two-thirds so 3840x2160 becomes 2560x1440. Covered by `sokoban_vulkan_device_selection_tests` alongside the headless device-selection policy.
@@ -637,7 +638,8 @@ Editor capabilities:
 - New/resize documents.
 - Insert layers above or below the active layer, and delete layers.
 - Paint tile types from a palette.
-- Browse manifest-registered source meshes and place them as decorations.
+- Browse any source `.gltf`/`.glb`; first selection registers it automatically,
+  then place it as a decoration.
 - Select, translate, rotate, non-uniformly scale, reset, duplicate, and delete
   mesh decorations through undoable headless editor commands.
 - Delete tiles.
@@ -669,9 +671,14 @@ Important editor behavior:
 - Picking logic was fixed so top/side wall faces are selected more reliably instead of accidentally selecting the ground below.
 - Placing a ladder in the editor validates same-layer adjacent Ground.
 - The Debug mesh catalog scans source `assets/` recursively for `.gltf` and
-  `.glb`. Registered entries are selectable; unregistered files stay visible
-  but disabled so a screen can never serialize a path that runtime content
-  cannot resolve. Release builds do not scan source assets.
+  `.glb`. Selecting an unregistered file generates a `Decoration_<stem>` model
+  name (with a uniqueness suffix when needed), adds a default static/untextured
+  model to both manifests, copies the mesh and external glTF dependencies into
+  staged assets, grows the renderer's model slots, and refreshes the catalog.
+  The screen still serializes only the stable generated manifest name, so
+  shipping content never depends on a source filesystem path. Material mode,
+  textures, aspect preservation, and other model metadata can be refined later
+  in the Asset Manifest tab. Release builds do not scan source assets.
 - New decorations snap their pivot to the top surface under the mouse. Their
   initial position uses the tile center in X/Y and the resolved top elevation
   in Z; transform controls can then move them freely. Decorations remain
@@ -1266,6 +1273,14 @@ these focused modules rather than moving player UI into Debug-only ImGui.
 
 Major recent additions and fixes:
 
+- Fixed mesh-decoration imports that rendered white and tile-fitted. Static
+  mesh loading now has an opt-in `preserveSourceScale` path that performs only
+  the engine coordinate-system conversion, decoration instances use the
+  authored origin as their pivot, and the importer discovers and binds a
+  single external glTF base-color atlas while reusing existing texture paths.
+  Existing Furniture Bits and Platformer decoration entries were migrated.
+  Manifest, importer, real-mesh scale, and presentation-pivot regressions cover
+  the complete path.
 - Added a live mirror activation preview backed by the exact pure rules
   transaction. Valid idle reflections now show a two-layer animated energy
   beam through every chained mirror leg and a translucent textured ghost of
@@ -1541,7 +1556,7 @@ At the time this handoff was updated:
 - Full Debug and Release builds passed from the clean `out/visual-studio` build
   tree. Clean installed Release builds also start and remain healthy without
   access to the source checkout.
-- All 30 CTest suites pass, including real-font/options UI, concurrent texture decoding,
+- All 36 CTest suites pass, including real-font/options UI, concurrent texture decoding,
   input/gamepad mapping, profile
   migration/recovery, gameplay
   move-count semantics, mandatory validation of the shipped manifest,
@@ -1550,7 +1565,7 @@ At the time this handoff was updated:
   `content_pipeline` suite.
 - `cmake --build out\visual-studio --config Release --target package` produces
   `out/visual-studio/Sokoban3D-0.1.0-Windows-x64.zip`. The latest verified
-  Debug content stage contains 73 reachable files (about 23.3 MB) instead of
+  Debug content stage contains 128 reachable files (about 24.0 MB) instead of
   copying the complete source vendor packs.
 - Migrated the asset manifest from the custom indentation-based format to
   versioned strict JSON parsed by pinned nlohmann/json 3.11.3. The parser now

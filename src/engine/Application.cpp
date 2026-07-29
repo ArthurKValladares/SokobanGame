@@ -168,6 +168,10 @@ Application::Application()
                 (void)decorationMeshCatalog_.refresh(
                     SOKOBAN_SOURCE_ASSET_DIR, assetManifest_);
             },
+            .registerDecorationMesh = [this](
+                const std::filesystem::path& relativePath) {
+                return registerDecorationMesh(relativePath);
+            },
         });
     });
     DebugUi::addTab("Animation Preview", [this] {
@@ -954,6 +958,37 @@ void Application::persistManifestTexture(
 #else
     (void)name;
     (void)relativePath;
+#endif
+}
+
+std::optional<std::string> Application::registerDecorationMesh(
+    const std::filesystem::path& relativePath)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    const DecorationAssetRegistry::Result result =
+        DecorationAssetRegistry::registerMesh({
+            .sourceAssetRoot = SOKOBAN_SOURCE_ASSET_DIR,
+            .runtimeAssetRoot = assetRoot_,
+            .relativeMeshPath = relativePath,
+            .runtimeManifest = assetManifest_,
+            .manifestEditor = assetManifestEditor_,
+        });
+    if (!result.succeeded) {
+        log::error(log::Category::Assets) << result.status;
+        return std::nullopt;
+    }
+
+    // Registration may discover and append a glTF base-colour texture before
+    // appending the model that references it.
+    renderer_.syncManifestTextures();
+    renderer_.syncManifestModels();
+    (void)decorationMeshCatalog_.refresh(
+        SOKOBAN_SOURCE_ASSET_DIR, assetManifest_);
+    log::info(log::Category::Assets) << result.status;
+    return result.modelName;
+#else
+    (void)relativePath;
+    return std::nullopt;
 #endif
 }
 

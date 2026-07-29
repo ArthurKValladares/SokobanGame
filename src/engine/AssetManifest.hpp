@@ -87,6 +87,9 @@ public:
         std::string path; // relative to the assets root
         ModelGeometry geometry = ModelGeometry::Static;
         bool preserveAspectRatio = false;
+        // Keep authored mesh units and origin instead of remapping the source
+        // bounds into the engine's unit tile. Used by free-form decorations.
+        bool preserveSourceScale = false;
         bool rotateHalfTurn = false;
         bool primitiveTextures = false;
         bool beltScroll = false; // UVs scroll with the conveyor clock
@@ -145,6 +148,10 @@ public:
     // per-texture state (see VulkanModelResources::syncManifestTextures) and
     // persist the entry, or it is lost on restart.
     [[nodiscard]] RenderTexture addTexture(Texture texture);
+    // Appends an ordinary static model for Debug authoring. Existing ids stay
+    // stable because model ids, like texture ids, are ordered list indices.
+    // Returns cubeModel when validation fails.
+    [[nodiscard]] RenderModel addModel(Model model);
     [[nodiscard]] const std::vector<Model>& models() const { return models_; }
     [[nodiscard]] const std::vector<Animation>& animations() const { return animations_; }
     [[nodiscard]] const std::vector<TileEntry>& tileEntries() const { return tiles_; }

@@ -192,6 +192,9 @@ std::string AssetManifestEditor::serialize() const
         if (model.preserveAspectRatio) {
             item["preserveAspectRatio"] = true;
         }
+        if (model.preserveSourceScale) {
+            item["preserveSourceScale"] = true;
+        }
         if (model.rotateHalfTurn) {
             item["rotateHalfTurn"] = true;
         }

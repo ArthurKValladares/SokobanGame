@@ -142,10 +142,15 @@ editor commands but does not own document or filesystem policy.
   water-layer numbering.
 - Painting one cell beyond an edge expands every layer transactionally.
 - The Mesh Decorations tool scans source `assets/` for `.gltf` and `.glb`
-  files in Debug builds. Manifest-registered meshes can be placed on the top
-  surface under the cursor, selected, translated, rotated, non-uniformly
-  scaled, duplicated, deleted, and undone. Discovered but unregistered files
-  remain visible but disabled until added to the manifest.
+  files in Debug builds. Any discovered mesh can be selected: an unregistered
+  mesh is automatically added to the source and staged manifests, along with
+  its external glTF buffer/image dependencies. A glTF using one external
+  base-color atlas automatically reuses or registers that texture and binds it
+  to the model. Imported decorations set `preserveSourceScale`, so scale
+  `[1,1,1]` retains the mesh's exported units and origin instead of fitting
+  its bounds into one tile. Meshes can be placed on the top surface under the
+  cursor, selected, translated, rotated, non-uniformly scaled, duplicated,
+  deleted, and undone.
 - Source saves, runtime mirroring, screen/level insertion and renumbering,
   soft deletion, restore, and guarded permanent deletion are handled by the
   tested editor/project APIs.
@@ -156,6 +161,12 @@ editor commands but does not own document or filesystem policy.
 textures, animations, sounds, music, tile visuals, and material behavior. A
 normal build runs `sokoban_content`, validates all reachable content, compiles
 shaders, and stages only required files beside the executable.
+
+Models default to normalized unit-tile geometry. Set
+`"preserveSourceScale": true` on free-form scenery that should retain its
+authored dimensions and origin. Automatic decoration import currently binds
+single external base-color atlases; multi-atlas or embedded-image GLTF/GLB
+materials still require explicit manifest material entries.
 
 ```powershell
 cmake --build build --config Debug --target sokoban_content
@@ -187,6 +198,8 @@ staged assets, and third-party licenses.
   transactional project filesystem operations.
 - `src/engine/DecorationMeshCatalog.*`: Debug-authoring discovery of source
   GLTF/GLB files and their manifest-registration state.
+- `src/engine/DecorationAssetRegistry.*`: headless automatic manifest
+  registration and staged dependency mirroring for selected decoration meshes.
 - `src/engine/Application.*`: composition, SDL event loop, and lifecycle.
 - `src/engine/ui/`: reusable player-facing UI and pure menu reduction.
 - `src/engine/render/`: Vulkan-free scene preparation plus decomposed Vulkan

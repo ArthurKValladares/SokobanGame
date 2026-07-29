@@ -92,6 +92,9 @@ public:
     // ensureAssets; existing slots and their ids are untouched, because ids
     // are indices and the manifest only ever appends.
     bool syncManifestTextures();
+    // Grows static model slots after the Debug decoration authoring path
+    // appends manifest models. Existing slots and ids remain untouched.
+    bool syncManifestModels();
 
     struct TextureUpdate {
         bool updated = false;

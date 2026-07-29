@@ -38,6 +38,10 @@ public:
             decorationMeshes;
         std::function<const std::string&()> decorationMeshStatus;
         std::function<void()> refreshDecorationMeshes;
+        // Registers an arbitrary source mesh on first selection and returns
+        // the stable manifest model name used by the level document.
+        std::function<std::optional<std::string>(
+            const std::filesystem::path&)> registerDecorationMesh;
     };
 
     void initialize(const LevelEditor& editor);
@@ -62,6 +66,7 @@ private:
     std::string filePathBuffer_;
     std::string browserRootBuffer_;
     std::string decorationFilter_;
+    std::string decorationRegistrationStatus_;
     int requestedWidth_ = 12;
     int requestedHeight_ = 8;
     std::optional<LevelEditor::LevelDirectory> pendingDeleteLevel_;

@@ -157,6 +157,7 @@ add_library(sokoban_core STATIC
     src/engine/CampaignSession.cpp
     src/engine/BoardLayout.cpp
     src/engine/ContentPipeline.cpp
+    src/engine/DecorationAssetRegistry.cpp
     src/engine/DecorationMeshCatalog.cpp
     src/engine/GameplayPresentation.cpp
     src/engine/GameplayLoop.cpp

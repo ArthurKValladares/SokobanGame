@@ -349,6 +349,7 @@ void AssetManifestDebugUi::drawModels(AssetManifestEditor& editor)
                 }
             }
             changed = ImGui::Checkbox("Preserve Aspect Ratio", &model.preserveAspectRatio) || changed;
+            changed = ImGui::Checkbox("Preserve Source Scale", &model.preserveSourceScale) || changed;
             changed = ImGui::Checkbox("Rotate Half Turn", &model.rotateHalfTurn) || changed;
             changed = ImGui::Checkbox("Belt Scroll", &model.beltScroll) || changed;
             changed = ImGui::Checkbox("Player Role", &model.playerRole) || changed;
