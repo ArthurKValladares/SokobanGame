@@ -608,6 +608,54 @@ void testFailedRenumberPreservesSourceAndRuntimeTrees()
         std::string::npos);
 }
 
+void testDecorationEditingPersistenceAndUndo()
+{
+    TEST("decorationEditingPersistenceAndUndo");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(3, 2, false);
+    editor.setSelectedDecorationModel("Stone");
+    CHECK(editor.tool() == LevelEditor::Tool::Decorations);
+    CHECK(editor.placeDecoration({ 1, 1, 1 }));
+    CHECK(editor.decorations().size() == 1);
+    CHECK(editor.selectedDecorationIndex() == 0U);
+    CHECK(editor.decorations()[0].model == "Stone");
+    CHECK(editor.decorations()[0].position.x == 1.5f);
+    CHECK(editor.decorations()[0].position.y == 1.5f);
+    CHECK(editor.decorations()[0].position.z == 1.0f);
+
+    Level::Decoration transformed = *editor.selectedDecoration();
+    transformed.position = { 0.25f, 1.75f, 2.5f };
+    transformed.rotationDegrees = { 10.0f, 20.0f, 30.0f };
+    transformed.scale = { 0.5f, 1.5f, 2.0f };
+    CHECK(editor.updateSelectedDecoration(transformed));
+    CHECK(*editor.selectedDecoration() == transformed);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.selectedDecoration()->position.x == 1.5f);
+    CHECK(editor.selectedDecoration()->scale.x == 1.0f);
+
+    CHECK(editor.duplicateSelectedDecoration());
+    CHECK(editor.decorations().size() == 2);
+    CHECK(editor.deleteSelectedDecoration());
+    CHECK(editor.decorations().size() == 1);
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.decorations().size() == 2);
+
+    const std::filesystem::path path =
+        project.source / "level0" / "screen0.scr";
+    CHECK(editor.saveDocument(path));
+    LevelEditor loaded = makeEditor(project);
+    CHECK(loaded.decorations().size() == 2);
+    CHECK(loaded.documentToLevel().decorations().size() == 2);
+
+    const float oldX = loaded.decorations()[0].position.x;
+    loaded.setSelectedTile(TileType::Wall);
+    loaded.paintCell({ -1, 0, 0 });
+    CHECK(loaded.decorations()[0].position.x == oldX + 1.0f);
+    CHECK(loaded.tryUndoEdit());
+    CHECK(loaded.decorations()[0].position.x == oldX);
+}
+
 } // namespace
 
 int main()
@@ -627,6 +675,7 @@ int main()
     testAlternateBrowserRootDoesNotMirrorRuntime();
     testBrowserFiltersJunkAndRejectsForeignDirectories();
     testFailedRenumberPreservesSourceAndRuntimeTrees();
+    testDecorationEditingPersistenceAndUndo();
 
     if (failures == 0) {
         std::cout << "LevelEditorTests: " << checks << " checks passed\n";

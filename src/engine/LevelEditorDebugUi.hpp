@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/DecorationMeshCatalog.hpp"
 #include "engine/LevelEditor.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/SplatPainter.hpp"
@@ -33,6 +34,10 @@ public:
         // --bake-tile-thumbnails command line, offered here because that flag
         // is easy to forget and awkward to pass when launching from an IDE.
         std::function<bool()> bakeTileThumbnails;
+        std::function<const std::vector<DecorationMeshCatalog::Entry>&()>
+            decorationMeshes;
+        std::function<const std::string&()> decorationMeshStatus;
+        std::function<void()> refreshDecorationMeshes;
     };
 
     void initialize(const LevelEditor& editor);
@@ -45,6 +50,9 @@ private:
     void syncDocumentPath(const LevelEditor& editor);
     void drawGroundPaintTab(SplatPainter& painter, const Callbacks& callbacks);
     void drawTilePalette(LevelEditor& editor, const Callbacks& callbacks);
+    void drawDecorationPalette(
+        LevelEditor& editor,
+        const Callbacks& callbacks);
     void drawFileBrowser(LevelEditor& editor);
     void drawActiveLevelsTab(LevelEditor& editor);
     void drawDeletedLevelsTab(LevelEditor& editor);
@@ -53,6 +61,7 @@ private:
 
     std::string filePathBuffer_;
     std::string browserRootBuffer_;
+    std::string decorationFilter_;
     int requestedWidth_ = 12;
     int requestedHeight_ = 8;
     std::optional<LevelEditor::LevelDirectory> pendingDeleteLevel_;

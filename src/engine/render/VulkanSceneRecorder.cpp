@@ -1342,6 +1342,23 @@ private:
         };
         const bool mirrorEnergy =
             tile.effect == RenderSurfaceEffect::MirrorEnergy;
+        const Vec3 modelRotation = tile.modelTransform
+            ? tile.modelTransform->rotationRadians
+            : Vec3 {
+                  0.0f,
+                  0.0f,
+                  static_cast<float>(
+                      tile.modelRotationQuarterTurns % 4) *
+                          1.57079632679f +
+                      tile.modelRotationOffsetRadians,
+              };
+        const Vec3 modelScale = tile.modelTransform
+            ? tile.modelTransform->scale
+            : Vec3 {
+                  tile.size.x,
+                  tile.size.y,
+                  std::max(tile.height, 0.0001f),
+              };
         const TilePushConstants constants {
             .vertices = IsoScenePreparer::modelClipTransform(
                 layout, renderExtent, tile),
@@ -1356,7 +1373,11 @@ private:
                     shadowLayout, transform.zPoint)),
             .color = tile.color,
             .normalAndAmbientRed = {
-                0.0f, 0.0f, 0.0f, ambientRadiance.x },
+                modelRotation.x,
+                modelRotation.y,
+                modelRotation.z,
+                ambientRadiance.x,
+            },
             .sunDirectionAndAmbientGreen = {
                 lighting.sun.direction.x,
                 lighting.sun.direction.y,
@@ -1407,13 +1428,15 @@ private:
                       config::mirrorEnergyPulseSpeed,
                       config::mirrorEnergyPulseStrength,
                   }
-                : Vec4 {},
+                : Vec4 {
+                      1.0f / std::max(std::abs(modelScale.x), 0.0001f),
+                      1.0f / std::max(std::abs(modelScale.y), 0.0001f),
+                      1.0f / std::max(std::abs(modelScale.z), 0.0001f),
+                      -1.0f,
+                  },
             .textureOptions = {
                 shaderValue(material.mode),
-                static_cast<float>(
-                    tile.modelRotationQuarterTurns % 4) *
-                        1.57079632679f +
-                    tile.modelRotationOffsetRadians,
+                modelRotation.z,
                 std::max(lighting.specularStrength, 0.0f),
                 std::max(lighting.specularPower, 1.0f),
             },

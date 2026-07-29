@@ -157,6 +157,7 @@ add_library(sokoban_core STATIC
     src/engine/CampaignSession.cpp
     src/engine/BoardLayout.cpp
     src/engine/ContentPipeline.cpp
+    src/engine/DecorationMeshCatalog.cpp
     src/engine/GameplayPresentation.cpp
     src/engine/GameplayLoop.cpp
     src/engine/GameplaySession.cpp
@@ -473,6 +474,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME level_editor TARGET sokoban_level_editor_tests
         LIBS sokoban_core
         SOURCES tests/LevelEditorTests.cpp
+    )
+    sokoban_add_test(NAME decoration_mesh_catalog TARGET sokoban_decoration_mesh_catalog_tests
+        LIBS sokoban_core
+        SOURCES tests/DecorationMeshCatalogTests.cpp
     )
     sokoban_add_test(NAME animation_controller TARGET sokoban_animation_controller_tests
         LIBS sokoban_core

@@ -3,6 +3,7 @@
 #include "engine/Level.hpp"
 #include "engine/LevelProjectStore.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -15,6 +16,11 @@ namespace sokoban {
 // invoke these operations; no presentation framework is required to use it.
 class LevelEditor {
 public:
+    enum class Tool {
+        Tiles,
+        Decorations,
+    };
+
     struct ScreenFile {
         int index = 0;
         std::filesystem::path path;
@@ -45,6 +51,8 @@ public:
     void setWaterLayer(std::optional<uint32_t> layer);
     void setLayerLocked(bool locked);
     void setSelectedTile(TileType tile);
+    void setTool(Tool tool);
+    void setSelectedDecorationModel(std::string modelName);
     void selectDocument(const std::filesystem::path& path);
     [[nodiscard]] bool setBrowserRoot(const std::filesystem::path& path);
 
@@ -61,6 +69,13 @@ public:
     void paintCell(GridPosition3 position);
     void eraseCell(GridPosition3 position);
     void setCell(GridPosition3 position, TileType tile);
+    [[nodiscard]] bool placeDecoration(GridPosition3 surfaceCell);
+    [[nodiscard]] bool selectDecoration(std::size_t index);
+    void clearDecorationSelection();
+    [[nodiscard]] bool updateSelectedDecoration(
+        const Level::Decoration& decoration);
+    [[nodiscard]] bool duplicateSelectedDecoration();
+    [[nodiscard]] bool deleteSelectedDecoration();
     [[nodiscard]] GridPosition3 resolveEditTarget(
         GridPosition3 pickedCell,
         bool deleting,
@@ -87,6 +102,11 @@ public:
     [[nodiscard]] const std::vector<std::string>& documentRows() const;
     [[nodiscard]] const Level::LayerRows& documentLayers() const;
     [[nodiscard]] TileType selectedTile() const;
+    [[nodiscard]] Tool tool() const;
+    [[nodiscard]] const std::string& selectedDecorationModel() const;
+    [[nodiscard]] const std::vector<Level::Decoration>& decorations() const;
+    [[nodiscard]] std::optional<std::size_t> selectedDecorationIndex() const;
+    [[nodiscard]] const Level::Decoration* selectedDecoration() const;
     // The path shown in the UI, which the file browser changes on a single
     // click. It is a *selection*: the document in memory is unchanged until
     // the selection is actually loaded.
@@ -104,6 +124,7 @@ private:
     struct Document {
         Level::LayerRows layers;
         std::optional<uint32_t> waterLayer;
+        std::vector<Level::Decoration> decorations;
         // Selected path (browser clicks move this).
         std::filesystem::path filePath;
         // Where `layers` was actually read from or written to. Empty for an
@@ -117,6 +138,9 @@ private:
         int requestedHeight = 8;
         int activeLayer = 0;
         TileType selectedTile = TileType::Wall;
+        Tool tool = Tool::Tiles;
+        std::string selectedDecorationModel;
+        std::optional<std::size_t> selectedDecoration;
         bool layerLocked = false;
         bool dirty = false;
         bool playingDraft = false;
@@ -126,6 +150,7 @@ private:
     struct DocumentSnapshot {
         Level::LayerRows layers;
         std::optional<uint32_t> waterLayer;
+        std::vector<Level::Decoration> decorations;
         std::filesystem::path filePath;
         // Undoing a load has to restore where the document came from too, or
         // the restored contents would be attributed to the wrong screen.
@@ -133,6 +158,7 @@ private:
         int requestedWidth = 12;
         int requestedHeight = 8;
         int activeLayer = 0;
+        std::optional<std::size_t> selectedDecoration;
         bool dirty = false;
     };
 

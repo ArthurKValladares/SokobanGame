@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <exception>
 #include <fstream>
 #include <charconv>
@@ -193,6 +194,18 @@ void LevelEditor::setLayerLocked(bool locked)
 void LevelEditor::setSelectedTile(TileType tile)
 {
     document_.selectedTile = tile;
+    document_.tool = Tool::Tiles;
+}
+
+void LevelEditor::setTool(Tool tool)
+{
+    document_.tool = tool;
+}
+
+void LevelEditor::setSelectedDecorationModel(std::string modelName)
+{
+    document_.selectedDecorationModel = std::move(modelName);
+    document_.tool = Tool::Decorations;
 }
 
 void LevelEditor::selectDocument(const std::filesystem::path& path)
@@ -380,6 +393,10 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
         }
         document_.requestedWidth = width;
         document_.requestedHeight = height;
+        for (Level::Decoration& decoration : document_.decorations) {
+            decoration.position.x += static_cast<float>(prependColumns);
+            decoration.position.y += static_cast<float>(prependRows);
+        }
     }
 
     while (translatedPosition.z >= static_cast<int>(document_.layers.size())) {
@@ -414,6 +431,129 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
                 std::to_string(translatedPosition.z + 1) + ".";
     }
     recordDocumentChange(before);
+}
+
+bool LevelEditor::placeDecoration(GridPosition3 surfaceCell)
+{
+    if (document_.selectedDecorationModel.empty()) {
+        document_.status = "Select a registered decoration mesh first.";
+        return false;
+    }
+    if (surfaceCell.x < 0 || surfaceCell.y < 0 || surfaceCell.z < 0 ||
+        surfaceCell.x >= static_cast<int>(documentWidth()) ||
+        surfaceCell.y >= static_cast<int>(documentHeight())) {
+        document_.status = "Decorations must be placed over the level board.";
+        return false;
+    }
+
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    document_.decorations.push_back({
+        .model = document_.selectedDecorationModel,
+        .position = {
+            static_cast<float>(surfaceCell.x) + 0.5f,
+            static_cast<float>(surfaceCell.y) + 0.5f,
+            static_cast<float>(surfaceCell.z),
+        },
+    });
+    document_.selectedDecoration = document_.decorations.size() - 1;
+    document_.dirty = true;
+    document_.status = "Placed decoration " +
+        document_.selectedDecorationModel + ".";
+    recordDocumentChange(before);
+    return true;
+}
+
+bool LevelEditor::selectDecoration(std::size_t index)
+{
+    if (index >= document_.decorations.size()) {
+        return false;
+    }
+    document_.selectedDecoration = index;
+    document_.tool = Tool::Decorations;
+    return true;
+}
+
+void LevelEditor::clearDecorationSelection()
+{
+    document_.selectedDecoration.reset();
+}
+
+bool LevelEditor::updateSelectedDecoration(
+    const Level::Decoration& decoration)
+{
+    if (!document_.selectedDecoration ||
+        *document_.selectedDecoration >= document_.decorations.size()) {
+        return false;
+    }
+    const auto finite = [](Vec3 value) {
+        return std::isfinite(value.x) &&
+            std::isfinite(value.y) &&
+            std::isfinite(value.z);
+    };
+    if (decoration.model.empty() ||
+        !finite(decoration.position) ||
+        !finite(decoration.rotationDegrees) ||
+        !finite(decoration.scale) ||
+        decoration.scale.x <= 0.0f ||
+        decoration.scale.y <= 0.0f ||
+        decoration.scale.z <= 0.0f) {
+        document_.status = "Decoration transform is invalid.";
+        return false;
+    }
+
+    Level::Decoration& current =
+        document_.decorations[*document_.selectedDecoration];
+    if (current == decoration) {
+        return false;
+    }
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    current = decoration;
+    document_.dirty = true;
+    document_.status = "Updated decoration transform.";
+    recordDocumentChange(before);
+    return true;
+}
+
+bool LevelEditor::duplicateSelectedDecoration()
+{
+    if (!document_.selectedDecoration ||
+        *document_.selectedDecoration >= document_.decorations.size()) {
+        return false;
+    }
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    Level::Decoration duplicate =
+        document_.decorations[*document_.selectedDecoration];
+    duplicate.position.x += 0.25f;
+    duplicate.position.y += 0.25f;
+    document_.decorations.push_back(std::move(duplicate));
+    document_.selectedDecoration = document_.decorations.size() - 1;
+    document_.dirty = true;
+    document_.status = "Duplicated decoration.";
+    recordDocumentChange(before);
+    return true;
+}
+
+bool LevelEditor::deleteSelectedDecoration()
+{
+    if (!document_.selectedDecoration ||
+        *document_.selectedDecoration >= document_.decorations.size()) {
+        return false;
+    }
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    document_.decorations.erase(
+        document_.decorations.begin() +
+        static_cast<std::ptrdiff_t>(*document_.selectedDecoration));
+    if (document_.decorations.empty()) {
+        document_.selectedDecoration.reset();
+    } else {
+        document_.selectedDecoration = std::min(
+            *document_.selectedDecoration,
+            document_.decorations.size() - 1);
+    }
+    document_.dirty = true;
+    document_.status = "Deleted decoration.";
+    recordDocumentChange(before);
+    return true;
 }
 
 bool LevelEditor::tryUndoEdit()
@@ -476,6 +616,35 @@ TileType LevelEditor::selectedTile() const
     return document_.selectedTile;
 }
 
+LevelEditor::Tool LevelEditor::tool() const
+{
+    return document_.tool;
+}
+
+const std::string& LevelEditor::selectedDecorationModel() const
+{
+    return document_.selectedDecorationModel;
+}
+
+const std::vector<Level::Decoration>& LevelEditor::decorations() const
+{
+    return document_.decorations;
+}
+
+std::optional<std::size_t> LevelEditor::selectedDecorationIndex() const
+{
+    return document_.selectedDecoration;
+}
+
+const Level::Decoration* LevelEditor::selectedDecoration() const
+{
+    if (!document_.selectedDecoration ||
+        *document_.selectedDecoration >= document_.decorations.size()) {
+        return nullptr;
+    }
+    return &document_.decorations[*document_.selectedDecoration];
+}
+
 bool LevelEditor::dirty() const
 {
     return document_.dirty;
@@ -517,6 +686,8 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
     };
     document_.layers[1].front().front() = tileTypeToChar(TileType::Player);
     document_.waterLayer.reset();
+    document_.decorations.clear();
+    document_.selectedDecoration.reset();
     // A new document belongs to no screen until it is saved as one, so it has
     // no splat map of its own and previews the shared fallback.
     document_.loadedPath.clear();
@@ -590,6 +761,11 @@ void LevelEditor::insertLayerAt(int insertionIndex, const char* status)
         std::vector<std::string>(
             static_cast<size_t>(height),
             std::string(static_cast<size_t>(width), tileTypeToChar(TileType::Air))));
+    for (Level::Decoration& decoration : document_.decorations) {
+        if (decoration.position.z >= static_cast<float>(insertionIndex)) {
+            decoration.position.z += 1.0f;
+        }
+    }
     document_.activeLayer = insertionIndex;
     document_.dirty = true;
     document_.status = status;
@@ -613,6 +789,11 @@ void LevelEditor::deleteActiveLayer()
         --*document_.waterLayer;
     }
     document_.layers.erase(document_.layers.begin() + document_.activeLayer);
+    for (Level::Decoration& decoration : document_.decorations) {
+        if (decoration.position.z >= static_cast<float>(deletedLayer + 1)) {
+            decoration.position.z -= 1.0f;
+        }
+    }
     document_.activeLayer = std::min(
         document_.activeLayer,
         static_cast<int>(document_.layers.size()) - 1);
@@ -671,6 +852,8 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
 
     document_.layers = std::move(definition.layers);
     document_.waterLayer = definition.waterLayer;
+    document_.decorations = std::move(definition.decorations);
+    document_.selectedDecoration.reset();
     document_.filePath = path;
     // This is the one place the in-memory document takes on a new origin by
     // reading; a browser selection deliberately does not.
@@ -715,6 +898,7 @@ bool LevelEditor::saveDocument(const std::filesystem::path& path)
         Level::serializeDefinition({
             .layers = document_.layers,
             .waterLayer = document_.waterLayer,
+            .decorations = document_.decorations,
         });
     for (const std::string& line : serialized) {
         file << line << '\n';
@@ -970,6 +1154,7 @@ void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
     const DocumentSnapshot after = captureDocumentSnapshot();
     if (before.layers == after.layers &&
         before.waterLayer == after.waterLayer &&
+        before.decorations == after.decorations &&
         before.filePath == after.filePath &&
         before.requestedWidth == after.requestedWidth &&
         before.requestedHeight == after.requestedHeight &&
@@ -988,11 +1173,13 @@ void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
 {
     document_.layers = snapshot.layers;
     document_.waterLayer = snapshot.waterLayer;
+    document_.decorations = snapshot.decorations;
     document_.filePath = snapshot.filePath;
     document_.loadedPath = snapshot.loadedPath;
     document_.requestedWidth = snapshot.requestedWidth;
     document_.requestedHeight = snapshot.requestedHeight;
     document_.activeLayer = snapshot.activeLayer;
+    document_.selectedDecoration = snapshot.selectedDecoration;
     document_.dirty = snapshot.dirty;
     document_.playingDraft = false;
     document_.editingDocument = true;
@@ -1003,7 +1190,8 @@ Level LevelEditor::documentToLevel() const
     return Level::loadFromLayers(
         document_.layers,
         "level editor draft",
-        document_.waterLayer);
+        document_.waterLayer,
+        document_.decorations);
 }
 
 std::optional<Level> LevelEditor::beginDraftPlayback()
@@ -1024,11 +1212,13 @@ LevelEditor::DocumentSnapshot LevelEditor::captureDocumentSnapshot() const
     return {
         .layers = document_.layers,
         .waterLayer = document_.waterLayer,
+        .decorations = document_.decorations,
         .filePath = document_.filePath,
         .loadedPath = document_.loadedPath,
         .requestedWidth = document_.requestedWidth,
         .requestedHeight = document_.requestedHeight,
         .activeLayer = document_.activeLayer,
+        .selectedDecoration = document_.selectedDecoration,
         .dirty = document_.dirty,
     };
 }

@@ -260,20 +260,21 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/SaveStore.*`: profile persistence rooted at SDL's platform-appropriate `SDL_GetPrefPath`. A `fileStem` constructor parameter names the slot's files (slot 1 keeps the historical `profile` stem so pre-slot saves remain valid; slots 2/3 use `profile-slot2/3`), and corrupt-archive detection derives its prefixes from those names so slots never interfere. Writes validated JSON through same-directory temporary replacement, keeps the previous valid primary as `<stem>.backup.json`, migrates old versions, archives corrupt primary/backup files for diagnosis, recovers from backup, and restores defaults when both copies are unusable.
 - `src/engine/AsyncSaveStore.*`: single serialized persistence worker serving one or more independent channels (each its own `SaveStore` + pending profile + per-channel deadline/diagnostics). The channel-less overloads target channel 0, preserving the original single-store API; `addChannel` and `replaceChannel` (drain-then-repoint, used on slot switch) support several destinations on one thread, so `SaveSlotManager` runs its progress and settings stores without a thread each. Deferred requests coalesce per channel over a configurable window, while JSON encoding, backup rotation, and atomic filesystem replacement happen off the game thread. Screen transitions and committed settings request immediate saves; clean shutdown flushes every channel. Multi-channel behavior is covered in `tests/PlayerProfileTests.cpp`.
 - `src/engine/Rules.*`: headless gameplay rules engine. `GameState` (player + movables + fallen flags + slide momentum) plus pure functions in `sokoban::rules` — `step` advances the whole world one discrete step by delegating to the file-local `MicroStepResolver`, which treats the player and movables as one uniform entity array (movables first, player last, preserving historical resolution order) and runs four named phases per micro-step: deriveIntents (momentum/input/belt against the source's budget), markContested (simultaneous same-destination intents all lose), resolveMoves (multi-pass so vacated cells can be entered; direct input may push a resolved blocker), and settleBlocked (mutually blocked slides cancel). Player and movable falls share one predicate-parameterized `fallTarget` walk differing only in who occupies the cell below. `hasPendingMotion` reports whether the world would keep moving without input; queries cover conveyors, unfilled water, pressure plates, and end unlock. No SDL/Vulkan/rendering dependencies; tested by `tests/RulesTests.cpp`.
-- `src/engine/Level.*`: level file parsing, serialization, layered grid storage, optional `@water N` metadata, walkability/support rules, player/movable extraction. Air on the configured water layer resolves to Water at runtime while the authored tile remains queryable. Tested by `tests/LevelTests.cpp` (`sokoban_level_tests`).
+- `src/engine/Level.*`: level file parsing, serialization, layered grid storage, optional `@water N` metadata, manifest-named mesh decorations with full affine authoring transforms, walkability/support rules, and player/movable extraction. Air on the configured water layer resolves to Water at runtime while the authored tile remains queryable. Decorations remain outside the rules grid and camera bounds. Tested by `tests/LevelTests.cpp` (`sokoban_level_tests`).
 - `src/engine/Log.*` + `src/engine/LogQueue.*`: categorized asynchronous logging with Debug/Info/Warning/Error levels. RAII `Message` objects format only their payload on the producer, then enqueue timestamp/category/message records into a bounded 4,096-entry queue; one writer owns stderr, the append-only file, timestamp formatting, and flushing. Normal traffic flushes every second, errors flush immediately, explicit `flush`/`shutdown` drain and join at process exit, and errors displace the oldest lower-severity entry when a full queue permits. Overflow is aggregated into synthetic `[WARN] [LOG] Dropped N...` records and exposed through queue/write/flush/drop/per-category diagnostics in Debug UI. Output is `[HH:MM:SS.mmm] [LEVEL] [CATEGORY] message`. `Application` adds `log.txt` beside profiles and Debug builds admit Debug messages. Covered by `tests/LogTests.cpp` (`sokoban_log_tests`) including bounded policy, concurrent producers, periodic/error flushing, category output, filtering, and shutdown/reset behavior.
 - `src/engine/TaskSystem.*`: standard-library-only worker pool for task-based parallelism. `taskSystem().enqueue(fn)` returns a future (exceptions propagate on get); `parallelFor(count, minChunk, fn(begin, end))` runs chunked loops with the calling thread participating. Tasks must not block on other tasks (no dependency graph yet). Used by GLTF vertex skinning (`skinWithPoses`) and lazy CPU-side model/texture/animation preparation in `VulkanModelResources`; Vulkan publication stays on the render thread. Tested by `tests/TaskSystemTests.cpp` (`sokoban_task_tests`).
 - `src/engine/TileTypes.*`: tile enum, character mapping, colors, helper predicates such as `tileTypeAllowsEntity`.
-- `src/engine/LevelEditor.*`: headless editor model and command API. Owns document state/history, water-layer selection and layer-index maintenance, tile validation, draft construction, level load/save, source/runtime mirroring, browser enumeration, screen/level renumbering, soft-delete/restore, and guarded permanent deletion. It has no SDL, Vulkan, or ImGui dependency and is tested by `tests/LevelEditorTests.cpp` (`sokoban_level_editor_tests`).
-- `src/engine/LevelEditorDebugUi.*`: Debug-only ImGui adapter for `LevelEditor`. Owns widget text buffers and confirmation-modal presentation only; every editor state transition and filesystem action is delegated to the headless API.
-- `src/engine/render/RenderTypes.hpp`: renderer-facing frame contract and model/animation enums, independent of the Vulkan facade. `WaterSurface` carries world bounds, lowered elevation, tint/opacity, and editor-preview state; the frame carries one shared water animation clock so adjacent cells remain phase-continuous.
+- `src/engine/LevelEditor.*`: headless editor model and command API. Owns document state/history, water-layer selection and layer-index maintenance, tile and mesh-decoration commands, decoration selection/transform validation, draft construction, level load/save, source/runtime mirroring, browser enumeration, screen/level renumbering, soft-delete/restore, and guarded permanent deletion. Map and layer insertion shift authored decoration coordinates in the same undoable transaction. It has no SDL, Vulkan, or ImGui dependency and is tested by `tests/LevelEditorTests.cpp` (`sokoban_level_editor_tests`).
+- `src/engine/DecorationMeshCatalog.*`: headless source-tree `.gltf`/`.glb` discovery for Debug authoring. It matches relative source paths to manifest model entries, sorts registered assets first, and exposes unregistered meshes as disabled diagnostics. Release application paths neither scan nor embed the source asset root. Tested by `tests/DecorationMeshCatalogTests.cpp` (`sokoban_decoration_mesh_catalog_tests`).
+- `src/engine/LevelEditorDebugUi.*`: Debug-only ImGui adapter for `LevelEditor`. Owns widget text buffers, the source-mesh browser, transform controls, and confirmation-modal presentation only; every editor state transition and filesystem action is delegated to the headless API.
+- `src/engine/render/RenderTypes.hpp`: renderer-facing frame contract and model/animation enums, independent of the Vulkan facade. `WaterSurface` carries world bounds, lowered elevation, tint/opacity, and editor-preview state; model instances may carry an authored translation/pivot, XYZ rotation, and non-uniform scale; the frame carries one shared water animation clock so adjacent cells remain phase-continuous.
 - `src/engine/render/RenderResolution.*`: Vulkan-free internal-resolution policy. Validates the supported 100/75/67/50/25 presets, clamps custom percentages to 25-100, and computes rounded, non-zero scene extents; 67% deliberately means exact two-thirds so 3840x2160 becomes 2560x1440. Covered by `sokoban_vulkan_device_selection_tests` alongside the headless device-selection policy.
 - `src/engine/AssetManifest.*`: runtime asset manifest - the single source of truth for models, textures, animations, asset-backed tile visuals (model + render scale per tile type), sounds, and music. Procedural Water and Ladder rendering are deliberate code-owned exceptions. Parses the versioned `assets/manifest.json` with nlohmann/json, rejects malformed JSON, wrong types, missing/unknown properties, unsupported format versions, and invalid material combinations, then performs domain validation (unique names/tiles/roles, resolvable textures/models, exactly one `role: "player"` skinned model, all three player animation roles, texture count <= `maxModelTextures`). `RenderModel`/`RenderAnimation` are runtime ids (index+1 into the ordered JSON arrays; 0 = cube/none) defined in `RenderTypes.hpp`. Adding an asset, tile visual, or sound is a JSON edit plus rebuilding `sokoban_content` and relaunching - no CMake, enum, or renderer change. Headless; tested by `tests/AssetManifestTests.cpp` (`sokoban_asset_manifest_tests`).
 - `src/engine/AssetManifestEditor.*`: headless editable manifest document. Loads the strict runtime model, exposes typed add/update/remove/reorder commands for every manifest section, tracks dirty/status state, serializes canonical JSON, validates through `AssetManifest`, and uses temporary/backup replacement so an invalid or failed save leaves the source manifest intact. Tested by `tests/AssetManifestEditorTests.cpp` (`sokoban_asset_manifest_editor_tests`).
 - `src/engine/AssetManifestDebugUi.*`: Debug-only ImGui adapter for `AssetManifestEditor`. Provides the Asset Manifest tab and owns only widget/modal presentation; all document and filesystem behavior stays reusable by a future non-debug editor UI.
-- `src/engine/ContentPipeline.*` + `tools/ContentTool.cpp`: headless production-content inventory, validation, and staging. Resolves manifest references and external `.gltf` URIs, rejects missing/escaping paths, parses every playable level, requires contiguous level/screen indices, verifies all compiled shaders, includes nearby asset notices, excludes `levels/Deleted`, and atomically replaces the output with only reachable files. Writes `content.index` with format/game version, file count, sizes, and paths. Tested by `tests/ContentPipelineTests.cpp` (`sokoban_content_pipeline_tests`).
+- `src/engine/ContentPipeline.*` + `tools/ContentTool.cpp`: headless production-content inventory, validation, and staging. Resolves manifest references and external `.gltf` URIs, rejects missing/escaping paths, parses every playable level, rejects decoration model names absent from the manifest, requires contiguous level/screen indices, verifies all compiled shaders, includes nearby asset notices, excludes `levels/Deleted`, and atomically replaces the output with only reachable files. Writes `content.index` with format/game version, file count, sizes, and paths. Tested by `tests/ContentPipelineTests.cpp` (`sokoban_content_pipeline_tests`).
 - `src/engine/RuntimeContent.*`: resolves the read-only `assets/` directory beside the executable through `SDL_GetBasePath` and rejects missing, corrupt, unsupported, or game-version-mismatched `content.index` files. `Application`, `VulkanRenderer`, and `AudioSystem` all use this one runtime root.
-- `src/engine/render/RenderAssetRequirements.*`: Vulkan-free model/animation/texture requirement sets plus shared tile-to-model mapping. Computes requirements from a loaded `Level` for prefetching or from `RenderFrameData` as a draw-time safety net. Mirror-bearing levels preload the ten smoke sprites; active particles explicitly require their selected textures. Procedural water is excluded, so no obsolete water mesh can enter lazy loading. Tested by `tests/AssetRequirementsTests.cpp` (`sokoban_asset_requirements_tests`).
+- `src/engine/render/RenderAssetRequirements.*`: Vulkan-free model/animation/texture requirement sets plus shared tile-to-model mapping. Computes requirements from a loaded `Level` for prefetching or from `RenderFrameData` as a draw-time safety net. Every level decoration contributes its manifest model, so current/next-level prefetch covers authored scenery. Mirror-bearing levels preload the ten smoke sprites; active particles explicitly require their selected textures. Procedural water is excluded, so no obsolete water mesh can enter lazy loading. Tested by `tests/AssetRequirementsTests.cpp` (`sokoban_asset_requirements_tests`).
 - `src/engine/render/AnimationController.*`: Vulkan-free owner of gameplay animation clips, Rogue clip selection, preview overrides, deduplication, and crossfade state. It emits immutable skinning requests and is tested by `tests/AnimationControllerTests.cpp` (`sokoban_animation_controller_tests`).
 - `src/engine/render/SkinnedMeshUpdater.*`: owns the Rogue's skinned source mesh and dynamic Vulkan vertex/index buffers. It consumes `AnimationController` requests, performs CPU skinning/blending, and uploads changed vertices.
 - `src/engine/render/VulkanModelResources.*`: owns lazy per-asset load states, TaskSystem futures, static model meshes, texture images/samplers, manifest material bindings, and failure retention. CPU parsing/decoding runs on workers; completed results are published to Vulkan on the render thread. It orchestrates `AnimationController` and `SkinnedMeshUpdater` while exposing lightweight mesh/material/texture views and loading statistics to the renderer.
@@ -411,10 +412,12 @@ Important tile behavior:
 
 Level screens are plain text `.scr` files under `levels/levelN/screenM.scr`.
 
-The modern format uses sequential layers and may declare one water layer:
+The modern format uses sequential layers, may declare one water layer, and may
+declare any number of manifest-backed mesh decorations:
 
 ```text
 @water 0
+@decoration {"model":"Tree","position":[4.5,2.5,1.0],"rotation":[0.0,0.0,30.0],"scale":[1.0,1.0,1.25]}
 
 @layer 0
 .........
@@ -433,6 +436,14 @@ Rules:
 - Layer headers must be exactly sequential starting with `@layer 0`.
 - `@water N` is optional, must appear before `@layer 0`, and must refer to an
   existing layer.
+- `@decoration` is optional and repeatable. Its compact JSON object requires a
+  non-empty manifest model name plus finite three-component `position`,
+  `rotation`, and `scale` arrays. Rotation is XYZ Euler degrees and every scale
+  component must be positive. Decoration metadata must appear before
+  `@layer 0`; using metadata requires the modern layered format.
+- Decorations render as non-pickable model instances but never enter the tile
+  grid, gameplay rules, support/occupancy queries, water-grid bounds, or camera
+  fit. The content pipeline rejects unknown model names before packaging.
 - Every authored Air cell on the water layer resolves to Water. Solid or other
   explicit tiles on that layer remain unchanged.
 - Empty lines between layers are allowed.
@@ -557,9 +568,9 @@ Mirrors:
 - `1`, `2`, `3`, and `4` pair the north-west, north-east, south-west, and
   south-east orthogonal rays. Reflection is bidirectional between each pair;
   distance from the mirror is preserved.
-- The configurable `Mirror` action defaults to keyboard `Z` and gamepad East.
-  Undo now defaults to keyboard `X` and gamepad West. Profile format 10
-  migrates format-9 bindings while preserving the one-binding/one-action rule.
+- The configurable `Mirror` action defaults to keyboard `F` and gamepad East;
+  Undo defaults to keyboard `Z` and gamepad West. Profile migrations preserve
+  the one-binding/one-action rule.
 - `rules::activateMirrors` is pure and transactional. It reflects the player,
   rocks, and ice; the nearest entity occludes entities behind it; chains may
   use each mirror once; ambiguous, obstructed, unsupported, and overlapping
@@ -626,6 +637,9 @@ Editor capabilities:
 - New/resize documents.
 - Insert layers above or below the active layer, and delete layers.
 - Paint tile types from a palette.
+- Browse manifest-registered source meshes and place them as decorations.
+- Select, translate, rotate, non-uniformly scale, reset, duplicate, and delete
+  mesh decorations through undoable headless editor commands.
 - Delete tiles.
 - Undo editor operations.
 - Play draft and return to current screen.
@@ -654,6 +668,14 @@ Important editor behavior:
   undoable transaction; north/west growth shifts existing authored cells.
 - Picking logic was fixed so top/side wall faces are selected more reliably instead of accidentally selecting the ground below.
 - Placing a ladder in the editor validates same-layer adjacent Ground.
+- The Debug mesh catalog scans source `assets/` recursively for `.gltf` and
+  `.glb`. Registered entries are selectable; unregistered files stay visible
+  but disabled so a screen can never serialize a path that runtime content
+  cannot resolve. Release builds do not scan source assets.
+- New decorations snap their pivot to the top surface under the mouse. Their
+  initial position uses the tile center in X/Y and the resolved top elevation
+  in Z; transform controls can then move them freely. Decorations remain
+  separate from tile picking and do not change camera framing.
 
 Rough editor areas:
 
@@ -740,7 +762,9 @@ Runtime lazy asset pipeline:
   level and every screen in the next level, merges their requirements, and
   calls `VulkanRenderer::preloadAssets`. Level files are small and read on the
   main thread; model parsing, animation parsing, and stb_image decoding run as
-  independent TaskSystem jobs.
+  independent TaskSystem jobs. Manifest models referenced by mesh decorations
+  are collected here exactly like tile/entity models, so scenery needed by an
+  upcoming screen is already preparing before the transition.
 - `Application` builds one `RenderFrameData` and calls
   `VulkanRenderer::prepareFrame` once per frame. The resulting camera/shadow
   layouts, projected faces, depth-sorted pass lists, model lists, and shadow

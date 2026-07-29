@@ -3,6 +3,7 @@
 #include "engine/TileTypes.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <exception>
 #include <string_view>
 #include <utility>
@@ -109,6 +110,21 @@ bool drawPaintButton(
     }
     return clicked;
 }
+
+bool containsInsensitive(std::string_view value, std::string_view filter)
+{
+    if (filter.empty()) {
+        return true;
+    }
+    std::string loweredValue(value);
+    std::string loweredFilter(filter);
+    auto lower = [](unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    };
+    std::ranges::transform(loweredValue, loweredValue.begin(), lower);
+    std::ranges::transform(loweredFilter, loweredFilter.begin(), lower);
+    return loweredValue.find(loweredFilter) != std::string::npos;
+}
 #endif
 
 } // namespace
@@ -213,7 +229,19 @@ void LevelEditorDebugUi::draw(
         editor.deleteActiveLayer();
     }
 
-    drawTilePalette(editor, callbacks);
+    int editorTool = editor.tool() == LevelEditor::Tool::Tiles ? 0 : 1;
+    if (ImGui::RadioButton("Tiles", &editorTool, 0)) {
+        editor.setTool(LevelEditor::Tool::Tiles);
+    }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Mesh Decorations", &editorTool, 1)) {
+        editor.setTool(LevelEditor::Tool::Decorations);
+    }
+    if (editor.tool() == LevelEditor::Tool::Tiles) {
+        drawTilePalette(editor, callbacks);
+    } else {
+        drawDecorationPalette(editor, callbacks);
+    }
     ImGui::Separator();
     drawGroundPaintTab(painter, callbacks);
     ImGui::Separator();
@@ -395,6 +423,141 @@ void LevelEditorDebugUi::drawTilePalette(
     }
 #else
     (void)editor;
+    (void)callbacks;
+#endif
+}
+
+void LevelEditorDebugUi::drawDecorationPalette(
+    LevelEditor& editor,
+    const Callbacks& callbacks)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    ImGui::TextUnformatted("Mesh Library");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Refresh") &&
+        callbacks.refreshDecorationMeshes) {
+        callbacks.refreshDecorationMeshes();
+    }
+    ImGui::InputTextWithHint(
+        "##decoration_filter",
+        "Filter mesh files",
+        &decorationFilter_);
+
+    if (callbacks.decorationMeshes) {
+        const auto& meshes = callbacks.decorationMeshes();
+        if (ImGui::BeginChild(
+                "DecorationMeshFiles",
+                ImVec2(0.0f, 190.0f),
+                true)) {
+            for (const DecorationMeshCatalog::Entry& mesh : meshes) {
+                const std::string path = mesh.relativePath.generic_string();
+                if (!containsInsensitive(path, decorationFilter_) &&
+                    !containsInsensitive(mesh.modelName, decorationFilter_)) {
+                    continue;
+                }
+                ImGui::PushID(path.c_str());
+                const bool registered = mesh.registered();
+                if (!registered) {
+                    ImGui::BeginDisabled();
+                }
+                const bool selected = registered &&
+                    editor.selectedDecorationModel() == mesh.modelName;
+                const std::string label = registered
+                    ? mesh.modelName
+                    : path + " (not in manifest)";
+                if (ImGui::Selectable(label.c_str(), selected) && registered) {
+                    editor.setSelectedDecorationModel(mesh.modelName);
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", path.c_str());
+                }
+                if (!registered) {
+                    ImGui::EndDisabled();
+                }
+                ImGui::PopID();
+            }
+        }
+        ImGui::EndChild();
+    }
+    if (callbacks.decorationMeshStatus) {
+        ImGui::TextDisabled(
+            "%s", callbacks.decorationMeshStatus().c_str());
+    }
+
+    ImGui::Separator();
+    ImGui::Text("Placed Meshes (%zu)", editor.decorations().size());
+    if (ImGui::BeginListBox(
+            "##placed_decorations",
+            ImVec2(-1.0f, 120.0f))) {
+        for (std::size_t index = 0;
+             index < editor.decorations().size();
+             ++index) {
+            const Level::Decoration& decoration =
+                editor.decorations()[index];
+            const std::string label =
+                std::to_string(index + 1) + ": " + decoration.model;
+            const bool selected =
+                editor.selectedDecorationIndex() == index;
+            if (ImGui::Selectable(label.c_str(), selected)) {
+                (void)editor.selectDecoration(index);
+            }
+        }
+        ImGui::EndListBox();
+    }
+
+    const Level::Decoration* selected = editor.selectedDecoration();
+    if (!selected) {
+        return;
+    }
+
+    Level::Decoration edited = *selected;
+    ImGui::Text("Transform: %s", edited.model.c_str());
+    bool changed = ImGui::DragFloat3(
+        "Translate",
+        &edited.position.x,
+        0.05f,
+        -1000.0f,
+        1000.0f,
+        "%.3f");
+    changed = ImGui::DragFloat3(
+                  "Rotate",
+                  &edited.rotationDegrees.x,
+                  1.0f,
+                  -3600.0f,
+                  3600.0f,
+                  "%.1f deg") ||
+        changed;
+    changed = ImGui::DragFloat3(
+                  "Scale",
+                  &edited.scale.x,
+                  0.02f,
+                  0.001f,
+                  100.0f,
+                  "%.3f") ||
+        changed;
+    edited.scale.x = std::max(edited.scale.x, 0.001f);
+    edited.scale.y = std::max(edited.scale.y, 0.001f);
+    edited.scale.z = std::max(edited.scale.z, 0.001f);
+    if (changed) {
+        (void)editor.updateSelectedDecoration(edited);
+    }
+
+    if (ImGui::Button("Reset Transform")) {
+        edited.rotationDegrees = {};
+        edited.scale = { 1.0f, 1.0f, 1.0f };
+        (void)editor.updateSelectedDecoration(edited);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Duplicate")) {
+        (void)editor.duplicateSelectedDecoration();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Delete")) {
+        (void)editor.deleteSelectedDecoration();
+    }
+#else
+    (void)editor;
+    (void)callbacks;
 #endif
 }
 

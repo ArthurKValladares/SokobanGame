@@ -783,6 +783,33 @@ void testParticlesBecomeSortedTranslucentBillboardsOnly()
     CHECK(scene.shadowModelIndices.empty());
 }
 
+void testAuthoredModelTransformSupportsPivotRotationAndNonUniformScale()
+{
+    using namespace sokoban;
+    constexpr float halfPi = 1.57079632679f;
+    RenderFrameData::Tile decoration {
+        .model = RenderModel { 1 },
+        .modelTransform = RenderFrameData::ModelTransform {
+            .translation = { 5.0f, 6.0f, 7.0f },
+            .rotationRadians = { 0.0f, 0.0f, halfPi },
+            .scale = { 2.0f, 3.0f, 4.0f },
+        },
+    };
+
+    const ModelTransformPoints transform =
+        IsoScenePreparer::modelTransformPoints(decoration);
+    CHECK(near(transform.origin.x, 6.5f));
+    CHECK(near(transform.origin.y, 5.0f));
+    CHECK(near(transform.origin.z, 7.0f));
+    CHECK(near(transform.xPoint.x, 6.5f));
+    CHECK(near(transform.xPoint.y, 7.0f));
+    CHECK(near(transform.yPoint.x, 3.5f));
+    CHECK(near(transform.yPoint.y, 5.0f));
+    CHECK(near(transform.zPoint.x, 6.5f));
+    CHECK(near(transform.zPoint.y, 5.0f));
+    CHECK(near(transform.zPoint.z, 11.0f));
+}
+
 } // namespace
 
 int main()
@@ -803,6 +830,7 @@ int main()
     testAdjacentModelsShareProjectiveCoordinates();
     testMirrorEnergyIsTranslucentNonPickableAndShadowless();
     testParticlesBecomeSortedTranslucentBillboardsOnly();
+    testAuthoredModelTransformSupportsPivotRotationAndNonUniformScale();
 
     if (failures == 0) {
         std::cout << "IsoScenePreparerTests: " << checks

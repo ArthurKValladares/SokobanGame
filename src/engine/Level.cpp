@@ -1,8 +1,11 @@
 #include "engine/Level.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cmath>
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -13,6 +16,9 @@ namespace {
 
 constexpr std::string_view layerPrefix = "@layer ";
 constexpr std::string_view waterPrefix = "@water ";
+constexpr std::string_view decorationPrefix = "@decoration ";
+
+using Json = nlohmann::json;
 
 std::runtime_error unknownLevelCharacter(char value)
 {
@@ -49,6 +55,128 @@ std::optional<uint32_t> parseWaterHeader(std::string_view line)
         return std::nullopt;
     }
     return layer;
+}
+
+Vec3 parseDecorationVec3(
+    const Json& object,
+    std::string_view field,
+    std::string_view sourceName)
+{
+    const auto found = object.find(field);
+    if (found == object.end() || !found->is_array() || found->size() != 3) {
+        throw std::runtime_error(
+            "Decoration '" + std::string(field) +
+            "' must be an array of three numbers: " +
+            std::string(sourceName));
+    }
+
+    Vec3 value;
+    float* components[] { &value.x, &value.y, &value.z };
+    for (size_t i = 0; i < 3; ++i) {
+        if (!(*found)[i].is_number()) {
+            throw std::runtime_error(
+                "Decoration '" + std::string(field) +
+                "' must contain only numbers: " +
+                std::string(sourceName));
+        }
+        *components[i] = (*found)[i].get<float>();
+        if (!std::isfinite(*components[i])) {
+            throw std::runtime_error(
+                "Decoration '" + std::string(field) +
+                "' must contain finite numbers: " +
+                std::string(sourceName));
+        }
+    }
+    return value;
+}
+
+void validateDecoration(
+    const Level::Decoration& decoration,
+    std::string_view sourceName)
+{
+    if (decoration.model.empty()) {
+        throw std::runtime_error(
+            "Decoration model must not be empty: " +
+            std::string(sourceName));
+    }
+    const auto finite = [](Vec3 value) {
+        return std::isfinite(value.x) &&
+            std::isfinite(value.y) &&
+            std::isfinite(value.z);
+    };
+    if (!finite(decoration.position) ||
+        !finite(decoration.rotationDegrees) ||
+        !finite(decoration.scale)) {
+        throw std::runtime_error(
+            "Decoration transforms must contain finite numbers: " +
+            std::string(sourceName));
+    }
+    if (decoration.scale.x <= 0.0f ||
+        decoration.scale.y <= 0.0f ||
+        decoration.scale.z <= 0.0f) {
+        throw std::runtime_error(
+            "Decoration scale components must be greater than zero: " +
+            std::string(sourceName));
+    }
+}
+
+Level::Decoration parseDecoration(
+    std::string_view payload,
+    std::string_view sourceName)
+{
+    try {
+        const Json object = Json::parse(payload);
+        if (!object.is_object()) {
+            throw std::runtime_error("decoration payload is not an object");
+        }
+        const auto model = object.find("model");
+        if (model == object.end() || !model->is_string()) {
+            throw std::runtime_error("decoration 'model' must be a string");
+        }
+        Level::Decoration decoration {
+            .model = model->get<std::string>(),
+            .position = parseDecorationVec3(
+                object, "position", sourceName),
+            .rotationDegrees = parseDecorationVec3(
+                object, "rotation", sourceName),
+            .scale = parseDecorationVec3(
+                object, "scale", sourceName),
+        };
+        validateDecoration(decoration, sourceName);
+        return decoration;
+    } catch (const nlohmann::json::exception& error) {
+        throw std::runtime_error(
+            "Invalid decoration JSON in " + std::string(sourceName) +
+            ": " + error.what());
+    } catch (const std::runtime_error& error) {
+        throw std::runtime_error(
+            "Invalid decoration in " + std::string(sourceName) +
+            ": " + error.what());
+    }
+}
+
+std::string serializeDecoration(const Level::Decoration& decoration)
+{
+    validateDecoration(decoration, "serialized level");
+    const Json object {
+        { "model", decoration.model },
+        { "position", {
+              decoration.position.x,
+              decoration.position.y,
+              decoration.position.z,
+          } },
+        { "rotation", {
+              decoration.rotationDegrees.x,
+              decoration.rotationDegrees.y,
+              decoration.rotationDegrees.z,
+          } },
+        { "scale", {
+              decoration.scale.x,
+              decoration.scale.y,
+              decoration.scale.z,
+          } },
+    };
+    return std::string(decorationPrefix) + object.dump();
 }
 
 size_t tileIndex(uint32_t x, uint32_t y, uint32_t z, uint32_t width, uint32_t height)
@@ -120,10 +248,11 @@ Level::Definition Level::parseDefinition(
     });
     if (!layered) {
         if (std::ranges::any_of(lines, [](const std::string& line) {
-                return line.starts_with(waterPrefix);
+                return line.starts_with(waterPrefix) ||
+                    line.starts_with(decorationPrefix);
             })) {
             throw std::runtime_error(
-                "Water metadata requires explicit '@layer 0' sections: " + source);
+                "Level metadata requires explicit '@layer 0' sections: " + source);
         }
         return { .layers = { lines } };
     }
@@ -131,6 +260,17 @@ Level::Definition Level::parseDefinition(
     Definition definition;
     std::optional<uint32_t> currentLayer;
     for (const std::string& line : lines) {
+        if (line.starts_with(decorationPrefix)) {
+            if (currentLayer) {
+                throw std::runtime_error(
+                    "Decoration metadata must appear before '@layer 0': " + source);
+            }
+            definition.decorations.push_back(parseDecoration(
+                std::string_view(line).substr(decorationPrefix.size()),
+                sourceName));
+            continue;
+        }
+
         if (line.starts_with(waterPrefix)) {
             if (currentLayer) {
                 throw std::runtime_error(
@@ -203,7 +343,9 @@ Level::LayerRows Level::parseLayerRows(
 std::vector<std::string> Level::serializeDefinition(
     const Definition& definition)
 {
-    if (definition.layers.size() == 1 && !definition.waterLayer) {
+    if (definition.layers.size() == 1 &&
+        !definition.waterLayer &&
+        definition.decorations.empty()) {
         return definition.layers.front();
     }
 
@@ -212,6 +354,11 @@ std::vector<std::string> Level::serializeDefinition(
         lines.push_back(
             std::string(waterPrefix) +
             std::to_string(*definition.waterLayer));
+    }
+    for (const Decoration& decoration : definition.decorations) {
+        lines.push_back(serializeDecoration(decoration));
+    }
+    if (definition.waterLayer || !definition.decorations.empty()) {
         lines.emplace_back();
     }
     for (size_t layer = 0; layer < definition.layers.size(); ++layer) {
@@ -244,13 +391,15 @@ Level Level::loadFromDefinition(
     return loadFromLayers(
         definition.layers,
         sourceName,
-        definition.waterLayer);
+        definition.waterLayer,
+        definition.decorations);
 }
 
 Level Level::loadFromLayers(
     const LayerRows& sourceLayers,
     std::string_view sourceName,
-    std::optional<uint32_t> waterLayer)
+    std::optional<uint32_t> waterLayer,
+    const std::vector<Decoration>& decorations)
 {
     const std::string source(sourceName);
     if (sourceLayers.empty()) {
@@ -264,6 +413,10 @@ Level Level::loadFromLayers(
             "Water layer must refer to an existing layer: " + source);
     }
     level.waterLayer_ = waterLayer;
+    for (const Decoration& decoration : decorations) {
+        validateDecoration(decoration, sourceName);
+    }
+    level.decorations_ = decorations;
     for (const auto& layer : sourceLayers) {
         level.height_ = std::max(level.height_, static_cast<uint32_t>(layer.size()));
         for (const std::string& row : layer) {

@@ -24,6 +24,9 @@ pipeline, and a headless editor model exposed through Debug ImGui tools.
   background prefetching for upcoming levels.
 - A transactional level editor whose document and filesystem logic do not
   depend on ImGui, SDL, or Vulkan.
+- Manifest-backed mesh decorations with free translation, Euler rotation, and
+  non-uniform scale; they render without participating in gameplay or camera
+  framing.
 
 ## Requirements
 
@@ -52,7 +55,7 @@ executable-relative assets.
 
 ## Tests
 
-The project currently registers 30 CTest suites covering rules, level parsing,
+The project currently registers 36 CTest suites covering rules, level parsing,
 campaign and gameplay sessions, persistence and migrations, input routing,
 player UI, renderer state, scene preparation and picking, editor transactions,
 assets, animation, particles, tasks, logging, and content packaging.
@@ -86,9 +89,12 @@ shared settings profile.
 Screens are text `.scr` files containing sequential `@layer N` sections. An
 optional `@water N` directive makes Air on that layer resolve to Water and
 extends the water beyond the authored board without expanding camera bounds.
+Any number of `@decoration` directives may reference manifest model names and
+provide authored transforms. Metadata must appear before `@layer 0`.
 
 ```text
 @water 0
+@decoration {"model":"Tree","position":[4.5,2.5,1.0],"rotation":[0.0,0.0,30.0],"scale":[1.0,1.0,1.25]}
 
 @layer 0
 .....
@@ -117,6 +123,11 @@ Decorative blocks render but have no gameplay, support, occupancy, camera-fit,
 or water-grid-bound semantics. New water layouts should use `@water N`; `W`
 remains supported for older screens.
 
+Mesh decoration positions are world-space tile coordinates, rotations are XYZ
+Euler degrees, and scales must be positive. Their `model` names must exist in
+the `models` section of `assets/manifest.json`. Decorations are non-pickable
+during gameplay and do not alter level bounds, rules, support, or camera fit.
+
 ## Level Editor
 
 Debug builds expose the headless `LevelEditor` through ImGui. The UI invokes
@@ -130,6 +141,11 @@ editor commands but does not own document or filesystem policy.
 - `+ Layer Below` and `+ Layer Above` insert undoable Air layers and preserve
   water-layer numbering.
 - Painting one cell beyond an edge expands every layer transactionally.
+- The Mesh Decorations tool scans source `assets/` for `.gltf` and `.glb`
+  files in Debug builds. Manifest-registered meshes can be placed on the top
+  surface under the cursor, selected, translated, rotated, non-uniformly
+  scaled, duplicated, deleted, and undone. Discovered but unregistered files
+  remain visible but disabled until added to the manifest.
 - Source saves, runtime mirroring, screen/level insertion and renumbering,
   soft deletion, restore, and guarded permanent deletion are handled by the
   tested editor/project APIs.
@@ -147,7 +163,9 @@ cmake --build build --config Debug --target sokoban_content
 
 The game loads from the staged `assets/` tree. Runtime asset requests are lazy;
 CPU work uses the task system, and requirements for the current and next level
-are prefetched to reduce level-transition stalls.
+are prefetched to reduce level-transition stalls. Decoration model references
+participate in the same requirement collection, validation, staging, and
+prefetch path as gameplay models.
 
 ## Release Package
 
@@ -167,6 +185,8 @@ staged assets, and third-party licenses.
 - `src/engine/GameplayPresentation.*`: interpolation and visual animation.
 - `src/engine/LevelEditor.*`: headless document, history, validation, and
   transactional project filesystem operations.
+- `src/engine/DecorationMeshCatalog.*`: Debug-authoring discovery of source
+  GLTF/GLB files and their manifest-registration state.
 - `src/engine/Application.*`: composition, SDL event loop, and lifecycle.
 - `src/engine/ui/`: reusable player-facing UI and pure menu reduction.
 - `src/engine/render/`: Vulkan-free scene preparation plus decomposed Vulkan

@@ -32,6 +32,33 @@ Vec3 multiply(Vec3 value, float scalar)
     return { value.x * scalar, value.y * scalar, value.z * scalar };
 }
 
+Vec3 rotateEulerXyz(Vec3 value, Vec3 radians)
+{
+    const float cosineX = std::cos(radians.x);
+    const float sineX = std::sin(radians.x);
+    value = {
+        value.x,
+        cosineX * value.y - sineX * value.z,
+        sineX * value.y + cosineX * value.z,
+    };
+
+    const float cosineY = std::cos(radians.y);
+    const float sineY = std::sin(radians.y);
+    value = {
+        cosineY * value.x + sineY * value.z,
+        value.y,
+        -sineY * value.x + cosineY * value.z,
+    };
+
+    const float cosineZ = std::cos(radians.z);
+    const float sineZ = std::sin(radians.z);
+    return {
+        cosineZ * value.x - sineZ * value.y,
+        sineZ * value.x + cosineZ * value.y,
+        value.z,
+    };
+}
+
 float dot(Vec3 left, Vec3 right)
 {
     return left.x * right.x + left.y * right.y + left.z * right.z;
@@ -91,6 +118,25 @@ Vec4 projectIsoPointToClip(
 
 std::array<Vec3, 8> tileCorners(const RenderFrameData::Tile& tile)
 {
+    if (tile.modelTransform) {
+        const ModelTransformPoints transform =
+            IsoScenePreparer::modelTransformPoints(tile);
+        const Vec3 xAxis = subtract(transform.xPoint, transform.origin);
+        const Vec3 yAxis = subtract(transform.yPoint, transform.origin);
+        const Vec3 zAxis = subtract(transform.zPoint, transform.origin);
+        const Vec3 xy = add(add(transform.origin, xAxis), yAxis);
+        return {
+            transform.origin,
+            transform.xPoint,
+            xy,
+            transform.yPoint,
+            transform.zPoint,
+            add(transform.xPoint, zAxis),
+            add(xy, zAxis),
+            add(transform.yPoint, zAxis),
+        };
+    }
+
     const float x = tile.position.x;
     const float y = tile.position.y;
     const float width = tile.size.x;
@@ -512,6 +558,33 @@ Vec3 IsoScenePreparer::projectIsoPoint(
 ModelTransformPoints IsoScenePreparer::modelTransformPoints(
     const RenderFrameData::Tile& tile)
 {
+    if (tile.modelTransform) {
+        const RenderFrameData::ModelTransform& authored =
+            *tile.modelTransform;
+        const Vec3 xAxis = rotateEulerXyz(
+            { authored.scale.x, 0.0f, 0.0f },
+            authored.rotationRadians);
+        const Vec3 yAxis = rotateEulerXyz(
+            { 0.0f, authored.scale.y, 0.0f },
+            authored.rotationRadians);
+        const Vec3 zAxis = rotateEulerXyz(
+            { 0.0f, 0.0f, authored.scale.z },
+            authored.rotationRadians);
+        const Vec3 pivotOffset = add(
+            add(
+                multiply(xAxis, authored.pivot.x),
+                multiply(yAxis, authored.pivot.y)),
+            multiply(zAxis, authored.pivot.z));
+        const Vec3 origin = subtract(
+            authored.translation, pivotOffset);
+        return {
+            .origin = origin,
+            .xPoint = add(origin, xAxis),
+            .yPoint = add(origin, yAxis),
+            .zPoint = add(origin, zAxis),
+        };
+    }
+
     const float x = tile.position.x;
     const float y = tile.position.y;
     const float z = tile.baseElevation;
@@ -743,6 +816,7 @@ void IsoScenePreparer::prepare(
             const float height = std::max(tile.height, 0.0f);
             const bool drawCube = tile.model.isCube() && !tile.pickOnly;
             const bool pickable =
+                tile.pickable &&
                 !tile.isEditorPreview &&
                 tile.effect != RenderSurfaceEffect::MirrorEnergy;
             const PreparedSurfaceMaterial tileMaterial =

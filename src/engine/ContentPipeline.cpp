@@ -11,6 +11,7 @@
 #include <cctype>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -222,7 +223,9 @@ private:
         addAssetPath(
             std::filesystem::path(config::titleBackgroundPath),
             "title background");
-        const AssetManifest manifest = AssetManifest::loadFromFile(roots_.assets / "manifest.json");
+        manifest_ = AssetManifest::loadFromFile(
+            roots_.assets / "manifest.json");
+        const AssetManifest& manifest = *manifest_;
 
         for (const auto& texture : manifest.textures()) {
             addAssetPath(texture.path, "texture '" + texture.name + "'");
@@ -303,7 +306,22 @@ private:
                 }
                 const int screenIndex = std::stoi(screenMatch[1].str());
                 levelScreens.insert(screenIndex);
-                (void)Level::loadFromFile(screenFile.path());
+                const Level level = Level::loadFromFile(screenFile.path());
+                if (!manifest_) {
+                    throw std::logic_error(
+                        "content manifest was not loaded before levels");
+                }
+                for (const Level::Decoration& decoration :
+                     level.decorations()) {
+                    try {
+                        (void)manifest_->modelIdByName(decoration.model);
+                    } catch (const std::exception&) {
+                        throw std::runtime_error(
+                            "level decoration references unknown manifest "
+                            "model '" + decoration.model + "': " +
+                            screenFile.path().string());
+                    }
+                }
                 const std::filesystem::path relative = screenFile.path().lexically_relative(roots_.levels);
                 addFile(roots_.levels, relative, std::filesystem::path("levels") / relative, "level screen");
             }
@@ -350,6 +368,7 @@ private:
     };
 
     ContentSourceRoots roots_;
+    std::optional<AssetManifest> manifest_;
     std::map<std::string, PendingFile> files_;
 };
 

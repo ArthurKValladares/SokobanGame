@@ -163,6 +163,10 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
     for (const Level::MovableTile& movable : level.movableTiles()) {
         requirements.requireModel(manifest.modelForTile(movable.type));
     }
+    for (const Level::Decoration& decoration : level.decorations()) {
+        requirements.requireModel(
+            manifest.modelIdByName(decoration.model));
+    }
     return requirements;
 }
 

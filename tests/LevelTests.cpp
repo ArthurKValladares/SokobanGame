@@ -114,6 +114,40 @@ void testWaterLayerMetadataAndTileResolution()
     CHECK(level.isWalkable({ 0, 0, 1 }));
 }
 
+void testDecorationMetadataRoundTrip()
+{
+    TEST("decorationMetadataRoundTrip");
+    const Level::Decoration decoration {
+        .model = "Stone",
+        .position = { 1.5f, 2.25f, 3.0f },
+        .rotationDegrees = { 15.0f, -25.0f, 90.0f },
+        .scale = { 0.5f, 1.25f, 2.0f },
+    };
+    const Level::Definition definition {
+        .layers = {
+            { "..." },
+            { "C  " },
+        },
+        .decorations = { decoration },
+    };
+
+    const std::vector<std::string> serialized =
+        Level::serializeDefinition(definition);
+    CHECK(serialized.front().starts_with("@decoration {"));
+    CHECK(serialized[1].empty());
+    CHECK(serialized[2] == "@layer 0");
+    const Level::Definition parsed =
+        Level::parseDefinition(serialized, "decoration round trip");
+    CHECK(parsed == definition);
+
+    const Level level =
+        Level::loadFromDefinition(parsed, "decoration round trip");
+    CHECK(level.decorations().size() == 1);
+    CHECK(level.decorations().front() == decoration);
+    CHECK(level.tileAt(1, 0, 1) == TileType::Air);
+    CHECK(level.isWalkable({ 1, 0, 1 }));
+}
+
 void testParserRejectsMalformedStructure()
 {
     TEST("parserRejectsMalformedStructure");
@@ -135,6 +169,10 @@ void testParserRejectsMalformedStructure()
     }, "requires explicit");
     checkThrowsContaining([] {
         (void)Level::parseDefinition(
+            { "@decoration {}", "C" }, "decoration legacy");
+    }, "requires explicit");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
             { "@water nope", "@layer 0", "C" },
             "bad water");
     }, "expected '@water N'");
@@ -152,6 +190,25 @@ void testParserRejectsMalformedStructure()
         (void)Level::parseDefinition(
             { "@layer 0", "C", "@water 0" },
             "late water");
+    }, "before '@layer 0'");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            { "@decoration not-json", "@layer 0", "C" },
+            "bad decoration json");
+    }, "Invalid decoration JSON");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            { "@decoration {\"model\":\"Stone\",\"position\":[0,0,0],"
+              "\"rotation\":[0,0,0],\"scale\":[1,0,1]}",
+              "@layer 0", "C" },
+            "zero decoration scale");
+    }, "greater than zero");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            { "@layer 0", "C",
+              "@decoration {\"model\":\"Stone\",\"position\":[0,0,0],"
+              "\"rotation\":[0,0,0],\"scale\":[1,1,1]}" },
+            "late decoration");
     }, "before '@layer 0'");
 }
 
@@ -269,6 +326,7 @@ int main()
     testLegacyAndLayeredParsing();
     testSerializationRoundTrip();
     testWaterLayerMetadataAndTileResolution();
+    testDecorationMetadataRoundTrip();
     testParserRejectsMalformedStructure();
     testLevelValidationErrors();
     testRaggedLayersNormalizeToAir();

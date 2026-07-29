@@ -19,6 +19,7 @@
 #include "engine/Level.hpp"
 #include "engine/LevelEditor.hpp"
 #include "engine/LevelEditorDebugUi.hpp"
+#include "engine/DecorationMeshCatalog.hpp"
 #include "engine/Math.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/PlayerProfile.hpp"
@@ -152,6 +153,7 @@ private:
     AssetManifestEditor assetManifestEditor_;
     AssetManifestDebugUi assetManifestDebugUi_;
     LevelEditor levelEditor_;
+    DecorationMeshCatalog decorationMeshCatalog_;
     LevelEditorDebugUi levelEditorDebugUi_;
     AnimationPreviewDebugUi animationPreviewDebugUi_;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;

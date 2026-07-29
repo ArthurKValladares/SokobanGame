@@ -726,6 +726,55 @@ void appendStaticTiles(
     }
 }
 
+RenderFrameData::Tile decorationVisual(
+    const Level::Decoration& decoration,
+    const AssetManifest& manifest,
+    bool preview)
+{
+    constexpr float radiansPerDegree =
+        3.14159265358979323846f / 180.0f;
+    return {
+        .cell = {
+            static_cast<int>(std::floor(decoration.position.x)),
+            static_cast<int>(std::floor(decoration.position.y)),
+            static_cast<int>(std::floor(decoration.position.z)),
+        },
+        .position = {
+            decoration.position.x - decoration.scale.x * 0.5f,
+            decoration.position.y - decoration.scale.y * 0.5f,
+        },
+        .size = { decoration.scale.x, decoration.scale.y },
+        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+        .baseElevation = decoration.position.z,
+        .height = decoration.scale.z,
+        .pickable = false,
+        .showGrid = false,
+        .isEditorPreview = preview,
+        .affectsCameraFit = false,
+        .model = manifest.modelIdByName(decoration.model),
+        .modelTransform = RenderFrameData::ModelTransform {
+            .translation = decoration.position,
+            .rotationRadians = {
+                decoration.rotationDegrees.x * radiansPerDegree,
+                decoration.rotationDegrees.y * radiansPerDegree,
+                decoration.rotationDegrees.z * radiansPerDegree,
+            },
+            .scale = decoration.scale,
+        },
+    };
+}
+
+void appendDecorations(
+    RenderFrameData& frame,
+    const std::vector<Level::Decoration>& decorations,
+    const AssetManifest& manifest)
+{
+    for (const Level::Decoration& decoration : decorations) {
+        frame.tiles.push_back(
+            decorationVisual(decoration, manifest, false));
+    }
+}
+
 } // namespace
 
 RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
@@ -836,6 +885,8 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
         [&](TileType tile) {
             return input.settings.tileScale(tile);
         });
+    appendDecorations(
+        frame, input.level.decorations(), input.manifest);
 
     auto levelTileAt = [&](GridPosition3 position) {
         if (!input.level.inBounds(position)) {
@@ -1286,7 +1337,7 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
             frame.levelHeight *
             layerCount *
             2 +
-        2);
+        input.editor.decorations().size() + 2);
 
     auto documentTileAt = [&](uint32_t x, uint32_t y, uint32_t z) {
         if (z >= layers.size() ||
@@ -1543,7 +1594,11 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
             });
     }
 
-    if (input.hoverCell &&
+    appendDecorations(
+        frame, input.editor.decorations(), input.manifest);
+
+    if (input.editor.tool() == LevelEditor::Tool::Tiles &&
+        input.hoverCell &&
         input.hoverCell->z >= 0 &&
         input.hoverCell->x >= -1 &&
         input.hoverCell->y >= -1 &&
@@ -1563,6 +1618,26 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
             previewTile,
             true,
             false);
+    }
+    if (input.editor.tool() == LevelEditor::Tool::Decorations &&
+        !input.editor.selectedDecorationModel().empty() &&
+        input.hoverCell &&
+        input.hoverCell->x >= 0 &&
+        input.hoverCell->y >= 0 &&
+        input.hoverCell->x < static_cast<int>(frame.levelWidth) &&
+        input.hoverCell->y < static_cast<int>(frame.levelHeight) &&
+        input.hoverCell->z >= 0) {
+        frame.tiles.push_back(decorationVisual(
+            {
+                .model = input.editor.selectedDecorationModel(),
+                .position = {
+                    static_cast<float>(input.hoverCell->x) + 0.5f,
+                    static_cast<float>(input.hoverCell->y) + 0.5f,
+                    static_cast<float>(input.hoverCell->z),
+                },
+            },
+            input.manifest,
+            true));
     }
 
     for (RenderFrameData::Tile& tile : frame.tiles) {

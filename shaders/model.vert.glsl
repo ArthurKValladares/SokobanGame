@@ -43,11 +43,31 @@ void main()
     outFaceCoordU = inUv.x;
     outFaceCoordV = inUv.y;
     outTextureIndex = inTextureIndex;
-    float rotation = pc.textureOptions.y;
-    float cosine = cos(rotation);
-    float sine = sin(rotation);
-    outNormal = vec3(
-        cosine * inNormal.x - sine * inNormal.y,
-        sine * inNormal.x + cosine * inNormal.y,
-        inNormal.z);
+    vec3 normal = inNormal;
+    // Standard models use gridColor.xyz for inverse scale and a negative W
+    // as the marker. Mirror-energy models need gridColor for their effect and
+    // retain unit normal scaling.
+    if (pc.gridColor.w < 0.0) {
+        normal *= pc.gridColor.xyz;
+    }
+
+    vec3 rotation = pc.normalAndAmbientRed.xyz;
+    float cosine = cos(rotation.x);
+    float sine = sin(rotation.x);
+    normal = vec3(
+        normal.x,
+        cosine * normal.y - sine * normal.z,
+        sine * normal.y + cosine * normal.z);
+    cosine = cos(rotation.y);
+    sine = sin(rotation.y);
+    normal = vec3(
+        cosine * normal.x + sine * normal.z,
+        normal.y,
+        -sine * normal.x + cosine * normal.z);
+    cosine = cos(rotation.z);
+    sine = sin(rotation.z);
+    outNormal = normalize(vec3(
+        cosine * normal.x - sine * normal.y,
+        sine * normal.x + cosine * normal.y,
+        normal.z));
 }

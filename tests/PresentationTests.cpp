@@ -1227,6 +1227,56 @@ void testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition()
     }
 }
 
+void testGameplayFrameBuildsManifestDecorationInstances()
+{
+    TEST("gameplayFrameBuildsManifestDecorationInstances");
+    const Level level = Level::loadFromLayers(
+        {
+            { "..." },
+            { "C  " },
+        },
+        "mesh decorations",
+        std::nullopt,
+        {
+            Level::Decoration {
+                .model = "Stone",
+                .position = { 1.5f, 0.5f, 1.0f },
+                .rotationDegrees = { 10.0f, 20.0f, 90.0f },
+                .scale = { 0.5f, 1.5f, 2.0f },
+            },
+        });
+    GameState state = stateWithPlayer(level.playerStart());
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+    const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = state,
+        .moving = false,
+        .activeAction = {},
+        .presentation = presentation,
+        .settings = PresentationSettings {},
+    });
+
+    const RenderModel stone = testManifest().modelIdByName("Stone");
+    const auto found = std::ranges::find_if(
+        frame.tiles,
+        [stone](const RenderFrameData::Tile& tile) {
+            return tile.model == stone && tile.modelTransform.has_value();
+        });
+    CHECK(found != frame.tiles.end());
+    if (found != frame.tiles.end()) {
+        CHECK(!found->pickable);
+        CHECK(!found->affectsCameraFit);
+        CHECK(!found->showGrid);
+        CHECK(near(found->modelTransform->translation.x, 1.5f));
+        CHECK(near(found->modelTransform->scale.y, 1.5f));
+        CHECK(near(
+            found->modelTransform->rotationRadians.z,
+            1.57079632679f));
+    }
+}
+
 } // namespace
 
 int main()
@@ -1245,6 +1295,7 @@ int main()
     testWaterLayerBuildsUnboundedNonPickableExterior();
     testFilledWaterUpdatesEdgesAndRoundedCornerCaps();
     testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition();
+    testGameplayFrameBuildsManifestDecorationInstances();
 
     if (failures == 0) {
         std::cout << "PresentationTests: "

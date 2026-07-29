@@ -102,6 +102,8 @@ Application::Application()
     animationPreviewDebugUi_.initialize(SOKOBAN_SOURCE_ASSET_DIR);
     assetManifestEditor_.initialize(
         std::filesystem::path(SOKOBAN_SOURCE_ASSET_DIR) / "manifest.json");
+    (void)decorationMeshCatalog_.refresh(
+        SOKOBAN_SOURCE_ASSET_DIR, assetManifest_);
 
     DebugUi::addTab("Engine", [this] {
         applicationDebugUi_.draw({
@@ -155,6 +157,17 @@ Application::Application()
                 bakeThumbnailsRequested_ = true;
                 return true;
             },
+            .decorationMeshes = [this]()
+                -> const std::vector<DecorationMeshCatalog::Entry>& {
+                return decorationMeshCatalog_.entries();
+            },
+            .decorationMeshStatus = [this]() -> const std::string& {
+                return decorationMeshCatalog_.status();
+            },
+            .refreshDecorationMeshes = [this] {
+                (void)decorationMeshCatalog_.refresh(
+                    SOKOBAN_SOURCE_ASSET_DIR, assetManifest_);
+            },
         });
     });
     DebugUi::addTab("Animation Preview", [this] {
@@ -187,6 +200,7 @@ Application::~Application()
 
 bool Application::bakeTileThumbnails()
 {
+#if SOKOBAN_ENABLE_DEBUG_UI
     namespace bake = tileThumbnails;
 
     // Warm every asset first: a tile drawn before its model is resident would
@@ -280,6 +294,9 @@ bool Application::bakeTileThumbnails()
         << (sourceRoot / "custom/thumbnails").string();
     renderer_.waitIdle();
     return allSucceeded;
+#else
+    return false;
+#endif
 }
 
 void Application::run()
@@ -715,15 +732,19 @@ void Application::updateEditorPainting(
             renderer_.pickIsoGridCell(
                 *previousRenderFrame, mousePixels)) {
         GridPosition3 target = *clicked;
-        const bool deleting = input.deleting;
+        const bool editingDecorations =
+            levelEditor_.tool() == LevelEditor::Tool::Decorations;
+        const bool deleting = input.deleting && !editingDecorations;
         target = levelEditor_.resolveEditTarget(
             target,
             deleting,
-            input.replaceLayer);
+            input.replaceLayer && !editingDecorations);
 
         editorHoverCell_ = target;
         if (input.primaryPressed) {
-            if (deleting) {
+            if (editingDecorations) {
+                (void)levelEditor_.placeDecoration(target);
+            } else if (deleting) {
                 levelEditor_.eraseCell(target);
             } else {
                 levelEditor_.paintCell(target);
@@ -1425,7 +1446,8 @@ RenderFrameData Application::buildRenderFrame(
             .editor = levelEditor_,
             .settings = presentationSettings_,
             .hoverCell = editorHoverCell_,
-            .deleting = editorInput.deleting,
+            .deleting = editorInput.deleting &&
+                levelEditor_.tool() == LevelEditor::Tool::Tiles,
             .worldAnimationTimeSeconds =
                 presentation_.worldAnimationTimeSeconds(),
             .conveyorBeltScrollOffset = beltScrollOffset,

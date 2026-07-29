@@ -202,6 +202,16 @@ struct RenderFrameData {
         float modelShadowReceive = 0.0f;
     };
 
+    struct ModelTransform {
+        Vec3 translation {};
+        Vec3 rotationRadians {};
+        Vec3 scale { 1.0f, 1.0f, 1.0f };
+        // Decoration placement uses a bottom-centre pivot. Keeping it in the
+        // transform makes this affine path reusable for other authored model
+        // instances without changing mesh data.
+        Vec3 pivot { 0.5f, 0.5f, 0.0f };
+    };
+
     struct Tile {
         GridPosition3 cell {};
         Vec2 position {};
@@ -211,6 +221,7 @@ struct RenderFrameData {
         float height = 0.0f;
         bool blurBehind = false;
         bool pickOnly = false;
+        bool pickable = true;
         bool showGrid = true;
         bool isEditorPreview = false;
         bool affectsCameraFit = true;
@@ -222,6 +233,7 @@ struct RenderFrameData {
         float beltScrollOffset = 0.0f;
         uint32_t modelRotationQuarterTurns = 0;
         float modelRotationOffsetRadians = 0.0f;
+        std::optional<ModelTransform> modelTransform;
         RenderSurfaceEffect effect = RenderSurfaceEffect::Standard;
     };
 

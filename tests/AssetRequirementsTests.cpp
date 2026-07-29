@@ -85,14 +85,21 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     const Level level = Level::loadFromLayers({
         { "......." },
         { "C#W>RI " },
-    }, "asset requirements");
+    }, "asset requirements", std::nullopt, {
+        Level::Decoration {
+            .model = "Water",
+            .position = { 2.5f, 0.5f, 2.0f },
+        },
+    });
 
     const AssetManifest& manifest = testManifest();
     const RenderAssetRequirements requirements =
         renderAssetRequirementsForLevel(level, manifest);
     CHECK(requirements.contains(manifest.playerModel()));
     CHECK(requirements.contains(manifest.modelIdByName("Bricks")));
-    CHECK(!requirements.contains(manifest.modelIdByName("Water")));
+    // The water tile is procedural, but a decoration can explicitly use the
+    // manifest model and must warm it for screen transitions.
+    CHECK(requirements.contains(manifest.modelIdByName("Water")));
     CHECK(requirements.contains(manifest.modelIdByName("Conveyor")));
     CHECK(requirements.contains(manifest.modelIdByName("Stone")));
     CHECK(requirements.contains(manifest.modelIdByName("Glass")));
@@ -102,7 +109,7 @@ void testLevelRequirementsIncludeDynamicAndStaticAssets()
     CHECK(requirements.contains(manifest.playerPushAnimation()));
     CHECK(requirements.contains(manifest.playerDeathAnimation()));
     CHECK(requirements.contains(manifest.playerDeadIdleAnimation()));
-    CHECK(requirements.modelCount() == 5);
+    CHECK(requirements.modelCount() == 6);
     CHECK(requirements.animationCount() == 5);
     // The three ground splat textures are always required.
     CHECK(requirements.textureCount() == 3);

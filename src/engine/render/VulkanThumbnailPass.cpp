@@ -4,8 +4,10 @@
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/render/ImageData.hpp"
 
+#if SOKOBAN_ENABLE_DEBUG_UI
 #include <imgui.h>
 #include <imgui_impl_vulkan.h>
+#endif
 
 #include <cstring>
 #include <exception>
@@ -63,9 +65,13 @@ void VulkanThumbnailPass::destroyThumbnail(
     bool releaseImGuiDescriptor)
 {
     if (thumbnail.imguiTexture) {
+#if SOKOBAN_ENABLE_DEBUG_UI
         if (releaseImGuiDescriptor) {
             ImGui_ImplVulkan_RemoveTexture(thumbnail.imguiTexture);
         }
+#else
+        (void)releaseImGuiDescriptor;
+#endif
         thumbnail.imguiTexture = VK_NULL_HANDLE;
     }
     vulkanResources::destroyImage(device_, thumbnail.image);
@@ -81,8 +87,12 @@ void VulkanThumbnailPass::invalidate()
     // ImGui draw data.
     vkDeviceWaitIdle(device_);
     const bool imguiBackendAvailable =
+#if SOKOBAN_ENABLE_DEBUG_UI
         ImGui::GetCurrentContext() != nullptr &&
         ImGui::GetIO().BackendRendererUserData != nullptr;
+#else
+        false;
+#endif
     bool reportedLateDestruction = false;
     for (auto& [tile, thumbnail] : cache_) {
         if (thumbnail.imguiTexture && !imguiBackendAvailable &&
@@ -99,6 +109,10 @@ void VulkanThumbnailPass::invalidate()
 
 VkDescriptorSet VulkanThumbnailPass::thumbnailFor(TileType tile)
 {
+#if !SOKOBAN_ENABLE_DEBUG_UI
+    (void)tile;
+    return VK_NULL_HANDLE;
+#else
     if (!valid()) {
         return VK_NULL_HANDLE;
     }
@@ -126,6 +140,7 @@ VkDescriptorSet VulkanThumbnailPass::thumbnailFor(TileType tile)
     const VkDescriptorSet texture = thumbnail.imguiTexture;
     cache_.emplace(key, thumbnail);
     return texture;
+#endif
 }
 
 bool VulkanThumbnailPass::loadThumbnail(TileType tile, Thumbnail& target)
@@ -323,9 +338,13 @@ bool VulkanThumbnailPass::loadThumbnail(TileType tile, Thumbnail& target)
         throw;
     }
 
+#if SOKOBAN_ENABLE_DEBUG_UI
     target.imguiTexture = ImGui_ImplVulkan_AddTexture(
         target.image.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     return target.imguiTexture != VK_NULL_HANDLE;
+#else
+    return false;
+#endif
 }
 
 } // namespace sokoban

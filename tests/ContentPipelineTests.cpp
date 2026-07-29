@@ -249,6 +249,19 @@ void testValidationFailures()
     checkThrows([&] { (void)sokoban::collectContentInventory(roots); }, "asset path traversal");
     writeFile(roots.assets / "manifest.json", manifest());
 
+    writeFile(
+        roots.levels / "level0/screen0.scr",
+        "@decoration {\"model\":\"MissingDecoration\","
+        "\"position\":[0.5,0.5,1.0],\"rotation\":[0,0,0],"
+        "\"scale\":[1,1,1]}\n\n"
+        "@layer 0\n...\n\n@layer 1\n.CE\n");
+    checkThrows(
+        [&] { (void)sokoban::collectContentInventory(roots); },
+        "unknown decoration model");
+    writeFile(
+        roots.levels / "level0/screen0.scr",
+        "@layer 0\n...\n\n@layer 1\n.CE\n");
+
     std::filesystem::create_directories(roots.levels / "level2");
     writeFile(roots.levels / "level2/screen0.scr", "@layer 0\n...\n\n@layer 1\n.CE\n");
     checkThrows([&] { (void)sokoban::collectContentInventory(roots); }, "non-contiguous levels");
