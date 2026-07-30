@@ -106,7 +106,7 @@ Application::Application()
         SOKOBAN_SOURCE_ASSET_DIR, assetManifest_);
 
     DebugUi::addTab("Engine", [this] {
-        applicationDebugUi_.draw({
+        const ApplicationDebugUi::Result result = applicationDebugUi_.draw({
             .currentLevel = campaign_.currentLevel(),
             .currentScreen = campaign_.currentScreen(),
             .level = level_,
@@ -124,6 +124,9 @@ Application::Application()
                     settingsCoordinator_.applyAudioSettings(settings, persist));
             },
         });
+        if (result.solveCurrentScreen) {
+            solveCurrentScreenForDebug();
+        }
     });
     DebugUi::addTab("Asset Manifest", [this] {
         assetManifestDebugUi_.draw(assetManifestEditor_);
@@ -506,11 +509,15 @@ void Application::update(
         checkpointCurrentScreen(true);
     }
 
-    const GameplayPresentation::PlayerVisual& playerVisual = presentation_.player();
-    const bool pushing =
-        playerVisual.motion.moving &&
-        playerVisual.movingClip == assetManifest_.playerPushAnimation();
-    audioSystem_.update(dt, playerVisual.motion.moving, pushing);
+    bool playerMoving = false;
+    bool pushing = false;
+    for (const GameplayPresentation::PlayerVisual& player :
+         presentation_.players()) {
+        playerMoving |= player.motion.moving;
+        pushing |= player.motion.moving &&
+            player.movingClip == assetManifest_.playerPushAnimation();
+    }
+    audioSystem_.update(dt, playerMoving, pushing);
 }
 
 void Application::drawBrushPreview()
@@ -1340,6 +1347,24 @@ void Application::advanceScreen()
 {
     const CampaignSession::AdvanceResult result = campaign_.advanceScreen(
         playerProfile_, gameplaySession_.playerMoveCount());
+    handleCampaignAdvance(result);
+}
+
+void Application::solveCurrentScreenForDebug()
+{
+    if (!campaign_.gameLoaded() || levelEditor_.playingDraft() ||
+        levelCompleteOverlay_.isOpen()) {
+        return;
+    }
+    const CampaignSession::AdvanceResult result =
+        campaign_.completeCurrentScreenForDebug(
+        playerProfile_, gameplaySession_.playerMoveCount());
+    handleCampaignAdvance(result);
+}
+
+void Application::handleCampaignAdvance(
+    const CampaignSession::AdvanceResult& result)
+{
     if (std::holds_alternative<CampaignSession::ScreenAdvanced>(result)) {
         loadCurrentScreen();
         return;

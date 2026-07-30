@@ -238,14 +238,18 @@ void testActiveScreenCheckpointRoundTrip()
     profile.setCurrentScreen(2, 3);
 
     sokoban::GameState before;
-    before.player = { 1, 0, 1 };
+    before.players.push_back({ .cell = { 1, 0, 1 } });
     before.movables.push_back({
         .type = sokoban::TileType::Rock,
         .cell = { 2, 0, 1 },
     });
     sokoban::GameState after = before;
-    after.player = { 2, 0, 1 };
-    after.playerSliding = sokoban::MoveDirection::Right;
+    after.players[0].cell = { 2, 0, 1 };
+    after.players[0].sliding = sokoban::MoveDirection::Right;
+    after.players.push_back({
+        .cell = { 4, 2, 1 },
+        .sliding = sokoban::MoveDirection::Left,
+    });
     after.movables.front().cell = { 3, 0, 1 };
     after.movables.front().sliding = sokoban::MoveDirection::Right;
 
@@ -278,6 +282,29 @@ void testActiveScreenCheckpointRoundTrip()
         "undo stack round-trips");
     check(decoded.profile.activeScreen->session.state == after,
         "exact committed game state round-trips");
+
+    const nlohmann::json current = nlohmann::json::parse(serialized);
+    check(current["progress"]["activeScreen"]["session"]["state"]
+            .contains("players"),
+        "checkpoint state uses the players array");
+    check(!current["progress"]["activeScreen"]["session"]["state"]
+            .contains("playerClones"),
+        "checkpoint state has no primary/clone compatibility fields");
+    nlohmann::json emptyPlayers = current;
+    emptyPlayers["progress"]["activeScreen"]["session"]["state"]
+        ["players"] = nlohmann::json::array();
+    checkThrows([&] {
+        (void)sokoban::decodePlayerProfile(emptyPlayers.dump());
+    }, "checkpoint rejects an empty players array");
+
+    nlohmann::json format13 = current;
+    format13["format"] = 13;
+    const sokoban::DecodedPlayerProfile migrated13 =
+        sokoban::decodePlayerProfile(format13.dump());
+    check(migrated13.sourceFormat == 13,
+        "format 13 checkpoint source is reported");
+    check(!migrated13.profile.activeScreen,
+        "format 13 active checkpoint is intentionally discarded");
 
     std::string mismatched = serialized;
     const std::string screen = "\"screen\": 3";

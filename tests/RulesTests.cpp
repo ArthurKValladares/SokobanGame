@@ -54,9 +54,9 @@ void testInitialState()
     });
     const GameState state = rules::initialState(level);
 
-    CHECK(state.player == cell(0, 0, 1));
-    CHECK(!state.playerDead);
-    CHECK(!state.playerSliding);
+    CHECK(state.players[0].cell == cell(0, 0, 1));
+    CHECK(!state.players[0].dead);
+    CHECK(!state.players[0].sliding);
     CHECK(state.movables.size() == 2);
     CHECK(state.movables[0].type == TileType::Rock);
     CHECK(state.movables[0].cell == cell(1, 0, 1));
@@ -81,8 +81,8 @@ void testStepMovesPlayer()
     const GameState state = rules::initialState(level);
 
     const GameState left = rules::step(level, state, MoveDirection::Left);
-    CHECK(left.player == cell(0, 0, 1));
-    CHECK(!left.playerDead);
+    CHECK(left.players[0].cell == cell(0, 0, 1));
+    CHECK(!left.players[0].dead);
 
     // Blocked by the wall / by the level edge: the step changes nothing.
     CHECK(rules::step(level, state, MoveDirection::Right) == state);
@@ -102,7 +102,7 @@ void testDecorativeTileDoesNotBlockMovement()
     const GameState state = rules::initialState(level);
 
     const GameState moved = rules::step(level, state, MoveDirection::Right);
-    CHECK(moved.player == cell(1, 0, 1));
+    CHECK(moved.players[0].cell == cell(1, 0, 1));
     CHECK(level.tileAt(1, 0, 1) == TileType::Decorative);
     CHECK(moved.movables.empty());
 }
@@ -133,7 +133,7 @@ void testPushRock()
 
     // Push resolves within one step: player and rock advance together.
     const GameState pushed = rules::step(level, state, MoveDirection::Right);
-    CHECK(pushed.player == cell(1, 0, 1));
+    CHECK(pushed.players[0].cell == cell(1, 0, 1));
     CHECK(pushed.movables[0].cell == cell(2, 0, 1));
     CHECK(!pushed.movables[0].fallen);
     // A rock on plain ground has no momentum: the world settles immediately.
@@ -170,7 +170,7 @@ void testIceSlidesOneTilePerStep()
 
     // Step 1: the push moves the ice one tile and gives it momentum.
     state = rules::step(level, state, MoveDirection::Right);
-    CHECK(state.player == cell(1, 0, 1));
+    CHECK(state.players[0].cell == cell(1, 0, 1));
     CHECK(state.movables[0].cell == cell(2, 0, 1));
     CHECK(state.movables[0].sliding == MoveDirection::Right);
     CHECK(rules::hasPendingMotion(level, state));
@@ -193,14 +193,14 @@ void testPlayerMovesWhileIceSlides()
     GameState state = rules::initialState(level);
 
     state = rules::step(level, state, MoveDirection::Right); // push
-    CHECK(state.player == cell(1, 0, 1));
+    CHECK(state.players[0].cell == cell(1, 0, 1));
     CHECK(state.movables[0].cell == cell(2, 0, 1));
     CHECK(state.movables[0].sliding == MoveDirection::Right);
 
     // While the ice keeps sliding, the player walks somewhere else in the
     // very same step.
     state = rules::step(level, state, MoveDirection::Down);
-    CHECK(state.player == cell(1, 1, 1));
+    CHECK(state.players[0].cell == cell(1, 1, 1));
     CHECK(state.movables[0].cell == cell(3, 0, 1));
     CHECK(state.movables[0].sliding == MoveDirection::Right);
 
@@ -225,7 +225,7 @@ void testPlayerMovesWhileConveyorCarriesRock()
     // walks into the cell the rock vacates.
     state = rules::step(level, state, MoveDirection::Right);
     CHECK(state.movables[0].cell == cell(2, 0, 1));
-    CHECK(state.player == cell(1, 0, 1));
+    CHECK(state.players[0].cell == cell(1, 0, 1));
 }
 
 void testConveyorMovesRockEachStep()
@@ -245,7 +245,7 @@ void testConveyorMovesRockEachStep()
     state = rules::step(level, state);
     CHECK(state.movables[0].cell == cell(3, 0, 1)); // carried off the belt
     CHECK(!rules::hasPendingMotion(level, state));
-    CHECK(state.player == cell(0, 0, 1)); // player never moved
+    CHECK(state.players[0].cell == cell(0, 0, 1)); // player never moved
 }
 
 void testConveyorBlocked()
@@ -326,19 +326,19 @@ void testPlayerSlidesOnFallenIce()
     CHECK(state.movables[0].fallen);
 
     state = rules::step(level, state, MoveDirection::Right); // player to x=2
-    CHECK(state.player == cell(2, 0, 1));
+    CHECK(state.players[0].cell == cell(2, 0, 1));
 
     // Stepping onto the ice-filled water gives the player slide momentum.
     state = rules::step(level, state, MoveDirection::Right);
-    CHECK(state.player == cell(3, 0, 1));
-    CHECK(state.playerSliding == MoveDirection::Right);
+    CHECK(state.players[0].cell == cell(3, 0, 1));
+    CHECK(state.players[0].sliding == MoveDirection::Right);
     CHECK(rules::hasPendingMotion(level, state));
 
     // Momentum carries the player off the ice, then ends on normal ground.
     state = rules::step(level, state);
-    CHECK(state.player == cell(4, 0, 1));
-    CHECK(!state.playerSliding);
-    CHECK(!state.playerDead);
+    CHECK(state.players[0].cell == cell(4, 0, 1));
+    CHECK(!state.players[0].sliding);
+    CHECK(!state.players[0].dead);
 }
 
 void testSlideMomentumOverridesInput()
@@ -353,12 +353,12 @@ void testSlideMomentumOverridesInput()
     state = rules::step(level, state);                       // ice falls into water
     state = rules::step(level, state, MoveDirection::Right); // player to x=2
     state = rules::step(level, state, MoveDirection::Right); // onto the ice floor
-    CHECK(state.playerSliding == MoveDirection::Right);
+    CHECK(state.players[0].sliding == MoveDirection::Right);
 
     // Input cannot steer a sliding player: the slide continues instead.
     state = rules::step(level, state, MoveDirection::Down);
-    CHECK(state.player == cell(4, 0, 1));
-    CHECK(state.player.y == 0);
+    CHECK(state.players[0].cell == cell(4, 0, 1));
+    CHECK(state.players[0].cell.y == 0);
 }
 
 void testPressurePlateUnlocksEnd()
@@ -385,7 +385,7 @@ void testPlayerOnPlateUnlocks()
         { "CP" },
     });
     const GameState moved = rules::step(level, rules::initialState(level), MoveDirection::Right);
-    CHECK(moved.player == cell(1, 0, 1));
+    CHECK(moved.players[0].cell == cell(1, 0, 1));
     CHECK(rules::isEndUnlocked(level, moved));
 }
 
@@ -403,9 +403,9 @@ void testPlayerDrownsInWater()
     CHECK(rules::isUnfilledWater(level, state, cell(1, 0, 1)));
 
     const GameState drowned = rules::step(level, state, MoveDirection::Right);
-    CHECK(drowned.player == cell(1, 0, 1));
-    CHECK(drowned.playerDead);
-    CHECK(!drowned.playerSliding);
+    CHECK(drowned.players[0].cell == cell(1, 0, 1));
+    CHECK(drowned.players[0].dead);
+    CHECK(!drowned.players[0].sliding);
     CHECK(rules::isUnfilledWater(level, drowned, cell(1, 0, 1)));
 
     // Dead players ignore input; the drowned world is inert.
@@ -429,8 +429,8 @@ void testRockFillsWater()
 
     // The filled water is now safe to walk over.
     state = rules::step(level, state, MoveDirection::Right);
-    CHECK(state.player == cell(2, 0, 1));
-    CHECK(!state.playerDead);
+    CHECK(state.players[0].cell == cell(2, 0, 1));
+    CHECK(!state.players[0].dead);
 }
 
 void testLadderClimb()
@@ -443,12 +443,12 @@ void testLadderClimb()
     GameState state = rules::initialState(level);
 
     state = rules::step(level, state, MoveDirection::Left);
-    CHECK(state.player == cell(1, 0, 1)); // onto the ladder
+    CHECK(state.players[0].cell == cell(1, 0, 1)); // onto the ladder
 
     // Moving toward the attached ground climbs on top of it.
     state = rules::step(level, state, MoveDirection::Left);
-    CHECK(state.player == cell(0, 0, 2));
-    CHECK(!state.playerDead);
+    CHECK(state.players[0].cell == cell(0, 0, 2));
+    CHECK(!state.players[0].dead);
 }
 
 void testLadderClimbBlockedByMovable()
@@ -462,7 +462,7 @@ void testLadderClimbBlockedByMovable()
     });
     GameState state = rules::initialState(level);
     state = rules::step(level, state, MoveDirection::Left); // onto ladder
-    CHECK(state.player == cell(1, 0, 1));
+    CHECK(state.players[0].cell == cell(1, 0, 1));
 
     // The climb destination (0, 0, 2) is occupied by the rock, and the flat
     // target is solid ground, so the step changes nothing.
@@ -479,8 +479,8 @@ void testUnsupportedMovesAreBlocked()
         { "C  " },
     });
     const GameState blocked = rules::step(level, rules::initialState(level), MoveDirection::Right);
-    CHECK(blocked.player == cell(0, 0, 1));
-    CHECK(!blocked.playerDead);
+    CHECK(blocked.players[0].cell == cell(0, 0, 1));
+    CHECK(!blocked.players[0].dead);
 }
 
 void testSupportedDropIsStillAllowed()
@@ -494,10 +494,10 @@ void testSupportedDropIsStillAllowed()
         { "C  " },
     });
     GameState state = rules::step(level, rules::initialState(level), MoveDirection::Right);
-    CHECK(state.player == cell(1, 0, 2));
+    CHECK(state.players[0].cell == cell(1, 0, 2));
     state = rules::step(level, state, MoveDirection::Right);
-    CHECK(state.player == cell(2, 0, 1));
-    CHECK(!state.playerDead);
+    CHECK(state.players[0].cell == cell(2, 0, 1));
+    CHECK(!state.players[0].dead);
 }
 
 void testPushIntoVoidIsBlocked()
@@ -508,7 +508,7 @@ void testPushIntoVoidIsBlocked()
         { "CR  " },
     });
     const GameState after = rules::step(level, rules::initialState(level), MoveDirection::Right);
-    CHECK(after.player == cell(0, 0, 1));
+    CHECK(after.players[0].cell == cell(0, 0, 1));
     CHECK(after.movables[0].cell == cell(1, 0, 1));
     CHECK(!after.movables[0].fallen);
 }
@@ -533,15 +533,15 @@ void testConveyorCarriesPlayer()
         { "C>> " },
     });
     GameState state = rules::initialState(level);
-    state.player = cell(1, 0, 1); // standing on the first belt
+    state.players[0].cell = cell(1, 0, 1); // standing on the first belt
     CHECK(rules::hasPendingMotion(level, state));
 
     // Without input the belt carries the player; direct input overrides it.
     const GameState carried = rules::step(level, state);
-    CHECK(carried.player == cell(2, 0, 1));
+    CHECK(carried.players[0].cell == cell(2, 0, 1));
 
     const GameState steered = rules::step(level, state, MoveDirection::Left);
-    CHECK(steered.player == cell(0, 0, 1));
+    CHECK(steered.players[0].cell == cell(0, 0, 1));
 }
 
 
@@ -574,7 +574,7 @@ void testFastPlayerRate()
     rules::StepRates rates;
     rates.playerMove = 2;
     const GameState moved = rules::step(level, rules::initialState(level), MoveDirection::Right, rates);
-    CHECK(moved.player == cell(2, 0, 1));
+    CHECK(moved.players[0].cell == cell(2, 0, 1));
 
     // A fast player shoves a pushable along, one push per micro-step.
     const Level pushLevel = makeLevel({
@@ -582,7 +582,7 @@ void testFastPlayerRate()
         { "CR   " },
     });
     const GameState pushed = rules::step(pushLevel, rules::initialState(pushLevel), MoveDirection::Right, rates);
-    CHECK(pushed.player == cell(2, 0, 1));
+    CHECK(pushed.players[0].cell == cell(2, 0, 1));
     CHECK(pushed.movables[0].cell == cell(3, 0, 1));
 }
 
@@ -655,11 +655,11 @@ void testPlayerAndMovableContestingDestinationBothWait()
         { "> ", " ^", "CR" },
     });
     GameState state = rules::initialState(level);
-    state.player = cell(0, 0, 1);
+    state.players[0].cell = cell(0, 0, 1);
     state.movables[0].cell = cell(1, 1, 1);
 
     const GameState stepped = rules::step(level, state);
-    CHECK(stepped.player == state.player);
+    CHECK(stepped.players[0].cell == state.players[0].cell);
     CHECK(stepped.movables[0].cell == state.movables[0].cell);
 }
 
@@ -710,7 +710,7 @@ void testEveryPressurePlateMustHaveLiveOccupant()
     GameState state = rules::initialState(level);
     CHECK(!rules::isEndUnlocked(level, state));
 
-    state.player = cell(2, 0, 1);
+    state.players[0].cell = cell(2, 0, 1);
     state.movables[0].cell = cell(1, 0, 1);
     CHECK(rules::isEndUnlocked(level, state));
 
@@ -754,13 +754,13 @@ void testEveryMirrorOrientationReflectsBothWays()
         const GameState original = state;
         const std::optional<GameState> first = rules::activateMirrors(level, state);
         CHECK(first.has_value());
-        CHECK(first && first->player == test.firstExpected);
+        CHECK(first && first->players[0].cell == test.firstExpected);
         CHECK(state == original);
 
-        state.player = test.second;
+        state.players[0].cell = test.second;
         const std::optional<GameState> second = rules::activateMirrors(level, state);
         CHECK(second.has_value());
-        CHECK(second && second->player == test.secondExpected);
+        CHECK(second && second->players[0].cell == test.secondExpected);
     }
 }
 
@@ -775,7 +775,7 @@ void testMirrorReflectsMovablesAndStopsAtNearestEntity()
     const std::optional<GameState> after = rules::activateMirrors(level, state);
 
     CHECK(after.has_value());
-    CHECK(after && after->player == state.player);
+    CHECK(after && after->players[0].cell == state.players[0].cell);
     CHECK(after && after->movables[0].type == TileType::Rock);
     CHECK(after && after->movables[0].cell == cell(1, 2, 1));
     // The nearer rock occludes the ice on the same input ray.
@@ -810,7 +810,7 @@ void testMirrorChainsWithoutReusingAMirror()
     }
     const std::optional<GameState> after = rules::activateMirrors(level, state);
     CHECK(after.has_value());
-    CHECK(after && after->player == cell(0, 0, 1));
+    CHECK(after && after->players[0].cell == cell(0, 0, 1));
     CHECK(preview && after && preview->after == *after);
 }
 
@@ -823,7 +823,7 @@ void testInvalidMirrorOutputRejectsWholeActivation()
     });
     const GameState state = rules::initialState(level);
     CHECK(!rules::activateMirrors(level, state));
-    CHECK(state.player == cell(2, 4, 1));
+    CHECK(state.players[0].cell == cell(2, 4, 1));
 }
 
 void testMirrorCanTeleportPlayerIntoWater()
@@ -836,8 +836,8 @@ void testMirrorCanTeleportPlayerIntoWater()
     const std::optional<GameState> after =
         rules::activateMirrors(level, rules::initialState(level));
     CHECK(after.has_value());
-    CHECK(after && after->player == cell(0, 2, 1));
-    CHECK(after && after->playerDead);
+    CHECK(after && after->players[0].cell == cell(0, 2, 1));
+    CHECK(after && after->players[0].dead);
 
     const std::optional<rules::MirrorActivationPreview> preview =
         rules::previewMirrorActivation(level, rules::initialState(level));
@@ -852,6 +852,75 @@ void testMirrorNoVisibilityIsNoOp()
         { "C    ", "     ", "  3  ", "     ", "     " },
     });
     CHECK(!rules::activateMirrors(level, rules::initialState(level)));
+}
+
+void testEquidistantMirrorsDuplicatePlayers()
+{
+    TEST("equidistantMirrorsDuplicatePlayers");
+    const Level level = makeLevel({
+        { ".....", ".....", ".....", ".....", "....." },
+        { "  3  ", "     ", "  C  ", "     ", "  2  " },
+    });
+    const GameState state = rules::initialState(level);
+    const std::optional<rules::MirrorActivationPreview> preview =
+        rules::previewMirrorActivation(level, state);
+
+    CHECK(preview.has_value());
+    CHECK(preview && preview->after.players.size() == 2);
+    CHECK(preview && preview->after.players[0].cell == cell(0, 0, 1));
+    CHECK(preview && preview->after.players.size() == 2);
+    CHECK(preview && preview->after.players[1].cell == cell(4, 4, 1));
+    CHECK(preview && preview->entities.size() == 2);
+    CHECK(preview && preview->entities[0].player);
+    CHECK(preview && preview->entities[0].playerIndex == 0);
+    CHECK(preview && preview->entities[0].reflectionIndex == 0);
+    CHECK(preview && preview->entities[1].reflectionIndex == 1);
+}
+
+void testPlayerCopiesShareMovementAndCanDuplicateAgain()
+{
+    TEST("playerCopiesShareMovementAndCanDuplicateAgain");
+    const Level openLevel = makeLevel({
+        { ".....", ".....", "....." },
+        { "C    ", "     ", "     " },
+    });
+    GameState state = rules::initialState(openLevel);
+    state.players.push_back({ .cell = cell(0, 2, 1) });
+    const GameState moved = rules::step(
+        openLevel, state, MoveDirection::Right);
+    CHECK(moved.players[0].cell == cell(1, 0, 1));
+    CHECK(moved.players[1].cell == cell(1, 2, 1));
+
+    const Level mirrorLevel = makeLevel({
+        { ".....", ".....", ".....", ".....", "....." },
+        { "  3  ", "     ", "  C  ", "     ", "  2  " },
+    });
+    GameState duplicated = rules::initialState(mirrorLevel);
+    duplicated.players[0].cell = cell(4, 2, 1);
+    duplicated.players.push_back({ .cell = cell(2, 2, 1) });
+    const std::optional<GameState> duplicatedAgain =
+        rules::activateMirrors(mirrorLevel, duplicated);
+    CHECK(duplicatedAgain.has_value());
+    CHECK(duplicatedAgain && duplicatedAgain->players.size() == 3);
+}
+
+void testEveryPlayerMustReachAnActiveEnd()
+{
+    TEST("everyPlayerMustReachAnActiveEnd");
+    const Level level = makeLevel({
+        { "...." },
+        { "CE E" },
+    });
+    GameState state = rules::initialState(level);
+    state.players[0].cell = cell(1, 0, 1);
+    state.players.push_back({ .cell = cell(3, 0, 1) });
+    CHECK(rules::isAtUnlockedEnd(level, state));
+
+    state.players[0].cell = cell(2, 0, 1);
+    CHECK(!rules::isAtUnlockedEnd(level, state));
+    state.players[1].cell = cell(3, 0, 1);
+    state.players[1].dead = true;
+    CHECK(!rules::isAtUnlockedEnd(level, state));
 }
 
 } // namespace
@@ -900,6 +969,9 @@ int main()
     testInvalidMirrorOutputRejectsWholeActivation();
     testMirrorCanTeleportPlayerIntoWater();
     testMirrorNoVisibilityIsNoOp();
+    testEquidistantMirrorsDuplicatePlayers();
+    testPlayerCopiesShareMovementAndCanDuplicateAgain();
+    testEveryPlayerMustReachAnActiveEnd();
 
     if (failures == 0) {
         std::cout << "All " << checks << " checks passed.\n";

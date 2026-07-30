@@ -57,6 +57,9 @@ public:
     [[nodiscard]] AdvanceResult advanceScreen(
         PlayerProfile& profile,
         int screenMoveCount);
+    [[nodiscard]] AdvanceResult completeCurrentScreenForDebug(
+        PlayerProfile& profile,
+        int currentScreenMoveCount);
     void resolveLevelComplete(PlayerProfile& profile);
 
     void addElapsedTime(float dt);
@@ -92,6 +95,10 @@ private:
     static constexpr double autosaveIntervalSeconds_ = 2.0;
 
     void clearRunState();
+    [[nodiscard]] AdvanceResult finishCurrentLevel(
+        PlayerProfile& profile,
+        int completedMoves,
+        bool recordBests);
 
     std::vector<int> levelScreenCounts_;
     LevelLocation current_ {};

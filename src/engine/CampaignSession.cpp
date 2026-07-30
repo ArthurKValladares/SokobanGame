@@ -95,6 +95,29 @@ CampaignSession::AdvanceResult CampaignSession::advanceScreen(
         return ScreenAdvanced {};
     }
 
+    return finishCurrentLevel(profile, completedMoves, levelRunFromStart_);
+}
+
+CampaignSession::AdvanceResult CampaignSession::completeCurrentScreenForDebug(
+    PlayerProfile& profile,
+    int currentScreenMoveCount)
+{
+    const int completedMoves = completedLevelMoveCount_ +
+        std::max(currentScreenMoveCount, 0);
+    if (screenExists(current_.level, current_.screen + 1)) {
+        completedLevelMoveCount_ = completedMoves;
+        ++current_.screen;
+        profile.setCurrentScreen(current_.level, current_.screen);
+        return ScreenAdvanced {};
+    }
+    return finishCurrentLevel(profile, completedMoves, false);
+}
+
+CampaignSession::AdvanceResult CampaignSession::finishCurrentLevel(
+    PlayerProfile& profile,
+    int completedMoves,
+    bool recordBests)
+{
     const bool hasNextLevel = screenExists(current_.level + 1, 0);
     const PlayerProfile::LevelProgress* progress =
         profile.progressForLevel(current_.level);
@@ -108,9 +131,9 @@ CampaignSession::AdvanceResult CampaignSession::advanceScreen(
         .timeSeconds = levelElapsedSeconds_,
         .previousBestMoves = previousBestMoves,
         .previousBestTimeSeconds = previousBestTime,
-        .newBestMoves = levelRunFromStart_ &&
+        .newBestMoves = recordBests &&
             (!previousBestMoves || completedMoves < *previousBestMoves),
-        .newBestTime = levelRunFromStart_ &&
+        .newBestTime = recordBests &&
             (!previousBestTime || levelElapsedSeconds_ < *previousBestTime),
         .hasNextLevel = hasNextLevel,
     };
@@ -119,7 +142,7 @@ CampaignSession::AdvanceResult CampaignSession::advanceScreen(
         completedMoves,
         levelElapsedSeconds_,
         hasNextLevel,
-        levelRunFromStart_);
+        recordBests);
     pendingNextLevel_ = hasNextLevel ? current_.level + 1 : 0;
     if (hasNextLevel) {
         return completed;

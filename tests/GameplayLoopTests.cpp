@@ -71,7 +71,7 @@ void testMoveAdvancesSessionAndPresentation()
     CHECK(result.stateCommitted);
     CHECK(!result.screenSolved);
     CHECK(!result.mirrorActivated);
-    CHECK(session.state().player == (GridPosition3 { 1, 0, 1 }));
+    CHECK(session.state().players[0].cell == (GridPosition3 { 1, 0, 1 }));
     CHECK(session.playerMoveCount() == 1);
 }
 
@@ -100,7 +100,7 @@ void testMirrorInputCommitsAnInstantAction()
         GridPosition3 { 0, 2, 1 },
     };
     CHECK(result.mirrorSwapDestinations == expectedDestinations);
-    CHECK(session.state().player == (GridPosition3 { 0, 2, 1 }));
+    CHECK(session.state().players[0].cell == (GridPosition3 { 0, 2, 1 }));
     CHECK(session.playerMoveCount() == 0);
     CHECK(session.undoCount() == 1);
 }
@@ -128,7 +128,7 @@ void testRejectedMirrorInputDoesNotEmitActivation()
     CHECK(!result.mirrorActivated);
     CHECK(result.mirrorSwapDestinations.empty());
     CHECK(!result.stateCommitted);
-    CHECK(session.state().player == (GridPosition3 { 0, 0, 1 }));
+    CHECK(session.state().players[0].cell == (GridPosition3 { 0, 0, 1 }));
     CHECK(session.undoCount() == 0);
 }
 
@@ -166,6 +166,44 @@ void testSolvedScreenAndDraftOutcomesDiffer()
     CHECK(result.draftSolved);
 }
 
+void testMirrorDuplicationRequiresEveryPlayerOnAnEnd()
+{
+    TEST("mirrorDuplicationRequiresEveryPlayerOnAnEnd");
+    auto activate = [](const Level& level) {
+        GameplaySession session;
+        session.reset(level);
+        GameplayPresentation presentation;
+        presentation.resetEntities(session.state());
+        return GameplayLoop::update(
+            level,
+            session,
+            presentation,
+            { .mirrorPressed = true },
+            0.01f,
+            false);
+    };
+
+    const Level oneEnd = makeLevel({
+        { ".....", ".....", ".....", ".....", "....." },
+        { "E 3  ", "     ", "  C  ", "     ", "  2  " },
+    });
+    const GameplayLoop::UpdateResult incomplete = activate(oneEnd);
+    CHECK(incomplete.mirrorActivated);
+    CHECK(incomplete.mirrorSwapDestinations.size() == 2);
+    CHECK(!incomplete.screenSolved);
+    CHECK(incomplete.stateCommitted);
+
+    const Level twoEnds = makeLevel({
+        { ".....", ".....", ".....", ".....", "....." },
+        { "E 3  ", "     ", "  C  ", "     ", "  2 E" },
+    });
+    const GameplayLoop::UpdateResult complete = activate(twoEnds);
+    CHECK(complete.mirrorActivated);
+    CHECK(complete.mirrorSwapDestinations.size() == 2);
+    CHECK(complete.screenSolved);
+    CHECK(!complete.stateCommitted);
+}
+
 } // namespace
 
 int main()
@@ -175,6 +213,7 @@ int main()
     testMirrorInputCommitsAnInstantAction();
     testRejectedMirrorInputDoesNotEmitActivation();
     testSolvedScreenAndDraftOutcomesDiffer();
+    testMirrorDuplicationRequiresEveryPlayerOnAnEnd();
 
     if (failures == 0) {
         std::cout << "GameplayLoopTests: " << checks << " checks passed\n";

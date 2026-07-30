@@ -128,6 +128,40 @@ void testLaterScreenRunDoesNotRecordBests()
     CHECK(!progress->bestTimeSeconds.has_value());
 }
 
+void testCompleteCurrentScreenUsesNormalProgressionTransaction()
+{
+    TEST("completeCurrentScreenUsesNormalProgressionTransaction");
+    CampaignSession campaign;
+    campaign.setLevelScreenCounts({ 3, 1 });
+    PlayerProfile profile;
+    campaign.startNewGame(profile);
+    campaign.finishScreenLoad(profile);
+    campaign.addElapsedTime(4.0f);
+
+    CampaignSession::AdvanceResult result = campaign.advanceScreen(profile, 5);
+    CHECK(std::holds_alternative<CampaignSession::ScreenAdvanced>(result));
+    result = campaign.completeCurrentScreenForDebug(profile, 2);
+    CHECK(std::holds_alternative<CampaignSession::ScreenAdvanced>(result));
+    CHECK(campaign.currentScreen() == 2);
+
+    result = campaign.completeCurrentScreenForDebug(profile, 0);
+    CHECK(std::holds_alternative<CampaignSession::LevelCompleted>(result));
+    const CampaignSession::LevelCompleted& completed =
+        std::get<CampaignSession::LevelCompleted>(result);
+    CHECK(completed.moves == 7);
+    CHECK(completed.timeSeconds == 4.0);
+    CHECK(completed.hasNextLevel);
+    CHECK(!completed.newBestMoves);
+    CHECK(!completed.newBestTime);
+    CHECK(profile.progressForLevel(0)->completed);
+    CHECK(!profile.progressForLevel(0)->bestMoves);
+    CHECK(!profile.progressForLevel(0)->bestTimeSeconds);
+
+    campaign.resolveLevelComplete(profile);
+    result = campaign.completeCurrentScreenForDebug(profile, 0);
+    CHECK(std::holds_alternative<CampaignSession::GameCompleted>(result));
+}
+
 } // namespace
 
 int main()
@@ -136,6 +170,7 @@ int main()
     testCheckpointCadenceAndRestore();
     testScreenAndLevelCompletion();
     testLaterScreenRunDoesNotRecordBests();
+    testCompleteCurrentScreenUsesNormalProgressionTransaction();
 
     if (failures == 0) {
         std::cout << "CampaignSessionTests: " << checks

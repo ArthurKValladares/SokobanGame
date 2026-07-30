@@ -1,8 +1,4 @@
 @water 1
-@decoration {"model":"Decoration_desk","position":[2.5,3.5,3.0],"rotation":[0.0,0.0,0.0],"scale":[1.0,1.0,1.0]}
-@decoration {"model":"Decoration_monitor","position":[2.5,3.299999952316284,4.0],"rotation":[0.0,0.0,180.0],"scale":[1.0,1.0,1.0]}
-@decoration {"model":"Decoration_chair_desk_A","position":[2.5,4.5,3.0],"rotation":[0.0,0.0,0.0],"scale":[1.0,1.0,1.0]}
-@decoration {"model":"Decoration_keyboard","position":[2.5,4.0,4.0],"rotation":[0.0,0.0,0.0],"scale":[1.0,1.0,1.0]}
 
 @layer 0
              

@@ -64,19 +64,19 @@ void testMoveCommitsAfterAnimation()
     session.queueMove(MoveDirection::Right);
     CHECK(session.tryStartNextAction(level, {}));
     CHECK(session.moving());
-    CHECK(session.state().player == cell(1, 0, 1));
-    CHECK(session.activeAction().after.player == cell(2, 0, 1));
+    CHECK(session.state().players[0].cell == cell(1, 0, 1));
+    CHECK(session.activeAction().after.players[0].cell == cell(2, 0, 1));
     CHECK(session.activeAction().facingDirection == MoveDirection::Right);
 
     session.advanceActiveAction(0.1f);
     CHECK(!session.activeActionComplete());
-    CHECK(session.state().player == cell(1, 0, 1));
+    CHECK(session.state().players[0].cell == cell(1, 0, 1));
 
     session.advanceActiveAction(0.1f);
     CHECK(session.activeActionComplete());
     session.completeActiveAction();
     CHECK(!session.moving());
-    CHECK(session.state().player == cell(2, 0, 1));
+    CHECK(session.state().players[0].cell == cell(2, 0, 1));
     CHECK(session.historySize() == 1);
 }
 
@@ -93,7 +93,7 @@ void testPushMetadata()
     session.queueMove(MoveDirection::Right);
     CHECK(session.tryStartNextAction(level, {}));
     CHECK(session.activeAction().playerPushing);
-    CHECK(session.activeAction().after.player == cell(2, 0, 1));
+    CHECK(session.activeAction().after.players[0].cell == cell(2, 0, 1));
     CHECK(session.activeAction().after.movables[0].cell == cell(3, 0, 1));
 }
 
@@ -110,14 +110,14 @@ void testUndoRoundTrip()
     session.queueMove(MoveDirection::Right);
     CHECK(session.tryStartNextAction(level, {}));
     finishAction(session);
-    CHECK(session.state().player == cell(2, 0, 1));
+    CHECK(session.state().players[0].cell == cell(2, 0, 1));
 
     session.queueUndo();
     CHECK(session.tryStartNextAction(level, {}));
     CHECK(session.activeAction().reversed);
     CHECK(session.activeAction().facingDirection == MoveDirection::Right);
     finishAction(session);
-    CHECK(session.state().player == cell(1, 0, 1));
+    CHECK(session.state().players[0].cell == cell(1, 0, 1));
     CHECK(session.historySize() == 2);
 }
 
@@ -137,17 +137,17 @@ void testContiguousUndoWalksOriginalHistory()
     session.queueMove(MoveDirection::Right);
     CHECK(session.tryStartNextAction(level, {}));
     finishAction(session);
-    CHECK(session.state().player == cell(3, 0, 1));
+    CHECK(session.state().players[0].cell == cell(3, 0, 1));
 
     session.queueUndo();
     CHECK(session.tryStartNextAction(level, {}));
     finishAction(session);
-    CHECK(session.state().player == cell(2, 0, 1));
+    CHECK(session.state().players[0].cell == cell(2, 0, 1));
 
     session.queueUndo();
     CHECK(session.tryStartNextAction(level, {}));
     finishAction(session);
-    CHECK(session.state().player == cell(1, 0, 1));
+    CHECK(session.state().players[0].cell == cell(1, 0, 1));
 
     session.queueUndo();
     CHECK(!session.tryStartNextAction(level, {}));
@@ -187,16 +187,16 @@ void testUndoPausesAutomaticMotion()
     session.queueMove(MoveDirection::Right);
     CHECK(session.tryStartNextAction(level, {}));
     finishAction(session);
-    CHECK(session.state().player == cell(2, 0, 1));
+    CHECK(session.state().players[0].cell == cell(2, 0, 1));
 
     CHECK(session.tryStartNextAction(level, {}));
     finishAction(session);
-    CHECK(session.state().player == cell(3, 0, 1));
+    CHECK(session.state().players[0].cell == cell(3, 0, 1));
 
     session.queueUndo();
     CHECK(session.tryStartNextAction(level, {}));
     finishAction(session);
-    CHECK(session.state().player == cell(2, 0, 1));
+    CHECK(session.state().players[0].cell == cell(2, 0, 1));
     CHECK(!session.tryStartNextAction(level, {}));
 }
 
@@ -240,10 +240,10 @@ void testQueuedCommandsWaitForActiveAction()
     session.queueMove(MoveDirection::Right);
     CHECK(!session.tryStartNextAction(level, {}));
     finishAction(session);
-    CHECK(session.state().player == cell(1, 0, 1));
+    CHECK(session.state().players[0].cell == cell(1, 0, 1));
     CHECK(session.tryStartNextAction(level, {}));
     finishAction(session);
-    CHECK(session.state().player == cell(2, 0, 1));
+    CHECK(session.state().players[0].cell == cell(2, 0, 1));
 }
 
 void testBlockedQueuedCommandDoesNotStarveNextCommand()
@@ -259,7 +259,7 @@ void testBlockedQueuedCommandDoesNotStarveNextCommand()
     session.queueMove(MoveDirection::Right);
 
     CHECK(session.tryStartNextAction(level, {}));
-    CHECK(session.activeAction().after.player == cell(1, 0, 1));
+    CHECK(session.activeAction().after.players[0].cell == cell(1, 0, 1));
 }
 
 void testDeadPlayerDiscardsCommandsUntilUndo()
@@ -274,7 +274,7 @@ void testDeadPlayerDiscardsCommandsUntilUndo()
     session.queueMove(MoveDirection::Right);
     CHECK(session.tryStartNextAction(level, {}));
     finishAction(session);
-    CHECK(session.state().playerDead);
+    CHECK(session.state().players[0].dead);
 
     session.queueRestart();
     session.queueMove(MoveDirection::Left);
@@ -282,8 +282,8 @@ void testDeadPlayerDiscardsCommandsUntilUndo()
     CHECK(session.tryStartNextAction(level, {}));
     CHECK(session.activeAction().reversed);
     finishAction(session);
-    CHECK(!session.state().playerDead);
-    CHECK(session.state().player == cell(0, 0, 1));
+    CHECK(!session.state().players[0].dead);
+    CHECK(session.state().players[0].cell == cell(0, 0, 1));
 }
 
 void testRestartCanBeUndone()
@@ -327,26 +327,26 @@ void testNewMoveAfterUndoCreatesCleanHistoryBranch()
     session.queueMove(MoveDirection::Right);
     CHECK(session.tryStartNextAction(level, {}));
     finishAction(session);
-    CHECK(session.state().player == cell(3, 0, 1));
+    CHECK(session.state().players[0].cell == cell(3, 0, 1));
 
     session.queueUndo();
     CHECK(session.tryStartNextAction(level, {}));
     finishAction(session);
-    CHECK(session.state().player == cell(2, 0, 1));
+    CHECK(session.state().players[0].cell == cell(2, 0, 1));
 
     session.queueMove(MoveDirection::Left);
     CHECK(session.tryStartNextAction(level, {}));
     finishAction(session);
-    CHECK(session.state().player == cell(1, 0, 1));
+    CHECK(session.state().players[0].cell == cell(1, 0, 1));
 
     session.queueUndo();
     CHECK(session.tryStartNextAction(level, {}));
     finishAction(session);
-    CHECK(session.state().player == cell(2, 0, 1));
+    CHECK(session.state().players[0].cell == cell(2, 0, 1));
     session.queueUndo();
     CHECK(session.tryStartNextAction(level, {}));
     finishAction(session);
-    CHECK(session.state().player == cell(1, 0, 1));
+    CHECK(session.state().players[0].cell == cell(1, 0, 1));
     session.queueUndo();
     CHECK(!session.tryStartNextAction(level, {}));
 }
@@ -406,7 +406,7 @@ void testSnapshotRestoresExactStateAndUndoStack()
 
     const GameplaySession::Snapshot saved = original.snapshot();
     CHECK(saved.undoStack.size() == 2);
-    CHECK(saved.state.player == cell(3, 0, 1));
+    CHECK(saved.state.players[0].cell == cell(3, 0, 1));
     CHECK(saved.playerMoveCount == 2);
 
     GameplaySession restored;
@@ -417,7 +417,7 @@ void testSnapshotRestoresExactStateAndUndoStack()
     restored.queueUndo();
     CHECK(restored.tryStartNextAction(level, {}));
     finishAction(restored);
-    CHECK(restored.state().player == cell(2, 0, 1));
+    CHECK(restored.state().players[0].cell == cell(2, 0, 1));
     CHECK(restored.playerMoveCount() == 1);
     CHECK(restored.undoCount() == 1);
 }
@@ -491,7 +491,7 @@ void testInvalidSnapshotIsRejectedWithoutMutation()
     finishAction(source);
 
     GameplaySession::Snapshot corrupted = source.snapshot();
-    corrupted.undoStack.front().before.player.x += 1;
+    corrupted.undoStack.front().before.players[0].cell.x += 1;
 
     GameplaySession target;
     target.reset(level);
@@ -500,7 +500,7 @@ void testInvalidSnapshotIsRejectedWithoutMutation()
     CHECK(target.snapshot() == beforeRestore);
 
     corrupted = source.snapshot();
-    corrupted.undoStack.front().after.player.x += 10;
+    corrupted.undoStack.front().after.players[0].cell.x += 10;
     corrupted.state = corrupted.undoStack.front().after;
     CHECK(!target.restore(level, corrupted));
     CHECK(target.snapshot() == beforeRestore);
@@ -520,7 +520,7 @@ void testMirrorActionIsInstantUndoableAndRestorable()
     session.queueMirror();
     CHECK(session.tryStartNextAction(level, {}));
     CHECK(session.activeActionDuration() == 0.0f);
-    CHECK(session.activeAction().after.player == cell(0, 2, 1));
+    CHECK(session.activeAction().after.players[0].cell == cell(0, 2, 1));
     finishAction(session);
     CHECK(session.playerMoveCount() == 0);
     CHECK(session.undoCount() == 1);
@@ -528,6 +528,33 @@ void testMirrorActionIsInstantUndoableAndRestorable()
     GameplaySession restored;
     CHECK(restored.restore(level, session.snapshot()));
     CHECK(restored.state() == session.state());
+    restored.queueUndo();
+    CHECK(restored.tryStartNextAction(level, {}));
+    finishAction(restored);
+    CHECK(restored.state() == initial);
+}
+
+void testMirrorDuplicationIsInstantUndoableAndRestorable()
+{
+    TEST("mirrorDuplicationIsInstantUndoableAndRestorable");
+    const Level level = makeLevel({
+        { ".....", ".....", ".....", ".....", "....." },
+        { "  3  ", "     ", "  C  ", "     ", "  2  " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    const GameState initial = session.state();
+
+    session.queueMirror();
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeAction().after.players.size() == 2);
+    finishAction(session);
+    CHECK(session.state().players.size() == 2);
+    CHECK(session.playerMoveCount() == 0);
+
+    GameplaySession restored;
+    CHECK(restored.restore(level, session.snapshot()));
+    CHECK(restored.state().players.size() == 2);
     restored.queueUndo();
     CHECK(restored.tryStartNextAction(level, {}));
     finishAction(restored);
@@ -556,6 +583,7 @@ int main()
     testSnapshotRestoreAcceptsRestartHistory();
     testInvalidSnapshotIsRejectedWithoutMutation();
     testMirrorActionIsInstantUndoableAndRestorable();
+    testMirrorDuplicationIsInstantUndoableAndRestorable();
 
     if (failures == 0) {
         std::cout << "GameplaySessionTests: " << checks << " checks passed\n";

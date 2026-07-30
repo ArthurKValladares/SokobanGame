@@ -100,16 +100,24 @@ void GameplayPresentation::setPlayerClips(RenderAnimation moveClip, RenderAnimat
 {
     playerMoveClip_ = moveClip;
     playerPushClip_ = pushClip;
-    if (player_.movingClip.isNone()) {
-        player_.movingClip = moveClip;
+    for (PlayerVisual& player : players_) {
+        if (player.movingClip.isNone()) {
+            player.movingClip = moveClip;
+        }
     }
 }
 
 void GameplayPresentation::resetEntities(const GameState& state)
 {
-    player_ = {};
-    setImmediatePosition(player_.motion, playerRenderTarget(state.player, state.playerDead));
-    player_.facingQuarterTurns = facingQuarterTurns(MoveDirection::Down);
+    players_.assign(state.players.size(), {});
+    for (std::size_t i = 0; i < state.players.size(); ++i) {
+        setImmediatePosition(
+            players_[i].motion,
+            playerRenderTarget(state.players[i].cell, state.players[i].dead));
+        players_[i].facingQuarterTurns =
+            facingQuarterTurns(MoveDirection::Down);
+        players_[i].movingClip = playerMoveClip_;
+    }
 
     movables_.clear();
     movables_.resize(state.movables.size());
@@ -123,7 +131,9 @@ void GameplayPresentation::resetEntities(const GameState& state)
 void GameplayPresentation::advanceClocks(float dt, bool reversed)
 {
     worldAnimationTimeSeconds_ += reversed ? -dt : dt;
-    player_.clipTimeSeconds += dt * player_.clipPlaybackRate;
+    for (PlayerVisual& player : players_) {
+        player.clipTimeSeconds += dt * player.clipPlaybackRate;
+    }
 }
 
 void GameplayPresentation::updateCameraPitch(
@@ -175,7 +185,9 @@ void GameplayPresentation::advanceAnimations(float dt)
             visual.animationSecondsPerTile);
     };
 
-    advance(player_.motion);
+    for (PlayerVisual& player : players_) {
+        advance(player.motion);
+    }
     for (EntityVisual& visual : movables_) {
         advance(visual);
     }
@@ -199,26 +211,55 @@ void GameplayPresentation::beginAction(const GameplaySession::Action& action)
         visual.moving = true;
     };
 
-    if (action.facingDirection) {
-        player_.facingQuarterTurns = facingQuarterTurns(*action.facingDirection);
+    while (players_.size() < action.after.players.size()) {
+        const std::size_t playerIndex = players_.size();
+        PlayerVisual visual;
+        visual.movingClip = playerMoveClip_;
+        visual.facingQuarterTurns = players_.empty()
+            ? facingQuarterTurns(MoveDirection::Down)
+            : players_.front().facingQuarterTurns;
+        setImmediatePosition(
+            visual.motion,
+            playerRenderTarget(
+                action.after.players[playerIndex].cell,
+                action.after.players[playerIndex].dead));
+        players_.push_back(std::move(visual));
     }
-    if (!action.before.playerDead && action.after.playerDead) {
-        player_.deathTransitionPlaying = true;
-        player_.clipTimeSeconds = 0.0f;
-        player_.clipPlaybackRate = 1.0f;
-    } else if (action.before.playerDead && !action.after.playerDead) {
-        player_.deathTransitionPlaying = false;
-        player_.clipTimeSeconds = 0.0f;
-    }
-    beginMotion(
-        player_.motion,
-        playerRenderTarget(action.after.player, action.after.playerDead));
-    if (player_.motion.moving) {
-        player_.movingClip =
-            action.playerPushing ? playerPushClip_ : playerMoveClip_;
-        player_.clipPlaybackRate = action.reversed ? -1.0f : 1.0f;
-    } else {
-        player_.clipPlaybackRate = 1.0f;
+
+    auto beginPlayer = [&](PlayerVisual& visual,
+                           const GameState::Player& before,
+                           const GameState::Player& after) {
+        if (action.facingDirection) {
+            visual.facingQuarterTurns =
+                facingQuarterTurns(*action.facingDirection);
+        }
+        if (!before.dead && after.dead) {
+            visual.deathTransitionPlaying = true;
+            visual.clipTimeSeconds = 0.0f;
+            visual.clipPlaybackRate = 1.0f;
+        } else if (before.dead && !after.dead) {
+            visual.deathTransitionPlaying = false;
+            visual.clipTimeSeconds = 0.0f;
+        }
+        beginMotion(
+            visual.motion,
+            playerRenderTarget(after.cell, after.dead));
+        if (visual.motion.moving) {
+            visual.movingClip =
+                action.playerPushing ? playerPushClip_ : playerMoveClip_;
+            visual.clipPlaybackRate = action.reversed ? -1.0f : 1.0f;
+        } else {
+            visual.clipPlaybackRate = 1.0f;
+        }
+    };
+
+    const std::size_t sharedPlayerCount = std::min(
+        action.before.players.size(), action.after.players.size());
+    for (std::size_t i = 0; i < sharedPlayerCount; ++i) {
+        beginPlayer(
+            players_[i],
+            action.before.players[i],
+            action.after.players[i]);
     }
 
     const std::size_t movableCount =
@@ -233,15 +274,34 @@ void GameplayPresentation::beginAction(const GameplaySession::Action& action)
 void GameplayPresentation::finishAction(const GameState& state)
 {
     syncToGameState(state);
-    player_.clipPlaybackRate = 1.0f;
+    for (PlayerVisual& player : players_) {
+        player.clipPlaybackRate = 1.0f;
+    }
 }
 
 void GameplayPresentation::syncToGameState(const GameState& state)
 {
-    if (!player_.motion.moving) {
+    if (players_.size() > state.players.size()) {
+        players_.resize(state.players.size());
+    }
+    while (players_.size() < state.players.size()) {
+        const std::size_t i = players_.size();
+        PlayerVisual visual;
+        visual.movingClip = playerMoveClip_;
+        visual.facingQuarterTurns = players_.empty()
+            ? facingQuarterTurns(MoveDirection::Down)
+            : players_.front().facingQuarterTurns;
         setImmediatePosition(
-            player_.motion,
-            playerRenderTarget(state.player, state.playerDead));
+            visual.motion,
+            playerRenderTarget(state.players[i].cell, state.players[i].dead));
+        players_.push_back(std::move(visual));
+    }
+    for (std::size_t i = 0; i < players_.size(); ++i) {
+        if (!players_[i].motion.moving) {
+            setImmediatePosition(
+                players_[i].motion,
+                playerRenderTarget(state.players[i].cell, state.players[i].dead));
+        }
     }
     for (std::size_t i = 0; i < movables_.size() && i < state.movables.size(); ++i) {
         if (!movables_[i].moving) {

@@ -258,16 +258,32 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
 {
     rejectUnknownProperties(
         value,
-        { "player", "playerDead", "playerSliding", "movables" },
+        { "players", "movables" },
         context);
     GameState state;
-    state.player = positionFromJson(
-        requiredProperty(value, "player", context),
-        std::string(context) + ".player");
-    state.playerDead = boolProperty(value, "playerDead", context);
-    state.playerSliding = directionFromJson(
-        requiredProperty(value, "playerSliding", context),
-        std::string(context) + ".playerSliding");
+    const Json& players = requiredProperty(value, "players", context);
+    if (!players.is_array() || players.empty()) {
+        fail(context, "property 'players' must be a non-empty array");
+    }
+    for (std::size_t i = 0; i < players.size(); ++i) {
+        const std::string playerContext =
+            std::string(context) + ".players[" +
+            std::to_string(i) + "]";
+        const Json& item = players[i];
+        rejectUnknownProperties(
+            item,
+            { "cell", "dead", "sliding" },
+            playerContext);
+        state.players.push_back({
+            .cell = positionFromJson(
+                requiredProperty(item, "cell", playerContext),
+                playerContext + ".cell"),
+            .dead = boolProperty(item, "dead", playerContext),
+            .sliding = directionFromJson(
+                requiredProperty(item, "sliding", playerContext),
+                playerContext + ".sliding"),
+        });
+    }
 
     const Json& movables = requiredProperty(value, "movables", context);
     if (!movables.is_array()) {
@@ -296,6 +312,16 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
 
 OrderedJson gameStateToJson(const GameState& state)
 {
+    OrderedJson players = OrderedJson::array();
+    for (const GameState::Player& player : state.players) {
+        players.push_back({
+            { "cell", positionToJson(player.cell) },
+            { "dead", player.dead },
+            { "sliding", player.sliding
+                ? OrderedJson(directionName(*player.sliding))
+                : OrderedJson(nullptr) },
+        });
+    }
     OrderedJson movables = OrderedJson::array();
     for (const GameState::Movable& movable : state.movables) {
         movables.push_back({
@@ -308,11 +334,7 @@ OrderedJson gameStateToJson(const GameState& state)
         });
     }
     return {
-        { "player", positionToJson(state.player) },
-        { "playerDead", state.playerDead },
-        { "playerSliding", state.playerSliding
-            ? OrderedJson(directionName(*state.playerSliding))
-            : OrderedJson(nullptr) },
+        { "players", std::move(players) },
         { "movables", std::move(movables) },
     };
 }
@@ -906,6 +928,16 @@ void migrate12to13(Json& root)
     }
 }
 
+void migrate13to14(Json& root)
+{
+    // Format 14 deliberately replaces the primary-player checkpoint shape.
+    // Keep profile progress/settings, but restart an in-flight screen instead
+    // of carrying the old runtime schema into the new model.
+    if (root.contains("progress") && root["progress"].is_object()) {
+        root["progress"]["activeScreen"] = nullptr;
+    }
+}
+
 // ---- Strict current-format parse -------------------------------------------
 
 void parseProgressSection(PlayerProfile& profile, const Json& progress)
@@ -1181,6 +1213,7 @@ DecodedPlayerProfile decodePlayerProfile(std::string_view text)
         migrate10to11,
         migrate11to12,
         migrate12to13,
+        migrate13to14,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

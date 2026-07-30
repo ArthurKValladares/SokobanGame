@@ -77,6 +77,8 @@ private:
         Level level,
         const GameplaySession::Snapshot* snapshot = nullptr);
     void advanceScreen();
+    void solveCurrentScreenForDebug();
+    void handleCampaignAdvance(const CampaignSession::AdvanceResult& result);
     void checkpointCurrentScreen(bool immediateSave);
     void applySettingsEffects(const SettingsEffects& effects);
     void persistProfile(bool immediate);

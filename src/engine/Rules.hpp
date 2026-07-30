@@ -25,6 +25,14 @@ enum class MoveDirection {
 // tile in that direction every world step until it is blocked, falls, or
 // leaves slippery ground.
 struct GameState {
+    struct Player {
+        GridPosition3 cell {};
+        bool dead = false;
+        std::optional<MoveDirection> sliding;
+
+        bool operator==(const Player&) const = default;
+    };
+
     struct Movable {
         TileType type = TileType::Rock;
         GridPosition3 cell {};
@@ -34,9 +42,7 @@ struct GameState {
         bool operator==(const Movable&) const = default;
     };
 
-    GridPosition3 player {};
-    bool playerDead = false;
-    std::optional<MoveDirection> playerSliding;
+    std::vector<Player> players;
     std::vector<Movable> movables;
 
     bool operator==(const GameState&) const = default;
@@ -65,6 +71,8 @@ struct StepRates {
 };
 
 [[nodiscard]] GameState initialState(const Level& level);
+
+[[nodiscard]] bool anyPlayerDead(const GameState& state);
 
 [[nodiscard]] GridPosition directionOffset(MoveDirection direction);
 [[nodiscard]] GridPosition3 movementTarget(GridPosition3 origin, MoveDirection direction);
@@ -99,6 +107,9 @@ struct MirrorBeamSegment {
 
 struct MirrorEntityPreview {
     bool player = false;
+    std::size_t playerIndex = 0;
+    std::size_t reflectionIndex = 0;
+    std::size_t resultPlayerIndex = 0;
     std::size_t movableIndex = 0;
     GridPosition3 start {};
     GridPosition3 destination {};

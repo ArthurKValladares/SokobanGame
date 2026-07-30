@@ -27,13 +27,42 @@ std::optional<MoveDirection> movementDirection(GridPosition3 from, GridPosition3
     return std::nullopt;
 }
 
+bool anyPlayerMoved(const GameState& before, const GameState& after)
+{
+    const std::size_t count = std::min(
+        before.players.size(), after.players.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        if (!(before.players[i].cell == after.players[i].cell)) {
+            return true;
+        }
+    }
+    return before.players.size() != after.players.size();
+}
+
+std::optional<MoveDirection> firstPlayerMovementDirection(
+    const GameState& before,
+    const GameState& after)
+{
+    const std::size_t count = std::min(
+        before.players.size(), after.players.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        const std::optional<MoveDirection> direction = movementDirection(
+            before.players[i].cell,
+            after.players[i].cell);
+        if (direction) {
+            return direction;
+        }
+    }
+    return std::nullopt;
+}
+
 bool matchesForwardTransition(
     const Level& level,
     const GameplaySession::Action& action,
     const rules::StepRates& rates)
 {
     const GameState initial = rules::initialState(level);
-    if (!action.before.playerDead && !(action.before == initial) &&
+    if (!rules::anyPlayerDead(action.before) && !(action.before == initial) &&
         action.after == initial && action.playerMoveCountAfter == 0) {
         return true;
     }
@@ -56,7 +85,7 @@ bool matchesForwardTransition(
     return std::ranges::any_of(inputs, [&](std::optional<MoveDirection> input) {
         const GameState after = rules::step(level, action.before, input, rates);
         const int expectedMoveCount = action.playerMoveCountBefore +
-            (input && !(action.before.player == after.player) ? 1 : 0);
+            (input && anyPlayerMoved(action.before, after) ? 1 : 0);
         return !(after == action.before) &&
             after == action.after &&
             action.playerMoveCountAfter == expectedMoveCount;
@@ -161,7 +190,7 @@ bool GameplaySession::tryStartNextAction(const Level& level, const Controls& con
         return false;
     }
 
-    if (state_.playerDead) {
+    if (rules::anyPlayerDead(state_)) {
         while (!pendingCommands_.empty()) {
             const Command command = pendingCommands_.front();
             pendingCommands_.pop_front();
@@ -273,7 +302,7 @@ bool GameplaySession::tryStartWorldStep(const Level& level, std::optional<MoveDi
         return false;
     }
     const bool countsAsPlayerMove = playerInput.has_value() &&
-        !(state_.player == after.player);
+        anyPlayerMoved(state_, after);
 
     Action action {
         .before = state_,
@@ -284,12 +313,24 @@ bool GameplaySession::tryStartWorldStep(const Level& level, std::optional<MoveDi
         .facingDirection = playerInput,
     };
 
-    if (playerInput && !(action.before.player == action.after.player)) {
-        const GridPosition3 pushCell = rules::movementTarget(action.before.player, *playerInput);
-        for (std::size_t i = 0; i < action.before.movables.size() && i < action.after.movables.size(); ++i) {
-            if (action.before.movables[i].cell == pushCell &&
-                !(action.after.movables[i].cell == pushCell)) {
-                action.playerPushing = true;
+    if (playerInput && anyPlayerMoved(action.before, action.after)) {
+        for (std::size_t playerIndex = 0;
+             playerIndex < action.before.players.size();
+             ++playerIndex) {
+            const GridPosition3 pushCell = rules::movementTarget(
+                action.before.players[playerIndex].cell,
+                *playerInput);
+            for (std::size_t i = 0;
+                 i < action.before.movables.size() &&
+                 i < action.after.movables.size();
+                 ++i) {
+                if (action.before.movables[i].cell == pushCell &&
+                    !(action.after.movables[i].cell == pushCell)) {
+                    action.playerPushing = true;
+                    break;
+                }
+            }
+            if (action.playerPushing) {
                 break;
             }
         }
@@ -298,7 +339,8 @@ bool GameplaySession::tryStartWorldStep(const Level& level, std::optional<MoveDi
     if (playerInput) {
         autoMotionPaused_ = false;
     } else {
-        action.facingDirection = movementDirection(action.before.player, action.after.player);
+        action.facingDirection = firstPlayerMovementDirection(
+            action.before, action.after);
     }
     beginAction(std::move(action));
     return true;
@@ -337,7 +379,8 @@ bool GameplaySession::tryStartUndoMove()
 
     Action action = invertAction(undoHistory_.back());
     action.durationSeconds = stepDurationSeconds_;
-    action.facingDirection = movementDirection(action.after.player, action.before.player);
+    action.facingDirection = firstPlayerMovementDirection(
+        action.after, action.before);
     autoMotionPaused_ = true;
     beginAction(std::move(action));
     return true;
@@ -345,7 +388,7 @@ bool GameplaySession::tryStartUndoMove()
 
 bool GameplaySession::tryStartRestart(const Level& level)
 {
-    if (state_.playerDead) {
+    if (rules::anyPlayerDead(state_)) {
         return false;
     }
 

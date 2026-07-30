@@ -805,7 +805,8 @@ void appendDecorations(
 RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
 {
     const GameState& state = input.state;
-    const auto& playerVisual = input.presentation.player();
+    const auto& playerVisuals = input.presentation.players();
+    const auto& primaryPlayerVisual = playerVisuals.front();
     const auto& movableVisuals = input.presentation.movables();
     RenderFrameData frame;
     frame.viewMode = RenderViewMode::Isometric3D;
@@ -838,8 +839,8 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     frame.effectAnimationTimeSeconds =
         input.presentation.worldAnimationTimeSeconds();
     frame.playerPosition = {
-        playerVisual.motion.renderPosition.x,
-        playerVisual.motion.renderPosition.y,
+        primaryPlayerVisual.motion.renderPosition.x,
+        primaryPlayerVisual.motion.renderPosition.y,
     };
     const bool endUnlocked = rules::isEndUnlocked(input.level, state);
 
@@ -847,10 +848,6 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
         static_cast<std::size_t>(input.level.width()) *
         input.level.height() *
         input.level.depth());
-    const bool playerMovingOutOfWater =
-        input.moving &&
-        input.activeAction.before.playerDead &&
-        !input.activeAction.after.playerDead;
     auto fallenMovableIsMoving =
         [&state, &movableVisuals](const GameState::Movable* movable) {
             const auto index =
@@ -900,7 +897,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
                 std::nullopt,
                 input.settings.geometry.surfaceEntityHeight,
                 input.settings.geometry.surfaceEntityWidthDepth,
-                playerVisual.facingQuarterTurns);
+                primaryPlayerVisual.facingQuarterTurns);
         };
     appendStaticTiles(
         frame,
@@ -1009,42 +1006,56 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             });
     }
 
-    RenderAnimation playerAnimation = input.manifest.playerIdleAnimation();
-    RenderAnimation playerAnimationFallback = noAnimation;
-    bool playerAnimationLoops = true;
-    if (state.playerDead && !playerMovingOutOfWater) {
-        if (playerVisual.deathTransitionPlaying) {
-            playerAnimation = input.manifest.playerDeathAnimation();
-            playerAnimationFallback = input.manifest.playerDeadIdleAnimation();
-            playerAnimationLoops = false;
-        } else {
-            playerAnimation = input.manifest.playerDeadIdleAnimation();
-        }
-    } else if (playerVisual.motion.moving) {
-        playerAnimation = playerVisual.movingClip;
-    }
+    for (std::size_t playerIndex = 0;
+         playerIndex < state.players.size() &&
+         playerIndex < playerVisuals.size();
+         ++playerIndex) {
+        const GameState::Player& player = state.players[playerIndex];
+        const GameplayPresentation::PlayerVisual& visual = playerVisuals[playerIndex];
+        const bool movingOutOfWater =
+            input.moving &&
+            playerIndex < input.activeAction.before.players.size() &&
+            playerIndex < input.activeAction.after.players.size() &&
+            input.activeAction.before.players[playerIndex].dead &&
+            !input.activeAction.after.players[playerIndex].dead;
 
-    RenderFrameData::Tile playerTile {
-        .position = {
-            playerVisual.motion.renderPosition.x,
-            playerVisual.motion.renderPosition.y,
-        },
-        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
-        .baseElevation = playerVisual.motion.renderPosition.z,
-        .height = 1.0f,
-        .showGrid = false,
-        .affectsCameraFit = false,
-        .model = input.manifest.playerModel(),
-        .animation = playerAnimation,
-        .animationFallback = playerAnimationFallback,
-        .animationLoops = playerAnimationLoops,
-        .animationTimeSeconds = playerVisual.clipTimeSeconds,
-        .modelRotationQuarterTurns = playerVisual.facingQuarterTurns,
-    };
-    applyTileScale(
-        playerTile,
-        input.settings.tileScale(TileType::Player));
-    frame.tiles.push_back(playerTile);
+        RenderAnimation animation = input.manifest.playerIdleAnimation();
+        RenderAnimation fallback = noAnimation;
+        bool loops = true;
+        if (player.dead && !movingOutOfWater) {
+            if (visual.deathTransitionPlaying) {
+                animation = input.manifest.playerDeathAnimation();
+                fallback = input.manifest.playerDeadIdleAnimation();
+                loops = false;
+            } else {
+                animation = input.manifest.playerDeadIdleAnimation();
+            }
+        } else if (visual.motion.moving) {
+            animation = visual.movingClip;
+        }
+
+        RenderFrameData::Tile playerTile {
+            .position = {
+                visual.motion.renderPosition.x,
+                visual.motion.renderPosition.y,
+            },
+            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+            .baseElevation = visual.motion.renderPosition.z,
+            .height = 1.0f,
+            .showGrid = false,
+            .affectsCameraFit = false,
+            .model = input.manifest.playerModel(),
+            .animation = animation,
+            .animationFallback = fallback,
+            .animationLoops = loops,
+            .animationTimeSeconds = visual.clipTimeSeconds,
+            .modelRotationQuarterTurns = visual.facingQuarterTurns,
+        };
+        applyTileScale(
+            playerTile,
+            input.settings.tileScale(TileType::Player));
+        frame.tiles.push_back(playerTile);
+    }
 
     for (std::size_t movableIndex = 0;
          movableIndex < state.movables.size() &&
@@ -1085,11 +1096,12 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
         frame.tiles.push_back(movableTile);
     }
 
-    if (!state.playerDead) {
+    if (!rules::anyPlayerDead(state)) {
         std::optional<rules::MirrorActivationPreview> mirrorPreview =
             rules::previewMirrorActivation(input.level, state);
         std::optional<rules::MirrorActivationPreview> actionEndPreview;
-        if (input.moving && !input.activeAction.after.playerDead) {
+        if (input.moving &&
+            !rules::anyPlayerDead(input.activeAction.after)) {
             actionEndPreview = rules::previewMirrorActivation(
                 input.level, input.activeAction.after);
         }
@@ -1103,7 +1115,12 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
                         actionEndPreview->entities,
                         [&](const rules::MirrorEntityPreview& candidate) {
                             return candidate.player == entity.player &&
-                                (entity.player ||
+                                (entity.player
+                                    ? candidate.playerIndex ==
+                                            entity.playerIndex &&
+                                        candidate.reflectionIndex ==
+                                            entity.reflectionIndex
+                                    :
                                     candidate.movableIndex ==
                                         entity.movableIndex);
                         });
@@ -1114,9 +1131,13 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
                 const bool hasMatchingEndEntity =
                     matchingEndEntity != nullptr;
 
+                const GameplayPresentation::PlayerVisual* previewPlayer =
+                    entity.player && entity.playerIndex < playerVisuals.size()
+                    ? &playerVisuals[entity.playerIndex]
+                    : nullptr;
                 const GameplayPresentation::EntityVisual* visual =
                     entity.player
-                    ? &playerVisual.motion
+                    ? (previewPlayer ? &previewPlayer->motion : nullptr)
                     : (entity.movableIndex < movableVisuals.size()
                             ? &movableVisuals[entity.movableIndex]
                             : nullptr);
@@ -1293,9 +1314,13 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
                                 : input.manifest.playerIdleAnimation())
                         : noAnimation,
                     .animationLoops = true,
-                    .animationTimeSeconds = playerVisual.clipTimeSeconds,
+                    .animationTimeSeconds = previewPlayer
+                        ? previewPlayer->clipTimeSeconds
+                        : 0.0f,
                     .modelRotationQuarterTurns = entity.player
-                        ? playerVisual.facingQuarterTurns
+                        ? (previewPlayer
+                                ? previewPlayer->facingQuarterTurns
+                                : 0U)
                         : 0U,
                     .effect = RenderSurfaceEffect::MirrorEnergy,
                 };

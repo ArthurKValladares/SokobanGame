@@ -50,13 +50,16 @@ public:
     [[nodiscard]] float conveyorBeltScrollOffset(float stepDurationSeconds) const;
     [[nodiscard]] float worldAnimationTimeSeconds() const { return worldAnimationTimeSeconds_; }
     [[nodiscard]] float cameraPitchDegrees() const { return cameraPitchDegrees_; }
-    [[nodiscard]] const PlayerVisual& player() const { return player_; }
+    [[nodiscard]] const std::vector<PlayerVisual>& players() const
+    {
+        return players_;
+    }
     [[nodiscard]] const std::vector<EntityVisual>& movables() const { return movables_; }
 
 private:
     static void setImmediatePosition(EntityVisual& visual, Vec3 target);
 
-    PlayerVisual player_;
+    std::vector<PlayerVisual> players_;
     std::vector<EntityVisual> movables_;
     RenderAnimation playerMoveClip_ {};
     RenderAnimation playerPushClip_ {};

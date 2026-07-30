@@ -87,19 +87,23 @@ void drawSunDirectionPreview(Vec3 direction, float tiltDegrees)
 
 } // namespace
 
-void ApplicationDebugUi::draw(const Context& context) const
+ApplicationDebugUi::Result ApplicationDebugUi::draw(
+    const Context& context) const
 {
+    Result result;
 #if SOKOBAN_ENABLE_DEBUG_UI
     const GameState& state = context.gameplaySession.state();
+    const GameState::Player& primaryPlayer = state.players.front();
     PresentationSettings& settings = context.settings;
     ImGui::Text(
         "Level %d Screen %d", context.currentLevel, context.currentScreen);
     ImGui::Text(
         "Player (%d, %d, %d)",
-        state.player.x,
-        state.player.y,
-        state.player.z);
-    ImGui::Text("Player %s", state.playerDead ? "dead" : "alive");
+        primaryPlayer.cell.x,
+        primaryPlayer.cell.y,
+        primaryPlayer.cell.z);
+    ImGui::Text("Player %s", primaryPlayer.dead ? "dead" : "alive");
+    ImGui::Text("Player instances: %zu", state.players.size());
     ImGui::Text("Movables %zu", state.movables.size());
     ImGui::Text("History %zu", context.gameplaySession.historySize());
     ImGui::Text(
@@ -116,6 +120,7 @@ void ApplicationDebugUi::draw(const Context& context) const
     ImGui::Text(
         "End %s",
         rules::isEndUnlocked(context.level, state) ? "unlocked" : "locked");
+    result.solveCurrentScreen = ImGui::Button("Solve Current Screen");
     ImGui::Text(
         "Task workers %u, tasks run %llu",
         taskSystem().workerCount(),
@@ -538,6 +543,7 @@ void ApplicationDebugUi::draw(const Context& context) const
 #else
     (void)context;
 #endif
+    return result;
 }
 
 } // namespace sokoban
