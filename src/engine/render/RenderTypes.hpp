@@ -153,6 +153,12 @@ template <typename FindTextureByName>
 }
 
 struct RenderFrameData {
+    enum class EditorDecorationHighlight {
+        None,
+        Hovered,
+        Selected,
+    };
+
     struct CameraExtent {
         int32_t originX = 0;
         int32_t originY = 0;
@@ -235,6 +241,9 @@ struct RenderFrameData {
         float modelRotationOffsetRadians = 0.0f;
         std::optional<ModelTransform> modelTransform;
         RenderSurfaceEffect effect = RenderSurfaceEffect::Standard;
+        std::optional<uint32_t> editorDecorationIndex;
+        EditorDecorationHighlight editorDecorationHighlight =
+            EditorDecorationHighlight::None;
     };
 
     struct IsoFace {

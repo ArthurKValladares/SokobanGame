@@ -1342,6 +1342,14 @@ private:
         };
         const bool mirrorEnergy =
             tile.effect == RenderSurfaceEffect::MirrorEnergy;
+        const float editorHighlightState =
+            tile.editorDecorationHighlight ==
+                    RenderFrameData::EditorDecorationHighlight::Selected
+                ? 2.0f
+                : (tile.editorDecorationHighlight ==
+                          RenderFrameData::EditorDecorationHighlight::Hovered
+                      ? 1.0f
+                      : 0.0f);
         const Vec3 modelRotation = tile.modelTransform
             ? tile.modelTransform->rotationRadians
             : Vec3 {
@@ -1417,9 +1425,11 @@ private:
                 static_cast<float>(material.textureIndex),
                 mirrorEnergy
                     ? effectAnimationTimeSeconds
-                    : (tile.isEditorPreview
-                            ? -config::iceBlurRadiusPixels
-                            : config::iceBlurRadiusPixels),
+                    : (editorHighlightState > 0.0f
+                            ? effectAnimationTimeSeconds
+                            : (tile.isEditorPreview
+                                      ? -config::iceBlurRadiusPixels
+                                      : config::iceBlurRadiusPixels)),
             },
             .gridColor = mirrorEnergy
                 ? Vec4 {
@@ -1436,7 +1446,7 @@ private:
                   },
             .textureOptions = {
                 shaderValue(material.mode),
-                modelRotation.z,
+                editorHighlightState,
                 std::max(lighting.specularStrength, 0.0f),
                 std::max(lighting.specularPower, 1.0f),
             },

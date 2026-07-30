@@ -50,6 +50,7 @@ public:
         const LevelEditor& editor;
         const PresentationSettings& settings;
         std::optional<GridPosition3> hoverCell;
+        std::optional<std::size_t> hoverDecoration;
         bool deleting = false;
         float worldAnimationTimeSeconds = 0.0f;
         float conveyorBeltScrollOffset = 0.0f;

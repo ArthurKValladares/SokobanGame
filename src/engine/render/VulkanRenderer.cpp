@@ -16,6 +16,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <limits>
 #include <optional>
 #include <ranges>
 #include <stdexcept>
@@ -33,6 +35,78 @@ void vkCheck(VkResult result, const char* message)
     if (result != VK_SUCCESS) {
         throw std::runtime_error(std::string(message) + " (VkResult " + std::to_string(result) + ")");
     }
+}
+
+Vec3 transformedModelPoint(
+    const ModelTransformPoints& transform,
+    Vec3 localPoint)
+{
+    const Vec3 xAxis {
+        transform.xPoint.x - transform.origin.x,
+        transform.xPoint.y - transform.origin.y,
+        transform.xPoint.z - transform.origin.z,
+    };
+    const Vec3 yAxis {
+        transform.yPoint.x - transform.origin.x,
+        transform.yPoint.y - transform.origin.y,
+        transform.yPoint.z - transform.origin.z,
+    };
+    const Vec3 zAxis {
+        transform.zPoint.x - transform.origin.x,
+        transform.zPoint.y - transform.origin.y,
+        transform.zPoint.z - transform.origin.z,
+    };
+    return {
+        transform.origin.x + xAxis.x * localPoint.x +
+            yAxis.x * localPoint.y + zAxis.x * localPoint.z,
+        transform.origin.y + xAxis.y * localPoint.x +
+            yAxis.y * localPoint.y + zAxis.y * localPoint.z,
+        transform.origin.z + xAxis.z * localPoint.x +
+            yAxis.z * localPoint.y + zAxis.z * localPoint.z,
+    };
+}
+
+float cross(Vec2 origin, Vec2 first, Vec2 second)
+{
+    return (first.x - origin.x) * (second.y - origin.y) -
+        (first.y - origin.y) * (second.x - origin.x);
+}
+
+bool pointInConvexHull(std::array<Vec2, 8> points, Vec2 point)
+{
+    std::ranges::sort(points, {}, [](Vec2 value) {
+        return std::pair { value.x, value.y };
+    });
+    std::array<Vec2, 16> hull {};
+    std::size_t count = 0;
+    for (Vec2 candidate : points) {
+        while (count >= 2 &&
+               cross(hull[count - 2], hull[count - 1], candidate) <= 0.0f) {
+            --count;
+        }
+        hull[count++] = candidate;
+    }
+    const std::size_t lowerCount = count;
+    for (std::size_t index = points.size() - 1; index-- > 0;) {
+        const Vec2 candidate = points[index];
+        while (count > lowerCount &&
+               cross(hull[count - 2], hull[count - 1], candidate) <= 0.0f) {
+            --count;
+        }
+        hull[count++] = candidate;
+    }
+    if (count < 4) {
+        return false;
+    }
+    --count;
+    constexpr float edgeTolerancePixels = 1.5f;
+    for (std::size_t index = 0; index < count; ++index) {
+        if (cross(hull[index], hull[(index + 1) % count], point) <
+            -edgeTolerancePixels) {
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace
@@ -498,6 +572,95 @@ std::optional<Vec3> VulkanRenderer::pickIsoGroundPoint(
             static_cast<float>(outputExtent.width),
             static_cast<float>(outputExtent.height),
         });
+}
+
+std::optional<std::size_t> VulkanRenderer::pickDecoration(
+    const PreparedFrame& frame,
+    Vec2 pixelPosition) const
+{
+    const PreparedFrameScratch& prepared = resolvePreparedFrame(frame);
+    if (prepared.frameData.viewMode != RenderViewMode::Isometric3D) {
+        return std::nullopt;
+    }
+    const VkExtent2D outputExtent = activeResources_.swapchain->extent();
+    if (outputExtent.width == 0 || outputExtent.height == 0) {
+        return std::nullopt;
+    }
+
+    std::optional<std::size_t> result;
+    float nearestDepth = std::numeric_limits<float>::max();
+    for (const RenderFrameData::Tile& tile : prepared.frameData.tiles) {
+        if (!tile.editorDecorationIndex || tile.model.isCube()) {
+            continue;
+        }
+        VulkanModelResources::ModelBounds bounds =
+            modelResources_.boundsForModel(tile.model);
+        if (!bounds.valid) {
+            bounds = {
+                .minimum = { 0.0f, 0.0f, 0.0f },
+                .maximum = { 1.0f, 1.0f, 1.0f },
+                .valid = true,
+            };
+        }
+
+        const ModelTransformPoints transform =
+            IsoScenePreparer::modelTransformPoints(tile);
+        const std::array<Vec3, 8> localCorners {
+            Vec3 { bounds.minimum.x, bounds.minimum.y, bounds.minimum.z },
+            Vec3 { bounds.maximum.x, bounds.minimum.y, bounds.minimum.z },
+            Vec3 { bounds.minimum.x, bounds.maximum.y, bounds.minimum.z },
+            Vec3 { bounds.maximum.x, bounds.maximum.y, bounds.minimum.z },
+            Vec3 { bounds.minimum.x, bounds.minimum.y, bounds.maximum.z },
+            Vec3 { bounds.maximum.x, bounds.minimum.y, bounds.maximum.z },
+            Vec3 { bounds.minimum.x, bounds.maximum.y, bounds.maximum.z },
+            Vec3 { bounds.maximum.x, bounds.maximum.y, bounds.maximum.z },
+        };
+        Vec2 minimum {
+            std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max(),
+        };
+        Vec2 maximum {
+            std::numeric_limits<float>::lowest(),
+            std::numeric_limits<float>::lowest(),
+        };
+        std::array<Vec2, 8> projectedCorners {};
+        float depth = 0.0f;
+        for (std::size_t corner = 0; corner < localCorners.size(); ++corner) {
+            const Vec3 localCorner = localCorners[corner];
+            const Vec3 projected = IsoScenePreparer::projectIsoPoint(
+                prepared.scene.isoLayout,
+                prepared.scene.renderExtent,
+                transformedModelPoint(transform, localCorner));
+            const Vec2 pixel {
+                (projected.x + 1.0f) * 0.5f *
+                    static_cast<float>(outputExtent.width),
+                (1.0f - projected.y) * 0.5f *
+                    static_cast<float>(outputExtent.height),
+            };
+            projectedCorners[corner] = pixel;
+            minimum.x = std::min(minimum.x, pixel.x);
+            minimum.y = std::min(minimum.y, pixel.y);
+            maximum.x = std::max(maximum.x, pixel.x);
+            maximum.y = std::max(maximum.y, pixel.y);
+            depth += projected.z;
+        }
+        constexpr float pickPaddingPixels = 3.0f;
+        if (pixelPosition.x < minimum.x - pickPaddingPixels ||
+            pixelPosition.y < minimum.y - pickPaddingPixels ||
+            pixelPosition.x > maximum.x + pickPaddingPixels ||
+            pixelPosition.y > maximum.y + pickPaddingPixels) {
+            continue;
+        }
+        if (!pointInConvexHull(projectedCorners, pixelPosition)) {
+            continue;
+        }
+        depth /= static_cast<float>(localCorners.size());
+        if (depth < nearestDepth) {
+            nearestDepth = depth;
+            result = static_cast<std::size_t>(*tile.editorDecorationIndex);
+        }
+    }
+    return result;
 }
 
 std::optional<Vec2> VulkanRenderer::projectToPixels(

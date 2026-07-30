@@ -459,11 +459,13 @@ void testEditorFrameProvidesInvisibleExpansionBorderAndPreview()
         .editor = editor,
         .settings = {},
         .hoverCell = GridPosition3 { -1, 0, 0 },
+        .worldAnimationTimeSeconds = 1.25f,
     });
 
     CHECK(frame.levelWidth == 2);
     CHECK(frame.levelHeight == 2);
     CHECK(frame.gridPickBorder == 1);
+    CHECK(near(frame.effectAnimationTimeSeconds, 1.25f));
     const auto pickCell = std::ranges::find_if(
         frame.tiles,
         [](const RenderFrameData::Tile& tile) {

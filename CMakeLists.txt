@@ -158,6 +158,7 @@ add_library(sokoban_core STATIC
     src/engine/BoardLayout.cpp
     src/engine/ContentPipeline.cpp
     src/engine/DecorationAssetRegistry.cpp
+    src/engine/DecorationGizmo.cpp
     src/engine/DecorationMeshCatalog.cpp
     src/engine/GameplayPresentation.cpp
     src/engine/GameplayLoop.cpp
@@ -479,6 +480,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME decoration_mesh_catalog TARGET sokoban_decoration_mesh_catalog_tests
         LIBS sokoban_core
         SOURCES tests/DecorationMeshCatalogTests.cpp
+    )
+    sokoban_add_test(NAME decoration_gizmo TARGET sokoban_decoration_gizmo_tests
+        LIBS sokoban_core
+        SOURCES tests/DecorationGizmoTests.cpp
     )
     sokoban_add_test(NAME animation_controller TARGET sokoban_animation_controller_tests
         LIBS sokoban_core

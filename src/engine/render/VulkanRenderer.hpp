@@ -83,6 +83,12 @@ public:
     [[nodiscard]] std::optional<Vec3> pickIsoGroundPoint(
         const PreparedFrame& frame,
         Vec2 pixelPosition) const;
+    // Selects Debug-authored decorations using their transformed mesh bounds.
+    // The frame tags only editor decoration models, so gameplay models are
+    // never accidentally selectable through this path.
+    [[nodiscard]] std::optional<std::size_t> pickDecoration(
+        const PreparedFrame& frame,
+        Vec2 pixelPosition) const;
     // Uploads freshly painted pixels over a resident texture.
     bool updateTexture(RenderTexture texture, const ImageData& image);
     // Picks up textures appended to the manifest after startup.

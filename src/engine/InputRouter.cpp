@@ -41,7 +41,9 @@ InputRouter::EventResult InputRouter::routeEvent(
     const bool editorEditModifier = keyboardEvent &&
         context.editorEditing &&
         (event.key.scancode == SDL_SCANCODE_R ||
-            event.key.scancode == SDL_SCANCODE_D);
+            event.key.scancode == SDL_SCANCODE_D ||
+            event.key.scancode == SDL_SCANCODE_T ||
+            event.key.scancode == SDL_SCANCODE_S);
     const bool menuBackKey = keyboardEvent &&
         input.keyBoundToAction(event.key.scancode, InputAction::MenuBack);
 
@@ -130,6 +132,7 @@ InputRouter::Frame InputRouter::routeFrame(
         .primaryPressed = input.mouseButtonPressed(SDL_BUTTON_LEFT),
     };
     if (context.editorEditing && !shellOpen) {
+        const bool allowEditorShortcuts = !context.keyboardCaptured;
         frame.editor = {
             .pointerPosition = input.mousePosition(),
             .primaryPressed = input.mouseButtonPressed(SDL_BUTTON_LEFT),
@@ -137,6 +140,12 @@ InputRouter::Frame InputRouter::routeFrame(
             .undoPressed = input.keyPressed(SDL_SCANCODE_Z),
             .deleting = input.keyDown(SDL_SCANCODE_D),
             .replaceLayer = input.keyDown(SDL_SCANCODE_R),
+            .translateGizmoPressed = allowEditorShortcuts &&
+                input.keyPressed(SDL_SCANCODE_T),
+            .rotateGizmoPressed = allowEditorShortcuts &&
+                input.keyPressed(SDL_SCANCODE_R),
+            .scaleGizmoPressed = allowEditorShortcuts &&
+                input.keyPressed(SDL_SCANCODE_S),
             .pointerCaptured = context.mouseCaptured,
         };
     }

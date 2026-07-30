@@ -20,6 +20,7 @@
 #include "engine/LevelEditor.hpp"
 #include "engine/LevelEditorDebugUi.hpp"
 #include "engine/DecorationMeshCatalog.hpp"
+#include "engine/DecorationGizmo.hpp"
 #include "engine/DecorationAssetRegistry.hpp"
 #include "engine/Math.hpp"
 #include "engine/PresentationSettings.hpp"
@@ -86,6 +87,7 @@ private:
     void drawDraftExitConfirmation();
     // Ring showing where and how large the ground brush will paint.
     void drawBrushPreview();
+    void drawDecorationGizmo();
     void updateEditorPainting(
         const InputRouter::EditorInput& input,
         const VulkanRenderer::PreparedFrame* previousRenderFrame);
@@ -95,6 +97,13 @@ private:
         const InputRouter::EditorInput& input,
         const VulkanRenderer::PreparedFrame* previousRenderFrame,
         Vec2 pointerPixels);
+    bool updateDecorationEditing(
+        const InputRouter::EditorInput& input,
+        const VulkanRenderer::PreparedFrame& previousRenderFrame,
+        Vec2 pointerPixels);
+    [[nodiscard]] std::optional<DecorationGizmo::Geometry>
+        decorationGizmoGeometry(
+            const VulkanRenderer::PreparedFrame& frame) const;
     // Opens the splat map belonging to the document currently being edited.
     bool openGroundPainting();
     // Creates and registers a splat map for the edited screen, then opens it
@@ -161,6 +170,8 @@ private:
     AnimationPreviewDebugUi animationPreviewDebugUi_;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;
     std::optional<GridPosition3> editorHoverCell_;
+    std::optional<std::size_t> editorHoverDecoration_;
+    DecorationGizmo decorationGizmo_;
     SplatPainter splatPainter_;
     // World position of the brush under the pointer, for the preview ring:
     // x/y are board tiles, z is the height of the surface it landed on.

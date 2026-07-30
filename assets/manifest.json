@@ -150,6 +150,14 @@
       "path": "custom/textures/ground_splat_level3_screen3.png",
       "filter": "linear",
       "colorSpace": "linear"
+    },
+    {
+      "name": "DecorationTexture_rogue_texture",
+      "path": "KayKit Adventurers 2.0/Assets/gltf/rogue_texture.png"
+    },
+    {
+      "name": "DecorationTexture_block_bits_texture",
+      "path": "KayKit Block Bits 1.0/Assets/gltf/block_bits_texture.png"
     }
   ],
   "models": [
@@ -279,6 +287,60 @@
     {
       "name": "Decoration_rug_rectangle_stripes_B",
       "path": "KayKit Furniture Bits 1.0/Assets/gltf/rug_rectangle_stripes_B.gltf",
+      "material": {
+        "mode": "texture",
+        "texture": "FurnitureBits"
+      },
+      "preserveSourceScale": true
+    },
+    {
+      "name": "Decoration_arrow_crossbow",
+      "path": "KayKit Adventurers 2.0/Assets/gltf/arrow_crossbow.gltf",
+      "material": {
+        "mode": "texture",
+        "texture": "DecorationTexture_rogue_texture"
+      },
+      "preserveSourceScale": true
+    },
+    {
+      "name": "Decoration_metal",
+      "path": "KayKit Block Bits 1.0/Assets/gltf/metal.gltf",
+      "material": {
+        "mode": "texture",
+        "texture": "DecorationTexture_block_bits_texture"
+      },
+      "preserveSourceScale": true
+    },
+    {
+      "name": "Decoration_striped_block_blue",
+      "path": "KayKit Block Bits 1.0/Assets/gltf/striped_block_blue.gltf",
+      "material": {
+        "mode": "texture",
+        "texture": "DecorationTexture_block_bits_texture"
+      },
+      "preserveSourceScale": true
+    },
+    {
+      "name": "Decoration_chair_A",
+      "path": "KayKit Furniture Bits 1.0/Assets/gltf/chair_A.gltf",
+      "material": {
+        "mode": "texture",
+        "texture": "FurnitureBits"
+      },
+      "preserveSourceScale": true
+    },
+    {
+      "name": "Decoration_chair_desk_A",
+      "path": "KayKit Furniture Bits 1.0/Assets/gltf/chair_desk_A.gltf",
+      "material": {
+        "mode": "texture",
+        "texture": "FurnitureBits"
+      },
+      "preserveSourceScale": true
+    },
+    {
+      "name": "Decoration_keyboard",
+      "path": "KayKit Furniture Bits 1.0/Assets/gltf/keyboard.gltf",
       "material": {
         "mode": "texture",
         "texture": "FurnitureBits"

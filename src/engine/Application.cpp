@@ -393,6 +393,7 @@ void Application::run()
         }
         drawDraftExitConfirmation();
         drawBrushPreview();
+        drawDecorationGizmo();
 
         if (const std::optional<TitleAction> titleAction = titleScreen_.draw(
                 ui_, pixelSize, routedInput.title)) {
@@ -636,6 +637,200 @@ void Application::drawBrushPreview()
 #endif
 }
 
+std::optional<DecorationGizmo::Geometry>
+Application::decorationGizmoGeometry(
+    const VulkanRenderer::PreparedFrame& frame) const
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    const Level::Decoration* decoration = levelEditor_.selectedDecoration();
+    if (!decoration || levelEditor_.tool() != LevelEditor::Tool::Decorations) {
+        return std::nullopt;
+    }
+    const std::optional<Vec2> projectedOrigin =
+        renderer_.projectToPixels(frame, decoration->position);
+    if (!projectedOrigin) {
+        return std::nullopt;
+    }
+
+    constexpr float targetAxisLengthPixels = 92.0f;
+    constexpr float ringRadiusScale = 0.72f;
+    const std::array<Vec3, 3> axes {
+        Vec3 { 1.0f, 0.0f, 0.0f },
+        Vec3 { 0.0f, 1.0f, 0.0f },
+        Vec3 { 0.0f, 0.0f, 1.0f },
+    };
+    auto addScaled = [](Vec3 origin, Vec3 axis, float amount) {
+        return Vec3 {
+            origin.x + axis.x * amount,
+            origin.y + axis.y * amount,
+            origin.z + axis.z * amount,
+        };
+    };
+    auto pixelDistance = [](Vec2 left, Vec2 right) {
+        const float x = left.x - right.x;
+        const float y = left.y - right.y;
+        return std::sqrt(x * x + y * y);
+    };
+
+    DecorationGizmo::Geometry geometry;
+    geometry.origin = *projectedOrigin;
+    std::array<float, 3> worldLengths {};
+    for (std::size_t axis = 0; axis < axes.size(); ++axis) {
+        const std::optional<Vec2> projectedUnit = renderer_.projectToPixels(
+            frame, addScaled(decoration->position, axes[axis], 1.0f));
+        if (!projectedUnit) {
+            return std::nullopt;
+        }
+        const float unitPixels = std::max(
+            pixelDistance(*projectedUnit, *projectedOrigin), 1.0f);
+        worldLengths[axis] = std::clamp(
+            targetAxisLengthPixels / unitPixels, 0.05f, 100.0f);
+        const std::optional<Vec2> endpoint = renderer_.projectToPixels(
+            frame,
+            addScaled(
+                decoration->position, axes[axis], worldLengths[axis]));
+        if (!endpoint) {
+            return std::nullopt;
+        }
+        geometry.axes[axis] = {
+            .start = *projectedOrigin,
+            .end = *endpoint,
+            .worldLength = worldLengths[axis],
+        };
+    }
+
+    constexpr int ringSegments = 64;
+    const std::array<std::array<std::size_t, 2>, 3> ringAxes {
+        std::array<std::size_t, 2> { 1, 2 },
+        std::array<std::size_t, 2> { 0, 2 },
+        std::array<std::size_t, 2> { 0, 1 },
+    };
+    for (std::size_t ring = 0; ring < geometry.rings.size(); ++ring) {
+        std::vector<Vec2>& points = geometry.rings[ring];
+        points.reserve(ringSegments + 1);
+        for (int segment = 0; segment <= ringSegments; ++segment) {
+            const float angle = static_cast<float>(segment) *
+                2.0f * std::numbers::pi_v<float> /
+                static_cast<float>(ringSegments);
+            const std::size_t first = ringAxes[ring][0];
+            const std::size_t second = ringAxes[ring][1];
+            Vec3 world = addScaled(
+                decoration->position,
+                axes[first],
+                std::cos(angle) * worldLengths[first] * ringRadiusScale);
+            world = addScaled(
+                world,
+                axes[second],
+                std::sin(angle) * worldLengths[second] * ringRadiusScale);
+            const std::optional<Vec2> pixel =
+                renderer_.projectToPixels(frame, world);
+            if (!pixel) {
+                return std::nullopt;
+            }
+            points.push_back(*pixel);
+        }
+    }
+    return geometry;
+#else
+    (void)frame;
+    return std::nullopt;
+#endif
+}
+
+void Application::drawDecorationGizmo()
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (!preparedRenderFrame_ || !levelEditor_.editingDocument()) {
+        return;
+    }
+    const std::optional<DecorationGizmo::Geometry> geometry =
+        decorationGizmoGeometry(*preparedRenderFrame_);
+    if (!geometry) {
+        return;
+    }
+
+    const Vec2 windowSize = window_.size();
+    const Vec2 pixelSize = window_.sizeInPixels();
+    const Vec2 mouse = input_.mousePosition();
+    const Vec2 pointerPixels {
+        windowSize.x > 0.0f ? mouse.x * pixelSize.x / windowSize.x : mouse.x,
+        windowSize.y > 0.0f ? mouse.y * pixelSize.y / windowSize.y : mouse.y,
+    };
+    const std::optional<DecorationGizmo::Axis> hovered =
+        renderer_.wantsMouseCapture()
+        ? std::nullopt
+        : decorationGizmo_.hoveredAxis(*geometry, pointerPixels);
+    const std::optional<DecorationGizmo::Axis> active =
+        decorationGizmo_.activeAxis();
+    constexpr std::array<ImU32, 3> axisColors {
+        IM_COL32(235, 75, 72, 255),
+        IM_COL32(80, 210, 105, 255),
+        IM_COL32(72, 135, 245, 255),
+    };
+    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
+    auto point = [](Vec2 value) { return ImVec2(value.x, value.y); };
+    auto colorFor = [&](std::size_t axis) {
+        const DecorationGizmo::Axis value =
+            static_cast<DecorationGizmo::Axis>(axis);
+        return active == value || hovered == value
+            ? IM_COL32(255, 226, 92, 255)
+            : axisColors[axis];
+    };
+
+    if (decorationGizmo_.mode() == DecorationGizmo::Mode::Rotate) {
+        for (std::size_t axis = 0; axis < geometry->rings.size(); ++axis) {
+            const std::vector<Vec2>& ring = geometry->rings[axis];
+            for (std::size_t index = 1; index < ring.size(); ++index) {
+                drawList->AddLine(
+                    point(ring[index - 1]), point(ring[index]),
+                    IM_COL32(20, 24, 30, 210), 5.5f);
+                drawList->AddLine(
+                    point(ring[index - 1]), point(ring[index]),
+                    colorFor(axis), 2.8f);
+            }
+        }
+        return;
+    }
+
+    for (std::size_t axis = 0; axis < geometry->axes.size(); ++axis) {
+        const DecorationGizmo::AxisHandle& handle = geometry->axes[axis];
+        const Vec2 delta {
+            handle.end.x - handle.start.x,
+            handle.end.y - handle.start.y,
+        };
+        const float magnitude = std::max(
+            std::sqrt(delta.x * delta.x + delta.y * delta.y), 1.0f);
+        const Vec2 direction { delta.x / magnitude, delta.y / magnitude };
+        const Vec2 perpendicular { -direction.y, direction.x };
+        const ImU32 color = colorFor(axis);
+        drawList->AddLine(
+            point(handle.start), point(handle.end),
+            IM_COL32(20, 24, 30, 220), 6.5f);
+        drawList->AddLine(
+            point(handle.start), point(handle.end), color, 3.5f);
+        if (decorationGizmo_.mode() == DecorationGizmo::Mode::Translate) {
+            const Vec2 base {
+                handle.end.x - direction.x * 13.0f,
+                handle.end.y - direction.y * 13.0f,
+            };
+            drawList->AddTriangleFilled(
+                point(handle.end),
+                point({ base.x + perpendicular.x * 6.0f,
+                        base.y + perpendicular.y * 6.0f }),
+                point({ base.x - perpendicular.x * 6.0f,
+                        base.y - perpendicular.y * 6.0f }),
+                color);
+        } else {
+            drawList->AddRectFilled(
+                ImVec2(handle.end.x - 5.5f, handle.end.y - 5.5f),
+                ImVec2(handle.end.x + 5.5f, handle.end.y + 5.5f),
+                color,
+                1.0f);
+        }
+    }
+#endif
+}
+
 void Application::drawDraftExitConfirmation()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -684,8 +879,13 @@ void Application::updateEditorPainting(
     (void)previousRenderFrame;
 #if SOKOBAN_ENABLE_DEBUG_UI
     editorHoverCell_.reset();
+    editorHoverDecoration_.reset();
     editorBrushPoint_.reset();
     if (input.undoPressed) {
+        if (decorationGizmo_.dragging()) {
+            decorationGizmo_.endDrag();
+            (void)levelEditor_.endSelectedDecorationTransform(false);
+        }
         // While painting, Ctrl+Z belongs to the brush: tile edits and paint
         // strokes are separate histories, and the visible one should win.
         const bool undone = splatPainter_.active()
@@ -699,6 +899,10 @@ void Application::updateEditorPainting(
         // The pointer is over an ImGui window. Release any stroke in progress
         // so dragging onto a panel does not keep painting underneath it.
         splatPainter_.endStroke();
+        if (decorationGizmo_.dragging() && !input.primaryDown) {
+            decorationGizmo_.endDrag();
+            (void)levelEditor_.endSelectedDecorationTransform();
+        }
         return;
     }
     if (!previousRenderFrame) {
@@ -732,6 +936,19 @@ void Application::updateEditorPainting(
     if (updateGroundPainting(input, previousRenderFrame, mousePixels)) {
         return;
     }
+    if (levelEditor_.tool() == LevelEditor::Tool::Decorations) {
+        if (input.translateGizmoPressed) {
+            decorationGizmo_.setMode(DecorationGizmo::Mode::Translate);
+        } else if (input.rotateGizmoPressed) {
+            decorationGizmo_.setMode(DecorationGizmo::Mode::Rotate);
+        } else if (input.scaleGizmoPressed) {
+            decorationGizmo_.setMode(DecorationGizmo::Mode::Scale);
+        }
+        if (updateDecorationEditing(
+                input, *previousRenderFrame, mousePixels)) {
+            return;
+        }
+    }
     if (const std::optional<GridPosition3> clicked =
             renderer_.pickIsoGridCell(
                 *previousRenderFrame, mousePixels)) {
@@ -754,7 +971,59 @@ void Application::updateEditorPainting(
                 levelEditor_.paintCell(target);
             }
         }
+    } else if (levelEditor_.tool() == LevelEditor::Tool::Decorations &&
+               input.primaryPressed) {
+        levelEditor_.clearDecorationSelection();
     }
+#endif
+}
+
+bool Application::updateDecorationEditing(
+    const InputRouter::EditorInput& input,
+    const VulkanRenderer::PreparedFrame& previousRenderFrame,
+    Vec2 pointerPixels)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    editorHoverDecoration_ = renderer_.pickDecoration(
+        previousRenderFrame, pointerPixels);
+
+    if (decorationGizmo_.dragging()) {
+        if (!input.primaryDown) {
+            decorationGizmo_.endDrag();
+            (void)levelEditor_.endSelectedDecorationTransform();
+            return true;
+        }
+        if (const std::optional<Level::Decoration> transformed =
+                decorationGizmo_.updateDrag(pointerPixels)) {
+            (void)levelEditor_.previewSelectedDecorationTransform(*transformed);
+        }
+        return true;
+    }
+
+    if (!input.primaryPressed) {
+        return false;
+    }
+    if (const std::optional<DecorationGizmo::Geometry> geometry =
+            decorationGizmoGeometry(previousRenderFrame)) {
+        const Level::Decoration* selected = levelEditor_.selectedDecoration();
+        if (selected && decorationGizmo_.beginDrag(
+                *geometry, pointerPixels, *selected)) {
+            if (!levelEditor_.beginSelectedDecorationTransform()) {
+                decorationGizmo_.endDrag();
+            }
+            return true;
+        }
+    }
+    if (editorHoverDecoration_) {
+        (void)levelEditor_.selectDecoration(*editorHoverDecoration_);
+        return true;
+    }
+    return false;
+#else
+    (void)input;
+    (void)previousRenderFrame;
+    (void)pointerPixels;
+    return false;
 #endif
 }
 
@@ -1381,6 +1650,7 @@ InputRouter::RoutingContext Application::inputRoutingContext() const
         .optionsOpen = optionsMenu_.isOpen(),
         .titleOpen = titleScreen_.isOpen(),
         .overlayOpen = levelCompleteOverlay_.isOpen(),
+        .keyboardCaptured = renderer_.wantsKeyboardCapture(),
         .mouseCaptured = renderer_.wantsMouseCapture(),
     };
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -1481,6 +1751,7 @@ RenderFrameData Application::buildRenderFrame(
             .editor = levelEditor_,
             .settings = presentationSettings_,
             .hoverCell = editorHoverCell_,
+            .hoverDecoration = editorHoverDecoration_,
             .deleting = editorInput.deleting &&
                 levelEditor_.tool() == LevelEditor::Tool::Tiles,
             .worldAnimationTimeSeconds =

@@ -656,6 +656,44 @@ void testDecorationEditingPersistenceAndUndo()
     CHECK(loaded.decorations()[0].position.x == oldX);
 }
 
+void testDecorationTransformSessionCoalescesUndoAndCanCancel()
+{
+    TEST("decorationTransformSessionCoalescesUndoAndCanCancel");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(3, 2, false);
+    editor.setSelectedDecorationModel("Stone");
+    CHECK(editor.placeDecoration({ 1, 1, 1 }));
+    const Level::Decoration original = *editor.selectedDecoration();
+
+    CHECK(editor.beginSelectedDecorationTransform());
+    CHECK(editor.transformingSelectedDecoration());
+    Level::Decoration transformed = original;
+    transformed.position.x += 0.5f;
+    CHECK(editor.previewSelectedDecorationTransform(transformed));
+    transformed.position.x += 0.75f;
+    CHECK(editor.previewSelectedDecorationTransform(transformed));
+    CHECK(editor.endSelectedDecorationTransform());
+    CHECK(!editor.transformingSelectedDecoration());
+    CHECK(editor.selectedDecoration()->position.x == transformed.position.x);
+
+    // Both preview updates are one committed edit.
+    CHECK(editor.tryUndoEdit());
+    CHECK(*editor.selectedDecoration() == original);
+    // The next undo is the placement itself, proving no preview record leaked.
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.decorations().empty());
+
+    CHECK(editor.placeDecoration({ 1, 1, 1 }));
+    const Level::Decoration beforeCancel = *editor.selectedDecoration();
+    CHECK(editor.beginSelectedDecorationTransform());
+    transformed = beforeCancel;
+    transformed.scale = { 2.0f, 3.0f, 4.0f };
+    CHECK(editor.previewSelectedDecorationTransform(transformed));
+    CHECK(editor.endSelectedDecorationTransform(false));
+    CHECK(*editor.selectedDecoration() == beforeCancel);
+}
+
 } // namespace
 
 int main()
@@ -676,6 +714,7 @@ int main()
     testBrowserFiltersJunkAndRejectsForeignDirectories();
     testFailedRenumberPreservesSourceAndRuntimeTrees();
     testDecorationEditingPersistenceAndUndo();
+    testDecorationTransformSessionCoalescesUndoAndCanCancel();
 
     if (failures == 0) {
         std::cout << "LevelEditorTests: " << checks << " checks passed\n";

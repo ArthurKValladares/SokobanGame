@@ -485,18 +485,7 @@ bool LevelEditor::updateSelectedDecoration(
         *document_.selectedDecoration >= document_.decorations.size()) {
         return false;
     }
-    const auto finite = [](Vec3 value) {
-        return std::isfinite(value.x) &&
-            std::isfinite(value.y) &&
-            std::isfinite(value.z);
-    };
-    if (decoration.model.empty() ||
-        !finite(decoration.position) ||
-        !finite(decoration.rotationDegrees) ||
-        !finite(decoration.scale) ||
-        decoration.scale.x <= 0.0f ||
-        decoration.scale.y <= 0.0f ||
-        decoration.scale.z <= 0.0f) {
+    if (!validDecorationTransform(decoration)) {
         document_.status = "Decoration transform is invalid.";
         return false;
     }
@@ -512,6 +501,76 @@ bool LevelEditor::updateSelectedDecoration(
     document_.status = "Updated decoration transform.";
     recordDocumentChange(before);
     return true;
+}
+
+bool LevelEditor::beginSelectedDecorationTransform()
+{
+    if (decorationTransformBefore_ ||
+        !document_.selectedDecoration ||
+        *document_.selectedDecoration >= document_.decorations.size()) {
+        return false;
+    }
+    decorationTransformBefore_ = captureDocumentSnapshot();
+    return true;
+}
+
+bool LevelEditor::previewSelectedDecorationTransform(
+    const Level::Decoration& decoration)
+{
+    if (!decorationTransformBefore_ ||
+        !document_.selectedDecoration ||
+        *document_.selectedDecoration >= document_.decorations.size() ||
+        !validDecorationTransform(decoration)) {
+        return false;
+    }
+    Level::Decoration& current =
+        document_.decorations[*document_.selectedDecoration];
+    if (current == decoration) {
+        return false;
+    }
+    current = decoration;
+    document_.dirty = true;
+    document_.status = "Transforming decoration.";
+    return true;
+}
+
+bool LevelEditor::endSelectedDecorationTransform(bool commit)
+{
+    if (!decorationTransformBefore_) {
+        return false;
+    }
+    const DocumentSnapshot before = *decorationTransformBefore_;
+    decorationTransformBefore_.reset();
+    if (!commit) {
+        applyDocumentSnapshot(before);
+        document_.status = "Cancelled decoration transform.";
+        return true;
+    }
+    recordDocumentChange(before);
+    document_.status = "Updated decoration transform.";
+    return true;
+}
+
+bool LevelEditor::transformingSelectedDecoration() const
+{
+    return decorationTransformBefore_.has_value();
+}
+
+bool LevelEditor::validDecorationTransform(
+    const Level::Decoration& decoration) const
+{
+    const auto finite = [](Vec3 value) {
+        return std::isfinite(value.x) &&
+            std::isfinite(value.y) &&
+            std::isfinite(value.z);
+    };
+    return !decoration.model.empty() &&
+        finite(decoration.position) &&
+        finite(decoration.rotationDegrees) &&
+        finite(decoration.scale) &&
+        decoration.scale.x > 0.0f &&
+        decoration.scale.y > 0.0f &&
+        decoration.scale.z > 0.0f;
 }
 
 bool LevelEditor::duplicateSelectedDecoration()

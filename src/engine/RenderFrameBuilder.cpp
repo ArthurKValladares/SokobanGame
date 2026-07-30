@@ -729,7 +729,10 @@ void appendStaticTiles(
 RenderFrameData::Tile decorationVisual(
     const Level::Decoration& decoration,
     const AssetManifest& manifest,
-    bool preview)
+    bool preview,
+    std::optional<std::size_t> editorIndex = std::nullopt,
+    RenderFrameData::EditorDecorationHighlight highlight =
+        RenderFrameData::EditorDecorationHighlight::None)
 {
     constexpr float radiansPerDegree =
         3.14159265358979323846f / 180.0f;
@@ -766,17 +769,34 @@ RenderFrameData::Tile decorationVisual(
             .scale = decoration.scale,
             .pivot = pivot,
         },
+        .editorDecorationIndex = editorIndex
+            ? std::optional<uint32_t>(static_cast<uint32_t>(*editorIndex))
+            : std::nullopt,
+        .editorDecorationHighlight = highlight,
     };
 }
 
 void appendDecorations(
     RenderFrameData& frame,
     const std::vector<Level::Decoration>& decorations,
-    const AssetManifest& manifest)
+    const AssetManifest& manifest,
+    std::optional<std::size_t> selected = std::nullopt,
+    std::optional<std::size_t> hovered = std::nullopt,
+    bool editorDecorations = false)
 {
-    for (const Level::Decoration& decoration : decorations) {
-        frame.tiles.push_back(
-            decorationVisual(decoration, manifest, false));
+    for (std::size_t index = 0; index < decorations.size(); ++index) {
+        const RenderFrameData::EditorDecorationHighlight highlight =
+            selected == index
+            ? RenderFrameData::EditorDecorationHighlight::Selected
+            : (hovered == index
+                ? RenderFrameData::EditorDecorationHighlight::Hovered
+                : RenderFrameData::EditorDecorationHighlight::None);
+        frame.tiles.push_back(decorationVisual(
+            decorations[index],
+            manifest,
+            false,
+            editorDecorations ? std::optional<std::size_t>(index) : std::nullopt,
+            highlight));
     }
 }
 
@@ -1329,6 +1349,7 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
     // the shared map.
     frame.groundSplat = groundSplatTextures(input.manifest, input.levelLocation);
     frame.waterAnimationTimeSeconds = input.worldAnimationTimeSeconds;
+    frame.effectAnimationTimeSeconds = input.worldAnimationTimeSeconds;
 
     const Level::LayerRows& layers = input.editor.documentLayers();
     const uint32_t activeLayer = input.editor.activeLayer();
@@ -1600,7 +1621,12 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
     }
 
     appendDecorations(
-        frame, input.editor.decorations(), input.manifest);
+        frame,
+        input.editor.decorations(),
+        input.manifest,
+        input.editor.selectedDecorationIndex(),
+        input.hoverDecoration,
+        true);
 
     if (input.editor.tool() == LevelEditor::Tool::Tiles &&
         input.hoverCell &&
@@ -1626,6 +1652,7 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
     }
     if (input.editor.tool() == LevelEditor::Tool::Decorations &&
         !input.editor.selectedDecorationModel().empty() &&
+        !input.hoverDecoration &&
         input.hoverCell &&
         input.hoverCell->x >= 0 &&
         input.hoverCell->y >= 0 &&

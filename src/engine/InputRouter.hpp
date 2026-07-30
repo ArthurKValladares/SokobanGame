@@ -44,6 +44,7 @@ public:
         bool editorEditing = false;
         bool draftPlaying = false;
         bool draftExitConfirmationOpen = false;
+        bool keyboardCaptured = false;
         bool mouseCaptured = false;
     };
 
@@ -64,6 +65,9 @@ public:
         bool undoPressed = false;
         bool deleting = false;
         bool replaceLayer = false;
+        bool translateGizmoPressed = false;
+        bool rotateGizmoPressed = false;
+        bool scaleGizmoPressed = false;
         bool pointerCaptured = false;
     };
 

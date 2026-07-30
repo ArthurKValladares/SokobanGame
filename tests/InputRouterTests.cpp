@@ -134,6 +134,8 @@ void testEditorFrameUsesRawControls()
     pressKey(router, input, SDL_SCANCODE_Z);
     pressKey(router, input, SDL_SCANCODE_D);
     pressKey(router, input, SDL_SCANCODE_R);
+    pressKey(router, input, SDL_SCANCODE_T);
+    pressKey(router, input, SDL_SCANCODE_S);
 
     const sokoban::InputRouter::Frame frame = router.routeFrame(
         input,
@@ -141,8 +143,28 @@ void testEditorFrameUsesRawControls()
     CHECK(frame.editor.undoPressed);
     CHECK(frame.editor.deleting);
     CHECK(frame.editor.replaceLayer);
+    CHECK(frame.editor.rotateGizmoPressed);
+    CHECK(frame.editor.translateGizmoPressed);
+    CHECK(frame.editor.scaleGizmoPressed);
     CHECK(frame.editor.pointerCaptured);
     CHECK(!frame.gameplay.undoPressed);
+}
+
+void testEditorGizmoShortcutsRespectKeyboardCapture()
+{
+    sokoban::InputRouter router;
+    sokoban::InputState input(false);
+    input.beginFrame();
+    pressKey(router, input, SDL_SCANCODE_R);
+    pressKey(router, input, SDL_SCANCODE_T);
+    pressKey(router, input, SDL_SCANCODE_S);
+
+    const sokoban::InputRouter::Frame frame = router.routeFrame(
+        input,
+        { .editorEditing = true, .keyboardCaptured = true });
+    CHECK(!frame.editor.rotateGizmoPressed);
+    CHECK(!frame.editor.translateGizmoPressed);
+    CHECK(!frame.editor.scaleGizmoPressed);
 }
 
 void testEditorPointerExposesPressAndHold()
@@ -189,6 +211,7 @@ int main()
     testBackPriority();
     testEditorFrameUsesRawControls();
     testEditorPointerExposesPressAndHold();
+    testEditorGizmoShortcutsRespectKeyboardCapture();
 
     if (failures == 0) {
         std::cout << "InputRouterTests: " << checks << " checks passed\n";

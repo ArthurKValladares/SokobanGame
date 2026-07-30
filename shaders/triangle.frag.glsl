@@ -187,6 +187,28 @@ void main()
             specular *= smoothstep(0.0, 0.2, lambertDiffuse) * shadow * specularStrength;
             color += pc.sunRadianceAndAmbientBlue.rgb * specular * materialColor.a;
         }
+
+    }
+
+    int editorHighlight = int(pc.textureOptions.y + 0.5);
+    if (pc.gridColor.w < 0.0 && editorHighlight > 0) {
+        vec3 highlightColor = editorHighlight == 2
+            ? vec3(1.0, 0.48, 0.08)
+            : vec3(0.08, 0.88, 1.0);
+        float tintStrength = editorHighlight == 2 ? 0.48 : 0.38;
+        float pulse = 0.5 + 0.5 * sin(pc.materialOptions.w * 3.5);
+
+        // A narrow screen-space sweep gives the opaque tint some life without
+        // changing the model's geometry, texture, depth, or silhouette.
+        float sweepPhase = fract(
+            (gl_FragCoord.x + gl_FragCoord.y) * 0.0025 -
+            pc.materialOptions.w * 0.55);
+        float glimmer = 1.0 - smoothstep(0.0, 0.075, abs(sweepPhase - 0.5));
+
+        color = mix(color, highlightColor, tintStrength + pulse * 0.04);
+        color += mix(vec3(1.0), highlightColor, 0.35) * glimmer * 0.32;
+        outColor = vec4(color, 1.0);
+        return;
     }
 
     if (pc.materialOptions.x > 0.5) {

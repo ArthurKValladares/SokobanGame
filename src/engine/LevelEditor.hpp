@@ -74,6 +74,13 @@ public:
     void clearDecorationSelection();
     [[nodiscard]] bool updateSelectedDecoration(
         const Level::Decoration& decoration);
+    // Gizmo drags preview many transforms but produce one undo record. The
+    // session begins from a full document snapshot so cancellation is exact.
+    [[nodiscard]] bool beginSelectedDecorationTransform();
+    [[nodiscard]] bool previewSelectedDecorationTransform(
+        const Level::Decoration& decoration);
+    [[nodiscard]] bool endSelectedDecorationTransform(bool commit = true);
+    [[nodiscard]] bool transformingSelectedDecoration() const;
     [[nodiscard]] bool duplicateSelectedDecoration();
     [[nodiscard]] bool deleteSelectedDecoration();
     [[nodiscard]] GridPosition3 resolveEditTarget(
@@ -180,9 +187,12 @@ private:
     [[nodiscard]] bool applyProjectMutation(
         const LevelProjectStore::Mutation& mutation);
     void loadFirstAvailableScreen();
+    [[nodiscard]] bool validDecorationTransform(
+        const Level::Decoration& decoration) const;
 
     Document document_;
     std::vector<EditActionRecord> editHistory_;
+    std::optional<DocumentSnapshot> decorationTransformBefore_;
 };
 
 } // namespace sokoban
