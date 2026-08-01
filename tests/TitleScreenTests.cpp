@@ -179,28 +179,33 @@ void testLevelSelectScreensAndLocking()
     title.openLevelSelect(sampleLevels());
     CHECK(title.page() == sokoban::TitleScreen::Page::LevelSelect);
 
-    // Completed level: every screen is selectable and choice clamps.
-    draw({ .right = true });
-    draw({ .right = true });
-    draw({ .right = true });
+    // Choosing a level opens its explicit screen picker.
+    CHECK(!draw({ .confirm = true }).has_value());
+    CHECK(title.page() == sokoban::TitleScreen::Page::ScreenSelect);
+    draw({ .down = true });
+    draw({ .down = true });
     CHECK(title.selectedScreen() == 2);
     const auto startLate = draw({ .confirm = true });
     const auto* lateStart = actionAs<sokoban::title::StartLevel>(startLate);
     CHECK(lateStart != nullptr && lateStart->level == 0 && lateStart->screen == 2);
 
-    // Screen choice resets when moving to another level.
+    // Unfinished levels expose every screen the player has reached.
     title.openLevelSelect(sampleLevels());
-    draw({ .right = true });
     draw({ .down = true });
-    CHECK(title.selectedScreen() == 0);
-
-    // Unfinished level: only reached screens are selectable.
-    draw({ .right = true });
-    draw({ .right = true });
+    draw({ .confirm = true });
+    CHECK(title.page() == sokoban::TitleScreen::Page::ScreenSelect);
+    draw({ .down = true });
     CHECK(title.selectedScreen() == 1);
     const auto startSecond = draw({ .confirm = true });
     const auto* secondStart = actionAs<sokoban::title::StartLevel>(startSecond);
     CHECK(secondStart != nullptr && secondStart->level == 1 && secondStart->screen == 1);
+
+    // Back from the screen picker returns to its parent level row.
+    title.openLevelSelect(sampleLevels());
+    draw({ .confirm = true });
+    title.back();
+    CHECK(title.page() == sokoban::TitleScreen::Page::LevelSelect);
+    CHECK(title.selectedRow() == 0);
 
     // Locked level: confirm does nothing.
     title.openLevelSelect(sampleLevels());

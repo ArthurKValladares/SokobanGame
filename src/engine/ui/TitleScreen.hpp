@@ -89,6 +89,7 @@ public:
     enum class Page {
         Main,
         LevelSelect,
+        ScreenSelect,
         SaveSlots,
         SlotDeleteConfirmation,
     };
@@ -129,6 +130,10 @@ private:
         UiContext& ui,
         UiRect panel,
         const TitleScreenInput& input);
+    [[nodiscard]] std::optional<TitleAction> drawScreenSelect(
+        UiContext& ui,
+        UiRect panel,
+        const TitleScreenInput& input);
     [[nodiscard]] std::optional<TitleAction> drawSaveSlots(
         UiContext& ui,
         UiRect panel,
@@ -149,6 +154,7 @@ private:
     Page page_ = Page::Main;
     int selectedRow_ = 0;
     int selectedScreen_ = 0;
+    int selectedLevel_ = 0;
     std::vector<TitleLevelInfo> levels_;
     std::vector<SaveSlotInfo> saveSlots_;
     int activeSlot_ = 0;
