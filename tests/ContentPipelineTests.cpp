@@ -73,6 +73,9 @@ std::string manifest(std::string_view texturePath = "textures/hero.png")
       "path": "models/hero.gltf",
       "geometry": "skinned",
       "material": { "mode": "texture", "texture": "HeroTexture" },
+      "attachments": [
+        { "path": "models/sword.gltf", "node": "handslot.r" }
+      ],
       "role": "player"
     }
   ],
@@ -105,6 +108,8 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
     writeFile(assets / "custom/ui/main-menu-rogue-pushing-rock-4k.png");
     writeFile(assets / "models/hero.gltf", R"({"buffers":[{"uri":"hero.bin"}]})");
     writeFile(assets / "models/hero.bin");
+    writeFile(assets / "models/sword.gltf", R"({"buffers":[{"uri":"sword.bin"}]})");
+    writeFile(assets / "models/sword.bin");
     writeFile(assets / "models/LICENSE.txt", "model license");
     writeFile(assets / "animations/idle.glb");
     writeFile(assets / "animations/move.glb");
@@ -154,6 +159,8 @@ void testInventoryAndStaging()
     check(contains(inventory, "manifest.json"), "manifest included");
     check(contains(inventory, "models/hero.gltf"), "model included");
     check(contains(inventory, "models/hero.bin"), "external glTF buffer included");
+    check(contains(inventory, "models/sword.gltf"), "attachment mesh included");
+    check(contains(inventory, "models/sword.bin"), "attachment dependency included");
     check(contains(inventory, "models/LICENSE.txt"), "nearby asset license included");
     check(contains(inventory, "ui/Karla-Regular.ttf"), "UI font included");
     check(contains(inventory, "ui/OFL.txt"), "UI font license included");

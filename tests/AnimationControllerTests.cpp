@@ -274,6 +274,93 @@ void testAnimatedInstancesKeepIndependentPlayback()
     CHECK(fallback[1].skinning.toClip->name == "idle");
 }
 
+void testSkinnedAttachmentsInheritAnimatedNodeTransforms()
+{
+    TEST("skinnedAttachmentsInheritAnimatedNodeTransforms");
+    Mat4 identity {};
+    identity.values[0] = 1.0f;
+    identity.values[5] = 1.0f;
+    identity.values[10] = 1.0f;
+    identity.values[15] = 1.0f;
+
+    SkinnedMeshData actor;
+    actor.nodes = {
+        SkeletonNode { .name = "root" },
+        SkeletonNode { .name = "handslot.r", .parent = 0 },
+    };
+    actor.jointNodeIndices = { 0 };
+    actor.inverseBindMatrices = { identity };
+    actor.sourceMinimum = { -10.0f, -10.0f, -10.0f };
+    actor.sourceMaximum = { 10.0f, 10.0f, 10.0f };
+    actor.preserveSourceScale = true;
+    actor.vertices.resize(3);
+    for (SkinnedVertex& vertex : actor.vertices) {
+        vertex.normal = { 0.0f, 1.0f, 0.0f };
+        vertex.joints = { 0, 0, 0, 0 };
+        vertex.weights = { 1.0f, 0.0f, 0.0f, 0.0f };
+    }
+    actor.indices = { 0, 1, 2 };
+
+    MeshData axe;
+    axe.vertices.resize(3);
+    for (MeshVertex& vertex : axe.vertices) {
+        // Source-scale static geometry is stored in engine coordinates. This
+        // corresponds to glTF source position (1, 0, 0).
+        vertex.position = { 1.0f, 0.0f, 0.0f };
+        vertex.normal = { 0.0f, 0.0f, 1.0f };
+    }
+    axe.indices = { 0, 1, 2 };
+    addSkinnedAttachment(actor, std::move(axe), "handslot.r");
+
+    GltfAnimationClip clip;
+    clip.durationSeconds = 1.0f;
+    clip.channels = {
+        AnimationChannel {
+            .targetNodeName = "handslot.r",
+            .path = AnimationChannelPath::Translation,
+            .keyframes = {
+                .times = { 0.0f, 1.0f },
+                .values = {
+                    Vec4 {},
+                    Vec4 { 2.0f, 3.0f, 4.0f, 0.0f },
+                },
+            },
+        },
+        AnimationChannel {
+            .targetNodeName = "handslot.r",
+            .path = AnimationChannelPath::Rotation,
+            .keyframes = {
+                .times = { 0.0f, 1.0f },
+                .values = {
+                    Vec4 { 0.0f, 0.0f, 0.0f, 1.0f },
+                    Vec4 { 0.0f, 0.0f, 1.0f, 0.0f },
+                },
+            },
+        },
+    };
+
+    const MeshData posed = skinGltfMesh(actor, clip, 0.5f);
+    CHECK(posed.vertices.size() == 6);
+    CHECK(posed.indices.size() == 6);
+    CHECK(posed.indices[3] == 3);
+    CHECK(posed.indices[5] == 5);
+    CHECK(near(posed.vertices[3].position.x, 1.0f));
+    CHECK(near(posed.vertices[3].position.y, -2.0f));
+    CHECK(near(posed.vertices[3].position.z, 2.5f));
+
+    bool missingNodeThrew = false;
+    try {
+        MeshData missingNodeAttachment;
+        missingNodeAttachment.vertices.resize(1);
+        missingNodeAttachment.indices = { 0 };
+        addSkinnedAttachment(
+            actor, std::move(missingNodeAttachment), "missing");
+    } catch (const std::runtime_error&) {
+        missingNodeThrew = true;
+    }
+    CHECK(missingNodeThrew);
+}
+
 } // namespace
 
 int main()
@@ -285,6 +372,7 @@ int main()
     testNonLoopingAnimationFallsBackAtClipDuration();
     testClipValidationAndClear();
     testAnimatedInstancesKeepIndependentPlayback();
+    testSkinnedAttachmentsInheritAnimatedNodeTransforms();
 
     if (failures == 0) {
         std::cout << "AnimationControllerTests: " << checks << " checks passed\n";

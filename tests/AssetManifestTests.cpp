@@ -74,6 +74,13 @@ constexpr const char* validManifest = R"json(
       "path": "models/hero.glb",
       "geometry": "skinned",
       "material": { "mode": "texture", "texture": "Tex" },
+      "attachments": [
+        {
+          "path": "models/sword.gltf",
+          "node": "handslot.r",
+          "rotateHalfTurn": true
+        }
+      ],
       "preserveAspectRatio": true,
       "rotateHalfTurn": true,
       "role": "player"
@@ -179,6 +186,13 @@ void testValidManifest()
     check(manifest.model(hero).materialMode == sokoban::ModelMaterialMode::SingleTexture,
         "hero single texture");
     check(manifest.model(hero).textureIndex == 1, "hero texture index resolved by name");
+    check(manifest.model(hero).attachments.size() == 1,
+        "hero attachment parsed");
+    check(manifest.model(hero).attachments[0].path == "models/sword.gltf" &&
+            manifest.model(hero).attachments[0].node == "handslot.r",
+        "attachment path and node preserved");
+    check(manifest.model(hero).attachments[0].rotateHalfTurn,
+        "attachment local half turn parsed");
 
     const sokoban::RenderModel belt = manifest.modelIdByName("Belt");
     check(manifest.model(belt).hasScrollingMaterial(), "scrolling material flag");
@@ -272,6 +286,16 @@ void testSyntaxAndSchemaFailures()
             { "slots", Json::array() },
         };
     }, "primitive material mappings cannot be empty");
+    checkJsonThrows([](Json& json) {
+        json["models"][0]["attachments"] = {
+            { { "path", "models/sword.gltf" }, { "node", "hand" } },
+        };
+    }, "static models cannot own skeleton attachments");
+    checkJsonThrows([](Json& json) {
+        json["models"][1]["attachments"] = {
+            { { "path", "models/sword.gltf" } },
+        };
+    }, "attachment node is required");
 }
 
 void testDomainValidationFailures()

@@ -310,12 +310,28 @@ void VulkanModelResources::requestModel(RenderModel model)
         });
     }
     const ModelGeometry geometry = definition.geometry;
-    slot.future = taskSystem().enqueue([path, options, geometry]() -> PreparedModel {
-        if (geometry == ModelGeometry::Skinned) {
-            return loadGltfSkinnedMesh(path, options);
-        }
-        return loadGltfMesh(path, options);
-    });
+    const std::filesystem::path assetRoot = assetRoot_;
+    const std::vector<AssetManifest::Model::Attachment> attachments =
+        definition.attachments;
+    slot.future = taskSystem().enqueue(
+        [path, options, geometry, assetRoot, attachments]() -> PreparedModel {
+            if (geometry == ModelGeometry::Skinned) {
+                SkinnedMeshData mesh = loadGltfSkinnedMesh(path, options);
+                for (const AssetManifest::Model::Attachment& attachment : attachments) {
+                    addSkinnedAttachment(
+                        mesh,
+                        loadGltfMesh(
+                            assetRoot / attachment.path,
+                            GltfMeshLoadOptions {
+                                .preserveSourceScale = true,
+                                .rotateHalfTurn = attachment.rotateHalfTurn,
+                            }),
+                        attachment.node);
+                }
+                return mesh;
+            }
+            return loadGltfMesh(path, options);
+        });
     slot.state = LoadState::Loading;
     requestModelDependencies(model);
 }

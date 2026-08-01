@@ -11,6 +11,8 @@ pipeline, and a headless editor model exposed through Debug ImGui tools.
   multi-screen levels, and completion tracking.
 - Ice, ladders, conveyors, falling, configurable water layers, and four
   directional mirror types that can reflect the player and movable entities.
+- Immobile animated enemies that track and attack adjacent players, can be
+  pushed by blocks, and support skeleton-driven held-item attachments.
 - Animated mirror beams, destination ghosts, sound, and particle effects.
 - Stylized procedural water with cellular ripples, two-tone shading,
   shorelines, tile borders, and submerged-entity rendering.

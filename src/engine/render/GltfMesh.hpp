@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace sokoban {
@@ -55,12 +56,18 @@ struct SkeletonNode {
     Vec3 scale { 1.0f, 1.0f, 1.0f };
 };
 
+struct SkinnedAttachment {
+    MeshData mesh;
+    uint32_t nodeIndex = 0;
+};
+
 struct SkinnedMeshData {
     std::vector<SkinnedVertex> vertices;
     std::vector<uint32_t> indices;
     std::vector<SkeletonNode> nodes;
     std::vector<uint32_t> jointNodeIndices;
     std::vector<Mat4> inverseBindMatrices;
+    std::vector<SkinnedAttachment> attachments;
     Vec3 sourceMinimum {};
     Vec3 sourceMaximum {};
     bool preserveAspectRatio = false;
@@ -106,6 +113,13 @@ struct GltfMeshLoadOptions {
 [[nodiscard]] SkinnedMeshData loadGltfSkinnedMesh(
     const std::filesystem::path& path,
     GltfMeshLoadOptions options = {});
+
+// Binds source-scale static geometry to a named skeleton node. The attachment
+// is transformed by the sampled node pose and merged into every skinned frame.
+void addSkinnedAttachment(
+    SkinnedMeshData& mesh,
+    MeshData attachment,
+    std::string_view nodeName);
 
 [[nodiscard]] GltfAnimationClip loadGltfAnimationClip(
     const std::filesystem::path& path,

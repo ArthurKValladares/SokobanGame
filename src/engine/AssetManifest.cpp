@@ -319,7 +319,7 @@ static void parseModels(const Json& root, AssetManifest& manifest)
         const Json& modelJson = models[i];
         rejectUnknownProperties(modelJson, {
             "name", "path", "geometry", "material", "preserveAspectRatio",
-            "preserveSourceScale", "rotateHalfTurn", "role",
+            "preserveSourceScale", "rotateHalfTurn", "attachments", "role",
         }, context);
 
         AssetManifest::Model model;
@@ -340,6 +340,28 @@ static void parseModels(const Json& root, AssetManifest& manifest)
             modelJson, "preserveSourceScale", false, context);
         model.rotateHalfTurn = optionalBool(
             modelJson, "rotateHalfTurn", false, context);
+        const Json& attachments = optionalArray(modelJson, "attachments", context);
+        model.attachments.reserve(attachments.size());
+        for (std::size_t attachmentIndex = 0;
+             attachmentIndex < attachments.size();
+             ++attachmentIndex) {
+            const std::string attachmentContext = context + ".attachments[" +
+                std::to_string(attachmentIndex) + "]";
+            const Json& attachment = attachments[attachmentIndex];
+            rejectUnknownProperties(
+                attachment,
+                { "path", "node", "rotateHalfTurn" },
+                attachmentContext);
+            model.attachments.push_back({
+                .path = requiredString(attachment, "path", attachmentContext),
+                .node = requiredString(attachment, "node", attachmentContext),
+                .rotateHalfTurn = optionalBool(
+                    attachment, "rotateHalfTurn", false, attachmentContext),
+            });
+        }
+        if (!model.attachments.empty() && model.geometry != ModelGeometry::Skinned) {
+            fail(context, "attachments require geometry 'skinned'");
+        }
         parseModelMaterial(modelJson, model, context);
 
         const std::optional<std::string> role = optionalString(modelJson, "role", context);

@@ -109,6 +109,14 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
             return model.name == "Decoration_desk" &&
                 model.preserveSourceScale;
         }), "authored-scale decoration model loaded");
+    check(std::ranges::any_of(
+        editor.models(),
+        [](const sokoban::AssetManifest::Model& model) {
+            return model.name == "Barbarian" &&
+                model.attachments.size() == 1 &&
+                model.attachments[0].node == "handslot.r" &&
+                model.attachments[0].rotateHalfTurn;
+        }), "skinned attachment loaded");
     check(editor.animations().size() == 6, "animations loaded");
     check(editor.tileEntries().size() == 14, "authored tile entries loaded");
     check(editor.soundSets().size() == 3, "sound sets loaded");

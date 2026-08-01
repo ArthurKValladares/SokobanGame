@@ -390,6 +390,34 @@ void AssetManifestDebugUi::drawModels(AssetManifestEditor& editor)
             changed = ImGui::Checkbox("Preserve Aspect Ratio", &model.preserveAspectRatio) || changed;
             changed = ImGui::Checkbox("Preserve Source Scale", &model.preserveSourceScale) || changed;
             changed = ImGui::Checkbox("Rotate Half Turn", &model.rotateHalfTurn) || changed;
+            if (model.geometry == ModelGeometry::Skinned) {
+                ImGui::SeparatorText("Attachments");
+                for (std::size_t attachmentIndex = 0;
+                     attachmentIndex < model.attachments.size();
+                     ++attachmentIndex) {
+                    AssetManifest::Model::Attachment& attachment =
+                        model.attachments[attachmentIndex];
+                    ImGui::PushID(static_cast<int>(attachmentIndex));
+                    changed = ImGui::InputText("Path", &attachment.path) || changed;
+                    changed = ImGui::InputText("Node", &attachment.node) || changed;
+                    changed = ImGui::Checkbox(
+                        "Rotate Half Turn", &attachment.rotateHalfTurn) || changed;
+                    if (ImGui::SmallButton("Remove Attachment")) {
+                        model.attachments.erase(
+                            model.attachments.begin() +
+                            static_cast<std::ptrdiff_t>(attachmentIndex));
+                        changed = true;
+                        ImGui::PopID();
+                        break;
+                    }
+                    ImGui::Separator();
+                    ImGui::PopID();
+                }
+                if (ImGui::Button("+ Attachment")) {
+                    model.attachments.push_back({});
+                    changed = true;
+                }
+            }
             if (ImGui::Checkbox("Player Role", &model.playerRole)) {
                 if (model.playerRole) {
                     model.enemyRole = false;

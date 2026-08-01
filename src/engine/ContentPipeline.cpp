@@ -232,6 +232,11 @@ private:
         }
         for (const auto& model : manifest.models()) {
             addAssetPath(model.path, "model '" + model.name + "'");
+            for (const auto& attachment : model.attachments) {
+                addAssetPath(
+                    attachment.path,
+                    "attachment on model '" + model.name + "'");
+            }
         }
         for (const auto& animation : manifest.animations()) {
             addAssetPath(animation.path, "animation '" + animation.name + "'");

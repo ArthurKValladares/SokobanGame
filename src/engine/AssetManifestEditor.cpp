@@ -209,6 +209,21 @@ std::string AssetManifestEditor::serialize() const
         if (model.rotateHalfTurn) {
             item["rotateHalfTurn"] = true;
         }
+        if (!model.attachments.empty()) {
+            Json attachments = Json::array();
+            for (const AssetManifest::Model::Attachment& attachment :
+                 model.attachments) {
+                Json attachmentItem = {
+                    { "path", attachment.path },
+                    { "node", attachment.node },
+                };
+                if (attachment.rotateHalfTurn) {
+                    attachmentItem["rotateHalfTurn"] = true;
+                }
+                attachments.push_back(std::move(attachmentItem));
+            }
+            item["attachments"] = std::move(attachments);
+        }
         if (model.playerRole) {
             item["role"] = "player";
         } else if (model.enemyRole) {

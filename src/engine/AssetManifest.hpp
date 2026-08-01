@@ -83,6 +83,12 @@ public:
     };
 
     struct Model {
+        struct Attachment {
+            std::string path;
+            std::string node;
+            bool rotateHalfTurn = false;
+        };
+
         struct PrimitiveMaterial {
             std::string textureName;
             uint32_t textureIndex = 0;
@@ -106,6 +112,10 @@ public:
         // validation, so descriptor ordering and material behavior are never
         // inferred from unrelated global indices.
         std::vector<PrimitiveMaterial> primitiveMaterials;
+        // Static meshes attached to named skeleton nodes. Attachment geometry
+        // uses the owning model's material and is skinned into the same dynamic
+        // mesh, so it cannot drift from the sampled pose.
+        std::vector<Attachment> attachments;
 
         [[nodiscard]] bool hasScrollingMaterial() const
         {

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <regex>
@@ -1282,6 +1283,33 @@ SkinnedMeshData loadGltfSkinnedMesh(const std::filesystem::path& path, GltfMeshL
     return mesh;
 }
 
+void addSkinnedAttachment(
+    SkinnedMeshData& mesh,
+    MeshData attachment,
+    std::string_view nodeName)
+{
+    if (attachment.vertices.empty() || attachment.indices.empty()) {
+        throw std::runtime_error(
+            "Cannot attach an empty mesh to skeleton node '" +
+            std::string(nodeName) + "'");
+    }
+    const auto node = std::ranges::find_if(
+        mesh.nodes,
+        [&](const SkeletonNode& candidate) {
+            return candidate.name == nodeName;
+        });
+    if (node == mesh.nodes.end()) {
+        throw std::runtime_error(
+            "Skinned model has no attachment node named '" +
+            std::string(nodeName) + "'");
+    }
+    mesh.attachments.push_back({
+        .mesh = std::move(attachment),
+        .nodeIndex = static_cast<uint32_t>(
+            std::distance(mesh.nodes.begin(), node)),
+    });
+}
+
 std::vector<std::string> listGltfAnimationNames(const std::filesystem::path& path)
 {
     std::vector<std::string> names;
@@ -1542,6 +1570,50 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
                 options);
         }
     });
+
+    for (const SkinnedAttachment& attachment : mesh.attachments) {
+        if (attachment.nodeIndex >= globalMatrices.size()) {
+            throw std::runtime_error("Skinned attachment references an invalid node");
+        }
+        const uint32_t baseVertex = static_cast<uint32_t>(result.vertices.size());
+        result.vertices.reserve(
+            result.vertices.size() + attachment.mesh.vertices.size());
+        for (const MeshVertex& vertex : attachment.mesh.vertices) {
+            // Source-scale static meshes use the engine's axis convention;
+            // convert them back to glTF space before applying the skeleton's
+            // sampled node matrix, then normalize once with the actor.
+            const Vec3 sourcePosition {
+                vertex.position.x,
+                vertex.position.z,
+                -vertex.position.y,
+            };
+            const Vec3 sourceNormal {
+                vertex.normal.x,
+                vertex.normal.z,
+                -vertex.normal.y,
+            };
+            MeshVertex transformed = normalizedVertex(
+                transformPoint(
+                    globalMatrices[attachment.nodeIndex], sourcePosition),
+                normalize(transformVector(
+                    globalMatrices[attachment.nodeIndex], sourceNormal)),
+                vertex.uv,
+                vertex.textureIndex,
+                bounds,
+                options);
+            transformed.materialFlags = vertex.materialFlags;
+            result.vertices.push_back(transformed);
+        }
+        result.indices.reserve(
+            result.indices.size() + attachment.mesh.indices.size());
+        for (const uint32_t index : attachment.mesh.indices) {
+            if (index >= attachment.mesh.vertices.size()) {
+                throw std::runtime_error(
+                    "Skinned attachment contains an invalid vertex index");
+            }
+            result.indices.push_back(baseVertex + index);
+        }
+    }
 
     return result;
 }

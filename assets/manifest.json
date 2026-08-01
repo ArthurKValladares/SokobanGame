@@ -213,6 +213,13 @@
         "mode": "texture",
         "texture": "Barbarian"
       },
+      "attachments": [
+        {
+          "path": "KayKit Adventurers 2.0/Assets/gltf/axe_1handed.gltf",
+          "node": "handslot.r",
+          "rotateHalfTurn": true
+        }
+      ],
       "preserveAspectRatio": true,
       "rotateHalfTurn": true,
       "role": "enemy"
