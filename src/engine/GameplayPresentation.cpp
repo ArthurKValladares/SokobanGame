@@ -144,6 +144,16 @@ GameplayPresentation::GameplayPresentation()
 {
 }
 
+namespace {
+
+uint64_t enemyEventInstance(std::size_t enemyIndex)
+{
+    return 0x454E454D59000000ULL |
+        static_cast<uint64_t>(enemyIndex + 1);
+}
+
+} // namespace
+
 void GameplayPresentation::setActorClips(
     RenderAnimation moveClip,
     RenderAnimation pushClip,
@@ -161,6 +171,7 @@ void GameplayPresentation::setActorClips(
 
 void GameplayPresentation::resetEntities(const GameState& state)
 {
+    eventSequencer_.clear();
     players_.assign(state.players.size(), {});
     for (std::size_t i = 0; i < state.players.size(); ++i) {
         setImmediatePosition(
@@ -191,10 +202,41 @@ void GameplayPresentation::advanceClocks(float dt, bool reversed)
 {
     worldAnimationTimeSeconds_ += reversed ? -dt : dt;
     for (PlayerVisual& player : players_) {
-        player.clipTimeSeconds += dt * player.clipPlaybackRate;
+        if (!player.deathTransitionPending) {
+            player.clipTimeSeconds += dt * player.clipPlaybackRate;
+        }
     }
-    for (EnemyVisual& enemy : enemies_) {
+    for (std::size_t enemyIndex = 0;
+         enemyIndex < enemies_.size();
+         ++enemyIndex) {
+        EnemyVisual& enemy = enemies_[enemyIndex];
         enemy.clipTimeSeconds += dt * enemy.clipPlaybackRate;
+        if (!enemy.attackTransitionPlaying || animationCatalog_ == nullptr) {
+            continue;
+        }
+        const auto fired = eventSequencer_.advance(
+            enemyEventInstance(enemyIndex),
+            enemy.clipTimeSeconds,
+            *animationCatalog_);
+        for (const AnimationEventSequencer::FiredEvent& event : fired) {
+            for (PlayerVisual& player : players_) {
+                if (!player.deathTransitionPending ||
+                    player.deathGateSourceInstance != event.instanceId) {
+                    continue;
+                }
+                const auto& gate =
+                    animationCatalog_->startGate(AnimationUse::PlayerDeath);
+                if (!gate || gate->sourceUse != event.use ||
+                    gate->eventId != event.eventId) {
+                    continue;
+                }
+                player.deathTransitionPending = false;
+                player.deathGateSourceInstance.reset();
+                player.deathTransitionPlaying = true;
+                player.clipTimeSeconds = event.overshootSeconds;
+                player.clipPlaybackRate = 1.0f;
+            }
+        }
     }
 }
 
@@ -343,11 +385,15 @@ void GameplayPresentation::beginAction(const GameplaySession::Action& action)
                 facingQuarterTurns(*action.facingDirection);
         }
         if (!before.dead && after.dead) {
-            visual.deathTransitionPlaying = true;
+            visual.deathTransitionPending = true;
+            visual.deathTransitionPlaying = false;
+            visual.deathGateSourceInstance.reset();
             visual.clipTimeSeconds = 0.0f;
             visual.clipPlaybackRate = 1.0f;
         } else if (before.dead && !after.dead) {
+            visual.deathTransitionPending = false;
             visual.deathTransitionPlaying = false;
+            visual.deathGateSourceInstance.reset();
             visual.clipTimeSeconds = 0.0f;
         }
         beginMotion(
@@ -390,6 +436,7 @@ void GameplayPresentation::beginAction(const GameplaySession::Action& action)
     }
     const std::size_t enemyCount = std::min(
         action.before.enemies.size(), action.after.enemies.size());
+    std::vector<std::vector<std::size_t>> attackedPlayers(enemyCount);
     for (std::size_t i = 0; i < enemyCount && i < enemies_.size(); ++i) {
         beginMotion(
             enemies_[i].motion,
@@ -408,17 +455,59 @@ void GameplayPresentation::beginAction(const GameplaySession::Action& action)
                 after.cell.z != action.after.enemies[i].cell.z) {
                 continue;
             }
-            attacked = std::abs(after.cell.x - action.after.enemies[i].cell.x) +
+            const bool attacksPlayer =
+                std::abs(after.cell.x - action.after.enemies[i].cell.x) +
                     std::abs(after.cell.y - action.after.enemies[i].cell.y) ==
                 1;
-            if (attacked) {
-                break;
+            if (attacksPlayer) {
+                attacked = true;
+                attackedPlayers[i].push_back(playerIndex);
             }
         }
         if (attacked) {
             enemies_[i].attackTransitionPlaying = true;
             enemies_[i].clipTimeSeconds = 0.0f;
             enemies_[i].clipPlaybackRate = 1.0f;
+            if (animationCatalog_ != nullptr) {
+                eventSequencer_.begin(
+                    enemyEventInstance(i), AnimationUse::EnemyAttack);
+            }
+        }
+    }
+
+    for (std::size_t playerIndex = 0;
+         playerIndex < sharedPlayerCount;
+         ++playerIndex) {
+        const GameState::Player& before = action.before.players[playerIndex];
+        const GameState::Player& after = action.after.players[playerIndex];
+        if (before.dead || !after.dead) {
+            continue;
+        }
+        PlayerVisual& visual = players_[playerIndex];
+        bool gated = false;
+        if (!after.drowned && animationCatalog_ != nullptr) {
+            const auto& gate =
+                animationCatalog_->startGate(AnimationUse::PlayerDeath);
+            if (gate && gate->sourceUse == AnimationUse::EnemyAttack) {
+                for (std::size_t enemyIndex = 0;
+                     enemyIndex < attackedPlayers.size();
+                     ++enemyIndex) {
+                    if (std::ranges::find(
+                            attackedPlayers[enemyIndex], playerIndex) ==
+                        attackedPlayers[enemyIndex].end()) {
+                        continue;
+                    }
+                    visual.deathGateSourceInstance =
+                        enemyEventInstance(enemyIndex);
+                    gated = true;
+                    break;
+                }
+            }
+        }
+        if (!gated) {
+            visual.deathTransitionPending = false;
+            visual.deathTransitionPlaying = true;
+            visual.clipTimeSeconds = 0.0f;
         }
     }
 }

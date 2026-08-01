@@ -81,6 +81,14 @@ void AnimationCatalogEditor::setGlobalSpeed(
     dirty_ = true;
 }
 
+void AnimationCatalogEditor::setClipDuration(
+    RenderAnimation animation,
+    float durationSeconds)
+{
+    catalog_.setClipDuration(animation, durationSeconds);
+    dirty_ = true;
+}
+
 void AnimationCatalogEditor::setUseAnimation(
     AnimationUse use,
     RenderAnimation animation)
@@ -92,6 +100,31 @@ void AnimationCatalogEditor::setUseAnimation(
 void AnimationCatalogEditor::setUseSpeed(AnimationUse use, float speed)
 {
     catalog_.setUseSpeed(use, speed);
+    dirty_ = true;
+}
+
+void AnimationCatalogEditor::setTimelineEvent(
+    AnimationUse use,
+    std::string eventId,
+    float normalizedTime)
+{
+    catalog_.setTimelineEvent(use, std::move(eventId), normalizedTime);
+    dirty_ = true;
+}
+
+void AnimationCatalogEditor::removeTimelineEvent(
+    AnimationUse use,
+    std::string_view eventId)
+{
+    catalog_.removeTimelineEvent(use, eventId);
+    dirty_ = true;
+}
+
+void AnimationCatalogEditor::setStartGate(
+    AnimationUse use,
+    std::optional<AnimationCatalog::EventGate> gate)
+{
+    catalog_.setStartGate(use, std::move(gate));
     dirty_ = true;
 }
 

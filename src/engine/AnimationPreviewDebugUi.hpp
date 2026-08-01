@@ -1,10 +1,12 @@
 #pragma once
 
+#include "engine/AnimationCatalog.hpp"
 #include "engine/render/GltfMesh.hpp"
 #include "engine/render/VulkanRenderer.hpp"
 
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -20,7 +22,17 @@ class AnimationPreviewDebugUi {
 public:
     void initialize(std::filesystem::path assetRoot);
     void update(float dt, VulkanRenderer& renderer);
-    void draw(VulkanRenderer& renderer, const AssetManifest& manifest);
+    void draw(
+        VulkanRenderer& renderer,
+        const AssetManifest& manifest,
+        std::span<const AnimationCatalog::TimelineEvent> markers = {});
+    bool previewCatalogAnimation(
+        RenderModel model,
+        RenderAnimation animation,
+        const AssetManifest& manifest,
+        VulkanRenderer& renderer);
+    [[nodiscard]] float normalizedTime() const;
+    [[nodiscard]] float durationSeconds() const;
     [[nodiscard]] std::optional<RenderFrameData> previewFrame(
         const AssetManifest& manifest,
         const PresentationSettings& settings) const;

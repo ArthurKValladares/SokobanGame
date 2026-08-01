@@ -33,8 +33,17 @@ public:
     }
 
     void setGlobalSpeed(RenderAnimation animation, float speed);
+    void setClipDuration(RenderAnimation animation, float durationSeconds);
     void setUseAnimation(AnimationUse use, RenderAnimation animation);
     void setUseSpeed(AnimationUse use, float speed);
+    void setTimelineEvent(
+        AnimationUse use,
+        std::string eventId,
+        float normalizedTime);
+    void removeTimelineEvent(AnimationUse use, std::string_view eventId);
+    void setStartGate(
+        AnimationUse use,
+        std::optional<AnimationCatalog::EventGate> gate);
 
 private:
     std::filesystem::path sourcePath_;

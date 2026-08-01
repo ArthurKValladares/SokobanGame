@@ -48,7 +48,8 @@ void AnimationPreviewDebugUi::update(float dt, VulkanRenderer& renderer)
 
 void AnimationPreviewDebugUi::draw(
     VulkanRenderer& renderer,
-    const AssetManifest& manifest)
+    const AssetManifest& manifest,
+    std::span<const AnimationCatalog::TimelineEvent> markers)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     if (!scanned_) {
@@ -203,11 +204,91 @@ void AnimationPreviewDebugUi::draw(
             "Timeline", &time_, 0.0f, duration, "%.3fs")) {
         playing_ = false;
     }
+    const ImVec2 timelineMin = ImGui::GetItemRectMin();
+    const ImVec2 timelineMax = ImGui::GetItemRectMax();
+    for (const AnimationCatalog::TimelineEvent& marker : markers) {
+        const float x = timelineMin.x +
+            (timelineMax.x - timelineMin.x) * marker.normalizedTime;
+        ImGui::GetWindowDrawList()->AddLine(
+            { x, timelineMin.y },
+            { x, timelineMax.y },
+            IM_COL32(255, 205, 70, 255),
+            2.0f);
+    }
     ImGui::EndDisabled();
 #else
     (void)renderer;
     (void)manifest;
+    (void)markers;
 #endif
+}
+
+bool AnimationPreviewDebugUi::previewCatalogAnimation(
+    RenderModel model,
+    RenderAnimation animation,
+    const AssetManifest& manifest,
+    VulkanRenderer& renderer)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (model.isCube() || animation.isNone() ||
+        manifest.model(model).geometry != ModelGeometry::Skinned) {
+        return false;
+    }
+    if (!scanned_) {
+        rescan(renderer);
+    }
+    const AssetManifest::Animation& definition = manifest.animation(animation);
+    const std::filesystem::path path =
+        (assetRoot_ / definition.path).lexically_normal();
+    const auto found = std::ranges::find_if(
+        files_,
+        [&](const std::filesystem::path& candidate) {
+            return candidate.lexically_normal() == path;
+        });
+    if (found == files_.end()) {
+        error_ = "Animation source is outside the preview asset catalog.";
+        return false;
+    }
+    fileIndex_ = static_cast<int>(std::distance(files_.begin(), found));
+    clipNames_ = listGltfAnimationNames(path);
+    clipIndex_ = static_cast<int>(
+        animationIndexFromManifestClip(definition.clip));
+    error_.clear();
+    try {
+        clip_ = loadGltfAnimationClip(
+            path, static_cast<uint32_t>(clipIndex_));
+        model_ = model;
+        time_ = 0.0f;
+        playing_ = false;
+        loop_ = false;
+        active_ = true;
+        return true;
+    } catch (const std::exception& exception) {
+        renderer.setAnimationPreview(cubeModel, nullptr, 0.0f);
+        clip_.reset();
+        active_ = false;
+        error_ = exception.what();
+        return false;
+    }
+#else
+    (void)model;
+    (void)animation;
+    (void)manifest;
+    (void)renderer;
+    return false;
+#endif
+}
+
+float AnimationPreviewDebugUi::normalizedTime() const
+{
+    return clip_ && clip_->durationSeconds > 0.0f
+        ? std::clamp(time_ / clip_->durationSeconds, 0.0f, 1.0f)
+        : 0.0f;
+}
+
+float AnimationPreviewDebugUi::durationSeconds() const
+{
+    return clip_ ? clip_->durationSeconds : 0.0f;
 }
 
 std::optional<RenderFrameData> AnimationPreviewDebugUi::previewFrame(

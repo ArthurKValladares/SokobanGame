@@ -3,6 +3,7 @@
 #include "engine/TileTypes.hpp"
 
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -80,11 +81,11 @@ std::string manifest(std::string_view texturePath = "textures/hero.png")
     }
   ],
   "animations": [
-    { "name": "Idle", "path": "animations/idle.glb", "role": "player-idle" },
-    { "name": "Move", "path": "animations/move.glb", "role": "player-move" },
-    { "name": "Push", "path": "animations/push.glb", "role": "player-push" },
-    { "name": "Death", "path": "animations/death.glb", "role": "player-death" },
-    { "name": "DeadIdle", "path": "animations/dead.glb", "role": "player-dead-idle" }
+    { "name": "Idle", "path": "animations/all.gltf", "role": "player-idle" },
+    { "name": "Move", "path": "animations/all.gltf", "role": "player-move" },
+    { "name": "Push", "path": "animations/all.gltf", "role": "player-push" },
+    { "name": "Death", "path": "animations/all.gltf", "role": "player-death" },
+    { "name": "DeadIdle", "path": "animations/static.gltf", "role": "player-dead-idle" }
   ],
   "sounds": [
     { "name": "footsteps", "files": ["audio/step.ogg"] }
@@ -98,13 +99,13 @@ std::string manifest(std::string_view texturePath = "textures/hero.png")
 std::string animationCatalog()
 {
     return R"json({
-  "format": 1,
+  "format": 2,
   "clips": [
-    { "animation": "Idle", "speed": 1.0 },
-    { "animation": "Move", "speed": 1.0 },
-    { "animation": "Push", "speed": 1.0 },
-    { "animation": "Death", "speed": 1.0 },
-    { "animation": "DeadIdle", "speed": 1.0 }
+    { "animation": "Idle", "speed": 1.0, "duration": 1.0 },
+    { "animation": "Move", "speed": 1.0, "duration": 1.0 },
+    { "animation": "Push", "speed": 1.0, "duration": 1.0 },
+    { "animation": "Death", "speed": 1.0, "duration": 1.0 },
+    { "animation": "DeadIdle", "speed": 1.0, "duration": 0.0 }
   ],
   "uses": [
     { "id": "player.idle", "animation": "Idle", "speed": 1.0 },
@@ -141,11 +142,50 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
     writeFile(assets / "models/sword.gltf", R"({"buffers":[{"uri":"sword.bin"}]})");
     writeFile(assets / "models/sword.bin");
     writeFile(assets / "models/LICENSE.txt", "model license");
-    writeFile(assets / "animations/idle.glb");
-    writeFile(assets / "animations/move.glb");
-    writeFile(assets / "animations/push.glb");
-    writeFile(assets / "animations/death.glb");
-    writeFile(assets / "animations/dead.glb");
+    const std::string animationGltf = R"json({
+      "asset":{"version":"2.0"},
+      "buffers":[{"uri":"clip.bin","byteLength":32}],
+      "bufferViews":[
+        {"buffer":0,"byteOffset":0,"byteLength":8},
+        {"buffer":0,"byteOffset":8,"byteLength":24}
+      ],
+      "accessors":[
+        {"bufferView":0,"componentType":5126,"count":2,"type":"SCALAR"},
+        {"bufferView":1,"componentType":5126,"count":2,"type":"VEC3"}
+      ],
+      "nodes":[{"name":"root"}],
+      "animations":[{
+        "name":"Test",
+        "samplers":[{"input":0,"output":1,"interpolation":"LINEAR"}],
+        "channels":[{"sampler":0,"target":{"node":0,"path":"translation"}}]
+      }]
+    })json";
+    const std::string staticAnimationGltf = R"json({
+      "asset":{"version":"2.0"},
+      "buffers":[{"uri":"static.bin","byteLength":16}],
+      "bufferViews":[
+        {"buffer":0,"byteOffset":0,"byteLength":4},
+        {"buffer":0,"byteOffset":4,"byteLength":12}
+      ],
+      "accessors":[
+        {"bufferView":0,"componentType":5126,"count":1,"type":"SCALAR"},
+        {"bufferView":1,"componentType":5126,"count":1,"type":"VEC3"}
+      ],
+      "nodes":[{"name":"root"}],
+      "animations":[{
+        "name":"Static",
+        "samplers":[{"input":0,"output":1,"interpolation":"STEP"}],
+        "channels":[{"sampler":0,"target":{"node":0,"path":"translation"}}]
+      }]
+    })json";
+    writeFile(assets / "animations/all.gltf", animationGltf);
+    writeFile(assets / "animations/static.gltf", staticAnimationGltf);
+    std::string clipBuffer(32, '\0');
+    const float oneSecond = 1.0f;
+    std::memcpy(clipBuffer.data() + sizeof(float),
+        &oneSecond, sizeof(oneSecond));
+    writeFile(assets / "animations/clip.bin", clipBuffer);
+    writeFile(assets / "animations/static.bin", std::string(16, '\0'));
     writeFile(assets / "audio/step.ogg");
     writeFile(assets / "audio/music.ogg");
     writeFile(levels / "level0/screen0.scr", "@layer 0\n...\n\n@layer 1\n.CE\n");

@@ -160,10 +160,20 @@ cmake --build build --config Debug --target sokoban_animation_controller_tests
 .\build\Debug\sokoban_animation_controller_tests.exe
 ```
 
+Headless animation-event sequencer tests cover source-time marker evaluation,
+global/per-use speed composition, one-shot delivery, frame overshoot, replay,
+and reset:
+
+```powershell
+cmake --build build --config Debug --target sokoban_animation_event_sequencer_tests
+.\build\Debug\sokoban_animation_event_sequencer_tests.exe
+```
+
 Headless presentation tests cover mutable settings normalization, lighting/grid
 conversion, entity interpolation, clip/facing behavior, fallen offsets,
-isolated animation-preview stage construction, and gameplay render-frame
-construction, including valid mirror beam/ghost previews:
+actor-specific attack-to-death event routing and frame overshoot, drowning
+bypass, isolated animation-preview stage construction, and gameplay
+render-frame construction, including valid mirror beam/ghost previews:
 
 ```powershell
 cmake --build build --config Debug --target sokoban_presentation_tests
@@ -187,7 +197,7 @@ cmake --build build --config Debug --target sokoban_content_pipeline_tests
 .\build\Debug\sokoban_content_pipeline_tests.exe
 ```
 
-Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Developer Tools window with Engine, Asset Manifest, Level Editor, and Animation tabs. Animation owns global clip speeds, per-semantic-use clip/speed controls, and a source glTF/GLB preview browser. The preview independently selects any skinned manifest model and source animation, replaces the normal game/editor frame with an isolated 3x3 authoring stage, and supports play/pause, looping, speed, 1/60-second frame steps, and exact timeline scrubbing. Release builds still compile the headless editor APIs but do not expose the ImGui editor/debug UI or compile source-asset paths into the executable.
+Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Developer Tools window with Engine, Asset Manifest, Level Editor, and Animation tabs. Animation owns global clip speeds, per-semantic-use clip/speed controls, timeline events, start gates, and a source glTF/GLB preview browser. The selected use's markers are drawn over the preview timeline and can be added or repositioned at its scrub cursor. The preview independently selects any skinned manifest model and source animation, replaces the normal game/editor frame with an isolated 3x3 authoring stage, and supports play/pause, looping, speed, 1/60-second frame steps, and exact timeline scrubbing. Release builds still compile the headless editor APIs but do not expose the ImGui editor/debug UI or compile source-asset paths into the executable.
 
 ## Important Source Map
 
@@ -217,16 +227,24 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   bounds, video defaults, audio cadence limits, font-atlas sizing, and camera
   fit policy that were previously hard-coded at their call sites.
 - `src/engine/PresentationSettings.*`: mutable runtime presentation settings initialized from the immutable defaults in the focused render config headers. Owns lighting, SSAO/shadow tuning, grid appearance, surface geometry, tile scales, normalization, sun-direction conversion, and renderer-facing lighting/grid values.
-- `src/engine/GameplayPresentation.*`: headless presentation state derived from `GameplaySession::Action` snapshots. Owns player/movable interpolation, fallen render offsets, player clip/facing/playback state, and the shared world/conveyor animation clock without mutating authoritative gameplay state.
+- `src/engine/GameplayPresentation.*`: headless presentation state derived from `GameplaySession::Action` snapshots. Owns player/movable interpolation, fallen render offsets, player/enemy clip, facing and playback state, concrete attacker-to-victim animation gate routing, and the shared world/conveyor animation clock without mutating authoritative gameplay state. A pending combat death keeps its prior visual state until the linked enemy instance emits the configured event; unrelated enemies cannot release it, and drowning bypasses the combat gate.
 - `src/engine/AnimationCatalog.*`: strict, Vulkan-free mapping between stable
-  code-owned `AnimationUse` IDs and manifest clips. Every manifest animation
-  has one global speed and every semantic use has one independently editable
-  clip binding and speed multiplier; effective speed is their product. Parsing
-  rejects unknown/duplicate/missing uses, unknown clips, missing global clip
-  rows, and invalid speeds. Canonical JSON saves use `AtomicFile`; content
-  staging validates and packages `assets/animation_catalog.json`. Covered by
-  `sokoban_animation_catalog_tests` plus render-timing assertions in
-  `sokoban_presentation_tests`.
+  code-owned `AnimationUse` IDs and manifest clips. Format 2 records the source
+  duration and global speed of every manifest animation. Every semantic use
+  has one independently editable clip binding and speed multiplier, may emit
+  uniquely named events at normalized source-clip times, and may wait for a
+  named event on another use. Parsing rejects unknown/duplicate/missing uses,
+  unknown clips, stale/missing durations, invalid events, missing gate targets,
+  and dependency cycles. Canonical JSON saves use `AtomicFile`; content staging
+  loads each source glTF/GLB clip to verify its catalog duration before
+  packaging `assets/animation_catalog.json`. Covered by
+  `sokoban_animation_catalog_tests`, `sokoban_animation_event_sequencer_tests`,
+  and render-timing assertions in `sokoban_presentation_tests`.
+- `src/engine/AnimationEventSequencer.*`: Vulkan-free evaluator for authored
+  events on concrete runtime actor instances. It compares logical presentation
+  clocks in source-clip time using the catalog's effective speed, emits each
+  marker once per `begin`, preserves frame overshoot for dependent clips, and
+  supports stop/reset without coupling event delivery to renderer state.
 - `src/engine/AnimationCatalogEditor.*`: headless animation authoring document
   and filesystem owner. It loads the authoritative source catalog, tracks
   dirty/status state, validates and atomically saves it, then mirrors the same
@@ -244,9 +262,12 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/DebugUi.*`: Debug-only registry and presentation owner for the single Developer Tools window. Feature adapters register content callbacks as reorderable, scrolling tabs instead of creating independent windows.
 - `src/engine/AnimationPreviewDebugUi.*`: Debug-only owner of animation/model
   selection, source-asset scanning, play/loop/speed/scrub/frame-step state,
-  preview-scene activation, and renderer preview delegation.
+  preview-scene activation, timeline-marker drawing, and renderer preview
+  delegation. It can select an exact catalog clip/use for event authoring and
+  synchronizes the catalog's stored source duration with the loaded clip.
 - `src/engine/AnimationCatalogDebugUi.*`: thin Debug-only ImGui adapter for
-  live global/per-use tuning and clip rebinding. Save/reload and dirty state
+  live global/per-use tuning, clip rebinding, normalized timeline event
+  placement, and start-gate selection. Save/reload, validation, and dirty state
   are delegated to `AnimationCatalogEditor`; it composes
   `AnimationPreviewDebugUi` into the same Animation tab.
 - `src/engine/AudioSystem.*`: miniaudio-backed sound playback behind a pimpl (`EngineHandle`), so no miniaudio types leak into headers. Preloads manifest sound sets from the staged runtime content tree with `MA_SOUND_FLAG_DECODE` into stable `std::vector<ma_sound>` storage. `playOneShot(name)` handles reusable randomized effects; `update(dt, playerWalking, pushingStone)` retains specialized footstep cadence and seamless stone-drag loops with short fades. Music streams one looping track per level with a 600 ms crossfade. Manifest gains remain authored in the Asset Manifest window; profile-backed master, music, and sound-effect bus gains are previewed live and persisted when Debug UI sliders are committed. Audio degrades gracefully to silence if the device or files are missing.

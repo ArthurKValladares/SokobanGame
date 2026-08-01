@@ -90,6 +90,21 @@ void testProductionCatalogIsCompleteAndRoundTrips()
         catalog.animation(sokoban::AnimationUse::EnemyIdle) ==
             manifest.animationIdByName("RogueIdle"),
         "enemy idle can share the player idle clip");
+    check(
+        std::abs(catalog.clipDuration(
+            manifest.animationIdByName("BarbarianAttack")) -
+            1.3666667f) < 0.0001f,
+        "source clip duration is catalogued");
+    check(
+        catalog.events(sokoban::AnimationUse::EnemyAttack).size() == 1 &&
+            catalog.events(sokoban::AnimationUse::EnemyAttack)[0].id ==
+                "attack-connected",
+        "enemy attack event is authored");
+    check(
+        catalog.startGate(sokoban::AnimationUse::PlayerDeath).has_value() &&
+            catalog.startGate(sokoban::AnimationUse::PlayerDeath)->sourceUse ==
+                sokoban::AnimationUse::EnemyAttack,
+        "player death listens to enemy attack event");
 
     const auto idle = manifest.animationIdByName("RogueIdle");
     catalog.setGlobalSpeed(idle, 1.5f);
@@ -109,6 +124,34 @@ void testProductionCatalogIsCompleteAndRoundTrips()
         std::abs(reparsed.useSpeed(sokoban::AnimationUse::EnemyIdle) - 0.5f) <
             0.0001f,
         "per-use speed round trips");
+
+    catalog.setTimelineEvent(
+        sokoban::AnimationUse::EnemyAttack, "second-impact", 0.75f);
+    catalog.setStartGate(
+        sokoban::AnimationUse::PlayerDeath,
+        sokoban::AnimationCatalog::EventGate {
+            .sourceUse = sokoban::AnimationUse::EnemyAttack,
+            .eventId = "second-impact",
+        });
+    check(
+        catalog.events(sokoban::AnimationUse::EnemyAttack).size() == 2,
+        "timeline event can be added");
+    catalog.removeTimelineEvent(
+        sokoban::AnimationUse::EnemyAttack, "second-impact");
+    check(
+        !catalog.startGate(sokoban::AnimationUse::PlayerDeath).has_value(),
+        "removing an event clears dependent gates");
+
+    checkThrows(
+        [&] {
+            catalog.setStartGate(
+                sokoban::AnimationUse::EnemyAttack,
+                sokoban::AnimationCatalog::EventGate {
+                    .sourceUse = sokoban::AnimationUse::EnemyAttack,
+                    .eventId = "attack-connected",
+                });
+        },
+        "cyclic event dependency rejected");
 }
 
 void testCatalogRejectsCodeAndManifestDrift()
@@ -169,6 +212,8 @@ void testEditorPersistsSourceAndRuntimeCopies()
     const auto idle = manifest.animationIdByName("RogueIdle");
     editor.setGlobalSpeed(idle, 1.75f);
     editor.setUseSpeed(sokoban::AnimationUse::EnemyIdle, 0.6f);
+    editor.setTimelineEvent(
+        sokoban::AnimationUse::EnemyAttack, "recovery", 0.95f);
     check(editor.dirty(), "editing marks catalog dirty");
     check(editor.save(manifest), "editor saves mirrored catalogs");
     check(!editor.dirty(), "successful save clears dirty state");
@@ -184,6 +229,12 @@ void testEditorPersistsSourceAndRuntimeCopies()
         std::abs(savedRuntime.useSpeed(sokoban::AnimationUse::EnemyIdle) -
                  0.6f) < 0.0001f,
         "runtime catalog persisted per-use speed");
+    check(
+        savedSource.events(sokoban::AnimationUse::EnemyAttack).size() == 2,
+        "source catalog persisted timeline event");
+    check(
+        savedRuntime.events(sokoban::AnimationUse::EnemyAttack).size() == 2,
+        "runtime catalog persisted timeline event");
 }
 
 } // namespace

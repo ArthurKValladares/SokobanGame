@@ -1,10 +1,12 @@
 #pragma once
 
+#include "engine/AnimationEventSequencer.hpp"
 #include "engine/GameplaySession.hpp"
 #include "engine/Math.hpp"
 #include "engine/render/RenderTypes.hpp"
 
 #include <vector>
+#include <optional>
 
 namespace sokoban {
 
@@ -37,7 +39,9 @@ public:
     struct PlayerVisual : AnimatedActorVisual {
         RenderAnimation movingClip {};
         uint32_t facingQuarterTurns = 0;
+        bool deathTransitionPending = false;
         bool deathTransitionPlaying = false;
+        std::optional<uint64_t> deathGateSourceInstance;
     };
 
     struct EnemyVisual : AnimatedActorVisual {
@@ -49,6 +53,10 @@ public:
         RenderAnimation moveClip,
         RenderAnimation pushClip,
         RenderAnimation enemyAttackClip);
+    void setAnimationCatalog(const AnimationCatalog* catalog)
+    {
+        animationCatalog_ = catalog;
+    }
     void setPlayerClips(RenderAnimation moveClip, RenderAnimation pushClip)
     {
         setActorClips(moveClip, pushClip, enemyAttackClip_);
@@ -84,6 +92,8 @@ private:
     RenderAnimation playerMoveClip_ {};
     RenderAnimation playerPushClip_ {};
     RenderAnimation enemyAttackClip_ {};
+    const AnimationCatalog* animationCatalog_ = nullptr;
+    AnimationEventSequencer eventSequencer_;
     float worldAnimationTimeSeconds_ = 0.0f;
     float cameraPitchDegrees_ = 0.0f;
     float cameraPitchStartDegrees_ = 0.0f;

@@ -57,7 +57,7 @@ executable-relative assets.
 
 ## Tests
 
-The project currently registers 38 CTest suites covering rules, level parsing,
+The project currently registers 39 CTest suites covering rules, level parsing,
 campaign and gameplay sessions, persistence and migrations, input routing,
 player UI, renderer state, scene preparation and picking, editor transactions,
 assets, animation, particles, tasks, logging, and content packaging.
@@ -164,18 +164,27 @@ textures, animations, sounds, music, tile visuals, and material behavior. A
 normal build runs `sokoban_content`, validates all reachable content, compiles
 shaders, and stages only required files beside the executable.
 
-`assets/animation_catalog.json` is the source of truth for animation usage and
-playback tuning. Each manifest animation has a global speed, and every
-code-declared semantic use such as `player.idle` or `enemy.idle` selects a clip
-and contributes its own speed multiplier. Debug builds expose both layers in
-the Developer Tools `Animation` tab. Its preview tool independently selects a
-skinned manifest model and any source glTF/GLB animation, renders that pairing
-on an isolated 3x3 stage, and provides play/pause, looping, speed, frame-step,
-and exact timeline scrubbing controls. The content build rejects missing,
-duplicate, or stale use IDs and unknown or untuned manifest clips. `Save
-Animation Catalog` atomically writes the source catalog and mirrors it into the
-running Visual Studio build's staged assets, so tuning survives an immediate
-restart without requiring a rebuild.
+`assets/animation_catalog.json` is the source of truth for animation usage,
+playback tuning, and animation ordering. Each manifest animation records its
+validated source duration and a global speed. Every code-declared semantic use
+such as `player.idle` or `enemy.attack` selects a clip, contributes its own
+speed multiplier, and may own normalized timeline events. A use may declare a
+`startAfter` gate naming an event on another use. The shipped catalog places
+`attack-connected` at 90% of `enemy.attack` and gates `player.death` on it;
+drowning and other deaths without a concrete attacking enemy still begin
+immediately.
+
+Debug builds expose all of this in the Developer Tools `Animation` tab. The
+Timeline Events editor previews the selected semantic use, displays authored
+markers over its scrubber, adds or moves markers at the current cursor, and
+configures start gates. The underlying preview tool can also independently
+select a skinned manifest model and any source glTF/GLB animation, render that
+pairing on an isolated 3x3 stage, and provide play/pause, looping, speed,
+frame-step, and exact timeline scrubbing controls. The content build rejects
+missing, duplicate, cyclic, or stale uses, gates, source durations, and clips.
+`Save Animation Catalog` atomically writes the source catalog and mirrors it
+into the running Visual Studio build's staged assets, so tuning survives an
+immediate restart without requiring a rebuild.
 
 Models default to normalized unit-tile geometry. Set
 `"preserveSourceScale": true` on free-form scenery that should retain its
@@ -210,7 +219,10 @@ staged assets, and third-party licenses.
 - `src/engine/GameplaySession.*`: commands, timing, state, and undo history.
 - `src/engine/GameplayPresentation.*`: interpolation and visual animation.
 - `src/engine/AnimationCatalog.*`: strict semantic animation bindings plus
-  global/per-use playback speeds and atomic JSON persistence.
+  source durations, timeline events, start gates, global/per-use playback
+  speeds, and atomic JSON persistence.
+- `src/engine/AnimationEventSequencer.*`: Vulkan-free, actor-instance-aware
+  timeline event evaluation.
 - `src/engine/AnimationCatalogEditor.*`: headless dirty/reload/save workflow
   that keeps source and staged runtime catalogs synchronized.
 - `src/engine/AnimationPreviewScene.*`: Vulkan-free construction of the

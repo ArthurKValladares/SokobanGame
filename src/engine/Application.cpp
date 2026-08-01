@@ -89,6 +89,7 @@ Application::Application()
         animationCatalog_.animation(AnimationUse::PlayerMove),
         animationCatalog_.animation(AnimationUse::PlayerPush),
         animationCatalog_.animation(AnimationUse::EnemyAttack));
+    presentation_.setAnimationCatalog(&animationCatalog_);
     // The world stays unloaded until the title's Continue/New Game, but its
     // assets warm up in the background so that first load doesn't block.
     openTitleScreen();
@@ -109,6 +110,10 @@ Application::Application()
             assetRoot_ / "animation_catalog.json",
             assetManifest_)) {
         animationCatalog_ = animationCatalogEditor_.catalog();
+        presentation_.setActorClips(
+            animationCatalog_.animation(AnimationUse::PlayerMove),
+            animationCatalog_.animation(AnimationUse::PlayerPush),
+            animationCatalog_.animation(AnimationUse::EnemyAttack));
     }
     assetManifestEditor_.initialize(
         std::filesystem::path(SOKOBAN_SOURCE_ASSET_DIR) / "manifest.json");

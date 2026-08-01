@@ -1,29 +1,35 @@
 {
-  "format": 1,
+  "format": 2,
   "clips": [
     {
       "animation": "RogueIdle",
-      "speed": 1.0
+      "speed": 1.0,
+      "duration": 2.1333333333333333
     },
     {
       "animation": "RogueMovement",
-      "speed": 1.0
+      "speed": 1.0,
+      "duration": 0.8
     },
     {
       "animation": "RoguePush",
-      "speed": 1.0
+      "speed": 1.0,
+      "duration": 1.0666667222976685
     },
     {
       "animation": "RogueDeath",
-      "speed": 2.0
+      "speed": 2.0,
+      "duration": 2.6333333333333333
     },
     {
       "animation": "RogueDeadIdle",
-      "speed": 1.0
+      "speed": 1.0,
+      "duration": 0.0
     },
     {
       "animation": "BarbarianAttack",
-      "speed": 1.5
+      "speed": 1.5,
+      "duration": 1.3666666666666667
     }
   ],
   "uses": [
@@ -45,7 +51,11 @@
     {
       "id": "player.death",
       "animation": "RogueDeath",
-      "speed": 1.0
+      "speed": 1.0,
+      "startAfter": {
+        "use": "enemy.attack",
+        "event": "attack-connected"
+      }
     },
     {
       "id": "player.dead-idle",
@@ -60,7 +70,13 @@
     {
       "id": "enemy.attack",
       "animation": "BarbarianAttack",
-      "speed": 1.0
+      "speed": 1.0,
+      "events": [
+        {
+          "id": "attack-connected",
+          "at": 0.9
+        }
+      ]
     },
     {
       "id": "mirror-preview.player-idle",

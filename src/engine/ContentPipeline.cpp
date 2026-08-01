@@ -1,6 +1,7 @@
 #include "engine/ContentPipeline.hpp"
 
 #include "engine/AnimationCatalog.hpp"
+#include "engine/render/GltfMesh.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/Level.hpp"
 #include "engine/TileThumbnailBake.hpp"
@@ -10,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <map>
 #include <optional>
@@ -235,8 +237,31 @@ private:
         // Validation is part of staging: missing code-owned use IDs, stale
         // IDs, or clip names that no longer exist fail the build instead of
         // reaching a shipped runtime.
-        (void)AnimationCatalog::loadFromFile(
+        const AnimationCatalog animationCatalog =
+            AnimationCatalog::loadFromFile(
             roots_.assets / "animation_catalog.json", manifest);
+
+        for (std::size_t i = 0; i < manifest.animations().size(); ++i) {
+            const RenderAnimation animation { static_cast<uint32_t>(i + 1) };
+            const AssetManifest::Animation& definition =
+                manifest.animations()[i];
+            const GltfAnimationClip clip = loadGltfAnimationClip(
+                sourceFile(
+                    roots_.assets,
+                    definition.path,
+                    "animation '" + definition.name + "'"),
+                animationIndexFromManifestClip(definition.clip));
+            if (std::abs(
+                    clip.durationSeconds -
+                    animationCatalog.clipDuration(animation)) > 0.0001f) {
+                throw std::runtime_error(
+                    "animation catalog duration for '" + definition.name +
+                    "' is stale: catalog=" +
+                    std::to_string(
+                        animationCatalog.clipDuration(animation)) +
+                    ", source=" + std::to_string(clip.durationSeconds));
+            }
+        }
 
         for (const auto& texture : manifest.textures()) {
             addAssetPath(texture.path, "texture '" + texture.name + "'");

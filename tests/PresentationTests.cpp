@@ -110,23 +110,25 @@ const AssetManifest& testManifest()
 AnimationCatalog testAnimationCatalog()
 {
     return AnimationCatalog::parse(R"json({
-      "format": 1,
+      "format": 2,
       "clips": [
-        { "animation": "Idle", "speed": 1.0 },
-        { "animation": "Move", "speed": 1.0 },
-        { "animation": "Push", "speed": 1.0 },
-        { "animation": "Death", "speed": 1.0 },
-        { "animation": "DeadIdle", "speed": 1.0 },
-        { "animation": "EnemyAttack", "speed": 1.0 }
+        { "animation": "Idle", "speed": 1.0, "duration": 2.0 },
+        { "animation": "Move", "speed": 1.0, "duration": 1.0 },
+        { "animation": "Push", "speed": 1.0, "duration": 1.0 },
+        { "animation": "Death", "speed": 1.0, "duration": 1.0 },
+        { "animation": "DeadIdle", "speed": 1.0, "duration": 0.0 },
+        { "animation": "EnemyAttack", "speed": 1.0, "duration": 1.0 }
       ],
       "uses": [
         { "id": "player.idle", "animation": "Idle", "speed": 1.0 },
         { "id": "player.move", "animation": "Move", "speed": 1.0 },
         { "id": "player.push", "animation": "Push", "speed": 1.0 },
-        { "id": "player.death", "animation": "Death", "speed": 1.0 },
+        { "id": "player.death", "animation": "Death", "speed": 1.0,
+          "startAfter": { "use": "enemy.attack", "event": "attack-connected" } },
         { "id": "player.dead-idle", "animation": "DeadIdle", "speed": 1.0 },
         { "id": "enemy.idle", "animation": "Idle", "speed": 1.0 },
-        { "id": "enemy.attack", "animation": "EnemyAttack", "speed": 1.0 },
+        { "id": "enemy.attack", "animation": "EnemyAttack", "speed": 1.0,
+          "events": [{ "id": "attack-connected", "at": 0.9 }] },
         { "id": "mirror-preview.player-idle", "animation": "Idle", "speed": 1.0 },
         { "id": "mirror-preview.player-dead-idle", "animation": "DeadIdle", "speed": 1.0 },
         { "id": "editor.player-idle", "animation": "Idle", "speed": 1.0 },
@@ -1401,7 +1403,9 @@ void testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition()
     drowned.players[0].dead = true;
     drowned.players[0].drowned = true;
 
+    AnimationCatalog animations = testAnimationCatalog();
     GameplayPresentation presentation;
+    presentation.setAnimationCatalog(&animations);
     presentation.setPlayerClips(
         testManifest().playerMoveAnimation(),
         testManifest().playerPushAnimation());
@@ -1530,7 +1534,14 @@ void testEnemyFacingAttackAndAnimationInstances()
         },
         "enemy presentation");
     GameState before = rules::initialState(level);
+    AnimationCatalog animations = testAnimationCatalog();
+    animations.setGlobalSpeed(
+        testManifest().enemyAttackAnimation(), 2.0f);
+    animations.setUseSpeed(AnimationUse::EnemyAttack, 1.5f);
+    animations.setGlobalSpeed(testManifest().playerIdleAnimation(), 0.5f);
+    animations.setUseSpeed(AnimationUse::EnemyIdle, 0.5f);
     GameplayPresentation presentation;
+    presentation.setAnimationCatalog(&animations);
     presentation.setActorClips(
         testManifest().playerMoveAnimation(),
         testManifest().playerPushAnimation(),
@@ -1553,14 +1564,15 @@ void testEnemyFacingAttackAndAnimationInstances()
     };
     presentation.beginAction(action);
     CHECK(presentation.enemies()[0].attackTransitionPlaying);
-    presentation.advanceClocks(0.2f, false);
-
-    AnimationCatalog animations = testAnimationCatalog();
-    animations.setGlobalSpeed(
-        testManifest().enemyAttackAnimation(), 2.0f);
-    animations.setUseSpeed(AnimationUse::EnemyAttack, 1.5f);
-    animations.setGlobalSpeed(testManifest().playerIdleAnimation(), 0.5f);
-    animations.setUseSpeed(AnimationUse::EnemyIdle, 0.5f);
+    CHECK(presentation.players()[0].deathTransitionPending);
+    CHECK(!presentation.players()[0].deathTransitionPlaying);
+    presentation.advanceClocks(0.29f, false);
+    CHECK(presentation.players()[0].deathTransitionPending);
+    CHECK(!presentation.players()[0].deathTransitionPlaying);
+    presentation.advanceClocks(0.02f, false);
+    CHECK(!presentation.players()[0].deathTransitionPending);
+    CHECK(presentation.players()[0].deathTransitionPlaying);
+    CHECK(near(presentation.players()[0].clipTimeSeconds, 0.01f));
 
     const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
         .manifest = testManifest(),
@@ -1591,8 +1603,10 @@ void testEnemyFacingAttackAndAnimationInstances()
         CHECK(enemy->animationInstanceId != 0);
         CHECK(enemy->animationInstanceId != player->animationInstanceId);
         CHECK(near(enemy->baseElevation, 1.0f));
-        CHECK(near(enemy->animationTimeSeconds, 0.6f));
-        CHECK(near(enemy->animationFallbackTimeSeconds, 0.05f));
+        CHECK(near(enemy->animationTimeSeconds, 0.93f));
+        CHECK(near(enemy->animationFallbackTimeSeconds, 0.0775f));
+        CHECK(player->animation == testManifest().playerDeathAnimation());
+        CHECK(near(player->animationTimeSeconds, 0.01f));
     }
 }
 

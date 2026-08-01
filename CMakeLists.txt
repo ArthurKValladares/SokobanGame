@@ -151,6 +151,7 @@ endfunction()
 add_library(sokoban_core STATIC
     src/engine/AnimationCatalog.cpp
     src/engine/AnimationCatalogEditor.cpp
+    src/engine/AnimationEventSequencer.cpp
     src/engine/AnimationPreviewScene.cpp
     src/engine/AtomicFile.cpp
     src/engine/AsyncSaveStore.cpp
@@ -497,6 +498,11 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         ASSETS_ENV
         SOURCES tests/AnimationCatalogTests.cpp
+    )
+    sokoban_add_test(NAME animation_event_sequencer TARGET sokoban_animation_event_sequencer_tests
+        LIBS sokoban_core
+        ASSETS_ENV
+        SOURCES tests/AnimationEventSequencerTests.cpp
     )
     sokoban_add_test(NAME asset_manifest TARGET sokoban_asset_manifest_tests
         LIBS sokoban_core sokoban_json

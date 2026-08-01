@@ -15,6 +15,12 @@ public:
         const AssetManifest& manifest,
         AnimationPreviewDebugUi& preview,
         VulkanRenderer& renderer);
+
+private:
+    int timelineUseIndex_ = 6;
+    int gateSourceUseIndex_ = 6;
+    int gateEventIndex_ = 0;
+    char newEventId_[64] = "event";
 };
 
 } // namespace sokoban

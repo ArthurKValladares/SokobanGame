@@ -1082,7 +1082,8 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
         RenderAnimation fallback = noAnimation;
         AnimationUse fallbackUse = AnimationUse::PlayerDeadIdle;
         bool loops = true;
-        if (player.dead && !movingOutOfWater) {
+        if (player.dead && !movingOutOfWater &&
+            !visual.deathTransitionPending) {
             if (visual.deathTransitionPlaying) {
                 animationUse = AnimationUse::PlayerDeath;
                 animation = animationFor(
