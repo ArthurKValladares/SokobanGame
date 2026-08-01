@@ -197,7 +197,7 @@ cmake --build build --config Debug --target sokoban_content_pipeline_tests
 .\build\Debug\sokoban_content_pipeline_tests.exe
 ```
 
-Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Developer Tools window with Engine, Asset Manifest, Level Editor, and Animation tabs. Animation owns global clip speeds, per-semantic-use clip/speed controls, timeline events, start gates, and a source glTF/GLB preview browser. The selected use's markers are drawn over the preview timeline and can be added or repositioned at its scrub cursor. The preview independently selects any skinned manifest model and source animation, replaces the normal game/editor frame with an isolated 3x3 authoring stage, and supports play/pause, looping, speed, 1/60-second frame steps, and exact timeline scrubbing. Release builds still compile the headless editor APIs but do not expose the ImGui editor/debug UI or compile source-asset paths into the executable.
+Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Developer Tools window with Engine, Asset Manifest, Level Editor, and Animation tabs. Animation owns global clip speeds, per-semantic-use clip/speed controls, timeline events, start gates, and a source glTF/GLB preview browser. Timeline Events and the free-form Animation Preview own independent clip, cursor, playback, and visibility sessions; interacting with one makes it the isolated preview-scene owner without mutating the other. The selected use's markers are drawn over its dedicated event timeline and can be added or repositioned at that scrub cursor. Both previews replace the normal game/editor frame with the isolated 3x3 authoring stage and support play/pause, looping, speed, 1/60-second frame steps, and exact timeline scrubbing. Release builds still compile the headless editor APIs but do not expose the ImGui editor/debug UI or compile source-asset paths into the executable.
 
 ## Important Source Map
 
@@ -263,8 +263,10 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/AnimationPreviewDebugUi.*`: Debug-only owner of animation/model
   selection, source-asset scanning, play/loop/speed/scrub/frame-step state,
   preview-scene activation, timeline-marker drawing, and renderer preview
-  delegation. It can select an exact catalog clip/use for event authoring and
-  synchronizes the catalog's stored source duration with the loaded clip.
+  delegation. Its catalog-event and free-form browser sessions are independent,
+  with explicit active-session selection. It can select an exact catalog
+  clip/use for event authoring and synchronizes the catalog's stored source
+  duration with the loaded clip.
 - `src/engine/AnimationCatalogDebugUi.*`: thin Debug-only ImGui adapter for
   live global/per-use tuning, clip rebinding, normalized timeline event
   placement, and start-gate selection. Save/reload, validation, and dirty state

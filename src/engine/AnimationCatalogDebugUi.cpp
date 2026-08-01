@@ -46,6 +46,7 @@ bool AnimationCatalogDebugUi::draw(
     ImGui::SameLine();
     if (ImGui::Button("Reload Catalog")) {
         if (editor.reload(manifest)) {
+            preview.clearCatalogPreview(renderer);
             changed = true;
         }
     }
@@ -101,6 +102,7 @@ bool AnimationCatalogDebugUi::draw(
                             manifest.animations()[i].name.c_str(),
                             isSelected)) {
                         editor.setUseAnimation(definition.use, candidate);
+                        preview.clearCatalogPreview(renderer);
                         changed = true;
                     }
                     if (isSelected) {
@@ -138,6 +140,7 @@ bool AnimationCatalogDebugUi::draw(
                 if (ImGui::Selectable(definitions[i].label.data(), selected)) {
                     timelineUseIndex_ = i;
                     gateEventIndex_ = 0;
+                    preview.clearCatalogPreview(renderer);
                 }
                 if (selected) {
                     ImGui::SetItemDefaultFocus();
@@ -156,7 +159,8 @@ bool AnimationCatalogDebugUi::draw(
                     selectedAnimation,
                     manifest,
                     renderer)) {
-                const float sourceDuration = preview.durationSeconds();
+                const float sourceDuration =
+                    preview.catalogDurationSeconds();
                 if (std::abs(
                         sourceDuration -
                         catalog.clipDuration(selectedAnimation)) > 0.0001f) {
@@ -170,6 +174,8 @@ bool AnimationCatalogDebugUi::draw(
         ImGui::TextDisabled(
             "%.3fs source clip",
             catalog.clipDuration(selectedAnimation));
+
+        preview.drawCatalogPreview(catalog.events(selectedUse));
 
         bool removedEvent = false;
         const auto selectedEvents = catalog.events(selectedUse);
@@ -187,7 +193,9 @@ bool AnimationCatalogDebugUi::draw(
             ImGui::SameLine();
             if (ImGui::Button("Use Cursor")) {
                 editor.setTimelineEvent(
-                    selectedUse, event.id, preview.normalizedTime());
+                    selectedUse,
+                    event.id,
+                    preview.catalogNormalizedTime());
                 changed = true;
             }
             ImGui::SameLine();
@@ -210,7 +218,9 @@ bool AnimationCatalogDebugUi::draw(
             catalog.clipDuration(selectedAnimation) <= 0.0f);
         if (ImGui::Button("Add At Cursor")) {
             editor.setTimelineEvent(
-                selectedUse, newEventId_, preview.normalizedTime());
+                selectedUse,
+                newEventId_,
+                preview.catalogNormalizedTime());
             changed = true;
         }
         ImGui::EndDisabled();
@@ -295,9 +305,7 @@ bool AnimationCatalogDebugUi::draw(
 
     if (ImGui::CollapsingHeader(
             "Animation Preview", ImGuiTreeNodeFlags_DefaultOpen)) {
-        const AnimationUse selectedUse =
-            definitions[static_cast<std::size_t>(timelineUseIndex_)].use;
-        preview.draw(renderer, manifest, catalog.events(selectedUse));
+        preview.draw(renderer, manifest);
     }
     return changed;
 #else

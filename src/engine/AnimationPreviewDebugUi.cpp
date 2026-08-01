@@ -22,21 +22,14 @@ void AnimationPreviewDebugUi::initialize(std::filesystem::path assetRoot)
 void AnimationPreviewDebugUi::update(float dt, VulkanRenderer& renderer)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    if (active_ && clip_ && !model_.isCube()) {
-        if (playing_) {
-            time_ += dt * speed_;
-            const float duration = clip_->durationSeconds;
-            if (duration > 0.0001f && time_ >= duration) {
-                if (loop_) {
-                    time_ = std::fmod(time_, duration);
-                }
-                else {
-                    time_ = duration;
-                    playing_ = false;
-                }
-            }
-        }
-        renderer.setAnimationPreview(model_, &*clip_, time_);
+    PreviewSession* active = catalog_.active ? &catalog_ : nullptr;
+    if (browser_.active) {
+        active = &browser_;
+    }
+    if (active != nullptr && active->clip && !active->model.isCube()) {
+        advanceSession(*active, dt);
+        renderer.setAnimationPreview(
+            active->model, &*active->clip, active->time);
     } else {
         renderer.setAnimationPreview(cubeModel, nullptr, 0.0f);
     }
@@ -48,17 +41,16 @@ void AnimationPreviewDebugUi::update(float dt, VulkanRenderer& renderer)
 
 void AnimationPreviewDebugUi::draw(
     VulkanRenderer& renderer,
-    const AssetManifest& manifest,
-    std::span<const AnimationCatalog::TimelineEvent> markers)
+    const AssetManifest& manifest)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     if (!scanned_) {
         rescan(renderer);
     }
 
-    const char* modelLabel = model_.isCube()
+    const char* modelLabel = browser_.model.isCube()
         ? "Select model..."
-        : manifest.model(model_).name.c_str();
+        : manifest.model(browser_.model).name.c_str();
     if (ImGui::BeginCombo("Model", modelLabel)) {
         for (std::size_t i = 0; i < manifest.models().size(); ++i) {
             const AssetManifest::Model& definition = manifest.models()[i];
@@ -66,12 +58,13 @@ void AnimationPreviewDebugUi::draw(
                 continue;
             }
             const RenderModel candidate { static_cast<uint32_t>(i + 1) };
-            const bool selected = candidate == model_;
+            const bool selected = candidate == browser_.model;
             if (ImGui::Selectable(definition.name.c_str(), selected) &&
                 !selected) {
                 renderer.setAnimationPreview(cubeModel, nullptr, 0.0f);
-                model_ = candidate;
-                active_ = clip_.has_value();
+                browser_.model = candidate;
+                browser_.active = browser_.clip.has_value();
+                catalog_.active = false;
             }
             if (selected) {
                 ImGui::SetItemDefaultFocus();
@@ -101,8 +94,8 @@ void AnimationPreviewDebugUi::draw(
                 clipNames_ = listGltfAnimationNames(
                     files_[static_cast<std::size_t>(i)]);
                 clipIndex_ = -1;
-                clip_.reset();
-                active_ = false;
+                browser_.clip.reset();
+                browser_.active = false;
                 error_.clear();
             }
             if (selected) {
@@ -135,16 +128,17 @@ void AnimationPreviewDebugUi::draw(
                 clipIndex_ = i;
                 error_.clear();
                 try {
-                    clip_ = loadGltfAnimationClip(
+                    browser_.clip = loadGltfAnimationClip(
                         files_[static_cast<std::size_t>(fileIndex_)],
                         static_cast<uint32_t>(i));
-                    time_ = 0.0f;
-                    playing_ = true;
-                    active_ = !model_.isCube();
+                    browser_.time = 0.0f;
+                    browser_.playing = true;
+                    browser_.active = !browser_.model.isCube();
+                    catalog_.active = false;
                 } catch (const std::exception& exception) {
                     renderer.setAnimationPreview(cubeModel, nullptr, 0.0f);
-                    clip_.reset();
-                    active_ = false;
+                    browser_.clip.reset();
+                    browser_.active = false;
                     error_ = exception.what();
                 }
             }
@@ -161,48 +155,149 @@ void AnimationPreviewDebugUi::draw(
             "%s",
             error_.c_str());
     }
-    if (!clip_) {
+    if (!browser_.clip) {
         return;
     }
 
     ImGui::Text(
         "Duration %.2fs, %zu channels",
-        clip_->durationSeconds,
-        clip_->channels.size());
-    ImGui::Checkbox("Show Preview Scene", &active_);
-    ImGui::BeginDisabled(model_.isCube());
+        browser_.clip->durationSeconds,
+        browser_.clip->channels.size());
+    if (ImGui::Checkbox("Show Preview Scene", &browser_.active) &&
+        browser_.active) {
+        catalog_.active = false;
+    }
+    ImGui::BeginDisabled(browser_.model.isCube());
     if (ImGui::Button("|<")) {
-        time_ = 0.0f;
-        playing_ = false;
+        browser_.time = 0.0f;
+        browser_.playing = false;
+        browser_.active = true;
+        catalog_.active = false;
     }
     ImGui::SameLine();
     if (ImGui::Button("< Frame")) {
-        time_ = std::max(0.0f, time_ - 1.0f / 60.0f);
-        playing_ = false;
+        browser_.time = std::max(0.0f, browser_.time - 1.0f / 60.0f);
+        browser_.playing = false;
+        browser_.active = true;
+        catalog_.active = false;
     }
     ImGui::SameLine();
-    if (ImGui::Button(playing_ ? "Pause" : "Play")) {
-        playing_ = !playing_;
+    if (ImGui::Button(browser_.playing ? "Pause" : "Play")) {
+        browser_.playing = !browser_.playing;
+        browser_.active = true;
+        catalog_.active = false;
     }
     ImGui::SameLine();
     if (ImGui::Button("Frame >")) {
-        time_ = std::min(
-            clip_->durationSeconds,
-            time_ + 1.0f / 60.0f);
-        playing_ = false;
+        browser_.time = std::min(
+            browser_.clip->durationSeconds,
+            browser_.time + 1.0f / 60.0f);
+        browser_.playing = false;
+        browser_.active = true;
+        catalog_.active = false;
     }
     ImGui::SameLine();
     if (ImGui::Button(">|")) {
-        time_ = clip_->durationSeconds;
-        playing_ = false;
+        browser_.time = browser_.clip->durationSeconds;
+        browser_.playing = false;
+        browser_.active = true;
+        catalog_.active = false;
     }
     ImGui::SameLine();
-    ImGui::Checkbox("Loop", &loop_);
-    ImGui::SliderFloat("Speed", &speed_, 0.1f, 3.0f, "%.2fx");
-    const float duration = std::max(clip_->durationSeconds, 0.0001f);
+    ImGui::Checkbox("Loop", &browser_.loop);
+    ImGui::SliderFloat("Speed", &browser_.speed, 0.1f, 3.0f, "%.2fx");
+    const float duration =
+        std::max(browser_.clip->durationSeconds, 0.0001f);
     if (ImGui::SliderFloat(
-            "Timeline", &time_, 0.0f, duration, "%.3fs")) {
-        playing_ = false;
+            "Timeline", &browser_.time, 0.0f, duration, "%.3fs")) {
+        browser_.playing = false;
+        browser_.active = true;
+        catalog_.active = false;
+    }
+    ImGui::EndDisabled();
+#else
+    (void)renderer;
+    (void)manifest;
+#endif
+}
+
+void AnimationPreviewDebugUi::drawCatalogPreview(
+    std::span<const AnimationCatalog::TimelineEvent> markers)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    ImGui::PushID("CatalogEventPreview");
+    if (!catalogError_.empty()) {
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.35f, 0.35f, 1.0f),
+            "%s",
+            catalogError_.c_str());
+    }
+    if (!catalog_.clip) {
+        ImGui::TextDisabled(
+            "Preview this use to author events against its source clip.");
+        ImGui::PopID();
+        return;
+    }
+
+    ImGui::Text(
+        "Duration %.2fs, %zu channels",
+        catalog_.clip->durationSeconds,
+        catalog_.clip->channels.size());
+    if (ImGui::Checkbox("Show Event Preview Scene", &catalog_.active) &&
+        catalog_.active) {
+        browser_.active = false;
+    }
+    ImGui::BeginDisabled(catalog_.model.isCube());
+    if (ImGui::Button("|<")) {
+        catalog_.time = 0.0f;
+        catalog_.playing = false;
+        catalog_.active = true;
+        browser_.active = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("< Frame")) {
+        catalog_.time = std::max(0.0f, catalog_.time - 1.0f / 60.0f);
+        catalog_.playing = false;
+        catalog_.active = true;
+        browser_.active = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(catalog_.playing ? "Pause" : "Play")) {
+        catalog_.playing = !catalog_.playing;
+        catalog_.active = true;
+        browser_.active = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Frame >")) {
+        catalog_.time = std::min(
+            catalog_.clip->durationSeconds,
+            catalog_.time + 1.0f / 60.0f);
+        catalog_.playing = false;
+        catalog_.active = true;
+        browser_.active = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(">|")) {
+        catalog_.time = catalog_.clip->durationSeconds;
+        catalog_.playing = false;
+        catalog_.active = true;
+        browser_.active = false;
+    }
+    ImGui::SameLine();
+    ImGui::Checkbox("Loop", &catalog_.loop);
+    ImGui::SliderFloat(
+        "Speed", &catalog_.speed, 0.1f, 3.0f, "%.2fx");
+    const float duration =
+        std::max(catalog_.clip->durationSeconds, 0.0001f);
+    if (ImGui::SliderFloat(
+            "Event Timeline",
+            &catalog_.time,
+            0.0f,
+            duration,
+            "%.3fs")) {
+        catalog_.playing = false;
+        catalog_.active = true;
+        browser_.active = false;
     }
     const ImVec2 timelineMin = ImGui::GetItemRectMin();
     const ImVec2 timelineMax = ImGui::GetItemRectMax();
@@ -216,9 +311,8 @@ void AnimationPreviewDebugUi::draw(
             2.0f);
     }
     ImGui::EndDisabled();
+    ImGui::PopID();
 #else
-    (void)renderer;
-    (void)manifest;
     (void)markers;
 #endif
 }
@@ -234,40 +328,33 @@ bool AnimationPreviewDebugUi::previewCatalogAnimation(
         manifest.model(model).geometry != ModelGeometry::Skinned) {
         return false;
     }
-    if (!scanned_) {
-        rescan(renderer);
-    }
     const AssetManifest::Animation& definition = manifest.animation(animation);
     const std::filesystem::path path =
         (assetRoot_ / definition.path).lexically_normal();
-    const auto found = std::ranges::find_if(
-        files_,
-        [&](const std::filesystem::path& candidate) {
-            return candidate.lexically_normal() == path;
-        });
-    if (found == files_.end()) {
-        error_ = "Animation source is outside the preview asset catalog.";
+    std::error_code errorCode;
+    if (!std::filesystem::is_regular_file(path, errorCode) || errorCode) {
+        catalogError_ = "Animation source file is unavailable.";
         return false;
     }
-    fileIndex_ = static_cast<int>(std::distance(files_.begin(), found));
-    clipNames_ = listGltfAnimationNames(path);
-    clipIndex_ = static_cast<int>(
-        animationIndexFromManifestClip(definition.clip));
-    error_.clear();
     try {
-        clip_ = loadGltfAnimationClip(
-            path, static_cast<uint32_t>(clipIndex_));
-        model_ = model;
-        time_ = 0.0f;
-        playing_ = false;
-        loop_ = false;
-        active_ = true;
+        PreviewSession replacement {
+            .clip = loadGltfAnimationClip(
+                path, animationIndexFromManifestClip(definition.clip)),
+            .time = 0.0f,
+            .speed = 1.0f,
+            .model = model,
+            .playing = false,
+            .loop = false,
+            .active = true,
+        };
+        catalog_ = std::move(replacement);
+        browser_.active = false;
+        catalogError_.clear();
         return true;
     } catch (const std::exception& exception) {
         renderer.setAnimationPreview(cubeModel, nullptr, 0.0f);
-        clip_.reset();
-        active_ = false;
-        error_ = exception.what();
+        catalog_ = {};
+        catalogError_ = exception.what();
         return false;
     }
 #else
@@ -279,16 +366,32 @@ bool AnimationPreviewDebugUi::previewCatalogAnimation(
 #endif
 }
 
-float AnimationPreviewDebugUi::normalizedTime() const
+void AnimationPreviewDebugUi::clearCatalogPreview(VulkanRenderer& renderer)
 {
-    return clip_ && clip_->durationSeconds > 0.0f
-        ? std::clamp(time_ / clip_->durationSeconds, 0.0f, 1.0f)
+#if SOKOBAN_ENABLE_DEBUG_UI
+    catalog_ = {};
+    catalogError_.clear();
+    if (!browser_.active) {
+        renderer.setAnimationPreview(cubeModel, nullptr, 0.0f);
+    }
+#else
+    (void)renderer;
+#endif
+}
+
+float AnimationPreviewDebugUi::catalogNormalizedTime() const
+{
+    return catalog_.clip && catalog_.clip->durationSeconds > 0.0f
+        ? std::clamp(
+              catalog_.time / catalog_.clip->durationSeconds,
+              0.0f,
+              1.0f)
         : 0.0f;
 }
 
-float AnimationPreviewDebugUi::durationSeconds() const
+float AnimationPreviewDebugUi::catalogDurationSeconds() const
 {
-    return clip_ ? clip_->durationSeconds : 0.0f;
+    return catalog_.clip ? catalog_.clip->durationSeconds : 0.0f;
 }
 
 std::optional<RenderFrameData> AnimationPreviewDebugUi::previewFrame(
@@ -296,8 +399,13 @@ std::optional<RenderFrameData> AnimationPreviewDebugUi::previewFrame(
     const PresentationSettings& settings) const
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    if (active_ && clip_ && !model_.isCube()) {
-        return animationPreviewScene::build(model_, manifest, settings);
+    const PreviewSession* active = catalog_.active ? &catalog_ : nullptr;
+    if (browser_.active) {
+        active = &browser_;
+    }
+    if (active != nullptr && active->clip && !active->model.isCube()) {
+        return animationPreviewScene::build(
+            active->model, manifest, settings);
     }
 #else
     (void)manifest;
@@ -315,13 +423,9 @@ void AnimationPreviewDebugUi::rescan(VulkanRenderer& renderer)
     fileIndex_ = -1;
     clipNames_.clear();
     clipIndex_ = -1;
-    clip_.reset();
+    browser_.clip.reset();
     error_.clear();
-    time_ = 0.0f;
-    speed_ = 1.0f;
-    playing_ = true;
-    loop_ = true;
-    active_ = false;
+    browser_ = {};
     scanned_ = true;
 
     std::error_code errorCode;
@@ -345,6 +449,26 @@ void AnimationPreviewDebugUi::rescan(VulkanRenderer& renderer)
 #else
     (void)renderer;
 #endif
+}
+
+void AnimationPreviewDebugUi::advanceSession(
+    PreviewSession& session,
+    float dt)
+{
+    if (!session.playing || !session.clip) {
+        return;
+    }
+    session.time += dt * session.speed;
+    const float duration = session.clip->durationSeconds;
+    if (duration <= 0.0001f || session.time < duration) {
+        return;
+    }
+    if (session.loop) {
+        session.time = std::fmod(session.time, duration);
+    } else {
+        session.time = duration;
+        session.playing = false;
+    }
 }
 
 } // namespace sokoban
