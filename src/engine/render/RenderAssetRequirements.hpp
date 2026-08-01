@@ -9,6 +9,7 @@
 namespace sokoban {
 
 class AssetManifest;
+class AnimationCatalog;
 class Level;
 
 class RenderAssetRequirements {
@@ -38,7 +39,8 @@ private:
 [[nodiscard]] RenderAssetRequirements renderAssetRequirementsForLevel(
     const Level& level,
     const AssetManifest& manifest,
-    std::optional<LevelLocation> location = std::nullopt);
+    std::optional<LevelLocation> location = std::nullopt,
+    const AnimationCatalog* animations = nullptr);
 [[nodiscard]] RenderAssetRequirements renderAssetRequirementsForFrame(
     const RenderFrameData& frame);
 

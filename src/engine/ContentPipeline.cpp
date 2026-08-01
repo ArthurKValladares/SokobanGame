@@ -1,5 +1,6 @@
 #include "engine/ContentPipeline.hpp"
 
+#include "engine/AnimationCatalog.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/Level.hpp"
 #include "engine/TileThumbnailBake.hpp"
@@ -219,6 +220,11 @@ private:
     void addManifestAssets()
     {
         addFile(roots_.assets, "manifest.json", "manifest.json", "asset manifest");
+        addFile(
+            roots_.assets,
+            "animation_catalog.json",
+            "animation_catalog.json",
+            "animation catalog");
         addAssetPath(std::filesystem::path(config::uiFontPath), "UI font");
         addAssetPath(
             std::filesystem::path(config::titleBackgroundPath),
@@ -226,6 +232,11 @@ private:
         manifest_ = AssetManifest::loadFromFile(
             roots_.assets / "manifest.json");
         const AssetManifest& manifest = *manifest_;
+        // Validation is part of staging: missing code-owned use IDs, stale
+        // IDs, or clip names that no longer exist fail the build instead of
+        // reaching a shipped runtime.
+        (void)AnimationCatalog::loadFromFile(
+            roots_.assets / "animation_catalog.json", manifest);
 
         for (const auto& texture : manifest.textures()) {
             addAssetPath(texture.path, "texture '" + texture.name + "'");

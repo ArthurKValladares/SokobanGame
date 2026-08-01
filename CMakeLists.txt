@@ -149,6 +149,7 @@ function(sokoban_enable_warnings target)
 endfunction()
 
 add_library(sokoban_core STATIC
+    src/engine/AnimationCatalog.cpp
     src/engine/AtomicFile.cpp
     src/engine/AsyncSaveStore.cpp
     src/engine/AssetManifest.cpp
@@ -287,6 +288,7 @@ target_link_libraries(sokoban_content_tool PRIVATE sokoban_core)
 
 add_executable(sokoban
     src/main.cpp
+    src/engine/AnimationCatalogDebugUi.cpp
     src/engine/AnimationPreviewDebugUi.cpp
     src/engine/Application.cpp
     src/engine/ApplicationDebugUi.cpp
@@ -488,6 +490,11 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME animation_controller TARGET sokoban_animation_controller_tests
         LIBS sokoban_core
         SOURCES tests/AnimationControllerTests.cpp
+    )
+    sokoban_add_test(NAME animation_catalog TARGET sokoban_animation_catalog_tests
+        LIBS sokoban_core
+        ASSETS_ENV
+        SOURCES tests/AnimationCatalogTests.cpp
     )
     sokoban_add_test(NAME asset_manifest TARGET sokoban_asset_manifest_tests
         LIBS sokoban_core sokoban_json

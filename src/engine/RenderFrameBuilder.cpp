@@ -1,5 +1,6 @@
 #include "engine/RenderFrameBuilder.hpp"
 
+#include "engine/AnimationCatalog.hpp"
 #include "engine/Rules.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
@@ -13,6 +14,24 @@
 
 namespace sokoban {
 namespace {
+
+RenderAnimation animationFor(
+    const AnimationCatalog* catalog,
+    AnimationUse use,
+    RenderAnimation fallback)
+{
+    return catalog != nullptr ? catalog->animation(use) : fallback;
+}
+
+float animationTimeFor(
+    const AnimationCatalog* catalog,
+    AnimationUse use,
+    float timeSeconds)
+{
+    return catalog != nullptr
+        ? timeSeconds * catalog->effectiveSpeed(use)
+        : timeSeconds;
+}
 
 struct StaticRenderCell {
     TileType tile = TileType::Ground;
@@ -1055,19 +1074,41 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             input.activeAction.before.players[playerIndex].drowned &&
             !input.activeAction.after.players[playerIndex].drowned;
 
-        RenderAnimation animation = input.manifest.playerIdleAnimation();
+        AnimationUse animationUse = AnimationUse::PlayerIdle;
+        RenderAnimation animation = animationFor(
+            input.animations,
+            animationUse,
+            input.manifest.playerIdleAnimation());
         RenderAnimation fallback = noAnimation;
+        AnimationUse fallbackUse = AnimationUse::PlayerDeadIdle;
         bool loops = true;
         if (player.dead && !movingOutOfWater) {
             if (visual.deathTransitionPlaying) {
-                animation = input.manifest.playerDeathAnimation();
-                fallback = input.manifest.playerDeadIdleAnimation();
+                animationUse = AnimationUse::PlayerDeath;
+                animation = animationFor(
+                    input.animations,
+                    animationUse,
+                    input.manifest.playerDeathAnimation());
+                fallback = animationFor(
+                    input.animations,
+                    fallbackUse,
+                    input.manifest.playerDeadIdleAnimation());
                 loops = false;
             } else {
-                animation = input.manifest.playerDeadIdleAnimation();
+                animationUse = AnimationUse::PlayerDeadIdle;
+                animation = animationFor(
+                    input.animations,
+                    animationUse,
+                    input.manifest.playerDeadIdleAnimation());
             }
         } else if (visual.motion.moving) {
             animation = visual.movingClip;
+            animationUse = visual.movingClip == animationFor(
+                input.animations,
+                AnimationUse::PlayerPush,
+                input.manifest.playerPushAnimation())
+                ? AnimationUse::PlayerPush
+                : AnimationUse::PlayerMove;
         }
 
         RenderFrameData::Tile playerTile {
@@ -1085,7 +1126,10 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             .animationFallback = fallback,
             .animationInstanceId = playerAnimationInstance(playerIndex),
             .animationLoops = loops,
-            .animationTimeSeconds = visual.clipTimeSeconds,
+            .animationTimeSeconds = animationTimeFor(
+                input.animations, animationUse, visual.clipTimeSeconds),
+            .animationFallbackTimeSeconds = animationTimeFor(
+                input.animations, fallbackUse, visual.clipTimeSeconds),
             .modelRotationQuarterTurns = visual.facingQuarterTurns,
         };
         applyTileScale(
@@ -1115,14 +1159,32 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             .affectsCameraFit = false,
             .model = input.manifest.enemyModel(),
             .animation = visual.attackTransitionPlaying
-                ? input.manifest.enemyAttackAnimation()
-                : input.manifest.playerIdleAnimation(),
+                ? animationFor(
+                      input.animations,
+                      AnimationUse::EnemyAttack,
+                      input.manifest.enemyAttackAnimation())
+                : animationFor(
+                      input.animations,
+                      AnimationUse::EnemyIdle,
+                      input.manifest.playerIdleAnimation()),
             .animationFallback = visual.attackTransitionPlaying
-                ? input.manifest.playerIdleAnimation()
+                ? animationFor(
+                      input.animations,
+                      AnimationUse::EnemyIdle,
+                      input.manifest.playerIdleAnimation())
                 : noAnimation,
             .animationInstanceId = enemyAnimationInstance(enemyIndex),
             .animationLoops = !visual.attackTransitionPlaying,
-            .animationTimeSeconds = visual.clipTimeSeconds,
+            .animationTimeSeconds = animationTimeFor(
+                input.animations,
+                visual.attackTransitionPlaying
+                    ? AnimationUse::EnemyAttack
+                    : AnimationUse::EnemyIdle,
+                visual.clipTimeSeconds),
+            .animationFallbackTimeSeconds = animationTimeFor(
+                input.animations,
+                AnimationUse::EnemyIdle,
+                visual.clipTimeSeconds),
             .modelRotationOffsetRadians = yawRadians(visual.orientation),
         };
         applyTileScale(enemyTile, input.settings.tileScale(TileType::Enemy));
@@ -1382,8 +1444,14 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
                               state.movables[entity.movableIndex].type),
                     .animation = entity.player
                         ? (ghostFallen
-                                ? input.manifest.playerDeadIdleAnimation()
-                                : input.manifest.playerIdleAnimation())
+                                ? animationFor(
+                                      input.animations,
+                                      AnimationUse::MirrorPreviewPlayerDeadIdle,
+                                      input.manifest.playerDeadIdleAnimation())
+                                : animationFor(
+                                      input.animations,
+                                      AnimationUse::MirrorPreviewPlayerIdle,
+                                      input.manifest.playerIdleAnimation()))
                         : noAnimation,
                     .animationInstanceId = entity.player
                         ? mirrorGhostAnimationInstance(
@@ -1391,7 +1459,12 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
                         : uint64_t { 0 },
                     .animationLoops = true,
                     .animationTimeSeconds = previewPlayer
-                        ? previewPlayer->clipTimeSeconds
+                        ? animationTimeFor(
+                              input.animations,
+                              ghostFallen
+                                  ? AnimationUse::MirrorPreviewPlayerDeadIdle
+                                  : AnimationUse::MirrorPreviewPlayerIdle,
+                              previewPlayer->clipTimeSeconds)
                         : 0.0f,
                     .modelRotationQuarterTurns = entity.player
                         ? (previewPlayer
@@ -1591,11 +1664,20 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
             renderTile.isEditorPreview = preview;
             const bool animatedActor =
                 tile == TileType::Player || tile == TileType::Enemy;
+            const AnimationUse editorUse = tile == TileType::Enemy
+                ? AnimationUse::EditorEnemyIdle
+                : AnimationUse::EditorPlayerIdle;
             renderTile.animation = animatedActor
-                ? input.manifest.playerIdleAnimation()
+                ? animationFor(
+                      input.animations,
+                      editorUse,
+                      input.manifest.playerIdleAnimation())
                 : noAnimation;
             renderTile.animationTimeSeconds = animatedActor
-                ? input.worldAnimationTimeSeconds
+                ? animationTimeFor(
+                      input.animations,
+                      editorUse,
+                      input.worldAnimationTimeSeconds)
                 : 0.0f;
             frame.tiles.push_back(renderTile);
         };

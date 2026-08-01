@@ -1,5 +1,6 @@
 #include "engine/TileThumbnailBake.hpp"
 
+#include "engine/AnimationCatalog.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/RenderFrameBuilder.hpp"
@@ -54,7 +55,8 @@ bool shouldBake(TileType tile)
 RenderFrameData buildBakeFrame(
     TileType tile,
     const AssetManifest& manifest,
-    const PresentationSettings& settings)
+    const PresentationSettings& settings,
+    const AnimationCatalog* animations)
 {
     RenderFrameData frame;
     frame.viewMode = RenderViewMode::Isometric3D;
@@ -124,6 +126,14 @@ RenderFrameData buildBakeFrame(
     // must count toward the fit so the camera is identical for all of them.
     subject.showGrid = false;
     subject.affectsCameraFit = true;
+    if (animations != nullptr &&
+        (tile == TileType::Player || tile == TileType::Enemy)) {
+        const AnimationUse use = tile == TileType::Enemy
+            ? AnimationUse::ThumbnailEnemyIdle
+            : AnimationUse::ThumbnailPlayerIdle;
+        subject.animation = animations->animation(use);
+        subject.animationTimeSeconds = 0.0f;
+    }
     frame.tiles.push_back(subject);
 
     if (tile == TileType::Ground) {

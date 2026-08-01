@@ -51,6 +51,8 @@ Application::Application()
     , playerProfile_(saveSlots_.loadActiveProfile())
     , assetRoot_(runtimeContentRoot())
     , assetManifest_(AssetManifest::loadFromFile(assetRoot_ / "manifest.json"))
+    , animationCatalog_(AnimationCatalog::loadFromFile(
+          assetRoot_ / "animation_catalog.json", assetManifest_))
     , uiFont_(FontAtlas::load(
           assetRoot_ / config::uiFontPath,
           config::uiFontPixelHeight,
@@ -84,9 +86,9 @@ Application::Application()
     presentationSettings_.applyTileScales(assetManifest_);
     presentationSettings_.normalize();
     presentation_.setActorClips(
-        assetManifest_.playerMoveAnimation(),
-        assetManifest_.playerPushAnimation(),
-        assetManifest_.enemyAttackAnimation());
+        animationCatalog_.animation(AnimationUse::PlayerMove),
+        animationCatalog_.animation(AnimationUse::PlayerPush),
+        animationCatalog_.animation(AnimationUse::EnemyAttack));
     // The world stays unloaded until the title's Continue/New Game, but its
     // assets warm up in the background so that first load doesn't block.
     openTitleScreen();
@@ -101,6 +103,9 @@ Application::Application()
         campaign_.currentScreen());
     levelEditorDebugUi_.initialize(levelEditor_);
     animationPreviewDebugUi_.initialize(SOKOBAN_SOURCE_ASSET_DIR);
+    animationCatalogDebugUi_.initialize(
+        std::filesystem::path(SOKOBAN_SOURCE_ASSET_DIR) /
+        "animation_catalog.json");
     assetManifestEditor_.initialize(
         std::filesystem::path(SOKOBAN_SOURCE_ASSET_DIR) / "manifest.json");
     (void)decorationMeshCatalog_.refresh(
@@ -178,8 +183,17 @@ Application::Application()
             },
         });
     });
-    DebugUi::addTab("Animation Preview", [this] {
-        animationPreviewDebugUi_.draw(renderer_);
+    DebugUi::addTab("Animation", [this] {
+        if (animationCatalogDebugUi_.draw(
+                animationCatalog_,
+                assetManifest_,
+                animationPreviewDebugUi_,
+                renderer_)) {
+            presentation_.setActorClips(
+                animationCatalog_.animation(AnimationUse::PlayerMove),
+                animationCatalog_.animation(AnimationUse::PlayerPush),
+                animationCatalog_.animation(AnimationUse::EnemyAttack));
+        }
     });
 #endif
 }
@@ -253,14 +267,18 @@ bool Application::bakeTileThumbnails()
                         bake::buildBakeFrame(
                             definition.type,
                             assetManifest_,
-                            presentationSettings_)),
+                            presentationSettings_,
+                            &animationCatalog_)),
                     ui_.drawData());
             }
 
             const VkExtent2D extent = renderer_.renderExtent();
             const bake::CropRect crop = bake::cropFor(
                 bake::buildBakeFrame(
-                    definition.type, assetManifest_, presentationSettings_),
+                    definition.type,
+                    assetManifest_,
+                    presentationSettings_,
+                    &animationCatalog_),
                 extent.width,
                 extent.height);
             const ImageData captured = renderer_.captureRenderedFrame(
@@ -519,7 +537,8 @@ void Application::update(
          presentation_.players()) {
         playerMoving |= player.motion.moving;
         pushing |= player.motion.moving &&
-            player.movingClip == assetManifest_.playerPushAnimation();
+            player.movingClip ==
+                animationCatalog_.animation(AnimationUse::PlayerPush);
     }
     audioSystem_.update(dt, playerMoving, pushing);
 }
@@ -1335,7 +1354,8 @@ bool Application::applyLevel(
         LevelLocation {
             .level = campaign_.currentLevel(),
             .screen = campaign_.currentScreen(),
-        }));
+        },
+        &animationCatalog_));
     level_ = std::move(level);
     const bool restored = snapshot && gameplaySession_.restore(level_, *snapshot);
     if (!restored) {
@@ -1739,7 +1759,8 @@ RenderAssetRequirements Application::levelAssetRequirements(int levelIndex) cons
             requirements.merge(renderAssetRequirementsForLevel(
                 Level::loadFromFile(screenPath(levelIndex, screenIndex)),
                 assetManifest_,
-                LevelLocation { .level = levelIndex, .screen = screenIndex }));
+                LevelLocation { .level = levelIndex, .screen = screenIndex },
+                &animationCatalog_));
         } catch (const std::exception& error) {
             log::warning(log::Category::Assets)
                 << "asset preload skipped "
@@ -1779,6 +1800,7 @@ RenderFrameData Application::buildRenderFrame(
             .manifest = assetManifest_,
             .editor = levelEditor_,
             .settings = presentationSettings_,
+            .animations = &animationCatalog_,
             .hoverCell = editorHoverCell_,
             .hoverDecoration = editorHoverDecoration_,
             .deleting = editorInput.deleting &&
@@ -1805,6 +1827,7 @@ RenderFrameData Application::buildRenderFrame(
         .activeAction = gameplaySession_.activeAction(),
         .presentation = presentation_,
         .settings = presentationSettings_,
+        .animations = &animationCatalog_,
         .conveyorBeltScrollOffset = beltScrollOffset,
         .cameraPitchDegrees = presentation_.cameraPitchDegrees(),
         .levelLocation = LevelLocation {

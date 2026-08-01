@@ -1,6 +1,7 @@
 // Headless tests for mutable presentation settings, entity interpolation, and
 // render-frame construction.
 
+#include "engine/AnimationCatalog.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/GameplayPresentation.hpp"
 #include "engine/PresentationSettings.hpp"
@@ -103,6 +104,36 @@ const AssetManifest& testManifest()
       ]
     })json");
     return manifest;
+}
+
+AnimationCatalog testAnimationCatalog()
+{
+    return AnimationCatalog::parse(R"json({
+      "format": 1,
+      "clips": [
+        { "animation": "Idle", "speed": 1.0 },
+        { "animation": "Move", "speed": 1.0 },
+        { "animation": "Push", "speed": 1.0 },
+        { "animation": "Death", "speed": 1.0 },
+        { "animation": "DeadIdle", "speed": 1.0 },
+        { "animation": "EnemyAttack", "speed": 1.0 }
+      ],
+      "uses": [
+        { "id": "player.idle", "animation": "Idle", "speed": 1.0 },
+        { "id": "player.move", "animation": "Move", "speed": 1.0 },
+        { "id": "player.push", "animation": "Push", "speed": 1.0 },
+        { "id": "player.death", "animation": "Death", "speed": 1.0 },
+        { "id": "player.dead-idle", "animation": "DeadIdle", "speed": 1.0 },
+        { "id": "enemy.idle", "animation": "Idle", "speed": 1.0 },
+        { "id": "enemy.attack", "animation": "EnemyAttack", "speed": 1.0 },
+        { "id": "mirror-preview.player-idle", "animation": "Idle", "speed": 1.0 },
+        { "id": "mirror-preview.player-dead-idle", "animation": "DeadIdle", "speed": 1.0 },
+        { "id": "editor.player-idle", "animation": "Idle", "speed": 1.0 },
+        { "id": "editor.enemy-idle", "animation": "Idle", "speed": 1.0 },
+        { "id": "thumbnail.player-idle", "animation": "Idle", "speed": 1.0 },
+        { "id": "thumbnail.enemy-idle", "animation": "Idle", "speed": 1.0 }
+      ]
+    })json", testManifest());
 }
 
 
@@ -1476,6 +1507,14 @@ void testEnemyFacingAttackAndAnimationInstances()
     };
     presentation.beginAction(action);
     CHECK(presentation.enemies()[0].attackTransitionPlaying);
+    presentation.advanceClocks(0.2f, false);
+
+    AnimationCatalog animations = testAnimationCatalog();
+    animations.setGlobalSpeed(
+        testManifest().enemyAttackAnimation(), 2.0f);
+    animations.setUseSpeed(AnimationUse::EnemyAttack, 1.5f);
+    animations.setGlobalSpeed(testManifest().playerIdleAnimation(), 0.5f);
+    animations.setUseSpeed(AnimationUse::EnemyIdle, 0.5f);
 
     const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
         .manifest = testManifest(),
@@ -1485,6 +1524,7 @@ void testEnemyFacingAttackAndAnimationInstances()
         .activeAction = action,
         .presentation = presentation,
         .settings = PresentationSettings {},
+        .animations = &animations,
     });
     const auto enemy = std::ranges::find_if(
         frame.tiles,
@@ -1505,6 +1545,8 @@ void testEnemyFacingAttackAndAnimationInstances()
         CHECK(enemy->animationInstanceId != 0);
         CHECK(enemy->animationInstanceId != player->animationInstanceId);
         CHECK(near(enemy->baseElevation, 1.0f));
+        CHECK(near(enemy->animationTimeSeconds, 0.6f));
+        CHECK(near(enemy->animationFallbackTimeSeconds, 0.05f));
     }
 }
 

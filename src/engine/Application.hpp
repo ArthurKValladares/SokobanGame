@@ -1,6 +1,8 @@
 #pragma once
 
 #include "engine/AnimationPreviewDebugUi.hpp"
+#include "engine/AnimationCatalog.hpp"
+#include "engine/AnimationCatalogDebugUi.hpp"
 #include "engine/ApplicationDebugUi.hpp"
 #include "engine/SaveSlotManager.hpp"
 #include "engine/ShellFlow.hpp"
@@ -142,6 +144,7 @@ private:
     std::filesystem::path assetRoot_;
     // Declared before the renderer/audio members that hold references to it.
     AssetManifest assetManifest_;
+    AnimationCatalog animationCatalog_;
     FontAtlas uiFont_;
     VulkanRenderer renderer_;
     UiContext ui_;
@@ -170,6 +173,7 @@ private:
     DecorationMeshCatalog decorationMeshCatalog_;
     LevelEditorDebugUi levelEditorDebugUi_;
     AnimationPreviewDebugUi animationPreviewDebugUi_;
+    AnimationCatalogDebugUi animationCatalogDebugUi_;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;
     std::optional<GridPosition3> editorHoverCell_;
     std::optional<std::size_t> editorHoverDecoration_;

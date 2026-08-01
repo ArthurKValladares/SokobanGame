@@ -11,6 +11,8 @@
 
 namespace sokoban {
 
+class AnimationCatalog;
+
 // How a tile type looks: footprint, height, colour, model, rotation and scale.
 //
 // The single definition of that, shared by the editor and the thumbnail bake.
@@ -37,6 +39,7 @@ public:
         const GameplaySession::Action& activeAction;
         const GameplayPresentation& presentation;
         const PresentationSettings& settings;
+        const AnimationCatalog* animations = nullptr;
         float conveyorBeltScrollOffset = 0.0f;
         std::optional<float> cameraPitchDegrees;
         // Selects this screen's ground splat map. Unset falls back to the
@@ -49,6 +52,7 @@ public:
         const AssetManifest& manifest;
         const LevelEditor& editor;
         const PresentationSettings& settings;
+        const AnimationCatalog* animations = nullptr;
         std::optional<GridPosition3> hoverCell;
         std::optional<std::size_t> hoverDecoration;
         bool deleting = false;

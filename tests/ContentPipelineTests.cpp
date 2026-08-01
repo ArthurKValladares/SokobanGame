@@ -95,6 +95,35 @@ std::string manifest(std::string_view texturePath = "textures/hero.png")
 })json";
 }
 
+std::string animationCatalog()
+{
+    return R"json({
+  "format": 1,
+  "clips": [
+    { "animation": "Idle", "speed": 1.0 },
+    { "animation": "Move", "speed": 1.0 },
+    { "animation": "Push", "speed": 1.0 },
+    { "animation": "Death", "speed": 1.0 },
+    { "animation": "DeadIdle", "speed": 1.0 }
+  ],
+  "uses": [
+    { "id": "player.idle", "animation": "Idle", "speed": 1.0 },
+    { "id": "player.move", "animation": "Move", "speed": 1.0 },
+    { "id": "player.push", "animation": "Push", "speed": 1.0 },
+    { "id": "player.death", "animation": "Death", "speed": 1.0 },
+    { "id": "player.dead-idle", "animation": "DeadIdle", "speed": 1.0 },
+    { "id": "enemy.idle", "animation": "Idle", "speed": 1.0 },
+    { "id": "enemy.attack", "animation": "Idle", "speed": 1.0 },
+    { "id": "mirror-preview.player-idle", "animation": "Idle", "speed": 1.0 },
+    { "id": "mirror-preview.player-dead-idle", "animation": "DeadIdle", "speed": 1.0 },
+    { "id": "editor.player-idle", "animation": "Idle", "speed": 1.0 },
+    { "id": "editor.enemy-idle", "animation": "Idle", "speed": 1.0 },
+    { "id": "thumbnail.player-idle", "animation": "Idle", "speed": 1.0 },
+    { "id": "thumbnail.enemy-idle", "animation": "Idle", "speed": 1.0 }
+  ]
+})json";
+}
+
 sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root)
 {
     const std::filesystem::path assets = root / "source-assets";
@@ -102,6 +131,7 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
     const std::filesystem::path shaders = root / "compiled-shaders";
 
     writeFile(assets / "manifest.json", manifest());
+    writeFile(assets / "animation_catalog.json", animationCatalog());
     writeFile(assets / "textures/hero.png");
     writeFile(assets / "ui/Karla-Regular.ttf");
     writeFile(assets / "ui/OFL.txt", "font license");
@@ -157,6 +187,9 @@ void testInventoryAndStaging()
     const sokoban::ContentInventory inventory = sokoban::collectContentInventory(roots);
 
     check(contains(inventory, "manifest.json"), "manifest included");
+    check(
+        contains(inventory, "animation_catalog.json"),
+        "animation catalog included");
     check(contains(inventory, "models/hero.gltf"), "model included");
     check(contains(inventory, "models/hero.bin"), "external glTF buffer included");
     check(contains(inventory, "models/sword.gltf"), "attachment mesh included");

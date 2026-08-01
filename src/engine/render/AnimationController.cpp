@@ -142,6 +142,7 @@ std::optional<AnimationController::SkinningRequest> AnimationController::updateT
         hasClip(tile.animationFallback) &&
         requestedTime >= clip(requestedAnimation).durationSeconds) {
         requestedAnimation = tile.animationFallback;
+        requestedTime = tile.animationFallbackTimeSeconds;
         resolvedNonLoopingFallback = true;
     }
     if (requestedAnimation.isNone() || !hasClip(requestedAnimation)) {

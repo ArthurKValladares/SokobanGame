@@ -204,11 +204,12 @@ void testNonLoopingAnimationFallsBackAtClipDuration()
     CHECK(death->toClip->name == "death");
 
     frame.tiles.front().animationTimeSeconds = 1.0f;
+    frame.tiles.front().animationFallbackTimeSeconds = 0.25f;
     const auto deadIdle = controller.update(frame);
     CHECK(deadIdle.has_value());
     CHECK(!deadIdle->blended());
     CHECK(deadIdle->toClip->name == "dead idle");
-    CHECK(near(deadIdle->toTimeSeconds, 1.0f));
+    CHECK(near(deadIdle->toTimeSeconds, 0.25f));
 }
 
 void testClipValidationAndClear()

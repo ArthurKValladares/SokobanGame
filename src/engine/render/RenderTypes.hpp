@@ -239,6 +239,10 @@ struct RenderFrameData {
         uint64_t animationInstanceId = 0;
         bool animationLoops = true;
         float animationTimeSeconds = 0.0f;
+        // A non-looping clip can transition to a differently tuned use. Keep
+        // its clock independent so changing the one-shot speed does not also
+        // change the fallback pose's playback rate.
+        float animationFallbackTimeSeconds = 0.0f;
         float beltScrollOffset = 0.0f;
         uint32_t modelRotationQuarterTurns = 0;
         float modelRotationOffsetRadians = 0.0f;

@@ -9,6 +9,7 @@
 namespace sokoban {
 
 class AssetManifest;
+class AnimationCatalog;
 class PresentationSettings;
 
 // Offline baking of tile palette thumbnails.
@@ -64,7 +65,8 @@ inline constexpr float cameraDistanceMultiplier = 4.0f;
 [[nodiscard]] RenderFrameData buildBakeFrame(
     TileType tile,
     const AssetManifest& manifest,
-    const PresentationSettings& settings);
+    const PresentationSettings& settings,
+    const AnimationCatalog* animations = nullptr);
 
 struct CropRect {
     int32_t x = 0;

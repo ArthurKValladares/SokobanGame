@@ -1,5 +1,6 @@
 #include "engine/render/RenderAssetRequirements.hpp"
 
+#include "engine/AnimationCatalog.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/Level.hpp"
 #include "engine/ParticleConfig.hpp"
@@ -105,21 +106,33 @@ bool RenderAssetRequirements::empty() const
 RenderAssetRequirements renderAssetRequirementsForLevel(
     const Level& level,
     const AssetManifest& manifest,
-    std::optional<LevelLocation> location)
+    std::optional<LevelLocation> location,
+    const AnimationCatalog* animations)
 {
     RenderAssetRequirements requirements;
 
     // Every valid level has a player, and gameplay can select any of these
     // clips without the level data changing.
     requirements.requireModel(manifest.playerModel());
-    requirements.requireAnimation(manifest.playerIdleAnimation());
-    requirements.requireAnimation(manifest.playerMoveAnimation());
-    requirements.requireAnimation(manifest.playerPushAnimation());
-    requirements.requireAnimation(manifest.playerDeathAnimation());
-    requirements.requireAnimation(manifest.playerDeadIdleAnimation());
+    auto requireUse = [&](AnimationUse use, RenderAnimation fallback) {
+        requirements.requireAnimation(
+            animations != nullptr ? animations->animation(use) : fallback);
+    };
+    requireUse(AnimationUse::PlayerIdle, manifest.playerIdleAnimation());
+    requireUse(AnimationUse::PlayerMove, manifest.playerMoveAnimation());
+    requireUse(AnimationUse::PlayerPush, manifest.playerPushAnimation());
+    requireUse(AnimationUse::PlayerDeath, manifest.playerDeathAnimation());
+    requireUse(AnimationUse::PlayerDeadIdle, manifest.playerDeadIdleAnimation());
+    requireUse(
+        AnimationUse::MirrorPreviewPlayerIdle,
+        manifest.playerIdleAnimation());
+    requireUse(
+        AnimationUse::MirrorPreviewPlayerDeadIdle,
+        manifest.playerDeadIdleAnimation());
     if (!level.enemyStarts().empty()) {
         requirements.requireModel(manifest.enemyModel());
-        requirements.requireAnimation(manifest.enemyAttackAnimation());
+        requireUse(AnimationUse::EnemyIdle, manifest.playerIdleAnimation());
+        requireUse(AnimationUse::EnemyAttack, manifest.enemyAttackAnimation());
     }
 
     // Ground splatting samples these directly from the descriptor array, so

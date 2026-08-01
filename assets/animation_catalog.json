@@ -1,0 +1,96 @@
+{
+  "format": 1,
+  "clips": [
+    {
+      "animation": "RogueIdle",
+      "speed": 1.0
+    },
+    {
+      "animation": "RogueMovement",
+      "speed": 1.0
+    },
+    {
+      "animation": "RoguePush",
+      "speed": 1.0
+    },
+    {
+      "animation": "RogueDeath",
+      "speed": 1.0
+    },
+    {
+      "animation": "RogueDeadIdle",
+      "speed": 1.0
+    },
+    {
+      "animation": "BarbarianAttack",
+      "speed": 1.0
+    }
+  ],
+  "uses": [
+    {
+      "id": "player.idle",
+      "animation": "RogueIdle",
+      "speed": 1.0
+    },
+    {
+      "id": "player.move",
+      "animation": "RogueMovement",
+      "speed": 1.0
+    },
+    {
+      "id": "player.push",
+      "animation": "RoguePush",
+      "speed": 1.0
+    },
+    {
+      "id": "player.death",
+      "animation": "RogueDeath",
+      "speed": 1.0
+    },
+    {
+      "id": "player.dead-idle",
+      "animation": "RogueDeadIdle",
+      "speed": 1.0
+    },
+    {
+      "id": "enemy.idle",
+      "animation": "RogueIdle",
+      "speed": 1.0
+    },
+    {
+      "id": "enemy.attack",
+      "animation": "BarbarianAttack",
+      "speed": 1.0
+    },
+    {
+      "id": "mirror-preview.player-idle",
+      "animation": "RogueIdle",
+      "speed": 1.0
+    },
+    {
+      "id": "mirror-preview.player-dead-idle",
+      "animation": "RogueDeadIdle",
+      "speed": 1.0
+    },
+    {
+      "id": "editor.player-idle",
+      "animation": "RogueIdle",
+      "speed": 1.0
+    },
+    {
+      "id": "editor.enemy-idle",
+      "animation": "RogueIdle",
+      "speed": 1.0
+    },
+    {
+      "id": "thumbnail.player-idle",
+      "animation": "RogueIdle",
+      "speed": 1.0
+    },
+    {
+      "id": "thumbnail.enemy-idle",
+      "animation": "RogueIdle",
+      "speed": 1.0
+    }
+  ]
+}
