@@ -810,7 +810,7 @@ MeshVertex normalizedVertex(
     Vec3 position,
     Vec3 normal,
     Vec2 uv,
-    float textureIndex,
+    uint32_t textureIndex,
     SourceBounds bounds,
     GltfMeshLoadOptions options)
 {
@@ -1004,9 +1004,23 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
             const size_t normalIndex = requiredUnsignedField(primitive, "NORMAL");
             const size_t uvIndex = requiredUnsignedField(primitive, "TEXCOORD_0");
             const size_t indicesIndex = requiredUnsignedField(primitive, "indices");
-            const float textureIndex = options.usePrimitiveMaterialTextures
-                ? static_cast<float>(unsignedField(primitive, "material").value_or(0) + 1)
-                : 0.0f;
+            const std::size_t primitiveMaterialIndex =
+                unsignedField(primitive, "material").value_or(0);
+            uint32_t textureIndex = 0;
+            uint32_t materialFlags = PrimitiveMaterialNone;
+            if (!options.primitiveMaterials.empty()) {
+                if (primitiveMaterialIndex >=
+                    options.primitiveMaterials.size()) {
+                    throw std::runtime_error(
+                        "glTF primitive material " +
+                        std::to_string(primitiveMaterialIndex) +
+                        " has no texture mapping in the asset manifest");
+                }
+                const PrimitiveMaterialBinding& material =
+                    options.primitiveMaterials[primitiveMaterialIndex];
+                textureIndex = material.textureIndex + 1;
+                materialFlags = material.flags;
+            }
             if (positionIndex >= accessors.size() ||
                 normalIndex >= accessors.size() ||
                 uvIndex >= accessors.size() ||
@@ -1049,6 +1063,7 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
                     .normal = normal,
                     .uv = uv,
                     .textureIndex = textureIndex,
+                    .materialFlags = materialFlags,
                 });
                 minimum.x = std::min(minimum.x, position.x);
                 minimum.y = std::min(minimum.y, position.y);
@@ -1522,7 +1537,7 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
                 skinnedPosition,
                 normalize(skinnedNormal),
                 source.uv,
-                0.0f,
+                0u,
                 bounds,
                 options);
         }

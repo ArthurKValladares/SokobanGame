@@ -6,7 +6,8 @@ layout(location = 0) in vec4 inShadowPosition;
 layout(location = 1) in float inFaceCoordU;
 layout(location = 2) in float inFaceCoordV;
 layout(location = 3) in vec3 inNormal;
-layout(location = 4) in float inTextureIndex;
+layout(location = 4) flat in uint inTextureIndex;
+layout(location = 5) flat in uint inMaterialFlags;
 layout(location = 0) out vec4 outColor;
 
 layout(push_constant) uniform PushConstants
@@ -26,13 +27,10 @@ layout(push_constant) uniform PushConstants
 vec4 sampledMaterial()
 {
     int materialMode = int(pc.textureOptions.x + 0.5);
-    if (materialMode == 2 && inTextureIndex > 0.5) {
-        int textureIndex = clamp(
-            int(inTextureIndex + pc.materialOptions.z + 0.5),
-            0,
-            MODEL_TEXTURE_COUNT - 1);
+    if (materialMode == 2 && inTextureIndex != 0u) {
+        int textureIndex = clamp(int(inTextureIndex - 1u), 0, MODEL_TEXTURE_COUNT - 1);
         vec2 uv = vec2(inFaceCoordU, inFaceCoordV);
-        if (inTextureIndex > 1.5) {
+        if ((inMaterialFlags & 1u) != 0u) {
             uv.y = fract(uv.y + pc.materialOptions.y);
         }
         return texture(modelTextures[textureIndex], uv);

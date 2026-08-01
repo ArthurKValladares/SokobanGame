@@ -10,7 +10,8 @@ layout(location = 0) in vec4 inShadowPosition;
 layout(location = 1) in float inFaceCoordU;
 layout(location = 2) in float inFaceCoordV;
 layout(location = 3) in vec3 inNormal;
-layout(location = 4) in float inTextureIndex;
+layout(location = 4) flat in uint inTextureIndex;
+layout(location = 5) flat in uint inMaterialFlags;
 layout(location = 0) out vec4 outColor;
 
 layout(push_constant) uniform PushConstants
@@ -134,14 +135,13 @@ void main()
         vec2 uv = pc.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
         materialColor *= texture(titleBackground, uv);
     } else if (materialMode == 2) {
-        if (inTextureIndex > 1.5) {
-            // materialOptions.y carries the belt scroll offset; the belt UVs span
-            // a full 0..1 along V, so fract() wraps the scroll seamlessly.
-            int textureIndex = clamp(int(inTextureIndex - 1.0 + pc.materialOptions.z + 0.5), 0, MODEL_TEXTURE_COUNT - 1);
-            materialColor *= texture(modelTextures[textureIndex], vec2(inFaceCoordU, fract(inFaceCoordV + pc.materialOptions.y)));
-        } else if (inTextureIndex > 0.5) {
-            int textureIndex = clamp(int(inTextureIndex - 1.0 + pc.materialOptions.z + 0.5), 0, MODEL_TEXTURE_COUNT - 1);
-            materialColor *= texture(modelTextures[textureIndex], vec2(inFaceCoordU, inFaceCoordV));
+        if (inTextureIndex != 0u) {
+            int textureIndex = clamp(int(inTextureIndex - 1u), 0, MODEL_TEXTURE_COUNT - 1);
+            vec2 uv = vec2(inFaceCoordU, inFaceCoordV);
+            if ((inMaterialFlags & 1u) != 0u) {
+                uv.y = fract(uv.y + pc.materialOptions.y);
+            }
+            materialColor *= texture(modelTextures[textureIndex], uv);
         }
     } else if (materialMode == MATERIAL_MODE_PROCEDURAL_TEXTURE) {
         // Procedural quads use a one-based texture handle because zero means

@@ -33,7 +33,7 @@ bool drawGeometry(ModelGeometry& geometry)
 
 bool drawMaterialMode(ModelMaterialMode& mode)
 {
-    constexpr std::array labels { "None", "Texture", "Primitive Texture Index" };
+    constexpr std::array labels { "None", "Texture", "Primitive Materials" };
     int selected = static_cast<int>(mode);
     if (!ImGui::Combo("Material", &selected, labels.data(), static_cast<int>(labels.size()))) {
         return false;
@@ -43,12 +43,13 @@ bool drawMaterialMode(ModelMaterialMode& mode)
 }
 
 bool drawTextureReference(
+    const char* label,
     std::string& textureName,
     const std::vector<AssetManifest::Texture>& textures)
 {
     const char* preview = textureName.empty() ? "<Select Texture>" : textureName.c_str();
     bool changed = false;
-    if (ImGui::BeginCombo("Texture", preview)) {
+    if (ImGui::BeginCombo(label, preview)) {
         for (const AssetManifest::Texture& texture : textures) {
             const bool selected = textureName == texture.name;
             if (ImGui::Selectable(texture.name.c_str(), selected)) {
@@ -347,15 +348,48 @@ void AssetManifestDebugUi::drawModels(AssetManifestEditor& editor)
             changed = drawGeometry(model.geometry) || changed;
             changed = drawMaterialMode(model.materialMode) || changed;
             if (model.materialMode == ModelMaterialMode::SingleTexture) {
-                changed = drawTextureReference(model.materialTextureName, editor.textures()) || changed;
-            } else if (model.materialMode == ModelMaterialMode::PrimitiveTextureIndex) {
                 changed = drawTextureReference(
-                    model.materialTextureName, editor.textures()) || changed;
+                    "Texture", model.materialTextureName, editor.textures()) ||
+                    changed;
+            } else if (model.materialMode == ModelMaterialMode::PrimitiveMaterials) {
+                for (std::size_t materialIndex = 0;
+                     materialIndex < model.primitiveMaterials.size();
+                     ++materialIndex) {
+                    AssetManifest::Model::PrimitiveMaterial& material =
+                        model.primitiveMaterials[materialIndex];
+                    ImGui::PushID(static_cast<int>(materialIndex));
+                    ImGui::Text("glTF Material %zu", materialIndex);
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(220.0f);
+                    changed = drawTextureReference(
+                        "##Texture",
+                        material.textureName,
+                        editor.textures()) || changed;
+                    ImGui::SameLine();
+                    changed = ImGui::Checkbox("Scroll V", &material.scrollV) || changed;
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Remove")) {
+                        model.primitiveMaterials.erase(
+                            model.primitiveMaterials.begin() +
+                            static_cast<std::ptrdiff_t>(materialIndex));
+                        changed = true;
+                        ImGui::PopID();
+                        break;
+                    }
+                    ImGui::PopID();
+                }
+                if (ImGui::Button("+ Material Slot")) {
+                    model.primitiveMaterials.push_back({
+                        .textureName = editor.textures().empty()
+                            ? std::string {}
+                            : editor.textures().front().name,
+                    });
+                    changed = true;
+                }
             }
             changed = ImGui::Checkbox("Preserve Aspect Ratio", &model.preserveAspectRatio) || changed;
             changed = ImGui::Checkbox("Preserve Source Scale", &model.preserveSourceScale) || changed;
             changed = ImGui::Checkbox("Rotate Half Turn", &model.rotateHalfTurn) || changed;
-            changed = ImGui::Checkbox("Belt Scroll", &model.beltScroll) || changed;
             if (ImGui::Checkbox("Player Role", &model.playerRole)) {
                 if (model.playerRole) {
                     model.enemyRole = false;
@@ -369,8 +403,6 @@ void AssetManifestDebugUi::drawModels(AssetManifestEditor& editor)
                 changed = true;
             }
             if (changed) {
-                model.primitiveTextures =
-                    model.materialMode == ModelMaterialMode::PrimitiveTextureIndex;
                 editor.updateModel(i, std::move(model));
             }
             ImGui::TreePop();

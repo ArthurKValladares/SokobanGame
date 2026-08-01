@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <optional>
 #include <sstream>
 #include <algorithm>
@@ -118,9 +119,17 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
     texture.path = "textures/edited.png";
     editor.updateTexture(0, texture);
 
-    auto model = editor.models()[0];
-    model.beltScroll = true;
-    editor.updateModel(0, model);
+    const auto conveyorIt = std::ranges::find_if(
+        editor.models(),
+        [](const sokoban::AssetManifest::Model& candidate) {
+            return candidate.name == "Conveyor";
+        });
+    check(conveyorIt != editor.models().end(), "conveyor model loaded");
+    const std::size_t conveyorIndex = static_cast<std::size_t>(
+        std::distance(editor.models().begin(), conveyorIt));
+    auto model = *conveyorIt;
+    model.primitiveMaterials[0].scrollV = true;
+    editor.updateModel(conveyorIndex, model);
 
     auto animation = editor.animations()[0];
     animation.clip = 12;
@@ -151,7 +160,9 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
     const sokoban::AssetManifest saved =
         sokoban::AssetManifest::loadFromFile(temporary.file());
     check(saved.textures()[0].path == "textures/edited.png", "texture edit persisted");
-    check(saved.models()[0].beltScroll, "model edit persisted");
+    const sokoban::RenderModel conveyor = saved.modelIdByName("Conveyor");
+    check(saved.model(conveyor).primitiveMaterials[0].scrollV,
+        "per-material behavior edit persisted");
     check(saved.animations()[0].clip == 12, "animation edit persisted");
     check(saved.tileEntries()[0].scale == 1.25f, "tile edit persisted");
     check(saved.soundSets()[0].files.size() == 6, "sound file edit persisted");

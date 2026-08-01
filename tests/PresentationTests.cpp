@@ -47,7 +47,16 @@ const AssetManifest& testManifest()
         { "name": "Stone", "path": "stone.gltf" },
         { "name": "Glass", "path": "glass.gltf" },
         { "name": "Bricks", "path": "bricks.gltf" },
-        { "name": "Conveyor", "path": "conveyor.gltf", "beltScroll": true },
+        {
+          "name": "Conveyor",
+          "path": "conveyor.gltf",
+          "material": {
+            "mode": "primitive-materials",
+            "slots": [
+              { "texture": "Tex", "scrollV": true }
+            ]
+          }
+        },
         { "name": "Mirror", "path": "mirror.gltf" },
         {
           "name": "Decoration",

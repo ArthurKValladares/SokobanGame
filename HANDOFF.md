@@ -800,30 +800,35 @@ GLTF loader notes:
 
 - `GltfMesh.*` is a small custom loader, not a general-purpose robust GLTF implementation.
 - It supports enough JSON parsing, buffers, accessors, nodes, skins, and animations for the current assets.
-- Static model vertices include `textureIndex`; a model uses those primitive
-  indices when its JSON material mode is `primitive-texture-index`. The parser
-  infers primitive-texture loading from that mode so it cannot disagree with a
-  second boolean flag.
-- Manifest texture order defines the Vulkan descriptor-array indices. The
-  current conveyor asset maps primitive indices 1 and 2 to `Platformer` and
-  `PlatformerThread`; this invariant is documented beside the texture list in
-  `assets/manifest.json`.
+- Static model vertices include an integer, one-based `textureIndex` containing
+  the final global descriptor-array slot and integer `materialFlags` containing
+  resolved per-material behavior. Models using
+  `{ "mode": "primitive-materials", "slots": [...] }` resolve every glTF
+  material slot from a manifest texture name independently while loading.
+  There is no base-index-plus-offset or source-slot behavior contract, so
+  inserting or reordering unrelated textures cannot silently change a model.
+- Lazy asset requirements request exactly the named textures used by each
+  primitive-texture model. Missing, empty, or unknown mappings fail manifest
+  validation, while a glTF primitive whose material slot has no mapping fails
+  model loading with the offending slot number.
 - If adding complex GLTF assets, consider switching to a proven GLTF library or broadening loader support carefully.
 
 Shader notes:
 
-- `model.vert.glsl` accepts position, normal, UV, and texture index.
+- `model.vert.glsl` accepts position, normal, UV, final texture index, and
+  material flags. Descriptor handles and flags use flat integer varyings.
 - `triangle.frag.glsl` samples the shadow map, resolved scene color, and a
   model texture descriptor array (`MODEL_TEXTURE_COUNT`, padded with a
   fallback texture). That count is compiled into every shader from
   `CMakeLists.txt`, which reads it out of `sokoban::maxModelTextures` in
   `AssetManifest.hpp`; the manifest rejects more textures than the cap, and
   device selection rejects GPUs that cannot bind that many sampled images.
-- Each manifest model declares `material none`, `material texture <Name>`, or
-  `material primitive-texture-index <n>`; draw code passes that mode and
-  texture index through push constants instead of checking model names or
-  sampler bindings. A `belt-scroll true` model scrolls its UVs with the
-  conveyor clock (no hard-coded conveyor special case).
+- Each manifest model declares material mode `none`, `texture` with one named
+  texture, or `primitive-materials` with one record per glTF material slot.
+  Every record owns its texture and optional behavior such as `scrollV`;
+  mappings become final descriptor indices and vertex flags during loading.
+  The conveyor is therefore ordinary material data rather than a hard-coded
+  model, descriptor index, or source-slot convention.
 - Push constants carry transform, lighting, grid, material, and texture options.
 - `ground_splat.frag.glsl` blends two ground textures through a splat map on
   ground tile tops. It reuses the standard tile lighting, shadowing, grid
@@ -1667,9 +1672,6 @@ Rendering/assets:
 
 - Add an explicit cache budget/eviction policy if the manifest grows enough
   for lifetime caching to become expensive.
-- Extend manifest material metadata with exact primitive-texture dependency
-  masks; `PrimitiveTextureIndex` models currently conservatively request every
-  manifest texture.
 - Add timing/history diagnostics for blocking `ensureAssets` calls and
   background CPU preparation if asset stalls become difficult to reproduce.
 - Replace the custom GLTF parsing with a robust library if assets get more complex.
@@ -1795,4 +1797,7 @@ Engineering:
   - No enum, CMake, or renderer change is needed; relaunch to apply.
   - Extend material modes only if the model cannot use `{ "mode": "none" }`,
     `{ "mode": "texture", "texture": "<Name>" }`, or
-    `{ "mode": "primitive-texture-index", "index": <n> }`.
+    `{ "mode": "primitive-materials", "slots": [{ "texture":
+    "<Material0>" }, { "texture": "<Material1>", "scrollV": true }] }`.
+    The array position is the glTF material slot; each texture name and behavior
+    resolves independently of global descriptor ordering.

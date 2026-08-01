@@ -14,7 +14,20 @@ struct MeshVertex {
     Vec3 position {};
     Vec3 normal {};
     Vec2 uv {};
-    float textureIndex = 0.0f;
+    // One-based global descriptor index; zero means untextured.
+    uint32_t textureIndex = 0;
+    // Bitwise PrimitiveMaterialFlag values resolved from manifest metadata.
+    uint32_t materialFlags = 0;
+};
+
+enum PrimitiveMaterialFlag : uint32_t {
+    PrimitiveMaterialNone = 0,
+    PrimitiveMaterialScrollV = 1U << 0U,
+};
+
+struct PrimitiveMaterialBinding {
+    uint32_t textureIndex = 0;
+    uint32_t flags = PrimitiveMaterialNone;
 };
 
 struct MeshData {
@@ -82,7 +95,8 @@ struct GltfMeshLoadOptions {
     bool preserveAspectRatio = false;
     bool preserveSourceScale = false;
     bool rotateHalfTurn = false;
-    bool usePrimitiveMaterialTextures = false;
+    // Entry N is the resolved render behavior for glTF material N.
+    std::vector<PrimitiveMaterialBinding> primitiveMaterials;
 };
 
 [[nodiscard]] MeshData loadGltfMesh(

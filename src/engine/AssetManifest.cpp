@@ -268,32 +268,45 @@ static void parseModelMaterial(
 
     const std::string materialContext = std::string(context) + ".material";
     const Json& material = *materialIt;
-    rejectUnknownProperties(material, { "mode", "texture", "index" }, materialContext);
+    rejectUnknownProperties(material, { "mode", "texture", "slots" }, materialContext);
     const std::string mode = requiredString(material, "mode", materialContext);
     const bool hasTexture = material.contains("texture");
-    const bool hasIndex = material.contains("index");
+    const bool hasSlots = material.contains("slots");
 
     if (mode == "none") {
-        if (hasTexture || hasIndex) {
-            fail(materialContext, "mode 'none' does not accept texture or index");
+        if (hasTexture || hasSlots) {
+            fail(materialContext, "mode 'none' does not accept texture or slots");
         }
     } else if (mode == "texture") {
-        if (hasIndex) {
-            fail(materialContext, "mode 'texture' does not accept index");
+        if (hasSlots) {
+            fail(materialContext, "mode 'texture' does not accept slots");
         }
         model.materialMode = ModelMaterialMode::SingleTexture;
         model.materialTextureName = requiredString(material, "texture", materialContext);
-    } else if (mode == "primitive-texture-index") {
-        if (hasIndex) {
-            fail(materialContext, "mode 'primitive-texture-index' does not accept index");
+    } else if (mode == "primitive-materials") {
+        if (hasTexture) {
+            fail(materialContext, "mode 'primitive-materials' does not accept texture");
         }
-        model.materialMode = ModelMaterialMode::PrimitiveTextureIndex;
-        model.materialTextureName =
-            requiredString(material, "texture", materialContext);
-        model.primitiveTextures = true;
+        const Json& slots = requiredProperty(material, "slots", materialContext);
+        if (!slots.is_array() || slots.empty()) {
+            fail(materialContext,
+                "property 'slots' must be a non-empty array");
+        }
+        model.materialMode = ModelMaterialMode::PrimitiveMaterials;
+        model.primitiveMaterials.reserve(slots.size());
+        for (std::size_t i = 0; i < slots.size(); ++i) {
+            const std::string slotContext =
+                materialContext + ".slots[" + std::to_string(i) + "]";
+            const Json& slot = slots[i];
+            rejectUnknownProperties(slot, { "texture", "scrollV" }, slotContext);
+            model.primitiveMaterials.push_back({
+                .textureName = requiredString(slot, "texture", slotContext),
+                .scrollV = optionalBool(slot, "scrollV", false, slotContext),
+            });
+        }
     } else {
         fail(materialContext,
-            "mode must be 'none', 'texture', or 'primitive-texture-index'");
+            "mode must be 'none', 'texture', or 'primitive-materials'");
     }
 }
 
@@ -306,7 +319,7 @@ static void parseModels(const Json& root, AssetManifest& manifest)
         const Json& modelJson = models[i];
         rejectUnknownProperties(modelJson, {
             "name", "path", "geometry", "material", "preserveAspectRatio",
-            "preserveSourceScale", "rotateHalfTurn", "beltScroll", "role",
+            "preserveSourceScale", "rotateHalfTurn", "role",
         }, context);
 
         AssetManifest::Model model;
@@ -327,7 +340,6 @@ static void parseModels(const Json& root, AssetManifest& manifest)
             modelJson, "preserveSourceScale", false, context);
         model.rotateHalfTurn = optionalBool(
             modelJson, "rotateHalfTurn", false, context);
-        model.beltScroll = optionalBool(modelJson, "beltScroll", false, context);
         parseModelMaterial(modelJson, model, context);
 
         const std::optional<std::string> role = optionalString(modelJson, "role", context);
@@ -525,20 +537,26 @@ void AssetManifest::validateAndResolve()
         if (duplicate(models_, model.name)) {
             throw std::runtime_error("asset manifest: duplicate model '" + model.name + "'");
         }
-        if (model.materialMode == ModelMaterialMode::SingleTexture ||
-            model.materialMode == ModelMaterialMode::PrimitiveTextureIndex) {
-            bool found = false;
+        const auto resolveTexture = [&](std::string_view name) {
             for (std::size_t i = 0; i < textures_.size(); ++i) {
-                if (textures_[i].name == model.materialTextureName) {
-                    model.textureIndex = static_cast<uint32_t>(i);
-                    found = true;
-                    break;
+                if (textures_[i].name == name) {
+                    return static_cast<uint32_t>(i);
                 }
             }
-            if (!found) {
+            throw std::runtime_error(
+                "asset manifest: model '" + model.name +
+                "' references unknown texture '" + std::string(name) + "'");
+        };
+        if (model.materialMode == ModelMaterialMode::SingleTexture) {
+            model.textureIndex = resolveTexture(model.materialTextureName);
+        } else if (model.materialMode == ModelMaterialMode::PrimitiveMaterials) {
+            for (Model::PrimitiveMaterial& material : model.primitiveMaterials) {
+                material.textureIndex = resolveTexture(material.textureName);
+            }
+            if (model.primitiveMaterials.empty()) {
                 throw std::runtime_error(
-                    "asset manifest: model '" + model.name + "' references unknown texture '" +
-                    model.materialTextureName + "'");
+                    "asset manifest: model '" + model.name +
+                    "' has no primitive material mappings");
             }
         }
         if (model.playerRole) {
@@ -712,14 +730,24 @@ RenderModel AssetManifest::addModel(Model model)
             return cubeModel;
         }
     }
-    if (model.materialMode == ModelMaterialMode::SingleTexture ||
-        model.materialMode == ModelMaterialMode::PrimitiveTextureIndex) {
+    if (model.materialMode == ModelMaterialMode::SingleTexture) {
         const RenderTexture texture =
             findTextureIdByName(model.materialTextureName);
         if (texture.isNone()) {
             return cubeModel;
         }
         model.textureIndex = static_cast<uint32_t>(texture.index());
+    } else if (model.materialMode == ModelMaterialMode::PrimitiveMaterials) {
+        for (Model::PrimitiveMaterial& material : model.primitiveMaterials) {
+            const RenderTexture texture = findTextureIdByName(material.textureName);
+            if (texture.isNone()) {
+                return cubeModel;
+            }
+            material.textureIndex = static_cast<uint32_t>(texture.index());
+        }
+        if (model.primitiveMaterials.empty()) {
+            return cubeModel;
+        }
     }
     models_.push_back(std::move(model));
     return RenderModel { static_cast<uint32_t>(models_.size()) };

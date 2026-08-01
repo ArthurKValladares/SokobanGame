@@ -296,12 +296,19 @@ void VulkanModelResources::requestModel(RenderModel model)
     }
 
     const std::filesystem::path path = assetRoot_ / definition.path;
-    const GltfMeshLoadOptions options {
+    GltfMeshLoadOptions options {
         .preserveAspectRatio = definition.preserveAspectRatio,
         .preserveSourceScale = definition.preserveSourceScale,
         .rotateHalfTurn = definition.rotateHalfTurn,
-        .usePrimitiveMaterialTextures = definition.primitiveTextures,
     };
+    options.primitiveMaterials.reserve(definition.primitiveMaterials.size());
+    for (const AssetManifest::Model::PrimitiveMaterial& material :
+         definition.primitiveMaterials) {
+        options.primitiveMaterials.push_back({
+            .textureIndex = material.textureIndex,
+            .flags = material.scrollV ? PrimitiveMaterialScrollV : PrimitiveMaterialNone,
+        });
+    }
     const ModelGeometry geometry = definition.geometry;
     slot.future = taskSystem().enqueue([path, options, geometry]() -> PreparedModel {
         if (geometry == ModelGeometry::Skinned) {
@@ -353,12 +360,10 @@ void VulkanModelResources::requestModelDependencies(RenderModel model)
     const AssetManifest::Model& definition = manifest_->model(model);
     if (definition.materialMode == ModelMaterialMode::SingleTexture) {
         requestTexture(definition.textureIndex);
-    } else if (definition.materialMode == ModelMaterialMode::PrimitiveTextureIndex) {
-        // Primitive material indices address the manifest descriptor array.
-        // Until the manifest records a narrower mask, every slot is a real
-        // dependency of this material mode.
-        for (std::size_t i = 0; i < textures_.size(); ++i) {
-            requestTexture(i);
+    } else if (definition.materialMode == ModelMaterialMode::PrimitiveMaterials) {
+        for (const AssetManifest::Model::PrimitiveMaterial& material :
+             definition.primitiveMaterials) {
+            requestTexture(material.textureIndex);
         }
     }
     if (definition.geometry == ModelGeometry::Skinned) {
@@ -582,8 +587,11 @@ std::vector<bool> VulkanModelResources::requiredTextures(
         const AssetManifest::Model& definition = manifest_->model(model);
         if (definition.materialMode == ModelMaterialMode::SingleTexture) {
             result.at(definition.textureIndex) = true;
-        } else if (definition.materialMode == ModelMaterialMode::PrimitiveTextureIndex) {
-            std::fill(result.begin(), result.end(), true);
+        } else if (definition.materialMode == ModelMaterialMode::PrimitiveMaterials) {
+            for (const AssetManifest::Model::PrimitiveMaterial& material :
+                 definition.primitiveMaterials) {
+                result.at(material.textureIndex) = true;
+            }
         }
     }
     return result;

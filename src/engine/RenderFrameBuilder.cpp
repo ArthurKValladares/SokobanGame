@@ -1429,7 +1429,8 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     }
 
     for (RenderFrameData::Tile& tile : frame.tiles) {
-        if (!tile.model.isCube() && input.manifest.model(tile.model).beltScroll) {
+        if (!tile.model.isCube() &&
+            input.manifest.model(tile.model).hasScrollingMaterial()) {
             tile.beltScrollOffset = input.conveyorBeltScrollOffset;
         }
     }
@@ -1776,7 +1777,8 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
     }
 
     for (RenderFrameData::Tile& tile : frame.tiles) {
-        if (!tile.model.isCube() && input.manifest.model(tile.model).beltScroll) {
+        if (!tile.model.isCube() &&
+            input.manifest.model(tile.model).hasScrollingMaterial()) {
             tile.beltScrollOffset = input.conveyorBeltScrollOffset;
         }
     }

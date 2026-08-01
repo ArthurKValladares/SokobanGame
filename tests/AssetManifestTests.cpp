@@ -58,7 +58,10 @@ constexpr const char* validManifest = R"json(
   "format": 1,
   "textures": [
     { "name": "Unused", "path": "textures/unused.png" },
-    { "name": "Tex", "path": "textures/tex.png" }
+    { "name": "Tex", "path": "textures/tex.png" },
+    { "name": "PrimitiveA", "path": "textures/a.png" },
+    { "name": "Spacer", "path": "textures/spacer.png" },
+    { "name": "PrimitiveB", "path": "textures/b.png" }
   ],
   "models": [
     {
@@ -78,8 +81,13 @@ constexpr const char* validManifest = R"json(
     {
       "name": "Belt",
       "path": "models/belt.gltf",
-      "material": { "mode": "primitive-texture-index", "texture": "Tex" },
-      "beltScroll": true
+      "material": {
+        "mode": "primitive-materials",
+        "slots": [
+          { "texture": "PrimitiveA" },
+          { "texture": "PrimitiveB", "scrollV": true }
+        ]
+      }
     }
   ],
   "animations": [
@@ -120,7 +128,7 @@ void testValidManifest()
     using sokoban::AssetManifest;
     const AssetManifest manifest = AssetManifest::parse(validManifest);
 
-    check(manifest.textures().size() == 2, "two textures");
+    check(manifest.textures().size() == 5, "five textures");
     check(!manifest.textures()[0].tiling, "textures clamp unless marked tiling");
     check(manifest.textures()[0].filter == sokoban::TextureFilter::Nearest,
         "textures point sample unless asked for linear");
@@ -173,12 +181,17 @@ void testValidManifest()
     check(manifest.model(hero).textureIndex == 1, "hero texture index resolved by name");
 
     const sokoban::RenderModel belt = manifest.modelIdByName("Belt");
-    check(manifest.model(belt).beltScroll, "belt scroll flag");
-    check(manifest.model(belt).primitiveTextures, "primitive texture loading inferred");
-    check(manifest.model(belt).materialMode == sokoban::ModelMaterialMode::PrimitiveTextureIndex,
+    check(manifest.model(belt).hasScrollingMaterial(), "scrolling material flag");
+    check(manifest.model(belt).materialMode == sokoban::ModelMaterialMode::PrimitiveMaterials,
         "belt primitive material");
-    check(manifest.model(belt).textureIndex == 1,
-        "primitive texture base resolved by name");
+    check(manifest.model(belt).primitiveMaterials.size() == 2,
+        "belt material slot count");
+    check(manifest.model(belt).primitiveMaterials[0].textureIndex == 2 &&
+            manifest.model(belt).primitiveMaterials[1].textureIndex == 4,
+        "each primitive texture resolved independently by name");
+    check(!manifest.model(belt).primitiveMaterials[0].scrollV &&
+            manifest.model(belt).primitiveMaterials[1].scrollV,
+        "per-material behavior stays independent of descriptor index");
 
     check(manifest.playerIdleAnimation() == manifest.animationIdByName("Idle"), "idle role");
     check(manifest.playerMoveAnimation() == manifest.animationIdByName("Move"), "move role");
@@ -250,9 +263,15 @@ void testSyntaxAndSchemaFailures()
     }, "material mode fields enforced");
     checkJsonThrows([](Json& json) {
         json["models"][0]["material"] = {
-            { "mode", "primitive-texture-index" },
+            { "mode", "primitive-materials" },
         };
-    }, "primitive material texture required");
+    }, "primitive material mappings required");
+    checkJsonThrows([](Json& json) {
+        json["models"][0]["material"] = {
+            { "mode", "primitive-materials" },
+            { "slots", Json::array() },
+        };
+    }, "primitive material mappings cannot be empty");
 }
 
 void testDomainValidationFailures()
@@ -293,8 +312,11 @@ void testDomainValidationFailures()
         json["models"].push_back({
             { "name", "BadPrimitiveTexture" }, { "path", "p.gltf" },
             { "material", {
-                { "mode", "primitive-texture-index" },
-                { "texture", "Ghost" },
+                { "mode", "primitive-materials" },
+                { "slots", {
+                    { { "texture", "PrimitiveA" } },
+                    { { "texture", "Ghost" } },
+                } },
             } },
         });
     }, "unknown primitive texture base");

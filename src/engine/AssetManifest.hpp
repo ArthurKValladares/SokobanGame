@@ -51,7 +51,7 @@ enum class TextureColorSpace {
 enum class ModelMaterialMode : uint32_t {
     Untextured = 0,
     SingleTexture = 1,
-    PrimitiveTextureIndex = 2,
+    PrimitiveMaterials = 2,
 };
 
 [[nodiscard]] constexpr float shaderValue(ModelMaterialMode mode)
@@ -83,6 +83,12 @@ public:
     };
 
     struct Model {
+        struct PrimitiveMaterial {
+            std::string textureName;
+            uint32_t textureIndex = 0;
+            bool scrollV = false;
+        };
+
         std::string name;
         std::string path; // relative to the assets root
         ModelGeometry geometry = ModelGeometry::Static;
@@ -91,16 +97,25 @@ public:
         // bounds into the engine's unit tile. Used by free-form decorations.
         bool preserveSourceScale = false;
         bool rotateHalfTurn = false;
-        bool primitiveTextures = false;
-        bool beltScroll = false; // UVs scroll with the conveyor clock
         bool playerRole = false; // the model gameplay animates as the player
         bool enemyRole = false; // the model gameplay animates as an enemy
         ModelMaterialMode materialMode = ModelMaterialMode::Untextured;
-        uint32_t textureIndex = 0; // resolved into the texture list
-        // Single-texture materials use this texture directly. Primitive
-        // materials use it as the named base for glTF material index zero,
-        // avoiding descriptor offsets that break whenever textures are added.
+        uint32_t textureIndex = 0; // resolved single-texture descriptor index
         std::string materialTextureName; // as written in the manifest
+        // Entry N describes glTF material N. Texture names resolve once during
+        // validation, so descriptor ordering and material behavior are never
+        // inferred from unrelated global indices.
+        std::vector<PrimitiveMaterial> primitiveMaterials;
+
+        [[nodiscard]] bool hasScrollingMaterial() const
+        {
+            for (const PrimitiveMaterial& material : primitiveMaterials) {
+                if (material.scrollV) {
+                    return true;
+                }
+            }
+            return false;
+        }
     };
 
     struct Animation {

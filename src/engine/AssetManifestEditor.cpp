@@ -183,10 +183,21 @@ std::string AssetManifestEditor::serialize() const
                 { "mode", "texture" },
                 { "texture", model.materialTextureName },
             };
-        } else if (model.materialMode == ModelMaterialMode::PrimitiveTextureIndex) {
+        } else if (model.materialMode == ModelMaterialMode::PrimitiveMaterials) {
+            Json slots = Json::array();
+            for (const AssetManifest::Model::PrimitiveMaterial& material :
+                 model.primitiveMaterials) {
+                Json slot = {
+                    { "texture", material.textureName },
+                };
+                if (material.scrollV) {
+                    slot["scrollV"] = true;
+                }
+                slots.push_back(std::move(slot));
+            }
             item["material"] = {
-                { "mode", "primitive-texture-index" },
-                { "texture", model.materialTextureName },
+                { "mode", "primitive-materials" },
+                { "slots", std::move(slots) },
             };
         }
         if (model.preserveAspectRatio) {
@@ -197,9 +208,6 @@ std::string AssetManifestEditor::serialize() const
         }
         if (model.rotateHalfTurn) {
             item["rotateHalfTurn"] = true;
-        }
-        if (model.beltScroll) {
-            item["beltScroll"] = true;
         }
         if (model.playerRole) {
             item["role"] = "player";

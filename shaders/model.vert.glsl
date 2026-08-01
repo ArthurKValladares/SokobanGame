@@ -3,13 +3,15 @@
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inUv;
-layout(location = 3) in float inTextureIndex;
+layout(location = 3) in uint inTextureIndex;
+layout(location = 4) in uint inMaterialFlags;
 
 layout(location = 0) out vec4 outShadowPosition;
 layout(location = 1) out float outFaceCoordU;
 layout(location = 2) out float outFaceCoordV;
 layout(location = 3) out vec3 outNormal;
-layout(location = 4) out float outTextureIndex;
+layout(location = 4) flat out uint outTextureIndex;
+layout(location = 5) flat out uint outMaterialFlags;
 
 layout(push_constant) uniform PushConstants
 {
@@ -43,6 +45,7 @@ void main()
     outFaceCoordU = inUv.x;
     outFaceCoordV = inUv.y;
     outTextureIndex = inTextureIndex;
+    outMaterialFlags = inMaterialFlags;
     vec3 normal = inNormal;
     // Standard models use gridColor.xyz for inverse scale and a negative W
     // as the marker. Mirror-energy models need gridColor for their effect and

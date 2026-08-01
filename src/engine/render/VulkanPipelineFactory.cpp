@@ -200,7 +200,7 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
         .stride = sizeof(MeshVertex),
         .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
     };
-    const std::array<VkVertexInputAttributeDescription, 4> attributes {
+    const std::array<VkVertexInputAttributeDescription, 5> attributes {
         VkVertexInputAttributeDescription {
             .location = 0,
             .binding = 0,
@@ -222,8 +222,14 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
         VkVertexInputAttributeDescription {
             .location = 3,
             .binding = 0,
-            .format = VK_FORMAT_R32_SFLOAT,
+            .format = VK_FORMAT_R32_UINT,
             .offset = offsetof(MeshVertex, textureIndex),
+        },
+        VkVertexInputAttributeDescription {
+            .location = 4,
+            .binding = 0,
+            .format = VK_FORMAT_R32_UINT,
+            .offset = offsetof(MeshVertex, materialFlags),
         },
     };
     VkPipelineVertexInputStateCreateInfo vertexInput {
