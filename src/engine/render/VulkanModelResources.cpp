@@ -134,7 +134,7 @@ void VulkanModelResources::destroy()
                 UINT64_MAX);
         }
 
-        skinnedMeshUpdater_.destroy();
+        skinnedInstances_.clear();
         for (auto texture = textures_.rbegin(); texture != textures_.rend(); ++texture) {
             destroyTextureUpload(texture->upload);
             destroyTexture(texture->gpu.image, texture->gpu.sampler);
@@ -244,8 +244,7 @@ bool VulkanModelResources::publishReadyAssets(std::size_t maxPublications)
         ModelSlot& slot = models_[i];
         const bool canPublish =
             (slot.state == LoadState::Loading && futureReady(slot.future)) ||
-            (slot.state == LoadState::CpuReady &&
-                animationController_.hasClip(manifest_->playerIdleAnimation()));
+            slot.state == LoadState::CpuReady;
         if (canPublish && publishModel(model, false)) {
             ++publications;
         }
@@ -362,7 +361,7 @@ void VulkanModelResources::requestModelDependencies(RenderModel model)
             requestTexture(i);
         }
     }
-    if (model == manifest_->playerModel()) {
+    if (definition.geometry == ModelGeometry::Skinned) {
         requestAnimation(manifest_->playerIdleAnimation());
     }
 }
@@ -388,7 +387,15 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
     }
     if (slot.state == LoadState::CpuReady) {
         try {
-            finalizeSkinnedMeshIfReady();
+            if (!slot.prepared ||
+                !std::holds_alternative<SkinnedMeshData>(*slot.prepared)) {
+                throw std::runtime_error(
+                    "Skinned manifest entry did not prepare a skinned mesh");
+            }
+            slot.skinnedSource = std::make_shared<SkinnedMeshData>(
+                std::move(std::get<SkinnedMeshData>(*slot.prepared)));
+            slot.prepared.reset();
+            slot.state = LoadState::Ready;
         } catch (...) {
             slot.failure = std::current_exception();
             slot.state = LoadState::Failed;
@@ -426,7 +433,10 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                 .maximum = skinned.sourceMaximum,
                 .valid = true,
             };
-            finalizeSkinnedMeshIfReady();
+            slot.skinnedSource = std::make_shared<SkinnedMeshData>(
+                std::move(std::get<SkinnedMeshData>(*slot.prepared)));
+            slot.prepared.reset();
+            slot.state = LoadState::Ready;
         }
     } catch (...) {
         slot.failure = std::current_exception();
@@ -534,27 +544,6 @@ bool VulkanModelResources::publishAnimation(RenderAnimation animation, bool wait
     return true;
 }
 
-void VulkanModelResources::finalizeSkinnedMeshIfReady()
-{
-    ModelSlot& player = models_[manifest_->playerModel().index()];
-    if (player.state != LoadState::CpuReady ||
-        !animationController_.hasClip(manifest_->playerIdleAnimation())) {
-        return;
-    }
-    if (!player.prepared ||
-        !std::holds_alternative<SkinnedMeshData>(*player.prepared)) {
-        throw std::runtime_error("Player manifest entry did not prepare a skinned mesh");
-    }
-
-    skinnedMeshUpdater_.create(
-        physicalDevice_,
-        device_,
-        std::move(std::get<SkinnedMeshData>(*player.prepared)),
-        animationController_.clip(manifest_->playerIdleAnimation()));
-    player.prepared.reset();
-    player.state = LoadState::Ready;
-}
-
 void VulkanModelResources::throwIfFailed(
     LoadState state,
     const std::exception_ptr& failure,
@@ -633,27 +622,58 @@ void VulkanModelResources::setAnimationPreview(
     animationController_.setPreview(clip, timeSeconds);
 }
 
-void VulkanModelResources::updateAnimations(const RenderFrameData& frameData)
+void VulkanModelResources::updateAnimations(
+    const RenderFrameData& frameData,
+    uint32_t frameIndex)
 {
-    if (!skinnedMeshUpdater_.valid()) {
-        return;
-    }
-    if (const std::optional<AnimationController::SkinningRequest> request =
-            animationController_.update(frameData)) {
-        skinnedMeshUpdater_.update(*request);
+    for (const AnimationController::InstanceSkinningRequest& request :
+         animationController_.updateInstances(frameData)) {
+        ModelSlot& model = models_.at(request.model.index());
+        if (!model.skinnedSource) {
+            throw std::runtime_error(
+                "Animated tile references a model without skinned source data");
+        }
+        const AnimatedMeshKey key {
+            frameIndex,
+            request.instanceId,
+            request.model.value,
+        };
+        auto& instance = skinnedInstances_[key];
+        if (!instance) {
+            instance = std::make_unique<SkinnedMeshUpdater>();
+            instance->create(
+                physicalDevice_,
+                device_,
+                model.skinnedSource,
+                *request.skinning.toClip);
+        }
+        instance->update(request.skinning);
     }
 }
 
-VulkanModelResources::MeshView VulkanModelResources::meshForModel(
-    RenderModel model) const
+VulkanModelResources::MeshView VulkanModelResources::meshForTile(
+    const RenderFrameData::Tile& tile,
+    uint32_t frameIndex) const
 {
-    if (model == manifest_->playerModel()) {
-        if (models_[model.index()].state != LoadState::Ready) {
+    const AssetManifest::Model& definition = manifest_->model(tile.model);
+    if (definition.geometry == ModelGeometry::Skinned) {
+        if (models_[tile.model.index()].state != LoadState::Ready) {
             throw std::runtime_error("Skinned model was used before it was ready");
         }
-        return skinnedMeshUpdater_.mesh();
+        const auto instance = skinnedInstances_.find(
+            { frameIndex, tile.animationInstanceId, tile.model.value });
+        if (instance == skinnedInstances_.end()) {
+            throw std::runtime_error(
+                "Skinned model instance pose was not published (model='" +
+                definition.name + "', modelId=" +
+                std::to_string(tile.model.value) + ", animationId=" +
+                std::to_string(tile.animation.value) + ", instanceId=" +
+                std::to_string(tile.animationInstanceId) + ", frame=" +
+                std::to_string(frameIndex) + ")");
+        }
+        return instance->second->mesh();
     }
-    const GpuMesh& mesh = gpuMeshForModel(model);
+    const GpuMesh& mesh = gpuMeshForModel(tile.model);
     return {
         .vertexBuffer = mesh.vertexBuffer.buffer,
         .indexBuffer = mesh.indexBuffer.buffer,

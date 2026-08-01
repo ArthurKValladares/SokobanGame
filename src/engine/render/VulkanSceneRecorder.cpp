@@ -1317,7 +1317,7 @@ private:
         float effectAnimationTimeSeconds)
     {
         const VulkanModelResources::MeshView mesh =
-            models_.meshForModel(tile.model);
+            models_.meshForTile(tile, configuration_.descriptorFrameIndex);
         const VulkanModelResources::MaterialBinding material =
             models_.materialForModel(tile.model);
         const ModelTransformPoints transform =
@@ -1482,7 +1482,7 @@ private:
         const RenderFrameData::Tile& tile)
     {
         const VulkanModelResources::MeshView mesh =
-            models_.meshForModel(tile.model);
+            models_.meshForTile(tile, configuration_.descriptorFrameIndex);
         const ModelTransformPoints transform =
             IsoScenePreparer::modelTransformPoints(tile);
         const TilePushConstants constants {

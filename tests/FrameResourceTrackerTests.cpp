@@ -1,4 +1,5 @@
 #include "engine/render/FrameResourceTracker.hpp"
+#include "engine/render/ReusableScratchPool.hpp"
 
 #include <iostream>
 #include <stdexcept>
@@ -71,12 +72,39 @@ void testRejectsInvalidSubmissionTransitions()
         tracker.markSubmitted(2, 1));
 }
 
+void testScratchStorageIsNeverReusedWhileLeased()
+{
+    struct Scratch {
+        int value = 0;
+    };
+    sokoban::ReusableScratchPool<Scratch, 2> pool;
+
+    auto first = pool.acquire();
+    auto second = pool.acquire();
+    first->value = 11;
+    second->value = 22;
+    Scratch* firstAddress = first.get();
+
+    auto overflow = pool.acquire();
+    CHECK(overflow.get() != first.get());
+    CHECK(overflow.get() != second.get());
+    overflow->value = 33;
+    CHECK(first->value == 11);
+    CHECK(second->value == 22);
+
+    first.reset();
+    auto reused = pool.acquire();
+    CHECK(reused.get() == firstAddress);
+    CHECK(second->value == 22);
+}
+
 } // namespace
 
 int main()
 {
     testTracksOverlappingGenerationsExactly();
     testRejectsInvalidSubmissionTransitions();
+    testScratchStorageIsNeverReusedWhileLeased();
 
     if (failures == 0) {
         std::cout << "FrameResourceTrackerTests: "

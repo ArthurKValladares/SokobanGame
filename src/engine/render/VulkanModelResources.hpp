@@ -13,7 +13,9 @@
 #include <exception>
 #include <filesystem>
 #include <future>
+#include <memory>
 #include <optional>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -116,9 +118,11 @@ public:
     void retireCompletedUploads();
 
     void setAnimationPreview(const GltfAnimationClip* clip, float timeSeconds);
-    void updateAnimations(const RenderFrameData& frameData);
+    void updateAnimations(const RenderFrameData& frameData, uint32_t frameIndex);
 
-    [[nodiscard]] MeshView meshForModel(RenderModel model) const;
+    [[nodiscard]] MeshView meshForTile(
+        const RenderFrameData::Tile& tile,
+        uint32_t frameIndex) const;
     [[nodiscard]] MaterialBinding materialForModel(RenderModel model) const;
     // Invalid until the model has finished uploading.
     [[nodiscard]] ModelBounds boundsForModel(RenderModel model) const;
@@ -179,6 +183,7 @@ private:
         GpuMesh gpu {};
         std::future<PreparedModel> future;
         std::optional<PreparedModel> prepared;
+        std::shared_ptr<const SkinnedMeshData> skinnedSource;
         std::exception_ptr failure;
         // Captured at upload, because the CPU mesh is released immediately
         // afterwards and nothing else keeps it.
@@ -207,7 +212,6 @@ private:
     [[nodiscard]] bool publishModel(RenderModel model, bool wait);
     [[nodiscard]] bool publishTexture(std::size_t textureIndex, bool wait);
     [[nodiscard]] bool publishAnimation(RenderAnimation animation, bool wait);
-    void finalizeSkinnedMeshIfReady();
     void throwIfFailed(
         LoadState state,
         const std::exception_ptr& failure,
@@ -274,7 +278,27 @@ private:
     std::vector<TextureSlot> textures_;
     TextureResource fallbackTexture_ {};
     AnimationController animationController_ {};
-    SkinnedMeshUpdater skinnedMeshUpdater_ {};
+    struct AnimatedMeshKey {
+        uint32_t frameIndex = 0;
+        uint64_t instanceId = 0;
+        uint32_t modelValue = 0;
+
+        bool operator==(const AnimatedMeshKey&) const = default;
+    };
+    struct AnimatedMeshKeyHash {
+        std::size_t operator()(AnimatedMeshKey key) const
+        {
+            return std::hash<uint64_t> {}(
+                key.instanceId ^
+                (static_cast<uint64_t>(key.frameIndex) << 56) ^
+                (static_cast<uint64_t>(key.modelValue) << 24));
+        }
+    };
+    std::unordered_map<
+        AnimatedMeshKey,
+        std::unique_ptr<SkinnedMeshUpdater>,
+        AnimatedMeshKeyHash>
+        skinnedInstances_;
     uint64_t textureUploadSubmissions_ = 0;
     uint64_t textureUploadCompletions_ = 0;
 };

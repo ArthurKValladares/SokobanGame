@@ -42,7 +42,8 @@ std::string_view tileTypeName(TileType type)
 
 bool tileTypeOccupiesLevelCell(TileType type)
 {
-    return type == TileType::Player || type == TileType::Rock || type == TileType::Ice;
+    return type == TileType::Player || type == TileType::Rock ||
+        type == TileType::Ice || type == TileType::Enemy;
 }
 
 bool tileTypeIsSolidBlock(TileType type)

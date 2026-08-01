@@ -203,6 +203,8 @@ std::string AssetManifestEditor::serialize() const
         }
         if (model.playerRole) {
             item["role"] = "player";
+        } else if (model.enemyRole) {
+            item["role"] = "enemy";
         }
         root["models"].push_back(std::move(item));
     }

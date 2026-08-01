@@ -83,9 +83,10 @@ Application::Application()
     applySettingsEffects(settingsCoordinator_.initialize());
     presentationSettings_.applyTileScales(assetManifest_);
     presentationSettings_.normalize();
-    presentation_.setPlayerClips(
+    presentation_.setActorClips(
         assetManifest_.playerMoveAnimation(),
-        assetManifest_.playerPushAnimation());
+        assetManifest_.playerPushAnimation(),
+        assetManifest_.enemyAttackAnimation());
     // The world stays unloaded until the title's Continue/New Game, but its
     // assets warm up in the background so that first load doesn't block.
     openTitleScreen();
@@ -314,6 +315,9 @@ void Application::run()
         if (bakeThumbnailsRequested_) {
             bakeThumbnailsRequested_ = false;
             (void)bakeTileThumbnails();
+            // The bake drives its own frames. Do not use an older gameplay
+            // frame for editor picking or gizmo projection afterward.
+            preparedRenderFrame_.reset();
             // The files on disk changed, so drop what the palette already
             // loaded; it would otherwise keep showing the old pictures until
             // the next launch.

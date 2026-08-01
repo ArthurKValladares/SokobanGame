@@ -6,6 +6,10 @@
       "path": "KayKit Adventurers 2.0/Characters/gltf/rogue_texture.png"
     },
     {
+      "name": "Barbarian",
+      "path": "KayKit Adventurers 2.0/Characters/gltf/barbarian_texture.png"
+    },
+    {
       "name": "Platformer",
       "path": "KayKit Platformer Pack 1.0/Assets/gltf/blue/platformer_texture.png"
     },
@@ -195,6 +199,18 @@
       "role": "player"
     },
     {
+      "name": "Barbarian",
+      "path": "KayKit Adventurers 2.0/Characters/gltf/Barbarian.glb",
+      "geometry": "skinned",
+      "material": {
+        "mode": "texture",
+        "texture": "Barbarian"
+      },
+      "preserveAspectRatio": true,
+      "rotateHalfTurn": true,
+      "role": "enemy"
+    },
+    {
       "name": "PictureFrameLargeA",
       "path": "KayKit Furniture Bits 1.0/Assets/gltf/pictureframe_large_A.gltf",
       "material": {
@@ -378,6 +394,12 @@
       "path": "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/Rig_Medium_General.glb",
       "clip": 4,
       "role": "player-dead-idle"
+    },
+    {
+      "name": "BarbarianAttack",
+      "path": "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/Rig_Medium_General.glb",
+      "clip": 14,
+      "role": "enemy-attack"
     }
   ],
   "tiles": [
@@ -428,6 +450,11 @@
     },
     {
       "tile": "Decorative Block"
+    },
+    {
+      "tile": "Enemy",
+      "model": "Barbarian",
+      "scale": 1.1
     },
     {
       "tile": "Player",

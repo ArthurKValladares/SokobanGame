@@ -76,6 +76,7 @@ public:
     [[nodiscard]] uint32_t depth() const { return depth_; }
     [[nodiscard]] GridPosition3 playerStart() const { return playerStart_; }
     [[nodiscard]] const std::vector<MovableTile>& movableTiles() const { return movableTiles_; }
+    [[nodiscard]] const std::vector<GridPosition3>& enemyStarts() const { return enemyStarts_; }
     [[nodiscard]] const std::vector<GridPosition3>& pressurePlates() const { return pressurePlates_; }
     [[nodiscard]] std::optional<uint32_t> waterLayer() const { return waterLayer_; }
     [[nodiscard]] const std::vector<Decoration>& decorations() const { return decorations_; }
@@ -92,6 +93,7 @@ private:
     uint32_t depth_ = 0;
     GridPosition3 playerStart_ {};
     std::vector<MovableTile> movableTiles_;
+    std::vector<GridPosition3> enemyStarts_;
     std::vector<GridPosition3> pressurePlates_;
     std::vector<TileType> tiles_;
     std::optional<uint32_t> waterLayer_;

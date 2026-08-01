@@ -117,6 +117,10 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
     requirements.requireAnimation(manifest.playerPushAnimation());
     requirements.requireAnimation(manifest.playerDeathAnimation());
     requirements.requireAnimation(manifest.playerDeadIdleAnimation());
+    if (!level.enemyStarts().empty()) {
+        requirements.requireModel(manifest.enemyModel());
+        requirements.requireAnimation(manifest.enemyAttackAnimation());
+    }
 
     // Ground splatting samples these directly from the descriptor array, so
     // they must be required like any model texture; unset ids are ignored.

@@ -28,6 +28,9 @@ struct GameState {
     struct Player {
         GridPosition3 cell {};
         bool dead = false;
+        // Death and submersion are separate facts: enemy attacks leave the
+        // actor on the board, while water deaths render below the surface.
+        bool drowned = false;
         std::optional<MoveDirection> sliding;
 
         bool operator==(const Player&) const = default;
@@ -42,8 +45,16 @@ struct GameState {
         bool operator==(const Movable&) const = default;
     };
 
+    struct Enemy {
+        GridPosition3 cell {};
+        bool fallen = false;
+
+        bool operator==(const Enemy&) const = default;
+    };
+
     std::vector<Player> players;
     std::vector<Movable> movables;
+    std::vector<Enemy> enemies;
 
     bool operator==(const GameState&) const = default;
 };
@@ -86,6 +97,8 @@ struct StepRates {
 
 [[nodiscard]] const GameState::Movable* movableAt(const GameState& state, GridPosition3 position);
 [[nodiscard]] const GameState::Movable* fallenMovableAt(const GameState& state, GridPosition3 position);
+[[nodiscard]] const GameState::Enemy* enemyAt(const GameState& state, GridPosition3 position);
+[[nodiscard]] const GameState::Enemy* fallenEnemyAt(const GameState& state, GridPosition3 position);
 
 // Water that has not been filled by a fallen movable. A drowned player remains
 // below the water surface and does not displace it.

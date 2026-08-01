@@ -334,10 +334,13 @@ static void parseModels(const Json& root, AssetManifest& manifest)
 
         const std::optional<std::string> role = optionalString(modelJson, "role", context);
         if (role) {
-            if (*role != "player") {
-                fail(context, "the only model role is 'player'");
+            if (*role == "player") {
+                model.playerRole = true;
+            } else if (*role == "enemy") {
+                model.enemyRole = true;
+            } else {
+                fail(context, "model role must be 'player' or 'enemy'");
             }
-            model.playerRole = true;
         }
         manifest.models_.push_back(std::move(model));
     }
@@ -362,10 +365,11 @@ static void parseAnimations(const Json& root, AssetManifest& manifest)
             animation.role != "player-move" &&
             animation.role != "player-push" &&
             animation.role != "player-death" &&
-            animation.role != "player-dead-idle") {
+            animation.role != "player-dead-idle" &&
+            animation.role != "enemy-attack") {
             fail(context,
                 "role must be 'player-idle', 'player-move', 'player-push', "
-                "'player-death', or 'player-dead-idle'");
+                "'player-death', 'player-dead-idle', or 'enemy-attack'");
         }
         manifest.animations_.push_back(std::move(animation));
     }
@@ -553,6 +557,16 @@ void AssetManifest::validateAndResolve()
             }
             playerModel_ = modelIdByName(model.name);
         }
+        if (model.enemyRole) {
+            if (!enemyModel_.isCube()) {
+                throw std::runtime_error("asset manifest: multiple models with role enemy");
+            }
+            if (model.geometry != ModelGeometry::Skinned) {
+                throw std::runtime_error(
+                    "asset manifest: enemy model '" + model.name + "' must be skinned");
+            }
+            enemyModel_ = modelIdByName(model.name);
+        }
     }
 
     for (const Animation& animation : animations_) {
@@ -571,6 +585,8 @@ void AssetManifest::validateAndResolve()
             role = &playerDeath_;
         } else if (animation.role == "player-dead-idle") {
             role = &playerDeadIdle_;
+        } else if (animation.role == "enemy-attack") {
+            role = &enemyAttack_;
         }
         if (role != nullptr) {
             if (!role->isNone()) {
@@ -592,6 +608,10 @@ void AssetManifest::validateAndResolve()
         throw std::runtime_error(
             "asset manifest: animations with roles player-idle, player-move, "
             "player-push, player-death, and player-dead-idle are all required");
+    }
+    if (enemyModel_.isCube() != enemyAttack_.isNone()) {
+        throw std::runtime_error(
+            "asset manifest: enemy model and enemy-attack animation roles must be declared together");
     }
 
     for (std::size_t i = 0; i < tileModelNames_.size(); ++i) {
@@ -689,7 +709,7 @@ RenderTexture AssetManifest::addTexture(Texture texture)
 
 RenderModel AssetManifest::addModel(Model model)
 {
-    if (model.name.empty() || model.path.empty() || model.playerRole ||
+    if (model.name.empty() || model.path.empty() || model.playerRole || model.enemyRole ||
         model.geometry != ModelGeometry::Static) {
         return cubeModel;
     }

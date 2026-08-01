@@ -923,6 +923,61 @@ void testEveryPlayerMustReachAnActiveEnd()
     CHECK(!rules::isAtUnlockedEnd(level, state));
 }
 
+void testEnemySpawnsOutsideStaticGridAndKillsAdjacentPlayer()
+{
+    TEST("enemySpawnsOutsideStaticGridAndKillsAdjacentPlayer");
+    const Level level = makeLevel({
+        { "...." },
+        { "C N " },
+    });
+    const GameState state = rules::initialState(level);
+    CHECK(state.enemies.size() == 1);
+    CHECK(state.enemies[0].cell == cell(2, 0, 1));
+    CHECK(level.authoredTileAt(2, 0, 1) == TileType::Air);
+
+    const GameState attacked = rules::step(
+        level, state, MoveDirection::Right);
+    CHECK(attacked.players[0].cell == cell(1, 0, 1));
+    CHECK(attacked.players[0].dead);
+    CHECK(!attacked.players[0].drowned);
+}
+
+void testEnemyDoesNotAttackDiagonallyAndBlocksDirectMovement()
+{
+    TEST("enemyDoesNotAttackDiagonallyAndBlocksDirectMovement");
+    const Level diagonal = makeLevel({
+        { "...", "...", "..." },
+        { " N ", "C  ", "   " },
+    });
+    const GameState diagonalState = rules::step(
+        diagonal, rules::initialState(diagonal), MoveDirection::Down);
+    CHECK(diagonalState.players[0].cell == cell(0, 2, 1));
+    CHECK(!diagonalState.players[0].dead);
+
+    const Level blocked = makeLevel({
+        { "..." },
+        { "CN " },
+    });
+    const GameState start = rules::initialState(blocked);
+    CHECK(rules::step(blocked, start, MoveDirection::Right) == start);
+}
+
+void testMovingBlockPushesEnemy()
+{
+    TEST("movingBlockPushesEnemy");
+    const Level level = makeLevel({
+        { "....." },
+        { "CRN  " },
+    });
+    const GameState pushed = rules::step(
+        level, rules::initialState(level), MoveDirection::Right);
+    CHECK(pushed.players[0].cell == cell(1, 0, 1));
+    CHECK(pushed.movables[0].cell == cell(2, 0, 1));
+    CHECK(pushed.enemies[0].cell == cell(3, 0, 1));
+    CHECK(!pushed.enemies[0].fallen);
+    CHECK(!pushed.players[0].dead);
+}
+
 } // namespace
 
 int main()
@@ -972,6 +1027,9 @@ int main()
     testEquidistantMirrorsDuplicatePlayers();
     testPlayerCopiesShareMovementAndCanDuplicateAgain();
     testEveryPlayerMustReachAnActiveEnd();
+    testEnemySpawnsOutsideStaticGridAndKillsAdjacentPlayer();
+    testEnemyDoesNotAttackDiagonallyAndBlocksDirectMovement();
+    testMovingBlockPushesEnemy();
 
     if (failures == 0) {
         std::cout << "All " << checks << " checks passed.\n";

@@ -25,24 +25,42 @@ public:
         bool moving = false;
     };
 
-    struct PlayerVisual {
+    struct AnimatedActorVisual {
         EntityVisual motion;
-        RenderAnimation movingClip {};
         float clipTimeSeconds = 0.0f;
         float clipPlaybackRate = 1.0f;
+        // Unit quaternion. Actor presentation owns smooth orientation;
+        // render data receives only the resulting yaw angle.
+        Vec4 orientation { 0.0f, 0.0f, 0.0f, 1.0f };
+    };
+
+    struct PlayerVisual : AnimatedActorVisual {
+        RenderAnimation movingClip {};
         uint32_t facingQuarterTurns = 0;
         bool deathTransitionPlaying = false;
     };
 
+    struct EnemyVisual : AnimatedActorVisual {
+        bool attackTransitionPlaying = false;
+    };
+
     // Ids come from the asset manifest; must be set before actions begin.
-    void setPlayerClips(RenderAnimation moveClip, RenderAnimation pushClip);
+    void setActorClips(
+        RenderAnimation moveClip,
+        RenderAnimation pushClip,
+        RenderAnimation enemyAttackClip);
+    void setPlayerClips(RenderAnimation moveClip, RenderAnimation pushClip)
+    {
+        setActorClips(moveClip, pushClip, enemyAttackClip_);
+    }
     void resetEntities(const GameState& state);
     void advanceClocks(float dt, bool reversed);
     void updateCameraPitch(
         float targetDegrees,
         float dt,
         float transitionSeconds);
-    void advanceAnimations(float dt);
+    void advanceAnimations(float dt, const GameState& state);
+    void advanceAnimations(float dt) { advanceAnimations(dt, {}); }
     void beginAction(const GameplaySession::Action& action);
     void finishAction(const GameState& state);
     void syncToGameState(const GameState& state);
@@ -55,14 +73,17 @@ public:
         return players_;
     }
     [[nodiscard]] const std::vector<EntityVisual>& movables() const { return movables_; }
+    [[nodiscard]] const std::vector<EnemyVisual>& enemies() const { return enemies_; }
 
 private:
     static void setImmediatePosition(EntityVisual& visual, Vec3 target);
 
     std::vector<PlayerVisual> players_;
     std::vector<EntityVisual> movables_;
+    std::vector<EnemyVisual> enemies_;
     RenderAnimation playerMoveClip_ {};
     RenderAnimation playerPushClip_ {};
+    RenderAnimation enemyAttackClip_ {};
     float worldAnimationTimeSeconds_ = 0.0f;
     float cameraPitchDegrees_ = 0.0f;
     float cameraPitchStartDegrees_ = 0.0f;

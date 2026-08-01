@@ -29,6 +29,7 @@ enum class TileType {
     MirrorSouthWest,
     MirrorSouthEast,
     Decorative,
+    Enemy,
     Count,
 };
 
@@ -61,6 +62,7 @@ inline constexpr std::array<TileTypeDefinition, tileTypeCount> tileTypeDefinitio
     TileTypeDefinition { TileType::MirrorSouthWest, '3', "Mirror South-West", { 0.72f, 0.90f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::MirrorSouthEast, '4', "Mirror South-East", { 0.72f, 0.90f, 1.0f, 1.0f } },
     TileTypeDefinition { TileType::Decorative, 'D', "Decorative Block", { 0.32f, 0.58f, 0.48f, 1.0f } },
+    TileTypeDefinition { TileType::Enemy, 'N', "Enemy", { 0.75f, 0.18f, 0.12f, 1.0f } },
 };
 
 [[nodiscard]] const std::array<TileTypeDefinition, tileTypeCount>& tileTypeDefinitions();

@@ -63,8 +63,8 @@ void AnimationController::setPreview(const GltfAnimationClip* clip, float timeSe
 
 std::optional<AnimationController::SkinningRequest> AnimationController::update(const RenderFrameData& frameData)
 {
-    constexpr float timeEpsilon = 0.0001f;
     if (previewClip_ != nullptr) {
+        constexpr float timeEpsilon = 0.0001f;
         if (previewClip_ == activePreviewClip_ &&
             std::abs(previewTimeSeconds_ - activePreviewTime_) < timeEpsilon) {
             return std::nullopt;
@@ -72,8 +72,7 @@ std::optional<AnimationController::SkinningRequest> AnimationController::update(
 
         activePreviewClip_ = previewClip_;
         activePreviewTime_ = previewTimeSeconds_;
-        activeAnimation_ = noAnimation;
-        fadeFromAnimation_ = noAnimation;
+        legacyPlayback_ = {};
         return SkinningRequest {
             .toClip = previewClip_,
             .toTimeSeconds = previewTimeSeconds_,
@@ -81,46 +80,93 @@ std::optional<AnimationController::SkinningRequest> AnimationController::update(
     }
     activePreviewClip_ = nullptr;
 
-    RenderAnimation requestedAnimation = noAnimation;
-    float requestedTime = 0.0f;
-    bool resolvedNonLoopingFallback = false;
     for (const RenderFrameData::Tile& tile : frameData.tiles) {
         if (tile.model == playerModel_ && !tile.animation.isNone()) {
-            requestedAnimation = tile.animation;
-            requestedTime = tile.animationTimeSeconds;
-            if (!tile.animationLoops &&
-                !tile.animationFallback.isNone() &&
-                hasClip(requestedAnimation) &&
-                hasClip(tile.animationFallback) &&
-                requestedTime >= clip(requestedAnimation).durationSeconds) {
-                requestedAnimation = tile.animationFallback;
-                resolvedNonLoopingFallback = true;
-            }
-            break;
+            return updateTile(tile, legacyPlayback_);
         }
+    }
+    return std::nullopt;
+}
+
+std::vector<AnimationController::InstanceSkinningRequest>
+AnimationController::updateInstances(const RenderFrameData& frameData)
+{
+    std::vector<InstanceSkinningRequest> requests;
+    requests.reserve(frameData.tiles.size());
+    activePreviewClip_ = previewClip_;
+    activePreviewTime_ = previewClip_ != nullptr
+        ? previewTimeSeconds_
+        : -1.0f;
+    for (const RenderFrameData::Tile& tile : frameData.tiles) {
+        if (tile.animationInstanceId == 0) {
+            continue;
+        }
+        PlaybackState& playback = instancePlayback_[tile.animationInstanceId];
+        if (previewClip_ != nullptr && tile.model == playerModel_) {
+            playback = {};
+            requests.push_back({
+                .instanceId = tile.animationInstanceId,
+                .model = tile.model,
+                .skinning = {
+                    .toClip = previewClip_,
+                    .toTimeSeconds = previewTimeSeconds_,
+                },
+            });
+            continue;
+        }
+        if (std::optional<SkinningRequest> request = updateTile(tile, playback, true)) {
+            requests.push_back({
+                .instanceId = tile.animationInstanceId,
+                .model = tile.model,
+                .skinning = *request,
+            });
+        }
+    }
+    return requests;
+}
+
+std::optional<AnimationController::SkinningRequest> AnimationController::updateTile(
+    const RenderFrameData::Tile& tile,
+    PlaybackState& playback,
+    bool forceSample)
+{
+    constexpr float timeEpsilon = 0.0001f;
+    RenderAnimation requestedAnimation = tile.animation.isNone()
+        ? fallbackClip_
+        : tile.animation;
+    float requestedTime = tile.animationTimeSeconds;
+    bool resolvedNonLoopingFallback = false;
+    if (!tile.animationLoops &&
+        !tile.animationFallback.isNone() &&
+        hasClip(requestedAnimation) &&
+        hasClip(tile.animationFallback) &&
+        requestedTime >= clip(requestedAnimation).durationSeconds) {
+        requestedAnimation = tile.animationFallback;
+        resolvedNonLoopingFallback = true;
     }
     if (requestedAnimation.isNone() || !hasClip(requestedAnimation)) {
         return std::nullopt;
     }
 
-    const float timeDelta = activeAnimation_.isNone()
+    const float timeDelta = playback.activeAnimation.isNone()
         ? 0.0f
-        : requestedTime - activeAnimationTime_;
+        : requestedTime - playback.activeAnimationTime;
     if (resolvedNonLoopingFallback) {
         // The fallback is authored as the terminal pose of the one-shot clip.
         // A generic crossfade would sample the completed source at its exact
         // duration, which looping samplers wrap back to the starting pose.
-        fadeFromAnimation_ = noAnimation;
-        fadeElapsed_ = 0.0f;
-    } else if (!(requestedAnimation == activeAnimation_) && !activeAnimation_.isNone()) {
-        fadeFromAnimation_ = activeAnimation_;
-        fadeFromTime_ = activeAnimationTime_;
-        fadeElapsed_ = 0.0f;
+        playback.fadeFromAnimation = noAnimation;
+        playback.fadeElapsed = 0.0f;
+    } else if (!(requestedAnimation == playback.activeAnimation) &&
+        !playback.activeAnimation.isNone()) {
+        playback.fadeFromAnimation = playback.activeAnimation;
+        playback.fadeFromTime = playback.activeAnimationTime;
+        playback.fadeElapsed = 0.0f;
     }
 
-    if (fadeFromAnimation_.isNone() &&
-        requestedAnimation == activeAnimation_ &&
-        std::abs(requestedTime - activeAnimationTime_) < timeEpsilon) {
+    if (!forceSample && playback.fadeFromAnimation.isNone() &&
+        requestedAnimation == playback.activeAnimation &&
+        std::abs(requestedTime - playback.activeAnimationTime) < timeEpsilon) {
         return std::nullopt;
     }
 
@@ -128,32 +174,30 @@ std::optional<AnimationController::SkinningRequest> AnimationController::update(
         .toClip = &clip(requestedAnimation),
         .toTimeSeconds = requestedTime,
     };
-    if (!fadeFromAnimation_.isNone()) {
-        fadeFromTime_ += timeDelta;
-        fadeElapsed_ += std::abs(timeDelta);
-        if (fadeDurationSeconds_ <= 0.0f || fadeElapsed_ >= fadeDurationSeconds_) {
-            fadeFromAnimation_ = noAnimation;
+    if (!playback.fadeFromAnimation.isNone()) {
+        playback.fadeFromTime += timeDelta;
+        playback.fadeElapsed += std::abs(timeDelta);
+        if (fadeDurationSeconds_ <= 0.0f ||
+            playback.fadeElapsed >= fadeDurationSeconds_) {
+            playback.fadeFromAnimation = noAnimation;
         } else {
-            float blend = fadeElapsed_ / fadeDurationSeconds_;
+            float blend = playback.fadeElapsed / fadeDurationSeconds_;
             blend = blend * blend * (3.0f - 2.0f * blend);
-            request.fromClip = &clip(fadeFromAnimation_);
-            request.fromTimeSeconds = fadeFromTime_;
+            request.fromClip = &clip(playback.fadeFromAnimation);
+            request.fromTimeSeconds = playback.fadeFromTime;
             request.blend = blend;
         }
     }
 
-    activeAnimation_ = requestedAnimation;
-    activeAnimationTime_ = requestedTime;
+    playback.activeAnimation = requestedAnimation;
+    playback.activeAnimationTime = requestedTime;
     return request;
 }
 
 void AnimationController::resetPlayback()
 {
-    activeAnimation_ = noAnimation;
-    activeAnimationTime_ = -1.0f;
-    fadeFromAnimation_ = noAnimation;
-    fadeFromTime_ = 0.0f;
-    fadeElapsed_ = 0.0f;
+    legacyPlayback_ = {};
+    instancePlayback_.clear();
     activePreviewClip_ = nullptr;
     activePreviewTime_ = -1.0f;
 }

@@ -35,6 +35,7 @@ constexpr RenderAnimation moveClip { 2 };
 constexpr RenderAnimation pushClip { 3 };
 constexpr RenderAnimation deathClip { 4 };
 constexpr RenderAnimation deadIdleClip { 5 };
+constexpr RenderAnimation attackClip { 6 };
 
 bool near(float left, float right)
 {
@@ -70,6 +71,7 @@ AnimationController makeController(float fadeSeconds = 0.1f)
     controller.setClip(pushClip, makeClip("push"));
     controller.setClip(deathClip, makeClip("death", 1.0f));
     controller.setClip(deadIdleClip, makeClip("dead idle", 2.0f));
+    controller.setClip(attackClip, makeClip("attack", 1.0f));
     return controller;
 }
 
@@ -166,6 +168,27 @@ void testPreviewOverridesAndThenReleasesGameplay()
     CHECK(gameplayRequest.has_value());
     CHECK(!gameplayRequest->blended());
     CHECK(gameplayRequest->toClip->name == "push");
+
+    // Instance poses back separate buffers for each frame in flight, so a
+    // paused preview must still publish its pose whenever that frame recurs.
+    AnimationController instanceController = makeController();
+    RenderFrameData instanceFrame = frameWithAnimation(pushClip, 4.0f);
+    instanceFrame.tiles.front().animationInstanceId = 17;
+    instanceController.setPreview(&preview, 2.0f);
+    CHECK(instanceController.updateInstances(instanceFrame).size() == 1);
+    CHECK(instanceController.updateInstances(instanceFrame).size() == 1);
+
+    instanceFrame.tiles.push_back({
+        .model = RenderModel { 3 },
+        .animation = attackClip,
+        .animationInstanceId = 18,
+        .animationTimeSeconds = 0.5f,
+    });
+    const auto mixedPreview = instanceController.updateInstances(instanceFrame);
+    CHECK(mixedPreview.size() == 2);
+    CHECK(mixedPreview[0].skinning.toClip == &preview);
+    CHECK(mixedPreview[1].model == RenderModel { 3 });
+    CHECK(mixedPreview[1].skinning.toClip->name == "attack");
 }
 
 void testNonLoopingAnimationFallsBackAtClipDuration()
@@ -208,6 +231,49 @@ void testClipValidationAndClear()
     CHECK(!controller.update(frameWithAnimation(idleClip, 1.0f)));
 }
 
+void testAnimatedInstancesKeepIndependentPlayback()
+{
+    TEST("animatedInstancesKeepIndependentPlayback");
+    AnimationController controller = makeController(0.1f);
+    RenderFrameData frame;
+    frame.tiles.push_back({
+        .model = heroModel,
+        .animation = idleClip,
+        .animationInstanceId = 1,
+        .animationTimeSeconds = 1.0f,
+    });
+    frame.tiles.push_back({
+        .model = RenderModel { 3 },
+        .animation = attackClip,
+        .animationFallback = idleClip,
+        .animationInstanceId = 2,
+        .animationLoops = false,
+        .animationTimeSeconds = 0.25f,
+    });
+    const auto initial = controller.updateInstances(frame);
+    CHECK(initial.size() == 2);
+    CHECK(initial[0].instanceId == 1);
+    CHECK(initial[0].skinning.toClip->name == "idle");
+    CHECK(initial[1].instanceId == 2);
+    CHECK(initial[1].skinning.toClip->name == "attack");
+
+    frame.tiles[0].animation = moveClip;
+    frame.tiles[0].animationTimeSeconds = 1.05f;
+    frame.tiles[1].animationTimeSeconds = 0.30f;
+    const auto advanced = controller.updateInstances(frame);
+    CHECK(advanced.size() == 2);
+    CHECK(advanced[0].skinning.blended());
+    CHECK(advanced[0].skinning.fromClip->name == "idle");
+    CHECK(advanced[0].skinning.toClip->name == "movement");
+    CHECK(!advanced[1].skinning.blended());
+    CHECK(advanced[1].skinning.toClip->name == "attack");
+
+    frame.tiles[1].animation = noAnimation;
+    const auto fallback = controller.updateInstances(frame);
+    CHECK(fallback.size() == 2);
+    CHECK(fallback[1].skinning.toClip->name == "idle");
+}
+
 } // namespace
 
 int main()
@@ -218,6 +284,7 @@ int main()
     testPreviewOverridesAndThenReleasesGameplay();
     testNonLoopingAnimationFallsBackAtClipDuration();
     testClipValidationAndClear();
+    testAnimatedInstancesKeepIndependentPlayback();
 
     if (failures == 0) {
         std::cout << "AnimationControllerTests: " << checks << " checks passed\n";

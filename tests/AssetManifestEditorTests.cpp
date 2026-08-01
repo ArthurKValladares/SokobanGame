@@ -108,8 +108,8 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
             return model.name == "Decoration_desk" &&
                 model.preserveSourceScale;
         }), "authored-scale decoration model loaded");
-    check(editor.animations().size() == 5, "animations loaded");
-    check(editor.tileEntries().size() == 13, "authored tile entries loaded");
+    check(editor.animations().size() == 6, "animations loaded");
+    check(editor.tileEntries().size() == 14, "authored tile entries loaded");
     check(editor.soundSets().size() == 3, "sound sets loaded");
     check(editor.musicTracks().size() == 4, "music tracks loaded");
     check(editor.validate(), "unchanged document validates");

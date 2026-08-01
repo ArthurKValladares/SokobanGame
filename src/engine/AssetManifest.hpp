@@ -94,6 +94,7 @@ public:
         bool primitiveTextures = false;
         bool beltScroll = false; // UVs scroll with the conveyor clock
         bool playerRole = false; // the model gameplay animates as the player
+        bool enemyRole = false; // the model gameplay animates as an enemy
         ModelMaterialMode materialMode = ModelMaterialMode::Untextured;
         uint32_t textureIndex = 0; // resolved into the texture list
         std::string materialTextureName; // as written in the manifest
@@ -178,6 +179,8 @@ public:
     [[nodiscard]] RenderAnimation playerPushAnimation() const { return playerPush_; }
     [[nodiscard]] RenderAnimation playerDeathAnimation() const { return playerDeath_; }
     [[nodiscard]] RenderAnimation playerDeadIdleAnimation() const { return playerDeadIdle_; }
+    [[nodiscard]] RenderModel enemyModel() const { return enemyModel_; }
+    [[nodiscard]] RenderAnimation enemyAttackAnimation() const { return enemyAttack_; }
 
     // Returns an empty list for unknown set names.
     [[nodiscard]] const std::vector<std::string>& soundSet(std::string_view name) const;
@@ -205,6 +208,8 @@ private:
     RenderAnimation playerPush_ {};
     RenderAnimation playerDeath_ {};
     RenderAnimation playerDeadIdle_ {};
+    RenderModel enemyModel_ {};
+    RenderAnimation enemyAttack_ {};
 };
 
 } // namespace sokoban

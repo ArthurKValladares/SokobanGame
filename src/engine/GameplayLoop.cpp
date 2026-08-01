@@ -63,7 +63,7 @@ GameplayLoop::UpdateResult GameplayLoop::update(
         session.queueMove(*horizontal);
     }
 
-    presentation.advanceAnimations(dt);
+    presentation.advanceAnimations(dt, session.state());
     float remainingTime = dt;
     UpdateResult result;
     std::size_t observedMirrorActivation =

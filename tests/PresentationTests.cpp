@@ -60,6 +60,13 @@ const AssetManifest& testManifest()
           "geometry": "skinned",
           "material": { "mode": "texture", "texture": "Tex" },
           "role": "player"
+        },
+        {
+          "name": "Enemy",
+          "path": "enemy.glb",
+          "geometry": "skinned",
+          "material": { "mode": "texture", "texture": "Tex" },
+          "role": "enemy"
         }
       ],
       "animations": [
@@ -67,7 +74,8 @@ const AssetManifest& testManifest()
         { "name": "Move", "path": "a.glb", "role": "player-move" },
         { "name": "Push", "path": "a.glb", "role": "player-push" },
         { "name": "Death", "path": "a.glb", "role": "player-death" },
-        { "name": "DeadIdle", "path": "a.glb", "role": "player-dead-idle" }
+        { "name": "DeadIdle", "path": "a.glb", "role": "player-dead-idle" },
+        { "name": "EnemyAttack", "path": "a.glb", "role": "enemy-attack" }
       ],
       "tiles": [
         { "tile": "Wall", "model": "Bricks" },
@@ -81,7 +89,8 @@ const AssetManifest& testManifest()
         { "tile": "Mirror North-East", "model": "Mirror" },
         { "tile": "Mirror South-West", "model": "Mirror" },
         { "tile": "Mirror South-East", "model": "Mirror" },
-        { "tile": "Player", "model": "Hero" }
+        { "tile": "Player", "model": "Hero" },
+        { "tile": "Enemy", "model": "Enemy" }
       ]
     })json");
     return manifest;
@@ -196,6 +205,7 @@ void testPresentationResetClocksAndFallenTargets()
     TEST("presentationResetClocksAndFallenTargets");
     GameState state = stateWithPlayer({ 1, 2, 3 });
     state.players[0].dead = true;
+    state.players[0].drowned = true;
     state.movables.push_back({
         .type = TileType::Rock,
         .cell = { 4, 5, 2 },
@@ -594,6 +604,44 @@ void testEditorFrameProvidesInvisibleExpansionBorderAndPreview()
     CHECK(deletionPickProxy != deletionFrame.tiles.end());
     CHECK(deletionPreview != deletionFrame.tiles.end());
     CHECK(drawableDeletedTile == deletionFrame.tiles.end());
+
+    LevelEditor actorEditor;
+    actorEditor.newDocument(2, 2, false);
+    actorEditor.setCell({ 0, 0, 0 }, TileType::Enemy);
+    actorEditor.setSelectedTile(TileType::Enemy);
+    const RenderFrameData actorFrame = RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(),
+        .editor = actorEditor,
+        .settings = {},
+        .hoverCell = GridPosition3 { 1, 1, 0 },
+        .worldAnimationTimeSeconds = 1.25f,
+    });
+    const auto placedEnemy = std::ranges::find_if(
+        actorFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { 0, 0, 0 } &&
+                !tile.isEditorPreview && !tile.pickOnly;
+        });
+    const auto enemyPreview = std::ranges::find_if(
+        actorFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { 1, 1, 0 } &&
+                tile.isEditorPreview;
+        });
+    CHECK(placedEnemy != actorFrame.tiles.end());
+    CHECK(enemyPreview != actorFrame.tiles.end());
+    if (placedEnemy != actorFrame.tiles.end()) {
+        CHECK(placedEnemy->model == testManifest().enemyModel());
+        CHECK(placedEnemy->animation == testManifest().playerIdleAnimation());
+        CHECK(placedEnemy->animationInstanceId != 0);
+        CHECK(near(placedEnemy->animationTimeSeconds, 1.25f));
+    }
+    if (enemyPreview != actorFrame.tiles.end()) {
+        CHECK(enemyPreview->model == testManifest().enemyModel());
+        CHECK(enemyPreview->animation == testManifest().playerIdleAnimation());
+        CHECK(enemyPreview->animationInstanceId != 0);
+        CHECK(near(enemyPreview->animationTimeSeconds, 1.25f));
+    }
 }
 
 void testMirrorTilesUseTheirModelAndOrientation()
@@ -697,6 +745,7 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
         CHECK(near(ghost->position.y, 2.0f));
         CHECK(ghost->model == testManifest().playerModel());
         CHECK(ghost->animation == testManifest().playerIdleAnimation());
+        CHECK(ghost->animationInstanceId != uint64_t { 0 });
         CHECK(sameColor(ghost->color, config::mirrorGhostColor));
     }
 
@@ -989,6 +1038,19 @@ void testMirrorDuplicationPreviewsEveryDestination()
         [](const RenderFrameData::Tile& tile) {
             return tile.effect == RenderSurfaceEffect::MirrorEnergy;
         }) == 2);
+    uint64_t firstGhostInstance = 0;
+    for (const RenderFrameData::Tile& tile : frame.tiles) {
+        if (tile.effect != RenderSurfaceEffect::MirrorEnergy) {
+            continue;
+        }
+        CHECK(tile.animationInstanceId != uint64_t { 0 });
+        if (firstGhostInstance == 0) {
+            firstGhostInstance = tile.animationInstanceId;
+        }
+        else {
+            CHECK(tile.animationInstanceId != firstGhostInstance);
+        }
+    }
     CHECK(std::ranges::count_if(
         frame.isoFaces,
         [](const RenderFrameData::IsoFace& face) {
@@ -1251,6 +1313,7 @@ void testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition()
     GameState drowned = before;
     drowned.players[0].cell = { 1, 0, 1 };
     drowned.players[0].dead = true;
+    drowned.players[0].drowned = true;
 
     GameplayPresentation presentation;
     presentation.setPlayerClips(
@@ -1371,6 +1434,71 @@ void testGameplayFrameBuildsManifestDecorationInstances()
     }
 }
 
+void testEnemyFacingAttackAndAnimationInstances()
+{
+    TEST("enemyFacingAttackAndAnimationInstances");
+    const Level level = Level::loadFromLayers(
+        {
+            { "...." },
+            { "C N " },
+        },
+        "enemy presentation");
+    GameState before = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.setActorClips(
+        testManifest().playerMoveAnimation(),
+        testManifest().playerPushAnimation(),
+        testManifest().enemyAttackAnimation());
+    presentation.resetEntities(before);
+
+    presentation.advanceAnimations(0.01f, before);
+    CHECK(presentation.enemies().size() == 1);
+    CHECK(presentation.enemies()[0].orientation.z > 0.0f);
+    CHECK(presentation.enemies()[0].orientation.z < 1.0f);
+
+    GameState after = before;
+    after.players[0].cell = { 1, 0, 1 };
+    after.players[0].dead = true;
+    GameplaySession::Action action {
+        .before = before,
+        .after = after,
+        .durationSeconds = 0.15f,
+        .facingDirection = MoveDirection::Right,
+    };
+    presentation.beginAction(action);
+    CHECK(presentation.enemies()[0].attackTransitionPlaying);
+
+    const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = after,
+        .moving = true,
+        .activeAction = action,
+        .presentation = presentation,
+        .settings = PresentationSettings {},
+    });
+    const auto enemy = std::ranges::find_if(
+        frame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.model == testManifest().enemyModel();
+        });
+    const auto player = std::ranges::find_if(
+        frame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.model == testManifest().playerModel();
+        });
+    CHECK(enemy != frame.tiles.end());
+    CHECK(player != frame.tiles.end());
+    if (enemy != frame.tiles.end() && player != frame.tiles.end()) {
+        CHECK(enemy->animation == testManifest().enemyAttackAnimation());
+        CHECK(enemy->animationFallback == testManifest().playerIdleAnimation());
+        CHECK(!enemy->animationLoops);
+        CHECK(enemy->animationInstanceId != 0);
+        CHECK(enemy->animationInstanceId != player->animationInstanceId);
+        CHECK(near(enemy->baseElevation, 1.0f));
+    }
+}
+
 } // namespace
 
 int main()
@@ -1392,6 +1520,7 @@ int main()
     testFilledWaterUpdatesEdgesAndRoundedCornerCaps();
     testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition();
     testGameplayFrameBuildsManifestDecorationInstances();
+    testEnemyFacingAttackAndAnimationInstances();
 
     if (failures == 0) {
         std::cout << "PresentationTests: "

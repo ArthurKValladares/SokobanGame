@@ -726,6 +726,39 @@ void appendStaticTiles(
     }
 }
 
+float yawRadians(Vec4 orientation)
+{
+    return 2.0f * std::atan2(orientation.z, orientation.w);
+}
+
+uint64_t playerAnimationInstance(std::size_t index)
+{
+    return static_cast<uint64_t>(index) + 1;
+}
+
+uint64_t enemyAnimationInstance(std::size_t index)
+{
+    return (uint64_t { 1 } << 32) | (static_cast<uint64_t>(index) + 1);
+}
+
+uint64_t mirrorGhostAnimationInstance(std::size_t resultPlayerIndex)
+{
+    return (uint64_t { 1 } << 62) |
+        (static_cast<uint64_t>(resultPlayerIndex) + 1);
+}
+
+uint64_t authoredAnimationInstance(TileType tile, GridPosition3 cell)
+{
+    const uint64_t x = static_cast<uint32_t>(cell.x);
+    const uint64_t y = static_cast<uint32_t>(cell.y);
+    const uint64_t z = static_cast<uint32_t>(cell.z);
+    return (uint64_t { 1 } << 63) |
+        (static_cast<uint64_t>(tile) << 56) |
+        ((z & 0xffffU) << 40) |
+        ((y & 0xfffffU) << 20) |
+        (x & 0xfffffU);
+}
+
 RenderFrameData::Tile decorationVisual(
     const Level::Decoration& decoration,
     const AssetManifest& manifest,
@@ -829,6 +862,9 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     includeCameraCell(authoredGameplayExtent, input.level.playerStart());
     for (const Level::MovableTile& movable : input.level.movableTiles()) {
         includeCameraCell(authoredGameplayExtent, movable.position);
+    }
+    for (GridPosition3 enemy : input.level.enemyStarts()) {
+        includeCameraCell(authoredGameplayExtent, enemy);
     }
     frame.waterGridBounds = waterGridBoundsFor(authoredGameplayExtent);
     frame.cameraExtent = authoredGameplayExtent.value_or(
@@ -1016,8 +1052,8 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             input.moving &&
             playerIndex < input.activeAction.before.players.size() &&
             playerIndex < input.activeAction.after.players.size() &&
-            input.activeAction.before.players[playerIndex].dead &&
-            !input.activeAction.after.players[playerIndex].dead;
+            input.activeAction.before.players[playerIndex].drowned &&
+            !input.activeAction.after.players[playerIndex].drowned;
 
         RenderAnimation animation = input.manifest.playerIdleAnimation();
         RenderAnimation fallback = noAnimation;
@@ -1047,6 +1083,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             .model = input.manifest.playerModel(),
             .animation = animation,
             .animationFallback = fallback,
+            .animationInstanceId = playerAnimationInstance(playerIndex),
             .animationLoops = loops,
             .animationTimeSeconds = visual.clipTimeSeconds,
             .modelRotationQuarterTurns = visual.facingQuarterTurns,
@@ -1055,6 +1092,41 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             playerTile,
             input.settings.tileScale(TileType::Player));
         frame.tiles.push_back(playerTile);
+    }
+
+    const auto& enemyVisuals = input.presentation.enemies();
+    for (std::size_t enemyIndex = 0;
+         enemyIndex < state.enemies.size() && enemyIndex < enemyVisuals.size();
+         ++enemyIndex) {
+        const GameState::Enemy& enemy = state.enemies[enemyIndex];
+        const GameplayPresentation::EnemyVisual& visual = enemyVisuals[enemyIndex];
+        if (enemy.fallen && !visual.motion.moving) {
+            continue;
+        }
+        RenderFrameData::Tile enemyTile {
+            .position = {
+                visual.motion.renderPosition.x,
+                visual.motion.renderPosition.y,
+            },
+            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+            .baseElevation = visual.motion.renderPosition.z,
+            .height = 1.0f,
+            .showGrid = false,
+            .affectsCameraFit = false,
+            .model = input.manifest.enemyModel(),
+            .animation = visual.attackTransitionPlaying
+                ? input.manifest.enemyAttackAnimation()
+                : input.manifest.playerIdleAnimation(),
+            .animationFallback = visual.attackTransitionPlaying
+                ? input.manifest.playerIdleAnimation()
+                : noAnimation,
+            .animationInstanceId = enemyAnimationInstance(enemyIndex),
+            .animationLoops = !visual.attackTransitionPlaying,
+            .animationTimeSeconds = visual.clipTimeSeconds,
+            .modelRotationOffsetRadians = yawRadians(visual.orientation),
+        };
+        applyTileScale(enemyTile, input.settings.tileScale(TileType::Enemy));
+        frame.tiles.push_back(enemyTile);
     }
 
     for (std::size_t movableIndex = 0;
@@ -1313,6 +1385,10 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
                                 ? input.manifest.playerDeadIdleAnimation()
                                 : input.manifest.playerIdleAnimation())
                         : noAnimation,
+                    .animationInstanceId = entity.player
+                        ? mirrorGhostAnimationInstance(
+                              entity.resultPlayerIndex)
+                        : uint64_t { 0 },
                     .animationLoops = true,
                     .animationTimeSeconds = previewPlayer
                         ? previewPlayer->clipTimeSeconds
@@ -1512,10 +1588,12 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
             renderTile.baseElevation += preview ? 0.02f : 0.0f;
             renderTile.pickOnly = pickOnly;
             renderTile.isEditorPreview = preview;
-            renderTile.animation = tile == TileType::Player
+            const bool animatedActor =
+                tile == TileType::Player || tile == TileType::Enemy;
+            renderTile.animation = animatedActor
                 ? input.manifest.playerIdleAnimation()
                 : noAnimation;
-            renderTile.animationTimeSeconds = tile == TileType::Player
+            renderTile.animationTimeSeconds = animatedActor
                 ? input.worldAnimationTimeSeconds
                 : 0.0f;
             frame.tiles.push_back(renderTile);
@@ -1719,7 +1797,7 @@ RenderFrameData::Tile tileVisual(
     const float centeredOffset = (1.0f - tileSize) * 0.5f;
 
     Vec4 color = tileColor(tile);
-    if (tile == TileType::Player) {
+    if (tile == TileType::Player || tile == TileType::Enemy) {
         color = { 1.0f, 1.0f, 1.0f, 1.0f };
     }
     if (tile == TileType::Ice) {
@@ -1752,6 +1830,12 @@ RenderFrameData::Tile tileVisual(
         .showGrid = tile != TileType::Player,
         .affectsCameraFit = tileTypeAffectsCameraFit(tile),
         .model = manifest.modelForTile(tile),
+        .animation = tile == TileType::Player || tile == TileType::Enemy
+            ? manifest.playerIdleAnimation()
+            : noAnimation,
+        .animationInstanceId = tile == TileType::Player || tile == TileType::Enemy
+            ? authoredAnimationInstance(tile, cell)
+            : uint64_t { 0 },
         // Conveyors carry their direction in the tile type; mirrors carry an
         // orientation. Both are rotations of one shared model, so dropping
         // either collapses a whole family into identical-looking tiles.

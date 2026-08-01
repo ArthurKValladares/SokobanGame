@@ -105,6 +105,7 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
     ImGui::Text("Player %s", primaryPlayer.dead ? "dead" : "alive");
     ImGui::Text("Player instances: %zu", state.players.size());
     ImGui::Text("Movables %zu", state.movables.size());
+    ImGui::Text("Enemies %zu", state.enemies.size());
     ImGui::Text("History %zu", context.gameplaySession.historySize());
     ImGui::Text(
         "Input %s, gamepads %zu%s%s",

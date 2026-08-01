@@ -60,6 +60,20 @@ bool movableBlocksAt(const GameState& state, GridPosition3 position, size_t igno
     return false;
 }
 
+bool enemyBlocksAt(
+    const GameState& state,
+    GridPosition3 position,
+    std::optional<std::size_t> ignoredEnemy = std::nullopt)
+{
+    for (std::size_t i = 0; i < state.enemies.size(); ++i) {
+        if ((!ignoredEnemy || i != *ignoredEnemy) &&
+            !state.enemies[i].fallen && state.enemies[i].cell == position) {
+            return true;
+        }
+    }
+    return false;
+}
+
 const GridPosition3& playerCell(const GameState& state, std::size_t playerIndex)
 {
     return state.players.at(playerIndex).cell;
@@ -151,6 +165,8 @@ FallResult playerFallTarget(
     return fallTarget(level, state, position, [&](GridPosition3 below) {
         return movableAt(state, below) != nullptr ||
             fallenMovableAt(state, below) != nullptr ||
+            enemyAt(state, below) != nullptr ||
+            fallenEnemyAt(state, below) != nullptr ||
             playerBlocksAt(state, below, playerIndex);
     });
 }
@@ -163,8 +179,53 @@ FallResult movableFallTarget(const Level& level, const GameState& state, size_t 
                 return true;
             }
         }
-        return playerBlocksAt(state, below);
+        return playerBlocksAt(state, below) || enemyBlocksAt(state, below);
     });
+}
+
+FallResult enemyFallTarget(
+    const Level& level,
+    const GameState& state,
+    std::size_t enemyIndex,
+    GridPosition3 position)
+{
+    return fallTarget(level, state, position, [&](GridPosition3 below) {
+        for (std::size_t i = 0; i < state.enemies.size(); ++i) {
+            if (i != enemyIndex && state.enemies[i].cell == below) {
+                return true;
+            }
+        }
+        return movableAt(state, below) != nullptr ||
+            fallenMovableAt(state, below) != nullptr ||
+            playerBlocksAt(state, below);
+    });
+}
+
+void resolveEnemyAttacks(GameState& state)
+{
+    for (std::size_t playerIndex = 0;
+         playerIndex < state.players.size();
+         ++playerIndex) {
+        GameState::Player& player = state.players[playerIndex];
+        if (player.dead) {
+            continue;
+        }
+        const bool threatened = std::ranges::any_of(
+            state.enemies,
+            [&](const GameState::Enemy& enemy) {
+                if (enemy.fallen || enemy.cell.z != player.cell.z) {
+                    return false;
+                }
+                return std::abs(enemy.cell.x - player.cell.x) +
+                        std::abs(enemy.cell.y - player.cell.y) ==
+                    1;
+            });
+        if (threatened) {
+            player.dead = true;
+            player.drowned = false;
+            player.sliding.reset();
+        }
+    }
 }
 
 std::optional<GridPosition3> ladderClimbTarget(
@@ -196,6 +257,9 @@ std::optional<GridPosition3> ladderClimbTarget(
         return std::nullopt;
     }
     if (playerBlocksAt(state, topCell)) {
+        return std::nullopt;
+    }
+    if (enemyAt(state, topCell) != nullptr) {
         return std::nullopt;
     }
 
@@ -233,6 +297,10 @@ GameState initialState(const Level& level)
         entry.type = movable.type;
         entry.cell = movable.position;
         state.movables.push_back(entry);
+    }
+    state.enemies.reserve(level.enemyStarts().size());
+    for (GridPosition3 position : level.enemyStarts()) {
+        state.enemies.push_back({ .cell = position });
     }
 
     return state;
@@ -328,6 +396,26 @@ const GameState::Movable* fallenMovableAt(const GameState& state, GridPosition3 
     });
 
     return movable != state.movables.end() ? &*movable : nullptr;
+}
+
+const GameState::Enemy* enemyAt(const GameState& state, GridPosition3 position)
+{
+    const auto enemy = std::ranges::find_if(
+        state.enemies,
+        [position](const GameState::Enemy& candidate) {
+            return !candidate.fallen && candidate.cell == position;
+        });
+    return enemy != state.enemies.end() ? &*enemy : nullptr;
+}
+
+const GameState::Enemy* fallenEnemyAt(const GameState& state, GridPosition3 position)
+{
+    const auto enemy = std::ranges::find_if(
+        state.enemies,
+        [position](const GameState::Enemy& candidate) {
+            return candidate.fallen && candidate.cell == position;
+        });
+    return enemy != state.enemies.end() ? &*enemy : nullptr;
 }
 
 bool isUnfilledWater(const Level& level, const GameState& state, GridPosition3 position)
@@ -450,6 +538,9 @@ bool entityBlocksSight(
             state.movables[i].cell == cell) {
             return true;
         }
+    }
+    if (enemyBlocksAt(state, cell)) {
+        return true;
     }
     return false;
 }
@@ -637,6 +728,15 @@ bool liveCellsAreUnique(const GameState& state)
         }
         occupied.push_back(movable.cell);
     }
+    for (const GameState::Enemy& enemy : state.enemies) {
+        if (enemy.fallen) {
+            continue;
+        }
+        if (std::ranges::find(occupied, enemy.cell) != occupied.end()) {
+            return false;
+        }
+        occupied.push_back(enemy.cell);
+    }
     return true;
 }
 
@@ -683,6 +783,7 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
                 after.players.push_back({
                     .cell = reflected.cell,
                     .dead = source.dead,
+                    .drowned = source.drowned,
                     .sliding = std::nullopt,
                 });
                 resultPlayer = after.players.size() - 1;
@@ -739,6 +840,7 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
         }
         playerCell(after, playerIndex) = fall.cell;
         playerDead(after, playerIndex) = fall.fallen;
+        after.players[playerIndex].drowned = fall.fallen;
     }
     for (std::size_t i = 0; i < after.movables.size(); ++i) {
         if (!movableReflected[i]) {
@@ -756,10 +858,11 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
     if (!liveCellsAreUnique(after) || after == state) {
         return std::nullopt;
     }
+    resolveEnemyAttacks(after);
     for (MirrorEntityPreview& entity : entities) {
         if (entity.player) {
             entity.destination = playerCell(after, entity.resultPlayerIndex);
-            entity.fallen = playerDead(after, entity.resultPlayerIndex);
+            entity.fallen = after.players[entity.resultPlayerIndex].drowned;
         } else {
             entity.destination = after.movables[entity.movableIndex].cell;
             entity.fallen = after.movables[entity.movableIndex].fallen;
@@ -833,6 +936,14 @@ public:
             markContested();
             anyMovement = resolveMoves();
             settleBlocked();
+            if (anyMovement) {
+                resolveEnemyAttacks(after_);
+                for (std::size_t i = 0; i < playerCount_; ++i) {
+                    if (playerDead(after_, i)) {
+                        status_[entityIndexForPlayer(i)].done = true;
+                    }
+                }
+            }
         }
     }
 
@@ -1016,6 +1127,16 @@ private:
             playerBlocksAt(after_, target)) {
             return false; // the blocking entity may still move this micro-step
         }
+        if (const GameState::Enemy* enemy = enemyAt(after_, target)) {
+            const std::size_t enemyIndex =
+                static_cast<std::size_t>(enemy - after_.enemies.data());
+            if (!pushEnemy(enemyIndex, direction)) {
+                slidingOf(index) = std::nullopt;
+                status.done = true;
+                status.resolved = true;
+                return true;
+            }
+        }
         applyMovableMove(index, direction, target);
         status.resolved = true;
         status.movedThisMicro = true;
@@ -1047,6 +1168,14 @@ private:
         if (playerBlocksAt(after_, target, playerIndex)) {
             return false;
         }
+        if (enemyAt(after_, target) != nullptr) {
+            if (playerSliding(after_, playerIndex)) {
+                playerSliding(after_, playerIndex).reset();
+                status.done = true;
+            }
+            status.resolved = true;
+            return true;
+        }
         if (const GameState::Movable* blocker = movableAt(after_, target)) {
             const auto blockerIndex =
                 static_cast<std::size_t>(blocker - after_.movables.data());
@@ -1056,13 +1185,24 @@ private:
             // The blocker has finished its own movement for this micro-step.
             // Direct input may push it.
             const GridPosition3 pushTarget = movementTarget(target, direction);
+            const GameState::Enemy* pushedEnemy = enemyAt(after_, pushTarget);
+            const bool enemyCanMove = pushedEnemy == nullptr ||
+                canPushEnemy(
+                    static_cast<std::size_t>(pushedEnemy - after_.enemies.data()),
+                    direction);
             if (status.inputDriven &&
                 !status_[blockerIndex].movedThisMicro &&
                 staticCellAllowsEntity(level_, pushTarget) &&
                 !movableBlocksAt(after_, pushTarget, blockerIndex) &&
                 !playerBlocksAt(after_, pushTarget, playerIndex) &&
+                enemyCanMove &&
                 movableFallTarget(level_, after_, blockerIndex, pushTarget)
                     .supported) {
+                if (pushedEnemy != nullptr) {
+                    (void)pushEnemy(
+                        static_cast<std::size_t>(pushedEnemy - after_.enemies.data()),
+                        direction);
+                }
                 applyMovableMove(blockerIndex, direction, pushTarget);
                 status_[blockerIndex].movedThisMicro = true;
                 status_[blockerIndex].done = false;
@@ -1081,6 +1221,38 @@ private:
         status.resolved = true;
         status.movedThisMicro = true;
         anyMovement = true;
+        return true;
+    }
+
+    [[nodiscard]] bool canPushEnemy(
+        std::size_t enemyIndex,
+        MoveDirection direction) const
+    {
+        const GridPosition3 destination = movementTarget(
+            after_.enemies[enemyIndex].cell,
+            direction);
+        return staticCellAllowsEntity(level_, destination) &&
+            !movableBlocksAt(after_, destination, after_.movables.size()) &&
+            !playerBlocksAt(after_, destination) &&
+            !enemyBlocksAt(after_, destination, enemyIndex) &&
+            enemyFallTarget(level_, after_, enemyIndex, destination).supported;
+    }
+
+    [[nodiscard]] bool pushEnemy(
+        std::size_t enemyIndex,
+        MoveDirection direction)
+    {
+        if (!canPushEnemy(enemyIndex, direction)) {
+            return false;
+        }
+        const GridPosition3 destination = movementTarget(
+            after_.enemies[enemyIndex].cell,
+            direction);
+        after_.enemies[enemyIndex].cell = destination;
+        const FallResult fall = enemyFallTarget(
+            level_, after_, enemyIndex, destination);
+        after_.enemies[enemyIndex].cell = fall.cell;
+        after_.enemies[enemyIndex].fallen = fall.fallen;
         return true;
     }
 
@@ -1117,6 +1289,7 @@ private:
         const bool fell = fall.cell.z != target.z || fall.fallen;
         playerCell(after_, playerIndex) = fall.cell;
         playerDead(after_, playerIndex) = fall.fallen;
+        after_.players[playerIndex].drowned = fall.fallen;
         playerSliding(after_, playerIndex) =
             (!fell && !playerDead(after_, playerIndex) &&
                 isIceFloor(level_, after_, fall.cell) &&

@@ -25,7 +25,7 @@ SkinnedMeshUpdater::~SkinnedMeshUpdater()
 void SkinnedMeshUpdater::create(
     VkPhysicalDevice physicalDevice,
     VkDevice device,
-    SkinnedMeshData sourceMesh,
+    std::shared_ptr<const SkinnedMeshData> sourceMesh,
     const GltfAnimationClip& initialClip)
 {
     destroy();
@@ -33,7 +33,10 @@ void SkinnedMeshUpdater::create(
     device_ = device;
 
     try {
-        const MeshData initialMesh = skinGltfMesh(sourceMesh, initialClip, 0.0f);
+        if (!sourceMesh) {
+            throw std::invalid_argument("Skinned mesh source is null");
+        }
+        const MeshData initialMesh = skinGltfMesh(*sourceMesh, initialClip, 0.0f);
         if (initialMesh.vertices.empty() || initialMesh.indices.empty()) {
             throw std::runtime_error("Skinned glTF mesh contains no geometry");
         }
@@ -82,7 +85,7 @@ void SkinnedMeshUpdater::destroy()
 
     indexBuffer_ = {};
     vertexBuffer_ = {};
-    sourceMesh_ = {};
+    sourceMesh_.reset();
     indexCount_ = 0;
     vertexCount_ = 0;
     device_ = VK_NULL_HANDLE;
@@ -97,13 +100,13 @@ void SkinnedMeshUpdater::update(const AnimationController::SkinningRequest& requ
 
     const MeshData skinnedMesh = request.blended()
         ? skinGltfMeshBlended(
-            sourceMesh_,
+            *sourceMesh_,
             *request.fromClip,
             request.fromTimeSeconds,
             *request.toClip,
             request.toTimeSeconds,
             request.blend)
-        : skinGltfMesh(sourceMesh_, *request.toClip, request.toTimeSeconds);
+        : skinGltfMesh(*sourceMesh_, *request.toClip, request.toTimeSeconds);
     uploadVertices(skinnedMesh.vertices);
 }
 

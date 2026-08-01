@@ -7,6 +7,7 @@
 #include "engine/render/IsoScenePreparer.hpp"
 #include "engine/render/RendererReconfiguration.hpp"
 #include "engine/render/RenderTypes.hpp"
+#include "engine/render/ReusableScratchPool.hpp"
 #include "engine/render/VulkanDeviceContext.hpp"
 #include "engine/render/VulkanModelResources.hpp"
 #include "engine/render/VulkanPipelineFactory.hpp"
@@ -38,6 +39,9 @@ class AssetManifest;
 class FontAtlas;
 
 class VulkanRenderer {
+private:
+    struct PreparedFrameScratch;
+
 public:
     struct PreparedFrame {
         uint32_t levelWidth = 0;
@@ -45,7 +49,7 @@ public:
 
     private:
         friend class VulkanRenderer;
-        uint32_t scratchIndex = 0;
+        std::shared_ptr<const PreparedFrameScratch> scratch;
         uint64_t generation = 0;
     };
 
@@ -208,12 +212,11 @@ private:
     std::array<FrameResources, maxFramesInFlight_> frames_ {};
     FrameResourceTracker frameResourceTracker_ {
         maxFramesInFlight_ };
-    std::array<PreparedFrameScratch, preparedFrameSlotCount_>
-        preparedFrameScratch_ {};
+    ReusableScratchPool<PreparedFrameScratch, preparedFrameSlotCount_>
+        preparedFrameScratch_;
     IsoScenePreparer scenePreparer_;
     FrameDescriptorSync descriptorSync_ { maxFramesInFlight_ };
     uint32_t currentFrame_ = 0;
-    uint32_t nextPreparedFrameSlot_ = 0;
     uint64_t nextPreparedFrameGeneration_ = 1;
     VkSampleCountFlagBits activeSampleCount_ = VK_SAMPLE_COUNT_1_BIT;
     float wireframeLineWidth_ = 1.0f;

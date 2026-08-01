@@ -6,6 +6,7 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <memory>
 
 namespace sokoban {
 
@@ -29,7 +30,7 @@ public:
     void create(
         VkPhysicalDevice physicalDevice,
         VkDevice device,
-        SkinnedMeshData sourceMesh,
+        std::shared_ptr<const SkinnedMeshData> sourceMesh,
         const GltfAnimationClip& initialClip);
     void destroy();
     void update(const AnimationController::SkinningRequest& request);
@@ -54,7 +55,7 @@ private:
 
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkDevice device_ = VK_NULL_HANDLE;
-    SkinnedMeshData sourceMesh_ {};
+    std::shared_ptr<const SkinnedMeshData> sourceMesh_;
     OwnedBuffer vertexBuffer_ {};
     OwnedBuffer indexBuffer_ {};
     uint32_t vertexCount_ = 0;

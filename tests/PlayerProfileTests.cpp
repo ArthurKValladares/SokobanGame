@@ -243,6 +243,7 @@ void testActiveScreenCheckpointRoundTrip()
         .type = sokoban::TileType::Rock,
         .cell = { 2, 0, 1 },
     });
+    before.enemies.push_back({ .cell = { 4, 0, 1 } });
     sokoban::GameState after = before;
     after.players[0].cell = { 2, 0, 1 };
     after.players[0].sliding = sokoban::MoveDirection::Right;
@@ -252,6 +253,7 @@ void testActiveScreenCheckpointRoundTrip()
     });
     after.movables.front().cell = { 3, 0, 1 };
     after.movables.front().sliding = sokoban::MoveDirection::Right;
+    after.enemies.front().cell = { 5, 0, 1 };
 
     sokoban::GameplaySession::Action move {
         .before = before,
@@ -287,6 +289,9 @@ void testActiveScreenCheckpointRoundTrip()
     check(current["progress"]["activeScreen"]["session"]["state"]
             .contains("players"),
         "checkpoint state uses the players array");
+    check(current["progress"]["activeScreen"]["session"]["state"]
+            .contains("enemies"),
+        "checkpoint state persists enemies");
     check(!current["progress"]["activeScreen"]["session"]["state"]
             .contains("playerClones"),
         "checkpoint state has no primary/clone compatibility fields");

@@ -73,8 +73,17 @@ bool drawAnimationRole(std::string& role)
         "player-push",
         "player-death",
         "player-dead-idle",
+        "enemy-attack",
     };
-    constexpr std::array labels { "None", "Player Idle", "Player Move", "Player Push" };
+    constexpr std::array labels {
+        "None",
+        "Player Idle",
+        "Player Move",
+        "Player Push",
+        "Player Death",
+        "Player Dead Idle",
+        "Enemy Attack",
+    };
     int selected = 0;
     for (std::size_t i = 1; i < values.size(); ++i) {
         if (role == values[i]) {
@@ -352,7 +361,18 @@ void AssetManifestDebugUi::drawModels(AssetManifestEditor& editor)
             changed = ImGui::Checkbox("Preserve Source Scale", &model.preserveSourceScale) || changed;
             changed = ImGui::Checkbox("Rotate Half Turn", &model.rotateHalfTurn) || changed;
             changed = ImGui::Checkbox("Belt Scroll", &model.beltScroll) || changed;
-            changed = ImGui::Checkbox("Player Role", &model.playerRole) || changed;
+            if (ImGui::Checkbox("Player Role", &model.playerRole)) {
+                if (model.playerRole) {
+                    model.enemyRole = false;
+                }
+                changed = true;
+            }
+            if (ImGui::Checkbox("Enemy Role", &model.enemyRole)) {
+                if (model.enemyRole) {
+                    model.playerRole = false;
+                }
+                changed = true;
+            }
             if (changed) {
                 model.primitiveTextures =
                     model.materialMode == ModelMaterialMode::PrimitiveTextureIndex;

@@ -5,7 +5,9 @@
 #include "engine/render/RenderTypes.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 namespace sokoban {
@@ -24,6 +26,12 @@ public:
         [[nodiscard]] bool blended() const { return fromClip != nullptr; }
     };
 
+    struct InstanceSkinningRequest {
+        uint64_t instanceId = 0;
+        RenderModel model = cubeModel;
+        SkinningRequest skinning;
+    };
+
     explicit AnimationController(float fadeDurationSeconds = config::playerAnimationFadeSeconds);
 
     // Identifies the model whose tiles drive clip selection and the clip used
@@ -38,8 +46,22 @@ public:
 
     void setPreview(const GltfAnimationClip* clip, float timeSeconds);
     [[nodiscard]] std::optional<SkinningRequest> update(const RenderFrameData& frameData);
+    [[nodiscard]] std::vector<InstanceSkinningRequest> updateInstances(
+        const RenderFrameData& frameData);
 
 private:
+    struct PlaybackState {
+        RenderAnimation activeAnimation = noAnimation;
+        float activeAnimationTime = -1.0f;
+        RenderAnimation fadeFromAnimation = noAnimation;
+        float fadeFromTime = 0.0f;
+        float fadeElapsed = 0.0f;
+    };
+
+    [[nodiscard]] std::optional<SkinningRequest> updateTile(
+        const RenderFrameData::Tile& tile,
+        PlaybackState& playback,
+        bool forceSample = false);
     void resetPlayback();
 
     // Indexed by RenderAnimation::value - 1; grown on demand.
@@ -47,11 +69,8 @@ private:
     RenderModel playerModel_ {};
     RenderAnimation fallbackClip_ {};
     float fadeDurationSeconds_ = config::playerAnimationFadeSeconds;
-    RenderAnimation activeAnimation_ = noAnimation;
-    float activeAnimationTime_ = -1.0f;
-    RenderAnimation fadeFromAnimation_ = noAnimation;
-    float fadeFromTime_ = 0.0f;
-    float fadeElapsed_ = 0.0f;
+    PlaybackState legacyPlayback_;
+    std::unordered_map<uint64_t, PlaybackState> instancePlayback_;
     const GltfAnimationClip* previewClip_ = nullptr;
     float previewTimeSeconds_ = 0.0f;
     const GltfAnimationClip* activePreviewClip_ = nullptr;

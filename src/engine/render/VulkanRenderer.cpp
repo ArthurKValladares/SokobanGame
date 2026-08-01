@@ -211,44 +211,37 @@ VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
 {
     const VkExtent2D extent =
         activeResources_.swapchain->renderExtent();
-    const uint32_t scratchIndex = nextPreparedFrameSlot_;
-    nextPreparedFrameSlot_ =
-        (nextPreparedFrameSlot_ + 1) % preparedFrameSlotCount_;
-    PreparedFrameScratch& scratch = preparedFrameScratch_[scratchIndex];
-    scratch.frameData = std::move(frameData);
-    scratch.generation = nextPreparedFrameGeneration_++;
+    std::shared_ptr<PreparedFrameScratch> scratch =
+        preparedFrameScratch_.acquire();
+    scratch->frameData = std::move(frameData);
+    scratch->generation = nextPreparedFrameGeneration_++;
     scenePreparer_.prepare(
-        scratch.frameData,
+        scratch->frameData,
         {
             static_cast<float>(extent.width),
             static_cast<float>(extent.height),
         },
-        scratch.scene);
+        scratch->scene);
 
     PreparedFrame frame;
-    frame.levelWidth = scratch.frameData.levelWidth;
-    frame.levelHeight = scratch.frameData.levelHeight;
-    frame.scratchIndex = scratchIndex;
-    frame.generation = scratch.generation;
+    frame.levelWidth = scratch->frameData.levelWidth;
+    frame.levelHeight = scratch->frameData.levelHeight;
+    frame.generation = scratch->generation;
+    frame.scratch = std::move(scratch);
     return frame;
 }
 
 const VulkanRenderer::PreparedFrameScratch&
 VulkanRenderer::resolvePreparedFrame(const PreparedFrame& frame) const
 {
-    if (frame.scratchIndex >= preparedFrameScratch_.size()) {
-        throw std::logic_error("Prepared frame has an invalid scratch slot");
-    }
-    if (frame.generation == 0) {
+    if (!frame.scratch || frame.generation == 0) {
         throw std::logic_error("Prepared frame was never initialized");
     }
-    const PreparedFrameScratch& scratch =
-        preparedFrameScratch_[frame.scratchIndex];
-    if (scratch.generation != frame.generation) {
+    if (frame.scratch->generation != frame.generation) {
         throw std::logic_error(
-            "Prepared frame scratch was reused before consumption");
+            "Prepared frame scratch changed while it was leased");
     }
-    return scratch;
+    return *frame.scratch;
 }
 
 void VulkanRenderer::drawFrame(
@@ -286,7 +279,7 @@ void VulkanRenderer::drawFrame(
             descriptorResources(activeResources_));
         descriptorSync_.markUpdated(currentFrame_);
     }
-    modelResources_.updateAnimations(frameData);
+    modelResources_.updateAnimations(frameData, currentFrame_);
 
     uint32_t imageIndex = 0;
     VkResult acquired = activeResources_.swapchain->acquire(

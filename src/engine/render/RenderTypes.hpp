@@ -234,6 +234,9 @@ struct RenderFrameData {
         RenderModel model = cubeModel;
         RenderAnimation animation = noAnimation;
         RenderAnimation animationFallback = noAnimation;
+        // Stable presentation identity for independently posed skinned
+        // actors. Zero means the model has no persistent animated instance.
+        uint64_t animationInstanceId = 0;
         bool animationLoops = true;
         float animationTimeSeconds = 0.0f;
         float beltScrollOffset = 0.0f;

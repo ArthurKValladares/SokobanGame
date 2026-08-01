@@ -464,6 +464,10 @@ Level Level::loadFromLayers(
                     });
                 }
 
+                if (*tile == TileType::Enemy) {
+                    level.enemyStarts_.push_back(position);
+                }
+
                 level.tiles_[tileIndex(x, y, z, level.width_, level.height_)] =
                     tileTypeOccupiesLevelCell(*tile) ? TileType::Air : *tile;
                 if (*tile == TileType::PressurePlate) {
