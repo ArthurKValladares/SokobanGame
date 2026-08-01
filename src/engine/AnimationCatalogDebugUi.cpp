@@ -1,6 +1,7 @@
 #include "engine/AnimationCatalogDebugUi.hpp"
 
 #include "engine/AnimationCatalog.hpp"
+#include "engine/AnimationCatalogEditor.hpp"
 #include "engine/AnimationPreviewDebugUi.hpp"
 #include "engine/AssetManifest.hpp"
 
@@ -8,50 +9,32 @@
 #include <imgui.h>
 #endif
 
-#include <exception>
-#include <utility>
-
 namespace sokoban {
 
-void AnimationCatalogDebugUi::initialize(std::filesystem::path filePath)
-{
-    filePath_ = std::move(filePath);
-    status_ = "Editing " + filePath_.string();
-}
-
 bool AnimationCatalogDebugUi::draw(
-    AnimationCatalog& catalog,
+    AnimationCatalogEditor& editor,
     const AssetManifest& manifest,
     AnimationPreviewDebugUi& preview,
     VulkanRenderer& renderer)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     bool changed = false;
-    if (ImGui::Button("Save Catalog")) {
-        try {
-            catalog.save(filePath_, manifest);
-            dirty_ = false;
-            status_ = "Saved " + filePath_.string();
-        } catch (const std::exception& error) {
-            status_ = "Save failed: " + std::string(error.what());
-        }
+    if (ImGui::Button("Save Animation Catalog")) {
+        (void)editor.save(manifest);
     }
     ImGui::SameLine();
     if (ImGui::Button("Reload Catalog")) {
-        try {
-            catalog = AnimationCatalog::loadFromFile(filePath_, manifest);
-            dirty_ = false;
+        if (editor.reload(manifest)) {
             changed = true;
-            status_ = "Reloaded " + filePath_.string();
-        } catch (const std::exception& error) {
-            status_ = "Reload failed: " + std::string(error.what());
         }
     }
     ImGui::SameLine();
-    ImGui::TextDisabled("%s", dirty_ ? "Unsaved changes" : "Saved");
-    if (!status_.empty()) {
-        ImGui::TextWrapped("%s", status_.c_str());
+    ImGui::TextDisabled("%s", editor.dirty() ? "Unsaved changes" : "Saved");
+    if (!editor.status().empty()) {
+        ImGui::TextWrapped("%s", editor.status().c_str());
     }
+
+    const AnimationCatalog& catalog = editor.catalog();
 
     if (ImGui::CollapsingHeader(
             "Global Clip Speeds", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -68,9 +51,8 @@ bool AnimationCatalogDebugUi::draw(
                     0.1f,
                     4.0f,
                     "%.2fx")) {
-                catalog.setGlobalSpeed(animation, speed);
+                editor.setGlobalSpeed(animation, speed);
                 changed = true;
-                dirty_ = true;
             }
             ImGui::PopID();
         }
@@ -97,9 +79,8 @@ bool AnimationCatalogDebugUi::draw(
                     if (ImGui::Selectable(
                             manifest.animations()[i].name.c_str(),
                             isSelected)) {
-                        catalog.setUseAnimation(definition.use, candidate);
+                        editor.setUseAnimation(definition.use, candidate);
                         changed = true;
-                        dirty_ = true;
                     }
                     if (isSelected) {
                         ImGui::SetItemDefaultFocus();
@@ -111,9 +92,8 @@ bool AnimationCatalogDebugUi::draw(
             ImGui::SetNextItemWidth(220.0f);
             if (ImGui::SliderFloat(
                     "Use Speed", &speed, 0.1f, 4.0f, "%.2fx")) {
-                catalog.setUseSpeed(definition.use, speed);
+                editor.setUseSpeed(definition.use, speed);
                 changed = true;
-                dirty_ = true;
             }
             ImGui::SameLine();
             ImGui::TextDisabled(
@@ -129,7 +109,7 @@ bool AnimationCatalogDebugUi::draw(
     }
     return changed;
 #else
-    (void)catalog;
+    (void)editor;
     (void)manifest;
     (void)preview;
     (void)renderer;

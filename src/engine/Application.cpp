@@ -103,9 +103,13 @@ Application::Application()
         campaign_.currentScreen());
     levelEditorDebugUi_.initialize(levelEditor_);
     animationPreviewDebugUi_.initialize(SOKOBAN_SOURCE_ASSET_DIR);
-    animationCatalogDebugUi_.initialize(
-        std::filesystem::path(SOKOBAN_SOURCE_ASSET_DIR) /
-        "animation_catalog.json");
+    if (animationCatalogEditor_.initialize(
+            std::filesystem::path(SOKOBAN_SOURCE_ASSET_DIR) /
+                "animation_catalog.json",
+            assetRoot_ / "animation_catalog.json",
+            assetManifest_)) {
+        animationCatalog_ = animationCatalogEditor_.catalog();
+    }
     assetManifestEditor_.initialize(
         std::filesystem::path(SOKOBAN_SOURCE_ASSET_DIR) / "manifest.json");
     (void)decorationMeshCatalog_.refresh(
@@ -185,10 +189,11 @@ Application::Application()
     });
     DebugUi::addTab("Animation", [this] {
         if (animationCatalogDebugUi_.draw(
-                animationCatalog_,
+                animationCatalogEditor_,
                 assetManifest_,
                 animationPreviewDebugUi_,
                 renderer_)) {
+            animationCatalog_ = animationCatalogEditor_.catalog();
             presentation_.setActorClips(
                 animationCatalog_.animation(AnimationUse::PlayerMove),
                 animationCatalog_.animation(AnimationUse::PlayerPush),

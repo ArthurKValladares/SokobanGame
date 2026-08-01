@@ -170,7 +170,9 @@ code-declared semantic use such as `player.idle` or `enemy.idle` selects a clip
 and contributes its own speed multiplier. Debug builds expose both layers in
 the Developer Tools `Animation` tab, alongside the existing clip preview. The
 content build rejects missing, duplicate, or stale use IDs and unknown or
-untuned manifest clips.
+untuned manifest clips. `Save Animation Catalog` atomically writes the source
+catalog and mirrors it into the running Visual Studio build's staged assets,
+so tuning survives an immediate restart without requiring a rebuild.
 
 Models default to normalized unit-tile geometry. Set
 `"preserveSourceScale": true` on free-form scenery that should retain its
@@ -206,6 +208,8 @@ staged assets, and third-party licenses.
 - `src/engine/GameplayPresentation.*`: interpolation and visual animation.
 - `src/engine/AnimationCatalog.*`: strict semantic animation bindings plus
   global/per-use playback speeds and atomic JSON persistence.
+- `src/engine/AnimationCatalogEditor.*`: headless dirty/reload/save workflow
+  that keeps source and staged runtime catalogs synchronized.
 - `src/engine/LevelEditor.*`: headless document, history, validation, and
   transactional project filesystem operations.
 - `src/engine/DecorationMeshCatalog.*`: Debug-authoring discovery of source

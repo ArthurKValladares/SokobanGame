@@ -1,9 +1,12 @@
 #include "engine/AnimationCatalog.hpp"
+#include "engine/AnimationCatalogEditor.hpp"
 #include "engine/AssetManifest.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 
@@ -47,6 +50,29 @@ std::filesystem::path assetRoot()
 #endif
     return "assets";
 }
+
+class TempDirectory {
+public:
+    TempDirectory()
+    {
+        const auto id =
+            std::chrono::steady_clock::now().time_since_epoch().count();
+        path_ = std::filesystem::temp_directory_path() /
+            ("sokoban-animation-catalog-" + std::to_string(id));
+        std::filesystem::create_directories(path_);
+    }
+
+    ~TempDirectory()
+    {
+        std::error_code error;
+        std::filesystem::remove_all(path_, error);
+    }
+
+    [[nodiscard]] const std::filesystem::path& path() const { return path_; }
+
+private:
+    std::filesystem::path path_;
+};
 
 void testProductionCatalogIsCompleteAndRoundTrips()
 {
@@ -121,12 +147,52 @@ void testCatalogRejectsCodeAndManifestDrift()
         "unknown manifest animation rejected");
 }
 
+void testEditorPersistsSourceAndRuntimeCopies()
+{
+    const sokoban::AssetManifest manifest =
+        sokoban::AssetManifest::loadFromFile(assetRoot() / "manifest.json");
+    const sokoban::AnimationCatalog initial =
+        sokoban::AnimationCatalog::loadFromFile(
+            assetRoot() / "animation_catalog.json", manifest);
+    TempDirectory temporary;
+    const std::filesystem::path source = temporary.path() / "source.json";
+    const std::filesystem::path runtime = temporary.path() / "staged.json";
+    {
+        std::ofstream stream(source, std::ios::binary);
+        stream << initial.serialize(manifest);
+    }
+
+    sokoban::AnimationCatalogEditor editor;
+    check(
+        editor.initialize(source, runtime, manifest),
+        "editor loads source catalog");
+    const auto idle = manifest.animationIdByName("RogueIdle");
+    editor.setGlobalSpeed(idle, 1.75f);
+    editor.setUseSpeed(sokoban::AnimationUse::EnemyIdle, 0.6f);
+    check(editor.dirty(), "editing marks catalog dirty");
+    check(editor.save(manifest), "editor saves mirrored catalogs");
+    check(!editor.dirty(), "successful save clears dirty state");
+
+    const sokoban::AnimationCatalog savedSource =
+        sokoban::AnimationCatalog::loadFromFile(source, manifest);
+    const sokoban::AnimationCatalog savedRuntime =
+        sokoban::AnimationCatalog::loadFromFile(runtime, manifest);
+    check(
+        std::abs(savedSource.globalSpeed(idle) - 1.75f) < 0.0001f,
+        "source catalog persisted global speed");
+    check(
+        std::abs(savedRuntime.useSpeed(sokoban::AnimationUse::EnemyIdle) -
+                 0.6f) < 0.0001f,
+        "runtime catalog persisted per-use speed");
+}
+
 } // namespace
 
 int main()
 {
     testProductionCatalogIsCompleteAndRoundTrips();
     testCatalogRejectsCodeAndManifestDrift();
+    testEditorPersistsSourceAndRuntimeCopies();
 
     if (failures != 0) {
         std::cerr << failures << " animation catalog checks failed\n";

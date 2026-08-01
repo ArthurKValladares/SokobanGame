@@ -2,6 +2,7 @@
 
 #include "engine/AnimationPreviewDebugUi.hpp"
 #include "engine/AnimationCatalog.hpp"
+#include "engine/AnimationCatalogEditor.hpp"
 #include "engine/AnimationCatalogDebugUi.hpp"
 #include "engine/ApplicationDebugUi.hpp"
 #include "engine/SaveSlotManager.hpp"
@@ -173,6 +174,7 @@ private:
     DecorationMeshCatalog decorationMeshCatalog_;
     LevelEditorDebugUi levelEditorDebugUi_;
     AnimationPreviewDebugUi animationPreviewDebugUi_;
+    AnimationCatalogEditor animationCatalogEditor_;
     AnimationCatalogDebugUi animationCatalogDebugUi_;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;
     std::optional<GridPosition3> editorHoverCell_;
