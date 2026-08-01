@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <utility>
 
 namespace sokoban {
@@ -243,7 +244,7 @@ void AnimationPreviewDebugUi::drawCatalogPreview(
         "Duration %.2fs, %zu channels",
         catalog_.clip->durationSeconds,
         catalog_.clip->channels.size());
-    if (ImGui::Checkbox("Show Event Preview Scene", &catalog_.active) &&
+    if (ImGui::Checkbox("Show Event Preview", &catalog_.active) &&
         catalog_.active) {
         browser_.active = false;
     }
@@ -289,12 +290,13 @@ void AnimationPreviewDebugUi::drawCatalogPreview(
         "Speed", &catalog_.speed, 0.1f, 3.0f, "%.2fx");
     const float duration =
         std::max(catalog_.clip->durationSeconds, 0.0001f);
+    ImGui::SetNextItemWidth(-1.0f);
     if (ImGui::SliderFloat(
-            "Event Timeline",
+            "##EventTimeline",
             &catalog_.time,
             0.0f,
             duration,
-            "%.3fs")) {
+            "")) {
         catalog_.playing = false;
         catalog_.active = true;
         browser_.active = false;
@@ -310,6 +312,23 @@ void AnimationPreviewDebugUi::drawCatalogPreview(
             IM_COL32(255, 205, 70, 255),
             2.0f);
     }
+    char timelineLabel[64] {};
+    std::snprintf(
+        timelineLabel,
+        sizeof(timelineLabel),
+        "%.3fs / %.1f%%",
+        catalog_.time,
+        catalogNormalizedTime() * 100.0f);
+    const ImVec2 labelSize = ImGui::CalcTextSize(timelineLabel);
+    ImGui::GetWindowDrawList()->AddText(
+        {
+            timelineMin.x +
+                (timelineMax.x - timelineMin.x - labelSize.x) * 0.5f,
+            timelineMin.y +
+                (timelineMax.y - timelineMin.y - labelSize.y) * 0.5f,
+        },
+        IM_COL32(235, 240, 245, 255),
+        timelineLabel);
     ImGui::EndDisabled();
     ImGui::PopID();
 #else
@@ -377,6 +396,20 @@ void AnimationPreviewDebugUi::clearCatalogPreview(VulkanRenderer& renderer)
 #else
     (void)renderer;
 #endif
+}
+
+void AnimationPreviewDebugUi::setCatalogNormalizedTime(float normalizedTime)
+{
+    if (!catalog_.clip) {
+        return;
+    }
+    catalog_.time = catalog_.clip->durationSeconds *
+        std::clamp(normalizedTime, 0.0f, 1.0f);
+    catalog_.playing = false;
+    catalog_.active = !catalog_.model.isCube();
+    if (catalog_.active) {
+        browser_.active = false;
+    }
 }
 
 float AnimationPreviewDebugUi::catalogNormalizedTime() const

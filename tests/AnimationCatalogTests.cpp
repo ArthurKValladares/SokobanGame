@@ -136,8 +136,39 @@ void testProductionCatalogIsCompleteAndRoundTrips()
     check(
         catalog.events(sokoban::AnimationUse::EnemyAttack).size() == 2,
         "timeline event can be added");
+    catalog.updateTimelineEvent(
+        sokoban::AnimationUse::EnemyAttack,
+        "second-impact",
+        "renamed-impact",
+        0.8f);
+    check(
+        catalog.startGate(sokoban::AnimationUse::PlayerDeath).has_value() &&
+            catalog.startGate(sokoban::AnimationUse::PlayerDeath)->eventId ==
+                "renamed-impact",
+        "renaming an event updates dependent gates transactionally");
+    check(
+        std::abs(catalog.eventSourceTime(
+            sokoban::AnimationUse::EnemyAttack,
+            "renamed-impact") -
+            catalog.clipDuration(manifest.animationIdByName(
+                "BarbarianAttack")) * 0.8f) < 0.0001f,
+        "editing an event updates its timeline position");
+    checkThrows(
+        [&] {
+            catalog.updateTimelineEvent(
+                sokoban::AnimationUse::EnemyAttack,
+                "renamed-impact",
+                "attack-connected",
+                0.5f);
+        },
+        "renaming an event to a duplicate is rejected");
+    check(
+        catalog.startGate(sokoban::AnimationUse::PlayerDeath).has_value() &&
+            catalog.startGate(sokoban::AnimationUse::PlayerDeath)->eventId ==
+                "renamed-impact",
+        "failed event rename rolls back dependent gates");
     catalog.removeTimelineEvent(
-        sokoban::AnimationUse::EnemyAttack, "second-impact");
+        sokoban::AnimationUse::EnemyAttack, "renamed-impact");
     check(
         !catalog.startGate(sokoban::AnimationUse::PlayerDeath).has_value(),
         "removing an event clears dependent gates");

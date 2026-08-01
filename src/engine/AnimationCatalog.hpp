@@ -101,6 +101,11 @@ public:
         AnimationUse use,
         std::string eventId,
         float normalizedTime);
+    void updateTimelineEvent(
+        AnimationUse use,
+        std::string_view originalEventId,
+        std::string eventId,
+        float normalizedTime);
     void removeTimelineEvent(AnimationUse use, std::string_view eventId);
     void setStartGate(AnimationUse use, std::optional<EventGate> gate);
 

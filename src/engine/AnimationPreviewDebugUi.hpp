@@ -33,6 +33,7 @@ public:
         const AssetManifest& manifest,
         VulkanRenderer& renderer);
     void clearCatalogPreview(VulkanRenderer& renderer);
+    void setCatalogNormalizedTime(float normalizedTime);
     [[nodiscard]] float catalogNormalizedTime() const;
     [[nodiscard]] float catalogDurationSeconds() const;
     [[nodiscard]] std::optional<RenderFrameData> previewFrame(

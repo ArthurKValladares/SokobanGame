@@ -456,6 +456,60 @@ void AnimationCatalog::setTimelineEvent(
     });
 }
 
+void AnimationCatalog::updateTimelineEvent(
+    AnimationUse use,
+    std::string_view originalEventId,
+    std::string eventId,
+    float normalizedTime)
+{
+    validateEventId(originalEventId, animationUseId(use));
+    validateEventId(eventId, animationUseId(use));
+    normalizedTime = validatedNormalizedTime(
+        normalizedTime, animationUseId(use));
+
+    const auto previousUses = uses_;
+    try {
+        UseBinding& binding = uses_[indexOf(use)];
+        const auto existing = std::ranges::find(
+            binding.events, originalEventId, &TimelineEvent::id);
+        if (existing == binding.events.end()) {
+            throw std::runtime_error(
+                "animation catalog: event '" +
+                std::string(originalEventId) + "' does not exist on use '" +
+                std::string(animationUseId(use)) + "'");
+        }
+        const auto duplicate = std::ranges::find(
+            binding.events, eventId, &TimelineEvent::id);
+        if (duplicate != binding.events.end() && duplicate != existing) {
+            throw std::runtime_error(
+                "animation catalog: duplicate event '" + eventId +
+                "' on use '" + std::string(animationUseId(use)) + "'");
+        }
+
+        const std::string oldId = existing->id;
+        existing->id = std::move(eventId);
+        existing->normalizedTime = normalizedTime;
+        for (UseBinding& candidate : uses_) {
+            if (candidate.startAfter &&
+                candidate.startAfter->sourceUse == use &&
+                candidate.startAfter->eventId == oldId) {
+                candidate.startAfter->eventId = existing->id;
+            }
+        }
+        std::ranges::sort(binding.events, [](const TimelineEvent& left,
+                                             const TimelineEvent& right) {
+            if (left.normalizedTime != right.normalizedTime) {
+                return left.normalizedTime < right.normalizedTime;
+            }
+            return left.id < right.id;
+        });
+        validateRelations();
+    } catch (...) {
+        uses_ = previousUses;
+        throw;
+    }
+}
+
 void AnimationCatalog::removeTimelineEvent(
     AnimationUse use,
     std::string_view eventId)

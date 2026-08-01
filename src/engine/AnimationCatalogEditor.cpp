@@ -112,6 +112,33 @@ void AnimationCatalogEditor::setTimelineEvent(
     dirty_ = true;
 }
 
+bool AnimationCatalogEditor::commitTimelineEvent(
+    AnimationUse use,
+    std::string_view originalEventId,
+    std::string eventId,
+    float normalizedTime)
+{
+    try {
+        if (originalEventId.empty()) {
+            catalog_.setTimelineEvent(
+                use, std::move(eventId), normalizedTime);
+            status_ = "Added animation event.";
+        } else {
+            catalog_.updateTimelineEvent(
+                use,
+                originalEventId,
+                std::move(eventId),
+                normalizedTime);
+            status_ = "Updated animation event.";
+        }
+        dirty_ = true;
+        return true;
+    } catch (const std::exception& error) {
+        status_ = "Event edit failed: " + std::string(error.what());
+        return false;
+    }
+}
+
 void AnimationCatalogEditor::removeTimelineEvent(
     AnimationUse use,
     std::string_view eventId)

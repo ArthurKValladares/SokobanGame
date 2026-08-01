@@ -175,10 +175,12 @@ drowning and other deaths without a concrete attacking enemy still begin
 immediately.
 
 Debug builds expose all of this in the Developer Tools `Animation` tab. The
-Timeline Events editor previews the selected semantic use, displays authored
-markers over its dedicated scrubber, adds or moves markers at the current
-cursor, and configures start gates. Its clip, cursor, and playback state are
-independent from the free-form Animation Preview below it. That browser can
+Timeline Events section first presents a selected semantic use and its named
+event list. `Edit` and `Add New Event` open a focused editor with preview
+visibility, playback/frame-step controls, and one scrubber showing both source
+seconds and normalized percentage. `Add at Cursor` commits the entered name at
+that position. Its clip, cursor, and playback state are independent from the
+free-form Animation Preview below it. That browser can
 select a skinned manifest model and any source glTF/GLB animation, render that
 pairing on an isolated 3x3 stage, and provide play/pause, looping, speed,
 frame-step, and exact timeline scrubbing controls. The content build rejects

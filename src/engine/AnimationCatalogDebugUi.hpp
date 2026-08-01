@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 namespace sokoban {
 
 class AnimationCatalogEditor;
@@ -17,10 +19,17 @@ public:
         VulkanRenderer& renderer);
 
 private:
+    enum class TimelinePage {
+        EventList,
+        EventEditor,
+    };
+
     int timelineUseIndex_ = 6;
     int gateSourceUseIndex_ = 6;
     int gateEventIndex_ = 0;
-    char newEventId_[64] = "event";
+    TimelinePage timelinePage_ = TimelinePage::EventList;
+    std::string originalEventId_;
+    char eventName_[64] {};
 };
 
 } // namespace sokoban
