@@ -85,10 +85,6 @@ Application::Application()
     applySettingsEffects(settingsCoordinator_.initialize());
     presentationSettings_.applyTileScales(assetManifest_);
     presentationSettings_.normalize();
-    presentation_.setActorClips(
-        animationCatalog_.animation(AnimationUse::PlayerMove),
-        animationCatalog_.animation(AnimationUse::PlayerPush),
-        animationCatalog_.animation(AnimationUse::EnemyAttack));
     presentation_.setAnimationCatalog(&animationCatalog_);
     // The world stays unloaded until the title's Continue/New Game, but its
     // assets warm up in the background so that first load doesn't block.
@@ -110,10 +106,6 @@ Application::Application()
             assetRoot_ / "animation_catalog.json",
             assetManifest_)) {
         animationCatalog_ = animationCatalogEditor_.catalog();
-        presentation_.setActorClips(
-            animationCatalog_.animation(AnimationUse::PlayerMove),
-            animationCatalog_.animation(AnimationUse::PlayerPush),
-            animationCatalog_.animation(AnimationUse::EnemyAttack));
     }
     assetManifestEditor_.initialize(
         std::filesystem::path(SOKOBAN_SOURCE_ASSET_DIR) / "manifest.json");
@@ -199,10 +191,6 @@ Application::Application()
                 animationPreviewDebugUi_,
                 renderer_)) {
             animationCatalog_ = animationCatalogEditor_.catalog();
-            presentation_.setActorClips(
-                animationCatalog_.animation(AnimationUse::PlayerMove),
-                animationCatalog_.animation(AnimationUse::PlayerPush),
-                animationCatalog_.animation(AnimationUse::EnemyAttack));
         }
     });
 #endif
@@ -546,8 +534,7 @@ void Application::update(
          presentation_.players()) {
         playerMoving |= player.motion.moving;
         pushing |= player.motion.moving &&
-            player.movingClip ==
-                animationCatalog_.animation(AnimationUse::PlayerPush);
+            player.animationUse == AnimationUse::PlayerPush;
     }
     audioSystem_.update(dt, playerMoving, pushing);
 }

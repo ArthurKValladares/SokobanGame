@@ -453,9 +453,10 @@ void GameplaySession::setActiveActionPresentation(
         return;
     }
     activeAction_.presentation = std::move(presentation);
-    if (activeAction_.reversed && !activeAction_.presentation.empty()) {
+    if (!activeAction_.presentation.empty()) {
         activeAction_.durationSeconds =
             activeAction_.presentation.durationSeconds;
+        moveElapsed_ = std::min(moveElapsed_, activeAction_.durationSeconds);
     }
 }
 

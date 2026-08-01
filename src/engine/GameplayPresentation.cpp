@@ -1,11 +1,13 @@
 #include "engine/GameplayPresentation.hpp"
 
-#include "engine/render/CameraConfig.hpp"
+#include "engine/PresentationTransactionBuilder.hpp"
 #include "engine/render/AnimationConfig.hpp"
+#include "engine/render/CameraConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <ranges>
 
 namespace sokoban {
 namespace {
@@ -28,13 +30,42 @@ Vec3 movableRenderTarget(GridPosition3 position, bool fallen)
     return target;
 }
 
-Vec3 playerRenderTarget(GridPosition3 position, bool dead)
+Vec3 playerRenderTarget(GridPosition3 position, bool drowned)
 {
     Vec3 target = toVec3(position);
-    if (dead) {
+    if (drowned) {
         target.z -= config::drownedPlayerDepthBelowGround;
     }
     return target;
+}
+
+EntityTarget playerTarget(const GameState::Player& player, std::size_t index)
+{
+    return {
+        EntityKind::Player,
+        resolvedEntityId(EntityKind::Player, player.id, index),
+    };
+}
+
+EntityTarget movableTarget(const GameState::Movable& movable, std::size_t index)
+{
+    return {
+        EntityKind::Movable,
+        resolvedEntityId(EntityKind::Movable, movable.id, index),
+    };
+}
+
+EntityTarget enemyTarget(const GameState::Enemy& enemy, std::size_t index)
+{
+    return {
+        EntityKind::Enemy,
+        resolvedEntityId(EntityKind::Enemy, enemy.id, index),
+    };
+}
+
+AnimationUse playerRestAnimation(const GameState::Player& player)
+{
+    return player.dead ? AnimationUse::PlayerDeadIdle : AnimationUse::PlayerIdle;
 }
 
 Vec4 normalizedQuaternion(Vec4 value)
@@ -91,7 +122,11 @@ float gridDistance(Vec3 from, Vec3 to)
         std::abs(to.z - from.z);
 }
 
-Vec3 interpolateGridMotion(Vec3 from, Vec3 to, float elapsedSeconds, float secondsPerTile)
+Vec3 interpolateGridMotion(
+    Vec3 from,
+    Vec3 to,
+    float elapsedSeconds,
+    float secondsPerTile)
 {
     const float distance = gridDistance(from, to);
     if (distance <= 0.0001f || secondsPerTile <= 0.0f) {
@@ -135,6 +170,19 @@ uint32_t facingQuarterTurns(MoveDirection direction)
     return 0;
 }
 
+template <typename Visual>
+void setRestAnimation(Visual& visual, AnimationUse use)
+{
+    if (visual.animationUse != use) {
+        visual.clipTimeSeconds = 0.0f;
+    }
+    visual.animationUse = use;
+    visual.animationFallbackUse.reset();
+    visual.clipPlaybackRate = 1.0f;
+    visual.animationLoops = true;
+    visual.animationCrossfades = true;
+}
+
 } // namespace
 
 GameplayPresentation::GameplayPresentation()
@@ -144,106 +192,26 @@ GameplayPresentation::GameplayPresentation()
 {
 }
 
-namespace {
-
-uint64_t enemyEventInstance(std::size_t enemyIndex)
-{
-    return 0x454E454D59000000ULL |
-        static_cast<uint64_t>(enemyIndex + 1);
-}
-
-} // namespace
-
-void GameplayPresentation::setActorClips(
-    RenderAnimation moveClip,
-    RenderAnimation pushClip,
-    RenderAnimation enemyAttackClip)
-{
-    playerMoveClip_ = moveClip;
-    playerPushClip_ = pushClip;
-    enemyAttackClip_ = enemyAttackClip;
-    for (PlayerVisual& player : players_) {
-        if (player.movingClip.isNone()) {
-            player.movingClip = moveClip;
-        }
-    }
-}
-
 void GameplayPresentation::resetEntities(const GameState& state)
 {
-    eventSequencer_.clear();
     trackedTimeline_ = {};
     trackedTimelineSeconds_ = 0.0f;
     reverseSourceStartSeconds_ = 0.0f;
     trackedTimelineReversed_ = false;
-    players_.assign(state.players.size(), {});
-    for (std::size_t i = 0; i < state.players.size(); ++i) {
-        setImmediatePosition(
-            players_[i].motion,
-            playerRenderTarget(state.players[i].cell, state.players[i].drowned));
-        players_[i].facingQuarterTurns =
-            facingQuarterTurns(MoveDirection::Down);
-        players_[i].movingClip = playerMoveClip_;
-    }
-
+    players_.clear();
     movables_.clear();
-    movables_.resize(state.movables.size());
-    for (std::size_t i = 0; i < state.movables.size(); ++i) {
-        setImmediatePosition(
-            movables_[i],
-            movableRenderTarget(state.movables[i].cell, state.movables[i].fallen));
-    }
-
-    enemies_.assign(state.enemies.size(), {});
-    for (std::size_t i = 0; i < state.enemies.size(); ++i) {
-        setImmediatePosition(
-            enemies_[i].motion,
-            movableRenderTarget(state.enemies[i].cell, state.enemies[i].fallen));
-    }
+    enemies_.clear();
+    syncToGameState(state);
 }
 
 void GameplayPresentation::advanceClocks(float dt, bool reversed)
 {
     worldAnimationTimeSeconds_ += reversed ? -dt : dt;
-    if (!trackedTimelineReversed_ && !trackedTimeline_.empty()) {
-        trackedTimelineSeconds_ = std::min(
-            trackedTimelineSeconds_ + std::max(dt, 0.0f),
-            trackedTimeline_.durationSeconds);
-    }
     for (PlayerVisual& player : players_) {
         player.clipTimeSeconds += dt * player.clipPlaybackRate;
     }
-    for (std::size_t enemyIndex = 0;
-         enemyIndex < enemies_.size();
-         ++enemyIndex) {
-        EnemyVisual& enemy = enemies_[enemyIndex];
+    for (EnemyVisual& enemy : enemies_) {
         enemy.clipTimeSeconds += dt * enemy.clipPlaybackRate;
-        if (!enemy.attackTransitionPlaying || animationCatalog_ == nullptr) {
-            continue;
-        }
-        const auto fired = eventSequencer_.advance(
-            enemyEventInstance(enemyIndex),
-            enemy.clipTimeSeconds,
-            *animationCatalog_);
-        for (const AnimationEventSequencer::FiredEvent& event : fired) {
-            for (PlayerVisual& player : players_) {
-                if (!player.deathTransitionPending ||
-                    player.deathGateSourceInstance != event.instanceId) {
-                    continue;
-                }
-                const auto& gate =
-                    animationCatalog_->startGate(AnimationUse::PlayerDeath);
-                if (!gate || gate->sourceUse != event.use ||
-                    gate->eventId != event.eventId) {
-                    continue;
-                }
-                player.deathTransitionPending = false;
-                player.deathGateSourceInstance.reset();
-                player.deathTransitionPlaying = true;
-                player.clipTimeSeconds = event.overshootSeconds;
-                player.clipPlaybackRate = 1.0f;
-            }
-        }
     }
 }
 
@@ -278,34 +246,6 @@ void GameplayPresentation::updateCameraPitch(
 
 void GameplayPresentation::advanceAnimations(float dt, const GameState& state)
 {
-    auto advance = [dt](EntityVisual& visual) {
-        if (!visual.moving) {
-            return;
-        }
-        visual.animationElapsed =
-            std::min(visual.animationElapsed + dt, visual.animationDuration);
-        if (visual.animationDuration <= 0.0f ||
-            visual.animationElapsed >= visual.animationDuration) {
-            setImmediatePosition(visual, visual.animationEnd);
-            return;
-        }
-        visual.renderPosition = interpolateGridMotion(
-            visual.animationStart,
-            visual.animationEnd,
-            visual.animationElapsed,
-            visual.animationSecondsPerTile);
-    };
-
-    for (PlayerVisual& player : players_) {
-        advance(player.motion);
-    }
-    for (EntityVisual& visual : movables_) {
-        advance(visual);
-    }
-    for (EnemyVisual& enemy : enemies_) {
-        advance(enemy.motion);
-    }
-
     for (std::size_t enemyIndex = 0;
          enemyIndex < enemies_.size() && enemyIndex < state.enemies.size();
          ++enemyIndex) {
@@ -347,328 +287,194 @@ void GameplayPresentation::advanceAnimations(float dt, const GameState& state)
                   -4.0f * std::max(dt, 0.0f) /
                   config::enemyFacingSlerpSeconds);
         enemies_[enemyIndex].orientation = slerp(
-            enemies_[enemyIndex].orientation, target, blend);
+            enemies_[enemyIndex].orientation,
+            target,
+            blend);
     }
 }
 
 ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     const GameplaySession::Action& action) const
 {
-    ActionPresentationTimeline timeline {
-        .durationSeconds = std::max(action.durationSeconds, 0.0f),
-        .motionStartSeconds = 0.0f,
-        .motionDurationSeconds = std::max(action.durationSeconds, 0.0f),
-    };
+    PresentationTransactionBuilder builder(animationCatalog_);
+    const float motionDuration = std::max(action.durationSeconds, 0.0f);
 
-    auto logicalDuration = [&](AnimationUse use) {
-        if (animationCatalog_ == nullptr) {
-            return 0.0f;
+    const std::size_t playerCount = std::min(
+        action.before.players.size(),
+        action.after.players.size());
+    for (std::size_t index = 0; index < playerCount; ++index) {
+        const GameState::Player& before = action.before.players[index];
+        const GameState::Player& after = action.after.players[index];
+        const EntityTarget target = playerTarget(before, index);
+        float initialClipTime = 0.0f;
+        const auto visual = std::ranges::find_if(
+            players_,
+            [&](const PlayerVisual& candidate) {
+                return candidate.motion.target == target;
+            });
+        if (visual != players_.end()) {
+            initialClipTime = visual->clipTimeSeconds;
         }
-        const float speed = animationCatalog_->effectiveSpeed(use);
-        if (speed <= 0.0f) {
-            return 0.0f;
+        builder.setInitialAnimation(
+            target,
+            playerRestAnimation(before),
+            initialClipTime);
+        const Vec3 from = playerRenderTarget(before.cell, before.drowned);
+        const Vec3 to = playerRenderTarget(after.cell, after.drowned);
+        if (gridDistance(from, to) > 0.0001f) {
+            builder.addMotion({
+                .target = target,
+                .from = from,
+                .to = to,
+                .durationSeconds = motionDuration,
+            });
+            static_cast<void>(builder.addAnimation({
+                .target = target,
+                .use = action.playerPushing
+                    ? AnimationUse::PlayerPush
+                    : AnimationUse::PlayerMove,
+                .completionUse = AnimationUse::PlayerIdle,
+                .clipStartSeconds = initialClipTime,
+                .durationSeconds = motionDuration,
+                .loops = true,
+            }));
         }
-        return animationCatalog_->clipDuration(
-            animationCatalog_->animation(use)) / speed;
-    };
-    auto append = [&](ActionAnimationSpan span) {
-        if (span.durationSeconds <= 0.0f) {
-            return;
-        }
-        timeline.durationSeconds = std::max(
-            timeline.durationSeconds,
-            span.startSeconds + span.durationSeconds);
-        timeline.animations.push_back(std::move(span));
-    };
-
-    const std::size_t sharedPlayers = std::min(
-        action.before.players.size(), action.after.players.size());
-    for (std::size_t playerIndex = 0;
-         playerIndex < sharedPlayers && playerIndex < players_.size();
-         ++playerIndex) {
-        if (action.before.players[playerIndex].cell ==
-            action.after.players[playerIndex].cell) {
-            continue;
-        }
-        append({
-            .actorKind = ActionActorKind::Player,
-            .actorIndex = playerIndex,
-            .use = action.playerPushing
-                ? AnimationUse::PlayerPush
-                : AnimationUse::PlayerMove,
-            .startSeconds = timeline.motionStartSeconds,
-            .durationSeconds = timeline.motionDurationSeconds,
-            .clipStartSeconds = players_[playerIndex].clipTimeSeconds,
-        });
     }
 
-    const std::size_t enemyCount = std::min(
-        action.before.enemies.size(), action.after.enemies.size());
-    std::vector<std::vector<std::size_t>> attackedPlayers(enemyCount);
-    const float attackDuration = logicalDuration(AnimationUse::EnemyAttack);
-    for (std::size_t enemyIndex = 0; enemyIndex < enemyCount; ++enemyIndex) {
-        for (std::size_t playerIndex = 0;
-             playerIndex < sharedPlayers;
-             ++playerIndex) {
-            const GameState::Player& before = action.before.players[playerIndex];
-            const GameState::Player& after = action.after.players[playerIndex];
-            if (before.dead || !after.dead || after.drowned ||
-                action.after.enemies[enemyIndex].fallen ||
-                after.cell.z != action.after.enemies[enemyIndex].cell.z) {
-                continue;
-            }
-            if (std::abs(after.cell.x - action.after.enemies[enemyIndex].cell.x) +
-                    std::abs(after.cell.y - action.after.enemies[enemyIndex].cell.y) ==
-                1) {
-                attackedPlayers[enemyIndex].push_back(playerIndex);
-            }
-        }
-        if (!attackedPlayers[enemyIndex].empty()) {
-            append({
-                .actorKind = ActionActorKind::Enemy,
-                .actorIndex = enemyIndex,
-                .use = AnimationUse::EnemyAttack,
-                .durationSeconds = attackDuration,
+    const std::size_t movableCount = std::min(
+        action.before.movables.size(),
+        action.after.movables.size());
+    for (std::size_t index = 0; index < movableCount; ++index) {
+        const GameState::Movable& before = action.before.movables[index];
+        const GameState::Movable& after = action.after.movables[index];
+        const Vec3 from = movableRenderTarget(before.cell, before.fallen);
+        const Vec3 to = movableRenderTarget(after.cell, after.fallen);
+        if (gridDistance(from, to) > 0.0001f) {
+            builder.addMotion({
+                .target = movableTarget(before, index),
+                .from = from,
+                .to = to,
+                .durationSeconds = motionDuration,
             });
         }
     }
 
-    float attackConnectionSeconds = 0.0f;
-    if (animationCatalog_ != nullptr) {
-        const auto& gate =
-            animationCatalog_->startGate(AnimationUse::PlayerDeath);
-        if (gate && gate->sourceUse == AnimationUse::EnemyAttack) {
-            const float speed =
-                animationCatalog_->effectiveSpeed(gate->sourceUse);
-            if (speed > 0.0f) {
-                attackConnectionSeconds =
-                    animationCatalog_->eventSourceTime(
-                        gate->sourceUse, gate->eventId) /
-                    speed;
+    using IntentId = PresentationTransactionBuilder::AnimationIntentId;
+    const std::size_t enemyCount = std::min(
+        action.before.enemies.size(),
+        action.after.enemies.size());
+    std::vector<std::vector<std::size_t>> attackedPlayers(enemyCount);
+    std::vector<std::optional<IntentId>> attackIntents(enemyCount);
+    for (std::size_t enemyIndex = 0; enemyIndex < enemyCount; ++enemyIndex) {
+        const GameState::Enemy& before = action.before.enemies[enemyIndex];
+        const GameState::Enemy& after = action.after.enemies[enemyIndex];
+        const EntityTarget target = enemyTarget(before, enemyIndex);
+        float initialClipTime = 0.0f;
+        const auto visual = std::ranges::find_if(
+            enemies_,
+            [&](const EnemyVisual& candidate) {
+                return candidate.motion.target == target;
+            });
+        if (visual != enemies_.end()) {
+            initialClipTime = visual->clipTimeSeconds;
+        }
+        builder.setInitialAnimation(
+            target,
+            AnimationUse::EnemyIdle,
+            initialClipTime);
+        const Vec3 from = movableRenderTarget(before.cell, before.fallen);
+        const Vec3 to = movableRenderTarget(after.cell, after.fallen);
+        if (gridDistance(from, to) > 0.0001f) {
+            builder.addMotion({
+                .target = target,
+                .from = from,
+                .to = to,
+                .durationSeconds = motionDuration,
+            });
+        }
+
+        for (std::size_t playerIndex = 0;
+             playerIndex < playerCount;
+             ++playerIndex) {
+            const GameState::Player& playerBefore = action.before.players[playerIndex];
+            const GameState::Player& playerAfter = action.after.players[playerIndex];
+            if (playerBefore.dead || !playerAfter.dead || playerAfter.drowned ||
+                after.fallen || playerAfter.cell.z != after.cell.z) {
+                continue;
             }
+            const int distance =
+                std::abs(playerAfter.cell.x - after.cell.x) +
+                std::abs(playerAfter.cell.y - after.cell.y);
+            if (distance == 1) {
+                attackedPlayers[enemyIndex].push_back(playerIndex);
+            }
+        }
+        if (!attackedPlayers[enemyIndex].empty()) {
+            attackIntents[enemyIndex] = builder.addAnimation({
+                .target = target,
+                .use = AnimationUse::EnemyAttack,
+                .completionUse = AnimationUse::EnemyIdle,
+                .fallbackUse = AnimationUse::EnemyIdle,
+            });
         }
     }
 
-    const float deathDuration = logicalDuration(AnimationUse::PlayerDeath);
     for (std::size_t playerIndex = 0;
-         playerIndex < sharedPlayers;
+         playerIndex < playerCount;
          ++playerIndex) {
         const GameState::Player& before = action.before.players[playerIndex];
         const GameState::Player& after = action.after.players[playerIndex];
         if (before.dead || !after.dead) {
             continue;
         }
-        bool attacked = false;
-        for (const auto& victims : attackedPlayers) {
-            if (std::ranges::find(victims, playerIndex) != victims.end()) {
-                attacked = true;
+        const IntentId deathIntent = builder.addAnimation({
+            .target = playerTarget(before, playerIndex),
+            .use = AnimationUse::PlayerDeath,
+            .completionUse = AnimationUse::PlayerDeadIdle,
+            .fallbackUse = AnimationUse::PlayerDeadIdle,
+        });
+        if (after.drowned) {
+            continue;
+        }
+        for (std::size_t enemyIndex = 0;
+             enemyIndex < attackedPlayers.size();
+             ++enemyIndex) {
+            if (!attackIntents[enemyIndex] ||
+                std::ranges::find(attackedPlayers[enemyIndex], playerIndex) ==
+                    attackedPlayers[enemyIndex].end()) {
+                continue;
+            }
+            if (builder.startAfterCatalogEvent(
+                    deathIntent,
+                    *attackIntents[enemyIndex])) {
                 break;
             }
         }
-        append({
-            .actorKind = ActionActorKind::Player,
-            .actorIndex = playerIndex,
-            .use = AnimationUse::PlayerDeath,
-            .startSeconds = attacked ? attackConnectionSeconds : 0.0f,
-            .durationSeconds = deathDuration,
-        });
     }
 
-    return timeline;
+    return builder.build();
 }
 
 float GameplayPresentation::reverseDuration(
     const GameplaySession::Action& action) const
 {
-    if (action.presentation.empty()) {
-        return std::max(action.durationSeconds, 0.0f);
-    }
-    if (!trackedTimelineReversed_ &&
-        trackedTimeline_ == action.presentation) {
-        return std::clamp(
-            trackedTimelineSeconds_,
-            0.0f,
-            action.presentation.durationSeconds);
-    }
-    return action.presentation.durationSeconds;
+    return action.presentation.empty()
+        ? std::max(action.durationSeconds, 0.0f)
+        : action.presentation.durationSeconds;
 }
 
 void GameplayPresentation::beginAction(const GameplaySession::Action& action)
 {
-    if (action.reversed) {
-        reverseSourceStartSeconds_ = reverseDuration(action);
-        trackedTimeline_ = action.presentation;
-        trackedTimelineSeconds_ = reverseSourceStartSeconds_;
-        trackedTimelineReversed_ = true;
-    } else {
-        trackedTimeline_ = action.presentation;
-        trackedTimelineSeconds_ = 0.0f;
-        reverseSourceStartSeconds_ = 0.0f;
-        trackedTimelineReversed_ = false;
-    }
-    auto beginMotion = [&action](EntityVisual& visual, Vec3 target) {
-        if (gridDistance(visual.renderPosition, target) <= 0.0001f) {
-            setImmediatePosition(visual, target);
-            return;
-        }
-
-        visual.animationStart = visual.renderPosition;
-        visual.animationEnd = target;
-        visual.animationElapsed = 0.0f;
-        const float distance = gridDistance(visual.animationStart, visual.animationEnd);
-        visual.animationDuration = action.durationSeconds;
-        visual.animationSecondsPerTile =
-            distance > 0.0001f ? action.durationSeconds / distance : 0.0f;
-        visual.moving = true;
-    };
-
-    while (players_.size() < action.after.players.size()) {
-        const std::size_t playerIndex = players_.size();
-        PlayerVisual visual;
-        visual.movingClip = playerMoveClip_;
-        visual.facingQuarterTurns = players_.empty()
-            ? facingQuarterTurns(MoveDirection::Down)
-            : players_.front().facingQuarterTurns;
-        setImmediatePosition(
-            visual.motion,
-            playerRenderTarget(
-                action.after.players[playerIndex].cell,
-                action.after.players[playerIndex].drowned));
-        players_.push_back(std::move(visual));
-    }
-
-    auto beginPlayer = [&](PlayerVisual& visual,
-                           const GameState::Player& before,
-                           const GameState::Player& after) {
-        visual.revivedDuringUndo = false;
-        if (action.facingDirection) {
-            visual.facingQuarterTurns =
-                facingQuarterTurns(*action.facingDirection);
-        }
-        if (!before.dead && after.dead) {
-            visual.deathTransitionPending = true;
-            visual.deathTransitionPlaying = false;
-            visual.deathGateSourceInstance.reset();
-            visual.clipTimeSeconds = 0.0f;
-            visual.clipPlaybackRate = 1.0f;
-        } else if (before.dead && !after.dead) {
-            visual.deathTransitionPending = false;
-            visual.deathTransitionPlaying = false;
-            visual.deathGateSourceInstance.reset();
-            visual.clipTimeSeconds = 0.0f;
-        }
-        beginMotion(
-            visual.motion,
-            playerRenderTarget(after.cell, after.drowned));
-        if (visual.motion.moving) {
-            visual.movingClip =
-                action.playerPushing ? playerPushClip_ : playerMoveClip_;
-            visual.clipPlaybackRate = action.reversed ? -1.0f : 1.0f;
-        } else {
-            visual.clipPlaybackRate = 1.0f;
-        }
-    };
-
-    const std::size_t sharedPlayerCount = std::min(
-        action.before.players.size(), action.after.players.size());
-    for (std::size_t i = 0; i < sharedPlayerCount; ++i) {
-        beginPlayer(
-            players_[i],
-            action.before.players[i],
-            action.after.players[i]);
-    }
-
-    const std::size_t movableCount =
-        std::min(action.before.movables.size(), action.after.movables.size());
-    for (std::size_t i = 0; i < movableCount && i < movables_.size(); ++i) {
-        beginMotion(
-            movables_[i],
-            movableRenderTarget(action.after.movables[i].cell, action.after.movables[i].fallen));
-    }
-
-    while (enemies_.size() < action.after.enemies.size()) {
-        EnemyVisual visual;
-        setImmediatePosition(
-            visual.motion,
-            movableRenderTarget(
-                action.after.enemies[enemies_.size()].cell,
-                action.after.enemies[enemies_.size()].fallen));
-        enemies_.push_back(std::move(visual));
-    }
-    const std::size_t enemyCount = std::min(
-        action.before.enemies.size(), action.after.enemies.size());
-    std::vector<std::vector<std::size_t>> attackedPlayers(enemyCount);
-    for (std::size_t i = 0; i < enemyCount && i < enemies_.size(); ++i) {
-        beginMotion(
-            enemies_[i].motion,
-            movableRenderTarget(
-                action.after.enemies[i].cell,
-                action.after.enemies[i].fallen));
-        bool attacked = false;
-        for (std::size_t playerIndex = 0;
-             playerIndex < action.before.players.size() &&
-             playerIndex < action.after.players.size();
-             ++playerIndex) {
-            const GameState::Player& before = action.before.players[playerIndex];
-            const GameState::Player& after = action.after.players[playerIndex];
-            if (before.dead || !after.dead || after.drowned ||
-                action.after.enemies[i].fallen ||
-                after.cell.z != action.after.enemies[i].cell.z) {
-                continue;
-            }
-            const bool attacksPlayer =
-                std::abs(after.cell.x - action.after.enemies[i].cell.x) +
-                    std::abs(after.cell.y - action.after.enemies[i].cell.y) ==
-                1;
-            if (attacksPlayer) {
-                attacked = true;
-                attackedPlayers[i].push_back(playerIndex);
-            }
-        }
-        if (attacked) {
-            enemies_[i].attackTransitionPlaying = true;
-            enemies_[i].clipTimeSeconds = 0.0f;
-            enemies_[i].clipPlaybackRate = 1.0f;
-            if (animationCatalog_ != nullptr) {
-                eventSequencer_.begin(
-                    enemyEventInstance(i), AnimationUse::EnemyAttack);
-            }
-        }
-    }
-
-    for (std::size_t playerIndex = 0;
-         playerIndex < sharedPlayerCount;
-         ++playerIndex) {
-        const GameState::Player& before = action.before.players[playerIndex];
-        const GameState::Player& after = action.after.players[playerIndex];
-        if (before.dead || !after.dead) {
-            continue;
-        }
-        PlayerVisual& visual = players_[playerIndex];
-        bool gated = false;
-        if (!after.drowned && animationCatalog_ != nullptr) {
-            const auto& gate =
-                animationCatalog_->startGate(AnimationUse::PlayerDeath);
-            if (gate && gate->sourceUse == AnimationUse::EnemyAttack) {
-                for (std::size_t enemyIndex = 0;
-                     enemyIndex < attackedPlayers.size();
-                     ++enemyIndex) {
-                    if (std::ranges::find(
-                            attackedPlayers[enemyIndex], playerIndex) ==
-                        attackedPlayers[enemyIndex].end()) {
-                        continue;
-                    }
-                    visual.deathGateSourceInstance =
-                        enemyEventInstance(enemyIndex);
-                    gated = true;
-                    break;
-                }
-            }
-        }
-        if (!gated) {
-            visual.deathTransitionPending = false;
-            visual.deathTransitionPlaying = true;
-            visual.clipTimeSeconds = 0.0f;
+    syncToGameState(action.before);
+    trackedTimeline_ = action.presentation;
+    trackedTimelineSeconds_ = action.reversed
+        ? action.presentation.durationSeconds
+        : 0.0f;
+    reverseSourceStartSeconds_ = trackedTimelineSeconds_;
+    trackedTimelineReversed_ = action.reversed;
+    if (action.facingDirection) {
+        for (PlayerVisual& player : players_) {
+            player.facingQuarterTurns = facingQuarterTurns(*action.facingDirection);
         }
     }
 }
@@ -680,145 +486,88 @@ void GameplayPresentation::seekAction(
     if (action.presentation.empty()) {
         return;
     }
-
-    if (!action.reversed) {
-        trackedTimelineSeconds_ = std::clamp(
-            std::max(elapsedSeconds, 0.0f),
-            0.0f,
-            action.presentation.durationSeconds);
-        return;
-    }
-
     const ActionPresentationTimeline& timeline = action.presentation;
+    const float elapsed = std::max(elapsedSeconds, 0.0f);
     const float sourceTime = std::clamp(
-        reverseSourceStartSeconds_ - std::max(elapsedSeconds, 0.0f),
+        action.reversed
+            ? reverseSourceStartSeconds_ - elapsed
+            : elapsed,
         0.0f,
         timeline.durationSeconds);
     trackedTimelineSeconds_ = sourceTime;
-    const float motionEnd =
-        timeline.motionStartSeconds + timeline.motionDurationSeconds;
 
-    auto seekMotion = [&](EntityVisual& visual, Vec3 from, Vec3 to) {
-        if (sourceTime > motionEnd || timeline.motionDurationSeconds <= 0.0f) {
-            setImmediatePosition(visual, from);
-            return;
-        }
-        if (sourceTime <= timeline.motionStartSeconds) {
-            setImmediatePosition(visual, to);
-            return;
-        }
+    for (PlayerVisual& player : players_) {
+        player.motion.moving = false;
+    }
+    for (EntityVisual& movable : movables_) {
+        movable.moving = false;
+    }
+    for (EnemyVisual& enemy : enemies_) {
+        enemy.motion.moving = false;
+    }
 
-        const float reverseElapsed = motionEnd - sourceTime;
-        visual.animationStart = from;
-        visual.animationEnd = to;
-        visual.animationElapsed = reverseElapsed;
-        visual.animationDuration = timeline.motionDurationSeconds;
-        const float distance = gridDistance(from, to);
-        visual.animationSecondsPerTile = distance > 0.0001f
-            ? timeline.motionDurationSeconds / distance
+    for (const ActionMotionTrack& track : timeline.motions) {
+        EntityVisual* visual = findMotionVisual(track.target);
+        if (visual == nullptr) {
+            continue;
+        }
+        const float end = track.startSeconds + track.durationSeconds;
+        if (sourceTime < track.startSeconds ||
+            (action.reversed && sourceTime <= track.startSeconds) ||
+            track.durationSeconds <= 0.0f) {
+            setImmediatePosition(*visual, track.from);
+            continue;
+        }
+        if (sourceTime >= end) {
+            setImmediatePosition(*visual, track.to);
+            continue;
+        }
+        const float motionElapsed = sourceTime - track.startSeconds;
+        const float distance = gridDistance(track.from, track.to);
+        visual->animationStart = track.from;
+        visual->animationEnd = track.to;
+        visual->animationElapsed = motionElapsed;
+        visual->animationDuration = track.durationSeconds;
+        visual->animationSecondsPerTile = distance > 0.0001f
+            ? track.durationSeconds / distance
             : 0.0f;
-        visual.renderPosition = interpolateGridMotion(
-            from, to, reverseElapsed, visual.animationSecondsPerTile);
-        visual.moving = distance > 0.0001f;
-    };
+        visual->renderPosition = interpolateGridMotion(
+            track.from,
+            track.to,
+            motionElapsed,
+            visual->animationSecondsPerTile);
+        visual->moving = distance > 0.0001f;
+    }
 
-    const std::size_t playerCount = std::min({
-        players_.size(),
-        action.before.players.size(),
-        action.after.players.size(),
-    });
-    for (std::size_t playerIndex = 0; playerIndex < playerCount; ++playerIndex) {
-        PlayerVisual& visual = players_[playerIndex];
-        seekMotion(
-            visual.motion,
-            playerRenderTarget(
-                action.before.players[playerIndex].cell,
-                action.before.players[playerIndex].drowned),
-            playerRenderTarget(
-                action.after.players[playerIndex].cell,
-                action.after.players[playerIndex].drowned));
-        visual.deathTransitionPending = false;
-        visual.deathTransitionPlaying = false;
-        visual.deathGateSourceInstance.reset();
-        visual.revivedDuringUndo = false;
-
-        for (const ActionAnimationSpan& span : timeline.animations) {
-            if (span.actorKind != ActionActorKind::Player ||
-                span.actorIndex != playerIndex) {
-                continue;
-            }
-            const float end = span.startSeconds + span.durationSeconds;
-            if (span.use == AnimationUse::PlayerDeath) {
-                if (sourceTime > span.startSeconds && sourceTime <= end) {
-                    visual.deathTransitionPlaying = true;
-                    visual.clipTimeSeconds =
-                        span.clipStartSeconds + sourceTime - span.startSeconds;
-                    visual.clipPlaybackRate = -1.0f;
-                } else if (sourceTime <= span.startSeconds) {
-                    visual.revivedDuringUndo = true;
-                }
-                continue;
-            }
-            if ((span.use == AnimationUse::PlayerMove ||
-                    span.use == AnimationUse::PlayerPush) &&
-                sourceTime > span.startSeconds && sourceTime <= end) {
-                visual.movingClip = animationCatalog_ != nullptr
-                    ? animationCatalog_->animation(span.use)
-                    : (span.use == AnimationUse::PlayerPush
-                              ? playerPushClip_
-                              : playerMoveClip_);
-                visual.clipTimeSeconds =
-                    span.clipStartSeconds + sourceTime - span.startSeconds;
-                visual.clipPlaybackRate = -1.0f;
-            }
+    for (const ActionAnimationTrack& track : timeline.animations) {
+        AnimatedActorVisual* visual = findAnimatedVisual(track.target);
+        if (visual == nullptr) {
+            continue;
         }
-    }
+        visual->animationUse = track.initialUse;
+        visual->animationFallbackUse.reset();
+        visual->clipTimeSeconds = track.initialClipTimeSeconds + sourceTime;
+        visual->animationLoops = true;
+        visual->animationCrossfades = !action.reversed;
+        visual->clipPlaybackRate = action.reversed ? -1.0f : 1.0f;
 
-    const std::size_t movableCount = std::min({
-        movables_.size(),
-        action.before.movables.size(),
-        action.after.movables.size(),
-    });
-    for (std::size_t movableIndex = 0; movableIndex < movableCount; ++movableIndex) {
-        seekMotion(
-            movables_[movableIndex],
-            movableRenderTarget(
-                action.before.movables[movableIndex].cell,
-                action.before.movables[movableIndex].fallen),
-            movableRenderTarget(
-                action.after.movables[movableIndex].cell,
-                action.after.movables[movableIndex].fallen));
-    }
-
-    const std::size_t enemyCount = std::min({
-        enemies_.size(),
-        action.before.enemies.size(),
-        action.after.enemies.size(),
-    });
-    for (std::size_t enemyIndex = 0; enemyIndex < enemyCount; ++enemyIndex) {
-        EnemyVisual& visual = enemies_[enemyIndex];
-        seekMotion(
-            visual.motion,
-            movableRenderTarget(
-                action.before.enemies[enemyIndex].cell,
-                action.before.enemies[enemyIndex].fallen),
-            movableRenderTarget(
-                action.after.enemies[enemyIndex].cell,
-                action.after.enemies[enemyIndex].fallen));
-        visual.attackTransitionPlaying = false;
-        for (const ActionAnimationSpan& span : timeline.animations) {
-            if (span.actorKind != ActionActorKind::Enemy ||
-                span.actorIndex != enemyIndex ||
-                span.use != AnimationUse::EnemyAttack) {
+        for (const ActionAnimationSegment& segment : track.segments) {
+            if (sourceTime < segment.startSeconds) {
+                break;
+            }
+            const float end = segment.startSeconds + segment.durationSeconds;
+            if (sourceTime < end) {
+                visual->animationUse = segment.use;
+                visual->animationFallbackUse = segment.fallbackUse;
+                visual->clipTimeSeconds = segment.clipStartSeconds +
+                    sourceTime - segment.startSeconds;
+                visual->animationLoops = segment.loops;
                 continue;
             }
-            const float end = span.startSeconds + span.durationSeconds;
-            if (sourceTime > span.startSeconds && sourceTime <= end) {
-                visual.attackTransitionPlaying = true;
-                visual.clipTimeSeconds =
-                    span.clipStartSeconds + sourceTime - span.startSeconds;
-                visual.clipPlaybackRate = -1.0f;
-            }
+            visual->animationUse = segment.completionUse;
+            visual->animationFallbackUse.reset();
+            visual->clipTimeSeconds = sourceTime - end;
+            visual->animationLoops = true;
         }
     }
 }
@@ -826,82 +575,100 @@ void GameplayPresentation::seekAction(
 void GameplayPresentation::finishAction(const GameState& state)
 {
     syncToGameState(state);
-    for (PlayerVisual& player : players_) {
-        player.clipPlaybackRate = 1.0f;
-        player.revivedDuringUndo = false;
-    }
-    for (EnemyVisual& enemy : enemies_) {
-        enemy.clipPlaybackRate = 1.0f;
-    }
-    if (trackedTimelineReversed_) {
-        trackedTimeline_ = {};
-        trackedTimelineSeconds_ = 0.0f;
-        reverseSourceStartSeconds_ = 0.0f;
-        trackedTimelineReversed_ = false;
-    }
+    trackedTimeline_ = {};
+    trackedTimelineSeconds_ = 0.0f;
+    reverseSourceStartSeconds_ = 0.0f;
+    trackedTimelineReversed_ = false;
 }
 
 void GameplayPresentation::syncToGameState(const GameState& state)
 {
-    if (players_.size() > state.players.size()) {
-        players_.resize(state.players.size());
-    }
-    while (players_.size() < state.players.size()) {
-        const std::size_t i = players_.size();
+    std::vector<PlayerVisual> oldPlayers = std::move(players_);
+    players_.clear();
+    players_.reserve(state.players.size());
+    for (std::size_t index = 0; index < state.players.size(); ++index) {
+        const GameState::Player& player = state.players[index];
+        const EntityTarget target = playerTarget(player, index);
+        auto existing = std::ranges::find_if(
+            oldPlayers,
+            [&](const PlayerVisual& candidate) {
+                return candidate.motion.target == target;
+            });
         PlayerVisual visual;
-        visual.movingClip = playerMoveClip_;
-        visual.facingQuarterTurns = players_.empty()
-            ? facingQuarterTurns(MoveDirection::Down)
-            : players_.front().facingQuarterTurns;
+        if (existing != oldPlayers.end()) {
+            visual = std::move(*existing);
+        } else {
+            visual.facingQuarterTurns = players_.empty()
+                ? facingQuarterTurns(MoveDirection::Down)
+                : players_.front().facingQuarterTurns;
+        }
+        visual.motion.target = target;
         setImmediatePosition(
             visual.motion,
-            playerRenderTarget(state.players[i].cell, state.players[i].drowned));
+            playerRenderTarget(player.cell, player.drowned));
+        setRestAnimation(visual, playerRestAnimation(player));
         players_.push_back(std::move(visual));
     }
-    for (std::size_t i = 0; i < players_.size(); ++i) {
-        if (!players_[i].motion.moving) {
-            setImmediatePosition(
-                players_[i].motion,
-                playerRenderTarget(state.players[i].cell, state.players[i].drowned));
+
+    std::vector<EntityVisual> oldMovables = std::move(movables_);
+    movables_.clear();
+    movables_.reserve(state.movables.size());
+    for (std::size_t index = 0; index < state.movables.size(); ++index) {
+        const GameState::Movable& movable = state.movables[index];
+        const EntityTarget target = movableTarget(movable, index);
+        auto existing = std::ranges::find(
+            oldMovables,
+            target,
+            &EntityVisual::target);
+        EntityVisual visual;
+        if (existing != oldMovables.end()) {
+            visual = std::move(*existing);
         }
+        visual.target = target;
+        setImmediatePosition(
+            visual,
+            movableRenderTarget(movable.cell, movable.fallen));
+        movables_.push_back(std::move(visual));
     }
-    for (std::size_t i = 0; i < movables_.size() && i < state.movables.size(); ++i) {
-        if (!movables_[i].moving) {
-            setImmediatePosition(
-                movables_[i],
-                movableRenderTarget(state.movables[i].cell, state.movables[i].fallen));
-        }
-    }
-    if (enemies_.size() > state.enemies.size()) {
-        enemies_.resize(state.enemies.size());
-    }
-    while (enemies_.size() < state.enemies.size()) {
+
+    std::vector<EnemyVisual> oldEnemies = std::move(enemies_);
+    enemies_.clear();
+    enemies_.reserve(state.enemies.size());
+    for (std::size_t index = 0; index < state.enemies.size(); ++index) {
+        const GameState::Enemy& enemy = state.enemies[index];
+        const EntityTarget target = enemyTarget(enemy, index);
+        auto existing = std::ranges::find_if(
+            oldEnemies,
+            [&](const EnemyVisual& candidate) {
+                return candidate.motion.target == target;
+            });
         EnemyVisual visual;
+        if (existing != oldEnemies.end()) {
+            visual = std::move(*existing);
+        }
+        visual.motion.target = target;
         setImmediatePosition(
             visual.motion,
-            movableRenderTarget(
-                state.enemies[enemies_.size()].cell,
-                state.enemies[enemies_.size()].fallen));
+            movableRenderTarget(enemy.cell, enemy.fallen));
+        setRestAnimation(visual, AnimationUse::EnemyIdle);
         enemies_.push_back(std::move(visual));
-    }
-    for (std::size_t i = 0; i < enemies_.size(); ++i) {
-        if (!enemies_[i].motion.moving) {
-            setImmediatePosition(
-                enemies_[i].motion,
-                movableRenderTarget(state.enemies[i].cell, state.enemies[i].fallen));
-        }
     }
 }
 
-float GameplayPresentation::conveyorBeltScrollOffset(float stepDurationSeconds) const
+float GameplayPresentation::conveyorBeltScrollOffset(
+    float stepDurationSeconds) const
 {
     if (stepDurationSeconds <= 0.0f) {
         return 0.0f;
     }
-    return std::fmod(worldAnimationTimeSeconds_ / stepDurationSeconds, 1.0f);
+    return std::fmod(
+        worldAnimationTimeSeconds_ / stepDurationSeconds,
+        1.0f);
 }
 
-void GameplayPresentation::setImmediatePosition(EntityVisual& visual, Vec3 target)
+void GameplayPresentation::setImmediatePosition(
+    EntityVisual& visual,
+    Vec3 target)
 {
     visual.renderPosition = target;
     visual.animationStart = target;
@@ -910,6 +677,52 @@ void GameplayPresentation::setImmediatePosition(EntityVisual& visual, Vec3 targe
     visual.animationDuration = 0.0f;
     visual.animationSecondsPerTile = 0.0f;
     visual.moving = false;
+}
+
+GameplayPresentation::EntityVisual* GameplayPresentation::findMotionVisual(
+    EntityTarget target)
+{
+    if (target.kind == EntityKind::Player) {
+        const auto found = std::ranges::find_if(
+            players_,
+            [&](const PlayerVisual& candidate) {
+                return candidate.motion.target == target;
+            });
+        return found == players_.end() ? nullptr : &found->motion;
+    }
+    if (target.kind == EntityKind::Movable) {
+        const auto found = std::ranges::find(
+            movables_, target, &EntityVisual::target);
+        return found == movables_.end() ? nullptr : &*found;
+    }
+    const auto found = std::ranges::find_if(
+        enemies_,
+        [&](const EnemyVisual& candidate) {
+            return candidate.motion.target == target;
+        });
+    return found == enemies_.end() ? nullptr : &found->motion;
+}
+
+GameplayPresentation::AnimatedActorVisual*
+GameplayPresentation::findAnimatedVisual(EntityTarget target)
+{
+    if (target.kind == EntityKind::Player) {
+        const auto found = std::ranges::find_if(
+            players_,
+            [&](const PlayerVisual& candidate) {
+                return candidate.motion.target == target;
+            });
+        return found == players_.end() ? nullptr : &*found;
+    }
+    if (target.kind == EntityKind::Enemy) {
+        const auto found = std::ranges::find_if(
+            enemies_,
+            [&](const EnemyVisual& candidate) {
+                return candidate.motion.target == target;
+            });
+        return found == enemies_.end() ? nullptr : &*found;
+    }
+    return nullptr;
 }
 
 } // namespace sokoban

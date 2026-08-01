@@ -1,6 +1,7 @@
 #include "engine/PlayerProfile.hpp"
 
 #include "engine/render/RenderResolution.hpp"
+#include "engine/render/WaterConfig.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -17,7 +18,7 @@
 // itself lives in PlayerProfile.cpp.
 //
 // Migration strategy: old formats are upgraded by forward JSON patches
-// (migrate1to2 .. migrate15to16) applied in sequence, then a single strict
+// (migrate1to2 .. migrate16to17) applied in sequence, then a single strict
 // current-format parse validates the fully migrated document. Patches only move
 // fields and add defaults; unknown keys survive them and are rejected by the
 // final parse, so schema strictness is preserved without every historical
@@ -27,6 +28,7 @@
 // Format 10 added Mirror bindings and temporarily moved the default Undo key.
 // Format 11 restores Undo to Z and moves the default Mirror action to F.
 // Format 16 persists presentation timelines with undo actions.
+// Format 17 introduces stable entity ids and generic presentation tracks.
 // Save-slot files carry only progress and the shared settings.json
 // carries only settings (ProfileSections selects the shape at serialize
 // time); pre-split combined files simply contain both.
@@ -113,6 +115,25 @@ int nonNegativeIntegerProperty(
         fail(context, "property '" + std::string(key) + "' must not be negative");
     }
     return value;
+}
+
+uint64_t unsignedIntegerProperty(
+    const Json& object,
+    std::string_view key,
+    std::string_view context)
+{
+    const Json& value = requiredProperty(object, key, context);
+    if (!value.is_number_integer()) {
+        fail(context, "property '" + std::string(key) + "' must be an integer");
+    }
+    if (value.is_number_unsigned()) {
+        return value.get<uint64_t>();
+    }
+    const int64_t number = value.get<int64_t>();
+    if (number < 0) {
+        fail(context, "property '" + std::string(key) + "' must not be negative");
+    }
+    return static_cast<uint64_t>(number);
 }
 
 std::optional<int> optionalNonNegativeInteger(
@@ -273,9 +294,10 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
         const Json& item = players[i];
         rejectUnknownProperties(
             item,
-            { "cell", "dead", "drowned", "sliding" },
+            { "id", "cell", "dead", "drowned", "sliding" },
             playerContext);
         state.players.push_back({
+            .id = unsignedIntegerProperty(item, "id", playerContext),
             .cell = positionFromJson(
                 requiredProperty(item, "cell", playerContext),
                 playerContext + ".cell"),
@@ -295,8 +317,9 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
         const std::string movableContext =
             std::string(context) + ".movables[" + std::to_string(i) + "]";
         const Json& item = movables[i];
-        rejectUnknownProperties(item, { "type", "cell", "fallen", "sliding" }, movableContext);
+        rejectUnknownProperties(item, { "id", "type", "cell", "fallen", "sliding" }, movableContext);
         GameState::Movable movable;
+        movable.id = unsignedIntegerProperty(item, "id", movableContext);
         movable.type = tileTypeFromName(
             stringProperty(item, "type", movableContext),
             movableContext + ".type");
@@ -317,8 +340,9 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
         const std::string enemyContext =
             std::string(context) + ".enemies[" + std::to_string(i) + "]";
         const Json& item = enemies[i];
-        rejectUnknownProperties(item, { "cell", "fallen" }, enemyContext);
+        rejectUnknownProperties(item, { "id", "cell", "fallen" }, enemyContext);
         state.enemies.push_back({
+            .id = unsignedIntegerProperty(item, "id", enemyContext),
             .cell = positionFromJson(
                 requiredProperty(item, "cell", enemyContext),
                 enemyContext + ".cell"),
@@ -333,6 +357,7 @@ OrderedJson gameStateToJson(const GameState& state)
     OrderedJson players = OrderedJson::array();
     for (const GameState::Player& player : state.players) {
         players.push_back({
+            { "id", player.id },
             { "cell", positionToJson(player.cell) },
             { "dead", player.dead },
             { "drowned", player.drowned },
@@ -344,6 +369,7 @@ OrderedJson gameStateToJson(const GameState& state)
     OrderedJson movables = OrderedJson::array();
     for (const GameState::Movable& movable : state.movables) {
         movables.push_back({
+            { "id", movable.id },
             { "type", tileTypeName(movable.type) },
             { "cell", positionToJson(movable.cell) },
             { "fallen", movable.fallen },
@@ -355,6 +381,7 @@ OrderedJson gameStateToJson(const GameState& state)
     OrderedJson enemies = OrderedJson::array();
     for (const GameState::Enemy& enemy : state.enemies) {
         enemies.push_back({
+            { "id", enemy.id },
             { "cell", positionToJson(enemy.cell) },
             { "fallen", enemy.fallen },
         });
@@ -364,6 +391,92 @@ OrderedJson gameStateToJson(const GameState& state)
         { "movables", std::move(movables) },
         { "enemies", std::move(enemies) },
     };
+}
+
+Vec3 vec3FromJson(const Json& value, std::string_view context)
+{
+    rejectUnknownProperties(value, { "x", "y", "z" }, context);
+    return {
+        floatProperty(value, "x", context),
+        floatProperty(value, "y", context),
+        floatProperty(value, "z", context),
+    };
+}
+
+OrderedJson vec3ToJson(Vec3 value)
+{
+    return {
+        { "x", value.x },
+        { "y", value.y },
+        { "z", value.z },
+    };
+}
+
+EntityKind entityKindFromJson(const Json& value, std::string_view context)
+{
+    const std::string kind = stringProperty(value, "kind", context);
+    if (kind == "player") {
+        return EntityKind::Player;
+    }
+    if (kind == "movable") {
+        return EntityKind::Movable;
+    }
+    if (kind == "enemy") {
+        return EntityKind::Enemy;
+    }
+    fail(context, "unknown entity kind '" + kind + "'");
+}
+
+std::string_view entityKindName(EntityKind kind)
+{
+    switch (kind) {
+    case EntityKind::Player:
+        return "player";
+    case EntityKind::Movable:
+        return "movable";
+    case EntityKind::Enemy:
+        return "enemy";
+    }
+    return "player";
+}
+
+EntityTarget entityTargetFromJson(const Json& value, std::string_view context)
+{
+    rejectUnknownProperties(value, { "kind", "id" }, context);
+    const EntityTarget target {
+        .kind = entityKindFromJson(value, context),
+        .id = unsignedIntegerProperty(value, "id", context),
+    };
+    if (target.id == invalidEntityId) {
+        fail(context, "entity id must not be zero");
+    }
+    return target;
+}
+
+OrderedJson entityTargetToJson(EntityTarget target)
+{
+    return {
+        { "kind", entityKindName(target.kind) },
+        { "id", target.id },
+    };
+}
+
+AnimationUse animationUseFromJson(
+    const Json& value,
+    std::string_view key,
+    std::string_view context)
+{
+    const std::string id = stringProperty(value, key, context);
+    const auto definitions = animationUseDefinitions();
+    const auto found = std::ranges::find_if(
+        definitions,
+        [&](const AnimationUseDefinition& definition) {
+            return definition.id == id;
+        });
+    if (found == definitions.end()) {
+        fail(context, "unknown animation use '" + id + "'");
+    }
+    return found->use;
 }
 
 GameplaySession::Action undoActionFromJson(
@@ -391,87 +504,153 @@ GameplaySession::Action undoActionFromJson(
     const std::string presentationContext =
         std::string(context) + ".presentation";
     rejectUnknownProperties(presentation, {
-        "durationSeconds", "motionStartSeconds", "motionDurationSeconds",
-        "animations",
+        "durationSeconds", "motions", "animations",
     }, presentationContext);
     action.presentation.durationSeconds =
         floatProperty(presentation, "durationSeconds", presentationContext);
-    action.presentation.motionStartSeconds =
-        floatProperty(presentation, "motionStartSeconds", presentationContext);
-    action.presentation.motionDurationSeconds =
-        floatProperty(presentation, "motionDurationSeconds", presentationContext);
-    if (action.presentation.durationSeconds < 0.0f ||
-        action.presentation.motionStartSeconds < 0.0f ||
-        action.presentation.motionDurationSeconds < 0.0f) {
-        fail(presentationContext, "timeline times must be non-negative");
+    if (action.presentation.durationSeconds < 0.0f) {
+        fail(presentationContext, "timeline duration must be non-negative");
     }
+
+    const Json& motions =
+        requiredProperty(presentation, "motions", presentationContext);
+    if (!motions.is_array()) {
+        fail(presentationContext, "property 'motions' must be an array");
+    }
+    for (std::size_t i = 0; i < motions.size(); ++i) {
+        const Json& encoded = motions[i];
+        const std::string motionContext = presentationContext +
+            ".motions[" + std::to_string(i) + "]";
+        rejectUnknownProperties(encoded, {
+            "target", "from", "to", "startSeconds", "durationSeconds",
+        }, motionContext);
+        ActionMotionTrack motion {
+            .target = entityTargetFromJson(
+                requiredProperty(encoded, "target", motionContext),
+                motionContext + ".target"),
+            .from = vec3FromJson(
+                requiredProperty(encoded, "from", motionContext),
+                motionContext + ".from"),
+            .to = vec3FromJson(
+                requiredProperty(encoded, "to", motionContext),
+                motionContext + ".to"),
+            .startSeconds = floatProperty(
+                encoded, "startSeconds", motionContext),
+            .durationSeconds = floatProperty(
+                encoded, "durationSeconds", motionContext),
+        };
+        if (motion.startSeconds < 0.0f || motion.durationSeconds < 0.0f ||
+            motion.startSeconds + motion.durationSeconds >
+                action.presentation.durationSeconds + 0.0001f) {
+            fail(motionContext, "motion track is outside the timeline");
+        }
+        action.presentation.motions.push_back(std::move(motion));
+    }
+
     const Json& animations =
         requiredProperty(presentation, "animations", presentationContext);
     if (!animations.is_array()) {
         fail(presentationContext, "property 'animations' must be an array");
     }
-    const auto definitions = animationUseDefinitions();
     for (std::size_t i = 0; i < animations.size(); ++i) {
         const Json& encoded = animations[i];
-        const std::string animationContext = presentationContext +
+        const std::string trackContext = presentationContext +
             ".animations[" + std::to_string(i) + "]";
         rejectUnknownProperties(encoded, {
-            "actorKind", "actorIndex", "use", "startSeconds",
-            "durationSeconds", "clipStartSeconds",
-        }, animationContext);
-        const std::string actorKind =
-            stringProperty(encoded, "actorKind", animationContext);
-        ActionAnimationSpan span;
-        if (actorKind == "player") {
-            span.actorKind = ActionActorKind::Player;
-        } else if (actorKind == "enemy") {
-            span.actorKind = ActionActorKind::Enemy;
-        } else {
-            fail(animationContext, "unknown actor kind '" + actorKind + "'");
+            "target", "initialUse", "initialClipTimeSeconds", "segments",
+        }, trackContext);
+        ActionAnimationTrack track {
+            .target = entityTargetFromJson(
+                requiredProperty(encoded, "target", trackContext),
+                trackContext + ".target"),
+            .initialUse = animationUseFromJson(
+                encoded, "initialUse", trackContext),
+            .initialClipTimeSeconds = floatProperty(
+                encoded, "initialClipTimeSeconds", trackContext),
+        };
+        if (track.initialClipTimeSeconds < 0.0f) {
+            fail(trackContext, "initial clip time must be non-negative");
         }
-        span.actorIndex = static_cast<std::size_t>(
-            nonNegativeIntegerProperty(encoded, "actorIndex", animationContext));
-        const std::string useId =
-            stringProperty(encoded, "use", animationContext);
-        const auto use = std::ranges::find_if(
-            definitions,
-            [&](const AnimationUseDefinition& definition) {
-                return definition.id == useId;
-            });
-        if (use == definitions.end()) {
-            fail(animationContext, "unknown animation use '" + useId + "'");
+        const Json& segments = requiredProperty(encoded, "segments", trackContext);
+        if (!segments.is_array()) {
+            fail(trackContext, "property 'segments' must be an array");
         }
-        span.use = use->use;
-        span.startSeconds =
-            floatProperty(encoded, "startSeconds", animationContext);
-        span.durationSeconds =
-            floatProperty(encoded, "durationSeconds", animationContext);
-        span.clipStartSeconds =
-            floatProperty(encoded, "clipStartSeconds", animationContext);
-        if (span.startSeconds < 0.0f || span.durationSeconds < 0.0f ||
-            span.clipStartSeconds < 0.0f ||
-            span.startSeconds + span.durationSeconds >
-                action.presentation.durationSeconds + 0.0001f) {
-            fail(animationContext, "animation span is outside the timeline");
+        for (std::size_t segmentIndex = 0;
+             segmentIndex < segments.size();
+             ++segmentIndex) {
+            const Json& segmentJson = segments[segmentIndex];
+            const std::string segmentContext = trackContext +
+                ".segments[" + std::to_string(segmentIndex) + "]";
+            rejectUnknownProperties(segmentJson, {
+                "use", "completionUse", "fallbackUse", "startSeconds",
+                "durationSeconds", "clipStartSeconds", "loops",
+            }, segmentContext);
+            ActionAnimationSegment segment {
+                .use = animationUseFromJson(
+                    segmentJson, "use", segmentContext),
+                .completionUse = animationUseFromJson(
+                    segmentJson, "completionUse", segmentContext),
+                .startSeconds = floatProperty(
+                    segmentJson, "startSeconds", segmentContext),
+                .durationSeconds = floatProperty(
+                    segmentJson, "durationSeconds", segmentContext),
+                .clipStartSeconds = floatProperty(
+                    segmentJson, "clipStartSeconds", segmentContext),
+                .loops = boolProperty(segmentJson, "loops", segmentContext),
+            };
+            const Json& fallback = requiredProperty(
+                segmentJson, "fallbackUse", segmentContext);
+            if (!fallback.is_null()) {
+                segment.fallbackUse = animationUseFromJson(
+                    segmentJson, "fallbackUse", segmentContext);
+            }
+            if (segment.startSeconds < 0.0f ||
+                segment.durationSeconds < 0.0f ||
+                segment.clipStartSeconds < 0.0f ||
+                segment.startSeconds + segment.durationSeconds >
+                    action.presentation.durationSeconds + 0.0001f) {
+                fail(segmentContext, "animation segment is outside the timeline");
+            }
+            track.segments.push_back(std::move(segment));
         }
-        action.presentation.animations.push_back(std::move(span));
+        action.presentation.animations.push_back(std::move(track));
     }
     return action;
 }
 
 OrderedJson undoActionToJson(const GameplaySession::Action& action)
 {
+    OrderedJson motions = OrderedJson::array();
+    for (const ActionMotionTrack& motion : action.presentation.motions) {
+        motions.push_back({
+            { "target", entityTargetToJson(motion.target) },
+            { "from", vec3ToJson(motion.from) },
+            { "to", vec3ToJson(motion.to) },
+            { "startSeconds", motion.startSeconds },
+            { "durationSeconds", motion.durationSeconds },
+        });
+    }
     OrderedJson animations = OrderedJson::array();
-    for (const ActionAnimationSpan& span : action.presentation.animations) {
+    for (const ActionAnimationTrack& track : action.presentation.animations) {
+        OrderedJson segments = OrderedJson::array();
+        for (const ActionAnimationSegment& segment : track.segments) {
+            segments.push_back({
+                { "use", animationUseId(segment.use) },
+                { "completionUse", animationUseId(segment.completionUse) },
+                { "fallbackUse", segment.fallbackUse
+                    ? OrderedJson(animationUseId(*segment.fallbackUse))
+                    : OrderedJson(nullptr) },
+                { "startSeconds", segment.startSeconds },
+                { "durationSeconds", segment.durationSeconds },
+                { "clipStartSeconds", segment.clipStartSeconds },
+                { "loops", segment.loops },
+            });
+        }
         animations.push_back({
-            { "actorKind", span.actorKind == ActionActorKind::Player
-                ? "player"
-                : "enemy" },
-            { "actorIndex", span.actorIndex },
-            { "use", animationUseId(span.use) },
-            { "startSeconds", span.startSeconds },
-            { "durationSeconds", span.durationSeconds },
-            { "clipStartSeconds", span.clipStartSeconds },
+            { "target", entityTargetToJson(track.target) },
+            { "initialUse", animationUseId(track.initialUse) },
+            { "initialClipTimeSeconds", track.initialClipTimeSeconds },
+            { "segments", std::move(segments) },
         });
     }
     return {
@@ -482,8 +661,7 @@ OrderedJson undoActionToJson(const GameplaySession::Action& action)
         { "moveCountAfter", action.playerMoveCountAfter },
         { "presentation", {
             { "durationSeconds", action.presentation.durationSeconds },
-            { "motionStartSeconds", action.presentation.motionStartSeconds },
-            { "motionDurationSeconds", action.presentation.motionDurationSeconds },
+            { "motions", std::move(motions) },
             { "animations", std::move(animations) },
         } },
     };
@@ -1090,6 +1268,160 @@ void migrate15to16(Json& root)
     }
 }
 
+void migrate16to17(Json& root)
+{
+    if (!root.contains("progress") || !root["progress"].is_object()) {
+        return;
+    }
+    Json& activeScreen = root["progress"]["activeScreen"];
+    if (!activeScreen.is_object() || !activeScreen.contains("session") ||
+        !activeScreen["session"].is_object()) {
+        return;
+    }
+
+    auto assignIds = [](Json& state) {
+        if (!state.is_object()) {
+            return;
+        }
+        constexpr uint64_t movableBase = uint64_t { 1 } << 20;
+        constexpr uint64_t enemyBase = uint64_t { 2 } << 20;
+        for (const auto [name, base] : {
+                 std::pair { "players", uint64_t { 1 } },
+                 std::pair { "movables", movableBase },
+                 std::pair { "enemies", enemyBase },
+             }) {
+            if (!state.contains(name) || !state[name].is_array()) {
+                continue;
+            }
+            for (std::size_t i = 0; i < state[name].size(); ++i) {
+                if (state[name][i].is_object()) {
+                    state[name][i]["id"] = base + i;
+                }
+            }
+        }
+    };
+
+    auto targetJson = [](std::string_view kind, std::size_t index) {
+        uint64_t id = index + 1;
+        if (kind == "movable") {
+            id = (uint64_t { 1 } << 20) + index;
+        } else if (kind == "enemy") {
+            id = (uint64_t { 2 } << 20) + index;
+        }
+        return Json { { "kind", kind }, { "id", id } };
+    };
+
+    auto renderPosition = [](const Json& entity, std::string_view kind) {
+        const Json& cell = entity["cell"];
+        float z = cell.value("z", 0.0f);
+        if (kind == "player" && entity.value("drowned", false)) {
+            z -= config::drownedPlayerDepthBelowGround;
+        } else if (kind != "player" && entity.value("fallen", false)) {
+            z -= config::waterDepthBelowGround;
+        }
+        return Json {
+            { "x", cell.value("x", 0.0f) },
+            { "y", cell.value("y", 0.0f) },
+            { "z", z },
+        };
+    };
+
+    Json& session = activeScreen["session"];
+    if (session.contains("state")) {
+        assignIds(session["state"]);
+    }
+    if (!session.contains("undoStack") || !session["undoStack"].is_array()) {
+        return;
+    }
+    for (Json& action : session["undoStack"]) {
+        if (!action.is_object() || !action.contains("before") ||
+            !action.contains("after")) {
+            continue;
+        }
+        assignIds(action["before"]);
+        assignIds(action["after"]);
+        if (!action.contains("presentation") ||
+            !action["presentation"].is_object()) {
+            continue;
+        }
+        Json& old = action["presentation"];
+        const float duration = old.value("durationSeconds", 0.0f);
+        const float motionStart = old.value("motionStartSeconds", 0.0f);
+        const float motionDuration = old.value("motionDurationSeconds", 0.0f);
+        Json motions = Json::array();
+        for (const auto [arrayName, kind] : {
+                 std::pair { "players", "player" },
+                 std::pair { "movables", "movable" },
+                 std::pair { "enemies", "enemy" },
+             }) {
+            const Json& before = action["before"][arrayName];
+            const Json& after = action["after"][arrayName];
+            const std::size_t count = std::min(before.size(), after.size());
+            for (std::size_t i = 0; i < count; ++i) {
+                const Json from = renderPosition(before[i], kind);
+                const Json to = renderPosition(after[i], kind);
+                if (from == to) {
+                    continue;
+                }
+                motions.push_back({
+                    { "target", targetJson(kind, i) },
+                    { "from", from },
+                    { "to", to },
+                    { "startSeconds", motionStart },
+                    { "durationSeconds", motionDuration },
+                });
+            }
+        }
+
+        Json tracks = Json::array();
+        if (old.contains("animations") && old["animations"].is_array()) {
+            for (const Json& span : old["animations"]) {
+                if (!span.is_object()) {
+                    continue;
+                }
+                const std::string kind = span.value("actorKind", "player");
+                const std::size_t index = span.value("actorIndex", 0U);
+                const std::string use = span.value("use", "player.idle");
+                const bool death = use == "player.death";
+                const bool attack = use == "enemy.attack";
+                const bool motion = use == "player.move" || use == "player.push";
+                std::string initialUse = kind == "enemy"
+                    ? "enemy.idle"
+                    : "player.idle";
+                if (kind == "player" &&
+                    action["before"]["players"].size() > index &&
+                    action["before"]["players"][index].value("dead", false)) {
+                    initialUse = "player.dead-idle";
+                }
+                const std::string completionUse = death
+                    ? "player.dead-idle"
+                    : (attack ? "enemy.idle" : "player.idle");
+                tracks.push_back({
+                    { "target", targetJson(kind, index) },
+                    { "initialUse", initialUse },
+                    { "initialClipTimeSeconds", 0.0f },
+                    { "segments", Json::array({ {
+                        { "use", use },
+                        { "completionUse", completionUse },
+                        { "fallbackUse", death
+                            ? Json("player.dead-idle")
+                            : (attack ? Json("enemy.idle") : Json(nullptr)) },
+                        { "startSeconds", span.value("startSeconds", 0.0f) },
+                        { "durationSeconds", span.value("durationSeconds", 0.0f) },
+                        { "clipStartSeconds", span.value("clipStartSeconds", 0.0f) },
+                        { "loops", motion },
+                    } }) },
+                });
+            }
+        }
+        old = {
+            { "durationSeconds", duration },
+            { "motions", std::move(motions) },
+            { "animations", std::move(tracks) },
+        };
+    }
+}
+
 // ---- Strict current-format parse -------------------------------------------
 
 void parseProgressSection(PlayerProfile& profile, const Json& progress)
@@ -1368,6 +1700,7 @@ DecodedPlayerProfile decodePlayerProfile(std::string_view text)
         migrate13to14,
         migrate14to15,
         migrate15to16,
+        migrate16to17,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

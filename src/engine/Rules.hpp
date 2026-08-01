@@ -2,6 +2,7 @@
 
 #include "engine/Level.hpp"
 #include "engine/Math.hpp"
+#include "engine/EntityId.hpp"
 #include "engine/TileTypes.hpp"
 
 #include <cstddef>
@@ -26,6 +27,7 @@ enum class MoveDirection {
 // leaves slippery ground.
 struct GameState {
     struct Player {
+        EntityId id = invalidEntityId;
         GridPosition3 cell {};
         bool dead = false;
         // Death and submersion are separate facts: enemy attacks leave the
@@ -37,6 +39,7 @@ struct GameState {
     };
 
     struct Movable {
+        EntityId id = invalidEntityId;
         TileType type = TileType::Rock;
         GridPosition3 cell {};
         bool fallen = false;
@@ -46,6 +49,7 @@ struct GameState {
     };
 
     struct Enemy {
+        EntityId id = invalidEntityId;
         GridPosition3 cell {};
         bool fallen = false;
 

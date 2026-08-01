@@ -111,14 +111,14 @@ void testUndoRoundTrip()
     CHECK(session.tryStartNextAction(level, {}));
     session.setActiveActionPresentation({
         .durationSeconds = 0.4f,
-        .motionDurationSeconds = session.activeActionDuration(),
         .animations = {
             {
-                .actorKind = ActionActorKind::Player,
-                .actorIndex = 0,
-                .use = AnimationUse::PlayerMove,
-                .durationSeconds = session.activeActionDuration(),
-                .clipStartSeconds = 0.25f,
+                .target = {
+                    EntityKind::Player,
+                    session.activeAction().before.players[0].id,
+                },
+                .initialUse = AnimationUse::PlayerIdle,
+                .segments = {},
             },
         },
     });

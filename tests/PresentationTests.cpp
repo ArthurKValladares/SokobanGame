@@ -5,6 +5,7 @@
 #include "engine/AnimationPreviewScene.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/GameplayPresentation.hpp"
+#include "engine/PresentationTransactionBuilder.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/Rules.hpp"
 #include "engine/render/SceneConfig.hpp"
@@ -150,6 +151,82 @@ GameState stateWithPlayer(GridPosition3 player)
     GameState state;
     state.players.push_back({ .cell = player });
     return state;
+}
+
+void testPresentationTransactionResolvesActorIndependentDependencies()
+{
+    TEST("presentationTransactionResolvesActorIndependentDependencies");
+    AnimationCatalog animations = testAnimationCatalog();
+    animations.setGlobalSpeed(testManifest().enemyAttackAnimation(), 2.0f);
+
+    const EntityTarget sourceTarget { EntityKind::Enemy, 41 };
+    const EntityTarget dependentTarget { EntityKind::Player, 73 };
+    PresentationTransactionBuilder builder(&animations);
+    builder.setInitialAnimation(sourceTarget, AnimationUse::EnemyIdle, 0.25f);
+    builder.setInitialAnimation(dependentTarget, AnimationUse::PlayerIdle, 0.5f);
+    builder.addMotion({
+        .target = dependentTarget,
+        .from = { 0.0f, 0.0f, 1.0f },
+        .to = { 1.0f, 0.0f, 1.0f },
+        .durationSeconds = 0.2f,
+    });
+    const auto source = builder.addAnimation({
+        .target = sourceTarget,
+        .use = AnimationUse::EnemyAttack,
+        .completionUse = AnimationUse::EnemyIdle,
+    });
+    const auto dependent = builder.addAnimation({
+        .target = dependentTarget,
+        .use = AnimationUse::PlayerDeath,
+        .completionUse = AnimationUse::PlayerDeadIdle,
+    });
+    CHECK(builder.startAfterCatalogEvent(dependent, source));
+
+    const ActionPresentationTimeline timeline = builder.build();
+    CHECK(timeline.motions.size() == 1);
+    CHECK(timeline.motions[0].target == dependentTarget);
+    CHECK(timeline.animations.size() == 2);
+
+    const auto dependentTrack = std::ranges::find(
+        timeline.animations,
+        dependentTarget,
+        &ActionAnimationTrack::target);
+    CHECK(dependentTrack != timeline.animations.end());
+    if (dependentTrack != timeline.animations.end()) {
+        CHECK(dependentTrack->segments.size() == 1);
+        CHECK(near(dependentTrack->initialClipTimeSeconds, 0.5f));
+        CHECK(near(dependentTrack->segments[0].startSeconds, 0.45f));
+        CHECK(dependentTrack->segments[0].completionUse ==
+            AnimationUse::PlayerDeadIdle);
+    }
+    CHECK(near(timeline.durationSeconds, 1.45f));
+}
+
+void testPresentationTransactionRejectsDependencyCycles()
+{
+    TEST("presentationTransactionRejectsDependencyCycles");
+    AnimationCatalog animations = testAnimationCatalog();
+    PresentationTransactionBuilder builder(&animations);
+    const auto first = builder.addAnimation({
+        .target = { EntityKind::Player, 1 },
+        .use = AnimationUse::PlayerMove,
+        .completionUse = AnimationUse::PlayerIdle,
+    });
+    const auto second = builder.addAnimation({
+        .target = { EntityKind::Movable, 2 },
+        .use = AnimationUse::PlayerPush,
+        .completionUse = AnimationUse::PlayerIdle,
+    });
+    CHECK(builder.startAfterEvent(first, second, "first-ready"));
+    CHECK(builder.startAfterEvent(second, first, "second-ready"));
+
+    bool threw = false;
+    try {
+        (void)builder.build();
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    CHECK(threw);
 }
 
 void testCameraPitchTransition()
@@ -301,16 +378,14 @@ void testPresentationResetClocksAndFallenTargets()
     });
 
     GameplayPresentation presentation;
-    presentation.setPlayerClips(
-        testManifest().playerMoveAnimation(),
-        testManifest().playerPushAnimation());
     presentation.resetEntities(state);
     CHECK(near(presentation.players()[0].motion.renderPosition.x, 1.0f));
     CHECK(near(presentation.players()[0].motion.renderPosition.y, 2.0f));
     CHECK(near(
         presentation.players()[0].motion.renderPosition.z,
         3.0f - config::drownedPlayerDepthBelowGround));
-    CHECK(!presentation.players()[0].deathTransitionPlaying);
+    CHECK(presentation.players()[0].animationUse ==
+        AnimationUse::PlayerDeadIdle);
     CHECK(presentation.movables().size() == 1);
     CHECK(near(
         presentation.movables()[0].renderPosition.z,
@@ -330,9 +405,6 @@ void testPresentationInterpolatesActionsAndClips()
 {
     TEST("presentationInterpolatesActionsAndClips");
     GameplayPresentation presentation;
-    presentation.setPlayerClips(
-        testManifest().playerMoveAnimation(),
-        testManifest().playerPushAnimation());
     GameState before = stateWithPlayer({ 0, 0, 0 });
     before.movables.push_back({
         .type = TileType::Rock,
@@ -348,29 +420,30 @@ void testPresentationInterpolatesActionsAndClips()
         .after = after,
         .durationSeconds = 3.0f,
         .playerPushing = true,
-        .reversed = true,
         .facingDirection = MoveDirection::Left,
     };
+    action.presentation = presentation.buildActionPresentation(action);
     presentation.beginAction(action);
+    presentation.seekAction(action, 0.0f);
 
     CHECK(presentation.players()[0].motion.moving);
-    CHECK(presentation.players()[0].movingClip == testManifest().playerPushAnimation());
-    CHECK(near(presentation.players()[0].clipPlaybackRate, -1.0f));
+    CHECK(presentation.players()[0].animationUse == AnimationUse::PlayerPush);
+    CHECK(near(presentation.players()[0].clipPlaybackRate, 1.0f));
     CHECK(presentation.players()[0].facingQuarterTurns == 1);
     CHECK(presentation.movables()[0].moving);
 
-    presentation.advanceAnimations(0.5f);
+    presentation.seekAction(action, 0.5f);
     CHECK(near(presentation.players()[0].motion.renderPosition.x, 0.0f));
     CHECK(near(presentation.players()[0].motion.renderPosition.y, 0.0f));
     CHECK(near(presentation.players()[0].motion.renderPosition.z, 0.5f));
     CHECK(near(presentation.movables()[0].renderPosition.x, 1.0f + 1.0f / 6.0f));
 
-    presentation.advanceAnimations(1.0f);
+    presentation.seekAction(action, 1.5f);
     CHECK(near(presentation.players()[0].motion.renderPosition.z, 1.0f));
     CHECK(near(presentation.players()[0].motion.renderPosition.x, 0.5f));
     CHECK(near(presentation.players()[0].motion.renderPosition.y, 0.0f));
 
-    presentation.advanceAnimations(1.5f);
+    presentation.seekAction(action, 3.0f);
     CHECK(!presentation.players()[0].motion.moving);
     CHECK(near(presentation.players()[0].motion.renderPosition.x, 1.0f));
     CHECK(near(presentation.players()[0].motion.renderPosition.y, 1.0f));
@@ -397,9 +470,6 @@ void testGameplayFrameUsesSettingsAndPresentation()
         });
     }
     GameplayPresentation presentation;
-    presentation.setPlayerClips(
-        testManifest().playerMoveAnimation(),
-        testManifest().playerPushAnimation());
     presentation.resetEntities(state);
 
     PresentationSettings settings;
@@ -795,9 +865,6 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
     }, "mirror visualization");
     const GameState state = rules::initialState(level);
     GameplayPresentation presentation;
-    presentation.setPlayerClips(
-        testManifest().playerMoveAnimation(),
-        testManifest().playerPushAnimation());
     presentation.resetEntities(state);
     presentation.advanceClocks(0.75f, false);
 
@@ -859,14 +926,15 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
 
     GameState moved = state;
     moved.players[0].cell = { 2, 3, 1 };
-    const GameplaySession::Action moveAction {
+    GameplaySession::Action moveAction {
         .before = state,
         .after = moved,
         .durationSeconds = 1.0f,
         .facingDirection = MoveDirection::Up,
     };
+    moveAction.presentation = presentation.buildActionPresentation(moveAction);
     presentation.beginAction(moveAction);
-    presentation.advanceAnimations(0.5f);
+    presentation.seekAction(moveAction, 0.5f);
     const RenderFrameData movingFrame =
         RenderFrameBuilder::buildGameplay({
             .manifest = testManifest(),
@@ -896,14 +964,16 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
     presentation.resetEntities(state);
     GameState movedSideways = state;
     movedSideways.players[0].cell = { 3, 4, 1 };
-    const GameplaySession::Action sidewaysAction {
+    GameplaySession::Action sidewaysAction {
         .before = state,
         .after = movedSideways,
         .durationSeconds = 1.0f,
         .facingDirection = MoveDirection::Right,
     };
+    sidewaysAction.presentation =
+        presentation.buildActionPresentation(sidewaysAction);
     presentation.beginAction(sidewaysAction);
-    presentation.advanceAnimations(0.1f);
+    presentation.seekAction(sidewaysAction, 0.1f);
     const RenderFrameData sidewaysFrame =
         RenderFrameBuilder::buildGameplay({
             .manifest = testManifest(),
@@ -959,7 +1029,7 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
         CHECK(near(centerX * 0.25f, 2.5f));
     }
 
-    presentation.advanceAnimations(0.4f);
+    presentation.seekAction(sidewaysAction, 0.5f);
     const RenderFrameData fadedOutFrame =
         RenderFrameBuilder::buildGameplay({
             .manifest = testManifest(),
@@ -992,9 +1062,6 @@ void testGameplayFrameBuildsProceduralWaterSurface()
     GameState state = stateWithPlayer(level.playerStart());
 
     GameplayPresentation presentation;
-    presentation.setPlayerClips(
-        testManifest().playerMoveAnimation(),
-        testManifest().playerPushAnimation());
     presentation.resetEntities(state);
     presentation.advanceClocks(0.75f, false);
 
@@ -1061,23 +1128,21 @@ void testPlayerCopiesRenderAndInterpolateTogether()
     before.players.push_back({ .cell = { 0, 2, 1 } });
 
     GameplayPresentation presentation;
-    presentation.setPlayerClips(
-        testManifest().playerMoveAnimation(),
-        testManifest().playerPushAnimation());
     presentation.resetEntities(before);
     CHECK(presentation.players().size() == 2);
 
     GameState after = before;
     after.players[0].cell = { 1, 0, 1 };
     after.players[1].cell = { 1, 2, 1 };
-    const GameplaySession::Action action {
+    GameplaySession::Action action {
         .before = before,
         .after = after,
         .durationSeconds = 1.0f,
         .facingDirection = MoveDirection::Right,
     };
+    action.presentation = presentation.buildActionPresentation(action);
     presentation.beginAction(action);
-    presentation.advanceAnimations(0.5f);
+    presentation.seekAction(action, 0.5f);
     CHECK(near(presentation.players()[0].motion.renderPosition.x, 0.5f));
     CHECK(near(
         presentation.players()[1].motion.renderPosition.x, 0.5f));
@@ -1108,9 +1173,6 @@ void testMirrorDuplicationPreviewsEveryDestination()
     }, "mirror duplication presentation");
     const GameState state = rules::initialState(level);
     GameplayPresentation presentation;
-    presentation.setPlayerClips(
-        testManifest().playerMoveAnimation(),
-        testManifest().playerPushAnimation());
     presentation.resetEntities(state);
 
     const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
@@ -1158,9 +1220,6 @@ void testWaterLayerBuildsUnboundedNonPickableExterior()
         0U);
     const GameState state = stateWithPlayer(level.playerStart());
     GameplayPresentation presentation;
-    presentation.setPlayerClips(
-        testManifest().playerMoveAnimation(),
-        testManifest().playerPushAnimation());
     presentation.resetEntities(state);
 
     const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
@@ -1212,9 +1271,6 @@ void testWaterLayerBuildsUnboundedNonPickableExterior()
     const GameState allWaterState =
         stateWithPlayer(allWaterLevel.playerStart());
     GameplayPresentation allWaterPresentation;
-    allWaterPresentation.setPlayerClips(
-        testManifest().playerMoveAnimation(),
-        testManifest().playerPushAnimation());
     allWaterPresentation.resetEntities(allWaterState);
     const RenderFrameData allWaterFrame =
         RenderFrameBuilder::buildGameplay({
@@ -1247,9 +1303,6 @@ void testFilledWaterUpdatesEdgesAndRoundedCornerCaps()
     GameState state = stateWithPlayer(level.playerStart());
 
     GameplayPresentation presentation;
-    presentation.setPlayerClips(
-        testManifest().playerMoveAnimation(),
-        testManifest().playerPushAnimation());
     presentation.resetEntities(state);
     const PresentationSettings settings;
 
@@ -1406,21 +1459,19 @@ void testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition()
     AnimationCatalog animations = testAnimationCatalog();
     GameplayPresentation presentation;
     presentation.setAnimationCatalog(&animations);
-    presentation.setPlayerClips(
-        testManifest().playerMoveAnimation(),
-        testManifest().playerPushAnimation());
     presentation.resetEntities(before);
-    const GameplaySession::Action action {
+    GameplaySession::Action action {
         .before = before,
         .after = drowned,
         .durationSeconds = 1.0f,
         .facingDirection = MoveDirection::Right,
     };
+    action.presentation = presentation.buildActionPresentation(action);
     presentation.beginAction(action);
-    presentation.advanceAnimations(1.0f);
+    presentation.seekAction(action, 0.9f);
 
-    CHECK(presentation.players()[0].deathTransitionPlaying);
-    CHECK(near(presentation.players()[0].motion.renderPosition.z, 0.0f));
+    CHECK(presentation.players()[0].animationUse == AnimationUse::PlayerDeath);
+    CHECK(presentation.players()[0].motion.renderPosition.z < 1.0f);
 
     const PresentationSettings settings;
     const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
@@ -1441,7 +1492,9 @@ void testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition()
         });
     CHECK(player != frame.tiles.end());
     if (player != frame.tiles.end()) {
-        CHECK(near(player->baseElevation, 0.0f));
+        CHECK(near(
+            player->baseElevation,
+            presentation.players()[0].motion.renderPosition.z));
         CHECK(player->animation == testManifest().playerDeathAnimation());
         CHECK(player->animationFallback == testManifest().playerDeadIdleAnimation());
         CHECK(!player->animationLoops);
@@ -1542,10 +1595,6 @@ void testEnemyFacingAttackAndAnimationInstances()
     animations.setUseSpeed(AnimationUse::EnemyIdle, 0.5f);
     GameplayPresentation presentation;
     presentation.setAnimationCatalog(&animations);
-    presentation.setActorClips(
-        testManifest().playerMoveAnimation(),
-        testManifest().playerPushAnimation(),
-        testManifest().enemyAttackAnimation());
     presentation.resetEntities(before);
 
     presentation.advanceAnimations(0.01f, before);
@@ -1563,15 +1612,26 @@ void testEnemyFacingAttackAndAnimationInstances()
         .facingDirection = MoveDirection::Right,
     };
     action.presentation = presentation.buildActionPresentation(action);
-    CHECK(action.presentation.animations.size() == 3);
+    CHECK(action.presentation.animations.size() == 2);
     CHECK(action.presentation.durationSeconds > action.durationSeconds);
+    float deathStart = -1.0f;
+    for (const ActionAnimationTrack& track : action.presentation.animations) {
+        for (const ActionAnimationSegment& segment : track.segments) {
+            if (segment.use == AnimationUse::PlayerDeath) {
+                deathStart = segment.startSeconds;
+            }
+        }
+    }
+    CHECK(near(deathStart, 0.3f));
+
     presentation.beginAction(action);
-    CHECK(presentation.enemies()[0].attackTransitionPlaying);
-    CHECK(presentation.players()[0].deathTransitionPending);
-    CHECK(!presentation.players()[0].deathTransitionPlaying);
-    presentation.advanceClocks(0.1f, false);
+    presentation.seekAction(action, 0.1f);
+    CHECK(presentation.enemies()[0].animationUse == AnimationUse::EnemyAttack);
+    CHECK(presentation.players()[0].animationUse == AnimationUse::PlayerMove);
     CHECK(near(presentation.players()[0].clipTimeSeconds, 0.1f));
-    presentation.advanceAnimations(action.durationSeconds, after);
+
+    presentation.seekAction(action, 0.2f);
+    CHECK(presentation.players()[0].animationUse == AnimationUse::PlayerIdle);
     const RenderFrameData waitingFrame = RenderFrameBuilder::buildGameplay({
         .manifest = testManifest(),
         .level = level,
@@ -1591,15 +1651,12 @@ void testEnemyFacingAttackAndAnimationInstances()
     if (waitingPlayer != waitingFrame.tiles.end()) {
         CHECK(waitingPlayer->animation ==
             testManifest().playerIdleAnimation());
-        CHECK(near(waitingPlayer->animationTimeSeconds, 0.05f));
+        CHECK(near(waitingPlayer->animationTimeSeconds, 0.025f));
     }
-    presentation.advanceClocks(0.19f, false);
-    CHECK(presentation.players()[0].deathTransitionPending);
-    CHECK(!presentation.players()[0].deathTransitionPlaying);
-    CHECK(near(presentation.players()[0].clipTimeSeconds, 0.29f));
-    presentation.advanceClocks(0.02f, false);
-    CHECK(!presentation.players()[0].deathTransitionPending);
-    CHECK(presentation.players()[0].deathTransitionPlaying);
+
+    presentation.seekAction(action, deathStart + 0.01f);
+    CHECK(presentation.players()[0].animationUse == AnimationUse::PlayerDeath);
+    CHECK(presentation.enemies()[0].animationUse == AnimationUse::EnemyAttack);
     CHECK(near(presentation.players()[0].clipTimeSeconds, 0.01f));
 
     const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
@@ -1645,25 +1702,38 @@ void testEnemyFacingAttackAndAnimationInstances()
         .facingDirection = MoveDirection::Left,
         .presentation = action.presentation,
     };
-    CHECK(near(presentation.reverseDuration(undo), 0.31f));
+    CHECK(near(
+        presentation.reverseDuration(undo),
+        action.presentation.durationSeconds));
     presentation.beginAction(undo);
     presentation.seekAction(undo, 0.0f);
-    CHECK(presentation.players()[0].deathTransitionPlaying);
+    CHECK(presentation.players()[0].animationUse ==
+        AnimationUse::PlayerDeadIdle);
     CHECK(!presentation.players()[0].motion.moving);
     CHECK(near(presentation.players()[0].clipPlaybackRate, -1.0f));
+
+    const float deathSampleElapsed =
+        action.presentation.durationSeconds - (deathStart + 0.01f);
+    presentation.seekAction(undo, deathSampleElapsed);
+    CHECK(presentation.players()[0].animationUse == AnimationUse::PlayerDeath);
+    CHECK(!presentation.players()[0].motion.moving);
+    CHECK(presentation.enemies()[0].animationUse == AnimationUse::EnemyAttack);
     CHECK(near(presentation.players()[0].clipTimeSeconds, 0.01f));
 
-    presentation.seekAction(undo, 0.02f);
-    CHECK(!presentation.players()[0].deathTransitionPlaying);
-    CHECK(presentation.players()[0].revivedDuringUndo);
-    CHECK(!presentation.players()[0].motion.moving);
-    CHECK(presentation.enemies()[0].attackTransitionPlaying);
+    const float waitingSampleElapsed =
+        action.presentation.durationSeconds - (deathStart - 0.01f);
+    presentation.seekAction(undo, waitingSampleElapsed);
+    CHECK(presentation.players()[0].animationUse == AnimationUse::PlayerIdle);
+    CHECK(presentation.enemies()[0].animationUse == AnimationUse::EnemyAttack);
 
-    presentation.seekAction(undo, 0.20f);
+    const float movementSampleElapsed =
+        action.presentation.durationSeconds - 0.1f;
+    presentation.seekAction(undo, movementSampleElapsed);
     CHECK(presentation.players()[0].motion.moving);
     CHECK(presentation.players()[0].motion.renderPosition.x < 1.0f);
     CHECK(presentation.players()[0].motion.renderPosition.x > 0.0f);
-    CHECK(near(presentation.players()[0].clipTimeSeconds, 0.11f));
+    CHECK(presentation.players()[0].animationUse == AnimationUse::PlayerMove);
+    CHECK(near(presentation.players()[0].clipTimeSeconds, 0.1f));
 
     const RenderFrameData undoFrame = RenderFrameBuilder::buildGameplay({
         .manifest = testManifest(),
@@ -1685,10 +1755,10 @@ void testEnemyFacingAttackAndAnimationInstances()
         CHECK(revivedPlayer->animation ==
             testManifest().playerMoveAnimation());
         CHECK(!revivedPlayer->animationCrossfades);
-        CHECK(near(revivedPlayer->animationTimeSeconds, 0.11f));
+        CHECK(near(revivedPlayer->animationTimeSeconds, 0.1f));
     }
 
-    presentation.seekAction(undo, 0.31f);
+    presentation.seekAction(undo, action.presentation.durationSeconds);
     CHECK(!presentation.players()[0].motion.moving);
     CHECK(near(presentation.players()[0].motion.renderPosition.x, 0.0f));
 }
@@ -1697,6 +1767,8 @@ void testEnemyFacingAttackAndAnimationInstances()
 
 int main()
 {
+    testPresentationTransactionResolvesActorIndependentDependencies();
+    testPresentationTransactionRejectsDependencyCycles();
     testCameraPitchTransition();
     testAnimationPreviewBuildsIsolatedStage();
     testSettingsNormalizeAndConvert();

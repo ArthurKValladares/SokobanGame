@@ -290,17 +290,19 @@ std::optional<GridPosition3> playerLadderClimbTarget(
 GameState initialState(const Level& level)
 {
     GameState state;
-    state.players.push_back({ .cell = level.playerStart() });
+    EntityId nextId = 1;
+    state.players.push_back({ .id = nextId++, .cell = level.playerStart() });
     state.movables.reserve(level.movableTiles().size());
     for (const Level::MovableTile& movable : level.movableTiles()) {
         GameState::Movable entry;
+        entry.id = nextId++;
         entry.type = movable.type;
         entry.cell = movable.position;
         state.movables.push_back(entry);
     }
     state.enemies.reserve(level.enemyStarts().size());
     for (GridPosition3 position : level.enemyStarts()) {
-        state.enemies.push_back({ .cell = position });
+        state.enemies.push_back({ .id = nextId++, .cell = position });
     }
 
     return state;
@@ -752,6 +754,16 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
     const std::size_t originalPlayerCount = state.players.size();
     std::vector<std::size_t> reflectedPlayerIndices;
     std::vector<bool> movableReflected(state.movables.size(), false);
+    EntityId nextEntityId = 1;
+    for (const GameState::Player& player : state.players) {
+        nextEntityId = std::max(nextEntityId, player.id + 1);
+    }
+    for (const GameState::Movable& movable : state.movables) {
+        nextEntityId = std::max(nextEntityId, movable.id + 1);
+    }
+    for (const GameState::Enemy& enemy : state.enemies) {
+        nextEntityId = std::max(nextEntityId, enemy.id + 1);
+    }
 
     for (std::size_t sourcePlayer = 0;
          sourcePlayer < originalPlayerCount;
@@ -781,6 +793,7 @@ std::optional<MirrorActivationPreview> previewMirrorActivation(
             } else {
                 const GameState::Player& source = state.players[sourcePlayer];
                 after.players.push_back({
+                    .id = nextEntityId++,
                     .cell = reflected.cell,
                     .dead = source.dead,
                     .drowned = source.drowned,

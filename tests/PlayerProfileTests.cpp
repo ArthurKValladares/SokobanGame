@@ -238,16 +238,18 @@ void testActiveScreenCheckpointRoundTrip()
     profile.setCurrentScreen(2, 3);
 
     sokoban::GameState before;
-    before.players.push_back({ .cell = { 1, 0, 1 } });
+    before.players.push_back({ .id = 1, .cell = { 1, 0, 1 } });
     before.movables.push_back({
+        .id = 2,
         .type = sokoban::TileType::Rock,
         .cell = { 2, 0, 1 },
     });
-    before.enemies.push_back({ .cell = { 4, 0, 1 } });
+    before.enemies.push_back({ .id = 3, .cell = { 4, 0, 1 } });
     sokoban::GameState after = before;
     after.players[0].cell = { 2, 0, 1 };
     after.players[0].sliding = sokoban::MoveDirection::Right;
     after.players.push_back({
+        .id = 4,
         .cell = { 4, 2, 1 },
         .sliding = sokoban::MoveDirection::Left,
     });
@@ -263,20 +265,39 @@ void testActiveScreenCheckpointRoundTrip()
         .playerMoveCountAfter = 1,
         .presentation = {
             .durationSeconds = 1.25f,
-            .motionDurationSeconds = 0.15f,
+            .motions = {
+                {
+                    .target = { sokoban::EntityKind::Player, 1 },
+                    .from = { 1.0f, 0.0f, 1.0f },
+                    .to = { 2.0f, 0.0f, 1.0f },
+                    .durationSeconds = 0.15f,
+                },
+            },
             .animations = {
                 {
-                    .actorKind = sokoban::ActionActorKind::Player,
-                    .actorIndex = 0,
-                    .use = sokoban::AnimationUse::PlayerPush,
-                    .durationSeconds = 0.15f,
-                    .clipStartSeconds = 0.4f,
+                    .target = { sokoban::EntityKind::Player, 1 },
+                    .initialUse = sokoban::AnimationUse::PlayerIdle,
+                    .segments = {
+                        {
+                            .use = sokoban::AnimationUse::PlayerPush,
+                            .completionUse = sokoban::AnimationUse::PlayerIdle,
+                            .durationSeconds = 0.15f,
+                            .clipStartSeconds = 0.4f,
+                            .loops = true,
+                        },
+                    },
                 },
                 {
-                    .actorKind = sokoban::ActionActorKind::Enemy,
-                    .actorIndex = 0,
-                    .use = sokoban::AnimationUse::EnemyAttack,
-                    .durationSeconds = 1.0f,
+                    .target = { sokoban::EntityKind::Enemy, 3 },
+                    .initialUse = sokoban::AnimationUse::EnemyIdle,
+                    .segments = {
+                        {
+                            .use = sokoban::AnimationUse::EnemyAttack,
+                            .completionUse = sokoban::AnimationUse::EnemyIdle,
+                            .fallbackUse = sokoban::AnimationUse::EnemyIdle,
+                            .durationSeconds = 1.0f,
+                        },
+                    },
                 },
             },
         },
@@ -326,9 +347,9 @@ void testActiveScreenCheckpointRoundTrip()
         sokoban::decodePlayerProfile(format15.dump());
     check(migrated15.profile.activeScreen.has_value(),
         "format 15 migration preserves the active checkpoint");
-    check(migrated15.profile.activeScreen->session.undoStack[0]
-            .presentation.empty(),
-        "format 15 migration marks old undo timelines for lazy reconstruction");
+    check(!migrated15.profile.activeScreen->session.undoStack[0]
+            .presentation.motions.empty(),
+        "format 15 migration reconstructs generic motion tracks");
     nlohmann::json emptyPlayers = current;
     emptyPlayers["progress"]["activeScreen"]["session"]["state"]
         ["players"] = nlohmann::json::array();

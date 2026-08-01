@@ -33,6 +33,29 @@ float animationTimeFor(
         : timeSeconds;
 }
 
+RenderAnimation manifestAnimationForUse(
+    const AssetManifest& manifest,
+    AnimationUse use)
+{
+    switch (use) {
+    case AnimationUse::PlayerIdle:
+    case AnimationUse::EnemyIdle:
+        return manifest.playerIdleAnimation();
+    case AnimationUse::PlayerMove:
+        return manifest.playerMoveAnimation();
+    case AnimationUse::PlayerPush:
+        return manifest.playerPushAnimation();
+    case AnimationUse::PlayerDeath:
+        return manifest.playerDeathAnimation();
+    case AnimationUse::PlayerDeadIdle:
+        return manifest.playerDeadIdleAnimation();
+    case AnimationUse::EnemyAttack:
+        return manifest.enemyAttackAnimation();
+    default:
+        return noAnimation;
+    }
+}
+
 struct StaticRenderCell {
     TileType tile = TileType::Ground;
     bool active = true;
@@ -750,14 +773,9 @@ float yawRadians(Vec4 orientation)
     return 2.0f * std::atan2(orientation.z, orientation.w);
 }
 
-uint64_t playerAnimationInstance(std::size_t index)
+uint64_t actorAnimationInstance(EntityTarget target)
 {
-    return static_cast<uint64_t>(index) + 1;
-}
-
-uint64_t enemyAnimationInstance(std::size_t index)
-{
-    return (uint64_t { 1 } << 32) | (static_cast<uint64_t>(index) + 1);
+    return target.id;
 }
 
 uint64_t mirrorGhostAnimationInstance(std::size_t resultPlayerIndex)
@@ -1065,58 +1083,20 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
          playerIndex < state.players.size() &&
          playerIndex < playerVisuals.size();
          ++playerIndex) {
-        const GameState::Player& player = state.players[playerIndex];
         const GameplayPresentation::PlayerVisual& visual = playerVisuals[playerIndex];
-        const bool movingOutOfWater =
-            input.moving &&
-            playerIndex < input.activeAction.before.players.size() &&
-            playerIndex < input.activeAction.after.players.size() &&
-            input.activeAction.before.players[playerIndex].drowned &&
-            !input.activeAction.after.players[playerIndex].drowned;
-        const bool revivingThroughUndo =
-            input.moving && input.activeAction.reversed &&
-            playerIndex < input.activeAction.before.players.size() &&
-            playerIndex < input.activeAction.after.players.size() &&
-            input.activeAction.before.players[playerIndex].dead &&
-            !input.activeAction.after.players[playerIndex].dead;
-
-        AnimationUse animationUse = AnimationUse::PlayerIdle;
+        const AnimationUse animationUse = visual.animationUse;
         RenderAnimation animation = animationFor(
             input.animations,
             animationUse,
-            input.manifest.playerIdleAnimation());
-        RenderAnimation fallback = noAnimation;
-        AnimationUse fallbackUse = AnimationUse::PlayerDeadIdle;
-        bool loops = true;
-        if (player.dead && !visual.revivedDuringUndo && !movingOutOfWater &&
-            !visual.deathTransitionPending) {
-            if (visual.deathTransitionPlaying) {
-                animationUse = AnimationUse::PlayerDeath;
-                animation = animationFor(
-                    input.animations,
-                    animationUse,
-                    input.manifest.playerDeathAnimation());
-                fallback = animationFor(
-                    input.animations,
-                    fallbackUse,
-                    input.manifest.playerDeadIdleAnimation());
-                loops = false;
-            } else {
-                animationUse = AnimationUse::PlayerDeadIdle;
-                animation = animationFor(
-                    input.animations,
-                    animationUse,
-                    input.manifest.playerDeadIdleAnimation());
-            }
-        } else if (visual.motion.moving) {
-            animation = visual.movingClip;
-            animationUse = visual.movingClip == animationFor(
-                input.animations,
-                AnimationUse::PlayerPush,
-                input.manifest.playerPushAnimation())
-                ? AnimationUse::PlayerPush
-                : AnimationUse::PlayerMove;
-        }
+            manifestAnimationForUse(input.manifest, animationUse));
+        const AnimationUse fallbackUse =
+            visual.animationFallbackUse.value_or(animationUse);
+        const RenderAnimation fallback = visual.animationFallbackUse
+            ? animationFor(
+                  input.animations,
+                  fallbackUse,
+                  manifestAnimationForUse(input.manifest, fallbackUse))
+            : noAnimation;
 
         RenderFrameData::Tile playerTile {
             .position = {
@@ -1131,9 +1111,9 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             .model = input.manifest.playerModel(),
             .animation = animation,
             .animationFallback = fallback,
-            .animationInstanceId = playerAnimationInstance(playerIndex),
-            .animationLoops = loops,
-            .animationCrossfades = !revivingThroughUndo,
+            .animationInstanceId = actorAnimationInstance(visual.motion.target),
+            .animationLoops = visual.animationLoops,
+            .animationCrossfades = visual.animationCrossfades,
             .animationTimeSeconds = animationTimeFor(
                 input.animations, animationUse, visual.clipTimeSeconds),
             .animationFallbackTimeSeconds = animationTimeFor(
@@ -1166,33 +1146,28 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             .showGrid = false,
             .affectsCameraFit = false,
             .model = input.manifest.enemyModel(),
-            .animation = visual.attackTransitionPlaying
+            .animation = animationFor(
+                input.animations,
+                visual.animationUse,
+                manifestAnimationForUse(input.manifest, visual.animationUse)),
+            .animationFallback = visual.animationFallbackUse
                 ? animationFor(
                       input.animations,
-                      AnimationUse::EnemyAttack,
-                      input.manifest.enemyAttackAnimation())
-                : animationFor(
-                      input.animations,
-                      AnimationUse::EnemyIdle,
-                      input.manifest.playerIdleAnimation()),
-            .animationFallback = visual.attackTransitionPlaying
-                ? animationFor(
-                      input.animations,
-                      AnimationUse::EnemyIdle,
-                      input.manifest.playerIdleAnimation())
+                      *visual.animationFallbackUse,
+                      manifestAnimationForUse(
+                          input.manifest,
+                          *visual.animationFallbackUse))
                 : noAnimation,
-            .animationInstanceId = enemyAnimationInstance(enemyIndex),
-            .animationLoops = !visual.attackTransitionPlaying,
-            .animationCrossfades = !input.activeAction.reversed,
+            .animationInstanceId = actorAnimationInstance(visual.motion.target),
+            .animationLoops = visual.animationLoops,
+            .animationCrossfades = visual.animationCrossfades,
             .animationTimeSeconds = animationTimeFor(
                 input.animations,
-                visual.attackTransitionPlaying
-                    ? AnimationUse::EnemyAttack
-                    : AnimationUse::EnemyIdle,
+                visual.animationUse,
                 visual.clipTimeSeconds),
             .animationFallbackTimeSeconds = animationTimeFor(
                 input.animations,
-                AnimationUse::EnemyIdle,
+                visual.animationFallbackUse.value_or(visual.animationUse),
                 visual.clipTimeSeconds),
             .modelRotationOffsetRadians = yawRadians(visual.orientation),
         };
