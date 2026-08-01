@@ -97,6 +97,9 @@ public:
         bool enemyRole = false; // the model gameplay animates as an enemy
         ModelMaterialMode materialMode = ModelMaterialMode::Untextured;
         uint32_t textureIndex = 0; // resolved into the texture list
+        // Single-texture materials use this texture directly. Primitive
+        // materials use it as the named base for glTF material index zero,
+        // avoiding descriptor offsets that break whenever textures are added.
         std::string materialTextureName; // as written in the manifest
     };
 

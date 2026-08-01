@@ -349,13 +349,8 @@ void AssetManifestDebugUi::drawModels(AssetManifestEditor& editor)
             if (model.materialMode == ModelMaterialMode::SingleTexture) {
                 changed = drawTextureReference(model.materialTextureName, editor.textures()) || changed;
             } else if (model.materialMode == ModelMaterialMode::PrimitiveTextureIndex) {
-                int index = static_cast<int>(std::min<uint32_t>(
-                    model.textureIndex,
-                    static_cast<uint32_t>(std::numeric_limits<int>::max())));
-                if (ImGui::InputInt("Texture Index", &index)) {
-                    model.textureIndex = static_cast<uint32_t>(std::max(index, 0));
-                    changed = true;
-                }
+                changed = drawTextureReference(
+                    model.materialTextureName, editor.textures()) || changed;
             }
             changed = ImGui::Checkbox("Preserve Aspect Ratio", &model.preserveAspectRatio) || changed;
             changed = ImGui::Checkbox("Preserve Source Scale", &model.preserveSourceScale) || changed;

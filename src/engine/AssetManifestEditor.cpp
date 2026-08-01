@@ -186,7 +186,7 @@ std::string AssetManifestEditor::serialize() const
         } else if (model.materialMode == ModelMaterialMode::PrimitiveTextureIndex) {
             item["material"] = {
                 { "mode", "primitive-texture-index" },
-                { "index", model.textureIndex },
+                { "texture", model.materialTextureName },
             };
         }
         if (model.preserveAspectRatio) {

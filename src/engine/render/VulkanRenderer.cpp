@@ -445,9 +445,10 @@ ImageData VulkanRenderer::captureRenderedFrame(std::optional<VkRect2D> region)
         deviceContext_.graphicsQueue(),
         activeResources_.swapchain->resolvedColorImage(),
         activeResources_.swapchain->colorFormat(),
-        // The scene pass leaves the resolve target readable by shaders; the
-        // capture moves it to transfer-source and puts it back.
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        // The final upscale leaves the resolve target as a transfer source.
+        // Capture preserves that layout; the next frame deliberately discards
+        // and transitions it back to a color attachment in beginFrame().
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
         rect.offset,
         rect.extent);
 }

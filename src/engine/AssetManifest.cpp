@@ -284,14 +284,12 @@ static void parseModelMaterial(
         model.materialMode = ModelMaterialMode::SingleTexture;
         model.materialTextureName = requiredString(material, "texture", materialContext);
     } else if (mode == "primitive-texture-index") {
-        if (hasTexture) {
-            fail(materialContext, "mode 'primitive-texture-index' does not accept texture");
-        }
-        if (!hasIndex) {
-            fail(materialContext, "mode 'primitive-texture-index' requires index");
+        if (hasIndex) {
+            fail(materialContext, "mode 'primitive-texture-index' does not accept index");
         }
         model.materialMode = ModelMaterialMode::PrimitiveTextureIndex;
-        model.textureIndex = optionalUint(material, "index", 0, materialContext);
+        model.materialTextureName =
+            requiredString(material, "texture", materialContext);
         model.primitiveTextures = true;
     } else {
         fail(materialContext,
@@ -527,7 +525,8 @@ void AssetManifest::validateAndResolve()
         if (duplicate(models_, model.name)) {
             throw std::runtime_error("asset manifest: duplicate model '" + model.name + "'");
         }
-        if (model.materialMode == ModelMaterialMode::SingleTexture) {
+        if (model.materialMode == ModelMaterialMode::SingleTexture ||
+            model.materialMode == ModelMaterialMode::PrimitiveTextureIndex) {
             bool found = false;
             for (std::size_t i = 0; i < textures_.size(); ++i) {
                 if (textures_[i].name == model.materialTextureName) {
@@ -541,11 +540,6 @@ void AssetManifest::validateAndResolve()
                     "asset manifest: model '" + model.name + "' references unknown texture '" +
                     model.materialTextureName + "'");
             }
-        }
-        if (model.materialMode == ModelMaterialMode::PrimitiveTextureIndex &&
-            model.textureIndex >= textures_.size()) {
-            throw std::runtime_error(
-                "asset manifest: model '" + model.name + "' texture index out of range");
         }
         if (model.playerRole) {
             if (!playerModel_.isCube()) {
@@ -718,17 +712,14 @@ RenderModel AssetManifest::addModel(Model model)
             return cubeModel;
         }
     }
-    if (model.materialMode == ModelMaterialMode::SingleTexture) {
+    if (model.materialMode == ModelMaterialMode::SingleTexture ||
+        model.materialMode == ModelMaterialMode::PrimitiveTextureIndex) {
         const RenderTexture texture =
             findTextureIdByName(model.materialTextureName);
         if (texture.isNone()) {
             return cubeModel;
         }
         model.textureIndex = static_cast<uint32_t>(texture.index());
-    } else if (model.materialMode ==
-                   ModelMaterialMode::PrimitiveTextureIndex &&
-               model.textureIndex >= textures_.size()) {
-        return cubeModel;
     }
     models_.push_back(std::move(model));
     return RenderModel { static_cast<uint32_t>(models_.size()) };

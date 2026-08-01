@@ -137,10 +137,10 @@ void main()
         if (inTextureIndex > 1.5) {
             // materialOptions.y carries the belt scroll offset; the belt UVs span
             // a full 0..1 along V, so fract() wraps the scroll seamlessly.
-            int textureIndex = clamp(int(inTextureIndex + pc.materialOptions.z + 0.5), 0, MODEL_TEXTURE_COUNT - 1);
+            int textureIndex = clamp(int(inTextureIndex - 1.0 + pc.materialOptions.z + 0.5), 0, MODEL_TEXTURE_COUNT - 1);
             materialColor *= texture(modelTextures[textureIndex], vec2(inFaceCoordU, fract(inFaceCoordV + pc.materialOptions.y)));
         } else if (inTextureIndex > 0.5) {
-            int textureIndex = clamp(int(inTextureIndex + pc.materialOptions.z + 0.5), 0, MODEL_TEXTURE_COUNT - 1);
+            int textureIndex = clamp(int(inTextureIndex - 1.0 + pc.materialOptions.z + 0.5), 0, MODEL_TEXTURE_COUNT - 1);
             materialColor *= texture(modelTextures[textureIndex], vec2(inFaceCoordU, inFaceCoordV));
         }
     } else if (materialMode == MATERIAL_MODE_PROCEDURAL_TEXTURE) {

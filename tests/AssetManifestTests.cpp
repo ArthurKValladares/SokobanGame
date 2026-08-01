@@ -57,6 +57,7 @@ constexpr const char* validManifest = R"json(
 {
   "format": 1,
   "textures": [
+    { "name": "Unused", "path": "textures/unused.png" },
     { "name": "Tex", "path": "textures/tex.png" }
   ],
   "models": [
@@ -77,7 +78,7 @@ constexpr const char* validManifest = R"json(
     {
       "name": "Belt",
       "path": "models/belt.gltf",
-      "material": { "mode": "primitive-texture-index", "index": 0 },
+      "material": { "mode": "primitive-texture-index", "texture": "Tex" },
       "beltScroll": true
     }
   ],
@@ -119,7 +120,7 @@ void testValidManifest()
     using sokoban::AssetManifest;
     const AssetManifest manifest = AssetManifest::parse(validManifest);
 
-    check(manifest.textures().size() == 1, "one texture");
+    check(manifest.textures().size() == 2, "two textures");
     check(!manifest.textures()[0].tiling, "textures clamp unless marked tiling");
     check(manifest.textures()[0].filter == sokoban::TextureFilter::Nearest,
         "textures point sample unless asked for linear");
@@ -169,13 +170,15 @@ void testValidManifest()
     check(manifest.model(hero).rotateHalfTurn, "hero rotates half turn");
     check(manifest.model(hero).materialMode == sokoban::ModelMaterialMode::SingleTexture,
         "hero single texture");
-    check(manifest.model(hero).textureIndex == 0, "hero texture index resolved");
+    check(manifest.model(hero).textureIndex == 1, "hero texture index resolved by name");
 
     const sokoban::RenderModel belt = manifest.modelIdByName("Belt");
     check(manifest.model(belt).beltScroll, "belt scroll flag");
     check(manifest.model(belt).primitiveTextures, "primitive texture loading inferred");
     check(manifest.model(belt).materialMode == sokoban::ModelMaterialMode::PrimitiveTextureIndex,
         "belt primitive material");
+    check(manifest.model(belt).textureIndex == 1,
+        "primitive texture base resolved by name");
 
     check(manifest.playerIdleAnimation() == manifest.animationIdByName("Idle"), "idle role");
     check(manifest.playerMoveAnimation() == manifest.animationIdByName("Move"), "move role");
@@ -249,7 +252,7 @@ void testSyntaxAndSchemaFailures()
         json["models"][0]["material"] = {
             { "mode", "primitive-texture-index" },
         };
-    }, "primitive material index required");
+    }, "primitive material texture required");
 }
 
 void testDomainValidationFailures()
@@ -288,10 +291,13 @@ void testDomainValidationFailures()
     }, "unknown material texture");
     checkJsonThrows([](Json& json) {
         json["models"].push_back({
-            { "name", "BadIdx" }, { "path", "p.gltf" },
-            { "material", { { "mode", "primitive-texture-index" }, { "index", 9 } } },
+            { "name", "BadPrimitiveTexture" }, { "path", "p.gltf" },
+            { "material", {
+                { "mode", "primitive-texture-index" },
+                { "texture", "Ghost" },
+            } },
         });
-    }, "primitive texture index out of range");
+    }, "unknown primitive texture base");
     checkJsonThrows([](Json& json) { json["animations"].erase(2); },
         "missing player-push role");
     checkJsonThrows([](Json& json) { json["animations"].erase(3); },

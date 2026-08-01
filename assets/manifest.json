@@ -182,7 +182,7 @@
       "path": "KayKit Platformer Pack 1.0/Assets/gltf/blue/conveyor_4x4x1_blue.gltf",
       "material": {
         "mode": "primitive-texture-index",
-        "index": 0
+        "texture": "Platformer"
       },
       "beltScroll": true
     },
