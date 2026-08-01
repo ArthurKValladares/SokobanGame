@@ -41,6 +41,7 @@ public:
         uint32_t facingQuarterTurns = 0;
         bool deathTransitionPending = false;
         bool deathTransitionPlaying = false;
+        bool revivedDuringUndo = false;
         std::optional<uint64_t> deathGateSourceInstance;
     };
 
@@ -69,7 +70,14 @@ public:
         float transitionSeconds);
     void advanceAnimations(float dt, const GameState& state);
     void advanceAnimations(float dt) { advanceAnimations(dt, {}); }
+    [[nodiscard]] ActionPresentationTimeline buildActionPresentation(
+        const GameplaySession::Action& action) const;
+    [[nodiscard]] float reverseDuration(
+        const GameplaySession::Action& action) const;
     void beginAction(const GameplaySession::Action& action);
+    void seekAction(
+        const GameplaySession::Action& action,
+        float elapsedSeconds);
     void finishAction(const GameState& state);
     void syncToGameState(const GameState& state);
 
@@ -94,6 +102,10 @@ private:
     RenderAnimation enemyAttackClip_ {};
     const AnimationCatalog* animationCatalog_ = nullptr;
     AnimationEventSequencer eventSequencer_;
+    ActionPresentationTimeline trackedTimeline_;
+    float trackedTimelineSeconds_ = 0.0f;
+    float reverseSourceStartSeconds_ = 0.0f;
+    bool trackedTimelineReversed_ = false;
     float worldAnimationTimeSeconds_ = 0.0f;
     float cameraPitchDegrees_ = 0.0f;
     float cameraPitchStartDegrees_ = 0.0f;

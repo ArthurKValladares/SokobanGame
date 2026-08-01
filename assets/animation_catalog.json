@@ -4,12 +4,12 @@
     {
       "animation": "RogueIdle",
       "speed": 1.0,
-      "duration": 2.1333333333333333
+      "duration": 2.133333444595337
     },
     {
       "animation": "RogueMovement",
       "speed": 1.0,
-      "duration": 0.8
+      "duration": 0.800000011920929
     },
     {
       "animation": "RoguePush",
@@ -19,7 +19,7 @@
     {
       "animation": "RogueDeath",
       "speed": 2.0,
-      "duration": 2.6333333333333333
+      "duration": 2.633333444595337
     },
     {
       "animation": "RogueDeadIdle",
@@ -29,7 +29,7 @@
     {
       "animation": "BarbarianAttack",
       "speed": 1.5,
-      "duration": 1.3666666666666667
+      "duration": 1.3666666746139526
     }
   ],
   "uses": [
@@ -74,7 +74,7 @@
       "events": [
         {
           "id": "attack-connected",
-          "at": 0.9
+          "at": 0.5519307851791382
         }
       ]
     },

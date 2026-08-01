@@ -17,7 +17,7 @@
 // itself lives in PlayerProfile.cpp.
 //
 // Migration strategy: old formats are upgraded by forward JSON patches
-// (migrate1to2 .. migrate11to12) applied in sequence, then a single strict
+// (migrate1to2 .. migrate15to16) applied in sequence, then a single strict
 // current-format parse validates the fully migrated document. Patches only move
 // fields and add defaults; unknown keys survive them and are rejected by the
 // final parse, so schema strictness is preserved without every historical
@@ -26,6 +26,7 @@
 // Format 9 introduced optional top-level "progress" and "settings" sections.
 // Format 10 added Mirror bindings and temporarily moved the default Undo key.
 // Format 11 restores Undo to Z and moves the default Mirror action to F.
+// Format 16 persists presentation timelines with undo actions.
 // Save-slot files carry only progress and the shared settings.json
 // carries only settings (ProfileSections selects the shape at serialize
 // time); pre-split combined files simply contain both.
@@ -369,10 +370,10 @@ GameplaySession::Action undoActionFromJson(
     const Json& value,
     std::string_view context)
 {
-    rejectUnknownProperties(
-        value,
-        { "before", "after", "playerPushing", "moveCountBefore", "moveCountAfter" },
-        context);
+    rejectUnknownProperties(value, {
+        "before", "after", "playerPushing", "moveCountBefore",
+        "moveCountAfter", "presentation",
+    }, context);
     GameplaySession::Action action;
     action.before = gameStateFromJson(
         requiredProperty(value, "before", context),
@@ -385,17 +386,106 @@ GameplaySession::Action undoActionFromJson(
         nonNegativeIntegerProperty(value, "moveCountBefore", context);
     action.playerMoveCountAfter =
         nonNegativeIntegerProperty(value, "moveCountAfter", context);
+
+    const Json& presentation = requiredProperty(value, "presentation", context);
+    const std::string presentationContext =
+        std::string(context) + ".presentation";
+    rejectUnknownProperties(presentation, {
+        "durationSeconds", "motionStartSeconds", "motionDurationSeconds",
+        "animations",
+    }, presentationContext);
+    action.presentation.durationSeconds =
+        floatProperty(presentation, "durationSeconds", presentationContext);
+    action.presentation.motionStartSeconds =
+        floatProperty(presentation, "motionStartSeconds", presentationContext);
+    action.presentation.motionDurationSeconds =
+        floatProperty(presentation, "motionDurationSeconds", presentationContext);
+    if (action.presentation.durationSeconds < 0.0f ||
+        action.presentation.motionStartSeconds < 0.0f ||
+        action.presentation.motionDurationSeconds < 0.0f) {
+        fail(presentationContext, "timeline times must be non-negative");
+    }
+    const Json& animations =
+        requiredProperty(presentation, "animations", presentationContext);
+    if (!animations.is_array()) {
+        fail(presentationContext, "property 'animations' must be an array");
+    }
+    const auto definitions = animationUseDefinitions();
+    for (std::size_t i = 0; i < animations.size(); ++i) {
+        const Json& encoded = animations[i];
+        const std::string animationContext = presentationContext +
+            ".animations[" + std::to_string(i) + "]";
+        rejectUnknownProperties(encoded, {
+            "actorKind", "actorIndex", "use", "startSeconds",
+            "durationSeconds", "clipStartSeconds",
+        }, animationContext);
+        const std::string actorKind =
+            stringProperty(encoded, "actorKind", animationContext);
+        ActionAnimationSpan span;
+        if (actorKind == "player") {
+            span.actorKind = ActionActorKind::Player;
+        } else if (actorKind == "enemy") {
+            span.actorKind = ActionActorKind::Enemy;
+        } else {
+            fail(animationContext, "unknown actor kind '" + actorKind + "'");
+        }
+        span.actorIndex = static_cast<std::size_t>(
+            nonNegativeIntegerProperty(encoded, "actorIndex", animationContext));
+        const std::string useId =
+            stringProperty(encoded, "use", animationContext);
+        const auto use = std::ranges::find_if(
+            definitions,
+            [&](const AnimationUseDefinition& definition) {
+                return definition.id == useId;
+            });
+        if (use == definitions.end()) {
+            fail(animationContext, "unknown animation use '" + useId + "'");
+        }
+        span.use = use->use;
+        span.startSeconds =
+            floatProperty(encoded, "startSeconds", animationContext);
+        span.durationSeconds =
+            floatProperty(encoded, "durationSeconds", animationContext);
+        span.clipStartSeconds =
+            floatProperty(encoded, "clipStartSeconds", animationContext);
+        if (span.startSeconds < 0.0f || span.durationSeconds < 0.0f ||
+            span.clipStartSeconds < 0.0f ||
+            span.startSeconds + span.durationSeconds >
+                action.presentation.durationSeconds + 0.0001f) {
+            fail(animationContext, "animation span is outside the timeline");
+        }
+        action.presentation.animations.push_back(std::move(span));
+    }
     return action;
 }
 
 OrderedJson undoActionToJson(const GameplaySession::Action& action)
 {
+    OrderedJson animations = OrderedJson::array();
+    for (const ActionAnimationSpan& span : action.presentation.animations) {
+        animations.push_back({
+            { "actorKind", span.actorKind == ActionActorKind::Player
+                ? "player"
+                : "enemy" },
+            { "actorIndex", span.actorIndex },
+            { "use", animationUseId(span.use) },
+            { "startSeconds", span.startSeconds },
+            { "durationSeconds", span.durationSeconds },
+            { "clipStartSeconds", span.clipStartSeconds },
+        });
+    }
     return {
         { "before", gameStateToJson(action.before) },
         { "after", gameStateToJson(action.after) },
         { "playerPushing", action.playerPushing },
         { "moveCountBefore", action.playerMoveCountBefore },
         { "moveCountAfter", action.playerMoveCountAfter },
+        { "presentation", {
+            { "durationSeconds", action.presentation.durationSeconds },
+            { "motionStartSeconds", action.presentation.motionStartSeconds },
+            { "motionDurationSeconds", action.presentation.motionDurationSeconds },
+            { "animations", std::move(animations) },
+        } },
     };
 }
 
@@ -973,6 +1063,33 @@ void migrate14to15(Json& root)
     }
 }
 
+void migrate15to16(Json& root)
+{
+    if (!root.contains("progress") || !root["progress"].is_object()) {
+        return;
+    }
+    Json& activeScreen = root["progress"]["activeScreen"];
+    if (!activeScreen.is_object() || !activeScreen.contains("session")) {
+        return;
+    }
+    Json& session = activeScreen["session"];
+    if (!session.is_object() || !session.contains("undoStack") ||
+        !session["undoStack"].is_array()) {
+        return;
+    }
+    for (Json& action : session["undoStack"]) {
+        if (!action.is_object() || action.contains("presentation")) {
+            continue;
+        }
+        action["presentation"] = {
+            { "durationSeconds", 0.0f },
+            { "motionStartSeconds", 0.0f },
+            { "motionDurationSeconds", 0.0f },
+            { "animations", Json::array() },
+        };
+    }
+}
+
 // ---- Strict current-format parse -------------------------------------------
 
 void parseProgressSection(PlayerProfile& profile, const Json& progress)
@@ -1250,6 +1367,7 @@ DecodedPlayerProfile decodePlayerProfile(std::string_view text)
         migrate12to13,
         migrate13to14,
         migrate14to15,
+        migrate15to16,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

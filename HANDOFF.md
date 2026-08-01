@@ -227,7 +227,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   bounds, video defaults, audio cadence limits, font-atlas sizing, and camera
   fit policy that were previously hard-coded at their call sites.
 - `src/engine/PresentationSettings.*`: mutable runtime presentation settings initialized from the immutable defaults in the focused render config headers. Owns lighting, SSAO/shadow tuning, grid appearance, surface geometry, tile scales, normalization, sun-direction conversion, and renderer-facing lighting/grid values.
-- `src/engine/GameplayPresentation.*`: headless presentation state derived from `GameplaySession::Action` snapshots. Owns player/movable interpolation, fallen render offsets, player/enemy clip, facing and playback state, concrete attacker-to-victim animation gate routing, and the shared world/conveyor animation clock without mutating authoritative gameplay state. A pending combat death keeps its prior visual state until the linked enemy instance emits the configured event; unrelated enemies cannot release it, and drowning bypasses the combat gate.
+- `src/engine/GameplayPresentation.*`: headless presentation state derived from `GameplaySession::Action` snapshots. Owns player/movable interpolation, fallen render offsets, player/enemy clip, facing and playback state, concrete attacker-to-victim animation gate routing, and the shared world/conveyor animation clock without mutating authoritative gameplay state. A pending combat death continues normal movement/idle playback until the linked enemy instance emits the configured event, then resets the death clip to the event's frame overshoot; unrelated enemies cannot release it, and drowning bypasses the combat gate. It records action-local motion plus semantic player/enemy animation spans, authored event offsets, and clip-clock origins into `ActionPresentationTimeline`; reverse playback seeks that same timeline backward, including partial attack/death sequences, rather than inferring an animation from dead/alive snapshots.
 - `src/engine/AnimationCatalog.*`: strict, Vulkan-free mapping between stable
   code-owned `AnimationUse` IDs and manifest clips. Format 2 records the source
   duration and global speed of every manifest animation. Every semantic use
@@ -274,17 +274,17 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   `AnimationCatalogEditor`; it composes
   `AnimationPreviewDebugUi` into the same Animation tab.
 - `src/engine/AudioSystem.*`: miniaudio-backed sound playback behind a pimpl (`EngineHandle`), so no miniaudio types leak into headers. Preloads manifest sound sets from the staged runtime content tree with `MA_SOUND_FLAG_DECODE` into stable `std::vector<ma_sound>` storage. `playOneShot(name)` handles reusable randomized effects; `update(dt, playerWalking, pushingStone)` retains specialized footstep cadence and seamless stone-drag loops with short fades. Music streams one looping track per level with a 600 ms crossfade. Manifest gains remain authored in the Asset Manifest window; profile-backed master, music, and sound-effect bus gains are previewed live and persisted when Debug UI sliders are committed. Audio degrades gracefully to silence if the device or files are missing.
-- `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, action history, a branch-safe undo stack, automatic world steps, the post-undo automatic-motion pause, and solution-move snapshots that restore correctly across undo/restart. Its committed-state snapshot/restore API persists the exact player/movable state and usable undo chain; restore rejects disconnected or impossible rules transitions without mutating the live session. `reset` always clears undo state at a screen boundary. Emits `Action` snapshots for `Application` to animate. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
+- `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, action history, a branch-safe undo stack, automatic world steps, the post-undo automatic-motion pause, and solution-move snapshots that restore correctly across undo/restart. Each committed `Action` also owns a Vulkan-free `ActionPresentationTimeline` containing motion timing and ordered semantic actor animation spans; inversion preserves that timeline and uses its current/full duration. Its committed-state snapshot/restore API persists the exact player/movable state, presentation ordering, and usable undo chain; restore rejects disconnected or impossible rules transitions without mutating the live session. `reset` always clears undo state at a screen boundary. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
 - `src/engine/InputBindings.*`: platform-neutral semantic action and binding model. Each action owns an ordered list of keyboard, gamepad-button, and signed gamepad-axis bindings, allowing keyboard+D-pad+stick defaults. `assignBinding` implements remapping semantics (removes the identical binding from every action, then replaces only the action's bindings of the same kind, so a d-pad rebind keeps a stick binding); `bindingDisplayName`/`actionBindingsDisplay` provide UI labels.
 - `src/engine/Input.*`: SDL3 device owner and action mapper. Tracks raw keyboard/mouse state for editor tooling, hot-plugs gamepads, selects the most recently used controller, normalizes stick axes with threshold/pressed-edge semantics, clears stuck input on focus loss, reports active-device diagnostics, and converts raw SDL events into typed remapping candidates. `InputRouter` controls event admission and distributes its state to active consumers. Covered by `tests/InputTests.cpp` (`sokoban_input_tests`).
 - `src/engine/PlayerProfile.*` + `src/engine/PlayerProfileCodec.cpp`:
-  current format-12 player progress model plus one owned `UserSettings` value.
-  Forward JSON patches (`migrate1to2` through `migrate11to12`) feed one strict
+  current format-16 player progress model plus one owned `UserSettings` value.
+  Forward JSON patches (`migrate1to2` through `migrate15to16`) feed one strict
   current-format parse. Format 9 made progress/settings independently optional
   for split slot and shared-settings files; format 10 added Mirror bindings,
   format 11 restored the intended `Z` Undo / `F` Mirror defaults, and format 12
   added the remappable Show Top-Down View action. Stores exact active-screen
-  gameplay/undo state, progress, bests, reached screens, typed input bindings,
+  gameplay/undo state including action presentation timelines, progress, bests, reached screens, typed input bindings,
   audio/video/accessibility settings, and normalized display/render settings.
   Covered with `SaveStore` by `tests/PlayerProfileTests.cpp`.
 - `src/engine/Flow.hpp`: minimal generic state-machine toolkit shared by UI
@@ -1566,7 +1566,9 @@ Major recent additions and fixes:
   plays the manifest's `player-death` clip once, then
   `AnimationController` switches at the loaded clip duration to the looping
   `player-dead-idle` clip. Restored dead checkpoints start directly in the dead
-  idle pose, and undo clears the death transition. The shipped roles use
+  idle pose, and undo clears the death transition. Revival through undo starts
+  reverse movement at the end of its clip and discards the old death-pose
+  crossfade; ordinary animation changes continue to crossfade normally. The shipped roles use
   `Rig_Medium_General.glb` Animation 3 (`Death_B`, manifest clip 3) and
   Animation 4 (`Death_B_Pose`, manifest clip 4). Manifest clip values use the
   one-based numbering shown by asset tools. The one-shot-to-pose handoff

@@ -219,8 +219,11 @@ staged assets, and third-party licenses.
 ## Architecture
 
 - `src/engine/Rules.*`: pure gameplay rules over `Level` and `GameState`.
-- `src/engine/GameplaySession.*`: commands, timing, state, and undo history.
-- `src/engine/GameplayPresentation.*`: interpolation and visual animation.
+- `src/engine/GameplaySession.*`: commands, timing, state, and undo history;
+  committed actions retain a semantic presentation timeline so undo can replay
+  movement and actor animations in their exact reverse order.
+- `src/engine/GameplayPresentation.*`: interpolation, visual animation, and
+  forward/reverse evaluation of recorded action timelines.
 - `src/engine/AnimationCatalog.*`: strict semantic animation bindings plus
   source durations, timeline events, start gates, global/per-use playback
   speeds, and atomic JSON persistence.

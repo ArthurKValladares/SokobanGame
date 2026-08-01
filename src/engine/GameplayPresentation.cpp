@@ -172,6 +172,10 @@ void GameplayPresentation::setActorClips(
 void GameplayPresentation::resetEntities(const GameState& state)
 {
     eventSequencer_.clear();
+    trackedTimeline_ = {};
+    trackedTimelineSeconds_ = 0.0f;
+    reverseSourceStartSeconds_ = 0.0f;
+    trackedTimelineReversed_ = false;
     players_.assign(state.players.size(), {});
     for (std::size_t i = 0; i < state.players.size(); ++i) {
         setImmediatePosition(
@@ -201,10 +205,13 @@ void GameplayPresentation::resetEntities(const GameState& state)
 void GameplayPresentation::advanceClocks(float dt, bool reversed)
 {
     worldAnimationTimeSeconds_ += reversed ? -dt : dt;
+    if (!trackedTimelineReversed_ && !trackedTimeline_.empty()) {
+        trackedTimelineSeconds_ = std::min(
+            trackedTimelineSeconds_ + std::max(dt, 0.0f),
+            trackedTimeline_.durationSeconds);
+    }
     for (PlayerVisual& player : players_) {
-        if (!player.deathTransitionPending) {
-            player.clipTimeSeconds += dt * player.clipPlaybackRate;
-        }
+        player.clipTimeSeconds += dt * player.clipPlaybackRate;
     }
     for (std::size_t enemyIndex = 0;
          enemyIndex < enemies_.size();
@@ -344,8 +351,161 @@ void GameplayPresentation::advanceAnimations(float dt, const GameState& state)
     }
 }
 
+ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
+    const GameplaySession::Action& action) const
+{
+    ActionPresentationTimeline timeline {
+        .durationSeconds = std::max(action.durationSeconds, 0.0f),
+        .motionStartSeconds = 0.0f,
+        .motionDurationSeconds = std::max(action.durationSeconds, 0.0f),
+    };
+
+    auto logicalDuration = [&](AnimationUse use) {
+        if (animationCatalog_ == nullptr) {
+            return 0.0f;
+        }
+        const float speed = animationCatalog_->effectiveSpeed(use);
+        if (speed <= 0.0f) {
+            return 0.0f;
+        }
+        return animationCatalog_->clipDuration(
+            animationCatalog_->animation(use)) / speed;
+    };
+    auto append = [&](ActionAnimationSpan span) {
+        if (span.durationSeconds <= 0.0f) {
+            return;
+        }
+        timeline.durationSeconds = std::max(
+            timeline.durationSeconds,
+            span.startSeconds + span.durationSeconds);
+        timeline.animations.push_back(std::move(span));
+    };
+
+    const std::size_t sharedPlayers = std::min(
+        action.before.players.size(), action.after.players.size());
+    for (std::size_t playerIndex = 0;
+         playerIndex < sharedPlayers && playerIndex < players_.size();
+         ++playerIndex) {
+        if (action.before.players[playerIndex].cell ==
+            action.after.players[playerIndex].cell) {
+            continue;
+        }
+        append({
+            .actorKind = ActionActorKind::Player,
+            .actorIndex = playerIndex,
+            .use = action.playerPushing
+                ? AnimationUse::PlayerPush
+                : AnimationUse::PlayerMove,
+            .startSeconds = timeline.motionStartSeconds,
+            .durationSeconds = timeline.motionDurationSeconds,
+            .clipStartSeconds = players_[playerIndex].clipTimeSeconds,
+        });
+    }
+
+    const std::size_t enemyCount = std::min(
+        action.before.enemies.size(), action.after.enemies.size());
+    std::vector<std::vector<std::size_t>> attackedPlayers(enemyCount);
+    const float attackDuration = logicalDuration(AnimationUse::EnemyAttack);
+    for (std::size_t enemyIndex = 0; enemyIndex < enemyCount; ++enemyIndex) {
+        for (std::size_t playerIndex = 0;
+             playerIndex < sharedPlayers;
+             ++playerIndex) {
+            const GameState::Player& before = action.before.players[playerIndex];
+            const GameState::Player& after = action.after.players[playerIndex];
+            if (before.dead || !after.dead || after.drowned ||
+                action.after.enemies[enemyIndex].fallen ||
+                after.cell.z != action.after.enemies[enemyIndex].cell.z) {
+                continue;
+            }
+            if (std::abs(after.cell.x - action.after.enemies[enemyIndex].cell.x) +
+                    std::abs(after.cell.y - action.after.enemies[enemyIndex].cell.y) ==
+                1) {
+                attackedPlayers[enemyIndex].push_back(playerIndex);
+            }
+        }
+        if (!attackedPlayers[enemyIndex].empty()) {
+            append({
+                .actorKind = ActionActorKind::Enemy,
+                .actorIndex = enemyIndex,
+                .use = AnimationUse::EnemyAttack,
+                .durationSeconds = attackDuration,
+            });
+        }
+    }
+
+    float attackConnectionSeconds = 0.0f;
+    if (animationCatalog_ != nullptr) {
+        const auto& gate =
+            animationCatalog_->startGate(AnimationUse::PlayerDeath);
+        if (gate && gate->sourceUse == AnimationUse::EnemyAttack) {
+            const float speed =
+                animationCatalog_->effectiveSpeed(gate->sourceUse);
+            if (speed > 0.0f) {
+                attackConnectionSeconds =
+                    animationCatalog_->eventSourceTime(
+                        gate->sourceUse, gate->eventId) /
+                    speed;
+            }
+        }
+    }
+
+    const float deathDuration = logicalDuration(AnimationUse::PlayerDeath);
+    for (std::size_t playerIndex = 0;
+         playerIndex < sharedPlayers;
+         ++playerIndex) {
+        const GameState::Player& before = action.before.players[playerIndex];
+        const GameState::Player& after = action.after.players[playerIndex];
+        if (before.dead || !after.dead) {
+            continue;
+        }
+        bool attacked = false;
+        for (const auto& victims : attackedPlayers) {
+            if (std::ranges::find(victims, playerIndex) != victims.end()) {
+                attacked = true;
+                break;
+            }
+        }
+        append({
+            .actorKind = ActionActorKind::Player,
+            .actorIndex = playerIndex,
+            .use = AnimationUse::PlayerDeath,
+            .startSeconds = attacked ? attackConnectionSeconds : 0.0f,
+            .durationSeconds = deathDuration,
+        });
+    }
+
+    return timeline;
+}
+
+float GameplayPresentation::reverseDuration(
+    const GameplaySession::Action& action) const
+{
+    if (action.presentation.empty()) {
+        return std::max(action.durationSeconds, 0.0f);
+    }
+    if (!trackedTimelineReversed_ &&
+        trackedTimeline_ == action.presentation) {
+        return std::clamp(
+            trackedTimelineSeconds_,
+            0.0f,
+            action.presentation.durationSeconds);
+    }
+    return action.presentation.durationSeconds;
+}
+
 void GameplayPresentation::beginAction(const GameplaySession::Action& action)
 {
+    if (action.reversed) {
+        reverseSourceStartSeconds_ = reverseDuration(action);
+        trackedTimeline_ = action.presentation;
+        trackedTimelineSeconds_ = reverseSourceStartSeconds_;
+        trackedTimelineReversed_ = true;
+    } else {
+        trackedTimeline_ = action.presentation;
+        trackedTimelineSeconds_ = 0.0f;
+        reverseSourceStartSeconds_ = 0.0f;
+        trackedTimelineReversed_ = false;
+    }
     auto beginMotion = [&action](EntityVisual& visual, Vec3 target) {
         if (gridDistance(visual.renderPosition, target) <= 0.0001f) {
             setImmediatePosition(visual, target);
@@ -380,6 +540,7 @@ void GameplayPresentation::beginAction(const GameplaySession::Action& action)
     auto beginPlayer = [&](PlayerVisual& visual,
                            const GameState::Player& before,
                            const GameState::Player& after) {
+        visual.revivedDuringUndo = false;
         if (action.facingDirection) {
             visual.facingQuarterTurns =
                 facingQuarterTurns(*action.facingDirection);
@@ -512,14 +673,171 @@ void GameplayPresentation::beginAction(const GameplaySession::Action& action)
     }
 }
 
+void GameplayPresentation::seekAction(
+    const GameplaySession::Action& action,
+    float elapsedSeconds)
+{
+    if (action.presentation.empty()) {
+        return;
+    }
+
+    if (!action.reversed) {
+        trackedTimelineSeconds_ = std::clamp(
+            std::max(elapsedSeconds, 0.0f),
+            0.0f,
+            action.presentation.durationSeconds);
+        return;
+    }
+
+    const ActionPresentationTimeline& timeline = action.presentation;
+    const float sourceTime = std::clamp(
+        reverseSourceStartSeconds_ - std::max(elapsedSeconds, 0.0f),
+        0.0f,
+        timeline.durationSeconds);
+    trackedTimelineSeconds_ = sourceTime;
+    const float motionEnd =
+        timeline.motionStartSeconds + timeline.motionDurationSeconds;
+
+    auto seekMotion = [&](EntityVisual& visual, Vec3 from, Vec3 to) {
+        if (sourceTime > motionEnd || timeline.motionDurationSeconds <= 0.0f) {
+            setImmediatePosition(visual, from);
+            return;
+        }
+        if (sourceTime <= timeline.motionStartSeconds) {
+            setImmediatePosition(visual, to);
+            return;
+        }
+
+        const float reverseElapsed = motionEnd - sourceTime;
+        visual.animationStart = from;
+        visual.animationEnd = to;
+        visual.animationElapsed = reverseElapsed;
+        visual.animationDuration = timeline.motionDurationSeconds;
+        const float distance = gridDistance(from, to);
+        visual.animationSecondsPerTile = distance > 0.0001f
+            ? timeline.motionDurationSeconds / distance
+            : 0.0f;
+        visual.renderPosition = interpolateGridMotion(
+            from, to, reverseElapsed, visual.animationSecondsPerTile);
+        visual.moving = distance > 0.0001f;
+    };
+
+    const std::size_t playerCount = std::min({
+        players_.size(),
+        action.before.players.size(),
+        action.after.players.size(),
+    });
+    for (std::size_t playerIndex = 0; playerIndex < playerCount; ++playerIndex) {
+        PlayerVisual& visual = players_[playerIndex];
+        seekMotion(
+            visual.motion,
+            playerRenderTarget(
+                action.before.players[playerIndex].cell,
+                action.before.players[playerIndex].drowned),
+            playerRenderTarget(
+                action.after.players[playerIndex].cell,
+                action.after.players[playerIndex].drowned));
+        visual.deathTransitionPending = false;
+        visual.deathTransitionPlaying = false;
+        visual.deathGateSourceInstance.reset();
+        visual.revivedDuringUndo = false;
+
+        for (const ActionAnimationSpan& span : timeline.animations) {
+            if (span.actorKind != ActionActorKind::Player ||
+                span.actorIndex != playerIndex) {
+                continue;
+            }
+            const float end = span.startSeconds + span.durationSeconds;
+            if (span.use == AnimationUse::PlayerDeath) {
+                if (sourceTime > span.startSeconds && sourceTime <= end) {
+                    visual.deathTransitionPlaying = true;
+                    visual.clipTimeSeconds =
+                        span.clipStartSeconds + sourceTime - span.startSeconds;
+                    visual.clipPlaybackRate = -1.0f;
+                } else if (sourceTime <= span.startSeconds) {
+                    visual.revivedDuringUndo = true;
+                }
+                continue;
+            }
+            if ((span.use == AnimationUse::PlayerMove ||
+                    span.use == AnimationUse::PlayerPush) &&
+                sourceTime > span.startSeconds && sourceTime <= end) {
+                visual.movingClip = animationCatalog_ != nullptr
+                    ? animationCatalog_->animation(span.use)
+                    : (span.use == AnimationUse::PlayerPush
+                              ? playerPushClip_
+                              : playerMoveClip_);
+                visual.clipTimeSeconds =
+                    span.clipStartSeconds + sourceTime - span.startSeconds;
+                visual.clipPlaybackRate = -1.0f;
+            }
+        }
+    }
+
+    const std::size_t movableCount = std::min({
+        movables_.size(),
+        action.before.movables.size(),
+        action.after.movables.size(),
+    });
+    for (std::size_t movableIndex = 0; movableIndex < movableCount; ++movableIndex) {
+        seekMotion(
+            movables_[movableIndex],
+            movableRenderTarget(
+                action.before.movables[movableIndex].cell,
+                action.before.movables[movableIndex].fallen),
+            movableRenderTarget(
+                action.after.movables[movableIndex].cell,
+                action.after.movables[movableIndex].fallen));
+    }
+
+    const std::size_t enemyCount = std::min({
+        enemies_.size(),
+        action.before.enemies.size(),
+        action.after.enemies.size(),
+    });
+    for (std::size_t enemyIndex = 0; enemyIndex < enemyCount; ++enemyIndex) {
+        EnemyVisual& visual = enemies_[enemyIndex];
+        seekMotion(
+            visual.motion,
+            movableRenderTarget(
+                action.before.enemies[enemyIndex].cell,
+                action.before.enemies[enemyIndex].fallen),
+            movableRenderTarget(
+                action.after.enemies[enemyIndex].cell,
+                action.after.enemies[enemyIndex].fallen));
+        visual.attackTransitionPlaying = false;
+        for (const ActionAnimationSpan& span : timeline.animations) {
+            if (span.actorKind != ActionActorKind::Enemy ||
+                span.actorIndex != enemyIndex ||
+                span.use != AnimationUse::EnemyAttack) {
+                continue;
+            }
+            const float end = span.startSeconds + span.durationSeconds;
+            if (sourceTime > span.startSeconds && sourceTime <= end) {
+                visual.attackTransitionPlaying = true;
+                visual.clipTimeSeconds =
+                    span.clipStartSeconds + sourceTime - span.startSeconds;
+                visual.clipPlaybackRate = -1.0f;
+            }
+        }
+    }
+}
+
 void GameplayPresentation::finishAction(const GameState& state)
 {
     syncToGameState(state);
     for (PlayerVisual& player : players_) {
         player.clipPlaybackRate = 1.0f;
+        player.revivedDuringUndo = false;
     }
     for (EnemyVisual& enemy : enemies_) {
         enemy.clipPlaybackRate = 1.0f;
+    }
+    if (trackedTimelineReversed_) {
+        trackedTimeline_ = {};
+        trackedTimelineSeconds_ = 0.0f;
+        reverseSourceStartSeconds_ = 0.0f;
+        trackedTimelineReversed_ = false;
     }
 }
 

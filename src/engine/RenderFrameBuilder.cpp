@@ -1073,6 +1073,12 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             playerIndex < input.activeAction.after.players.size() &&
             input.activeAction.before.players[playerIndex].drowned &&
             !input.activeAction.after.players[playerIndex].drowned;
+        const bool revivingThroughUndo =
+            input.moving && input.activeAction.reversed &&
+            playerIndex < input.activeAction.before.players.size() &&
+            playerIndex < input.activeAction.after.players.size() &&
+            input.activeAction.before.players[playerIndex].dead &&
+            !input.activeAction.after.players[playerIndex].dead;
 
         AnimationUse animationUse = AnimationUse::PlayerIdle;
         RenderAnimation animation = animationFor(
@@ -1082,7 +1088,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
         RenderAnimation fallback = noAnimation;
         AnimationUse fallbackUse = AnimationUse::PlayerDeadIdle;
         bool loops = true;
-        if (player.dead && !movingOutOfWater &&
+        if (player.dead && !visual.revivedDuringUndo && !movingOutOfWater &&
             !visual.deathTransitionPending) {
             if (visual.deathTransitionPlaying) {
                 animationUse = AnimationUse::PlayerDeath;
@@ -1127,6 +1133,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             .animationFallback = fallback,
             .animationInstanceId = playerAnimationInstance(playerIndex),
             .animationLoops = loops,
+            .animationCrossfades = !revivingThroughUndo,
             .animationTimeSeconds = animationTimeFor(
                 input.animations, animationUse, visual.clipTimeSeconds),
             .animationFallbackTimeSeconds = animationTimeFor(
@@ -1176,6 +1183,7 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
                 : noAnimation,
             .animationInstanceId = enemyAnimationInstance(enemyIndex),
             .animationLoops = !visual.attackTransitionPlaying,
+            .animationCrossfades = !input.activeAction.reversed,
             .animationTimeSeconds = animationTimeFor(
                 input.animations,
                 visual.attackTransitionPlaying

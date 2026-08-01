@@ -85,7 +85,22 @@ GameplayLoop::UpdateResult GameplayLoop::update(
                 result.mirrorSwapDestinations =
                     session.lastMirrorSwapDestinations();
             }
+            if (session.activeAction().presentation.empty()) {
+                GameplaySession::Action source = session.activeAction();
+                if (source.reversed) {
+                    std::swap(source.before, source.after);
+                    source.reversed = false;
+                    source.durationSeconds = session.stepDurationSeconds();
+                }
+                session.setActiveActionPresentation(
+                    presentation.buildActionPresentation(source));
+            }
+            if (session.activeAction().reversed) {
+                session.setActiveActionDuration(
+                    presentation.reverseDuration(session.activeAction()));
+            }
             presentation.beginAction(session.activeAction());
+            presentation.seekAction(session.activeAction(), 0.0f);
         }
 
         const float duration = session.activeActionDuration();
@@ -95,6 +110,9 @@ GameplayLoop::UpdateResult GameplayLoop::update(
                 session.activeActionRemainingSeconds());
             remainingTime -= step;
             session.advanceActiveAction(step);
+            presentation.seekAction(
+                session.activeAction(),
+                session.activeActionElapsedSeconds());
             if (!session.activeActionComplete()) {
                 continue;
             }

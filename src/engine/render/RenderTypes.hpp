@@ -238,6 +238,10 @@ struct RenderFrameData {
         // actors. Zero means the model has no persistent animated instance.
         uint64_t animationInstanceId = 0;
         bool animationLoops = true;
+        // False requests a hard clip transition for semantic discontinuities
+        // such as reviving during undo. The actor identity and GPU resources
+        // stay stable while stale crossfade source poses are discarded.
+        bool animationCrossfades = true;
         float animationTimeSeconds = 0.0f;
         // A non-looping clip can transition to a differently tuned use. Keep
         // its clock independent so changing the one-shot speed does not also

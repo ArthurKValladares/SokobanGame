@@ -378,7 +378,9 @@ bool GameplaySession::tryStartUndoMove()
     }
 
     Action action = invertAction(undoHistory_.back());
-    action.durationSeconds = stepDurationSeconds_;
+    action.durationSeconds = action.presentation.empty()
+        ? stepDurationSeconds_
+        : action.presentation.durationSeconds;
     action.facingDirection = firstPlayerMovementDirection(
         action.after, action.before);
     autoMotionPaused_ = true;
@@ -440,7 +442,30 @@ GameplaySession::Action GameplaySession::invertAction(const Action& action) cons
         .reversed = true,
         .playerMoveCountBefore = action.playerMoveCountAfter,
         .playerMoveCountAfter = action.playerMoveCountBefore,
+        .presentation = action.presentation,
     };
+}
+
+void GameplaySession::setActiveActionPresentation(
+    ActionPresentationTimeline presentation)
+{
+    if (!moving_) {
+        return;
+    }
+    activeAction_.presentation = std::move(presentation);
+    if (activeAction_.reversed && !activeAction_.presentation.empty()) {
+        activeAction_.durationSeconds =
+            activeAction_.presentation.durationSeconds;
+    }
+}
+
+void GameplaySession::setActiveActionDuration(float durationSeconds)
+{
+    if (!moving_) {
+        return;
+    }
+    activeAction_.durationSeconds = std::max(durationSeconds, 0.0f);
+    moveElapsed_ = std::min(moveElapsed_, activeAction_.durationSeconds);
 }
 
 void GameplaySession::beginAction(Action action)

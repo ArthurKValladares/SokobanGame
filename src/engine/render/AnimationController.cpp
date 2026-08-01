@@ -168,9 +168,14 @@ std::optional<AnimationController::SkinningRequest> AnimationController::updateT
         playback.fadeElapsed = 0.0f;
     } else if (!(requestedAnimation == playback.activeAnimation) &&
         !playback.activeAnimation.isNone()) {
-        playback.fadeFromAnimation = playback.activeAnimation;
-        playback.fadeFromTime = playback.activeAnimationTime;
-        playback.fadeElapsed = 0.0f;
+        if (tile.animationCrossfades) {
+            playback.fadeFromAnimation = playback.activeAnimation;
+            playback.fadeFromTime = playback.activeAnimationTime;
+            playback.fadeElapsed = 0.0f;
+        } else {
+            playback.fadeFromAnimation = noAnimation;
+            playback.fadeElapsed = 0.0f;
+        }
     }
 
     if (!forceSample && playback.fadeFromAnimation.isNone() &&

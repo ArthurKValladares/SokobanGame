@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/ActionPresentation.hpp"
 #include "engine/GameplayConfig.hpp"
 #include "engine/Level.hpp"
 #include "engine/Rules.hpp"
@@ -34,6 +35,7 @@ public:
         int playerMoveCountBefore = 0;
         int playerMoveCountAfter = 0;
         std::optional<MoveDirection> facingDirection;
+        ActionPresentationTimeline presentation;
 
         bool operator==(const Action&) const = default;
     };
@@ -64,6 +66,7 @@ public:
     [[nodiscard]] bool moving() const { return moving_; }
     [[nodiscard]] const Action& activeAction() const { return activeAction_; }
     [[nodiscard]] float activeActionDuration() const { return activeAction_.durationSeconds; }
+    [[nodiscard]] float activeActionElapsedSeconds() const { return moveElapsed_; }
     [[nodiscard]] float activeActionRemainingSeconds() const;
     [[nodiscard]] bool activeActionComplete() const;
     [[nodiscard]] std::size_t historySize() const { return moveHistory_.size(); }
@@ -83,6 +86,8 @@ public:
 
     void setStepDurationSeconds(float durationSeconds) { stepDurationSeconds_ = durationSeconds; }
     void setStepRates(rules::StepRates rates) { stepRates_ = rates; }
+    void setActiveActionPresentation(ActionPresentationTimeline presentation);
+    void setActiveActionDuration(float durationSeconds);
 
 private:
     enum class CommandType {

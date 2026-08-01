@@ -261,6 +261,25 @@ void testActiveScreenCheckpointRoundTrip()
         .playerPushing = true,
         .playerMoveCountBefore = 0,
         .playerMoveCountAfter = 1,
+        .presentation = {
+            .durationSeconds = 1.25f,
+            .motionDurationSeconds = 0.15f,
+            .animations = {
+                {
+                    .actorKind = sokoban::ActionActorKind::Player,
+                    .actorIndex = 0,
+                    .use = sokoban::AnimationUse::PlayerPush,
+                    .durationSeconds = 0.15f,
+                    .clipStartSeconds = 0.4f,
+                },
+                {
+                    .actorKind = sokoban::ActionActorKind::Enemy,
+                    .actorIndex = 0,
+                    .use = sokoban::AnimationUse::EnemyAttack,
+                    .durationSeconds = 1.0f,
+                },
+            },
+        },
     };
     profile.activeScreen = sokoban::PlayerProfile::ActiveScreen {
         .level = 2,
@@ -295,6 +314,21 @@ void testActiveScreenCheckpointRoundTrip()
     check(!current["progress"]["activeScreen"]["session"]["state"]
             .contains("playerClones"),
         "checkpoint state has no primary/clone compatibility fields");
+    check(current["progress"]["activeScreen"]["session"]["undoStack"][0]
+            ["presentation"]["animations"].size() == 2,
+        "undo presentation timeline is persisted");
+
+    nlohmann::json format15 = current;
+    format15["format"] = 15;
+    format15["progress"]["activeScreen"]["session"]["undoStack"][0]
+        .erase("presentation");
+    const sokoban::DecodedPlayerProfile migrated15 =
+        sokoban::decodePlayerProfile(format15.dump());
+    check(migrated15.profile.activeScreen.has_value(),
+        "format 15 migration preserves the active checkpoint");
+    check(migrated15.profile.activeScreen->session.undoStack[0]
+            .presentation.empty(),
+        "format 15 migration marks old undo timelines for lazy reconstruction");
     nlohmann::json emptyPlayers = current;
     emptyPlayers["progress"]["activeScreen"]["session"]["state"]
         ["players"] = nlohmann::json::array();

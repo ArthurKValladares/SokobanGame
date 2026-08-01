@@ -146,6 +146,22 @@ void testReverseTimeStillAdvancesFade()
     CHECK(near(request->blend, 0.5f));
 }
 
+void testHardTransitionDiscardsPreviousPose()
+{
+    TEST("hardTransitionDiscardsPreviousPose");
+    AnimationController controller = makeController(0.1f);
+    CHECK(controller.update(
+        frameWithAnimation(deathClip, 0.75f)).has_value());
+
+    RenderFrameData revived = frameWithAnimation(moveClip, 0.99f);
+    revived.tiles.front().animationCrossfades = false;
+    const auto request = controller.update(revived);
+    CHECK(request.has_value());
+    CHECK(!request->blended());
+    CHECK(request->toClip->name == "movement");
+    CHECK(near(request->toTimeSeconds, 0.99f));
+}
+
 void testPreviewOverridesAndThenReleasesGameplay()
 {
     TEST("previewOverridesAndThenReleasesGameplay");
@@ -379,6 +395,7 @@ int main()
     testSelectsFirstAnimatedRogueAndDeduplicates();
     testCrossfadeProgressesAndCompletes();
     testReverseTimeStillAdvancesFade();
+    testHardTransitionDiscardsPreviousPose();
     testPreviewOverridesAndThenReleasesGameplay();
     testNonLoopingAnimationFallsBackAtClipDuration();
     testClipValidationAndClear();

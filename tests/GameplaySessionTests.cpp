@@ -109,6 +109,19 @@ void testUndoRoundTrip()
 
     session.queueMove(MoveDirection::Right);
     CHECK(session.tryStartNextAction(level, {}));
+    session.setActiveActionPresentation({
+        .durationSeconds = 0.4f,
+        .motionDurationSeconds = session.activeActionDuration(),
+        .animations = {
+            {
+                .actorKind = ActionActorKind::Player,
+                .actorIndex = 0,
+                .use = AnimationUse::PlayerMove,
+                .durationSeconds = session.activeActionDuration(),
+                .clipStartSeconds = 0.25f,
+            },
+        },
+    });
     finishAction(session);
     CHECK(session.state().players[0].cell == cell(2, 0, 1));
 
@@ -116,6 +129,8 @@ void testUndoRoundTrip()
     CHECK(session.tryStartNextAction(level, {}));
     CHECK(session.activeAction().reversed);
     CHECK(session.activeAction().facingDirection == MoveDirection::Right);
+    CHECK(session.activeAction().presentation.animations.size() == 1);
+    CHECK(session.activeActionDuration() == 0.4f);
     finishAction(session);
     CHECK(session.state().players[0].cell == cell(1, 0, 1));
     CHECK(session.historySize() == 2);

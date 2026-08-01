@@ -1562,13 +1562,41 @@ void testEnemyFacingAttackAndAnimationInstances()
         .durationSeconds = 0.15f,
         .facingDirection = MoveDirection::Right,
     };
+    action.presentation = presentation.buildActionPresentation(action);
+    CHECK(action.presentation.animations.size() == 3);
+    CHECK(action.presentation.durationSeconds > action.durationSeconds);
     presentation.beginAction(action);
     CHECK(presentation.enemies()[0].attackTransitionPlaying);
     CHECK(presentation.players()[0].deathTransitionPending);
     CHECK(!presentation.players()[0].deathTransitionPlaying);
-    presentation.advanceClocks(0.29f, false);
+    presentation.advanceClocks(0.1f, false);
+    CHECK(near(presentation.players()[0].clipTimeSeconds, 0.1f));
+    presentation.advanceAnimations(action.durationSeconds, after);
+    const RenderFrameData waitingFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = after,
+        .moving = true,
+        .activeAction = action,
+        .presentation = presentation,
+        .settings = PresentationSettings {},
+        .animations = &animations,
+    });
+    const auto waitingPlayer = std::ranges::find_if(
+        waitingFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.model == testManifest().playerModel();
+        });
+    CHECK(waitingPlayer != waitingFrame.tiles.end());
+    if (waitingPlayer != waitingFrame.tiles.end()) {
+        CHECK(waitingPlayer->animation ==
+            testManifest().playerIdleAnimation());
+        CHECK(near(waitingPlayer->animationTimeSeconds, 0.05f));
+    }
+    presentation.advanceClocks(0.19f, false);
     CHECK(presentation.players()[0].deathTransitionPending);
     CHECK(!presentation.players()[0].deathTransitionPlaying);
+    CHECK(near(presentation.players()[0].clipTimeSeconds, 0.29f));
     presentation.advanceClocks(0.02f, false);
     CHECK(!presentation.players()[0].deathTransitionPending);
     CHECK(presentation.players()[0].deathTransitionPlaying);
@@ -1608,6 +1636,61 @@ void testEnemyFacingAttackAndAnimationInstances()
         CHECK(player->animation == testManifest().playerDeathAnimation());
         CHECK(near(player->animationTimeSeconds, 0.01f));
     }
+
+    const GameplaySession::Action undo {
+        .before = after,
+        .after = before,
+        .durationSeconds = 0.15f,
+        .reversed = true,
+        .facingDirection = MoveDirection::Left,
+        .presentation = action.presentation,
+    };
+    CHECK(near(presentation.reverseDuration(undo), 0.31f));
+    presentation.beginAction(undo);
+    presentation.seekAction(undo, 0.0f);
+    CHECK(presentation.players()[0].deathTransitionPlaying);
+    CHECK(!presentation.players()[0].motion.moving);
+    CHECK(near(presentation.players()[0].clipPlaybackRate, -1.0f));
+    CHECK(near(presentation.players()[0].clipTimeSeconds, 0.01f));
+
+    presentation.seekAction(undo, 0.02f);
+    CHECK(!presentation.players()[0].deathTransitionPlaying);
+    CHECK(presentation.players()[0].revivedDuringUndo);
+    CHECK(!presentation.players()[0].motion.moving);
+    CHECK(presentation.enemies()[0].attackTransitionPlaying);
+
+    presentation.seekAction(undo, 0.20f);
+    CHECK(presentation.players()[0].motion.moving);
+    CHECK(presentation.players()[0].motion.renderPosition.x < 1.0f);
+    CHECK(presentation.players()[0].motion.renderPosition.x > 0.0f);
+    CHECK(near(presentation.players()[0].clipTimeSeconds, 0.11f));
+
+    const RenderFrameData undoFrame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = after,
+        .moving = true,
+        .activeAction = undo,
+        .presentation = presentation,
+        .settings = PresentationSettings {},
+        .animations = &animations,
+    });
+    const auto revivedPlayer = std::ranges::find_if(
+        undoFrame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.model == testManifest().playerModel();
+        });
+    CHECK(revivedPlayer != undoFrame.tiles.end());
+    if (revivedPlayer != undoFrame.tiles.end()) {
+        CHECK(revivedPlayer->animation ==
+            testManifest().playerMoveAnimation());
+        CHECK(!revivedPlayer->animationCrossfades);
+        CHECK(near(revivedPlayer->animationTimeSeconds, 0.11f));
+    }
+
+    presentation.seekAction(undo, 0.31f);
+    CHECK(!presentation.players()[0].motion.moving);
+    CHECK(near(presentation.players()[0].motion.renderPosition.x, 0.0f));
 }
 
 } // namespace
