@@ -10,6 +10,9 @@
 
 namespace sokoban {
 
+class AssetManifest;
+class PresentationSettings;
+
 // Debug-only animation browser state and ImGui adapter. Application only
 // schedules update/draw calls; the browser owns scanning, selection, playback,
 // and renderer preview delegation.
@@ -17,7 +20,10 @@ class AnimationPreviewDebugUi {
 public:
     void initialize(std::filesystem::path assetRoot);
     void update(float dt, VulkanRenderer& renderer);
-    void draw(VulkanRenderer& renderer);
+    void draw(VulkanRenderer& renderer, const AssetManifest& manifest);
+    [[nodiscard]] std::optional<RenderFrameData> previewFrame(
+        const AssetManifest& manifest,
+        const PresentationSettings& settings) const;
 
 private:
     void rescan(VulkanRenderer& renderer);
@@ -32,7 +38,9 @@ private:
     std::string error_;
     float time_ = 0.0f;
     float speed_ = 1.0f;
+    RenderModel model_ = cubeModel;
     bool playing_ = true;
+    bool loop_ = true;
     bool active_ = false;
     bool scanned_ = false;
 };

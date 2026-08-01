@@ -1,5 +1,9 @@
 #include "engine/AnimationPreviewDebugUi.hpp"
 
+#include "engine/AnimationPreviewScene.hpp"
+#include "engine/AssetManifest.hpp"
+#include "engine/PresentationSettings.hpp"
+
 #if SOKOBAN_ENABLE_DEBUG_UI
 #include <imgui.h>
 #endif
@@ -18,17 +22,23 @@ void AnimationPreviewDebugUi::initialize(std::filesystem::path assetRoot)
 void AnimationPreviewDebugUi::update(float dt, VulkanRenderer& renderer)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    if (active_ && clip_) {
+    if (active_ && clip_ && !model_.isCube()) {
         if (playing_) {
             time_ += dt * speed_;
-            if (clip_->durationSeconds > 0.0001f &&
-                time_ > clip_->durationSeconds) {
-                time_ = std::fmod(time_, clip_->durationSeconds);
+            const float duration = clip_->durationSeconds;
+            if (duration > 0.0001f && time_ >= duration) {
+                if (loop_) {
+                    time_ = std::fmod(time_, duration);
+                }
+                else {
+                    time_ = duration;
+                    playing_ = false;
+                }
             }
         }
-        renderer.setAnimationPreview(&*clip_, time_);
+        renderer.setAnimationPreview(model_, &*clip_, time_);
     } else {
-        renderer.setAnimationPreview(nullptr, 0.0f);
+        renderer.setAnimationPreview(cubeModel, nullptr, 0.0f);
     }
 #else
     (void)dt;
@@ -36,11 +46,37 @@ void AnimationPreviewDebugUi::update(float dt, VulkanRenderer& renderer)
 #endif
 }
 
-void AnimationPreviewDebugUi::draw(VulkanRenderer& renderer)
+void AnimationPreviewDebugUi::draw(
+    VulkanRenderer& renderer,
+    const AssetManifest& manifest)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     if (!scanned_) {
         rescan(renderer);
+    }
+
+    const char* modelLabel = model_.isCube()
+        ? "Select model..."
+        : manifest.model(model_).name.c_str();
+    if (ImGui::BeginCombo("Model", modelLabel)) {
+        for (std::size_t i = 0; i < manifest.models().size(); ++i) {
+            const AssetManifest::Model& definition = manifest.models()[i];
+            if (definition.geometry != ModelGeometry::Skinned) {
+                continue;
+            }
+            const RenderModel candidate { static_cast<uint32_t>(i + 1) };
+            const bool selected = candidate == model_;
+            if (ImGui::Selectable(definition.name.c_str(), selected) &&
+                !selected) {
+                renderer.setAnimationPreview(cubeModel, nullptr, 0.0f);
+                model_ = candidate;
+                active_ = clip_.has_value();
+            }
+            if (selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
     }
 
     if (ImGui::Button("Rescan Assets")) {
@@ -59,7 +95,7 @@ void AnimationPreviewDebugUi::draw(VulkanRenderer& renderer)
                     fileLabels_[static_cast<std::size_t>(i)].c_str(),
                     selected) &&
                 i != fileIndex_) {
-                renderer.setAnimationPreview(nullptr, 0.0f);
+                renderer.setAnimationPreview(cubeModel, nullptr, 0.0f);
                 fileIndex_ = i;
                 clipNames_ = listGltfAnimationNames(
                     files_[static_cast<std::size_t>(i)]);
@@ -103,9 +139,9 @@ void AnimationPreviewDebugUi::draw(VulkanRenderer& renderer)
                         static_cast<uint32_t>(i));
                     time_ = 0.0f;
                     playing_ = true;
-                    active_ = true;
+                    active_ = !model_.isCube();
                 } catch (const std::exception& exception) {
-                    renderer.setAnimationPreview(nullptr, 0.0f);
+                    renderer.setAnimationPreview(cubeModel, nullptr, 0.0f);
                     clip_.reset();
                     active_ = false;
                     error_ = exception.what();
@@ -132,28 +168,67 @@ void AnimationPreviewDebugUi::draw(VulkanRenderer& renderer)
         "Duration %.2fs, %zu channels",
         clip_->durationSeconds,
         clip_->channels.size());
-    ImGui::Checkbox("Preview On Player", &active_);
+    ImGui::Checkbox("Show Preview Scene", &active_);
+    ImGui::BeginDisabled(model_.isCube());
+    if (ImGui::Button("|<")) {
+        time_ = 0.0f;
+        playing_ = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("< Frame")) {
+        time_ = std::max(0.0f, time_ - 1.0f / 60.0f);
+        playing_ = false;
+    }
+    ImGui::SameLine();
     if (ImGui::Button(playing_ ? "Pause" : "Play")) {
         playing_ = !playing_;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Restart")) {
-        time_ = 0.0f;
+    if (ImGui::Button("Frame >")) {
+        time_ = std::min(
+            clip_->durationSeconds,
+            time_ + 1.0f / 60.0f);
+        playing_ = false;
     }
+    ImGui::SameLine();
+    if (ImGui::Button(">|")) {
+        time_ = clip_->durationSeconds;
+        playing_ = false;
+    }
+    ImGui::SameLine();
+    ImGui::Checkbox("Loop", &loop_);
     ImGui::SliderFloat("Speed", &speed_, 0.1f, 3.0f, "%.2fx");
     const float duration = std::max(clip_->durationSeconds, 0.0001f);
-    ImGui::SliderFloat("Time", &time_, 0.0f, duration, "%.2fs");
-    ImGui::TextDisabled(
-        "Plays on the player model, overriding gameplay animation.");
+    if (ImGui::SliderFloat(
+            "Timeline", &time_, 0.0f, duration, "%.3fs")) {
+        playing_ = false;
+    }
+    ImGui::EndDisabled();
 #else
     (void)renderer;
+    (void)manifest;
 #endif
+}
+
+std::optional<RenderFrameData> AnimationPreviewDebugUi::previewFrame(
+    const AssetManifest& manifest,
+    const PresentationSettings& settings) const
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (active_ && clip_ && !model_.isCube()) {
+        return animationPreviewScene::build(model_, manifest, settings);
+    }
+#else
+    (void)manifest;
+    (void)settings;
+#endif
+    return std::nullopt;
 }
 
 void AnimationPreviewDebugUi::rescan(VulkanRenderer& renderer)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    renderer.setAnimationPreview(nullptr, 0.0f);
+    renderer.setAnimationPreview(cubeModel, nullptr, 0.0f);
     files_.clear();
     fileLabels_.clear();
     fileIndex_ = -1;
@@ -164,6 +239,7 @@ void AnimationPreviewDebugUi::rescan(VulkanRenderer& renderer)
     time_ = 0.0f;
     speed_ = 1.0f;
     playing_ = true;
+    loop_ = true;
     active_ = false;
     scanned_ = true;
 

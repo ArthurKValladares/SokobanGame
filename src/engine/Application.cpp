@@ -397,8 +397,6 @@ void Application::run()
             dt,
             routedInput,
             preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
-        animationPreviewDebugUi_.update(dt, renderer_);
-
         const Vec2 windowSize = window_.size();
         const Vec2 pixelSize = window_.sizeInPixels();
         const Vec2 mouse = routedInput.pointer.position;
@@ -455,6 +453,7 @@ void Application::run()
                 handleShellEvent(ShellOptionsAction { *optionsAction });
             }
         }
+        animationPreviewDebugUi_.update(dt, renderer_);
         ui_.endFrame();
         preparedRenderFrame_ = renderer_.prepareFrame(
             buildRenderFrame(routedInput.editor));
@@ -1800,6 +1799,11 @@ RenderFrameData Application::buildRenderFrame(
         presentation_.conveyorBeltScrollOffset(
             gameplaySession_.stepDurationSeconds());
 #if SOKOBAN_ENABLE_DEBUG_UI
+    if (const std::optional<RenderFrameData> preview =
+            animationPreviewDebugUi_.previewFrame(
+                assetManifest_, presentationSettings_)) {
+        return *preview;
+    }
     if (levelEditor_.editingDocument()) {
         return RenderFrameBuilder::buildEditor({
             .manifest = assetManifest_,

@@ -44,7 +44,10 @@ public:
     [[nodiscard]] bool hasClip(RenderAnimation animation) const;
     [[nodiscard]] const GltfAnimationClip& clip(RenderAnimation animation) const;
 
-    void setPreview(const GltfAnimationClip* clip, float timeSeconds);
+    void setPreview(
+        RenderModel model,
+        const GltfAnimationClip* clip,
+        float timeSeconds);
     [[nodiscard]] std::optional<SkinningRequest> update(const RenderFrameData& frameData);
     [[nodiscard]] std::vector<InstanceSkinningRequest> updateInstances(
         const RenderFrameData& frameData);
@@ -72,6 +75,7 @@ private:
     PlaybackState legacyPlayback_;
     std::unordered_map<uint64_t, PlaybackState> instancePlayback_;
     const GltfAnimationClip* previewClip_ = nullptr;
+    RenderModel previewModel_ {};
     float previewTimeSeconds_ = 0.0f;
     const GltfAnimationClip* activePreviewClip_ = nullptr;
     float activePreviewTime_ = -1.0f;

@@ -153,7 +153,7 @@ void testPreviewOverridesAndThenReleasesGameplay()
     CHECK(controller.update(frameWithAnimation(idleClip, 0.0f)).has_value());
 
     GltfAnimationClip preview = makeClip("preview");
-    controller.setPreview(&preview, 2.0f);
+    controller.setPreview(heroModel, &preview, 2.0f);
     const auto previewRequest = controller.update(frameWithAnimation(pushClip, 4.0f));
     CHECK(previewRequest.has_value());
     CHECK(!previewRequest->blended());
@@ -161,9 +161,9 @@ void testPreviewOverridesAndThenReleasesGameplay()
     CHECK(near(previewRequest->toTimeSeconds, 2.0f));
     CHECK(!controller.update(frameWithAnimation(pushClip, 4.0f)));
 
-    controller.setPreview(&preview, 2.25f);
+    controller.setPreview(heroModel, &preview, 2.25f);
     CHECK(controller.update(frameWithAnimation(pushClip, 4.0f)).has_value());
-    controller.setPreview(nullptr, 0.0f);
+    controller.setPreview(cubeModel, nullptr, 0.0f);
     const auto gameplayRequest = controller.update(frameWithAnimation(pushClip, 4.0f));
     CHECK(gameplayRequest.has_value());
     CHECK(!gameplayRequest->blended());
@@ -174,7 +174,7 @@ void testPreviewOverridesAndThenReleasesGameplay()
     AnimationController instanceController = makeController();
     RenderFrameData instanceFrame = frameWithAnimation(pushClip, 4.0f);
     instanceFrame.tiles.front().animationInstanceId = 17;
-    instanceController.setPreview(&preview, 2.0f);
+    instanceController.setPreview(heroModel, &preview, 2.0f);
     CHECK(instanceController.updateInstances(instanceFrame).size() == 1);
     CHECK(instanceController.updateInstances(instanceFrame).size() == 1);
 
@@ -189,6 +189,16 @@ void testPreviewOverridesAndThenReleasesGameplay()
     CHECK(mixedPreview[0].skinning.toClip == &preview);
     CHECK(mixedPreview[1].model == RenderModel { 3 });
     CHECK(mixedPreview[1].skinning.toClip->name == "attack");
+
+    instanceController.setPreview(RenderModel { 3 }, &preview, 1.5f);
+    const auto selectedModelPreview =
+        instanceController.updateInstances(instanceFrame);
+    CHECK(selectedModelPreview.size() == 2);
+    CHECK(selectedModelPreview[0].model == heroModel);
+    CHECK(selectedModelPreview[0].skinning.toClip->name == "push");
+    CHECK(selectedModelPreview[1].model == RenderModel { 3 });
+    CHECK(selectedModelPreview[1].skinning.toClip == &preview);
+    CHECK(near(selectedModelPreview[1].skinning.toTimeSeconds, 1.5f));
 }
 
 void testNonLoopingAnimationFallsBackAtClipDuration()

@@ -805,9 +805,12 @@ VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources(
     };
 }
 
-void VulkanRenderer::setAnimationPreview(const GltfAnimationClip* clip, float timeSeconds)
+void VulkanRenderer::setAnimationPreview(
+    RenderModel model,
+    const GltfAnimationClip* clip,
+    float timeSeconds)
 {
-    modelResources_.setAnimationPreview(clip, timeSeconds);
+    modelResources_.setAnimationPreview(model, clip, timeSeconds);
 }
 
 VulkanRenderer::RenderResourceSet

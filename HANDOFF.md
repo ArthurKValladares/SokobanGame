@@ -152,8 +152,8 @@ cmake --build build --config Debug --target sokoban_title_tests
 .\build\Debug\sokoban_title_tests.exe
 ```
 
-Headless animation-controller tests cover Rogue animation selection,
-deduplication, crossfades, reverse playback, preview overrides, and reset:
+Headless animation-controller tests cover animation selection, deduplication,
+crossfades, reverse playback, selected-model preview overrides, and reset:
 
 ```powershell
 cmake --build build --config Debug --target sokoban_animation_controller_tests
@@ -161,8 +161,9 @@ cmake --build build --config Debug --target sokoban_animation_controller_tests
 ```
 
 Headless presentation tests cover mutable settings normalization, lighting/grid
-conversion, entity interpolation, clip/facing behavior, fallen offsets, and
-gameplay render-frame construction, including valid mirror beam/ghost previews:
+conversion, entity interpolation, clip/facing behavior, fallen offsets,
+isolated animation-preview stage construction, and gameplay render-frame
+construction, including valid mirror beam/ghost previews:
 
 ```powershell
 cmake --build build --config Debug --target sokoban_presentation_tests
@@ -186,7 +187,7 @@ cmake --build build --config Debug --target sokoban_content_pipeline_tests
 .\build\Debug\sokoban_content_pipeline_tests.exe
 ```
 
-Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Developer Tools window with Engine, Asset Manifest, Level Editor, and Animation tabs. Animation owns global clip speeds, per-semantic-use clip/speed controls, and the existing source glTF/GLB preview browser. Preview can play any clip on the player model with play/pause/scrub/speed controls, overriding gameplay animation while active. Release builds still compile the headless editor APIs but do not expose the ImGui editor/debug UI or compile source-asset paths into the executable.
+Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Developer Tools window with Engine, Asset Manifest, Level Editor, and Animation tabs. Animation owns global clip speeds, per-semantic-use clip/speed controls, and a source glTF/GLB preview browser. The preview independently selects any skinned manifest model and source animation, replaces the normal game/editor frame with an isolated 3x3 authoring stage, and supports play/pause, looping, speed, 1/60-second frame steps, and exact timeline scrubbing. Release builds still compile the headless editor APIs but do not expose the ImGui editor/debug UI or compile source-asset paths into the executable.
 
 ## Important Source Map
 
@@ -232,12 +233,18 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   canonical JSON into the active staged runtime assets so a Visual Studio
   relaunch retains tuning without a content rebuild. Persistence and both-file
   reload behavior are covered by `sokoban_animation_catalog_tests`.
+- `src/engine/AnimationPreviewScene.*`: Vulkan-free builder for the isolated
+  3x3 animation stage. It emits the selected skinned model with a stable
+  instance identity; `AnimationPreviewDebugUi` owns the arbitrary source clip
+  and timeline, while the renderer only samples the requested model/time.
 - `src/engine/ParticleSystem.*`: Vulkan-free reusable particle simulation. Effect definitions provide texture choices, tint, burst count, lifetime/size ranges, spawn radius, and velocity/rotation ranges; live particles own randomized state and emit renderer-facing billboards with smooth lifetime fading. `MirrorParticleEffect.*` resolves the ten code-configured smoke texture names through the manifest and builds the cyan mirror-swap effect. Covered by `sokoban_particle_tests`.
 - `src/engine/RenderFrameBuilder.*`: SDL/Vulkan-free construction of gameplay and editor `RenderFrameData`. Owns tile/model mapping, static geometry, procedural open-water planes/shore edges, ladder rungs, editor previews/pick-only cells, dynamic entities, tile scaling, and conveyor texture offsets. Water is emitted as `WaterSurface` data rather than a manifest model; filled cells omit the surface. Level-wide water adds a one-cell shoreline ring and four large non-pickable continuation surfaces outside the board without changing the frame's authored dimensions.
 - `src/engine/render/IsoScenePreparer.*`: Vulkan-free once-per-frame scene preparation and picking. Computes top-down, isometric-camera, and shadow layouts; creates one projected/cull-tested face pool; and emits depth-sorted opaque/translucent face indices plus model, shadow, picking, and camera-facing particle billboard lists. Particles are translucent-only, shadowless, and non-pickable. It fills reusable renderer-owned frame scratch rather than using function-static storage. Covered by `tests/IsoScenePreparerTests.cpp` (`sokoban_iso_scene_preparer_tests`).
 - `src/engine/ApplicationDebugUi.*`: Debug-only ImGui adapter for engine statistics and tuning. Edits `PresentationSettings` and calls the public `GameplaySession`/`VulkanRenderer` controls instead of storing application logic.
 - `src/engine/DebugUi.*`: Debug-only registry and presentation owner for the single Developer Tools window. Feature adapters register content callbacks as reorderable, scrolling tabs instead of creating independent windows.
-- `src/engine/AnimationPreviewDebugUi.*`: Debug-only owner of animation asset scanning, clip selection, preview playback state, and renderer preview delegation.
+- `src/engine/AnimationPreviewDebugUi.*`: Debug-only owner of animation/model
+  selection, source-asset scanning, play/loop/speed/scrub/frame-step state,
+  preview-scene activation, and renderer preview delegation.
 - `src/engine/AnimationCatalogDebugUi.*`: thin Debug-only ImGui adapter for
   live global/per-use tuning and clip rebinding. Save/reload and dirty state
   are delegated to `AnimationCatalogEditor`; it composes

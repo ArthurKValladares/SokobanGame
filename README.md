@@ -57,7 +57,7 @@ executable-relative assets.
 
 ## Tests
 
-The project currently registers 36 CTest suites covering rules, level parsing,
+The project currently registers 38 CTest suites covering rules, level parsing,
 campaign and gameplay sessions, persistence and migrations, input routing,
 player UI, renderer state, scene preparation and picking, editor transactions,
 assets, animation, particles, tasks, logging, and content packaging.
@@ -168,11 +168,14 @@ shaders, and stages only required files beside the executable.
 playback tuning. Each manifest animation has a global speed, and every
 code-declared semantic use such as `player.idle` or `enemy.idle` selects a clip
 and contributes its own speed multiplier. Debug builds expose both layers in
-the Developer Tools `Animation` tab, alongside the existing clip preview. The
-content build rejects missing, duplicate, or stale use IDs and unknown or
-untuned manifest clips. `Save Animation Catalog` atomically writes the source
-catalog and mirrors it into the running Visual Studio build's staged assets,
-so tuning survives an immediate restart without requiring a rebuild.
+the Developer Tools `Animation` tab. Its preview tool independently selects a
+skinned manifest model and any source glTF/GLB animation, renders that pairing
+on an isolated 3x3 stage, and provides play/pause, looping, speed, frame-step,
+and exact timeline scrubbing controls. The content build rejects missing,
+duplicate, or stale use IDs and unknown or untuned manifest clips. `Save
+Animation Catalog` atomically writes the source catalog and mirrors it into the
+running Visual Studio build's staged assets, so tuning survives an immediate
+restart without requiring a rebuild.
 
 Models default to normalized unit-tile geometry. Set
 `"preserveSourceScale": true` on free-form scenery that should retain its
@@ -210,6 +213,8 @@ staged assets, and third-party licenses.
   global/per-use playback speeds and atomic JSON persistence.
 - `src/engine/AnimationCatalogEditor.*`: headless dirty/reload/save workflow
   that keeps source and staged runtime catalogs synchronized.
+- `src/engine/AnimationPreviewScene.*`: Vulkan-free construction of the
+  isolated 3x3 animation-authoring stage.
 - `src/engine/LevelEditor.*`: headless document, history, validation, and
   transactional project filesystem operations.
 - `src/engine/DecorationMeshCatalog.*`: Debug-authoring discovery of source

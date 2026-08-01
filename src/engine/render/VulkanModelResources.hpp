@@ -117,7 +117,10 @@ public:
     // have signaled. This never waits for GPU work.
     void retireCompletedUploads();
 
-    void setAnimationPreview(const GltfAnimationClip* clip, float timeSeconds);
+    void setAnimationPreview(
+        RenderModel model,
+        const GltfAnimationClip* clip,
+        float timeSeconds);
     void updateAnimations(const RenderFrameData& frameData, uint32_t frameIndex);
 
     [[nodiscard]] MeshView meshForTile(

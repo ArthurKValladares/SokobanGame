@@ -135,10 +135,13 @@ public:
     [[nodiscard]] float wireframeLineWidth() const;
     [[nodiscard]] std::array<float, 2> wireframeLineWidthRange() const;
     void setWireframeLineWidth(float lineWidth);
-    // Debug: overrides the player model's animation with an arbitrary clip
-    // (nullptr restores gameplay animation). The clip must stay alive while
-    // set; call every frame with the current preview time.
-    void setAnimationPreview(const GltfAnimationClip* clip, float timeSeconds);
+    // Debug: applies an arbitrary clip to one selected skinned model
+    // (nullptr restores ordinary frame animation). The clip must stay alive
+    // while set; call every frame with the current preview time.
+    void setAnimationPreview(
+        RenderModel model,
+        const GltfAnimationClip* clip,
+        float timeSeconds);
 
 private:
     struct FrameResources {

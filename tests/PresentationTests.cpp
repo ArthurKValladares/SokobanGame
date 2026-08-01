@@ -2,6 +2,7 @@
 // render-frame construction.
 
 #include "engine/AnimationCatalog.hpp"
+#include "engine/AnimationPreviewScene.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/GameplayPresentation.hpp"
 #include "engine/PresentationSettings.hpp"
@@ -187,6 +188,51 @@ void testCameraPitchTransition()
 
     presentation.updateCameraPitch(0.0f, 0.0f, 0.0f);
     CHECK(near(presentation.cameraPitchDegrees(), 0.0f));
+}
+
+void testAnimationPreviewBuildsIsolatedStage()
+{
+    TEST("animationPreviewBuildsIsolatedStage");
+    const RenderModel model = testManifest().enemyModel();
+    const PresentationSettings settings;
+    const RenderFrameData frame = animationPreviewScene::build(
+        model, testManifest(), settings);
+
+    CHECK(frame.viewMode == RenderViewMode::Isometric3D);
+    CHECK(frame.levelWidth == animationPreviewScene::bedSize);
+    CHECK(frame.levelHeight == animationPreviewScene::bedSize);
+    CHECK(frame.levelDepth == 2);
+    CHECK(frame.cameraDistanceMultiplier.has_value());
+    if (frame.cameraDistanceMultiplier) {
+        CHECK(near(
+            *frame.cameraDistanceMultiplier,
+            animationPreviewScene::cameraDistanceMultiplier));
+    }
+    CHECK(frame.tiles.size() == 10);
+    CHECK(std::ranges::count_if(
+        frame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.model.isCube() && tile.showGrid;
+        }) == 9);
+
+    const auto actor = std::ranges::find_if(
+        frame.tiles,
+        [model](const RenderFrameData::Tile& tile) {
+            return tile.model == model;
+        });
+    CHECK(actor != frame.tiles.end());
+    if (actor != frame.tiles.end()) {
+        const GridPosition3 expectedCell {
+            static_cast<int>(animationPreviewScene::bedCenter),
+            static_cast<int>(animationPreviewScene::bedCenter),
+            1,
+        };
+        CHECK(actor->cell == expectedCell);
+        CHECK(actor->animationInstanceId ==
+            animationPreviewScene::animationInstanceId);
+        CHECK(actor->animation.isNone());
+        CHECK(actor->affectsCameraFit);
+    }
 }
 
 void testSettingsNormalizeAndConvert()
@@ -1555,6 +1601,7 @@ void testEnemyFacingAttackAndAnimationInstances()
 int main()
 {
     testCameraPitchTransition();
+    testAnimationPreviewBuildsIsolatedStage();
     testSettingsNormalizeAndConvert();
     testPresentationResetClocksAndFallenTargets();
     testPresentationInterpolatesActionsAndClips();

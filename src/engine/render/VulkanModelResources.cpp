@@ -640,10 +640,11 @@ bool VulkanModelResources::assetsReady(
 }
 
 void VulkanModelResources::setAnimationPreview(
+    RenderModel model,
     const GltfAnimationClip* clip,
     float timeSeconds)
 {
-    animationController_.setPreview(clip, timeSeconds);
+    animationController_.setPreview(model, clip, timeSeconds);
 }
 
 void VulkanModelResources::updateAnimations(

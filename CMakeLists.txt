@@ -151,6 +151,7 @@ endfunction()
 add_library(sokoban_core STATIC
     src/engine/AnimationCatalog.cpp
     src/engine/AnimationCatalogEditor.cpp
+    src/engine/AnimationPreviewScene.cpp
     src/engine/AtomicFile.cpp
     src/engine/AsyncSaveStore.cpp
     src/engine/AssetManifest.cpp

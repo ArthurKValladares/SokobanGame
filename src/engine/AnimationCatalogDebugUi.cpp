@@ -105,7 +105,7 @@ bool AnimationCatalogDebugUi::draw(
 
     if (ImGui::CollapsingHeader(
             "Animation Preview", ImGuiTreeNodeFlags_DefaultOpen)) {
-        preview.draw(renderer);
+        preview.draw(renderer, manifest);
     }
     return changed;
 #else

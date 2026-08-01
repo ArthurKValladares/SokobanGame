@@ -22,6 +22,7 @@ void AnimationController::clear()
 {
     clips_.clear();
     previewClip_ = nullptr;
+    previewModel_ = cubeModel;
     previewTimeSeconds_ = 0.0f;
     resetPlayback();
 }
@@ -55,15 +56,22 @@ const GltfAnimationClip& AnimationController::clip(RenderAnimation animation) co
     return clips_[animation.index()];
 }
 
-void AnimationController::setPreview(const GltfAnimationClip* clip, float timeSeconds)
+void AnimationController::setPreview(
+    RenderModel model,
+    const GltfAnimationClip* clip,
+    float timeSeconds)
 {
+    previewModel_ = clip != nullptr ? model : cubeModel;
     previewClip_ = clip;
     previewTimeSeconds_ = timeSeconds;
 }
 
 std::optional<AnimationController::SkinningRequest> AnimationController::update(const RenderFrameData& frameData)
 {
-    if (previewClip_ != nullptr) {
+    if (previewClip_ != nullptr &&
+        std::ranges::any_of(frameData.tiles, [&](const RenderFrameData::Tile& tile) {
+            return tile.model == previewModel_;
+        })) {
         constexpr float timeEpsilon = 0.0001f;
         if (previewClip_ == activePreviewClip_ &&
             std::abs(previewTimeSeconds_ - activePreviewTime_) < timeEpsilon) {
@@ -102,7 +110,7 @@ AnimationController::updateInstances(const RenderFrameData& frameData)
             continue;
         }
         PlaybackState& playback = instancePlayback_[tile.animationInstanceId];
-        if (previewClip_ != nullptr && tile.model == playerModel_) {
+        if (previewClip_ != nullptr && tile.model == previewModel_) {
             playback = {};
             requests.push_back({
                 .instanceId = tile.animationInstanceId,
