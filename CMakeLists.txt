@@ -189,6 +189,7 @@ add_library(sokoban_core STATIC
     src/engine/SaveStore.cpp
     src/engine/SettingsCoordinator.cpp
     src/engine/SettingsTypes.cpp
+    src/engine/ActionPlan.cpp
     src/engine/SplatCanvas.cpp
     src/engine/SplatPainter.cpp
     src/engine/StateDelta.cpp
@@ -555,6 +556,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME ground_pick TARGET sokoban_ground_pick_tests
         LIBS sokoban_core
         SOURCES tests/GroundPickTests.cpp
+    )
+    sokoban_add_test(NAME action_plan TARGET sokoban_action_plan_tests
+        LIBS sokoban_core
+        SOURCES tests/ActionPlanTests.cpp
     )
     sokoban_add_test(NAME state_delta TARGET sokoban_state_delta_tests
         LIBS sokoban_core

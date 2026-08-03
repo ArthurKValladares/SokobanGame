@@ -207,9 +207,22 @@ struct ActionPlan {
    Known gap, deferred to step 4: `GameplayPresentation::beginAction` calls
    `syncToGameState(action.before)`, which is a stale whole-world snapshot.
    Harmless with one action in flight; wrong once actions overlap.
-2. `ActionPlan` plus planners for the current action kinds, still executed one
-   at a time. Still no behaviour change — this is a pure restructuring, and the
-   fact that behaviour is unchanged is exactly what makes it verifiable.
+2. **Done.** `ActionPlan` (`src/engine/ActionPlan.hpp`) plus pure `plans::`
+   functions for the existing action kinds — `worldStep`, `fromMirrorPreview`,
+   `restart`, `inverted`. `GameplaySession` keeps only timing, history and the
+   running move total. No behaviour change.
+
+   `GameplaySession::Action` is now an **alias** for `ActionPlan` rather than
+   its own struct, and `ActionPlan` deliberately carries no new fields. The
+   reason is that `Snapshot` — including its `undoStack` of actions — is
+   serialised into save files by `PlayerProfileCodec`. Adding `effect` there
+   would either bloat every save with a delta per undo entry, or default on
+   load and make a restored action compare unequal to a live one. The delta
+   therefore stays derived at completion, and the `effect` field belongs on
+   whatever the scheduler holds in step 4, not on the persisted record.
+
+   Move counts are left at zero by the planners: only the session knows the
+   running total.
 3. Full-chain planning for slides. Behaviour changes here: slides become
    stable. Still single-timeline, so no reservations needed yet.
 4. `ReservationTable` and concurrent execution, with queueing and admission

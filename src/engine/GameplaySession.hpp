@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/ActionPlan.hpp"
 #include "engine/ActionPresentation.hpp"
 #include "engine/GameplayConfig.hpp"
 #include "engine/Level.hpp"
@@ -26,19 +27,11 @@ public:
 
     // One discrete world step (or undo/restart transition). State remains at
     // `before` until the presentation layer completes the action.
-    struct Action {
-        GameState before;
-        GameState after;
-        float durationSeconds = config::stepDurationSeconds;
-        bool playerPushing = false;
-        bool reversed = false;
-        int playerMoveCountBefore = 0;
-        int playerMoveCountAfter = 0;
-        std::optional<MoveDirection> facingDirection;
-        ActionPresentationTimeline presentation;
-
-        bool operator==(const Action&) const = default;
-    };
+    //
+    // The type lives in ActionPlan.hpp, where the pure functions that produce
+    // it live too. It is an alias rather than its own struct so that the save
+    // format, which persists these inside `Snapshot`, is unaffected.
+    using Action = ActionPlan;
 
     struct Snapshot {
         GameState state;
@@ -112,7 +105,6 @@ private:
         MoveDirection direction,
         std::optional<MoveDirection> queuedDirection);
     [[nodiscard]] bool hasPendingMove(MoveDirection direction) const;
-    [[nodiscard]] Action invertAction(const Action& action) const;
     void beginAction(Action action);
 
     GameState state_;

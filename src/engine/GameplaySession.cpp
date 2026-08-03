@@ -10,53 +10,8 @@
 namespace sokoban {
 namespace {
 
-std::optional<MoveDirection> movementDirection(GridPosition3 from, GridPosition3 to)
-{
-    const int deltaX = to.x - from.x;
-    const int deltaY = to.y - from.y;
-    if (deltaX < 0) {
-        return MoveDirection::Left;
-    }
-    if (deltaX > 0) {
-        return MoveDirection::Right;
-    }
-    if (deltaY < 0) {
-        return MoveDirection::Up;
-    }
-    if (deltaY > 0) {
-        return MoveDirection::Down;
-    }
-    return std::nullopt;
-}
-
-bool anyPlayerMoved(const GameState& before, const GameState& after)
-{
-    const std::size_t count = std::min(
-        before.players.size(), after.players.size());
-    for (std::size_t i = 0; i < count; ++i) {
-        if (!(before.players[i].cell == after.players[i].cell)) {
-            return true;
-        }
-    }
-    return before.players.size() != after.players.size();
-}
-
-std::optional<MoveDirection> firstPlayerMovementDirection(
-    const GameState& before,
-    const GameState& after)
-{
-    const std::size_t count = std::min(
-        before.players.size(), after.players.size());
-    for (std::size_t i = 0; i < count; ++i) {
-        const std::optional<MoveDirection> direction = movementDirection(
-            before.players[i].cell,
-            after.players[i].cell);
-        if (direction) {
-            return direction;
-        }
-    }
-    return std::nullopt;
-}
+// movementDirection, anyPlayerMoved and firstPlayerMovementDirection now live
+// in plans:: alongside the planners that need them.
 
 bool matchesForwardTransition(
     const Level& level,
@@ -87,7 +42,7 @@ bool matchesForwardTransition(
     return std::ranges::any_of(inputs, [&](std::optional<MoveDirection> input) {
         const GameState after = rules::step(level, action.before, input, rates);
         const int expectedMoveCount = action.playerMoveCountBefore +
-            (input && anyPlayerMoved(action.before, after) ? 1 : 0);
+            (input && plans::anyPlayerMoved(action.before, after) ? 1 : 0);
         return !(after == action.before) &&
             after == action.after &&
             action.playerMoveCountAfter == expectedMoveCount;
@@ -307,52 +262,24 @@ bool GameplaySession::tryStartHeldMove(const Level& level, const Controls& contr
 
 bool GameplaySession::tryStartWorldStep(const Level& level, std::optional<MoveDirection> playerInput)
 {
-    GameState after = rules::step(level, state_, playerInput, stepRates_);
-    if (after == state_) {
+    std::optional<Action> action = plans::worldStep(
+        level, state_, playerInput, stepRates_, stepDurationSeconds_);
+    if (!action) {
         return false;
     }
+
+    // The plan settles the outcome; the session only knows the running move
+    // total, so it fills that in.
     const bool countsAsPlayerMove = playerInput.has_value() &&
-        anyPlayerMoved(state_, after);
-
-    Action action {
-        .before = state_,
-        .after = std::move(after),
-        .durationSeconds = stepDurationSeconds_,
-        .playerMoveCountBefore = playerMoveCount_,
-        .playerMoveCountAfter = playerMoveCount_ + (countsAsPlayerMove ? 1 : 0),
-        .facingDirection = playerInput,
-    };
-
-    if (playerInput && anyPlayerMoved(action.before, action.after)) {
-        for (std::size_t playerIndex = 0;
-             playerIndex < action.before.players.size();
-             ++playerIndex) {
-            const GridPosition3 pushCell = rules::movementTarget(
-                action.before.players[playerIndex].cell,
-                *playerInput);
-            for (std::size_t i = 0;
-                 i < action.before.movables.size() &&
-                 i < action.after.movables.size();
-                 ++i) {
-                if (action.before.movables[i].cell == pushCell &&
-                    !(action.after.movables[i].cell == pushCell)) {
-                    action.playerPushing = true;
-                    break;
-                }
-            }
-            if (action.playerPushing) {
-                break;
-            }
-        }
-    }
+        plans::anyPlayerMoved(action->before, action->after);
+    action->playerMoveCountBefore = playerMoveCount_;
+    action->playerMoveCountAfter =
+        playerMoveCount_ + (countsAsPlayerMove ? 1 : 0);
 
     if (playerInput) {
         autoMotionPaused_ = false;
-    } else {
-        action.facingDirection = firstPlayerMovementDirection(
-            action.before, action.after);
     }
-    beginAction(std::move(action));
+    beginAction(std::move(*action));
     return true;
 }
 
@@ -371,13 +298,10 @@ bool GameplaySession::tryStartMirrorAction(const Level& level)
         lastMirrorSwapDestinations_.push_back(entity.destination);
     }
     ++mirrorActivationSequence_;
-    beginAction({
-        .before = state_,
-        .after = std::move(activation->after),
-        .durationSeconds = 0.0f,
-        .playerMoveCountBefore = playerMoveCount_,
-        .playerMoveCountAfter = playerMoveCount_,
-    });
+    Action action = plans::fromMirrorPreview(state_, *activation);
+    action.playerMoveCountBefore = playerMoveCount_;
+    action.playerMoveCountAfter = playerMoveCount_;
+    beginAction(std::move(action));
     return true;
 }
 
@@ -387,11 +311,11 @@ bool GameplaySession::tryStartUndoMove()
         return false;
     }
 
-    Action action = invertAction(undoHistory_.back());
+    Action action = plans::inverted(undoHistory_.back());
     action.durationSeconds = action.presentation.empty()
         ? stepDurationSeconds_
         : action.presentation.durationSeconds;
-    action.facingDirection = firstPlayerMovementDirection(
+    action.facingDirection = plans::firstPlayerMovementDirection(
         action.after, action.before);
     autoMotionPaused_ = true;
     beginAction(std::move(action));
@@ -400,23 +324,16 @@ bool GameplaySession::tryStartUndoMove()
 
 bool GameplaySession::tryStartRestart(const Level& level)
 {
-    if (rules::anyPlayerDead(state_)) {
+    std::optional<Action> action =
+        plans::restart(level, state_, stepDurationSeconds_);
+    if (!action) {
         return false;
     }
 
-    GameState restarted = rules::initialState(level);
-    if (state_ == restarted) {
-        return false;
-    }
-
+    action->playerMoveCountBefore = playerMoveCount_;
+    action->playerMoveCountAfter = 0;
     autoMotionPaused_ = false;
-    beginAction({
-        .before = state_,
-        .after = std::move(restarted),
-        .durationSeconds = stepDurationSeconds_,
-        .playerMoveCountBefore = playerMoveCount_,
-        .playerMoveCountAfter = 0,
-    });
+    beginAction(std::move(*action));
     return true;
 }
 
@@ -441,19 +358,6 @@ bool GameplaySession::hasPendingMove(MoveDirection direction) const
     return std::ranges::any_of(pendingCommands_, [direction](const Command& command) {
         return command.type == CommandType::Move && command.direction == direction;
     });
-}
-
-GameplaySession::Action GameplaySession::invertAction(const Action& action) const
-{
-    return {
-        .before = action.after,
-        .after = action.before,
-        .playerPushing = action.playerPushing,
-        .reversed = true,
-        .playerMoveCountBefore = action.playerMoveCountAfter,
-        .playerMoveCountAfter = action.playerMoveCountBefore,
-        .presentation = action.presentation,
-    };
 }
 
 void GameplaySession::setActiveActionPresentation(
