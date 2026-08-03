@@ -1,5 +1,7 @@
 #include "engine/GameplaySession.hpp"
 
+#include "engine/StateDelta.hpp"
+
 #include <algorithm>
 #include <array>
 #include <ranges>
@@ -254,7 +256,15 @@ void GameplaySession::completeActiveAction()
         return;
     }
 
-    state_ = activeAction_.after;
+    // Only what this action changed, rather than assigning its `after`
+    // wholesale. With one action in flight the two are identical; once actions
+    // can overlap, assigning a whole state would erase whatever the other
+    // in-flight actions had already committed, because `after` is a snapshot of
+    // the world as it stood when this action started. Undo goes through the
+    // same path: an inverted action's endpoints are swapped, so its delta is
+    // the inverse delta.
+    StateDelta::between(activeAction_.before, activeAction_.after)
+        .applyTo(state_);
     moveHistory_.push_back(activeAction_);
     playerMoveCount_ = activeAction_.playerMoveCountAfter;
     if (activeAction_.reversed) {

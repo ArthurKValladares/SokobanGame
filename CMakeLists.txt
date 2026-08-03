@@ -191,6 +191,7 @@ add_library(sokoban_core STATIC
     src/engine/SettingsTypes.cpp
     src/engine/SplatCanvas.cpp
     src/engine/SplatPainter.cpp
+    src/engine/StateDelta.cpp
     src/engine/TileThumbnailBake.cpp
     src/engine/TaskSystem.cpp
     src/engine/TileTypes.cpp
@@ -554,6 +555,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME ground_pick TARGET sokoban_ground_pick_tests
         LIBS sokoban_core
         SOURCES tests/GroundPickTests.cpp
+    )
+    sokoban_add_test(NAME state_delta TARGET sokoban_state_delta_tests
+        LIBS sokoban_core
+        SOURCES tests/StateDeltaTests.cpp
     )
     sokoban_add_test(NAME tile_thumbnail_bake TARGET sokoban_tile_thumbnail_bake_tests
         LIBS sokoban_core

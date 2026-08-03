@@ -193,8 +193,20 @@ struct ActionPlan {
 
 ## Suggested sequence
 
-1. Delta refactor of `Action` / undo / `Snapshot`, with the existing single
-   timeline still in place. No behaviour change; all existing suites must pass.
+1. **Done.** `StateDelta` (`src/engine/StateDelta.hpp`) plus delta application
+   in `GameplaySession::completeActiveAction`. No behaviour change.
+
+   Smaller than this document originally implied, and deliberately so. The
+   substance of the step is that completing an action writes only what that
+   action changed, and that undo runs the same machinery backwards — both of
+   which fall out of one call site. `Action` still carries `before`/`after`,
+   because `GameplayPresentation` genuinely needs paired whole states to
+   animate from, and the delta is derived from them. When step 2 introduces
+   `ActionPlan`, the stored `effect` belongs there rather than on `Action`.
+
+   Known gap, deferred to step 4: `GameplayPresentation::beginAction` calls
+   `syncToGameState(action.before)`, which is a stale whole-world snapshot.
+   Harmless with one action in flight; wrong once actions overlap.
 2. `ActionPlan` plus planners for the current action kinds, still executed one
    at a time. Still no behaviour change — this is a pure restructuring, and the
    fact that behaviour is unchanged is exactly what makes it verifiable.
