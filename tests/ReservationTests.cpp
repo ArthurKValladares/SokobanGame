@@ -390,8 +390,64 @@ void testEmptyPlanClaimsNothing()
 
 } // namespace
 
+void testEntitiesAnActionAddsAreClaimed()
+{
+    TEST("entitiesAnActionAddsAreClaimed");
+    // The bug this pins: tracks were built by walking `before`-sized ranges
+    // into each leg, so an entity a leg *adds* fell off the end of the loop and
+    // claimed nothing at all. Mirror activation clones a player, and the
+    // clone's destination was left free for anything else to walk into - a
+    // silent hole in the guarantee rather than a visible refusal.
+    const Level level = makeLevel({
+        { "........", "........" },
+        { "C      #", "        " },
+    });
+    const GameState state = rules::initialState(level);
+
+    // Mirror activation as the session builds it: instantaneous, no legs of its
+    // own, and the clone appended to the player vector.
+    GameState reflected = state;
+    reflected.players[0].cell = cell(3, 0);
+    GameState::Player clone = reflected.players[0];
+    clone.id = reflected.players[0].id + 100;
+    clone.cell = cell(5, 0);
+    reflected.players.push_back(clone);
+
+    plans::PlannedAction activation;
+    activation.action.before = state;
+    activation.action.after = reflected;
+    activation.legs.push_back(reflected);
+
+    const ActionReservations claims = plans::reservationsFor(activation);
+    // The original's move, as before.
+    CHECK(holds(claims.writes, cell(0, 0), 0));
+    CHECK(holds(claims.writes, cell(3, 0), 999));
+    // And the clone's cell, held open-ended from the instant it appears.
+    CHECK(holds(claims.writes, cell(5, 0), 1));
+    CHECK(holds(claims.writes, cell(5, 0), 999));
+    // But not before it existed. Claiming instant 0 would refuse concurrency
+    // that is genuinely fine, since nothing was standing there yet.
+    CHECK(!holds(claims.writes, cell(5, 0), 0));
+
+    // So something else walking onto the clone's cell is now refused.
+    ReservationTable table;
+    table.admit(1, claims, 0);
+
+    plans::PlannedAction intruder;
+    GameState before = state;
+    before.movables.push_back({});
+    before.movables[0].cell = cell(5, 1);
+    intruder.action.before = before;
+    GameState after = before;
+    after.movables[0].cell = cell(5, 0);
+    intruder.action.after = after;
+    intruder.legs.push_back(after);
+    CHECK(table.conflict(plans::reservationsFor(intruder), 0).has_value());
+}
+
 int main()
 {
+    testEntitiesAnActionAddsAreClaimed();
     testOverlapRules();
     testSlideClaimsItsWholePath();
     testUninvolvedEntitiesAreNotClaimed();

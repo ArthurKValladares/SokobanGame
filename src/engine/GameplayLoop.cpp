@@ -3,6 +3,8 @@
 #include "engine/Rules.hpp"
 
 #include <algorithm>
+#include <cstddef>
+#include <vector>
 
 namespace sokoban {
 namespace {
@@ -71,7 +73,49 @@ void startPresentation(
         started = session.findInFlight(actionId);
     }
     presentation.beginAction(started->plan, session.state());
-    presentation.seekAction(started->plan, 0.0f);
+    // A deferred action holds its claims but has not begun, and its entities
+    // are still being driven by the action that caused it. Seeking it to zero
+    // would snap them to where that action is going to leave them, cutting its
+    // animation short. It takes them over when its own clock reaches zero.
+    if (started->elapsedSeconds >= 0.0f) {
+        presentation.seekAction(started->plan, 0.0f);
+    }
+}
+
+// The highest action id in flight, used as a watermark for "already has a
+// timeline". Ids only ever increase, so anything above it is new.
+std::size_t highestInFlightId(const GameplaySession& session)
+{
+    std::size_t highest = 0;
+    for (const ActionScheduler::InFlight& action : session.inFlight()) {
+        highest = std::max(highest, action.id);
+    }
+    return highest;
+}
+
+// Installs a timeline on every action admitted since the watermark.
+//
+// One call to `tryStartNextAction` can start more than one action - a push and
+// the slide it sets off are planned together - so taking the newest and
+// assuming it is the only one would leave the others without a timeline, which
+// makes them instantaneous and commits them on the frame they started.
+void startNewPresentations(
+    GameplaySession& session,
+    GameplayPresentation& presentation,
+    std::size_t& watermark)
+{
+    std::vector<std::size_t> fresh;
+    for (const ActionScheduler::InFlight& action : session.inFlight()) {
+        if (action.id > watermark) {
+            fresh.push_back(action.id);
+        }
+    }
+    // Collected first: `startPresentation` writes through the session, and the
+    // in-flight vector must not be iterated across a mutation.
+    for (const std::size_t id : fresh) {
+        watermark = std::max(watermark, id);
+        startPresentation(session, presentation, id);
+    }
 }
 
 // Samples every action in flight at its own elapsed time. Each one clears and
@@ -80,6 +124,10 @@ void seekAllInFlight(
     const GameplaySession& session, GameplayPresentation& presentation)
 {
     for (const ActionScheduler::InFlight& action : session.inFlight()) {
+        // Not started yet; see `startPresentation`.
+        if (action.elapsedSeconds < 0.0f) {
+            continue;
+        }
         presentation.seekAction(
             action.plan,
             std::min(
@@ -121,6 +169,8 @@ GameplayLoop::UpdateResult GameplayLoop::update(
     UpdateResult result;
     std::size_t observedMirrorActivation =
         session.mirrorActivationSequence();
+    // Anything already running arrived with a timeline in an earlier frame.
+    std::size_t presentedThrough = highestInFlightId(session);
 
     // The old loop had to finish one action before it could start the next,
     // because there was only ever one. It does not any more: admit whatever can
@@ -137,8 +187,6 @@ GameplayLoop::UpdateResult GameplayLoop::update(
             .verticalMove = heldVertical(input),
             .horizontalMove = heldHorizontal(input),
         };
-        // Admits one action today; the same call admits every non-conflicting
-        // action once the reservation gate opens.
         while (session.tryStartNextAction(level, controls)) {
             if (session.mirrorActivationSequence() !=
                 observedMirrorActivation) {
@@ -147,8 +195,7 @@ GameplayLoop::UpdateResult GameplayLoop::update(
                 result.mirrorSwapDestinations =
                     session.lastMirrorSwapDestinations();
             }
-            startPresentation(
-                session, presentation, session.inFlight().back().id);
+            startNewPresentations(session, presentation, presentedThrough);
         }
         if (!session.moving()) {
             return result;

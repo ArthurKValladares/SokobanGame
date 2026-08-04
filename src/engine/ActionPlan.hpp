@@ -86,6 +86,84 @@ inline constexpr int maxChainedSteps = 512;
     const rules::StepRates& rates,
     float stepDurationSeconds);
 
+// Every living player takes one input-driven step, together with everything
+// that step drags in: a block they push, an enemy that block shoves, a player
+// the enemy kills. Players are planned as one action rather than one each
+// because they are one character - mirror copies share a single input.
+//
+// One step, deliberately. The slide a push sets off is planned separately, so
+// that the player is released after their own tile instead of being held for
+// the length of the slide. The slide is still settled at the moment of the
+// push - both plans are made from the same instant - which is what the
+// guarantee actually requires. There is no separate `planPush`: whether a move
+// turns out to be a push is for the rules to decide, not the caller.
+[[nodiscard]] std::optional<PlannedAction> planPlayerStep(
+    const Level& level,
+    const GameState& state,
+    MoveDirection input,
+    const rules::StepRates& rates,
+    float stepDurationSeconds);
+
+// One entity's slide, resolved to its end as a single committed chain, plus
+// whatever it runs into on the way. Nothing that happens while it travels can
+// change where it stops.
+[[nodiscard]] std::optional<PlannedAction> planSlide(
+    const Level& level,
+    const GameState& state,
+    EntityId slider,
+    const rules::StepRates& rates,
+    float stepDurationSeconds);
+
+// Several entities sliding at once, as one action.
+//
+// They must be planned together rather than one plan each. Two entities sliding
+// from the same instant are outside each other's scope, so each treats the
+// other as scenery standing where it started - and both plans then agree that a
+// cell neither will be occupying is blocked, while a third cell both cross at
+// the same step looks free to each of them. Planning them in one scope hands
+// the arbitration back to `MicroStepResolver`, which is the only thing that
+// knows how to resolve simultaneous intents.
+[[nodiscard]] std::optional<PlannedAction> planSlides(
+    const Level& level,
+    const GameState& state,
+    std::vector<EntityId> sliders,
+    const rules::StepRates& rates,
+    float stepDurationSeconds);
+
+// One belt rider, one step.
+//
+// Never chained: belt motion is ambient and does not terminate, so a chained
+// ride would be an action that never ends. Re-planning each step also keeps a
+// rider's claims one cell and one interval long, without which the area around
+// any belt would be permanently unusable and two riders could not follow each
+// other down the same belt.
+[[nodiscard]] std::optional<PlannedAction> planConveyorRide(
+    const Level& level,
+    const GameState& state,
+    EntityId rider,
+    const rules::StepRates& rates,
+    float stepDurationSeconds);
+
+// Every belt rider, one step, as one action.
+//
+// Together for the same reason slides are, and for one more: riders following
+// each other down the same belt only work if they move in one scope. Planned
+// separately, the follower sees the leader as scenery in the cell it is about
+// to leave and refuses to move, and a queue on a belt would never advance.
+[[nodiscard]] std::optional<PlannedAction> planConveyorRides(
+    const Level& level,
+    const GameState& state,
+    std::vector<EntityId> riders,
+    const rules::StepRates& rates,
+    float stepDurationSeconds);
+
+// Entities carrying slide momentum, and entities standing on a belt. What the
+// session needs in order to know which ambient actions to plan; the split
+// between them matters because only the first may be chained.
+[[nodiscard]] std::vector<EntityId> slidingEntities(const GameState& state);
+[[nodiscard]] std::vector<EntityId> conveyorRiders(
+    const Level& level, const GameState& state);
+
 // Whether any entity is still carrying slide momentum, which is what decides
 // whether a chain keeps going. Distinct from `rules::hasPendingMotion`, which
 // also reports conveyor riders.

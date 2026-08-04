@@ -156,6 +156,31 @@ struct MirrorActivationPreview {
     const Level& level,
     const GameState& state);
 
+// Which entities a step is allowed to move.
+//
+// An entity outside the scope is scenery. It blocks, supports, occludes and
+// stops a slide exactly as it always did, but it forms no intent of its own and
+// is never written. That is what lets one action move a player without also
+// re-deciding what every other entity in the world is doing.
+//
+// Why this exists: planning used to be whole-world, so a plan made while a
+// slide was in flight re-planned that slide too, and its claims collided
+// head-on with the copy already running. Nothing could ever be admitted
+// alongside anything else. A scope is the seam that a per-entity planner needs.
+//
+// The scope grows during resolution, because the causal closure is not knowable
+// before the step is resolved: whether a move turns out to be a push, and what
+// that push sets off, is decided while resolving it. A movable that gets
+// pushed, an enemy that movable shoves, and a bystander an enemy is shoved next
+// to all join the closure - they are written, so they belong to the action.
+struct StepScope {
+    // Entities permitted to act. Empty means every entity, which is the
+    // whole-world step this game has always taken.
+    std::vector<EntityId> actors;
+
+    [[nodiscard]] bool wholeWorld() const { return actors.empty(); }
+};
+
 // Advances the world one discrete step and returns the resulting state
 // (unchanged if nothing can move). Movement intents per entity:
 //   - slide momentum first (it overrides player input),
@@ -170,6 +195,18 @@ struct MirrorActivationPreview {
     const GameState& state,
     std::optional<MoveDirection> playerInput = std::nullopt,
     const StepRates& rates = {});
+
+// The same step, restricted to the entities the scope names.
+//
+// `step` is exactly this with an empty scope, and the two must stay that way:
+// every save in existence is validated by replaying it through the whole-world
+// form, so it cannot be allowed to drift.
+[[nodiscard]] GameState scopedStep(
+    const Level& level,
+    const GameState& state,
+    std::optional<MoveDirection> playerInput,
+    const StepRates& rates,
+    const StepScope& scope);
 
 } // namespace rules
 

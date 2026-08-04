@@ -3,6 +3,7 @@
 
 #include "engine/GameplaySession.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -48,6 +49,33 @@ void finishAction(GameplaySession& session)
     session.advanceActiveAction(session.activeActionDuration());
     CHECK(session.activeActionComplete());
     session.completeActiveAction();
+}
+
+// Runs the world until nothing is left in flight, admitting whatever becomes
+// admissible on the way.
+//
+// Advances in whole completion boundaries rather than fixed slices, which is
+// what `GameplayLoop` does and for the same reason: stepping over a completion
+// commits an action late and plans whatever follows from a state that never
+// existed.
+void runUntilIdle(GameplaySession& session, const Level& level, int maxSteps = 256)
+{
+    for (int guard = 0; guard < maxSteps; ++guard) {
+        // Admit first, then advance - the same order `GameplayLoop` uses.
+        // Testing `moving()` before admitting would stop dead on a world that
+        // is idle but has ambient motion still owed to it, which is exactly the
+        // state a belt is in between one rider's step and the next.
+        while (session.tryStartNextAction(level, {})) {
+        }
+        if (!session.moving()) {
+            return;
+        }
+        session.advanceActiveAction(
+            std::max(session.timeToNextCompletion(), 0.0001f));
+        if (session.anyActionComplete()) {
+            session.completeActiveAction();
+        }
+    }
 }
 
 void testMoveCommitsAfterAnimation()
@@ -578,9 +606,255 @@ void testMirrorDuplicationIsInstantUndoableAndRestorable()
 
 } // namespace
 
-void testIceSlideRunsAsASingleAction()
+void testBeltCarriesARiderOneActionPerStep()
 {
-    TEST("iceSlideRunsAsASingleAction");
+    TEST("beltCarriesARiderOneActionPerStep");
+    // Belt motion is ambient and never terminates, so a ride is planned one
+    // step at a time and re-planned, rather than committed as a chain the way a
+    // slide is. That keeps a rider's claims one cell and one interval long -
+    // without which the area around any belt would be permanently unusable.
+    //
+    // Reached by pushing, because a movable's start tile resolves to Air and a
+    // rock standing on a conveyor cannot be authored directly.
+    const Level level = makeLevel({
+        { "........" },
+        { "CR>>>>>#" },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    // The push alone. A belt gives no momentum, so there is no consequence
+    // slide to plan alongside it.
+    CHECK(session.inFlight().size() == 1);
+    finishAction(session);
+    CHECK(session.state().movables[0].cell == cell(2, 0, 1));
+    CHECK(rules::hasPendingMotion(level, session.state()));
+
+    // From here the belt carries it, one action per step, until the wall.
+    runUntilIdle(session, level);
+    CHECK(session.state().movables[0].cell == cell(6, 0, 1));
+    CHECK(session.state().players[0].cell == cell(1, 0, 1));
+    // It comes to rest pinned against the wall while still standing on the
+    // belt, so `hasPendingMotion` goes on saying yes forever - it reports that
+    // an entity is on a conveyor, not that the conveyor can move it. What stops
+    // the scheduling loop is the planner: a ride that changes nothing is no
+    // plan at all, so nothing is admitted and the world stays idle.
+    CHECK(rules::hasPendingMotion(level, session.state()));
+    CHECK(!session.moving());
+    CHECK(!session.tryStartNextAction(level, {}));
+
+    // One entry for the push and one per belt step, rather than a single
+    // chained ride: four cells travelled, four actions.
+    CHECK(session.undoCount() == 5);
+    // The ride is not the player's doing, so it never counts as a move.
+    CHECK(session.playerMoveCount() == 1);
+}
+
+// Plays a fixed input script to completion and returns everything a trace
+// should be judged on.
+struct ScriptedRun {
+    GameState finalState;
+    std::vector<GameplaySession::Action> committed;
+    int playerMoveCount = 0;
+};
+
+[[nodiscard]] ScriptedRun runScript(
+    const Level& level, const std::vector<MoveDirection>& script)
+{
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+    for (const MoveDirection input : script) {
+        session.queueMove(input);
+        runUntilIdle(session, level);
+    }
+    const GameplaySession::Snapshot snapshot = session.snapshot();
+    return {
+        snapshot.state,
+        snapshot.undoStack,
+        snapshot.playerMoveCount,
+    };
+}
+
+void testGoldenTraceIsReproducible()
+{
+    TEST("goldenTraceIsReproducible");
+    // The same inputs must produce the same actions - not merely the same
+    // final position, but the same sequence of plans reaching it.
+    //
+    // Compared against a second run rather than against literals baked into
+    // the test. A hard-coded expectation would pin the ordering of a hundred
+    // fields nobody reads and break on every unrelated change; what actually
+    // needs guarding is that nothing in the scheduler has become dependent on
+    // anything other than the level, the state and the input. Concurrency is
+    // exactly where that kind of dependence creeps in - commit order, clock
+    // rounding, iteration over a table - and none of it shows up in the final
+    // state alone.
+    const Level level = makeLevel({
+        { "........", "........" },
+        { "CI     #", "        " },
+    });
+    const std::vector<MoveDirection> script {
+        MoveDirection::Right,
+        MoveDirection::Down,
+        MoveDirection::Right,
+        MoveDirection::Up,
+        MoveDirection::Left,
+    };
+
+    const ScriptedRun first = runScript(level, script);
+    const ScriptedRun second = runScript(level, script);
+
+    // The whole plan sequence, compared exactly. `ActionPlan` has a defaulted
+    // `operator==`, so this covers endpoints, move counts, push flags and
+    // presentation together.
+    CHECK(first.committed == second.committed);
+    CHECK(first.finalState == second.finalState);
+    CHECK(first.playerMoveCount == second.playerMoveCount);
+
+    // Guards against the comparison passing because nothing happened.
+    CHECK(first.committed.size() > 1);
+    CHECK(first.playerMoveCount > 1);
+    // The push really did set a slide off, so the trace covers the interesting
+    // path rather than five plain steps.
+    CHECK(first.finalState.movables[0].cell == cell(6, 0, 1));
+
+    // A trace is only worth recording if it is also a valid history.
+    GameplaySession restored;
+    CHECK(restored.restore(
+        level,
+        GameplaySession::Snapshot {
+            .state = first.finalState,
+            .undoStack = first.committed,
+            .playerMoveCount = first.playerMoveCount,
+            .automaticMotionPaused = false,
+        }));
+}
+
+void testQueuedCommandsGoAheadOfAmbientMotion()
+{
+    TEST("queuedCommandsGoAheadOfAmbientMotion");
+    // The starvation rule. A belt rider releases its reservation at the end of
+    // every step and immediately takes another, so a queued player action
+    // waiting on a cell in the belt's path could be shut out for as long as the
+    // belt runs. What prevents it is ordering: at every scheduling point the
+    // command queue is drained before any new ambient action is started.
+    const Level level = makeLevel({
+        { "........", "........" },
+        { "CR>>>>>#", "        " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    // Idle, with a rider on the belt owed a step.
+    CHECK(!session.moving());
+    CHECK(rules::hasPendingMotion(level, session.state()));
+
+    session.queueMove(MoveDirection::Down);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 1);
+    // The player's step, not the belt's - the queue was drained first. Had the
+    // belt gone first this would be the rider's action instead, and on a long
+    // enough belt the player would never get a turn.
+    const GameplaySession::Action& started = session.inFlight().front().plan;
+    CHECK(started.after.players[0].cell == cell(1, 1, 1));
+    CHECK(started.after.movables[0].cell == cell(2, 0, 1));
+}
+
+void testAnEntityInFlightCannotBeTakenBySomethingElse()
+{
+    TEST("anEntityInFlightCannotBeTakenBySomethingElse");
+    // The guarantee, enforced where it belongs. A block's destination is
+    // settled at the moment it is pushed, so the block is spoken for until it
+    // gets there, and nothing else may plan to move it.
+    //
+    // This was admitted before, and the reason is worth remembering: the
+    // reservation table reasons about cells at instants, and by the time the
+    // second push was tried it believed the block had left the cell it was
+    // claimed on - while authoritative state, which is what planning reads,
+    // still had the block sitting there because the slide had not committed.
+    // Both were right on their own terms. Ownership is the rule neither could
+    // express.
+    const Level level = makeLevel({
+        { "........" },
+        { "CI     #" },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    session.advanceActiveAction(session.timeToNextCompletion());
+    session.completeActiveAction();
+    // The push has landed; the slide is still travelling and owns the block.
+    CHECK(session.moving());
+    CHECK(session.state().movables[0].cell == cell(2, 0, 1));
+
+    // Walking back into it would plan a second move for the same block.
+    // Refused, and refused for that reason rather than on a cell.
+    const auto before = session.admissionStats();
+    session.queueMove(MoveDirection::Right);
+    CHECK(!session.tryStartNextAction(level, {}));
+    const auto after = session.admissionStats();
+    CHECK(after.refusedByOwnership == before.refusedByOwnership + 1);
+    CHECK(after.admitted == before.admitted);
+
+    // Queued, not dropped: it runs once the slide has landed, and the block
+    // ends exactly where the push said it would.
+    runUntilIdle(session, level);
+    CHECK(session.state().movables[0].cell == cell(6, 0, 1));
+    CHECK(session.state().players[0].cell == cell(2, 0, 1));
+}
+
+void testSnapshotMidFlightRestoresFromTheCommittedState()
+{
+    TEST("snapshotMidFlightRestoresFromTheCommittedState");
+    // What lets checkpointing stop waiting for the world to go idle. A snapshot
+    // holds the committed state and the stack chained to it, and an action in
+    // flight has contributed to neither - so it is a valid save, and what it
+    // loses is the action, not the consistency.
+    const Level level = makeLevel({
+        { "........" },
+        { "CI     #" },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    session.advanceActiveAction(session.timeToNextCompletion());
+    session.completeActiveAction();
+    // The push has committed; the slide it set off has not.
+    CHECK(session.moving());
+
+    const GameplaySession::Snapshot snapshot = session.snapshot();
+    CHECK(snapshot.state.movables[0].cell == cell(2, 0, 1));
+
+    GameplaySession restored;
+    CHECK(restored.restore(level, snapshot));
+    CHECK(!restored.moving());
+    CHECK(restored.state() == snapshot.state);
+
+    // The momentum survived in committed state, so the slide is simply planned
+    // again and still runs to the wall.
+    while (restored.tryStartNextAction(level, {})) {
+    }
+    runUntilIdle(restored, level);
+    CHECK(restored.state().movables[0].cell == cell(6, 0, 1));
+}
+
+void testIceSlideIsSettledAtTheMomentOfThePush()
+{
+    TEST("iceSlideIsSettledAtTheMomentOfThePush");
     const Level level = makeLevel({
         { "........" },
         { "CI     #" },
@@ -592,35 +866,166 @@ void testIceSlideRunsAsASingleAction()
     session.queueMove(MoveDirection::Right);
     CHECK(session.tryStartNextAction(level, {}));
 
+    // Two actions, one instant. The push is a single step so the player is
+    // released after their own tile; the slide is a second plan that starts a
+    // step later. Both were made from the same state, which is the whole of
+    // what the guarantee asks for.
+    CHECK(session.inFlight().size() == 2);
+    const ActionScheduler::InFlight& push = session.inFlight()[0];
+    const ActionScheduler::InFlight& slide = session.inFlight()[1];
+    CHECK(push.causalGroup != 0);
+    CHECK(slide.causalGroup == push.causalGroup);
+
     // The destination is settled before a single tile of travel has played:
-    // the ice runs to the wall and the action already says so.
-    CHECK(session.activeAction().after.movables[0].cell == cell(6, 0, 1));
-    CHECK(session.activeActionLegs().size() > 1);
-    CHECK(session.activeActionLegs().back() == session.activeAction().after);
-    // One action spanning the whole slide, not one action per tile.
-    CHECK(session.activeAction().durationSeconds > 0.1f);
+    // the ice runs to the wall and the plan already says so.
+    CHECK(slide.plan.after.movables[0].cell == cell(6, 0, 1));
+    // Committed as one chain rather than re-decided every step.
+    CHECK(slide.legs.size() > 1);
+    CHECK(slide.legs.back() == slide.plan.after);
+    // Admitted now, but not yet running - it is waiting out the push.
+    CHECK(slide.elapsedSeconds < 0.0f);
+    CHECK(push.elapsedSeconds == 0.0f);
 
-    // Nothing else can start while it runs, so nothing can change the outcome.
-    // A command entered mid-slide is buffered rather than dropped, and runs
-    // once the slide is over - it never gets to interfere with it.
-    CHECK(!session.tryStartNextAction(level, {}));
-
-    session.advanceActiveAction(session.activeAction().durationSeconds);
-    CHECK(session.activeActionComplete());
-    session.completeActiveAction();
+    runUntilIdle(session, level);
     CHECK(session.state().movables[0].cell == cell(6, 0, 1));
     CHECK(session.state().players[0].cell == cell(1, 0, 1));
-    // Nothing is left moving: the slide was spent inside the one action.
+    // Nothing is left moving: the slide was spent inside its own action.
     CHECK(!rules::hasPendingMotion(level, session.state()));
 
-    // One history entry, so one undo takes the entire slide back.
+    // Two actions to the scheduler, one to the player. Undo is the player's
+    // idea of what happened, so the slide folded into the entry its push
+    // opened.
     CHECK(session.undoCount() == 1);
     CHECK(session.playerMoveCount() == 1);
     session.queueUndo();
     CHECK(session.tryStartNextAction(level, {}));
-    session.advanceActiveAction(session.activeAction().durationSeconds);
-    session.completeActiveAction();
+    finishAction(session);
     CHECK(session.state() == rules::initialState(level));
+    CHECK(session.playerMoveCount() == 0);
+}
+
+void testPlayerMovesAlongsideASlideItCannotDisturb()
+{
+    TEST("playerMovesAlongsideASlideItCannotDisturb");
+    // The point of the whole reservation system: the player is released after
+    // their own tile instead of being locked out for the length of the slide.
+    const Level level = makeLevel({
+        { "........", "........" },
+        { "CI     #", "        " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 2);
+
+    // Finish only the push. The slide is still travelling.
+    session.advanceActiveAction(session.timeToNextCompletion());
+    session.completeActiveAction();
+    CHECK(session.moving());
+
+    // Stepping aside touches none of the cells the slide has left to cross, so
+    // it is admitted rather than queued behind it.
+    session.queueMove(MoveDirection::Down);
+    CHECK(session.tryStartNextAction(level, {}));
+    // Two now in flight at once: the slide, and a player step that started
+    // while it was running.
+    CHECK(session.inFlight().size() == 2);
+
+    runUntilIdle(session, level);
+    CHECK(session.state().players[0].cell == cell(1, 1, 1));
+    CHECK(session.state().movables[0].cell == cell(6, 0, 1));
+    // Counted on commit, not on admission.
+    CHECK(session.playerMoveCount() == 2);
+}
+
+void testCommandRefusedByAClaimIsRequeuedNotLost()
+{
+    TEST("commandRefusedByAClaimIsRequeuedNotLost");
+    // Queued, not rejected. A command the table refuses has to go back on the
+    // queue and be retried, or a conflicting input would simply vanish.
+    const Level level = makeLevel({
+        { "........" },
+        { "CI     #" },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    session.advanceActiveAction(session.timeToNextCompletion());
+    session.completeActiveAction();
+
+    // Straight into the sliding block's path, so it cannot be admitted now.
+    session.queueMove(MoveDirection::Right);
+    CHECK(!session.tryStartNextAction(level, {}));
+    CHECK(session.state().players[0].cell == cell(1, 0, 1));
+
+    // Not consumed by the refusal: once the slide is done it runs.
+    runUntilIdle(session, level);
+    CHECK(session.state().players[0].cell == cell(2, 0, 1));
+    CHECK(session.playerMoveCount() == 2);
+}
+
+void testConcurrentPlayHistoryRoundTrips()
+{
+    TEST("concurrentPlayHistoryRoundTrips");
+    // An undo entry records what its action changed, replayed onto the running
+    // chain. Actions committing out of the order they were planned in must
+    // still leave a stack that restores.
+    const Level level = makeLevel({
+        { "........", "........" },
+        { "CI     #", "        " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    session.advanceActiveAction(session.timeToNextCompletion());
+    session.completeActiveAction();
+    // Committed while the slide it set off is still in flight, so this entry
+    // lands in the stack between the push and the slide that folds into it.
+    session.queueMove(MoveDirection::Down);
+    CHECK(session.tryStartNextAction(level, {}));
+    runUntilIdle(session, level);
+
+    // Two entries, not three: the slide folded into the push that caused it
+    // even though an unrelated step committed in between. That entry is what
+    // the parallel group vector exists for, and folding into it moved an
+    // endpoint the later entry was chained to - so the later one was rebased.
+    CHECK(session.undoCount() == 2);
+    CHECK(session.playerMoveCount() == 2);
+
+    const GameplaySession::Snapshot snapshot = session.snapshot();
+    // Every entry begins where the previous one ended, whatever order the
+    // actions actually committed in. `restore` rejects any stack where that
+    // fails to hold, so this is the invariant under test.
+    GameState chained = rules::initialState(level);
+    for (const GameplaySession::Action& entry : snapshot.undoStack) {
+        CHECK(entry.before == chained);
+        chained = entry.after;
+    }
+    CHECK(chained == session.state());
+
+    GameplaySession restored;
+    CHECK(restored.restore(level, snapshot));
+    CHECK(restored.state() == session.state());
+    CHECK(restored.playerMoveCount() == session.playerMoveCount());
+    CHECK(restored.undoCount() == session.undoCount());
+
+    // And the restored stack still unwinds to the opening state.
+    for (std::size_t undos = restored.undoCount(); undos > 0; --undos) {
+        restored.queueUndo();
+        CHECK(restored.tryStartNextAction(level, {}));
+        finishAction(restored);
+    }
+    CHECK(restored.state() == rules::initialState(level));
+    CHECK(restored.playerMoveCount() == 0);
 }
 
 void testQueueIsBounded()
@@ -653,8 +1058,10 @@ void testQueueIsBounded()
 void testStaleCommandsAreDropped()
 {
     TEST("staleCommandsAreDropped");
-    // A command entered at the start of a long slide has been overtaken by
-    // events long before the slide ends.
+    // Staleness is what stops a refused command retrying forever. A step into
+    // the path of a long slide is refused every time it is tried, and must
+    // eventually be given up on rather than played back into a world that has
+    // moved on.
     const Level level = makeLevel({
         { "........" },
         { "CI     #" },
@@ -665,18 +1072,22 @@ void testStaleCommandsAreDropped()
 
     session.queueMove(MoveDirection::Right);
     CHECK(session.tryStartNextAction(level, {}));
-    CHECK(session.activeActionDuration() > 1.0f);
+    session.advanceActiveAction(session.timeToNextCompletion());
+    session.completeActiveAction();
 
-    session.queueMove(MoveDirection::Left);
-    finishAction(session);
+    // Into the block's path: refused now, and for as long as the slide runs.
+    session.queueMove(MoveDirection::Right);
+    CHECK(!session.tryStartNextAction(level, {}));
+
+    runUntilIdle(session, level);
 
     // Dropped rather than played back, so the player stays where the push left
     // them.
     CHECK(!session.tryStartNextAction(level, {}));
     CHECK(session.state().players[0].cell == cell(1, 0, 1));
 
-    // A command entered after the slide is honoured normally: staleness is
-    // measured from when it was entered, not from some global age.
+    // A command entered afterwards is honoured normally: staleness is measured
+    // from when it was entered, not from some global age.
     session.queueMove(MoveDirection::Left);
     CHECK(session.tryStartNextAction(level, {}));
     finishAction(session);
@@ -687,7 +1098,15 @@ int main()
 {
     testQueueIsBounded();
     testStaleCommandsAreDropped();
-    testIceSlideRunsAsASingleAction();
+    testIceSlideIsSettledAtTheMomentOfThePush();
+    testAnEntityInFlightCannotBeTakenBySomethingElse();
+    testSnapshotMidFlightRestoresFromTheCommittedState();
+    testBeltCarriesARiderOneActionPerStep();
+    testQueuedCommandsGoAheadOfAmbientMotion();
+    testGoldenTraceIsReproducible();
+    testPlayerMovesAlongsideASlideItCannotDisturb();
+    testCommandRefusedByAClaimIsRequeuedNotLost();
+    testConcurrentPlayHistoryRoundTrips();
     testMoveCommitsAfterAnimation();
     testPushMetadata();
     testUndoRoundTrip();

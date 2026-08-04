@@ -58,6 +58,14 @@ public:
 
     [[nodiscard]] const GameState& state() const { return scheduler_.state(); }
     [[nodiscard]] bool moving() const { return !scheduler_.idle(); }
+    // The world as it will stand once everything in flight has committed.
+    //
+    // What rendering needs when it wants to know where an action is going: no
+    // single action's `after` answers that any more, since each is a snapshot
+    // taken when it started and blind to the others. Applying every in-flight
+    // delta to the live state does, and the deltas are disjoint by construction
+    // so the order they are applied in does not matter.
+    [[nodiscard]] GameState projectedState() const;
 
     // Several actions can be in flight at once. The accessors below still speak
     // in terms of a single "active" action, resolving to the one that has been
@@ -103,6 +111,12 @@ public:
         return lastMirrorSwapDestinations_;
     }
     [[nodiscard]] int playerMoveCount() const { return playerMoveCount_; }
+    // How admissions have gone this screen, for deciding whether the
+    // reservation machinery is earning its keep. See `AdmissionStats`.
+    [[nodiscard]] const ActionScheduler::AdmissionStats& admissionStats() const
+    {
+        return scheduler_.admissionStats();
+    }
     [[nodiscard]] float stepDurationSeconds() const { return stepDurationSeconds_; }
     [[nodiscard]] const rules::StepRates& stepRates() const { return stepRates_; }
 
@@ -134,25 +148,118 @@ private:
         float queuedAtSeconds = 0.0f;
     };
 
+    // Why an attempt to start something did or did not produce an action.
+    //
+    // The distinction exists for the command queue. Under the one-at-a-time
+    // guard a pop was always followed by an admission, so a plain bool was
+    // enough; once the reservation table can refuse, a command that was refused
+    // has to go back on the queue and one that was impossible must not, or a
+    // player walking into a wall would retry it until it went stale.
+    enum class StartOutcome {
+        // Admitted, and now in flight.
+        Started,
+        // Nothing to do. There was no plan to make - the move is into a wall,
+        // there is no undo history, the mirror activation is invalid. Retrying
+        // cannot help, because only a committed action changes the state this
+        // was judged against, and by then the command is the player's stale
+        // idea of a world that has moved on.
+        Impossible,
+        // Planned, but something already in flight holds a cell it needs. The
+        // decision is queued, not rejected: it goes back on the front of the
+        // queue and is retried on a later frame, and staleness is what stops it
+        // retrying forever.
+        Refused,
+    };
+
     void enqueue(Command command);
     [[nodiscard]] bool isStale(const Command& command) const;
 
-    [[nodiscard]] bool tryStartHeldMove(const Level& level, const Controls& controls);
-    [[nodiscard]] bool tryStartWorldStep(const Level& level, std::optional<MoveDirection> playerInput);
-    [[nodiscard]] bool tryStartMirrorAction(const Level& level);
-    [[nodiscard]] bool tryStartUndoMove();
-    [[nodiscard]] bool tryStartRestart(const Level& level);
-    [[nodiscard]] bool tryStartHeldDirection(
+    [[nodiscard]] StartOutcome tryStartHeldMove(
+        const Level& level, const Controls& controls);
+    // One input-driven step for every living player, together with the slide it
+    // sets off, admitted as one causal group.
+    //
+    // The consequence is planned here rather than when the step commits. Both
+    // plans are therefore made from the same instant, which is what settles the
+    // slide's destination at the moment of the push; planning it on commit
+    // would settle it against a state that arrives a step late, and that is
+    // precisely the stability bug this whole design exists to remove.
+    [[nodiscard]] StartOutcome tryStartPlayerStep(
+        const Level& level, MoveDirection input);
+    // Motion nobody asked for: entities still carrying momentum, and entities
+    // standing on a belt.
+    //
+    // Sliders and riders are two actions, not one. A slide is committed to its
+    // end as a chain, while a ride is one step and re-planned - belts never
+    // terminate, so a chained ride would be an action that never ends.
+    // Entities an action already owns are left out, or the same motion would be
+    // planned twice and the copy refused by the claims of the original.
+    [[nodiscard]] StartOutcome tryStartAmbientMotion(const Level& level);
+    [[nodiscard]] StartOutcome tryStartMirrorAction(const Level& level);
+    [[nodiscard]] StartOutcome tryStartUndoMove();
+    [[nodiscard]] StartOutcome tryStartRestart(const Level& level);
+    [[nodiscard]] StartOutcome tryStartHeldDirection(
         const Level& level,
         MoveDirection direction,
         std::optional<MoveDirection> queuedDirection);
+    // Runs one queued command. `Impossible` also covers a command this context
+    // ignores entirely, such as anything but undo while a player is dead.
+    [[nodiscard]] StartOutcome runCommand(
+        const Level& level, const Command& command, const Controls& controls);
     [[nodiscard]] bool hasPendingMove(MoveDirection direction) const;
     // Hands a plan to the scheduler, which admits it only if nothing already
     // running would be disturbed. Returns false when it was refused.
-    [[nodiscard]] bool beginAction(Action action, std::vector<GameState> legs = {});
+    //
+    // `causalGroup` is the player action this one belongs to; zero opens a new
+    // one. Consequences of an action - the slide a push starts - pass the group
+    // of the action that caused them, so that they undo together.
+    //
+    // `deferral` holds an action back that was planned now but begins later -
+    // the slide a push sets off. It is admitted immediately, so its cells are
+    // held from this moment and nothing can invalidate the outcome already
+    // promised for it.
+    [[nodiscard]] bool beginAction(
+        Action action,
+        std::vector<GameState> legs = {},
+        std::size_t causalGroup = 0,
+        ActionDeferral deferral = {});
+    // Everything the scheduler needs to admit one plan, including the claims
+    // derived from the cells its entities pass through.
+    [[nodiscard]] ActionScheduler::Pending makePending(
+        const Action& action,
+        const std::vector<GameState>& legs,
+        ActionDeferral deferral) const;
+    // Drops entities some action in flight is already moving.
+    //
+    // Nothing may plan for them: authoritative state does not change until an
+    // action commits, so a second plan made from it would be the same motion
+    // over again, and its claims would collide with the copy already running.
+    // This applies as much to the consequences of a player's step as to ambient
+    // motion - a block still sliding is visible in the state that step produces
+    // and would otherwise be handed a second slide.
+    [[nodiscard]] std::vector<EntityId> withoutEntitiesInFlight(
+        std::vector<EntityId> candidates) const;
     // Bookkeeping for one action that has just committed: history, the undo
     // stack, and the running move total.
-    void recordCompletion(const Action& action);
+    void recordCompletion(const Action& action, std::size_t causalGroup);
+    // Where the undo stack starts from, which is the last entry's `after`, or
+    // the level's opening state when there are none left to pop.
+    [[nodiscard]] const GameState& undoBaseState() const;
+    // Re-derives entries from `index` onward so each begins where the previous
+    // one ended.
+    //
+    // An entry records what its action *changed*, not the state that action was
+    // planned against - under concurrency those differ, because another action
+    // may have committed in between and written entities of its own. Storing
+    // the change and replaying it onto the running chain keeps `restore`'s
+    // linear-chain invariant true by construction, whatever order things
+    // actually committed in.
+    //
+    // Needed on a fold: composing a consequence into the entry its cause opened
+    // moves that entry's endpoint, and anything appended after it has to
+    // follow. The tail is short - only what committed between the two - so this
+    // is not the whole stack.
+    void rebaseUndoFrom(std::size_t index);
 
     // Buffered input is a courtesy, not a recording. Once slides resolve as one
     // long action, an unbounded queue turns a moment of mashing during a slide
@@ -173,8 +280,25 @@ private:
     std::deque<Command> pendingCommands_;
     // Completed forward actions that can still be undone. Reversed actions
     // remain in moveHistory_ for diagnostics but never become undoable again.
+    //
+    // One entry per *player* action, not per scheduled action. A push and the
+    // slide it sets off are two actions to the scheduler and one entry here:
+    // the consequence folds into the entry its cause created, so the folded
+    // entry is exactly the whole-world transition `worldStep` would have
+    // produced. That is what keeps the save format and `matchesForwardTransition`
+    // untouched by the planner split.
     std::vector<Action> undoHistory_;
+    // Which causal group each undo entry belongs to, so a consequence folds
+    // into its own cause rather than into whatever committed most recently -
+    // ambient motion can interleave. Parallel to `undoHistory_`, never
+    // persisted: a restored session has no action in flight, so every group is
+    // closed and each entry is its own.
+    std::vector<std::size_t> undoGroups_;
+    std::size_t nextCausalGroup_ = 1;
     std::vector<Action> moveHistory_;
+    // The level's opening state, which is where the undo chain is anchored.
+    // `restore` validates the stack by replaying from exactly this.
+    GameState undoBaseState_;
     float stepDurationSeconds_ = config::stepDurationSeconds;
     int playerMoveCount_ = 0;
     // Transient event sequence; intentionally excluded from save snapshots.

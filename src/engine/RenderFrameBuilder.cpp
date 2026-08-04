@@ -1184,10 +1184,9 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             movableVisuals[movableIndex];
         const bool movingOutOfWater =
             input.moving &&
-            movableIndex < input.activeAction.before.movables.size() &&
-            movableIndex < input.activeAction.after.movables.size() &&
-            input.activeAction.before.movables[movableIndex].fallen &&
-            !input.activeAction.after.movables[movableIndex].fallen;
+            movableIndex < input.projectedState.movables.size() &&
+            movable.fallen &&
+            !input.projectedState.movables[movableIndex].fallen;
         if (movable.fallen && !visual.moving && !movingOutOfWater) {
             continue;
         }
@@ -1219,9 +1218,9 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             rules::previewMirrorActivation(input.level, state);
         std::optional<rules::MirrorActivationPreview> actionEndPreview;
         if (input.moving &&
-            !rules::anyPlayerDead(input.activeAction.after)) {
+            !rules::anyPlayerDead(input.projectedState)) {
             actionEndPreview = rules::previewMirrorActivation(
-                input.level, input.activeAction.after);
+                input.level, input.projectedState);
         }
         if (mirrorPreview) {
             std::vector<MirrorRenderSegment> beamSegments;

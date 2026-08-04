@@ -223,17 +223,26 @@ void testSharedClockPlacesClaims()
         .cell = cell(9, 0), .firstStep = 4, .lastStep = std::nullopt });
     CHECK(started(scheduler.tryStart(slow, late)));
 
+    // Probed with a plan that moves nothing, so that only the claims are under
+    // test. Reusing `slow` here would now be refused before the table is ever
+    // consulted - it moves a rock `slow` is already moving, and an entity in
+    // flight is spoken for.
+    ActionPlan probe;
+    probe.before = scheduler.state();
+    probe.after = probe.before;
+    probe.durationSeconds = 1.0f;
+
     // Something wanting that cell right now is fine - the block is nowhere
     // near it yet and will be gone from where it is.
     ActionReservations nowAndGone;
     nowAndGone.writes.push_back({
         .cell = cell(9, 0), .firstStep = 0, .lastStep = 1 });
-    CHECK(started(scheduler.tryStart(slow, nowAndGone)));
+    CHECK(started(scheduler.tryStart(probe, nowAndGone)));
 
     // But three steps in, the same claim lands on top of it.
     static_cast<void>(scheduler.advance(0.3f));
     CHECK(scheduler.currentStep() == 3);
-    CHECK(!started(scheduler.tryStart(slow, nowAndGone)));
+    CHECK(!started(scheduler.tryStart(probe, nowAndGone)));
 }
 
 void testResetClearsEverything()

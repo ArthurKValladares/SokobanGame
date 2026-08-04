@@ -114,15 +114,31 @@ public:
     };
 
     // `baseStep` is where the action's own step 0 falls on the shared clock.
+    // `causalGroup` is the player action it traces back to; zero means none.
     void admit(
         std::size_t actionId,
         const ActionReservations& reservations,
-        int baseStep);
+        int baseStep,
+        std::size_t causalGroup = 0);
     void release(std::size_t actionId);
     void clear();
 
+    // `exemptGroup`, when non-zero, skips actions belonging to that causal
+    // group.
+    //
+    // A consequence always collides with its own cause, and the collision is an
+    // artifact rather than a real one. The cause claims its entities' final
+    // cells open-ended - they are still standing there when it ends - and the
+    // consequence is precisely the continuation that moves those same entities
+    // out of them. Since it was planned from the state its cause produces, it
+    // cannot disagree with it: there is nothing for the table to protect.
+    //
+    // Only the group is exempt. A third action still sees the cause's claims and
+    // is held off until it commits, which is the conservative reading.
     [[nodiscard]] std::optional<Conflict> conflict(
-        const ActionReservations& reservations, int baseStep) const;
+        const ActionReservations& reservations,
+        int baseStep,
+        std::size_t exemptGroup = 0) const;
 
     [[nodiscard]] bool empty() const { return entries_.empty(); }
     [[nodiscard]] std::size_t size() const { return entries_.size(); }
@@ -130,6 +146,7 @@ public:
 private:
     struct Entry {
         std::size_t actionId = 0;
+        std::size_t causalGroup = 0;
         ActionReservations reservations;
     };
 

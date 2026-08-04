@@ -173,4 +173,42 @@ ActionPresentationTimeline PresentationTransactionBuilder::build() const
     return result;
 }
 
+ActionPresentationTimeline concatenateTimelines(
+    ActionPresentationTimeline earlier,
+    const ActionPresentationTimeline& later,
+    float offsetSeconds)
+{
+    const float offset = std::max(offsetSeconds, 0.0f);
+    earlier.durationSeconds =
+        std::max(earlier.durationSeconds, offset + later.durationSeconds);
+
+    for (const ActionMotionTrack& motion : later.motions) {
+        ActionMotionTrack shifted = motion;
+        shifted.startSeconds += offset;
+        earlier.motions.push_back(shifted);
+    }
+
+    for (const ActionAnimationTrack& track : later.animations) {
+        const auto existing = std::ranges::find(
+            earlier.animations, track.target, &ActionAnimationTrack::target);
+        // A target the earlier half never mentioned brings its own initial
+        // pose; one it did keeps the pose it started from, or reversing the
+        // joined timeline would begin from the wrong frame.
+        ActionAnimationTrack& into = existing == earlier.animations.end()
+            ? earlier.animations.emplace_back(ActionAnimationTrack {
+                  .target = track.target,
+                  .initialUse = track.initialUse,
+                  .initialClipTimeSeconds = track.initialClipTimeSeconds,
+                  .segments = {},
+              })
+            : *existing;
+        for (const ActionAnimationSegment& segment : track.segments) {
+            ActionAnimationSegment shifted = segment;
+            shifted.startSeconds += offset;
+            into.segments.push_back(shifted);
+        }
+    }
+    return earlier;
+}
+
 } // namespace sokoban

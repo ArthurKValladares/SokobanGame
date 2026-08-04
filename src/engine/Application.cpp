@@ -198,9 +198,20 @@ Application::Application()
 
 Application::~Application()
 {
-    if (campaign_.gameLoaded() &&
-        !gameplaySession_.moving() &&
-        !levelEditor_.playingDraft()) {
+    // No longer waits for the world to go quiet.
+    //
+    // The gate was there because a snapshot taken mid-action would have caught
+    // the world half-way through a transition. It does not: a snapshot holds
+    // the *committed* state and the undo stack chained to it, and an action in
+    // flight has contributed nothing to either. What is lost on reload is the
+    // action itself, and the state it was planned from is still on disk with
+    // whatever momentum it carried, so ambient motion simply plans it again.
+    //
+    // Under concurrency the world is rarely idle, so keeping the gate meant
+    // saves quietly became rare exactly when there was most to lose. The one
+    // cost is undo granularity: a slide whose push had already committed
+    // reappears as its own undo entry rather than folded into that push.
+    if (campaign_.gameLoaded() && !levelEditor_.playingDraft()) {
         checkpointCurrentScreen(false);
     } else if (!playerProfile_.progressEmpty()) {
         persistProfile(true);
@@ -1463,10 +1474,9 @@ void Application::switchSaveSlot(int slot)
         return;
     }
 
-    // Settle the outgoing slot on disk first.
-    if (campaign_.gameLoaded() &&
-        !gameplaySession_.moving() &&
-        !levelEditor_.playingDraft()) {
+    // Settle the outgoing slot on disk first. Not gated on the world being
+    // idle - see the destructor for why that gate was wrong under concurrency.
+    if (campaign_.gameLoaded() && !levelEditor_.playingDraft()) {
         checkpointCurrentScreen(true);
     } else {
         persistProfile(true);
@@ -1820,12 +1830,14 @@ RenderFrameData Application::buildRenderFrame(
         return RenderFrameData {};
     }
 
+    // Held by reference for the duration of the call, so it has to outlive it.
+    const GameState projectedState = gameplaySession_.projectedState();
     RenderFrameData frame = RenderFrameBuilder::buildGameplay({
         .manifest = assetManifest_,
         .level = level_,
         .state = gameplaySession_.state(),
         .moving = gameplaySession_.moving(),
-        .activeAction = gameplaySession_.activeAction(),
+        .projectedState = projectedState,
         .presentation = presentation_,
         .settings = presentationSettings_,
         .animations = &animationCatalog_,

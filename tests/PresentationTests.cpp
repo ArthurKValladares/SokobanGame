@@ -483,7 +483,7 @@ void testGameplayFrameUsesSettingsAndPresentation()
         .level = level,
         .state = state,
         .moving = false,
-        .activeAction = action,
+        .projectedState = action.after,
         .presentation = presentation,
         .settings = settings,
         .conveyorBeltScrollOffset = 0.75f,
@@ -495,7 +495,7 @@ void testGameplayFrameUsesSettingsAndPresentation()
         .level = level,
         .state = state,
         .moving = false,
-        .activeAction = action,
+        .projectedState = action.after,
         .presentation = presentation,
         .settings = settings,
         .cameraPitchDegrees = 0.0f,
@@ -547,7 +547,7 @@ void testDecorativeTileRendersWithoutChangingCameraExtent()
         .level = level,
         .state = state,
         .moving = false,
-        .activeAction = {},
+        .projectedState = {},
         .presentation = presentation,
         .settings = {},
     });
@@ -600,7 +600,7 @@ void testGameplayCameraExtentComesOnlyFromAuthoredLayout()
         .level = level,
         .state = state,
         .moving = false,
-        .activeAction = {},
+        .projectedState = {},
         .presentation = presentation,
         .settings = {},
     });
@@ -820,7 +820,7 @@ void testMirrorTilesUseTheirModelAndOrientation()
         .level = level,
         .state = state,
         .moving = false,
-        .activeAction = {},
+        .projectedState = {},
         .presentation = presentation,
         .settings = settings,
     });
@@ -875,7 +875,7 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
             .level = level,
             .state = state,
             .moving = moving,
-            .activeAction = {},
+            .projectedState = {},
             .presentation = presentation,
             .settings = {},
         });
@@ -942,7 +942,7 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
             .level = level,
             .state = state,
             .moving = true,
-            .activeAction = moveAction,
+            .projectedState = moveAction.after,
             .presentation = presentation,
             .settings = {},
         });
@@ -981,7 +981,7 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
             .level = level,
             .state = state,
             .moving = true,
-            .activeAction = sidewaysAction,
+            .projectedState = sidewaysAction.after,
             .presentation = presentation,
             .settings = {},
         });
@@ -1037,7 +1037,7 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
             .level = level,
             .state = state,
             .moving = true,
-            .activeAction = sidewaysAction,
+            .projectedState = sidewaysAction.after,
             .presentation = presentation,
             .settings = {},
         });
@@ -1073,7 +1073,7 @@ void testGameplayFrameBuildsProceduralWaterSurface()
         .level = level,
         .state = state,
         .moving = false,
-        .activeAction = action,
+        .projectedState = action.after,
         .presentation = presentation,
         .settings = settings,
     });
@@ -1111,7 +1111,7 @@ void testGameplayFrameBuildsProceduralWaterSurface()
         .level = level,
         .state = state,
         .moving = false,
-        .activeAction = action,
+        .projectedState = action.after,
         .presentation = presentation,
         .settings = settings,
     });
@@ -1153,7 +1153,7 @@ void testPlayerCopiesRenderAndInterpolateTogether()
         .level = level,
         .state = before,
         .moving = true,
-        .activeAction = action,
+        .projectedState = action.after,
         .presentation = presentation,
         .settings = {},
     });
@@ -1227,7 +1227,7 @@ void testMirrorDuplicationPreviewsEveryDestination()
         .manifest = testManifest(),
         .level = level,
         .state = state,
-        .activeAction = {},
+        .projectedState = {},
         .presentation = presentation,
         .settings = {},
     });
@@ -1275,7 +1275,7 @@ void testWaterLayerBuildsUnboundedNonPickableExterior()
         .level = level,
         .state = state,
         .moving = false,
-        .activeAction = {},
+        .projectedState = {},
         .presentation = presentation,
         .settings = {},
     });
@@ -1326,7 +1326,7 @@ void testWaterLayerBuildsUnboundedNonPickableExterior()
             .level = allWaterLevel,
             .state = allWaterState,
             .moving = false,
-            .activeAction = {},
+            .projectedState = {},
             .presentation = allWaterPresentation,
             .settings = {},
         });
@@ -1360,7 +1360,7 @@ void testFilledWaterUpdatesEdgesAndRoundedCornerCaps()
             .level = level,
             .state = state,
             .moving = false,
-            .activeAction = {},
+            .projectedState = {},
             .presentation = presentation,
             .settings = settings,
         });
@@ -1527,7 +1527,7 @@ void testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition()
         .level = level,
         .state = drowned,
         .moving = false,
-        .activeAction = action,
+        .projectedState = action.after,
         .presentation = presentation,
         .settings = settings,
     });
@@ -1554,7 +1554,7 @@ void testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition()
         .level = level,
         .state = drowned,
         .moving = false,
-        .activeAction = {},
+        .projectedState = {},
         .presentation = presentation,
         .settings = settings,
     });
@@ -1597,7 +1597,7 @@ void testGameplayFrameBuildsManifestDecorationInstances()
         .level = level,
         .state = state,
         .moving = false,
-        .activeAction = {},
+        .projectedState = {},
         .presentation = presentation,
         .settings = PresentationSettings {},
     });
@@ -1685,7 +1685,7 @@ void testEnemyFacingAttackAndAnimationInstances()
         .level = level,
         .state = after,
         .moving = true,
-        .activeAction = action,
+        .projectedState = action.after,
         .presentation = presentation,
         .settings = PresentationSettings {},
         .animations = &animations,
@@ -1712,7 +1712,7 @@ void testEnemyFacingAttackAndAnimationInstances()
         .level = level,
         .state = after,
         .moving = true,
-        .activeAction = action,
+        .projectedState = action.after,
         .presentation = presentation,
         .settings = PresentationSettings {},
         .animations = &animations,
@@ -1788,7 +1788,7 @@ void testEnemyFacingAttackAndAnimationInstances()
         .level = level,
         .state = after,
         .moving = true,
-        .activeAction = undo,
+        .projectedState = undo.after,
         .presentation = presentation,
         .settings = PresentationSettings {},
         .animations = &animations,

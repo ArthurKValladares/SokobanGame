@@ -57,4 +57,19 @@ private:
     std::vector<AnimationIntent> animationIntents_;
 };
 
+// Appends `later` to `earlier`, shifted so it begins `offsetSeconds` in.
+//
+// Every track already carries an absolute `startSeconds`, so joining two
+// resolved timelines is just an offset. Tracks for the same actor merge into
+// one, so that playback - forward or reversed - still sees a single timeline
+// per entity.
+//
+// Two callers with the same need: the legs of a chained slide, each resolved as
+// its own transaction and laid end to end, and an undo entry that a consequence
+// folded into.
+[[nodiscard]] ActionPresentationTimeline concatenateTimelines(
+    ActionPresentationTimeline earlier,
+    const ActionPresentationTimeline& later,
+    float offsetSeconds);
+
 } // namespace sokoban

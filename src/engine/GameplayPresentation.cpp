@@ -290,55 +290,6 @@ void GameplayPresentation::advanceAnimations(float dt, const GameState& state)
     }
 }
 
-namespace {
-
-// Motion for one leg of a chained action: every entity that changed cell
-// between two consecutive world steps, timed to that leg's slot.
-void appendLegMotions(
-    ActionPresentationTimeline& timeline,
-    const GameState& before,
-    const GameState& after,
-    float startSeconds,
-    float durationSeconds)
-{
-    const auto add = [&](EntityTarget target, Vec3 from, Vec3 to) {
-        if (gridDistance(from, to) > 0.0001f) {
-            timeline.motions.push_back({
-                .target = target,
-                .from = from,
-                .to = to,
-                .startSeconds = startSeconds,
-                .durationSeconds = durationSeconds,
-            });
-        }
-    };
-
-    const std::size_t players =
-        std::min(before.players.size(), after.players.size());
-    for (std::size_t i = 0; i < players; ++i) {
-        add(playerTarget(before.players[i], i),
-            playerRenderTarget(before.players[i].cell, before.players[i].drowned),
-            playerRenderTarget(after.players[i].cell, after.players[i].drowned));
-    }
-
-    const std::size_t movables =
-        std::min(before.movables.size(), after.movables.size());
-    for (std::size_t i = 0; i < movables; ++i) {
-        add(movableTarget(before.movables[i], i),
-            movableRenderTarget(before.movables[i].cell, before.movables[i].fallen),
-            movableRenderTarget(after.movables[i].cell, after.movables[i].fallen));
-    }
-
-    const std::size_t enemies =
-        std::min(before.enemies.size(), after.enemies.size());
-    for (std::size_t i = 0; i < enemies; ++i) {
-        add(enemyTarget(before.enemies[i], i),
-            movableRenderTarget(before.enemies[i].cell, before.enemies[i].fallen),
-            movableRenderTarget(after.enemies[i].cell, after.enemies[i].fallen));
-    }
-}
-
-} // namespace
 
 ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     const GameplaySession::Action& action,
@@ -355,28 +306,33 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     const float stepDuration =
         action.durationSeconds / static_cast<float>(legs.size());
 
-    // Animations - pushes, deaths, attacks - come from the ordinary builder run
-    // over the first leg alone, which is the only leg the player drove. Nothing
-    // about how those are chosen changes.
+    // Each leg is resolved as its own transaction and the results are laid end
+    // to end. Motion alone used to be enough here, on the reasoning that only
+    // the first leg is player-driven and only it can produce an animated event.
+    // That is not true: a player crushed or drowned part-way through a slide
+    // dies on leg four, and running the builder over leg one only gave it
+    // correct motion and no clip at all.
     //
-    // Known gap: an animated event that happens in a *later* leg, such as a
-    // player killed part-way through a slide, is not represented yet. The
-    // motion is correct; only the clip is missing. Building a timeline per leg
-    // and merging them would fix it.
-    GameplaySession::Action firstLeg = action;
-    firstLeg.after = legs.front();
-    firstLeg.durationSeconds = stepDuration;
-    ActionPresentationTimeline timeline = buildActionPresentation(firstLeg);
-    timeline.durationSeconds = action.durationSeconds;
+    // `playerPushing` is deliberately confined to the first leg. A push is
+    // something input does, and the later legs are momentum spending itself
+    // out - carrying the flag through would play the push animation for the
+    // whole length of the slide.
+    ActionPresentationTimeline timeline;
+    for (std::size_t leg = 0; leg < legs.size(); ++leg) {
+        GameplaySession::Action legAction = action;
+        legAction.before = leg == 0 ? action.before : legs[leg - 1];
+        legAction.after = legs[leg];
+        legAction.durationSeconds = stepDuration;
+        legAction.playerPushing = leg == 0 && action.playerPushing;
 
-    for (std::size_t leg = 1; leg < legs.size(); ++leg) {
-        appendLegMotions(
-            timeline,
-            legs[leg - 1],
-            legs[leg],
-            static_cast<float>(leg) * stepDuration,
-            stepDuration);
+        timeline = concatenateTimelines(
+            std::move(timeline),
+            buildActionPresentation(legAction),
+            static_cast<float>(leg) * stepDuration);
     }
+    // The action's own duration is authoritative: rounding across legs must not
+    // shorten or stretch it.
+    timeline.durationSeconds = action.durationSeconds;
     return timeline;
 }
 
@@ -615,9 +571,46 @@ void GameplayPresentation::seekAction(
         }
     }
 
-    for (const ActionMotionTrack& track : timeline.motions) {
+    // One entity can own several motion tracks - a chained slide has one per
+    // leg - and only the leg it is currently on may be applied.
+    //
+    // Applying all of them let the last one win, and a track whose leg has not
+    // begun sets the entity to *that* leg's starting cell. So a block one tile
+    // into a five-tile slide was drawn at the start of the final leg, which is
+    // to say at its destination, for the entire slide. It then snapped back the
+    // moment anything else re-synchronised it.
+    const auto chosenTrackFor = [&](EntityTarget target) {
+        std::size_t chosen = timeline.motions.size();
+        for (std::size_t i = 0; i < timeline.motions.size(); ++i) {
+            if (!(timeline.motions[i].target == target)) {
+                continue;
+            }
+            if (chosen == timeline.motions.size()) {
+                chosen = i;
+                continue;
+            }
+            const float candidate = timeline.motions[i].startSeconds;
+            const float current = timeline.motions[chosen].startSeconds;
+            const bool candidateBegun = candidate <= sourceTime;
+            const bool currentBegun = current <= sourceTime;
+            // The latest leg that has begun; before any has, the earliest,
+            // which is what holds the entity at the action's start pose.
+            if (candidateBegun && (!currentBegun || candidate > current)) {
+                chosen = i;
+            } else if (!candidateBegun && !currentBegun && candidate < current) {
+                chosen = i;
+            }
+        }
+        return chosen;
+    };
+
+    for (std::size_t index = 0; index < timeline.motions.size(); ++index) {
+        const ActionMotionTrack& track = timeline.motions[index];
         EntityVisual* visual = findMotionVisual(track.target);
         if (visual == nullptr) {
+            continue;
+        }
+        if (chosenTrackFor(track.target) != index) {
             continue;
         }
         const float end = track.startSeconds + track.durationSeconds;

@@ -979,6 +979,165 @@ void testMovingBlockPushesEnemy()
     CHECK(!pushed.players[0].dead);
 }
 
+// A scope names the entities an action is allowed to move. These pin the two
+// halves of that: in-scope entities behave exactly as they always did, and
+// out-of-scope entities keep every passive role while never being written.
+
+void testEmptyScopeIsTheWholeWorldStep()
+{
+    TEST("emptyScopeIsTheWholeWorldStep");
+    const Level level = makeLevel({
+        { "....." },
+        { "C> R " },
+    });
+    GameState state = rules::initialState(level);
+    state.movables[0].cell = cell(1, 0, 1);
+
+    // Every save in existence is validated by replaying it through the
+    // whole-world form, so this equivalence is not a nicety.
+    CHECK(rules::scopedStep(
+              level, state, MoveDirection::Right, {}, rules::StepScope {}) ==
+        rules::step(level, state, MoveDirection::Right));
+}
+
+void testScopeLeavesAmbientMotionAlone()
+{
+    TEST("scopeLeavesAmbientMotionAlone");
+    // The rock rides a belt on the row below, well clear of the player, so
+    // nothing here is a push.
+    const Level level = makeLevel({
+        { ".....", "....." },
+        { "C   R", " >   " },
+    });
+    GameState state = rules::initialState(level);
+    state.movables[0].cell = cell(1, 1, 1); // onto the belt
+    CHECK(rules::hasPendingMotion(level, state));
+
+    // Only the player acts. The belt is running under the rock, but this
+    // action is not the one carrying it, so the rock must be untouched - that
+    // is what stops a player's plan from re-planning a ride already in flight.
+    const rules::StepScope playerOnly { .actors = { state.players[0].id } };
+    const GameState after = rules::scopedStep(
+        level, state, MoveDirection::Right, {}, playerOnly);
+
+    CHECK(after.players[0].cell == cell(1, 0, 1));
+    CHECK(after.movables[0] == state.movables[0]);
+
+    // The whole-world step is what carries it, and still does.
+    const GameState whole = rules::step(level, state, MoveDirection::Right);
+    CHECK(whole.movables[0].cell == cell(2, 1, 1));
+}
+
+void testOutOfScopeEntitiesStillBlock()
+{
+    TEST("outOfScopeEntitiesStillBlock");
+    const Level level = makeLevel({
+        { "...." },
+        { "CR# " },
+    });
+    GameState state = rules::initialState(level);
+
+    // Scenery, not absence: the rock cannot be pushed into the wall, so the
+    // player does not move either.
+    const rules::StepScope playerOnly { .actors = { state.players[0].id } };
+    const GameState after = rules::scopedStep(
+        level, state, MoveDirection::Right, {}, playerOnly);
+
+    CHECK(after == state);
+}
+
+void testPushingBringsTheMovableIntoTheClosure()
+{
+    TEST("pushingBringsTheMovableIntoTheClosure");
+    const Level level = makeLevel({
+        { "....." },
+        { "CI  #" },
+    });
+    GameState state = rules::initialState(level);
+
+    // The ice was never named, but pushing it is what makes it part of this
+    // action - including the momentum it leaves the step carrying.
+    const rules::StepScope playerOnly { .actors = { state.players[0].id } };
+    const GameState after = rules::scopedStep(
+        level, state, MoveDirection::Right, {}, playerOnly);
+
+    CHECK(after.players[0].cell == cell(1, 0, 1));
+    CHECK(after.movables[0].cell == cell(2, 0, 1));
+    CHECK(after.movables[0].sliding == MoveDirection::Right);
+}
+
+void testScopedSlideDoesNotMoveThePlayer()
+{
+    TEST("scopedSlideDoesNotMoveThePlayer");
+    const Level level = makeLevel({
+        { "....." },
+        { "CI  #" },
+    });
+    GameState state = rules::step(level, rules::initialState(level),
+        MoveDirection::Right);
+
+    // The slide continues on its own. Input is present but the player is not
+    // in scope, so it is not this action's to spend - the responsiveness the
+    // whole design is for depends on these being separable.
+    const rules::StepScope iceOnly { .actors = { state.movables[0].id } };
+    const GameState after = rules::scopedStep(
+        level, state, MoveDirection::Right, {}, iceOnly);
+
+    CHECK(after.movables[0].cell == cell(3, 0, 1));
+    CHECK(after.players[0] == state.players[0]);
+}
+
+void testScopedActionDoesNotKillABystander()
+{
+    TEST("scopedActionDoesNotKillABystander");
+    const Level level = makeLevel({
+        { "......" },
+        { "C   N " },
+    });
+    GameState state = rules::initialState(level);
+    GameState::Player bystander;
+    bystander.id = 99;
+    bystander.cell = cell(3, 0, 1); // already standing next to the enemy
+    state.players.push_back(bystander);
+
+    // Adjacency is a standing fact about the board, so an unscoped sweep would
+    // have any action anywhere kill this player for where they already were.
+    const rules::StepScope firstOnly { .actors = { state.players[0].id } };
+    const GameState scoped = rules::scopedStep(
+        level, state, MoveDirection::Right, {}, firstOnly);
+    CHECK(scoped.players[0].cell == cell(1, 0, 1));
+    CHECK(!scoped.players[1].dead);
+
+    // The whole-world step still resolves attacks over everyone, unchanged.
+    const GameState whole = rules::step(level, state, MoveDirection::Right);
+    CHECK(whole.players[1].dead);
+}
+
+void testShovingAnEnemyPullsItsVictimIntoTheClosure()
+{
+    TEST("shovingAnEnemyPullsItsVictimIntoTheClosure");
+    const Level level = makeLevel({
+        { "......" },
+        { "CRN   " },
+    });
+    GameState state = rules::initialState(level);
+    GameState::Player victim;
+    victim.id = 99;
+    victim.cell = cell(4, 0, 1); // two cells away, so safe until the shove
+    state.players.push_back(victim);
+
+    // Seeded with one player, the action ends up writing three entities: it
+    // pushed the rock, the rock shoved the enemy, and the enemy killed someone
+    // who was never named. That growth is the causal closure.
+    const rules::StepScope firstOnly { .actors = { state.players[0].id } };
+    const GameState after = rules::scopedStep(
+        level, state, MoveDirection::Right, {}, firstOnly);
+
+    CHECK(after.movables[0].cell == cell(2, 0, 1));
+    CHECK(after.enemies[0].cell == cell(3, 0, 1));
+    CHECK(after.players[1].dead);
+}
+
 } // namespace
 
 int main()
@@ -1031,6 +1190,13 @@ int main()
     testEnemySpawnsOutsideStaticGridAndKillsAdjacentPlayer();
     testEnemyDoesNotAttackDiagonallyAndBlocksDirectMovement();
     testMovingBlockPushesEnemy();
+    testEmptyScopeIsTheWholeWorldStep();
+    testScopeLeavesAmbientMotionAlone();
+    testOutOfScopeEntitiesStillBlock();
+    testPushingBringsTheMovableIntoTheClosure();
+    testScopedSlideDoesNotMoveThePlayer();
+    testScopedActionDoesNotKillABystander();
+    testShovingAnEnemyPullsItsVictimIntoTheClosure();
 
     if (failures == 0) {
         std::cout << "All " << checks << " checks passed.\n";

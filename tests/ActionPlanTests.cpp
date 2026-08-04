@@ -6,6 +6,10 @@
 // total, and re-planning the same inputs gives the same answer.
 
 #include "engine/ActionPlan.hpp"
+#include "engine/Reservation.hpp"
+
+#include <algorithm>
+#include <ranges>
 
 #include <cmath>
 #include <cstddef>
@@ -219,6 +223,45 @@ void testPlayerMovementHelpers()
 
 // An ice block the player can push, with a long run of floor ahead of it and a
 // wall to stop it. Ice is a movable that keeps its momentum, not a floor.
+// A level together with a state whose entities have been placed by hand.
+struct Fixture {
+    Level level;
+    GameState state;
+};
+
+// Moves authored movables onto the cells a test needs them on.
+//
+// Why this is necessary at all: a movable's start tile ('R', 'I') resolves to
+// Air, so "a rock standing on a conveyor" cannot be authored - the cell is
+// either the rock or the belt, never both. Every belt scenario would otherwise
+// have to be reached by pushing something on, which makes the setup longer than
+// the test and drags the push's own mechanics into a test about belts.
+//
+// The result is the state that push would have produced, without the push. It
+// is deliberately not validated: these are reachable configurations, and a test
+// that wants an unreachable one is welcome to it.
+void placeMovables(GameState& state, const std::vector<GridPosition3>& cells)
+{
+    for (std::size_t i = 0; i < cells.size() && i < state.movables.size(); ++i) {
+        state.movables[i].cell = cells[i];
+    }
+}
+
+// A belt running right along row 0 with two movables queued on its leftmost
+// cells, and the player parked on row 1 clear of it.
+//
+// `movables[0]` is the follower at x=0; `movables[1]` is the leader at x=1.
+[[nodiscard]] Fixture beltWithTwoRiders()
+{
+    Level level = makeLevel({
+        { "........", "........" },
+        { ">>>>>>>#", "CRR     " },
+    });
+    GameState state = rules::initialState(level);
+    placeMovables(state, { cell(0, 0, 1), cell(1, 0, 1) });
+    return { std::move(level), std::move(state) };
+}
+
 [[nodiscard]] Level iceRink()
 {
     return makeLevel({
@@ -324,10 +367,331 @@ void testSlideMomentumDetection()
     CHECK(plans::anySlideMomentum(state));
 }
 
+// The scoped planners. `worldStep` plans every entity, so a plan made while a
+// slide was in flight re-planned that slide and collided with the copy already
+// running - nothing could ever be admitted alongside anything else. These pin
+// the per-entity planners that replace it.
+
+void testPlayerStepIsOneStepAndLeavesTheSlideBehind()
+{
+    TEST("playerStepIsOneStepAndLeavesTheSlideBehind");
+    const Level level = iceRink();
+    const GameState state = rules::initialState(level);
+
+    const std::optional<plans::PlannedAction> planned = plans::planPlayerStep(
+        level, state, MoveDirection::Right, {}, 0.2f);
+    CHECK(planned.has_value());
+    if (!planned) {
+        return;
+    }
+
+    // One tile, one leg. The player is released after their own step instead of
+    // being held for however far the block they pushed travels.
+    CHECK(planned->legs.size() == 1);
+    CHECK(planned->action.after.players[0].cell == cell(1, 0, 1));
+    CHECK(planned->action.playerPushing);
+    // The block is left mid-slide, for a separate plan to carry.
+    CHECK(planned->action.after.movables[0].cell == cell(2, 0, 1));
+    CHECK(planned->action.after.movables[0].sliding == MoveDirection::Right);
+}
+
+void testSlidePlanSettlesTheDestination()
+{
+    TEST("slidePlanSettlesTheDestination");
+    const Level level = iceRink();
+    const GameState pushed = plans::planPlayerStep(
+        level, rules::initialState(level), MoveDirection::Right, {}, 0.2f)
+                                ->action.after;
+
+    const std::vector<EntityId> sliding = plans::slidingEntities(pushed);
+    CHECK(sliding.size() == 1);
+    if (sliding.empty()) {
+        return;
+    }
+
+    const std::optional<plans::PlannedAction> slide =
+        plans::planSlide(level, pushed, sliding.front(), {}, 0.2f);
+    CHECK(slide.has_value());
+    if (!slide) {
+        return;
+    }
+
+    // The whole journey, decided now. Nothing that happens while it travels can
+    // move where it stops.
+    CHECK(slide->legs.size() > 1);
+    CHECK(!plans::anySlideMomentum(slide->action.after));
+    CHECK(slide->action.after.movables[0].cell == cell(6, 0, 1));
+    // The player is not this action's to move, so it must be untouched.
+    CHECK(slide->action.after.players[0] == pushed.players[0]);
+}
+
+void testPlayerStepAndSlideComposeToTheWholeWorldStep()
+{
+    TEST("playerStepAndSlideComposeToTheWholeWorldStep");
+    const Level level = iceRink();
+    const GameState state = rules::initialState(level);
+
+    const std::optional<plans::PlannedAction> whole =
+        plans::worldStep(level, state, MoveDirection::Right, {}, 0.2f);
+    const std::optional<plans::PlannedAction> step =
+        plans::planPlayerStep(level, state, MoveDirection::Right, {}, 0.2f);
+    CHECK(whole.has_value());
+    CHECK(step.has_value());
+    if (!whole || !step) {
+        return;
+    }
+
+    GameState composed = step->action.after;
+    for (const EntityId slider : plans::slidingEntities(composed)) {
+        if (const std::optional<plans::PlannedAction> slide =
+                plans::planSlide(level, composed, slider, {}, 0.2f)) {
+            composed = slide->action.after;
+        }
+    }
+
+    // Splitting the planner must not change where anything ends up. This is the
+    // property that lets the two coexist while the split is wired through.
+    CHECK(composed == whole->action.after);
+}
+
+void testPlayerStepLeavesAmbientRidersAlone()
+{
+    TEST("playerStepLeavesAmbientRidersAlone");
+    const Level level = makeLevel({
+        { ".....", "....." },
+        { "C   R", " >   " },
+    });
+    GameState state = rules::initialState(level);
+    state.movables[0].cell = cell(1, 1, 1); // onto the belt
+
+    const std::optional<plans::PlannedAction> planned = plans::planPlayerStep(
+        level, state, MoveDirection::Right, {}, 0.2f);
+    CHECK(planned.has_value());
+    if (planned) {
+        CHECK(planned->action.after.players[0].cell == cell(1, 0, 1));
+        CHECK(planned->action.after.movables[0] == state.movables[0]);
+    }
+}
+
+void testConveyorRideIsOneStepPerAction()
+{
+    TEST("conveyorRideIsOneStepPerAction");
+    const Level level = makeLevel({
+        { ".....", "....." },
+        { "C   R", " >>  " },
+    });
+    GameState state = rules::initialState(level);
+    state.movables[0].cell = cell(1, 1, 1);
+
+    const std::vector<EntityId> riders = plans::conveyorRiders(level, state);
+    CHECK(riders.size() == 1);
+    if (riders.empty()) {
+        return;
+    }
+
+    const std::optional<plans::PlannedAction> ride =
+        plans::planConveyorRide(level, state, riders.front(), {}, 0.2f);
+    CHECK(ride.has_value());
+    if (ride) {
+        // The belt has more to give, but this action is over: ambient motion
+        // never terminates, so a chained ride would never end, and one-step
+        // claims are what keep the area around a belt usable.
+        CHECK(ride->legs.size() == 1);
+        CHECK(ride->action.after.movables[0].cell == cell(2, 1, 1));
+        CHECK(ride->action.after.players[0] == state.players[0]);
+    }
+}
+
+void testScopedPlannersRefuseEntitiesWithNothingToDo()
+{
+    TEST("scopedPlannersRefuseEntitiesWithNothingToDo");
+    const Level level = iceRink();
+    const GameState state = rules::initialState(level);
+
+    // No momentum and no belt: nothing to plan, and saying so is how the
+    // session's admit loop terminates.
+    CHECK(plans::slidingEntities(state).empty());
+    CHECK(plans::conveyorRiders(level, state).empty());
+    CHECK(!plans::planSlide(level, state, state.movables[0].id, {}, 0.2f));
+    CHECK(!plans::planConveyorRide(level, state, state.movables[0].id, {}, 0.2f));
+    CHECK(!plans::planSlide(level, state, invalidEntityId, {}, 0.2f));
+}
+
 } // namespace
+
+void testOutcomeSurvivesAnyChangeOutsideTheReadSet()
+{
+    TEST("outcomeSurvivesAnyChangeOutsideTheReadSet");
+    // The guarantee, stated as an executable property.
+    //
+    // A plan's outcome is a pure function of the state at the instant it was
+    // made, and the read set is the claim about *which parts* of that state it
+    // depended on. So mutating anything the plan neither reads nor writes must
+    // leave its outcome bit-for-bit identical - and if it does not, either the
+    // read set is understated or the planner is consulting something it never
+    // declared. Either way the reservation table would then be admitting
+    // concurrency that can change a committed outcome, which is the one thing
+    // this design exists to make impossible.
+    //
+    // Note the asymmetry being tested: this says nothing about whether the read
+    // set is *tight*. An overstated read set only refuses concurrency that
+    // would have been safe, which costs responsiveness and never correctness.
+    const Level level = makeLevel({
+        { "........", "........" },
+        { "CI     #", "        " },
+    });
+    const GameState pushed = plans::planPlayerStep(
+        level, rules::initialState(level), MoveDirection::Right, {}, 0.2f)
+                                ->action.after;
+
+    const std::vector<EntityId> sliding = plans::slidingEntities(pushed);
+    CHECK(sliding.size() == 1);
+    if (sliding.empty()) {
+        return;
+    }
+    const std::optional<plans::PlannedAction> slide =
+        plans::planSlides(level, pushed, sliding, {}, 0.2f);
+    CHECK(slide.has_value());
+    if (!slide) {
+        return;
+    }
+    const ActionReservations claims = plans::reservationsFor(*slide);
+
+    const auto claimed = [&](GridPosition3 at) {
+        const auto touches = [&](const std::vector<Reservation>& set) {
+            return std::ranges::any_of(
+                set,
+                [&](const Reservation& reservation) {
+                    return reservation.cell.x == at.x &&
+                        reservation.cell.y == at.y &&
+                        reservation.cell.z == at.z;
+                });
+        };
+        return touches(claims.writes) || touches(claims.reads);
+    };
+
+    // Every free cell on the board that the slide neither reads nor writes.
+    // Putting the player on each in turn is the strongest mutation available
+    // here, since a player is exactly the kind of thing that could block it.
+    int tested = 0;
+    for (int y = 0; y <= 1; ++y) {
+        for (int x = 0; x < 8; ++x) {
+            const GridPosition3 at = cell(x, y, 1);
+            if (claimed(at) || !rules::staticCellAllowsEntity(level, at)) {
+                continue;
+            }
+
+            GameState mutated = pushed;
+            mutated.players[0].cell = at;
+            const std::optional<plans::PlannedAction> replanned =
+                plans::planSlides(level, mutated, sliding, {}, 0.2f);
+            CHECK(replanned.has_value());
+            if (!replanned) {
+                continue;
+            }
+            ++tested;
+            // The block lands in exactly the same place, having taken exactly
+            // the same route to get there.
+            CHECK(replanned->action.after.movables[0] ==
+                slide->action.after.movables[0]);
+            CHECK(replanned->legs.size() == slide->legs.size());
+        }
+    }
+    // Guards against the property passing vacuously because nothing qualified.
+    CHECK(tested > 0);
+}
+
+void testBeltRidersFollowEachOtherDownOneBelt()
+{
+    TEST("beltRidersFollowEachOtherDownOneBelt");
+    const Fixture belt = beltWithTwoRiders();
+    const std::vector<EntityId> riders =
+        plans::conveyorRiders(belt.level, belt.state);
+    CHECK(riders.size() == 2);
+    if (riders.size() != 2) {
+        return;
+    }
+
+    const std::optional<plans::PlannedAction> ride = plans::planConveyorRides(
+        belt.level, belt.state, riders, {}, 0.2f);
+    CHECK(ride.has_value());
+    if (!ride) {
+        return;
+    }
+    // Both advance. The follower moves into the cell the leader vacates during
+    // the same step, which is the whole reason riders are planned as a set.
+    CHECK(ride->action.after.movables[0].cell == cell(1, 0, 1));
+    CHECK(ride->action.after.movables[1].cell == cell(2, 0, 1));
+    // One step, never chained: belt motion does not terminate, so a chained
+    // ride would be an action that never ends.
+    CHECK(ride->legs.size() == 1);
+
+    // And the bug the set exists to avoid. Planned one at a time, the follower
+    // is outside its own plan's scope-mate, so it sees the leader as scenery
+    // standing in the cell it is about to leave, and refuses to move. A queue
+    // on a belt would never advance.
+    const std::optional<plans::PlannedAction> followerAlone =
+        plans::planConveyorRide(belt.level, belt.state, riders[0], {}, 0.2f);
+    CHECK(!followerAlone.has_value());
+    // The leader alone is fine - nothing is in front of it.
+    const std::optional<plans::PlannedAction> leaderAlone =
+        plans::planConveyorRide(belt.level, belt.state, riders[1], {}, 0.2f);
+    CHECK(leaderAlone.has_value());
+}
+
+void testChainPlanningStopsAtTheCap()
+{
+    TEST("chainPlanningStopsAtTheCap");
+    // `maxChainedSteps` guards against a cycle nobody has thought of rather
+    // than an expected limit - with the mechanics as they stand a slide travels
+    // in a straight line and is bounded by the board, and no arrangement of
+    // ice, belts and falls has been found that loops. So the cap is reached
+    // here the only way it can be: a corridor longer than the cap.
+    //
+    // What matters is that planning stops rather than running away, and that
+    // stopping is safe. It is, because a capped plan leaves the block still
+    // carrying momentum, and momentum is what ambient motion schedules on - so
+    // the remainder is planned as a second action instead of being lost.
+    const int width = plans::maxChainedSteps + 8;
+    const std::string floor(static_cast<std::size_t>(width), '.');
+    const std::string row =
+        "CI" + std::string(static_cast<std::size_t>(width - 3), ' ') + "#";
+    const Level level = makeLevel({ { floor }, { row } });
+
+    const std::optional<plans::PlannedAction> planned = plans::worldStep(
+        level, rules::initialState(level), MoveDirection::Right, {}, 0.2f);
+    CHECK(planned.has_value());
+    if (!planned) {
+        return;
+    }
+
+    // Cut short exactly at the cap, not one leg over.
+    CHECK(static_cast<int>(planned->legs.size()) == plans::maxChainedSteps);
+    // And cut short rather than finished: the block is still travelling, so
+    // this is genuinely the cap engaging and not a slide that happened to end.
+    CHECK(plans::anySlideMomentum(planned->action.after));
+    CHECK(planned->action.after.movables[0].cell.x < width - 2);
+
+    // The remainder is still schedulable, which is what makes the cap safe to
+    // hit. Ambient motion sees the momentum and plans the rest.
+    const std::vector<EntityId> sliding =
+        plans::slidingEntities(planned->action.after);
+    CHECK(sliding.size() == 1);
+    const std::optional<plans::PlannedAction> rest = plans::planSlides(
+        level, planned->action.after, sliding, {}, 0.2f);
+    CHECK(rest.has_value());
+    if (rest) {
+        // Which finishes the journey at the wall.
+        CHECK(rest->action.after.movables[0].cell == cell(width - 2, 0, 1));
+        CHECK(!plans::anySlideMomentum(rest->action.after));
+    }
+}
 
 int main()
 {
+    testChainPlanningStopsAtTheCap();
+    testBeltRidersFollowEachOtherDownOneBelt();
+    testOutcomeSurvivesAnyChangeOutsideTheReadSet();
     testWorldStepPlansAPush();
     testWorldStepWithoutMovementHasNoPlan();
     testPlanningIsPureAndRepeatable();
@@ -339,6 +703,12 @@ int main()
     testSlideOutcomeIgnoresLaterInterference();
     testChainStopsAtConveyors();
     testSlideMomentumDetection();
+    testPlayerStepIsOneStepAndLeavesTheSlideBehind();
+    testSlidePlanSettlesTheDestination();
+    testPlayerStepAndSlideComposeToTheWholeWorldStep();
+    testPlayerStepLeavesAmbientRidersAlone();
+    testConveyorRideIsOneStepPerAction();
+    testScopedPlannersRefuseEntitiesWithNothingToDo();
 
     if (failures == 0) {
         std::cout << "ActionPlanTests: " << checks << " checks passed\n";

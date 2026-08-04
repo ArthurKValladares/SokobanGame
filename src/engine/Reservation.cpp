@@ -9,7 +9,10 @@ namespace {
 // appending players cannot shift one entity's track onto another.
 struct EntityTrack {
     EntityId id = invalidEntityId;
-    // cells[0] is where it started; cells[i + 1] is where leg i left it.
+    // The instant `cells[0]` describes. Zero for anything present when the
+    // action began; later for an entity the action creates part-way through.
+    int firstInstant = 0;
+    // cells[i] is where it stands at instant `firstInstant + i`.
     std::vector<GridPosition3> cells;
     // Whether it ever carried slide momentum. Only a sliding entity can be
     // said to have been *stopped* by something; see the read set below.
@@ -22,7 +25,17 @@ void collectTracks(
     const std::vector<std::vector<Entity>>& perLeg,
     std::vector<EntityTrack>& tracks)
 {
-    for (std::size_t index = 0; index < before.size(); ++index) {
+    // Past the end of `before`, because an action may *add* entities: mirror
+    // activation clones a player, and the clone's cell went unclaimed entirely
+    // while this loop ran to `before.size()`. An unclaimed cell is one another
+    // action is free to walk into.
+    std::size_t count = before.size();
+    for (const std::vector<Entity>& leg : perLeg) {
+        count = std::max(count, leg.size());
+    }
+
+    for (std::size_t index = 0; index < count; ++index) {
+        const bool existedBefore = index < before.size();
         // Only entities this action actually involves.
         //
         // Claiming every entity in the world was the original reading and it is
@@ -35,33 +48,62 @@ void collectTracks(
         //
         // An entity another action depends on staying put is that action's
         // read set to declare, not this one's to hold.
-        const bool involved = std::ranges::any_of(
-            perLeg,
-            [&](const std::vector<Entity>& leg) {
-                // Removed counts as involved: the action took it out of the
-                // world, which is as much a change as moving it.
-                return index >= leg.size() || !(leg[index] == before[index]);
-            });
+        //
+        // One the action creates is involved by definition.
+        const bool involved = !existedBefore ||
+            std::ranges::any_of(
+                perLeg,
+                [&](const std::vector<Entity>& leg) {
+                    // Removed counts as involved: the action took it out of the
+                    // world, which is as much a change as moving it.
+                    return index >= leg.size() || !(leg[index] == before[index]);
+                });
         if (!involved) {
             continue;
         }
 
         EntityTrack track;
-        track.id = resolvedEntityId(kind, before[index].id, index);
-        track.cells.push_back(before[index].cell);
         const auto noteMomentum = [&track](const Entity& entity) {
             if constexpr (requires { entity.sliding; }) {
                 track.slid = track.slid || entity.sliding.has_value();
             }
         };
-        noteMomentum(before[index]);
-        for (const std::vector<Entity>& leg : perLeg) {
+
+        if (existedBefore) {
+            track.id = resolvedEntityId(kind, before[index].id, index);
+            track.cells.push_back(before[index].cell);
+            noteMomentum(before[index]);
+        } else {
+            // Claimed from the instant it appears rather than from the start of
+            // the action. It did not exist before that, and claiming a cell it
+            // was not standing in would refuse concurrency that is in fact
+            // fine.
+            const auto appears = std::ranges::find_if(
+                perLeg,
+                [index](const std::vector<Entity>& leg) {
+                    return index < leg.size();
+                });
+            if (appears == perLeg.end()) {
+                continue;
+            }
+            track.firstInstant =
+                static_cast<int>(std::distance(perLeg.begin(), appears)) + 1;
+            track.id = resolvedEntityId(kind, (*appears)[index].id, index);
+        }
+
+        for (std::size_t leg = 0; leg < perLeg.size(); ++leg) {
+            // Instants before it exists are not its to claim.
+            if (static_cast<int>(leg) + 1 < track.firstInstant) {
+                continue;
+            }
             // An entity that vanishes keeps its last known cell, which is the
             // conservative reading: the cell stays claimed.
             track.cells.push_back(
-                index < leg.size() ? leg[index].cell : track.cells.back());
-            if (index < leg.size()) {
-                noteMomentum(leg[index]);
+                index < perLeg[leg].size()
+                    ? perLeg[leg][index].cell
+                    : track.cells.back());
+            if (index < perLeg[leg].size()) {
+                noteMomentum(perLeg[leg][index]);
             }
         }
         tracks.push_back(std::move(track));
@@ -167,7 +209,7 @@ ActionReservations reservationsFor(const PlannedAction& planned)
         // and a push - where one entity leaves a cell exactly as another enters
         // it - could never be admitted.
         for (std::size_t i = 0; i < track.cells.size(); ++i) {
-            claim(track.cells[i], static_cast<int>(i));
+            claim(track.cells[i], track.firstInstant + static_cast<int>(i));
         }
 
         // The crossings themselves, so that two entities cannot trade places
@@ -177,7 +219,7 @@ ActionReservations reservationsFor(const PlannedAction& planned)
                 result.moves.push_back({
                     .from = track.cells[i],
                     .to = track.cells[i + 1],
-                    .step = static_cast<int>(i),
+                    .step = track.firstInstant + static_cast<int>(i),
                 });
             }
         }
@@ -216,7 +258,8 @@ ActionReservations reservationsFor(const PlannedAction& planned)
             // been clear then, the entity would have kept going.
             addReservation(result.reads, {
                 .cell = *blocker,
-                .firstStep = static_cast<int>(track.cells.size()) - 1,
+                .firstStep =
+                    track.firstInstant + static_cast<int>(track.cells.size()) - 1,
                 .lastStep = std::nullopt,
             });
         }
@@ -265,10 +308,12 @@ namespace {
 void ReservationTable::admit(
     std::size_t actionId,
     const ActionReservations& reservations,
-    int baseStep)
+    int baseStep,
+    std::size_t causalGroup)
 {
     entries_.push_back({
         .actionId = actionId,
+        .causalGroup = causalGroup,
         .reservations = {
             .writes = offsetBy(reservations.writes, baseStep),
             .reads = offsetBy(reservations.reads, baseStep),
@@ -290,7 +335,9 @@ void ReservationTable::clear()
 }
 
 std::optional<ReservationTable::Conflict> ReservationTable::conflict(
-    const ActionReservations& reservations, int baseStep) const
+    const ActionReservations& reservations,
+    int baseStep,
+    std::size_t exemptGroup) const
 {
     const std::vector<Reservation> writes =
         offsetBy(reservations.writes, baseStep);
@@ -341,6 +388,9 @@ std::optional<ReservationTable::Conflict> ReservationTable::conflict(
     };
 
     for (const Entry& entry : entries_) {
+        if (exemptGroup != 0 && entry.causalGroup == exemptGroup) {
+            continue;
+        }
         std::optional<Reservation> found =
             clash(writes, entry.reservations.writes);
         if (!found) {

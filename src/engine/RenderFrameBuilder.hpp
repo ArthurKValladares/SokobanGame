@@ -36,7 +36,16 @@ public:
         const Level& level;
         const GameState& state;
         bool moving = false;
-        const GameplaySession::Action& activeAction;
+        // The world as it will stand once everything in flight has committed.
+        //
+        // This used to be "the" active action's `before` and `after` read as
+        // whole states, which was fine while exactly one action existed and
+        // `before` was simply the live state. Now that the active action is
+        // merely the oldest of several, its `after` describes a world that
+        // never existed - it is a snapshot taken when that action started, with
+        // no knowledge of what the others are doing. Projecting the live state
+        // through every in-flight delta is the honest version of the same idea.
+        const GameState& projectedState;
         const GameplayPresentation& presentation;
         const PresentationSettings& settings;
         const AnimationCatalog* animations = nullptr;

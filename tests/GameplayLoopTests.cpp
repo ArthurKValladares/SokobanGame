@@ -1,5 +1,6 @@
 #include "engine/GameplayLoop.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -49,6 +50,129 @@ void testOpposingDirectionsAreNeutral()
     CHECK(!GameplayLoop::pressedHorizontal(input).has_value());
     CHECK(!GameplayLoop::heldVertical(input).has_value());
     CHECK(!GameplayLoop::heldHorizontal(input).has_value());
+}
+
+void testRenderedPlayerNeverGoesBackwards()
+{
+    TEST("renderedPlayerNeverGoesBackwards");
+    // A frame in which the player is drawn behind where the previous frame drew
+    // them reads as a flicker, and it is invisible to every other test here -
+    // the committed state is right, the action sequence is right, and only the
+    // sampled position between them is wrong.
+    //
+    // The dt is deliberately not a divisor of the step duration, so frames land
+    // part-way through actions and across completion boundaries rather than
+    // neatly on them. That is where the presentation gets resynchronised, and
+    // where a whole-world sync can stamp on an action still in flight.
+    const Level level = makeLevel({
+        { "..........", ".........." },
+        { "C         ", "          " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.15f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+
+    const GameplayLoop::InputFrame holdRight {
+        .right = { .pressed = true, .down = true },
+    };
+    const GameplayLoop::InputFrame holdDown {
+        .down = { .pressed = true, .down = true },
+    };
+
+    // A frame can only carry the player dt/stepDuration of a tile, so anything
+    // approaching a whole tile in one frame is a snap rather than motion.
+    const float perFrame = (1.0f / 60.0f) / 0.15f;
+    const float tolerance = perFrame * 3.0f;
+
+    Vec3 previous = presentation.players().front().motion.renderPosition;
+    float worst = 0.0f;
+    int jumps = 0;
+    float travelled = 0.0f;
+    for (int frame = 0; frame < 90; ++frame) {
+        // Turning corners, which is where the video flickers: a direction
+        // change ends one action and starts another on the same frame.
+        const bool goRight = (frame / 10) % 2 == 0;
+        GameplayLoop::update(
+            level,
+            session,
+            presentation,
+            goRight ? holdRight : holdDown,
+            1.0f / 60.0f,
+            false);
+
+        const Vec3 at = presentation.players().front().motion.renderPosition;
+        const float moved = std::abs(at.x - previous.x) +
+            std::abs(at.y - previous.y) + std::abs(at.z - previous.z);
+        travelled += moved;
+        if (moved > tolerance) {
+            ++jumps;
+            worst = std::max(worst, moved);
+        }
+        previous = at;
+    }
+    if (jumps != 0) {
+        std::cerr << "          rendered position jumped on " << jumps
+                  << " frame(s), worst " << worst << " tiles (tolerance "
+                  << tolerance << ")\n";
+    }
+    CHECK(jumps == 0);
+    // Guards against passing because the player never moved at all.
+    CHECK(travelled > 3.0f);
+}
+
+void testChainedSlideIsDrawnTileByTile()
+{
+    TEST("chainedSlideIsDrawnTileByTile");
+    // A chained slide owns one motion track per leg, and `seekAction` used to
+    // apply all of them. The last one won, and a track whose leg had not begun
+    // set the entity to *that* leg's starting cell - so a block one tile into a
+    // five-tile slide was drawn at the start of the final leg, which is to say
+    // at its destination, for the whole slide. Nothing caught it, because the
+    // committed state and the plan were both correct; only the sampled position
+    // between them was wrong.
+    const Level level = makeLevel({
+        { "..........", ".........." },
+        { "CI      # ", "          " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.15f);
+    GameplayPresentation presentation;
+    presentation.resetEntities(session.state());
+
+    const GameplayLoop::InputFrame push {
+        .right = { .pressed = true, .down = true },
+    };
+    const GameplayLoop::InputFrame idle {};
+
+    GameplayLoop::update(level, session, presentation, push, 1.0f / 60.0f, false);
+    float previous = presentation.movables().front().renderPosition.x;
+    float worst = 0.0f;
+    int jumps = 0;
+    // Only the push is driven; the rest is the slide playing out on its own.
+    for (int frame = 0; frame < 20; ++frame) {
+        GameplayLoop::update(
+            level, session, presentation, idle, 1.0f / 60.0f, false);
+        const float x = presentation.movables().front().renderPosition.x;
+        const float moved = std::abs(x - previous);
+        // A frame carries dt/stepDuration of a tile; a whole tile is a snap.
+        if (moved > 0.4f) {
+            ++jumps;
+            worst = std::max(worst, moved);
+        }
+        previous = x;
+    }
+    if (jumps != 0) {
+        std::cerr << "          block position jumped on " << jumps
+                  << " frame(s), worst " << worst << " tiles\n";
+    }
+    CHECK(jumps == 0);
+    // Travelling, but nowhere near the far wall yet - if it had teleported to
+    // its destination this would already be 7.
+    CHECK(previous > 2.0f);
+    CHECK(previous < 5.0f);
 }
 
 void testMoveAdvancesSessionAndPresentation()
@@ -209,6 +333,8 @@ void testMirrorDuplicationRequiresEveryPlayerOnAnEnd()
 int main()
 {
     testOpposingDirectionsAreNeutral();
+    testRenderedPlayerNeverGoesBackwards();
+    testChainedSlideIsDrawnTileByTile();
     testMoveAdvancesSessionAndPresentation();
     testMirrorInputCommitsAnInstantAction();
     testRejectedMirrorInputDoesNotEmitActivation();

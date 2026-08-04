@@ -921,13 +921,20 @@ namespace {
 //                    mutual block; blocked slide momentum does not survive.
 //
 // Micro-steps repeat until one completes with no movement at all.
+//
+// A scope restricts which entities may act. Out-of-scope entities keep every
+// passive role they had - they block, support, and stop slides - but derive no
+// intent and are never written, so a step can move one entity without deciding
+// the fate of the whole board. An empty scope means everything acts, which is
+// the behaviour every existing save was written against.
 class MicroStepResolver {
 public:
     MicroStepResolver(
         const Level& level,
         GameState& after,
         std::optional<MoveDirection> playerInput,
-        const StepRates& rates)
+        const StepRates& rates,
+        const StepScope& scope)
         : level_(level)
         , after_(after)
         , playerInput_(playerInput)
@@ -935,7 +942,14 @@ public:
         , movableCount_(after.movables.size())
         , playerCount_(after.players.size())
         , status_(movableCount_ + playerCount_)
+        , enemyMoved_(after.enemies.size(), 0)
     {
+        for (Status& status : status_) {
+            status.active = scope.wholeWorld();
+        }
+        for (const EntityId actor : scope.actors) {
+            activate(actor);
+        }
         for (std::size_t i = 0; i < playerCount_; ++i) {
             status_[entityIndexForPlayer(i)].done = playerDead(after_, i);
         }
@@ -950,7 +964,7 @@ public:
             anyMovement = resolveMoves();
             settleBlocked();
             if (anyMovement) {
-                resolveEnemyAttacks(after_);
+                resolveAttacks();
                 for (std::size_t i = 0; i < playerCount_; ++i) {
                     if (playerDead(after_, i)) {
                         status_[entityIndexForPlayer(i)].done = true;
@@ -966,6 +980,12 @@ private:
         // whether this entity's movement source is finished for the step.
         int consumed = 0;
         bool done = false;
+        // Whether this entity may act at all. Deliberately not folded into
+        // `done`, which means "has finished acting": an entity that gets pushed
+        // joins the causal closure part-way through and has to start acting,
+        // and reusing one flag for both would make that indistinguishable from
+        // an entity resuming after it had already stopped.
+        bool active = false;
         // Re-derived every micro-step.
         std::optional<MoveDirection> intent;
         std::optional<GridPosition3> target;
@@ -974,6 +994,35 @@ private:
         bool movedThisMicro = false;
         bool inputDriven = false; // player only
     };
+
+    // Brings one entity into the causal closure, by the id the rest of the
+    // engine knows it by. Unmatched ids are ignored rather than rejected: a
+    // caller may name an entity a previous action has already removed from the
+    // world, and that is not an error, it is just nothing left to move.
+    void activate(EntityId actor)
+    {
+        if (actor == invalidEntityId) {
+            return;
+        }
+        for (std::size_t i = 0; i < movableCount_; ++i) {
+            if (resolvedEntityId(
+                    EntityKind::Movable, after_.movables[i].id, i) == actor) {
+                status_[i].active = true;
+                return;
+            }
+        }
+        for (std::size_t i = 0; i < playerCount_; ++i) {
+            if (resolvedEntityId(
+                    EntityKind::Player, after_.players[i].id, i) == actor) {
+                status_[entityIndexForPlayer(i)].active = true;
+                return;
+            }
+        }
+        // Enemy ids are accepted and do nothing, deliberately. An enemy has no
+        // volition - it only ever moves because something shoved it - so there
+        // is no sense in which naming one lets it act. It joins a closure by
+        // being pushed, and `pushEnemy` is where that is recorded.
+    }
 
     [[nodiscard]] std::size_t entityIndexForPlayer(
         std::size_t playerIndex) const
@@ -1014,7 +1063,9 @@ private:
             status.movedThisMicro = false;
             status.inputDriven = false;
 
-            if (status.done) {
+            // Out of scope means scenery: still an obstacle to everyone else,
+            // but it wants nothing and will not be written.
+            if (status.done || !status.active) {
                 continue;
             }
             if (isPlayer(i)) {
@@ -1219,6 +1270,10 @@ private:
                 applyMovableMove(blockerIndex, direction, pushTarget);
                 status_[blockerIndex].movedThisMicro = true;
                 status_[blockerIndex].done = false;
+                // Pushing it is what makes it part of this action: it has been
+                // written, and if it lands on ice it has to keep sliding under
+                // the same action rather than be left for whatever comes next.
+                status_[blockerIndex].active = true;
                 applyPlayerMove(entityIndex, direction, target);
                 status.movedThisMicro = true;
                 anyMovement = true;
@@ -1266,7 +1321,61 @@ private:
             level_, after_, enemyIndex, destination);
         after_.enemies[enemyIndex].cell = fall.cell;
         after_.enemies[enemyIndex].fallen = fall.fallen;
+        // Shoved, therefore written, therefore this action's responsibility -
+        // including for whoever it has just been parked next to.
+        enemyMoved_[enemyIndex] = true;
         return true;
+    }
+
+    // Enemies kill orthogonally adjacent players.
+    //
+    // Scoping matters here in a way it does not elsewhere. Adjacency is a
+    // standing fact about the board, so an unscoped sweep would have any action
+    // anywhere kill a bystander who was already standing next to an enemy
+    // before the action began - writing an entity far outside the closure and
+    // attributing a death to the wrong action.
+    //
+    // An action is answerable for a death only when it caused the adjacency:
+    // either it moved the player, or it shoved the enemy into place. The second
+    // case pulls the victim into the closure, because it is about to be
+    // written.
+    void resolveAttacks()
+    {
+        for (std::size_t playerIndex = 0;
+             playerIndex < playerCount_;
+             ++playerIndex) {
+            GameState::Player& player = after_.players[playerIndex];
+            if (player.dead) {
+                continue;
+            }
+
+            bool threatened = false;
+            bool byMovedEnemy = false;
+            for (std::size_t i = 0; i < after_.enemies.size(); ++i) {
+                const GameState::Enemy& enemy = after_.enemies[i];
+                if (enemy.fallen || enemy.cell.z != player.cell.z) {
+                    continue;
+                }
+                if (std::abs(enemy.cell.x - player.cell.x) +
+                        std::abs(enemy.cell.y - player.cell.y) != 1) {
+                    continue;
+                }
+                threatened = true;
+                byMovedEnemy = byMovedEnemy || enemyMoved_[i];
+            }
+            if (!threatened) {
+                continue;
+            }
+
+            const std::size_t entityIndex = entityIndexForPlayer(playerIndex);
+            if (!status_[entityIndex].active && !byMovedEnemy) {
+                continue;
+            }
+            status_[entityIndex].active = true;
+            player.dead = true;
+            player.drowned = false;
+            player.sliding.reset();
+        }
     }
 
     // Moves one tile, resolves the fall, and updates slide momentum.
@@ -1328,6 +1437,9 @@ private:
     const std::size_t movableCount_;
     const std::size_t playerCount_;
     std::vector<Status> status_;
+    // Enemies never act on their own, so they need no Status - only whether
+    // this step has shoved them, which is what decides who they may kill.
+    std::vector<char> enemyMoved_;
 };
 
 } // namespace
@@ -1338,8 +1450,18 @@ GameState step(
     std::optional<MoveDirection> playerInput,
     const StepRates& rates)
 {
+    return scopedStep(level, state, playerInput, rates, StepScope {});
+}
+
+GameState scopedStep(
+    const Level& level,
+    const GameState& state,
+    std::optional<MoveDirection> playerInput,
+    const StepRates& rates,
+    const StepScope& scope)
+{
     GameState after = state;
-    MicroStepResolver resolver(level, after, playerInput, rates);
+    MicroStepResolver resolver(level, after, playerInput, rates, scope);
     resolver.run();
     return after;
 }
