@@ -5,6 +5,7 @@
 #include "engine/Log.hpp"
 #include "engine/render/VulkanDeviceSelection.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
+#include "engine/render/VulkanResourceUtils.hpp"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -29,15 +30,6 @@ constexpr std::array<const char*, 2> requiredDeviceExtensions {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
     VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME,
 };
-
-void vkCheck(VkResult result, const char* message)
-{
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error(
-            std::string(message) + " (VkResult " +
-            std::to_string(result) + ")");
-    }
-}
 
 std::vector<const char*> validationLayers()
 {

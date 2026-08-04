@@ -1,22 +1,11 @@
 #include "engine/render/SkinnedMeshUpdater.hpp"
+#include "engine/render/VulkanResourceUtils.hpp"
 
 #include <cstring>
 #include <stdexcept>
-#include <string>
 #include <utility>
 
 namespace sokoban {
-namespace {
-
-void vkCheck(VkResult result, const char* message)
-{
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error(std::string(message) + " (VkResult " + std::to_string(result) + ")");
-    }
-}
-
-} // namespace
-
 SkinnedMeshUpdater::~SkinnedMeshUpdater()
 {
     destroy();

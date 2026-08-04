@@ -1,6 +1,7 @@
 #include "engine/render/VulkanSwapchainResources.hpp"
 
 #include "engine/render/RenderResolution.hpp"
+#include "engine/render/VulkanResourceUtils.hpp"
 
 #include <SDL3/SDL_video.h>
 
@@ -8,20 +9,8 @@
 #include <array>
 #include <limits>
 #include <stdexcept>
-#include <string>
 
 namespace sokoban {
-namespace {
-
-void vkCheck(VkResult result, const char* message)
-{
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error(std::string(message) + " (VkResult " + std::to_string(result) + ")");
-    }
-}
-
-} // namespace
-
 VulkanSwapchainResources::~VulkanSwapchainResources()
 {
     destroy();

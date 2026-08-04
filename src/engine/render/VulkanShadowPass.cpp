@@ -1,22 +1,11 @@
 #include "engine/render/VulkanShadowPass.hpp"
 
 #include "engine/render/LightingConfig.hpp"
+#include "engine/render/VulkanResourceUtils.hpp"
 
 #include <stdexcept>
-#include <string>
 
 namespace sokoban {
-namespace {
-
-void vkCheck(VkResult result, const char* message)
-{
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error(std::string(message) + " (VkResult " + std::to_string(result) + ")");
-    }
-}
-
-} // namespace
-
 VulkanShadowPass::~VulkanShadowPass()
 {
     destroy();

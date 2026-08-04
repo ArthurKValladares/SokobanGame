@@ -183,6 +183,7 @@ add_library(sokoban_core STATIC
     src/engine/PresentationSettings.cpp
     src/engine/PlayerProfile.cpp
     src/engine/PlayerProfileCodec.cpp
+    src/engine/PlayerProfileMigrations.cpp
     src/engine/PresentationTransactionBuilder.cpp
     src/engine/RenderFrameBuilder.cpp
     src/engine/Reservation.cpp

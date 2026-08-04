@@ -2,7 +2,11 @@
 
 #include <vulkan/vulkan.h>
 
-namespace sokoban::vulkanResources {
+namespace sokoban {
+
+void vkCheck(VkResult result, const char* message);
+
+namespace vulkanResources {
 
 struct OwnedImage {
     VkImage image = VK_NULL_HANDLE;
@@ -26,4 +30,5 @@ struct OwnedImage {
     VkImageAspectFlags aspectMask);
 void destroyImage(VkDevice device, OwnedImage& image);
 
-} // namespace sokoban::vulkanResources
+} // namespace vulkanResources
+} // namespace sokoban

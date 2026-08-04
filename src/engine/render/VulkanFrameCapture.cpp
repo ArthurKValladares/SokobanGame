@@ -4,18 +4,9 @@
 
 #include <cstring>
 #include <stdexcept>
-#include <string>
 
 namespace sokoban {
 namespace {
-
-void vkCheck(VkResult result, const char* message)
-{
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error(
-            std::string(message) + " (VkResult " + std::to_string(result) + ")");
-    }
-}
 
 // Swapchain colour formats are commonly BGRA; ImageData and the PNG writer are
 // RGBA, so the channel order is fixed up on the CPU during the copy out.

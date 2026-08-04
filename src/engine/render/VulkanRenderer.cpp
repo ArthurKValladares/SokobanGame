@@ -4,6 +4,7 @@
 #include "engine/render/ImageData.hpp"
 #include "engine/render/VulkanDeviceSelection.hpp"
 #include "engine/render/VulkanFrameCapture.hpp"
+#include "engine/render/VulkanResourceUtils.hpp"
 #include "engine/ui/UiConfig.hpp"
 
 #include <SDL3/SDL.h>
@@ -29,13 +30,6 @@
 
 namespace sokoban {
 namespace {
-
-void vkCheck(VkResult result, const char* message)
-{
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error(std::string(message) + " (VkResult " + std::to_string(result) + ")");
-    }
-}
 
 Vec3 transformedModelPoint(
     const ModelTransformPoints& transform,

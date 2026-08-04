@@ -870,14 +870,10 @@ void appendDecorations(
     }
 }
 
-} // namespace
-
-RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
+RenderFrameData initializeGameplayFrame(
+    const RenderFrameBuilder::GameplayInput& input)
 {
-    const GameState& state = input.state;
-    const auto& playerVisuals = input.presentation.players();
-    const auto& primaryPlayerVisual = playerVisuals.front();
-    const auto& movableVisuals = input.presentation.movables();
+    const auto& primaryPlayerVisual = input.presentation.players().front();
     RenderFrameData frame;
     frame.viewMode = RenderViewMode::Isometric3D;
     frame.cameraPitchDegrees = input.cameraPitchDegrees;
@@ -915,6 +911,16 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
         primaryPlayerVisual.motion.renderPosition.x,
         primaryPlayerVisual.motion.renderPosition.y,
     };
+    return frame;
+}
+
+void appendGameplayWorld(
+    RenderFrameData& frame,
+    const RenderFrameBuilder::GameplayInput& input)
+{
+    const GameState& state = input.state;
+    const auto& primaryPlayerVisual = input.presentation.players().front();
+    const auto& movableVisuals = input.presentation.movables();
     const bool endUnlocked = rules::isEndUnlocked(input.level, state);
 
     frame.tiles.reserve(
@@ -1078,6 +1084,15 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
                 });
             });
     }
+}
+
+void appendGameplayEntities(
+    RenderFrameData& frame,
+    const RenderFrameBuilder::GameplayInput& input)
+{
+    const GameState& state = input.state;
+    const auto& playerVisuals = input.presentation.players();
+    const auto& movableVisuals = input.presentation.movables();
 
     for (std::size_t playerIndex = 0;
          playerIndex < state.players.size() &&
@@ -1212,6 +1227,15 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             input.settings.tileScale(movable.type));
         frame.tiles.push_back(movableTile);
     }
+}
+
+void appendMirrorPreview(
+    RenderFrameData& frame,
+    const RenderFrameBuilder::GameplayInput& input)
+{
+    const GameState& state = input.state;
+    const auto& playerVisuals = input.presentation.players();
+    const auto& movableVisuals = input.presentation.movables();
 
     if (!rules::anyPlayerDead(state)) {
         std::optional<rules::MirrorActivationPreview> mirrorPreview =
@@ -1483,13 +1507,29 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
             }
         }
     }
+}
 
+void applyScrollingMaterials(
+    RenderFrameData& frame,
+    const RenderFrameBuilder::GameplayInput& input)
+{
     for (RenderFrameData::Tile& tile : frame.tiles) {
         if (!tile.model.isCube() &&
             input.manifest.model(tile.model).hasScrollingMaterial()) {
             tile.beltScrollOffset = input.conveyorBeltScrollOffset;
         }
     }
+}
+
+} // namespace
+
+RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
+{
+    RenderFrameData frame = initializeGameplayFrame(input);
+    appendGameplayWorld(frame, input);
+    appendGameplayEntities(frame, input);
+    appendMirrorPreview(frame, input);
+    applyScrollingMaterials(frame, input);
     return frame;
 }
 

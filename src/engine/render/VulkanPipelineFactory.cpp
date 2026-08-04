@@ -2,24 +2,17 @@
 
 #include "engine/render/GltfMesh.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
+#include "engine/render/VulkanResourceUtils.hpp"
 
 #include <array>
 #include <cstddef>
 #include <fstream>
 #include <stdexcept>
-#include <string>
 #include <utility>
 #include <vector>
 
 namespace sokoban {
 namespace {
-
-void vkCheck(VkResult result, const char* message)
-{
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error(std::string(message) + " (VkResult " + std::to_string(result) + ")");
-    }
-}
 
 std::vector<char> readFile(const std::filesystem::path& path)
 {

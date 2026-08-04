@@ -3,6 +3,7 @@
 #include "engine/Log.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/render/ImageData.hpp"
+#include "engine/render/VulkanResourceUtils.hpp"
 
 #if SOKOBAN_ENABLE_DEBUG_UI
 #include <imgui.h>
@@ -11,23 +12,9 @@
 
 #include <cstring>
 #include <exception>
-#include <stdexcept>
-#include <string>
 #include <system_error>
 
 namespace sokoban {
-namespace {
-
-void vkCheck(VkResult result, const char* message)
-{
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error(
-            std::string(message) + " (VkResult " + std::to_string(result) + ")");
-    }
-}
-
-} // namespace
-
 VulkanThumbnailPass::~VulkanThumbnailPass()
 {
     destroy();

@@ -1,12 +1,12 @@
 #include "engine/render/VulkanUiResources.hpp"
 
 #include "engine/render/ImageData.hpp"
+#include "engine/render/VulkanResourceUtils.hpp"
 #include "engine/ui/FontAtlas.hpp"
 
 #include <cstring>
 #include <span>
 #include <stdexcept>
-#include <string>
 
 namespace sokoban {
 namespace {
@@ -15,13 +15,6 @@ struct StagingBuffer {
     VkBuffer buffer = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
 };
-
-void vkCheck(VkResult result, const char* message)
-{
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error(std::string(message) + " (VkResult " + std::to_string(result) + ")");
-    }
-}
 
 void destroyStaging(VkDevice device, StagingBuffer& staging)
 {

@@ -3,8 +3,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace sokoban::vulkanResources {
-namespace {
+namespace sokoban {
 
 void vkCheck(VkResult result, const char* message)
 {
@@ -13,7 +12,7 @@ void vkCheck(VkResult result, const char* message)
     }
 }
 
-} // namespace
+namespace vulkanResources {
 
 uint32_t findMemoryType(
     VkPhysicalDevice physicalDevice,
@@ -107,4 +106,5 @@ void destroyImage(VkDevice device, OwnedImage& image)
     image = {};
 }
 
-} // namespace sokoban::vulkanResources
+} // namespace vulkanResources
+} // namespace sokoban

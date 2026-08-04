@@ -2,6 +2,7 @@
 
 #include "engine/Log.hpp"
 #include "engine/TaskSystem.hpp"
+#include "engine/render/VulkanResourceUtils.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -12,13 +13,6 @@
 
 namespace sokoban {
 namespace {
-
-void vkCheck(VkResult result, const char* message)
-{
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error(std::string(message) + " (VkResult " + std::to_string(result) + ")");
-    }
-}
 
 template <typename Result>
 bool futureReady(std::future<Result>& future)

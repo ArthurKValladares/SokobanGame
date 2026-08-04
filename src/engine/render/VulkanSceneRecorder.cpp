@@ -6,6 +6,7 @@
 #include "engine/render/VulkanModelResources.hpp"
 #include "engine/render/VulkanPipelineFactory.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
+#include "engine/render/VulkanResourceUtils.hpp"
 #include "engine/render/VulkanSceneDescriptors.hpp"
 #include "engine/render/VulkanShadowPass.hpp"
 #include "engine/render/VulkanSsaoPass.hpp"
@@ -19,8 +20,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <stdexcept>
-#include <string>
 #include <vector>
 
 #ifndef SOKOBAN_ENABLE_DEBUG_UI
@@ -31,15 +30,6 @@ namespace sokoban {
 namespace {
 
 constexpr float particleTextureMaterialMode = 5.0f;
-
-void vkCheck(VkResult result, const char* message)
-{
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error(
-            std::string(message) + " (VkResult " +
-            std::to_string(result) + ")");
-    }
-}
 
 Vec4 subtract(Vec4 left, Vec4 right)
 {
