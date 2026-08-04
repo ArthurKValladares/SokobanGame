@@ -36,7 +36,34 @@ mkdir -p "$OUT/obj" "$OUT/bin" "$OUT/inc/nlohmann"
 cp "$ROOT/third_party/nlohmann/json.hpp" "$OUT/inc/nlohmann/"
 
 INCS=(-I"$ROOT/src" -I"$OUT/inc" -I"$ROOT/third_party" -I"$ROOT/third_party/stb" -I"$ROOT/third_party/SDL/include")
-FLAGS=(-std=c++20 -O0 -g0 -Wall -Wextra -Wpedantic -DSOKOBAN_GAME_VERSION='"0.1.0"')
+# -MMD writes a .d listing every header the unit included. Without it a header
+# change leaves objects that were compiled against the old layout, and linking
+# those against freshly built ones produces a binary that fails in ways that
+# look like logic bugs and move around between runs.
+FLAGS=(-std=c++20 -O0 -g0 -MMD -MP -Wall -Wextra -Wpedantic -DSOKOBAN_GAME_VERSION='"0.1.0"')
+
+# Rebuild when the object is missing, older than its source, or older than the
+# most recently touched header in the tree.
+#
+# Deliberately coarse: one header edit rebuilds everything. The precise version
+# reads the .d files gcc writes, and that was tried and quietly did nothing -
+# the checkout path contains a space ("Sokoban Game"), .d files escape it as
+# "\ ", and splitting those lines on whitespace mangles every path into
+# something that does not exist and is skipped. The result looked like working
+# dependency tracking while rebuilding nothing, which produced objects built
+# against different layouts of the same struct and crashes that read as logic
+# bugs. A whole-tree timestamp cannot fail that way.
+NEWEST_HEADER_TS=$(
+  find "$ROOT/src" \( -name '*.hpp' -o -name '*.h' -o -name '*.inl' \) \
+    -printf '%T@\n' | sort -n | tail -1 | cut -d. -f1
+)
+needsRebuild() {
+  local src="$1" obj="$2"
+  [ -f "$obj" ] || return 0
+  [ "$obj" -nt "$src" ] || return 0
+  [ "$(stat -c %Y "$obj")" -ge "${NEWEST_HEADER_TS:-0}" ] || return 0
+  return 1
+}
 
 # SDL3 is built once from the vendored tree with the desktop backends off:
 #   cmake -S third_party/SDL -B "$SDL_BUILD" -DSDL_STATIC=ON -DSDL_SHARED=OFF \
@@ -78,14 +105,14 @@ done
 # reports every unit built.
 todo=0
 while IFS=$'\t' read -r src obj; do
-  [ -f "$obj" ] && [ "$obj" -nt "$src" ] && continue
+  needsRebuild "$src" "$obj" || continue
   todo=$((todo+1))
 done < "$OUT/units.txt"
 echo "== $todo units to build =="
 
 running=0
 while IFS=$'\t' read -r src obj; do
-  [ -f "$obj" ] && [ "$obj" -nt "$src" ] && continue
+  needsRebuild "$src" "$obj" || continue
   ( g++ "${FLAGS[@]}" "${INCS[@]}" -c "$src" -o "$obj" 2> "$obj.log" \
       || { echo "COMPILE FAIL: $src"; head -20 "$obj.log"; rm -f "$obj"; } ) &
   running=$((running+1))
@@ -100,9 +127,17 @@ if [ "$built" -lt "$total" ]; then
   exit 2
 fi
 
-rm -f "$OUT/libcore.a"
-ar rcs "$OUT/libcore.a" "$OUT"/obj/*.o 2>/dev/null
-echo "== core archive: $(ar t "$OUT/libcore.a" 2>/dev/null | wc -l) objects =="
+# Only rebuilt when an object actually changed. Re-archiving unconditionally
+# makes the archive newer than every test binary, so all of them look stale and
+# the whole suite relinks on every run.
+if [ -n "$(find "$OUT/obj" -name '*.o' -newer "$OUT/libcore.a" -print -quit 2>/dev/null)" ] \
+   || [ ! -f "$OUT/libcore.a" ]; then
+  rm -f "$OUT/libcore.a"
+  ar rcs "$OUT/libcore.a" "$OUT"/obj/*.o 2>/dev/null
+  echo "== core archive rebuilt: $(ar t "$OUT/libcore.a" 2>/dev/null | wc -l) objects =="
+else
+  echo "== core archive up to date =="
+fi
 
 # name:test-source. SDL-free suites.
 TESTS="
@@ -162,8 +197,8 @@ running=0
 for entry in $TESTS; do
   name="${entry%%:*}"; src="${entry##*:}"
   [ -f "$ROOT/tests/$src.cpp" ] || { echo "MISSING SOURCE: $src"; continue; }
-  if [ -x "$OUT/bin/$name" ] && [ "$OUT/bin/$name" -nt "$ROOT/tests/$src.cpp" ] \
-     && [ "$OUT/bin/$name" -nt "$OUT/libcore.a" ]; then continue; fi
+  if [ "$OUT/bin/$name" -nt "$OUT/libcore.a" ] \
+     && ! needsRebuild "$ROOT/tests/$src.cpp" "$OUT/bin/$name"; then continue; fi
   pending=$((pending+1))
   ( g++ "${FLAGS[@]}" "${INCS[@]}" -DSOKOBAN_TEST_ASSET_DIR="\"$ROOT/assets\"" \
       "$ROOT/tests/$src.cpp" "$OUT/libcore.a" "${LINKLIBS[@]}" -o "$OUT/bin/$name" \

@@ -112,9 +112,10 @@ void testSlideClaimsItsWholePath()
     const ActionReservations claims = plans::reservationsFor(planned);
 
     // The block starts at x=1 and ends at x=6; every cell between is claimed at
-    // the step it is occupied, and none of them earlier.
+    // the instant it is occupied, and none of them earlier. There is one more
+    // instant than there are legs - the state before the first step counts.
     CHECK(holds(claims.writes, cell(1, 0), 0));
-    CHECK(holds(claims.writes, cell(6, 0), static_cast<int>(planned.legs.size()) - 1));
+    CHECK(holds(claims.writes, cell(6, 0), static_cast<int>(planned.legs.size())));
     // Its resting cell stays claimed indefinitely - it is still standing there.
     CHECK(holds(claims.writes, cell(6, 0), 999));
     // But it does not claim the destination before it arrives.
@@ -126,6 +127,107 @@ void testSlideClaimsItsWholePath()
 
     // The player claims the cell it stepped into, open-ended.
     CHECK(holds(claims.writes, cell(1, 0), 999));
+}
+
+void testUninvolvedEntitiesAreNotClaimed()
+{
+    TEST("uninvolvedEntitiesAreNotClaimed");
+    // The bug this pins: claims were built for every entity in the state, not
+    // for the ones the action moves. A bystander's resting cell was therefore
+    // claimed open-ended by an action that never touched it - and since every
+    // plan is computed from the same whole world, every plan claimed every
+    // bystander, so no two plans could ever run together.
+    //
+    // Caught only when reservationsFor and the table are used together; each
+    // looked right on its own.
+    const Level level = makeLevel({
+        { "........", "........" },
+        { "CI     #", "        " },
+    });
+    const GameState state = rules::initialState(level);
+
+    // A slide that moves only the block: the player stays where it is.
+    plans::PlannedAction slide;
+    slide.action.before = state;
+    GameState current = state;
+    for (int x = 2; x <= 6; ++x) {
+        current.movables[0].cell = cell(x, 0);
+        slide.legs.push_back(current);
+    }
+    slide.action.after = current;
+
+    const ActionReservations claims = plans::reservationsFor(slide);
+    // The block's path, as before.
+    CHECK(holds(claims.writes, cell(6, 0), 999));
+    // But nothing at all on the player, which this action leaves alone.
+    CHECK(!holds(claims.writes, cell(0, 0), 0));
+    CHECK(!holds(claims.writes, cell(0, 0), 999));
+
+    // So a player step clear of the block's path runs alongside it. This is
+    // the concurrency the whole design is for.
+    ReservationTable table;
+    table.admit(1, claims, 0);
+
+    plans::PlannedAction stepAside;
+    stepAside.action.before = state;
+    GameState aside = state;
+    aside.players[0].cell = cell(0, 1);
+    stepAside.action.after = aside;
+    stepAside.legs.push_back(aside);
+    CHECK(!table.conflict(plans::reservationsFor(stepAside), 0));
+
+    // And stepping into the cell the block is vacating this very step is
+    // allowed - that is a push, and refusing it would make the commonest
+    // interaction in the game the one thing concurrency cannot express. The
+    // block holds the cell at instant 0, the player from instant 1.
+    plans::PlannedAction follow;
+    follow.action.before = state;
+    GameState followed = state;
+    followed.players[0].cell = cell(1, 0);
+    follow.action.after = followed;
+    follow.legs.push_back(followed);
+    CHECK(!table.conflict(plans::reservationsFor(follow), 0));
+}
+
+void testEntitiesCannotSwapThroughEachOther()
+{
+    TEST("entitiesCannotSwapThroughEachOther");
+    // The case occupancy-at-instants misses on its own. Two entities that trade
+    // cells in one step are each where the other was, so they share no instant
+    // - but they cross mid-step and pass straight through one another.
+    ActionReservations left;
+    left.writes.push_back({ .cell = cell(1, 0), .firstStep = 0, .lastStep = 0 });
+    left.writes.push_back({
+        .cell = cell(2, 0), .firstStep = 1, .lastStep = std::nullopt });
+    left.moves.push_back({ .from = cell(1, 0), .to = cell(2, 0), .step = 0 });
+
+    ActionReservations right;
+    right.writes.push_back({ .cell = cell(2, 0), .firstStep = 0, .lastStep = 0 });
+    right.writes.push_back({
+        .cell = cell(1, 0), .firstStep = 1, .lastStep = std::nullopt });
+    right.moves.push_back({ .from = cell(2, 0), .to = cell(1, 0), .step = 0 });
+
+    ReservationTable table;
+    table.admit(1, left, 0);
+    CHECK(table.conflict(right, 0).has_value());
+
+    // Following in convoy is the same geometry minus the head-on crossing, and
+    // is exactly what a push is, so it must still be admitted.
+    ActionReservations convoy;
+    convoy.writes.push_back({ .cell = cell(0, 0), .firstStep = 0, .lastStep = 0 });
+    convoy.writes.push_back({
+        .cell = cell(1, 0), .firstStep = 1, .lastStep = std::nullopt });
+    convoy.moves.push_back({ .from = cell(0, 0), .to = cell(1, 0), .step = 0 });
+    CHECK(!table.conflict(convoy, 0));
+
+    // Not that the swap rule is doing all the work here: the first entity comes
+    // to rest on (2,0) and holds it open-ended, so a later attempt on that cell
+    // is refused by occupancy regardless of direction.
+    ActionReservations later = right;
+    later.moves[0].step = 1;
+    later.writes[0].firstStep = 1; later.writes[0].lastStep = 1;
+    later.writes[1].firstStep = 2;
+    CHECK(table.conflict(later, 0).has_value());
 }
 
 void testDisjointActionsDoNotConflict()
@@ -292,6 +394,8 @@ int main()
 {
     testOverlapRules();
     testSlideClaimsItsWholePath();
+    testUninvolvedEntitiesAreNotClaimed();
+    testEntitiesCannotSwapThroughEachOther();
     testDisjointActionsDoNotConflict();
     testCrossingAheadOfTheBlockIsAllowed();
     testStandingInThePathConflicts();

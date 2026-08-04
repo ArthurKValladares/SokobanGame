@@ -98,7 +98,7 @@ void testIndependentActionsRunTogether()
     CHECK(!scheduler.idle());
 
     // The shorter one finishes first and commits alone.
-    std::vector<std::size_t> done = scheduler.advance(0.25f);
+    std::vector<ActionScheduler::InFlight> done = scheduler.advance(0.25f);
     CHECK(done.size() == 1);
     CHECK(scheduler.state().movables[1].cell == cell(6, 9));
     CHECK(scheduler.state().movables[0].cell == cell(5, 0));
@@ -173,7 +173,7 @@ void testCommitsAreDeltasNotWholeStates()
     CHECK(started(scheduler.tryStart(first, firstClaims)));
     CHECK(started(scheduler.tryStart(second, secondClaims)));
 
-    const std::vector<std::size_t> done = scheduler.advance(0.15f);
+    const std::vector<ActionScheduler::InFlight> done = scheduler.advance(0.15f);
     CHECK(done.size() == 2);
     CHECK(scheduler.state().movables[0].cell == cell(6, 0));
     CHECK(scheduler.state().movables[1].cell == cell(6, 9));
@@ -195,13 +195,13 @@ void testCompletionOrderIsDeterministic()
         static_cast<void>(scheduler.tryStart(b, bClaims));
         return scheduler.advance(0.5f);
     };
-    const std::vector<std::size_t> first = run();
+    const std::vector<ActionScheduler::InFlight> first = run();
     CHECK(first.size() == 2);
     CHECK(run() == first);
     // The one that ran out earliest commits first: b (0.1s) before a (0.2s).
     if (first.size() == 2) {
-        CHECK(first[0] == 2);
-        CHECK(first[1] == 1);
+        CHECK(first[0].id == 2);
+        CHECK(first[1].id == 1);
     }
 }
 
@@ -265,7 +265,7 @@ void testZeroDurationActionCompletesImmediately()
     const auto [plan, claims] =
         movePlan(scheduler.state(), 0, cell(6, 0), 0.0f);
     CHECK(started(scheduler.tryStart(plan, claims)));
-    const std::vector<std::size_t> done = scheduler.advance(0.0f);
+    const std::vector<ActionScheduler::InFlight> done = scheduler.advance(0.0f);
     CHECK(done.size() == 1);
     CHECK(scheduler.idle());
     CHECK(scheduler.state().movables[0].cell == cell(6, 0));

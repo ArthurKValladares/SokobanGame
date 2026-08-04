@@ -396,8 +396,143 @@ struct ActionPlan {
 
    ### Remaining
 
-   Wire `ActionScheduler` into `GameplaySession` and let `tryStartNextAction`
-   admit a second action. `GameplaySession` keeps its current single-action
+   **The scheduler is wired in.** `GameplaySession` no longer holds
+   `activeAction_`/`activeActionLegs_`/`moveElapsed_`/`moving_`/`clockSeconds_`
+   or its own `GameState`; it holds an `ActionScheduler`, which owns the
+   authoritative state, every action in flight, their clocks, the shared step
+   clock and the reservation table. The single-action accessors remain and
+   resolve to the oldest action in flight, so `Application`, `RenderFrameBuilder`
+   and both test suites are unchanged. Reservations are computed and checked on
+   every action already; `tryStartNextAction` still refuses to start a second
+   one, so behaviour is identical. Undo and restart now refuse while anything is
+   in flight, per the decision above.
+
+   Three things the sketch above did not anticipate:
+
+   - **`advance` had to split into `advanceClock` and `commitFinished`.** The
+     caller does work between them - the presentation is sampled at the new
+     elapsed time before anything commits, and history bookkeeping hangs off the
+     commit. `advance` remains as the composition of the two.
+   - **Elapsed time must not be clamped to the duration.** How far an action ran
+     past its end is what orders the commits; clamping erases it. Readers that
+     want a sampling time clamp on the way out.
+   - **Legs serve two masters and must not be shared.** Reservations need at
+     least one leg or a plan claims nothing and conflicts with nothing - the
+     leg-less-plan gap noted above. But the presentation reads legs to decide
+     whether to animate a chain tile by tile, and handing a single-step action a
+     synthetic leg sends it down the chain-aware path, which pairs entities
+     positionally between legs and cannot survive an action that adds a player.
+     Mirror activation does exactly that, and it crashes. `beginAction` therefore
+     computes the claim from a local copy and stores the legs the caller meant.
+
+   **`GameplayLoop::update` is restructured.** Starting an action is no longer
+   gated on `!session.moving()`: the frame admits whatever it can, advances
+   everything, and commits whatever finished. Two helpers do the per-action
+   work - `startPresentation` installs a timeline by action id (the newest
+   action is not the one the single-action setters target) and `seekAllInFlight`
+   samples each action at its own elapsed time.
+
+   The loop itself did not disappear, and the note above that said it would was
+   too strong. What it no longer does is *sequence* - it does not have to finish
+   one action before starting the next. What remains is **catch-up**: a frame
+   longer than an action still has to run the world forward more than once, and
+   it must stop at each completion rather than step over it, or an action
+   commits late and whatever follows is planned against a state that never
+   existed. Hence `timeToNextCompletion()`. A regression check confirms one
+   0.35s frame lands identically to seven 0.05s frames.
+
+   ### Remaining: admit a second action
+
+   Deleting the `if (moving()) return false;` guard in `tryStartNextAction` is
+   the whole change, but two things have to be settled with it:
+
+   - **Rejected commands are currently swallowed.** `tryStartNextAction` pops a
+     command off `pendingCommands_` before trying it. Under the guard a pop was
+     always followed by an admission, so this never mattered; once admission can
+     be refused by the reservation table, a conflicting command is consumed and
+     lost. The decision at the top of this document is *queued, not rejected*,
+     so it has to go back on the front of the queue and retry on a later frame -
+     bearing in mind the staleness rule, which is what stops it retrying
+     forever.
+   - **Termination of the admit loop.** `GameplayLoop` now calls
+     `tryStartNextAction` until it returns false. That terminates for the right
+     reason and it is worth knowing why: authoritative state does not change
+     until an action commits, so re-planning against it produces the same plan,
+     whose claims collide with the copy already in flight. Ambient motion is
+     self-limiting for the same reason. This is load-bearing - a planner that
+     produced a *different* plan from an unchanged state would spin.
+
+   **A bug in 4a had to be fixed before any of this could work, and it is the
+   real reason step 3 was not simply a matter of deleting the guard.**
+
+   `plans::reservationsFor` built a track for *every entity in `before`*, not
+   for the ones the action involves. A bystander's resting cell was therefore
+   write-claimed open-ended by an action that never touched it. Since every plan
+   is computed from the same whole world, every plan claimed every stationary
+   entity, so **no two plans could ever be admitted together** - the table would
+   refuse a player step on the far side of the board from a sliding block.
+   Deleting the guard would have changed nothing observable.
+
+   Neither existing suite caught it. `ReservationTests` checked one plan's
+   claims in isolation; `ActionSchedulerTests` hand-builds minimal claims rather
+   than calling `reservationsFor`, so the two halves were never used together.
+   `uninvolvedEntitiesAreNotClaimed` now pins it, and is the first test that
+   exercises both.
+
+   An entity another action depends on staying put is that action's *read* set
+   to declare, not this one's to hold. That is what the read/write split was
+   for, and the write side was quietly doing the read side's job.
+
+   ### What is genuinely left
+
+   With that fixed, a plan that moves only a block admits a player step beside
+   it. But `plans::worldStep` is a whole-world planner: given the player's
+   input it steps *everything*, so the plan for a player's move during a slide
+   still re-plans the slide and collides with the copy in flight. The per-entity
+   planners the Shape section calls for - `planMove`, `planPush`, `planSlide`,
+   `planConveyorRide` - do not exist; only `worldStep` does. Splitting the
+   whole-world planner into those is the remaining work, and it is what releases
+   the player as soon as their own leg ends rather than at the end of the chain.
+
+   **Same-step handoff is now representable, and that question is settled.**
+   Claims number instants rather than step intervals: an entity leaving a cell
+   during step `i` holds it through instant `i`, one arriving holds it from
+   instant `i + 1`. A push hands the cell over within the step and both halves
+   are admitted. Two further pieces were needed to make that sound:
+
+   - `Traversal` claims (the boundary crossings) reject two entities swapping
+     places, which occupancy-at-instants alone would allow - they share no
+     instant yet pass through each other mid-step.
+   - The inferred stopping read is limited to entities that actually carried
+     slide momentum. `blockingCell` assumed anything that stopped was blocked,
+     so a one-tile input step claimed a read on the cell beyond it - precisely
+     the cell the block it had just pushed was moving into, which refused every
+     push. Only something still travelling can be said to have been stopped.
+
+   ### The remaining work, concretely
+
+   `plans::worldStep` is still the only planner, and it plans the whole world:
+   given the player's input it steps every entity. So a player move planned
+   while a slide is in flight re-plans that slide and collides with the copy
+   already running. Until it is split, deleting the one-at-a-time guard in
+   `tryStartNextAction` changes nothing in play.
+
+   The split wants `planMove`, `planPush`, `planSlide` and `planConveyorRide`,
+   each a pure `(Level, GameState, params) -> std::optional<ActionPlan>` over
+   the causal closure of the entities it actually moves - not over the world.
+   `worldStep` then becomes a composition of them for the paths that still want
+   whole-world semantics (save validation in `matchesForwardTransition` depends
+   on replaying a chain, so it cannot simply be deleted).
+
+   Two things to carry into that work:
+
+   - **Deferred commands are still dropped.** `tryStartNextAction` pops a
+     command before trying it, so once admission can be refused the command is
+     lost. It needs to go back on the front of the queue; staleness retires it.
+   - **The read set will need to come from the planners.** Momentum makes the
+     inferred stopping read correct for the cases the game has today, but a
+     per-entity planner knows exactly which cells it consulted, and declaring
+     them is what removes the last of the guesswork. `GameplaySession` keeps its current single-action
    accessors, returning the oldest in-flight action, so `Application` and
    `RenderFrameBuilder` need no changes in the same pass.
 

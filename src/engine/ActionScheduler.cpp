@@ -24,9 +24,27 @@ int ActionScheduler::currentStep() const
         std::floor(clockSeconds_ / stepDurationSeconds_));
 }
 
+void ActionScheduler::setStepDurationSeconds(float seconds)
+{
+    stepDurationSeconds_ = std::max(seconds, 0.0001f);
+}
+
+const ActionScheduler::InFlight* ActionScheduler::oldest() const
+{
+    return inFlight_.empty() ? nullptr : &inFlight_.front();
+}
+
+ActionScheduler::InFlight* ActionScheduler::find(std::size_t id)
+{
+    const auto found = std::ranges::find(inFlight_, id, &InFlight::id);
+    return found == inFlight_.end() ? nullptr : &*found;
+}
+
 std::variant<ActionScheduler::Started, ActionScheduler::Rejection>
 ActionScheduler::tryStart(
-    const ActionPlan& plan, const ActionReservations& reservations)
+    const ActionPlan& plan,
+    const ActionReservations& reservations,
+    std::vector<GameState> legs)
 {
     // Rounded down deliberately. An action starting part-way through a step
     // gets claims that begin fractionally early, which can only make the check
@@ -47,25 +65,36 @@ ActionScheduler::tryStart(
     inFlight_.push_back({
         .id = id,
         .plan = plan,
+        .legs = std::move(legs),
         .elapsedSeconds = 0.0f,
         .baseStep = baseStep,
     });
     return Started { .id = id };
 }
 
-std::vector<std::size_t> ActionScheduler::advance(float deltaSeconds)
+void ActionScheduler::advanceClock(float deltaSeconds)
 {
+    if (inFlight_.empty()) {
+        return;
+    }
     const float step = std::max(deltaSeconds, 0.0f);
     clockSeconds_ += step;
+    // Deliberately not clamped to the duration. How far an action ran past its
+    // end is what orders the commits below, and clamping would erase it.
+    // Readers that want a sampling time clamp on the way out.
+    for (InFlight& action : inFlight_) {
+        action.elapsedSeconds += step;
+    }
+}
 
+std::vector<ActionScheduler::InFlight> ActionScheduler::commitFinished()
+{
     struct Finished {
         std::size_t id = 0;
         float overshoot = 0.0f;
     };
     std::vector<Finished> finished;
-
-    for (InFlight& action : inFlight_) {
-        action.elapsedSeconds += step;
+    for (const InFlight& action : inFlight_) {
         if (action.elapsedSeconds >= action.plan.durationSeconds) {
             finished.push_back({
                 .id = action.id,
@@ -85,12 +114,10 @@ std::vector<std::size_t> ActionScheduler::advance(float deltaSeconds)
         return a.id < b.id;
     });
 
-    std::vector<std::size_t> completed;
+    std::vector<InFlight> completed;
     completed.reserve(finished.size());
     for (const Finished& entry : finished) {
-        const auto found = std::ranges::find_if(
-            inFlight_,
-            [&entry](const InFlight& action) { return action.id == entry.id; });
+        const auto found = std::ranges::find(inFlight_, entry.id, &InFlight::id);
         if (found == inFlight_.end()) {
             continue;
         }
@@ -99,10 +126,17 @@ std::vector<std::size_t> ActionScheduler::advance(float deltaSeconds)
         StateDelta::between(found->plan.before, found->plan.after)
             .applyTo(state_);
         reservations_.release(entry.id);
+        completed.push_back(std::move(*found));
         inFlight_.erase(found);
-        completed.push_back(entry.id);
     }
     return completed;
+}
+
+std::vector<ActionScheduler::InFlight> ActionScheduler::advance(
+    float deltaSeconds)
+{
+    advanceClock(deltaSeconds);
+    return commitFinished();
 }
 
 } // namespace sokoban

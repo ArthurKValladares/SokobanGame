@@ -17,6 +17,23 @@ namespace sokoban {
 // the player's move would lock out most of the board for the length of every
 // slide. Time is what makes concurrency worth having.
 //
+// **Steps number instants, not intervals.** Step `i` is the moment step `i`
+// begins, and a claim covers the instants at which the entity is standing in
+// the cell. An entity that leaves a cell during step `i` holds it through
+// instant `i` and no longer; one that arrives during step `i` holds its
+// destination from instant `i + 1`.
+//
+// This is what lets a push work. The block vacates the pushed-from cell during
+// the same step the player enters it, so the block holds it at instant `i` and
+// the player from instant `i + 1` - no overlap, and the two run concurrently.
+// Numbering by interval instead (claiming both the origin and destination for
+// the whole of step `i`) makes every handoff look like a collision, which is
+// neither true to what happens nor extensible to the other mechanics that hand
+// cells over.
+//
+// The one thing instants alone do not catch is two entities swapping places
+// through each other; `Traversal` below covers that.
+//
 // Steps are relative to the action that produced the reservation;
 // `ReservationTable` offsets them onto the shared clock when it admits one.
 struct Reservation {
@@ -35,11 +52,29 @@ struct Reservation {
     bool operator==(const Reservation&) const = default;
 };
 
+// One entity crossing one cell boundary during one step.
+//
+// Occupancy at instants permits a handoff, which is right, but on its own it
+// would also permit two entities to exchange cells in the same step: each is
+// where the other was, so no instant is ever shared. They would pass straight
+// through one another. Traversals are compared separately for exactly that.
+struct Traversal {
+    GridPosition3 from {};
+    GridPosition3 to {};
+    // The step during which the move happens: from the entity's position at
+    // instant `step` to its position at instant `step + 1`.
+    int step = 0;
+
+    bool operator==(const Traversal&) const = default;
+};
+
 // What an action claims.
 //
-// `writes` are cells it occupies or vacates. `reads` are cells whose contents
-// its precomputed outcome depended on - chiefly whatever stopped a slide,
-// since the block would have travelled further had that cell been empty.
+// `writes` are the instants at which it occupies cells. `reads` are cells whose
+// contents its precomputed outcome depended on - chiefly whatever stopped a
+// slide, since the block would have travelled further had that cell been empty.
+// `moves` are the boundary crossings, which catch head-on swaps that occupancy
+// alone would let through.
 //
 // The read set is deliberately conservative. Deriving it exactly would mean
 // instrumenting `rules::step` to report every cell it consulted; approximating
@@ -48,6 +83,7 @@ struct Reservation {
 struct ActionReservations {
     std::vector<Reservation> writes;
     std::vector<Reservation> reads;
+    std::vector<Traversal> moves;
 
     bool operator==(const ActionReservations&) const = default;
 };

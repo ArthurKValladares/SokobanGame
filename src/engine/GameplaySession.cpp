@@ -1,6 +1,9 @@
 #include "engine/GameplaySession.hpp"
 
+#include "engine/Reservation.hpp"
 #include "engine/StateDelta.hpp"
+
+#include <variant>
 
 #include <algorithm>
 #include <array>
@@ -75,25 +78,88 @@ bool matchesForwardTransition(
 
 void GameplaySession::reset(const Level& level)
 {
-    state_ = rules::initialState(level);
+    scheduler_.reset(rules::initialState(level), stepDurationSeconds_);
     pendingCommands_.clear();
     undoHistory_.clear();
     moveHistory_.clear();
-    activeAction_ = {};
-    activeActionLegs_.clear();
-    moveElapsed_ = 0.0f;
-    clockSeconds_ = 0.0f;
     playerMoveCount_ = 0;
     mirrorActivationSequence_ = 0;
     lastMirrorSwapDestinations_.clear();
-    moving_ = false;
     autoMotionPaused_ = false;
+}
+
+void GameplaySession::setStepDurationSeconds(float durationSeconds)
+{
+    stepDurationSeconds_ = durationSeconds;
+    scheduler_.setStepDurationSeconds(durationSeconds);
+}
+
+const GameplaySession::Action& GameplaySession::activeAction() const
+{
+    static const Action idle {};
+    const ActionScheduler::InFlight* action = scheduler_.oldest();
+    return action == nullptr ? idle : action->plan;
+}
+
+const std::vector<GameState>& GameplaySession::activeActionLegs() const
+{
+    static const std::vector<GameState> none {};
+    const ActionScheduler::InFlight* action = scheduler_.oldest();
+    return action == nullptr ? none : action->legs;
+}
+
+float GameplaySession::activeActionDuration() const
+{
+    return activeAction().durationSeconds;
+}
+
+float GameplaySession::activeActionElapsedSeconds() const
+{
+    const ActionScheduler::InFlight* action = scheduler_.oldest();
+    if (action == nullptr) {
+        return 0.0f;
+    }
+    // The scheduler lets elapsed run past the duration so that it can order
+    // commits by how far each overshot. A sampling time never should.
+    return std::min(
+        action->elapsedSeconds, std::max(action->plan.durationSeconds, 0.0f));
+}
+
+const ActionScheduler::InFlight* GameplaySession::findInFlight(
+    std::size_t actionId) const
+{
+    const auto found = std::ranges::find(
+        scheduler_.inFlight(), actionId, &ActionScheduler::InFlight::id);
+    return found == scheduler_.inFlight().end() ? nullptr : &*found;
+}
+
+float GameplaySession::timeToNextCompletion() const
+{
+    bool any = false;
+    float soonest = 0.0f;
+    for (const ActionScheduler::InFlight& action : scheduler_.inFlight()) {
+        const float remaining = std::max(
+            action.plan.durationSeconds - action.elapsedSeconds, 0.0f);
+        soonest = any ? std::min(soonest, remaining) : remaining;
+        any = true;
+    }
+    return soonest;
+}
+
+bool GameplaySession::anyActionComplete() const
+{
+    return std::ranges::any_of(
+        scheduler_.inFlight(),
+        [](const ActionScheduler::InFlight& action) {
+            return action.plan.durationSeconds <= 0.0f ||
+                action.elapsedSeconds >= action.plan.durationSeconds;
+        });
 }
 
 GameplaySession::Snapshot GameplaySession::snapshot() const
 {
     Snapshot result {
-        .state = state_,
+        .state = state(),
         .undoStack = undoHistory_,
         .playerMoveCount = playerMoveCount_,
         .automaticMotionPaused = autoMotionPaused_,
@@ -131,25 +197,20 @@ bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
         return false;
     }
 
-    state_ = snapshot.state;
+    scheduler_.reset(snapshot.state, stepDurationSeconds_);
     pendingCommands_.clear();
     undoHistory_ = snapshot.undoStack;
     moveHistory_.clear();
-    activeAction_ = {};
-    activeActionLegs_.clear();
-    moveElapsed_ = 0.0f;
-    clockSeconds_ = 0.0f;
     playerMoveCount_ = snapshot.playerMoveCount;
     mirrorActivationSequence_ = 0;
     lastMirrorSwapDestinations_.clear();
-    moving_ = false;
     autoMotionPaused_ = snapshot.automaticMotionPaused;
     return true;
 }
 
 void GameplaySession::enqueue(Command command)
 {
-    command.queuedAtSeconds = clockSeconds_;
+    command.queuedAtSeconds = scheduler_.clockSeconds();
     // Full queue drops the oldest rather than refusing the newest: the most
     // recent input is the one the player still means.
     while (pendingCommands_.size() >= maxQueuedCommands) {
@@ -180,11 +241,15 @@ void GameplaySession::queueRestart()
 
 bool GameplaySession::tryStartNextAction(const Level& level, const Controls& controls)
 {
-    if (moving_) {
+    // One at a time, still. The scheduler and its reservations are wired in and
+    // exercised on every action, but nothing yet admits a second one - that is
+    // the step where behaviour actually changes, and the presentation is the
+    // part that has to be ready for it.
+    if (moving()) {
         return false;
     }
 
-    if (rules::anyPlayerDead(state_)) {
+    if (rules::anyPlayerDead(state())) {
         while (!pendingCommands_.empty()) {
             const Command command = pendingCommands_.front();
             pendingCommands_.pop_front();
@@ -233,60 +298,56 @@ bool GameplaySession::tryStartNextAction(const Level& level, const Controls& con
     }
 
     return !autoMotionPaused_ &&
-        rules::hasPendingMotion(level, state_) &&
+        rules::hasPendingMotion(level, state()) &&
         tryStartWorldStep(level, std::nullopt);
 }
 
 void GameplaySession::advanceActiveAction(float dt)
 {
-    if (!moving_) {
-        return;
-    }
-
-    const float step = std::max(dt, 0.0f);
-    clockSeconds_ += step;
-    moveElapsed_ = std::min(
-        moveElapsed_ + step,
-        std::max(activeAction_.durationSeconds, 0.0f));
+    scheduler_.advanceClock(dt);
 }
 
 void GameplaySession::completeActiveAction()
 {
-    if (!moving_) {
-        return;
+    // The scheduler applies each finished action's delta - only what that
+    // action changed, rather than its `after` wholesale. With one action in
+    // flight the two are identical; once actions overlap, assigning a whole
+    // state would erase whatever the others had already committed, because
+    // `after` is a snapshot of the world as it stood when this action started.
+    // Undo goes through the same path: an inverted action's endpoints are
+    // swapped, so its delta is the inverse delta.
+    //
+    // What stays here is the bookkeeping only the session knows about.
+    for (const ActionScheduler::InFlight& finished : scheduler_.commitFinished()) {
+        recordCompletion(finished.plan);
     }
+}
 
-    // Only what this action changed, rather than assigning its `after`
-    // wholesale. With one action in flight the two are identical; once actions
-    // can overlap, assigning a whole state would erase whatever the other
-    // in-flight actions had already committed, because `after` is a snapshot of
-    // the world as it stood when this action started. Undo goes through the
-    // same path: an inverted action's endpoints are swapped, so its delta is
-    // the inverse delta.
-    StateDelta::between(activeAction_.before, activeAction_.after)
-        .applyTo(state_);
-    moveHistory_.push_back(activeAction_);
-    playerMoveCount_ = activeAction_.playerMoveCountAfter;
-    if (activeAction_.reversed) {
+void GameplaySession::recordCompletion(const Action& action)
+{
+    moveHistory_.push_back(action);
+    playerMoveCount_ = action.playerMoveCountAfter;
+    if (action.reversed) {
         if (!undoHistory_.empty()) {
             undoHistory_.pop_back();
         }
     } else {
-        undoHistory_.push_back(activeAction_);
+        undoHistory_.push_back(action);
     }
-    moving_ = false;
-    moveElapsed_ = 0.0f;
 }
 
 float GameplaySession::activeActionRemainingSeconds() const
 {
-    return std::max(activeAction_.durationSeconds - moveElapsed_, 0.0f);
+    return std::max(
+        activeActionDuration() - activeActionElapsedSeconds(), 0.0f);
 }
 
 bool GameplaySession::activeActionComplete() const
 {
-    return moving_ &&
-        (activeAction_.durationSeconds <= 0.0f || moveElapsed_ >= activeAction_.durationSeconds);
+    const ActionScheduler::InFlight* action = scheduler_.oldest();
+    return action != nullptr &&
+        (action->plan.durationSeconds <= 0.0f ||
+            action->elapsedSeconds >= action->plan.durationSeconds);
 }
 
 bool GameplaySession::tryStartHeldMove(const Level& level, const Controls& controls)
@@ -308,7 +369,7 @@ bool GameplaySession::tryStartHeldMove(const Level& level, const Controls& contr
 bool GameplaySession::tryStartWorldStep(const Level& level, std::optional<MoveDirection> playerInput)
 {
     std::optional<plans::PlannedAction> planned = plans::worldStep(
-        level, state_, playerInput, stepRates_, stepDurationSeconds_);
+        level, state(), playerInput, stepRates_, stepDurationSeconds_);
     if (!planned) {
         return false;
     }
@@ -322,41 +383,48 @@ bool GameplaySession::tryStartWorldStep(const Level& level, std::optional<MoveDi
     planned->action.playerMoveCountAfter =
         playerMoveCount_ + (countsAsPlayerMove ? 1 : 0);
 
+    const bool wasPaused = autoMotionPaused_;
     if (playerInput) {
         autoMotionPaused_ = false;
     }
-    beginAction(std::move(planned->action));
-    // After beginAction, which clears them: every other action kind is a single
-    // step and has none.
-    activeActionLegs_ = std::move(planned->legs);
+    if (!beginAction(std::move(planned->action), std::move(planned->legs))) {
+        autoMotionPaused_ = wasPaused;
+        return false;
+    }
     return true;
 }
 
 bool GameplaySession::tryStartMirrorAction(const Level& level)
 {
     std::optional<rules::MirrorActivationPreview> activation =
-        rules::previewMirrorActivation(level, state_);
+        rules::previewMirrorActivation(level, state());
     if (!activation) {
         return false;
     }
 
-    autoMotionPaused_ = false;
     lastMirrorSwapDestinations_.clear();
     lastMirrorSwapDestinations_.reserve(activation->entities.size());
     for (const rules::MirrorEntityPreview& entity : activation->entities) {
         lastMirrorSwapDestinations_.push_back(entity.destination);
     }
-    ++mirrorActivationSequence_;
-    Action action = plans::fromMirrorPreview(state_, *activation);
+    Action action = plans::fromMirrorPreview(state(), *activation);
     action.playerMoveCountBefore = playerMoveCount_;
     action.playerMoveCountAfter = playerMoveCount_;
-    beginAction(std::move(action));
+    if (!beginAction(std::move(action))) {
+        lastMirrorSwapDestinations_.clear();
+        return false;
+    }
+    autoMotionPaused_ = false;
+    ++mirrorActivationSequence_;
     return true;
 }
 
 bool GameplaySession::tryStartUndoMove()
 {
-    if (undoHistory_.empty()) {
+    // Undo is only permitted when nothing is in flight. That keeps the undo
+    // stack a linear sequence of invertible whole-world transitions, rather
+    // than the DAG that overlapping actions would make of it.
+    if (undoHistory_.empty() || moving()) {
         return false;
     }
 
@@ -366,23 +434,33 @@ bool GameplaySession::tryStartUndoMove()
         : action.presentation.durationSeconds;
     action.facingDirection = plans::firstPlayerMovementDirection(
         action.after, action.before);
+    if (!beginAction(std::move(action))) {
+        return false;
+    }
     autoMotionPaused_ = true;
-    beginAction(std::move(action));
     return true;
 }
 
 bool GameplaySession::tryStartRestart(const Level& level)
 {
+    // Same reasoning as undo: a restart rewrites the whole world, so it cannot
+    // share it with an action that planned against the old one.
+    if (moving()) {
+        return false;
+    }
+
     std::optional<Action> action =
-        plans::restart(level, state_, stepDurationSeconds_);
+        plans::restart(level, state(), stepDurationSeconds_);
     if (!action) {
         return false;
     }
 
     action->playerMoveCountBefore = playerMoveCount_;
     action->playerMoveCountAfter = 0;
+    if (!beginAction(std::move(*action))) {
+        return false;
+    }
     autoMotionPaused_ = false;
-    beginAction(std::move(*action));
     return true;
 }
 
@@ -404,7 +482,10 @@ bool GameplaySession::tryStartHeldDirection(
 
 bool GameplaySession::isStale(const Command& command) const
 {
-    return clockSeconds_ - command.queuedAtSeconds > commandStalenessSeconds;
+    // The scheduler's clock runs only while something is in flight, so a
+    // command entered into an idle world never ages out from under the player.
+    return scheduler_.clockSeconds() - command.queuedAtSeconds >
+        commandStalenessSeconds;
 }
 
 bool GameplaySession::hasPendingMove(MoveDirection direction) const
@@ -417,32 +498,69 @@ bool GameplaySession::hasPendingMove(MoveDirection direction) const
 void GameplaySession::setActiveActionPresentation(
     ActionPresentationTimeline presentation)
 {
-    if (!moving_) {
-        return;
-    }
-    activeAction_.presentation = std::move(presentation);
-    if (!activeAction_.presentation.empty()) {
-        activeAction_.durationSeconds =
-            activeAction_.presentation.durationSeconds;
-        moveElapsed_ = std::min(moveElapsed_, activeAction_.durationSeconds);
+    if (const ActionScheduler::InFlight* action = scheduler_.oldest()) {
+        setActionPresentation(action->id, std::move(presentation));
     }
 }
 
 void GameplaySession::setActiveActionDuration(float durationSeconds)
 {
-    if (!moving_) {
-        return;
+    if (const ActionScheduler::InFlight* action = scheduler_.oldest()) {
+        setActionDuration(action->id, durationSeconds);
     }
-    activeAction_.durationSeconds = std::max(durationSeconds, 0.0f);
-    moveElapsed_ = std::min(moveElapsed_, activeAction_.durationSeconds);
 }
 
-void GameplaySession::beginAction(Action action)
+void GameplaySession::setActionPresentation(
+    std::size_t actionId, ActionPresentationTimeline presentation)
 {
-    activeAction_ = std::move(action);
-    activeActionLegs_.clear();
-    moveElapsed_ = 0.0f;
-    moving_ = true;
+    ActionScheduler::InFlight* action = scheduler_.find(actionId);
+    if (action == nullptr) {
+        return;
+    }
+    action->plan.presentation = std::move(presentation);
+    if (!action->plan.presentation.empty()) {
+        action->plan.durationSeconds =
+            action->plan.presentation.durationSeconds;
+        action->elapsedSeconds =
+            std::min(action->elapsedSeconds, action->plan.durationSeconds);
+    }
+}
+
+void GameplaySession::setActionDuration(
+    std::size_t actionId, float durationSeconds)
+{
+    ActionScheduler::InFlight* action = scheduler_.find(actionId);
+    if (action == nullptr) {
+        return;
+    }
+    action->plan.durationSeconds = std::max(durationSeconds, 0.0f);
+    action->elapsedSeconds =
+        std::min(action->elapsedSeconds, action->plan.durationSeconds);
+}
+
+bool GameplaySession::beginAction(Action action, std::vector<GameState> legs)
+{
+    // Two different needs, deliberately not conflated.
+    //
+    // Reservations are derived from the cells an action's entities pass
+    // through, so they need at least one leg or the action claims nothing at
+    // all and conflicts with nothing.
+    //
+    // The presentation reads legs to animate a chain tile by tile, and a
+    // single-step action must carry none - handing it a synthetic leg sends it
+    // down the chain-aware path, which pairs entities positionally between the
+    // legs and cannot cope with an action that adds a player. Mirror activation
+    // does exactly that.
+    //
+    // So the claim is computed from a local copy and the stored legs are left
+    // as the caller meant them.
+    const plans::PlannedAction claimed {
+        .action = action,
+        .legs = legs.empty() ? std::vector<GameState> { action.after } : legs,
+    };
+    const ActionReservations claims = plans::reservationsFor(claimed);
+    return std::holds_alternative<ActionScheduler::Started>(
+        scheduler_.tryStart(action, claims, std::move(legs)));
 }
 
 } // namespace sokoban

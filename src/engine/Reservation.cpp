@@ -11,6 +11,9 @@ struct EntityTrack {
     EntityId id = invalidEntityId;
     // cells[0] is where it started; cells[i + 1] is where leg i left it.
     std::vector<GridPosition3> cells;
+    // Whether it ever carried slide momentum. Only a sliding entity can be
+    // said to have been *stopped* by something; see the read set below.
+    bool slid = false;
 };
 
 template <EntityKind kind, typename Entity>
@@ -20,14 +23,46 @@ void collectTracks(
     std::vector<EntityTrack>& tracks)
 {
     for (std::size_t index = 0; index < before.size(); ++index) {
+        // Only entities this action actually involves.
+        //
+        // Claiming every entity in the world was the original reading and it is
+        // wrong: a plan that does not touch an entity would still write-claim
+        // the cell that entity is resting on, open-ended. Since every plan is
+        // computed from the same whole state, every plan claimed every
+        // stationary entity's cell, so no two plans could ever be concurrent -
+        // the reservation table would reject a player step on the far side of
+        // the board from a sliding block.
+        //
+        // An entity another action depends on staying put is that action's
+        // read set to declare, not this one's to hold.
+        const bool involved = std::ranges::any_of(
+            perLeg,
+            [&](const std::vector<Entity>& leg) {
+                // Removed counts as involved: the action took it out of the
+                // world, which is as much a change as moving it.
+                return index >= leg.size() || !(leg[index] == before[index]);
+            });
+        if (!involved) {
+            continue;
+        }
+
         EntityTrack track;
         track.id = resolvedEntityId(kind, before[index].id, index);
         track.cells.push_back(before[index].cell);
+        const auto noteMomentum = [&track](const Entity& entity) {
+            if constexpr (requires { entity.sliding; }) {
+                track.slid = track.slid || entity.sliding.has_value();
+            }
+        };
+        noteMomentum(before[index]);
         for (const std::vector<Entity>& leg : perLeg) {
             // An entity that vanishes keeps its last known cell, which is the
             // conservative reading: the cell stays claimed.
             track.cells.push_back(
                 index < leg.size() ? leg[index].cell : track.cells.back());
+            if (index < leg.size()) {
+                noteMomentum(leg[index]);
+            }
         }
         tracks.push_back(std::move(track));
     }
@@ -109,9 +144,6 @@ ActionReservations reservationsFor(const PlannedAction& planned)
         planned.action.before.enemies, enemyLegs, tracks);
 
     for (const EntityTrack& track : tracks) {
-        // During step i the entity travels from cells[i] to cells[i + 1], so it
-        // is claimed to be in both for the length of that step. Steps are
-        // numbered by leg, which is what the shared clock counts.
         struct Span {
             GridPosition3 cell {};
             int firstStep = 0;
@@ -129,10 +161,25 @@ ActionReservations reservationsFor(const PlannedAction& planned)
             spans.push_back({ .cell = at, .firstStep = step, .lastStep = step });
         };
 
+        // `cells[i]` is where the entity stands at instant i, so that is the
+        // only instant it holds that cell for. Claiming the destination too
+        // would mean an entity held both ends of every move for the whole step,
+        // and a push - where one entity leaves a cell exactly as another enters
+        // it - could never be admitted.
+        for (std::size_t i = 0; i < track.cells.size(); ++i) {
+            claim(track.cells[i], static_cast<int>(i));
+        }
+
+        // The crossings themselves, so that two entities cannot trade places
+        // through one another while sharing no instant.
         for (std::size_t i = 0; i + 1 < track.cells.size(); ++i) {
-            const int step = static_cast<int>(i);
-            claim(track.cells[i], step);
-            claim(track.cells[i + 1], step);
+            if (!sameCell(track.cells[i], track.cells[i + 1])) {
+                result.moves.push_back({
+                    .from = track.cells[i],
+                    .to = track.cells[i + 1],
+                    .step = static_cast<int>(i),
+                });
+            }
         }
 
         // The cell it finishes on is claimed open-ended: it is still standing
@@ -149,8 +196,22 @@ ActionReservations reservationsFor(const PlannedAction& planned)
             });
         }
 
+        // Only a sliding entity gets an inferred stopping read.
+        //
+        // The cell an entity would have entered next is evidence about its
+        // outcome only if it was still travelling. An entity that moved one
+        // tile under input stopped because the input was one tile, not because
+        // anything was in the way, and reading the cell beyond it is a claim on
+        // a dependency that does not exist. That spurious read is enough to
+        // refuse a push - the player's step would read exactly the cell the
+        // block it just pushed is moving into.
+        //
+        // Momentum is the distinction, and it is right there in the state.
+        // Deriving the rest of the read set properly means having the planners
+        // declare what they consulted; this is the part that can be known from
+        // the states alone.
         if (const std::optional<GridPosition3> blocker =
-                blockingCell(track.cells)) {
+                track.slid ? blockingCell(track.cells) : std::nullopt) {
             // Claimed from the moment the entity comes to rest: had this cell
             // been clear then, the entity would have kept going.
             addReservation(result.reads, {
@@ -184,6 +245,21 @@ namespace {
     return result;
 }
 
+[[nodiscard]] std::vector<Traversal> offsetBy(
+    const std::vector<Traversal>& moves, int baseStep)
+{
+    std::vector<Traversal> result;
+    result.reserve(moves.size());
+    for (const Traversal& move : moves) {
+        result.push_back({
+            .from = move.from,
+            .to = move.to,
+            .step = move.step + baseStep,
+        });
+    }
+    return result;
+}
+
 } // namespace
 
 void ReservationTable::admit(
@@ -196,6 +272,7 @@ void ReservationTable::admit(
         .reservations = {
             .writes = offsetBy(reservations.writes, baseStep),
             .reads = offsetBy(reservations.reads, baseStep),
+            .moves = offsetBy(reservations.moves, baseStep),
         },
     });
 }
@@ -241,6 +318,28 @@ std::optional<ReservationTable::Conflict> ReservationTable::conflict(
         return std::nullopt;
     };
 
+    const std::vector<Traversal> moves = offsetBy(reservations.moves, baseStep);
+
+    // Two entities exchanging cells in one step share no instant, so occupancy
+    // alone says they are fine. They would pass through each other.
+    const auto swaps = [](
+        const std::vector<Traversal>& left,
+        const std::vector<Traversal>& right)
+        -> std::optional<Reservation> {
+        for (const Traversal& a : left) {
+            for (const Traversal& b : right) {
+                if (a.step == b.step && a.from == b.to && a.to == b.from) {
+                    return Reservation {
+                        .cell = a.to,
+                        .firstStep = a.step,
+                        .lastStep = std::nullopt,
+                    };
+                }
+            }
+        }
+        return std::nullopt;
+    };
+
     for (const Entry& entry : entries_) {
         std::optional<Reservation> found =
             clash(writes, entry.reservations.writes);
@@ -249,6 +348,9 @@ std::optional<ReservationTable::Conflict> ReservationTable::conflict(
         }
         if (!found) {
             found = clash(reads, entry.reservations.writes);
+        }
+        if (!found) {
+            found = swaps(moves, entry.reservations.moves);
         }
         if (found) {
             return Conflict {

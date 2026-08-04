@@ -2,6 +2,7 @@
 
 #include "engine/ActionPlan.hpp"
 #include "engine/ActionPresentation.hpp"
+#include "engine/ActionScheduler.hpp"
 #include "engine/GameplayConfig.hpp"
 #include "engine/Level.hpp"
 #include "engine/Rules.hpp"
@@ -55,22 +56,41 @@ public:
     void advanceActiveAction(float dt);
     void completeActiveAction();
 
-    [[nodiscard]] const GameState& state() const { return state_; }
-    [[nodiscard]] bool moving() const { return moving_; }
-    [[nodiscard]] const Action& activeAction() const { return activeAction_; }
+    [[nodiscard]] const GameState& state() const { return scheduler_.state(); }
+    [[nodiscard]] bool moving() const { return !scheduler_.idle(); }
+
+    // Several actions can be in flight at once. The accessors below still speak
+    // in terms of a single "active" action, resolving to the one that has been
+    // running longest, so callers that have no notion of concurrency yet -
+    // `Application` and `RenderFrameBuilder` - keep working unchanged. They read
+    // as a default-constructed action while idle.
+    [[nodiscard]] const Action& activeAction() const;
     // The states the active action passes through, one per world step. A slide
     // resolved as a chain has several; everything else has one. The presentation
     // uses these to animate a chain tile by tile rather than interpolating once
     // from start to finish. Empty for a restored action, which already carries
     // its built timeline.
-    [[nodiscard]] const std::vector<GameState>& activeActionLegs() const
-    {
-        return activeActionLegs_;
-    }
-    [[nodiscard]] float activeActionDuration() const { return activeAction_.durationSeconds; }
-    [[nodiscard]] float activeActionElapsedSeconds() const { return moveElapsed_; }
+    [[nodiscard]] const std::vector<GameState>& activeActionLegs() const;
+    [[nodiscard]] float activeActionDuration() const;
+    [[nodiscard]] float activeActionElapsedSeconds() const;
     [[nodiscard]] float activeActionRemainingSeconds() const;
     [[nodiscard]] bool activeActionComplete() const;
+    [[nodiscard]] const std::vector<ActionScheduler::InFlight>& inFlight() const
+    {
+        return scheduler_.inFlight();
+    }
+    // One action in flight, by the id `tryStart` gave it. Null once it has
+    // committed.
+    [[nodiscard]] const ActionScheduler::InFlight* findInFlight(
+        std::size_t actionId) const;
+    // How long until the next action finishes. Advancing by more than this
+    // would step over a completion boundary, committing an action late and
+    // planning whatever follows it from a state that never existed. Zero when
+    // idle, or when something is already due.
+    [[nodiscard]] float timeToNextCompletion() const;
+    // Whether any action has run its full duration. `activeActionComplete`
+    // asks the same of the oldest one only.
+    [[nodiscard]] bool anyActionComplete() const;
     [[nodiscard]] std::size_t historySize() const { return moveHistory_.size(); }
     [[nodiscard]] std::size_t undoCount() const { return undoHistory_.size(); }
     [[nodiscard]] std::size_t mirrorActivationSequence() const
@@ -86,10 +106,17 @@ public:
     [[nodiscard]] float stepDurationSeconds() const { return stepDurationSeconds_; }
     [[nodiscard]] const rules::StepRates& stepRates() const { return stepRates_; }
 
-    void setStepDurationSeconds(float durationSeconds) { stepDurationSeconds_ = durationSeconds; }
+    void setStepDurationSeconds(float durationSeconds);
     void setStepRates(rules::StepRates rates) { stepRates_ = rates; }
+    // Both target the oldest in-flight action. `GameplayLoop` installs a
+    // timeline on the action it has just started, which is the oldest only
+    // because it starts one at a time; the id overloads are what a caller
+    // starting several in a frame needs.
     void setActiveActionPresentation(ActionPresentationTimeline presentation);
     void setActiveActionDuration(float durationSeconds);
+    void setActionPresentation(
+        std::size_t actionId, ActionPresentationTimeline presentation);
+    void setActionDuration(std::size_t actionId, float durationSeconds);
 
 private:
     enum class CommandType {
@@ -120,7 +147,12 @@ private:
         MoveDirection direction,
         std::optional<MoveDirection> queuedDirection);
     [[nodiscard]] bool hasPendingMove(MoveDirection direction) const;
-    void beginAction(Action action);
+    // Hands a plan to the scheduler, which admits it only if nothing already
+    // running would be disturbed. Returns false when it was refused.
+    [[nodiscard]] bool beginAction(Action action, std::vector<GameState> legs = {});
+    // Bookkeeping for one action that has just committed: history, the undo
+    // stack, and the running move total.
+    void recordCompletion(const Action& action);
 
     // Buffered input is a courtesy, not a recording. Once slides resolve as one
     // long action, an unbounded queue turns a moment of mashing during a slide
@@ -133,26 +165,22 @@ private:
     // not outlive the situation it was meant for.
     static constexpr float commandStalenessSeconds = 1.0f;
 
-    GameState state_;
+    // Owns the authoritative state, every action in flight, their per-action
+    // clocks, the shared step clock, and the reservations that decide whether a
+    // new action may join them. The session decides *what* to plan and in what
+    // order; the scheduler only executes.
+    ActionScheduler scheduler_;
     std::deque<Command> pendingCommands_;
     // Completed forward actions that can still be undone. Reversed actions
     // remain in moveHistory_ for diagnostics but never become undoable again.
     std::vector<Action> undoHistory_;
     std::vector<Action> moveHistory_;
-    Action activeAction_;
-    // Transient: rebuilt with every action, never persisted.
-    std::vector<GameState> activeActionLegs_;
-    float moveElapsed_ = 0.0f;
-    // Advances only while an action runs, so a command entered while the world
-    // is idle is never considered stale.
-    float clockSeconds_ = 0.0f;
     float stepDurationSeconds_ = config::stepDurationSeconds;
     int playerMoveCount_ = 0;
     // Transient event sequence; intentionally excluded from save snapshots.
     std::size_t mirrorActivationSequence_ = 0;
     std::vector<GridPosition3> lastMirrorSwapDestinations_;
     rules::StepRates stepRates_ {};
-    bool moving_ = false;
     // Rewinding freezes pending slides and conveyors until the next
     // input-driven step.
     bool autoMotionPaused_ = false;
