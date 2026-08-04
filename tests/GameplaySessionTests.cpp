@@ -941,6 +941,67 @@ void testPlayerMovesAlongsideASlideItCannotDisturb()
     CHECK(session.playerMoveCount() == 2);
 }
 
+void testPlayerFollowsIntoACellTheSlideHasPassed()
+{
+    TEST("playerFollowsIntoACellTheSlideHasPassed");
+    // The second of the two kinds of concurrency the design wants, and the only
+    // reason a claim carries a last step rather than being held for the whole
+    // action. The block claims each cell from the moment the slide starts until
+    // the instant it leaves; behind it the cell is free, so the player may walk
+    // in after it while it is still travelling.
+    //
+    // If this ever has to go, the claim rule collapses to "an action locks the
+    // cells it touches for as long as it runs" and the time dimension can be
+    // dropped entirely. That would be a gameplay decision, so it is pinned here
+    // rather than left to be inferred from the table tests.
+    // A long corridor, and a second row for the player to walk down. The player
+    // cannot simply follow the block - it moves a tile per step, exactly as fast
+    // as the player - so reaching a cell it has passed means going around.
+    const Level level = makeLevel({
+        { ".............", "............." },
+        { "CI          #", "             " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 2);
+    // Finish the push; the slide runs on.
+    session.advanceActiveAction(session.timeToNextCompletion());
+    session.completeActiveAction();
+    CHECK(session.state().players[0].cell == cell(1, 0, 1));
+
+    // Down into the second row and along it, one step at a time, while the
+    // block travels. None of these touch the corridor, so they are case 1.
+    for (const MoveDirection step :
+         { MoveDirection::Down, MoveDirection::Right, MoveDirection::Right }) {
+        session.queueMove(step);
+        CHECK(session.tryStartNextAction(level, {}));
+        session.advanceActiveAction(session.timeToNextCompletion());
+        session.completeActiveAction();
+    }
+    CHECK(session.state().players[0].cell == cell(3, 1, 1));
+    CHECK(session.moving());
+
+    // And back up into the corridor at (3,0). The block was standing there at
+    // instant 2 and left it; four steps have passed, so the claim has expired
+    // and the step is admitted alongside the slide.
+    session.queueMove(MoveDirection::Up);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.inFlight().size() == 2);
+    // What freed the cell is the claim expiring, not the block arriving
+    // anywhere: the slide has not committed, so authoritative state still shows
+    // the block where the push left it.
+    CHECK(session.state().movables[0].cell == cell(2, 0, 1));
+
+    runUntilIdle(session, level);
+    CHECK(session.state().players[0].cell == cell(3, 0, 1));
+    CHECK(session.state().movables[0].cell == cell(11, 0, 1));
+    CHECK(session.playerMoveCount() == 5);
+}
+
 void testCommandRefusedByAClaimIsRequeuedNotLost()
 {
     TEST("commandRefusedByAClaimIsRequeuedNotLost");
@@ -1105,6 +1166,7 @@ int main()
     testQueuedCommandsGoAheadOfAmbientMotion();
     testGoldenTraceIsReproducible();
     testPlayerMovesAlongsideASlideItCannotDisturb();
+    testPlayerFollowsIntoACellTheSlideHasPassed();
     testCommandRefusedByAClaimIsRequeuedNotLost();
     testConcurrentPlayHistoryRoundTrips();
     testMoveCommitsAfterAnimation();

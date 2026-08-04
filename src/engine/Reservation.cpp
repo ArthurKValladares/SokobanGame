@@ -14,9 +14,6 @@ struct EntityTrack {
     int firstInstant = 0;
     // cells[i] is where it stands at instant `firstInstant + i`.
     std::vector<GridPosition3> cells;
-    // Whether it ever carried slide momentum. Only a sliding entity can be
-    // said to have been *stopped* by something; see the read set below.
-    bool slid = false;
 };
 
 template <EntityKind kind, typename Entity>
@@ -39,15 +36,16 @@ void collectTracks(
         // Only entities this action actually involves.
         //
         // Claiming every entity in the world was the original reading and it is
-        // wrong: a plan that does not touch an entity would still write-claim
-        // the cell that entity is resting on, open-ended. Since every plan is
-        // computed from the same whole state, every plan claimed every
-        // stationary entity's cell, so no two plans could ever be concurrent -
-        // the reservation table would reject a player step on the far side of
-        // the board from a sliding block.
+        // wrong: a plan that does not touch an entity would still claim the cell
+        // that entity is resting on, open-ended. Since every plan is computed
+        // from the same whole state, every plan claimed every stationary
+        // entity's cell, so no two plans could ever be concurrent - the
+        // reservation table would reject a player step on the far side of the
+        // board from a sliding block.
         //
-        // An entity another action depends on staying put is that action's
-        // read set to declare, not this one's to hold.
+        // An entity another action depends on staying put is not this action's
+        // to hold. Nothing needs it to be: an outcome is settled when its plan
+        // is made and is meant not to change, so there is nothing to protect.
         //
         // One the action creates is involved by definition.
         const bool involved = !existedBefore ||
@@ -63,16 +61,9 @@ void collectTracks(
         }
 
         EntityTrack track;
-        const auto noteMomentum = [&track](const Entity& entity) {
-            if constexpr (requires { entity.sliding; }) {
-                track.slid = track.slid || entity.sliding.has_value();
-            }
-        };
-
         if (existedBefore) {
             track.id = resolvedEntityId(kind, before[index].id, index);
             track.cells.push_back(before[index].cell);
-            noteMomentum(before[index]);
         } else {
             // Claimed from the instant it appears rather than from the start of
             // the action. It did not exist before that, and claiming a cell it
@@ -102,9 +93,6 @@ void collectTracks(
                 index < perLeg[leg].size()
                     ? perLeg[leg][index].cell
                     : track.cells.back());
-            if (index < perLeg[leg].size()) {
-                noteMomentum(perLeg[leg][index]);
-            }
         }
         tracks.push_back(std::move(track));
     }
@@ -113,24 +101,6 @@ void collectTracks(
 [[nodiscard]] bool sameCell(GridPosition3 a, GridPosition3 b)
 {
     return a.x == b.x && a.y == b.y && a.z == b.z;
-}
-
-// The cell an entity would have moved into next had nothing been there. That
-// cell's contents are why the entity stopped, so the outcome depended on them.
-[[nodiscard]] std::optional<GridPosition3> blockingCell(
-    const std::vector<GridPosition3>& cells)
-{
-    for (std::size_t i = cells.size(); i-- > 1;) {
-        if (!sameCell(cells[i], cells[i - 1])) {
-            const GridPosition3 last = cells.back();
-            return GridPosition3 {
-                last.x + (cells[i].x - cells[i - 1].x),
-                last.y + (cells[i].y - cells[i - 1].y),
-                last.z + (cells[i].z - cells[i - 1].z),
-            };
-        }
-    }
-    return std::nullopt;
 }
 
 void addReservation(
@@ -186,81 +156,51 @@ ActionReservations reservationsFor(const PlannedAction& planned)
         planned.action.before.enemies, enemyLegs, tracks);
 
     for (const EntityTrack& track : tracks) {
+        // The last instant at which the entity is standing in each cell - the
+        // instant it leaves it, in other words. The claim runs from the start of
+        // the action up to and including that instant.
         struct Span {
             GridPosition3 cell {};
-            int firstStep = 0;
             int lastStep = 0;
         };
         std::vector<Span> spans;
         const auto claim = [&spans](GridPosition3 at, int step) {
             for (Span& span : spans) {
                 if (sameCell(span.cell, at)) {
-                    span.firstStep = std::min(span.firstStep, step);
                     span.lastStep = std::max(span.lastStep, step);
                     return;
                 }
             }
-            spans.push_back({ .cell = at, .firstStep = step, .lastStep = step });
+            spans.push_back({ .cell = at, .lastStep = step });
         };
 
-        // `cells[i]` is where the entity stands at instant i, so that is the
-        // only instant it holds that cell for. Claiming the destination too
-        // would mean an entity held both ends of every move for the whole step,
-        // and a push - where one entity leaves a cell exactly as another enters
-        // it - could never be admitted.
         for (std::size_t i = 0; i < track.cells.size(); ++i) {
             claim(track.cells[i], track.firstInstant + static_cast<int>(i));
         }
 
-        // The crossings themselves, so that two entities cannot trade places
-        // through one another while sharing no instant.
-        for (std::size_t i = 0; i + 1 < track.cells.size(); ++i) {
-            if (!sameCell(track.cells[i], track.cells[i + 1])) {
-                result.moves.push_back({
-                    .from = track.cells[i],
-                    .to = track.cells[i + 1],
-                    .step = track.firstInstant + static_cast<int>(i),
-                });
-            }
-        }
-
-        // The cell it finishes on is claimed open-ended: it is still standing
-        // there long after the action is over, which is precisely what a later
-        // action needs to know.
+        // Every cell on the path is held from the action's own start, not from
+        // the instant the entity arrives. A cell it is going to occupy is as
+        // much its own as one it occupies now - the outcome was settled when the
+        // action began, and anything that walked in ahead of it would have to be
+        // pushed aside by a plan that has already been made. What time still
+        // buys is the trailing half: once the entity has left, the cell is free,
+        // so something else may follow in behind a slide.
+        //
+        // `firstInstant` is zero for everything present when the action began.
+        // It is later only for an entity the action adds part-way through, which
+        // was standing nowhere at all before that.
+        //
+        // The cell it finishes on gets no end at all: it is still standing there
+        // long after the action is over, which is precisely what a later action
+        // needs to know.
         const GridPosition3 resting = track.cells.back();
         for (const Span& span : spans) {
-            addReservation(result.writes, {
+            addReservation(result.cells, {
                 .cell = span.cell,
-                .firstStep = span.firstStep,
+                .firstStep = track.firstInstant,
                 .lastStep = sameCell(span.cell, resting)
                     ? std::nullopt
                     : std::optional<int>(span.lastStep),
-            });
-        }
-
-        // Only a sliding entity gets an inferred stopping read.
-        //
-        // The cell an entity would have entered next is evidence about its
-        // outcome only if it was still travelling. An entity that moved one
-        // tile under input stopped because the input was one tile, not because
-        // anything was in the way, and reading the cell beyond it is a claim on
-        // a dependency that does not exist. That spurious read is enough to
-        // refuse a push - the player's step would read exactly the cell the
-        // block it just pushed is moving into.
-        //
-        // Momentum is the distinction, and it is right there in the state.
-        // Deriving the rest of the read set properly means having the planners
-        // declare what they consulted; this is the part that can be known from
-        // the states alone.
-        if (const std::optional<GridPosition3> blocker =
-                track.slid ? blockingCell(track.cells) : std::nullopt) {
-            // Claimed from the moment the entity comes to rest: had this cell
-            // been clear then, the entity would have kept going.
-            addReservation(result.reads, {
-                .cell = *blocker,
-                .firstStep =
-                    track.firstInstant + static_cast<int>(track.cells.size()) - 1,
-                .lastStep = std::nullopt,
             });
         }
     }
@@ -288,21 +228,6 @@ namespace {
     return result;
 }
 
-[[nodiscard]] std::vector<Traversal> offsetBy(
-    const std::vector<Traversal>& moves, int baseStep)
-{
-    std::vector<Traversal> result;
-    result.reserve(moves.size());
-    for (const Traversal& move : moves) {
-        result.push_back({
-            .from = move.from,
-            .to = move.to,
-            .step = move.step + baseStep,
-        });
-    }
-    return result;
-}
-
 } // namespace
 
 void ReservationTable::admit(
@@ -314,11 +239,7 @@ void ReservationTable::admit(
     entries_.push_back({
         .actionId = actionId,
         .causalGroup = causalGroup,
-        .reservations = {
-            .writes = offsetBy(reservations.writes, baseStep),
-            .reads = offsetBy(reservations.reads, baseStep),
-            .moves = offsetBy(reservations.moves, baseStep),
-        },
+        .reservations = { .cells = offsetBy(reservations.cells, baseStep) },
     });
 }
 
@@ -339,14 +260,9 @@ std::optional<ReservationTable::Conflict> ReservationTable::conflict(
     int baseStep,
     std::size_t exemptGroup) const
 {
-    const std::vector<Reservation> writes =
-        offsetBy(reservations.writes, baseStep);
-    const std::vector<Reservation> reads =
-        offsetBy(reservations.reads, baseStep);
+    const std::vector<Reservation> cells =
+        offsetBy(reservations.cells, baseStep);
 
-    // A conflict is one side's write against the other's reads or writes.
-    // Reads against reads are harmless: two actions may both depend on the same
-    // wall staying put.
     const auto clash = [](
         const std::vector<Reservation>& left,
         const std::vector<Reservation>& right)
@@ -365,44 +281,15 @@ std::optional<ReservationTable::Conflict> ReservationTable::conflict(
         return std::nullopt;
     };
 
-    const std::vector<Traversal> moves = offsetBy(reservations.moves, baseStep);
-
-    // Two entities exchanging cells in one step share no instant, so occupancy
-    // alone says they are fine. They would pass through each other.
-    const auto swaps = [](
-        const std::vector<Traversal>& left,
-        const std::vector<Traversal>& right)
-        -> std::optional<Reservation> {
-        for (const Traversal& a : left) {
-            for (const Traversal& b : right) {
-                if (a.step == b.step && a.from == b.to && a.to == b.from) {
-                    return Reservation {
-                        .cell = a.to,
-                        .firstStep = a.step,
-                        .lastStep = std::nullopt,
-                    };
-                }
-            }
-        }
-        return std::nullopt;
-    };
-
     for (const Entry& entry : entries_) {
         if (exemptGroup != 0 && entry.causalGroup == exemptGroup) {
             continue;
         }
-        std::optional<Reservation> found =
-            clash(writes, entry.reservations.writes);
-        if (!found) {
-            found = clash(writes, entry.reservations.reads);
-        }
-        if (!found) {
-            found = clash(reads, entry.reservations.writes);
-        }
-        if (!found) {
-            found = swaps(moves, entry.reservations.moves);
-        }
-        if (found) {
+        // Two entities exchanging cells needs no separate check any more. Each
+        // one's claim on its destination begins at its own instant 0, where the
+        // other is still standing, so they overlap on both cells.
+        if (const std::optional<Reservation> found =
+                clash(cells, entry.reservations.cells)) {
             return Conflict {
                 .heldBy = entry.actionId,
                 .cell = found->cell,

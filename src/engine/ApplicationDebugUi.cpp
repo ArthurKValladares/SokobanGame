@@ -107,6 +107,30 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
     ImGui::Text("Movables %zu", state.movables.size());
     ImGui::Text("Enemies %zu", state.enemies.size());
     ImGui::Text("History %zu", context.gameplaySession.historySize());
+
+    // Admissions, so the reservation machinery can be judged on evidence rather
+    // than argument. Ownership is the simple rule - an entity another action is
+    // already moving is off limits - and cell claims are the elaborate one,
+    // existing only to catch actions whose entities are disjoint but whose paths
+    // cross. If "by claim" stays at or near zero across real play, the elaborate
+    // half is not earning its keep and the next simplification is to drop time
+    // from claims entirely. See DESIGN-deterministic-actions.md.
+    const ActionScheduler::AdmissionStats& admissions =
+        context.gameplaySession.admissionStats();
+    ImGui::Text(
+        "Actions in flight %zu, admitted %zu",
+        context.gameplaySession.inFlight().size(),
+        admissions.admitted);
+    ImGui::Text(
+        "Refused: %zu by ownership, %zu by claim",
+        admissions.refusedByOwnership,
+        admissions.refusedByReservation);
+    if (admissions.refusedByReservation == 0 &&
+        admissions.refusedByOwnership + admissions.admitted != 0) {
+        ImGui::TextDisabled(
+            "No claim refusals yet this screen - ownership is carrying them.");
+    }
+
     ImGui::Text(
         "Input %s, gamepads %zu%s%s",
         context.input.activeDevice() == ActiveInputDevice::Gamepad

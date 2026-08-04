@@ -70,12 +70,12 @@ void checkImpl(bool ok, const char* expression, int line)
     plan.durationSeconds = duration;
 
     ActionReservations claims;
-    claims.writes.push_back({
+    claims.cells.push_back({
         .cell = before.movables[movableIndex].cell,
         .firstStep = 0,
         .lastStep = 0,
     });
-    claims.writes.push_back({
+    claims.cells.push_back({
         .cell = to, .firstStep = 0, .lastStep = std::nullopt });
     return { plan, claims };
 }
@@ -129,7 +129,7 @@ void testConflictingActionIsRefused()
     intruder.after.players[0].cell = cell(6, 0);
     intruder.durationSeconds = 0.1f;
     ActionReservations intruderClaims;
-    intruderClaims.writes.push_back({
+    intruderClaims.cells.push_back({
         .cell = cell(6, 0), .firstStep = 0, .lastStep = std::nullopt });
 
     const auto result = scheduler.tryStart(intruder, intruderClaims);
@@ -149,7 +149,7 @@ void testConflictingActionIsRefused()
     // Re-planned against the new state, since the rock now sits there; this
     // stands in for the session re-planning a queued command.
     ActionReservations elsewhere;
-    elsewhere.writes.push_back({
+    elsewhere.cells.push_back({
         .cell = cell(7, 0), .firstStep = 0, .lastStep = std::nullopt });
     CHECK(started(scheduler.tryStart(intruder, elsewhere)));
 }
@@ -213,13 +213,16 @@ void testSharedClockPlacesClaims()
     CHECK(scheduler.currentStep() == 0);
 
     // A long-running action claims a cell only from its fourth step onward.
+    // Hand-built: `reservationsFor` no longer produces a claim that starts after
+    // the action does, but the table's job of placing relative steps on the
+    // shared clock is what is under test here, not the claim shape.
     ActionPlan slow;
     slow.before = scheduler.state();
     slow.after = slow.before;
     slow.after.movables[0].cell = cell(9, 0);
     slow.durationSeconds = 1.0f;
     ActionReservations late;
-    late.writes.push_back({
+    late.cells.push_back({
         .cell = cell(9, 0), .firstStep = 4, .lastStep = std::nullopt });
     CHECK(started(scheduler.tryStart(slow, late)));
 
@@ -235,7 +238,7 @@ void testSharedClockPlacesClaims()
     // Something wanting that cell right now is fine - the block is nowhere
     // near it yet and will be gone from where it is.
     ActionReservations nowAndGone;
-    nowAndGone.writes.push_back({
+    nowAndGone.cells.push_back({
         .cell = cell(9, 0), .firstStep = 0, .lastStep = 1 });
     CHECK(started(scheduler.tryStart(probe, nowAndGone)));
 

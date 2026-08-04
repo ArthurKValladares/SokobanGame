@@ -519,23 +519,28 @@ void testScopedPlannersRefuseEntitiesWithNothingToDo()
 
 } // namespace
 
-void testOutcomeSurvivesAnyChangeOutsideTheReadSet()
+void testOutcomeSurvivesAnyChangeOutsideItsClaims()
 {
-    TEST("outcomeSurvivesAnyChangeOutsideTheReadSet");
+    TEST("outcomeSurvivesAnyChangeOutsideItsClaims");
     // The guarantee, stated as an executable property.
     //
     // A plan's outcome is a pure function of the state at the instant it was
-    // made, and the read set is the claim about *which parts* of that state it
-    // depended on. So mutating anything the plan neither reads nor writes must
-    // leave its outcome bit-for-bit identical - and if it does not, either the
-    // read set is understated or the planner is consulting something it never
-    // declared. Either way the reservation table would then be admitting
-    // concurrency that can change a committed outcome, which is the one thing
-    // this design exists to make impossible.
+    // made, and its claims are what the reservation table will protect. So
+    // mutating any cell the plan does not claim must leave its outcome
+    // bit-for-bit identical - and if it does not, either the claim set is
+    // understated or the planner is consulting something no claim covers.
+    // Either way the table would then be admitting concurrency that can change
+    // a committed outcome, which is the one thing this design exists to make
+    // impossible.
     //
-    // Note the asymmetry being tested: this says nothing about whether the read
-    // set is *tight*. An overstated read set only refuses concurrency that
-    // would have been safe, which costs responsiveness and never correctness.
+    // This is the property that let the read set go. The cell that stopped the
+    // slide used to be declared as a read; under the claim rule the block claims
+    // its whole path from the start, so the only cells left unclaimed are ones
+    // it never touches - and those are exactly the ones this loop mutates.
+    //
+    // Note the asymmetry being tested: this says nothing about whether the claim
+    // set is *tight*. An overstated one only refuses concurrency that would have
+    // been safe, which costs responsiveness and never correctness.
     const Level level = makeLevel({
         { "........", "........" },
         { "CI     #", "        " },
@@ -558,19 +563,16 @@ void testOutcomeSurvivesAnyChangeOutsideTheReadSet()
     const ActionReservations claims = plans::reservationsFor(*slide);
 
     const auto claimed = [&](GridPosition3 at) {
-        const auto touches = [&](const std::vector<Reservation>& set) {
-            return std::ranges::any_of(
-                set,
-                [&](const Reservation& reservation) {
-                    return reservation.cell.x == at.x &&
-                        reservation.cell.y == at.y &&
-                        reservation.cell.z == at.z;
-                });
-        };
-        return touches(claims.writes) || touches(claims.reads);
+        return std::ranges::any_of(
+            claims.cells,
+            [&](const Reservation& reservation) {
+                return reservation.cell.x == at.x &&
+                    reservation.cell.y == at.y &&
+                    reservation.cell.z == at.z;
+            });
     };
 
-    // Every free cell on the board that the slide neither reads nor writes.
+    // Every free cell on the board the slide does not claim.
     // Putting the player on each in turn is the strongest mutation available
     // here, since a player is exactly the kind of thing that could block it.
     int tested = 0;
@@ -691,7 +693,7 @@ int main()
 {
     testChainPlanningStopsAtTheCap();
     testBeltRidersFollowEachOtherDownOneBelt();
-    testOutcomeSurvivesAnyChangeOutsideTheReadSet();
+    testOutcomeSurvivesAnyChangeOutsideItsClaims();
     testWorldStepPlansAPush();
     testWorldStepWithoutMovementHasNoPlan();
     testPlanningIsPureAndRepeatable();
