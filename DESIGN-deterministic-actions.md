@@ -353,16 +353,74 @@ struct ActionPlan {
       Check `PresentationTests` before changing it — this may be load-bearing
       for the mirror mechanic rather than incidental.
 
-   ### Suggested order
+   ### Progress
 
-   Steps 1-3 are mechanical and behaviour-preserving with a single action, so
-   they can land and be verified against the existing suites before any
-   concurrency is switched on. Only then wire `ActionScheduler` into
-   `GameplaySession` and let `tryStartNextAction` admit a second action.
+   **Steps 1-3 are done**, all behaviour-preserving with a single action and
+   verified against the full suite.
 
-   `GameplaySession` should keep its current single-action accessors working —
-   returning the oldest in-flight action — so `Application` and
+   - `beginAction` now takes the session's current state for structural sync.
+   - Three of the four `trackedTimeline*` members turned out to be **written on
+     every action and never read**. They are gone. The presentation's entire
+     per-action state is now `reverseSourceStartSeconds_`, and since undo is the
+     only reversed action and only runs when nothing else is in flight, one
+     value suffices even under concurrency. The per-action record the plan
+     called for is not needed.
+   - `seekAction` clears `moving` only on the targets in its own timeline.
+
+   **Step 4 (facing) is deliberately not done, and is an open decision.**
+   Scoping facing to the players an action animates is required for
+   concurrency — otherwise one action turns players another action is moving.
+   But the suite passes *identically* with and without the change, so it does
+   not discriminate, and the current whole-player behaviour may be intentional
+   for keeping mirror clones visually synchronised. Whoever switches
+   concurrency on should decide this on gameplay feel and add a test either
+   way.
+
+   ### Remaining
+
+   Wire `ActionScheduler` into `GameplaySession` and let `tryStartNextAction`
+   admit a second action. `GameplaySession` keeps its current single-action
+   accessors, returning the oldest in-flight action, so `Application` and
    `RenderFrameBuilder` need no changes in the same pass.
+
+   Shape:
+
+   ```cpp
+   struct InFlightAction {
+       std::size_t id = 0;
+       Action action;
+       std::vector<GameState> legs;   // transient, for the presentation
+       ActionReservations claims;
+       float elapsedSeconds = 0.0f;
+   };
+   std::vector<InFlightAction> inFlight_;
+   ```
+
+   `moving()` becomes `!inFlight_.empty()`; `activeAction()` returns
+   `inFlight_.front().action`, or a default when idle.
+
+   Two things found while sizing this that are not obvious from the code:
+
+   - **`GameplayLoop`'s loop gets simpler, not harder.** Its
+     `while (remainingTime > 0.0f)` structure exists because actions are
+     strictly sequential — it must finish one before it can start the next
+     within a frame. Concurrent actions do not need that: admit whatever can be
+     admitted, advance everything by `dt`, complete whatever finished. The
+     nested time-slicing goes away.
+   - **`playerMoveCount_` is safe, and it is worth knowing why.** Each plan
+     carries `playerMoveCountBefore/After` computed at planning time, so two
+     concurrent actions both incrementing it would clash. They cannot: only
+     input-driven actions increment, and a second one would have to move the
+     player, whose cells the first already claims. Ambient actions never
+     increment. The invariant is enforced by the reservation table, not by
+     anything in the counting code, so a comment there is warranted.
+
+   `setActiveActionPresentation` and `setActiveActionDuration` currently target
+   "the" action implicitly and will need an id, since `GameplayLoop` builds a
+   timeline per action.
+
+   Undo and restart must refuse while `!inFlight_.empty()`, per the decision
+   above.
 
    **4c — not started.** Presentation compositing. `GameplayPresentation::
    beginAction` calls `syncToGameState(action.before)`, resetting the whole

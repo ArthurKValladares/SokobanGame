@@ -194,10 +194,7 @@ GameplayPresentation::GameplayPresentation()
 
 void GameplayPresentation::resetEntities(const GameState& state)
 {
-    trackedTimeline_ = {};
-    trackedTimelineSeconds_ = 0.0f;
     reverseSourceStartSeconds_ = 0.0f;
-    trackedTimelineReversed_ = false;
     players_.clear();
     movables_.clear();
     enemies_.clear();
@@ -553,15 +550,19 @@ float GameplayPresentation::reverseDuration(
         : action.presentation.durationSeconds;
 }
 
-void GameplayPresentation::beginAction(const GameplaySession::Action& action)
+void GameplayPresentation::beginAction(
+    const GameplaySession::Action& action, const GameState& worldState)
 {
-    syncToGameState(action.before);
-    trackedTimeline_ = action.presentation;
-    trackedTimelineSeconds_ = action.reversed
+    // Structural sync - creating visuals for players a mirror just made, and
+    // dropping ones undo removed - comes from the world, not from this action's
+    // snapshot of it. The two are the same value today, because state does not
+    // advance until an action completes; they stop being the same the moment a
+    // second action is in flight, and then rebuilding from one action's `before`
+    // would snap the other action's entities back to where they started.
+    syncToGameState(worldState);
+    reverseSourceStartSeconds_ = action.reversed
         ? action.presentation.durationSeconds
         : 0.0f;
-    reverseSourceStartSeconds_ = trackedTimelineSeconds_;
-    trackedTimelineReversed_ = action.reversed;
     if (action.facingDirection) {
         for (PlayerVisual& player : players_) {
             player.facingQuarterTurns = facingQuarterTurns(*action.facingDirection);
@@ -584,16 +585,17 @@ void GameplayPresentation::seekAction(
             : elapsed,
         0.0f,
         timeline.durationSeconds);
-    trackedTimelineSeconds_ = sourceTime;
-
-    for (PlayerVisual& player : players_) {
-        player.motion.moving = false;
-    }
-    for (EntityVisual& movable : movables_) {
-        movable.moving = false;
-    }
-    for (EnemyVisual& enemy : enemies_) {
-        enemy.motion.moving = false;
+    // Only the entities this action drives. Clearing every visual would be
+    // fine while one action exists, but with two in flight whichever seeks last
+    // would stop the other's entities dead every frame.
+    //
+    // Entities this action does not touch are not its business: either nothing
+    // is moving them, or another action is, and that action clears and sets
+    // them itself.
+    for (const ActionMotionTrack& track : timeline.motions) {
+        if (EntityVisual* visual = findMotionVisual(track.target)) {
+            visual->moving = false;
+        }
     }
 
     for (const ActionMotionTrack& track : timeline.motions) {
@@ -665,10 +667,7 @@ void GameplayPresentation::seekAction(
 void GameplayPresentation::finishAction(const GameState& state)
 {
     syncToGameState(state);
-    trackedTimeline_ = {};
-    trackedTimelineSeconds_ = 0.0f;
     reverseSourceStartSeconds_ = 0.0f;
-    trackedTimelineReversed_ = false;
 }
 
 void GameplayPresentation::syncToGameState(const GameState& state)

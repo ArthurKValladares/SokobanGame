@@ -68,7 +68,10 @@ public:
         const std::vector<GameState>& legs) const;
     [[nodiscard]] float reverseDuration(
         const GameplaySession::Action& action) const;
-    void beginAction(const GameplaySession::Action& action);
+    // `worldState` is the session's current state, used to create and remove
+    // visuals. Deliberately not taken from `action.before`: see the definition.
+    void beginAction(
+        const GameplaySession::Action& action, const GameState& worldState);
     void seekAction(
         const GameplaySession::Action& action,
         float elapsedSeconds);
@@ -91,10 +94,13 @@ private:
     std::vector<EntityVisual> movables_;
     std::vector<EnemyVisual> enemies_;
     const AnimationCatalog* animationCatalog_ = nullptr;
-    ActionPresentationTimeline trackedTimeline_;
-    float trackedTimelineSeconds_ = 0.0f;
+    // Where a reversed action's timeline is sampled from. The only piece of
+    // per-action state the presentation keeps; three sibling members were
+    // written on every action and never read once, so they are gone.
+    //
+    // Undo is the only reversed action, and only runs when nothing else is in
+    // flight, so one value suffices even with concurrent actions.
     float reverseSourceStartSeconds_ = 0.0f;
-    bool trackedTimelineReversed_ = false;
     float worldAnimationTimeSeconds_ = 0.0f;
     float cameraPitchDegrees_ = 0.0f;
     float cameraPitchStartDegrees_ = 0.0f;

@@ -14,6 +14,7 @@
 #include "engine/render/CameraConfig.hpp"
 #include "engine/render/MirrorConfig.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <ranges>
@@ -423,7 +424,7 @@ void testPresentationInterpolatesActionsAndClips()
         .facingDirection = MoveDirection::Left,
     };
     action.presentation = presentation.buildActionPresentation(action);
-    presentation.beginAction(action);
+    presentation.beginAction(action, action.before);
     presentation.seekAction(action, 0.0f);
 
     CHECK(presentation.players()[0].motion.moving);
@@ -933,7 +934,7 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
         .facingDirection = MoveDirection::Up,
     };
     moveAction.presentation = presentation.buildActionPresentation(moveAction);
-    presentation.beginAction(moveAction);
+    presentation.beginAction(moveAction, moveAction.before);
     presentation.seekAction(moveAction, 0.5f);
     const RenderFrameData movingFrame =
         RenderFrameBuilder::buildGameplay({
@@ -972,7 +973,7 @@ void testMirrorActivationBuildsBeamAndDestinationGhost()
     };
     sidewaysAction.presentation =
         presentation.buildActionPresentation(sidewaysAction);
-    presentation.beginAction(sidewaysAction);
+    presentation.beginAction(sidewaysAction, sidewaysAction.before);
     presentation.seekAction(sidewaysAction, 0.1f);
     const RenderFrameData sidewaysFrame =
         RenderFrameBuilder::buildGameplay({
@@ -1141,7 +1142,7 @@ void testPlayerCopiesRenderAndInterpolateTogether()
         .facingDirection = MoveDirection::Right,
     };
     action.presentation = presentation.buildActionPresentation(action);
-    presentation.beginAction(action);
+    presentation.beginAction(action, action.before);
     presentation.seekAction(action, 0.5f);
     CHECK(near(presentation.players()[0].motion.renderPosition.x, 0.5f));
     CHECK(near(
@@ -1467,7 +1468,7 @@ void testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition()
         .facingDirection = MoveDirection::Right,
     };
     action.presentation = presentation.buildActionPresentation(action);
-    presentation.beginAction(action);
+    presentation.beginAction(action, action.before);
     presentation.seekAction(action, 0.9f);
 
     CHECK(presentation.players()[0].animationUse == AnimationUse::PlayerDeath);
@@ -1624,7 +1625,7 @@ void testEnemyFacingAttackAndAnimationInstances()
     }
     CHECK(near(deathStart, 0.3f));
 
-    presentation.beginAction(action);
+    presentation.beginAction(action, action.before);
     presentation.seekAction(action, 0.1f);
     CHECK(presentation.enemies()[0].animationUse == AnimationUse::EnemyAttack);
     CHECK(presentation.players()[0].animationUse == AnimationUse::PlayerMove);
@@ -1705,7 +1706,7 @@ void testEnemyFacingAttackAndAnimationInstances()
     CHECK(near(
         presentation.reverseDuration(undo),
         action.presentation.durationSeconds));
-    presentation.beginAction(undo);
+    presentation.beginAction(undo, undo.before);
     presentation.seekAction(undo, 0.0f);
     CHECK(presentation.players()[0].animationUse ==
         AnimationUse::PlayerDeadIdle);

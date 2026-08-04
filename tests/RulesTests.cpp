@@ -4,6 +4,7 @@
 #include "engine/Level.hpp"
 #include "engine/Rules.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <string>
 #include <vector>

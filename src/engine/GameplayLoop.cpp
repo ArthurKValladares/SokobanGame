@@ -100,7 +100,8 @@ GameplayLoop::UpdateResult GameplayLoop::update(
                 session.setActiveActionDuration(
                     presentation.reverseDuration(session.activeAction()));
             }
-            presentation.beginAction(session.activeAction());
+            presentation.beginAction(
+                session.activeAction(), session.state());
             presentation.seekAction(session.activeAction(), 0.0f);
         }
 
