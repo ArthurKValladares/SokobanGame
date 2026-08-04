@@ -49,6 +49,7 @@ the rest of this is needed.
 | Causal chains | Committed in full at the first action |
 | Conflict detection | Space-time read/write sets |
 | Red rejection glow | Dropped for now |
+| Player facing | Every instance faces the last input, moved or not |
 
 ### Chains and reservations interact in a way that matters
 
@@ -256,9 +257,14 @@ struct ActionPlan {
    part-way through a slide — has correct motion but no clip, because
    animations are built from the first leg alone. Fixing it means building a
    timeline per leg and merging them.
-4. Split into three, because the presentation half is both the largest part and
-   the one the sandbox cannot test (`PresentationTests` needs `std::ranges`
-   algorithms GCC 11 lacks).
+4. Split into three, because the presentation half is the largest part.
+
+   An earlier note here claimed `PresentationTests` could not be run outside
+   Windows because it needed `std::ranges` algorithms GCC 11 lacks. That is not
+   true — it compiles and passes under GCC 11. See `tools/build_headless_tests.sh`,
+   which builds and runs 41 of the 43 suites without Vulkan or a display. Only
+   `vulkan_device_selection` and `frame_descriptor_sync` need the Windows build.
+   Nothing in step 4 is unverifiable.
 
    **4a — done.** `Reservation`, `ActionReservations` and `ReservationTable`
    (`src/engine/Reservation.hpp`), plus `plans::reservationsFor`. Pure and
@@ -309,12 +315,11 @@ struct ActionPlan {
      construction so order should not matter, but a non-deterministic commit
      order would be impossible to reproduce from a bug report.
 
-   **4c — not started.** Presentation compositing, and wiring the scheduler
+   **4c — in progress.** Presentation compositing, and wiring the scheduler
    into `GameplaySession`.
 
-   This is the one step that should not be done without running
-   `PresentationTests`, which needs a toolchain with `std::ranges` algorithms.
-   Everything before it was verifiable headlessly; this is not.
+   `PresentationTests` is the suite that decides whether this step is right, and
+   it runs headlessly like everything else.
 
    ### What actually blocks concurrency
 
@@ -348,10 +353,8 @@ struct ActionPlan {
       members with a small record keyed by action id, one per action in flight.
    3. **`seekAction` clears only its own targets**, taken from its timeline's
       motion tracks, instead of every visual.
-   4. **Facing applies only to players the action moves.** Careful here: with
-      one action and several mirror-created players, today *all* of them turn.
-      Check `PresentationTests` before changing it — this may be load-bearing
-      for the mirror mechanic rather than incidental.
+   4. **Input facing applies to every player, and stays that way.** See the
+      decision below; this item was originally the opposite and was wrong.
 
    ### Progress
 
@@ -367,14 +370,29 @@ struct ActionPlan {
      called for is not needed.
    - `seekAction` clears `moving` only on the targets in its own timeline.
 
-   **Step 4 (facing) is deliberately not done, and is an open decision.**
-   Scoping facing to the players an action animates is required for
-   concurrency — otherwise one action turns players another action is moving.
-   But the suite passes *identically* with and without the change, so it does
-   not discriminate, and the current whole-player behaviour may be intentional
-   for keeping mirror clones visually synchronised. Whoever switches
-   concurrency on should decide this on gameplay feel and add a test either
-   way.
+   **Step 4 (facing) is decided: every player instance faces the last movement
+   input, including instances that input did not move.** The earlier note here
+   had this backwards, calling the whole-player behaviour an obstacle to
+   concurrency that should be narrowed. It is not incidental — it is the mirror
+   mechanic. The copies are one character the player is controlling in several
+   places, not several characters; they share one input, so they share one
+   facing. A copy held against a wall while its siblings walk right still turns
+   right, or the set stops reading as one body.
+
+   It follows that facing is not per-action state and must not be scoped to the
+   entities an action moves, even when actions overlap.
+
+   `playerCopiesShareTheInputFacing` in `PresentationTests` pins it, covering
+   both the copy that cannot move and the input that moves nobody at all. It was
+   checked against the scoped-to-moved-players variant and fails three checks
+   there, so unlike the rest of the suite it does discriminate.
+
+   **What does need scoping is ambient facing**, which is a different thing that
+   the old note conflated with this one. The `!playerInput` branch of
+   `plans::worldStep` faces players from `firstPlayerMovementDirection` — a belt
+   or slide turning a rider to face travel. That is not an input, and once
+   actions overlap it would let an ambient action turn players another action is
+   driving. Narrow that one; leave input facing global.
 
    ### Remaining
 
@@ -422,11 +440,21 @@ struct ActionPlan {
    Undo and restart must refuse while `!inFlight_.empty()`, per the decision
    above.
 
-   **4c — not started.** Presentation compositing. `GameplayPresentation::
-   beginAction` calls `syncToGameState(action.before)`, resetting the whole
-   visual world from one action's snapshot; that is wrong the moment two
-   actions overlap. Twenty-four call sites across `Application`, `GameplayLoop`
-   and `GameplayPresentation` assume a single active action.
+   Two gaps in 4a that only bite once the scheduler is wired in:
+
+   - **`plans::reservationsFor` returns nothing when `legs` is empty.** Mirror
+     activation, restart and undo all produce leg-less `ActionPlan`s. Undo and
+     restart are gated to idle so they are fine, but a mirror activation is an
+     ordinary concurrent action and would claim no cells at all, conflicting
+     with nothing. It needs a one-leg `PlannedAction` wrapper before it can be
+     scheduled.
+   - **`collectTracks` walks `before`-sized ranges positionally into each leg**,
+     so entities a leg *adds* — mirror clones — are never claimed.
+
+   `RenderFrameBuilder` also reads `activeAction.before`/`.after` as whole
+   states for the water-fill and mirror-preview visuals. Once "the" active
+   action is merely the oldest of several, those two read a world that no
+   longer exists. Cosmetic, but it will look wrong.
 5. Conveyors as per-step actions.
 
 Steps 1 and 2 are the risky, wide-reaching ones and produce no visible change;
@@ -434,6 +462,13 @@ steps 3–5 are where behaviour moves. Keeping that split means most of the chur
 is verifiable by existing tests.
 
 ## Testing
+
+Run `tools/build_headless_tests.sh` on Linux, or the normal CMake/CTest build on
+Windows. The script builds `sokoban_core` and `sokoban_ui` directly from the
+source lists in `CMakeLists.txt` and runs 41 of the 43 suites; only the two that
+include `<vulkan/vulkan.h>` need the Windows build.
+
+Still to write:
 
 - Golden traces: a recorded input sequence produces an exact `ActionPlan`
   sequence. `Action` already has `operator==`, and `GameState` is cheap to copy

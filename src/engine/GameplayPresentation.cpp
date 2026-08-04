@@ -563,6 +563,23 @@ void GameplayPresentation::beginAction(
     reverseSourceStartSeconds_ = action.reversed
         ? action.presentation.durationSeconds
         : 0.0f;
+    // Every player instance turns, including ones this action does not move.
+    //
+    // This is intended, not an oversight, and it is the mirror mechanic's whole
+    // read: the copies are one character the player is controlling in several
+    // places, not several characters. They share one input, so they share one
+    // facing. A copy pressed against a wall while its siblings walk right must
+    // still turn right, or the set stops looking like one body and starts
+    // looking like a crowd that has lost sync.
+    //
+    // Scoping this to the players the action moves therefore stays wrong even
+    // under concurrency, where the obvious refactor would be to narrow it. What
+    // does need narrowing is ambient facing - see the `!playerInput` branch of
+    // `plans::worldStep`, which faces players from whoever a belt or slide
+    // happened to move. That is not an input and has no business turning
+    // players another action is driving.
+    //
+    // Pinned by `playerCopiesShareTheInputFacing` in PresentationTests.
     if (action.facingDirection) {
         for (PlayerVisual& player : players_) {
             player.facingQuarterTurns = facingQuarterTurns(*action.facingDirection);

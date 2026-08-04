@@ -630,6 +630,13 @@ Players and enemies:
   additional player instances when a player is reflected by multiple equally
   near valid mirrors. Every copy receives the same movement input and may be
   duplicated again.
+- Every player instance faces the direction of the last movement input,
+  including instances that input did not move — a copy blocked by a wall still
+  turns. The copies are one character in several places, so they share one
+  facing; this is intended and is pinned by
+  `playerCopiesShareTheInputFacing` in `tests/PresentationTests.cpp`. Facing
+  driven by a belt or slide rather than by input is a separate case and applies
+  only to the entities that moved.
 - `N` creates an immobile enemy. Enemies kill any living player entering an
   orthogonally adjacent tile; diagonals do not count. Movables can push enemies
   when the resulting destination/fall is valid.

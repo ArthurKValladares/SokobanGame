@@ -1165,6 +1165,53 @@ void testPlayerCopiesRenderAndInterpolateTogether()
         }) == 2);
 }
 
+void testPlayerCopiesShareTheInputFacing()
+{
+    TEST("playerCopiesShareTheInputFacing");
+    // Mirror copies are one character in several places, so one input gives one
+    // facing. The copy that cannot move still turns; see the comment on
+    // GameplayPresentation::beginAction.
+    const Level level = Level::loadFromLayers({
+        { "....", "....", "...." },
+        { "C   ", "    ", "  # " },
+    }, "player copy facing");
+    GameState before = rules::initialState(level);
+    before.players.push_back({ .cell = { 1, 2, 1 } });
+
+    GameplayPresentation presentation;
+    presentation.resetEntities(before);
+    CHECK(presentation.players().size() == 2);
+
+    // Only the first copy moves; the second is against the wall at { 2, 2, 1 }.
+    GameState after = before;
+    after.players[0].cell = { 1, 0, 1 };
+    GameplaySession::Action action {
+        .before = before,
+        .after = after,
+        .durationSeconds = 1.0f,
+        .facingDirection = MoveDirection::Right,
+    };
+    action.presentation = presentation.buildActionPresentation(action);
+    presentation.beginAction(action, action.before);
+
+    const uint32_t right = 3;
+    CHECK(presentation.players()[0].facingQuarterTurns == right);
+    CHECK(presentation.players()[1].facingQuarterTurns == right);
+
+    // And again on an input that moves nobody: walking into a wall still turns
+    // the whole set, because the input is what facing follows.
+    GameplaySession::Action blocked {
+        .before = after,
+        .after = after,
+        .durationSeconds = 1.0f,
+        .facingDirection = MoveDirection::Up,
+    };
+    presentation.beginAction(blocked, blocked.before);
+    const uint32_t up = 2;
+    CHECK(presentation.players()[0].facingQuarterTurns == up);
+    CHECK(presentation.players()[1].facingQuarterTurns == up);
+}
+
 void testMirrorDuplicationPreviewsEveryDestination()
 {
     TEST("mirrorDuplicationPreviewsEveryDestination");
@@ -1782,6 +1829,7 @@ int main()
     testMirrorTilesUseTheirModelAndOrientation();
     testMirrorActivationBuildsBeamAndDestinationGhost();
     testPlayerCopiesRenderAndInterpolateTogether();
+    testPlayerCopiesShareTheInputFacing();
     testMirrorDuplicationPreviewsEveryDestination();
     testGameplayFrameBuildsProceduralWaterSurface();
     testWaterLayerBuildsUnboundedNonPickableExterior();
