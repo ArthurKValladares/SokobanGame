@@ -60,6 +60,12 @@ public:
     void advanceAnimations(float dt) { advanceAnimations(dt, {}); }
     [[nodiscard]] ActionPresentationTimeline buildActionPresentation(
         const GameplaySession::Action& action) const;
+    // Chain-aware: `legs` are the states the action passes through, one per
+    // world step, so a slide animates tile by tile instead of interpolating
+    // once from start to finish. One leg (or none) is the ordinary case above.
+    [[nodiscard]] ActionPresentationTimeline buildActionPresentation(
+        const GameplaySession::Action& action,
+        const std::vector<GameState>& legs) const;
     [[nodiscard]] float reverseDuration(
         const GameplaySession::Action& action) const;
     void beginAction(const GameplaySession::Action& action);

@@ -40,12 +40,34 @@ bool matchesForwardTransition(
         MoveDirection::Right,
     };
     return std::ranges::any_of(inputs, [&](std::optional<MoveDirection> input) {
-        const GameState after = rules::step(level, action.before, input, rates);
+        const GameState first = rules::step(level, action.before, input, rates);
+        if (first == action.before) {
+            return false;
+        }
+        // A move counts once, judged on the input-driven first step, however
+        // many steps the slide it started runs for.
         const int expectedMoveCount = action.playerMoveCountBefore +
-            (input && plans::anyPlayerMoved(action.before, after) ? 1 : 0);
-        return !(after == action.before) &&
-            after == action.after &&
-            action.playerMoveCountAfter == expectedMoveCount;
+            (input && plans::anyPlayerMoved(action.before, first) ? 1 : 0);
+        if (action.playerMoveCountAfter != expectedMoveCount) {
+            return false;
+        }
+        // Saves written before slides were chained hold one step per action,
+        // so a single step still has to be accepted. Newer saves hold the whole
+        // chain, which is what replaying the plan produces.
+        if (first == action.after) {
+            return true;
+        }
+
+        GameState current = first;
+        while (plans::anySlideMomentum(current) &&
+            !(current == action.after)) {
+            GameState next = rules::step(level, current, std::nullopt, rates);
+            if (next == current) {
+                break;
+            }
+            current = std::move(next);
+        }
+        return current == action.after;
     });
 }
 
@@ -58,7 +80,9 @@ void GameplaySession::reset(const Level& level)
     undoHistory_.clear();
     moveHistory_.clear();
     activeAction_ = {};
+    activeActionLegs_.clear();
     moveElapsed_ = 0.0f;
+    clockSeconds_ = 0.0f;
     playerMoveCount_ = 0;
     mirrorActivationSequence_ = 0;
     lastMirrorSwapDestinations_.clear();
@@ -112,7 +136,9 @@ bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
     undoHistory_ = snapshot.undoStack;
     moveHistory_.clear();
     activeAction_ = {};
+    activeActionLegs_.clear();
     moveElapsed_ = 0.0f;
+    clockSeconds_ = 0.0f;
     playerMoveCount_ = snapshot.playerMoveCount;
     mirrorActivationSequence_ = 0;
     lastMirrorSwapDestinations_.clear();
@@ -121,24 +147,35 @@ bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
     return true;
 }
 
+void GameplaySession::enqueue(Command command)
+{
+    command.queuedAtSeconds = clockSeconds_;
+    // Full queue drops the oldest rather than refusing the newest: the most
+    // recent input is the one the player still means.
+    while (pendingCommands_.size() >= maxQueuedCommands) {
+        pendingCommands_.pop_front();
+    }
+    pendingCommands_.push_back(command);
+}
+
 void GameplaySession::queueMove(MoveDirection direction)
 {
-    pendingCommands_.push_back({ .type = CommandType::Move, .direction = direction });
+    enqueue({ .type = CommandType::Move, .direction = direction });
 }
 
 void GameplaySession::queueMirror()
 {
-    pendingCommands_.push_back({ .type = CommandType::Mirror });
+    enqueue({ .type = CommandType::Mirror });
 }
 
 void GameplaySession::queueUndo()
 {
-    pendingCommands_.push_back({ .type = CommandType::Undo });
+    enqueue({ .type = CommandType::Undo });
 }
 
 void GameplaySession::queueRestart()
 {
-    pendingCommands_.push_back({ .type = CommandType::Restart });
+    enqueue({ .type = CommandType::Restart });
 }
 
 bool GameplaySession::tryStartNextAction(const Level& level, const Controls& controls)
@@ -151,6 +188,9 @@ bool GameplaySession::tryStartNextAction(const Level& level, const Controls& con
         while (!pendingCommands_.empty()) {
             const Command command = pendingCommands_.front();
             pendingCommands_.pop_front();
+            if (isStale(command)) {
+                continue;
+            }
             if (command.type == CommandType::Undo && tryStartUndoMove()) {
                 return true;
             }
@@ -162,6 +202,9 @@ bool GameplaySession::tryStartNextAction(const Level& level, const Controls& con
     while (!pendingCommands_.empty()) {
         const Command command = pendingCommands_.front();
         pendingCommands_.pop_front();
+        if (isStale(command)) {
+            continue;
+        }
 
         if (command.type == CommandType::Undo && tryStartUndoMove()) {
             return true;
@@ -200,8 +243,10 @@ void GameplaySession::advanceActiveAction(float dt)
         return;
     }
 
+    const float step = std::max(dt, 0.0f);
+    clockSeconds_ += step;
     moveElapsed_ = std::min(
-        moveElapsed_ + std::max(dt, 0.0f),
+        moveElapsed_ + step,
         std::max(activeAction_.durationSeconds, 0.0f));
 }
 
@@ -262,24 +307,28 @@ bool GameplaySession::tryStartHeldMove(const Level& level, const Controls& contr
 
 bool GameplaySession::tryStartWorldStep(const Level& level, std::optional<MoveDirection> playerInput)
 {
-    std::optional<Action> action = plans::worldStep(
+    std::optional<plans::PlannedAction> planned = plans::worldStep(
         level, state_, playerInput, stepRates_, stepDurationSeconds_);
-    if (!action) {
+    if (!planned) {
         return false;
     }
 
     // The plan settles the outcome; the session only knows the running move
-    // total, so it fills that in.
+    // total, so it fills that in. The count is judged on the first leg, since
+    // that is the only one the player drove - a long slide is still one move.
     const bool countsAsPlayerMove = playerInput.has_value() &&
-        plans::anyPlayerMoved(action->before, action->after);
-    action->playerMoveCountBefore = playerMoveCount_;
-    action->playerMoveCountAfter =
+        plans::anyPlayerMoved(planned->action.before, planned->legs.front());
+    planned->action.playerMoveCountBefore = playerMoveCount_;
+    planned->action.playerMoveCountAfter =
         playerMoveCount_ + (countsAsPlayerMove ? 1 : 0);
 
     if (playerInput) {
         autoMotionPaused_ = false;
     }
-    beginAction(std::move(*action));
+    beginAction(std::move(planned->action));
+    // After beginAction, which clears them: every other action kind is a single
+    // step and has none.
+    activeActionLegs_ = std::move(planned->legs);
     return true;
 }
 
@@ -353,6 +402,11 @@ bool GameplaySession::tryStartHeldDirection(
     return true;
 }
 
+bool GameplaySession::isStale(const Command& command) const
+{
+    return clockSeconds_ - command.queuedAtSeconds > commandStalenessSeconds;
+}
+
 bool GameplaySession::hasPendingMove(MoveDirection direction) const
 {
     return std::ranges::any_of(pendingCommands_, [direction](const Command& command) {
@@ -386,6 +440,7 @@ void GameplaySession::setActiveActionDuration(float durationSeconds)
 void GameplaySession::beginAction(Action action)
 {
     activeAction_ = std::move(action);
+    activeActionLegs_.clear();
     moveElapsed_ = 0.0f;
     moving_ = true;
 }

@@ -578,8 +578,116 @@ void testMirrorDuplicationIsInstantUndoableAndRestorable()
 
 } // namespace
 
+void testIceSlideRunsAsASingleAction()
+{
+    TEST("iceSlideRunsAsASingleAction");
+    const Level level = makeLevel({
+        { "........" },
+        { "CI     #" },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+
+    // The destination is settled before a single tile of travel has played:
+    // the ice runs to the wall and the action already says so.
+    CHECK(session.activeAction().after.movables[0].cell == cell(6, 0, 1));
+    CHECK(session.activeActionLegs().size() > 1);
+    CHECK(session.activeActionLegs().back() == session.activeAction().after);
+    // One action spanning the whole slide, not one action per tile.
+    CHECK(session.activeAction().durationSeconds > 0.1f);
+
+    // Nothing else can start while it runs, so nothing can change the outcome.
+    // A command entered mid-slide is buffered rather than dropped, and runs
+    // once the slide is over - it never gets to interfere with it.
+    CHECK(!session.tryStartNextAction(level, {}));
+
+    session.advanceActiveAction(session.activeAction().durationSeconds);
+    CHECK(session.activeActionComplete());
+    session.completeActiveAction();
+    CHECK(session.state().movables[0].cell == cell(6, 0, 1));
+    CHECK(session.state().players[0].cell == cell(1, 0, 1));
+    // Nothing is left moving: the slide was spent inside the one action.
+    CHECK(!rules::hasPendingMotion(level, session.state()));
+
+    // One history entry, so one undo takes the entire slide back.
+    CHECK(session.undoCount() == 1);
+    CHECK(session.playerMoveCount() == 1);
+    session.queueUndo();
+    CHECK(session.tryStartNextAction(level, {}));
+    session.advanceActiveAction(session.activeAction().durationSeconds);
+    session.completeActiveAction();
+    CHECK(session.state() == rules::initialState(level));
+}
+
+void testQueueIsBounded()
+{
+    TEST("queueIsBounded");
+    // Buffered input is a courtesy, not a recording. Mashing during a long
+    // action must not spool out as a burst of moves once it ends.
+    const Level level = makeLevel({
+        { "......" },
+        { "C     " },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.1f);
+
+    for (int i = 0; i < 5; ++i) {
+        session.queueMove(MoveDirection::Right);
+    }
+
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    // Only the last two survived, so the player ends two cells along and not
+    // five.
+    CHECK(session.state().players[0].cell == cell(2, 0, 1));
+    CHECK(!session.tryStartNextAction(level, {}));
+}
+
+void testStaleCommandsAreDropped()
+{
+    TEST("staleCommandsAreDropped");
+    // A command entered at the start of a long slide has been overtaken by
+    // events long before the slide ends.
+    const Level level = makeLevel({
+        { "........" },
+        { "CI     #" },
+    });
+    GameplaySession session;
+    session.reset(level);
+    session.setStepDurationSeconds(0.3f);
+
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    CHECK(session.activeActionDuration() > 1.0f);
+
+    session.queueMove(MoveDirection::Left);
+    finishAction(session);
+
+    // Dropped rather than played back, so the player stays where the push left
+    // them.
+    CHECK(!session.tryStartNextAction(level, {}));
+    CHECK(session.state().players[0].cell == cell(1, 0, 1));
+
+    // A command entered after the slide is honoured normally: staleness is
+    // measured from when it was entered, not from some global age.
+    session.queueMove(MoveDirection::Left);
+    CHECK(session.tryStartNextAction(level, {}));
+    finishAction(session);
+    CHECK(session.state().players[0].cell == cell(0, 0, 1));
+}
+
 int main()
 {
+    testQueueIsBounded();
+    testStaleCommandsAreDropped();
+    testIceSlideRunsAsASingleAction();
     testMoveCommitsAfterAnimation();
     testPushMetadata();
     testUndoRoundTrip();

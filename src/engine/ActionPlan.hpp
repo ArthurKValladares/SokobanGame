@@ -6,6 +6,7 @@
 #include "engine/Rules.hpp"
 
 #include <optional>
+#include <vector>
 
 namespace sokoban {
 
@@ -43,14 +44,52 @@ struct ActionPlan {
 // fills those in. Everything else about the action is settled here.
 namespace plans {
 
-// One discrete world step - slide momentum, then any player input, then
-// conveyors. No plan when nothing would move.
-[[nodiscard]] std::optional<ActionPlan> worldStep(
+// A plan together with the intermediate states it passes through.
+//
+// The legs exist so the presentation can animate a chain tile by tile instead
+// of interpolating once from start to finish. They are a planning artifact and
+// are deliberately not part of `ActionPlan`: actions are persisted inside save
+// files, and a restored action already carries the built timeline, so it has no
+// use for them.
+struct PlannedAction {
+    ActionPlan action;
+    // One state per world step. `legs.back()` is always `action.after`, and the
+    // state before `legs[i]` is `legs[i - 1]`, or `action.before` when i is 0.
+    std::vector<GameState> legs;
+
+    bool operator==(const PlannedAction&) const = default;
+};
+
+// How many world steps a single action may chain through before planning gives
+// up. Slides travel in straight lines and are bounded by the board, so this is
+// a guard against an unforeseen cycle rather than an expected limit.
+inline constexpr int maxChainedSteps = 512;
+
+// A world step and everything that inevitably follows from it.
+//
+// The first step applies `playerInput`; after that the world keeps stepping for
+// as long as anything still carries slide momentum, and the whole run becomes
+// one action. That is what makes a slide's destination final the moment it is
+// pushed: the outcome is computed here, in full, and nothing that happens later
+// can change it.
+//
+// Conveyor riders are deliberately left out. Belt motion is ambient and never
+// terminates, so chaining it would produce an action that never ends; a rider
+// gets one step per action instead, and hands back over to the caller.
+//
+// `durationSeconds` is per world step, so the action's total duration is that
+// times the number of legs. No plan when nothing would move.
+[[nodiscard]] std::optional<PlannedAction> worldStep(
     const Level& level,
     const GameState& state,
     std::optional<MoveDirection> playerInput,
     const rules::StepRates& rates,
-    float durationSeconds);
+    float stepDurationSeconds);
+
+// Whether any entity is still carrying slide momentum, which is what decides
+// whether a chain keeps going. Distinct from `rules::hasPendingMotion`, which
+// also reports conveyor riders.
+[[nodiscard]] bool anySlideMomentum(const GameState& state);
 
 // Mirror activation, from the transaction `rules::previewMirrorActivation`
 // already validated. Takes the preview rather than recomputing it, because the

@@ -81,36 +81,70 @@ std::optional<MoveDirection> firstPlayerMovementDirection(
     return std::nullopt;
 }
 
-std::optional<ActionPlan> worldStep(
+bool anySlideMomentum(const GameState& state)
+{
+    for (const GameState::Player& player : state.players) {
+        if (player.sliding.has_value()) {
+            return true;
+        }
+    }
+    for (const GameState::Movable& movable : state.movables) {
+        if (movable.sliding.has_value()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::optional<PlannedAction> worldStep(
     const Level& level,
     const GameState& state,
     std::optional<MoveDirection> playerInput,
     const rules::StepRates& rates,
-    float durationSeconds)
+    float stepDurationSeconds)
 {
-    GameState after = rules::step(level, state, playerInput, rates);
-    if (after == state) {
+    GameState current = rules::step(level, state, playerInput, rates);
+    if (current == state) {
         return std::nullopt;
     }
 
-    ActionPlan plan {
-        .before = state,
-        .after = std::move(after),
-        .durationSeconds = durationSeconds,
-        .facingDirection = playerInput,
-    };
+    PlannedAction planned;
+    planned.legs.push_back(current);
 
-    if (playerInput && anyPlayerMoved(plan.before, plan.after)) {
+    // Everything that inevitably follows. Momentum is resolved here rather than
+    // one step at a time so that the destination is settled before the block
+    // has moved a single tile.
+    while (anySlideMomentum(current) &&
+        static_cast<int>(planned.legs.size()) < maxChainedSteps) {
+        GameState next = rules::step(level, current, std::nullopt, rates);
+        if (next == current) {
+            // Momentum that cannot be spent - nothing would change by asking
+            // again, so stop rather than spin.
+            break;
+        }
+        current = std::move(next);
+        planned.legs.push_back(current);
+    }
+
+    ActionPlan& plan = planned.action;
+    plan.before = state;
+    plan.after = current;
+    plan.durationSeconds =
+        stepDurationSeconds * static_cast<float>(planned.legs.size());
+    plan.facingDirection = playerInput;
+
+    if (playerInput && anyPlayerMoved(plan.before, planned.legs.front())) {
+        // Only the first leg is input-driven, so a push is judged there.
         plan.playerPushing =
-            derivePlayerPushing(plan.before, plan.after, *playerInput);
+            derivePlayerPushing(plan.before, planned.legs.front(), *playerInput);
     }
     if (!playerInput) {
         // Nothing was driving a facing, so take it from whoever moved - a
         // conveyor rider or a sliding player still turns to face their travel.
         plan.facingDirection =
-            firstPlayerMovementDirection(plan.before, plan.after);
+            firstPlayerMovementDirection(plan.before, planned.legs.front());
     }
-    return plan;
+    return planned;
 }
 
 ActionPlan fromMirrorPreview(

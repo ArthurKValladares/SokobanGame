@@ -93,7 +93,8 @@ GameplayLoop::UpdateResult GameplayLoop::update(
                     source.durationSeconds = session.stepDurationSeconds();
                 }
                 session.setActiveActionPresentation(
-                    presentation.buildActionPresentation(source));
+                    presentation.buildActionPresentation(
+                        source, session.activeActionLegs()));
             }
             if (session.activeAction().reversed) {
                 session.setActiveActionDuration(

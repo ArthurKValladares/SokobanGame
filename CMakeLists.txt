@@ -149,6 +149,8 @@ function(sokoban_enable_warnings target)
 endfunction()
 
 add_library(sokoban_core STATIC
+    src/engine/ActionPlan.cpp
+    src/engine/ActionScheduler.cpp
     src/engine/AnimationCatalog.cpp
     src/engine/AnimationCatalogEditor.cpp
     src/engine/AnimationEventSequencer.cpp
@@ -183,13 +185,13 @@ add_library(sokoban_core STATIC
     src/engine/PlayerProfileCodec.cpp
     src/engine/PresentationTransactionBuilder.cpp
     src/engine/RenderFrameBuilder.cpp
+    src/engine/Reservation.cpp
     src/engine/Rules.cpp
     src/engine/RuntimeContent.cpp
     src/engine/SaveSlotManager.cpp
     src/engine/SaveStore.cpp
     src/engine/SettingsCoordinator.cpp
     src/engine/SettingsTypes.cpp
-    src/engine/ActionPlan.cpp
     src/engine/SplatCanvas.cpp
     src/engine/SplatPainter.cpp
     src/engine/StateDelta.cpp
@@ -560,6 +562,14 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME action_plan TARGET sokoban_action_plan_tests
         LIBS sokoban_core
         SOURCES tests/ActionPlanTests.cpp
+    )
+    sokoban_add_test(NAME action_scheduler TARGET sokoban_action_scheduler_tests
+        LIBS sokoban_core
+        SOURCES tests/ActionSchedulerTests.cpp
+    )
+    sokoban_add_test(NAME reservation TARGET sokoban_reservation_tests
+        LIBS sokoban_core
+        SOURCES tests/ReservationTests.cpp
     )
     sokoban_add_test(NAME state_delta TARGET sokoban_state_delta_tests
         LIBS sokoban_core

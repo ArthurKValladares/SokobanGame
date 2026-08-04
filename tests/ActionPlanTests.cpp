@@ -7,6 +7,7 @@
 
 #include "engine/ActionPlan.hpp"
 
+#include <cmath>
 #include <cstddef>
 #include <iostream>
 #include <string>
@@ -66,22 +67,22 @@ void testWorldStepPlansAPush()
     const Level level = roomWithRock();
     const GameState state = rules::initialState(level);
 
-    const std::optional<ActionPlan> plan = plans::worldStep(
+    const std::optional<plans::PlannedAction> planned = plans::worldStep(
         level, state, MoveDirection::Right, {}, 0.25f);
-    CHECK(plan.has_value());
-    if (!plan) {
+    CHECK(planned.has_value());
+    if (!planned) {
         return;
     }
-    CHECK(plan->before == state);
-    CHECK(plan->after.players[0].cell == cell(2, 0, 1));
-    CHECK(plan->after.movables[0].cell == cell(3, 0, 1));
-    CHECK(plan->playerPushing);
-    CHECK(plan->facingDirection == MoveDirection::Right);
-    CHECK(plan->durationSeconds == 0.25f);
-    CHECK(!plan->reversed);
+    CHECK(planned->action.before == state);
+    CHECK(planned->action.after.players[0].cell == cell(2, 0, 1));
+    CHECK(planned->action.after.movables[0].cell == cell(3, 0, 1));
+    CHECK(planned->action.playerPushing);
+    CHECK(planned->action.facingDirection == MoveDirection::Right);
+    CHECK(planned->action.durationSeconds == 0.25f);
+    CHECK(!planned->action.reversed);
     // The session owns the running total, so the planner leaves it alone.
-    CHECK(plan->playerMoveCountBefore == 0);
-    CHECK(plan->playerMoveCountAfter == 0);
+    CHECK(planned->action.playerMoveCountBefore == 0);
+    CHECK(planned->action.playerMoveCountAfter == 0);
 }
 
 void testWorldStepWithoutMovementHasNoPlan()
@@ -103,9 +104,9 @@ void testPlanningIsPureAndRepeatable()
     const Level level = roomWithRock();
     const GameState state = rules::initialState(level);
 
-    const std::optional<ActionPlan> first =
+    const std::optional<plans::PlannedAction> first =
         plans::worldStep(level, state, MoveDirection::Right, {}, 0.25f);
-    const std::optional<ActionPlan> second =
+    const std::optional<plans::PlannedAction> second =
         plans::worldStep(level, state, MoveDirection::Right, {}, 0.25f);
     CHECK(first == second);
 
@@ -118,14 +119,14 @@ void testWalkingWithoutPushing()
     TEST("walkingWithoutPushing");
     const Level level = roomWithRock();
     const GameState state = rules::initialState(level);
-    const std::optional<ActionPlan> plan = plans::worldStep(
+    const std::optional<plans::PlannedAction> planned = plans::worldStep(
         level, state, MoveDirection::Left, {}, 0.25f);
-    CHECK(plan.has_value());
-    if (plan) {
-        CHECK(plan->after.players[0].cell == cell(0, 0, 1));
+    CHECK(planned.has_value());
+    if (planned) {
+        CHECK(planned->action.after.players[0].cell == cell(0, 0, 1));
         // Nothing was in the way, so this is a walk rather than a push.
-        CHECK(!plan->playerPushing);
-        CHECK(plan->after.movables[0].cell == cell(2, 0, 1));
+        CHECK(!planned->action.playerPushing);
+        CHECK(planned->action.after.movables[0].cell == cell(2, 0, 1));
     }
 }
 
@@ -138,17 +139,17 @@ void testRestartPlan()
     // Already at the opening state, so there is nothing to restart to.
     CHECK(!plans::restart(level, initial, 0.25f));
 
-    const std::optional<ActionPlan> moved =
+    const std::optional<plans::PlannedAction> moved =
         plans::worldStep(level, initial, MoveDirection::Right, {}, 0.25f);
     CHECK(moved.has_value());
     if (!moved) {
         return;
     }
     const std::optional<ActionPlan> plan =
-        plans::restart(level, moved->after, 0.25f);
+        plans::restart(level, moved->action.after, 0.25f);
     CHECK(plan.has_value());
     if (plan) {
-        CHECK(plan->before == moved->after);
+        CHECK(plan->before == moved->action.after);
         CHECK(plan->after == initial);
     }
 
@@ -163,30 +164,30 @@ void testInvertedSwapsEndpointsAndCounts()
     TEST("invertedSwapsEndpointsAndCounts");
     const Level level = roomWithRock();
     const GameState state = rules::initialState(level);
-    std::optional<ActionPlan> forward =
+    std::optional<plans::PlannedAction> forward =
         plans::worldStep(level, state, MoveDirection::Right, {}, 0.25f);
     CHECK(forward.has_value());
     if (!forward) {
         return;
     }
-    forward->playerMoveCountBefore = 4;
-    forward->playerMoveCountAfter = 5;
+    forward->action.playerMoveCountBefore = 4;
+    forward->action.playerMoveCountAfter = 5;
 
-    const ActionPlan back = plans::inverted(*forward);
-    CHECK(back.before == forward->after);
-    CHECK(back.after == forward->before);
+    const ActionPlan back = plans::inverted(forward->action);
+    CHECK(back.before == forward->action.after);
+    CHECK(back.after == forward->action.before);
     CHECK(back.reversed);
     CHECK(back.playerMoveCountBefore == 5);
     CHECK(back.playerMoveCountAfter == 4);
     // Carried through so the reversed animation still knows it was a push.
-    CHECK(back.playerPushing == forward->playerPushing);
+    CHECK(back.playerPushing == forward->action.playerPushing);
 
     // Inverting twice returns the original, aside from the reversed flag that
     // marks which direction history is being walked in.
     ActionPlan again = plans::inverted(back);
-    CHECK(again.before == forward->before);
-    CHECK(again.after == forward->after);
-    CHECK(again.playerMoveCountAfter == forward->playerMoveCountAfter);
+    CHECK(again.before == forward->action.before);
+    CHECK(again.after == forward->action.after);
+    CHECK(again.playerMoveCountAfter == forward->action.playerMoveCountAfter);
 }
 
 void testPlayerMovementHelpers()
@@ -194,26 +195,133 @@ void testPlayerMovementHelpers()
     TEST("playerMovementHelpers");
     const Level level = roomWithRock();
     const GameState state = rules::initialState(level);
-    const std::optional<ActionPlan> plan = plans::worldStep(
+    const std::optional<plans::PlannedAction> planned = plans::worldStep(
         level, state, MoveDirection::Right, {}, 0.25f);
-    CHECK(plan.has_value());
-    if (!plan) {
+    CHECK(planned.has_value());
+    if (!planned) {
         return;
     }
-    CHECK(plans::anyPlayerMoved(plan->before, plan->after));
-    CHECK(!plans::anyPlayerMoved(plan->before, plan->before));
-    CHECK(plans::firstPlayerMovementDirection(plan->before, plan->after) ==
+    CHECK(plans::anyPlayerMoved(planned->action.before, planned->action.after));
+    CHECK(!plans::anyPlayerMoved(planned->action.before, planned->action.before));
+    CHECK(plans::firstPlayerMovementDirection(planned->action.before, planned->action.after) ==
         MoveDirection::Right);
     // Backwards, which is how undo derives the facing it animates with.
-    CHECK(plans::firstPlayerMovementDirection(plan->after, plan->before) ==
+    CHECK(plans::firstPlayerMovementDirection(planned->action.after, planned->action.before) ==
         MoveDirection::Left);
-    CHECK(!plans::firstPlayerMovementDirection(plan->before, plan->before));
+    CHECK(!plans::firstPlayerMovementDirection(planned->action.before, planned->action.before));
 
     // A player appearing or vanishing counts as movement, because mirror
     // activation adds reflections and undo removes them again.
-    GameState grown = plan->before;
+    GameState grown = planned->action.before;
     grown.players.push_back({ .id = 99, .cell = cell(4, 0, 1) });
-    CHECK(plans::anyPlayerMoved(plan->before, grown));
+    CHECK(plans::anyPlayerMoved(planned->action.before, grown));
+}
+
+// An ice block the player can push, with a long run of floor ahead of it and a
+// wall to stop it. Ice is a movable that keeps its momentum, not a floor.
+[[nodiscard]] Level iceRink()
+{
+    return makeLevel({
+        { "........" },
+        { "CI     #" },
+    });
+}
+
+void testSlideResolvesAsOneAction()
+{
+    TEST("slideResolvesAsOneAction");
+    const Level level = iceRink();
+    const GameState state = rules::initialState(level);
+
+    const std::optional<plans::PlannedAction> planned = plans::worldStep(
+        level, state, MoveDirection::Right, {}, 0.2f);
+    CHECK(planned.has_value());
+    if (!planned) {
+        return;
+    }
+
+    // The rock's whole journey is settled here, not one tile at a time. It runs
+    // out of ice or hits the wall; either way the destination is decided before
+    // anything has moved.
+    CHECK(planned->legs.size() > 1);
+    CHECK(!plans::anySlideMomentum(planned->action.after));
+    CHECK(planned->legs.back() == planned->action.after);
+    // Duration covers every leg, so the animation has time to play them.
+    const float expected =
+        0.2f * static_cast<float>(planned->legs.size());
+    CHECK(std::abs(planned->action.durationSeconds - expected) < 0.0001f);
+    // Still one player move, however far the rock travelled.
+    CHECK(planned->action.playerPushing);
+
+    // Every leg differs from the one before it: no wasted frames.
+    for (std::size_t i = 1; i < planned->legs.size(); ++i) {
+        CHECK(!(planned->legs[i] == planned->legs[i - 1]));
+    }
+}
+
+void testSlideOutcomeIgnoresLaterInterference()
+{
+    TEST("slideOutcomeIgnoresLaterInterference");
+    // The guarantee, stated as a test. Planning the same push against the same
+    // world always gives the same destination, and that destination is fixed
+    // before the first tile of travel - so nothing that happens during the
+    // slide can be consulted, because the answer already exists.
+    const Level level = iceRink();
+    const GameState state = rules::initialState(level);
+
+    const std::optional<plans::PlannedAction> planned =
+        plans::worldStep(level, state, MoveDirection::Right, {}, 0.2f);
+    CHECK(planned.has_value());
+    if (!planned) {
+        return;
+    }
+    const GridPosition3 destination = planned->action.after.movables[0].cell;
+
+    // Re-plan from a mid-slide leg with the world otherwise untouched: the rock
+    // still ends up in the same place, which is what "already decided" means.
+    const std::optional<plans::PlannedAction> resumed = plans::worldStep(
+        level, planned->legs.front(), std::nullopt, {}, 0.2f);
+    CHECK(resumed.has_value());
+    if (resumed) {
+        CHECK(resumed->action.after.movables[0].cell == destination);
+    }
+}
+
+void testChainStopsAtConveyors()
+{
+    TEST("chainStopsAtConveyors");
+    // Belt motion is ambient and never ends, so chaining it would produce an
+    // action that never finishes. A rider gets one step per action.
+    const Level level = makeLevel({
+        { "...", "..." },
+        { ">> ", "C  " },
+    });
+    GameState state = rules::initialState(level);
+    state.players[0].cell = cell(0, 0, 1);  // step onto the belt
+    const std::optional<plans::PlannedAction> planned =
+        plans::worldStep(level, state, std::nullopt, {}, 0.2f);
+    CHECK(planned.has_value());
+    if (planned) {
+        CHECK(planned->legs.size() == 1);
+        // The belt has more to give, but this action is over.
+        CHECK(rules::hasPendingMotion(level, planned->action.after));
+        CHECK(!plans::anySlideMomentum(planned->action.after));
+    }
+}
+
+void testSlideMomentumDetection()
+{
+    TEST("slideMomentumDetection");
+    GameState state;
+    CHECK(!plans::anySlideMomentum(state));
+    state.movables.push_back({ .id = 1, .type = TileType::Rock });
+    CHECK(!plans::anySlideMomentum(state));
+    state.movables[0].sliding = MoveDirection::Right;
+    CHECK(plans::anySlideMomentum(state));
+    state.movables[0].sliding.reset();
+    state.players.push_back({ .id = 2 });
+    state.players[0].sliding = MoveDirection::Left;
+    CHECK(plans::anySlideMomentum(state));
 }
 
 } // namespace
@@ -227,6 +335,10 @@ int main()
     testRestartPlan();
     testInvertedSwapsEndpointsAndCounts();
     testPlayerMovementHelpers();
+    testSlideResolvesAsOneAction();
+    testSlideOutcomeIgnoresLaterInterference();
+    testChainStopsAtConveyors();
+    testSlideMomentumDetection();
 
     if (failures == 0) {
         std::cout << "ActionPlanTests: " << checks << " checks passed\n";

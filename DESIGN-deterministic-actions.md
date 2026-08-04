@@ -223,10 +223,152 @@ struct ActionPlan {
 
    Move counts are left at zero by the planners: only the session knows the
    running total.
-3. Full-chain planning for slides. Behaviour changes here: slides become
-   stable. Still single-timeline, so no reservations needed yet.
-4. `ReservationTable` and concurrent execution, with queueing and admission
-   priority.
+3. **Done.** `plans::worldStep` resolves the whole chain: the first step applies
+   the player's input, then the world keeps stepping while anything carries
+   slide momentum, and the run becomes one action whose duration covers every
+   leg. Slides are now stable — the destination is settled before the block has
+   moved a tile, and nothing can start while the action runs.
+
+   Consequences, all intended but worth knowing:
+
+   - **The player is locked out for the whole chain.** Single timeline, so a
+     long slide is a long wait. This is the regression step 4 removes: with
+     space-time reservations the player is released as soon as their own leg's
+     interval ends.
+   - **One undo reverses the entire slide**, not one tile of it, since the
+     chain is one history entry.
+   - Conveyor riders stop after one step, as decided. `plans::anySlideMomentum`
+     is what distinguishes them from sliders; `rules::hasPendingMotion` reports
+     both and is the wrong test for chaining.
+
+   Two things needed handling that the plan above did not anticipate:
+
+   - `matchesForwardTransition` replays a single `rules::step` to validate a
+     save, so it rejected chained actions outright. It now replays the chain —
+     and still accepts a single step, so saves written before this change load
+     unchanged.
+   - Motion has to be staggered per leg, or a block that only starts moving on
+     the fourth step would set off immediately. `GameplayPresentation` gained a
+     leg-aware overload; the session carries the legs transiently
+     (`activeActionLegs()`), never persisting them.
+
+   Known gap: an animated event occurring in a *later* leg — a player killed
+   part-way through a slide — has correct motion but no clip, because
+   animations are built from the first leg alone. Fixing it means building a
+   timeline per leg and merging them.
+4. Split into three, because the presentation half is both the largest part and
+   the one the sandbox cannot test (`PresentationTests` needs `std::ranges`
+   algorithms GCC 11 lacks).
+
+   **4a — done.** `Reservation`, `ActionReservations` and `ReservationTable`
+   (`src/engine/Reservation.hpp`), plus `plans::reservationsFor`. Pure and
+   headless; nothing consumes it yet, so no behaviour change.
+
+   Two details settled here that the sketch above left open:
+
+   - **Step numbering.** During step *i* an entity travels from `cells[i]` to
+     `cells[i + 1]`, so it claims both for that step. Numbering by state index
+     instead is off by one and lets a claim start a step late.
+   - **A resting cell is claimed open-ended.** This is what makes the read/write
+     distinction actually bite. An entity that steps onto a cell and stays
+     writes it once; a bounded interval says it is free ten steps later, when
+     the entity is plainly still standing there. `Reservation::lastStep` is
+     therefore optional, and unset means "until something else moves it".
+
+   The read set is deliberately conservative — approximated as the cell that
+   stopped each entity, rather than derived by instrumenting `rules::step` to
+   report everything it consulted. That can reject concurrency which would have
+   been safe; it cannot admit concurrency which is not.
+
+   **4b — done.** `ActionScheduler` (`src/engine/ActionScheduler.hpp`) runs
+   several actions at once: conflict-gated admission, per-action elapsed time,
+   and commit-as-delta on completion. Built standalone and tested rather than
+   wired in, because wiring it in *is* 4c — the presentation cannot cope with
+   two actions yet.
+
+   Also landed: the command queue is now bounded (two) and drops commands the
+   world has outlived (one second). Both matter more than they did before step
+   3, since a chained slide is long enough for a burst of mashing to spool out
+   behind it.
+
+   Decisions worth recording:
+
+   - **The scheduler executes plans; it does not make them.** Choosing what to
+     plan, and in what order, stays with the session. Admission priority —
+     queued player commands ahead of ambient belt motion — therefore lives in
+     `tryStartNextAction`, which already drains the queue before falling
+     through to `rules::hasPendingMotion`. That ordering was already correct;
+     it just now matters.
+   - **A full queue drops the oldest, not the newest.** The most recent input
+     is the one the player still means.
+   - **`baseStep` rounds down.** An action starting part-way through a step gets
+     claims that begin fractionally early, which can only make the conflict
+     check stricter. Rounding the other way would let two actions slip past
+     each other by a fraction of a step.
+   - **Completion order is sorted, not incidental.** Effects are disjoint by
+     construction so order should not matter, but a non-deterministic commit
+     order would be impossible to reproduce from a bug report.
+
+   **4c — not started.** Presentation compositing, and wiring the scheduler
+   into `GameplaySession`.
+
+   This is the one step that should not be done without running
+   `PresentationTests`, which needs a toolchain with `std::ranges` algorithms.
+   Everything before it was verifiable headlessly; this is not.
+
+   ### What actually blocks concurrency
+
+   The presentation owns *world* state, not *per-action* state:
+
+   - `beginAction` calls `syncToGameState(action.before)`, rebuilding every
+     visual from one action's snapshot. A second action beginning mid-slide
+     would snap the first action's moving entities back to where they started.
+   - `trackedTimeline_`, `trackedTimelineSeconds_`, `reverseSourceStartSeconds_`
+     and `trackedTimelineReversed_` are single-valued. Two actions need two.
+   - `seekAction` clears `moving` on every visual before applying its timeline,
+     so whichever action seeks last wins and the other appears frozen.
+   - `beginAction` turns *every* player to `action.facingDirection`, including
+     ones the action does not touch.
+
+   ### The decomposition that makes it work
+
+   Concurrent actions have disjoint entity sets. That is not an assumption but a
+   consequence of 4a: an entity occupies cells, so two actions moving the same
+   entity would claim the same cells and conflict. Every entity is therefore
+   driven by at most one action at a time, which means the presentation can be
+   split per entity rather than per world.
+
+   1. **Structural sync separates from action start.** `syncToGameState` keeps
+      its job of creating and removing visuals (mirror reflections appear,
+      undo removes them) but is driven by the session's current state, not by
+      an action's `before`. Note these are the same value today — `state_` is
+      still `before` when `beginAction` runs — so this is behaviour-preserving
+      for one action and correct for several.
+   2. **Per-action timeline records.** Replace the four `trackedTimeline*`
+      members with a small record keyed by action id, one per action in flight.
+   3. **`seekAction` clears only its own targets**, taken from its timeline's
+      motion tracks, instead of every visual.
+   4. **Facing applies only to players the action moves.** Careful here: with
+      one action and several mirror-created players, today *all* of them turn.
+      Check `PresentationTests` before changing it — this may be load-bearing
+      for the mirror mechanic rather than incidental.
+
+   ### Suggested order
+
+   Steps 1-3 are mechanical and behaviour-preserving with a single action, so
+   they can land and be verified against the existing suites before any
+   concurrency is switched on. Only then wire `ActionScheduler` into
+   `GameplaySession` and let `tryStartNextAction` admit a second action.
+
+   `GameplaySession` should keep its current single-action accessors working —
+   returning the oldest in-flight action — so `Application` and
+   `RenderFrameBuilder` need no changes in the same pass.
+
+   **4c — not started.** Presentation compositing. `GameplayPresentation::
+   beginAction` calls `syncToGameState(action.before)`, resetting the whole
+   visual world from one action's snapshot; that is wrong the moment two
+   actions overlap. Twenty-four call sites across `Application`, `GameplayLoop`
+   and `GameplayPresentation` assume a single active action.
 5. Conveyors as per-step actions.
 
 Steps 1 and 2 are the risky, wide-reaching ones and produce no visible change;

@@ -293,6 +293,96 @@ void GameplayPresentation::advanceAnimations(float dt, const GameState& state)
     }
 }
 
+namespace {
+
+// Motion for one leg of a chained action: every entity that changed cell
+// between two consecutive world steps, timed to that leg's slot.
+void appendLegMotions(
+    ActionPresentationTimeline& timeline,
+    const GameState& before,
+    const GameState& after,
+    float startSeconds,
+    float durationSeconds)
+{
+    const auto add = [&](EntityTarget target, Vec3 from, Vec3 to) {
+        if (gridDistance(from, to) > 0.0001f) {
+            timeline.motions.push_back({
+                .target = target,
+                .from = from,
+                .to = to,
+                .startSeconds = startSeconds,
+                .durationSeconds = durationSeconds,
+            });
+        }
+    };
+
+    const std::size_t players =
+        std::min(before.players.size(), after.players.size());
+    for (std::size_t i = 0; i < players; ++i) {
+        add(playerTarget(before.players[i], i),
+            playerRenderTarget(before.players[i].cell, before.players[i].drowned),
+            playerRenderTarget(after.players[i].cell, after.players[i].drowned));
+    }
+
+    const std::size_t movables =
+        std::min(before.movables.size(), after.movables.size());
+    for (std::size_t i = 0; i < movables; ++i) {
+        add(movableTarget(before.movables[i], i),
+            movableRenderTarget(before.movables[i].cell, before.movables[i].fallen),
+            movableRenderTarget(after.movables[i].cell, after.movables[i].fallen));
+    }
+
+    const std::size_t enemies =
+        std::min(before.enemies.size(), after.enemies.size());
+    for (std::size_t i = 0; i < enemies; ++i) {
+        add(enemyTarget(before.enemies[i], i),
+            movableRenderTarget(before.enemies[i].cell, before.enemies[i].fallen),
+            movableRenderTarget(after.enemies[i].cell, after.enemies[i].fallen));
+    }
+}
+
+} // namespace
+
+ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
+    const GameplaySession::Action& action,
+    const std::vector<GameState>& legs) const
+{
+    if (legs.size() <= 1) {
+        return buildActionPresentation(action);
+    }
+
+    // A chained slide is one action spanning several world steps. Interpolating
+    // once from start to finish would be right for a single block travelling in
+    // a straight line, but wrong the moment a chain is involved: a block that
+    // only starts moving on the fourth step would set off immediately.
+    const float stepDuration =
+        action.durationSeconds / static_cast<float>(legs.size());
+
+    // Animations - pushes, deaths, attacks - come from the ordinary builder run
+    // over the first leg alone, which is the only leg the player drove. Nothing
+    // about how those are chosen changes.
+    //
+    // Known gap: an animated event that happens in a *later* leg, such as a
+    // player killed part-way through a slide, is not represented yet. The
+    // motion is correct; only the clip is missing. Building a timeline per leg
+    // and merging them would fix it.
+    GameplaySession::Action firstLeg = action;
+    firstLeg.after = legs.front();
+    firstLeg.durationSeconds = stepDuration;
+    ActionPresentationTimeline timeline = buildActionPresentation(firstLeg);
+    timeline.durationSeconds = action.durationSeconds;
+
+    for (std::size_t leg = 1; leg < legs.size(); ++leg) {
+        appendLegMotions(
+            timeline,
+            legs[leg - 1],
+            legs[leg],
+            static_cast<float>(leg) * stepDuration,
+            stepDuration);
+    }
+    return timeline;
+}
+
 ActionPresentationTimeline GameplayPresentation::buildActionPresentation(
     const GameplaySession::Action& action) const
 {
