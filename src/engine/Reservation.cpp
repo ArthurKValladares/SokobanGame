@@ -8,7 +8,6 @@ namespace {
 // Where an entity sits after each leg, keyed so that a mirror activation
 // appending players cannot shift one entity's track onto another.
 struct EntityTrack {
-    EntityId id = invalidEntityId;
     // The instant `cells[0]` describes. Zero for anything present when the
     // action began; later for an entity the action creates part-way through.
     int firstInstant = 0;
@@ -16,10 +15,11 @@ struct EntityTrack {
     std::vector<GridPosition3> cells;
 };
 
-template <EntityKind kind, typename Entity>
+template <typename Entity>
 void collectTracks(
     const std::vector<Entity>& before,
-    const std::vector<std::vector<Entity>>& perLeg,
+    const std::vector<GameState>& legs,
+    const std::vector<Entity> GameState::* entitiesMember,
     std::vector<EntityTrack>& tracks)
 {
     // Past the end of `before`, because an action may *add* entities: mirror
@@ -27,8 +27,8 @@ void collectTracks(
     // while this loop ran to `before.size()`. An unclaimed cell is one another
     // action is free to walk into.
     std::size_t count = before.size();
-    for (const std::vector<Entity>& leg : perLeg) {
-        count = std::max(count, leg.size());
+    for (const GameState& leg : legs) {
+        count = std::max(count, (leg.*entitiesMember).size());
     }
 
     for (std::size_t index = 0; index < count; ++index) {
@@ -50,8 +50,9 @@ void collectTracks(
         // One the action creates is involved by definition.
         const bool involved = !existedBefore ||
             std::ranges::any_of(
-                perLeg,
-                [&](const std::vector<Entity>& leg) {
+                legs,
+                [&](const GameState& state) {
+                    const std::vector<Entity>& leg = state.*entitiesMember;
                     // Removed counts as involved: the action took it out of the
                     // world, which is as much a change as moving it.
                     return index >= leg.size() || !(leg[index] == before[index]);
@@ -62,7 +63,6 @@ void collectTracks(
 
         EntityTrack track;
         if (existedBefore) {
-            track.id = resolvedEntityId(kind, before[index].id, index);
             track.cells.push_back(before[index].cell);
         } else {
             // Claimed from the instant it appears rather than from the start of
@@ -70,28 +70,27 @@ void collectTracks(
             // was not standing in would refuse concurrency that is in fact
             // fine.
             const auto appears = std::ranges::find_if(
-                perLeg,
-                [index](const std::vector<Entity>& leg) {
-                    return index < leg.size();
+                legs,
+                [index, entitiesMember](const GameState& state) {
+                    return index < (state.*entitiesMember).size();
                 });
-            if (appears == perLeg.end()) {
+            if (appears == legs.end()) {
                 continue;
             }
             track.firstInstant =
-                static_cast<int>(std::distance(perLeg.begin(), appears)) + 1;
-            track.id = resolvedEntityId(kind, (*appears)[index].id, index);
+                static_cast<int>(std::distance(legs.begin(), appears)) + 1;
         }
 
-        for (std::size_t leg = 0; leg < perLeg.size(); ++leg) {
+        for (std::size_t leg = 0; leg < legs.size(); ++leg) {
             // Instants before it exists are not its to claim.
             if (static_cast<int>(leg) + 1 < track.firstInstant) {
                 continue;
             }
             // An entity that vanishes keeps its last known cell, which is the
             // conservative reading: the cell stays claimed.
-            track.cells.push_back(
-                index < perLeg[leg].size()
-                    ? perLeg[leg][index].cell
+            const std::vector<Entity>& entities = legs[leg].*entitiesMember;
+            track.cells.push_back(index < entities.size()
+                    ? entities[index].cell
                     : track.cells.back());
         }
         tracks.push_back(std::move(track));
@@ -135,25 +134,22 @@ ActionReservations reservationsFor(const PlannedAction& planned)
         return result;
     }
 
-    std::vector<std::vector<GameState::Player>> playerLegs;
-    std::vector<std::vector<GameState::Movable>> movableLegs;
-    std::vector<std::vector<GameState::Enemy>> enemyLegs;
-    playerLegs.reserve(planned.legs.size());
-    movableLegs.reserve(planned.legs.size());
-    enemyLegs.reserve(planned.legs.size());
-    for (const GameState& leg : planned.legs) {
-        playerLegs.push_back(leg.players);
-        movableLegs.push_back(leg.movables);
-        enemyLegs.push_back(leg.enemies);
-    }
-
     std::vector<EntityTrack> tracks;
-    collectTracks<EntityKind::Player>(
-        planned.action.before.players, playerLegs, tracks);
-    collectTracks<EntityKind::Movable>(
-        planned.action.before.movables, movableLegs, tracks);
-    collectTracks<EntityKind::Enemy>(
-        planned.action.before.enemies, enemyLegs, tracks);
+    collectTracks(
+        planned.action.before.players,
+        planned.legs,
+        &GameState::players,
+        tracks);
+    collectTracks(
+        planned.action.before.movables,
+        planned.legs,
+        &GameState::movables,
+        tracks);
+    collectTracks(
+        planned.action.before.enemies,
+        planned.legs,
+        &GameState::enemies,
+        tracks);
 
     for (const EntityTrack& track : tracks) {
         // The last instant at which the entity is standing in each cell - the

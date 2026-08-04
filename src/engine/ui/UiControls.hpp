@@ -33,7 +33,6 @@ struct SegmentedControlOptions {
 
 [[nodiscard]] bool button(
     UiContext& ui,
-    std::string_view id,
     UiRect rect,
     std::string_view label,
     ButtonOptions options = {});
@@ -48,7 +47,6 @@ struct SegmentedControlOptions {
     bool enabled = true);
 [[nodiscard]] bool checkbox(
     UiContext& ui,
-    std::string_view id,
     UiRect rect,
     std::string_view label,
     bool& value,
@@ -56,14 +54,12 @@ struct SegmentedControlOptions {
     bool activate = false);
 [[nodiscard]] bool segmentedControl(
     UiContext& ui,
-    std::string_view id,
     UiRect rect,
     std::span<const ChoiceOption> choices,
     int& selectedValue,
     SegmentedControlOptions options = {});
 [[nodiscard]] bool choiceStepper(
     UiContext& ui,
-    std::string_view id,
     UiRect rect,
     std::span<const std::string_view> labels,
     int& selected,

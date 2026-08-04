@@ -125,7 +125,7 @@ std::optional<OverlayAction> LevelCompleteOverlay::drawLevelComplete(
 
     std::optional<OverlayAction> action;
     if (uiControls::button(
-            ui, "level-complete.continue", tree.rect(continueRow),
+            ui, tree.rect(continueRow),
             stats_.hasNextLevel ? "Next Level" : "Back To Start", {
             .tone = ButtonTone::Accent,
             .focused = selectedRow_ == continueRowIndex,
@@ -134,7 +134,7 @@ std::optional<OverlayAction> LevelCompleteOverlay::drawLevelComplete(
         action = overlay::Continue {};
     }
     if (uiControls::button(
-            ui, "level-complete.title", tree.rect(titleRow), "Title Screen", {
+            ui, tree.rect(titleRow), "Title Screen", {
             .focused = selectedRow_ == titleRowIndex,
             .activate = input.confirm && selectedRow_ == titleRowIndex,
         })) {
@@ -220,7 +220,7 @@ std::optional<OverlayAction> LevelCompleteOverlay::drawGameComplete(
 
     std::optional<OverlayAction> action;
     if (uiControls::button(
-            ui, "game-complete.level-select", tree.rect(levelSelectRow),
+            ui, tree.rect(levelSelectRow),
             "Level Select", {
             .tone = ButtonTone::Accent,
             .focused = selectedRow_ == levelSelectRowIndex,
@@ -229,7 +229,7 @@ std::optional<OverlayAction> LevelCompleteOverlay::drawGameComplete(
         action = overlay::ToLevelSelect {};
     }
     if (uiControls::button(
-            ui, "game-complete.title", tree.rect(titleRow), "Title Screen", {
+            ui, tree.rect(titleRow), "Title Screen", {
             .focused = selectedRow_ == titleRowIndex,
             .activate = input.confirm && selectedRow_ == titleRowIndex,
         })) {

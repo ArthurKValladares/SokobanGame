@@ -108,13 +108,7 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
     ImGui::Text("Enemies %zu", state.enemies.size());
     ImGui::Text("History %zu", context.gameplaySession.historySize());
 
-    // Admissions, so the reservation machinery can be judged on evidence rather
-    // than argument. Ownership is the simple rule - an entity another action is
-    // already moving is off limits - and cell claims are the elaborate one,
-    // existing only to catch actions whose entities are disjoint but whose paths
-    // cross. If "by claim" stays at or near zero across real play, the elaborate
-    // half is not earning its keep and the next simplification is to drop time
-    // from claims entirely. See DESIGN-deterministic-actions.md.
+    // Show which admission rule is preventing concurrent actions.
     const ActionScheduler::AdmissionStats& admissions =
         context.gameplaySession.admissionStats();
     ImGui::Text(

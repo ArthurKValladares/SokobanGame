@@ -29,7 +29,6 @@ Vec4 buttonColor(ButtonTone tone, bool hovered, bool pressed)
 
 bool button(
     UiContext& ui,
-    std::string_view,
     UiRect rect,
     std::string_view label,
     ButtonOptions options)
@@ -103,7 +102,6 @@ bool slider(
 
 bool checkbox(
     UiContext& ui,
-    std::string_view,
     UiRect rect,
     std::string_view label,
     bool& value,
@@ -137,7 +135,6 @@ bool checkbox(
 
 bool segmentedControl(
     UiContext& ui,
-    std::string_view id,
     UiRect rect,
     std::span<const ChoiceOption> choices,
     int& selectedValue,
@@ -167,8 +164,7 @@ bool segmentedControl(
             { rect.position.x + segmentWidth * static_cast<float>(index), rect.position.y },
             { segmentWidth, rect.size.y },
         };
-        const std::string segmentId = std::string(id) + "." + std::to_string(index);
-        if (button(ui, segmentId, segment, choices[index].label, {
+        if (button(ui, segment, choices[index].label, {
                 .tone = static_cast<int>(index) == selectedIndex
                     ? ButtonTone::Accent
                     : ButtonTone::Normal,
@@ -184,7 +180,6 @@ bool segmentedControl(
 
 bool choiceStepper(
     UiContext& ui,
-    std::string_view id,
     UiRect rect,
     std::span<const std::string_view> labels,
     int& selected,
@@ -196,7 +191,7 @@ bool choiceStepper(
     const int oldSelected = selected;
     selected = std::clamp(selected, 0, static_cast<int>(labels.size()) - 1);
     constexpr float arrowWidth = 52.0f;
-    if (button(ui, std::string(id) + ".previous", {
+    if (button(ui, {
             rect.position, { arrowWidth, rect.size.y } }, "<", { .focused = focused })) {
         selected = (selected + static_cast<int>(labels.size()) - 1) % static_cast<int>(labels.size());
     }
@@ -208,7 +203,7 @@ bool choiceStepper(
         { rect.position.x + arrowWidth, rect.position.y },
         { rect.size.x - arrowWidth * 2.0f, rect.size.y },
     }, labels[static_cast<size_t>(selected)], textColor, 22.0f);
-    if (button(ui, std::string(id) + ".next", {
+    if (button(ui, {
             { rect.position.x + rect.size.x - arrowWidth, rect.position.y },
             { arrowWidth, rect.size.y } }, ">", { .focused = focused })) {
         selected = (selected + 1) % static_cast<int>(labels.size());

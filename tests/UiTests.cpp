@@ -86,7 +86,7 @@ void testReusableControls()
     sokoban::UiContext ui(font);
     ui.beginFrame({ 400.0f, 200.0f }, { 50.0f, 25.0f }, true, true);
     CHECK(sokoban::uiControls::button(
-        ui, "button", { { 10.0f, 10.0f }, { 100.0f, 40.0f } }, "Button"));
+        ui, { { 10.0f, 10.0f }, { 100.0f, 40.0f } }, "Button"));
 
     float value = 0.0f;
     ui.beginFrame({ 400.0f, 200.0f }, { 110.0f, 85.0f }, true, true);
@@ -113,20 +113,20 @@ void testReusableControls()
     int selectedChoice = 20;
     ui.beginFrame({ 400.0f, 200.0f }, {}, false, false);
     CHECK(sokoban::uiControls::segmentedControl(
-        ui, "choices", { { 10.0f, 110.0f }, { 300.0f, 40.0f } },
+        ui, { { 10.0f, 110.0f }, { 300.0f, 40.0f } },
         choices, selectedChoice, { .selectNext = true }));
     CHECK(selectedChoice == 30);
 
     ui.beginFrame({ 400.0f, 200.0f }, { 50.0f, 130.0f }, true, true);
     CHECK(sokoban::uiControls::segmentedControl(
-        ui, "choices", { { 10.0f, 110.0f }, { 300.0f, 40.0f } },
+        ui, { { 10.0f, 110.0f }, { 300.0f, 40.0f } },
         choices, selectedChoice));
     CHECK(selectedChoice == 10);
 
     bool checked = false;
     ui.beginFrame({ 400.0f, 200.0f }, { 20.0f, 135.0f }, true, true);
     CHECK(sokoban::uiControls::checkbox(
-        ui, "check", { { 10.0f, 120.0f }, { 180.0f, 48.0f } },
+        ui, { { 10.0f, 120.0f }, { 180.0f, 48.0f } },
         "Enabled", checked));
     CHECK(checked);
 }

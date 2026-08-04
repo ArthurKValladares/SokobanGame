@@ -216,7 +216,7 @@ std::optional<TitleAction> TitleScreen::drawMain(
     std::optional<TitleAction> action;
     const bool hasSave = activeSlotHasSave();
     if (uiControls::button(
-            ui, "title.primary", tree.rect(primaryRow),
+            ui, tree.rect(primaryRow),
             hasSave ? "Continue" : "New Game", {
             .tone = ButtonTone::Accent,
             .focused = selectedRow_ == primaryRowIndex,
@@ -235,7 +235,7 @@ std::optional<TitleAction> TitleScreen::drawMain(
     }
     if (showSaveSlots &&
         uiControls::button(
-            ui, "title.save-slots", tree.rect(saveSlotsRow),
+            ui, tree.rect(saveSlotsRow),
             "Save Slot " + std::to_string(activeSlot_ + 1), {
             .focused = selectedRow_ == saveSlotsRowIndex,
             .activate = input.confirm && selectedRow_ == saveSlotsRowIndex,
@@ -243,7 +243,7 @@ std::optional<TitleAction> TitleScreen::drawMain(
         setPage(Page::SaveSlots);
     }
     if (uiControls::button(
-            ui, "title.options", tree.rect(optionsRow), "Options", {
+            ui, tree.rect(optionsRow), "Options", {
             .focused = selectedRow_ == optionsRowIndex,
             .activate = input.confirm && selectedRow_ == optionsRowIndex,
         })) {
@@ -251,7 +251,7 @@ std::optional<TitleAction> TitleScreen::drawMain(
     }
     ui.divider(tree.rect(quitDivider));
     if (uiControls::button(
-            ui, "title.quit", tree.rect(quitRow), "Quit", {
+            ui, tree.rect(quitRow), "Quit", {
             .tone = ButtonTone::Danger,
             .focused = selectedRow_ == quitRowIndex,
             .activate = input.confirm && selectedRow_ == quitRowIndex,
@@ -305,7 +305,7 @@ std::optional<TitleAction> TitleScreen::drawLevelSelect(
         }
 
         if (uiControls::button(
-                ui, "title.level-" + std::to_string(i), row, label, {
+                ui, row, label, {
                 .tone = level.completed ? ButtonTone::Normal : ButtonTone::Accent,
                 .focused = focused,
                 .activate = input.confirm && focused,
@@ -338,7 +338,7 @@ std::optional<TitleAction> TitleScreen::drawLevelSelect(
 
     const bool backFocused = selectedRow_ == backRowIndex;
     if (uiControls::button(
-            ui, "title.level-select.back", tree.rect(backRow), "Back", {
+            ui, tree.rect(backRow), "Back", {
             .focused = backFocused,
             .activate = input.confirm && backFocused,
         })) {
@@ -393,7 +393,6 @@ std::optional<TitleAction> TitleScreen::drawScreenSelect(
         const bool focused = selectedRow_ == screen;
         if (uiControls::button(
                 ui,
-                "title.screen-" + std::to_string(screen),
                 tree.rect(screenRows[static_cast<std::size_t>(screen)]),
                 "Screen " + std::to_string(screen + 1),
                 {
@@ -410,7 +409,7 @@ std::optional<TitleAction> TitleScreen::drawScreenSelect(
 
     const bool backFocused = selectedRow_ == backRowIndex;
     if (uiControls::button(
-            ui, "title.screen-select.back", tree.rect(backRow), "Back", {
+            ui, tree.rect(backRow), "Back", {
             .focused = backFocused,
             .activate = input.confirm && backFocused,
         })) {
@@ -483,7 +482,7 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
         }
 
         if (uiControls::button(
-                ui, "title.slot-" + std::to_string(i), slotRect,
+                ui, slotRect,
                 "Slot " + std::to_string(i + 1), {
                 .tone = active ? ButtonTone::Accent : ButtonTone::Normal,
                 .focused = slotFocused,
@@ -500,7 +499,7 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
         }
         if (deletable &&
             uiControls::button(
-                ui, "title.slot-delete-" + std::to_string(i),
+                ui,
                 {
                     { row.position.x + row.size.x - deleteWidth, row.position.y },
                     { deleteWidth, row.size.y },
@@ -554,7 +553,7 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
 
     const bool backFocused = selectedRow_ == backRowIndex;
     if (uiControls::button(
-            ui, "title.save-slots.back", tree.rect(backRow), "Back", {
+            ui, tree.rect(backRow), "Back", {
             .focused = backFocused,
             .activate = input.confirm && backFocused,
         })) {
@@ -598,7 +597,7 @@ std::optional<TitleAction> TitleScreen::drawSlotDeleteConfirmation(
     std::optional<TitleAction> action;
     const bool cancelFocused = selectedRow_ == cancelRowIndex;
     if (uiControls::button(
-            ui, "title.slot-delete.cancel", tree.rect(cancelRow), "Cancel", {
+            ui, tree.rect(cancelRow), "Cancel", {
             .focused = cancelFocused,
             .activate = input.confirm && cancelFocused,
         })) {
@@ -606,7 +605,7 @@ std::optional<TitleAction> TitleScreen::drawSlotDeleteConfirmation(
     }
     const bool confirmFocused = selectedRow_ == confirmRowIndex;
     if (uiControls::button(
-            ui, "title.slot-delete.confirm", tree.rect(confirmRow),
+            ui, tree.rect(confirmRow),
             "Delete Save", {
             .tone = ButtonTone::Danger,
             .focused = confirmFocused,

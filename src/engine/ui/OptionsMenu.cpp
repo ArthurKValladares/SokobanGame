@@ -941,7 +941,6 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
         case OptionsMenuRowKind::Button:
             if (uiControls::button(
                     ui,
-                    controlId,
                     layout.tree.rect(rowLayout.primary),
                     row.label,
                     {
@@ -955,7 +954,6 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             bool value = row.toggleValue;
             if (uiControls::checkbox(
                     ui,
-                    controlId,
                     layout.tree.rect(rowLayout.primary),
                     row.label,
                     value,
@@ -978,7 +976,6 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             int value = row.choiceValue;
             if (uiControls::segmentedControl(
                     ui,
-                    controlId,
                     layout.tree.rect(rowLayout.control),
                     choices,
                     value,
@@ -1002,7 +999,6 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             int value = row.choiceValue;
             if (uiControls::choiceStepper(
                     ui,
-                    controlId,
                     layout.tree.rect(rowLayout.control),
                     labels,
                     value,
@@ -1050,7 +1046,6 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             bool enabled = row.toggleValue;
             if (uiControls::checkbox(
                     ui,
-                    controlId + ".toggle",
                     layout.tree.rect(rowLayout.primary),
                     row.label,
                     enabled,
@@ -1115,7 +1110,6 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             const UiRect bindingRow = layout.tree.rect(rowLayout.primary);
             if (uiControls::button(
                     ui,
-                    controlId,
                     bindingRow,
                     "",
                     {
