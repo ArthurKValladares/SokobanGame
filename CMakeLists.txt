@@ -300,6 +300,7 @@ add_executable(sokoban
     src/engine/AnimationCatalogDebugUi.cpp
     src/engine/AnimationPreviewDebugUi.cpp
     src/engine/Application.cpp
+    src/engine/ApplicationTools.cpp
     src/engine/ApplicationDebugUi.cpp
     src/engine/AssetManifestDebugUi.cpp
     src/engine/DebugUi.cpp

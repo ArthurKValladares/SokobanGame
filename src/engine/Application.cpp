@@ -1,9 +1,9 @@
 #include "engine/Application.hpp"
+#include "engine/ApplicationTools.hpp"
 
 #include "engine/ParticleConfig.hpp"
 #include "engine/render/CameraConfig.hpp"
 
-#include "engine/AtomicFile.hpp"
 #include "engine/DebugUi.hpp"
 #include "engine/Log.hpp"
 #include "engine/RenderFrameBuilder.hpp"
@@ -71,6 +71,7 @@ Application::Application()
     , mirrorSwapParticleEffect_(
           makeMirrorSwapParticleEffect(assetManifest_))
     , settingsCoordinator_(playerProfile_, presentationSettings_)
+    , tools_(std::make_unique<ApplicationTools>())
 {
     // Leave a diagnostic trail next to the profiles so shipped builds can be
     // debugged from the save directory; Debug builds also emit debug traces.
@@ -93,27 +94,17 @@ Application::Application()
         levelAssetRequirements(campaign_.currentLevel()));
 
 #if SOKOBAN_ENABLE_DEBUG_UI
-    levelEditor_.initialize(
+    tools_->initialize(
         SOKOBAN_SOURCE_LEVEL_DIR,
-        assetRoot_ / "levels",
+        SOKOBAN_SOURCE_ASSET_DIR,
+        assetRoot_,
         campaign_.currentLevel(),
-        campaign_.currentScreen());
-    levelEditorDebugUi_.initialize(levelEditor_);
-    animationPreviewDebugUi_.initialize(SOKOBAN_SOURCE_ASSET_DIR);
-    if (animationCatalogEditor_.initialize(
-            std::filesystem::path(SOKOBAN_SOURCE_ASSET_DIR) /
-                "animation_catalog.json",
-            assetRoot_ / "animation_catalog.json",
-            assetManifest_)) {
-        animationCatalog_ = animationCatalogEditor_.catalog();
-    }
-    assetManifestEditor_.initialize(
-        std::filesystem::path(SOKOBAN_SOURCE_ASSET_DIR) / "manifest.json");
-    (void)decorationMeshCatalog_.refresh(
-        SOKOBAN_SOURCE_ASSET_DIR, assetManifest_);
+        campaign_.currentScreen(),
+        assetManifest_,
+        animationCatalog_);
 
     DebugUi::addTab("Engine", [this] {
-        const ApplicationDebugUi::Result result = applicationDebugUi_.draw({
+        const ApplicationDebugUi::Result result = tools_->applicationDebugUi.draw({
             .currentLevel = campaign_.currentLevel(),
             .currentScreen = campaign_.currentScreen(),
             .level = level_,
@@ -136,23 +127,35 @@ Application::Application()
         }
     });
     DebugUi::addTab("Asset Manifest", [this] {
-        assetManifestDebugUi_.draw(assetManifestEditor_);
+        tools_->assetManifestDebugUi.draw(tools_->assetManifestEditor);
     });
     DebugUi::addTab("Level Editor", [this] {
-        levelEditorDebugUi_.draw(levelEditor_, splatPainter_, {
+        tools_->levelEditorDebugUi.draw(tools_->levelEditor, tools_->splatPainter, {
             .playDraft = [this](Level level) {
                 // Playing a draft leaves the document view; a half-finished
                 // paint session would otherwise keep painting on the level
                 // being played.
-                splatPainter_.close();
+                tools_->splatPainter.close();
                 (void)applyLevel(std::move(level));
             },
             .returnToCurrentScreen = [this] {
-                splatPainter_.close();
+                tools_->splatPainter.close();
                 loadCurrentScreen();
             },
-            .openGroundPainting = [this] { return openGroundPainting(); },
-            .createGroundSplatMap = [this] { return createGroundSplatMap(); },
+            .openGroundPainting = [this] {
+                return tools_->openGroundPainting(
+                    SOKOBAN_SOURCE_ASSET_DIR,
+                    assetRoot_,
+                    assetManifest_,
+                    renderer_);
+            },
+            .createGroundSplatMap = [this] {
+                return tools_->createGroundSplatMap(
+                    SOKOBAN_SOURCE_ASSET_DIR,
+                    assetRoot_,
+                    assetManifest_,
+                    renderer_);
+            },
             .tileThumbnail = [this](TileType tile) {
                 // VkDescriptorSet is what ImGui's Vulkan backend uses as a
                 // texture id; null means "no thumbnail, draw the swatch".
@@ -164,33 +167,38 @@ Application::Application()
                 // debug UI's ImGui frame, and the bake begins ImGui and UI
                 // frames of its own. Nesting them would trip ImGui's
                 // frame-scope assertion.
-                bakeThumbnailsRequested_ = true;
+                tools_->bakeThumbnailsRequested = true;
                 return true;
             },
             .decorationMeshes = [this]()
                 -> const std::vector<DecorationMeshCatalog::Entry>& {
-                return decorationMeshCatalog_.entries();
+                return tools_->decorationMeshCatalog.entries();
             },
             .decorationMeshStatus = [this]() -> const std::string& {
-                return decorationMeshCatalog_.status();
+                return tools_->decorationMeshCatalog.status();
             },
             .refreshDecorationMeshes = [this] {
-                (void)decorationMeshCatalog_.refresh(
+                (void)tools_->decorationMeshCatalog.refresh(
                     SOKOBAN_SOURCE_ASSET_DIR, assetManifest_);
             },
             .registerDecorationMesh = [this](
                 const std::filesystem::path& relativePath) {
-                return registerDecorationMesh(relativePath);
+                return tools_->registerDecorationMesh(
+                    SOKOBAN_SOURCE_ASSET_DIR,
+                    assetRoot_,
+                    relativePath,
+                    assetManifest_,
+                    renderer_);
             },
         });
     });
     DebugUi::addTab("Animation", [this] {
-        if (animationCatalogDebugUi_.draw(
-                animationCatalogEditor_,
+        if (tools_->animationCatalogDebugUi.draw(
+                tools_->animationCatalogEditor,
                 assetManifest_,
-                animationPreviewDebugUi_,
+                tools_->animationPreviewDebugUi,
                 renderer_)) {
-            animationCatalog_ = animationCatalogEditor_.catalog();
+            animationCatalog_ = tools_->animationCatalogEditor.catalog();
         }
     });
 #endif
@@ -211,7 +219,7 @@ Application::~Application()
     // saves quietly became rare exactly when there was most to lose. The one
     // cost is undo granularity: a slide whose push had already committed
     // reappears as its own undo entry rather than folded into that push.
-    if (campaign_.gameLoaded() && !levelEditor_.playingDraft()) {
+    if (campaign_.gameLoaded() && !tools_->levelEditor.playingDraft()) {
         checkpointCurrentScreen(false);
     } else if (!playerProfile_.progressEmpty()) {
         persistProfile(true);
@@ -339,8 +347,8 @@ void Application::run()
     while (running_) {
 #if SOKOBAN_ENABLE_DEBUG_UI
         // Serviced here, between frames, where no ImGui or UI frame is open.
-        if (bakeThumbnailsRequested_) {
-            bakeThumbnailsRequested_ = false;
+        if (tools_->bakeThumbnailsRequested) {
+            tools_->bakeThumbnailsRequested = false;
             (void)bakeTileThumbnails();
             // The bake drives its own frames. Do not use an older gameplay
             // frame for editor picking or gizmo projection afterward.
@@ -363,7 +371,7 @@ void Application::run()
                 .mouseCaptured = renderer_.wantsMouseCapture(),
             };
 #if SOKOBAN_ENABLE_DEBUG_UI
-            eventContext.editorEditing = levelEditor_.editingDocument();
+            eventContext.editorEditing = tools_->levelEditor.editingDocument();
 #endif
             const InputRouter::EventResult routedEvent =
                 inputRouter_.routeEvent(event, input_, eventContext);
@@ -382,10 +390,10 @@ void Application::run()
 
         switch (inputRouter_.backAction(input_, inputRoutingContext())) {
         case InputRouter::BackAction::CloseDraftConfirmation:
-            draftExitConfirmationOpen_ = false;
+            tools_->draftExitConfirmationOpen = false;
             break;
         case InputRouter::BackAction::OpenDraftConfirmation:
-            draftExitConfirmationOpen_ = true;
+            tools_->draftExitConfirmationOpen = true;
             break;
         case InputRouter::BackAction::ShellBack:
             handleShellEvent(ShellBackPressed {});
@@ -457,7 +465,7 @@ void Application::run()
                 handleShellEvent(ShellOptionsAction { *optionsAction });
             }
         }
-        animationPreviewDebugUi_.update(dt, renderer_);
+        tools_->animationPreviewDebugUi.update(dt, renderer_);
         ui_.endFrame();
         preparedRenderFrame_ = renderer_.prepareFrame(
             buildRenderFrame(routedInput.editor));
@@ -489,11 +497,11 @@ void Application::update(
     }
 
 #if SOKOBAN_ENABLE_DEBUG_UI
-    if (draftExitConfirmationOpen_) {
+    if (tools_->draftExitConfirmationOpen) {
         audioSystem_.update(dt, false, false);
         return;
     }
-    if (levelEditor_.editingDocument()) {
+    if (tools_->levelEditor.editingDocument()) {
         audioSystem_.update(dt, false, false);
         updateEditorPainting(input.editor, previousRenderFrame);
         return;
@@ -508,7 +516,7 @@ void Application::update(
         presentation_,
         input.gameplay,
         dt,
-        levelEditor_.playingDraft());
+        tools_->levelEditor.playingDraft());
     if (gameplayResult.mirrorActivated) {
         audioSystem_.playOneShot("mirror-swap");
         for (GridPosition3 destination :
@@ -524,7 +532,7 @@ void Application::update(
         }
     }
     if (gameplayResult.draftSolved) {
-        levelEditor_.markDraftSolved();
+        tools_->levelEditor.markDraftSolved();
     }
     if (gameplayResult.screenSolved) {
         advanceScreen();
@@ -535,7 +543,7 @@ void Application::update(
     if (campaign_.updateDeferredCheckpoint(
             dt,
             gameplaySession_.moving(),
-            levelEditor_.playingDraft())) {
+            tools_->levelEditor.playingDraft())) {
         checkpointCurrentScreen(true);
     }
 
@@ -553,12 +561,12 @@ void Application::update(
 void Application::drawBrushPreview()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    if (!splatPainter_.active() || !editorBrushPoint_ ||
+    if (!tools_->splatPainter.active() || !tools_->brushPoint ||
         !preparedRenderFrame_) {
         return;
     }
 
-    const SplatCanvas::Brush& brush = splatPainter_.brush();
+    const SplatCanvas::Brush& brush = tools_->splatPainter.brush();
     if (brush.radiusTiles <= 0.0f) {
         return;
     }
@@ -571,7 +579,7 @@ void Application::drawBrushPreview()
     // Every vertex is a world point projected individually, so the disc sits
     // on the board in perspective instead of being a flat screen-space circle.
     // It projects through the previous frame's camera, the same one that
-    // produced editorBrushPoint_ in updateEditorPainting; the frame being
+    // produced tools_->brushPoint in updateEditorPainting; the frame being
     // built now would put the preview somewhere the pointer was never tested
     // against.
     constexpr int segments = 48;
@@ -582,13 +590,13 @@ void Application::drawBrushPreview()
             (2.0f * std::numbers::pi_v<float>) /
             static_cast<float>(segments);
         const Vec3 world {
-            editorBrushPoint_->x + std::cos(angle) * radiusTiles,
-            editorBrushPoint_->y + std::sin(angle) * radiusTiles,
+            tools_->brushPoint->x + std::cos(angle) * radiusTiles,
+            tools_->brushPoint->y + std::sin(angle) * radiusTiles,
             // The height the pick actually landed on. Ground is not always at
             // z=0 - editor previews are nudged up and raised blocks are a
             // whole unit higher - and assuming one puts the preview below the
             // paint, by more the further it is from the camera.
-            editorBrushPoint_->z,
+            tools_->brushPoint->z,
         };
         const std::optional<Vec2> pixel =
             renderer_.projectToPixels(*preparedRenderFrame_, world);
@@ -674,114 +682,14 @@ void Application::drawBrushPreview()
 #endif
 }
 
-std::optional<DecorationGizmo::Geometry>
-Application::decorationGizmoGeometry(
-    const VulkanRenderer::PreparedFrame& frame) const
-{
-#if SOKOBAN_ENABLE_DEBUG_UI
-    const Level::Decoration* decoration = levelEditor_.selectedDecoration();
-    if (!decoration || levelEditor_.tool() != LevelEditor::Tool::Decorations) {
-        return std::nullopt;
-    }
-    const std::optional<Vec2> projectedOrigin =
-        renderer_.projectToPixels(frame, decoration->position);
-    if (!projectedOrigin) {
-        return std::nullopt;
-    }
-
-    constexpr float targetAxisLengthPixels = 92.0f;
-    constexpr float ringRadiusScale = 0.72f;
-    const std::array<Vec3, 3> axes {
-        Vec3 { 1.0f, 0.0f, 0.0f },
-        Vec3 { 0.0f, 1.0f, 0.0f },
-        Vec3 { 0.0f, 0.0f, 1.0f },
-    };
-    auto addScaled = [](Vec3 origin, Vec3 axis, float amount) {
-        return Vec3 {
-            origin.x + axis.x * amount,
-            origin.y + axis.y * amount,
-            origin.z + axis.z * amount,
-        };
-    };
-    auto pixelDistance = [](Vec2 left, Vec2 right) {
-        const float x = left.x - right.x;
-        const float y = left.y - right.y;
-        return std::sqrt(x * x + y * y);
-    };
-
-    DecorationGizmo::Geometry geometry;
-    geometry.origin = *projectedOrigin;
-    std::array<float, 3> worldLengths {};
-    for (std::size_t axis = 0; axis < axes.size(); ++axis) {
-        const std::optional<Vec2> projectedUnit = renderer_.projectToPixels(
-            frame, addScaled(decoration->position, axes[axis], 1.0f));
-        if (!projectedUnit) {
-            return std::nullopt;
-        }
-        const float unitPixels = std::max(
-            pixelDistance(*projectedUnit, *projectedOrigin), 1.0f);
-        worldLengths[axis] = std::clamp(
-            targetAxisLengthPixels / unitPixels, 0.05f, 100.0f);
-        const std::optional<Vec2> endpoint = renderer_.projectToPixels(
-            frame,
-            addScaled(
-                decoration->position, axes[axis], worldLengths[axis]));
-        if (!endpoint) {
-            return std::nullopt;
-        }
-        geometry.axes[axis] = {
-            .start = *projectedOrigin,
-            .end = *endpoint,
-            .worldLength = worldLengths[axis],
-        };
-    }
-
-    constexpr int ringSegments = 64;
-    const std::array<std::array<std::size_t, 2>, 3> ringAxes {
-        std::array<std::size_t, 2> { 1, 2 },
-        std::array<std::size_t, 2> { 0, 2 },
-        std::array<std::size_t, 2> { 0, 1 },
-    };
-    for (std::size_t ring = 0; ring < geometry.rings.size(); ++ring) {
-        std::vector<Vec2>& points = geometry.rings[ring];
-        points.reserve(ringSegments + 1);
-        for (int segment = 0; segment <= ringSegments; ++segment) {
-            const float angle = static_cast<float>(segment) *
-                2.0f * std::numbers::pi_v<float> /
-                static_cast<float>(ringSegments);
-            const std::size_t first = ringAxes[ring][0];
-            const std::size_t second = ringAxes[ring][1];
-            Vec3 world = addScaled(
-                decoration->position,
-                axes[first],
-                std::cos(angle) * worldLengths[first] * ringRadiusScale);
-            world = addScaled(
-                world,
-                axes[second],
-                std::sin(angle) * worldLengths[second] * ringRadiusScale);
-            const std::optional<Vec2> pixel =
-                renderer_.projectToPixels(frame, world);
-            if (!pixel) {
-                return std::nullopt;
-            }
-            points.push_back(*pixel);
-        }
-    }
-    return geometry;
-#else
-    (void)frame;
-    return std::nullopt;
-#endif
-}
-
 void Application::drawDecorationGizmo()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    if (!preparedRenderFrame_ || !levelEditor_.editingDocument()) {
+    if (!preparedRenderFrame_ || !tools_->levelEditor.editingDocument()) {
         return;
     }
     const std::optional<DecorationGizmo::Geometry> geometry =
-        decorationGizmoGeometry(*preparedRenderFrame_);
+        tools_->decorationGizmoGeometry(renderer_, *preparedRenderFrame_);
     if (!geometry) {
         return;
     }
@@ -796,9 +704,9 @@ void Application::drawDecorationGizmo()
     const std::optional<DecorationGizmo::Axis> hovered =
         renderer_.wantsMouseCapture()
         ? std::nullopt
-        : decorationGizmo_.hoveredAxis(*geometry, pointerPixels);
+        : tools_->decorationGizmo.hoveredAxis(*geometry, pointerPixels);
     const std::optional<DecorationGizmo::Axis> active =
-        decorationGizmo_.activeAxis();
+        tools_->decorationGizmo.activeAxis();
     constexpr std::array<ImU32, 3> axisColors {
         IM_COL32(235, 75, 72, 255),
         IM_COL32(80, 210, 105, 255),
@@ -814,7 +722,7 @@ void Application::drawDecorationGizmo()
             : axisColors[axis];
     };
 
-    if (decorationGizmo_.mode() == DecorationGizmo::Mode::Rotate) {
+    if (tools_->decorationGizmo.mode() == DecorationGizmo::Mode::Rotate) {
         for (std::size_t axis = 0; axis < geometry->rings.size(); ++axis) {
             const std::vector<Vec2>& ring = geometry->rings[axis];
             for (std::size_t index = 1; index < ring.size(); ++index) {
@@ -845,7 +753,7 @@ void Application::drawDecorationGizmo()
             IM_COL32(20, 24, 30, 220), 6.5f);
         drawList->AddLine(
             point(handle.start), point(handle.end), color, 3.5f);
-        if (decorationGizmo_.mode() == DecorationGizmo::Mode::Translate) {
+        if (tools_->decorationGizmo.mode() == DecorationGizmo::Mode::Translate) {
             const Vec2 base {
                 handle.end.x - direction.x * 13.0f,
                 handle.end.y - direction.y * 13.0f,
@@ -872,7 +780,7 @@ void Application::drawDraftExitConfirmation()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     constexpr const char* popupName = "Stop Testing Draft?";
-    if (draftExitConfirmationOpen_) {
+    if (tools_->draftExitConfirmationOpen) {
         ImGui::OpenPopup(popupName);
     }
 
@@ -886,21 +794,21 @@ void Application::drawDraftExitConfirmation()
 
     if (ImGui::BeginPopupModal(
             popupName,
-            &draftExitConfirmationOpen_,
+            &tools_->draftExitConfirmationOpen,
             ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextUnformatted(
             "Stop testing this draft and return to the editor?");
         ImGui::Separator();
 
         if (ImGui::Button("Stop Testing", ImVec2(120.0f, 0.0f))) {
-            levelEditor_.setEditingDocument(true);
-            editorHoverCell_.reset();
-            draftExitConfirmationOpen_ = false;
+            tools_->levelEditor.setEditingDocument(true);
+            tools_->hoverCell.reset();
+            tools_->draftExitConfirmationOpen = false;
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2(90.0f, 0.0f))) {
-            draftExitConfirmationOpen_ = false;
+            tools_->draftExitConfirmationOpen = false;
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
@@ -915,30 +823,30 @@ void Application::updateEditorPainting(
     (void)input;
     (void)previousRenderFrame;
 #if SOKOBAN_ENABLE_DEBUG_UI
-    editorHoverCell_.reset();
-    editorHoverDecoration_.reset();
-    editorBrushPoint_.reset();
+    tools_->hoverCell.reset();
+    tools_->hoverDecoration.reset();
+    tools_->brushPoint.reset();
     if (input.undoPressed) {
-        if (decorationGizmo_.dragging()) {
-            decorationGizmo_.endDrag();
-            (void)levelEditor_.endSelectedDecorationTransform(false);
+        if (tools_->decorationGizmo.dragging()) {
+            tools_->decorationGizmo.endDrag();
+            (void)tools_->levelEditor.endSelectedDecorationTransform(false);
         }
         // While painting, Ctrl+Z belongs to the brush: tile edits and paint
         // strokes are separate histories, and the visible one should win.
-        const bool undone = splatPainter_.active()
-            ? splatPainter_.undo()
-            : levelEditor_.tryUndoEdit();
+        const bool undone = tools_->splatPainter.active()
+            ? tools_->splatPainter.undo()
+            : tools_->levelEditor.tryUndoEdit();
         (void)undone;
-        pushPaintedSplatMap();
+        tools_->pushPaintedSplatMap(renderer_);
         return;
     }
     if (input.pointerCaptured) {
         // The pointer is over an ImGui window. Release any stroke in progress
         // so dragging onto a panel does not keep painting underneath it.
-        splatPainter_.endStroke();
-        if (decorationGizmo_.dragging() && !input.primaryDown) {
-            decorationGizmo_.endDrag();
-            (void)levelEditor_.endSelectedDecorationTransform();
+        tools_->splatPainter.endStroke();
+        if (tools_->decorationGizmo.dragging() && !input.primaryDown) {
+            tools_->decorationGizmo.endDrag();
+            (void)tools_->levelEditor.endSelectedDecorationTransform();
         }
         return;
     }
@@ -946,8 +854,8 @@ void Application::updateEditorPainting(
         return;
     }
 
-    const uint32_t documentWidth = levelEditor_.documentWidth();
-    const uint32_t documentHeight = levelEditor_.documentHeight();
+    const uint32_t documentWidth = tools_->levelEditor.documentWidth();
+    const uint32_t documentHeight = tools_->levelEditor.documentHeight();
     if (documentWidth == 0 || documentHeight == 0) {
         return;
     }
@@ -973,13 +881,13 @@ void Application::updateEditorPainting(
     if (updateGroundPainting(input, previousRenderFrame, mousePixels)) {
         return;
     }
-    if (levelEditor_.tool() == LevelEditor::Tool::Decorations) {
+    if (tools_->levelEditor.tool() == LevelEditor::Tool::Decorations) {
         if (input.translateGizmoPressed) {
-            decorationGizmo_.setMode(DecorationGizmo::Mode::Translate);
+            tools_->decorationGizmo.setMode(DecorationGizmo::Mode::Translate);
         } else if (input.rotateGizmoPressed) {
-            decorationGizmo_.setMode(DecorationGizmo::Mode::Rotate);
+            tools_->decorationGizmo.setMode(DecorationGizmo::Mode::Rotate);
         } else if (input.scaleGizmoPressed) {
-            decorationGizmo_.setMode(DecorationGizmo::Mode::Scale);
+            tools_->decorationGizmo.setMode(DecorationGizmo::Mode::Scale);
         }
         if (updateDecorationEditing(
                 input, *previousRenderFrame, mousePixels)) {
@@ -991,26 +899,26 @@ void Application::updateEditorPainting(
                 *previousRenderFrame, mousePixels)) {
         GridPosition3 target = *clicked;
         const bool editingDecorations =
-            levelEditor_.tool() == LevelEditor::Tool::Decorations;
+            tools_->levelEditor.tool() == LevelEditor::Tool::Decorations;
         const bool deleting = input.deleting && !editingDecorations;
-        target = levelEditor_.resolveEditTarget(
+        target = tools_->levelEditor.resolveEditTarget(
             target,
             deleting,
             input.replaceLayer && !editingDecorations);
 
-        editorHoverCell_ = target;
+        tools_->hoverCell = target;
         if (input.primaryPressed) {
             if (editingDecorations) {
-                (void)levelEditor_.placeDecoration(target);
+                (void)tools_->levelEditor.placeDecoration(target);
             } else if (deleting) {
-                levelEditor_.eraseCell(target);
+                tools_->levelEditor.eraseCell(target);
             } else {
-                levelEditor_.paintCell(target);
+                tools_->levelEditor.paintCell(target);
             }
         }
-    } else if (levelEditor_.tool() == LevelEditor::Tool::Decorations &&
+    } else if (tools_->levelEditor.tool() == LevelEditor::Tool::Decorations &&
                input.primaryPressed) {
-        levelEditor_.clearDecorationSelection();
+        tools_->levelEditor.clearDecorationSelection();
     }
 #endif
 }
@@ -1021,18 +929,18 @@ bool Application::updateDecorationEditing(
     Vec2 pointerPixels)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    editorHoverDecoration_ = renderer_.pickDecoration(
+    tools_->hoverDecoration = renderer_.pickDecoration(
         previousRenderFrame, pointerPixels);
 
-    if (decorationGizmo_.dragging()) {
+    if (tools_->decorationGizmo.dragging()) {
         if (!input.primaryDown) {
-            decorationGizmo_.endDrag();
-            (void)levelEditor_.endSelectedDecorationTransform();
+            tools_->decorationGizmo.endDrag();
+            (void)tools_->levelEditor.endSelectedDecorationTransform();
             return true;
         }
         if (const std::optional<Level::Decoration> transformed =
-                decorationGizmo_.updateDrag(pointerPixels)) {
-            (void)levelEditor_.previewSelectedDecorationTransform(*transformed);
+                tools_->decorationGizmo.updateDrag(pointerPixels)) {
+            (void)tools_->levelEditor.previewSelectedDecorationTransform(*transformed);
         }
         return true;
     }
@@ -1041,18 +949,18 @@ bool Application::updateDecorationEditing(
         return false;
     }
     if (const std::optional<DecorationGizmo::Geometry> geometry =
-            decorationGizmoGeometry(previousRenderFrame)) {
-        const Level::Decoration* selected = levelEditor_.selectedDecoration();
-        if (selected && decorationGizmo_.beginDrag(
+            tools_->decorationGizmoGeometry(renderer_, previousRenderFrame)) {
+        const Level::Decoration* selected = tools_->levelEditor.selectedDecoration();
+        if (selected && tools_->decorationGizmo.beginDrag(
                 *geometry, pointerPixels, *selected)) {
-            if (!levelEditor_.beginSelectedDecorationTransform()) {
-                decorationGizmo_.endDrag();
+            if (!tools_->levelEditor.beginSelectedDecorationTransform()) {
+                tools_->decorationGizmo.endDrag();
             }
             return true;
         }
     }
-    if (editorHoverDecoration_) {
-        (void)levelEditor_.selectDecoration(*editorHoverDecoration_);
+    if (tools_->hoverDecoration) {
+        (void)tools_->levelEditor.selectDecoration(*tools_->hoverDecoration);
         return true;
     }
     return false;
@@ -1070,36 +978,36 @@ bool Application::updateGroundPainting(
     Vec2 pointerPixels)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    if (!splatPainter_.active()) {
+    if (!tools_->splatPainter.active()) {
         return false;
     }
     // The file browser can load a different document while a session is open.
     // Painting on would edit one screen's map while looking at another's
     // board, so the session ends with the document it belongs to.
-    if (levelLocationFromScreenPath(levelEditor_.loadedDocumentPath()) !=
-        splatPainter_.location()) {
-        splatPainter_.close();
+    if (levelLocationFromScreenPath(tools_->levelEditor.loadedDocumentPath()) !=
+        tools_->splatPainter.location()) {
+        tools_->splatPainter.close();
         return false;
     }
     // The board can also be resized underneath an open session; the map has
     // to follow or it would cover the wrong extent.
-    if (splatPainter_.followBoardResize(
-            levelEditor_.documentWidth(), levelEditor_.documentHeight())) {
-        pushPaintedSplatMap();
+    if (tools_->splatPainter.followBoardResize(
+            tools_->levelEditor.documentWidth(), tools_->levelEditor.documentHeight())) {
+        tools_->pushPaintedSplatMap(renderer_);
     }
 
     // Sub-tile precision: a brush lands where the pointer is, not at a cell
     // centre, so this is a different query from tile picking.
     const std::optional<Vec3> groundPoint =
         renderer_.pickIsoGroundPoint(*previousRenderFrame, pointerPixels);
-    editorBrushPoint_ = groundPoint;
+    tools_->brushPoint = groundPoint;
 
     // primaryDown, not primaryPressed: the latter is only true on the frame
     // the button goes down, which would end every stroke one frame after it
     // began and make dragging impossible.
     if (!input.primaryDown) {
-        splatPainter_.endStroke();
-        pushPaintedSplatMap();
+        tools_->splatPainter.endStroke();
+        tools_->pushPaintedSplatMap(renderer_);
         return true;
     }
     if (!groundPoint) {
@@ -1111,210 +1019,18 @@ bool Application::updateGroundPainting(
     // Painting is flat: only the tile position matters, not the height it was
     // picked at.
     const Vec2 brushTile { groundPoint->x, groundPoint->y };
-    if (splatPainter_.strokeInProgress()) {
-        (void)splatPainter_.paintTo(brushTile);
+    if (tools_->splatPainter.strokeInProgress()) {
+        (void)tools_->splatPainter.paintTo(brushTile);
     } else {
-        (void)splatPainter_.beginStroke(brushTile);
+        (void)tools_->splatPainter.beginStroke(brushTile);
     }
-    pushPaintedSplatMap();
+    tools_->pushPaintedSplatMap(renderer_);
     return true;
 #else
     (void)input;
     (void)previousRenderFrame;
     (void)pointerPixels;
     return false;
-#endif
-}
-
-bool Application::openGroundPainting()
-{
-#if SOKOBAN_ENABLE_DEBUG_UI
-    // Editor pointer input is only routed, and updateEditorPainting only
-    // runs, while the editor is showing its document (see
-    // InputRouter::RoutingContext::editorEditing). Opening a paint session
-    // from the "current screen" view would otherwise appear to do nothing at
-    // all: no preview, no strokes, no error. Painting edits the document's
-    // screen, so switching to that view is also what the user means.
-    levelEditor_.setEditingDocument(true);
-
-    const bool opened = splatPainter_.open(
-        {
-            .documentPath = levelEditor_.loadedDocumentPath(),
-            .boardTilesWide = levelEditor_.documentWidth(),
-            .boardTilesHigh = levelEditor_.documentHeight(),
-            .sourceAssetRoot = SOKOBAN_SOURCE_ASSET_DIR,
-            // Mirrored into the staged tree so a painted map survives a
-            // restart without re-running the content pipeline.
-            .runtimeAssetRoot = assetRoot_,
-        },
-        assetManifest_);
-    if (opened) {
-        // The map may not be resident: the editor previews documents that are
-        // not the screen being played, and only played screens are preloaded.
-        RenderAssetRequirements requirements;
-        requirements.requireTexture(splatPainter_.texture());
-        renderer_.ensureAssets(requirements);
-        uploadedSplatRevision_ = splatPainter_.revision();
-    }
-    // On failure the editor deliberately stays on its document. Dropping back
-    // to the current-screen view would yank the user out of the editor
-    // entirely, which reads as "the button teleported me somewhere" rather
-    // than "that screen has no map"; the reason is in the painter's status.
-    return opened;
-#else
-    return false;
-#endif
-}
-
-bool Application::createGroundSplatMap()
-{
-#if SOKOBAN_ENABLE_DEBUG_UI
-    const std::optional<LevelLocation> location =
-        levelLocationFromScreenPath(levelEditor_.loadedDocumentPath());
-    if (!location) {
-        log::warning(log::Category::Assets)
-            << "Ground painting needs a saved screen; save the document as "
-               "levels/level<N>/screen<M>.scr first.";
-        return false;
-    }
-
-    // 1. The file, in both trees. Refuses to overwrite, so this is safe to
-    //    press on a screen that already has a map.
-    const CreatedSplatMap created = createBlankSplatMap(
-        *location,
-        levelEditor_.documentWidth(),
-        levelEditor_.documentHeight(),
-        SOKOBAN_SOURCE_ASSET_DIR,
-        assetRoot_);
-    log::info(log::Category::Assets) << created.message;
-    if (!created.created) {
-        return false;
-    }
-
-    // 2. The live manifest, so the map resolves to an id this session.
-    const std::string textureName =
-        groundSplatMapTextureNameForScreen(*location);
-    if (assetManifest_.findTextureIdByName(textureName).isNone()) {
-        const RenderTexture added = assetManifest_.addTexture({
-            .name = textureName,
-            .path = created.relativePath,
-            // Weight data covering the board once: clamped, smooth, and not
-            // sRGB. Must match what the generator's manifest entries use.
-            .tiling = false,
-            .filter = TextureFilter::Linear,
-            .colorSpace = TextureColorSpace::Linear,
-        });
-        if (added.isNone()) {
-            log::error(log::Category::Assets)
-                << "Could not register " << textureName
-                << "; the texture descriptor array is full (max "
-                << maxModelTextures << ").";
-            return false;
-        }
-        // Per-texture GPU state is sized from the manifest, so it has to grow
-        // with it before anything requires the new id.
-        renderer_.syncManifestTextures();
-
-        // 3. Persist, or the entry is gone on restart. The editor writes the
-        //    source manifest; the staged copy is what this build loads.
-        persistManifestTexture(textureName, created.relativePath);
-    }
-
-    return openGroundPainting();
-#else
-    return false;
-#endif
-}
-
-void Application::persistManifestTexture(
-    const std::string& name, const std::string& relativePath)
-{
-#if SOKOBAN_ENABLE_DEBUG_UI
-    const AssetManifest::Texture entry {
-        .name = name,
-        .path = relativePath,
-        .tiling = false,
-        .filter = TextureFilter::Linear,
-        .colorSpace = TextureColorSpace::Linear,
-    };
-
-    // Going through the manifest editor keeps the Asset Manifest tab showing
-    // the same list, rather than a stale one that would clobber this entry on
-    // its next save.
-    assetManifestEditor_.addTexture();
-    assetManifestEditor_.updateTexture(
-        assetManifestEditor_.textures().size() - 1, entry);
-    if (!assetManifestEditor_.save()) {
-        log::error(log::Category::Assets)
-            << "Could not write " << name << " to the source manifest: "
-            << assetManifestEditor_.status();
-        return;
-    }
-
-    // The staged manifest is what this build actually loaded, so without this
-    // the entry would vanish on restart until the content pipeline reran.
-    try {
-        atomicFile::write(
-            assetRoot_ / "manifest.json", assetManifestEditor_.serialize());
-    } catch (const std::exception& error) {
-        log::warning(log::Category::Assets)
-            << "Saved " << name << " to the source manifest but could not "
-            << "update the staged copy: " << error.what();
-    }
-#else
-    (void)name;
-    (void)relativePath;
-#endif
-}
-
-std::optional<std::string> Application::registerDecorationMesh(
-    const std::filesystem::path& relativePath)
-{
-#if SOKOBAN_ENABLE_DEBUG_UI
-    const DecorationAssetRegistry::Result result =
-        DecorationAssetRegistry::registerMesh({
-            .sourceAssetRoot = SOKOBAN_SOURCE_ASSET_DIR,
-            .runtimeAssetRoot = assetRoot_,
-            .relativeMeshPath = relativePath,
-            .runtimeManifest = assetManifest_,
-            .manifestEditor = assetManifestEditor_,
-        });
-    if (!result.succeeded) {
-        log::error(log::Category::Assets) << result.status;
-        return std::nullopt;
-    }
-
-    // Registration may discover and append a glTF base-colour texture before
-    // appending the model that references it.
-    renderer_.syncManifestTextures();
-    renderer_.syncManifestModels();
-    (void)decorationMeshCatalog_.refresh(
-        SOKOBAN_SOURCE_ASSET_DIR, assetManifest_);
-    log::info(log::Category::Assets) << result.status;
-    return result.modelName;
-#else
-    (void)relativePath;
-    return std::nullopt;
-#endif
-}
-
-void Application::pushPaintedSplatMap()
-{
-#if SOKOBAN_ENABLE_DEBUG_UI
-    // At most one upload per frame, and none while nothing changed: a stroke
-    // that paints white on white must not stall the device.
-    if (!splatPainter_.active() ||
-        splatPainter_.revision() == uploadedSplatRevision_) {
-        return;
-    }
-    uploadedSplatRevision_ = splatPainter_.revision();
-    try {
-        (void)renderer_.updateTexture(
-            splatPainter_.texture(), splatPainter_.canvas().toImage());
-    } catch (const std::exception& error) {
-        log::error(log::Category::Assets)
-            << "Could not upload the painted splat map: " << error.what();
-    }
 #endif
 }
 
@@ -1340,9 +1056,9 @@ void Application::loadCurrentScreen()
     checkpointCurrentScreen(true);
     audioSystem_.playMusicForLevel(campaign_.currentLevel());
     preloadUpcomingAssets();
-    levelEditor_.setPlayingDraft(false);
-    levelEditor_.setEditingDocument(false);
-    editorHoverCell_.reset();
+    tools_->levelEditor.setPlayingDraft(false);
+    tools_->levelEditor.setEditingDocument(false);
+    tools_->hoverCell.reset();
 
     log::debug(log::Category::Gameplay)
         << "player started level " << campaign_.currentLevel()
@@ -1383,7 +1099,7 @@ void Application::advanceScreen()
 
 void Application::solveCurrentScreenForDebug()
 {
-    if (!campaign_.gameLoaded() || levelEditor_.playingDraft() ||
+    if (!campaign_.gameLoaded() || tools_->levelEditor.playingDraft() ||
         levelCompleteOverlay_.isOpen()) {
         return;
     }
@@ -1476,7 +1192,7 @@ void Application::switchSaveSlot(int slot)
 
     // Settle the outgoing slot on disk first. Not gated on the world being
     // idle - see the destructor for why that gate was wrong under concurrency.
-    if (campaign_.gameLoaded() && !levelEditor_.playingDraft()) {
+    if (campaign_.gameLoaded() && !tools_->levelEditor.playingDraft()) {
         checkpointCurrentScreen(true);
     } else {
         persistProfile(true);
@@ -1709,9 +1425,9 @@ InputRouter::RoutingContext Application::inputRoutingContext() const
         .mouseCaptured = renderer_.wantsMouseCapture(),
     };
 #if SOKOBAN_ENABLE_DEBUG_UI
-    context.editorEditing = levelEditor_.editingDocument();
-    context.draftPlaying = levelEditor_.playingDraft();
-    context.draftExitConfirmationOpen = draftExitConfirmationOpen_;
+    context.editorEditing = tools_->levelEditor.editingDocument();
+    context.draftPlaying = tools_->levelEditor.playingDraft();
+    context.draftExitConfirmationOpen = tools_->draftExitConfirmationOpen;
 #endif
     return context;
 }
@@ -1802,25 +1518,25 @@ RenderFrameData Application::buildRenderFrame(
             gameplaySession_.stepDurationSeconds());
 #if SOKOBAN_ENABLE_DEBUG_UI
     if (const std::optional<RenderFrameData> preview =
-            animationPreviewDebugUi_.previewFrame(
+            tools_->animationPreviewDebugUi.previewFrame(
                 assetManifest_, presentationSettings_)) {
         return *preview;
     }
-    if (levelEditor_.editingDocument()) {
+    if (tools_->levelEditor.editingDocument()) {
         return RenderFrameBuilder::buildEditor({
             .manifest = assetManifest_,
-            .editor = levelEditor_,
+            .editor = tools_->levelEditor,
             .settings = presentationSettings_,
             .animations = &animationCatalog_,
-            .hoverCell = editorHoverCell_,
-            .hoverDecoration = editorHoverDecoration_,
+            .hoverCell = tools_->hoverCell,
+            .hoverDecoration = tools_->hoverDecoration,
             .deleting = editorInput.deleting &&
-                levelEditor_.tool() == LevelEditor::Tool::Tiles,
+                tools_->levelEditor.tool() == LevelEditor::Tool::Tiles,
             .worldAnimationTimeSeconds =
                 presentation_.worldAnimationTimeSeconds(),
             .conveyorBeltScrollOffset = beltScrollOffset,
             .levelLocation =
-                levelLocationFromScreenPath(levelEditor_.loadedDocumentPath()),
+                levelLocationFromScreenPath(tools_->levelEditor.loadedDocumentPath()),
         });
     }
 #endif

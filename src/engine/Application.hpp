@@ -1,15 +1,9 @@
 #pragma once
 
-#include "engine/AnimationPreviewDebugUi.hpp"
 #include "engine/AnimationCatalog.hpp"
-#include "engine/AnimationCatalogEditor.hpp"
-#include "engine/AnimationCatalogDebugUi.hpp"
-#include "engine/ApplicationDebugUi.hpp"
 #include "engine/SaveSlotManager.hpp"
 #include "engine/ShellFlow.hpp"
 #include "engine/AssetManifest.hpp"
-#include "engine/AssetManifestDebugUi.hpp"
-#include "engine/AssetManifestEditor.hpp"
 #include "engine/AudioSystem.hpp"
 #include "engine/MirrorParticleEffect.hpp"
 #include "engine/ParticleSystem.hpp"
@@ -20,16 +14,10 @@
 #include "engine/Input.hpp"
 #include "engine/GameplaySession.hpp"
 #include "engine/Level.hpp"
-#include "engine/LevelEditor.hpp"
-#include "engine/LevelEditorDebugUi.hpp"
-#include "engine/DecorationMeshCatalog.hpp"
-#include "engine/DecorationGizmo.hpp"
-#include "engine/DecorationAssetRegistry.hpp"
 #include "engine/Math.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/PlayerProfile.hpp"
 #include "engine/SettingsCoordinator.hpp"
-#include "engine/SplatPainter.hpp"
 #include "engine/Time.hpp"
 #include "engine/Window.hpp"
 #include "engine/render/VulkanRenderer.hpp"
@@ -44,6 +32,8 @@
 #include <vector>
 
 namespace sokoban {
+
+class ApplicationTools;
 
 class Application {
 public:
@@ -106,23 +96,6 @@ private:
         const InputRouter::EditorInput& input,
         const VulkanRenderer::PreparedFrame& previousRenderFrame,
         Vec2 pointerPixels);
-    [[nodiscard]] std::optional<DecorationGizmo::Geometry>
-        decorationGizmoGeometry(
-            const VulkanRenderer::PreparedFrame& frame) const;
-    // Opens the splat map belonging to the document currently being edited.
-    bool openGroundPainting();
-    // Creates and registers a splat map for the edited screen, then opens it
-    // for painting. Lets a screen added in the editor be painted without
-    // re-running tools/make_ground_textures.py or restarting.
-    bool createGroundSplatMap();
-    // Appends a texture entry to the source manifest (through the manifest
-    // editor, so its tab stays in sync) and to the staged copy the running
-    // build loads.
-    void persistManifestTexture(
-        const std::string& name, const std::string& relativePath);
-    [[nodiscard]] std::optional<std::string> registerDecorationMesh(
-        const std::filesystem::path& relativePath);
-    void pushPaintedSplatMap();
     [[nodiscard]] InputRouter::RoutingContext inputRoutingContext() const;
     [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;
     // Scans levels/ once into CampaignSession; the level set is fixed
@@ -167,33 +140,9 @@ private:
     PresentationSettings presentationSettings_;
     SettingsCoordinator settingsCoordinator_;
     GameplayPresentation presentation_;
-    ApplicationDebugUi applicationDebugUi_;
-    AssetManifestEditor assetManifestEditor_;
-    AssetManifestDebugUi assetManifestDebugUi_;
-    LevelEditor levelEditor_;
-    DecorationMeshCatalog decorationMeshCatalog_;
-    LevelEditorDebugUi levelEditorDebugUi_;
-    AnimationPreviewDebugUi animationPreviewDebugUi_;
-    AnimationCatalogEditor animationCatalogEditor_;
-    AnimationCatalogDebugUi animationCatalogDebugUi_;
+    std::unique_ptr<ApplicationTools> tools_;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;
-    std::optional<GridPosition3> editorHoverCell_;
-    std::optional<std::size_t> editorHoverDecoration_;
-    DecorationGizmo decorationGizmo_;
-    SplatPainter splatPainter_;
-    // World position of the brush under the pointer, for the preview ring:
-    // x/y are board tiles, z is the height of the surface it landed on.
-    // Empty when the pointer is not over paintable ground.
-    std::optional<Vec3> editorBrushPoint_;
-    // Last painted state pushed to the GPU. Comparing against the painter's
-    // revision keeps re-uploads to at most one per frame, and none at all
-    // while the brush is not changing anything.
-    uint64_t uploadedSplatRevision_ = 0;
     bool running_ = true;
-    bool draftExitConfirmationOpen_ = false;
-    // Set by the editor's re-bake button and serviced between frames, because
-    // the bake drives frames of its own.
-    bool bakeThumbnailsRequested_ = false;
 };
 
 } // namespace sokoban
