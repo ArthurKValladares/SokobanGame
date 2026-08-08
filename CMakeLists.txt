@@ -166,6 +166,7 @@ add_library(sokoban_core STATIC
     src/engine/DecorationAssetRegistry.cpp
     src/engine/DecorationGizmo.cpp
     src/engine/DecorationMeshCatalog.cpp
+    src/engine/EditorInteraction.cpp
     src/engine/FrameArena.cpp
     src/engine/GameplayPresentation.cpp
     src/engine/GameplayLoop.cpp
@@ -497,6 +498,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME decoration_gizmo TARGET sokoban_decoration_gizmo_tests
         LIBS sokoban_core
         SOURCES tests/DecorationGizmoTests.cpp
+    )
+    sokoban_add_test(NAME editor_interaction TARGET sokoban_editor_interaction_tests
+        LIBS sokoban_core
+        SOURCES tests/EditorInteractionTests.cpp
     )
     sokoban_add_test(NAME animation_controller TARGET sokoban_animation_controller_tests
         LIBS sokoban_core

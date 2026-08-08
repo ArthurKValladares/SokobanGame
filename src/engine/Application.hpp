@@ -79,23 +79,6 @@ private:
         float dt,
         const InputRouter::Frame& input,
         const VulkanRenderer::PreparedFrame* previousRenderFrame);
-    void drawDraftExitConfirmation();
-    // Ring showing where and how large the ground brush will paint.
-    void drawBrushPreview();
-    void drawDecorationGizmo();
-    void updateEditorPainting(
-        const InputRouter::EditorInput& input,
-        const VulkanRenderer::PreparedFrame* previousRenderFrame);
-    // Ground-splat brush painting, which replaces tile painting while a paint
-    // session is open. Returns true when it handled the pointer.
-    bool updateGroundPainting(
-        const InputRouter::EditorInput& input,
-        const VulkanRenderer::PreparedFrame* previousRenderFrame,
-        Vec2 pointerPixels);
-    bool updateDecorationEditing(
-        const InputRouter::EditorInput& input,
-        const VulkanRenderer::PreparedFrame& previousRenderFrame,
-        Vec2 pointerPixels);
     [[nodiscard]] InputRouter::RoutingContext inputRoutingContext() const;
     [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;
     // Scans levels/ once into CampaignSession; the level set is fixed
