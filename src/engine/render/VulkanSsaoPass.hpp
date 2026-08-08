@@ -28,7 +28,6 @@ public:
     void record(
         VkCommandBuffer commandBuffer,
         VkImageView targetView,
-        VkImage depthSource,
         const RenderFrameData::Lighting::AmbientOcclusion& settings,
         VkDescriptorSet descriptorSet,
         VkPipelineLayout pipelineLayout,

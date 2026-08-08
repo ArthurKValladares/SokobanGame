@@ -311,6 +311,74 @@ IsoRenderLayout calculateIsoLayout(
     return layout;
 }
 
+struct PlaneFootprint {
+    float left = std::numeric_limits<float>::max();
+    float top = std::numeric_limits<float>::max();
+    float right = std::numeric_limits<float>::lowest();
+    float bottom = std::numeric_limits<float>::lowest();
+    bool valid = false;
+};
+
+PlaneFootprint visiblePlaneFootprint(
+    const IsoRenderLayout& layout,
+    Vec2 renderExtent,
+    float planeHeight)
+{
+    constexpr float viewportOverscan = 1.02f;
+    constexpr float worldPadding = 0.5f;
+    const float aspect =
+        std::max(renderExtent.x, 1.0f) /
+        std::max(renderExtent.y, 1.0f);
+    const float inverseFitScale =
+        1.0f / std::max(layout.fitScale, 0.0001f);
+    const float inverseFocalLength =
+        1.0f / std::max(layout.focalLength, 0.0001f);
+
+    PlaneFootprint footprint;
+    for (Vec2 clipCorner : std::array<Vec2, 4> {
+             Vec2 { -viewportOverscan, -viewportOverscan },
+             Vec2 { viewportOverscan, -viewportOverscan },
+             Vec2 { viewportOverscan, viewportOverscan },
+             Vec2 { -viewportOverscan, viewportOverscan },
+         }) {
+        const float cameraXOverDepth = aspect *
+            (clipCorner.x * inverseFitScale + layout.projectedCenter.x) *
+            inverseFocalLength;
+        const float cameraYOverDepth =
+            (clipCorner.y * inverseFitScale + layout.projectedCenter.y) *
+            inverseFocalLength;
+        const Vec3 rayDirection = add(
+            add(
+                layout.cameraForward,
+                multiply(layout.cameraRight, cameraXOverDepth)),
+            multiply(layout.cameraUp, cameraYOverDepth));
+        if (std::abs(rayDirection.z) <= 0.0001f) {
+            continue;
+        }
+        const float rayDistance =
+            (planeHeight - layout.cameraPosition.z) / rayDirection.z;
+        if (rayDistance <= 0.0f) {
+            continue;
+        }
+        const Vec3 point = add(
+            layout.cameraPosition,
+            multiply(rayDirection, rayDistance));
+        footprint.left = std::min(footprint.left, point.x);
+        footprint.top = std::min(footprint.top, point.y);
+        footprint.right = std::max(footprint.right, point.x);
+        footprint.bottom = std::max(footprint.bottom, point.y);
+        footprint.valid = true;
+    }
+
+    if (footprint.valid) {
+        footprint.left -= worldPadding;
+        footprint.top -= worldPadding;
+        footprint.right += worldPadding;
+        footprint.bottom += worldPadding;
+    }
+    return footprint;
+}
+
 ShadowRenderLayout calculateShadowLayout(const RenderFrameData& frameData)
 {
     const Vec3 lightDirection =
@@ -935,10 +1003,46 @@ void IsoScenePreparer::prepare(
 
         for (const RenderFrameData::WaterSurface& water :
              frameData.waterSurfaces) {
-            const float left = water.position.x;
-            const float top = water.position.y;
-            const float right = left + water.size.x;
-            const float bottom = top + water.size.y;
+            float left = water.position.x;
+            float top = water.position.y;
+            float right = left + water.size.x;
+            float bottom = top + water.size.y;
+
+            // The exterior strips are deliberately excluded from camera fit,
+            // but still need to reach every visible ray/plane intersection.
+            // Extending only these large, non-pickable strips preserves the
+            // authored shoreline cells while avoiding a far-edge seam at
+            // wide aspect ratios or low camera pitches.
+            if (!water.pickable &&
+                (water.size.x > 1.0f || water.size.y > 1.0f)) {
+                const PlaneFootprint footprint = visiblePlaneFootprint(
+                    scene.isoLayout,
+                    scene.renderExtent,
+                    water.elevation);
+                if (footprint.valid) {
+                    const float boardRight =
+                        static_cast<float>(frameData.levelWidth);
+                    const float boardBottom =
+                        static_cast<float>(frameData.levelHeight);
+                    if (right <= -1.0f) {
+                        left = std::min(left, footprint.left);
+                        top = std::min(top, footprint.top);
+                        bottom = std::max(bottom, footprint.bottom);
+                    } else if (left >= boardRight + 1.0f) {
+                        right = std::max(right, footprint.right);
+                        top = std::min(top, footprint.top);
+                        bottom = std::max(bottom, footprint.bottom);
+                    } else if (bottom <= -1.0f) {
+                        left = std::min(left, footprint.left);
+                        right = std::max(right, footprint.right);
+                        top = std::min(top, footprint.top);
+                    } else if (top >= boardBottom + 1.0f) {
+                        left = std::min(left, footprint.left);
+                        right = std::max(right, footprint.right);
+                        bottom = std::max(bottom, footprint.bottom);
+                    }
+                }
+            }
             appendIsoFace(
                 {
                     Vec3 { left, top, water.elevation },
@@ -958,7 +1062,7 @@ void IsoScenePreparer::prepare(
                 water.isEditorPreview,
                 water.pickable && !water.isEditorPreview,
                 true,
-                water.size,
+                { right - left, bottom - top },
                 PreparedSurfaceMaterial::Water,
                 water.shorelineMask);
         }

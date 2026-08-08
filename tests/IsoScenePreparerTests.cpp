@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <ranges>
 #include <unordered_set>
 
@@ -477,6 +478,72 @@ void testExteriorWaterDoesNotAffectCameraFitOrPicking()
         baseScene.pickFaceIndices.size());
 }
 
+void testExteriorWaterReachesVisiblePlaneFootprint()
+{
+    sokoban::RenderFrameData frame = sceneFrame();
+    constexpr sokoban::Vec4 waterColor {
+        0.05f, 0.38f, 0.72f, 0.64f
+    };
+    constexpr float waterHeight = 0.82f;
+    frame.waterSurfaces.push_back({
+        .cell = { -2, -2, 0 },
+        .position = { -2.0f, -2.0f },
+        .size = { 1.0f, 7.0f },
+        .color = waterColor,
+        .elevation = waterHeight,
+        .pickable = false,
+    });
+    frame.waterSurfaces.push_back({
+        .cell = { 5, -2, 0 },
+        .position = { 5.0f, -2.0f },
+        .size = { 1.0f, 7.0f },
+        .color = waterColor,
+        .elevation = waterHeight,
+        .pickable = false,
+    });
+    frame.waterSurfaces.push_back({
+        .cell = { -1, -2, 0 },
+        .position = { -1.0f, -2.0f },
+        .size = { 6.0f, 1.0f },
+        .color = waterColor,
+        .elevation = waterHeight,
+        .pickable = false,
+    });
+    frame.waterSurfaces.push_back({
+        .cell = { -1, 4, 0 },
+        .position = { -1.0f, 4.0f },
+        .size = { 6.0f, 1.0f },
+        .color = waterColor,
+        .elevation = waterHeight,
+        .pickable = false,
+    });
+
+    const sokoban::PreparedRenderScene scene =
+        prepareScene(frame, { 1998.0f, 1264.0f });
+    float minimumX = std::numeric_limits<float>::max();
+    float minimumY = std::numeric_limits<float>::max();
+    float maximumX = std::numeric_limits<float>::lowest();
+    float maximumY = std::numeric_limits<float>::lowest();
+    for (const sokoban::PreparedIsoFace& face : scene.isoFaces) {
+        if (face.material != sokoban::PreparedSurfaceMaterial::Water ||
+            face.pickable ||
+            (face.gridSize.x <= 1.0f && face.gridSize.y <= 1.0f)) {
+            continue;
+        }
+        for (sokoban::Vec3 vertex : face.vertices) {
+            minimumX = std::min(minimumX, vertex.x);
+            minimumY = std::min(minimumY, vertex.y);
+            maximumX = std::max(maximumX, vertex.x);
+            maximumY = std::max(maximumY, vertex.y);
+        }
+    }
+
+    CHECK(minimumX < -1.0f);
+    CHECK(minimumY < -1.0f);
+    CHECK(maximumX > 1.0f);
+    CHECK(maximumY > 1.0f);
+}
+
 void testDecorativeTileDoesNotAffectCameraFit()
 {
     const sokoban::RenderFrameData baseFrame = sceneFrame();
@@ -823,6 +890,7 @@ int main()
     testTopDownPreparationSkipsIsoWork();
     testPreparationReusesOutputWithoutStaleLists();
     testExteriorWaterDoesNotAffectCameraFitOrPicking();
+    testExteriorWaterReachesVisiblePlaneFootprint();
     testDecorativeTileDoesNotAffectCameraFit();
     testExplicitCameraExtentOwnsEntireProjectedLayout();
     testExplicitCameraExtentLeavesDepthGuardBand();

@@ -147,7 +147,6 @@ public:
         ssaoPass_.record(
             commandBuffer,
             swapchain_.resolvedColorView(),
-            swapchain_.depthSourceImage(),
             frameData.lighting.ambientOcclusion,
             descriptorSet(),
             pipelines_.layout(),
@@ -245,6 +244,8 @@ private:
             scene.hasTranslucentContent || !resolveView,
             false,
             true);
+        swapchain_.copyResolvedSceneDepth(
+            commandBuffer, stats_);
         if (!scene.hasTranslucentContent) {
             return;
         }
@@ -610,6 +611,7 @@ private:
                     frameData.waterAnimationTimeSeconds,
                     face.shorelineMask,
                     frameData.waterRendering,
+                    scene.isoLayout,
                     face.isEditorPreview);
             } else if (
                 face.material == PreparedSurfaceMaterial::MirrorEnergy) {
@@ -1146,6 +1148,7 @@ private:
         float animationTimeSeconds,
         uint32_t shorelineMask,
         const RenderFrameData::WaterRendering& rendering,
+        const IsoRenderLayout& layout,
         bool isEditorPreview)
     {
         vkCmdSetPrimitiveTopology(
@@ -1155,6 +1158,9 @@ private:
         ++stats_.drawCalls;
         stats_.vertices += 6;
         stats_.triangles += 2;
+
+        const float waterRenderingMode =
+            rendering.visualizeCausticsOnly ? 2.0f : 1.0f;
 
         const TilePushConstants constants {
             .vertices = {
@@ -1211,8 +1217,8 @@ private:
             },
             .color = color,
             .normalAndAmbientRed = {
-                config::waterShorelineFarThickness,
-                config::waterTileBorderExteriorFadeDistance,
+                layout.nearestDepth,
+                layout.farthestDepth,
                 rendering.rippleCrestHalfWidth,
                 rendering.rippleHaloWidth,
             },
@@ -1235,16 +1241,18 @@ private:
                 rendering.secondaryRippleOpacity,
             },
             .materialOptions = {
-                config::waterShorelineNearDistance,
+                layout.cameraPosition.x,
                 size.x,
                 size.y,
-                isEditorPreview ? -1.0f : 1.0f,
+                isEditorPreview
+                    ? -waterRenderingMode
+                    : waterRenderingMode,
             },
             .gridColor = {
                 worldOrigin.x,
                 worldOrigin.y,
                 animationTimeSeconds,
-                config::waterShorelineFarDistance,
+                layout.cameraPosition.y,
             },
             .textureOptions = {
                 rendering.rippleSpatialFrequency,

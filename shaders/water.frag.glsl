@@ -1,6 +1,7 @@
 #version 460
 
 layout(set = 0, binding = 1) uniform sampler2D sceneColor;
+layout(set = 0, binding = 5) uniform sampler2D sceneDepth;
 
 layout(location = 1) in float inFaceCoordU;
 layout(location = 2) in float inFaceCoordV;
@@ -19,6 +20,13 @@ layout(push_constant) uniform PushConstants
     vec4 gridColor;
     vec4 textureOptions;
 } pc;
+
+// These infrequently tuned shape values stay shader-local so the packed water
+// constants can carry camera/depth data for projected caustics.
+const float shorelineNearDistance = 0.055;
+const float shorelineFarDistance = 0.090;
+const float shorelineFarThickness = 0.010;
+const float tileBorderExteriorFadeDistance = 0.25;
 
 float bayer8x8(ivec2 pixel)
 {
@@ -295,6 +303,44 @@ vec2 cellularRippleBands(
     return vec2(softHalo, brightCenter);
 }
 
+void waterRipplePatterns(
+    vec2 worldPosition,
+    float frequency,
+    float time,
+    float rippleCrestHalfWidth,
+    float rippleHaloWidth,
+    float secondaryThicknessScale,
+    out vec2 primary,
+    out vec2 secondary)
+{
+    vec2 patternPosition =
+        worldPosition * frequency +
+        vec2(time * 0.10, -time * 0.075);
+    primary = cellularRippleBands(
+        patternPosition,
+        time,
+        rippleCrestHalfWidth,
+        rippleHaloWidth);
+    vec2 secondaryPatternPosition =
+        vec2(-patternPosition.y, patternPosition.x) +
+        vec2(2.31, -1.73);
+    secondary = cellularRippleBands(
+        secondaryPatternPosition,
+        time + 1.40,
+        rippleCrestHalfWidth * secondaryThicknessScale,
+        rippleHaloWidth * secondaryThicknessScale);
+}
+
+float cameraDepthFromDeviceDepth(
+    float deviceDepth,
+    float nearDepth,
+    float farDepth)
+{
+    float depthRange = farDepth - nearDepth;
+    return farDepth * nearDepth /
+        max(farDepth - deviceDepth * depthRange, 0.0001);
+}
+
 vec2 shorelineWave(
     float distanceToEdge,
     float alongEdge,
@@ -485,7 +531,9 @@ vec2 shorelineFoam(
 
 void main()
 {
-    if (pc.materialOptions.w < 0.0) {
+    bool visualizeCausticsOnly =
+        abs(pc.materialOptions.w) > 1.5;
+    if (pc.materialOptions.w < 0.0 && !visualizeCausticsOnly) {
         ivec2 ditherPixel = ivec2(floor(gl_FragCoord.xy * 0.5));
         if (bayer8x8(ditherPixel) >= 0.56) {
             discard;
@@ -500,25 +548,19 @@ void main()
     float rippleHaloWidth =
         max(pc.normalAndAmbientRed.w, rippleCrestHalfWidth);
 
-    vec2 basePatternPosition = worldPosition * frequency;
-    vec2 patternPosition =
-        basePatternPosition +
-        vec2(time * 0.10, -time * 0.075);
-    vec2 caustics = cellularRippleBands(
-        patternPosition,
-        time,
-        rippleCrestHalfWidth,
-        rippleHaloWidth);
-    vec2 secondaryPatternPosition =
-        vec2(-patternPosition.y, patternPosition.x) +
-        vec2(2.31, -1.73);
     float secondaryThicknessScale =
         max(pc.sunRadianceAndAmbientBlue.w, 0.05);
-    vec2 secondaryCaustics = cellularRippleBands(
-        secondaryPatternPosition,
-        time + 1.40,
-        rippleCrestHalfWidth * secondaryThicknessScale,
-        rippleHaloWidth * secondaryThicknessScale);
+    vec2 caustics;
+    vec2 secondaryCaustics;
+    waterRipplePatterns(
+        worldPosition,
+        frequency,
+        time,
+        rippleCrestHalfWidth,
+        rippleHaloWidth,
+        secondaryThicknessScale,
+        caustics,
+        secondaryCaustics);
 
     // Treat the shared ripple field as a thin refractive lens. Its
     // screen-space gradient points toward the neighboring scene sample that
@@ -544,18 +586,59 @@ void main()
         sceneColor,
         clamp(sceneUv + refractionOffset, vec2(0.001), vec2(0.999))).rgb;
 
-    // Reuse the same bands as focused light on the geometry below the water.
-    // This happens before tinting so the caustics belong to the refracted
-    // scene instead of reading as another decal on the surface plane.
+    // Project the ripple field from the water plane to the opaque geometry's
+    // actual point along the camera ray. This separates the illuminated bands
+    // from the surface crests by an amount that grows with water depth and
+    // changes naturally as the camera moves.
+    float nearDepth = max(pc.normalAndAmbientRed.x, 0.001);
+    float farDepth = max(pc.normalAndAmbientRed.y, nearDepth + 0.001);
+    float opaqueDeviceDepth = texture(sceneDepth, sceneUv).r;
+    float waterCameraDepth = cameraDepthFromDeviceDepth(
+        gl_FragCoord.z, nearDepth, farDepth);
+    float opaqueCameraDepth = cameraDepthFromDeviceDepth(
+        opaqueDeviceDepth, nearDepth, farDepth);
+    float distanceBehindWater = max(
+        opaqueCameraDepth - waterCameraDepth,
+        0.0);
+    float geometryPresent = 1.0 - step(0.9999, opaqueDeviceDepth);
+    vec2 cameraPosition = vec2(
+        pc.materialOptions.x,
+        pc.gridColor.w);
+    vec2 causticProjectionOffset =
+        (worldPosition - cameraPosition) *
+        (distanceBehindWater / max(waterCameraDepth, 0.001)) *
+        geometryPresent;
+    vec2 projectedCaustics;
+    vec2 projectedSecondaryCaustics;
+    waterRipplePatterns(
+        worldPosition + causticProjectionOffset,
+        frequency,
+        time,
+        rippleCrestHalfWidth,
+        rippleHaloWidth,
+        secondaryThicknessScale,
+        projectedCaustics,
+        projectedSecondaryCaustics);
+
+    // Apply the projected bands before tinting so they belong to the geometry
+    // below the plane instead of reading as another surface decal.
     float underwaterCausticCoverage = clamp(
-        caustics.x * 0.35 + caustics.y * 0.65 +
-            secondaryCaustics.x * 0.08 +
-            secondaryCaustics.y * 0.12,
+        projectedCaustics.x * 0.35 +
+            projectedCaustics.y * 0.65 +
+            projectedSecondaryCaustics.x * 0.08 +
+            projectedSecondaryCaustics.y * 0.12,
         0.0,
-        1.0);
+        1.0) * geometryPresent;
     diffractedScene *= 1.0 +
         underwaterCausticCoverage *
             clamp(pc.shadowVertices[3].w, 0.0, 1.0);
+
+    // Debug view: retain the ripple-driven ray bend and focused light on the
+    // copied opaque geometry, but bypass every visible water-surface layer.
+    if (visualizeCausticsOnly) {
+        outColor = vec4(diffractedScene, 1.0);
+        return;
+    }
 
     float bodyTone = broadWaterTone(
         worldPosition,
@@ -615,7 +698,7 @@ void main()
         worldPosition,
         pc.shadowVertices[2].xy,
         max(pc.shadowVertices[2].zw, vec2(0.0)),
-        max(pc.normalAndAmbientRed.y, 0.0));
+        tileBorderExteriorFadeDistance);
     finalWaterColor = mix(
         finalWaterColor,
         pc.shadowVertices[0].rgb,
@@ -628,9 +711,9 @@ void main()
         pc.materialOptions.yz,
         worldPosition,
         time,
-        max(pc.materialOptions.x, 0.0),
-        max(pc.gridColor.w, 0.0),
-        max(pc.normalAndAmbientRed.x, 0.0));
+        shorelineNearDistance,
+        shorelineFarDistance,
+        shorelineFarThickness);
     float nearFoamOpacity =
         clamp(pc.shadowVertices[3].y, 0.0, 1.0);
     float farFoamOpacity =

@@ -55,6 +55,9 @@ public:
     void copyResolvedSceneColor(
         VkCommandBuffer commandBuffer,
         RenderStats& stats);
+    void copyResolvedSceneDepth(
+        VkCommandBuffer commandBuffer,
+        RenderStats& stats);
     void upscaleSceneToSwapchain(
         VkCommandBuffer commandBuffer,
         uint32_t imageIndex,
@@ -74,6 +77,7 @@ public:
     [[nodiscard]] VkImageView imageView(uint32_t index) const;
     [[nodiscard]] VkImageView sceneColorView() const { return sceneColorImage_.view; }
     [[nodiscard]] VkSampler sceneColorSampler() const { return sceneColorSampler_; }
+    [[nodiscard]] VkImageView sceneDepthView() const { return sceneDepthImage_.view; }
     [[nodiscard]] VkImageView depthView() const { return depthImage_.view; }
     [[nodiscard]] VkImageView sampledDepthView() const;
     [[nodiscard]] VkImage depthSourceImage() const;
@@ -95,6 +99,7 @@ private:
     void createMsaaColor();
     void createDepth();
     void createSceneColor();
+    void createSceneDepth();
     void destroyAttachments();
     [[nodiscard]] VkSurfaceFormatKHR chooseSurfaceFormat(
         const std::vector<VkSurfaceFormatKHR>& formats) const;
@@ -123,8 +128,10 @@ private:
     vulkanResources::OwnedImage depthImage_ {};
     vulkanResources::OwnedImage resolveDepthImage_ {};
     vulkanResources::OwnedImage sceneColorImage_ {};
+    vulkanResources::OwnedImage sceneDepthImage_ {};
     VkSampler sceneColorSampler_ = VK_NULL_HANDLE;
     VkImageLayout sceneColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImageLayout sceneDepthLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     bool depthLayoutInitialized_ = false;
 };
 

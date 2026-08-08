@@ -782,7 +782,7 @@ VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources(
         },
         .sceneDepth = {
             .sampler = shadowPass_.sampler(),
-            .imageView = resources.swapchain->sampledDepthView(),
+            .imageView = resources.swapchain->sceneDepthView(),
         },
         .ssao = {
             .sampler = resources.ssaoPass->sampler(),

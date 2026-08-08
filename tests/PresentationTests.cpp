@@ -1097,6 +1097,7 @@ void testGameplayFrameBuildsProceduralWaterSurface()
     settings.water.surfaceColor = { 0.12f, 0.24f, 0.36f, 0.48f };
     settings.water.underwaterCausticStrength = 0.61f;
     settings.water.refractionStrength = 0.0042f;
+    settings.water.visualizeCausticsOnly = true;
     const GameplaySession::Action action;
     const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
         .manifest = testManifest(),
@@ -1131,6 +1132,7 @@ void testGameplayFrameBuildsProceduralWaterSurface()
     CHECK(near(
         frame.waterRendering.refractionStrength,
         settings.water.refractionStrength));
+    CHECK(frame.waterRendering.visualizeCausticsOnly);
     CHECK(near(frame.waterAnimationTimeSeconds, 0.75f));
     CHECK(std::ranges::none_of(
         frame.tiles,

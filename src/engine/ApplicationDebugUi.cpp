@@ -318,6 +318,9 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
                 0.0f,
                 1.0f,
                 "%.2f");
+            ImGui::Checkbox(
+                "Caustics Only (Hide Water)",
+                &water.visualizeCausticsOnly);
             ImGui::TreePop();
         }
 

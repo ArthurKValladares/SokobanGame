@@ -312,6 +312,7 @@ struct RenderFrameData {
             config::waterSecondaryRippleThicknessScale;
         float underwaterCausticStrength =
             config::waterUnderwaterCausticStrength;
+        bool visualizeCausticsOnly = false;
         float primaryShorelineOpacity =
             config::waterPrimaryShorelineOpacity;
         float secondaryShorelineOpacity =
