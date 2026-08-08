@@ -1,11 +1,13 @@
 #include "engine/ui/FontAtlas.hpp"
 #include "engine/ui/OptionsMenu.hpp"
 #include "engine/ui/Ui.hpp"
+#include "engine/ui/UiConfig.hpp"
 #include "engine/ui/UiControls.hpp"
 #include "engine/ui/UiLayout.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -393,6 +395,60 @@ void testControlsRemapping()
     CHECK(settings.input == sokoban::defaultInputBindings());
 }
 
+void drawRects(sokoban::UiContext& ui, std::size_t count)
+{
+    ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
+    for (std::size_t i = 0; i < count; ++i) {
+        ui.rect(
+            { { static_cast<float>(i), 0.0f }, { 1.0f, 1.0f } },
+            { 1.0f, 1.0f, 1.0f, 1.0f });
+    }
+    ui.endFrame();
+}
+
+void testUiFrameArenaCommandBudget()
+{
+    const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
+    sokoban::UiContext ui(font);
+
+    // A full frame is one bump, and the frame after it gets the same arena
+    // back. Repeated many times because the arena's original failure was a
+    // reset that did not actually reclaim the buffer: a budget-sized frame
+    // worked exactly once, and the game died a few seconds later. Anything
+    // short of a full frame drains it slowly enough to hide that.
+    bool everyFrameFitTheArena = true;
+    std::size_t bytesUsedByAFullFrame = 0;
+    for (int frame = 0; frame < 500; ++frame) {
+        drawRects(ui, sokoban::config::uiFrameCommandBudget);
+        if (frame == 0) {
+            bytesUsedByAFullFrame = ui.frameArenaBytesUsed();
+        }
+        everyFrameFitTheArena = everyFrameFitTheArena &&
+            ui.drawData().commands.size() ==
+                sokoban::config::uiFrameCommandBudget &&
+            ui.frameArenaBytesUsed() == bytesUsedByAFullFrame &&
+            ui.droppedCommands() == 0;
+    }
+    CHECK(everyFrameFitTheArena);
+    CHECK(bytesUsedByAFullFrame > 0);
+    CHECK(ui.frameArenaHighWaterBytes() == bytesUsedByAFullFrame);
+
+    // Past the budget the extra commands are dropped and counted, so an
+    // over-busy frame loses its tail rather than the session. The arena is
+    // sized from the same budget, so it is never the thing that runs out.
+    drawRects(ui, sokoban::config::uiFrameCommandBudget + 100);
+    CHECK(ui.drawData().commands.size() ==
+        sokoban::config::uiFrameCommandBudget);
+    CHECK(ui.droppedCommands() == 100);
+    CHECK(ui.frameArenaBytesUsed() == bytesUsedByAFullFrame);
+
+    // And the next frame starts clean.
+    drawRects(ui, sokoban::config::uiFrameCommandBudget);
+    CHECK(ui.drawData().commands.size() ==
+        sokoban::config::uiFrameCommandBudget);
+    CHECK(ui.droppedCommands() == 0);
+}
+
 void testOptionsReducerAndDeclarativeRows()
 {
     sokoban::OptionsMenuState state;
@@ -575,6 +631,7 @@ void testOptionsReducerDraftAndBindingSemantics()
 int main()
 {
     testFontAtlasAndText();
+    testUiFrameArenaCommandBudget();
     testReusableControls();
     testLayoutTree();
     testOptionsNavigationAndSettings();

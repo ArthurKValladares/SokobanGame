@@ -1,5 +1,6 @@
 #include "engine/ui/Ui.hpp"
 
+#include "engine/Log.hpp"
 #include "engine/ui/FontAtlas.hpp"
 
 #include <algorithm>
@@ -8,6 +9,10 @@ namespace sokoban {
 
 UiContext::UiContext(const FontAtlas& font)
     : font_(&font)
+    , frameArena_(
+          "UI",
+          arenaBytesFor<UiDrawCommand>(config::uiFrameCommandBudget))
+    , drawData_(frameArena_)
 {
 }
 
@@ -17,8 +22,12 @@ void UiContext::beginFrame(
     bool mouseDown,
     bool mousePressed)
 {
+    // The head goes back to the start and last frame's commands cease to
+    // exist. Nothing needs destroying first: the arena holds trivially
+    // destructible data and the draw data owns none of it.
+    frameArena_.reset();
+    drawData_ = UiDrawData(frameArena_);
     drawData_.viewportSize = viewportSize;
-    drawData_.commands.clear();
     mousePosition_ = mousePosition;
     mouseDown_ = mouseDown;
     mousePressed_ = mousePressed;
@@ -29,6 +38,16 @@ void UiContext::beginFrame(
 
 void UiContext::endFrame()
 {
+    // Reported here rather than at the drop, so one warning covers the frame
+    // instead of one per command past the budget.
+    if (drawData_.commands.droppedCount() > 0 && !reportedDroppedCommands_) {
+        reportedDroppedCommands_ = true;
+        log::warning(log::Category::Rendering)
+            << "UI frame exceeded its budget of "
+            << config::uiFrameCommandBudget << " draw commands; "
+            << drawData_.commands.droppedCount()
+            << " were dropped. Raise config::uiFrameCommandBudget.";
+    }
 }
 
 bool UiContext::contains(UiRect rectValue, Vec2 point) const

@@ -166,6 +166,7 @@ add_library(sokoban_core STATIC
     src/engine/DecorationAssetRegistry.cpp
     src/engine/DecorationGizmo.cpp
     src/engine/DecorationMeshCatalog.cpp
+    src/engine/FrameArena.cpp
     src/engine/GameplayPresentation.cpp
     src/engine/GameplayLoop.cpp
     src/engine/GameplaySession.cpp
@@ -540,6 +541,21 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME logging TARGET sokoban_log_tests
         LIBS sokoban_core
         SOURCES tests/LogTests.cpp
+    )
+    sokoban_add_test(NAME frame_arena TARGET sokoban_frame_arena_tests
+        LIBS sokoban_core
+        SOURCES tests/FrameArenaTests.cpp
+    )
+    sokoban_add_test(NAME atomic_file TARGET sokoban_atomic_file_tests
+        LIBS sokoban_core
+        SOURCES tests/AtomicFileTests.cpp
+    )
+    sokoban_add_test(NAME level_project_store TARGET sokoban_level_project_store_tests
+        LIBS sokoban_core
+        SOURCES tests/LevelProjectStoreTests.cpp
+    )
+    target_compile_definitions(sokoban_level_project_store_tests PRIVATE
+        SOKOBAN_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
     )
     sokoban_add_test(NAME content_pipeline TARGET sokoban_content_pipeline_tests
         LIBS sokoban_core
