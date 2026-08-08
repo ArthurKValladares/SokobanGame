@@ -60,6 +60,7 @@ private:
     void drawFileBrowser(LevelEditor& editor);
     void drawActiveLevelsTab(LevelEditor& editor);
     void drawDeletedLevelsTab(LevelEditor& editor);
+    void drawRenamePopup(LevelEditor& editor);
     void drawDeleteLevelConfirmation(LevelEditor& editor);
     void drawPermanentDeleteConfirmation(LevelEditor& editor);
 
@@ -69,6 +70,10 @@ private:
     std::string decorationRegistrationStatus_;
     int requestedWidth_ = 12;
     int requestedHeight_ = 8;
+    std::optional<LevelEditor::LevelDirectory> pendingRenameLevel_;
+    std::optional<int> pendingRenameScreen_;
+    std::string renameBuffer_;
+    bool renamePopupOpen_ = false;
     std::optional<LevelEditor::LevelDirectory> pendingDeleteLevel_;
     bool deleteLevelConfirmationOpen_ = false;
     std::filesystem::path pendingPermanentDeletePath_;

@@ -1,6 +1,7 @@
 #include "engine/LevelProjectStore.hpp"
 
 #include "engine/Level.hpp"
+#include "engine/LevelCatalog.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -176,6 +177,9 @@ std::vector<IndexedPath> validateProject(const std::filesystem::path& root)
             }
             (void)Level::loadFromFile(screens[screenIndex].path);
         }
+        (void)loadLevelMetadata(
+            levels[levelIndex].path,
+            screens.size());
     }
     return levels;
 }

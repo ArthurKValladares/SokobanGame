@@ -14,6 +14,7 @@
 #include "engine/Input.hpp"
 #include "engine/GameplaySession.hpp"
 #include "engine/Level.hpp"
+#include "engine/LevelCatalog.hpp"
 #include "engine/Math.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/PlayerProfile.hpp"
@@ -117,6 +118,7 @@ private:
     Level level_;
     GameplaySession gameplaySession_;
     CampaignSession campaign_;
+    std::vector<LevelMetadata> levelMetadata_;
     InputState input_;
     InputRouter inputRouter_;
     FrameTimer frameTimer_;

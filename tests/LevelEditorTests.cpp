@@ -357,16 +357,29 @@ void testProjectRenumberDeleteAndRestore()
     CHECK(std::filesystem::exists(project.runtime / "level0" / "screen0.scr"));
     CHECK(std::filesystem::exists(project.runtime / "level1" / "screen0.scr"));
 
+    editor.renameLevel(levels[0], "Clockwork Garden");
+    editor.renameScreen(levels[0], 0, "First Steps");
+    levels = editor.collectLevelDirectories();
+    CHECK(levels[0].name == "Clockwork Garden");
+    CHECK(levels[0].screens[0].name == "First Steps");
+    CHECK(std::filesystem::exists(
+        project.runtime / "level0" / "metadata.json"));
+
     editor.addScreenAt(levels[0], 1);
     levels = editor.collectLevelDirectories();
     CHECK(levels[0].screens.size() == 2);
     CHECK(levels[0].screens[0].index == 0);
     CHECK(levels[0].screens[1].index == 1);
+    CHECK(levels[0].screens[0].name == "First Steps");
+    CHECK(levels[0].screens[1].name.empty());
+    editor.renameScreen(levels[0], 1, "The Long Hall");
+    levels = editor.collectLevelDirectories();
 
     editor.deleteScreen(levels[0], 0);
     levels = editor.collectLevelDirectories();
     CHECK(levels[0].screens.size() == 1);
     CHECK(levels[0].screens[0].index == 0);
+    CHECK(levels[0].screens[0].name == "The Long Hall");
     CHECK(!std::filesystem::exists(levels[0].path / "screen1.scr"));
 
     editor.deleteLevel(levels[0]);
@@ -375,11 +388,14 @@ void testProjectRenumberDeleteAndRestore()
     CHECK(levels.size() == 1);
     CHECK(levels[0].index == 0);
     CHECK(deleted.size() == 1);
+    CHECK(deleted[0].name == "Clockwork Garden");
+    CHECK(deleted[0].screens[0].name == "The Long Hall");
 
     editor.restoreDeletedLevel(deleted[0].path);
     levels = editor.collectLevelDirectories();
     CHECK(levels.size() == 2);
     CHECK(levels[1].index == 1);
+    CHECK(levels[1].name == "Clockwork Garden");
     CHECK(editor.collectDeletedLevels().empty());
 
     editor.deleteLevel(levels[1]);

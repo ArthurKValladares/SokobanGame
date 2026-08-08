@@ -4,6 +4,7 @@
 #include "engine/render/GltfMesh.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/Level.hpp"
+#include "engine/LevelCatalog.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/ui/UiConfig.hpp"
@@ -342,6 +343,9 @@ private:
                 }
                 std::smatch screenMatch;
                 const std::string screenName = screenFile.path().filename().string();
+                if (screenName == levelMetadataFilename) {
+                    continue;
+                }
                 if (!std::regex_match(screenName, screenMatch, screenPattern)) {
                     throw std::runtime_error("unexpected level file: " + screenFile.path().string());
                 }
@@ -365,6 +369,21 @@ private:
                 }
                 const std::filesystem::path relative = screenFile.path().lexically_relative(roots_.levels);
                 addFile(roots_.levels, relative, std::filesystem::path("levels") / relative, "level screen");
+            }
+
+            const std::filesystem::path metadataPath =
+                levelDirectory.path() / levelMetadataFilename;
+            (void)loadLevelMetadata(
+                levelDirectory.path(),
+                levelScreens.size());
+            if (std::filesystem::exists(metadataPath)) {
+                const std::filesystem::path relative =
+                    metadataPath.lexically_relative(roots_.levels);
+                addFile(
+                    roots_.levels,
+                    relative,
+                    std::filesystem::path("levels") / relative,
+                    "level metadata");
             }
         }
 

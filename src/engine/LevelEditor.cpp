@@ -1,5 +1,7 @@
 #include "engine/LevelEditor.hpp"
 
+#include "engine/LevelCatalog.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -1042,6 +1044,32 @@ void LevelEditor::addLevelAt(int levelIndex)
     document_.status = "Added " + newLevelPath.filename().string() + ".";
 }
 
+void LevelEditor::renameLevel(
+    const LevelDirectory& level,
+    std::string name)
+{
+    if (!isActiveLevelDirectory(level)) {
+        document_.status =
+            "Rename requires a level from the active browser root.";
+        return;
+    }
+
+    if (!applyProjectMutation([=](const std::filesystem::path& root) {
+            const std::filesystem::path stagedLevel =
+                levelDirectoryPath(root, level.index);
+            LevelMetadata metadata = loadLevelMetadata(
+                stagedLevel,
+                level.screens.size());
+            metadata.name = name;
+            writeLevelMetadata(stagedLevel, metadata);
+        })) {
+        return;
+    }
+    document_.status = name.empty()
+        ? "Cleared level name."
+        : "Named level " + name + ".";
+}
+
 void LevelEditor::deleteLevel(const LevelDirectory& levelToDelete)
 {
     if (!isActiveLevelDirectory(levelToDelete)) {
@@ -1088,6 +1116,9 @@ void LevelEditor::addScreenAt(const LevelDirectory& level, int screenIndex)
     if (!applyProjectMutation([=](const std::filesystem::path& root) {
             const std::filesystem::path levelRoot =
                 levelDirectoryPath(root, level.index);
+            LevelMetadata metadata = loadLevelMetadata(
+                levelRoot,
+                level.screens.size());
             for (int index = static_cast<int>(level.screens.size()) - 1;
                  index >= screenIndex;
                  --index) {
@@ -1096,6 +1127,10 @@ void LevelEditor::addScreenAt(const LevelDirectory& level, int screenIndex)
                     screenFilePath(levelRoot, index + 1));
             }
             writeScreenRows(screenFilePath(levelRoot, screenIndex), rows);
+            metadata.screenNames.insert(
+                metadata.screenNames.begin() + screenIndex,
+                std::string {});
+            writeLevelMetadata(levelRoot, metadata);
         })) {
         return;
     }
@@ -1104,6 +1139,39 @@ void LevelEditor::addScreenAt(const LevelDirectory& level, int screenIndex)
         return;
     }
     document_.status = "Added " + newScreenPath.filename().string() + ".";
+}
+
+void LevelEditor::renameScreen(
+    const LevelDirectory& level,
+    int screenIndex,
+    std::string name)
+{
+    if (!isActiveLevelDirectory(level)) {
+        document_.status =
+            "Rename screen requires a level from the active browser root.";
+        return;
+    }
+    if (screenIndex < 0 ||
+        screenIndex >= static_cast<int>(level.screens.size())) {
+        document_.status = "Screen name requires an existing screen.";
+        return;
+    }
+
+    if (!applyProjectMutation([=](const std::filesystem::path& root) {
+            const std::filesystem::path stagedLevel =
+                levelDirectoryPath(root, level.index);
+            LevelMetadata metadata = loadLevelMetadata(
+                stagedLevel,
+                level.screens.size());
+            metadata.screenNames[static_cast<std::size_t>(screenIndex)] =
+                name;
+            writeLevelMetadata(stagedLevel, metadata);
+        })) {
+        return;
+    }
+    document_.status = name.empty()
+        ? "Cleared screen name."
+        : "Named screen " + name + ".";
 }
 
 void LevelEditor::deleteScreen(const LevelDirectory& level, int screenIndex)
@@ -1128,6 +1196,9 @@ void LevelEditor::deleteScreen(const LevelDirectory& level, int screenIndex)
     if (!applyProjectMutation([=](const std::filesystem::path& root) {
             const std::filesystem::path levelRoot =
                 levelDirectoryPath(root, level.index);
+            LevelMetadata metadata = loadLevelMetadata(
+                levelRoot,
+                level.screens.size());
             if (!std::filesystem::remove(
                     screenFilePath(levelRoot, screenIndex))) {
                 throw std::runtime_error("screen disappeared during deletion");
@@ -1139,6 +1210,9 @@ void LevelEditor::deleteScreen(const LevelDirectory& level, int screenIndex)
                     screenFilePath(levelRoot, index),
                     screenFilePath(levelRoot, index - 1));
             }
+            metadata.screenNames.erase(
+                metadata.screenNames.begin() + screenIndex);
+            writeLevelMetadata(levelRoot, metadata);
         })) {
         return;
     }
@@ -1369,6 +1443,13 @@ std::vector<LevelEditor::LevelDirectory> LevelEditor::collectLevelDirectories() 
         }
 
         std::ranges::sort(level.screens, {}, &ScreenFile::index);
+        const LevelMetadata metadata = loadLevelMetadata(
+            level.path,
+            level.screens.size());
+        level.name = metadata.name;
+        for (std::size_t index = 0; index < level.screens.size(); ++index) {
+            level.screens[index].name = metadata.screenNames[index];
+        }
         levels.push_back(std::move(level));
     }
 
@@ -1415,6 +1496,15 @@ std::vector<LevelEditor::LevelDirectory> LevelEditor::collectDeletedLevels() con
             }
 
             std::ranges::sort(level.screens, {}, &ScreenFile::index);
+            const LevelMetadata metadata = loadLevelMetadata(
+                level.path,
+                level.screens.size());
+            level.name = metadata.name;
+            for (std::size_t index = 0;
+                 index < level.screens.size();
+                 ++index) {
+                level.screens[index].name = metadata.screenNames[index];
+            }
             levels.push_back(std::move(level));
         }
     }

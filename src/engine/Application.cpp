@@ -777,6 +777,9 @@ std::vector<TitleLevelInfo> Application::titleLevelInfos() const
         }
         result.push_back({
             .screenCount = screens,
+            .name = levelMetadata_[static_cast<std::size_t>(level)].name,
+            .screenNames =
+                levelMetadata_[static_cast<std::size_t>(level)].screenNames,
             .unlocked = level <= playerProfile_.unlockedLevel,
             .completed = progress && progress->completed,
             .reachedScreens = reached,
@@ -886,6 +889,7 @@ std::filesystem::path Application::screenPath(
 void Application::buildLevelCatalog()
 {
     std::vector<int> screenCounts;
+    levelMetadata_.clear();
     for (int level = 0;; ++level) {
         int screens = 0;
         while (std::filesystem::exists(screenPath(level, screens))) {
@@ -895,6 +899,10 @@ void Application::buildLevelCatalog()
             break;
         }
         screenCounts.push_back(screens);
+        levelMetadata_.push_back(loadLevelMetadata(
+            assetRoot_ / "levels" /
+                ("level" + std::to_string(level)),
+            static_cast<std::size_t>(screens)));
     }
     campaign_.setLevelScreenCounts(std::move(screenCounts));
 }

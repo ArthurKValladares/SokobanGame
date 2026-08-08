@@ -291,7 +291,10 @@ std::optional<TitleAction> TitleScreen::drawLevelSelect(
         const TitleLevelInfo& level = levels_[i];
         const UiRect row = tree.rect(levelRows[i]);
         const bool focused = selectedRow_ == static_cast<int>(i);
-        const std::string label = "Level " + std::to_string(i + 1);
+        std::string label = "Level " + std::to_string(i + 1);
+        if (!level.name.empty()) {
+            label += ": " + level.name;
+        }
 
         if (!level.unlocked) {
             ui.panel(row);
@@ -384,17 +387,26 @@ std::optional<TitleAction> TitleScreen::drawScreenSelect(
     const UiLayoutNode backRow = tree.item(tree.root(), 52.0f);
     tree.arrange(panel);
 
-    page.drawHeader(
-        ui,
-        "LEVEL " + std::to_string(selectedLevel_ + 1),
-        40.0f);
+    const TitleLevelInfo& selectedLevel =
+        levels_[static_cast<std::size_t>(selectedLevel_)];
+    std::string header = "LEVEL " + std::to_string(selectedLevel_ + 1);
+    if (!selectedLevel.name.empty()) {
+        header += ": " + selectedLevel.name;
+    }
+    page.drawHeader(ui, header, 40.0f);
 
     for (int screen = 0; screen < screenCount; ++screen) {
         const bool focused = selectedRow_ == screen;
+        std::string label = "Screen " + std::to_string(screen + 1);
+        if (screen < static_cast<int>(selectedLevel.screenNames.size()) &&
+            !selectedLevel.screenNames[static_cast<std::size_t>(screen)].empty()) {
+            label += ": " +
+                selectedLevel.screenNames[static_cast<std::size_t>(screen)];
+        }
         if (uiControls::button(
                 ui,
                 tree.rect(screenRows[static_cast<std::size_t>(screen)]),
-                "Screen " + std::to_string(screen + 1),
+                label,
                 {
                     .tone = ButtonTone::Accent,
                     .focused = focused,

@@ -189,6 +189,9 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
     writeFile(assets / "audio/step.ogg");
     writeFile(assets / "audio/music.ogg");
     writeFile(levels / "level0/screen0.scr", "@layer 0\n...\n\n@layer 1\n.CE\n");
+    writeFile(
+        levels / "level0/metadata.json",
+        R"json({"format":1,"name":"First Light","screens":["Arrival"]})json");
     writeFile(levels / "Deleted/level9/screen0.scr", "not shipped");
 
     constexpr const char* shaderNames[] {
@@ -241,6 +244,8 @@ void testInventoryAndStaging()
         contains(inventory, "custom/ui/main-menu-rogue-pushing-rock-4k.png"),
         "title background included");
     check(contains(inventory, "levels/level0/screen0.scr"), "playable level included");
+    check(contains(inventory, "levels/level0/metadata.json"),
+        "level names included");
     check(!contains(inventory, "levels/Deleted/level9/screen0.scr"), "deleted level excluded");
     check(contains(inventory, "shaders/model.vert.glsl.spv"), "compiled shader included");
 

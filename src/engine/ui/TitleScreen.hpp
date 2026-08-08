@@ -5,6 +5,7 @@
 #include "engine/ui/MenuKit.hpp"
 
 #include <optional>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -15,6 +16,8 @@ struct UiRect;
 
 struct TitleLevelInfo {
     int screenCount = 0;
+    std::string name;
+    std::vector<std::string> screenNames;
     bool unlocked = false;
     bool completed = false;
     // Screens the player has entered (max reached index + 1). Completed

@@ -601,6 +601,7 @@ void LevelEditorDebugUi::drawFileBrowser(LevelEditor& editor)
 
     drawDeleteLevelConfirmation(editor);
     drawPermanentDeleteConfirmation(editor);
+    drawRenamePopup(editor);
 #else
     (void)editor;
 #endif
@@ -627,7 +628,18 @@ void LevelEditorDebugUi::drawActiveLevelsTab(LevelEditor& editor)
             ImGui::PushID(level.path.string().c_str());
             const bool selectedLevel = editor.documentPath().parent_path() == level.path;
             ImGui::SetNextItemOpen(selectedLevel, ImGuiCond_Once);
-            const bool levelOpen = ImGui::TreeNodeEx(level.path.filename().string().c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+            const std::string levelLabel = level.name.empty()
+                ? level.path.filename().string()
+                : level.path.filename().string() + ": " + level.name;
+            const bool levelOpen = ImGui::TreeNodeEx(
+                levelLabel.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Rename")) {
+                pendingRenameLevel_ = level;
+                pendingRenameScreen_.reset();
+                renameBuffer_ = level.name;
+                renamePopupOpen_ = true;
+            }
             ImGui::SameLine();
             if (ImGui::SmallButton("+ Before")) {
                 editor.addLevelAt(level.index);
@@ -648,8 +660,9 @@ void LevelEditorDebugUi::drawActiveLevelsTab(LevelEditor& editor)
             }
 
             if (levelOpen) {
-                if (!browserChanged && ImGui::BeginTable("Screens", 4, ImGuiTableFlags_SizingStretchProp)) {
+                if (!browserChanged && ImGui::BeginTable("Screens", 5, ImGuiTableFlags_SizingStretchProp)) {
                     ImGui::TableSetupColumn("Screen");
+                    ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthFixed, 58.0f);
                     ImGui::TableSetupColumn("Before", ImGuiTableColumnFlags_WidthFixed, 70.0f);
                     ImGui::TableSetupColumn("After", ImGuiTableColumnFlags_WidthFixed, 70.0f);
                     ImGui::TableSetupColumn("Delete", ImGuiTableColumnFlags_WidthFixed, 58.0f);
@@ -662,25 +675,34 @@ void LevelEditorDebugUi::drawActiveLevelsTab(LevelEditor& editor)
                         ImGui::PushID(screen.path.string().c_str());
                         ImGui::TableNextRow();
                         ImGui::TableSetColumnIndex(0);
-                        const std::string screenLabel = screen.path.filename().string();
+                        const std::string screenLabel = screen.name.empty()
+                            ? screen.path.filename().string()
+                            : screen.path.filename().string() + ": " + screen.name;
                         if (ImGui::Selectable(screenLabel.c_str(), screen.path == editor.documentPath())) {
                             editor.selectDocument(screen.path);
                             syncDocumentPath(editor);
                         }
 
                         ImGui::TableSetColumnIndex(1);
+                        if (ImGui::SmallButton("Rename")) {
+                            pendingRenameLevel_ = level;
+                            pendingRenameScreen_ = screen.index;
+                            renameBuffer_ = screen.name;
+                            renamePopupOpen_ = true;
+                        }
+                        ImGui::TableSetColumnIndex(2);
                         if (ImGui::SmallButton("+ Before")) {
                             editor.addScreenAt(level, screen.index);
                             syncDocumentPath(editor);
                             browserChanged = true;
                         }
-                        ImGui::TableSetColumnIndex(2);
+                        ImGui::TableSetColumnIndex(3);
                         if (!browserChanged && ImGui::SmallButton("+ After")) {
                             editor.addScreenAt(level, screen.index + 1);
                             syncDocumentPath(editor);
                             browserChanged = true;
                         }
-                        ImGui::TableSetColumnIndex(3);
+                        ImGui::TableSetColumnIndex(4);
                         if (!browserChanged && ImGui::SmallButton("Delete")) {
                             editor.deleteScreen(level, screen.index);
                             syncDocumentPath(editor);
@@ -763,6 +785,61 @@ void LevelEditorDebugUi::drawDeletedLevelsTab(LevelEditor& editor)
         }
     }
     ImGui::EndChild();
+#else
+    (void)editor;
+#endif
+}
+
+void LevelEditorDebugUi::drawRenamePopup(LevelEditor& editor)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    constexpr const char* popupName = "Name Level or Screen";
+    if (renamePopupOpen_) {
+        ImGui::OpenPopup(popupName);
+    }
+
+    if (ImGui::BeginPopupModal(
+            popupName,
+            &renamePopupOpen_,
+            ImGuiWindowFlags_AlwaysAutoResize)) {
+        const bool namingScreen = pendingRenameScreen_.has_value();
+        ImGui::TextUnformatted(
+            namingScreen ? "Screen name" : "Level name");
+        if (ImGui::IsWindowAppearing()) {
+            ImGui::SetKeyboardFocusHere();
+        }
+        const bool submitted = ImGui::InputText(
+            "##level_name",
+            &renameBuffer_,
+            ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::TextDisabled(
+            "Leave blank to use the numbered default.");
+
+        if (submitted || ImGui::Button("Save", ImVec2(90.0f, 0.0f))) {
+            if (pendingRenameLevel_) {
+                if (pendingRenameScreen_) {
+                    editor.renameScreen(
+                        *pendingRenameLevel_,
+                        *pendingRenameScreen_,
+                        renameBuffer_);
+                } else {
+                    editor.renameLevel(*pendingRenameLevel_, renameBuffer_);
+                }
+            }
+            pendingRenameLevel_.reset();
+            pendingRenameScreen_.reset();
+            renamePopupOpen_ = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(90.0f, 0.0f))) {
+            pendingRenameLevel_.reset();
+            pendingRenameScreen_.reset();
+            renamePopupOpen_ = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
 #else
     (void)editor;
 #endif

@@ -24,11 +24,13 @@ public:
     struct ScreenFile {
         int index = 0;
         std::filesystem::path path;
+        std::string name;
     };
 
     struct LevelDirectory {
         int index = 0;
         std::filesystem::path path;
+        std::string name;
         std::vector<ScreenFile> screens;
     };
 
@@ -90,8 +92,13 @@ public:
     [[nodiscard]] bool tryUndoEdit();
 
     void addLevelAt(int levelIndex);
+    void renameLevel(const LevelDirectory& level, std::string name);
     void deleteLevel(const LevelDirectory& level);
     void addScreenAt(const LevelDirectory& level, int screenIndex);
+    void renameScreen(
+        const LevelDirectory& level,
+        int screenIndex,
+        std::string name);
     void deleteScreen(const LevelDirectory& level, int screenIndex);
     void restoreDeletedLevel(const std::filesystem::path& deletedLevelPath);
     [[nodiscard]] bool canPermanentlyDelete(const std::filesystem::path& path) const;
