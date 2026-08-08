@@ -63,6 +63,7 @@ Application::Application()
           makeMirrorSwapParticleEffect(assetManifest_))
     , settingsCoordinator_(playerProfile_, presentationSettings_)
     , tools_(std::make_unique<ApplicationTools>())
+    , renderFrameArena_("render frame", renderFrameArenaBytes())
 {
     // Leave a diagnostic trail next to the profiles so shipped builds can be
     // debugged from the save directory; Debug builds also emit debug traces.
@@ -950,7 +951,7 @@ void Application::preloadUpcomingAssets()
 }
 
 RenderFrameData Application::buildRenderFrame(
-    const InputRouter::EditorInput& editorInput) const
+    const InputRouter::EditorInput& editorInput)
 {
     (void)editorInput;
     const float beltScrollOffset =
@@ -963,6 +964,7 @@ RenderFrameData Application::buildRenderFrame(
         return *preview;
     }
     if (tools_->levelEditor.editingDocument()) {
+        renderFrameArena_.reset();
         return RenderFrameBuilder::buildEditor({
             .manifest = assetManifest_,
             .editor = tools_->levelEditor,
@@ -977,7 +979,7 @@ RenderFrameData Application::buildRenderFrame(
             .conveyorBeltScrollOffset = beltScrollOffset,
             .levelLocation =
                 levelLocationFromScreenPath(tools_->levelEditor.loadedDocumentPath()),
-        });
+        }, renderFrameArena_);
     }
 #endif
 
@@ -988,6 +990,7 @@ RenderFrameData Application::buildRenderFrame(
 
     // Held by reference for the duration of the call, so it has to outlive it.
     const GameState projectedState = gameplaySession_.projectedState();
+    renderFrameArena_.reset();
     RenderFrameData frame = RenderFrameBuilder::buildGameplay({
         .manifest = assetManifest_,
         .level = level_,
@@ -1003,7 +1006,7 @@ RenderFrameData Application::buildRenderFrame(
             .level = campaign_.currentLevel(),
             .screen = campaign_.currentScreen(),
         },
-    });
+    }, renderFrameArena_);
     particleSystem_.appendRenderData(frame);
     return frame;
 }

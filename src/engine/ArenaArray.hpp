@@ -61,6 +61,27 @@ public:
         dropped_ = 0;
     }
 
+    iterator erase(const_iterator first, const_iterator last) noexcept
+    {
+        const std::size_t firstIndex =
+            static_cast<std::size_t>(first - data_);
+        const std::size_t lastIndex =
+            static_cast<std::size_t>(last - data_);
+        const std::size_t removed = lastIndex - firstIndex;
+        for (std::size_t index = firstIndex;
+             index + removed < size_;
+             ++index) {
+            data_[index] = data_[index + removed];
+        }
+        size_ -= removed;
+        return data_ + firstIndex;
+    }
+
+    iterator erase(const_iterator position) noexcept
+    {
+        return erase(position, position + 1);
+    }
+
     [[nodiscard]] std::size_t size() const noexcept { return size_; }
     [[nodiscard]] std::size_t capacity() const noexcept { return capacity_; }
     [[nodiscard]] bool empty() const noexcept { return size_ == 0; }

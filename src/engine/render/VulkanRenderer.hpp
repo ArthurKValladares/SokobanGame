@@ -217,6 +217,7 @@ private:
         maxFramesInFlight_ };
     ReusableScratchPool<PreparedFrameScratch, preparedFrameSlotCount_>
         preparedFrameScratch_;
+    RenderAssetRequirements frameAssetRequirements_;
     IsoScenePreparer scenePreparer_;
     FrameDescriptorSync descriptorSync_ { maxFramesInFlight_ };
     uint32_t currentFrame_ = 0;

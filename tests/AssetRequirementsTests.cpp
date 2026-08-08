@@ -247,6 +247,14 @@ void testGroundSplatTexturesAreRequired()
     const RenderAssetRequirements empty =
         renderAssetRequirementsForFrame(RenderFrameData {});
     CHECK(!empty.contains(frame.groundSplat.base));
+
+    // The draw path reuses one requirement set. Filling it from an empty
+    // frame must clear the prior frame's bits without releasing its storage.
+    RenderAssetRequirements reused;
+    renderAssetRequirementsForFrame(frame, reused);
+    CHECK(reused.contains(frame.groundSplat.base));
+    renderAssetRequirementsForFrame(RenderFrameData {}, reused);
+    CHECK(reused.empty());
 }
 
 void testPerScreenSplatMapsAreSelectedAndFallBack()

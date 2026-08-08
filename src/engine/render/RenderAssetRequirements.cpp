@@ -66,6 +66,13 @@ void RenderAssetRequirements::merge(const RenderAssetRequirements& other)
     }
 }
 
+void RenderAssetRequirements::clear()
+{
+    std::fill(models_.begin(), models_.end(), false);
+    std::fill(animations_.begin(), animations_.end(), false);
+    std::fill(textures_.begin(), textures_.end(), false);
+}
+
 bool RenderAssetRequirements::contains(RenderModel model) const
 {
     return !model.isCube() && containsIndex(models_, model.index());
@@ -190,6 +197,15 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
 RenderAssetRequirements renderAssetRequirementsForFrame(const RenderFrameData& frame)
 {
     RenderAssetRequirements requirements;
+    renderAssetRequirementsForFrame(frame, requirements);
+    return requirements;
+}
+
+void renderAssetRequirementsForFrame(
+    const RenderFrameData& frame,
+    RenderAssetRequirements& requirements)
+{
+    requirements.clear();
     for (const RenderFrameData::Tile& tile : frame.tiles) {
         requirements.requireModel(tile.model);
         requirements.requireAnimation(tile.animation);
@@ -201,6 +217,5 @@ RenderAssetRequirements renderAssetRequirementsForFrame(const RenderFrameData& f
     requirements.requireTexture(frame.groundSplat.base);
     requirements.requireTexture(frame.groundSplat.detail);
     requirements.requireTexture(frame.groundSplat.splatMap);
-    return requirements;
 }
 } // namespace sokoban

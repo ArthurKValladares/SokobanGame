@@ -871,10 +871,13 @@ void appendDecorations(
 }
 
 RenderFrameData initializeGameplayFrame(
-    const RenderFrameBuilder::GameplayInput& input)
+    const RenderFrameBuilder::GameplayInput& input,
+    FrameArena* arena = nullptr)
 {
     const auto& primaryPlayerVisual = input.presentation.players().front();
-    RenderFrameData frame;
+    RenderFrameData frame = arena != nullptr
+        ? RenderFrameData(*arena)
+        : RenderFrameData {};
     frame.viewMode = RenderViewMode::Isometric3D;
     frame.cameraPitchDegrees = input.cameraPitchDegrees;
     frame.lighting = input.settings.renderLighting();
@@ -1533,12 +1536,27 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     return frame;
 }
 
+RenderFrameData RenderFrameBuilder::buildGameplay(
+    const GameplayInput& input,
+    FrameArena& arena)
+{
+    RenderFrameData frame = initializeGameplayFrame(input, &arena);
+    appendGameplayWorld(frame, input);
+    appendGameplayEntities(frame, input);
+    appendMirrorPreview(frame, input);
+    applyScrollingMaterials(frame, input);
+    return frame;
+}
+
 namespace {
 
 class EditorFrameBuild {
 public:
-    explicit EditorFrameBuild(const RenderFrameBuilder::EditorInput& input)
+    explicit EditorFrameBuild(
+        const RenderFrameBuilder::EditorInput& input,
+        FrameArena* arena = nullptr)
         : input_(input)
+        , arena_(arena)
         , layers_(input.editor.documentLayers())
         , activeLayer_(input.editor.activeLayer())
         , layerCount_(static_cast<uint32_t>(layers_.size()))
@@ -1560,7 +1578,9 @@ public:
 private:
     [[nodiscard]] RenderFrameData initializeEditorFrame() const
     {
-        RenderFrameData frame;
+        RenderFrameData frame = arena_ != nullptr
+            ? RenderFrameData(*arena_)
+            : RenderFrameData {};
         frame.viewMode = RenderViewMode::Isometric3D;
         frame.lighting = input_.settings.renderLighting();
         frame.gridOverlay = input_.settings.renderGridOverlay();
@@ -1942,6 +1962,7 @@ private:
     }
 
     const RenderFrameBuilder::EditorInput& input_;
+    FrameArena* arena_ = nullptr;
     const Level::LayerRows& layers_;
     uint32_t activeLayer_ = 0;
     uint32_t layerCount_ = 0;
@@ -1954,6 +1975,13 @@ private:
 RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
 {
     return EditorFrameBuild(input).build();
+}
+
+RenderFrameData RenderFrameBuilder::buildEditor(
+    const EditorInput& input,
+    FrameArena& arena)
+{
+    return EditorFrameBuild(input, &arena).build();
 }
 
 RenderFrameData::Tile tileVisual(

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/LevelCatalog.hpp"
+#include "engine/FrameArray.hpp"
 #include "engine/Math.hpp"
 
 #include <array>
@@ -153,6 +154,10 @@ template <typename FindTextureByName>
 }
 
 struct RenderFrameData {
+    static constexpr std::size_t tileCapacity = 16384;
+    static constexpr std::size_t waterSurfaceCapacity = 8192;
+    static constexpr std::size_t isoFaceCapacity = 65536;
+    static constexpr std::size_t particleCapacity = 8192;
     enum class EditorDecorationHighlight {
         None,
         Hovered,
@@ -289,6 +294,15 @@ struct RenderFrameData {
         float width = 0.0f;
     };
 
+    RenderFrameData() = default;
+    explicit RenderFrameData(FrameArena& arena)
+        : tiles(arena, tileCapacity)
+        , waterSurfaces(arena, waterSurfaceCapacity)
+        , isoFaces(arena, isoFaceCapacity)
+        , particles(arena, particleCapacity)
+    {
+    }
+
     RenderViewMode viewMode = RenderViewMode::TopDown2D;
     std::optional<float> cameraPitchDegrees;
     // Pulls the camera back without changing what is framed. The fit rescales
@@ -310,14 +324,25 @@ struct RenderFrameData {
     std::optional<CameraExtent> cameraExtent;
     WaterGridBounds waterGridBounds;
     Vec2 playerPosition {};
-    std::vector<Tile> tiles;
-    std::vector<WaterSurface> waterSurfaces;
-    std::vector<IsoFace> isoFaces;
-    std::vector<Particle> particles;
+    FrameArray<Tile> tiles;
+    FrameArray<WaterSurface> waterSurfaces;
+    FrameArray<IsoFace> isoFaces;
+    FrameArray<Particle> particles;
     GroundSplatTextures groundSplat {};
     float waterAnimationTimeSeconds = 0.0f;
     float effectAnimationTimeSeconds = 0.0f;
 };
+
+[[nodiscard]] constexpr std::size_t renderFrameArenaBytes()
+{
+    return arenaBytesFor<RenderFrameData::Tile>(RenderFrameData::tileCapacity) +
+        arenaBytesFor<RenderFrameData::WaterSurface>(
+            RenderFrameData::waterSurfaceCapacity) +
+        arenaBytesFor<RenderFrameData::IsoFace>(
+            RenderFrameData::isoFaceCapacity) +
+        arenaBytesFor<RenderFrameData::Particle>(
+            RenderFrameData::particleCapacity);
+}
 
 struct RenderStats {
     uint64_t frameIndex = 0;

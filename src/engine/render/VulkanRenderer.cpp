@@ -245,7 +245,8 @@ void VulkanRenderer::drawFrame(
     const PreparedFrameScratch& prepared =
         resolvePreparedFrame(preparedFrame);
     const RenderFrameData& frameData = prepared.frameData;
-    ensureAssets(renderAssetRequirementsForFrame(frameData));
+    renderAssetRequirementsForFrame(frameData, frameAssetRequirements_);
+    ensureAssets(frameAssetRequirements_);
 
 #if SOKOBAN_ENABLE_DEBUG_UI
     // Finish the ImGui frame even when swapchain acquisition is out of date

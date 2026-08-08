@@ -18,6 +18,7 @@ public:
     void requireAnimation(RenderAnimation animation);
     void requireTexture(RenderTexture texture);
     void merge(const RenderAssetRequirements& other);
+    void clear();
 
     [[nodiscard]] bool contains(RenderModel model) const;
     [[nodiscard]] bool contains(RenderAnimation animation) const;
@@ -43,5 +44,8 @@ private:
     const AnimationCatalog* animations = nullptr);
 [[nodiscard]] RenderAssetRequirements renderAssetRequirementsForFrame(
     const RenderFrameData& frame);
+void renderAssetRequirementsForFrame(
+    const RenderFrameData& frame,
+    RenderAssetRequirements& requirements);
 
 } // namespace sokoban

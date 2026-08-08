@@ -1,5 +1,7 @@
 #include "engine/ArenaArray.hpp"
 #include "engine/FrameArena.hpp"
+#include "engine/FrameArray.hpp"
+#include "engine/render/RenderTypes.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -177,6 +179,62 @@ void testArenaArrayFromExhaustedArenaIsEmptyNotNull()
     CHECK(values.begin() == values.end());
 }
 
+void testFrameArrayPreservesOwningCopySemantics()
+{
+    sokoban::FrameArena arena("test", sokoban::arenaBytesFor<int>(4));
+    sokoban::FrameArray<int> live(arena, 4);
+    CHECK(live.arenaBacked());
+    CHECK(live.push_back(10));
+    CHECK(live.push_back(20));
+
+    // Copying an arena-backed frame is an explicit lifetime escape, so the
+    // copy becomes ordinary owning storage and survives the arena reset.
+    sokoban::FrameArray<int> owned = live;
+    CHECK(!owned.arenaBacked());
+    arena.reset();
+    CHECK(owned.size() == 2);
+    CHECK(owned[0] == 10);
+    CHECK(owned[1] == 20);
+
+    owned = { 1, 2, 3 };
+    CHECK(owned.size() == 3);
+    CHECK(owned.back() == 3);
+    owned.erase(owned.begin() + 1);
+    CHECK(owned.size() == 2);
+    CHECK(owned.back() == 3);
+}
+
+void testArenaBackedFrameArrayKeepsItsFixedCapacity()
+{
+    sokoban::FrameArena arena("test", sokoban::arenaBytesFor<int>(2));
+    sokoban::FrameArray<int> values(arena, 2);
+    values.reserve(1000);
+    CHECK(values.capacity() == 2);
+    CHECK(values.push_back(1));
+    CHECK(values.push_back(2));
+    CHECK(!values.push_back(3));
+    CHECK(values.droppedCount() == 1);
+}
+
+void testRenderFrameTakesAllCollectionStorageInOneArena()
+{
+    sokoban::FrameArena arena(
+        "render test", sokoban::renderFrameArenaBytes());
+    sokoban::RenderFrameData frame(arena);
+    CHECK(frame.tiles.arenaBacked());
+    CHECK(frame.waterSurfaces.arenaBacked());
+    CHECK(frame.isoFaces.arenaBacked());
+    CHECK(frame.particles.arenaBacked());
+    CHECK(arena.bytesUsed() > 0);
+    CHECK(!arena.exhausted());
+
+    sokoban::RenderFrameData copy = frame;
+    CHECK(!copy.tiles.arenaBacked());
+    CHECK(!copy.waterSurfaces.arenaBacked());
+    CHECK(!copy.isoFaces.arenaBacked());
+    CHECK(!copy.particles.arenaBacked());
+}
+
 } // namespace
 
 int main()
@@ -188,6 +246,9 @@ int main()
     testAllocateUninitializedRespectsType();
     testArenaArrayFillsAndDropsRatherThanGrowing();
     testArenaArrayFromExhaustedArenaIsEmptyNotNull();
+    testFrameArrayPreservesOwningCopySemantics();
+    testArenaBackedFrameArrayKeepsItsFixedCapacity();
+    testRenderFrameTakesAllCollectionStorageInOneArena();
 
     if (failures > 0) {
         std::cerr << "FrameArenaTests: " << failures << " failure(s) of "

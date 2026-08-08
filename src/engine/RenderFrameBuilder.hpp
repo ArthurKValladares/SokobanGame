@@ -74,7 +74,13 @@ public:
     };
 
     [[nodiscard]] static RenderFrameData buildGameplay(const GameplayInput& input);
+    [[nodiscard]] static RenderFrameData buildGameplay(
+        const GameplayInput& input,
+        FrameArena& arena);
     [[nodiscard]] static RenderFrameData buildEditor(const EditorInput& input);
+    [[nodiscard]] static RenderFrameData buildEditor(
+        const EditorInput& input,
+        FrameArena& arena);
 };
 
 } // namespace sokoban

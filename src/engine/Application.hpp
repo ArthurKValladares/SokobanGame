@@ -90,7 +90,7 @@ private:
     [[nodiscard]] RenderAssetRequirements levelAssetRequirements(int levelIndex) const;
     void preloadUpcomingAssets();
     [[nodiscard]] RenderFrameData buildRenderFrame(
-        const InputRouter::EditorInput& editorInput) const;
+        const InputRouter::EditorInput& editorInput);
 
     Window window_;
     // Owns slot stores, the shared settings store, the marker, and every
@@ -124,6 +124,7 @@ private:
     SettingsCoordinator settingsCoordinator_;
     GameplayPresentation presentation_;
     std::unique_ptr<ApplicationTools> tools_;
+    FrameArena renderFrameArena_;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;
     bool running_ = true;
 };
