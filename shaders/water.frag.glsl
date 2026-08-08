@@ -520,20 +520,42 @@ void main()
         rippleCrestHalfWidth * secondaryThicknessScale,
         rippleHaloWidth * secondaryThicknessScale);
 
-    vec2 refractionFlow = 0.5 * vec2(
-        sin(patternPosition.y * 1.13 + time) +
-            cos(patternPosition.x * 0.71 - time * 0.81),
-        cos(patternPosition.x * 1.07 - time * 0.92) +
-            sin(patternPosition.y * 0.67 + time * 0.76));
+    // Treat the shared ripple field as a thin refractive lens. Its
+    // screen-space gradient points toward the neighboring scene sample that
+    // a bent ray would reach. Dividing by fwidth keeps the displacement
+    // stable across render scales and perspective foreshortening while flat
+    // parts of the field still produce no displacement.
+    float diffractionField =
+        caustics.x * 0.70 + caustics.y * 0.30 +
+        secondaryCaustics.x * 0.20 +
+        secondaryCaustics.y * 0.10;
+    vec2 diffractionGradient = vec2(
+        dFdx(diffractionField),
+        dFdy(diffractionField));
+    vec2 diffractionFlow = diffractionGradient /
+        max(fwidth(diffractionField), 0.0001);
 
     vec2 sceneSize = vec2(textureSize(sceneColor, 0));
     vec2 sceneUv = gl_FragCoord.xy / sceneSize;
     vec2 refractionOffset =
-        refractionFlow * pc.textureOptions.z *
+        diffractionFlow * pc.textureOptions.z *
         vec2(sceneSize.y / max(sceneSize.x, 1.0), 1.0);
-    vec3 refractedScene = texture(
+    vec3 diffractedScene = texture(
         sceneColor,
         clamp(sceneUv + refractionOffset, vec2(0.001), vec2(0.999))).rgb;
+
+    // Reuse the same bands as focused light on the geometry below the water.
+    // This happens before tinting so the caustics belong to the refracted
+    // scene instead of reading as another decal on the surface plane.
+    float underwaterCausticCoverage = clamp(
+        caustics.x * 0.35 + caustics.y * 0.65 +
+            secondaryCaustics.x * 0.08 +
+            secondaryCaustics.y * 0.12,
+        0.0,
+        1.0);
+    diffractedScene *= 1.0 +
+        underwaterCausticCoverage *
+            clamp(pc.shadowVertices[3].w, 0.0, 1.0);
 
     float bodyTone = broadWaterTone(
         worldPosition,
@@ -548,7 +570,7 @@ void main()
     vec3 waterTint =
         pc.color.rgb * bodyToneMultiplier;
     vec3 waterColor = mix(
-        refractedScene,
+        diffractedScene,
         waterTint,
         clamp(pc.color.a, 0.0, 0.95));
 

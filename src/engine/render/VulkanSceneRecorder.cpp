@@ -1204,7 +1204,7 @@ private:
                     config::waterPrimaryRippleOpacity,
                     config::waterPrimaryShorelineOpacity,
                     config::waterSecondaryShorelineOpacity,
-                    0.0f,
+                    config::waterUnderwaterCausticStrength,
                 },
             },
             .color = color,

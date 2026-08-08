@@ -31,6 +31,7 @@ inline constexpr float waterRippleHaloWidth = 0.085f;
 inline constexpr float waterRippleHaloStrength = 0.08f;
 inline constexpr float waterRippleCrestStrength = 0.50f;
 inline constexpr float waterSecondaryRippleThicknessScale = 0.48f;
+inline constexpr float waterUnderwaterCausticStrength = 0.22f;
 
 inline constexpr Vec3 waterTileBorderColor {
     0.52f,
@@ -56,6 +57,9 @@ static_assert(
 static_assert(
     waterSecondaryRippleOpacity >= 0.0f &&
     waterSecondaryRippleOpacity <= 1.0f);
+static_assert(
+    waterUnderwaterCausticStrength >= 0.0f &&
+    waterUnderwaterCausticStrength <= 1.0f);
 static_assert(
     waterPrimaryShorelineOpacity >= 0.0f &&
     waterPrimaryShorelineOpacity <= 1.0f);
