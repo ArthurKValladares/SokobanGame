@@ -3,6 +3,7 @@
 #include "engine/AssetManifest.hpp"
 #include "engine/render/LightingConfig.hpp"
 #include "engine/render/SceneConfig.hpp"
+#include "engine/render/WaterConfig.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -113,6 +114,49 @@ void PresentationSettings::normalize()
             geometry.surfaceEntityWidthDepth,
             config::minimumSurfaceEntityWidthDepth,
             config::maximumSurfaceEntityWidthDepth);
+
+    water.surfaceColor.x = std::clamp(water.surfaceColor.x, 0.0f, 1.0f);
+    water.surfaceColor.y = std::clamp(water.surfaceColor.y, 0.0f, 1.0f);
+    water.surfaceColor.z = std::clamp(water.surfaceColor.z, 0.0f, 1.0f);
+    water.surfaceColor.w = std::clamp(water.surfaceColor.w, 0.0f, 0.95f);
+    water.primaryRippleOpacity =
+        std::clamp(water.primaryRippleOpacity, 0.0f, 1.0f);
+    water.secondaryRippleOpacity =
+        std::clamp(water.secondaryRippleOpacity, 0.0f, 1.0f);
+    water.rippleSpatialFrequency = std::clamp(
+        water.rippleSpatialFrequency,
+        config::minimumWaterRippleSpatialFrequency,
+        config::maximumWaterRippleSpatialFrequency);
+    water.rippleSpeed = std::clamp(
+        water.rippleSpeed,
+        config::minimumWaterRippleSpeed,
+        config::maximumWaterRippleSpeed);
+    water.refractionStrength = std::clamp(
+        water.refractionStrength,
+        config::minimumWaterRefractionStrength,
+        config::maximumWaterRefractionStrength);
+    water.rippleCrestHalfWidth = std::clamp(
+        water.rippleCrestHalfWidth,
+        config::minimumWaterRippleWidth,
+        config::maximumWaterRippleWidth);
+    water.rippleHaloWidth = std::clamp(
+        water.rippleHaloWidth,
+        water.rippleCrestHalfWidth,
+        config::maximumWaterRippleWidth);
+    water.rippleHaloStrength =
+        std::clamp(water.rippleHaloStrength, 0.0f, 1.0f);
+    water.rippleCrestStrength =
+        std::clamp(water.rippleCrestStrength, 0.0f, 1.0f);
+    water.secondaryRippleThicknessScale = std::clamp(
+        water.secondaryRippleThicknessScale,
+        config::minimumWaterSecondaryRippleThicknessScale,
+        config::maximumWaterSecondaryRippleThicknessScale);
+    water.underwaterCausticStrength =
+        std::clamp(water.underwaterCausticStrength, 0.0f, 1.0f);
+    water.primaryShorelineOpacity =
+        std::clamp(water.primaryShorelineOpacity, 0.0f, 1.0f);
+    water.secondaryShorelineOpacity =
+        std::clamp(water.secondaryShorelineOpacity, 0.0f, 1.0f);
 
     for (float& scale : tileScales_) {
         scale = clampedTileScale(scale);

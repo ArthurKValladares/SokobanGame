@@ -3,6 +3,7 @@
 #include "engine/LevelCatalog.hpp"
 #include "engine/FrameArray.hpp"
 #include "engine/Math.hpp"
+#include "engine/render/WaterConfig.hpp"
 
 #include <array>
 #include <cstddef>
@@ -294,6 +295,29 @@ struct RenderFrameData {
         float width = 0.0f;
     };
 
+    // Snapshot of the live water tuning used by the render thread. Defaults
+    // preserve the authored look for frames built outside PresentationSettings.
+    struct WaterRendering {
+        Vec4 surfaceColor = config::waterSurfaceColor;
+        float primaryRippleOpacity = config::waterPrimaryRippleOpacity;
+        float secondaryRippleOpacity = config::waterSecondaryRippleOpacity;
+        float rippleSpatialFrequency = config::waterRippleSpatialFrequency;
+        float rippleSpeed = config::waterRippleSpeed;
+        float refractionStrength = config::waterRefractionStrength;
+        float rippleCrestHalfWidth = config::waterRippleCrestHalfWidth;
+        float rippleHaloWidth = config::waterRippleHaloWidth;
+        float rippleHaloStrength = config::waterRippleHaloStrength;
+        float rippleCrestStrength = config::waterRippleCrestStrength;
+        float secondaryRippleThicknessScale =
+            config::waterSecondaryRippleThicknessScale;
+        float underwaterCausticStrength =
+            config::waterUnderwaterCausticStrength;
+        float primaryShorelineOpacity =
+            config::waterPrimaryShorelineOpacity;
+        float secondaryShorelineOpacity =
+            config::waterSecondaryShorelineOpacity;
+    };
+
     RenderFrameData() = default;
     explicit RenderFrameData(FrameArena& arena)
         : tiles(arena, tileCapacity)
@@ -317,6 +341,7 @@ struct RenderFrameData {
     std::optional<float> cameraDistanceMultiplier;
     Lighting lighting {};
     GridOverlay gridOverlay {};
+    WaterRendering waterRendering {};
     uint32_t levelWidth = 0;
     uint32_t levelHeight = 0;
     uint32_t levelDepth = 1;

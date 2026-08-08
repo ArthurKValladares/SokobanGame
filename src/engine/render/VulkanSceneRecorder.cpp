@@ -609,6 +609,7 @@ private:
                     },
                     frameData.waterAnimationTimeSeconds,
                     face.shorelineMask,
+                    frameData.waterRendering,
                     face.isEditorPreview);
             } else if (
                 face.material == PreparedSurfaceMaterial::MirrorEnergy) {
@@ -1144,6 +1145,7 @@ private:
         Vec2 boardSize,
         float animationTimeSeconds,
         uint32_t shorelineMask,
+        const RenderFrameData::WaterRendering& rendering,
         bool isEditorPreview)
     {
         vkCmdSetPrimitiveTopology(
@@ -1201,18 +1203,18 @@ private:
                     boardSize.y,
                 },
                 Vec4 {
-                    config::waterPrimaryRippleOpacity,
-                    config::waterPrimaryShorelineOpacity,
-                    config::waterSecondaryShorelineOpacity,
-                    config::waterUnderwaterCausticStrength,
+                    rendering.primaryRippleOpacity,
+                    rendering.primaryShorelineOpacity,
+                    rendering.secondaryShorelineOpacity,
+                    rendering.underwaterCausticStrength,
                 },
             },
             .color = color,
             .normalAndAmbientRed = {
                 config::waterShorelineFarThickness,
                 config::waterTileBorderExteriorFadeDistance,
-                config::waterRippleCrestHalfWidth,
-                config::waterRippleHaloWidth,
+                rendering.rippleCrestHalfWidth,
+                rendering.rippleHaloWidth,
             },
             .sunDirectionAndAmbientGreen = {
                 config::waterToneSpatialFrequency,
@@ -1222,15 +1224,15 @@ private:
             },
             .sunRadianceAndAmbientBlue = {
                 config::waterToneSpeed,
-                config::waterRippleHaloStrength,
-                config::waterRippleCrestStrength,
-                config::waterSecondaryRippleThicknessScale,
+                rendering.rippleHaloStrength,
+                rendering.rippleCrestStrength,
+                rendering.secondaryRippleThicknessScale,
             },
             .shadowOptions = {
                 config::waterSecondaryRippleColor.x,
                 config::waterSecondaryRippleColor.y,
                 config::waterSecondaryRippleColor.z,
-                config::waterSecondaryRippleOpacity,
+                rendering.secondaryRippleOpacity,
             },
             .materialOptions = {
                 config::waterShorelineNearDistance,
@@ -1245,9 +1247,9 @@ private:
                 config::waterShorelineFarDistance,
             },
             .textureOptions = {
-                config::waterRippleSpatialFrequency,
-                config::waterRippleSpeed,
-                config::waterRefractionStrength,
+                rendering.rippleSpatialFrequency,
+                rendering.rippleSpeed,
+                rendering.refractionStrength,
                 static_cast<float>(shorelineMask),
             },
         };

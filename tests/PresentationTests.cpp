@@ -333,6 +333,15 @@ void testSettingsNormalizeAndConvert()
     settings.grid.lineWidth = -2.0f;
     settings.geometry.surfaceEntityHeight = 8.0f;
     settings.geometry.surfaceEntityWidthDepth = 0.0f;
+    settings.water.surfaceColor = { -1.0f, 2.0f, 0.5f, 2.0f };
+    settings.water.primaryRippleOpacity = 2.0f;
+    settings.water.secondaryRippleOpacity = -1.0f;
+    settings.water.rippleSpatialFrequency = 99.0f;
+    settings.water.rippleSpeed = -1.0f;
+    settings.water.refractionStrength = 1.0f;
+    settings.water.rippleCrestHalfWidth = 0.4f;
+    settings.water.rippleHaloWidth = 0.1f;
+    settings.water.underwaterCausticStrength = 2.0f;
     settings.setTileScale(TileType::Wall, 99.0f);
     settings.normalize();
 
@@ -350,6 +359,24 @@ void testSettingsNormalizeAndConvert()
     CHECK(near(settings.grid.lineWidth, 0.0f));
     CHECK(near(settings.geometry.surfaceEntityHeight, 0.5f));
     CHECK(near(settings.geometry.surfaceEntityWidthDepth, 0.1f));
+    CHECK(near(settings.water.surfaceColor.x, 0.0f));
+    CHECK(near(settings.water.surfaceColor.y, 1.0f));
+    CHECK(near(settings.water.surfaceColor.w, 0.95f));
+    CHECK(near(settings.water.primaryRippleOpacity, 1.0f));
+    CHECK(near(settings.water.secondaryRippleOpacity, 0.0f));
+    CHECK(near(
+        settings.water.rippleSpatialFrequency,
+        config::maximumWaterRippleSpatialFrequency));
+    CHECK(near(
+        settings.water.rippleSpeed,
+        config::minimumWaterRippleSpeed));
+    CHECK(near(
+        settings.water.refractionStrength,
+        config::maximumWaterRefractionStrength));
+    CHECK(near(
+        settings.water.rippleHaloWidth,
+        settings.water.rippleCrestHalfWidth));
+    CHECK(near(settings.water.underwaterCausticStrength, 1.0f));
     CHECK(near(settings.tileScale(TileType::Wall), config::maxTileScale));
 
     settings.lighting.sunAzimuthDegrees = 0.0f;
@@ -1066,7 +1093,10 @@ void testGameplayFrameBuildsProceduralWaterSurface()
     presentation.resetEntities(state);
     presentation.advanceClocks(0.75f, false);
 
-    const PresentationSettings settings;
+    PresentationSettings settings;
+    settings.water.surfaceColor = { 0.12f, 0.24f, 0.36f, 0.48f };
+    settings.water.underwaterCausticStrength = 0.61f;
+    settings.water.refractionStrength = 0.0042f;
     const GameplaySession::Action action;
     const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
         .manifest = testManifest(),
@@ -1088,12 +1118,19 @@ void testGameplayFrameBuildsProceduralWaterSurface()
         CHECK(near(
             water.elevation,
             1.0f - config::waterDepthBelowGround));
-        CHECK(near(water.color.w, config::waterSurfaceColor.w));
+        CHECK(near(water.color.x, settings.water.surfaceColor.x));
+        CHECK(near(water.color.w, settings.water.surfaceColor.w));
         const uint32_t expectedShorelineMask =
             waterShorelineBit(WaterShorelineEdge::NegativeX) |
             waterShorelineBit(WaterShorelineEdge::PositiveX);
         CHECK(water.shorelineMask == expectedShorelineMask);
     }
+    CHECK(near(
+        frame.waterRendering.underwaterCausticStrength,
+        settings.water.underwaterCausticStrength));
+    CHECK(near(
+        frame.waterRendering.refractionStrength,
+        settings.water.refractionStrength));
     CHECK(near(frame.waterAnimationTimeSeconds, 0.75f));
     CHECK(std::ranges::none_of(
         frame.tiles,

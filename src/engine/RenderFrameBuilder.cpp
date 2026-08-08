@@ -528,7 +528,7 @@ void appendWaterSurface(
         .cell = cell,
         .position = position,
         .size = size,
-        .color = config::waterSurfaceColor,
+        .color = frame.waterRendering.surfaceColor,
         .elevation = static_cast<float>(cell.z) + 1.0f -
             config::waterDepthBelowGround +
             (editorPreview ? 0.02f : 0.0f),
@@ -882,6 +882,7 @@ RenderFrameData initializeGameplayFrame(
     frame.cameraPitchDegrees = input.cameraPitchDegrees;
     frame.lighting = input.settings.renderLighting();
     frame.gridOverlay = input.settings.renderGridOverlay();
+    frame.waterRendering = input.settings.water;
     frame.levelWidth = input.level.width();
     frame.levelHeight = input.level.height();
     frame.levelDepth = input.level.depth();
@@ -1584,6 +1585,7 @@ private:
         frame.viewMode = RenderViewMode::Isometric3D;
         frame.lighting = input_.settings.renderLighting();
         frame.gridOverlay = input_.settings.renderGridOverlay();
+        frame.waterRendering = input_.settings.water;
         frame.levelWidth = input_.editor.documentWidth();
         frame.levelHeight = input_.editor.documentHeight();
         frame.levelDepth = std::max(layerCount_, 1U);

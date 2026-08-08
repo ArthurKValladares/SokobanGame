@@ -9,6 +9,7 @@
 #include "engine/TaskSystem.hpp"
 #include "engine/render/LightingConfig.hpp"
 #include "engine/render/SceneConfig.hpp"
+#include "engine/render/WaterConfig.hpp"
 
 #if SOKOBAN_ENABLE_DEBUG_UI
 #include <imgui.h>
@@ -278,6 +279,127 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             "%.2f");
         ImGui::TextDisabled("End and pressure plate geometry");
 
+    }
+
+    if (ImGui::CollapsingHeader("Water")) {
+        auto& water = settings.water;
+        if (ImGui::Button("Reset Water Defaults")) {
+            water = {};
+        }
+        ImGui::TextDisabled(
+            "Live renderer tuning; reset restores WaterConfig defaults.");
+
+        if (ImGui::TreeNodeEx(
+                "Optics", ImGuiTreeNodeFlags_DefaultOpen)) {
+            float surfaceColor[4] {
+                water.surfaceColor.x,
+                water.surfaceColor.y,
+                water.surfaceColor.z,
+                water.surfaceColor.w,
+            };
+            if (ImGui::ColorEdit4("Surface Color", surfaceColor)) {
+                water.surfaceColor = {
+                    surfaceColor[0],
+                    surfaceColor[1],
+                    surfaceColor[2],
+                    surfaceColor[3],
+                };
+            }
+            ImGui::DragFloat(
+                "Refraction Strength",
+                &water.refractionStrength,
+                0.0001f,
+                config::minimumWaterRefractionStrength,
+                config::maximumWaterRefractionStrength,
+                "%.4f");
+            ImGui::SliderFloat(
+                "Underwater Caustics",
+                &water.underwaterCausticStrength,
+                0.0f,
+                1.0f,
+                "%.2f");
+            ImGui::TreePop();
+        }
+
+        if (ImGui::TreeNodeEx(
+                "Ripples", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::DragFloat(
+                "Spatial Frequency",
+                &water.rippleSpatialFrequency,
+                0.02f,
+                config::minimumWaterRippleSpatialFrequency,
+                config::maximumWaterRippleSpatialFrequency,
+                "%.2f");
+            ImGui::DragFloat(
+                "Animation Speed",
+                &water.rippleSpeed,
+                0.02f,
+                config::minimumWaterRippleSpeed,
+                config::maximumWaterRippleSpeed,
+                "%.2f");
+            ImGui::SliderFloat(
+                "Primary Opacity",
+                &water.primaryRippleOpacity,
+                0.0f,
+                1.0f,
+                "%.2f");
+            ImGui::SliderFloat(
+                "Secondary Opacity",
+                &water.secondaryRippleOpacity,
+                0.0f,
+                1.0f,
+                "%.2f");
+            ImGui::DragFloat(
+                "Crest Half Width",
+                &water.rippleCrestHalfWidth,
+                0.001f,
+                config::minimumWaterRippleWidth,
+                config::maximumWaterRippleWidth,
+                "%.3f");
+            ImGui::DragFloat(
+                "Halo Width",
+                &water.rippleHaloWidth,
+                0.001f,
+                config::minimumWaterRippleWidth,
+                config::maximumWaterRippleWidth,
+                "%.3f");
+            ImGui::SliderFloat(
+                "Halo Strength",
+                &water.rippleHaloStrength,
+                0.0f,
+                1.0f,
+                "%.2f");
+            ImGui::SliderFloat(
+                "Crest Strength",
+                &water.rippleCrestStrength,
+                0.0f,
+                1.0f,
+                "%.2f");
+            ImGui::DragFloat(
+                "Secondary Width Scale",
+                &water.secondaryRippleThicknessScale,
+                0.01f,
+                config::minimumWaterSecondaryRippleThicknessScale,
+                config::maximumWaterSecondaryRippleThicknessScale,
+                "%.2f");
+            ImGui::TreePop();
+        }
+
+        if (ImGui::TreeNode("Shoreline")) {
+            ImGui::SliderFloat(
+                "Primary Foam Opacity",
+                &water.primaryShorelineOpacity,
+                0.0f,
+                1.0f,
+                "%.2f");
+            ImGui::SliderFloat(
+                "Secondary Foam Opacity",
+                &water.secondaryShorelineOpacity,
+                0.0f,
+                1.0f,
+                "%.2f");
+            ImGui::TreePop();
+        }
     }
 
     if (ImGui::CollapsingHeader("Audio")) {

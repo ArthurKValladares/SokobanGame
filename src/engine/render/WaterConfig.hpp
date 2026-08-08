@@ -33,6 +33,17 @@ inline constexpr float waterRippleCrestStrength = 0.50f;
 inline constexpr float waterSecondaryRippleThicknessScale = 0.48f;
 inline constexpr float waterUnderwaterCausticStrength = 0.22f;
 
+inline constexpr float minimumWaterRippleSpatialFrequency = 0.1f;
+inline constexpr float maximumWaterRippleSpatialFrequency = 6.0f;
+inline constexpr float minimumWaterRippleSpeed = 0.0f;
+inline constexpr float maximumWaterRippleSpeed = 5.0f;
+inline constexpr float minimumWaterRefractionStrength = 0.0f;
+inline constexpr float maximumWaterRefractionStrength = 0.02f;
+inline constexpr float minimumWaterRippleWidth = 0.001f;
+inline constexpr float maximumWaterRippleWidth = 0.5f;
+inline constexpr float minimumWaterSecondaryRippleThicknessScale = 0.05f;
+inline constexpr float maximumWaterSecondaryRippleThicknessScale = 2.0f;
+
 inline constexpr Vec3 waterTileBorderColor {
     0.52f,
     0.72f,

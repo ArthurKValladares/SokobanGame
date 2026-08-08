@@ -47,6 +47,7 @@ public:
     Lighting lighting;
     Grid grid;
     Geometry geometry;
+    RenderFrameData::WaterRendering water;
 
     void normalize();
     // Seeds per-tile render scales from the asset manifest's tile visuals.
