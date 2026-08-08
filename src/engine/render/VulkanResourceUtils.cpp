@@ -14,6 +14,57 @@ void vkCheck(VkResult result, const char* message)
 
 namespace vulkanResources {
 
+VkImageMemoryBarrier2 imageBarrier(
+    VkImage image,
+    VkImageSubresourceRange range,
+    ImageState from,
+    ImageState to)
+{
+    return {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = from.stageMask,
+        .srcAccessMask = from.accessMask,
+        .dstStageMask = to.stageMask,
+        .dstAccessMask = to.accessMask,
+        .oldLayout = from.layout,
+        .newLayout = to.layout,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = image,
+        .subresourceRange = range,
+    };
+}
+
+void transitionImages(
+    VkCommandBuffer commandBuffer,
+    std::span<const VkImageMemoryBarrier2> barriers,
+    VkDependencyFlags dependencyFlags)
+{
+    const VkDependencyInfo dependency {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .dependencyFlags = dependencyFlags,
+        .imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size()),
+        .pImageMemoryBarriers = barriers.data(),
+    };
+    vkCmdPipelineBarrier2(commandBuffer, &dependency);
+}
+
+void transitionImage(
+    VkCommandBuffer commandBuffer,
+    VkImage image,
+    VkImageSubresourceRange range,
+    ImageState from,
+    ImageState to,
+    VkDependencyFlags dependencyFlags)
+{
+    const VkImageMemoryBarrier2 barrier =
+        imageBarrier(image, range, from, to);
+    transitionImages(
+        commandBuffer,
+        std::span { &barrier, 1 },
+        dependencyFlags);
+}
+
 uint32_t findMemoryType(
     VkPhysicalDevice physicalDevice,
     uint32_t typeFilter,

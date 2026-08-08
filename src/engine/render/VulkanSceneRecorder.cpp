@@ -425,39 +425,21 @@ private:
             return;
         }
 #endif
-        const VkImageMemoryBarrier2 barrier {
-            .sType =
-                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask =
+        vulkanResources::transitionImage(
+            commandBuffer,
+            colorImage,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+            {
                 VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-            .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
-            .dstStageMask =
-                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-            .dstAccessMask =
-                VK_ACCESS_2_MEMORY_READ_BIT |
                 VK_ACCESS_2_MEMORY_WRITE_BIT,
-            .oldLayout =
                 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .newLayout =
-                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = colorImage,
-            .subresourceRange = {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1,
             },
-        };
-        const VkDependencyInfo dependency {
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
-            .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers = &barrier,
-        };
-        vkCmdPipelineBarrier2(commandBuffer, &dependency);
+            {
+                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            },
+            VK_DEPENDENCY_BY_REGION_BIT);
         ++stats_.imageBarriers;
 
         const VkRenderingAttachmentInfo colorAttachment {

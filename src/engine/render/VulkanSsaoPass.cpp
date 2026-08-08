@@ -86,43 +86,36 @@ void VulkanSsaoPass::record(
         return;
     }
 
-    VkImageMemoryBarrier2 depthToRead {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-            VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-        .srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-        .dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = depthSource,
-        .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
+    const std::array<VkImageMemoryBarrier2, 2> beforeBarriers {
+        vulkanResources::imageBarrier(
+            depthSource,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_DEPTH_BIT),
+            {
+                VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                    VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+            },
+            {
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            }),
+        vulkanResources::imageBarrier(
+            image_.image,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+            {
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                VK_ACCESS_2_NONE,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+            },
+            {
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            }),
     };
-    VkImageMemoryBarrier2 ssaoToAttachment = depthToRead;
-    ssaoToAttachment.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-    ssaoToAttachment.srcAccessMask = VK_ACCESS_2_NONE;
-    ssaoToAttachment.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-    ssaoToAttachment.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-    ssaoToAttachment.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    ssaoToAttachment.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    ssaoToAttachment.image = image_.image;
-    ssaoToAttachment.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-    std::array<VkImageMemoryBarrier2, 2> beforeBarriers { depthToRead, ssaoToAttachment };
-    VkDependencyInfo beforeDependency {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = static_cast<uint32_t>(beforeBarriers.size()),
-        .pImageMemoryBarriers = beforeBarriers.data(),
-    };
-    vkCmdPipelineBarrier2(commandBuffer, &beforeDependency);
+    vulkanResources::transitionImages(commandBuffer, beforeBarriers);
     stats.imageBarriers += 2;
 
     VkViewport viewport {
@@ -183,30 +176,36 @@ void VulkanSsaoPass::record(
     ++stats.drawCalls;
     vkCmdEndRendering(commandBuffer);
 
-    VkImageMemoryBarrier2 ssaoToRead = ssaoToAttachment;
-    ssaoToRead.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-    ssaoToRead.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-    ssaoToRead.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-    ssaoToRead.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
-    ssaoToRead.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    ssaoToRead.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-    VkImageMemoryBarrier2 depthBack = depthToRead;
-    depthBack.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-    depthBack.srcAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
-    depthBack.dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-        VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
-    depthBack.dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    depthBack.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    depthBack.newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-
-    std::array<VkImageMemoryBarrier2, 2> afterBarriers { ssaoToRead, depthBack };
-    VkDependencyInfo afterDependency {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = static_cast<uint32_t>(afterBarriers.size()),
-        .pImageMemoryBarriers = afterBarriers.data(),
+    const std::array<VkImageMemoryBarrier2, 2> afterBarriers {
+        vulkanResources::imageBarrier(
+            image_.image,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+            {
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            },
+            {
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            }),
+        vulkanResources::imageBarrier(
+            depthSource,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_DEPTH_BIT),
+            {
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            },
+            {
+                VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                    VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+            }),
     };
-    vkCmdPipelineBarrier2(commandBuffer, &afterDependency);
+    vulkanResources::transitionImages(commandBuffer, afterBarriers);
     stats.imageBarriers += 2;
 
     VkRenderingAttachmentInfo compositeAttachment {

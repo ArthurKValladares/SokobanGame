@@ -104,25 +104,20 @@ ImageData captureImageRegion(
         // The caller has already finished rendering into this image, so the
         // only synchronisation needed is the layout move to transfer-source
         // and back.
-        const VkImageMemoryBarrier2 toTransfer {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-            .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
-            .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
-            .oldLayout = sourceLayout,
-            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = sourceImage,
-            .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
-        };
-        const VkDependencyInfo toTransferDependency {
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers = &toTransfer,
-        };
-        vkCmdPipelineBarrier2(commandBuffer, &toTransferDependency);
+        vulkanResources::transitionImage(
+            commandBuffer,
+            sourceImage,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+            {
+                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                VK_ACCESS_2_MEMORY_WRITE_BIT,
+                sourceLayout,
+            },
+            {
+                VK_PIPELINE_STAGE_2_COPY_BIT,
+                VK_ACCESS_2_TRANSFER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            });
 
         const VkBufferImageCopy region {
             .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
@@ -139,26 +134,20 @@ ImageData captureImageRegion(
 
         // Restore the layout the caller left it in, so the next frame's
         // rendering is unaffected by having captured.
-        const VkImageMemoryBarrier2 restore {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
-            .srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-            .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT |
-                VK_ACCESS_2_MEMORY_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            .newLayout = sourceLayout,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = sourceImage,
-            .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
-        };
-        const VkDependencyInfo restoreDependency {
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers = &restore,
-        };
-        vkCmdPipelineBarrier2(commandBuffer, &restoreDependency);
+        vulkanResources::transitionImage(
+            commandBuffer,
+            sourceImage,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+            {
+                VK_PIPELINE_STAGE_2_COPY_BIT,
+                VK_ACCESS_2_TRANSFER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            },
+            {
+                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+                sourceLayout,
+            });
         vkCheck(vkEndCommandBuffer(commandBuffer),
             "vkEndCommandBuffer capture failed");
 

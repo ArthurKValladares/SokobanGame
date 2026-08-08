@@ -152,98 +152,68 @@ void VulkanSwapchainResources::beginFrame(
     RenderStats& stats)
 {
     (void)imageIndex;
-    VkImageMemoryBarrier2 resolvedToColor {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
-        .srcAccessMask = VK_ACCESS_2_NONE,
-        .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = resolvedColorImage_.image,
-        .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
+    const auto colorAttachmentState = vulkanResources::ImageState {
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
     };
-    VkDependencyInfo dependency {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &resolvedToColor,
-    };
-    vkCmdPipelineBarrier2(commandBuffer, &dependency);
+    vulkanResources::transitionImage(
+        commandBuffer,
+        resolvedColorImage_.image,
+        vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+        {},
+        colorAttachmentState);
     ++stats.imageBarriers;
 
     if (msaaEnabled()) {
-        VkImageMemoryBarrier2 msaaToColor = resolvedToColor;
-        msaaToColor.image = msaaColorImage_.image;
-        dependency.pImageMemoryBarriers = &msaaToColor;
-        vkCmdPipelineBarrier2(commandBuffer, &dependency);
+        vulkanResources::transitionImage(
+            commandBuffer,
+            msaaColorImage_.image,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+            {},
+            colorAttachmentState);
         ++stats.imageBarriers;
     }
 
     if (depthImage_.image) {
-        VkImageMemoryBarrier2 depthToAttachment {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = depthLayoutInitialized_
+        vulkanResources::transitionImage(
+            commandBuffer,
+            depthImage_.image,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_DEPTH_BIT),
+            {
+                depthLayoutInitialized_
                 ? VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT
                 : VK_PIPELINE_STAGE_2_NONE,
-            .srcAccessMask = depthLayoutInitialized_
+                depthLayoutInitialized_
                 ? VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
                 : VK_ACCESS_2_NONE,
-            .dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-            .dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            .oldLayout = depthLayoutInitialized_
+                depthLayoutInitialized_
                 ? VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL
                 : VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = depthImage_.image,
-            .subresourceRange = {
-                .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1,
             },
-        };
-        dependency.pImageMemoryBarriers = &depthToAttachment;
-        vkCmdPipelineBarrier2(commandBuffer, &dependency);
+            {
+                VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                    VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                    VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+            });
         depthLayoutInitialized_ = true;
         ++stats.imageBarriers;
     }
 
     if (resolveDepthImage_.image) {
-        VkImageMemoryBarrier2 resolveToAttachment {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
-            .srcAccessMask = VK_ACCESS_2_NONE,
-            .dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-            .dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = resolveDepthImage_.image,
-            .subresourceRange = {
-                .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1,
-            },
-        };
-        dependency.pImageMemoryBarriers = &resolveToAttachment;
-        vkCmdPipelineBarrier2(commandBuffer, &dependency);
+        vulkanResources::transitionImage(
+            commandBuffer,
+            resolveDepthImage_.image,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_DEPTH_BIT),
+            {},
+            {
+                VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                    VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+            });
         ++stats.imageBarriers;
     }
 }
@@ -253,31 +223,17 @@ void VulkanSwapchainResources::endFrame(
     uint32_t imageIndex,
     RenderStats& stats) const
 {
-    VkImageMemoryBarrier2 toPresent {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_NONE,
-        .dstAccessMask = VK_ACCESS_2_NONE,
-        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = image(imageIndex),
-        .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
+    vulkanResources::transitionImage(
+        commandBuffer,
+        image(imageIndex),
+        vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+        {
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         },
-    };
-    VkDependencyInfo dependency {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &toPresent,
-    };
-    vkCmdPipelineBarrier2(commandBuffer, &dependency);
+        { VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
+            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR });
     ++stats.imageBarriers;
 }
 
@@ -288,31 +244,16 @@ void VulkanSwapchainResources::ensureSceneColorReadable(
     if (!sceneColorImage_.image || sceneColorLayout_ != VK_IMAGE_LAYOUT_UNDEFINED) {
         return;
     }
-    VkImageMemoryBarrier2 toRead {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
-        .srcAccessMask = VK_ACCESS_2_NONE,
-        .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-        .dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = sceneColorImage_.image,
-        .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
-    };
-    VkDependencyInfo dependency {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &toRead,
-    };
-    vkCmdPipelineBarrier2(commandBuffer, &dependency);
+    vulkanResources::transitionImage(
+        commandBuffer,
+        sceneColorImage_.image,
+        vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+        {},
+        {
+            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        });
     sceneColorLayout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     ++stats.imageBarriers;
 }
@@ -321,44 +262,39 @@ void VulkanSwapchainResources::copyResolvedSceneColor(
     VkCommandBuffer commandBuffer,
     RenderStats& stats)
 {
-    VkImageMemoryBarrier2 colorToTransfer {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = resolvedColorImage_.image,
-        .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
+    const std::array<VkImageMemoryBarrier2, 2> toTransfer {
+        vulkanResources::imageBarrier(
+            resolvedColorImage_.image,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+            {
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            },
+            {
+                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                VK_ACCESS_2_TRANSFER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            }),
+        vulkanResources::imageBarrier(
+            sceneColorImage_.image,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+            {
+                sceneColorLayout_ == VK_IMAGE_LAYOUT_UNDEFINED
+                    ? VK_PIPELINE_STAGE_2_NONE
+                    : VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                sceneColorLayout_ == VK_IMAGE_LAYOUT_UNDEFINED
+                    ? VK_ACCESS_2_NONE
+                    : VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                sceneColorLayout_,
+            },
+            {
+                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            }),
     };
-    VkImageMemoryBarrier2 sceneToTransfer = colorToTransfer;
-    sceneToTransfer.srcStageMask = sceneColorLayout_ == VK_IMAGE_LAYOUT_UNDEFINED
-        ? VK_PIPELINE_STAGE_2_NONE
-        : VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-    sceneToTransfer.srcAccessMask = sceneColorLayout_ == VK_IMAGE_LAYOUT_UNDEFINED
-        ? VK_ACCESS_2_NONE
-        : VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
-    sceneToTransfer.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-    sceneToTransfer.oldLayout = sceneColorLayout_;
-    sceneToTransfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    sceneToTransfer.image = sceneColorImage_.image;
-
-    std::array<VkImageMemoryBarrier2, 2> toTransfer { colorToTransfer, sceneToTransfer };
-    VkDependencyInfo dependency {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = static_cast<uint32_t>(toTransfer.size()),
-        .pImageMemoryBarriers = toTransfer.data(),
-    };
-    vkCmdPipelineBarrier2(commandBuffer, &dependency);
+    vulkanResources::transitionImages(commandBuffer, toTransfer);
     ++stats.imageBarriers;
 
     VkImageCopy copyRegion {
@@ -385,26 +321,36 @@ void VulkanSwapchainResources::copyResolvedSceneColor(
         1,
         &copyRegion);
 
-    VkImageMemoryBarrier2 colorToAttachment = colorToTransfer;
-    colorToAttachment.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-    colorToAttachment.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
-    colorToAttachment.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-    colorToAttachment.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
-        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-    colorToAttachment.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    colorToAttachment.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkImageMemoryBarrier2 sceneToRead = sceneToTransfer;
-    sceneToRead.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-    sceneToRead.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-    sceneToRead.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-    sceneToRead.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
-    sceneToRead.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    sceneToRead.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-    std::array<VkImageMemoryBarrier2, 2> fromTransfer { colorToAttachment, sceneToRead };
-    dependency.pImageMemoryBarriers = fromTransfer.data();
-    vkCmdPipelineBarrier2(commandBuffer, &dependency);
+    const std::array<VkImageMemoryBarrier2, 2> fromTransfer {
+        vulkanResources::imageBarrier(
+            resolvedColorImage_.image,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+            {
+                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                VK_ACCESS_2_TRANSFER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            },
+            {
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            }),
+        vulkanResources::imageBarrier(
+            sceneColorImage_.image,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+            {
+                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            },
+            {
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            }),
+    };
+    vulkanResources::transitionImages(commandBuffer, fromTransfer);
     sceneColorLayout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     ++stats.imageBarriers;
 }
@@ -414,43 +360,31 @@ void VulkanSwapchainResources::upscaleSceneToSwapchain(
     uint32_t imageIndex,
     RenderStats& stats) const
 {
-    VkImageMemoryBarrier2 sceneToTransfer {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = resolvedColorImage_.image,
-        .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
+    const std::array<VkImageMemoryBarrier2, 2> toTransfer {
+        vulkanResources::imageBarrier(
+            resolvedColorImage_.image,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+            {
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            },
+            {
+                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                VK_ACCESS_2_TRANSFER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            }),
+        vulkanResources::imageBarrier(
+            image(imageIndex),
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+            {},
+            {
+                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            }),
     };
-    VkImageMemoryBarrier2 swapchainToTransfer = sceneToTransfer;
-    swapchainToTransfer.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
-    swapchainToTransfer.srcAccessMask = VK_ACCESS_2_NONE;
-    swapchainToTransfer.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-    swapchainToTransfer.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    swapchainToTransfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    swapchainToTransfer.image = image(imageIndex);
-
-    std::array<VkImageMemoryBarrier2, 2> toTransfer {
-        sceneToTransfer,
-        swapchainToTransfer,
-    };
-    VkDependencyInfo dependency {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = static_cast<uint32_t>(toTransfer.size()),
-        .pImageMemoryBarriers = toTransfer.data(),
-    };
-    vkCmdPipelineBarrier2(commandBuffer, &dependency);
+    vulkanResources::transitionImages(commandBuffer, toTransfer);
     stats.imageBarriers += static_cast<uint32_t>(toTransfer.size());
 
     VkImageBlit2 region {
@@ -496,17 +430,21 @@ void VulkanSwapchainResources::upscaleSceneToSwapchain(
     };
     vkCmdBlitImage2(commandBuffer, &blitInfo);
 
-    VkImageMemoryBarrier2 swapchainToColor = swapchainToTransfer;
-    swapchainToColor.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-    swapchainToColor.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-    swapchainToColor.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-    swapchainToColor.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
-        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-    swapchainToColor.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    swapchainToColor.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    dependency.imageMemoryBarrierCount = 1;
-    dependency.pImageMemoryBarriers = &swapchainToColor;
-    vkCmdPipelineBarrier2(commandBuffer, &dependency);
+    vulkanResources::transitionImage(
+        commandBuffer,
+        image(imageIndex),
+        vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+        {
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        },
+        {
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        });
     ++stats.imageBarriers;
 }
 
