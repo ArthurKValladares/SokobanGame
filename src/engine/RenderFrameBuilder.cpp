@@ -1533,62 +1533,92 @@ RenderFrameData RenderFrameBuilder::buildGameplay(const GameplayInput& input)
     return frame;
 }
 
-RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
-{
-    RenderFrameData frame;
-    frame.viewMode = RenderViewMode::Isometric3D;
-    frame.lighting = input.settings.renderLighting();
-    frame.gridOverlay = input.settings.renderGridOverlay();
-    frame.levelWidth = input.editor.documentWidth();
-    frame.levelHeight = input.editor.documentHeight();
-    frame.gridPickBorder = 1;
-    // Previews the edited screen's own map, so what the brush paints is what
-    // is on screen. A scratch document belongs to no screen and falls back to
-    // the shared map.
-    frame.groundSplat = groundSplatTextures(input.manifest, input.levelLocation);
-    frame.waterAnimationTimeSeconds = input.worldAnimationTimeSeconds;
-    frame.effectAnimationTimeSeconds = input.worldAnimationTimeSeconds;
+namespace {
 
-    const Level::LayerRows& layers = input.editor.documentLayers();
-    const uint32_t activeLayer = input.editor.activeLayer();
-    const uint32_t layerCount = static_cast<uint32_t>(layers.size());
-    const std::optional<uint32_t> waterLayer =
-        input.editor.waterLayer();
-    const bool layerLocked = input.editor.layerLocked();
-    frame.levelDepth = std::max(layerCount, 1U);
-    frame.tiles.reserve(
-        static_cast<std::size_t>(frame.levelWidth) *
-            frame.levelHeight *
-            layerCount *
-            2 +
-        input.editor.decorations().size() + 2);
+class EditorFrameBuild {
+public:
+    explicit EditorFrameBuild(const RenderFrameBuilder::EditorInput& input)
+        : input_(input)
+        , layers_(input.editor.documentLayers())
+        , activeLayer_(input.editor.activeLayer())
+        , layerCount_(static_cast<uint32_t>(layers_.size()))
+        , waterLayer_(input.editor.waterLayer())
+        , layerLocked_(input.editor.layerLocked())
+    {
+    }
 
-    auto documentTileAt = [&](uint32_t x, uint32_t y, uint32_t z) {
-        if (z >= layers.size() ||
-            y >= layers[z].size() ||
-            x >= layers[z][y].size()) {
+    [[nodiscard]] RenderFrameData build()
+    {
+        RenderFrameData frame = initializeEditorFrame();
+        appendEditorLayers(frame);
+        appendEditorPreviews(frame);
+        appendEditorCamera(frame);
+        applyEditorScrollingMaterials(frame);
+        return frame;
+    }
+
+private:
+    [[nodiscard]] RenderFrameData initializeEditorFrame() const
+    {
+        RenderFrameData frame;
+        frame.viewMode = RenderViewMode::Isometric3D;
+        frame.lighting = input_.settings.renderLighting();
+        frame.gridOverlay = input_.settings.renderGridOverlay();
+        frame.levelWidth = input_.editor.documentWidth();
+        frame.levelHeight = input_.editor.documentHeight();
+        frame.levelDepth = std::max(layerCount_, 1U);
+        frame.gridPickBorder = 1;
+        // Previews the edited screen's own map, so what the brush paints is
+        // what is on screen. A scratch document belongs to no screen and falls
+        // back to the shared map.
+        frame.groundSplat =
+            groundSplatTextures(input_.manifest, input_.levelLocation);
+        frame.waterAnimationTimeSeconds = input_.worldAnimationTimeSeconds;
+        frame.effectAnimationTimeSeconds = input_.worldAnimationTimeSeconds;
+        frame.tiles.reserve(
+            static_cast<std::size_t>(frame.levelWidth) *
+                frame.levelHeight *
+                layerCount_ *
+                2 +
+            input_.editor.decorations().size() + 2);
+
+        return frame;
+    }
+
+    void appendEditorCamera(RenderFrameData& frame) const
+    {
+        const auto gameplayExtent = gameplayExtentForTiles(
+            frame.levelWidth,
+            frame.levelHeight,
+            layerCount_,
+            [this](uint32_t x, uint32_t y, uint32_t z) {
+                return documentTileAt(x, y, z);
+            });
+        frame.cameraExtent =
+            gameplayExtent.value_or(RenderFrameData::CameraExtent {});
+        frame.waterGridBounds = waterGridBoundsFor(gameplayExtent);
+    }
+
+    [[nodiscard]] TileType documentTileAt(
+        uint32_t x,
+        uint32_t y,
+        uint32_t z) const
+    {
+        if (z >= layers_.size() ||
+            y >= layers_[z].size() ||
+            x >= layers_[z][y].size()) {
             return TileType::Air;
         }
         const TileType authored =
-            charToTileType(layers[z][y][x]).value_or(TileType::Air);
-        if (authored == TileType::Air &&
-            waterLayer == z) {
+            charToTileType(layers_[z][y][x]).value_or(TileType::Air);
+        if (authored == TileType::Air && waterLayer_ == z) {
             return TileType::Water;
         }
         return authored;
-    };
-    const std::optional<RenderFrameData::CameraExtent> gameplayExtent =
-        gameplayExtentForTiles(
-        frame.levelWidth,
-        frame.levelHeight,
-        layerCount,
-        [&](uint32_t x, uint32_t y, uint32_t z) {
-            return documentTileAt(x, y, z);
-        });
-    frame.cameraExtent = gameplayExtent.value_or(
-        RenderFrameData::CameraExtent {});
-    frame.waterGridBounds = waterGridBoundsFor(gameplayExtent);
-    auto documentTileAtPosition = [&](GridPosition3 position) {
+    }
+
+    [[nodiscard]] TileType documentTileAt(GridPosition3 position) const
+    {
         if (position.x < 0 || position.y < 0 || position.z < 0) {
             return TileType::Air;
         }
@@ -1596,298 +1626,334 @@ RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
             static_cast<uint32_t>(position.x),
             static_cast<uint32_t>(position.y),
             static_cast<uint32_t>(position.z));
-    };
-    auto appendEditorTile =
-        [&](int x,
-            int y,
-            int z,
-            TileType tile,
-            bool preview,
-            bool pickOnly = false) {
-            if (tile == TileType::Air) {
+    }
+
+    void appendEditorTile(
+        RenderFrameData& frame,
+        int x,
+        int y,
+        int z,
+        TileType tile,
+        bool preview,
+        bool pickOnly = false) const
+    {
+        if (tile == TileType::Air) {
+            return;
+        }
+        if (tile == TileType::Water) {
+            if (pickOnly) {
+                frame.tiles.push_back({
+                    .cell = { x, y, z },
+                    .position = {
+                        static_cast<float>(x),
+                        static_cast<float>(y),
+                    },
+                    .baseElevation = static_cast<float>(z) + 1.0f -
+                        config::waterDepthBelowGround,
+                    .pickOnly = true,
+                    .showGrid = false,
+                    .affectsCameraFit = false,
+                });
                 return;
             }
-            if (tile == TileType::Water) {
-                if (pickOnly) {
-                    frame.tiles.push_back({
-                        .cell = { x, y, z },
-                        .position = {
-                            static_cast<float>(x),
-                            static_cast<float>(y),
-                        },
-                        .baseElevation =
-                            static_cast<float>(z) + 1.0f -
-                            config::waterDepthBelowGround,
-                        .pickOnly = true,
-                        .showGrid = false,
-                        .affectsCameraFit = false,
-                    });
-                    return;
-                }
-                const GridPosition3 waterCell {
-                    x,
-                    y,
-                    z,
-                };
-                appendWaterCellSurface(
-                    frame,
+            const GridPosition3 waterCell { x, y, z };
+            appendWaterCellSurface(
+                frame,
+                waterCell,
+                preview,
+                shorelineMaskForWaterCell(
                     waterCell,
-                    preview,
-                    shorelineMaskForWaterCell(
-                        waterCell,
-                        [&](GridPosition3 position) {
-                            return tileTypeIsSolidBlock(
-                                documentTileAtPosition(position));
-                        }));
+                    [this](GridPosition3 position) {
+                        return tileTypeIsSolidBlock(
+                            documentTileAt(position));
+                    }));
+            return;
+        }
+        if (tile == TileType::Ladder) {
+            if (pickOnly) {
+                frame.tiles.push_back({
+                    .cell = { x, y, z },
+                    .position = {
+                        static_cast<float>(x),
+                        static_cast<float>(y),
+                    },
+                    .baseElevation = static_cast<float>(z) + 1.0f,
+                    .pickOnly = true,
+                    .showGrid = false,
+                    .affectsCameraFit = false,
+                });
                 return;
             }
-            if (tile == TileType::Ladder) {
-                if (pickOnly) {
-                    frame.tiles.push_back({
-                        .cell = { x, y, z },
-                        .position = {
-                            static_cast<float>(x),
-                            static_cast<float>(y),
-                        },
-                        .baseElevation = static_cast<float>(z) + 1.0f,
-                        .pickOnly = true,
-                        .showGrid = false,
-                        .affectsCameraFit = false,
-                    });
-                    return;
-                }
-                auto tileAtForLadder = [&](GridPosition3 position) {
+            const auto tileAtForLadder =
+                [this, preview, x, y, z](GridPosition3 position) {
                     if (preview &&
                         position.x == x &&
                         position.y == y &&
                         position.z == z) {
                         return TileType::Ladder;
                     }
-                    return documentTileAtPosition(position);
+                    return documentTileAt(position);
                 };
-                appendLadderRungsForCell(
-                    frame,
-                    {
-                        x,
-                        y,
-                        z,
-                    },
-                    tileAtForLadder,
-                    preview);
-                return;
-            }
+            appendLadderRungsForCell(
+                frame,
+                { x, y, z },
+                tileAtForLadder,
+                preview);
+            return;
+        }
 
-            // Shared with the thumbnail bake, so a palette icon cannot end up
-            // looking different from the tile the editor draws.
-            RenderFrameData::Tile renderTile = tileVisual(
-                tile, { x, y, z }, input.manifest, input.settings);
-            // Lift previews clear of the tile they are hovering over.
-            renderTile.baseElevation += preview ? 0.02f : 0.0f;
-            renderTile.pickOnly = pickOnly;
-            renderTile.isEditorPreview = preview;
-            const bool animatedActor =
-                tile == TileType::Player || tile == TileType::Enemy;
-            const AnimationUse editorUse = tile == TileType::Enemy
-                ? AnimationUse::EditorEnemyIdle
-                : AnimationUse::EditorPlayerIdle;
-            renderTile.animation = animatedActor
-                ? animationFor(
-                      input.animations,
-                      editorUse,
-                      input.manifest.playerIdleAnimation())
-                : noAnimation;
-            renderTile.animationTimeSeconds = animatedActor
-                ? animationTimeFor(
-                      input.animations,
-                      editorUse,
-                      input.worldAnimationTimeSeconds)
-                : 0.0f;
-            frame.tiles.push_back(renderTile);
-        };
+        // Shared with the thumbnail bake, so a palette icon cannot end up
+        // looking different from the tile the editor draws.
+        RenderFrameData::Tile renderTile = tileVisual(
+            tile, { x, y, z }, input_.manifest, input_.settings);
+        renderTile.baseElevation += preview ? 0.02f : 0.0f;
+        renderTile.pickOnly = pickOnly;
+        renderTile.isEditorPreview = preview;
+        const bool animatedActor =
+            tile == TileType::Player || tile == TileType::Enemy;
+        const AnimationUse editorUse = tile == TileType::Enemy
+            ? AnimationUse::EditorEnemyIdle
+            : AnimationUse::EditorPlayerIdle;
+        renderTile.animation = animatedActor
+            ? animationFor(
+                  input_.animations,
+                  editorUse,
+                  input_.manifest.playerIdleAnimation())
+            : noAnimation;
+        renderTile.animationTimeSeconds = animatedActor
+            ? animationTimeFor(
+                  input_.animations,
+                  editorUse,
+                  input_.worldAnimationTimeSeconds)
+            : 0.0f;
+        frame.tiles.push_back(renderTile);
+    }
 
-    auto appendEditorPickCell = [&](GridPosition3 cell,
-                                    bool affectsCameraFit = false) {
+    static void appendEditorPickCell(
+        RenderFrameData& frame,
+        GridPosition3 cell,
+        bool affectsCameraFit = false)
+    {
         frame.tiles.push_back({
             .cell = cell,
             .position = {
                 static_cast<float>(cell.x),
                 static_cast<float>(cell.y),
             },
-            // Pick the visible top of the edited cell. Picking its lower
-            // plane introduces perspective parallax against a block preview.
+            // Pick the visible top of the edited cell. Picking its lower plane
+            // introduces perspective parallax against a block preview.
             .baseElevation = static_cast<float>(cell.z) + 1.0f,
             .pickOnly = true,
             .showGrid = false,
             .affectsCameraFit = affectsCameraFit,
         });
-    };
-    const int expansionPickLayer = layerLocked
-        ? static_cast<int>(activeLayer)
-        : 0;
-    auto appendExpansionPickCell = [&](int x, int y) {
-        appendEditorPickCell(
-            { x, y, expansionPickLayer },
-            true);
-    };
-    const int editorWidth = static_cast<int>(frame.levelWidth);
-    const int editorHeight = static_cast<int>(frame.levelHeight);
-    for (int x = -1; x <= editorWidth; ++x) {
-        appendExpansionPickCell(x, -1);
-        appendExpansionPickCell(x, editorHeight);
-    }
-    for (int y = 0; y < editorHeight; ++y) {
-        appendExpansionPickCell(-1, y);
-        appendExpansionPickCell(editorWidth, y);
     }
 
-    for (uint32_t z = 0; z < layerCount; ++z) {
-        if (layerLocked && z != activeLayer) {
-            continue;
+    void appendExpansionPickCells(RenderFrameData& frame) const
+    {
+        const int expansionPickLayer = layerLocked_
+            ? static_cast<int>(activeLayer_)
+            : 0;
+        const int editorWidth = static_cast<int>(frame.levelWidth);
+        const int editorHeight = static_cast<int>(frame.levelHeight);
+        for (int x = -1; x <= editorWidth; ++x) {
+            appendEditorPickCell(
+                frame, { x, -1, expansionPickLayer }, true);
+            appendEditorPickCell(
+                frame, { x, editorHeight, expansionPickLayer }, true);
         }
-        for (uint32_t y = 0; y < frame.levelHeight; ++y) {
-            for (uint32_t x = 0; x < frame.levelWidth; ++x) {
-                const TileType tile = documentTileAt(x, y, z);
-                if (layerLocked && tile == TileType::Air) {
-                    appendEditorPickCell({
-                        static_cast<int>(x),
-                        static_cast<int>(y),
-                        static_cast<int>(z),
-                    });
-                    continue;
-                }
-                if (!layerLocked && z == 0 && tile == TileType::Air) {
-                    bool columnEmpty = true;
-                    for (uint32_t layer = 1;
-                         layer < layerCount && columnEmpty;
-                         ++layer) {
-                        columnEmpty =
-                            documentTileAt(x, y, layer) == TileType::Air;
+        for (int y = 0; y < editorHeight; ++y) {
+            appendEditorPickCell(
+                frame, { -1, y, expansionPickLayer }, true);
+            appendEditorPickCell(
+                frame, { editorWidth, y, expansionPickLayer }, true);
+        }
+    }
+
+    void appendAuthoredCells(RenderFrameData& frame) const
+    {
+        for (uint32_t z = 0; z < layerCount_; ++z) {
+            if (layerLocked_ && z != activeLayer_) {
+                continue;
+            }
+            for (uint32_t y = 0; y < frame.levelHeight; ++y) {
+                for (uint32_t x = 0; x < frame.levelWidth; ++x) {
+                    const TileType tile = documentTileAt(x, y, z);
+                    if (layerLocked_ && tile == TileType::Air) {
+                        appendEditorPickCell(frame, {
+                            static_cast<int>(x),
+                            static_cast<int>(y),
+                            static_cast<int>(z),
+                        });
+                        continue;
                     }
-                    if (columnEmpty) {
-                        appendEditorPickCell({
+                    if (!layerLocked_ && z == 0 &&
+                        tile == TileType::Air &&
+                        columnIsEmpty(x, y)) {
+                        appendEditorPickCell(frame, {
                             static_cast<int>(x),
                             static_cast<int>(y),
                             0,
                         });
                         continue;
                     }
-                }
-                const bool deletePreviewTarget =
-                    input.deleting && input.hoverCell &&
-                    *input.hoverCell == GridPosition3 {
+                    const bool deletePreviewTarget =
+                        input_.deleting && input_.hoverCell &&
+                        *input_.hoverCell == GridPosition3 {
+                            static_cast<int>(x),
+                            static_cast<int>(y),
+                            static_cast<int>(z),
+                        };
+                    appendEditorTile(
+                        frame,
                         static_cast<int>(x),
                         static_cast<int>(y),
                         static_cast<int>(z),
-                    };
-                appendEditorTile(
-                    x,
-                    y,
-                    z,
-                    tile,
-                    false,
-                    deletePreviewTarget);
+                        tile,
+                        false,
+                        deletePreviewTarget);
+                }
             }
         }
     }
-    if (waterLayer &&
-        (!layerLocked || *waterLayer == activeLayer)) {
-        appendUnboundedWaterExterior(
-            frame,
-            frame.levelWidth,
-            frame.levelHeight,
-            *waterLayer,
-            false,
-            [&](GridPosition3 position) {
-                return tileTypeIsSolidBlock(
-                    documentTileAtPosition(position));
-            });
-    }
 
-    auto documentHasOpenWater = [&](GridPosition position, uint32_t z) {
-        if (position.x < 0 ||
-            position.y < 0 ||
-            position.x >= static_cast<int>(frame.levelWidth) ||
-            position.y >= static_cast<int>(frame.levelHeight)) {
-            return waterLayer == z;
+    [[nodiscard]] bool columnIsEmpty(uint32_t x, uint32_t y) const
+    {
+        for (uint32_t layer = 1; layer < layerCount_; ++layer) {
+            if (documentTileAt(x, y, layer) != TileType::Air) {
+                return false;
+            }
         }
-        return documentTileAt(
-                   static_cast<uint32_t>(position.x),
-                   static_cast<uint32_t>(position.y),
-                   z) == TileType::Water;
-    };
-    for (uint32_t z = 0; z < layerCount; ++z) {
-        if (layerLocked && z != activeLayer) {
-            continue;
+        return true;
+    }
+
+    void appendEditorWater(RenderFrameData& frame) const
+    {
+        if (waterLayer_ &&
+            (!layerLocked_ || *waterLayer_ == activeLayer_)) {
+            appendUnboundedWaterExterior(
+                frame,
+                frame.levelWidth,
+                frame.levelHeight,
+                *waterLayer_,
+                false,
+                [this](GridPosition3 position) {
+                    return tileTypeIsSolidBlock(documentTileAt(position));
+                });
         }
-        appendWaterEdgeFaces(
+
+        for (uint32_t z = 0; z < layerCount_; ++z) {
+            if (layerLocked_ && z != activeLayer_) {
+                continue;
+            }
+            appendWaterEdgeFaces(
+                frame,
+                frame.levelWidth,
+                frame.levelHeight,
+                static_cast<float>(z) + 1.0f,
+                [this, &frame, z](GridPosition position) {
+                    if (position.x < 0 ||
+                        position.y < 0 ||
+                        position.x >=
+                            static_cast<int>(frame.levelWidth) ||
+                        position.y >=
+                            static_cast<int>(frame.levelHeight)) {
+                        return waterLayer_ == z;
+                    }
+                    return documentTileAt(
+                               static_cast<uint32_t>(position.x),
+                               static_cast<uint32_t>(position.y),
+                               z) == TileType::Water;
+                });
+        }
+    }
+
+    void appendEditorLayers(RenderFrameData& frame) const
+    {
+        appendExpansionPickCells(frame);
+        appendAuthoredCells(frame);
+        appendEditorWater(frame);
+        appendDecorations(
             frame,
-            frame.levelWidth,
-            frame.levelHeight,
-            static_cast<float>(z) + 1.0f,
-            [&, z](GridPosition position) {
-                return documentHasOpenWater(position, z);
-            });
+            input_.editor.decorations(),
+            input_.manifest,
+            input_.editor.selectedDecorationIndex(),
+            input_.hoverDecoration,
+            true);
     }
 
-    appendDecorations(
-        frame,
-        input.editor.decorations(),
-        input.manifest,
-        input.editor.selectedDecorationIndex(),
-        input.hoverDecoration,
-        true);
+    void appendEditorPreviews(RenderFrameData& frame) const
+    {
+        if (input_.editor.tool() == LevelEditor::Tool::Tiles &&
+            input_.hoverCell &&
+            input_.hoverCell->z >= 0 &&
+            input_.hoverCell->x >= -1 &&
+            input_.hoverCell->y >= -1 &&
+            input_.hoverCell->x <= static_cast<int>(frame.levelWidth) &&
+            input_.hoverCell->y <= static_cast<int>(frame.levelHeight)) {
+            const TileType selectedTile = input_.deleting
+                ? TileType::Air
+                : input_.editor.selectedTile();
+            const TileType hoveredTile =
+                documentTileAt(*input_.hoverCell);
+            const TileType previewTile = selectedTile == TileType::Air
+                ? hoveredTile
+                : selectedTile;
+            appendEditorTile(
+                frame,
+                input_.hoverCell->x,
+                input_.hoverCell->y,
+                input_.hoverCell->z,
+                previewTile,
+                true);
+        }
 
-    if (input.editor.tool() == LevelEditor::Tool::Tiles &&
-        input.hoverCell &&
-        input.hoverCell->z >= 0 &&
-        input.hoverCell->x >= -1 &&
-        input.hoverCell->y >= -1 &&
-        input.hoverCell->x <= static_cast<int>(frame.levelWidth) &&
-        input.hoverCell->y <= static_cast<int>(frame.levelHeight)) {
-        const TileType selectedTile = input.deleting
-            ? TileType::Air
-            : input.editor.selectedTile();
-        const TileType hoveredTile =
-            documentTileAtPosition(*input.hoverCell);
-        const TileType previewTile =
-            selectedTile == TileType::Air ? hoveredTile : selectedTile;
-        appendEditorTile(
-            input.hoverCell->x,
-            input.hoverCell->y,
-            input.hoverCell->z,
-            previewTile,
-            true,
-            false);
-    }
-    if (input.editor.tool() == LevelEditor::Tool::Decorations &&
-        !input.editor.selectedDecorationModel().empty() &&
-        !input.hoverDecoration &&
-        input.hoverCell &&
-        input.hoverCell->x >= 0 &&
-        input.hoverCell->y >= 0 &&
-        input.hoverCell->x < static_cast<int>(frame.levelWidth) &&
-        input.hoverCell->y < static_cast<int>(frame.levelHeight) &&
-        input.hoverCell->z >= 0) {
-        frame.tiles.push_back(decorationVisual(
-            {
-                .model = input.editor.selectedDecorationModel(),
-                .position = {
-                    static_cast<float>(input.hoverCell->x) + 0.5f,
-                    static_cast<float>(input.hoverCell->y) + 0.5f,
-                    static_cast<float>(input.hoverCell->z),
+        if (input_.editor.tool() == LevelEditor::Tool::Decorations &&
+            !input_.editor.selectedDecorationModel().empty() &&
+            !input_.hoverDecoration &&
+            input_.hoverCell &&
+            input_.hoverCell->x >= 0 &&
+            input_.hoverCell->y >= 0 &&
+            input_.hoverCell->x < static_cast<int>(frame.levelWidth) &&
+            input_.hoverCell->y < static_cast<int>(frame.levelHeight) &&
+            input_.hoverCell->z >= 0) {
+            frame.tiles.push_back(decorationVisual(
+                {
+                    .model = input_.editor.selectedDecorationModel(),
+                    .position = {
+                        static_cast<float>(input_.hoverCell->x) + 0.5f,
+                        static_cast<float>(input_.hoverCell->y) + 0.5f,
+                        static_cast<float>(input_.hoverCell->z),
+                    },
                 },
-            },
-            input.manifest,
-            true));
-    }
-
-    for (RenderFrameData::Tile& tile : frame.tiles) {
-        if (!tile.model.isCube() &&
-            input.manifest.model(tile.model).hasScrollingMaterial()) {
-            tile.beltScrollOffset = input.conveyorBeltScrollOffset;
+                input_.manifest,
+                true));
         }
     }
-    return frame;
+
+    void applyEditorScrollingMaterials(RenderFrameData& frame) const
+    {
+        for (RenderFrameData::Tile& tile : frame.tiles) {
+            if (!tile.model.isCube() &&
+                input_.manifest.model(tile.model).hasScrollingMaterial()) {
+                tile.beltScrollOffset = input_.conveyorBeltScrollOffset;
+            }
+        }
+    }
+
+    const RenderFrameBuilder::EditorInput& input_;
+    const Level::LayerRows& layers_;
+    uint32_t activeLayer_ = 0;
+    uint32_t layerCount_ = 0;
+    std::optional<uint32_t> waterLayer_;
+    bool layerLocked_ = false;
+};
+
+} // namespace
+
+RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
+{
+    return EditorFrameBuild(input).build();
 }
 
 RenderFrameData::Tile tileVisual(
