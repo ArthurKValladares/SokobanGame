@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/Math.hpp"
+#include "engine/LevelCatalog.hpp"
 #include "engine/TileTypes.hpp"
 
 #include <cstdint>
@@ -15,6 +16,14 @@ namespace sokoban {
 class Level {
 public:
     using LayerRows = std::vector<std::vector<std::string>>;
+
+    struct ScreenSelector {
+        uint32_t id = 0;
+        GridPosition3 cell {};
+        std::optional<LevelLocation> target;
+
+        bool operator==(const ScreenSelector&) const = default;
+    };
 
     struct Decoration {
         // Stable manifest model name. Screen files never embed source asset
@@ -46,6 +55,7 @@ public:
         LayerRows layers;
         std::optional<uint32_t> waterLayer;
         std::vector<Decoration> decorations;
+        std::vector<ScreenSelector> selectors;
 
         bool operator==(const Definition&) const = default;
     };
@@ -62,7 +72,8 @@ public:
         const LayerRows& layers,
         std::string_view sourceName,
         std::optional<uint32_t> waterLayer = std::nullopt,
-        const std::vector<Decoration>& decorations = {});
+        const std::vector<Decoration>& decorations = {},
+        const std::vector<ScreenSelector>& selectors = {});
     [[nodiscard]] static Definition parseDefinition(
         const std::vector<std::string>& lines,
         std::string_view sourceName);
@@ -80,6 +91,8 @@ public:
     [[nodiscard]] const std::vector<GridPosition3>& pressurePlates() const { return pressurePlates_; }
     [[nodiscard]] std::optional<uint32_t> waterLayer() const { return waterLayer_; }
     [[nodiscard]] const std::vector<Decoration>& decorations() const { return decorations_; }
+    [[nodiscard]] const std::vector<ScreenSelector>& selectors() const { return selectors_; }
+    [[nodiscard]] const ScreenSelector* selectorAt(GridPosition3 cell) const;
     [[nodiscard]] TileType authoredTileAt(uint32_t x, uint32_t y, uint32_t z = 0) const;
     [[nodiscard]] TileType tileAt(uint32_t x, uint32_t y, uint32_t z = 0) const;
     [[nodiscard]] std::optional<TileType> supportingTileAt(GridPosition3 position) const;
@@ -98,6 +111,7 @@ private:
     std::vector<TileType> tiles_;
     std::optional<uint32_t> waterLayer_;
     std::vector<Decoration> decorations_;
+    std::vector<ScreenSelector> selectors_;
 };
 
 } // namespace sokoban

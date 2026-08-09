@@ -96,8 +96,18 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
     const GameState& state = context.gameplaySession.state();
     const GameState::Player& primaryPlayer = state.players.front();
     PresentationSettings& settings = context.settings;
-    ImGui::Text(
-        "Level %d Screen %d", context.currentLevel, context.currentScreen);
+    if (context.inOverworld) {
+        ImGui::Text("World: Overworld");
+        ImGui::Text(
+            "Selector targets: %d / %d solved",
+            context.completedSelectorTargets,
+            context.selectorTargetCount);
+    } else {
+        ImGui::Text(
+            "World: Puzzle %d:%d",
+            context.currentLevel,
+            context.currentScreen);
+    }
     ImGui::Text(
         "Player (%d, %d, %d)",
         primaryPlayer.cell.x,
@@ -140,7 +150,9 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
     ImGui::Text(
         "End %s",
         rules::isEndUnlocked(context.level, state) ? "unlocked" : "locked");
+    ImGui::BeginDisabled(context.inOverworld);
     result.solveCurrentScreen = ImGui::Button("Solve Current Screen");
+    ImGui::EndDisabled();
     ImGui::Text(
         "Task workers %u, tasks run %llu",
         taskSystem().workerCount(),

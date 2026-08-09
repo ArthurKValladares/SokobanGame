@@ -114,6 +114,7 @@ InputRouter::Frame InputRouter::routeFrame(
             .undoPressed = input.actionPressed(InputAction::Undo),
             .undoDown = input.actionDown(InputAction::Undo),
             .restartPressed = input.actionPressed(InputAction::Restart),
+            .interactPressed = confirm,
         };
     }
     if (context.titleOpen && !context.optionsOpen) {

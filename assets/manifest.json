@@ -26,6 +26,10 @@
       "path": "KayKit Furniture Bits 1.0/Assets/gltf/furniturebits_texture.png"
     },
     {
+      "name": "BoardGameBits",
+      "path": "KayKit Board Game Bits 1.0/Assets/gltf/boardgame_bits_texture.png"
+    },
+    {
       "name": "Smoke01",
       "path": "kenney_particle-pack/PNG (Transparent)/smoke_01.png"
     },
@@ -192,6 +196,24 @@
           }
         ]
       }
+    },
+    {
+      "name": "ScreenSelectorUnsolved",
+      "path": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_blue.gltf",
+      "material": {
+        "mode": "texture",
+        "texture": "BoardGameBits"
+      },
+      "preserveSourceScale": true
+    },
+    {
+      "name": "ScreenSelectorSolved",
+      "path": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_yellow.gltf",
+      "material": {
+        "mode": "texture",
+        "texture": "BoardGameBits"
+      },
+      "preserveSourceScale": true
     },
     {
       "name": "Rogue",

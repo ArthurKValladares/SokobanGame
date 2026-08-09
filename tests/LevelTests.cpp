@@ -148,6 +148,52 @@ void testDecorationMetadataRoundTrip()
     CHECK(level.isWalkable({ 1, 0, 1 }));
 }
 
+void testSelectorMetadataRoundTripAndLookup()
+{
+    TEST("selectorMetadataRoundTripAndLookup");
+    const Level::Definition definition {
+        .layers = {
+            { "..." },
+            { "C  " },
+        },
+        .selectors = {
+            {
+                .id = 1,
+                .cell = { 1, 0, 1 },
+                .target = LevelLocation { .level = 2, .screen = 3 },
+            },
+            {
+                .id = 4,
+                .cell = { 2, 0, 1 },
+                .target = std::nullopt,
+            },
+        },
+    };
+
+    const std::vector<std::string> serialized =
+        Level::serializeDefinition(definition);
+    CHECK(serialized[0] ==
+        "@selector {\"cell\":[1,0,1],\"id\":1,\"target\":{\"level\":2,\"screen\":3}}");
+    CHECK(serialized[1] ==
+        "@selector {\"cell\":[2,0,1],\"id\":4,\"target\":null}");
+    CHECK(serialized[2].empty());
+
+    const Level::Definition parsed =
+        Level::parseDefinition(serialized, "selector round trip");
+    CHECK(parsed == definition);
+
+    const Level level =
+        Level::loadFromDefinition(parsed, "selector round trip");
+    CHECK(level.selectors().size() == 2);
+    CHECK(level.selectorAt({ 1, 0, 1 }) != nullptr);
+    CHECK(level.selectorAt({ 1, 0, 1 })->id == 1);
+    CHECK(level.selectorAt({ 1, 0, 1 })->target ==
+        std::optional<LevelLocation>({ .level = 2, .screen = 3 }));
+    CHECK(level.selectorAt({ 0, 0, 1 }) == nullptr);
+    CHECK(level.tileAt(1, 0, 1) == TileType::Air);
+    CHECK(level.isWalkable({ 1, 0, 1 }));
+}
+
 void testParserRejectsMalformedStructure()
 {
     TEST("parserRejectsMalformedStructure");
@@ -170,6 +216,10 @@ void testParserRejectsMalformedStructure()
     checkThrowsContaining([] {
         (void)Level::parseDefinition(
             { "@decoration {}", "C" }, "decoration legacy");
+    }, "requires explicit");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            { "@selector {}", "C" }, "selector legacy");
     }, "requires explicit");
     checkThrowsContaining([] {
         (void)Level::parseDefinition(
@@ -210,6 +260,43 @@ void testParserRejectsMalformedStructure()
               "\"rotation\":[0,0,0],\"scale\":[1,1,1]}" },
             "late decoration");
     }, "before '@layer 0'");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            { "@selector not-json", "@layer 0", "C" },
+            "bad selector json");
+    }, "Invalid selector JSON");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            { "@selector {\"id\":0,\"cell\":[0,0,0],\"target\":null}",
+              "@layer 0", "C" },
+            "zero selector id");
+    }, "greater than zero");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            { "@selector {\"id\":1,\"cell\":[0,-1,0],\"target\":null}",
+              "@layer 0", "C" },
+            "negative selector cell");
+    }, "must not be negative");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            { "@selector {\"id\":1,\"cell\":[0,0,0],\"target\":null}",
+              "@selector {\"id\":1,\"cell\":[1,0,0],\"target\":null}",
+              "@layer 0", "C." },
+            "duplicate selector id");
+    }, "duplicate selector id");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            { "@selector {\"id\":1,\"cell\":[0,0,0],\"target\":null}",
+              "@selector {\"id\":2,\"cell\":[0,0,0],\"target\":null}",
+              "@layer 0", "C" },
+            "duplicate selector cell");
+    }, "more than one selector at cell");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            { "@layer 0", "C",
+              "@selector {\"id\":1,\"cell\":[0,0,0],\"target\":null}" },
+            "late selector");
+    }, "before '@layer 0'");
 }
 
 void testLevelValidationErrors()
@@ -233,6 +320,17 @@ void testLevelValidationErrors()
     checkThrowsContaining([] {
         (void)Level::loadFromLayers({ { "..." }, { "LC " } }, "unsupported ladder");
     }, "same layer");
+    checkThrowsContaining([] {
+        (void)Level::loadFromLayers(
+            { { "." }, { "C" } },
+            "unsupported selector",
+            std::nullopt,
+            {},
+            { Level::ScreenSelector {
+                .id = 1,
+                .cell = { 0, 0, 0 },
+            } });
+    }, "supported walkable cell");
 }
 
 void testRaggedLayersNormalizeToAir()
@@ -327,6 +425,7 @@ int main()
     testSerializationRoundTrip();
     testWaterLayerMetadataAndTileResolution();
     testDecorationMetadataRoundTrip();
+    testSelectorMetadataRoundTripAndLookup();
     testParserRejectsMalformedStructure();
     testLevelValidationErrors();
     testRaggedLayersNormalizeToAir();

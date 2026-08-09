@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/GameplaySession.hpp"
+#include "engine/LevelCatalog.hpp"
 #include "engine/SettingsTypes.hpp"
 
 #include <optional>
@@ -10,7 +11,7 @@
 
 namespace sokoban {
 
-inline constexpr int currentPlayerProfileFormat = 17;
+inline constexpr int currentPlayerProfileFormat = 18;
 
 // Which top-level sections serialize() writes. Save-slot files carry only
 // progress and the shared settings file only settings; both sections are
@@ -22,6 +23,21 @@ enum class ProfileSections {
 };
 
 struct PlayerProfile {
+    enum class WorldContext {
+        Overworld,
+        Puzzle,
+    };
+
+    struct ScreenProgress {
+        int level = 0;
+        int screen = 0;
+        bool completed = false;
+        std::optional<int> bestMoves;
+        std::optional<double> bestTimeSeconds;
+
+        bool operator==(const ScreenProgress&) const = default;
+    };
+
     struct LevelProgress {
         int level = 0;
         bool completed = false;
@@ -53,7 +69,10 @@ struct PlayerProfile {
     int currentLevel = 0;
     int currentScreen = 0;
     std::vector<LevelProgress> levels;
+    std::vector<ScreenProgress> screens;
     std::optional<ActiveScreen> activeScreen;
+    std::optional<GameplaySession::Snapshot> overworldSession;
+    WorldContext worldContext = WorldContext::Overworld;
     UserSettings settings;
 
     void normalize();
@@ -79,8 +98,16 @@ struct PlayerProfile {
         std::optional<double> completionTimeSeconds,
         bool unlockNextLevel,
         bool recordBests = true);
+    void recordScreenCompletion(
+        LevelLocation location,
+        int moves,
+        std::optional<double> completionTimeSeconds,
+        bool recordBests = true);
 
     [[nodiscard]] const LevelProgress* progressForLevel(int level) const;
+    [[nodiscard]] const ScreenProgress* progressForScreen(
+        LevelLocation location) const;
+    [[nodiscard]] bool screenCompleted(LevelLocation location) const;
     [[nodiscard]] std::string serialize(
         ProfileSections sections = ProfileSections::All) const;
 

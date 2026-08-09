@@ -187,4 +187,29 @@ Vec2 EditorInteraction::pointerPixels(
     };
 }
 
+std::vector<EditorInteraction::SelectorLabel>
+EditorInteraction::selectorLabels(
+    const std::vector<Level::ScreenSelector>& selectors,
+    const ProjectToPixels& project)
+{
+    std::vector<SelectorLabel> labels;
+    labels.reserve(selectors.size());
+    for (const Level::ScreenSelector& selector : selectors) {
+        const std::optional<Vec2> anchor = project({
+            static_cast<float>(selector.cell.x) + 0.5f,
+            static_cast<float>(selector.cell.y) + 0.5f,
+            static_cast<float>(selector.cell.z) + 1.25f,
+        });
+        if (!anchor) {
+            continue;
+        }
+        labels.push_back({
+            .id = selector.id,
+            .text = "Selector " + std::to_string(selector.id),
+            .anchor = *anchor,
+        });
+    }
+    return labels;
+}
+
 } // namespace sokoban

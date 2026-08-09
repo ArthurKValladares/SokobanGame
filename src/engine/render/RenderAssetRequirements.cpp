@@ -1,4 +1,5 @@
 #include "engine/render/RenderAssetRequirements.hpp"
+#include "engine/render/SelectorRenderConfig.hpp"
 
 #include "engine/AnimationCatalog.hpp"
 #include "engine/AssetManifest.hpp"
@@ -190,6 +191,14 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
     for (const Level::Decoration& decoration : level.decorations()) {
         requirements.requireModel(
             manifest.modelIdByName(decoration.model));
+    }
+    if (!level.selectors().empty()) {
+        // Completion can change while the overworld stays resident, so both
+        // visual states must be ready before a solved puzzle returns to it.
+        requirements.requireModel(
+            manifest.modelIdByName(selectorRender::unsolvedModelName));
+        requirements.requireModel(
+            manifest.modelIdByName(selectorRender::solvedModelName));
     }
     return requirements;
 }

@@ -1,4 +1,5 @@
 #include "engine/ContentPipeline.hpp"
+#include "engine/render/SelectorRenderConfig.hpp"
 
 #include "engine/AnimationCatalog.hpp"
 #include "engine/render/GltfMesh.hpp"
@@ -326,6 +327,68 @@ private:
         const std::regex screenPattern(R"(^screen([0-9]+)\.scr$)");
         std::map<int, std::set<int>> screens;
 
+        if (!manifest_) {
+            throw std::logic_error(
+                "content manifest was not loaded before levels");
+        }
+
+        const auto validateDecorations = [&](
+            const Level& level,
+            const std::filesystem::path& path) {
+            for (const Level::Decoration& decoration :
+                 level.decorations()) {
+                try {
+                    (void)manifest_->modelIdByName(decoration.model);
+                } catch (const std::exception&) {
+                    throw std::runtime_error(
+                        "level decoration references unknown manifest "
+                        "model '" + decoration.model + "': " +
+                        path.string());
+                }
+            }
+        };
+
+        const std::filesystem::path overworldPath =
+            roots_.levels / "overworld.scr";
+        if (!std::filesystem::is_regular_file(overworldPath)) {
+            throw std::runtime_error(
+                "overworld screen is missing: " + overworldPath.string());
+        }
+        const Level overworld = Level::loadFromFile(overworldPath);
+        validateDecorations(overworld, overworldPath);
+        if (overworld.selectors().empty()) {
+            throw std::runtime_error(
+                "overworld must contain at least one screen selector: " +
+                overworldPath.string());
+        }
+        for (uint32_t z = 0; z < overworld.depth(); ++z) {
+            for (uint32_t y = 0; y < overworld.height(); ++y) {
+                for (uint32_t x = 0; x < overworld.width(); ++x) {
+                    if (overworld.authoredTileAt(x, y, z) == TileType::End) {
+                        throw std::runtime_error(
+                            "end tiles are not allowed in the overworld: " +
+                            overworldPath.string());
+                    }
+                }
+            }
+        }
+        try {
+            (void)manifest_->modelIdByName(
+                selectorRender::unsolvedModelName);
+            (void)manifest_->modelIdByName(
+                selectorRender::solvedModelName);
+        } catch (const std::exception&) {
+            throw std::runtime_error(
+                "overworld selectors require manifest models '" +
+                std::string(selectorRender::unsolvedModelName) + "' and '" +
+                std::string(selectorRender::solvedModelName) + "'");
+        }
+        addFile(
+            roots_.levels,
+            "overworld.scr",
+            std::filesystem::path("levels") / "overworld.scr",
+            "overworld screen");
+
         for (const auto& levelDirectory : std::filesystem::directory_iterator(roots_.levels)) {
             if (!levelDirectory.is_directory() || levelDirectory.path().filename() == "Deleted") {
                 continue;
@@ -352,21 +415,12 @@ private:
                 const int screenIndex = std::stoi(screenMatch[1].str());
                 levelScreens.insert(screenIndex);
                 const Level level = Level::loadFromFile(screenFile.path());
-                if (!manifest_) {
-                    throw std::logic_error(
-                        "content manifest was not loaded before levels");
+                if (!level.selectors().empty()) {
+                    throw std::runtime_error(
+                        "screen selectors are only allowed in overworld.scr: " +
+                        screenFile.path().string());
                 }
-                for (const Level::Decoration& decoration :
-                     level.decorations()) {
-                    try {
-                        (void)manifest_->modelIdByName(decoration.model);
-                    } catch (const std::exception&) {
-                        throw std::runtime_error(
-                            "level decoration references unknown manifest "
-                            "model '" + decoration.model + "': " +
-                            screenFile.path().string());
-                    }
-                }
+                validateDecorations(level, screenFile.path());
                 const std::filesystem::path relative = screenFile.path().lexically_relative(roots_.levels);
                 addFile(roots_.levels, relative, std::filesystem::path("levels") / relative, "level screen");
             }
@@ -406,6 +460,24 @@ private:
                         "screen indices in level" + std::to_string(level) +
                         " must be contiguous starting at screen0");
                 }
+            }
+        }
+
+        for (const Level::ScreenSelector& selector : overworld.selectors()) {
+            if (!selector.target) {
+                throw std::runtime_error(
+                    "overworld selector " + std::to_string(selector.id) +
+                    " is unassigned: " + overworldPath.string());
+            }
+            const auto level = screens.find(selector.target->level);
+            if (level == screens.end() ||
+                !level->second.contains(selector.target->screen)) {
+                throw std::runtime_error(
+                    "overworld selector " + std::to_string(selector.id) +
+                    " targets missing level " +
+                    std::to_string(selector.target->level) + " screen " +
+                    std::to_string(selector.target->screen) + ": " +
+                    overworldPath.string());
             }
         }
     }

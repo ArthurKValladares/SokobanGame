@@ -19,6 +19,7 @@ public:
     enum class Tool {
         Tiles,
         Decorations,
+        Selectors,
     };
 
     struct ScreenFile {
@@ -85,6 +86,12 @@ public:
     [[nodiscard]] bool transformingSelectedDecoration() const;
     [[nodiscard]] bool duplicateSelectedDecoration();
     [[nodiscard]] bool deleteSelectedDecoration();
+    [[nodiscard]] bool placeSelector(GridPosition3 cell);
+    [[nodiscard]] bool selectSelector(std::size_t index);
+    void clearSelectorSelection();
+    [[nodiscard]] bool updateSelectedSelectorTarget(
+        std::optional<LevelLocation> target);
+    [[nodiscard]] bool deleteSelectedSelector();
     [[nodiscard]] GridPosition3 resolveEditTarget(
         GridPosition3 pickedCell,
         bool deleting,
@@ -121,6 +128,10 @@ public:
     [[nodiscard]] const std::vector<Level::Decoration>& decorations() const;
     [[nodiscard]] std::optional<std::size_t> selectedDecorationIndex() const;
     [[nodiscard]] const Level::Decoration* selectedDecoration() const;
+    [[nodiscard]] const std::vector<Level::ScreenSelector>& selectors() const;
+    [[nodiscard]] std::optional<std::size_t> selectedSelectorIndex() const;
+    [[nodiscard]] const Level::ScreenSelector* selectedSelector() const;
+    [[nodiscard]] bool editingOverworld() const;
     // The path shown in the UI, which the file browser changes on a single
     // click. It is a *selection*: the document in memory is unchanged until
     // the selection is actually loaded.
@@ -139,6 +150,7 @@ private:
         Level::LayerRows layers;
         std::optional<uint32_t> waterLayer;
         std::vector<Level::Decoration> decorations;
+        std::vector<Level::ScreenSelector> selectors;
         // Selected path (browser clicks move this).
         std::filesystem::path filePath;
         // Where `layers` was actually read from or written to. Empty for an
@@ -155,6 +167,7 @@ private:
         Tool tool = Tool::Tiles;
         std::string selectedDecorationModel;
         std::optional<std::size_t> selectedDecoration;
+        std::optional<std::size_t> selectedSelector;
         bool layerLocked = false;
         bool dirty = false;
         bool playingDraft = false;
@@ -165,6 +178,7 @@ private:
         Level::LayerRows layers;
         std::optional<uint32_t> waterLayer;
         std::vector<Level::Decoration> decorations;
+        std::vector<Level::ScreenSelector> selectors;
         std::filesystem::path filePath;
         // Undoing a load has to restore where the document came from too, or
         // the restored contents would be attributed to the wrong screen.
@@ -173,6 +187,7 @@ private:
         int requestedHeight = 8;
         int activeLayer = 0;
         std::optional<std::size_t> selectedDecoration;
+        std::optional<std::size_t> selectedSelector;
         bool dirty = false;
     };
 

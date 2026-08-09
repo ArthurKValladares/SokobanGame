@@ -68,6 +68,16 @@ const AssetManifest& testManifest()
           "preserveSourceScale": true
         },
         {
+          "name": "ScreenSelectorUnsolved",
+          "path": "flag-blue.gltf",
+          "preserveSourceScale": true
+        },
+        {
+          "name": "ScreenSelectorSolved",
+          "path": "flag-yellow.gltf",
+          "preserveSourceScale": true
+        },
+        {
           "name": "Hero",
           "path": "hero.glb",
           "geometry": "skinned",
@@ -554,6 +564,65 @@ void testGameplayFrameUsesSettingsAndPresentation()
     CHECK(near(player->position.x, -0.5f));
     CHECK(player->animation == testManifest().playerIdleAnimation());
     CHECK(near(conveyor->beltScrollOffset, 0.75f));
+}
+
+void testSelectorFlagReflectsTargetCompletion()
+{
+    TEST("selectorFlagReflectsTargetCompletion");
+    const Level level = Level::loadFromLayers(
+        {
+            { ".." },
+            { "C " },
+        },
+        "selector flag",
+        std::nullopt,
+        {},
+        { Level::ScreenSelector {
+            .id = 1,
+            .cell = { 1, 0, 1 },
+            .target = LevelLocation { 0, 0 },
+        } });
+    GameState state;
+    state.players.push_back({ .cell = level.playerStart() });
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+
+    auto build = [&](bool solved) {
+        return RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(),
+            .level = level,
+            .state = state,
+            .moving = false,
+            .projectedState = state,
+            .presentation = presentation,
+            .settings = PresentationSettings {},
+            .selectorSolved = [solved](LevelLocation target) {
+                return solved && target == LevelLocation { 0, 0 };
+            },
+        });
+    };
+
+    const RenderFrameData unsolved = build(false);
+    CHECK(std::ranges::count_if(
+        unsolved.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.model == testManifest().modelIdByName(
+                "ScreenSelectorUnsolved");
+        }) == 1);
+    CHECK(std::ranges::count_if(
+        unsolved.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.model == testManifest().modelIdByName(
+                "ScreenSelectorSolved");
+        }) == 0);
+
+    const RenderFrameData solved = build(true);
+    CHECK(std::ranges::count_if(
+        solved.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.model == testManifest().modelIdByName(
+                "ScreenSelectorSolved");
+        }) == 1);
 }
 
 void testDecorativeTileRendersWithoutChangingCameraExtent()
@@ -1854,6 +1923,7 @@ void testEnemyFacingAttackAndAnimationInstances()
 
 int main()
 {
+    try {
     testPresentationTransactionResolvesActorIndependentDependencies();
     testPresentationTransactionRejectsDependencyCycles();
     testCameraPitchTransition();
@@ -1862,6 +1932,7 @@ int main()
     testPresentationResetClocksAndFallenTargets();
     testPresentationInterpolatesActionsAndClips();
     testGameplayFrameUsesSettingsAndPresentation();
+    testSelectorFlagReflectsTargetCompletion();
     testDecorativeTileRendersWithoutChangingCameraExtent();
     testGameplayCameraExtentComesOnlyFromAuthoredLayout();
     testEditorFrameProvidesInvisibleExpansionBorderAndPreview();
@@ -1876,6 +1947,10 @@ int main()
     testDrownedPlayerRemainsVisibleBelowWaterAndPlaysDeathTransition();
     testGameplayFrameBuildsManifestDecorationInstances();
     testEnemyFacingAttackAndAnimationInstances();
+    } catch (const std::exception& error) {
+        std::cerr << "UNCAUGHT: " << error.what() << '\n';
+        return 1;
+    }
 
     if (failures == 0) {
         std::cout << "PresentationTests: "

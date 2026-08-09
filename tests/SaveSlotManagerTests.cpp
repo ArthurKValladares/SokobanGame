@@ -75,6 +75,35 @@ void testFreshInstallWritesNothing()
     check(directoryEmpty(directory.path()), "fresh install writes no files");
 }
 
+void testOverworldTargetSummaries()
+{
+    TemporaryDirectory directory;
+    sokoban::SaveSlotManager manager(directory.path(), instantWrites);
+    sokoban::PlayerProfile profile = manager.loadActiveProfile();
+    const std::vector<sokoban::LevelLocation> targets {
+        { 0, 1 },
+        { 1, 0 },
+    };
+
+    profile.recordScreenCompletion({ 0, 1 }, 4, 3.0);
+    auto summaries = manager.slotSummaries(profile, targets);
+    check(summaries[0].state == sokoban::SaveSlotState::Ready,
+        "screen completion makes overworld slot ready");
+    check(summaries[0].completedLevels == 1,
+        "summary counts completed selector targets");
+    check(!summaries[0].completed,
+        "one unsolved target keeps slot incomplete");
+    check(summaries[0].currentLevel == -1,
+        "overworld slot has no current puzzle level");
+
+    profile.recordScreenCompletion({ 1, 0 }, 2, 1.0);
+    summaries = manager.slotSummaries(profile, targets);
+    check(summaries[0].completedLevels == 2,
+        "all solved selector targets are counted");
+    check(summaries[0].completed,
+        "all selector targets complete the slot");
+}
+
 void testPreSplitSettingsMigration()
 {
     TemporaryDirectory directory;
@@ -366,6 +395,7 @@ void testFailedMarkerCommitRollsBackSwitch()
 int main()
 {
     testFreshInstallWritesNothing();
+    testOverworldTargetSummaries();
     testPreSplitSettingsMigration();
     testSummariesSwitchingAndDeletion();
     testSummaryCacheInvalidation();

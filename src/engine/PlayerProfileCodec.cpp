@@ -906,7 +906,8 @@ void parseProgressSection(PlayerProfile& profile, const Json& progress)
 {
     rejectUnknownProperties(
         progress,
-        { "unlockedLevel", "currentLevel", "currentScreen", "levels", "activeScreen" },
+        { "unlockedLevel", "currentLevel", "currentScreen", "levels",
+          "screens", "activeScreen", "overworldSession", "worldContext" },
         "progress");
     profile.unlockedLevel =
         nonNegativeIntegerProperty(progress, "unlockedLevel", "progress");
@@ -945,6 +946,61 @@ void parseProgressSection(PlayerProfile& profile, const Json& progress)
         profile.levels.push_back(std::move(level));
     }
 
+    const Json& screens = requiredProperty(progress, "screens", "progress");
+    if (!screens.is_array()) {
+        fail("progress", "property 'screens' must be an array");
+    }
+    for (std::size_t i = 0; i < screens.size(); ++i) {
+        const std::string context =
+            "progress.screens[" + std::to_string(i) + "]";
+        const Json& item = screens[i];
+        rejectUnknownProperties(
+            item,
+            { "level", "screen", "completed", "bestMoves",
+              "bestTimeSeconds" },
+            context);
+        PlayerProfile::ScreenProgress screen;
+        screen.level = nonNegativeIntegerProperty(item, "level", context);
+        screen.screen = nonNegativeIntegerProperty(item, "screen", context);
+        screen.completed = boolProperty(item, "completed", context);
+        screen.bestMoves = optionalNonNegativeInteger(
+            item, "bestMoves", context);
+        screen.bestTimeSeconds = optionalNonNegativeDouble(
+            item, "bestTimeSeconds", context);
+        if (!screen.completed &&
+            (screen.bestMoves || screen.bestTimeSeconds)) {
+            fail(context, "incomplete screens cannot have completion bests");
+        }
+        if (std::ranges::any_of(
+                profile.screens,
+                [&](const PlayerProfile::ScreenProgress& existing) {
+                    return existing.level == screen.level &&
+                        existing.screen == screen.screen;
+                })) {
+            fail(context,
+                "duplicate screen " + std::to_string(screen.level) + ":" +
+                std::to_string(screen.screen));
+        }
+        profile.screens.push_back(std::move(screen));
+    }
+
+    const std::string worldContext =
+        stringProperty(progress, "worldContext", "progress");
+    if (worldContext == "overworld") {
+        profile.worldContext = PlayerProfile::WorldContext::Overworld;
+    } else if (worldContext == "puzzle") {
+        profile.worldContext = PlayerProfile::WorldContext::Puzzle;
+    } else {
+        fail("progress", "property 'worldContext' must be 'overworld' or 'puzzle'");
+    }
+
+    const Json& overworldSession =
+        requiredProperty(progress, "overworldSession", "progress");
+    if (!overworldSession.is_null()) {
+        profile.overworldSession = sessionSnapshotFromJson(
+            overworldSession, "progress.overworldSession");
+    }
+
     const Json& activeScreen =
         requiredProperty(progress, "activeScreen", "progress");
     if (!activeScreen.is_null()) {
@@ -970,6 +1026,14 @@ void parseProgressSection(PlayerProfile& profile, const Json& progress)
                 "checkpoint does not match current level and screen");
         }
         profile.activeScreen = std::move(checkpoint);
+    }
+    if (profile.worldContext == PlayerProfile::WorldContext::Puzzle &&
+        !profile.activeScreen) {
+        fail("progress", "puzzle world context requires an active screen checkpoint");
+    }
+    if (profile.worldContext == PlayerProfile::WorldContext::Overworld &&
+        profile.activeScreen) {
+        fail("progress", "overworld context cannot have an active screen checkpoint");
     }
 }
 
@@ -1075,6 +1139,16 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
             throw std::runtime_error(
                 "player profile active screen checkpoint is invalid");
         }
+        if (normalized.worldContext == WorldContext::Puzzle &&
+            !normalized.activeScreen) {
+            throw std::runtime_error(
+                "puzzle world context requires an active screen checkpoint");
+        }
+        if (normalized.worldContext == WorldContext::Overworld &&
+            normalized.activeScreen) {
+            throw std::runtime_error(
+                "overworld context cannot have an active screen checkpoint");
+        }
 
         OrderedJson levelItems = OrderedJson::array();
         for (const LevelProgress& level : normalized.levels) {
@@ -1092,6 +1166,22 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
             levelItems.push_back(std::move(item));
         }
 
+        OrderedJson screenItems = OrderedJson::array();
+        for (const ScreenProgress& screen : normalized.screens) {
+            OrderedJson item = {
+                { "level", screen.level },
+                { "screen", screen.screen },
+                { "completed", screen.completed },
+            };
+            if (screen.bestMoves) {
+                item["bestMoves"] = *screen.bestMoves;
+            }
+            if (screen.bestTimeSeconds) {
+                item["bestTimeSeconds"] = *screen.bestTimeSeconds;
+            }
+            screenItems.push_back(std::move(item));
+        }
+
         OrderedJson activeScreenJson = nullptr;
         if (normalized.activeScreen) {
             activeScreenJson = {
@@ -1103,12 +1193,24 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
             };
         }
 
+        OrderedJson overworldSessionJson = nullptr;
+        if (normalized.overworldSession) {
+            overworldSessionJson =
+                sessionSnapshotToJson(*normalized.overworldSession);
+        }
+
         root["progress"] = {
             { "unlockedLevel", normalized.unlockedLevel },
             { "currentLevel", normalized.currentLevel },
             { "currentScreen", normalized.currentScreen },
             { "levels", std::move(levelItems) },
+            { "screens", std::move(screenItems) },
             { "activeScreen", std::move(activeScreenJson) },
+            { "overworldSession", std::move(overworldSessionJson) },
+            { "worldContext",
+              normalized.worldContext == WorldContext::Overworld
+                  ? "overworld"
+                  : "puzzle" },
         };
     }
 

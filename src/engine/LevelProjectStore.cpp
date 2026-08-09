@@ -155,6 +155,8 @@ std::vector<IndexedPath> indexedScreens(const std::filesystem::path& levelRoot)
 std::vector<IndexedPath> validateProject(const std::filesystem::path& root)
 {
     const std::vector<IndexedPath> levels = indexedDirectories(root, "level");
+    std::vector<std::vector<IndexedPath>> screensByLevel;
+    screensByLevel.reserve(levels.size());
     for (std::size_t levelIndex = 0; levelIndex < levels.size(); ++levelIndex) {
         if (levels[levelIndex].index != static_cast<int>(levelIndex)) {
             throw std::runtime_error(
@@ -175,17 +177,57 @@ std::vector<IndexedPath> validateProject(const std::filesystem::path& root)
                     "screen files must be contiguous from screen0 in " +
                     levels[levelIndex].path.string());
             }
-            (void)Level::loadFromFile(screens[screenIndex].path);
+            const Level screen =
+                Level::loadFromFile(screens[screenIndex].path);
+            if (!screen.selectors().empty()) {
+                throw std::runtime_error(
+                    "screen selectors are only allowed in overworld.scr: " +
+                    screens[screenIndex].path.string());
+            }
         }
         (void)loadLevelMetadata(
             levels[levelIndex].path,
             screens.size());
+        screensByLevel.push_back(screens);
+    }
+
+    const std::filesystem::path overworldPath = root / "overworld.scr";
+    if (std::filesystem::is_regular_file(overworldPath)) {
+        const Level overworld = Level::loadFromFile(overworldPath);
+        for (uint32_t z = 0; z < overworld.depth(); ++z) {
+            for (uint32_t y = 0; y < overworld.height(); ++y) {
+                for (uint32_t x = 0; x < overworld.width(); ++x) {
+                    if (overworld.authoredTileAt(x, y, z) == TileType::End) {
+                        throw std::runtime_error(
+                            "end tiles are not allowed in overworld.scr");
+                    }
+                }
+            }
+        }
+        for (const Level::ScreenSelector& selector : overworld.selectors()) {
+            if (!selector.target) {
+                continue;
+            }
+            if (selector.target->level < 0 ||
+                selector.target->level >=
+                    static_cast<int>(screensByLevel.size()) ||
+                selector.target->screen < 0 ||
+                selector.target->screen >= static_cast<int>(
+                    screensByLevel[static_cast<std::size_t>(
+                        selector.target->level)].size())) {
+                throw std::runtime_error(
+                    "selector " + std::to_string(selector.id) +
+                    " targets a missing screen in " +
+                    overworldPath.string());
+            }
+        }
     }
     return levels;
 }
 
 void prepareRuntimeMirror(
     const std::vector<IndexedPath>& levels,
+    const std::filesystem::path& projectStage,
     const std::filesystem::path& runtimeStage)
 {
     std::filesystem::create_directories(runtimeStage);
@@ -201,6 +243,20 @@ void prepareRuntimeMirror(
         if (error) {
             throw std::runtime_error(
                 "cannot prepare runtime level mirror: " + error.message());
+        }
+    }
+    const std::filesystem::path overworld = projectStage / "overworld.scr";
+    if (std::filesystem::is_regular_file(overworld)) {
+        std::error_code error;
+        std::filesystem::copy_file(
+            overworld,
+            runtimeStage / "overworld.scr",
+            std::filesystem::copy_options::overwrite_existing,
+            error);
+        if (error) {
+            throw std::runtime_error(
+                "cannot prepare runtime overworld mirror: " +
+                error.message());
         }
     }
 }
@@ -263,7 +319,7 @@ LevelProjectStore::Result LevelProjectStore::transact(
         mutation(projectStage);
         const std::vector<IndexedPath> levels = validateProject(projectStage);
         if (runtimeRoot) {
-            prepareRuntimeMirror(levels, runtimeStage);
+            prepareRuntimeMirror(levels, projectStage, runtimeStage);
         }
 
         projectHadOriginal = std::filesystem::exists(projectRoot);

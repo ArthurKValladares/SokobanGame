@@ -7,6 +7,7 @@
 #include "engine/DebugUi.hpp"
 #include "engine/Log.hpp"
 #include "engine/RenderFrameBuilder.hpp"
+#include "engine/Rules.hpp"
 #include "engine/RuntimeContent.hpp"
 #include "engine/UserSettingsConfig.hpp"
 #include "engine/ui/UiConfig.hpp"
@@ -82,8 +83,11 @@ Application::Application()
     // The world stays unloaded until the title's Continue/New Game, but its
     // assets warm up in the background so that first load doesn't block.
     openTitleScreen();
-    renderer_.preloadAssets(
-        levelAssetRequirements(campaign_.currentLevel()));
+    RenderAssetRequirements initialRequirements =
+        renderAssetRequirementsForLevel(
+            Level::loadFromFile(overworldPath()), assetManifest_);
+    initialRequirements.merge(levelAssetRequirements(campaign_.currentLevel()));
+    renderer_.preloadAssets(initialRequirements);
 
 #if SOKOBAN_ENABLE_DEBUG_UI
     tools_->initialize(
@@ -96,9 +100,17 @@ Application::Application()
         animationCatalog_);
 
     DebugUi::addTab("Engine", [this] {
+        int completedTargets = 0;
+        for (LevelLocation target : campaign_.overworldTargets()) {
+            completedTargets += playerProfile_.screenCompleted(target) ? 1 : 0;
+        }
         const ApplicationDebugUi::Result result = tools_->applicationDebugUi.draw({
             .currentLevel = campaign_.currentLevel(),
             .currentScreen = campaign_.currentScreen(),
+            .inOverworld = campaign_.inOverworld(),
+            .completedSelectorTargets = completedTargets,
+            .selectorTargetCount = static_cast<int>(
+                campaign_.overworldTargets().size()),
             .level = level_,
             .gameplaySession = gameplaySession_,
             .input = input_,
@@ -346,6 +358,9 @@ void Application::run()
             window_.size(),
             window_.sizeInPixels(),
             renderer_.wantsMouseCapture());
+        tools_->drawSelectorLabels(
+            renderer_,
+            preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
 
         if (const std::optional<TitleAction> titleAction = titleScreen_.draw(
                 ui_, pixelSize, routedInput.title)) {
@@ -453,6 +468,10 @@ void Application::update(
     }
     if (gameplayResult.screenSolved) {
         advanceScreen();
+    } else if (input.gameplay.interactPressed &&
+        campaign_.inOverworld() && !gameplaySession_.moving() &&
+        !rules::hasPendingMotion(level_, gameplaySession_.state())) {
+        tryEnterSelector();
     } else if (gameplayResult.stateCommitted &&
         campaign_.deferCheckpoint()) {
         checkpointCurrentScreen(true);
@@ -479,46 +498,55 @@ void Application::loadCurrentScreen()
 {
     // Editor draft play or a New Game may have changed the level set.
     buildLevelCatalog();
-    const CampaignSession::ScreenRestore restore =
-        campaign_.prepareScreenLoad(playerProfile_);
+    const CampaignSession::WorldRestore restore =
+        campaign_.prepareWorldLoad(playerProfile_);
+
+    const std::optional<LevelLocation> location = campaign_.inOverworld()
+        ? std::nullopt
+        : std::optional<LevelLocation> { campaign_.location() };
+    const std::filesystem::path path = campaign_.inOverworld()
+        ? overworldPath()
+        : screenPath(campaign_.currentLevel(), campaign_.currentScreen());
 
     const bool restored = applyLevel(
-        Level::loadFromFile(screenPath(
-            campaign_.currentLevel(), campaign_.currentScreen())),
-        restore.snapshot ? &*restore.snapshot : nullptr);
+        Level::loadFromFile(path),
+        restore.snapshot ? &*restore.snapshot : nullptr,
+        location);
     if (restore.checkpointMatched && !restored) {
         log::warning(log::Category::Persistence)
-            << "Discarded invalid gameplay checkpoint for level "
-            << campaign_.currentLevel() << " screen "
-            << campaign_.currentScreen();
-        playerProfile_.activeScreen.reset();
+            << "Discarded invalid gameplay checkpoint for "
+            << (campaign_.inOverworld() ? "the overworld" : "puzzle");
+        if (campaign_.inOverworld()) {
+            playerProfile_.overworldSession.reset();
+        } else {
+            playerProfile_.activeScreen.reset();
+        }
     }
-    campaign_.finishScreenLoad(playerProfile_);
+    campaign_.finishWorldLoad(playerProfile_);
     checkpointCurrentScreen(true);
-    audioSystem_.playMusicForLevel(campaign_.currentLevel());
+    audioSystem_.playMusicForLevel(
+        campaign_.inOverworld() ? 0 : campaign_.currentLevel());
     preloadUpcomingAssets();
     tools_->levelEditor.setPlayingDraft(false);
     tools_->levelEditor.setEditingDocument(false);
     tools_->hoverCell.reset();
 
     log::debug(log::Category::Gameplay)
-        << "player started level " << campaign_.currentLevel()
-        << " screen " << campaign_.currentScreen();
+        << "player entered "
+        << (campaign_.inOverworld() ? "the overworld" : "puzzle");
 }
 
 bool Application::applyLevel(
     Level level,
-    const GameplaySession::Snapshot* snapshot)
+    const GameplaySession::Snapshot* snapshot,
+    std::optional<LevelLocation> location)
 {
     // Same location the render frame will use, so the splat map this screen
     // draws with is the one guaranteed resident here.
     renderer_.ensureAssets(renderAssetRequirementsForLevel(
         level,
         assetManifest_,
-        LevelLocation {
-            .level = campaign_.currentLevel(),
-            .screen = campaign_.currentScreen(),
-        },
+        location,
         &animationCatalog_));
     level_ = std::move(level);
     const bool restored = snapshot && gameplaySession_.restore(level_, *snapshot);
@@ -533,9 +561,14 @@ bool Application::applyLevel(
 
 void Application::advanceScreen()
 {
-    const CampaignSession::AdvanceResult result = campaign_.advanceScreen(
-        playerProfile_, gameplaySession_.playerMoveCount());
-    handleCampaignAdvance(result);
+    if (campaign_.inOverworld()) {
+        log::warning(log::Category::Gameplay)
+            << "Ignored an overworld completion event; overworlds may not "
+               "contain End tiles";
+        return;
+    }
+    handlePuzzleCompleted(campaign_.completePuzzle(
+        playerProfile_, gameplaySession_.playerMoveCount()));
 }
 
 void Application::solveCurrentScreenForDebug()
@@ -544,47 +577,37 @@ void Application::solveCurrentScreenForDebug()
         levelCompleteOverlay_.isOpen()) {
         return;
     }
-    const CampaignSession::AdvanceResult result =
-        campaign_.completeCurrentScreenForDebug(
-        playerProfile_, gameplaySession_.playerMoveCount());
-    handleCampaignAdvance(result);
-}
-
-void Application::handleCampaignAdvance(
-    const CampaignSession::AdvanceResult& result)
-{
-    if (std::holds_alternative<CampaignSession::ScreenAdvanced>(result)) {
-        loadCurrentScreen();
+    if (campaign_.inOverworld()) {
         return;
     }
+    handlePuzzleCompleted(campaign_.completePuzzle(
+        playerProfile_, gameplaySession_.playerMoveCount(), false));
+}
 
-    const bool gameCompleted =
-        std::holds_alternative<CampaignSession::GameCompleted>(result);
-    const CampaignSession::LevelCompleted& completed = gameCompleted
-        ? std::get<CampaignSession::GameCompleted>(result).finalLevel
-        : std::get<CampaignSession::LevelCompleted>(result);
+void Application::handlePuzzleCompleted(
+    const CampaignSession::PuzzleCompleted& completed)
+{
     const LevelCompleteStats stats {
-        .level = completed.level,
+        .level = completed.location.level,
         .moves = completed.moves,
         .timeSeconds = completed.timeSeconds,
         .previousBestMoves = completed.previousBestMoves,
         .previousBestTimeSeconds = completed.previousBestTimeSeconds,
         .newBestMoves = completed.newBestMoves,
         .newBestTime = completed.newBestTime,
-        .hasNextLevel = completed.hasNextLevel,
+        // Continue now means returning to the saved overworld position.
+        .hasNextLevel = true,
     };
     persistProfile(true);
-    if (gameCompleted) {
-        // The final level: congratulate with whole-game stats instead of the
-        // per-level screen; Level Select is unlocked from here on.
+    if (completed.gameCompleted) {
         std::vector<GameCompleteLevelStats> levels;
-        for (int level = 0; level < campaign_.levelCount(); ++level) {
-            const PlayerProfile::LevelProgress* levelProgress =
-                playerProfile_.progressForLevel(level);
+        for (LevelLocation target : campaign_.overworldTargets()) {
+            const PlayerProfile::ScreenProgress* screenProgress =
+                playerProfile_.progressForScreen(target);
             levels.push_back({
-                .bestMoves = levelProgress ? levelProgress->bestMoves : std::nullopt,
+                .bestMoves = screenProgress ? screenProgress->bestMoves : std::nullopt,
                 .bestTimeSeconds =
-                    levelProgress ? levelProgress->bestTimeSeconds : std::nullopt,
+                    screenProgress ? screenProgress->bestTimeSeconds : std::nullopt,
             });
         }
         levelCompleteOverlay_.openGameComplete(std::move(levels));
@@ -593,10 +616,39 @@ void Application::handleCampaignAdvance(
     levelCompleteOverlay_.open(stats);
 }
 
+void Application::tryEnterSelector()
+{
+    const GameState& state = gameplaySession_.state();
+    const Level::ScreenSelector* sharedSelector =
+        CampaignSession::selectorForInteraction(level_, state);
+    if (!sharedSelector || !sharedSelector->target) {
+        if (sharedSelector) {
+            log::warning(log::Category::Gameplay)
+                << "Selector " << sharedSelector->id
+                << " has no assigned screen";
+        }
+        return;
+    }
+    if (!campaign_.screenExists(
+            sharedSelector->target->level,
+            sharedSelector->target->screen)) {
+        log::warning(log::Category::Gameplay)
+            << "Selector " << sharedSelector->id
+            << " targets missing screen " << sharedSelector->target->level
+            << ':' << sharedSelector->target->screen;
+        return;
+    }
+
+    // Make the return point durable before changing the profile context.
+    checkpointCurrentScreen(true);
+    if (campaign_.startPuzzle(playerProfile_, *sharedSelector->target)) {
+        loadCurrentScreen();
+    }
+}
+
 void Application::resolveLevelComplete(bool toTitle)
 {
     levelCompleteOverlay_.close();
-    campaign_.resolveLevelComplete(playerProfile_);
     loadCurrentScreen();
     if (toTitle) {
         openTitleScreen();
@@ -613,7 +665,8 @@ std::vector<SaveSlotInfo> Application::saveSlotInfos() const
 {
     std::vector<SaveSlotInfo> slots;
     for (const SaveSlotManager::SlotSummary& summary :
-        saveSlots_.slotSummaries(playerProfile_, campaign_.levelCount())) {
+        saveSlots_.slotSummaries(
+            playerProfile_, campaign_.overworldTargets())) {
         slots.push_back({
             .state = summary.state,
             .completed = summary.completed,
@@ -754,7 +807,7 @@ void Application::executeShellCommand(const ShellCommand& command)
 
 bool Application::allLevelsCompleted() const
 {
-    return campaign_.allLevelsCompleted(playerProfile_);
+    return campaign_.allTargetsCompleted(playerProfile_);
 }
 
 bool Application::shellMenuOpen() const
@@ -801,7 +854,8 @@ void Application::startNewGame()
 
 void Application::startLevel(int level, int screen)
 {
-    if (campaign_.startLevel(playerProfile_, level, screen)) {
+    if (campaign_.startPuzzle(
+            playerProfile_, LevelLocation { .level = level, .screen = screen })) {
         loadCurrentScreen();
     }
 }
@@ -886,6 +940,11 @@ std::filesystem::path Application::screenPath(
         ("screen" + std::to_string(screenIndex) + ".scr");
 }
 
+std::filesystem::path Application::overworldPath() const
+{
+    return assetRoot_ / "levels" / "overworld.scr";
+}
+
 void Application::buildLevelCatalog()
 {
     std::vector<int> screenCounts;
@@ -905,6 +964,15 @@ void Application::buildLevelCatalog()
             static_cast<std::size_t>(screens)));
     }
     campaign_.setLevelScreenCounts(std::move(screenCounts));
+
+    std::vector<LevelLocation> selectorTargets;
+    const Level overworld = Level::loadFromFile(overworldPath());
+    for (const Level::ScreenSelector& selector : overworld.selectors()) {
+        if (selector.target) {
+            selectorTargets.push_back(*selector.target);
+        }
+    }
+    campaign_.setOverworldTargets(std::move(selectorTargets));
 }
 
 void Application::restoreProfileLocation()
@@ -916,7 +984,7 @@ void Application::restoreProfileLocation()
     if (!campaign_.restoreProfileLocation(playerProfile_)) {
         log::warning(log::Category::Persistence)
             << "Saved level location " << saved.level << ':' <<
-            saved.screen << " does not exist; falling back to 0:0";
+            saved.screen << " does not exist; falling back to the overworld";
     }
 }
 
@@ -944,16 +1012,15 @@ RenderAssetRequirements Application::levelAssetRequirements(int levelIndex) cons
 
 void Application::preloadUpcomingAssets()
 {
-    RenderAssetRequirements requirements =
-        levelAssetRequirements(campaign_.currentLevel());
-
-    int nextLevel = campaign_.currentLevel() + 1;
-    if (!campaign_.screenExists(nextLevel, 0)) {
-        nextLevel = 0;
-    }
-    if (nextLevel != campaign_.currentLevel() &&
-        campaign_.screenExists(nextLevel, 0)) {
-        requirements.merge(levelAssetRequirements(nextLevel));
+    RenderAssetRequirements requirements;
+    if (campaign_.inOverworld()) {
+        for (int level = 0; level < campaign_.levelCount(); ++level) {
+            requirements.merge(levelAssetRequirements(level));
+        }
+    } else {
+        requirements = levelAssetRequirements(campaign_.currentLevel());
+        requirements.merge(renderAssetRequirementsForLevel(
+            Level::loadFromFile(overworldPath()), assetManifest_));
     }
     renderer_.preloadAssets(requirements);
 }
@@ -987,6 +1054,9 @@ RenderFrameData Application::buildRenderFrame(
             .conveyorBeltScrollOffset = beltScrollOffset,
             .levelLocation =
                 levelLocationFromScreenPath(tools_->levelEditor.loadedDocumentPath()),
+            .selectorSolved = [this](LevelLocation target) {
+                return playerProfile_.screenCompleted(target);
+            },
         }, renderFrameArena_);
     }
 #endif
@@ -1010,9 +1080,11 @@ RenderFrameData Application::buildRenderFrame(
         .animations = &animationCatalog_,
         .conveyorBeltScrollOffset = beltScrollOffset,
         .cameraPitchDegrees = presentation_.cameraPitchDegrees(),
-        .levelLocation = LevelLocation {
-            .level = campaign_.currentLevel(),
-            .screen = campaign_.currentScreen(),
+        .levelLocation = campaign_.inOverworld()
+            ? std::nullopt
+            : std::optional<LevelLocation> { campaign_.location() },
+        .selectorSolved = [this](LevelLocation target) {
+            return playerProfile_.screenCompleted(target);
         },
     }, renderFrameArena_);
     particleSystem_.appendRenderData(frame);

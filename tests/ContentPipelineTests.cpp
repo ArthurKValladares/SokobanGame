@@ -66,7 +66,8 @@ std::string manifest(std::string_view texturePath = "textures/hero.png")
     return R"json({
   "format": 1,
   "textures": [
-    { "name": "HeroTexture", "path": ")json" + std::string(texturePath) + R"json(" }
+    { "name": "HeroTexture", "path": ")json" + std::string(texturePath) + R"json(" },
+    { "name": "BoardGameBits", "path": "textures/boardgame.png" }
   ],
   "models": [
     {
@@ -78,6 +79,16 @@ std::string manifest(std::string_view texturePath = "textures/hero.png")
         { "path": "models/sword.gltf", "node": "handslot.r" }
       ],
       "role": "player"
+    },
+    {
+      "name": "ScreenSelectorUnsolved",
+      "path": "models/flag-blue.gltf",
+      "material": { "mode": "texture", "texture": "BoardGameBits" }
+    },
+    {
+      "name": "ScreenSelectorSolved",
+      "path": "models/flag-yellow.gltf",
+      "material": { "mode": "texture", "texture": "BoardGameBits" }
     }
   ],
   "animations": [
@@ -134,6 +145,7 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
     writeFile(assets / "manifest.json", manifest());
     writeFile(assets / "animation_catalog.json", animationCatalog());
     writeFile(assets / "textures/hero.png");
+    writeFile(assets / "textures/boardgame.png");
     writeFile(assets / "ui/Karla-Regular.ttf");
     writeFile(assets / "ui/OFL.txt", "font license");
     writeFile(assets / "custom/ui/main-menu-rogue-pushing-rock-4k.png");
@@ -141,6 +153,14 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
     writeFile(assets / "models/hero.bin");
     writeFile(assets / "models/sword.gltf", R"({"buffers":[{"uri":"sword.bin"}]})");
     writeFile(assets / "models/sword.bin");
+    writeFile(
+        assets / "models/flag-blue.gltf",
+        R"({"buffers":[{"uri":"flag-blue.bin"}]})");
+    writeFile(assets / "models/flag-blue.bin");
+    writeFile(
+        assets / "models/flag-yellow.gltf",
+        R"({"buffers":[{"uri":"flag-yellow.bin"}]})");
+    writeFile(assets / "models/flag-yellow.bin");
     writeFile(assets / "models/LICENSE.txt", "model license");
     const std::string animationGltf = R"json({
       "asset":{"version":"2.0"},
@@ -189,6 +209,11 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
     writeFile(assets / "audio/step.ogg");
     writeFile(assets / "audio/music.ogg");
     writeFile(levels / "level0/screen0.scr", "@layer 0\n...\n\n@layer 1\n.CE\n");
+    writeFile(
+        levels / "overworld.scr",
+        "@selector {\"id\":1,\"cell\":[1,0,1],"
+        "\"target\":{\"level\":0,\"screen\":0}}\n\n"
+        "@layer 0\n...\n\n@layer 1\nC  \n");
     writeFile(
         levels / "level0/metadata.json",
         R"json({"format":1,"name":"First Light","screens":["Arrival"]})json");
@@ -244,6 +269,7 @@ void testInventoryAndStaging()
         contains(inventory, "custom/ui/main-menu-rogue-pushing-rock-4k.png"),
         "title background included");
     check(contains(inventory, "levels/level0/screen0.scr"), "playable level included");
+    check(contains(inventory, "levels/overworld.scr"), "overworld included");
     check(contains(inventory, "levels/level0/metadata.json"),
         "level names included");
     check(!contains(inventory, "levels/Deleted/level9/screen0.scr"), "deleted level excluded");
@@ -346,6 +372,47 @@ void testValidationFailures()
     writeFile(
         roots.levels / "level0/screen0.scr",
         "@layer 0\n...\n\n@layer 1\n.CE\n");
+
+    writeFile(
+        roots.levels / "level0/screen0.scr",
+        "@selector {\"id\":1,\"cell\":[1,0,1],"
+        "\"target\":{\"level\":0,\"screen\":0}}\n\n"
+        "@layer 0\n...\n\n@layer 1\nC E\n");
+    checkThrows(
+        [&] { (void)sokoban::collectContentInventory(roots); },
+        "selector outside overworld");
+    writeFile(
+        roots.levels / "level0/screen0.scr",
+        "@layer 0\n...\n\n@layer 1\n.CE\n");
+
+    writeFile(
+        roots.levels / "overworld.scr",
+        "@selector {\"id\":1,\"cell\":[1,0,1],\"target\":null}\n\n"
+        "@layer 0\n...\n\n@layer 1\nC  \n");
+    checkThrows(
+        [&] { (void)sokoban::collectContentInventory(roots); },
+        "unassigned overworld selector");
+    writeFile(
+        roots.levels / "overworld.scr",
+        "@selector {\"id\":1,\"cell\":[1,0,1],"
+        "\"target\":{\"level\":4,\"screen\":0}}\n\n"
+        "@layer 0\n...\n\n@layer 1\nC  \n");
+    checkThrows(
+        [&] { (void)sokoban::collectContentInventory(roots); },
+        "missing overworld target");
+    writeFile(
+        roots.levels / "overworld.scr",
+        "@selector {\"id\":1,\"cell\":[1,0,1],"
+        "\"target\":{\"level\":0,\"screen\":0}}\n\n"
+        "@layer 0\n...\n\n@layer 1\nCE \n");
+    checkThrows(
+        [&] { (void)sokoban::collectContentInventory(roots); },
+        "end tile in overworld");
+    writeFile(
+        roots.levels / "overworld.scr",
+        "@selector {\"id\":1,\"cell\":[1,0,1],"
+        "\"target\":{\"level\":0,\"screen\":0}}\n\n"
+        "@layer 0\n...\n\n@layer 1\nC  \n");
 
     std::filesystem::create_directories(roots.levels / "level2");
     writeFile(roots.levels / "level2/screen0.scr", "@layer 0\n...\n\n@layer 1\n.CE\n");

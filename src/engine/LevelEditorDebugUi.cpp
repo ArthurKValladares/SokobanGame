@@ -229,7 +229,9 @@ void LevelEditorDebugUi::draw(
         editor.deleteActiveLayer();
     }
 
-    int editorTool = editor.tool() == LevelEditor::Tool::Tiles ? 0 : 1;
+    int editorTool = editor.tool() == LevelEditor::Tool::Tiles
+        ? 0
+        : (editor.tool() == LevelEditor::Tool::Decorations ? 1 : 2);
     if (ImGui::RadioButton("Tiles", &editorTool, 0)) {
         editor.setTool(LevelEditor::Tool::Tiles);
     }
@@ -237,10 +239,16 @@ void LevelEditorDebugUi::draw(
     if (ImGui::RadioButton("Mesh Decorations", &editorTool, 1)) {
         editor.setTool(LevelEditor::Tool::Decorations);
     }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Screen Selectors", &editorTool, 2)) {
+        editor.setTool(LevelEditor::Tool::Selectors);
+    }
     if (editor.tool() == LevelEditor::Tool::Tiles) {
         drawTilePalette(editor, callbacks);
-    } else {
+    } else if (editor.tool() == LevelEditor::Tool::Decorations) {
         drawDecorationPalette(editor, callbacks);
+    } else {
+        drawSelectorPalette(editor);
     }
     ImGui::Separator();
     drawGroundPaintTab(painter, callbacks);
@@ -391,7 +399,8 @@ void LevelEditorDebugUi::drawTilePalette(
             (available + spacing) / (paletteButtonSize.x + spacing)));
     int column = 0;
     for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
-        if (definition.type == TileType::Water) {
+        if (definition.type == TileType::Water ||
+            (definition.type == TileType::End && editor.editingOverworld())) {
             continue;
         }
         if (column % perRow != 0) {
@@ -578,9 +587,153 @@ void LevelEditorDebugUi::drawDecorationPalette(
 #endif
 }
 
+void LevelEditorDebugUi::drawSelectorPalette(LevelEditor& editor)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (!editor.editingOverworld()) {
+        ImGui::TextWrapped(
+            "Screen selectors can only be authored in overworld.scr. "
+            "Open the pinned Overworld document below.");
+        return;
+    }
+
+    ImGui::TextUnformatted("Click: place/select   D + click: delete");
+    ImGui::Text("Screen Selectors (%zu)", editor.selectors().size());
+    if (ImGui::BeginListBox("##screen_selectors", ImVec2(-1.0f, 130.0f))) {
+        for (std::size_t index = 0; index < editor.selectors().size(); ++index) {
+            const Level::ScreenSelector& selector = editor.selectors()[index];
+            std::string label = "Selector " + std::to_string(selector.id);
+            if (!selector.target) {
+                label += " (unassigned)";
+            }
+            const bool selected = editor.selectedSelectorIndex() == index;
+            if (ImGui::Selectable(label.c_str(), selected)) {
+                (void)editor.selectSelector(index);
+            }
+        }
+        ImGui::EndListBox();
+    }
+
+    const Level::ScreenSelector* selected = editor.selectedSelector();
+    if (!selected) {
+        return;
+    }
+    const uint32_t selectorId = selected->id;
+    std::optional<LevelLocation> target = selected->target;
+    const std::vector<LevelEditor::LevelDirectory> levels =
+        editor.collectLevelDirectories();
+
+    const auto levelLabel = [](const LevelEditor::LevelDirectory& level) {
+        std::string label = "Level " + std::to_string(level.index + 1);
+        if (!level.name.empty()) {
+            label += ": " + level.name;
+        }
+        return label;
+    };
+    const auto screenLabel = [](const LevelEditor::ScreenFile& screen) {
+        std::string label = "Screen " + std::to_string(screen.index + 1);
+        if (!screen.name.empty()) {
+            label += ": " + screen.name;
+        }
+        return label;
+    };
+
+    ImGui::Text("Association for Selector %u", selectorId);
+    std::string levelPreview = "Unassigned";
+    const LevelEditor::LevelDirectory* targetLevel = nullptr;
+    if (target) {
+        const auto found = std::ranges::find(
+            levels, target->level, &LevelEditor::LevelDirectory::index);
+        if (found != levels.end()) {
+            targetLevel = &*found;
+            levelPreview = levelLabel(*found);
+        } else {
+            levelPreview = "Missing Level " +
+                std::to_string(target->level + 1);
+        }
+    }
+    if (ImGui::BeginCombo("Level", levelPreview.c_str())) {
+        for (const LevelEditor::LevelDirectory& level : levels) {
+            const std::string label = levelLabel(level);
+            const bool current = target && target->level == level.index;
+            if (ImGui::Selectable(label.c_str(), current)) {
+                target = LevelLocation {
+                    .level = level.index,
+                    .screen = level.screens.empty()
+                        ? 0
+                        : level.screens.front().index,
+                };
+                (void)editor.updateSelectedSelectorTarget(target);
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    // Re-resolve after the level combo because updating the editor can
+    // invalidate the pointer captured above.
+    selected = editor.selectedSelector();
+    target = selected ? selected->target : std::nullopt;
+    targetLevel = nullptr;
+    if (target) {
+        const auto found = std::ranges::find(
+            levels, target->level, &LevelEditor::LevelDirectory::index);
+        if (found != levels.end()) {
+            targetLevel = &*found;
+        }
+    }
+    std::string screenPreview = "Unassigned";
+    if (target && targetLevel) {
+        const auto found = std::ranges::find(
+            targetLevel->screens,
+            target->screen,
+            &LevelEditor::ScreenFile::index);
+        screenPreview = found == targetLevel->screens.end()
+            ? "Missing Screen " + std::to_string(target->screen + 1)
+            : screenLabel(*found);
+    }
+    ImGui::BeginDisabled(targetLevel == nullptr);
+    if (ImGui::BeginCombo("Screen", screenPreview.c_str())) {
+        for (const LevelEditor::ScreenFile& screen : targetLevel->screens) {
+            const std::string label = screenLabel(screen);
+            const bool current = target && target->screen == screen.index;
+            if (ImGui::Selectable(label.c_str(), current)) {
+                (void)editor.updateSelectedSelectorTarget(LevelLocation {
+                    .level = targetLevel->index,
+                    .screen = screen.index,
+                });
+            }
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::EndDisabled();
+
+    if (ImGui::Button("Unassign")) {
+        (void)editor.updateSelectedSelectorTarget(std::nullopt);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Delete Selector")) {
+        (void)editor.deleteSelectedSelector();
+    }
+#else
+    (void)editor;
+#endif
+}
+
 void LevelEditorDebugUi::drawFileBrowser(LevelEditor& editor)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
+    const std::filesystem::path overworldPath =
+        editor.browserRoot() / "overworld.scr";
+    if (ImGui::Button("Open Overworld")) {
+        editor.selectDocument(overworldPath);
+        if (std::filesystem::is_regular_file(overworldPath)) {
+            (void)editor.loadDocument(overworldPath);
+            syncDocumentPath(editor);
+        }
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", overworldPath.string().c_str());
+
     ImGui::InputText("Root", &browserRootBuffer_);
     ImGui::SameLine();
     if (ImGui::Button("Set Root") && editor.setBrowserRoot(browserRootBuffer_)) {

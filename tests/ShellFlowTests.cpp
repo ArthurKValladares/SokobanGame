@@ -71,8 +71,8 @@ void testBackRouting()
         CHECK(open != nullptr && !open->pauseContext && !open->allowLevelSelect);
     }
 
-    // In gameplay, Back opens the pause menu; Level Select only after the
-    // save has beaten the game.
+    // In gameplay, Back opens the pause menu. Completion never enables a
+    // shortcut around the overworld.
     {
         const std::vector<ShellCommand> commands = flow.handle(
             sokoban::ShellBackPressed {}, { .gameLoaded = true });
@@ -84,7 +84,7 @@ void testBackRouting()
             sokoban::ShellBackPressed {},
             { .gameLoaded = true, .allLevelsCompleted = true });
         const auto* open = commandAt<sokoban::shell::OpenOptions>(commands, 0);
-        CHECK(open != nullptr && open->pauseContext && open->allowLevelSelect);
+        CHECK(open != nullptr && open->pauseContext && !open->allowLevelSelect);
     }
 
     // The window's close button always goes through the confirmation.

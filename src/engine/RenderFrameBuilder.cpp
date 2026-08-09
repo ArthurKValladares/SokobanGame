@@ -4,6 +4,7 @@
 #include "engine/Rules.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
+#include "engine/render/SelectorRenderConfig.hpp"
 #include "engine/render/MirrorConfig.hpp"
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
@@ -918,6 +919,44 @@ RenderFrameData initializeGameplayFrame(
     return frame;
 }
 
+void appendSelectors(
+    RenderFrameData& frame,
+    const std::vector<Level::ScreenSelector>& selectors,
+    const AssetManifest& manifest,
+    const std::function<bool(LevelLocation)>& solved)
+{
+    constexpr float flagScale = 0.65f;
+    for (const Level::ScreenSelector& selector : selectors) {
+        const bool completed = selector.target && solved && solved(*selector.target);
+        const RenderModel model = manifest.modelIdByName(
+            completed
+                ? selectorRender::solvedModelName
+                : selectorRender::unsolvedModelName);
+        const Vec3 translation {
+            static_cast<float>(selector.cell.x) + 0.22f,
+            static_cast<float>(selector.cell.y) + 0.22f,
+            static_cast<float>(selector.cell.z),
+        };
+        frame.tiles.push_back({
+            .cell = selector.cell,
+            .position = { translation.x, translation.y },
+            .size = { flagScale, flagScale },
+            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+            .baseElevation = translation.z,
+            .height = flagScale * 1.5f,
+            .pickable = false,
+            .showGrid = false,
+            .affectsCameraFit = false,
+            .model = model,
+            .modelTransform = RenderFrameData::ModelTransform {
+                .translation = translation,
+                .scale = { flagScale, flagScale, flagScale },
+                .pivot = { 0.0f, 0.0f, 0.0f },
+            },
+        });
+    }
+}
+
 void appendGameplayWorld(
     RenderFrameData& frame,
     const RenderFrameBuilder::GameplayInput& input)
@@ -992,6 +1031,11 @@ void appendGameplayWorld(
         });
     appendDecorations(
         frame, input.level.decorations(), input.manifest);
+    appendSelectors(
+        frame,
+        input.level.selectors(),
+        input.manifest,
+        input.selectorSolved);
 
     auto levelTileAt = [&](GridPosition3 position) {
         if (!input.level.inBounds(position)) {
@@ -1902,6 +1946,11 @@ private:
             input_.editor.selectedDecorationIndex(),
             input_.hoverDecoration,
             true);
+        appendSelectors(
+            frame,
+            input_.editor.selectors(),
+            input_.manifest,
+            input_.selectorSolved);
     }
 
     void appendEditorPreviews(RenderFrameData& frame) const

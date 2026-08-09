@@ -389,6 +389,42 @@ void ApplicationTools::drawDecorationGizmo(
 #endif
 }
 
+void ApplicationTools::drawSelectorLabels(
+    const VulkanRenderer& renderer,
+    const VulkanRenderer::PreparedFrame* frame) const
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (!frame || !levelEditor.editingDocument() ||
+        !levelEditor.editingOverworld()) {
+        return;
+    }
+    const std::vector<EditorInteraction::SelectorLabel> labels =
+        EditorInteraction::selectorLabels(
+            levelEditor.selectors(),
+            [&](Vec3 world) {
+                return renderer.projectToPixels(*frame, world);
+            });
+    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
+    for (const EditorInteraction::SelectorLabel& label : labels) {
+        const ImVec2 size = ImGui::CalcTextSize(label.text.c_str());
+        const ImVec2 position {
+            label.anchor.x - size.x * 0.5f,
+            label.anchor.y - size.y * 0.5f,
+        };
+        drawList->AddRectFilled(
+            ImVec2(position.x - 4.0f, position.y - 2.0f),
+            ImVec2(position.x + size.x + 4.0f, position.y + size.y + 2.0f),
+            IM_COL32(16, 20, 26, 205),
+            3.0f);
+        drawList->AddText(position, IM_COL32(245, 247, 250, 255),
+            label.text.c_str());
+    }
+#else
+    (void)renderer;
+    (void)frame;
+#endif
+}
+
 void ApplicationTools::drawDraftExitConfirmation()
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -593,16 +629,33 @@ void ApplicationTools::updateEditorInteraction(
         GridPosition3 target = *clicked;
         const bool editingDecorations =
             levelEditor.tool() == LevelEditor::Tool::Decorations;
+        const bool editingSelectors =
+            levelEditor.tool() == LevelEditor::Tool::Selectors;
         const bool deleting = input.deleting && !editingDecorations;
         target = levelEditor.resolveEditTarget(
             target,
-            deleting,
-            input.replaceLayer && !editingDecorations);
+            deleting && !editingSelectors,
+            input.replaceLayer && !editingDecorations && !editingSelectors);
 
         hoverCell = target;
         if (input.primaryPressed) {
             if (editingDecorations) {
                 (void)levelEditor.placeDecoration(target);
+            } else if (editingSelectors) {
+                const auto found = std::ranges::find(
+                    levelEditor.selectors(),
+                    target,
+                    &Level::ScreenSelector::cell);
+                if (found != levelEditor.selectors().end()) {
+                    (void)levelEditor.selectSelector(
+                        static_cast<std::size_t>(std::distance(
+                            levelEditor.selectors().begin(), found)));
+                    if (deleting) {
+                        (void)levelEditor.deleteSelectedSelector();
+                    }
+                } else if (!deleting) {
+                    (void)levelEditor.placeSelector(target);
+                }
             } else if (deleting) {
                 levelEditor.eraseCell(target);
             } else {
@@ -612,6 +665,9 @@ void ApplicationTools::updateEditorInteraction(
     } else if (levelEditor.tool() == LevelEditor::Tool::Decorations &&
                input.primaryPressed) {
         levelEditor.clearDecorationSelection();
+    } else if (levelEditor.tool() == LevelEditor::Tool::Selectors &&
+               input.primaryPressed) {
+        levelEditor.clearSelectorSelection();
     }
 }
 

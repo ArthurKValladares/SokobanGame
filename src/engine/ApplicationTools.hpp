@@ -73,6 +73,9 @@ public:
         Vec2 windowSize,
         Vec2 pixelSize,
         bool pointerCaptured) const;
+    void drawSelectorLabels(
+        const VulkanRenderer& renderer,
+        const VulkanRenderer::PreparedFrame* frame) const;
     void drawDraftExitConfirmation();
     [[nodiscard]] bool bakeTileThumbnails(
         VulkanRenderer& renderer,

@@ -8,6 +8,7 @@
 #include "engine/render/RenderTypes.hpp"
 
 #include <optional>
+#include <functional>
 
 namespace sokoban {
 
@@ -55,6 +56,7 @@ public:
         // shared map, which is also what draft playback outside a campaign
         // gets.
         std::optional<LevelLocation> levelLocation;
+        std::function<bool(LevelLocation)> selectorSolved;
     };
 
     struct EditorInput {
@@ -71,6 +73,7 @@ public:
         // editor previews (and paints on) that screen's own splat map rather
         // than the shared fallback; unset for scratch documents.
         std::optional<LevelLocation> levelLocation;
+        std::function<bool(LevelLocation)> selectorSolved;
     };
 
     [[nodiscard]] static RenderFrameData buildGameplay(const GameplayInput& input);

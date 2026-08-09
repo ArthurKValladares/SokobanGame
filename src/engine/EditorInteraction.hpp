@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace sokoban {
@@ -29,6 +30,14 @@ public:
         std::vector<Vec2> rim;
     };
 
+    struct SelectorLabel {
+        uint32_t id = 0;
+        std::string text;
+        Vec2 anchor;
+
+        bool operator==(const SelectorLabel&) const = default;
+    };
+
     [[nodiscard]] static BrushPreview brushPreview(
         const SplatCanvas::Brush& brush,
         Vec3 brushPoint,
@@ -43,6 +52,10 @@ public:
         Vec2 pointer,
         Vec2 windowSize,
         Vec2 pixelSize);
+
+    [[nodiscard]] static std::vector<SelectorLabel> selectorLabels(
+        const std::vector<Level::ScreenSelector>& selectors,
+        const ProjectToPixels& project);
 };
 
 } // namespace sokoban

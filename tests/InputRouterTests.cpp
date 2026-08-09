@@ -89,6 +89,7 @@ void testModalFrameRouting()
     CHECK(frame.options.confirm);
     CHECK(!frame.title.up);
     CHECK(!frame.gameplay.up.pressed);
+    CHECK(!frame.gameplay.interactPressed);
     CHECK(!frame.showTopDownView);
 
     frame = router.routeFrame(input, { .titleOpen = true });
@@ -96,12 +97,14 @@ void testModalFrameRouting()
     CHECK(frame.title.confirm);
     CHECK(!frame.options.up);
     CHECK(!frame.gameplay.up.pressed);
+    CHECK(!frame.gameplay.interactPressed);
     CHECK(!frame.showTopDownView);
 
     frame = router.routeFrame(input, {});
     CHECK(frame.gameplay.up.pressed);
     CHECK(frame.gameplay.up.down);
     CHECK(frame.gameplay.mirrorPressed);
+    CHECK(frame.gameplay.interactPressed);
     CHECK(frame.showTopDownView);
 }
 

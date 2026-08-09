@@ -73,6 +73,11 @@ constexpr std::array bindingRows {
         InputAction::ShowTopDownView,
         "Show Top-Down View",
     },
+    BindingRow {
+        OptionsMenuRowId::ConfirmInteract,
+        InputAction::MenuConfirm,
+        "Confirm / Interact",
+    },
 };
 
 int displayIndex(const UserSettings& settings)
@@ -208,6 +213,7 @@ std::optional<OptionsAction> activateRow(
     case OptionsMenuRowId::Undo:
     case OptionsMenuRowId::Restart:
     case OptionsMenuRowId::ShowTopDownView:
+    case OptionsMenuRowId::ConfirmInteract:
         state.capturingAction = actionForRow(row);
         break;
     case OptionsMenuRowId::ResetBindings:
@@ -416,13 +422,6 @@ std::vector<OptionsMenuRow> optionsMenuRows(
             .kind = OptionsMenuRowKind::Button,
             .label = "Controls",
         });
-        if (state.allowLevelSelect) {
-            rows.push_back({
-                .id = OptionsMenuRowId::LevelSelect,
-                .kind = OptionsMenuRowKind::Button,
-                .label = "Level Select",
-            });
-        }
         if (state.allowTitleExit) {
             rows.push_back({
                 .id = OptionsMenuRowId::ExitToTitle,

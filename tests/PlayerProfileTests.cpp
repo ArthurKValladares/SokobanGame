@@ -314,6 +314,7 @@ void testActiveScreenCheckpointRoundTrip()
             .automaticMotionPaused = true,
         },
     };
+    profile.worldContext = sokoban::PlayerProfile::WorldContext::Puzzle;
 
     const std::string serialized = profile.serialize();
     const sokoban::DecodedPlayerProfile decoded =
@@ -387,7 +388,8 @@ void testNormalizationAndMigration()
     profile.settings.video.windowWidth = 20;
     profile.settings.video.windowHeight = 30;
     profile.normalize();
-    check(profile.currentLevel == 2, "current level clamps to unlocked level");
+    check(profile.currentLevel == 9,
+        "current level is independent of legacy unlock progression");
     check(profile.settings.audio.masterVolume == 0.0f, "master volume clamps low");
     check(profile.settings.audio.musicVolume == 1.0f, "music volume clamps high");
     check(profile.settings.video.antiAliasingSamples == 8, "invalid MSAA receives default");
@@ -657,6 +659,60 @@ void testNormalizationAndMigration()
     }, "invalid gamepad axis threshold is rejected");
 }
 
+void testScreenProgressOverworldCheckpointAndFormat17Migration()
+{
+    sokoban::PlayerProfile profile;
+    profile.recordScreenCompletion({ .level = 2, .screen = 3 }, 18, 12.5);
+    profile.recordScreenCompletion({ .level = 2, .screen = 3 }, 14, 13.0);
+    profile.recordScreenCompletion({ .level = 1, .screen = 0 }, 7, 4.0);
+    check(profile.screenCompleted({ .level = 2, .screen = 3 }),
+        "screen completion is queryable");
+    check(profile.progressForScreen({ .level = 2, .screen = 3 })->bestMoves == 14,
+        "screen best moves improve independently");
+    check(profile.progressForScreen({ .level = 2, .screen = 3 })->bestTimeSeconds == 12.5,
+        "screen best time does not regress");
+
+    const sokoban::Level overworld = sokoban::Level::loadFromLayers({
+        { ".." },
+        { "C " },
+    }, "profile overworld checkpoint");
+    sokoban::GameplaySession session;
+    session.reset(overworld);
+    profile.overworldSession = session.snapshot();
+    profile.worldContext = sokoban::PlayerProfile::WorldContext::Overworld;
+
+    const sokoban::DecodedPlayerProfile decoded =
+        sokoban::decodePlayerProfile(profile.serialize());
+    check(decoded.profile == profile,
+        "screen progress and overworld checkpoint round-trip");
+
+    nlohmann::json format17 = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    format17["format"] = 17;
+    format17["progress"].erase("screens");
+    format17["progress"].erase("overworldSession");
+    format17["progress"].erase("worldContext");
+    format17["progress"]["levels"] = nlohmann::json::array({ {
+        { "level", 4 },
+        { "completed", true },
+        { "reachedScreens", 2 },
+        { "bestMoves", 30 },
+        { "bestTimeSeconds", 20.0 },
+    } });
+    const sokoban::DecodedPlayerProfile migrated =
+        sokoban::decodePlayerProfile(format17.dump());
+    check(migrated.sourceFormat == 17, "format 17 source is reported");
+    check(migrated.profile.screenCompleted({ .level = 4, .screen = 0 }) &&
+            migrated.profile.screenCompleted({ .level = 4, .screen = 1 }),
+        "format 17 reached screens migrate as completed");
+    check(!migrated.profile.progressForScreen({ .level = 4, .screen = 0 })
+                ->bestMoves,
+        "legacy aggregate best is not copied to an individual screen");
+    check(migrated.profile.worldContext ==
+            sokoban::PlayerProfile::WorldContext::Overworld,
+        "format 17 without an active checkpoint resumes in overworld");
+}
+
 void testStoreBackupsAndRecovery()
 {
     TemporaryDirectory temporary;
@@ -903,7 +959,8 @@ int main()
         testReachedScreensAndProgressReset();
         testSectionedSerialization();
         testActiveScreenCheckpointRoundTrip();
-        testNormalizationAndMigration();
+    testNormalizationAndMigration();
+    testScreenProgressOverworldCheckpointAndFormat17Migration();
         testStoreBackupsAndRecovery();
         testSaveSlotStems();
         testMigrationAndDoubleCorruption();

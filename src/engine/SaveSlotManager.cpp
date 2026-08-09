@@ -77,6 +77,26 @@ SaveSlotManager::SlotSummary SaveSlotManager::summarize(
     return summary;
 }
 
+SaveSlotManager::SlotSummary SaveSlotManager::summarize(
+    const PlayerProfile& profile,
+    std::span<const LevelLocation> targets)
+{
+    SlotSummary summary;
+    summary.state = profile.progressEmpty()
+        ? SaveSlotState::Empty
+        : SaveSlotState::Ready;
+    summary.currentLevel = profile.worldContext ==
+            PlayerProfile::WorldContext::Puzzle
+        ? profile.currentLevel
+        : -1;
+    for (LevelLocation target : targets) {
+        summary.completedLevels += profile.screenCompleted(target) ? 1 : 0;
+    }
+    summary.completed = !targets.empty() &&
+        summary.completedLevels == static_cast<int>(targets.size());
+    return summary;
+}
+
 SaveSlotManager::SlotSummary SaveSlotManager::inspectSlotSummary(
     int slot,
     int levelCount) const
@@ -103,6 +123,32 @@ SaveSlotManager::SlotSummary SaveSlotManager::inspectSlotSummary(
     return summary;
 }
 
+SaveSlotManager::SlotSummary SaveSlotManager::inspectSlotSummary(
+    int slot,
+    std::span<const LevelLocation> targets) const
+{
+    const SaveStore::InspectionResult inspection =
+        SaveStore(directory_, slotFileStem(slot), ProfileSections::ProgressOnly)
+            .inspect();
+    if (inspection.profile) {
+        SlotSummary summary = summarize(*inspection.profile, targets);
+        if (inspection.disposition ==
+            SaveStore::InspectionDisposition::BackupValid) {
+            summary.state = SaveSlotState::Recoverable;
+        }
+        return summary;
+    }
+
+    SlotSummary summary;
+    if (inspection.disposition == SaveStore::InspectionDisposition::Corrupt) {
+        summary.state = SaveSlotState::Corrupt;
+    } else if (inspection.disposition ==
+        SaveStore::InspectionDisposition::StorageUnavailable) {
+        summary.state = SaveSlotState::Unavailable;
+    }
+    return summary;
+}
+
 std::vector<SaveSlotManager::SlotSummary> SaveSlotManager::slotSummaries(
     const PlayerProfile& activeProfile,
     int levelCount) const
@@ -111,6 +157,8 @@ std::vector<SaveSlotManager::SlotSummary> SaveSlotManager::slotSummaries(
         // A different level set invalidates every cached completed flag.
         summaryCache_.assign(slotCount, std::nullopt);
         summaryCacheLevelCount_ = levelCount;
+        summaryCacheUsesTargets_ = false;
+        summaryCacheTargets_.clear();
     }
 
     std::vector<SlotSummary> slots;
@@ -125,6 +173,35 @@ std::vector<SaveSlotManager::SlotSummary> SaveSlotManager::slotSummaries(
             summaryCache_[static_cast<std::size_t>(slot)];
         if (!cached) {
             cached = inspectSlotSummary(slot, levelCount);
+        }
+        slots.push_back(*cached);
+    }
+    return slots;
+}
+
+std::vector<SaveSlotManager::SlotSummary> SaveSlotManager::slotSummaries(
+    const PlayerProfile& activeProfile,
+    std::span<const LevelLocation> targets) const
+{
+    const std::vector<LevelLocation> targetKey(targets.begin(), targets.end());
+    if (!summaryCacheUsesTargets_ || summaryCacheTargets_ != targetKey) {
+        summaryCache_.assign(slotCount, std::nullopt);
+        summaryCacheTargets_ = targetKey;
+        summaryCacheUsesTargets_ = true;
+        summaryCacheLevelCount_ = -1;
+    }
+
+    std::vector<SlotSummary> slots;
+    slots.reserve(slotCount);
+    for (int slot = 0; slot < slotCount; ++slot) {
+        if (slot == activeSlot_) {
+            slots.push_back(summarize(activeProfile, targets));
+            continue;
+        }
+        std::optional<SlotSummary>& cached =
+            summaryCache_[static_cast<std::size_t>(slot)];
+        if (!cached) {
+            cached = inspectSlotSummary(slot, targets);
         }
         slots.push_back(*cached);
     }

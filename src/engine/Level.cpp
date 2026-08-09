@@ -17,6 +17,7 @@ namespace {
 constexpr std::string_view layerPrefix = "@layer ";
 constexpr std::string_view waterPrefix = "@water ";
 constexpr std::string_view decorationPrefix = "@decoration ";
+constexpr std::string_view selectorPrefix = "@selector ";
 
 using Json = nlohmann::json;
 
@@ -179,6 +180,144 @@ std::string serializeDecoration(const Level::Decoration& decoration)
     return std::string(decorationPrefix) + object.dump();
 }
 
+int parseSelectorInteger(
+    const Json& object,
+    std::string_view field,
+    std::string_view sourceName)
+{
+    const auto found = object.find(field);
+    if (found == object.end() || !found->is_number_integer()) {
+        throw std::runtime_error(
+            "Selector '" + std::string(field) +
+            "' must be an integer: " + std::string(sourceName));
+    }
+    const int value = found->get<int>();
+    if (value < 0) {
+        throw std::runtime_error(
+            "Selector '" + std::string(field) +
+            "' must not be negative: " + std::string(sourceName));
+    }
+    return value;
+}
+
+GridPosition3 parseSelectorCell(
+    const Json& object,
+    std::string_view sourceName)
+{
+    const auto found = object.find("cell");
+    if (found == object.end() || !found->is_array() || found->size() != 3) {
+        throw std::runtime_error(
+            "Selector 'cell' must be an array of three integers: " +
+            std::string(sourceName));
+    }
+    GridPosition3 cell;
+    int* components[] { &cell.x, &cell.y, &cell.z };
+    for (size_t i = 0; i < 3; ++i) {
+        if (!(*found)[i].is_number_integer()) {
+            throw std::runtime_error(
+                "Selector 'cell' must contain only integers: " +
+                std::string(sourceName));
+        }
+        *components[i] = (*found)[i].get<int>();
+        if (*components[i] < 0) {
+            throw std::runtime_error(
+                "Selector cell coordinates must not be negative: " +
+                std::string(sourceName));
+        }
+    }
+    return cell;
+}
+
+void validateSelectorRecord(
+    const Level::ScreenSelector& selector,
+    std::string_view sourceName)
+{
+    if (selector.id == 0) {
+        throw std::runtime_error(
+            "Selector id must be greater than zero: " +
+            std::string(sourceName));
+    }
+    if (selector.cell.x < 0 || selector.cell.y < 0 || selector.cell.z < 0) {
+        throw std::runtime_error(
+            "Selector cell coordinates must not be negative: " +
+            std::string(sourceName));
+    }
+    if (selector.target &&
+        (selector.target->level < 0 || selector.target->screen < 0)) {
+        throw std::runtime_error(
+            "Selector target coordinates must not be negative: " +
+            std::string(sourceName));
+    }
+}
+
+Level::ScreenSelector parseSelector(
+    std::string_view payload,
+    std::string_view sourceName)
+{
+    try {
+        const Json object = Json::parse(payload);
+        if (!object.is_object()) {
+            throw std::runtime_error("selector payload is not an object");
+        }
+        const int id = parseSelectorInteger(object, "id", sourceName);
+        if (id == 0) {
+            throw std::runtime_error("selector 'id' must be greater than zero");
+        }
+        const auto target = object.find("target");
+        if (target == object.end()) {
+            throw std::runtime_error("selector 'target' is required");
+        }
+        std::optional<LevelLocation> location;
+        if (!target->is_null()) {
+            if (!target->is_object()) {
+                throw std::runtime_error(
+                    "selector 'target' must be an object or null");
+            }
+            location = LevelLocation {
+                .level = parseSelectorInteger(*target, "level", sourceName),
+                .screen = parseSelectorInteger(*target, "screen", sourceName),
+            };
+        }
+        Level::ScreenSelector selector {
+            .id = static_cast<uint32_t>(id),
+            .cell = parseSelectorCell(object, sourceName),
+            .target = location,
+        };
+        validateSelectorRecord(selector, sourceName);
+        return selector;
+    } catch (const nlohmann::json::exception& error) {
+        throw std::runtime_error(
+            "Invalid selector JSON in " + std::string(sourceName) +
+            ": " + error.what());
+    } catch (const std::runtime_error& error) {
+        throw std::runtime_error(
+            "Invalid selector in " + std::string(sourceName) +
+            ": " + error.what());
+    }
+}
+
+std::string serializeSelector(const Level::ScreenSelector& selector)
+{
+    validateSelectorRecord(selector, "serialized level");
+    Json target = nullptr;
+    if (selector.target) {
+        target = {
+            { "level", selector.target->level },
+            { "screen", selector.target->screen },
+        };
+    }
+    const Json object {
+        { "id", selector.id },
+        { "cell", {
+              selector.cell.x,
+              selector.cell.y,
+              selector.cell.z,
+          } },
+        { "target", std::move(target) },
+    };
+    return std::string(selectorPrefix) + object.dump();
+}
+
 size_t tileIndex(uint32_t x, uint32_t y, uint32_t z, uint32_t width, uint32_t height)
 {
     return (static_cast<size_t>(z) * height + y) * width + x;
@@ -249,7 +388,8 @@ Level::Definition Level::parseDefinition(
     if (!layered) {
         if (std::ranges::any_of(lines, [](const std::string& line) {
                 return line.starts_with(waterPrefix) ||
-                    line.starts_with(decorationPrefix);
+                    line.starts_with(decorationPrefix) ||
+                    line.starts_with(selectorPrefix);
             })) {
             throw std::runtime_error(
                 "Level metadata requires explicit '@layer 0' sections: " + source);
@@ -260,6 +400,17 @@ Level::Definition Level::parseDefinition(
     Definition definition;
     std::optional<uint32_t> currentLayer;
     for (const std::string& line : lines) {
+        if (line.starts_with(selectorPrefix)) {
+            if (currentLayer) {
+                throw std::runtime_error(
+                    "Selector metadata must appear before '@layer 0': " + source);
+            }
+            definition.selectors.push_back(parseSelector(
+                std::string_view(line).substr(selectorPrefix.size()),
+                sourceName));
+            continue;
+        }
+
         if (line.starts_with(decorationPrefix)) {
             if (currentLayer) {
                 throw std::runtime_error(
@@ -330,6 +481,27 @@ Level::Definition Level::parseDefinition(
             "Water layer must refer to an existing layer: " + source);
     }
 
+    std::ranges::sort(
+        definition.selectors, {}, &Level::ScreenSelector::id);
+    for (size_t i = 0; i < definition.selectors.size(); ++i) {
+        const ScreenSelector& selector = definition.selectors[i];
+        validateSelectorRecord(selector, sourceName);
+        if (i > 0 && definition.selectors[i - 1].id == selector.id) {
+            throw std::runtime_error(
+                "Level contains duplicate selector id " +
+                std::to_string(selector.id) + ": " + source);
+        }
+        for (size_t j = 0; j < i; ++j) {
+            if (definition.selectors[j].cell == selector.cell) {
+                throw std::runtime_error(
+                    "Level contains more than one selector at cell " +
+                    std::to_string(selector.cell.x) + "," +
+                    std::to_string(selector.cell.y) + "," +
+                    std::to_string(selector.cell.z) + ": " + source);
+            }
+        }
+    }
+
     return definition;
 }
 
@@ -345,7 +517,8 @@ std::vector<std::string> Level::serializeDefinition(
 {
     if (definition.layers.size() == 1 &&
         !definition.waterLayer &&
-        definition.decorations.empty()) {
+        definition.decorations.empty() &&
+        definition.selectors.empty()) {
         return definition.layers.front();
     }
 
@@ -355,10 +528,16 @@ std::vector<std::string> Level::serializeDefinition(
             std::string(waterPrefix) +
             std::to_string(*definition.waterLayer));
     }
+    std::vector<ScreenSelector> selectors = definition.selectors;
+    std::ranges::sort(selectors, {}, &ScreenSelector::id);
+    for (const ScreenSelector& selector : selectors) {
+        lines.push_back(serializeSelector(selector));
+    }
     for (const Decoration& decoration : definition.decorations) {
         lines.push_back(serializeDecoration(decoration));
     }
-    if (definition.waterLayer || !definition.decorations.empty()) {
+    if (definition.waterLayer || !definition.decorations.empty() ||
+        !definition.selectors.empty()) {
         lines.emplace_back();
     }
     for (size_t layer = 0; layer < definition.layers.size(); ++layer) {
@@ -392,14 +571,16 @@ Level Level::loadFromDefinition(
         definition.layers,
         sourceName,
         definition.waterLayer,
-        definition.decorations);
+        definition.decorations,
+        definition.selectors);
 }
 
 Level Level::loadFromLayers(
     const LayerRows& sourceLayers,
     std::string_view sourceName,
     std::optional<uint32_t> waterLayer,
-    const std::vector<Decoration>& decorations)
+    const std::vector<Decoration>& decorations,
+    const std::vector<ScreenSelector>& selectors)
 {
     const std::string source(sourceName);
     if (sourceLayers.empty()) {
@@ -417,6 +598,24 @@ Level Level::loadFromLayers(
         validateDecoration(decoration, sourceName);
     }
     level.decorations_ = decorations;
+    level.selectors_ = selectors;
+    std::ranges::sort(level.selectors_, {}, &ScreenSelector::id);
+    for (size_t i = 0; i < level.selectors_.size(); ++i) {
+        validateSelectorRecord(level.selectors_[i], sourceName);
+        if (i > 0 &&
+            level.selectors_[i - 1].id == level.selectors_[i].id) {
+            throw std::runtime_error(
+                "Level contains duplicate selector id " +
+                std::to_string(level.selectors_[i].id) + ": " + source);
+        }
+        for (size_t j = 0; j < i; ++j) {
+            if (level.selectors_[j].cell == level.selectors_[i].cell) {
+                throw std::runtime_error(
+                    "Level contains more than one selector at the same cell: " +
+                    source);
+            }
+        }
+    }
     for (const auto& layer : sourceLayers) {
         level.height_ = std::max(level.height_, static_cast<uint32_t>(layer.size()));
         for (const std::string& row : layer) {
@@ -480,6 +679,14 @@ Level Level::loadFromLayers(
     if (!hasPlayer) {
         throw std::runtime_error(std::string("Level is missing a player start tile '") +
             tileTypeToChar(TileType::Player) + "': " + source);
+    }
+
+    for (const ScreenSelector& selector : level.selectors_) {
+        if (!level.isWalkable(selector.cell)) {
+            throw std::runtime_error(
+                "Selector " + std::to_string(selector.id) +
+                " must be placed on a supported walkable cell: " + source);
+        }
     }
 
     for (uint32_t z = 0; z < level.depth_; ++z) {
@@ -573,6 +780,12 @@ bool Level::isEnd(GridPosition3 position) const
         static_cast<uint32_t>(position.x),
         static_cast<uint32_t>(position.y),
         static_cast<uint32_t>(position.z)) == TileType::End;
+}
+
+const Level::ScreenSelector* Level::selectorAt(GridPosition3 cell) const
+{
+    const auto found = std::ranges::find(selectors_, cell, &ScreenSelector::cell);
+    return found == selectors_.end() ? nullptr : &*found;
 }
 
 } // namespace sokoban

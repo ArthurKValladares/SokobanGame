@@ -23,7 +23,7 @@ void reduceBack(const ShellFacts& facts, std::vector<ShellCommand>& commands)
     }
     commands.push_back(shell::OpenOptions {
         .pauseContext = true,
-        .allowLevelSelect = facts.allLevelsCompleted,
+        .allowLevelSelect = false,
     });
 }
 

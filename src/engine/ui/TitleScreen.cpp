@@ -538,10 +538,9 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
         } else if (slot.completed) {
             status = "Completed!";
         } else {
-            status = "Level " + std::to_string(slot.currentLevel + 1);
-            if (slot.completedLevels > 0) {
-                status += " - " + std::to_string(slot.completedLevels) + " done";
-            }
+            status = slot.completedLevels > 0
+                ? std::to_string(slot.completedLevels) + " screens solved"
+                : "Overworld";
         }
         if (active && !slotPickForNewGame_) {
             status += "  (active)";

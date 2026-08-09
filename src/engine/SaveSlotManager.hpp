@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/AsyncSaveStore.hpp"
+#include "engine/LevelCatalog.hpp"
 #include "engine/PlayerProfile.hpp"
 #include "engine/SaveSlotState.hpp"
 
@@ -8,6 +9,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace sokoban {
@@ -24,9 +26,9 @@ public:
 
     struct SlotSummary {
         SaveSlotState state = SaveSlotState::Empty;
-        bool completed = false; // every level 0..levelCount-1 completed
-        int currentLevel = 0; // 0-based
-        int completedLevels = 0;
+        bool completed = false;
+        int currentLevel = 0; // Legacy summary compatibility.
+        int completedLevels = 0; // Selector targets in overworld mode.
     };
 
     explicit SaveSlotManager(
@@ -49,6 +51,12 @@ public:
     [[nodiscard]] std::vector<SlotSummary> slotSummaries(
         const PlayerProfile& activeProfile,
         int levelCount) const;
+    // Overworld progression summary. `targets` must contain each distinct
+    // selector target once; duplicate selectors intentionally share one
+    // completion record.
+    [[nodiscard]] std::vector<SlotSummary> slotSummaries(
+        const PlayerProfile& activeProfile,
+        std::span<const LevelLocation> targets) const;
 
     // Flushes pending writes, swaps stores and the marker to `slot`, and
     // returns its progress with `currentProfile`'s shared settings carried
@@ -77,7 +85,13 @@ private:
     [[nodiscard]] static SlotSummary summarize(
         const PlayerProfile& profile,
         int levelCount);
+    [[nodiscard]] static SlotSummary summarize(
+        const PlayerProfile& profile,
+        std::span<const LevelLocation> targets);
     [[nodiscard]] SlotSummary inspectSlotSummary(int slot, int levelCount) const;
+    [[nodiscard]] SlotSummary inspectSlotSummary(
+        int slot,
+        std::span<const LevelLocation> targets) const;
     [[nodiscard]] int readActiveSlotMarker() const;
     void writeActiveSlotMarker(int slot) const;
 
@@ -87,6 +101,8 @@ private:
     mutable std::vector<std::optional<SlotSummary>> summaryCache_ =
         std::vector<std::optional<SlotSummary>>(slotCount);
     mutable int summaryCacheLevelCount_ = -1;
+    mutable std::vector<LevelLocation> summaryCacheTargets_;
+    mutable bool summaryCacheUsesTargets_ = false;
     std::chrono::milliseconds writeDelay_;
     int activeSlot_ = 0; // 0-based
     // One worker serves both channels: settings (0, shared across slots) and

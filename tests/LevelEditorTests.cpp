@@ -710,6 +710,82 @@ void testDecorationTransformSessionCoalescesUndoAndCanCancel()
     CHECK(*editor.selectedDecoration() == beforeCancel);
 }
 
+void testSelectorEditingPersistenceUndoAndProjectRemapping()
+{
+    TEST("selectorEditingPersistenceUndoAndProjectRemapping");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.setRequestedSize(4, 3);
+    editor.addLevelAt(0);
+
+    editor.newDocument(4, 3, false);
+    const std::filesystem::path overworld = project.source / "overworld.scr";
+    CHECK(editor.saveDocument(overworld));
+    CHECK(editor.editingOverworld());
+    editor.setSelectedTile(TileType::End);
+    editor.paintCell({ 2, 1, 1 });
+    CHECK(editor.documentToLevel().tileAt(2, 1, 1) != TileType::End);
+    CHECK(editor.status().find("not allowed") != std::string::npos);
+    editor.setTool(LevelEditor::Tool::Selectors);
+    CHECK(editor.placeSelector({ 1, 1, 1 }));
+    CHECK(editor.selectors().size() == 1);
+    CHECK(editor.selectors()[0].id == 1);
+    CHECK(!editor.selectors()[0].target);
+    CHECK(editor.updateSelectedSelectorTarget(
+        LevelLocation { .level = 0, .screen = 0 }));
+    CHECK(editor.selectors()[0].target ==
+        std::optional<LevelLocation>({ .level = 0, .screen = 0 }));
+    CHECK(editor.saveDocument(overworld));
+    CHECK(std::filesystem::exists(project.runtime / "overworld.scr"));
+
+    LevelEditor loaded = makeEditor(project);
+    CHECK(loaded.loadDocument(overworld));
+    CHECK(loaded.selectors().size() == 1);
+    CHECK(loaded.documentToLevel().selectorAt({ 1, 1, 1 }) != nullptr);
+    CHECK(loaded.selectSelector(0));
+    CHECK(loaded.updateSelectedSelectorTarget(std::nullopt));
+    CHECK(!loaded.selectors()[0].target);
+    CHECK(loaded.tryUndoEdit());
+    CHECK(loaded.selectors()[0].target ==
+        std::optional<LevelLocation>({ .level = 0, .screen = 0 }));
+
+    std::vector<LevelEditor::LevelDirectory> levels =
+        loaded.collectLevelDirectories();
+    loaded.addScreenAt(levels[0], 0);
+    const Level shifted = Level::loadFromFile(
+        project.source / "overworld.scr");
+    CHECK(shifted.selectors()[0].target ==
+        std::optional<LevelLocation>({ .level = 0, .screen = 1 }));
+    CHECK(std::filesystem::exists(project.runtime / "overworld.scr"));
+
+    levels = loaded.collectLevelDirectories();
+    loaded.deleteScreen(levels[0], 0);
+    const Level shiftedBack = Level::loadFromFile(
+        project.source / "overworld.scr");
+    CHECK(shiftedBack.selectors()[0].target ==
+        std::optional<LevelLocation>({ .level = 0, .screen = 0 }));
+
+    loaded.addLevelAt(0);
+    const Level levelShifted = Level::loadFromFile(
+        project.source / "overworld.scr");
+    CHECK(levelShifted.selectors()[0].target ==
+        std::optional<LevelLocation>({ .level = 1, .screen = 0 }));
+
+    levels = loaded.collectLevelDirectories();
+    loaded.deleteLevel(levels[0]);
+    const Level levelShiftedBack = Level::loadFromFile(
+        project.source / "overworld.scr");
+    CHECK(levelShiftedBack.selectors()[0].target ==
+        std::optional<LevelLocation>({ .level = 0, .screen = 0 }));
+
+    CHECK(loaded.loadDocument(overworld));
+    CHECK(loaded.selectSelector(0));
+    CHECK(loaded.deleteSelectedSelector());
+    CHECK(loaded.selectors().empty());
+    CHECK(loaded.tryUndoEdit());
+    CHECK(loaded.selectors().size() == 1);
+}
+
 } // namespace
 
 int main()
@@ -731,6 +807,7 @@ int main()
     testFailedRenumberPreservesSourceAndRuntimeTrees();
     testDecorationEditingPersistenceAndUndo();
     testDecorationTransformSessionCoalescesUndoAndCanCancel();
+    testSelectorEditingPersistenceUndoAndProjectRemapping();
 
     if (failures == 0) {
         std::cout << "LevelEditorTests: " << checks << " checks passed\n";

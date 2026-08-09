@@ -103,6 +103,27 @@ void testPointerPixelScaling()
     CHECK(near(scaled.y, 360.0f));
 }
 
+void testSelectorLabelsUseStableIdsAndWorldAnchors()
+{
+    const std::vector<sokoban::Level::ScreenSelector> selectors {
+        { .id = 2, .cell = { 1, 3, 1 } },
+        { .id = 9, .cell = { 5, 7, 2 } },
+    };
+    const auto labels = sokoban::EditorInteraction::selectorLabels(
+        selectors,
+        [](sokoban::Vec3 world) -> std::optional<sokoban::Vec2> {
+            if (world.x > 5.0f) {
+                return std::nullopt;
+            }
+            return sokoban::Vec2 { world.x * 10.0f, world.z * 20.0f };
+        });
+    CHECK(labels.size() == 1);
+    CHECK(labels[0].id == 2);
+    CHECK(labels[0].text == "Selector 2");
+    CHECK(near(labels[0].anchor.x, 15.0f));
+    CHECK(near(labels[0].anchor.y, 45.0f));
+}
+
 } // namespace
 
 int main()
@@ -111,6 +132,7 @@ int main()
     testEmptyBrushHasNoGeometry();
     testGizmoTargetsConstantPixelLength();
     testPointerPixelScaling();
+    testSelectorLabelsUseStableIdsAndWorldAnchors();
 
     if (failures != 0) {
         std::cerr << "EditorInteractionTests: " << failures

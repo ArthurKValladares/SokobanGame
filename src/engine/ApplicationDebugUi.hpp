@@ -23,6 +23,9 @@ public:
     struct Context {
         int currentLevel = 0;
         int currentScreen = 0;
+        bool inOverworld = false;
+        int completedSelectorTargets = 0;
+        int selectorTargetCount = 0;
         const Level& level;
         GameplaySession& gameplaySession;
         const InputState& input;

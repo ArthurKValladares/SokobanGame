@@ -583,6 +583,38 @@ void migrate16to17(Json& root)
     }
 }
 
+void migrate17to18(Json& root)
+{
+    if (!root.contains("progress") || !root["progress"].is_object()) {
+        return;
+    }
+    Json& progress = root["progress"];
+    Json screens = Json::array();
+    if (progress.contains("levels") && progress["levels"].is_array()) {
+        for (const Json& level : progress["levels"]) {
+            if (!level.is_object() || !level.value("completed", false)) {
+                continue;
+            }
+            const int levelIndex = level.value("level", 0);
+            const int reached = level.value("reachedScreens", 0);
+            for (int screen = 0; screen < reached; ++screen) {
+                screens.push_back({
+                    { "level", levelIndex },
+                    { "screen", screen },
+                    { "completed", true },
+                });
+            }
+        }
+    }
+    progress["screens"] = std::move(screens);
+    progress["overworldSession"] = nullptr;
+    progress["worldContext"] =
+        progress.contains("activeScreen") &&
+            progress["activeScreen"].is_object()
+        ? "puzzle"
+        : "overworld";
+}
+
 } // namespace
 
 void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
@@ -605,6 +637,7 @@ void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
         migrate14to15,
         migrate15to16,
         migrate16to17,
+        migrate17to18,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

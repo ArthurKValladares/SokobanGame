@@ -387,7 +387,7 @@ void testControlsRemapping()
     menu.back();
 
     // Reset restores the defaults.
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < 8; ++i) {
         draw({ .down = true });
     }
     const auto reset = draw({ .confirm = true });
@@ -465,9 +465,8 @@ void testOptionsReducerAndDeclarativeRows()
     CHECK(state.open);
     const std::vector<sokoban::OptionsMenuRow> mainRows =
         sokoban::optionsMenuRows(state, settings);
-    CHECK(mainRows.size() == 6);
-    CHECK(mainRows[3].id == sokoban::OptionsMenuRowId::LevelSelect);
-    CHECK(mainRows[4].id == sokoban::OptionsMenuRowId::ExitToTitle);
+    CHECK(mainRows.size() == 5);
+    CHECK(mainRows[3].id == sokoban::OptionsMenuRowId::ExitToTitle);
     CHECK(mainRows.back().tone == sokoban::OptionsMenuRowTone::Danger);
     CHECK(mainRows.back().dividerBefore);
 

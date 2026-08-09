@@ -29,9 +29,9 @@ struct TitleLevelInfo {
 
 struct SaveSlotInfo {
     SaveSlotState state = SaveSlotState::Empty;
-    bool completed = false; // every level has a completion record
-    int currentLevel = 0; // 0-based
-    int completedLevels = 0;
+    bool completed = false; // every distinct selector target is complete
+    int currentLevel = 0; // retained for legacy callers
+    int completedLevels = 0; // completed selector targets
 };
 
 struct TitleScreenInput {

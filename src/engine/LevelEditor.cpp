@@ -91,6 +91,33 @@ void writeScreenRows(
     }
 }
 
+template <typename Mutate>
+void rewriteOverworldSelectors(
+    const std::filesystem::path& root,
+    Mutate&& mutate)
+{
+    const std::filesystem::path path = root / "overworld.scr";
+    if (!std::filesystem::is_regular_file(path)) {
+        return;
+    }
+    std::ifstream file(path);
+    if (!file) {
+        throw std::runtime_error("cannot read overworld " + path.string());
+    }
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(file, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        lines.push_back(line);
+    }
+    Level::Definition definition =
+        Level::parseDefinition(lines, path.string());
+    mutate(definition.selectors);
+    writeScreenRows(path, Level::serializeDefinition(definition));
+}
+
 } // namespace
 
 void LevelEditor::initialize(
@@ -210,6 +237,119 @@ void LevelEditor::setSelectedDecorationModel(std::string modelName)
     document_.tool = Tool::Decorations;
 }
 
+bool LevelEditor::placeSelector(GridPosition3 cell)
+{
+    if (!editingOverworld()) {
+        document_.status =
+            "Screen selectors can only be placed in overworld.scr.";
+        return false;
+    }
+    const auto existing = std::ranges::find(
+        document_.selectors, cell, &Level::ScreenSelector::cell);
+    if (existing != document_.selectors.end()) {
+        document_.selectedSelector = static_cast<std::size_t>(
+            std::distance(document_.selectors.begin(), existing));
+        document_.tool = Tool::Selectors;
+        document_.status =
+            "Selected Selector " + std::to_string(existing->id) + ".";
+        return true;
+    }
+    if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
+        cell.x >= static_cast<int>(documentWidth()) ||
+        cell.y >= static_cast<int>(documentHeight()) ||
+        cell.z >= static_cast<int>(documentDepth())) {
+        document_.status = "Selectors must be placed on the level board.";
+        return false;
+    }
+
+    uint32_t nextId = 1;
+    for (const Level::ScreenSelector& selector : document_.selectors) {
+        nextId = std::max(nextId, selector.id + 1);
+    }
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    document_.selectors.push_back({ .id = nextId, .cell = cell });
+    std::ranges::sort(
+        document_.selectors, {}, &Level::ScreenSelector::id);
+    const auto added = std::ranges::find(
+        document_.selectors, nextId, &Level::ScreenSelector::id);
+    document_.selectedSelector = static_cast<std::size_t>(
+        std::distance(document_.selectors.begin(), added));
+    document_.tool = Tool::Selectors;
+    document_.dirty = true;
+    document_.status =
+        "Placed Selector " + std::to_string(nextId) + ".";
+    recordDocumentChange(before);
+    return true;
+}
+
+bool LevelEditor::selectSelector(std::size_t index)
+{
+    if (index >= document_.selectors.size()) {
+        return false;
+    }
+    document_.selectedSelector = index;
+    document_.tool = Tool::Selectors;
+    return true;
+}
+
+void LevelEditor::clearSelectorSelection()
+{
+    document_.selectedSelector.reset();
+}
+
+bool LevelEditor::updateSelectedSelectorTarget(
+    std::optional<LevelLocation> target)
+{
+    if (!document_.selectedSelector ||
+        *document_.selectedSelector >= document_.selectors.size()) {
+        return false;
+    }
+    if (target && (target->level < 0 || target->screen < 0)) {
+        document_.status = "Selector targets must not be negative.";
+        return false;
+    }
+    Level::ScreenSelector& selector =
+        document_.selectors[*document_.selectedSelector];
+    if (selector.target == target) {
+        return true;
+    }
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    selector.target = target;
+    document_.dirty = true;
+    document_.status = target
+        ? "Assigned Selector " + std::to_string(selector.id) +
+            " to level " + std::to_string(target->level) +
+            " screen " + std::to_string(target->screen) + "."
+        : "Unassigned Selector " + std::to_string(selector.id) + ".";
+    recordDocumentChange(before);
+    return true;
+}
+
+bool LevelEditor::deleteSelectedSelector()
+{
+    if (!document_.selectedSelector ||
+        *document_.selectedSelector >= document_.selectors.size()) {
+        return false;
+    }
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    const uint32_t id =
+        document_.selectors[*document_.selectedSelector].id;
+    document_.selectors.erase(
+        document_.selectors.begin() +
+        static_cast<std::ptrdiff_t>(*document_.selectedSelector));
+    if (document_.selectors.empty()) {
+        document_.selectedSelector.reset();
+    } else {
+        document_.selectedSelector = std::min(
+            *document_.selectedSelector,
+            document_.selectors.size() - 1);
+    }
+    document_.dirty = true;
+    document_.status = "Deleted Selector " + std::to_string(id) + ".";
+    recordDocumentChange(before);
+    return true;
+}
+
 void LevelEditor::selectDocument(const std::filesystem::path& path)
 {
     document_.filePath = path;
@@ -298,6 +438,10 @@ GridPosition3 LevelEditor::resolveEditTarget(
 void LevelEditor::setCell(GridPosition3 position, TileType tile)
 {
     if (document_.layers.empty() || position.z < 0) {
+        return;
+    }
+    if (editingOverworld() && tile == TileType::End) {
+        document_.status = "End tiles are not allowed in overworld.scr.";
         return;
     }
 
@@ -398,6 +542,10 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
         for (Level::Decoration& decoration : document_.decorations) {
             decoration.position.x += static_cast<float>(prependColumns);
             decoration.position.y += static_cast<float>(prependRows);
+        }
+        for (Level::ScreenSelector& selector : document_.selectors) {
+            selector.cell.x += prependColumns;
+            selector.cell.y += prependRows;
         }
     }
 
@@ -706,6 +854,31 @@ const Level::Decoration* LevelEditor::selectedDecoration() const
     return &document_.decorations[*document_.selectedDecoration];
 }
 
+const std::vector<Level::ScreenSelector>& LevelEditor::selectors() const
+{
+    return document_.selectors;
+}
+
+std::optional<std::size_t> LevelEditor::selectedSelectorIndex() const
+{
+    return document_.selectedSelector;
+}
+
+const Level::ScreenSelector* LevelEditor::selectedSelector() const
+{
+    if (!document_.selectedSelector ||
+        *document_.selectedSelector >= document_.selectors.size()) {
+        return nullptr;
+    }
+    return &document_.selectors[*document_.selectedSelector];
+}
+
+bool LevelEditor::editingOverworld() const
+{
+    return !document_.loadedPath.empty() &&
+        document_.loadedPath.filename() == "overworld.scr";
+}
+
 bool LevelEditor::dirty() const
 {
     return document_.dirty;
@@ -748,7 +921,9 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
     document_.layers[1].front().front() = tileTypeToChar(TileType::Player);
     document_.waterLayer.reset();
     document_.decorations.clear();
+    document_.selectors.clear();
     document_.selectedDecoration.reset();
+    document_.selectedSelector.reset();
     // A new document belongs to no screen until it is saved as one, so it has
     // no splat map of its own and previews the shared fallback.
     document_.loadedPath.clear();
@@ -783,6 +958,16 @@ void LevelEditor::resizeDocument(int width, int height, bool recordHistory)
             std::copy_n(document_.layers[layerIndex][y].begin(), copyWidth, resized[y].begin());
         }
         document_.layers[layerIndex] = std::move(resized);
+    }
+
+    std::erase_if(
+        document_.selectors,
+        [&](const Level::ScreenSelector& selector) {
+            return selector.cell.x >= width || selector.cell.y >= height;
+        });
+    if (document_.selectedSelector &&
+        *document_.selectedSelector >= document_.selectors.size()) {
+        document_.selectedSelector.reset();
     }
 
     document_.requestedWidth = width;
@@ -827,6 +1012,11 @@ void LevelEditor::insertLayerAt(int insertionIndex, const char* status)
             decoration.position.z += 1.0f;
         }
     }
+    for (Level::ScreenSelector& selector : document_.selectors) {
+        if (selector.cell.z >= insertionIndex) {
+            ++selector.cell.z;
+        }
+    }
     document_.activeLayer = insertionIndex;
     document_.dirty = true;
     document_.status = status;
@@ -854,6 +1044,21 @@ void LevelEditor::deleteActiveLayer()
         if (decoration.position.z >= static_cast<float>(deletedLayer + 1)) {
             decoration.position.z -= 1.0f;
         }
+    }
+    std::erase_if(
+        document_.selectors,
+        [&](Level::ScreenSelector& selector) {
+            if (selector.cell.z == static_cast<int>(deletedLayer)) {
+                return true;
+            }
+            if (selector.cell.z > static_cast<int>(deletedLayer)) {
+                --selector.cell.z;
+            }
+            return false;
+        });
+    if (document_.selectedSelector &&
+        *document_.selectedSelector >= document_.selectors.size()) {
+        document_.selectedSelector.reset();
     }
     document_.activeLayer = std::min(
         document_.activeLayer,
@@ -914,7 +1119,9 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     document_.layers = std::move(definition.layers);
     document_.waterLayer = definition.waterLayer;
     document_.decorations = std::move(definition.decorations);
+    document_.selectors = std::move(definition.selectors);
     document_.selectedDecoration.reset();
+    document_.selectedSelector.reset();
     document_.filePath = path;
     // This is the one place the in-memory document takes on a new origin by
     // reading; a browser selection deliberately does not.
@@ -960,6 +1167,7 @@ bool LevelEditor::saveDocument(const std::filesystem::path& path)
             .layers = document_.layers,
             .waterLayer = document_.waterLayer,
             .decorations = document_.decorations,
+            .selectors = document_.selectors,
         });
     for (const std::string& line : serialized) {
         file << line << '\n';
@@ -1022,6 +1230,16 @@ void LevelEditor::addLevelAt(int levelIndex)
 
     const std::vector<std::string> rows = defaultScreenRows();
     if (!applyProjectMutation([=](const std::filesystem::path& root) {
+            rewriteOverworldSelectors(
+                root,
+                [=](std::vector<Level::ScreenSelector>& selectors) {
+                    for (Level::ScreenSelector& selector : selectors) {
+                        if (selector.target &&
+                            selector.target->level >= levelIndex) {
+                            ++selector.target->level;
+                        }
+                    }
+                });
             for (int index = static_cast<int>(levels.size()) - 1;
                  index >= levelIndex;
                  --index) {
@@ -1081,6 +1299,21 @@ void LevelEditor::deleteLevel(const LevelDirectory& levelToDelete)
     const std::filesystem::path deletedName =
         uniqueDeletedLevelPath(levelToDelete.path).filename();
     if (!applyProjectMutation([=](const std::filesystem::path& root) {
+            rewriteOverworldSelectors(
+                root,
+                [=](std::vector<Level::ScreenSelector>& selectors) {
+                    for (Level::ScreenSelector& selector : selectors) {
+                        if (!selector.target) {
+                            continue;
+                        }
+                        if (selector.target->level == levelToDelete.index) {
+                            selector.target.reset();
+                        } else if (
+                            selector.target->level > levelToDelete.index) {
+                            --selector.target->level;
+                        }
+                    }
+                });
             const std::filesystem::path deletedRoot = root / "Deleted";
             std::filesystem::create_directories(deletedRoot);
             std::filesystem::rename(
@@ -1114,6 +1347,17 @@ void LevelEditor::addScreenAt(const LevelDirectory& level, int screenIndex)
 
     const std::vector<std::string> rows = defaultScreenRows();
     if (!applyProjectMutation([=](const std::filesystem::path& root) {
+            rewriteOverworldSelectors(
+                root,
+                [=](std::vector<Level::ScreenSelector>& selectors) {
+                    for (Level::ScreenSelector& selector : selectors) {
+                        if (selector.target &&
+                            selector.target->level == level.index &&
+                            selector.target->screen >= screenIndex) {
+                            ++selector.target->screen;
+                        }
+                    }
+                });
             const std::filesystem::path levelRoot =
                 levelDirectoryPath(root, level.index);
             LevelMetadata metadata = loadLevelMetadata(
@@ -1194,6 +1438,21 @@ void LevelEditor::deleteScreen(const LevelDirectory& level, int screenIndex)
     }
 
     if (!applyProjectMutation([=](const std::filesystem::path& root) {
+            rewriteOverworldSelectors(
+                root,
+                [=](std::vector<Level::ScreenSelector>& selectors) {
+                    for (Level::ScreenSelector& selector : selectors) {
+                        if (!selector.target ||
+                            selector.target->level != level.index) {
+                            continue;
+                        }
+                        if (selector.target->screen == screenIndex) {
+                            selector.target.reset();
+                        } else if (selector.target->screen > screenIndex) {
+                            --selector.target->screen;
+                        }
+                    }
+                });
             const std::filesystem::path levelRoot =
                 levelDirectoryPath(root, level.index);
             LevelMetadata metadata = loadLevelMetadata(
@@ -1288,6 +1547,7 @@ void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
     if (before.layers == after.layers &&
         before.waterLayer == after.waterLayer &&
         before.decorations == after.decorations &&
+        before.selectors == after.selectors &&
         before.filePath == after.filePath &&
         before.requestedWidth == after.requestedWidth &&
         before.requestedHeight == after.requestedHeight &&
@@ -1307,12 +1567,14 @@ void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
     document_.layers = snapshot.layers;
     document_.waterLayer = snapshot.waterLayer;
     document_.decorations = snapshot.decorations;
+    document_.selectors = snapshot.selectors;
     document_.filePath = snapshot.filePath;
     document_.loadedPath = snapshot.loadedPath;
     document_.requestedWidth = snapshot.requestedWidth;
     document_.requestedHeight = snapshot.requestedHeight;
     document_.activeLayer = snapshot.activeLayer;
     document_.selectedDecoration = snapshot.selectedDecoration;
+    document_.selectedSelector = snapshot.selectedSelector;
     document_.dirty = snapshot.dirty;
     document_.playingDraft = false;
     document_.editingDocument = true;
@@ -1324,7 +1586,8 @@ Level LevelEditor::documentToLevel() const
         document_.layers,
         "level editor draft",
         document_.waterLayer,
-        document_.decorations);
+        document_.decorations,
+        document_.selectors);
 }
 
 std::optional<Level> LevelEditor::beginDraftPlayback()
@@ -1346,12 +1609,14 @@ LevelEditor::DocumentSnapshot LevelEditor::captureDocumentSnapshot() const
         .layers = document_.layers,
         .waterLayer = document_.waterLayer,
         .decorations = document_.decorations,
+        .selectors = document_.selectors,
         .filePath = document_.filePath,
         .loadedPath = document_.loadedPath,
         .requestedWidth = document_.requestedWidth,
         .requestedHeight = document_.requestedHeight,
         .activeLayer = document_.activeLayer,
         .selectedDecoration = document_.selectedDecoration,
+        .selectedSelector = document_.selectedSelector,
         .dirty = document_.dirty,
     };
 }

@@ -390,8 +390,8 @@ void testGameCompleteOverlay()
         return result;
     };
 
-    // Rows: Level Select, Title Screen. No continue in game-complete mode.
-    CHECK(isAction<sokoban::overlay::ToLevelSelect>(draw({ .confirm = true })));
+    // Rows: Return to Overworld, Title Screen.
+    CHECK(isAction<sokoban::overlay::Continue>(draw({ .confirm = true })));
     draw({ .down = true });
     CHECK(isAction<sokoban::overlay::ToTitle>(draw({ .confirm = true })));
 
@@ -476,17 +476,14 @@ void testOptionsTitleExitRow()
     CHECK(!isAction<sokoban::options::ExitToTitle>(draw({ .confirm = true })));
     CHECK(menu.page() == sokoban::OptionsMenu::Page::QuitConfirmation);
 
-    // Pause context after beating the game: Graphics, Audio, Controls,
-    // Level Select, Exit To Title, Quit.
+    // Beating the game does not expose a menu shortcut around the overworld.
     menu.open(true, true);
     draw({ .down = true });
     draw({ .down = true });
     draw({ .down = true });
-    CHECK(isAction<sokoban::options::OpenLevelSelect>(draw({ .confirm = true })));
-    draw({ .down = true });
     CHECK(isAction<sokoban::options::ExitToTitle>(draw({ .confirm = true })));
 
-    // Level Select never appears outside the pause context.
+    // Level Select is also absent outside the pause context.
     menu.open(false, true);
     draw({ .down = true });
     draw({ .down = true });

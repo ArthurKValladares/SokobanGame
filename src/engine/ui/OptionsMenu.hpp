@@ -44,6 +44,7 @@ enum class OptionsMenuRowId {
     Undo,
     Restart,
     ShowTopDownView,
+    ConfirmInteract,
     ResetBindings,
     Back,
     CancelQuit,

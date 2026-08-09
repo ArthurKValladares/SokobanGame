@@ -28,6 +28,9 @@ public:
         bool undoPressed = false;
         bool undoDown = false;
         bool restartPressed = false;
+        // Contextual world interaction. GameplayLoop deliberately ignores
+        // this; Application owns transitions such as entering a selector.
+        bool interactPressed = false;
     };
 
     struct UpdateResult {

@@ -57,6 +57,7 @@ private:
     void drawDecorationPalette(
         LevelEditor& editor,
         const Callbacks& callbacks);
+    void drawSelectorPalette(LevelEditor& editor);
     void drawFileBrowser(LevelEditor& editor);
     void drawActiveLevelsTab(LevelEditor& editor);
     void drawDeletedLevelsTab(LevelEditor& editor);

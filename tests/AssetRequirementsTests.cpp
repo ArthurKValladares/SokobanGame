@@ -55,6 +55,8 @@ const AssetManifest& testManifest()
         { "name": "Glass", "path": "glass.gltf" },
         { "name": "Bricks", "path": "bricks.gltf" },
         { "name": "Conveyor", "path": "conveyor.gltf" },
+        { "name": "ScreenSelectorUnsolved", "path": "flag-blue.gltf" },
+        { "name": "ScreenSelectorSolved", "path": "flag-yellow.gltf" },
         { "name": "Hero", "path": "hero.glb", "geometry": "skinned", "role": "player" },
         { "name": "Enemy", "path": "enemy.glb", "geometry": "skinned", "role": "enemy" }
       ],
@@ -80,6 +82,29 @@ const AssetManifest& testManifest()
       ]
     })json");
     return manifest;
+}
+
+void testSelectorRequirementsIncludeBothFlagStates()
+{
+    TEST("selectorRequirementsIncludeBothFlagStates");
+    const Level level = Level::loadFromLayers(
+        { { ".." }, { "C " } },
+        "selector requirements",
+        std::nullopt,
+        {},
+        { Level::ScreenSelector {
+            .id = 1,
+            .cell = { 1, 0, 1 },
+            .target = LevelLocation { .level = 0, .screen = 0 },
+        } });
+    const AssetManifest& manifest = testManifest();
+    const RenderAssetRequirements requirements =
+        renderAssetRequirementsForLevel(level, manifest);
+
+    CHECK(requirements.contains(
+        manifest.modelIdByName("ScreenSelectorUnsolved")));
+    CHECK(requirements.contains(
+        manifest.modelIdByName("ScreenSelectorSolved")));
 }
 
 void testLevelRequirementsIncludeDynamicAndStaticAssets()
@@ -327,6 +352,7 @@ void testPerScreenSplatMapsAreSelectedAndFallBack()
 int main()
 {
     testLevelRequirementsIncludeDynamicAndStaticAssets();
+    testSelectorRequirementsIncludeBothFlagStates();
     testFrameRequirementsOnlyContainReferencedAssets();
     testMergeDeduplicatesRequirements();
     testCubeAndNoneAreNeverRequirements();

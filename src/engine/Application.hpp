@@ -69,10 +69,12 @@ private:
     [[nodiscard]] bool shellMenuOpen() const;
     [[nodiscard]] bool applyLevel(
         Level level,
-        const GameplaySession::Snapshot* snapshot = nullptr);
+        const GameplaySession::Snapshot* snapshot = nullptr,
+        std::optional<LevelLocation> location = std::nullopt);
     void advanceScreen();
     void solveCurrentScreenForDebug();
-    void handleCampaignAdvance(const CampaignSession::AdvanceResult& result);
+    void handlePuzzleCompleted(const CampaignSession::PuzzleCompleted& completed);
+    void tryEnterSelector();
     void checkpointCurrentScreen(bool immediateSave);
     void applySettingsEffects(const SettingsEffects& effects);
     void persistProfile(bool immediate);
@@ -82,6 +84,7 @@ private:
         const VulkanRenderer::PreparedFrame* previousRenderFrame);
     [[nodiscard]] InputRouter::RoutingContext inputRoutingContext() const;
     [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;
+    [[nodiscard]] std::filesystem::path overworldPath() const;
     // Scans levels/ once into CampaignSession; the level set is fixed
     // staged content, so title/progress queries read the cache instead of
     // hitting the filesystem per open. Rebuilt on screen loads so the debug

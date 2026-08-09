@@ -126,7 +126,7 @@ std::optional<OverlayAction> LevelCompleteOverlay::drawLevelComplete(
     std::optional<OverlayAction> action;
     if (uiControls::button(
             ui, tree.rect(continueRow),
-            stats_.hasNextLevel ? "Next Level" : "Back To Start", {
+            "Return to Overworld", {
             .tone = ButtonTone::Accent,
             .focused = selectedRow_ == continueRowIndex,
             .activate = input.confirm && selectedRow_ == continueRowIndex,
@@ -149,7 +149,7 @@ std::optional<OverlayAction> LevelCompleteOverlay::drawGameComplete(
     const LevelCompleteInput& input)
 {
     menuKit::RowList rows;
-    const int levelSelectRowIndex = rows.add();
+    const int overworldRowIndex = rows.add();
     const int titleRowIndex = rows.add();
     (void)rows.navigate(selectedRow_, input.up, input.down);
 
@@ -172,7 +172,7 @@ std::optional<OverlayAction> LevelCompleteOverlay::drawGameComplete(
     tree.spacer(tree.root(), 10.0f);
     const UiLayoutNode totalRow = tree.item(tree.root(), 28.0f);
     tree.flexibleSpacer(tree.root());
-    const UiLayoutNode levelSelectRow = tree.item(tree.root(), 58.0f);
+    const UiLayoutNode overworldRow = tree.item(tree.root(), 58.0f);
     tree.spacer(tree.root(), 16.0f);
     const UiLayoutNode titleRow = tree.item(tree.root(), 52.0f);
     tree.arrange(panel);
@@ -181,7 +181,7 @@ std::optional<OverlayAction> LevelCompleteOverlay::drawGameComplete(
     // header treatment.
     ui.centeredText(tree.rect(page.title), "GAME COMPLETE!", recordColor, 40.0f);
     ui.centeredText(tree.rect(page.subtitle),
-        "Every level solved - congratulations!", labelColor, 18.0f);
+        "Every overworld screen solved - congratulations!", labelColor, 18.0f);
     ui.divider(tree.rect(page.divider));
 
     int totalMoves = 0;
@@ -208,7 +208,7 @@ std::optional<OverlayAction> LevelCompleteOverlay::drawGameComplete(
             valueText = "-";
         }
         drawStatRow(ui, tree.rect(levelRows[i]),
-            "Level " + std::to_string(i + 1), valueText, valueColor, 20.0f);
+            "Screen " + std::to_string(i + 1), valueText, valueColor, 20.0f);
     }
 
     ui.divider(tree.rect(totalDivider));
@@ -216,17 +216,17 @@ std::optional<OverlayAction> LevelCompleteOverlay::drawGameComplete(
         ? std::to_string(totalMoves) + " moves  " +
             menuKit::formatDuration(totalSeconds, DurationStyle::MinutesSeconds)
         : "-";
-    drawStatRow(ui, tree.rect(totalRow), "Whole game", totalText, recordColor);
+    drawStatRow(ui, tree.rect(totalRow), "All screens", totalText, recordColor);
 
     std::optional<OverlayAction> action;
     if (uiControls::button(
-            ui, tree.rect(levelSelectRow),
-            "Level Select", {
+            ui, tree.rect(overworldRow),
+            "Return to Overworld", {
             .tone = ButtonTone::Accent,
-            .focused = selectedRow_ == levelSelectRowIndex,
-            .activate = input.confirm && selectedRow_ == levelSelectRowIndex,
+            .focused = selectedRow_ == overworldRowIndex,
+            .activate = input.confirm && selectedRow_ == overworldRowIndex,
         })) {
-        action = overlay::ToLevelSelect {};
+        action = overlay::Continue {};
     }
     if (uiControls::button(
             ui, tree.rect(titleRow), "Title Screen", {
