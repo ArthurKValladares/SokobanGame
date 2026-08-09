@@ -1722,6 +1722,35 @@ std::vector<LevelEditor::LevelDirectory> LevelEditor::collectLevelDirectories() 
     return levels;
 }
 
+std::string LevelEditor::selectorTargetLabel(
+    const Level::ScreenSelector& selector,
+    const std::vector<LevelDirectory>& levels)
+{
+    if (!selector.target) {
+        return "Unassigned";
+    }
+
+    std::string levelLabel =
+        "Level " + std::to_string(selector.target->level + 1);
+    std::string screenLabel =
+        "Screen " + std::to_string(selector.target->screen + 1);
+    const auto level = std::ranges::find(
+        levels, selector.target->level, &LevelDirectory::index);
+    if (level != levels.end()) {
+        if (!level->name.empty()) {
+            levelLabel = level->name;
+        }
+        const auto screen = std::ranges::find(
+            level->screens,
+            selector.target->screen,
+            &ScreenFile::index);
+        if (screen != level->screens.end() && !screen->name.empty()) {
+            screenLabel = screen->name;
+        }
+    }
+    return levelLabel + " / " + screenLabel;
+}
+
 std::vector<LevelEditor::LevelDirectory> LevelEditor::collectDeletedLevels() const
 {
     std::vector<LevelDirectory> levels;

@@ -615,6 +615,17 @@ void testSelectorFlagReflectsTargetCompletion()
             return tile.model == testManifest().modelIdByName(
                 "ScreenSelectorSolved");
         }) == 0);
+    const auto centeredFlag = std::ranges::find_if(
+        unsolved.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.model == testManifest().modelIdByName(
+                "ScreenSelectorUnsolved");
+        });
+    CHECK(centeredFlag != unsolved.tiles.end());
+    if (centeredFlag != unsolved.tiles.end() && centeredFlag->modelTransform) {
+        CHECK(near(centeredFlag->modelTransform->translation.x, 1.5f));
+        CHECK(near(centeredFlag->modelTransform->translation.y, 0.5f));
+    }
 
     const RenderFrameData solved = build(true);
     CHECK(std::ranges::count_if(

@@ -735,6 +735,20 @@ void testSelectorEditingPersistenceUndoAndProjectRemapping()
         LevelLocation { .level = 0, .screen = 0 }));
     CHECK(editor.selectors()[0].target ==
         std::optional<LevelLocation>({ .level = 0, .screen = 0 }));
+    std::vector<LevelEditor::LevelDirectory> labelLevels {
+        {
+            .index = 0,
+            .name = "Easy Plains",
+            .screens = { { .index = 0 } },
+        },
+    };
+    CHECK(LevelEditor::selectorTargetLabel(
+        editor.selectors()[0], labelLevels) ==
+        "Easy Plains / Screen 1");
+    labelLevels[0].screens[0].name = "First Push";
+    CHECK(LevelEditor::selectorTargetLabel(
+        editor.selectors()[0], labelLevels) ==
+        "Easy Plains / First Push");
     CHECK(editor.saveDocument(overworld));
     CHECK(std::filesystem::exists(project.runtime / "overworld.scr"));
 

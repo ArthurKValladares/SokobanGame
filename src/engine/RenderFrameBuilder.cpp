@@ -933,8 +933,8 @@ void appendSelectors(
                 ? selectorRender::solvedModelName
                 : selectorRender::unsolvedModelName);
         const Vec3 translation {
-            static_cast<float>(selector.cell.x) + 0.22f,
-            static_cast<float>(selector.cell.y) + 0.22f,
+            static_cast<float>(selector.cell.x) + 0.5f,
+            static_cast<float>(selector.cell.y) + 0.5f,
             static_cast<float>(selector.cell.z),
         };
         frame.tiles.push_back({

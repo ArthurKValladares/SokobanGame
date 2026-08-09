@@ -229,6 +229,7 @@ void LevelEditorDebugUi::draw(
         editor.deleteActiveLayer();
     }
 
+    ImGui::TextUnformatted("Editor Tool");
     int editorTool = editor.tool() == LevelEditor::Tool::Tiles
         ? 0
         : (editor.tool() == LevelEditor::Tool::Decorations ? 1 : 2);
@@ -239,8 +240,12 @@ void LevelEditorDebugUi::draw(
     if (ImGui::RadioButton("Mesh Decorations", &editorTool, 1)) {
         editor.setTool(LevelEditor::Tool::Decorations);
     }
-    ImGui::SameLine();
     if (ImGui::RadioButton("Screen Selectors", &editorTool, 2)) {
+        editor.setTool(LevelEditor::Tool::Selectors);
+    }
+    if (editor.editingOverworld() &&
+        editor.tool() != LevelEditor::Tool::Selectors &&
+        ImGui::Button("Assign Screens To Flags...")) {
         editor.setTool(LevelEditor::Tool::Selectors);
     }
     if (editor.tool() == LevelEditor::Tool::Tiles) {
@@ -597,15 +602,21 @@ void LevelEditorDebugUi::drawSelectorPalette(LevelEditor& editor)
         return;
     }
 
-    ImGui::TextUnformatted("Click: place/select   D + click: delete");
-    ImGui::Text("Screen Selectors (%zu)", editor.selectors().size());
+    ImGui::Separator();
+    ImGui::TextUnformatted("Selector Assignments");
+    ImGui::TextWrapped(
+        "Click a flag on the map to select it, or select it in this list. "
+        "Then choose its level and screen below.");
+    ImGui::TextUnformatted("Map controls: click to place/select, D + click to delete");
+    ImGui::Text("Flags (%zu)", editor.selectors().size());
+    const std::vector<LevelEditor::LevelDirectory> levels =
+        editor.collectLevelDirectories();
     if (ImGui::BeginListBox("##screen_selectors", ImVec2(-1.0f, 130.0f))) {
         for (std::size_t index = 0; index < editor.selectors().size(); ++index) {
             const Level::ScreenSelector& selector = editor.selectors()[index];
-            std::string label = "Selector " + std::to_string(selector.id);
-            if (!selector.target) {
-                label += " (unassigned)";
-            }
+            const std::string label =
+                "Selector " + std::to_string(selector.id) + ": " +
+                LevelEditor::selectorTargetLabel(selector, levels);
             const bool selected = editor.selectedSelectorIndex() == index;
             if (ImGui::Selectable(label.c_str(), selected)) {
                 (void)editor.selectSelector(index);
@@ -616,29 +627,28 @@ void LevelEditorDebugUi::drawSelectorPalette(LevelEditor& editor)
 
     const Level::ScreenSelector* selected = editor.selectedSelector();
     if (!selected) {
+        ImGui::TextDisabled(
+            "Select a flag above to assign it to a puzzle screen.");
         return;
     }
     const uint32_t selectorId = selected->id;
     std::optional<LevelLocation> target = selected->target;
-    const std::vector<LevelEditor::LevelDirectory> levels =
-        editor.collectLevelDirectories();
-
     const auto levelLabel = [](const LevelEditor::LevelDirectory& level) {
-        std::string label = "Level " + std::to_string(level.index + 1);
-        if (!level.name.empty()) {
-            label += ": " + level.name;
-        }
-        return label;
+        return level.name.empty()
+            ? "Level " + std::to_string(level.index + 1)
+            : level.name;
     };
     const auto screenLabel = [](const LevelEditor::ScreenFile& screen) {
-        std::string label = "Screen " + std::to_string(screen.index + 1);
-        if (!screen.name.empty()) {
-            label += ": " + screen.name;
-        }
-        return label;
+        return screen.name.empty()
+            ? "Screen " + std::to_string(screen.index + 1)
+            : screen.name;
     };
 
-    ImGui::Text("Association for Selector %u", selectorId);
+    ImGui::Separator();
+    ImGui::Text("Assign Selector %u To", selectorId);
+    ImGui::TextDisabled(
+        "Current: %s",
+        LevelEditor::selectorTargetLabel(*selected, levels).c_str());
     std::string levelPreview = "Unassigned";
     const LevelEditor::LevelDirectory* targetLevel = nullptr;
     if (target) {

@@ -18,6 +18,8 @@ namespace sokoban {
 class EditorInteraction {
 public:
     using ProjectToPixels = std::function<std::optional<Vec2>(Vec3)>;
+    using SelectorText =
+        std::function<std::string(const Level::ScreenSelector&)>;
 
     struct BrushVertex {
         Vec2 position;
@@ -55,7 +57,8 @@ public:
 
     [[nodiscard]] static std::vector<SelectorLabel> selectorLabels(
         const std::vector<Level::ScreenSelector>& selectors,
-        const ProjectToPixels& project);
+        const ProjectToPixels& project,
+        const SelectorText& text = {});
 };
 
 } // namespace sokoban

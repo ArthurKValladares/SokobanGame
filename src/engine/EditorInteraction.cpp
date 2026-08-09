@@ -190,7 +190,8 @@ Vec2 EditorInteraction::pointerPixels(
 std::vector<EditorInteraction::SelectorLabel>
 EditorInteraction::selectorLabels(
     const std::vector<Level::ScreenSelector>& selectors,
-    const ProjectToPixels& project)
+    const ProjectToPixels& project,
+    const SelectorText& text)
 {
     std::vector<SelectorLabel> labels;
     labels.reserve(selectors.size());
@@ -205,7 +206,9 @@ EditorInteraction::selectorLabels(
         }
         labels.push_back({
             .id = selector.id,
-            .text = "Selector " + std::to_string(selector.id),
+            .text = text
+                ? text(selector)
+                : "Selector " + std::to_string(selector.id),
             .anchor = *anchor,
         });
     }

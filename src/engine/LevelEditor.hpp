@@ -112,6 +112,9 @@ public:
     [[nodiscard]] bool permanentlyDelete(const std::filesystem::path& path);
     [[nodiscard]] std::vector<LevelDirectory> collectLevelDirectories() const;
     [[nodiscard]] std::vector<LevelDirectory> collectDeletedLevels() const;
+    [[nodiscard]] static std::string selectorTargetLabel(
+        const Level::ScreenSelector& selector,
+        const std::vector<LevelDirectory>& levels);
 
     [[nodiscard]] uint32_t documentWidth() const;
     [[nodiscard]] uint32_t documentHeight() const;

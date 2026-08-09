@@ -116,10 +116,14 @@ void testSelectorLabelsUseStableIdsAndWorldAnchors()
                 return std::nullopt;
             }
             return sokoban::Vec2 { world.x * 10.0f, world.z * 20.0f };
+        },
+        [](const sokoban::Level::ScreenSelector& selector) {
+            return "Selector " + std::to_string(selector.id) +
+                ": Easy Plains / Screen 1";
         });
     CHECK(labels.size() == 1);
     CHECK(labels[0].id == 2);
-    CHECK(labels[0].text == "Selector 2");
+    CHECK(labels[0].text == "Selector 2: Easy Plains / Screen 1");
     CHECK(near(labels[0].anchor.x, 15.0f));
     CHECK(near(labels[0].anchor.y, 45.0f));
 }

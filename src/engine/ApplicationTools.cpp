@@ -398,11 +398,17 @@ void ApplicationTools::drawSelectorLabels(
         !levelEditor.editingOverworld()) {
         return;
     }
+    const std::vector<LevelEditor::LevelDirectory> levels =
+        levelEditor.collectLevelDirectories();
     const std::vector<EditorInteraction::SelectorLabel> labels =
         EditorInteraction::selectorLabels(
             levelEditor.selectors(),
             [&](Vec3 world) {
                 return renderer.projectToPixels(*frame, world);
+            },
+            [&](const Level::ScreenSelector& selector) {
+                return "Selector " + std::to_string(selector.id) + ": " +
+                    LevelEditor::selectorTargetLabel(selector, levels);
             });
     ImDrawList* drawList = ImGui::GetBackgroundDrawList();
     for (const EditorInteraction::SelectorLabel& label : labels) {
