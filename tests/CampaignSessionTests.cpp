@@ -28,6 +28,7 @@ CampaignSession configuredCampaign()
     CampaignSession campaign;
     campaign.setLevelScreenCounts({ 2, 1 });
     campaign.setOverworldTargets({
+        { 0, 0 },
         { 1, 0 },
         { 0, 1 },
         { 0, 1 },
@@ -43,7 +44,7 @@ void testCatalogAndProfileRestore()
 
     CHECK(campaign.levelCount() == 2);
     CHECK(campaign.screenCount(0) == 2);
-    CHECK(campaign.overworldTargets().size() == 2);
+    CHECK(campaign.overworldTargets().size() == 3);
     CHECK(campaign.restoreProfileLocation(profile));
     CHECK(campaign.inOverworld());
     CHECK(!campaign.startPuzzle(profile, { 2, 0 }));
@@ -58,6 +59,31 @@ void testCatalogAndProfileRestore()
     CHECK(!campaign.restoreProfileLocation(invalidPuzzle));
     CHECK(campaign.inOverworld());
     CHECK(invalidPuzzle.worldContext == PlayerProfile::WorldContext::Overworld);
+}
+
+void testOverworldMustCoverEveryScreen()
+{
+    TEST("overworldMustCoverEveryScreen");
+    CampaignSession campaign;
+    campaign.setLevelScreenCounts({ 2, 1 });
+    bool rejected = false;
+    try {
+        campaign.setOverworldTargets({ { 0, 0 }, { 1, 0 } });
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    CHECK(rejected);
+
+    campaign.setOverworldTargets({ { 0, 0 }, { 0, 1 }, { 1, 0 } });
+    rejected = false;
+    try {
+        campaign.setOverworldTargets(
+            { { 0, 0 }, { 0, 1 }, { 1, 0 }, { 9, 0 } });
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    CHECK(rejected);
+    CHECK(campaign.overworldTargets().size() == 3);
 }
 
 void testSelectorInteractionRequiresAllLivingPlayersTogether()
@@ -106,7 +132,7 @@ void testSelectorEntryAndBothCheckpointKinds()
 
     GameplaySession::Snapshot overworld;
     overworld.playerMoveCount = 6;
-    CHECK(campaign.enterSelector(profile, { 0, 1 }, overworld));
+    CHECK(campaign.enterSelector(profile, { 1, 0 }, overworld));
     CHECK(!campaign.inOverworld());
     CHECK(profile.overworldSession.has_value());
     CHECK(profile.overworldSession->playerMoveCount == 6);
@@ -132,7 +158,7 @@ void testSelectorEntryAndBothCheckpointKinds()
 
     const CampaignSession::PuzzleCompleted completed =
         resumed.completePuzzle(profile, 7);
-    CHECK(completed.location == (LevelLocation { 0, 1 }));
+    CHECK(completed.location == (LevelLocation { 1, 0 }));
     CHECK(resumed.inOverworld());
     const CampaignSession::WorldRestore overworldRestore =
         resumed.prepareWorldLoad(profile);
@@ -148,6 +174,17 @@ void testIndependentCompletionAndAllTargets()
     PlayerProfile profile;
     campaign.startNewGame(profile);
 
+    CHECK(campaign.selectorViewState(profile, { 0, 0 }).status ==
+        ScreenSelectorStatus::Playable);
+    CHECK(campaign.selectorViewState(profile, { 0, 1 }).status ==
+        ScreenSelectorStatus::Unavailable);
+    CHECK(campaign.selectorViewState(profile, { 1, 0 }).status ==
+        ScreenSelectorStatus::Playable);
+    CHECK(campaign.selectorViewState(profile, { 0, 1 }).lastScreenInLevel);
+    CHECK(campaign.selectorViewState(profile, { 1, 0 }).lastScreenInLevel);
+    GameplaySession::Snapshot overworld;
+    CHECK(!campaign.enterSelector(profile, { 0, 1 }, overworld));
+
     CHECK(campaign.startPuzzle(profile, { 1, 0 }));
     CHECK(profile.currentLevel == 1);
     CHECK(profile.unlockedLevel == 0);
@@ -162,11 +199,22 @@ void testIndependentCompletionAndAllTargets()
     CHECK(!first.gameCompleted);
     CHECK(profile.screenCompleted({ 1, 0 }));
     CHECK(!campaign.allTargetsCompleted(profile));
+    CHECK(campaign.selectorViewState(profile, { 0, 1 }).status ==
+        ScreenSelectorStatus::Unavailable);
+
+    CHECK(campaign.startPuzzle(profile, { 0, 0 }));
+    campaign.addElapsedTime(2.0f);
+    const CampaignSession::PuzzleCompleted middle =
+        campaign.completePuzzle(profile, 3);
+    CHECK(!middle.gameCompleted);
+    CHECK(campaign.selectorViewState(profile, { 0, 0 }).status ==
+        ScreenSelectorStatus::Solved);
+    CHECK(campaign.selectorViewState(profile, { 0, 1 }).status ==
+        ScreenSelectorStatus::Playable);
 
     CHECK(campaign.startPuzzle(profile, { 0, 1 }));
-    campaign.addElapsedTime(2.0f);
     const CampaignSession::PuzzleCompleted final =
-        campaign.completePuzzle(profile, 3);
+        campaign.completePuzzle(profile, 2);
     CHECK(final.gameCompleted);
     CHECK(campaign.allTargetsCompleted(profile));
     CHECK(profile.screenCompleted({ 0, 1 }));
@@ -216,6 +264,7 @@ int main()
 {
     try {
     testCatalogAndProfileRestore();
+    testOverworldMustCoverEveryScreen();
     testSelectorInteractionRequiresAllLivingPlayersTogether();
     testSelectorEntryAndBothCheckpointKinds();
     testIndependentCompletionAndAllTargets();

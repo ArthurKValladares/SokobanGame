@@ -70,6 +70,9 @@ public:
 
     [[nodiscard]] bool allTargetsCompleted(
         const PlayerProfile& profile) const;
+    [[nodiscard]] ScreenSelectorViewState selectorViewState(
+        const PlayerProfile& profile,
+        LevelLocation location) const;
     [[nodiscard]] bool screenExists(int level, int screen) const;
     [[nodiscard]] int levelCount() const;
     [[nodiscard]] int screenCount(int level) const;
@@ -92,6 +95,8 @@ private:
     static constexpr double autosaveIntervalSeconds_ = 2.0;
 
     void clearRunState();
+    void validateOverworldCoverage(
+        const std::vector<LevelLocation>& targets) const;
 
     std::vector<int> levelScreenCounts_;
     std::vector<LevelLocation> overworldTargets_;

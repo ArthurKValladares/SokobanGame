@@ -10,7 +10,7 @@ namespace sokoban {
 void PlayerProfile::normalize()
 {
     unlockedLevel = std::max(unlockedLevel, 0);
-    // Selector navigation is intentionally nonsequential. The legacy
+    // Levels unlock independently through the overworld. The legacy
     // unlockedLevel field may be lower than the selected puzzle's level.
     currentLevel = std::max(currentLevel, 0);
     currentScreen = std::max(currentScreen, 0);
@@ -198,6 +198,24 @@ bool PlayerProfile::screenCompleted(LevelLocation location) const
     // count predates that field and therefore cannot enumerate the screens.
     const LevelProgress* legacy = progressForLevel(location.level);
     return legacy != nullptr && legacy->completed;
+}
+
+ScreenSelectorStatus PlayerProfile::selectorStatus(
+    LevelLocation location) const
+{
+    if (location.level < 0 || location.screen < 0) {
+        return ScreenSelectorStatus::Unavailable;
+    }
+    if (screenCompleted(location)) {
+        return ScreenSelectorStatus::Solved;
+    }
+    if (location.screen == 0 || screenCompleted({
+            .level = location.level,
+            .screen = location.screen - 1,
+        })) {
+        return ScreenSelectorStatus::Playable;
+    }
+    return ScreenSelectorStatus::Unavailable;
 }
 
 } // namespace sokoban

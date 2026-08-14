@@ -193,12 +193,11 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
             manifest.modelIdByName(decoration.model));
     }
     if (!level.selectors().empty()) {
-        // Completion can change while the overworld stays resident, so both
-        // visual states must be ready before a solved puzzle returns to it.
-        requirements.requireModel(
-            manifest.modelIdByName(selectorRender::unsolvedModelName));
-        requirements.requireModel(
-            manifest.modelIdByName(selectorRender::solvedModelName));
+        // Progress can change while the overworld stays resident. Keep every
+        // A/B and availability color ready for the return from a puzzle.
+        for (std::string_view modelName : selectorRender::modelNames) {
+            requirements.requireModel(manifest.modelIdByName(modelName));
+        }
     }
     return requirements;
 }

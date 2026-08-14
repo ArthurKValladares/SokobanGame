@@ -1,6 +1,7 @@
 #include "engine/CampaignSession.hpp"
 
 #include <algorithm>
+#include <stdexcept>
 #include <utility>
 
 namespace sokoban {
@@ -17,6 +18,7 @@ void CampaignSession::setOverworldTargets(std::vector<LevelLocation> targets)
             std::pair { right.level, right.screen };
     });
     targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
+    validateOverworldCoverage(targets);
     overworldTargets_ = std::move(targets);
 }
 
@@ -78,7 +80,9 @@ bool CampaignSession::enterSelector(
     LevelLocation target,
     const GameplaySession::Snapshot& overworldSnapshot)
 {
-    if (!inOverworld_ || !screenExists(target.level, target.screen)) {
+    if (!inOverworld_ || !screenExists(target.level, target.screen) ||
+        profile.selectorStatus(target) ==
+            ScreenSelectorStatus::Unavailable) {
         return false;
     }
     profile.overworldSession = overworldSnapshot;
@@ -239,6 +243,19 @@ bool CampaignSession::allTargetsCompleted(const PlayerProfile& profile) const
         });
 }
 
+ScreenSelectorViewState CampaignSession::selectorViewState(
+    const PlayerProfile& profile,
+    LevelLocation location) const
+{
+    return {
+        .status = screenExists(location.level, location.screen)
+            ? profile.selectorStatus(location)
+            : ScreenSelectorStatus::Unavailable,
+        .lastScreenInLevel = screenExists(location.level, location.screen) &&
+            location.screen == screenCount(location.level) - 1,
+    };
+}
+
 bool CampaignSession::screenExists(int level, int screen) const
 {
     return levelLocationExists(
@@ -257,6 +274,28 @@ int CampaignSession::screenCount(int level) const
         return 0;
     }
     return levelScreenCounts_[static_cast<std::size_t>(level)];
+}
+
+void CampaignSession::validateOverworldCoverage(
+    const std::vector<LevelLocation>& targets) const
+{
+    if (std::ranges::any_of(targets, [&](LevelLocation target) {
+            return !screenExists(target.level, target.screen);
+        })) {
+        throw std::invalid_argument(
+            "overworld selector targets a screen outside the catalog");
+    }
+    for (int level = 0; level < levelCount(); ++level) {
+        for (int screen = 0; screen < screenCount(level); ++screen) {
+            const LevelLocation required { .level = level, .screen = screen };
+            if (std::ranges::find(targets, required) == targets.end()) {
+                throw std::invalid_argument(
+                    "overworld has no selector for level " +
+                    std::to_string(level) + " screen " +
+                    std::to_string(screen));
+            }
+        }
+    }
 }
 
 void CampaignSession::clearRunState()

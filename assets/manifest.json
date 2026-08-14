@@ -198,7 +198,7 @@
       }
     },
     {
-      "name": "ScreenSelectorUnsolved",
+      "name": "ScreenSelectorAPlayable",
       "path": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_blue.gltf",
       "material": {
         "mode": "texture",
@@ -207,8 +207,44 @@
       "preserveSourceScale": true
     },
     {
-      "name": "ScreenSelectorSolved",
-      "path": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_yellow.gltf",
+      "name": "ScreenSelectorASolved",
+      "path": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_green.gltf",
+      "material": {
+        "mode": "texture",
+        "texture": "BoardGameBits"
+      },
+      "preserveSourceScale": true
+    },
+    {
+      "name": "ScreenSelectorAUnavailable",
+      "path": "KayKit Board Game Bits 1.0/Assets/gltf/flag_A_red.gltf",
+      "material": {
+        "mode": "texture",
+        "texture": "BoardGameBits"
+      },
+      "preserveSourceScale": true
+    },
+    {
+      "name": "ScreenSelectorBPlayable",
+      "path": "KayKit Board Game Bits 1.0/Assets/gltf/flag_B_blue.gltf",
+      "material": {
+        "mode": "texture",
+        "texture": "BoardGameBits"
+      },
+      "preserveSourceScale": true
+    },
+    {
+      "name": "ScreenSelectorBSolved",
+      "path": "KayKit Board Game Bits 1.0/Assets/gltf/flag_B_green.gltf",
+      "material": {
+        "mode": "texture",
+        "texture": "BoardGameBits"
+      },
+      "preserveSourceScale": true
+    },
+    {
+      "name": "ScreenSelectorBUnavailable",
+      "path": "KayKit Board Game Bits 1.0/Assets/gltf/flag_B_red.gltf",
       "material": {
         "mode": "texture",
         "texture": "BoardGameBits"

@@ -638,6 +638,14 @@ void Application::tryEnterSelector()
             << ':' << sharedSelector->target->screen;
         return;
     }
+    if (campaign_.selectorViewState(
+            playerProfile_, *sharedSelector->target).status ==
+        ScreenSelectorStatus::Unavailable) {
+        log::debug(log::Category::Gameplay)
+            << "Selector " << sharedSelector->id
+            << " is not playable until the previous screen is solved";
+        return;
+    }
 
     // Make the return point durable before changing the profile context.
     checkpointCurrentScreen(true);
@@ -1039,6 +1047,8 @@ RenderFrameData Application::buildRenderFrame(
         return *preview;
     }
     if (tools_->levelEditor.editingDocument()) {
+        const std::vector<LevelEditor::LevelDirectory> editorLevels =
+            tools_->levelEditor.collectLevelDirectories();
         renderFrameArena_.reset();
         return RenderFrameBuilder::buildEditor({
             .manifest = assetManifest_,
@@ -1054,8 +1064,23 @@ RenderFrameData Application::buildRenderFrame(
             .conveyorBeltScrollOffset = beltScrollOffset,
             .levelLocation =
                 levelLocationFromScreenPath(tools_->levelEditor.loadedDocumentPath()),
-            .selectorSolved = [this](LevelLocation target) {
-                return playerProfile_.screenCompleted(target);
+            .selectorState = [this, &editorLevels](LevelLocation target) {
+                const auto level = std::ranges::find(
+                    editorLevels,
+                    target.level,
+                    &LevelEditor::LevelDirectory::index);
+                const bool targetExists = level != editorLevels.end() &&
+                    std::ranges::find(
+                        level->screens,
+                        target.screen,
+                        &LevelEditor::ScreenFile::index) != level->screens.end();
+                return ScreenSelectorViewState {
+                    .status = targetExists
+                        ? playerProfile_.selectorStatus(target)
+                        : ScreenSelectorStatus::Unavailable,
+                    .lastScreenInLevel = targetExists &&
+                        level->screens.back().index == target.screen,
+                };
             },
         }, renderFrameArena_);
     }
@@ -1083,8 +1108,8 @@ RenderFrameData Application::buildRenderFrame(
         .levelLocation = campaign_.inOverworld()
             ? std::nullopt
             : std::optional<LevelLocation> { campaign_.location() },
-        .selectorSolved = [this](LevelLocation target) {
-            return playerProfile_.screenCompleted(target);
+        .selectorState = [this](LevelLocation target) {
+            return campaign_.selectorViewState(playerProfile_, target);
         },
     }, renderFrameArena_);
     particleSystem_.appendRenderData(frame);

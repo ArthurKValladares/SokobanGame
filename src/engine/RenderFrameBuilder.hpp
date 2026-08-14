@@ -5,6 +5,7 @@
 #include "engine/Level.hpp"
 #include "engine/LevelEditor.hpp"
 #include "engine/PresentationSettings.hpp"
+#include "engine/ScreenSelectorState.hpp"
 #include "engine/render/RenderTypes.hpp"
 
 #include <optional>
@@ -56,7 +57,7 @@ public:
         // shared map, which is also what draft playback outside a campaign
         // gets.
         std::optional<LevelLocation> levelLocation;
-        std::function<bool(LevelLocation)> selectorSolved;
+        std::function<ScreenSelectorViewState(LevelLocation)> selectorState;
     };
 
     struct EditorInput {
@@ -73,7 +74,7 @@ public:
         // editor previews (and paints on) that screen's own splat map rather
         // than the shared fallback; unset for scratch documents.
         std::optional<LevelLocation> levelLocation;
-        std::function<bool(LevelLocation)> selectorSolved;
+        std::function<ScreenSelectorViewState(LevelLocation)> selectorState;
     };
 
     [[nodiscard]] static RenderFrameData buildGameplay(const GameplayInput& input);

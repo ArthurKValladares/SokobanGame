@@ -2,6 +2,7 @@
 
 #include "engine/GameplaySession.hpp"
 #include "engine/LevelCatalog.hpp"
+#include "engine/ScreenSelectorState.hpp"
 #include "engine/SettingsTypes.hpp"
 
 #include <optional>
@@ -108,6 +109,8 @@ struct PlayerProfile {
     [[nodiscard]] const ScreenProgress* progressForScreen(
         LevelLocation location) const;
     [[nodiscard]] bool screenCompleted(LevelLocation location) const;
+    [[nodiscard]] ScreenSelectorStatus selectorStatus(
+        LevelLocation location) const;
     [[nodiscard]] std::string serialize(
         ProfileSections sections = ProfileSections::All) const;
 

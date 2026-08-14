@@ -4,23 +4,26 @@ Status: design only. No game code or content has been changed as part of this do
 
 ## 1. Goal
 
-Replace the current sequential campaign flow with a playable overworld. The overworld is authored and simulated as a normal Sokoban screen: it uses the same layered board format, player movement, pushing, ice, conveyors, ladders, water, mirrors, enemies, pressure plates, undo, restart, animation, audio, camera, and checkpoint behavior.
+Replace navigation between levels with a playable overworld while preserving sequential progression between screens within each level. The overworld is authored and simulated as a normal Sokoban screen: it uses the same layered board format, player movement, pushing, ice, conveyors, ladders, water, mirrors, enemies, pressure plates, undo, restart, animation, audio, camera, and checkpoint behavior.
 
-The overworld adds one semantic object: a **Screen Selector** anchored to a board cell. When the player is standing on a selector and presses Space, the game loads the level/screen assigned to that selector. Solving that screen records its completion and returns the player to the preserved overworld state. Unsolved selectors render with `flag_A_blue`; solved selectors render with `flag_A_yellow`.
+The overworld adds one semantic object: a **Screen Selector** anchored to a board cell. When the player is standing on an available selector and presses Space, the game loads the level/screen assigned to that selector. Solving that screen records its completion and returns the player to the preserved overworld state. A selector is blue when playable and unsolved, green when solved, and red when locked. The last screen in a level uses the corresponding `flag_B_COLOR` model; all other screens use `flag_A_COLOR`.
 
 The Debug Level Editor must be able to edit the overworld, place/delete selectors, show `Selector N` labels above them in the 3D editor view, and associate each selector with an existing level/screen.
 
 ## 2. Scope and interpretation
 
-This design treats each selector target as one independently playable screen, not as the start of the old sequential level run. In particular:
+Each level retains its own sequential screen progression, while levels remain independent of one another. In particular:
 
 - Entering a selector mapped to `(level 2, screen 1)` loads exactly that screen.
+- Screen 0 of every level is playable immediately.
+- Screen N is playable after screen N-1 in the same level has been solved.
+- Completing a screen never unlocks a screen in another level, and a level does not depend on any lower-numbered level.
 - Solving it does **not** automatically load screen 2 or the next level.
 - The completion overlay's Continue action returns to the overworld.
 - Completion, best moves, and best time are recorded per target screen.
 - A solved selector can be entered again to replay its screen and improve its records.
 - If two selectors point to the same screen, both display the same solved state.
-- Overall game completion means every distinct, valid screen target used by the overworld has been solved. An unreferenced screen file does not block completion.
+- The overworld is valid only when every catalog screen has at least one selector. Overall game completion therefore means every catalog screen has been solved.
 
 The existing level/screen directory organization, names, per-level music, screen files, and ground splat maps remain useful content organization. What changes is the player-facing progression policy.
 
@@ -143,7 +146,8 @@ Activation is accepted only when all of the following are true:
 - no gameplay action is in flight and no automatic movement is pending;
 - the completion overlay, title, options, editor document mode, and draft-exit modal are closed;
 - at least one living player exists;
-- the selector has a valid target that exists in the current catalog.
+- the selector has a valid target that exists in the current catalog;
+- the target is solved, is screen 0, or its immediately preceding screen in the same level has been solved.
 
 Because mirrors can create multiple players, selector activation follows a deterministic rule consistent with the existing end-tile rule: every living player must stand on the same selector cell. A dead player prevents activation just as death prevents screen completion. This avoids silently abandoning a clone elsewhere on the overworld.
 
@@ -166,7 +170,7 @@ When `GameplayLoop` reports `screenSolved` in a selected puzzle:
 4. Mark the saved current context as overworld.
 5. Persist immediately before opening a completion overlay.
 6. Open a **Screen Complete** overlay showing the target's level/screen name, moves, time, and best comparisons.
-7. On Continue, restore the preserved overworld snapshot. The selector flag is now yellow because rendering reads the updated profile.
+7. On Continue, restore the preserved overworld snapshot. The selector flag is now green and the following screen in that level is now blue because rendering reads the updated profile.
 
 The completion overlay's To Title action records the same completion first, then opens the title. Continue from the title returns to the overworld. It must not accidentally reload the completed puzzle.
 
@@ -237,7 +241,7 @@ Bump `currentPlayerProfileFormat` from 17 to 18 and add a strict migration.
 Old sequential saves should preserve earned completion as closely as possible:
 
 - For every old level record, create screen-completion records for indices `0 .. reachedScreens - 1` when the level was completed.
-- Old completion necessarily meant every then-existing screen in that level had been traversed sequentially. Retain a temporary `legacyLevelCompleted` marker (or the existing level `completed` field) so old formats whose `reachedScreens` was zero can still make every selector targeting that completed level yellow after the runtime catalog is available.
+- Old completion necessarily meant every then-existing screen in that level had been traversed sequentially. Retain a temporary `legacyLevelCompleted` marker (or the existing level `completed` field) so old formats whose `reachedScreens` was zero can still make every selector targeting that completed level green after the runtime catalog is available.
 - Old level aggregate best moves/time cannot be truthfully assigned to an individual screen. Preserve them as legacy aggregate statistics or omit them from screen bests; never copy the aggregate to every screen.
 - An old in-progress `activeScreen` becomes the active puzzle checkpoint for its saved location.
 - Since old saves have no overworld snapshot, returning from that resumed puzzle starts a fresh overworld. If the old save has no active screen, it starts directly in a fresh overworld.
@@ -259,26 +263,26 @@ Slot summaries require the overworld target catalog, not only `levelCount`. Cach
 
 ### 7.1 Manifest entries
 
-Register the supplied assets explicitly in `assets/manifest.json`:
+Register the supplied texture and six model variants explicitly in `assets/manifest.json`:
 
 - texture: `KayKit Board Game Bits 1.0/Assets/gltf/boardgame_bits_texture.png`;
-- unsolved model: `KayKit Board Game Bits 1.0/Assets/gltf/flag_A_blue.gltf`;
-- solved model: `KayKit Board Game Bits 1.0/Assets/gltf/flag_A_yellow.gltf`.
+- normal-screen models: `flag_A_blue.gltf`, `flag_A_green.gltf`, and `flag_A_red.gltf`;
+- final-screen models: `flag_B_blue.gltf`, `flag_B_green.gltf`, and `flag_B_red.gltf`.
 
-Suggested stable manifest names are `ScreenSelectorUnsolved`, `ScreenSelectorSolved`, and `BoardGameBits`. Both glTFs reference their adjacent `.bin` and texture; the content pipeline's existing glTF dependency scanner should stage those once the models and texture are in the manifest.
+The glTFs reference their adjacent `.bin` and texture; the content pipeline's existing glTF dependency scanner stages those once the models and texture are in the manifest.
 
 The models have identical bounds and a height of approximately 1.43 authored units. During implementation, use one shared selector transform policy and visually verify scale, axis orientation, bottom pivot, flag-pole corner offset, shadows, and player overlap. Do not expose per-selector transforms in content; all selectors must render consistently.
 
 ### 7.2 Dynamic model choice
 
-Gameplay overworld frame construction receives a read-only completion query/set. For each selector:
+Gameplay overworld frame construction receives a read-only selector-state query. For each selector:
 
-- use `ScreenSelectorUnsolved` when its valid target is incomplete or absent;
-- use `ScreenSelectorSolved` when `PlayerProfile::screenCompleted(target)` is true.
+- choose blue for playable but incomplete, green for solved, and red for unavailable or invalid;
+- choose the B model when the target is the last screen in its level, otherwise choose A.
 
-Editor frame construction should use the active save slot's progress so the author sees the same blue/yellow state as normal gameplay. An unassigned selector is blue.
+Editor frame construction should use the active save slot's progress so the author sees the same state as normal gameplay. An unassigned selector is red.
 
-Both flag models must be included in overworld asset requirements even if the current frame only uses one color. A screen can become solved and return to the already-loaded overworld without a blocking model load. The per-frame requirements assertion must therefore also accept the dynamic change.
+All six flag models must be included in overworld asset requirements even if the current frame only uses one variant. A screen can change state and return to the already-loaded overworld without a blocking model load. The per-frame requirements assertion must therefore also accept each dynamic change.
 
 Selectors do not affect camera fit, are not generic-decoration pick targets, and do not contribute collision geometry. They may cast/receive shadows using the normal model path.
 
@@ -403,7 +407,7 @@ Rename level-oriented types/text to screen-oriented equivalents. The normal over
 
 ### 9.4 Preloading and music
 
-- While in the overworld, preload both flag models and the assets for selector targets opportunistically. To control memory, preload the overworld plus the nearest/hovered selector later if needed; the first implementation may merge all target requirements if the current content size is acceptable.
+- While in the overworld, preload all six flag models and the assets for selector targets opportunistically. To control memory, preload the overworld plus the nearest/hovered selector later if needed; the first implementation may merge all target requirements if the current content size is acceptable.
 - While in a puzzle, preload the overworld requirements because it is the guaranteed next destination.
 - Selected puzzles continue using `playMusicForLevel(target.level)`.
 - Until a dedicated overworld music role is requested, the overworld should use the existing level 0 music/fallback rather than adding an unrelated new asset requirement.
@@ -421,21 +425,22 @@ Production validation fails when:
 - a selector target does not exist;
 - a selector cell is out of bounds, unsupported, or not walkable;
 - an ordinary puzzle screen contains selectors;
-- either flag model/texture is absent from the manifest or its files/dependencies are missing.
+- any catalog screen has no selector in the overworld;
+- any flag model/texture is absent from the manifest or its files/dependencies are missing.
 
-The pipeline should permit multiple selectors targeting the same screen and screens with no selector. It should report both as non-fatal authoring diagnostics if a diagnostic channel is available.
+The pipeline permits multiple selectors targeting the same screen. A screen with no selector is a production validation error.
 
 `LevelProjectStore` must include the root overworld file when cloning, validating, preparing a runtime mirror, committing, and rolling back. Current behavior copies the root file into the source staging tree but omits it from the runtime mirror, so this must be changed deliberately.
 
-Asset requirement tests that iterate all levels/screens must add the overworld and both possible flag states.
+Asset requirement tests that iterate all levels/screens must add the overworld and all six possible flag variants.
 
 ## 11. Error handling and edge cases
 
 - **Missing overworld at startup:** log a content error and remain at the title; do not fall back to `level0/screen0`, because that silently restores the old progression model.
-- **Missing selector target after a debug edit:** keep the overworld playable, render the selector blue, disable activation, and surface the error in Debug UI/logs. Production staging rejects it.
-- **Duplicate target:** allowed; all copies turn yellow together and overall completion counts the target once.
+- **Missing selector target after a debug edit:** keep the overworld playable, render the selector red, disable activation, and surface the error in Debug UI/logs. Production staging rejects it.
+- **Duplicate target:** allowed; all copies show the same state and overall completion counts the target once.
 - **Solved screen removed from content:** retain its historical save record but ignore it for current all-target completion. This avoids destructive save rewriting.
-- **New selector/target added after a save:** it starts blue and makes the game incomplete until solved.
+- **New selector/target added after a save:** it reflects its target's sequential state and makes the game incomplete until solved.
 - **Target changed after being solved:** the selector immediately reflects the new target's progress; completion is keyed to the screen, not selector ID.
 - **Selector moved:** its ID and target remain stable.
 - **Selector deleted:** its target's progress remains in the profile in case another selector points to it or it is restored later.
@@ -495,8 +500,8 @@ Implement in vertical, testable stages:
    - remove or deliberately redefine Level Select.
 
 8. **Integration and regression pass**
-   - add end-to-end tests for new game, selector entry, crash/resume in puzzle, solve/return, yellow flags, replay, duplicate targets, all-target completion, invalid edits, and old-save migration;
-   - run the complete Debug build/test suite and visually verify both flags and editor labels.
+   - add end-to-end tests for new game, selector entry, independent level chains, locked selectors, crash/resume in puzzle, solve/return, flag states, replay, duplicate targets, complete coverage, all-target completion, invalid edits, and old-save migration;
+   - run the complete Debug build/test suite and visually verify all flag states and editor labels.
 
 This order avoids a half-migrated runtime that can write a new save before the new codec and recovery paths are tested.
 
@@ -531,14 +536,15 @@ The change is complete when all of the following are true:
 1. New Game starts in `overworld.scr`; Continue restores the saved overworld or active selected puzzle.
 2. The overworld uses the normal gameplay/session/rules path and supports the same mechanics, undo, restart, animation, and checkpoints.
 3. A selector has a stable ID, exact cell, and optional level/screen assignment stored in the overworld file.
-4. Standing on a valid selector in an idle overworld and pressing Space loads exactly its assigned screen.
+4. Standing on a valid, available selector in an idle overworld and pressing Space loads exactly its assigned screen; unavailable selectors do nothing.
 5. Solving that screen records per-screen progress, shows screen-complete UI, and returns to the preserved overworld instead of advancing sequentially.
-6. Unsolved selectors use `flag_A_blue`; solved selectors use `flag_A_yellow`; duplicate targets stay visually consistent.
-7. Both flag assets and dependencies are staged and preloaded correctly.
-8. The Level Editor can open/save/mirror the overworld, place/delete/undo selectors, show `Selector N` labels, and edit assignments using named level/screen choices.
-9. Inserting/deleting/restoring levels or screens remaps selector targets atomically and never silently retargets a selector to different content.
-10. Old format-17 saves migrate without corruption; historical completions remain recognized; an old active screen can resume.
-11. Save slots summarize selector-target completion and all-target completion correctly.
-12. Invalid selectors fail production content validation and degrade safely during Debug editing.
-13. Player-facing Level Select no longer bypasses the overworld unless an explicit alternative design is approved.
-14. Unit/integration tests cover parsing, editor operations, remapping, rendering choice, input gating, navigation, persistence, migration, and completion.
+6. Each level unlocks sequentially from screen 0, independently of every other level.
+7. Playable, solved, and unavailable selectors use blue, green, and red respectively; the last screen of a level uses flag B and all others use flag A.
+8. All six flag assets and dependencies are staged and preloaded correctly.
+9. The Level Editor can open/save/mirror the overworld, place/delete/undo selectors, show `Selector N` labels, and edit assignments using named level/screen choices.
+10. Inserting/deleting/restoring levels or screens remaps selector targets atomically and never silently retargets a selector to different content.
+11. Old format-17 saves migrate without corruption; historical completions remain recognized; an old active screen can resume.
+12. Save slots summarize selector-target completion and all-target completion correctly.
+13. Missing catalog-screen coverage and other invalid selectors fail production content validation and degrade safely during Debug editing.
+14. Player-facing Level Select no longer bypasses the overworld unless an explicit alternative design is approved.
+15. Unit/integration tests cover parsing, editor operations, remapping, rendering choice, input gating, navigation, persistence, migration, and completion.

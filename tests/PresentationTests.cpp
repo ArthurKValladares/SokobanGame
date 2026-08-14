@@ -68,13 +68,33 @@ const AssetManifest& testManifest()
           "preserveSourceScale": true
         },
         {
-          "name": "ScreenSelectorUnsolved",
-          "path": "flag-blue.gltf",
+          "name": "ScreenSelectorAPlayable",
+          "path": "flag-a-blue.gltf",
           "preserveSourceScale": true
         },
         {
-          "name": "ScreenSelectorSolved",
-          "path": "flag-yellow.gltf",
+          "name": "ScreenSelectorASolved",
+          "path": "flag-a-green.gltf",
+          "preserveSourceScale": true
+        },
+        {
+          "name": "ScreenSelectorAUnavailable",
+          "path": "flag-a-red.gltf",
+          "preserveSourceScale": true
+        },
+        {
+          "name": "ScreenSelectorBPlayable",
+          "path": "flag-b-blue.gltf",
+          "preserveSourceScale": true
+        },
+        {
+          "name": "ScreenSelectorBSolved",
+          "path": "flag-b-green.gltf",
+          "preserveSourceScale": true
+        },
+        {
+          "name": "ScreenSelectorBUnavailable",
+          "path": "flag-b-red.gltf",
           "preserveSourceScale": true
         },
         {
@@ -587,7 +607,7 @@ void testSelectorFlagReflectsTargetCompletion()
     GameplayPresentation presentation;
     presentation.resetEntities(state);
 
-    auto build = [&](bool solved) {
+    auto build = [&](ScreenSelectorViewState selectorState) {
         return RenderFrameBuilder::buildGameplay({
             .manifest = testManifest(),
             .level = level,
@@ -596,44 +616,51 @@ void testSelectorFlagReflectsTargetCompletion()
             .projectedState = state,
             .presentation = presentation,
             .settings = PresentationSettings {},
-            .selectorSolved = [solved](LevelLocation target) {
-                return solved && target == LevelLocation { 0, 0 };
+            .selectorState = [selectorState](LevelLocation) {
+                return selectorState;
             },
         });
     };
 
-    const RenderFrameData unsolved = build(false);
-    CHECK(std::ranges::count_if(
-        unsolved.tiles,
-        [](const RenderFrameData::Tile& tile) {
-            return tile.model == testManifest().modelIdByName(
-                "ScreenSelectorUnsolved");
-        }) == 1);
-    CHECK(std::ranges::count_if(
-        unsolved.tiles,
-        [](const RenderFrameData::Tile& tile) {
-            return tile.model == testManifest().modelIdByName(
-                "ScreenSelectorSolved");
-        }) == 0);
+    auto checkState = [&](ScreenSelectorViewState state, std::string_view name) {
+        const RenderFrameData frame = build(state);
+        CHECK(std::ranges::count_if(
+            frame.tiles,
+            [&](const RenderFrameData::Tile& tile) {
+                return tile.model == testManifest().modelIdByName(name);
+            }) == 1);
+        return frame;
+    };
+
+    const RenderFrameData playable = checkState(
+        { .status = ScreenSelectorStatus::Playable },
+        "ScreenSelectorAPlayable");
+    (void)checkState(
+        { .status = ScreenSelectorStatus::Solved },
+        "ScreenSelectorASolved");
+    (void)checkState(
+        { .status = ScreenSelectorStatus::Unavailable },
+        "ScreenSelectorAUnavailable");
+    (void)checkState(
+        { .status = ScreenSelectorStatus::Playable, .lastScreenInLevel = true },
+        "ScreenSelectorBPlayable");
+    (void)checkState(
+        { .status = ScreenSelectorStatus::Solved, .lastScreenInLevel = true },
+        "ScreenSelectorBSolved");
+    (void)checkState(
+        { .status = ScreenSelectorStatus::Unavailable, .lastScreenInLevel = true },
+        "ScreenSelectorBUnavailable");
     const auto centeredFlag = std::ranges::find_if(
-        unsolved.tiles,
+        playable.tiles,
         [](const RenderFrameData::Tile& tile) {
             return tile.model == testManifest().modelIdByName(
-                "ScreenSelectorUnsolved");
+                "ScreenSelectorAPlayable");
         });
-    CHECK(centeredFlag != unsolved.tiles.end());
-    if (centeredFlag != unsolved.tiles.end() && centeredFlag->modelTransform) {
+    CHECK(centeredFlag != playable.tiles.end());
+    if (centeredFlag != playable.tiles.end() && centeredFlag->modelTransform) {
         CHECK(near(centeredFlag->modelTransform->translation.x, 1.5f));
         CHECK(near(centeredFlag->modelTransform->translation.y, 0.5f));
     }
-
-    const RenderFrameData solved = build(true);
-    CHECK(std::ranges::count_if(
-        solved.tiles,
-        [](const RenderFrameData::Tile& tile) {
-            return tile.model == testManifest().modelIdByName(
-                "ScreenSelectorSolved");
-        }) == 1);
 }
 
 void testDecorativeTileRendersWithoutChangingCameraExtent()

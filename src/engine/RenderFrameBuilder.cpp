@@ -923,15 +923,20 @@ void appendSelectors(
     RenderFrameData& frame,
     const std::vector<Level::ScreenSelector>& selectors,
     const AssetManifest& manifest,
-    const std::function<bool(LevelLocation)>& solved)
+    const std::function<ScreenSelectorViewState(LevelLocation)>& stateFor)
 {
     constexpr float flagScale = 0.65f;
     for (const Level::ScreenSelector& selector : selectors) {
-        const bool completed = selector.target && solved && solved(*selector.target);
+        ScreenSelectorViewState state;
+        if (selector.target) {
+            state = stateFor
+                ? stateFor(*selector.target)
+                : ScreenSelectorViewState {
+                    .status = ScreenSelectorStatus::Playable,
+                };
+        }
         const RenderModel model = manifest.modelIdByName(
-            completed
-                ? selectorRender::solvedModelName
-                : selectorRender::unsolvedModelName);
+            selectorRender::modelName(state));
         const Vec3 translation {
             static_cast<float>(selector.cell.x) + 0.5f,
             static_cast<float>(selector.cell.y) + 0.5f,
@@ -1035,7 +1040,7 @@ void appendGameplayWorld(
         frame,
         input.level.selectors(),
         input.manifest,
-        input.selectorSolved);
+        input.selectorState);
 
     auto levelTileAt = [&](GridPosition3 position) {
         if (!input.level.inBounds(position)) {
@@ -1950,7 +1955,7 @@ private:
             frame,
             input_.editor.selectors(),
             input_.manifest,
-            input_.selectorSolved);
+            input_.selectorState);
     }
 
     void appendEditorPreviews(RenderFrameData& frame) const

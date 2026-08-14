@@ -661,6 +661,27 @@ void testNormalizationAndMigration()
 
 void testScreenProgressOverworldCheckpointAndFormat17Migration()
 {
+    sokoban::PlayerProfile progression;
+    check(progression.selectorStatus({ .level = 0, .screen = 0 }) ==
+            sokoban::ScreenSelectorStatus::Playable,
+        "screen zero is immediately playable");
+    check(progression.selectorStatus({ .level = 0, .screen = 1 }) ==
+            sokoban::ScreenSelectorStatus::Unavailable,
+        "later screen waits for its predecessor");
+    check(progression.selectorStatus({ .level = 7, .screen = 0 }) ==
+            sokoban::ScreenSelectorStatus::Playable,
+        "a different level's first screen is independently playable");
+    progression.recordScreenCompletion({ .level = 0, .screen = 0 }, 3, 2.0);
+    check(progression.selectorStatus({ .level = 0, .screen = 0 }) ==
+            sokoban::ScreenSelectorStatus::Solved,
+        "completed screen is solved");
+    check(progression.selectorStatus({ .level = 0, .screen = 1 }) ==
+            sokoban::ScreenSelectorStatus::Playable,
+        "solving a screen unlocks only its successor");
+    check(progression.selectorStatus({ .level = 0, .screen = 2 }) ==
+            sokoban::ScreenSelectorStatus::Unavailable,
+        "unlocking does not skip a screen");
+
     sokoban::PlayerProfile profile;
     profile.recordScreenCompletion({ .level = 2, .screen = 3 }, 18, 12.5);
     profile.recordScreenCompletion({ .level = 2, .screen = 3 }, 14, 13.0);

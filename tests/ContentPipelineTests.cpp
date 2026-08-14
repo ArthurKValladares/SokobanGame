@@ -81,13 +81,33 @@ std::string manifest(std::string_view texturePath = "textures/hero.png")
       "role": "player"
     },
     {
-      "name": "ScreenSelectorUnsolved",
-      "path": "models/flag-blue.gltf",
+      "name": "ScreenSelectorAPlayable",
+      "path": "models/flag-a-blue.gltf",
       "material": { "mode": "texture", "texture": "BoardGameBits" }
     },
     {
-      "name": "ScreenSelectorSolved",
-      "path": "models/flag-yellow.gltf",
+      "name": "ScreenSelectorASolved",
+      "path": "models/flag-a-green.gltf",
+      "material": { "mode": "texture", "texture": "BoardGameBits" }
+    },
+    {
+      "name": "ScreenSelectorAUnavailable",
+      "path": "models/flag-a-red.gltf",
+      "material": { "mode": "texture", "texture": "BoardGameBits" }
+    },
+    {
+      "name": "ScreenSelectorBPlayable",
+      "path": "models/flag-b-blue.gltf",
+      "material": { "mode": "texture", "texture": "BoardGameBits" }
+    },
+    {
+      "name": "ScreenSelectorBSolved",
+      "path": "models/flag-b-green.gltf",
+      "material": { "mode": "texture", "texture": "BoardGameBits" }
+    },
+    {
+      "name": "ScreenSelectorBUnavailable",
+      "path": "models/flag-b-red.gltf",
       "material": { "mode": "texture", "texture": "BoardGameBits" }
     }
   ],
@@ -153,14 +173,20 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
     writeFile(assets / "models/hero.bin");
     writeFile(assets / "models/sword.gltf", R"({"buffers":[{"uri":"sword.bin"}]})");
     writeFile(assets / "models/sword.bin");
-    writeFile(
-        assets / "models/flag-blue.gltf",
-        R"({"buffers":[{"uri":"flag-blue.bin"}]})");
-    writeFile(assets / "models/flag-blue.bin");
-    writeFile(
-        assets / "models/flag-yellow.gltf",
-        R"({"buffers":[{"uri":"flag-yellow.bin"}]})");
-    writeFile(assets / "models/flag-yellow.bin");
+    for (std::string_view flag : {
+            "flag-a-blue",
+            "flag-a-green",
+            "flag-a-red",
+            "flag-b-blue",
+            "flag-b-green",
+            "flag-b-red",
+        }) {
+        writeFile(
+            assets / "models" / (std::string(flag) + ".gltf"),
+            "{\"buffers\":[{\"uri\":\"" + std::string(flag) +
+                ".bin\"}]}");
+        writeFile(assets / "models" / (std::string(flag) + ".bin"));
+    }
     writeFile(assets / "models/LICENSE.txt", "model license");
     const std::string animationGltf = R"json({
       "asset":{"version":"2.0"},
@@ -413,6 +439,14 @@ void testValidationFailures()
         "@selector {\"id\":1,\"cell\":[1,0,1],"
         "\"target\":{\"level\":0,\"screen\":0}}\n\n"
         "@layer 0\n...\n\n@layer 1\nC  \n");
+
+    writeFile(
+        roots.levels / "level0/screen1.scr",
+        "@layer 0\n...\n\n@layer 1\n.CE\n");
+    checkThrows(
+        [&] { (void)sokoban::collectContentInventory(roots); },
+        "overworld missing selector for a playable screen");
+    std::filesystem::remove(roots.levels / "level0/screen1.scr");
 
     std::filesystem::create_directories(roots.levels / "level2");
     writeFile(roots.levels / "level2/screen0.scr", "@layer 0\n...\n\n@layer 1\n.CE\n");

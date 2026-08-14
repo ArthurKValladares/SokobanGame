@@ -55,8 +55,12 @@ const AssetManifest& testManifest()
         { "name": "Glass", "path": "glass.gltf" },
         { "name": "Bricks", "path": "bricks.gltf" },
         { "name": "Conveyor", "path": "conveyor.gltf" },
-        { "name": "ScreenSelectorUnsolved", "path": "flag-blue.gltf" },
-        { "name": "ScreenSelectorSolved", "path": "flag-yellow.gltf" },
+        { "name": "ScreenSelectorAPlayable", "path": "flag-a-blue.gltf" },
+        { "name": "ScreenSelectorASolved", "path": "flag-a-green.gltf" },
+        { "name": "ScreenSelectorAUnavailable", "path": "flag-a-red.gltf" },
+        { "name": "ScreenSelectorBPlayable", "path": "flag-b-blue.gltf" },
+        { "name": "ScreenSelectorBSolved", "path": "flag-b-green.gltf" },
+        { "name": "ScreenSelectorBUnavailable", "path": "flag-b-red.gltf" },
         { "name": "Hero", "path": "hero.glb", "geometry": "skinned", "role": "player" },
         { "name": "Enemy", "path": "enemy.glb", "geometry": "skinned", "role": "enemy" }
       ],
@@ -84,9 +88,9 @@ const AssetManifest& testManifest()
     return manifest;
 }
 
-void testSelectorRequirementsIncludeBothFlagStates()
+void testSelectorRequirementsIncludeEveryFlagState()
 {
-    TEST("selectorRequirementsIncludeBothFlagStates");
+    TEST("selectorRequirementsIncludeEveryFlagState");
     const Level level = Level::loadFromLayers(
         { { ".." }, { "C " } },
         "selector requirements",
@@ -101,10 +105,16 @@ void testSelectorRequirementsIncludeBothFlagStates()
     const RenderAssetRequirements requirements =
         renderAssetRequirementsForLevel(level, manifest);
 
-    CHECK(requirements.contains(
-        manifest.modelIdByName("ScreenSelectorUnsolved")));
-    CHECK(requirements.contains(
-        manifest.modelIdByName("ScreenSelectorSolved")));
+    for (std::string_view name : {
+            "ScreenSelectorAPlayable",
+            "ScreenSelectorASolved",
+            "ScreenSelectorAUnavailable",
+            "ScreenSelectorBPlayable",
+            "ScreenSelectorBSolved",
+            "ScreenSelectorBUnavailable",
+        }) {
+        CHECK(requirements.contains(manifest.modelIdByName(name)));
+    }
 }
 
 void testLevelRequirementsIncludeDynamicAndStaticAssets()
@@ -352,7 +362,7 @@ void testPerScreenSplatMapsAreSelectedAndFallBack()
 int main()
 {
     testLevelRequirementsIncludeDynamicAndStaticAssets();
-    testSelectorRequirementsIncludeBothFlagStates();
+    testSelectorRequirementsIncludeEveryFlagState();
     testFrameRequirementsOnlyContainReferencedAssets();
     testMergeDeduplicatesRequirements();
     testCubeAndNoneAreNeverRequirements();

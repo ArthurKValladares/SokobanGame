@@ -373,15 +373,13 @@ private:
             }
         }
         try {
-            (void)manifest_->modelIdByName(
-                selectorRender::unsolvedModelName);
-            (void)manifest_->modelIdByName(
-                selectorRender::solvedModelName);
+            for (std::string_view modelName : selectorRender::modelNames) {
+                (void)manifest_->modelIdByName(modelName);
+            }
         } catch (const std::exception&) {
             throw std::runtime_error(
-                "overworld selectors require manifest models '" +
-                std::string(selectorRender::unsolvedModelName) + "' and '" +
-                std::string(selectorRender::solvedModelName) + "'");
+                "overworld selectors require all flag A/B playable, solved, "
+                "and unavailable manifest models");
         }
         addFile(
             roots_.levels,
@@ -463,6 +461,7 @@ private:
             }
         }
 
+        std::set<std::pair<int, int>> selectorTargets;
         for (const Level::ScreenSelector& selector : overworld.selectors()) {
             if (!selector.target) {
                 throw std::runtime_error(
@@ -478,6 +477,20 @@ private:
                     std::to_string(selector.target->level) + " screen " +
                     std::to_string(selector.target->screen) + ": " +
                     overworldPath.string());
+            }
+            selectorTargets.emplace(
+                selector.target->level,
+                selector.target->screen);
+        }
+        for (const auto& [level, levelScreens] : screens) {
+            for (int screen : levelScreens) {
+                if (!selectorTargets.contains({ level, screen })) {
+                    throw std::runtime_error(
+                        "overworld has no selector for level " +
+                        std::to_string(level) + " screen " +
+                        std::to_string(screen) + ": " +
+                        overworldPath.string());
+                }
             }
         }
     }
