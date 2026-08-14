@@ -59,6 +59,7 @@ private:
         const Callbacks& callbacks);
     void drawSelectorPalette(LevelEditor& editor);
     void drawFileBrowser(LevelEditor& editor);
+    void drawOverworldTab(LevelEditor& editor);
     void drawActiveLevelsTab(LevelEditor& editor);
     void drawDeletedLevelsTab(LevelEditor& editor);
     void drawRenamePopup(LevelEditor& editor);

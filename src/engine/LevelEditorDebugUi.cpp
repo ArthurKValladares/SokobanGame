@@ -598,7 +598,7 @@ void LevelEditorDebugUi::drawSelectorPalette(LevelEditor& editor)
     if (!editor.editingOverworld()) {
         ImGui::TextWrapped(
             "Screen selectors can only be authored in overworld.scr. "
-            "Open the pinned Overworld document below.");
+            "Open it from the Overworld tab below.");
         return;
     }
 
@@ -732,18 +732,6 @@ void LevelEditorDebugUi::drawSelectorPalette(LevelEditor& editor)
 void LevelEditorDebugUi::drawFileBrowser(LevelEditor& editor)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    const std::filesystem::path overworldPath =
-        editor.browserRoot() / "overworld.scr";
-    if (ImGui::Button("Open Overworld")) {
-        editor.selectDocument(overworldPath);
-        if (std::filesystem::is_regular_file(overworldPath)) {
-            (void)editor.loadDocument(overworldPath);
-            syncDocumentPath(editor);
-        }
-    }
-    ImGui::SameLine();
-    ImGui::TextDisabled("%s", overworldPath.string().c_str());
-
     ImGui::InputText("Root", &browserRootBuffer_);
     ImGui::SameLine();
     if (ImGui::Button("Set Root") && editor.setBrowserRoot(browserRootBuffer_)) {
@@ -753,6 +741,10 @@ void LevelEditorDebugUi::drawFileBrowser(LevelEditor& editor)
     if (ImGui::BeginTabBar("LevelBrowserTabs")) {
         if (ImGui::BeginTabItem("Levels")) {
             drawActiveLevelsTab(editor);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Overworld")) {
+            drawOverworldTab(editor);
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Deleted")) {
@@ -765,6 +757,50 @@ void LevelEditorDebugUi::drawFileBrowser(LevelEditor& editor)
     drawDeleteLevelConfirmation(editor);
     drawPermanentDeleteConfirmation(editor);
     drawRenamePopup(editor);
+#else
+    (void)editor;
+#endif
+}
+
+void LevelEditorDebugUi::drawOverworldTab(LevelEditor& editor)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    const std::filesystem::path overworldPath =
+        editor.browserRoot() / "overworld.scr";
+    const bool exists = std::filesystem::is_regular_file(overworldPath);
+    const bool loaded = editor.loadedDocumentPath() == overworldPath;
+
+    if (ImGui::BeginChild("OverworldFile", ImVec2(0.0f, 210.0f), true)) {
+        ImGui::TextUnformatted("overworld.scr");
+        ImGui::TextWrapped(
+            "Edit the overworld with the same tile, decoration, layer, and "
+            "play-draft tools as a normal screen. Screen Selectors are only "
+            "available in this document; End tiles are not allowed.");
+        ImGui::TextDisabled("%s", overworldPath.string().c_str());
+        ImGui::Spacing();
+
+        if (exists) {
+            if (!loaded && ImGui::Button("Open Overworld")) {
+                editor.selectDocument(overworldPath);
+                if (editor.loadDocument(overworldPath)) {
+                    syncDocumentPath(editor);
+                }
+            }
+            if (loaded) {
+                ImGui::TextUnformatted("Currently editing");
+            }
+        } else {
+            ImGui::TextDisabled("No overworld exists in this level project.");
+            if (ImGui::Button("Create Overworld")) {
+                editor.newDocument(requestedWidth_, requestedHeight_);
+                editor.selectDocument(overworldPath);
+                if (editor.saveDocument(overworldPath)) {
+                    syncDocumentPath(editor);
+                }
+            }
+        }
+    }
+    ImGui::EndChild();
 #else
     (void)editor;
 #endif

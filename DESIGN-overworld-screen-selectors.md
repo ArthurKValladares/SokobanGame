@@ -314,9 +314,9 @@ The editor's Paint Ground/Create Splat Map workflow and loaded-document path res
 
 ### 8.1 Opening the overworld
 
-Add a pinned **Overworld** entry above the existing Active Levels/Deleted Levels browser tabs. It loads `sourceLevelRoot/overworld.scr` and mirrors saves to `runtimeLevelRoot/overworld.scr`.
+Add an **Overworld** tab alongside the existing **Levels** and **Deleted** tabs in the Level Editor browser. It loads `sourceLevelRoot/overworld.scr` as a normal editable document and mirrors saves to `runtimeLevelRoot/overworld.scr`.
 
-Creating a brand-new generic document does not implicitly replace the overworld. If the overworld file is missing, the pinned entry offers **Create Overworld** using the normal default screen scaffold.
+Creating a brand-new generic document does not implicitly replace the overworld. If the overworld file is missing, the Overworld tab offers **Create Overworld** using the normal default screen scaffold.
 
 ### 8.2 Screen Selectors tool
 

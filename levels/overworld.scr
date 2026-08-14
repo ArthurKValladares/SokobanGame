@@ -1,15 +1,15 @@
-@selector {"id":1,"cell":[1,1,1],"target":{"level":0,"screen":0}}
-@selector {"id":2,"cell":[3,1,1],"target":{"level":0,"screen":1}}
-@selector {"id":3,"cell":[5,1,1],"target":{"level":1,"screen":0}}
-@selector {"id":4,"cell":[7,1,1],"target":{"level":1,"screen":1}}
-@selector {"id":5,"cell":[1,3,1],"target":{"level":1,"screen":2}}
-@selector {"id":6,"cell":[3,3,1],"target":{"level":2,"screen":0}}
-@selector {"id":7,"cell":[5,3,1],"target":{"level":2,"screen":1}}
-@selector {"id":8,"cell":[7,3,1],"target":{"level":2,"screen":2}}
-@selector {"id":9,"cell":[1,5,1],"target":{"level":3,"screen":0}}
-@selector {"id":10,"cell":[3,5,1],"target":{"level":3,"screen":1}}
-@selector {"id":11,"cell":[5,5,1],"target":{"level":3,"screen":2}}
-@selector {"id":12,"cell":[7,5,1],"target":{"level":3,"screen":3}}
+@selector {"cell":[1,0,1],"id":1,"target":{"level":0,"screen":0}}
+@selector {"cell":[2,0,1],"id":2,"target":{"level":0,"screen":1}}
+@selector {"cell":[1,1,1],"id":3,"target":{"level":1,"screen":0}}
+@selector {"cell":[2,1,1],"id":4,"target":{"level":1,"screen":1}}
+@selector {"cell":[3,1,1],"id":5,"target":{"level":1,"screen":2}}
+@selector {"cell":[1,2,1],"id":6,"target":{"level":2,"screen":0}}
+@selector {"cell":[2,2,1],"id":7,"target":{"level":2,"screen":1}}
+@selector {"cell":[3,2,1],"id":8,"target":{"level":2,"screen":2}}
+@selector {"cell":[1,3,1],"id":9,"target":{"level":3,"screen":0}}
+@selector {"cell":[2,3,1],"id":10,"target":{"level":3,"screen":1}}
+@selector {"cell":[3,3,1],"id":11,"target":{"level":3,"screen":2}}
+@selector {"cell":[4,3,1],"id":12,"target":{"level":3,"screen":3}}
 
 @layer 0
 .........
@@ -24,7 +24,7 @@
          
          
          
-    C    
+C        
          
          
          
