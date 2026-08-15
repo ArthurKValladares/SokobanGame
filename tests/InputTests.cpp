@@ -56,6 +56,12 @@ void testDefaultKeyboardBindings()
     CHECK(input.keyBoundToAction(SDL_SCANCODE_Z, sokoban::InputAction::Undo));
     CHECK(input.keyBoundToAction(
         SDL_SCANCODE_T, sokoban::InputAction::ShowTopDownView));
+    CHECK(input.keyBoundToAction(
+        SDL_SCANCODE_R, sokoban::InputAction::EditorReplaceTile));
+    CHECK(input.keyBoundToAction(
+        SDL_SCANCODE_D, sokoban::InputAction::EditorDeleteTile));
+    CHECK(input.keyBoundToAction(
+        SDL_SCANCODE_M, sokoban::InputAction::EditorMoveTile));
     CHECK(!input.keyBoundToAction(SDL_SCANCODE_Z, sokoban::InputAction::Mirror));
     CHECK(!input.keyBoundToAction(SDL_SCANCODE_F, sokoban::InputAction::Undo));
 
@@ -109,6 +115,41 @@ void testKeyboardRemapping()
     CHECK(!input.actionPressed(sokoban::InputAction::Undo));
     input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_BACKSPACE));
     CHECK(input.actionPressed(sokoban::InputAction::Undo));
+}
+
+void testEditorBindingsMayReuseGameplayKeys()
+{
+    sokoban::InputBindings bindings = sokoban::defaultInputBindings();
+    sokoban::assignBinding(
+        bindings,
+        sokoban::InputAction::EditorReplaceTile,
+        sokoban::KeyboardBinding { "P" });
+    CHECK(std::ranges::find(
+        bindings.forAction(sokoban::InputAction::EditorReplaceTile),
+        sokoban::InputBinding { sokoban::KeyboardBinding { "P" } }) !=
+        bindings.forAction(sokoban::InputAction::EditorReplaceTile).end());
+
+    sokoban::assignBinding(
+        bindings,
+        sokoban::InputAction::Restart,
+        sokoban::KeyboardBinding { "P" });
+    CHECK(std::ranges::find(
+        bindings.forAction(sokoban::InputAction::EditorReplaceTile),
+        sokoban::InputBinding { sokoban::KeyboardBinding { "P" } }) !=
+        bindings.forAction(sokoban::InputAction::EditorReplaceTile).end());
+    CHECK(std::ranges::find(
+        bindings.forAction(sokoban::InputAction::Restart),
+        sokoban::InputBinding { sokoban::KeyboardBinding { "P" } }) !=
+        bindings.forAction(sokoban::InputAction::Restart).end());
+
+    sokoban::assignBinding(
+        bindings,
+        sokoban::InputAction::EditorMoveTile,
+        sokoban::KeyboardBinding { "P" });
+    CHECK(sokoban::actionBindingsDisplay(
+        bindings, sokoban::InputAction::EditorMoveTile) == "P");
+    CHECK(sokoban::actionBindingsDisplay(
+        bindings, sokoban::InputAction::EditorReplaceTile) == "M");
 }
 
 void testGamepadButtonsAndRemapping()
@@ -222,6 +263,7 @@ int main()
     testDefaultKeyboardBindings();
     testMenuConfirmBindings();
     testKeyboardRemapping();
+    testEditorBindingsMayReuseGameplayKeys();
     testGamepadButtonsAndRemapping();
     testStickThresholdAndPressEdges();
     testInvalidBindingIsDiagnosed();

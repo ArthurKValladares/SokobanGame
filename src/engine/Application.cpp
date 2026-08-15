@@ -134,7 +134,11 @@ Application::Application()
         tools_->assetManifestDebugUi.draw(tools_->assetManifestEditor);
     });
     DebugUi::addTab("Level Editor", [this] {
-        tools_->levelEditorDebugUi.draw(tools_->levelEditor, tools_->splatPainter, {
+        tools_->levelEditorDebugUi.draw(
+            tools_->levelEditor,
+            tools_->splatPainter,
+            settingsCoordinator_.userSettings().input,
+            {
             .playDraft = [this](Level level) {
                 // Playing a draft leaves the document view; a half-finished
                 // paint session would otherwise keep painting on the level
@@ -194,7 +198,7 @@ Application::Application()
                     assetManifest_,
                     renderer_);
             },
-        });
+            });
     });
     DebugUi::addTab("Animation", [this] {
         if (tools_->animationCatalogDebugUi.draw(
@@ -1049,6 +1053,13 @@ RenderFrameData Application::buildRenderFrame(
     if (tools_->levelEditor.editingDocument()) {
         const std::vector<LevelEditor::LevelDirectory> editorLevels =
             tools_->levelEditor.collectLevelDirectories();
+        const std::optional<LevelEditor::MoveObject>& pendingMove =
+            tools_->levelEditor.pendingMove();
+        const std::optional<TileType> movedTile =
+            pendingMove &&
+                pendingMove->kind == LevelEditor::MoveObject::Kind::Tile
+            ? std::optional<TileType> { pendingMove->tile }
+            : std::nullopt;
         renderFrameArena_.reset();
         return RenderFrameBuilder::buildEditor({
             .manifest = assetManifest_,
@@ -1057,8 +1068,14 @@ RenderFrameData Application::buildRenderFrame(
             .animations = &animationCatalog_,
             .hoverCell = tools_->hoverCell,
             .hoverDecoration = tools_->hoverDecoration,
-            .deleting = editorInput.deleting &&
-                tools_->levelEditor.tool() == LevelEditor::Tool::Tiles,
+            .deleting =
+                (editorInput.deleting &&
+                    tools_->levelEditor.tool() == LevelEditor::Tool::Tiles) ||
+                (editorInput.moving && !pendingMove),
+            .selectingMoveSource = editorInput.moving && !pendingMove,
+            .editorPreviewTile = editorInput.moving
+                ? movedTile
+                : std::nullopt,
             .worldAnimationTimeSeconds =
                 presentation_.worldAnimationTimeSeconds(),
             .conveyorBeltScrollOffset = beltScrollOffset,

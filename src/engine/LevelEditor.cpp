@@ -141,6 +141,7 @@ void LevelEditor::initialize(
     document_.playingDraft = false;
     document_.editingDocument = false;
     editHistory_.clear();
+    pendingMove_.reset();
 }
 
 void LevelEditor::setPlayingDraft(bool playingDraft)
@@ -148,6 +149,7 @@ void LevelEditor::setPlayingDraft(bool playingDraft)
     document_.playingDraft = playingDraft;
     if (playingDraft) {
         document_.editingDocument = false;
+        pendingMove_.reset();
     }
 }
 
@@ -161,6 +163,8 @@ void LevelEditor::setEditingDocument(bool editingDocument)
     document_.editingDocument = editingDocument;
     if (editingDocument) {
         document_.playingDraft = false;
+    } else {
+        pendingMove_.reset();
     }
 }
 
@@ -380,6 +384,173 @@ void LevelEditor::eraseCell(GridPosition3 position)
     setCell(position, TileType::Air);
 }
 
+const std::optional<LevelEditor::MoveObject>& LevelEditor::pendingMove() const
+{
+    return pendingMove_;
+}
+
+bool LevelEditor::beginMove(GridPosition3 source)
+{
+    const auto selector = std::ranges::find(
+        document_.selectors, source, &Level::ScreenSelector::cell);
+    if (selector != document_.selectors.end()) {
+        document_.selectedSelector = static_cast<std::size_t>(
+            std::distance(document_.selectors.begin(), selector));
+        pendingMove_ = MoveObject {
+            .kind = MoveObject::Kind::ScreenSelector,
+            .source = source,
+            .selectorId = selector->id,
+        };
+        document_.status =
+            "Object selected. Hold Move Tile and click its destination.";
+        return true;
+    }
+
+    const auto tileAt = [&](GridPosition3 cell) {
+        if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
+            cell.x >= static_cast<int>(documentWidth()) ||
+            cell.y >= static_cast<int>(documentHeight()) ||
+            cell.z >= static_cast<int>(documentDepth())) {
+            return TileType::Air;
+        }
+        return charToTileType(
+            document_.layers[static_cast<std::size_t>(cell.z)]
+                [static_cast<std::size_t>(cell.y)]
+                [static_cast<std::size_t>(cell.x)]).value_or(TileType::Air);
+    };
+
+    const TileType tile = tileAt(source);
+    if (tile == TileType::Air) {
+        pendingMove_.reset();
+        document_.status = "Select an occupied object to move.";
+        return false;
+    }
+    pendingMove_ = MoveObject {
+        .kind = MoveObject::Kind::Tile,
+        .source = source,
+        .tile = tile,
+    };
+    document_.status =
+        "Object selected. Hold Move Tile and click its destination.";
+    return true;
+}
+
+void LevelEditor::cancelMove()
+{
+    if (pendingMove_) {
+        document_.status = "Cancelled object move.";
+    }
+    pendingMove_.reset();
+}
+
+bool LevelEditor::moveObject(GridPosition3 destination)
+{
+    const std::optional<MoveObject> move = pendingMove_;
+    pendingMove_.reset();
+    if (!move) {
+        document_.status = "Select an occupied object to move first.";
+        return false;
+    }
+    if (move->source == destination) {
+        document_.status = "Move destination must differ from the source.";
+        return false;
+    }
+
+    const auto tileAt = [&](GridPosition3 cell) {
+        if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
+            cell.x >= static_cast<int>(documentWidth()) ||
+            cell.y >= static_cast<int>(documentHeight()) ||
+            cell.z >= static_cast<int>(documentDepth())) {
+            return TileType::Air;
+        }
+        return charToTileType(
+            document_.layers[static_cast<std::size_t>(cell.z)]
+                [static_cast<std::size_t>(cell.y)]
+                [static_cast<std::size_t>(cell.x)]).value_or(TileType::Air);
+    };
+    const auto selectorAt = [&](GridPosition3 cell) {
+        return std::ranges::find(
+            document_.selectors, cell, &Level::ScreenSelector::cell);
+    };
+
+    if (move->kind == MoveObject::Kind::ScreenSelector) {
+        const auto selector = std::ranges::find(
+            document_.selectors,
+            move->selectorId,
+            &Level::ScreenSelector::id);
+        if (selector == document_.selectors.end()) {
+            document_.status = "The selected object no longer exists.";
+            return false;
+        }
+        if (destination.x < 0 || destination.y < 0 || destination.z < 0 ||
+            destination.x >= static_cast<int>(documentWidth()) ||
+            destination.y >= static_cast<int>(documentHeight()) ||
+            destination.z >= static_cast<int>(documentDepth())) {
+            document_.status = "The object must stay on the level board.";
+            return false;
+        }
+        if (tileAt(destination) != TileType::Air ||
+            selectorAt(destination) != document_.selectors.end()) {
+            document_.status = "Move destination must be empty.";
+            return false;
+        }
+
+        const DocumentSnapshot before = captureDocumentSnapshot();
+        selector->cell = destination;
+        document_.selectedSelector = static_cast<std::size_t>(
+            std::distance(document_.selectors.begin(), selector));
+        document_.dirty = true;
+        document_.status = "Moved object.";
+        recordDocumentChange(before);
+        return true;
+    }
+
+    if (move->tile == TileType::Air) {
+        document_.status = "The selected object no longer exists.";
+        return false;
+    }
+    if (tileAt(destination) != TileType::Air ||
+        selectorAt(destination) != document_.selectors.end()) {
+        document_.status = "Move destination must be empty.";
+        return false;
+    }
+
+    const DocumentSnapshot before = captureDocumentSnapshot();
+    const std::size_t historySize = editHistory_.size();
+    setCell(move->source, TileType::Air);
+    const std::size_t afterEraseHistorySize = editHistory_.size();
+    setCell(destination, move->tile);
+    if (editHistory_.size() == afterEraseHistorySize) {
+        applyDocumentSnapshot(before);
+        editHistory_.resize(historySize);
+        document_.status = "Tile cannot be moved to that destination.";
+        return false;
+    }
+
+    editHistory_.resize(historySize);
+    document_.status = "Moved object.";
+    recordDocumentChange(before);
+    return true;
+}
+
+GridPosition3 LevelEditor::resolveMoveTarget(GridPosition3 pickedCell) const
+{
+    if (pendingMove_) {
+        return resolveEditTarget(pickedCell, false, false);
+    }
+    if (document_.layerLocked) {
+        pickedCell.z = document_.activeLayer;
+        return pickedCell;
+    }
+    if (std::ranges::find(
+            document_.selectors,
+            pickedCell,
+            &Level::ScreenSelector::cell) != document_.selectors.end()) {
+        return pickedCell;
+    }
+    return resolveEditTarget(pickedCell, true, false);
+}
+
 GridPosition3 LevelEditor::resolveEditTarget(
     GridPosition3 pickedCell,
     bool deleting,
@@ -432,6 +603,49 @@ GridPosition3 LevelEditor::resolveEditTarget(
 
     const std::optional<int> occupied = topmostOccupiedLayer();
     pickedCell.z = occupied ? *occupied + 1 : 0;
+    return pickedCell;
+}
+
+GridPosition3 LevelEditor::resolveSelectorTarget(
+    GridPosition3 pickedCell) const
+{
+    if (document_.layerLocked) {
+        pickedCell.z = document_.activeLayer;
+        return pickedCell;
+    }
+
+    const auto selector = std::ranges::find_if(
+        document_.selectors,
+        [&](const Level::ScreenSelector& candidate) {
+            return candidate.cell.x == pickedCell.x &&
+                candidate.cell.y == pickedCell.y;
+        });
+    if (selector != document_.selectors.end()) {
+        return selector->cell;
+    }
+
+    for (int z = static_cast<int>(document_.layers.size()) - 1;
+         z >= 0;
+         --z) {
+        if (pickedCell.x < 0 || pickedCell.y < 0 ||
+            pickedCell.y >= static_cast<int>(
+                document_.layers[static_cast<std::size_t>(z)].size()) ||
+            pickedCell.x >= static_cast<int>(
+                document_.layers[static_cast<std::size_t>(z)]
+                    [static_cast<std::size_t>(pickedCell.y)].size())) {
+            continue;
+        }
+        const TileType tile = charToTileType(
+            document_.layers[static_cast<std::size_t>(z)]
+                [static_cast<std::size_t>(pickedCell.y)]
+                [static_cast<std::size_t>(pickedCell.x)])
+                                  .value_or(TileType::Air);
+        if (tile != TileType::Air) {
+            pickedCell.z = z + 1;
+            return pickedCell;
+        }
+    }
+    pickedCell.z = 0;
     return pickedCell;
 }
 
@@ -767,6 +981,7 @@ bool LevelEditor::deleteSelectedDecoration()
 
 bool LevelEditor::tryUndoEdit()
 {
+    pendingMove_.reset();
     if (editHistory_.empty()) {
         return false;
     }
@@ -907,6 +1122,7 @@ const std::string& LevelEditor::status() const
 void LevelEditor::newDocument(int width, int height, bool recordHistory)
 {
     const DocumentSnapshot before = captureDocumentSnapshot();
+    pendingMove_.reset();
     width = std::max(width, 1);
     height = std::max(height, 1);
 
@@ -1071,6 +1287,7 @@ void LevelEditor::deleteActiveLayer()
 bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHistory)
 {
     const DocumentSnapshot before = captureDocumentSnapshot();
+    pendingMove_.reset();
     std::ifstream file(path);
     if (!file) {
         document_.status = "Failed to load: " + path.string();
@@ -1564,6 +1781,7 @@ void LevelEditor::recordDocumentChange(const DocumentSnapshot& before)
 
 void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
 {
+    pendingMove_.reset();
     document_.layers = snapshot.layers;
     document_.waterLayer = snapshot.waterLayer;
     document_.decorations = snapshot.decorations;

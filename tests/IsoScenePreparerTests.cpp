@@ -293,6 +293,66 @@ void testPickingConsumesPreparedFaces()
     CHECK((picked == sokoban::GridPosition3 { 3, 0, 0 }));
 }
 
+void testModelBackedPickFacesUseLogicalBounds()
+{
+    using namespace sokoban;
+
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 3;
+    frame.levelHeight = 3;
+    frame.levelDepth = 2;
+    frame.tiles.push_back(cube(1, 1));
+
+    RenderFrameData::Tile flag = cube(1, 1);
+    flag.cell = { 1, 1, 1 };
+    flag.position = { 1.175f, 1.175f };
+    flag.size = { 0.65f, 0.65f };
+    flag.baseElevation = 1.0f;
+    flag.height = 0.975f;
+    flag.model = RenderModel { 1 };
+    flag.modelTransform = RenderFrameData::ModelTransform {
+        .translation = { 1.5f, 1.5f, 1.0f },
+        .scale = { 0.65f, 0.65f, 0.65f },
+        .pivot = { 0.0f, 0.0f, 0.0f },
+    };
+    frame.tiles.push_back(flag);
+
+    constexpr Vec2 extent { 1600.0f, 900.0f };
+    const PreparedRenderScene scene = prepareScene(frame, extent);
+    const auto top = std::ranges::find_if(
+        scene.pickFaceIndices,
+        [&](std::size_t index) {
+            const PreparedIsoFace& face = scene.isoFaces[index];
+            return face.cell == flag.cell && face.normal.z > 0.5f;
+        });
+    CHECK(top != scene.pickFaceIndices.end());
+    if (top == scene.pickFaceIndices.end()) {
+        return;
+    }
+
+    const PreparedIsoFace& face = scene.isoFaces[*top];
+    CHECK(near(face.worldOrigin.x, flag.position.x));
+    CHECK(near(face.worldOrigin.y, flag.position.y));
+    CHECK(near(face.worldHeight, flag.baseElevation + flag.height));
+    CHECK(near(face.gridSize.x, flag.size.x));
+    CHECK(near(face.gridSize.y, flag.size.y));
+
+    Vec2 center {};
+    for (Vec3 vertex : face.vertices) {
+        center.x += (vertex.x + 1.0f) * 0.5f * extent.x;
+        center.y += (1.0f - vertex.y) * 0.5f * extent.y;
+    }
+    center.x *= 0.25f;
+    center.y *= 0.25f;
+    CHECK((IsoScenePreparer {}.pickGridCell(
+        scene,
+        center,
+        extent,
+        frame.levelWidth,
+        frame.levelHeight) == flag.cell));
+}
+
 void testPickingHonorsConfiguredGridBorder()
 {
     sokoban::RenderFrameData frame;
@@ -885,6 +945,7 @@ int main()
     testPreparationCategorizesOneSharedFacePool();
     testPassListsAreDepthSorted();
     testPickingConsumesPreparedFaces();
+    testModelBackedPickFacesUseLogicalBounds();
     testPickingHonorsConfiguredGridBorder();
     testVirtualPickPlaneMatchesPreviewTopUnderPerspective();
     testTopDownPreparationSkipsIsoWork();

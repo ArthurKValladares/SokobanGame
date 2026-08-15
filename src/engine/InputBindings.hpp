@@ -20,6 +20,9 @@ enum class InputAction {
     ShowTopDownView,
     MenuBack,
     MenuConfirm,
+    EditorReplaceTile,
+    EditorDeleteTile,
+    EditorMoveTile,
     Count,
 };
 
@@ -82,9 +85,12 @@ enum class BindingDeviceClass {
     const InputBindings& bindings,
     InputAction action);
 // Rebinds `action`: bindings identical to `candidate` are removed from every
-// action (no duplicates), and the action's bindings of the candidate's exact
-// kind (keyboard / pad button / pad axis) are replaced by the candidate, so
-// rebinding a d-pad button keeps an existing stick binding and vice versa.
+// action active in the same input context, and the action's bindings of the
+// candidate's exact kind (keyboard / pad button / pad axis) are replaced by
+// the candidate. Editor-only modifiers may intentionally reuse gameplay keys;
+// an action that would otherwise become empty receives the target's displaced
+// same-kind binding. Rebinding a d-pad button still keeps an existing stick
+// binding and vice versa.
 void assignBinding(
     InputBindings& bindings,
     InputAction action,

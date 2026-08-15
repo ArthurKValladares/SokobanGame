@@ -18,6 +18,7 @@ enum class OptionsMenuPage {
     Graphics,
     Audio,
     Controls,
+    EditorControls,
     QuitConfirmation,
 };
 
@@ -45,6 +46,10 @@ enum class OptionsMenuRowId {
     Restart,
     ShowTopDownView,
     ConfirmInteract,
+    EditorControls,
+    EditorReplaceTile,
+    EditorDeleteTile,
+    EditorMoveTile,
     ResetBindings,
     Back,
     CancelQuit,

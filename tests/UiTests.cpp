@@ -406,6 +406,44 @@ void drawRects(sokoban::UiContext& ui, std::size_t count)
     ui.endFrame();
 }
 
+#if SOKOBAN_ENABLE_DEBUG_UI
+void testDebugEditorControlBindings()
+{
+    sokoban::UserSettings settings;
+    sokoban::OptionsMenuState state {
+        .open = true,
+        .page = sokoban::OptionsMenuPage::Controls,
+    };
+    const std::vector<sokoban::OptionsMenuRow> controlRows =
+        sokoban::optionsMenuRows(state, settings);
+    CHECK(std::ranges::find(
+        controlRows,
+        sokoban::OptionsMenuRowId::EditorControls,
+        &sokoban::OptionsMenuRow::id) != controlRows.end());
+
+    auto reduction = sokoban::reduceOptionsMenu(
+        state,
+        settings,
+        sokoban::options::intent::ActivateRow {
+            sokoban::OptionsMenuRowId::EditorControls });
+    state = reduction.state;
+    CHECK(state.page == sokoban::OptionsMenuPage::EditorControls);
+    const std::vector<sokoban::OptionsMenuRow> editorRows =
+        sokoban::optionsMenuRows(state, settings);
+    CHECK(editorRows.size() == 4);
+    CHECK(editorRows.front().id ==
+        sokoban::OptionsMenuRowId::EditorReplaceTile);
+
+    reduction = sokoban::reduceOptionsMenu(
+        state,
+        settings,
+        sokoban::options::intent::ActivateRow {
+            sokoban::OptionsMenuRowId::EditorMoveTile });
+    CHECK(reduction.state.capturingAction ==
+        sokoban::InputAction::EditorMoveTile);
+}
+#endif
+
 void testUiFrameArenaCommandBudget()
 {
     const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
@@ -637,6 +675,9 @@ int main()
     testControlsRemapping();
     testOptionsReducerAndDeclarativeRows();
     testOptionsReducerDraftAndBindingSemantics();
+#if SOKOBAN_ENABLE_DEBUG_UI
+    testDebugEditorControlBindings();
+#endif
 
     if (failures == 0) {
         std::cout << "UiTests: " << checks << " checks passed\n";

@@ -15,6 +15,29 @@ std::size_t actionIndex(InputAction action)
     return index;
 }
 
+bool editorOnlyAction(InputAction action)
+{
+    return action == InputAction::EditorReplaceTile ||
+        action == InputAction::EditorDeleteTile ||
+        action == InputAction::EditorMoveTile;
+}
+
+bool actionsShareContext(InputAction left, InputAction right)
+{
+    if (left == right) {
+        return true;
+    }
+    // Editor modifiers may intentionally reuse gameplay/menu controls because
+    // document editing and gameplay are mutually exclusive. Undo and Back are
+    // also active while editing, so they still conflict with both groups.
+    const bool globallyActive = [](InputAction action) {
+        return action == InputAction::Undo || action == InputAction::MenuBack;
+    }(left) || [](InputAction action) {
+        return action == InputAction::Undo || action == InputAction::MenuBack;
+    }(right);
+    return globallyActive || editorOnlyAction(left) == editorOnlyAction(right);
+}
+
 } // namespace
 
 std::vector<InputBinding>& InputBindings::forAction(InputAction action)
@@ -64,8 +87,24 @@ void assignBinding(
     InputAction action,
     const InputBinding& candidate)
 {
-    for (std::vector<InputBinding>& list : bindings.actions) {
-        std::erase(list, candidate);
+    const std::size_t targetIndex = actionIndex(action);
+    const std::vector<InputBinding> displaced = bindings.actions[targetIndex];
+    for (std::size_t i = 0; i < inputActionCount; ++i) {
+        const InputAction existingAction = static_cast<InputAction>(i);
+        if (actionsShareContext(action, existingAction)) {
+            std::erase(bindings.actions[i], candidate);
+            if (i != targetIndex && bindings.actions[i].empty()) {
+                const auto replacement = std::ranges::find_if(
+                    displaced,
+                    [&](const InputBinding& binding) {
+                        return binding.index() == candidate.index() &&
+                            binding != candidate;
+                    });
+                if (replacement != displaced.end()) {
+                    bindings.actions[i].push_back(*replacement);
+                }
+            }
+        }
     }
     std::vector<InputBinding>& target = bindings.forAction(action);
     std::erase_if(target, [&](const InputBinding& existing) {
@@ -121,6 +160,15 @@ InputBindings defaultInputBindings()
         KeyboardBinding { "Space" },
         GamepadButtonBinding { "south" },
     };
+    bindings.forAction(InputAction::EditorReplaceTile) = {
+        KeyboardBinding { "R" },
+    };
+    bindings.forAction(InputAction::EditorDeleteTile) = {
+        KeyboardBinding { "D" },
+    };
+    bindings.forAction(InputAction::EditorMoveTile) = {
+        KeyboardBinding { "M" },
+    };
     return bindings;
 }
 
@@ -137,6 +185,9 @@ std::string_view inputActionName(InputAction action)
     case InputAction::ShowTopDownView: return "showTopDownView";
     case InputAction::MenuBack: return "menuBack";
     case InputAction::MenuConfirm: return "menuConfirm";
+    case InputAction::EditorReplaceTile: return "editorReplaceTile";
+    case InputAction::EditorDeleteTile: return "editorDeleteTile";
+    case InputAction::EditorMoveTile: return "editorMoveTile";
     case InputAction::Count: break;
     }
     throw std::invalid_argument("invalid input action");

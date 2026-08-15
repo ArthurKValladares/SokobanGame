@@ -15,7 +15,9 @@
 #include "engine/render/MirrorConfig.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <filesystem>
 #include <iostream>
 #include <ranges>
 
@@ -39,6 +41,30 @@ void checkImpl(bool ok, const char* expression, int line)
 
 #define CHECK(expression) checkImpl((expression), #expression, __LINE__)
 #define TEST(name) currentTest = name
+
+struct TemporaryEditorProject {
+    TemporaryEditorProject()
+    {
+        const auto unique =
+            std::chrono::steady_clock::now().time_since_epoch().count();
+        root = std::filesystem::temp_directory_path() /
+            ("sokoban_presentation_tests_" + std::to_string(unique));
+        source = root / "source";
+        runtime = root / "runtime";
+        std::filesystem::create_directories(source);
+        std::filesystem::create_directories(runtime);
+    }
+
+    ~TemporaryEditorProject()
+    {
+        std::error_code error;
+        std::filesystem::remove_all(root, error);
+    }
+
+    std::filesystem::path root;
+    std::filesystem::path source;
+    std::filesystem::path runtime;
+};
 
 const AssetManifest& testManifest()
 {
@@ -660,6 +686,12 @@ void testSelectorFlagReflectsTargetCompletion()
     if (centeredFlag != playable.tiles.end() && centeredFlag->modelTransform) {
         CHECK(near(centeredFlag->modelTransform->translation.x, 1.5f));
         CHECK(near(centeredFlag->modelTransform->translation.y, 0.5f));
+        CHECK(near(
+            centeredFlag->position.x + centeredFlag->size.x * 0.5f,
+            centeredFlag->modelTransform->translation.x));
+        CHECK(near(
+            centeredFlag->position.y + centeredFlag->size.y * 0.5f,
+            centeredFlag->modelTransform->translation.y));
     }
 }
 
@@ -898,6 +930,41 @@ void testEditorFrameProvidesInvisibleExpansionBorderAndPreview()
     CHECK(deletionPreview != deletionFrame.tiles.end());
     CHECK(drawableDeletedTile == deletionFrame.tiles.end());
 
+    LevelEditor moveEditor;
+    moveEditor.newDocument(2, 2, false);
+    const GridPosition3 moveSource { 1, 0, 1 };
+    const GridPosition3 moveDestination { 0, 1, 1 };
+    moveEditor.setCell(moveSource, TileType::Decorative);
+    CHECK(moveEditor.beginMove(moveSource));
+    const RenderFrameData moveFrame = RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(),
+        .editor = moveEditor,
+        .settings = {},
+        .hoverCell = moveDestination,
+        .editorPreviewTile = moveEditor.pendingMove()
+            ? std::optional<TileType> { moveEditor.pendingMove()->tile }
+            : std::nullopt,
+    });
+    const auto ditheredMoveSource = std::ranges::find_if(
+        moveFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.cell == moveSource && tile.isEditorPreview;
+        });
+    const auto ditheredMoveDestination = std::ranges::find_if(
+        moveFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.cell == moveDestination && tile.isEditorPreview;
+        });
+    const auto drawableMoveSource = std::ranges::find_if(
+        moveFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.cell == moveSource && !tile.pickOnly &&
+                !tile.isEditorPreview;
+        });
+    CHECK(ditheredMoveSource != moveFrame.tiles.end());
+    CHECK(ditheredMoveDestination != moveFrame.tiles.end());
+    CHECK(drawableMoveSource == moveFrame.tiles.end());
+
     LevelEditor actorEditor;
     actorEditor.newDocument(2, 2, false);
     actorEditor.setCell({ 0, 0, 0 }, TileType::Enemy);
@@ -935,6 +1002,77 @@ void testEditorFrameProvidesInvisibleExpansionBorderAndPreview()
         CHECK(enemyPreview->animationInstanceId != 0);
         CHECK(near(enemyPreview->animationTimeSeconds, 1.25f));
     }
+}
+
+void testEditorSelectorMoveUsesFlagPreviews()
+{
+    TEST("editorSelectorMoveUsesFlagPreviews");
+    TemporaryEditorProject project;
+    LevelEditor editor;
+    editor.initialize(project.source, project.runtime, 0, 0);
+    editor.newDocument(2, 2, false);
+    CHECK(editor.saveDocument(project.source / "overworld.scr"));
+
+    const GridPosition3 source { 1, 0, 1 };
+    const GridPosition3 destination { 0, 1, 1 };
+    CHECK(editor.placeSelector(source));
+    editor.setTool(LevelEditor::Tool::Tiles);
+    editor.setSelectedTile(TileType::Rock);
+
+    const RenderModel flagModel =
+        testManifest().modelIdByName("ScreenSelectorAUnavailable");
+    const RenderModel rockModel = testManifest().modelForTile(TileType::Rock);
+    const RenderFrameData hoverFrame = RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(),
+        .editor = editor,
+        .settings = {},
+        .hoverCell = source,
+        .deleting = true,
+        .selectingMoveSource = true,
+    });
+    const auto ditheredHoveredFlag = std::ranges::find_if(
+        hoverFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.cell == source && tile.model == flagModel &&
+                tile.isEditorPreview;
+        });
+    const auto hoveredFlagPickProxy = std::ranges::find_if(
+        hoverFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.cell == source && tile.pickOnly &&
+                !tile.isEditorPreview;
+        });
+    CHECK(ditheredHoveredFlag != hoverFrame.tiles.end());
+    CHECK(hoveredFlagPickProxy != hoverFrame.tiles.end());
+
+    CHECK(editor.beginMove(source));
+    const RenderFrameData moveFrame = RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(),
+        .editor = editor,
+        .settings = {},
+        .hoverCell = destination,
+    });
+    const auto ditheredSourceFlag = std::ranges::find_if(
+        moveFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.cell == source && tile.model == flagModel &&
+                tile.isEditorPreview;
+        });
+    const auto destinationFlag = std::ranges::find_if(
+        moveFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.cell == destination && tile.model == flagModel &&
+                tile.isEditorPreview;
+        });
+    const auto destinationRock = std::ranges::find_if(
+        moveFrame.tiles,
+        [&](const RenderFrameData::Tile& tile) {
+            return tile.cell == destination && tile.model == rockModel &&
+                tile.isEditorPreview;
+        });
+    CHECK(ditheredSourceFlag != moveFrame.tiles.end());
+    CHECK(destinationFlag != moveFrame.tiles.end());
+    CHECK(destinationRock == moveFrame.tiles.end());
 }
 
 void testMirrorTilesUseTheirModelAndOrientation()
@@ -1974,6 +2112,7 @@ int main()
     testDecorativeTileRendersWithoutChangingCameraExtent();
     testGameplayCameraExtentComesOnlyFromAuthoredLayout();
     testEditorFrameProvidesInvisibleExpansionBorderAndPreview();
+    testEditorSelectorMoveUsesFlagPreviews();
     testMirrorTilesUseTheirModelAndOrientation();
     testMirrorActivationBuildsBeamAndDestinationGhost();
     testPlayerCopiesRenderAndInterpolateTogether();

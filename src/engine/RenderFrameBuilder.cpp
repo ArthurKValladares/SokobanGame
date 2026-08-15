@@ -919,46 +919,84 @@ RenderFrameData initializeGameplayFrame(
     return frame;
 }
 
+void appendSelector(
+    RenderFrameData& frame,
+    const Level::ScreenSelector& selector,
+    const AssetManifest& manifest,
+    const std::function<ScreenSelectorViewState(LevelLocation)>& stateFor,
+    bool preview = false,
+    bool pickable = false)
+{
+    constexpr float flagScale = 0.65f;
+    ScreenSelectorViewState state;
+    if (selector.target) {
+        state = stateFor
+            ? stateFor(*selector.target)
+            : ScreenSelectorViewState {
+                .status = ScreenSelectorStatus::Playable,
+            };
+    }
+    const RenderModel model = manifest.modelIdByName(
+        selectorRender::modelName(state));
+    const Vec3 translation {
+        static_cast<float>(selector.cell.x) + 0.5f,
+        static_cast<float>(selector.cell.y) + 0.5f,
+        static_cast<float>(selector.cell.z),
+    };
+    if (preview && pickable) {
+        frame.tiles.push_back({
+            .cell = selector.cell,
+            .position = {
+                translation.x - flagScale * 0.5f,
+                translation.y - flagScale * 0.5f,
+            },
+            .size = { flagScale, flagScale },
+            .baseElevation = translation.z,
+            .height = flagScale * 1.5f,
+            .pickOnly = true,
+            .showGrid = false,
+            .affectsCameraFit = false,
+        });
+    }
+    frame.tiles.push_back({
+        .cell = selector.cell,
+        .position = {
+            translation.x - flagScale * 0.5f,
+            translation.y - flagScale * 0.5f,
+        },
+        .size = { flagScale, flagScale },
+        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+        .baseElevation = translation.z,
+        .height = flagScale * 1.5f,
+        .pickable = pickable,
+        .showGrid = false,
+        .isEditorPreview = preview,
+        .affectsCameraFit = false,
+        .model = model,
+        .modelTransform = RenderFrameData::ModelTransform {
+            .translation = translation,
+            .scale = { flagScale, flagScale, flagScale },
+            .pivot = { 0.0f, 0.0f, 0.0f },
+        },
+    });
+}
+
 void appendSelectors(
     RenderFrameData& frame,
     const std::vector<Level::ScreenSelector>& selectors,
     const AssetManifest& manifest,
-    const std::function<ScreenSelectorViewState(LevelLocation)>& stateFor)
+    const std::function<ScreenSelectorViewState(LevelLocation)>& stateFor,
+    std::optional<uint32_t> previewId = std::nullopt,
+    bool pickable = false)
 {
-    constexpr float flagScale = 0.65f;
     for (const Level::ScreenSelector& selector : selectors) {
-        ScreenSelectorViewState state;
-        if (selector.target) {
-            state = stateFor
-                ? stateFor(*selector.target)
-                : ScreenSelectorViewState {
-                    .status = ScreenSelectorStatus::Playable,
-                };
-        }
-        const RenderModel model = manifest.modelIdByName(
-            selectorRender::modelName(state));
-        const Vec3 translation {
-            static_cast<float>(selector.cell.x) + 0.5f,
-            static_cast<float>(selector.cell.y) + 0.5f,
-            static_cast<float>(selector.cell.z),
-        };
-        frame.tiles.push_back({
-            .cell = selector.cell,
-            .position = { translation.x, translation.y },
-            .size = { flagScale, flagScale },
-            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
-            .baseElevation = translation.z,
-            .height = flagScale * 1.5f,
-            .pickable = false,
-            .showGrid = false,
-            .affectsCameraFit = false,
-            .model = model,
-            .modelTransform = RenderFrameData::ModelTransform {
-                .translation = translation,
-                .scale = { flagScale, flagScale, flagScale },
-                .pivot = { 0.0f, 0.0f, 0.0f },
-            },
-        });
+        appendSelector(
+            frame,
+            selector,
+            manifest,
+            stateFor,
+            previewId == selector.id,
+            pickable);
     }
 }
 
@@ -1626,6 +1664,25 @@ public:
     }
 
 private:
+    [[nodiscard]] std::optional<GridPosition3> pendingTileMoveSource() const
+    {
+        const std::optional<LevelEditor::MoveObject>& move =
+            input_.editor.pendingMove();
+        return move && move->kind == LevelEditor::MoveObject::Kind::Tile
+            ? std::optional<GridPosition3> { move->source }
+            : std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<uint32_t> pendingSelectorMoveId() const
+    {
+        const std::optional<LevelEditor::MoveObject>& move =
+            input_.editor.pendingMove();
+        return move &&
+                move->kind == LevelEditor::MoveObject::Kind::ScreenSelector
+            ? std::optional<uint32_t> { move->selectorId }
+            : std::nullopt;
+    }
+
     [[nodiscard]] RenderFrameData initializeEditorFrame() const
     {
         RenderFrameData frame = arena_ != nullptr
@@ -1874,7 +1931,14 @@ private:
                             static_cast<int>(x),
                             static_cast<int>(y),
                             static_cast<int>(z),
-                        };
+                    };
+                    const bool movePreviewSource =
+                        pendingTileMoveSource() ==
+                        std::optional<GridPosition3>({
+                            static_cast<int>(x),
+                            static_cast<int>(y),
+                            static_cast<int>(z),
+                        });
                     appendEditorTile(
                         frame,
                         static_cast<int>(x),
@@ -1882,7 +1946,7 @@ private:
                         static_cast<int>(z),
                         tile,
                         false,
-                        deletePreviewTarget);
+                        deletePreviewTarget || movePreviewSource);
                 }
             }
         }
@@ -1951,16 +2015,45 @@ private:
             input_.editor.selectedDecorationIndex(),
             input_.hoverDecoration,
             true);
-        appendSelectors(
-            frame,
-            input_.editor.selectors(),
-            input_.manifest,
-            input_.selectorState);
+        const std::optional<uint32_t> movingSelector =
+            pendingSelectorMoveId();
+        for (const Level::ScreenSelector& selector :
+            input_.editor.selectors()) {
+            if (layerLocked_ &&
+                selector.cell.z != static_cast<int>(activeLayer_)) {
+                continue;
+            }
+            const bool hoveredMoveSource =
+                input_.selectingMoveSource && input_.hoverCell &&
+                selector.cell == *input_.hoverCell;
+            appendSelector(
+                frame,
+                selector,
+                input_.manifest,
+                input_.selectorState,
+                movingSelector == selector.id || hoveredMoveSource,
+                true);
+        }
     }
 
     void appendEditorPreviews(RenderFrameData& frame) const
     {
-        if (input_.editor.tool() == LevelEditor::Tool::Tiles &&
+        const std::optional<uint32_t> movingSelector =
+            pendingSelectorMoveId();
+        if (const std::optional<GridPosition3> source =
+                pendingTileMoveSource();
+            source && input_.editorPreviewTile) {
+            appendEditorTile(
+                frame,
+                source->x,
+                source->y,
+                source->z,
+                *input_.editorPreviewTile,
+                true);
+        }
+        if (!movingSelector &&
+            (input_.editor.tool() == LevelEditor::Tool::Tiles ||
+                input_.deleting || input_.editorPreviewTile) &&
             input_.hoverCell &&
             input_.hoverCell->z >= 0 &&
             input_.hoverCell->x >= -1 &&
@@ -1969,19 +2062,40 @@ private:
             input_.hoverCell->y <= static_cast<int>(frame.levelHeight)) {
             const TileType selectedTile = input_.deleting
                 ? TileType::Air
-                : input_.editor.selectedTile();
+                : input_.editorPreviewTile.value_or(
+                    input_.editor.selectedTile());
             const TileType hoveredTile =
                 documentTileAt(*input_.hoverCell);
             const TileType previewTile = selectedTile == TileType::Air
                 ? hoveredTile
                 : selectedTile;
-            appendEditorTile(
-                frame,
-                input_.hoverCell->x,
-                input_.hoverCell->y,
-                input_.hoverCell->z,
-                previewTile,
-                true);
+            if (input_.hoverCell != pendingTileMoveSource()) {
+                appendEditorTile(
+                    frame,
+                    input_.hoverCell->x,
+                    input_.hoverCell->y,
+                    input_.hoverCell->z,
+                    previewTile,
+                    true);
+            }
+        }
+
+        if (input_.hoverCell && movingSelector) {
+            const auto source = std::ranges::find(
+                input_.editor.selectors(),
+                *movingSelector,
+                &Level::ScreenSelector::id);
+            if (source != input_.editor.selectors().end() &&
+                source->cell != *input_.hoverCell) {
+                Level::ScreenSelector preview = *source;
+                preview.cell = *input_.hoverCell;
+                appendSelector(
+                    frame,
+                    preview,
+                    input_.manifest,
+                    input_.selectorState,
+                    true);
+            }
         }
 
         if (input_.editor.tool() == LevelEditor::Tool::Decorations &&

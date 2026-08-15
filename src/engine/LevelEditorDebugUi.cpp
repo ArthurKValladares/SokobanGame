@@ -140,6 +140,7 @@ void LevelEditorDebugUi::initialize(const LevelEditor& editor)
 void LevelEditorDebugUi::draw(
     LevelEditor& editor,
     SplatPainter& painter,
+    const InputBindings& bindings,
     const Callbacks& callbacks)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -214,8 +215,26 @@ void LevelEditorDebugUi::draw(
     if (ImGui::Checkbox("Lock Edits To Current Layer", &layerLocked)) {
         editor.setLayerLocked(layerLocked);
     }
-    if (!editor.layerLocked()) {
-        ImGui::TextDisabled("Click: add above   R + click: replace   D + click: delete");
+    if (ImGui::CollapsingHeader(
+            "Tile Editing Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::BulletText("Click: paint above the resolved tile");
+        ImGui::BulletText(
+            "%s + click: replace the resolved tile",
+            actionBindingsDisplay(
+                bindings, InputAction::EditorReplaceTile).c_str());
+        ImGui::BulletText(
+            "%s + click twice: select and move any tile object, including flags",
+            actionBindingsDisplay(
+                bindings, InputAction::EditorMoveTile).c_str());
+        ImGui::BulletText(
+            "%s + click: delete the resolved tile",
+            actionBindingsDisplay(
+                bindings, InputAction::EditorDeleteTile).c_str());
+        ImGui::BulletText(
+            "%s: undo the latest editor change",
+            actionBindingsDisplay(bindings, InputAction::Undo).c_str());
+        ImGui::TextDisabled(
+            "Rebind under Options > Controls > Editor Controls.");
     }
     if (ImGui::Button("+ Layer Below")) {
         editor.addLayerBelow();
@@ -267,6 +286,7 @@ void LevelEditorDebugUi::draw(
 #else
     (void)editor;
     (void)painter;
+    (void)bindings;
     (void)callbacks;
 #endif
 }

@@ -129,7 +129,7 @@ void testBackPriority()
         sokoban::InputRouter::BackAction::None);
 }
 
-void testEditorFrameUsesRawControls()
+void testEditorFrameUsesConfiguredControls()
 {
     sokoban::InputRouter router;
     sokoban::InputState input(false);
@@ -137,6 +137,7 @@ void testEditorFrameUsesRawControls()
     pressKey(router, input, SDL_SCANCODE_Z);
     pressKey(router, input, SDL_SCANCODE_D);
     pressKey(router, input, SDL_SCANCODE_R);
+    pressKey(router, input, SDL_SCANCODE_M);
     pressKey(router, input, SDL_SCANCODE_T);
     pressKey(router, input, SDL_SCANCODE_S);
 
@@ -146,11 +147,30 @@ void testEditorFrameUsesRawControls()
     CHECK(frame.editor.undoPressed);
     CHECK(frame.editor.deleting);
     CHECK(frame.editor.replaceLayer);
+    CHECK(frame.editor.moving);
     CHECK(frame.editor.rotateGizmoPressed);
     CHECK(frame.editor.translateGizmoPressed);
     CHECK(frame.editor.scaleGizmoPressed);
     CHECK(frame.editor.pointerCaptured);
     CHECK(!frame.gameplay.undoPressed);
+}
+
+void testEditorFrameRespectsRemappedTileControls()
+{
+    sokoban::InputRouter router;
+    sokoban::InputState input(false);
+    sokoban::InputBindings bindings = sokoban::defaultInputBindings();
+    sokoban::assignBinding(
+        bindings,
+        sokoban::InputAction::EditorMoveTile,
+        sokoban::KeyboardBinding { "P" });
+    input.setBindings(bindings);
+    input.beginFrame();
+    pressKey(router, input, SDL_SCANCODE_P);
+
+    const sokoban::InputRouter::Frame frame = router.routeFrame(
+        input, { .editorEditing = true });
+    CHECK(frame.editor.moving);
 }
 
 void testEditorGizmoShortcutsRespectKeyboardCapture()
@@ -212,7 +232,8 @@ int main()
     testBindingCaptureAndUiCaptureAdmission();
     testModalFrameRouting();
     testBackPriority();
-    testEditorFrameUsesRawControls();
+    testEditorFrameUsesConfiguredControls();
+    testEditorFrameRespectsRemappedTileControls();
     testEditorPointerExposesPressAndHold();
     testEditorGizmoShortcutsRespectKeyboardCapture();
 

@@ -973,6 +973,32 @@ void testAsyncStoreMultipleChannels()
     // The single worker joined cleanly at destruction with all channels drained.
 }
 
+void testFormat18AddsEditorBindings()
+{
+    nlohmann::json format18 = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    format18["format"] = 18;
+    format18["settings"]["input"].erase("editorReplaceTile");
+    format18["settings"]["input"].erase("editorDeleteTile");
+    format18["settings"]["input"].erase("editorMoveTile");
+
+    const sokoban::DecodedPlayerProfile migrated =
+        sokoban::decodePlayerProfile(format18.dump());
+    check(migrated.sourceFormat == 18, "format 18 source is reported");
+    check(sokoban::actionBindingsDisplay(
+              migrated.profile.settings.input,
+              sokoban::InputAction::EditorReplaceTile) == "R",
+        "format 18 receives the editor replace default");
+    check(sokoban::actionBindingsDisplay(
+              migrated.profile.settings.input,
+              sokoban::InputAction::EditorDeleteTile) == "D",
+        "format 18 receives the editor delete default");
+    check(sokoban::actionBindingsDisplay(
+              migrated.profile.settings.input,
+              sokoban::InputAction::EditorMoveTile) == "M",
+        "format 18 receives the editor move default");
+}
+
 int main()
 {
     try {
@@ -982,6 +1008,7 @@ int main()
         testActiveScreenCheckpointRoundTrip();
     testNormalizationAndMigration();
     testScreenProgressOverworldCheckpointAndFormat17Migration();
+        testFormat18AddsEditorBindings();
         testStoreBackupsAndRecovery();
         testSaveSlotStems();
         testMigrationAndDoubleCorruption();

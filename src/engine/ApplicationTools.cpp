@@ -577,6 +577,9 @@ void ApplicationTools::updateEditorInteraction(
     hoverCell.reset();
     hoverDecoration.reset();
     brushPoint.reset();
+    if (!input.moving) {
+        levelEditor.cancelMove();
+    }
     if (input.undoPressed) {
         if (decorationGizmo.dragging()) {
             decorationGizmo.endDrag();
@@ -638,13 +641,27 @@ void ApplicationTools::updateEditorInteraction(
         const bool editingSelectors =
             levelEditor.tool() == LevelEditor::Tool::Selectors;
         const bool deleting = input.deleting && !editingDecorations;
-        target = levelEditor.resolveEditTarget(
-            target,
-            deleting && !editingSelectors,
-            input.replaceLayer && !editingDecorations && !editingSelectors);
+        if (input.moving) {
+            target = levelEditor.resolveMoveTarget(target);
+        } else if (editingSelectors) {
+            target = levelEditor.resolveSelectorTarget(target);
+        } else {
+            target = levelEditor.resolveEditTarget(
+                target,
+                deleting,
+                input.replaceLayer && !editingDecorations);
+        }
 
         hoverCell = target;
         if (input.primaryPressed) {
+            if (input.moving) {
+                if (levelEditor.pendingMove()) {
+                    (void)levelEditor.moveObject(target);
+                } else {
+                    (void)levelEditor.beginMove(target);
+                }
+                return;
+            }
             if (editingDecorations) {
                 (void)levelEditor.placeDecoration(target);
             } else if (editingSelectors) {

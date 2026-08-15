@@ -727,14 +727,61 @@ void testSelectorEditingPersistenceUndoAndProjectRemapping()
     CHECK(editor.documentToLevel().tileAt(2, 1, 1) != TileType::End);
     CHECK(editor.status().find("not allowed") != std::string::npos);
     editor.setTool(LevelEditor::Tool::Selectors);
+    editor.setCell({ 3, 0, 1 }, TileType::Wall);
     CHECK(editor.placeSelector({ 1, 1, 1 }));
     CHECK(editor.selectors().size() == 1);
     CHECK(editor.selectors()[0].id == 1);
     CHECK(!editor.selectors()[0].target);
+    editor.setActiveLayer(0);
+    editor.setLayerLocked(true);
+    CHECK((editor.resolveSelectorTarget({ 1, 1, 0 }) ==
+        GridPosition3 { 1, 1, 0 }));
+    CHECK((editor.resolveSelectorTarget({ 2, 1, 0 }) ==
+        GridPosition3 { 2, 1, 0 }));
+    editor.setActiveLayer(1);
+    CHECK((editor.resolveSelectorTarget({ 1, 1, 0 }) ==
+        GridPosition3 { 1, 1, 1 }));
+    CHECK((editor.resolveSelectorTarget({ 2, 1, 0 }) ==
+        GridPosition3 { 2, 1, 1 }));
     CHECK(editor.updateSelectedSelectorTarget(
         LevelLocation { .level = 0, .screen = 0 }));
     CHECK(editor.selectors()[0].target ==
         std::optional<LevelLocation>({ .level = 0, .screen = 0 }));
+    editor.setTool(LevelEditor::Tool::Tiles);
+    CHECK(editor.beginMove({ 1, 1, 1 }));
+    CHECK(editor.tool() == LevelEditor::Tool::Tiles);
+    CHECK(editor.pendingMove().has_value());
+    if (editor.pendingMove()) {
+        CHECK(editor.pendingMove()->kind ==
+            LevelEditor::MoveObject::Kind::ScreenSelector);
+        CHECK(editor.pendingMove()->selectorId == 1U);
+    }
+    CHECK(!editor.moveObject({ 3, 0, 1 }));
+    CHECK((editor.selectors()[0].cell == GridPosition3 { 1, 1, 1 }));
+    CHECK(editor.beginMove({ 1, 1, 1 }));
+    CHECK(editor.moveObject({ 2, 1, 1 }));
+    CHECK(editor.tool() == LevelEditor::Tool::Tiles);
+    CHECK(editor.selectors()[0].id == 1);
+    CHECK((editor.selectors()[0].cell == GridPosition3 { 2, 1, 1 }));
+    CHECK(editor.selectors()[0].target ==
+        std::optional<LevelLocation>({ .level = 0, .screen = 0 }));
+    editor.setTool(LevelEditor::Tool::Selectors);
+    CHECK(editor.beginMove({ 3, 0, 1 }));
+    CHECK(editor.pendingMove().has_value());
+    if (editor.pendingMove()) {
+        CHECK(editor.pendingMove()->kind ==
+            LevelEditor::MoveObject::Kind::Tile);
+    }
+    CHECK(!editor.moveObject({ 2, 1, 1 }));
+    CHECK(editor.beginMove({ 3, 0, 1 }));
+    CHECK(editor.moveObject({ 3, 1, 1 }));
+    CHECK(editor.tool() == LevelEditor::Tool::Selectors);
+    CHECK((editor.selectors()[0].cell == GridPosition3 { 2, 1, 1 }));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers()[1][0][3] ==
+        tileTypeToChar(TileType::Wall));
+    CHECK(editor.tryUndoEdit());
+    CHECK((editor.selectors()[0].cell == GridPosition3 { 1, 1, 1 }));
     std::vector<LevelEditor::LevelDirectory> labelLevels {
         {
             .index = 0,
@@ -800,6 +847,41 @@ void testSelectorEditingPersistenceUndoAndProjectRemapping()
     CHECK(loaded.selectors().size() == 1);
 }
 
+void testMoveTileIsAtomicAndUndoable()
+{
+    TEST("moveTileIsAtomicAndUndoable");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(4, 3, false);
+    editor.setCell({ 1, 1, 1 }, TileType::Wall);
+
+    CHECK(editor.beginMove({ 1, 1, 1 }));
+    CHECK(editor.pendingMove().has_value());
+    if (editor.pendingMove()) {
+        CHECK((editor.pendingMove()->source == GridPosition3 { 1, 1, 1 }));
+        CHECK(editor.pendingMove()->kind ==
+            LevelEditor::MoveObject::Kind::Tile);
+        CHECK(editor.pendingMove()->tile == TileType::Wall);
+    }
+    CHECK(editor.moveObject({ 2, 1, 1 }));
+    CHECK(!editor.pendingMove());
+    CHECK(editor.documentLayers()[1][1][1] ==
+        tileTypeToChar(TileType::Air));
+    CHECK(editor.documentLayers()[1][1][2] ==
+        tileTypeToChar(TileType::Wall));
+
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers()[1][1][1] ==
+        tileTypeToChar(TileType::Wall));
+    CHECK(editor.documentLayers()[1][1][2] ==
+        tileTypeToChar(TileType::Air));
+
+    CHECK(editor.beginMove({ 1, 1, 1 }));
+    CHECK(!editor.moveObject({ 0, 0, 0 }));
+    CHECK(editor.documentLayers()[1][1][1] ==
+        tileTypeToChar(TileType::Wall));
+}
+
 } // namespace
 
 int main()
@@ -822,6 +904,7 @@ int main()
     testDecorationEditingPersistenceAndUndo();
     testDecorationTransformSessionCoalescesUndoAndCanCancel();
     testSelectorEditingPersistenceUndoAndProjectRemapping();
+    testMoveTileIsAtomicAndUndoable();
 
     if (failures == 0) {
         std::cout << "LevelEditorTests: " << checks << " checks passed\n";

@@ -65,6 +65,7 @@ public:
         bool undoPressed = false;
         bool deleting = false;
         bool replaceLayer = false;
+        bool moving = false;
         bool translateGizmoPressed = false;
         bool rotateGizmoPressed = false;
         bool scaleGizmoPressed = false;

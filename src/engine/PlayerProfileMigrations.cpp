@@ -286,6 +286,16 @@ void migrate10to11(Json& root)
         input["showTopDownView"] =
             Json::parse(defaults.at("showTopDownView").dump());
     }
+    for (const InputAction action : {
+             InputAction::EditorReplaceTile,
+             InputAction::EditorDeleteTile,
+             InputAction::EditorMoveTile,
+         }) {
+        const std::string name(inputActionName(action));
+        if (!input.contains(name)) {
+            input[name] = Json::parse(defaults.at(name).dump());
+        }
+    }
 
     InputBindings bindings =
         playerProfileMigrationSupport::inputBindingsFromJson(input, "settings.input");
@@ -615,6 +625,30 @@ void migrate17to18(Json& root)
         : "overworld";
 }
 
+void migrate18to19(Json& root)
+{
+    if (!root.contains("settings") || !root["settings"].is_object()) {
+        return;
+    }
+    Json& input = root["settings"]["input"];
+    if (!input.is_object()) {
+        return;
+    }
+    const OrderedJson defaults =
+        playerProfileMigrationSupport::inputBindingsToJson(
+            defaultInputBindings());
+    for (const InputAction action : {
+             InputAction::EditorReplaceTile,
+             InputAction::EditorDeleteTile,
+             InputAction::EditorMoveTile,
+         }) {
+        const std::string name(inputActionName(action));
+        if (!input.contains(name)) {
+            input[name] = Json::parse(defaults.at(name).dump());
+        }
+    }
+}
+
 } // namespace
 
 void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
@@ -638,6 +672,7 @@ void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
         migrate15to16,
         migrate16to17,
         migrate17to18,
+        migrate18to19,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

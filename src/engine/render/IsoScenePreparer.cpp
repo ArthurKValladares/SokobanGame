@@ -116,6 +116,26 @@ Vec4 projectIsoPointToClip(
     };
 }
 
+std::array<Vec3, 8> logicalTileCorners(const RenderFrameData::Tile& tile)
+{
+    const float x = tile.position.x;
+    const float y = tile.position.y;
+    const float width = tile.size.x;
+    const float depth = tile.size.y;
+    const float base = tile.baseElevation;
+    const float top = base + std::max(tile.height, 0.0f);
+    return {
+        Vec3 { x, y, base },
+        Vec3 { x + width, y, base },
+        Vec3 { x + width, y + depth, base },
+        Vec3 { x, y + depth, base },
+        Vec3 { x, y, top },
+        Vec3 { x + width, y, top },
+        Vec3 { x + width, y + depth, top },
+        Vec3 { x, y + depth, top },
+    };
+}
+
 std::array<Vec3, 8> tileCorners(const RenderFrameData::Tile& tile)
 {
     if (tile.modelTransform) {
@@ -137,22 +157,7 @@ std::array<Vec3, 8> tileCorners(const RenderFrameData::Tile& tile)
         };
     }
 
-    const float x = tile.position.x;
-    const float y = tile.position.y;
-    const float width = tile.size.x;
-    const float depth = tile.size.y;
-    const float base = tile.baseElevation;
-    const float top = base + std::max(tile.height, 0.0f);
-    return {
-        Vec3 { x, y, base },
-        Vec3 { x + width, y, base },
-        Vec3 { x + width, y + depth, base },
-        Vec3 { x, y + depth, base },
-        Vec3 { x, y, top },
-        Vec3 { x + width, y, top },
-        Vec3 { x + width, y + depth, top },
-        Vec3 { x, y + depth, top },
-    };
+    return logicalTileCorners(tile);
 }
 
 TileRenderLayout calculateTileLayout(
@@ -878,11 +883,19 @@ void IsoScenePreparer::prepare(
              tileIndex < frameData.tiles.size();
              ++tileIndex) {
             const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
-            const std::array<Vec3, 8> corners = tileCorners(tile);
             const float width = tile.size.x;
             const float depth = tile.size.y;
             const float height = std::max(tile.height, 0.0f);
             const bool drawCube = tile.model.isCube() && !tile.pickOnly;
+            // Authored model transforms describe how mesh-local coordinates
+            // reach the world, but their unit cube is not necessarily the
+            // model's logical editor hit box. Model-backed editor objects such
+            // as selector flags carry an explicit centered position/size/
+            // height for picking, so use that volume for their invisible
+            // faces while leaving their visual transform untouched.
+            const std::array<Vec3, 8> corners = drawCube
+                ? tileCorners(tile)
+                : logicalTileCorners(tile);
             const bool pickable =
                 tile.pickable &&
                 !tile.isEditorPreview &&

@@ -137,9 +137,17 @@ editor commands but does not own document or filesystem policy.
 
 - Click normally paints above the selected cell.
 - Hold `R` while clicking to replace on the resolved layer.
+- Hold `M` and click a tile object, then its destination, to move it as one
+  undoable edit. The move tool is independent of the active palette: ordinary
+  tiles, mirrors, pressure plates, ends, and overworld selector flags all use
+  the same workflow. Flags retain their IDs and screen assignments. Both the
+  source and destination previews are dithered; releasing `M` cancels a pending
+  move.
 - Hold `D` while clicking to delete; the target is shown with a dithered
   preview while invisible pick geometry keeps hover selection stable.
 - Press `Z` to undo editor changes.
+- Debug builds list these controls in the Level Editor panel and expose their
+  configurable bindings under **Options > Controls > Editor Controls**.
 - `+ Layer Below` and `+ Layer Above` insert undoable Air layers and preserve
   water-layer numbering.
 - Painting one cell beyond an edge expands every layer transactionally.

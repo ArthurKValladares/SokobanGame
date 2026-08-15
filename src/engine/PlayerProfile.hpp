@@ -12,7 +12,7 @@
 
 namespace sokoban {
 
-inline constexpr int currentPlayerProfileFormat = 18;
+inline constexpr int currentPlayerProfileFormat = 19;
 
 // Which top-level sections serialize() writes. Save-slot files carry only
 // progress and the shared settings file only settings; both sections are

@@ -2,6 +2,7 @@
 
 #include "engine/DecorationMeshCatalog.hpp"
 #include "engine/LevelEditor.hpp"
+#include "engine/InputBindings.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/SplatPainter.hpp"
 
@@ -48,6 +49,7 @@ public:
     void draw(
         LevelEditor& editor,
         SplatPainter& painter,
+        const InputBindings& bindings,
         const Callbacks& callbacks);
 
 private:

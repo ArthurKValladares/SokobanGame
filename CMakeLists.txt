@@ -246,6 +246,9 @@ target_link_libraries(sokoban_ui
     PUBLIC sokoban_core
     PRIVATE sokoban_stb
 )
+target_compile_definitions(sokoban_ui PUBLIC
+    $<$<CONFIG:Debug>:SOKOBAN_ENABLE_DEBUG_UI=1>
+)
 sokoban_enable_warnings(sokoban_ui)
 
 add_library(sokoban_render_vulkan STATIC

@@ -309,11 +309,11 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   `AnimationPreviewDebugUi` into the same Animation tab.
 - `src/engine/AudioSystem.*`: miniaudio-backed sound playback behind a pimpl (`EngineHandle`), so no miniaudio types leak into headers. Preloads manifest sound sets from the staged runtime content tree with `MA_SOUND_FLAG_DECODE` into stable `std::vector<ma_sound>` storage. `playOneShot(name)` handles reusable randomized effects; `update(dt, playerWalking, pushingStone)` retains specialized footstep cadence and seamless stone-drag loops with short fades. Music streams one looping track per level with a 600 ms crossfade. Manifest gains remain authored in the Asset Manifest window; profile-backed master, music, and sound-effect bus gains are previewed live and persisted when Debug UI sliders are committed. Audio degrades gracefully to silence if the device or files are missing.
 - `src/engine/GameplaySession.*`: headless per-screen gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, action history, a branch-safe undo stack, automatic world steps, the post-undo automatic-motion pause, and solution-move snapshots that restore correctly across undo/restart. Each committed `Action` owns its complete Vulkan-free `ActionPresentationTimeline`; inversion preserves that transaction and runs it backward for its resolved full duration. Its committed-state snapshot/restore API persists exact player/movable/enemy state, stable IDs, presentation ordering, and the usable undo chain; restore rejects disconnected or impossible rules transitions without mutating the live session. `reset` always clears undo state at a screen boundary. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
-- `src/engine/InputBindings.*`: platform-neutral semantic action and binding model. Each action owns an ordered list of keyboard, gamepad-button, and signed gamepad-axis bindings, allowing keyboard+D-pad+stick defaults. `assignBinding` implements remapping semantics (removes the identical binding from every action, then replaces only the action's bindings of the same kind, so a d-pad rebind keeps a stick binding); `bindingDisplayName`/`actionBindingsDisplay` provide UI labels.
+- `src/engine/InputBindings.*`: platform-neutral semantic action and binding model. Each action owns an ordered list of keyboard, gamepad-button, and signed gamepad-axis bindings, allowing keyboard+D-pad+stick defaults. `assignBinding` removes an identical binding from actions active in the same context, then replaces only the action's bindings of the same kind, so editor-only modifiers can reuse gameplay defaults and a d-pad rebind keeps a stick binding; `bindingDisplayName`/`actionBindingsDisplay` provide UI labels.
 - `src/engine/Input.*`: SDL3 device owner and action mapper. Tracks raw keyboard/mouse state for editor tooling, hot-plugs gamepads, selects the most recently used controller, normalizes stick axes with threshold/pressed-edge semantics, clears stuck input on focus loss, reports active-device diagnostics, and converts raw SDL events into typed remapping candidates. `InputRouter` controls event admission and distributes its state to active consumers. Covered by `tests/InputTests.cpp` (`sokoban_input_tests`).
 - `src/engine/PlayerProfile.*` + `src/engine/PlayerProfileCodec.cpp`:
-  current format-17 player progress model plus one owned `UserSettings` value.
-  Forward JSON patches (`migrate1to2` through `migrate16to17`) feed one strict
+  current format-19 player progress model plus one owned `UserSettings` value.
+  Forward JSON patches (`migrate1to2` through `migrate18to19`) feed one strict
   current-format parse. Format 9 made progress/settings independently optional
   for split slot and shared-settings files; format 10 added Mirror bindings,
   format 11 restored the intended `Z` Undo / `F` Mirror defaults, and format 12
@@ -321,7 +321,9 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   strength, multi-player checkpoints, enemies, and explicit death causes;
   format 16 added presentation data to history, and format 17 added stable
   entity IDs plus generic motion/animation tracks while preserving compatible
-  format-16 checkpoints and undo history. Stores exact active-screen
+  format-16 checkpoints and undo history. Format 18 introduced per-screen and
+  overworld progress, and format 19 added the three editor tile bindings.
+  Stores exact active-screen
   gameplay/undo state including action presentation transactions, progress,
   bests, reached screens, typed input bindings,
   audio/video/accessibility settings, and normalized display/render settings.
@@ -438,14 +440,15 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   `allowLevelSelect` adds a
   "Level Select" row (pause context only; `Application` passes it once every
   level on disk has a completion record, so it is permanent for that save
-  and cleared by New Game). The Controls page lists the eight
+  and cleared by New Game). The Controls page lists the gameplay
   remappable gameplay actions (menu navigation is deliberately fixed) with
   press-to-rebind capture: `capturingBinding()` tells `InputRouter` to return
   binding candidates for `provideBindingCandidate` and suppress raw key/pad
   navigation meanwhile (keys bound to MenuBack still pass
   so Escape cancels; Start cancels directly). Escape/Start are never bindable,
-  duplicates are stolen from other actions, and Reset To Defaults restores
-  `defaultInputBindings()`.
+  duplicates are stolen from actions in the same input context, and Reset To
+  Defaults restores `defaultInputBindings()`. Debug builds add an Editor
+  Controls subpage for Replace Tile, Delete Tile, and Move Tile.
 - `src/engine/ui/TitleScreen.*`: headless fullscreen title-screen state
   (Main with Continue/New Game/Options/Quit and a destructive-action New Game
   confirmation). The world is not loaded while the main menu is up; only the
@@ -708,7 +711,7 @@ Mirrors:
   distance from the mirror is preserved.
 - The configurable `Mirror` action defaults to keyboard `F` and gamepad East;
   Undo defaults to keyboard `Z` and gamepad West. Profile migrations preserve
-  the one-binding/one-action rule.
+  the one-binding/one-active-context rule.
 - `rules::activateMirrors` is pure and transactional. It reflects the player,
   rocks, and ice; the nearest entity occludes entities behind it; chains may
   use each mirror once; ambiguous, obstructed, unsupported, and overlapping
@@ -801,7 +804,13 @@ Important editor behavior:
 - Undo histories are branch-safe: making a new gameplay move or editor edit after undo does not replay an abandoned action during later undos.
 - The active layer is shown with lower layers underneath.
 - "Lock edits to current layer" changes paint targeting behavior.
-- Clicking usually adds above; `R + click` replaces; `D + click` deletes.
+- Clicking usually adds above; `R + click` replaces; `D + click` deletes; hold
+  `M` while clicking a source and destination to move a tile in one undoable
+  edit. The same binding moves overworld screen-selector flags without changing
+  their stable IDs or targets, and both move endpoints are dithered. The Level
+  Editor panel documents these controls using their live
+  bindings, and Debug builds expose their remapping under
+  Options > Controls > Editor Controls.
 - Deletion preview dithers the selected tile while replacing its normal draw
   with an invisible pick-only proxy. Discarded pixels therefore reveal the
   actual scene instead of an identical copy of the tile, while top/side hover
@@ -1546,11 +1555,12 @@ Major recent additions and fixes:
   (`PlayerProfile::settingsOnly`/`adoptSettingsFrom`), bootstrapped from the
   pre-split save. Covered by store-isolation, settings-split, and
   slots-page tests.
-- Added the Options > Controls input-remapping page: the eight gameplay actions
+- Added the Options > Controls input-remapping page: gameplay actions
   render their current keyboard/pad bindings, confirm starts a raw-event
   capture (fed from `InputState::bindingCandidate` in the SDL loop with
   navigation suppressed), same-kind bindings are replaced while other-device
-  bindings survive, duplicates are stolen from other actions, Escape/Start
+  bindings survive, duplicates are stolen from actions in the same context,
+  Escape/Start
   cancel and can never be bound, and Reset To Defaults plus profile
   persistence complete the loop. Covered by new `sokoban_ui_tests` cases.
 - Added the player-facing game shell: headless `TitleScreen` (main menu,

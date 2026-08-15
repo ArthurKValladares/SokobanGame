@@ -80,6 +80,24 @@ constexpr std::array bindingRows {
     },
 };
 
+constexpr std::array editorBindingRows {
+    BindingRow {
+        OptionsMenuRowId::EditorReplaceTile,
+        InputAction::EditorReplaceTile,
+        "Replace tile",
+    },
+    BindingRow {
+        OptionsMenuRowId::EditorDeleteTile,
+        InputAction::EditorDeleteTile,
+        "Delete tile",
+    },
+    BindingRow {
+        OptionsMenuRowId::EditorMoveTile,
+        InputAction::EditorMoveTile,
+        "Move tile object",
+    },
+};
+
 int displayIndex(const UserSettings& settings)
 {
     if (settings.video.fullscreen) {
@@ -97,10 +115,14 @@ int displayIndex(const UserSettings& settings)
 std::optional<InputAction> actionForRow(OptionsMenuRowId row)
 {
     const auto found = std::ranges::find(bindingRows, row, &BindingRow::row);
-    if (found == bindingRows.end()) {
-        return std::nullopt;
+    if (found != bindingRows.end()) {
+        return found->action;
     }
-    return found->action;
+    const auto editorFound =
+        std::ranges::find(editorBindingRows, row, &BindingRow::row);
+    return editorFound == editorBindingRows.end()
+        ? std::nullopt
+        : std::optional<InputAction>(editorFound->action);
 }
 
 void setPage(OptionsMenuState& state, OptionsMenuPage page)
@@ -189,6 +211,9 @@ std::optional<OptionsAction> activateRow(
     case OptionsMenuRowId::Controls:
         setPage(state, OptionsMenuPage::Controls);
         break;
+    case OptionsMenuRowId::EditorControls:
+        setPage(state, OptionsMenuPage::EditorControls);
+        break;
     case OptionsMenuRowId::LevelSelect:
         return options::OpenLevelSelect {};
     case OptionsMenuRowId::ExitToTitle:
@@ -214,6 +239,9 @@ std::optional<OptionsAction> activateRow(
     case OptionsMenuRowId::Restart:
     case OptionsMenuRowId::ShowTopDownView:
     case OptionsMenuRowId::ConfirmInteract:
+    case OptionsMenuRowId::EditorReplaceTile:
+    case OptionsMenuRowId::EditorDeleteTile:
+    case OptionsMenuRowId::EditorMoveTile:
         state.capturingAction = actionForRow(row);
         break;
     case OptionsMenuRowId::ResetBindings:
@@ -223,6 +251,12 @@ std::optional<OptionsAction> activateRow(
         }
         break;
     case OptionsMenuRowId::Back:
+        setPage(
+            state,
+            state.page == OptionsMenuPage::EditorControls
+                ? OptionsMenuPage::Controls
+                : OptionsMenuPage::Main);
+        break;
     case OptionsMenuRowId::CancelQuit:
         setPage(state, OptionsMenuPage::Main);
         break;
@@ -301,6 +335,7 @@ std::string_view pageTitle(OptionsMenuPage page)
     case OptionsMenuPage::Graphics: return "GRAPHICS";
     case OptionsMenuPage::Audio: return "AUDIO";
     case OptionsMenuPage::Controls: return "CONTROLS";
+    case OptionsMenuPage::EditorControls: return "EDITOR CONTROLS";
     case OptionsMenuPage::QuitConfirmation: return "QUIT GAME";
     }
     return "OPTIONS";
@@ -311,6 +346,7 @@ float pageHeight(OptionsMenuPage page)
     switch (page) {
     case OptionsMenuPage::Graphics: return 740.0f;
     case OptionsMenuPage::Controls: return 720.0f;
+    case OptionsMenuPage::EditorControls: return 540.0f;
     default: return 540.0f;
     }
 }
@@ -532,10 +568,35 @@ std::vector<OptionsMenuRow> optionsMenuRows(
             .label = "Reset To Defaults",
             .flexibleSpaceBefore = true,
         });
+#if SOKOBAN_ENABLE_DEBUG_UI
+        rows.push_back({
+            .id = OptionsMenuRowId::EditorControls,
+            .kind = OptionsMenuRowKind::Button,
+            .label = "Editor Controls",
+        });
+#endif
         rows.push_back({
             .id = OptionsMenuRowId::Back,
             .kind = OptionsMenuRowKind::Button,
             .label = "Back",
+        });
+        break;
+    case OptionsMenuPage::EditorControls:
+        for (const BindingRow& binding : editorBindingRows) {
+            rows.push_back({
+                .id = binding.row,
+                .kind = OptionsMenuRowKind::Binding,
+                .label = binding.label,
+                .tone = state.capturingAction == binding.action
+                    ? OptionsMenuRowTone::Accent
+                    : OptionsMenuRowTone::Normal,
+            });
+        }
+        rows.push_back({
+            .id = OptionsMenuRowId::Back,
+            .kind = OptionsMenuRowKind::Button,
+            .label = "Back",
+            .flexibleSpaceBefore = true,
         });
         break;
     case OptionsMenuPage::QuitConfirmation:
@@ -583,6 +644,8 @@ OptionsMenuReduction reduceOptionsMenu(
                 result.state.capturingAction.reset();
             } else if (result.state.page == OptionsMenuPage::Main) {
                 result.state.open = false;
+            } else if (result.state.page == OptionsMenuPage::EditorControls) {
+                setPage(result.state, OptionsMenuPage::Controls);
             } else {
                 setPage(result.state, OptionsMenuPage::Main);
             }

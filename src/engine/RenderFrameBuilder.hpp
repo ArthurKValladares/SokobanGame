@@ -68,6 +68,8 @@ public:
         std::optional<GridPosition3> hoverCell;
         std::optional<std::size_t> hoverDecoration;
         bool deleting = false;
+        bool selectingMoveSource = false;
+        std::optional<TileType> editorPreviewTile;
         float worldAnimationTimeSeconds = 0.0f;
         float conveyorBeltScrollOffset = 0.0f;
         // The screen this document belongs to, when it is one. Set so the

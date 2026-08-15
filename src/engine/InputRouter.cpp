@@ -40,9 +40,14 @@ InputRouter::EventResult InputRouter::routeEvent(
         event.type == SDL_EVENT_MOUSE_BUTTON_UP;
     const bool editorEditModifier = keyboardEvent &&
         context.editorEditing &&
-        (event.key.scancode == SDL_SCANCODE_R ||
-            event.key.scancode == SDL_SCANCODE_D ||
+        (input.keyBoundToAction(
+             event.key.scancode, InputAction::EditorReplaceTile) ||
+            input.keyBoundToAction(
+                event.key.scancode, InputAction::EditorDeleteTile) ||
+            input.keyBoundToAction(
+                event.key.scancode, InputAction::EditorMoveTile) ||
             event.key.scancode == SDL_SCANCODE_T ||
+            event.key.scancode == SDL_SCANCODE_R ||
             event.key.scancode == SDL_SCANCODE_S);
     const bool menuBackKey = keyboardEvent &&
         input.keyBoundToAction(event.key.scancode, InputAction::MenuBack);
@@ -138,9 +143,10 @@ InputRouter::Frame InputRouter::routeFrame(
             .pointerPosition = input.mousePosition(),
             .primaryPressed = input.mouseButtonPressed(SDL_BUTTON_LEFT),
             .primaryDown = input.mouseButtonDown(SDL_BUTTON_LEFT),
-            .undoPressed = input.keyPressed(SDL_SCANCODE_Z),
-            .deleting = input.keyDown(SDL_SCANCODE_D),
-            .replaceLayer = input.keyDown(SDL_SCANCODE_R),
+            .undoPressed = input.actionPressed(InputAction::Undo),
+            .deleting = input.actionDown(InputAction::EditorDeleteTile),
+            .replaceLayer = input.actionDown(InputAction::EditorReplaceTile),
+            .moving = input.actionDown(InputAction::EditorMoveTile),
             .translateGizmoPressed = allowEditorShortcuts &&
                 input.keyPressed(SDL_SCANCODE_T),
             .rotateGizmoPressed = allowEditorShortcuts &&

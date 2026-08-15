@@ -22,6 +22,20 @@ public:
         Selectors,
     };
 
+    // Movement is tool-independent: selectors carry extra assignment data,
+    // but participate in picking and placement like other authored objects.
+    struct MoveObject {
+        enum class Kind {
+            Tile,
+            ScreenSelector,
+        };
+
+        Kind kind = Kind::Tile;
+        GridPosition3 source;
+        TileType tile = TileType::Air;
+        uint32_t selectorId = 0;
+    };
+
     struct ScreenFile {
         int index = 0;
         std::filesystem::path path;
@@ -72,6 +86,12 @@ public:
     void paintCell(GridPosition3 position);
     void eraseCell(GridPosition3 position);
     void setCell(GridPosition3 position, TileType tile);
+    [[nodiscard]] bool beginMove(GridPosition3 source);
+    void cancelMove();
+    [[nodiscard]] bool moveObject(GridPosition3 destination);
+    [[nodiscard]] const std::optional<MoveObject>& pendingMove() const;
+    [[nodiscard]] GridPosition3 resolveMoveTarget(
+        GridPosition3 pickedCell) const;
     [[nodiscard]] bool placeDecoration(GridPosition3 surfaceCell);
     [[nodiscard]] bool selectDecoration(std::size_t index);
     void clearDecorationSelection();
@@ -96,6 +116,11 @@ public:
         GridPosition3 pickedCell,
         bool deleting,
         bool replaceLayer) const;
+    // Unlocked selector clicks prefer a flag already in the picked column;
+    // locked editing treats selectors like every other object on that layer.
+    // Empty unlocked columns resolve to the surface placement cell.
+    [[nodiscard]] GridPosition3 resolveSelectorTarget(
+        GridPosition3 pickedCell) const;
     [[nodiscard]] bool tryUndoEdit();
 
     void addLevelAt(int levelIndex);
@@ -218,6 +243,7 @@ private:
     Document document_;
     std::vector<EditActionRecord> editHistory_;
     std::optional<DocumentSnapshot> decorationTransformBefore_;
+    std::optional<MoveObject> pendingMove_;
 };
 
 } // namespace sokoban
