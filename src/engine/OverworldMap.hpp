@@ -20,13 +20,6 @@ struct OverworldSlot {
     bool operator==(const OverworldSlot&) const = default;
 };
 
-struct OverworldPosition {
-    OverworldScreenId screen = 0;
-    GridPosition3 cell {};
-
-    bool operator==(const OverworldPosition&) const = default;
-};
-
 struct OverworldScreenSpec {
     OverworldScreenId id = 0;
     std::filesystem::path file;
@@ -36,10 +29,9 @@ struct OverworldScreenSpec {
 };
 
 struct OverworldLayout {
-    int format = 2;
+    int format = 3;
     uint32_t screenWidth = 0;
     uint32_t screenHeight = 0;
-    OverworldPosition start;
     std::vector<OverworldScreenSpec> screens;
 
     bool operator==(const OverworldLayout&) const = default;
@@ -111,7 +103,7 @@ public:
     }
     [[nodiscard]] OverworldScreenId startScreen() const
     {
-        return layout_.start.screen;
+        return startScreen_;
     }
     [[nodiscard]] const std::vector<OverworldScreenRuntime>& screens() const
     {
@@ -146,6 +138,7 @@ private:
     Level level_;
     GridPosition normalizationOffset_ {};
     uint64_t fingerprint_ = 0;
+    OverworldScreenId startScreen_ = 0;
     std::vector<OverworldScreenRuntime> screens_;
     std::vector<OverworldSelectorRuntime> selectors_;
 };

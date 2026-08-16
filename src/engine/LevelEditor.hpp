@@ -186,7 +186,6 @@ public:
     [[nodiscard]] std::optional<OverworldScreenId> overworldScreenId() const;
     [[nodiscard]] std::optional<OverworldScreenId> selectorLevelOwner(
         int puzzleLevel) const;
-    [[nodiscard]] std::optional<GridPosition3> overworldStartCell() const;
     [[nodiscard]] const std::string& status() const;
 
 private:

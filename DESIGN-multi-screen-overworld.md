@@ -1,12 +1,12 @@
 # Multi-Screen Overworld Design and Implementation
 
-Status: implemented. The runtime composes separately authored screens into one overworld, renders the active screen and its surrounding 3x3 neighborhood, and moves the camera between screen centers during ordinary cross-screen movement. The editor can add, move, edit, delete, restore, and save screens. Screen seams are implicit: no connection records or connection-editing tools exist.
+Status: implemented. The runtime composes separately authored screens into one overworld, renders the active screen and its surrounding 3x3 neighborhood, and moves the camera between screen centers during ordinary cross-screen movement. The editor can add, move, edit, delete, restore, and save screens.
 
 ## 1. Summary
 
 The overworld is a spatial map of separately authored, equal-sized screens. Each screen has a stable ID and occupies an integer `(x, y)` slot. Cardinally adjacent slots share a physical boundary. Diagonal screens are visible but do not share movement cells.
 
-At load time, every screen definition is translated into one global coordinate system and composed into one normal `Level`. A move across a screen boundary is therefore an ordinary one-cell move governed by the existing rules engine. If facing cells on two cardinally adjacent screens are walkable, the boundary is traversable. If normal tile, support, entity, or movement rules block the move, it is not traversable. There is no separate connection permission or metadata layer.
+At load time, every screen definition is translated into one global coordinate system and composed into one normal `Level`. A move across a screen boundary is therefore an ordinary one-cell move governed by the existing rules engine. If facing cells on two cardinally adjacent screens are walkable, the boundary is traversable. If normal tile, support, entity, or movement rules block the move, it is not traversable. Screen placement contributes no additional movement state.
 
 The active screen is derived from the living players' global cells. When movement changes that ownership, the camera interpolates from the old screen center to the new one during the same action. Rendering includes the active screen and every existing cardinal or diagonal neighbor in its surrounding 3x3 slot region.
 
@@ -17,12 +17,11 @@ Puzzle selectors remain inside component screen files. All selectors for one puz
 - Author an arbitrarily shaped overworld from separately editable screens.
 - Place screens in a two-dimensional slot layout.
 - Traverse cardinal seams through normal movement and collision rules.
-- Avoid authored connection records, endpoint markers, pairing tools, and special seam logic.
+- Keep boundary traversal entirely within the ordinary gameplay rules.
 - Animate the camera during a cross-screen action.
 - Render the active screen and all existing screens in its surrounding 3x3 neighborhood.
 - Preserve ordinary movement, pushing, conveyors, ice, mirrors, undo, restart, and checkpoint behavior across boundaries.
 - Keep screen identity stable when screens move or other screens are added.
-- Validate that every screen is reachable from the authored start through at least one chain of implicit walkable seams.
 - Enforce one overworld-screen owner per puzzle level.
 
 ## 3. Non-goals
@@ -50,11 +49,6 @@ struct OverworldSlot {
     int x = 0;
     int y = 0;
 };
-
-struct OverworldPosition {
-    OverworldScreenId screen = 0;
-    GridPosition3 cell;
-};
 ```
 
 IDs are positive and stable. Filenames derive from IDs but IDs do not need to be contiguous. Slots and referenced filenames are unique.
@@ -63,16 +57,12 @@ IDs are positive and stable. Filenames derive from IDs but IDs do not need to be
 
 ## 6. Layout format
 
-`levels/overworld/layout.json` uses strict format 2:
+`levels/overworld/layout.json` uses strict format 3:
 
 ```json
 {
-  "format": 2,
+  "format": 3,
   "screenSize": [12, 8],
-  "start": {
-    "screen": 1,
-    "cell": [6, 4, 1]
-  },
   "screens": [
     { "id": 1, "file": "screen1.scr", "slot": [0, 0] },
     { "id": 2, "file": "screen2.scr", "slot": [0, -1] },
@@ -83,9 +73,9 @@ IDs are positive and stable. Filenames derive from IDs but IDs do not need to be
 }
 ```
 
-There is deliberately no `connections` property. Strict parsing rejects it as unknown, and format 1 layouts are rejected rather than ambiguously reinterpreted. Serialization writes screens in ascending ID order, rejects unknown properties and unsafe paths, and uses safe integer coordinates.
+Serialization writes screens in ascending ID order, rejects unknown properties and unsafe paths, and uses safe integer coordinates.
 
-The start cell is local to its screen and is the only cell-level topology metadata. Component files do not contain a Player or End tile; the loader injects the single player at the translated start.
+Exactly one component screen contains one authored Player tile. Its screen and local cell define the overworld start. End tiles remain forbidden in overworld components.
 
 Every component has the declared width and height. Depth may differ; absent higher layers compose as Air. All screens must agree on water-layer metadata.
 
@@ -104,34 +94,29 @@ Two screens can be traversed directly only when their slots are cardinally adjac
 
 A boundary pair is an implicit seam exactly when both cells are walkable under the composed level's ordinary static walkability query. Gameplay still applies the complete rules when an entity attempts the move, so temporary entities and action-specific constraints remain authoritative. Multiple walkable pairs naturally create multiple crossings. Walls, unsupported Air, water, and other non-walkable geometry close individual portions of a boundary.
 
-No endpoint uniqueness, colored pairing, connection ID, or undeclared-seam check exists. Editing ordinary boundary tiles is how authors open or close a seam.
+Editing ordinary boundary tiles is how authors open or close a possible crossing.
 
 Topology rules:
 
 - screen IDs, slots, and active filenames are unique;
 - referenced files exist and parse;
-- every screen is reachable from the start screen through implicit walkable boundary pairs;
 - diagonal adjacency is visual only;
 - sparse layouts and holes are valid;
-- cardinal neighbors may have a fully blocked shared edge, provided both remain reachable through another route;
+- screens may be isolated, diagonal-only, or separated by fully blocked shared edges;
 - configured span, depth, and total-cell limits bound composition allocations.
 
 ## 8. Loading and composition
 
 Loading proceeds as follows:
 
-1. Strictly parse format-2 `layout.json` and validate identities, paths, slots, dimensions, and start metadata.
+1. Strictly parse format-3 `layout.json` and validate identities, paths, slots, and dimensions.
 2. Parse every referenced `.scr` as a `Level::Definition`.
-3. Require common dimensions and water metadata; reject component Player and End tiles.
+3. Require common dimensions and water metadata, exactly one Player tile across all components, and no End tiles.
 4. Compute origins, map bounds, and the normalization offset.
 5. Translate tiles, decorations, selectors, and water behavior into one composed definition.
-6. Inject the Player at the translated start and construct one normal `Level`.
+6. Construct one normal `Level`; its authored Player tile becomes the runtime start.
 7. Build slot-to-screen and global-cell ownership lookups.
-8. Inspect cardinal neighbors' facing cells using `Level::isWalkable` and build the derived reachability graph.
-9. Reject a map if any screen is unreachable from the start through that graph.
-10. Compute a deterministic fingerprint from format, dimensions, start, screen IDs/slots/files, and normalized component definitions.
-
-The derived seam graph is validation/navigation metadata only. It does not intercept gameplay moves; `GameplaySession` and the regular rules remain authoritative.
+8. Compute a deterministic fingerprint from format, dimensions, screen IDs/slots/files, and normalized component definitions.
 
 ## 9. Runtime behavior
 
@@ -167,7 +152,7 @@ struct OverworldCheckpoint {
 };
 ```
 
-The fingerprint includes screen layout, start, and component content. Because implicit seam state comes from ordinary component geometry, changing a boundary tile changes the fingerprint without needing separate topology metadata.
+The fingerprint includes screen layout and component content, including the Player tile. Moving that tile or changing a boundary therefore changes the fingerprint.
 
 If the fingerprint, snapshot, active screen, or living-player ownership is invalid, only the overworld checkpoint is discarded and rebuilt from the authored start. Puzzle progress and settings remain intact.
 
@@ -184,7 +169,7 @@ Selectors for different levels may share an overworld screen or live on separate
 
 ## 13. Editor design
 
-`OverworldMapEditor` owns the complete in-memory layout and component draft, selection, stable-ID allocation, screen add/move/delete/restore, start-cell editing, topology undo/redo, validation, and transactional save. `LevelEditor` continues to edit one selected component's tiles, decorations, and selectors.
+`OverworldMapEditor` owns the complete in-memory layout and component draft, selection, stable-ID allocation, screen add/move/delete/restore, topology undo/redo, validation, and transactional save. `LevelEditor` continues to edit one selected component's tiles, decorations, selectors, and the Player tile.
 
 The Overworld Map panel provides:
 
@@ -192,16 +177,16 @@ The Overworld Map panel provides:
 - selected-screen `+N`, `+E`, `+S`, and `+W` controls;
 - immediate creation of an all-Ground layer 0 with Air above;
 - screen open, move, delete, restore, undo, redo, and validated save actions;
-- start-screen markers and selector/diagnostic summaries.
+- selector and diagnostic summaries.
 
-Adding a cardinal neighbor is immediate. There is no connection picker or confirmation step. The new screen can be opened and edited at once, including before its first save. The default ground boundary is walkable, so adjacent newly created screens are reachable immediately.
+Adding a cardinal neighbor is immediate. The new screen can be opened and edited at once, including before its first save. Its initial layer is all Ground, with Air above.
 
 While editing an overworld component:
 
 - dimensions are locked to the map;
-- Player and End tiles are disabled;
+- Player is available and End is disabled;
 - selectors and decorations remain screen-local;
-- only the map start is protected and shown as a 3D metadata overlay;
+- placing Player moves the tile within the current component, and complete-map validation requires exactly one across all components;
 - ordinary edge tile edits directly open or close implicit crossings;
 - a component save validates the complete composed draft before replacing source or runtime files.
 
@@ -211,42 +196,38 @@ Draft play composes all in-memory screens plus the unsaved active component and 
 
 Structural validation shared by runtime loading, editor transactions, and content staging requires:
 
-- strict format-2 layout syntax with no legacy connection property;
+- strict format-3 layout syntax;
 - unique identities, slots, and paths;
 - referenced, parseable, dimension-compatible components;
-- valid start metadata and no component Player/End tiles;
+- exactly one authored Player tile and no component End tiles;
 - common water metadata;
-- complete reachability through derived walkable seam pairs;
 - valid selectors, decorations, and allocation limits;
 - successful construction of the composed `Level`.
 
 Production validation additionally requires assigned selector coverage and the one-overworld-screen-per-puzzle-level invariant.
 
-Useful diagnostics identify the screen and cause, for example: `screen 9 is unreachable: no path of facing walkable boundary cells from the start`.
-
 ## 15. Implementation phases
 
-1. **Topology and composition:** strict layout types, coordinate translation, ownership queries, selector identity, implicit seam reachability, and tests.
+1. **Topology and composition:** strict layout types, coordinate translation, ownership queries, selector identity, and tests.
 2. **Persistence and campaign state:** topology fingerprints, typed checkpoints, migration, and active-screen restoration.
 3. **Movement and camera:** projected-action ownership, crossing transitions, fixed 3x3 framing, and visibility union.
 4. **Rendering and assets:** neighborhood culling, per-screen splat regions, water seam handling, and production staging.
-5. **Content migration:** convert the old single overworld to a one-screen format-2 layout.
-6. **Editor topology:** spatial canvas, immediate cardinal add controls, all-ground defaults, move/delete/restore, start picker, draft composition, and transactional saves.
+5. **Content migration:** convert the old single overworld to a multi-screen format-3 layout.
+6. **Editor topology:** spatial canvas, immediate cardinal add controls, all-ground defaults, move/delete/restore, Player-tile authoring, draft composition, and transactional saves.
 7. **Polish and content authoring:** build the intended multi-screen production world and playtest visual readability at crossings.
 
 ## 16. Test plan
 
 Automated coverage includes:
 
-- canonical format-2 layout round trips;
-- rejection of format 1 and the legacy `connections` property;
+- canonical format-3 layout round trips;
 - global/local translation with negative slots;
 - composition and ordinary gameplay movement across an implicit seam;
-- blocked or diagonal boundaries not creating reachability;
+- isolated, diagonal, and fully blocked screens loading without topology errors;
 - action admission and undo across screens;
 - camera interpolation and fixed neighborhood framing;
 - selector coverage and one-screen ownership per puzzle level;
-- editor add/move/delete/restore/start/undo/redo flows;
+- editor add/move/delete/restore/undo/redo flows and unique-Player validation;
 - all-Ground/Air defaults for new screens;
 - unsaved topology and component draft play;
 - transactional failure leaving source and staged content unchanged;
@@ -257,7 +238,7 @@ Automated coverage includes:
 The feature is complete when:
 
 - production loads through `layout.json` and one composed session;
-- adjacent walkable boundary cells can be crossed using normal game mechanics without connection metadata;
+- adjacent walkable boundary cells can be crossed using normal game mechanics;
 - blocked boundary cells cannot be crossed;
 - the camera transitions during the same action and the destination becomes active;
 - cardinal and diagonal neighbors are visible;

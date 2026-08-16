@@ -900,12 +900,11 @@ void testComposedOverworldDocumentsArePathAwareAndTransactional()
         "@selector {\"cell\":[0,0,1],\"id\":1,"
         "\"target\":{\"level\":0,\"screen\":0}}\n\n"
         "@layer 0\n...\n...\n...\n"
-        "@layer 1\n   \n   \n   \n");
+        "@layer 1\n   \n C \n   \n");
     write(project.source / "overworld/layout.json",
         "{\n"
-        "  \"format\": 2,\n"
+        "  \"format\": 3,\n"
         "  \"screenSize\": [3, 3],\n"
-        "  \"start\": {\"screen\": 1, \"cell\": [1, 1, 1]},\n"
         "  \"screens\": ["
         "{\"id\": 1, \"file\": \"screen1.scr\", \"slot\": [0, 0]}]\n"
         "}\n");
@@ -919,16 +918,16 @@ void testComposedOverworldDocumentsArePathAwareAndTransactional()
     CHECK(editor.sourceLevelRoot() == project.source);
     CHECK(editor.runtimeLevelRoot() == project.runtime);
 
-    editor.setCell({ 1, 1, 1 }, TileType::Player);
+    editor.setCell({ 2, 1, 1 }, TileType::Player);
     CHECK(editor.documentLayers()[1][1][1] == tileTypeToChar(TileType::Air));
+    CHECK(editor.documentLayers()[1][1][2] == tileTypeToChar(TileType::Player));
     editor.resizeDocument(4, 4);
     CHECK(editor.documentWidth() == 3);
     CHECK(editor.documentHeight() == 3);
 
     const TreeSnapshot before = snapshotTree(project.source);
     editor.setCell({ 1, 1, 1 }, TileType::Wall);
-    CHECK(editor.documentLayers()[1][1][1] == tileTypeToChar(TileType::Air));
-    CHECK(editor.status().find("start") != std::string::npos);
+    CHECK(editor.documentLayers()[1][1][1] == tileTypeToChar(TileType::Wall));
     CHECK(snapshotTree(project.source) == before);
     editor.setCell({ 2, 2, 1 }, TileType::Wall);
     CHECK(editor.saveDocument(screen));
@@ -942,7 +941,7 @@ void testComposedOverworldDocumentsArePathAwareAndTransactional()
     CHECK(editor.draftOverworldMap() != nullptr);
     CHECK(editor.playingDraft());
     CHECK(overworldDraft &&
-        overworldDraft->playerStart() == GridPosition3({ 1, 1, 1 }));
+        overworldDraft->playerStart() == GridPosition3({ 2, 1, 1 }));
     editor.setPlayingDraft(false);
     CHECK(editor.draftOverworldMap() == nullptr);
 
@@ -996,7 +995,7 @@ void testComposedSelectorOwnershipIsEnforcedBeforeSave()
         "@layer 1\n   \n C \n E \n");
     write(project.source / "overworld/screen1.scr",
         "@layer 0\n...\n...\n...\n"
-        "@layer 1\n  #\n   \n  #\n");
+        "@layer 1\n  #\n C \n  #\n");
     write(project.source / "overworld/screen2.scr",
         "@selector {\"cell\":[1,1,1],\"id\":1,"
         "\"target\":{\"level\":0,\"screen\":0}}\n\n"
@@ -1004,9 +1003,8 @@ void testComposedSelectorOwnershipIsEnforcedBeforeSave()
         "@layer 1\n#  \n   \n#  \n");
     write(project.source / "overworld/layout.json",
         "{\n"
-        "  \"format\": 2,\n"
+        "  \"format\": 3,\n"
         "  \"screenSize\": [3, 3],\n"
-        "  \"start\": {\"screen\": 1, \"cell\": [1, 1, 1]},\n"
         "  \"screens\": [\n"
         "    {\"id\": 1, \"file\": \"screen1.scr\", \"slot\": [0, 0]},\n"
         "    {\"id\": 2, \"file\": \"screen2.scr\", \"slot\": [1, 0]}\n"
@@ -1015,14 +1013,61 @@ void testComposedSelectorOwnershipIsEnforcedBeforeSave()
 
     LevelEditor editor = makeEditor(project);
     CHECK(editor.loadDocument(project.source / "overworld/screen1.scr"));
-    CHECK(editor.overworldStartCell() ==
-        std::optional<GridPosition3>({ 1, 1, 1 }));
+    CHECK(editor.documentLayers()[1][1][1] ==
+        tileTypeToChar(TileType::Player));
     CHECK(editor.selectorLevelOwner(0) == 2U);
     CHECK(editor.placeSelector({ 0, 0, 1 }));
     CHECK(!editor.updateSelectedSelectorTarget(
         LevelLocation { .level = 0, .screen = 0 }));
     CHECK(!editor.selectors()[0].target);
     CHECK(editor.status().find("screen 2") != std::string::npos);
+}
+
+void testOverworldPlayerTileMovesAcrossComponents()
+{
+    TEST("overworldPlayerTileMovesAcrossComponents");
+    TemporaryProject project;
+    const auto write = [](const std::filesystem::path& path,
+                           std::string_view text) {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream file(path, std::ios::trunc);
+        file << text;
+    };
+    write(project.source / "level0/screen0.scr",
+        "@layer 0\n...\n...\n...\n"
+        "@layer 1\n   \n C \n E \n");
+    write(project.source / "overworld/screen1.scr",
+        "@layer 0\n...\n...\n...\n"
+        "@layer 1\n   \n C \n   \n");
+    write(project.source / "overworld/screen2.scr",
+        "@layer 0\n...\n...\n...\n"
+        "@layer 1\n   \n   \n   \n");
+    write(project.source / "overworld/layout.json",
+        "{\n"
+        "  \"format\": 3,\n"
+        "  \"screenSize\": [3, 3],\n"
+        "  \"screens\": [\n"
+        "    {\"id\": 1, \"file\": \"screen1.scr\", \"slot\": [0, 0]},\n"
+        "    {\"id\": 2, \"file\": \"screen2.scr\", \"slot\": [1, 0]}\n"
+        "  ]\n"
+        "}\n");
+
+    LevelEditor editor = makeEditor(project);
+    const std::filesystem::path screen2 =
+        project.source / "overworld/screen2.scr";
+    CHECK(editor.loadDocument(screen2));
+    editor.setCell({ 0, 1, 1 }, TileType::Player);
+    CHECK(editor.saveDocument(screen2));
+
+    const Level::Definition first = Level::loadDefinitionFromFile(
+        project.source / "overworld/screen1.scr");
+    const Level::Definition second = Level::loadDefinitionFromFile(screen2);
+    CHECK(first.layers[1][1][1] == tileTypeToChar(TileType::Air));
+    CHECK(second.layers[1][1][0] == tileTypeToChar(TileType::Player));
+    const OverworldMap map = OverworldMap::load(
+        project.source / "overworld");
+    CHECK(map.startScreen() == 2U);
+    CHECK(map.level().playerStart() == GridPosition3({ 3, 1, 1 }));
 }
 
 } // namespace
@@ -1050,6 +1095,7 @@ int main()
     testMoveTileIsAtomicAndUndoable();
     testComposedOverworldDocumentsArePathAwareAndTransactional();
     testComposedSelectorOwnershipIsEnforcedBeforeSave();
+    testOverworldPlayerTileMovesAcrossComponents();
 
     if (failures == 0) {
         std::cout << "LevelEditorTests: " << checks << " checks passed\n";

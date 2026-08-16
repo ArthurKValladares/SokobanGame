@@ -50,13 +50,12 @@ struct TemporaryProject {
             "...\n"
             "@layer 1\n"
             "   \n"
-            "   \n"
+            " C \n"
             "   \n");
         write(source / "overworld/layout.json",
             "{\n"
-            "  \"format\": 2,\n"
+            "  \"format\": 3,\n"
             "  \"screenSize\": [3, 3],\n"
-            "  \"start\": { \"screen\": 1, \"cell\": [1, 1, 1] },\n"
             "  \"screens\": [\n"
             "    { \"id\": 1, \"file\": \"screen1.scr\", \"slot\": [0, 0] }\n"
             "  ]\n"
@@ -81,7 +80,7 @@ struct TemporaryProject {
     std::filesystem::path runtime;
 };
 
-void testConnectedScreenLifecycleAndHistory()
+void testScreenLifecycleAndHistory()
 {
     TemporaryProject project;
     sokoban::OverworldMapEditor editor;
@@ -101,9 +100,6 @@ void testConnectedScreenLifecycleAndHistory()
     CHECK(editor.redo());
     CHECK(editor.screens().size() == 2);
     CHECK(editor.moveScreen(2, { 2, 0 }));
-    CHECK(!editor.save());
-    CHECK(editor.undo());
-
     CHECK(editor.save());
     CHECK(!editor.dirty());
     CHECK(std::filesystem::exists(project.source / "overworld/screen2.scr"));
@@ -116,20 +112,19 @@ void testConnectedScreenLifecycleAndHistory()
     CHECK(composed.screens().size() == 2);
 }
 
-void testInvalidDraftSavePreservesProject()
+void testIndependentScreenCanBeSaved()
 {
     TemporaryProject project;
     sokoban::OverworldMapEditor editor;
     editor.initialize(project.source, project.runtime);
 
     CHECK(editor.addScreen({ 2, 2 }));
-    CHECK(!editor.save());
-    CHECK(editor.status().find("preserved") != std::string::npos);
-    CHECK(!std::filesystem::exists(project.source / "overworld/screen2.scr"));
-    const sokoban::OverworldLayout original = sokoban::loadOverworldLayout(
+    CHECK(editor.save());
+    CHECK(std::filesystem::exists(project.source / "overworld/screen2.scr"));
+    const sokoban::OverworldLayout saved = sokoban::loadOverworldLayout(
         project.source / "overworld/layout.json");
-    CHECK(original.screens.size() == 1);
-    CHECK(editor.undo());
+    CHECK(saved.screens.size() == 2);
+    CHECK(saved.screens[1].slot == sokoban::OverworldSlot({ 2, 2 }));
     CHECK(!editor.dirty());
 }
 
@@ -159,34 +154,23 @@ void testSoftDeleteAndRestoreKeepStableIdentity()
     CHECK(editor.screen(2) != nullptr);
 }
 
-void testStartValidation()
+void testPlayerTileValidation()
 {
     TemporaryProject project;
     sokoban::OverworldMapEditor editor;
     editor.initialize(project.source, std::nullopt);
-    CHECK(!editor.setStart(1, { 1, 1, 0 }));
-    CHECK(editor.setStart(1, { 0, 0, 1 }));
-    CHECK((editor.layout().start.cell ==
-        sokoban::GridPosition3 { 0, 0, 1 }));
-    CHECK(editor.save());
+    CHECK(editor.addAdjacentScreen(1, { 1, 0 }));
+    CHECK(editor.deleteScreen(1));
+    CHECK(!editor.save());
+    CHECK(editor.status().find("exactly one Player tile") !=
+        std::string::npos);
 }
 
-void testCellPickingToolsAndUnsavedComposition()
+void testUnsavedComposition()
 {
     TemporaryProject project;
     sokoban::OverworldMapEditor editor;
     editor.initialize(project.source, std::nullopt);
-
-    CHECK(editor.beginSetStartCell(1));
-    CHECK(editor.cellTool().has_value());
-    CHECK(!editor.applyCellTool(2, { 0, 0, 1 }));
-    CHECK(editor.cellTool().has_value());
-    CHECK(!editor.applyCellTool(1, { 0, 0, 0 }));
-    CHECK(editor.cellTool().has_value());
-    CHECK(editor.applyCellTool(1, { 0, 0, 1 }));
-    CHECK(!editor.cellTool().has_value());
-    CHECK((editor.layout().start.cell ==
-        sokoban::GridPosition3 { 0, 0, 1 }));
 
     CHECK(editor.addAdjacentScreen(1, { 1, 0 }));
     CHECK(editor.screens().size() == 2);
@@ -209,9 +193,6 @@ void testCellPickingToolsAndUnsavedComposition()
         project.source / "overworld",
         editor.draftOverride());
     CHECK(draft.screens().size() == 2);
-    CHECK(editor.beginSetStartCell(1));
-    editor.cancelCellTool();
-    CHECK(!editor.cellTool().has_value());
 }
 
 void testTopologyDraftPreservesNewerComponentSaves()
@@ -227,7 +208,7 @@ void testTopologyDraftPreservesNewerComponentSaves()
         "...\n"
         "@layer 1\n"
         "   \n"
-        "   \n"
+        " C \n"
         "  #\n");
 
     const sokoban::OverworldMap draft = sokoban::OverworldMap::load(
@@ -237,7 +218,6 @@ void testTopologyDraftPreservesNewerComponentSaves()
     CHECK(draft.screen(1) &&
         draft.screen(1)->definition.layers[1][2][2] == '#');
 
-    CHECK(editor.setStart(1, { 0, 0, 1 }));
     CHECK(editor.save());
     const sokoban::Level::Definition saved =
         sokoban::Level::loadDefinitionFromFile(
@@ -253,11 +233,11 @@ void testTopologyDraftPreservesNewerComponentSaves()
 
 int main()
 {
-    testConnectedScreenLifecycleAndHistory();
-    testInvalidDraftSavePreservesProject();
+    testScreenLifecycleAndHistory();
+    testIndependentScreenCanBeSaved();
     testSoftDeleteAndRestoreKeepStableIdentity();
-    testStartValidation();
-    testCellPickingToolsAndUnsavedComposition();
+    testPlayerTileValidation();
+    testUnsavedComposition();
     testTopologyDraftPreservesNewerComponentSaves();
 
     if (failures != 0) {

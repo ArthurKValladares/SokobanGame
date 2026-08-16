@@ -444,72 +444,6 @@ void ApplicationTools::drawSelectorLabels(
             label.text.c_str());
     }
 
-    auto drawTopologyLabel = [&](GridPosition3 cell,
-                                 const std::string& text,
-                                 ImU32 color) {
-        const std::optional<Vec2> anchor = renderer.projectToPixels(
-            *frame,
-            {
-                static_cast<float>(cell.x) + 0.5f,
-                static_cast<float>(cell.y) + 0.5f,
-                static_cast<float>(cell.z) + 1.35f,
-            });
-        if (!anchor) {
-            return;
-        }
-        const ImVec2 size = ImGui::CalcTextSize(text.c_str());
-        const ImVec2 position {
-            anchor->x - size.x * 0.5f,
-            anchor->y - size.y * 0.5f,
-        };
-        drawList->AddRectFilled(
-            ImVec2(position.x - 5.0f, position.y - 3.0f),
-            ImVec2(position.x + size.x + 5.0f,
-                position.y + size.y + 3.0f),
-            IM_COL32(13, 18, 26, 220),
-            4.0f);
-        drawList->AddRect(
-            ImVec2(position.x - 5.0f, position.y - 3.0f),
-            ImVec2(position.x + size.x + 5.0f,
-                position.y + size.y + 3.0f),
-            color,
-            4.0f,
-            0,
-            2.0f);
-        drawList->AddText(position, color, text.c_str());
-    };
-    bool drewDraftTopology = false;
-    if (const std::optional<OverworldScreenId> visibleScreen =
-            levelEditor.overworldScreenId();
-        visibleScreen && overworldMapEditor.loaded() &&
-        overworldMapEditor.projectLevelRoot().lexically_normal() ==
-            levelEditor.browserRoot().lexically_normal() &&
-        overworldMapEditor.screen(*visibleScreen)) {
-        drewDraftTopology = true;
-        const OverworldLayout& layout = overworldMapEditor.layout();
-        if (layout.start.screen == *visibleScreen) {
-            drawTopologyLabel(
-                layout.start.cell,
-                "OVERWORLD START",
-                IM_COL32(102, 235, 145, 255));
-        }
-    }
-    if (!drewDraftTopology) {
-        if (const std::optional<GridPosition3> start =
-                levelEditor.overworldStartCell()) {
-            drawTopologyLabel(
-                *start,
-                "OVERWORLD START",
-                IM_COL32(102, 235, 145, 255));
-        }
-    }
-    if (const auto& tool = overworldMapEditor.cellTool();
-        tool && hoverCell) {
-        drawTopologyLabel(
-            *hoverCell,
-            "CLICK: SET START",
-            IM_COL32(102, 235, 145, 255));
-    }
 #else
     (void)renderer;
     (void)frame;
@@ -666,10 +600,6 @@ void ApplicationTools::updateEditorInteraction(
         levelEditor.cancelMove();
     }
     if (input.undoPressed) {
-        if (overworldMapEditor.cellTool()) {
-            overworldMapEditor.cancelCellTool();
-            return;
-        }
         if (decorationGizmo.dragging()) {
             decorationGizmo.endDrag();
             (void)levelEditor.endSelectedDecorationTransform(false);
@@ -705,25 +635,6 @@ void ApplicationTools::updateEditorInteraction(
 
     const Vec2 pointerPixels = EditorInteraction::pointerPixels(
         input.pointerPosition, windowSize, pixelSize);
-    if (overworldMapEditor.cellTool()) {
-        if (const std::optional<GridPosition3> clicked =
-                renderer.pickIsoGridCell(
-                    *previousRenderFrame, pointerPixels)) {
-            const GridPosition3 target = levelEditor.resolveEditTarget(
-                *clicked, false, false);
-            hoverCell = target;
-            if (input.primaryPressed) {
-                if (const std::optional<OverworldScreenId> visibleScreen =
-                        levelEditor.overworldScreenId()) {
-                    const Level::Definition visibleDefinition =
-                        levelEditor.documentDefinition();
-                    (void)overworldMapEditor.applyCellTool(
-                        *visibleScreen, target, &visibleDefinition);
-                }
-            }
-        }
-        return;
-    }
     if (updateGroundPainting(
             input, *previousRenderFrame, pointerPixels, renderer)) {
         return;

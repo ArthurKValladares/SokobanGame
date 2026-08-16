@@ -684,11 +684,9 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
     if (document_.layers.empty() || position.z < 0) {
         return;
     }
-    if (editingOverworld() &&
-        (tile == TileType::End || tile == TileType::Player)) {
+    if (editingOverworld() && tile == TileType::End) {
         document_.status =
-            "Player and End tiles are not allowed in overworld screens; "
-            "the player start is layout metadata.";
+            "End tiles are not allowed in overworld screens.";
         return;
     }
     if (editingOverworld() &&
@@ -699,35 +697,6 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
             "Overworld screen dimensions are fixed by layout.json.";
         return;
     }
-    if (const std::optional<OverworldScreenId> screenId =
-            overworldScreenId()) {
-        try {
-            const OverworldLayout layout = loadOverworldLayout(
-                document_.browserRoot / "overworld/layout.json");
-            if (layout.start.screen == *screenId) {
-                if (position == layout.start.cell && tile != TileType::Air) {
-                    document_.status =
-                        "The overworld start must remain authored Air; move "
-                        "the start metadata before changing this cell.";
-                    return;
-                }
-                GridPosition3 support = layout.start.cell;
-                --support.z;
-                if (position == support && !tileTypeSupportsEntity(tile)) {
-                    document_.status =
-                        "That tile supports the overworld start and cannot "
-                        "be removed first.";
-                    return;
-                }
-            }
-        } catch (const std::exception& error) {
-            document_.status =
-                "Cannot validate overworld metadata: " +
-                std::string(error.what());
-            return;
-        }
-    }
-
     const int oldHeight = static_cast<int>(documentHeight());
     const int oldWidth = static_cast<int>(documentWidth());
     const int prependColumns = std::max(-position.x, 0);
@@ -1212,23 +1181,6 @@ std::optional<OverworldScreenId> LevelEditor::selectorLevelOwner(
     return std::nullopt;
 }
 
-std::optional<GridPosition3> LevelEditor::overworldStartCell() const
-{
-    const std::optional<OverworldScreenId> id = overworldScreenId();
-    if (!id) {
-        return std::nullopt;
-    }
-    try {
-        const OverworldLayout layout = loadOverworldLayout(
-            document_.browserRoot / "overworld/layout.json");
-        return layout.start.screen == *id
-            ? std::optional<GridPosition3> { layout.start.cell }
-            : std::nullopt;
-    } catch (const std::exception&) {
-        return std::nullopt;
-    }
-}
-
 bool LevelEditor::dirty() const
 {
     return document_.dirty;
@@ -1488,9 +1440,8 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     try {
         definition = Level::parseDefinition(rows, path.string());
         if (overworldScreenIdForPath(path)) {
-            // Component definitions intentionally contain no Player tile.
-            // Validate them through the complete composed map, which injects
-            // the one layout-owned start and checks cross-file topology.
+            // The complete composed map validates the single Player tile
+            // across every overworld component.
             (void)OverworldMap::load(path.parent_path());
         } else {
             (void)Level::loadFromDefinition(definition, path.string());
@@ -1553,6 +1504,16 @@ bool LevelEditor::saveDocument(const std::filesystem::path& path)
     }
 
     const std::filesystem::path sourcePath = normalizedAbsolutePath(path);
+    const bool documentContainsPlayer = std::ranges::any_of(
+        document_.layers,
+        [](const std::vector<std::string>& layer) {
+            return std::ranges::any_of(
+                layer,
+                [](const std::string& row) {
+                    return row.find(tileTypeToChar(TileType::Player)) !=
+                        std::string::npos;
+                });
+        });
     const std::vector<std::string> serialized =
         Level::serializeDefinition({
             .layers = document_.layers,
@@ -1561,8 +1522,8 @@ bool LevelEditor::saveDocument(const std::filesystem::path& path)
             .selectors = document_.selectors,
         });
 
-    // A component edit can invalidate the start, implicit seam reachability,
-    // common dimensions, or water metadata. Route it through the
+    // A component edit can invalidate the unique Player tile, common
+    // dimensions, or water metadata. Route it through the
     // same whole-project validator as topology edits so source and runtime can
     // never disagree or expose a half-valid map.
     if (overworldScreenIdForPath(sourcePath)) {
@@ -1577,7 +1538,41 @@ bool LevelEditor::saveDocument(const std::filesystem::path& path)
             return false;
         }
         if (!applyProjectMutation(
-                [relative, serialized](const std::filesystem::path& root) {
+                [relative, serialized, documentContainsPlayer](
+                    const std::filesystem::path& root) {
+                    if (documentContainsPlayer) {
+                        const OverworldLayout layout = loadOverworldLayout(
+                            root / "overworld/layout.json");
+                        const std::filesystem::path current =
+                            (root / relative).lexically_normal();
+                        for (const OverworldScreenSpec& screen :
+                             layout.screens) {
+                            const std::filesystem::path other =
+                                (root / "overworld" / screen.file)
+                                    .lexically_normal();
+                            if (other == current) {
+                                continue;
+                            }
+                            Level::Definition definition =
+                                Level::loadDefinitionFromFile(other);
+                            bool changed = false;
+                            for (auto& layer : definition.layers) {
+                                for (std::string& row : layer) {
+                                    const auto before = row;
+                                    std::ranges::replace(
+                                        row,
+                                        tileTypeToChar(TileType::Player),
+                                        tileTypeToChar(TileType::Air));
+                                    changed = changed || row != before;
+                                }
+                            }
+                            if (changed) {
+                                writeScreenRows(
+                                    other,
+                                    Level::serializeDefinition(definition));
+                            }
+                        }
+                    }
                     writeScreenRows(root / relative, serialized);
                 })) {
             return false;

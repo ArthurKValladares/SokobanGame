@@ -1,17 +1,9 @@
 {
-  "format": 2,
+  "format": 3,
   "screenSize": [
     9,
     7
   ],
-  "start": {
-    "screen": 1,
-    "cell": [
-      0,
-      3,
-      1
-    ]
-  },
   "screens": [
     {
       "id": 1,
@@ -27,6 +19,14 @@
       "slot": [
         0,
         -1
+      ]
+    },
+    {
+      "id": 3,
+      "file": "screen3.scr",
+      "slot": [
+        1,
+        0
       ]
     }
   ]

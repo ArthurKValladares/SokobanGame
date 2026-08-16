@@ -60,6 +60,20 @@ bool containsId(
     return std::ranges::find(ids, id) != ids.end();
 }
 
+bool containsPlayer(const Level::Definition& definition)
+{
+    return std::ranges::any_of(
+        definition.layers,
+        [](const std::vector<std::string>& layer) {
+            return std::ranges::any_of(
+                layer,
+                [](const std::string& row) {
+                    return row.find(tileTypeToChar(TileType::Player)) !=
+                        std::string::npos;
+                });
+        });
+}
+
 } // namespace
 
 void OverworldMapEditor::initialize(
@@ -74,13 +88,11 @@ void OverworldMapEditor::initialize(
     } else {
         runtimeLevelRoot_.reset();
     }
-    cellTool_.reset();
     (void)reload();
 }
 
 bool OverworldMapEditor::reload()
 {
-    cellTool_.reset();
     try {
         State loaded;
         const std::filesystem::path root = projectLevelRoot_ / "overworld";
@@ -92,7 +104,15 @@ bool OverworldMapEditor::reload()
                 .definition = Level::loadDefinitionFromFile(root / spec.file),
             });
         }
-        loaded.selected = loaded.layout.start.screen;
+        const auto playerScreen = std::ranges::find_if(
+            loaded.screens,
+            [](const DraftScreen& screen) {
+                return containsPlayer(screen.definition);
+            });
+        loaded.selected = playerScreen != loaded.screens.end()
+            ? std::optional<OverworldScreenId> { playerScreen->spec.id }
+            : std::optional<OverworldScreenId> {
+                  loaded.layout.screens.front().id };
         state_ = std::move(loaded);
         savedState_ = state_;
         undo_.clear();
@@ -130,7 +150,6 @@ OverworldMapEditor::screens() const
             .slot = screen.spec.slot,
             .path = projectLevelRoot_ / "overworld" / screen.spec.file,
             .selectorCount = screen.definition.selectors.size(),
-            .start = state_.layout.start.screen == screen.spec.id,
             .selected = state_.selected == screen.spec.id,
         });
     }
@@ -219,28 +238,6 @@ OverworldDraftOverride OverworldMapEditor::draftOverride(
     return result;
 }
 
-std::string OverworldMapEditor::cellToolPrompt() const
-{
-    if (!cellTool_) {
-        return {};
-    }
-    return "Click a supported walkable cell to set the overworld start.";
-}
-
-bool OverworldMapEditor::beginSetStartCell(OverworldScreenId source)
-{
-    if (!screen(source)) {
-        status_ = "Open an existing overworld screen before picking its start.";
-        return false;
-    }
-    state_.selected = source;
-    cellTool_ = CellTool {
-        .source = source,
-    };
-    status_ = cellToolPrompt();
-    return true;
-}
-
 bool OverworldMapEditor::addAdjacentScreen(
     OverworldScreenId source,
     OverworldSlot slot)
@@ -261,40 +258,8 @@ bool OverworldMapEditor::addAdjacentScreen(
         return false;
     }
     status_ = "Added adjacent ground screen " +
-        std::to_string(*state_.selected) +
-        ". Facing walkable boundary cells are immediately traversable.";
+        std::to_string(*state_.selected) + ".";
     return true;
-}
-
-void OverworldMapEditor::cancelCellTool()
-{
-    if (cellTool_) {
-        cellTool_.reset();
-        status_ = "Cancelled overworld cell picking.";
-    }
-}
-
-bool OverworldMapEditor::applyCellTool(
-    OverworldScreenId visibleScreen,
-    GridPosition3 cell,
-    const Level::Definition* visibleDefinition)
-{
-    if (!cellTool_) {
-        status_ = "No overworld cell-picking tool is active.";
-        return false;
-    }
-    if (visibleScreen != cellTool_->source) {
-        status_ = "The cell picker is armed for screen " +
-            std::to_string(cellTool_->source) + ". Open that screen first.";
-        return false;
-    }
-
-    const bool applied = setStart(
-        cellTool_->source, cell, visibleDefinition);
-    if (applied) {
-        cellTool_.reset();
-    }
-    return applied;
 }
 
 bool OverworldMapEditor::selectScreen(OverworldScreenId id)
@@ -326,7 +291,7 @@ bool OverworldMapEditor::addScreen(OverworldSlot slot)
     state_.selected = id;
     record(std::move(before),
         "Added screen " + std::to_string(id) +
-        " to the draft. Place it beside a reachable walkable boundary before saving.");
+        " to the draft.");
     return true;
 }
 
@@ -356,10 +321,6 @@ bool OverworldMapEditor::deleteScreen(OverworldScreenId id)
         status_ = "An overworld must contain at least one screen.";
         return false;
     }
-    if (state_.layout.start.screen == id) {
-        status_ = "Move the overworld start before deleting its screen.";
-        return false;
-    }
     if (!draftScreen(id)) {
         status_ = "Cannot delete a missing overworld screen.";
         return false;
@@ -379,7 +340,9 @@ bool OverworldMapEditor::deleteScreen(OverworldScreenId id)
                    })) {
         state_.retiredIds.push_back(id);
     }
-    state_.selected = state_.layout.start.screen;
+    state_.selected = state_.screens.empty()
+        ? std::nullopt
+        : std::optional<OverworldScreenId> { state_.screens.front().spec.id };
     record(std::move(before),
         "Removed screen " + std::to_string(id) +
         " from the draft; saving moves its file to Deleted.");
@@ -411,7 +374,7 @@ bool OverworldMapEditor::restoreDeletedScreen(
         state_.selected = id;
         record(std::move(before),
             "Restored screen " + std::to_string(id) +
-            " to the draft. Place it beside a reachable walkable boundary before saving.");
+            " to the draft.");
         return true;
     } catch (const std::exception& error) {
         status_ = error.what();
@@ -419,27 +382,8 @@ bool OverworldMapEditor::restoreDeletedScreen(
     }
 }
 
-bool OverworldMapEditor::setStart(
-    OverworldScreenId screenId,
-    GridPosition3 cell,
-    const Level::Definition* sourceDefinition)
-{
-    const DraftScreen* target = draftScreen(screenId);
-    if (!target || !supportedWalkable(
-            sourceDefinition ? *sourceDefinition : target->definition,
-            cell)) {
-        status_ = "The overworld start must be a supported walkable cell.";
-        return false;
-    }
-    State before = state_;
-    state_.layout.start = { screenId, cell };
-    record(std::move(before), "Updated the overworld start cell.");
-    return true;
-}
-
 bool OverworldMapEditor::undo()
 {
-    cellTool_.reset();
     if (undo_.empty()) {
         status_ = "No topology edit to undo.";
         return false;
@@ -453,7 +397,6 @@ bool OverworldMapEditor::undo()
 
 bool OverworldMapEditor::redo()
 {
-    cellTool_.reset();
     if (redo_.empty()) {
         status_ = "No topology edit to redo.";
         return false;
@@ -611,32 +554,6 @@ Level::Definition OverworldMapEditor::defaultDefinition() const
             state_.layout.screenWidth,
             tileTypeToChar(TileType::Ground)));
     return definition;
-}
-
-bool OverworldMapEditor::supportedWalkable(
-    const Level::Definition& definition,
-    GridPosition3 cell) const
-{
-    auto tileAt = [&](GridPosition3 target) -> std::optional<TileType> {
-        if (target.x < 0 || target.y < 0 || target.z < 0 ||
-            target.z >= static_cast<int>(definition.layers.size())) {
-            return std::nullopt;
-        }
-        const auto& layer = definition.layers[static_cast<std::size_t>(target.z)];
-        if (target.y >= static_cast<int>(layer.size()) ||
-            target.x >= static_cast<int>(layer[static_cast<std::size_t>(target.y)].size())) {
-            return std::nullopt;
-        }
-        return charToTileType(
-            layer[static_cast<std::size_t>(target.y)]
-                 [static_cast<std::size_t>(target.x)]);
-    };
-    const std::optional<TileType> tile = tileAt(cell);
-    GridPosition3 below = cell;
-    --below.z;
-    const std::optional<TileType> support = tileAt(below);
-    return tile && support &&
-        tileTypeAllowsEntity(*tile) && tileTypeSupportsEntity(*support);
 }
 
 void OverworldMapEditor::record(State before, std::string status)

@@ -100,7 +100,7 @@ Level::Definition westDefinition(
     return {
         .layers = {
             { "...", "..." },
-            { "  #", "   " },
+            { "  #", " C " },
         },
         .selectors = std::move(selectors),
     };
@@ -121,13 +121,9 @@ Level::Definition eastDefinition(
 OverworldLayout eastWestLayout()
 {
     return {
-        .format = 2,
+        .format = 3,
         .screenWidth = 3,
         .screenHeight = 2,
-        .start = {
-            .screen = 1,
-            .cell = { 1, 1, 1 },
-        },
         .screens = {
             { .id = 1, .file = "screen1.scr", .slot = { 0, 0 } },
             { .id = 2, .file = "screen2.scr", .slot = { 1, 0 } },
@@ -325,38 +321,9 @@ void testActionAdmissionAndCameraTransition()
     CHECK(session.state().players.front().cell == GridPosition3({ 2, 1, 1 }));
 }
 
-void testInvalidTopologyIsRejected()
+void testLayoutValidationAndIndependentScreens()
 {
-    TEST("invalidTopologyIsRejected");
-
-    {
-        TestProject project("legacy_format");
-        OverworldLayout layout = eastWestLayout();
-        layout.format = 1;
-        checkThrowsContaining(
-            [&] { project.writeLayout(layout); },
-            "unsupported overworld layout format 1");
-    }
-
-    {
-        TestProject project("legacy_connections_property");
-        std::ofstream file(project.root / "layout.json", std::ios::trunc);
-        file << R"json({
-  "format": 2,
-  "screenSize": [3, 2],
-  "start": { "screen": 1, "cell": [1, 1, 1] },
-  "screens": [
-    { "id": 1, "file": "screen1.scr", "slot": [0, 0] }
-  ],
-  "connections": []
-})json";
-        file.close();
-        checkThrowsContaining(
-            [&] {
-                (void)loadOverworldLayout(project.root / "layout.json");
-            },
-            "unknown property 'connections'");
-    }
+    TEST("layoutValidationAndIndependentScreens");
 
     {
         TestProject project("duplicate_slot");
@@ -376,35 +343,65 @@ void testInvalidTopologyIsRejected()
         OverworldLayout layout = eastWestLayout();
         layout.screens[1].slot = { 1, 1 };
         project.writeLayout(layout);
-        checkThrowsContaining(
-            [&] { (void)OverworldMap::load(project.root); },
-            "walkable boundary pair");
+        const OverworldMap map = OverworldMap::load(project.root);
+        CHECK(map.screens().size() == 2);
+        CHECK(map.screen(2)->slot == OverworldSlot({ 1, 1 }));
     }
 
     {
         TestProject project("blocked_seam");
         Level::Definition blockedWest = westDefinition();
-        blockedWest.layers[1][1][2] = '#';
         Level::Definition blockedEast = eastDefinition();
         blockedEast.layers[1][1][0] = '#';
         project.writeScreen(1, blockedWest);
         project.writeScreen(2, blockedEast);
         project.writeLayout(eastWestLayout());
-        checkThrowsContaining(
-            [&] { (void)OverworldMap::load(project.root); },
-            "walkable boundary pair");
+        const OverworldMap map = OverworldMap::load(project.root);
+        CHECK(map.screens().size() == 2);
+
+        GameplaySession session;
+        session.reset(map.level());
+        move(session, map.level(), MoveDirection::Right);
+        CHECK(session.state().players[0].cell == GridPosition3({ 2, 1, 1 }));
+        session.queueMove(MoveDirection::Right);
+        CHECK(!session.tryStartNextAction(map.level(), {}));
+        CHECK(session.state().players[0].cell == GridPosition3({ 2, 1, 1 }));
     }
 
     {
-        TestProject project("component_player");
+        TestProject project("component_end");
         Level::Definition invalid = westDefinition();
-        invalid.layers[1][0][0] = 'C';
+        invalid.layers[1][0][0] = 'E';
         project.writeScreen(1, invalid);
         project.writeScreen(2, eastDefinition());
         project.writeLayout(eastWestLayout());
         checkThrowsContaining(
             [&] { (void)OverworldMap::load(project.root); },
-            "may not contain 'C'");
+            "may not contain 'E'");
+    }
+
+    {
+        TestProject project("missing_player");
+        Level::Definition noPlayer = westDefinition();
+        noPlayer.layers[1][1][1] = ' ';
+        project.writeScreen(1, noPlayer);
+        project.writeScreen(2, eastDefinition());
+        project.writeLayout(eastWestLayout());
+        checkThrowsContaining(
+            [&] { (void)OverworldMap::load(project.root); },
+            "exactly one Player tile; found 0");
+    }
+
+    {
+        TestProject project("multiple_players");
+        Level::Definition secondPlayer = eastDefinition();
+        secondPlayer.layers[1][1][1] = 'C';
+        project.writeScreen(1, westDefinition());
+        project.writeScreen(2, secondPlayer);
+        project.writeLayout(eastWestLayout());
+        checkThrowsContaining(
+            [&] { (void)OverworldMap::load(project.root); },
+            "exactly one Player tile; found 2");
     }
 }
 
@@ -481,7 +478,7 @@ int main()
     testCompositionAndGameplayCrossASeam();
     testNegativeSlotsNormalizeWithoutChangingIdentity();
     testActionAdmissionAndCameraTransition();
-    testInvalidTopologyIsRejected();
+    testLayoutValidationAndIndependentScreens();
     testSelectorOwnershipAndCoverage();
 
     if (failures != 0) {

@@ -437,8 +437,7 @@ void LevelEditorDebugUi::drawTilePalette(
     for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
         if (definition.type == TileType::Water ||
             (editor.editingOverworld() &&
-             (definition.type == TileType::End ||
-              definition.type == TileType::Player))) {
+             definition.type == TileType::End)) {
             continue;
         }
         if (column % perRow != 0) {
@@ -928,8 +927,7 @@ void LevelEditorDebugUi::drawOverworldTab(
                     ImGuiCol_Button,
                     ImVec4(0.20f, 0.48f, 0.76f, 1.0f));
             }
-            std::string label = screen.start ? "START  " : "";
-            label += "Screen " + std::to_string(screen.id) + "\n(" +
+            std::string label = "Screen " + std::to_string(screen.id) + "\n(" +
                 std::to_string(screen.slot.x) + ", " +
                 std::to_string(screen.slot.y) + ")  " +
                 std::to_string(screen.selectorCount) + " flags";
@@ -1031,28 +1029,11 @@ void LevelEditorDebugUi::drawOverworldTab(
                     { overworldMoveSlot_[0], overworldMoveSlot_[1] });
             }
 
-            const bool canPickInScreen =
-                std::filesystem::is_regular_file(path) ||
-                editor.overworldScreenId() == *selectedId;
-            ImGui::BeginDisabled(!canPickInScreen);
-            if (ImGui::Button("Pick Start Cell in 3D") &&
-                openSelectedScreen()) {
-                (void)overworldEditor.beginSetStartCell(*selectedId);
-            }
-            ImGui::EndDisabled();
-
             ImGui::TextWrapped(
                 "To add a neighboring screen, use the +N, +E, +S, or +W "
-                "button around this screen's card above. Adjacent walkable "
-                "edge tiles are automatically traversable.");
-        }
-    }
-
-    if (overworldEditor.cellTool()) {
-        ImGui::SeparatorText("3D Start Picking");
-        ImGui::TextWrapped("%s", overworldEditor.cellToolPrompt().c_str());
-        if (ImGui::Button("Cancel Cell Picking")) {
-            overworldEditor.cancelCellTool();
+                "button around this screen's card above. During play, regular "
+                "movement rules decide whether the player can cross an edge. "
+                "Place exactly one Player tile across all overworld screens.");
         }
     }
 

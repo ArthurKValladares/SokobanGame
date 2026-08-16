@@ -15,16 +15,11 @@ namespace sokoban {
 // for one component definition at a time.
 class OverworldMapEditor {
 public:
-    struct CellTool {
-        OverworldScreenId source = 0;
-    };
-
     struct ScreenSummary {
         OverworldScreenId id = 0;
         OverworldSlot slot {};
         std::filesystem::path path;
         std::size_t selectorCount = 0;
-        bool start = false;
         bool selected = false;
     };
 
@@ -60,20 +55,9 @@ public:
         std::optional<OverworldDefinitionOverride> activeDefinition =
             std::nullopt) const;
 
-    [[nodiscard]] const std::optional<CellTool>& cellTool() const
-    {
-        return cellTool_;
-    }
-    [[nodiscard]] std::string cellToolPrompt() const;
-    [[nodiscard]] bool beginSetStartCell(OverworldScreenId source);
     [[nodiscard]] bool addAdjacentScreen(
         OverworldScreenId source,
         OverworldSlot slot);
-    void cancelCellTool();
-    [[nodiscard]] bool applyCellTool(
-        OverworldScreenId visibleScreen,
-        GridPosition3 cell,
-        const Level::Definition* visibleDefinition = nullptr);
 
     [[nodiscard]] bool selectScreen(OverworldScreenId id);
     [[nodiscard]] bool addScreen(OverworldSlot slot);
@@ -82,11 +66,6 @@ public:
     [[nodiscard]] bool restoreDeletedScreen(
         OverworldScreenId id,
         OverworldSlot slot);
-    [[nodiscard]] bool setStart(
-        OverworldScreenId screenId,
-        GridPosition3 cell,
-        const Level::Definition* sourceDefinition = nullptr);
-
     [[nodiscard]] bool undo();
     [[nodiscard]] bool redo();
     [[nodiscard]] bool save();
@@ -116,9 +95,6 @@ private:
         std::optional<OverworldScreenId> ignore = std::nullopt) const;
     [[nodiscard]] OverworldScreenId nextScreenId() const;
     [[nodiscard]] Level::Definition defaultDefinition() const;
-    [[nodiscard]] bool supportedWalkable(
-        const Level::Definition& definition,
-        GridPosition3 cell) const;
     void record(State before, std::string status);
 
     std::filesystem::path projectLevelRoot_;
@@ -129,7 +105,6 @@ private:
     std::vector<State> redo_;
     std::string status_;
     bool loaded_ = false;
-    std::optional<CellTool> cellTool_;
 };
 
 } // namespace sokoban

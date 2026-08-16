@@ -10,7 +10,6 @@
 #include <cmath>
 #include <fstream>
 #include <limits>
-#include <queue>
 #include <ranges>
 #include <set>
 #include <stdexcept>
@@ -102,20 +101,6 @@ uint32_t positiveUint32(
     }
 }
 
-GridPosition3 cellFromJson(
-    const Json& value,
-    std::string_view context)
-{
-    if (!value.is_array() || value.size() != 3) {
-        fail(context, "must be an array of three integers");
-    }
-    return {
-        integer(value[0], std::string(context) + "[0]"),
-        integer(value[1], std::string(context) + "[1]"),
-        integer(value[2], std::string(context) + "[2]"),
-    };
-}
-
 OverworldSlot slotFromJson(
     const Json& value,
     std::string_view context)
@@ -126,21 +111,6 @@ OverworldSlot slotFromJson(
     return {
         integer(value[0], std::string(context) + "[0]"),
         integer(value[1], std::string(context) + "[1]"),
-    };
-}
-
-OverworldPosition positionFromJson(
-    const Json& value,
-    std::string_view context)
-{
-    rejectUnknownProperties(value, { "screen", "cell" }, context);
-    return {
-        .screen = positiveUint32(
-            required(value, "screen", context),
-            std::string(context) + ".screen"),
-        .cell = cellFromJson(
-            required(value, "cell", context),
-            std::string(context) + ".cell"),
     };
 }
 
@@ -169,18 +139,6 @@ void normalizeLayout(OverworldLayout& layout)
     std::ranges::sort(layout.screens, {}, &OverworldScreenSpec::id);
 }
 
-OrderedJson positionToJson(const OverworldPosition& position)
-{
-    return {
-        { "screen", position.screen },
-        { "cell", {
-            position.cell.x,
-            position.cell.y,
-            position.cell.z,
-        } },
-    };
-}
-
 OrderedJson layoutToJson(OverworldLayout layout)
 {
     normalizeLayout(layout);
@@ -195,14 +153,13 @@ OrderedJson layoutToJson(OverworldLayout layout)
     return {
         { "format", layout.format },
         { "screenSize", { layout.screenWidth, layout.screenHeight } },
-        { "start", positionToJson(layout.start) },
         { "screens", std::move(screens) },
     };
 }
 
 void validateBasicLayout(const OverworldLayout& layout)
 {
-    if (layout.format != 2) {
+    if (layout.format != 3) {
         throw std::runtime_error("unsupported overworld layout format " +
             std::to_string(layout.format));
     }
@@ -248,17 +205,6 @@ void validateBasicLayout(const OverworldLayout& layout)
                 screen.file.generic_string());
         }
     }
-    if (!ids.contains(layout.start.screen)) {
-        throw std::runtime_error("overworld start references a missing screen");
-    }
-}
-
-const OverworldScreenSpec* findScreenSpec(
-    const OverworldLayout& layout,
-    OverworldScreenId id)
-{
-    const auto found = std::ranges::find(layout.screens, id, &OverworldScreenSpec::id);
-    return found == layout.screens.end() ? nullptr : &*found;
 }
 
 const OverworldScreenRuntime* findRuntimeScreen(
@@ -267,25 +213,6 @@ const OverworldScreenRuntime* findRuntimeScreen(
 {
     const auto found = std::ranges::find(screens, id, &OverworldScreenRuntime::id);
     return found == screens.end() ? nullptr : &*found;
-}
-
-char definitionCell(
-    const Level::Definition& definition,
-    GridPosition3 cell)
-{
-    if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
-        cell.z >= static_cast<int>(definition.layers.size())) {
-        return '\0';
-    }
-    const auto& layer = definition.layers[static_cast<std::size_t>(cell.z)];
-    if (cell.y >= static_cast<int>(layer.size())) {
-        return '\0';
-    }
-    const std::string& row = layer[static_cast<std::size_t>(cell.y)];
-    if (cell.x >= static_cast<int>(row.size())) {
-        return '\0';
-    }
-    return row[static_cast<std::size_t>(cell.x)];
 }
 
 void validateComponentDefinition(
@@ -327,7 +254,7 @@ void validateComponentDefinition(
                         "overworld screen " + name +
                         " contains an unknown tile character");
                 }
-                if (*tile == TileType::Player || *tile == TileType::End) {
+                if (*tile == TileType::End) {
                     throw std::runtime_error(
                         "overworld component screens may not contain '" +
                         std::string(1, character) + "' tiles: " + name);
@@ -401,7 +328,7 @@ OverworldLayout loadOverworldLayout(const std::filesystem::path& path)
         const Json root = Json::parse(file);
         rejectUnknownProperties(
             root,
-            { "format", "screenSize", "start", "screens" },
+            { "format", "screenSize", "screens" },
             path.string());
 
         OverworldLayout layout;
@@ -416,10 +343,6 @@ OverworldLayout loadOverworldLayout(const std::filesystem::path& path)
             screenSize[0], path.string() + ".screenSize[0]");
         layout.screenHeight = positiveUint32(
             screenSize[1], path.string() + ".screenSize[1]");
-        layout.start = positionFromJson(
-            required(root, "start", path.string()),
-            path.string() + ".start");
-
         const Json& screens = required(root, "screens", path.string());
         if (!screens.is_array()) {
             fail(path.string() + ".screens", "must be an array");
@@ -535,6 +458,7 @@ OverworldMap OverworldMap::load(
     std::optional<uint32_t> commonWaterLayer;
     bool firstScreen = true;
     std::size_t overridesUsed = 0;
+    std::size_t playerTileCount = 0;
     uint32_t maximumDepth = 0;
     for (const OverworldScreenSpec& spec : map.layout_.screens) {
         const std::filesystem::path path = overworldRoot / spec.file;
@@ -561,6 +485,17 @@ OverworldMap OverworldMap::load(
             map.layout_.screenWidth,
             map.layout_.screenHeight,
             commonWaterLayer);
+        for (const auto& layer : definition.layers) {
+            for (const std::string& row : layer) {
+                const std::size_t players = static_cast<std::size_t>(
+                    std::ranges::count(
+                        row, tileTypeToChar(TileType::Player)));
+                if (players != 0) {
+                    playerTileCount += players;
+                    map.startScreen_ = spec.id;
+                }
+            }
+        }
         maximumDepth = std::max(
             maximumDepth,
             static_cast<uint32_t>(definition.layers.size()));
@@ -582,6 +517,11 @@ OverworldMap OverworldMap::load(
         overridesUsed != draftOverride->definitions.size()) {
         throw std::runtime_error(
             "overworld draft definition override references a missing screen");
+    }
+    if (playerTileCount != 1) {
+        throw std::runtime_error(
+            "overworld must contain exactly one Player tile; found " +
+            std::to_string(playerTileCount));
     }
 
     const uint64_t composedWidth =
@@ -672,117 +612,7 @@ OverworldMap OverworldMap::load(
         }
     }
 
-    const OverworldScreenRuntime* startScreen =
-        findRuntimeScreen(map.screens_, map.layout_.start.screen);
-    if (!startScreen || !localCellInScreen(
-            *startScreen,
-            map.layout_.start.cell,
-            map.layout_.screenWidth,
-            map.layout_.screenHeight)) {
-        throw std::runtime_error("overworld start cell is outside its screen");
-    }
-    if (definitionCell(startScreen->definition, map.layout_.start.cell) !=
-        tileTypeToChar(TileType::Air)) {
-        throw std::runtime_error(
-            "overworld start must occupy authored Air above its support");
-    }
-    const GridPosition3 globalStart =
-        translate(*startScreen, map.layout_.start.cell);
-    composed.layers[static_cast<std::size_t>(globalStart.z)]
-        [static_cast<std::size_t>(globalStart.y)]
-        [static_cast<std::size_t>(globalStart.x)] =
-            tileTypeToChar(TileType::Player);
-
     map.level_ = Level::loadFromDefinition(composed, "composed overworld");
-    if (!map.level_.isWalkable(globalStart)) {
-        throw std::runtime_error("overworld start is not a supported walkable cell");
-    }
-
-    // Cardinally adjacent component cells are ordinary adjacent cells in the
-    // composed Level. The same walkability query used by gameplay therefore
-    // defines every implicit screen seam; there is no separate seam
-    // permission or endpoint metadata to keep in sync.
-    std::vector<std::pair<OverworldScreenId, OverworldScreenId>>
-        implicitAdjacencies;
-    for (std::size_t first = 0; first < map.screens_.size(); ++first) {
-        for (std::size_t second = first + 1;
-             second < map.screens_.size();
-             ++second) {
-            const OverworldScreenRuntime& a = map.screens_[first];
-            const OverworldScreenRuntime& b = map.screens_[second];
-            const int dx = b.slot.x - a.slot.x;
-            const int dy = b.slot.y - a.slot.y;
-            if (std::abs(dx) + std::abs(dy) != 1) {
-                continue;
-            }
-            bool sharesWalkableSeam = false;
-            const uint32_t commonDepth = std::min(a.depth, b.depth);
-            for (uint32_t z = 0;
-                 z < commonDepth && !sharesWalkableSeam;
-                 ++z) {
-                const uint32_t count = dx != 0
-                    ? map.layout_.screenHeight
-                    : map.layout_.screenWidth;
-                for (uint32_t offset = 0; offset < count; ++offset) {
-                    GridPosition3 localA;
-                    GridPosition3 localB;
-                    if (dx == 1) {
-                        localA = { static_cast<int>(map.layout_.screenWidth) - 1,
-                            static_cast<int>(offset), static_cast<int>(z) };
-                        localB = { 0, static_cast<int>(offset), static_cast<int>(z) };
-                    } else if (dx == -1) {
-                        localA = { 0, static_cast<int>(offset), static_cast<int>(z) };
-                        localB = { static_cast<int>(map.layout_.screenWidth) - 1,
-                            static_cast<int>(offset), static_cast<int>(z) };
-                    } else if (dy == 1) {
-                        localA = { static_cast<int>(offset),
-                            static_cast<int>(map.layout_.screenHeight) - 1,
-                            static_cast<int>(z) };
-                        localB = { static_cast<int>(offset), 0, static_cast<int>(z) };
-                    } else {
-                        localA = { static_cast<int>(offset), 0, static_cast<int>(z) };
-                        localB = { static_cast<int>(offset),
-                            static_cast<int>(map.layout_.screenHeight) - 1,
-                            static_cast<int>(z) };
-                    }
-                    const GridPosition3 globalA = translate(a, localA);
-                    const GridPosition3 globalB = translate(b, localB);
-                    if (map.level_.isWalkable(globalA) &&
-                        map.level_.isWalkable(globalB)) {
-                        sharesWalkableSeam = true;
-                        break;
-                    }
-                }
-            }
-            if (sharesWalkableSeam) {
-                implicitAdjacencies.emplace_back(a.id, b.id);
-            }
-        }
-    }
-
-    std::set<OverworldScreenId> reached { map.layout_.start.screen };
-    std::queue<OverworldScreenId> pending;
-    pending.push(map.layout_.start.screen);
-    while (!pending.empty()) {
-        const OverworldScreenId current = pending.front();
-        pending.pop();
-        for (const auto& [a, b] : implicitAdjacencies) {
-            std::optional<OverworldScreenId> neighbor;
-            if (a == current) {
-                neighbor = b;
-            } else if (b == current) {
-                neighbor = a;
-            }
-            if (neighbor && reached.insert(*neighbor).second) {
-                pending.push(*neighbor);
-            }
-        }
-    }
-    if (reached.size() != map.screens_.size()) {
-        throw std::runtime_error(
-            "every overworld screen must be reachable from the start through "
-            "at least one walkable boundary pair");
-    }
 
     map.fingerprint_ = mapFingerprint(map.layout_, map.screens_);
     return map;
