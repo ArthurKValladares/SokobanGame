@@ -224,16 +224,7 @@ std::string OverworldMapEditor::cellToolPrompt() const
     if (!cellTool_) {
         return {};
     }
-    switch (cellTool_->kind) {
-    case CellToolKind::SetStart:
-        return "Click a supported walkable cell to set the overworld start.";
-    case CellToolKind::AddConnectedScreen:
-        return "Click a facing boundary cell to add and connect the new screen.";
-    case CellToolKind::ConnectExisting:
-        return "Click a facing boundary cell to connect to screen " +
-            std::to_string(*cellTool_->target) + ".";
-    }
-    return {};
+    return "Click a supported walkable cell to set the overworld start.";
 }
 
 bool OverworldMapEditor::beginSetStartCell(OverworldScreenId source)
@@ -244,46 +235,34 @@ bool OverworldMapEditor::beginSetStartCell(OverworldScreenId source)
     }
     state_.selected = source;
     cellTool_ = CellTool {
-        .kind = CellToolKind::SetStart,
         .source = source,
     };
     status_ = cellToolPrompt();
     return true;
 }
 
-bool OverworldMapEditor::beginAddConnectedScreenCell(
+bool OverworldMapEditor::addAdjacentScreen(
     OverworldScreenId source,
     OverworldSlot slot)
 {
     if (!screen(source) || !slotAvailable(slot)) {
-        status_ = "Adding a connected screen requires an existing source and empty slot.";
+        status_ = "Choose an empty cardinal slot beside an existing screen.";
         return false;
     }
-    cellTool_ = CellTool {
-        .kind = CellToolKind::AddConnectedScreen,
-        .source = source,
-        .newScreenSlot = slot,
-    };
-    state_.selected = source;
-    status_ = cellToolPrompt();
-    return true;
-}
-
-bool OverworldMapEditor::beginConnectCell(
-    OverworldScreenId source,
-    OverworldScreenId target)
-{
-    if (!screen(source) || !screen(target) || source == target) {
-        status_ = "A connection picker requires two different existing screens.";
+    const OverworldScreenSpec* sourceSpec = screen(source);
+    if (!sourceSpec ||
+        std::abs(slot.x - sourceSpec->slot.x) +
+                std::abs(slot.y - sourceSpec->slot.y) !=
+            1) {
+        status_ = "New screens must be placed directly north, east, south, or west.";
         return false;
     }
-    cellTool_ = CellTool {
-        .kind = CellToolKind::ConnectExisting,
-        .source = source,
-        .target = target,
-    };
-    state_.selected = source;
-    status_ = cellToolPrompt();
+    if (!addScreen(slot)) {
+        return false;
+    }
+    status_ = "Added adjacent ground screen " +
+        std::to_string(*state_.selected) +
+        ". Facing walkable boundary cells are immediately traversable.";
     return true;
 }
 
@@ -310,21 +289,8 @@ bool OverworldMapEditor::applyCellTool(
         return false;
     }
 
-    const CellTool tool = *cellTool_;
-    bool applied = false;
-    switch (tool.kind) {
-    case CellToolKind::SetStart:
-        applied = setStart(tool.source, cell, visibleDefinition);
-        break;
-    case CellToolKind::AddConnectedScreen:
-        applied = addConnectedScreen(
-            tool.source, *tool.newScreenSlot, cell, visibleDefinition);
-        break;
-    case CellToolKind::ConnectExisting:
-        applied = connect(
-            tool.source, *tool.target, cell, visibleDefinition);
-        break;
-    }
+    const bool applied = setStart(
+        cellTool_->source, cell, visibleDefinition);
     if (applied) {
         cellTool_.reset();
     }
@@ -360,61 +326,7 @@ bool OverworldMapEditor::addScreen(OverworldSlot slot)
     state_.selected = id;
     record(std::move(before),
         "Added screen " + std::to_string(id) +
-        " to the draft. Connect it before saving.");
-    return true;
-}
-
-bool OverworldMapEditor::addConnectedScreen(
-    OverworldScreenId from,
-    OverworldSlot slot,
-    GridPosition3 fromCell,
-    const Level::Definition* sourceDefinition)
-{
-    const DraftScreen* source = draftScreen(from);
-    if (!source || !slotAvailable(slot)) {
-        status_ = "A connected screen requires an existing source and empty slot.";
-        return false;
-    }
-    if (!supportedWalkable(
-            sourceDefinition ? *sourceDefinition : source->definition,
-            fromCell)) {
-        status_ = "The source connection cell must be supported and walkable.";
-        return false;
-    }
-
-    State before = state_;
-    const OverworldScreenId id = nextScreenId();
-    OverworldScreenSpec spec {
-        .id = id,
-        .file = "screen" + std::to_string(id) + ".scr",
-        .slot = slot,
-    };
-    const auto destination = matchingEndpoint(source->spec, spec, fromCell);
-    if (!destination) {
-        status_ = "New screens must occupy a cardinal neighboring slot and use a facing boundary cell.";
-        return false;
-    }
-
-    Level::Definition definition = defaultDefinition();
-    if (destination->z < 0 ||
-        destination->z >= static_cast<int>(definition.layers.size())) {
-        status_ = "The connection layer is unavailable in the new screen.";
-        return false;
-    }
-    definition.layers[static_cast<std::size_t>(destination->z)]
-        [static_cast<std::size_t>(destination->y)]
-        [static_cast<std::size_t>(destination->x)] =
-            tileTypeToChar(TileType::Air);
-
-    state_.layout.screens.push_back(spec);
-    state_.screens.push_back({ spec, std::move(definition) });
-    state_.layout.connections.push_back({
-        .a = { from, fromCell },
-        .b = { id, *destination },
-    });
-    state_.selected = id;
-    record(std::move(before),
-        "Added and connected overworld screen " + std::to_string(id) + ".");
+        " to the draft. Place it beside a reachable walkable boundary before saving.");
     return true;
 }
 
@@ -425,14 +337,6 @@ bool OverworldMapEditor::moveScreen(
     DraftScreen* target = draftScreen(id);
     if (!target || !slotAvailable(slot, id)) {
         status_ = "The requested overworld slot is unavailable.";
-        return false;
-    }
-    if (std::ranges::any_of(
-            state_.layout.connections,
-            [id](const OverworldConnection& connection) {
-                return connection.a.screen == id || connection.b.screen == id;
-            })) {
-        status_ = "Disconnect a screen before moving it.";
         return false;
     }
     State before = state_;
@@ -461,10 +365,6 @@ bool OverworldMapEditor::deleteScreen(OverworldScreenId id)
         return false;
     }
     State before = state_;
-    std::erase_if(state_.layout.connections,
-        [id](const OverworldConnection& connection) {
-            return connection.a.screen == id || connection.b.screen == id;
-        });
     std::erase_if(state_.layout.screens,
         [id](const OverworldScreenSpec& spec) { return spec.id == id; });
     std::erase_if(state_.screens,
@@ -511,7 +411,7 @@ bool OverworldMapEditor::restoreDeletedScreen(
         state_.selected = id;
         record(std::move(before),
             "Restored screen " + std::to_string(id) +
-            " to the draft. Connect it before saving.");
+            " to the draft. Place it beside a reachable walkable boundary before saving.");
         return true;
     } catch (const std::exception& error) {
         status_ = error.what();
@@ -534,82 +434,6 @@ bool OverworldMapEditor::setStart(
     State before = state_;
     state_.layout.start = { screenId, cell };
     record(std::move(before), "Updated the overworld start cell.");
-    return true;
-}
-
-bool OverworldMapEditor::connect(
-    OverworldScreenId from,
-    OverworldScreenId to,
-    GridPosition3 fromCell,
-    const Level::Definition* sourceDefinition)
-{
-    const DraftScreen* source = draftScreen(from);
-    const DraftScreen* destinationScreen = draftScreen(to);
-    if (!source || !destinationScreen || from == to) {
-        status_ = "A connection requires two different existing screens.";
-        return false;
-    }
-    const auto destination = matchingEndpoint(
-        source->spec, destinationScreen->spec, fromCell);
-    if (!destination) {
-        status_ = "Connection endpoints must face across cardinal neighboring slots.";
-        return false;
-    }
-    std::optional<Level::Definition> latestDestination;
-    const std::filesystem::path destinationPath =
-        projectLevelRoot_ / "overworld" / destinationScreen->spec.file;
-    if (std::filesystem::is_regular_file(destinationPath)) {
-        try {
-            latestDestination = Level::loadDefinitionFromFile(
-                destinationPath);
-        } catch (const std::exception& error) {
-            status_ = error.what();
-            return false;
-        }
-    }
-    if (!supportedWalkable(
-            sourceDefinition ? *sourceDefinition : source->definition,
-            fromCell) ||
-        !supportedWalkable(
-            latestDestination
-                ? *latestDestination
-                : destinationScreen->definition,
-            *destination)) {
-        status_ = "Both connection endpoints must be supported walkable cells.";
-        return false;
-    }
-    const auto endpointUsed = [&](OverworldScreenId id, GridPosition3 cell) {
-        return std::ranges::any_of(
-            state_.layout.connections,
-            [&](const OverworldConnection& connection) {
-                return (connection.a.screen == id && connection.a.cell == cell) ||
-                    (connection.b.screen == id && connection.b.cell == cell);
-            });
-    };
-    if (endpointUsed(from, fromCell) || endpointUsed(to, *destination)) {
-        status_ = "A connection endpoint may be used only once.";
-        return false;
-    }
-    State before = state_;
-    state_.layout.connections.push_back({
-        .a = { from, fromCell },
-        .b = { to, *destination },
-    });
-    record(std::move(before), "Connected overworld screens.");
-    return true;
-}
-
-bool OverworldMapEditor::disconnect(std::size_t connectionIndex)
-{
-    if (connectionIndex >= state_.layout.connections.size()) {
-        status_ = "Cannot remove a missing connection.";
-        return false;
-    }
-    State before = state_;
-    state_.layout.connections.erase(
-        state_.layout.connections.begin() +
-        static_cast<std::ptrdiff_t>(connectionIndex));
-    record(std::move(before), "Disconnected overworld screens.");
     return true;
 }
 
@@ -780,45 +604,13 @@ Level::Definition OverworldMapEditor::defaultDefinition() const
             state_.layout.screenHeight,
             std::string(
                 state_.layout.screenWidth,
-                tileTypeToChar(TileType::Wall))));
+                tileTypeToChar(TileType::Air))));
     std::ranges::fill(
         definition.layers.front(),
         std::string(
             state_.layout.screenWidth,
             tileTypeToChar(TileType::Ground)));
     return definition;
-}
-
-std::optional<GridPosition3> OverworldMapEditor::matchingEndpoint(
-    const OverworldScreenSpec& from,
-    const OverworldScreenSpec& to,
-    GridPosition3 fromCell) const
-{
-    if (fromCell.x < 0 || fromCell.y < 0 || fromCell.z < 0 ||
-        fromCell.x >= static_cast<int>(state_.layout.screenWidth) ||
-        fromCell.y >= static_cast<int>(state_.layout.screenHeight)) {
-        return std::nullopt;
-    }
-    const int dx = to.slot.x - from.slot.x;
-    const int dy = to.slot.y - from.slot.y;
-    if (std::abs(dx) + std::abs(dy) != 1) {
-        return std::nullopt;
-    }
-    GridPosition3 result = fromCell;
-    if (dx == 1 &&
-        fromCell.x == static_cast<int>(state_.layout.screenWidth) - 1) {
-        result.x = 0;
-    } else if (dx == -1 && fromCell.x == 0) {
-        result.x = static_cast<int>(state_.layout.screenWidth) - 1;
-    } else if (dy == 1 &&
-               fromCell.y == static_cast<int>(state_.layout.screenHeight) - 1) {
-        result.y = 0;
-    } else if (dy == -1 && fromCell.y == 0) {
-        result.y = static_cast<int>(state_.layout.screenHeight) - 1;
-    } else {
-        return std::nullopt;
-    }
-    return result;
 }
 
 bool OverworldMapEditor::supportedWalkable(

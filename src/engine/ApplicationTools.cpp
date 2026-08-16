@@ -493,19 +493,6 @@ void ApplicationTools::drawSelectorLabels(
                 "OVERWORLD START",
                 IM_COL32(102, 235, 145, 255));
         }
-        for (const OverworldConnection& connection : layout.connections) {
-            if (connection.a.screen == *visibleScreen) {
-                drawTopologyLabel(
-                    connection.a.cell,
-                    "TO SCREEN " + std::to_string(connection.b.screen),
-                    IM_COL32(112, 190, 255, 255));
-            } else if (connection.b.screen == *visibleScreen) {
-                drawTopologyLabel(
-                    connection.b.cell,
-                    "TO SCREEN " + std::to_string(connection.a.screen),
-                    IM_COL32(112, 190, 255, 255));
-            }
-        }
     }
     if (!drewDraftTopology) {
         if (const std::optional<GridPosition3> start =
@@ -515,32 +502,13 @@ void ApplicationTools::drawSelectorLabels(
                 "OVERWORLD START",
                 IM_COL32(102, 235, 145, 255));
         }
-        for (const auto& [cell, neighbor] :
-             levelEditor.overworldConnectionEndpoints()) {
-            drawTopologyLabel(
-                cell,
-                "TO SCREEN " + std::to_string(neighbor),
-                IM_COL32(112, 190, 255, 255));
-        }
     }
     if (const auto& tool = overworldMapEditor.cellTool();
         tool && hoverCell) {
-        std::string text;
-        ImU32 color = IM_COL32(255, 211, 92, 255);
-        switch (tool->kind) {
-        case OverworldMapEditor::CellToolKind::SetStart:
-            text = "CLICK: SET START";
-            color = IM_COL32(102, 235, 145, 255);
-            break;
-        case OverworldMapEditor::CellToolKind::AddConnectedScreen:
-            text = "CLICK: ADD CONNECTION";
-            break;
-        case OverworldMapEditor::CellToolKind::ConnectExisting:
-            text = "CLICK: CONNECT TO SCREEN " +
-                std::to_string(*tool->target);
-            break;
-        }
-        drawTopologyLabel(*hoverCell, text, color);
+        drawTopologyLabel(
+            *hoverCell,
+            "CLICK: SET START",
+            IM_COL32(102, 235, 145, 255));
     }
 #else
     (void)renderer;

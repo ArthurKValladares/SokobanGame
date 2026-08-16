@@ -860,6 +860,29 @@ void LevelEditorDebugUi::drawOverworldTab(
 
     const std::vector<OverworldMapEditor::ScreenSummary> screens =
         overworldEditor.screens();
+    auto openScreenForEditing =
+        [&](const OverworldMapEditor::ScreenSummary& screen) {
+            if (editor.overworldScreenId() == screen.id) {
+                editor.setEditingDocument(true);
+                return true;
+            }
+            if (!std::filesystem::is_regular_file(screen.path)) {
+                return false;
+            }
+            editor.selectDocument(screen.path);
+            if (!editor.loadDocument(screen.path)) {
+                return false;
+            }
+            syncDocumentPath(editor);
+            return true;
+        };
+    auto slotOccupied = [&](OverworldSlot slot) {
+        return std::ranges::any_of(
+            screens,
+            [&](const OverworldMapEditor::ScreenSummary& candidate) {
+                return candidate.slot == slot;
+            });
+    };
     int minX = 0;
     int maxX = 0;
     int minY = 0;
@@ -873,14 +896,16 @@ void LevelEditorDebugUi::drawOverworldTab(
 
     constexpr float cardWidth = 112.0f;
     constexpr float cardHeight = 62.0f;
-    constexpr float gap = 28.0f;
-    constexpr float margin = 18.0f;
+    constexpr float gap = 58.0f;
+    constexpr float margin = 42.0f;
     const float cellWidth = cardWidth + gap;
     const float cellHeight = cardHeight + gap;
     const ImVec2 canvasSize {
         margin * 2.0f + static_cast<float>(maxX - minX + 1) * cellWidth,
         margin * 2.0f + static_cast<float>(maxY - minY + 1) * cellHeight,
     };
+    ImGui::TextDisabled(
+        "Select a screen, then use its +N / +E / +S / +W controls to add a neighbor.");
     if (ImGui::BeginChild(
             "OverworldMapCanvas",
             ImVec2(0.0f, 250.0f),
@@ -894,32 +919,6 @@ void LevelEditorDebugUi::drawOverworldTab(
                 origin.y + margin + static_cast<float>(slot.y - minY) * cellHeight,
             };
         };
-        auto summaryFor = [&](OverworldScreenId id)
-            -> const OverworldMapEditor::ScreenSummary* {
-            const auto found = std::ranges::find(
-                screens, id, &OverworldMapEditor::ScreenSummary::id);
-            return found == screens.end() ? nullptr : &*found;
-        };
-
-        ImDrawList* drawList = ImGui::GetWindowDrawList();
-        for (const OverworldConnection& connection :
-             overworldEditor.layout().connections) {
-            const auto* a = summaryFor(connection.a.screen);
-            const auto* b = summaryFor(connection.b.screen);
-            if (!a || !b) {
-                continue;
-            }
-            const ImVec2 aPosition = cardPosition(a->slot);
-            const ImVec2 bPosition = cardPosition(b->slot);
-            drawList->AddLine(
-                ImVec2(aPosition.x + cardWidth * 0.5f,
-                    aPosition.y + cardHeight * 0.5f),
-                ImVec2(bPosition.x + cardWidth * 0.5f,
-                    bPosition.y + cardHeight * 0.5f),
-                IM_COL32(112, 190, 255, 255),
-                4.0f);
-        }
-
         for (const auto& screen : screens) {
             ImGui::PushID(static_cast<int>(screen.id));
             const ImVec2 position = cardPosition(screen.slot);
@@ -944,10 +943,48 @@ void LevelEditorDebugUi::drawOverworldTab(
             if (screen.selected) {
                 ImGui::PopStyleColor();
             }
-            if (open && std::filesystem::is_regular_file(screen.path)) {
-                editor.selectDocument(screen.path);
-                if (editor.loadDocument(screen.path)) {
-                    syncDocumentPath(editor);
+            if (open) {
+                (void)openScreenForEditing(screen);
+            }
+
+            if (screen.selected) {
+                const struct AddControl {
+                    const char* label;
+                    const char* tooltip;
+                    int dx;
+                    int dy;
+                    ImVec2 offset;
+                } controls[] {
+                    { "+N", "Add screen north", 0, -1,
+                        { cardWidth * 0.5f - 18.0f, -28.0f } },
+                    { "+E", "Add screen east", 1, 0,
+                        { cardWidth + 6.0f, cardHeight * 0.5f - 10.0f } },
+                    { "+S", "Add screen south", 0, 1,
+                        { cardWidth * 0.5f - 18.0f, cardHeight + 6.0f } },
+                    { "+W", "Add screen west", -1, 0,
+                        { -42.0f, cardHeight * 0.5f - 10.0f } },
+                };
+                for (const AddControl& control : controls) {
+                    const OverworldSlot target {
+                        screen.slot.x + control.dx,
+                        screen.slot.y + control.dy,
+                    };
+                    ImGui::SetCursorScreenPos({
+                        position.x + control.offset.x,
+                        position.y + control.offset.y,
+                    });
+                    ImGui::BeginDisabled(slotOccupied(target));
+                    if (ImGui::SmallButton(control.label)) {
+                        (void)overworldEditor.addAdjacentScreen(
+                            screen.id, target);
+                    }
+                    ImGui::EndDisabled();
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                        ImGui::SetTooltip(
+                            "%s%s",
+                            control.tooltip,
+                            slotOccupied(target) ? " (slot occupied)" : "");
+                    }
                 }
             }
             ImGui::PopID();
@@ -988,7 +1025,7 @@ void LevelEditorDebugUi::drawOverworldTab(
             }
 
             ImGui::InputInt2("Move To Slot", overworldMoveSlot_);
-            if (ImGui::Button("Move Disconnected Screen")) {
+            if (ImGui::Button("Move Screen")) {
                 (void)overworldEditor.moveScreen(
                     *selectedId,
                     { overworldMoveSlot_[0], overworldMoveSlot_[1] });
@@ -1004,101 +1041,18 @@ void LevelEditorDebugUi::drawOverworldTab(
             }
             ImGui::EndDisabled();
 
-            ImGui::TextUnformatted("Add connected screen (then pick its edge cell):");
-            const struct DirectionButton {
-                const char* label;
-                int dx;
-                int dy;
-            } directions[] {
-                { "North", 0, -1 },
-                { "East", 1, 0 },
-                { "South", 0, 1 },
-                { "West", -1, 0 },
-            };
-            for (std::size_t index = 0; index < std::size(directions); ++index) {
-                if (index != 0) {
-                    ImGui::SameLine();
-                }
-                ImGui::BeginDisabled(!canPickInScreen);
-                if (ImGui::Button(directions[index].label) &&
-                    openSelectedScreen()) {
-                    (void)overworldEditor.beginAddConnectedScreenCell(
-                        *selectedId,
-                        {
-                            selected->slot.x + directions[index].dx,
-                            selected->slot.y + directions[index].dy,
-                        });
-                }
-                ImGui::EndDisabled();
-            }
-
-            std::string targetPreview = overworldConnectionTarget_ > 0
-                ? "Screen " + std::to_string(overworldConnectionTarget_)
-                : "Choose screen";
-            if (ImGui::BeginCombo(
-                    "Connect Existing", targetPreview.c_str())) {
-                for (const auto& candidate : screens) {
-                    if (candidate.id == *selectedId) {
-                        continue;
-                    }
-                    const std::string candidateLabel =
-                        "Screen " + std::to_string(candidate.id);
-                    if (ImGui::Selectable(
-                            candidateLabel.c_str(),
-                            overworldConnectionTarget_ ==
-                                static_cast<int>(candidate.id))) {
-                        overworldConnectionTarget_ =
-                            static_cast<int>(candidate.id);
-                    }
-                }
-                ImGui::EndCombo();
-            }
-            ImGui::BeginDisabled(
-                overworldConnectionTarget_ <= 0 || !canPickInScreen);
-            if (ImGui::Button("Pick Connection Cell in 3D") &&
-                openSelectedScreen()) {
-                (void)overworldEditor.beginConnectCell(
-                    *selectedId,
-                    static_cast<OverworldScreenId>(
-                        overworldConnectionTarget_));
-            }
-            ImGui::EndDisabled();
+            ImGui::TextWrapped(
+                "To add a neighboring screen, use the +N, +E, +S, or +W "
+                "button around this screen's card above. Adjacent walkable "
+                "edge tiles are automatically traversable.");
         }
     }
 
     if (overworldEditor.cellTool()) {
-        ImGui::SeparatorText("3D Cell Picking");
+        ImGui::SeparatorText("3D Start Picking");
         ImGui::TextWrapped("%s", overworldEditor.cellToolPrompt().c_str());
         if (ImGui::Button("Cancel Cell Picking")) {
             overworldEditor.cancelCellTool();
-        }
-    }
-
-    if (!overworldEditor.layout().connections.empty()) {
-        ImGui::SeparatorText("Connections");
-        for (std::size_t index = 0;
-             index < overworldEditor.layout().connections.size();
-             ++index) {
-            const OverworldConnection& connection =
-                overworldEditor.layout().connections[index];
-            ImGui::PushID(static_cast<int>(index));
-            ImGui::Text(
-                "%u (%d,%d,%d) <-> %u (%d,%d,%d)",
-                static_cast<unsigned>(connection.a.screen),
-                connection.a.cell.x,
-                connection.a.cell.y,
-                connection.a.cell.z,
-                static_cast<unsigned>(connection.b.screen),
-                connection.b.cell.x,
-                connection.b.cell.y,
-                connection.b.cell.z);
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Disconnect")) {
-                (void)overworldEditor.disconnect(index);
-                ImGui::PopID();
-                break;
-            }
-            ImGui::PopID();
         }
     }
 

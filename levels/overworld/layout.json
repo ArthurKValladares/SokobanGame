@@ -1,5 +1,5 @@
 {
-  "format": 1,
+  "format": 2,
   "screenSize": [
     9,
     7
@@ -20,7 +20,14 @@
         0,
         0
       ]
+    },
+    {
+      "id": 2,
+      "file": "screen2.scr",
+      "slot": [
+        0,
+        -1
+      ]
     }
-  ],
-  "connections": []
+  ]
 }

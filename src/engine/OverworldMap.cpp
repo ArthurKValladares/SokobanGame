@@ -129,7 +129,7 @@ OverworldSlot slotFromJson(
     };
 }
 
-OverworldEndpoint endpointFromJson(
+OverworldPosition positionFromJson(
     const Json& value,
     std::string_view context)
 {
@@ -164,43 +164,19 @@ std::filesystem::path screenFileFromJson(
     return path;
 }
 
-bool endpointLess(
-    const OverworldEndpoint& left,
-    const OverworldEndpoint& right)
-{
-    return std::tuple {
-        left.screen, left.cell.z, left.cell.y, left.cell.x } <
-        std::tuple {
-            right.screen, right.cell.z, right.cell.y, right.cell.x };
-}
-
 void normalizeLayout(OverworldLayout& layout)
 {
     std::ranges::sort(layout.screens, {}, &OverworldScreenSpec::id);
-    for (OverworldConnection& connection : layout.connections) {
-        if (endpointLess(connection.b, connection.a)) {
-            std::swap(connection.a, connection.b);
-        }
-    }
-    std::ranges::sort(layout.connections, [](const auto& left, const auto& right) {
-        if (endpointLess(left.a, right.a)) {
-            return true;
-        }
-        if (endpointLess(right.a, left.a)) {
-            return false;
-        }
-        return endpointLess(left.b, right.b);
-    });
 }
 
-OrderedJson endpointToJson(const OverworldEndpoint& endpoint)
+OrderedJson positionToJson(const OverworldPosition& position)
 {
     return {
-        { "screen", endpoint.screen },
+        { "screen", position.screen },
         { "cell", {
-            endpoint.cell.x,
-            endpoint.cell.y,
-            endpoint.cell.z,
+            position.cell.x,
+            position.cell.y,
+            position.cell.z,
         } },
     };
 }
@@ -216,25 +192,17 @@ OrderedJson layoutToJson(OverworldLayout layout)
             { "slot", { screen.slot.x, screen.slot.y } },
         });
     }
-    OrderedJson connections = OrderedJson::array();
-    for (const OverworldConnection& connection : layout.connections) {
-        connections.push_back({
-            { "a", endpointToJson(connection.a) },
-            { "b", endpointToJson(connection.b) },
-        });
-    }
     return {
         { "format", layout.format },
         { "screenSize", { layout.screenWidth, layout.screenHeight } },
-        { "start", endpointToJson(layout.start) },
+        { "start", positionToJson(layout.start) },
         { "screens", std::move(screens) },
-        { "connections", std::move(connections) },
     };
 }
 
 void validateBasicLayout(const OverworldLayout& layout)
 {
-    if (layout.format != 1) {
+    if (layout.format != 2) {
         throw std::runtime_error("unsupported overworld layout format " +
             std::to_string(layout.format));
     }
@@ -392,23 +360,6 @@ GridPosition3 translate(
     };
 }
 
-int manhattan(GridPosition3 left, GridPosition3 right)
-{
-    return std::abs(left.x - right.x) +
-        std::abs(left.y - right.y) +
-        std::abs(left.z - right.z);
-}
-
-bool sameUndirectedCells(
-    GridPosition3 leftA,
-    GridPosition3 leftB,
-    GridPosition3 rightA,
-    GridPosition3 rightB)
-{
-    return (leftA == rightA && leftB == rightB) ||
-        (leftA == rightB && leftB == rightA);
-}
-
 uint64_t fnvAppend(uint64_t hash, std::string_view text)
 {
     constexpr uint64_t prime = 1099511628211ULL;
@@ -450,7 +401,7 @@ OverworldLayout loadOverworldLayout(const std::filesystem::path& path)
         const Json root = Json::parse(file);
         rejectUnknownProperties(
             root,
-            { "format", "screenSize", "start", "screens", "connections" },
+            { "format", "screenSize", "start", "screens" },
             path.string());
 
         OverworldLayout layout;
@@ -465,7 +416,7 @@ OverworldLayout loadOverworldLayout(const std::filesystem::path& path)
             screenSize[0], path.string() + ".screenSize[0]");
         layout.screenHeight = positiveUint32(
             screenSize[1], path.string() + ".screenSize[1]");
-        layout.start = endpointFromJson(
+        layout.start = positionFromJson(
             required(root, "start", path.string()),
             path.string() + ".start");
 
@@ -488,23 +439,6 @@ OverworldLayout loadOverworldLayout(const std::filesystem::path& path)
             });
         }
 
-        const Json& connections = required(root, "connections", path.string());
-        if (!connections.is_array()) {
-            fail(path.string() + ".connections", "must be an array");
-        }
-        for (std::size_t index = 0; index < connections.size(); ++index) {
-            const Json& encoded = connections[index];
-            const std::string context =
-                path.string() + ".connections[" +
-                std::to_string(index) + "]";
-            rejectUnknownProperties(encoded, { "a", "b" }, context);
-            layout.connections.push_back({
-                .a = endpointFromJson(
-                    required(encoded, "a", context), context + ".a"),
-                .b = endpointFromJson(
-                    required(encoded, "b", context), context + ".b"),
-            });
-        }
         normalizeLayout(layout);
         validateBasicLayout(layout);
         return layout;
@@ -764,117 +698,12 @@ OverworldMap OverworldMap::load(
         throw std::runtime_error("overworld start is not a supported walkable cell");
     }
 
-    std::set<std::pair<OverworldScreenId, std::tuple<int, int, int>>>
-        usedEndpoints;
-    for (const OverworldConnection& authored : map.layout_.connections) {
-        const OverworldScreenRuntime* a =
-            findRuntimeScreen(map.screens_, authored.a.screen);
-        const OverworldScreenRuntime* b =
-            findRuntimeScreen(map.screens_, authored.b.screen);
-        if (!a || !b) {
-            throw std::runtime_error("overworld connection references a missing screen");
-        }
-        if (a->id == b->id) {
-            throw std::runtime_error("overworld connection may not join a screen to itself");
-        }
-        if (!localCellInScreen(
-                *a, authored.a.cell,
-                map.layout_.screenWidth,
-                map.layout_.screenHeight) ||
-            !localCellInScreen(
-                *b, authored.b.cell,
-                map.layout_.screenWidth,
-                map.layout_.screenHeight)) {
-            throw std::runtime_error("overworld connection endpoint is outside its screen");
-        }
-        const int dx = b->slot.x - a->slot.x;
-        const int dy = b->slot.y - a->slot.y;
-        if (std::abs(dx) + std::abs(dy) != 1) {
-            throw std::runtime_error(
-                "overworld connections may join only cardinally adjacent slots");
-        }
-        bool geometryValid = authored.a.cell.z == authored.b.cell.z;
-        if (dx == 1) {
-            geometryValid = geometryValid &&
-                authored.a.cell.x == static_cast<int>(map.layout_.screenWidth) - 1 &&
-                authored.b.cell.x == 0 &&
-                authored.a.cell.y == authored.b.cell.y;
-        } else if (dx == -1) {
-            geometryValid = geometryValid &&
-                authored.a.cell.x == 0 &&
-                authored.b.cell.x == static_cast<int>(map.layout_.screenWidth) - 1 &&
-                authored.a.cell.y == authored.b.cell.y;
-        } else if (dy == 1) {
-            geometryValid = geometryValid &&
-                authored.a.cell.y == static_cast<int>(map.layout_.screenHeight) - 1 &&
-                authored.b.cell.y == 0 &&
-                authored.a.cell.x == authored.b.cell.x;
-        } else {
-            geometryValid = geometryValid &&
-                authored.a.cell.y == 0 &&
-                authored.b.cell.y == static_cast<int>(map.layout_.screenHeight) - 1 &&
-                authored.a.cell.x == authored.b.cell.x;
-        }
-        if (!geometryValid) {
-            throw std::runtime_error(
-                "overworld connection endpoints do not match their facing boundaries");
-        }
-        const GridPosition3 globalA = translate(*a, authored.a.cell);
-        const GridPosition3 globalB = translate(*b, authored.b.cell);
-        if (manhattan(globalA, globalB) != 1) {
-            throw std::runtime_error(
-                "overworld connection endpoints are not globally adjacent");
-        }
-        if (!map.level_.isWalkable(globalA) ||
-            !map.level_.isWalkable(globalB)) {
-            throw std::runtime_error(
-                "overworld connection endpoints must be supported walkable cells");
-        }
-        const auto aKey = std::pair {
-            authored.a.screen,
-            std::tuple { authored.a.cell.x, authored.a.cell.y, authored.a.cell.z },
-        };
-        const auto bKey = std::pair {
-            authored.b.screen,
-            std::tuple { authored.b.cell.x, authored.b.cell.y, authored.b.cell.z },
-        };
-        if (!usedEndpoints.insert(aKey).second ||
-            !usedEndpoints.insert(bKey).second) {
-            throw std::runtime_error(
-                "an overworld connection endpoint may be used only once");
-        }
-        map.connections_.push_back({
-            .authored = authored,
-            .globalA = globalA,
-            .globalB = globalB,
-        });
-    }
-
-    std::set<OverworldScreenId> reached { map.layout_.start.screen };
-    std::queue<OverworldScreenId> pending;
-    pending.push(map.layout_.start.screen);
-    while (!pending.empty()) {
-        const OverworldScreenId current = pending.front();
-        pending.pop();
-        for (const OverworldConnection& connection : map.layout_.connections) {
-            std::optional<OverworldScreenId> neighbor;
-            if (connection.a.screen == current) {
-                neighbor = connection.b.screen;
-            } else if (connection.b.screen == current) {
-                neighbor = connection.a.screen;
-            }
-            if (neighbor && reached.insert(*neighbor).second) {
-                pending.push(*neighbor);
-            }
-        }
-    }
-    if (reached.size() != map.screens_.size()) {
-        throw std::runtime_error(
-            "every overworld screen must be reachable from the start screen");
-    }
-
-    // The composed Level intentionally has no seam-specific collision branch.
-    // Reject every statically traversable adjacent pair not named by topology.
+    // Cardinally adjacent component cells are ordinary adjacent cells in the
+    // composed Level. The same walkability query used by gameplay therefore
+    // defines every implicit screen seam; there is no separate seam
+    // permission or endpoint metadata to keep in sync.
+    std::vector<std::pair<OverworldScreenId, OverworldScreenId>>
+        implicitAdjacencies;
     for (std::size_t first = 0; first < map.screens_.size(); ++first) {
         for (std::size_t second = first + 1;
              second < map.screens_.size();
@@ -886,8 +715,11 @@ OverworldMap OverworldMap::load(
             if (std::abs(dx) + std::abs(dy) != 1) {
                 continue;
             }
+            bool sharesWalkableSeam = false;
             const uint32_t commonDepth = std::min(a.depth, b.depth);
-            for (uint32_t z = 0; z < commonDepth; ++z) {
+            for (uint32_t z = 0;
+                 z < commonDepth && !sharesWalkableSeam;
+                 ++z) {
                 const uint32_t count = dx != 0
                     ? map.layout_.screenHeight
                     : map.layout_.screenWidth;
@@ -915,29 +747,41 @@ OverworldMap OverworldMap::load(
                     }
                     const GridPosition3 globalA = translate(a, localA);
                     const GridPosition3 globalB = translate(b, localB);
-                    if (!map.level_.isWalkable(globalA) ||
-                        !map.level_.isWalkable(globalB)) {
-                        continue;
-                    }
-                    const bool declared = std::ranges::any_of(
-                        map.connections_,
-                        [&](const OverworldConnectionRuntime& connection) {
-                            return sameUndirectedCells(
-                                globalA,
-                                globalB,
-                                connection.globalA,
-                                connection.globalB);
-                        });
-                    if (!declared) {
-                        throw std::runtime_error(
-                            "overworld has a traversable undeclared seam between " +
-                            std::to_string(a.id) + " and " +
-                            std::to_string(b.id) + " at layer " +
-                            std::to_string(z));
+                    if (map.level_.isWalkable(globalA) &&
+                        map.level_.isWalkable(globalB)) {
+                        sharesWalkableSeam = true;
+                        break;
                     }
                 }
             }
+            if (sharesWalkableSeam) {
+                implicitAdjacencies.emplace_back(a.id, b.id);
+            }
         }
+    }
+
+    std::set<OverworldScreenId> reached { map.layout_.start.screen };
+    std::queue<OverworldScreenId> pending;
+    pending.push(map.layout_.start.screen);
+    while (!pending.empty()) {
+        const OverworldScreenId current = pending.front();
+        pending.pop();
+        for (const auto& [a, b] : implicitAdjacencies) {
+            std::optional<OverworldScreenId> neighbor;
+            if (a == current) {
+                neighbor = b;
+            } else if (b == current) {
+                neighbor = a;
+            }
+            if (neighbor && reached.insert(*neighbor).second) {
+                pending.push(*neighbor);
+            }
+        }
+    }
+    if (reached.size() != map.screens_.size()) {
+        throw std::runtime_error(
+            "every overworld screen must be reachable from the start through "
+            "at least one walkable boundary pair");
     }
 
     map.fingerprint_ = mapFingerprint(map.layout_, map.screens_);

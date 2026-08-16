@@ -15,17 +15,8 @@ namespace sokoban {
 // for one component definition at a time.
 class OverworldMapEditor {
 public:
-    enum class CellToolKind {
-        SetStart,
-        AddConnectedScreen,
-        ConnectExisting,
-    };
-
     struct CellTool {
-        CellToolKind kind = CellToolKind::SetStart;
         OverworldScreenId source = 0;
-        std::optional<OverworldScreenId> target;
-        std::optional<OverworldSlot> newScreenSlot;
     };
 
     struct ScreenSummary {
@@ -75,12 +66,9 @@ public:
     }
     [[nodiscard]] std::string cellToolPrompt() const;
     [[nodiscard]] bool beginSetStartCell(OverworldScreenId source);
-    [[nodiscard]] bool beginAddConnectedScreenCell(
+    [[nodiscard]] bool addAdjacentScreen(
         OverworldScreenId source,
         OverworldSlot slot);
-    [[nodiscard]] bool beginConnectCell(
-        OverworldScreenId source,
-        OverworldScreenId target);
     void cancelCellTool();
     [[nodiscard]] bool applyCellTool(
         OverworldScreenId visibleScreen,
@@ -89,11 +77,6 @@ public:
 
     [[nodiscard]] bool selectScreen(OverworldScreenId id);
     [[nodiscard]] bool addScreen(OverworldSlot slot);
-    [[nodiscard]] bool addConnectedScreen(
-        OverworldScreenId from,
-        OverworldSlot slot,
-        GridPosition3 fromCell,
-        const Level::Definition* sourceDefinition = nullptr);
     [[nodiscard]] bool moveScreen(OverworldScreenId id, OverworldSlot slot);
     [[nodiscard]] bool deleteScreen(OverworldScreenId id);
     [[nodiscard]] bool restoreDeletedScreen(
@@ -103,12 +86,6 @@ public:
         OverworldScreenId screenId,
         GridPosition3 cell,
         const Level::Definition* sourceDefinition = nullptr);
-    [[nodiscard]] bool connect(
-        OverworldScreenId from,
-        OverworldScreenId to,
-        GridPosition3 fromCell,
-        const Level::Definition* sourceDefinition = nullptr);
-    [[nodiscard]] bool disconnect(std::size_t connectionIndex);
 
     [[nodiscard]] bool undo();
     [[nodiscard]] bool redo();
@@ -139,10 +116,6 @@ private:
         std::optional<OverworldScreenId> ignore = std::nullopt) const;
     [[nodiscard]] OverworldScreenId nextScreenId() const;
     [[nodiscard]] Level::Definition defaultDefinition() const;
-    [[nodiscard]] std::optional<GridPosition3> matchingEndpoint(
-        const OverworldScreenSpec& from,
-        const OverworldScreenSpec& to,
-        GridPosition3 fromCell) const;
     [[nodiscard]] bool supportedWalkable(
         const Level::Definition& definition,
         GridPosition3 cell) const;

@@ -326,11 +326,10 @@ void testComposedOverworldIsValidatedAndStaged()
     writeFile(
         roots.levels / "overworld/layout.json",
         R"json({
-          "format":1,
+          "format":2,
           "screenSize":[3,1],
           "start":{"screen":1,"cell":[0,0,1]},
-          "screens":[{"id":1,"file":"screen1.scr","slot":[0,0]}],
-          "connections":[]
+          "screens":[{"id":1,"file":"screen1.scr","slot":[0,0]}]
         })json");
 
     const sokoban::ContentInventory inventory =

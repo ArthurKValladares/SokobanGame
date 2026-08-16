@@ -91,7 +91,6 @@ private:
     std::filesystem::path overworldEditorRoot_;
     int overworldMoveSlot_[2] { 0, 0 };
     int overworldRestoreSlot_[2] { 0, 0 };
-    int overworldConnectionTarget_ = 0;
 };
 
 } // namespace sokoban

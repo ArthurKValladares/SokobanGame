@@ -1,5 +1,6 @@
 #include "engine/OverworldMapEditor.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -53,13 +54,12 @@ struct TemporaryProject {
             "   \n");
         write(source / "overworld/layout.json",
             "{\n"
-            "  \"format\": 1,\n"
+            "  \"format\": 2,\n"
             "  \"screenSize\": [3, 3],\n"
             "  \"start\": { \"screen\": 1, \"cell\": [1, 1, 1] },\n"
             "  \"screens\": [\n"
             "    { \"id\": 1, \"file\": \"screen1.scr\", \"slot\": [0, 0] }\n"
-            "  ],\n"
-            "  \"connections\": []\n"
+            "  ]\n"
             "}\n");
     }
 
@@ -91,22 +91,18 @@ void testConnectedScreenLifecycleAndHistory()
     CHECK(!editor.dirty());
     CHECK(editor.screens().size() == 1);
     CHECK(editor.selectedScreen() == 1U);
-    CHECK(editor.addConnectedScreen(1, { 1, 0 }, { 2, 1, 1 }));
+    CHECK(editor.addAdjacentScreen(1, { 1, 0 }));
     CHECK(editor.dirty());
     CHECK(editor.screens().size() == 2);
-    CHECK(editor.layout().connections.size() == 1);
-    if (!editor.layout().connections.empty()) {
-        CHECK(editor.layout().connections[0].b.screen == 2U);
-        CHECK((editor.layout().connections[0].b.cell ==
-            sokoban::GridPosition3 { 0, 1, 1 }));
-    }
     CHECK(editor.canUndo());
     CHECK(editor.undo());
     CHECK(editor.screens().size() == 1);
     CHECK(editor.canRedo());
     CHECK(editor.redo());
     CHECK(editor.screens().size() == 2);
-    CHECK(!editor.moveScreen(2, { 2, 0 }));
+    CHECK(editor.moveScreen(2, { 2, 0 }));
+    CHECK(!editor.save());
+    CHECK(editor.undo());
 
     CHECK(editor.save());
     CHECK(!editor.dirty());
@@ -118,7 +114,6 @@ void testConnectedScreenLifecycleAndHistory()
     const sokoban::OverworldMap composed = sokoban::OverworldMap::load(
         project.source / "overworld");
     CHECK(composed.screens().size() == 2);
-    CHECK(composed.connections().size() == 1);
 }
 
 void testInvalidDraftSavePreservesProject()
@@ -143,7 +138,7 @@ void testSoftDeleteAndRestoreKeepStableIdentity()
     TemporaryProject project;
     sokoban::OverworldMapEditor editor;
     editor.initialize(project.source, project.runtime);
-    CHECK(editor.addConnectedScreen(1, { 1, 0 }, { 2, 1, 1 }));
+    CHECK(editor.addAdjacentScreen(1, { 1, 0 }));
     CHECK(editor.save());
 
     CHECK(editor.deleteScreen(2));
@@ -157,7 +152,6 @@ void testSoftDeleteAndRestoreKeepStableIdentity()
         std::vector<sokoban::OverworldScreenId> { 2 });
 
     CHECK(editor.restoreDeletedScreen(2, { 1, 0 }));
-    CHECK(editor.connect(1, 2, { 2, 1, 1 }));
     CHECK(editor.save());
     CHECK(std::filesystem::exists(project.source / "overworld/screen2.scr"));
     CHECK(!std::filesystem::exists(
@@ -194,12 +188,19 @@ void testCellPickingToolsAndUnsavedComposition()
     CHECK((editor.layout().start.cell ==
         sokoban::GridPosition3 { 0, 0, 1 }));
 
-    CHECK(editor.beginAddConnectedScreenCell(1, { 1, 0 }));
-    CHECK(editor.cellToolPrompt().find("boundary") != std::string::npos);
-    CHECK(!editor.applyCellTool(1, { 1, 1, 1 }));
-    CHECK(editor.cellTool().has_value());
-    CHECK(editor.applyCellTool(1, { 2, 1, 1 }));
-    CHECK(!editor.cellTool().has_value());
+    CHECK(editor.addAdjacentScreen(1, { 1, 0 }));
+    CHECK(editor.screens().size() == 2);
+    CHECK(editor.selectedScreen() == 2U);
+    const sokoban::Level::Definition* newScreen = editor.definition(2);
+    CHECK(newScreen != nullptr);
+    if (newScreen) {
+        CHECK(std::ranges::all_of(
+            newScreen->layers[0],
+            [](const std::string& row) { return row == "..."; }));
+        CHECK(std::ranges::all_of(
+            newScreen->layers[1],
+            [](const std::string& row) { return row == "   "; }));
+    }
     CHECK(editor.screens().size() == 2);
     CHECK(!std::filesystem::exists(
         project.source / "overworld/screen2.scr"));
@@ -208,12 +209,6 @@ void testCellPickingToolsAndUnsavedComposition()
         project.source / "overworld",
         editor.draftOverride());
     CHECK(draft.screens().size() == 2);
-    CHECK(draft.connections().size() == 1);
-
-    CHECK(editor.disconnect(0));
-    CHECK(editor.beginConnectCell(1, 2));
-    CHECK(editor.applyCellTool(1, { 2, 1, 1 }));
-    CHECK(editor.layout().connections.size() == 1);
     CHECK(editor.beginSetStartCell(1));
     editor.cancelCellTool();
     CHECK(!editor.cellTool().has_value());

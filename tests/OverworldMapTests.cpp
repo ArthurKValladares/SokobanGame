@@ -121,7 +121,7 @@ Level::Definition eastDefinition(
 OverworldLayout eastWestLayout()
 {
     return {
-        .format = 1,
+        .format = 2,
         .screenWidth = 3,
         .screenHeight = 2,
         .start = {
@@ -131,12 +131,6 @@ OverworldLayout eastWestLayout()
         .screens = {
             { .id = 1, .file = "screen1.scr", .slot = { 0, 0 } },
             { .id = 2, .file = "screen2.scr", .slot = { 1, 0 } },
-        },
-        .connections = {
-            {
-                .a = { .screen = 1, .cell = { 2, 1, 1 } },
-                .b = { .screen = 2, .cell = { 0, 1, 1 } },
-            },
         },
     };
 }
@@ -161,7 +155,6 @@ void testLayoutRoundTripIsCanonical()
     TestProject project("layout_round_trip");
     OverworldLayout authored = eastWestLayout();
     std::ranges::reverse(authored.screens);
-    std::swap(authored.connections.front().a, authored.connections.front().b);
 
     project.writeLayout(authored);
     const OverworldLayout loaded =
@@ -169,8 +162,6 @@ void testLayoutRoundTripIsCanonical()
     CHECK(loaded.screens.size() == 2);
     CHECK(loaded.screens[0].id == 1);
     CHECK(loaded.screens[1].id == 2);
-    CHECK(loaded.connections[0].a.screen == 1);
-    CHECK(loaded.connections[0].b.screen == 2);
 
     project.writeLayout(loaded);
     CHECK(loadOverworldLayout(project.root / "layout.json") == loaded);
@@ -339,6 +330,35 @@ void testInvalidTopologyIsRejected()
     TEST("invalidTopologyIsRejected");
 
     {
+        TestProject project("legacy_format");
+        OverworldLayout layout = eastWestLayout();
+        layout.format = 1;
+        checkThrowsContaining(
+            [&] { project.writeLayout(layout); },
+            "unsupported overworld layout format 1");
+    }
+
+    {
+        TestProject project("legacy_connections_property");
+        std::ofstream file(project.root / "layout.json", std::ios::trunc);
+        file << R"json({
+  "format": 2,
+  "screenSize": [3, 2],
+  "start": { "screen": 1, "cell": [1, 1, 1] },
+  "screens": [
+    { "id": 1, "file": "screen1.scr", "slot": [0, 0] }
+  ],
+  "connections": []
+})json";
+        file.close();
+        checkThrowsContaining(
+            [&] {
+                (void)loadOverworldLayout(project.root / "layout.json");
+            },
+            "unknown property 'connections'");
+    }
+
+    {
         TestProject project("duplicate_slot");
         project.writeScreen(1, westDefinition());
         project.writeScreen(2, eastDefinition());
@@ -350,7 +370,7 @@ void testInvalidTopologyIsRejected()
     }
 
     {
-        TestProject project("diagonal_connection");
+        TestProject project("diagonal_screen");
         project.writeScreen(1, westDefinition());
         project.writeScreen(2, eastDefinition());
         OverworldLayout layout = eastWestLayout();
@@ -358,21 +378,21 @@ void testInvalidTopologyIsRejected()
         project.writeLayout(layout);
         checkThrowsContaining(
             [&] { (void)OverworldMap::load(project.root); },
-            "cardinally adjacent");
+            "walkable boundary pair");
     }
 
     {
-        TestProject project("undeclared_seam");
-        Level::Definition openWest = westDefinition();
-        openWest.layers[1][0][2] = ' ';
-        Level::Definition openEast = eastDefinition();
-        openEast.layers[1][0][0] = ' ';
-        project.writeScreen(1, openWest);
-        project.writeScreen(2, openEast);
+        TestProject project("blocked_seam");
+        Level::Definition blockedWest = westDefinition();
+        blockedWest.layers[1][1][2] = '#';
+        Level::Definition blockedEast = eastDefinition();
+        blockedEast.layers[1][1][0] = '#';
+        project.writeScreen(1, blockedWest);
+        project.writeScreen(2, blockedEast);
         project.writeLayout(eastWestLayout());
         checkThrowsContaining(
             [&] { (void)OverworldMap::load(project.root); },
-            "undeclared seam");
+            "walkable boundary pair");
     }
 
     {

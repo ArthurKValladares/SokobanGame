@@ -20,11 +20,11 @@ struct OverworldSlot {
     bool operator==(const OverworldSlot&) const = default;
 };
 
-struct OverworldEndpoint {
+struct OverworldPosition {
     OverworldScreenId screen = 0;
     GridPosition3 cell {};
 
-    bool operator==(const OverworldEndpoint&) const = default;
+    bool operator==(const OverworldPosition&) const = default;
 };
 
 struct OverworldScreenSpec {
@@ -35,20 +35,12 @@ struct OverworldScreenSpec {
     bool operator==(const OverworldScreenSpec&) const = default;
 };
 
-struct OverworldConnection {
-    OverworldEndpoint a;
-    OverworldEndpoint b;
-
-    bool operator==(const OverworldConnection&) const = default;
-};
-
 struct OverworldLayout {
-    int format = 1;
+    int format = 2;
     uint32_t screenWidth = 0;
     uint32_t screenHeight = 0;
-    OverworldEndpoint start;
+    OverworldPosition start;
     std::vector<OverworldScreenSpec> screens;
-    std::vector<OverworldConnection> connections;
 
     bool operator==(const OverworldLayout&) const = default;
 };
@@ -79,12 +71,6 @@ struct OverworldScreenRuntime {
     Level::Definition definition;
 };
 
-struct OverworldConnectionRuntime {
-    OverworldConnection authored;
-    GridPosition3 globalA {};
-    GridPosition3 globalB {};
-};
-
 struct OverworldSelectorRuntime {
     OverworldScreenId screen = 0;
     uint32_t localId = 0;
@@ -107,7 +93,7 @@ struct OverworldDraftOverride {
 };
 
 // Separately authored overworld chunks composed into one ordinary Level.
-// Gameplay can therefore cross a declared seam without resetting Rules,
+// Gameplay can therefore cross a walkable physical seam without resetting Rules,
 // GameplaySession, presentation history, or the undo chain.
 class OverworldMap {
 public:
@@ -130,10 +116,6 @@ public:
     [[nodiscard]] const std::vector<OverworldScreenRuntime>& screens() const
     {
         return screens_;
-    }
-    [[nodiscard]] const std::vector<OverworldConnectionRuntime>& connections() const
-    {
-        return connections_;
     }
     [[nodiscard]] const std::vector<OverworldSelectorRuntime>& selectors() const
     {
@@ -165,7 +147,6 @@ private:
     GridPosition normalizationOffset_ {};
     uint64_t fingerprint_ = 0;
     std::vector<OverworldScreenRuntime> screens_;
-    std::vector<OverworldConnectionRuntime> connections_;
     std::vector<OverworldSelectorRuntime> selectors_;
 };
 

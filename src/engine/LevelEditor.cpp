@@ -704,7 +704,6 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
         try {
             const OverworldLayout layout = loadOverworldLayout(
                 document_.browserRoot / "overworld/layout.json");
-            std::vector<GridPosition3> protectedEndpoints;
             if (layout.start.screen == *screenId) {
                 if (position == layout.start.cell && tile != TileType::Air) {
                     document_.status =
@@ -718,29 +717,6 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
                     document_.status =
                         "That tile supports the overworld start and cannot "
                         "be removed first.";
-                    return;
-                }
-            }
-            for (const OverworldConnection& connection : layout.connections) {
-                if (connection.a.screen == *screenId) {
-                    protectedEndpoints.push_back(connection.a.cell);
-                }
-                if (connection.b.screen == *screenId) {
-                    protectedEndpoints.push_back(connection.b.cell);
-                }
-            }
-            for (GridPosition3 endpoint : protectedEndpoints) {
-                if (position == endpoint && !tileTypeAllowsEntity(tile)) {
-                    document_.status =
-                        "That cell is an overworld start/connection endpoint; "
-                        "move the metadata before blocking it.";
-                    return;
-                }
-                --endpoint.z;
-                if (position == endpoint && !tileTypeSupportsEntity(tile)) {
-                    document_.status =
-                        "That tile supports an overworld start/connection "
-                        "endpoint and cannot be removed first.";
                     return;
                 }
             }
@@ -1253,30 +1229,6 @@ std::optional<GridPosition3> LevelEditor::overworldStartCell() const
     }
 }
 
-std::vector<std::pair<GridPosition3, OverworldScreenId>>
-LevelEditor::overworldConnectionEndpoints() const
-{
-    std::vector<std::pair<GridPosition3, OverworldScreenId>> result;
-    const std::optional<OverworldScreenId> id = overworldScreenId();
-    if (!id) {
-        return result;
-    }
-    try {
-        const OverworldLayout layout = loadOverworldLayout(
-            document_.browserRoot / "overworld/layout.json");
-        for (const OverworldConnection& connection : layout.connections) {
-            if (connection.a.screen == *id) {
-                result.emplace_back(connection.a.cell, connection.b.screen);
-            } else if (connection.b.screen == *id) {
-                result.emplace_back(connection.b.cell, connection.a.screen);
-            }
-        }
-    } catch (const std::exception&) {
-        result.clear();
-    }
-    return result;
-}
-
 bool LevelEditor::dirty() const
 {
     return document_.dirty;
@@ -1609,8 +1561,8 @@ bool LevelEditor::saveDocument(const std::filesystem::path& path)
             .selectors = document_.selectors,
         });
 
-    // A component edit can invalidate a start, connection endpoint, common
-    // dimensions, water metadata, or an undeclared seam. Route it through the
+    // A component edit can invalidate the start, implicit seam reachability,
+    // common dimensions, or water metadata. Route it through the
     // same whole-project validator as topology edits so source and runtime can
     // never disagree or expose a half-valid map.
     if (overworldScreenIdForPath(sourcePath)) {
