@@ -10,8 +10,9 @@
 namespace sokoban {
 
 // Headless rendering/navigation view of a composed overworld. A settled view
-// frames a fixed 3x3 screen window. While a player action crosses a seam, the
-// same window translates from the source screen to the destination screen;
+// frames only the active screen while still rendering its 3x3 neighborhood.
+// While a player action crosses a seam, that screen-sized view translates
+// from the source screen to the destination screen;
 // the destination becomes active only after gameplay commits the action.
 struct OverworldView {
     OverworldScreenId sourceScreen = 0;

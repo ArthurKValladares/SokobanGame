@@ -111,12 +111,12 @@ OverworldView calculateOverworldView(
     OverworldView view {
         .sourceScreen = activeScreen,
         .cameraExtent = {
-            .originX = active->origin.x - static_cast<int>(screenWidth),
-            .originY = active->origin.y - static_cast<int>(screenHeight),
+            .originX = active->origin.x,
+            .originY = active->origin.y,
             .originZ = 0,
-            .width = screenWidth * 3U,
-            .height = screenHeight * 3U,
-            .depth = map.level().depth(),
+            .width = screenWidth,
+            .height = screenHeight,
+            .depth = active->depth,
         },
     };
     includeNeighborhood(view.visibleScreens, map, activeScreen);

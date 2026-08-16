@@ -130,7 +130,7 @@ For a crossing action:
 - the visible region is the union of source and destination 3x3 neighborhoods while movement is in flight;
 - after commit, the destination becomes active.
 
-Camera framing uses a fixed 3x3-screen footprint so adding or removing neighbors does not change zoom. Missing slots contribute no geometry but still occupy their expected framing space.
+Camera framing uses only the active screen's authored extent, matching an ordinary level screen. Neighboring screens remain rendered for navigation context but do not affect camera fit or zoom. During a crossing, that same screen-sized view pans toward the destination screen.
 
 ## 10. Rendering
 
@@ -210,7 +210,7 @@ Production validation additionally requires assigned selector coverage and the o
 
 1. **Topology and composition:** strict layout types, coordinate translation, ownership queries, selector identity, and tests.
 2. **Persistence and campaign state:** topology fingerprints, typed checkpoints, migration, and active-screen restoration.
-3. **Movement and camera:** projected-action ownership, crossing transitions, fixed 3x3 framing, and visibility union.
+3. **Movement and camera:** projected-action ownership, crossing transitions, active-screen framing, and visibility union.
 4. **Rendering and assets:** neighborhood culling, per-screen splat regions, water seam handling, and production staging.
 5. **Content migration:** convert the old single overworld to a multi-screen format-3 layout.
 6. **Editor topology:** spatial canvas, immediate cardinal add controls, all-ground defaults, move/delete/restore, Player-tile authoring, draft composition, and transactional saves.

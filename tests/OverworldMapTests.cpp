@@ -270,10 +270,11 @@ void testActionAdmissionAndCameraTransition()
     CHECK(halfway.destinationScreen ==
         std::optional<OverworldScreenId> { 2 });
     CHECK(std::abs(halfway.transitionProgress - 0.5f) < 0.0001f);
-    CHECK(halfway.cameraExtent.originX == -3);
-    CHECK(halfway.cameraExtent.originY == -2);
-    CHECK(halfway.cameraExtent.width == 9);
-    CHECK(halfway.cameraExtent.height == 6);
+    CHECK(halfway.cameraExtent.originX == 0);
+    CHECK(halfway.cameraExtent.originY == 0);
+    CHECK(halfway.cameraExtent.width == 3);
+    CHECK(halfway.cameraExtent.height == 2);
+    CHECK(halfway.cameraExtent.depth == map.screen(1)->depth);
     CHECK(std::abs(halfway.cameraOffset.x - 1.5f) < 0.0001f);
     CHECK(std::abs(halfway.cameraOffset.y) < 0.0001f);
     CHECK(halfway.visibleScreens ==

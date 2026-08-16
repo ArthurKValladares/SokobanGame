@@ -396,8 +396,8 @@ struct RenderFrameData {
     uint32_t gridPickBorder = 0;
     std::optional<CameraExtent> cameraExtent;
     // Translates an explicit fitted extent without quantizing its origin to a
-    // cell. Composed overworld transitions use this to pan one 3x3 screen
-    // window smoothly between adjacent screen centers.
+    // cell. Composed overworld transitions use this to pan one screen-sized
+    // view smoothly between adjacent screen centers.
     Vec2 cameraOffset {};
     WaterGridBounds waterGridBounds;
     Vec2 playerPosition {};
