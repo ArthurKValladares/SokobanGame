@@ -608,6 +608,10 @@ GameplaySession::StartOutcome GameplaySession::tryStartPlayerStep(
             ActionDeferral { .steps = stepLegs, .seconds = stepDuration }));
     }
 
+    if (!actionAdmissionAllows(batch)) {
+        return StartOutcome::Impossible;
+    }
+
     // Allocated up front so the consequence carries the same group as its
     // cause and folds into its undo entry rather than opening one of its own.
     const std::size_t group = nextCausalGroup_++;
@@ -660,6 +664,9 @@ GameplaySession::StartOutcome GameplaySession::tryStartAmbientMotion(
             stepDurationSeconds_)) {
         slide->action.playerMoveCountBefore = playerMoveCount_;
         slide->action.playerMoveCountAfter = playerMoveCount_;
+        if (!actionAdmissionAllows(slide->action)) {
+            return StartOutcome::Impossible;
+        }
         return beginAction(std::move(slide->action), std::move(slide->legs))
             ? StartOutcome::Started
             : StartOutcome::Refused;
@@ -673,6 +680,9 @@ GameplaySession::StartOutcome GameplaySession::tryStartAmbientMotion(
             stepDurationSeconds_)) {
         ride->action.playerMoveCountBefore = playerMoveCount_;
         ride->action.playerMoveCountAfter = playerMoveCount_;
+        if (!actionAdmissionAllows(ride->action)) {
+            return StartOutcome::Impossible;
+        }
         return beginAction(std::move(ride->action), std::move(ride->legs))
             ? StartOutcome::Started
             : StartOutcome::Refused;
@@ -698,6 +708,10 @@ GameplaySession::StartOutcome GameplaySession::tryStartMirrorAction(
     Action action = plans::fromMirrorPreview(state(), *activation);
     action.playerMoveCountBefore = playerMoveCount_;
     action.playerMoveCountAfter = playerMoveCount_;
+    if (!actionAdmissionAllows(action)) {
+        lastMirrorSwapDestinations_.clear();
+        return StartOutcome::Impossible;
+    }
     if (!beginAction(std::move(action))) {
         lastMirrorSwapDestinations_.clear();
         return StartOutcome::Refused;
@@ -729,6 +743,9 @@ GameplaySession::StartOutcome GameplaySession::tryStartUndoMove()
         : action.presentation.durationSeconds;
     action.facingDirection = plans::firstPlayerMovementDirection(
         action.after, action.before);
+    if (!actionAdmissionAllows(action)) {
+        return StartOutcome::Impossible;
+    }
     if (!beginAction(std::move(action))) {
         return StartOutcome::Refused;
     }
@@ -753,6 +770,9 @@ GameplaySession::StartOutcome GameplaySession::tryStartRestart(
 
     action->playerMoveCountBefore = playerMoveCount_;
     action->playerMoveCountAfter = 0;
+    if (!actionAdmissionAllows(*action)) {
+        return StartOutcome::Impossible;
+    }
     if (!beginAction(std::move(*action))) {
         return StartOutcome::Refused;
     }
@@ -846,6 +866,32 @@ bool GameplaySession::beginAction(
     return std::holds_alternative<ActionScheduler::Started>(
         scheduler_.tryStart(
             action, claims, std::move(legs), causalGroup, deferral));
+}
+
+bool GameplaySession::actionAdmissionAllows(const Action& action) const
+{
+    if (!actionAdmissionPolicy_) {
+        return true;
+    }
+
+    GameState projected = projectedState();
+    StateDelta::between(action.before, action.after).applyTo(projected);
+    return actionAdmissionPolicy_(projected);
+}
+
+bool GameplaySession::actionAdmissionAllows(
+    const std::vector<ActionScheduler::Pending>& actions) const
+{
+    if (!actionAdmissionPolicy_) {
+        return true;
+    }
+
+    GameState projected = projectedState();
+    for (const ActionScheduler::Pending& pending : actions) {
+        StateDelta::between(pending.plan.before, pending.plan.after)
+            .applyTo(projected);
+    }
+    return actionAdmissionPolicy_(projected);
 }
 
 ActionScheduler::Pending GameplaySession::makePending(

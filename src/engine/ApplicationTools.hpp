@@ -10,6 +10,7 @@
 #include "engine/DecorationMeshCatalog.hpp"
 #include "engine/LevelEditor.hpp"
 #include "engine/LevelEditorDebugUi.hpp"
+#include "engine/OverworldMapEditor.hpp"
 #include "engine/InputRouter.hpp"
 #include "engine/SplatPainter.hpp"
 #include "engine/render/VulkanRenderer.hpp"
@@ -91,6 +92,7 @@ public:
     AssetManifestEditor assetManifestEditor;
     AssetManifestDebugUi assetManifestDebugUi;
     LevelEditor levelEditor;
+    OverworldMapEditor overworldMapEditor;
     DecorationMeshCatalog decorationMeshCatalog;
     LevelEditorDebugUi levelEditorDebugUi;
     AnimationPreviewDebugUi animationPreviewDebugUi;

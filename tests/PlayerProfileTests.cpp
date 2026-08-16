@@ -699,7 +699,11 @@ void testScreenProgressOverworldCheckpointAndFormat17Migration()
     }, "profile overworld checkpoint");
     sokoban::GameplaySession session;
     session.reset(overworld);
-    profile.overworldSession = session.snapshot();
+    profile.overworldCheckpoint = sokoban::PlayerProfile::OverworldCheckpoint {
+        .topologyFingerprint = 0x123456789abcdef0ULL,
+        .activeScreen = 7,
+        .session = session.snapshot(),
+    };
     profile.worldContext = sokoban::PlayerProfile::WorldContext::Overworld;
 
     const sokoban::DecodedPlayerProfile decoded =
@@ -711,7 +715,7 @@ void testScreenProgressOverworldCheckpointAndFormat17Migration()
         sokoban::PlayerProfile {}.serialize());
     format17["format"] = 17;
     format17["progress"].erase("screens");
-    format17["progress"].erase("overworldSession");
+    format17["progress"].erase("overworldCheckpoint");
     format17["progress"].erase("worldContext");
     format17["progress"]["levels"] = nlohmann::json::array({ {
         { "level", 4 },
@@ -732,6 +736,20 @@ void testScreenProgressOverworldCheckpointAndFormat17Migration()
     check(migrated.profile.worldContext ==
             sokoban::PlayerProfile::WorldContext::Overworld,
         "format 17 without an active checkpoint resumes in overworld");
+
+    nlohmann::json format19 = nlohmann::json::parse(profile.serialize());
+    format19["format"] = 19;
+    format19["progress"]["overworldSession"] =
+        format19["progress"]["overworldCheckpoint"]["session"];
+    format19["progress"].erase("overworldCheckpoint");
+    const sokoban::DecodedPlayerProfile migrated19 =
+        sokoban::decodePlayerProfile(format19.dump());
+    check(migrated19.sourceFormat == 19,
+        "format 19 source is reported");
+    check(!migrated19.profile.overworldCheckpoint,
+        "format 19 single-overworld checkpoint is safely discarded");
+    check(migrated19.profile.screenCompleted({ .level = 2, .screen = 3 }),
+        "format 19 puzzle progress survives checkpoint migration");
 }
 
 void testStoreBackupsAndRecovery()

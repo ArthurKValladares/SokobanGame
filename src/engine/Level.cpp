@@ -356,6 +356,12 @@ bool hasAdjacentGround(const Level& level, GridPosition3 position)
 
 Level Level::loadFromFile(const std::filesystem::path& path)
 {
+    return loadFromDefinition(loadDefinitionFromFile(path), path.string());
+}
+
+Level::Definition Level::loadDefinitionFromFile(
+    const std::filesystem::path& path)
+{
     std::ifstream file(path);
     if (!file) {
         throw std::runtime_error("Failed to open level file: " + path.string());
@@ -370,7 +376,7 @@ Level Level::loadFromFile(const std::filesystem::path& path)
         lines.push_back(line);
     }
 
-    return loadFromLines(lines, path.string());
+    return parseDefinition(lines, path.string());
 }
 
 Level::Definition Level::parseDefinition(

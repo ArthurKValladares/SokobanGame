@@ -909,7 +909,7 @@ void parseProgressSection(PlayerProfile& profile, const Json& progress)
     rejectUnknownProperties(
         progress,
         { "unlockedLevel", "currentLevel", "currentScreen", "levels",
-          "screens", "activeScreen", "overworldSession", "worldContext" },
+          "screens", "activeScreen", "overworldCheckpoint", "worldContext" },
         "progress");
     profile.unlockedLevel =
         nonNegativeIntegerProperty(progress, "unlockedLevel", "progress");
@@ -996,11 +996,36 @@ void parseProgressSection(PlayerProfile& profile, const Json& progress)
         fail("progress", "property 'worldContext' must be 'overworld' or 'puzzle'");
     }
 
-    const Json& overworldSession =
-        requiredProperty(progress, "overworldSession", "progress");
-    if (!overworldSession.is_null()) {
-        profile.overworldSession = sessionSnapshotFromJson(
-            overworldSession, "progress.overworldSession");
+    const Json& overworldCheckpoint =
+        requiredProperty(progress, "overworldCheckpoint", "progress");
+    if (!overworldCheckpoint.is_null()) {
+        rejectUnknownProperties(
+            overworldCheckpoint,
+            { "topologyFingerprint", "activeScreen", "session" },
+            "progress.overworldCheckpoint");
+        PlayerProfile::OverworldCheckpoint checkpoint;
+        checkpoint.topologyFingerprint = unsignedIntegerProperty(
+            overworldCheckpoint,
+            "topologyFingerprint",
+            "progress.overworldCheckpoint");
+        const uint64_t activeScreen = unsignedIntegerProperty(
+            overworldCheckpoint,
+            "activeScreen",
+            "progress.overworldCheckpoint");
+        if (activeScreen == 0 ||
+            activeScreen > std::numeric_limits<uint32_t>::max()) {
+            fail(
+                "progress.overworldCheckpoint",
+                "property 'activeScreen' must be a positive 32-bit integer");
+        }
+        checkpoint.activeScreen = static_cast<uint32_t>(activeScreen);
+        checkpoint.session = sessionSnapshotFromJson(
+            requiredProperty(
+                overworldCheckpoint,
+                "session",
+                "progress.overworldCheckpoint"),
+            "progress.overworldCheckpoint.session");
+        profile.overworldCheckpoint = std::move(checkpoint);
     }
 
     const Json& activeScreen =
@@ -1151,6 +1176,11 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
             throw std::runtime_error(
                 "overworld context cannot have an active screen checkpoint");
         }
+        if (normalized.overworldCheckpoint &&
+            normalized.overworldCheckpoint->activeScreen == 0) {
+            throw std::runtime_error(
+                "player profile overworld checkpoint has no active screen");
+        }
 
         OrderedJson levelItems = OrderedJson::array();
         for (const LevelProgress& level : normalized.levels) {
@@ -1195,10 +1225,17 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
             };
         }
 
-        OrderedJson overworldSessionJson = nullptr;
-        if (normalized.overworldSession) {
-            overworldSessionJson =
-                sessionSnapshotToJson(*normalized.overworldSession);
+        OrderedJson overworldCheckpointJson = nullptr;
+        if (normalized.overworldCheckpoint) {
+            overworldCheckpointJson = {
+                { "topologyFingerprint",
+                  normalized.overworldCheckpoint->topologyFingerprint },
+                { "activeScreen",
+                  normalized.overworldCheckpoint->activeScreen },
+                { "session",
+                  sessionSnapshotToJson(
+                      normalized.overworldCheckpoint->session) },
+            };
         }
 
         root["progress"] = {
@@ -1208,7 +1245,7 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
             { "levels", std::move(levelItems) },
             { "screens", std::move(screenItems) },
             { "activeScreen", std::move(activeScreenJson) },
-            { "overworldSession", std::move(overworldSessionJson) },
+            { "overworldCheckpoint", std::move(overworldCheckpointJson) },
             { "worldContext",
               normalized.worldContext == WorldContext::Overworld
                   ? "overworld"

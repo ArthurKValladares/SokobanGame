@@ -563,6 +563,18 @@ void testRealManifestFile()
         screenSplatMaps += screensForLevel;
     }
     check(screenSplatMaps > 0, "real manifest declares per-screen splat maps");
+    const sokoban::RenderTexture overworldSplat =
+        manifest.findTextureIdByName(
+            sokoban::groundSplatMapTextureNameForOverworldScreen(1));
+    check(!overworldSplat.isNone(),
+        "real manifest declares migrated overworld splat map");
+    check(splatMapSamplingIsCorrect(
+              manifest,
+              sokoban::groundSplatMapTextureNameForOverworldScreen(1)),
+        "real manifest overworld splat map samples as clamped linear data");
+    check(manifest.textures()[overworldSplat.index()].path ==
+            sokoban::groundSplatMapAssetPathForOverworldScreen(1),
+        "overworld splat map path uses stable screen ID convention");
     check(!manifest.textureIdByName("Smoke01").isNone(),
         "real manifest has first mirror smoke texture");
     check(!manifest.textureIdByName("Smoke10").isNone(),

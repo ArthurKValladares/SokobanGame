@@ -22,12 +22,48 @@ void CampaignSession::setOverworldTargets(std::vector<LevelLocation> targets)
     overworldTargets_ = std::move(targets);
 }
 
+void CampaignSession::setOverworldTopology(
+    uint64_t fingerprint,
+    std::vector<OverworldScreenId> screens,
+    OverworldScreenId startScreen)
+{
+    if (startScreen == 0 || screens.empty() ||
+        std::ranges::any_of(screens, [](OverworldScreenId screen) {
+            return screen == 0;
+        })) {
+        throw std::invalid_argument(
+            "overworld topology requires positive screen IDs");
+    }
+    std::ranges::sort(screens);
+    if (std::ranges::adjacent_find(screens) != screens.end()) {
+        throw std::invalid_argument(
+            "overworld topology contains duplicate screen IDs");
+    }
+    if (!std::ranges::binary_search(screens, startScreen)) {
+        throw std::invalid_argument(
+            "overworld topology start screen does not exist");
+    }
+
+    const bool topologyUnchanged = fingerprint == overworldFingerprint_ &&
+        screens == overworldScreens_ &&
+        startScreen == overworldStartScreen_;
+    overworldFingerprint_ = fingerprint;
+    overworldScreens_ = std::move(screens);
+    overworldStartScreen_ = startScreen;
+    if (!topologyUnchanged ||
+        !overworldScreenExists(activeOverworldScreen_)) {
+        activeOverworldScreen_ = overworldStartScreen_;
+    }
+}
+
 bool CampaignSession::restoreProfileLocation(PlayerProfile& profile)
 {
     clearRunState();
+    const bool overworldCheckpointValid =
+        validateOverworldCheckpoint(profile);
     if (profile.worldContext == PlayerProfile::WorldContext::Overworld) {
         inOverworld_ = true;
-        return true;
+        return overworldCheckpointValid;
     }
 
     const LevelLocation saved {
@@ -56,6 +92,7 @@ void CampaignSession::startNewGame(PlayerProfile& profile)
     profile.resetProgress();
     clearRunState();
     inOverworld_ = true;
+    activeOverworldScreen_ = overworldStartScreen_;
     profile.worldContext = PlayerProfile::WorldContext::Overworld;
 }
 
@@ -85,7 +122,11 @@ bool CampaignSession::enterSelector(
             ScreenSelectorStatus::Unavailable) {
         return false;
     }
-    profile.overworldSession = overworldSnapshot;
+    profile.overworldCheckpoint = PlayerProfile::OverworldCheckpoint {
+        .topologyFingerprint = overworldFingerprint_,
+        .activeScreen = activeOverworldScreen_,
+        .session = overworldSnapshot,
+    };
     return startPuzzle(profile, target);
 }
 
@@ -111,13 +152,52 @@ const Level::ScreenSelector* CampaignSession::selectorForInteraction(
     return sharedSelector;
 }
 
+std::optional<OverworldScreenId> CampaignSession::sharedPlayerScreen(
+    const OverworldMap& map,
+    const GameState& state)
+{
+    if (state.players.empty()) {
+        return std::nullopt;
+    }
+    std::optional<OverworldScreenId> shared;
+    for (const GameState::Player& player : state.players) {
+        if (player.dead) {
+            return std::nullopt;
+        }
+        const std::optional<OverworldScreenId> owner =
+            map.screenAt(player.cell);
+        if (!owner || (shared && *shared != *owner)) {
+            return std::nullopt;
+        }
+        shared = owner;
+    }
+    return shared;
+}
+
+bool CampaignSession::transitionOverworldScreen(
+    OverworldScreenId destination)
+{
+    if (!inOverworld_ || !overworldScreenExists(destination)) {
+        return false;
+    }
+    activeOverworldScreen_ = destination;
+    return true;
+}
+
 CampaignSession::WorldRestore CampaignSession::prepareWorldLoad(
     const PlayerProfile& profile)
 {
     if (inOverworld_) {
+        if (!profile.overworldCheckpoint ||
+            profile.overworldCheckpoint->topologyFingerprint !=
+                overworldFingerprint_ ||
+            profile.overworldCheckpoint->activeScreen !=
+                activeOverworldScreen_) {
+            return {};
+        }
         return {
-            .snapshot = profile.overworldSession,
-            .checkpointMatched = profile.overworldSession.has_value(),
+            .snapshot = profile.overworldCheckpoint->session,
+            .checkpointMatched = true,
         };
     }
     if (!profile.activeScreen ||
@@ -195,7 +275,11 @@ void CampaignSession::writeCheckpoint(
     if (inOverworld_) {
         profile.worldContext = PlayerProfile::WorldContext::Overworld;
         profile.activeScreen.reset();
-        profile.overworldSession = snapshot;
+        profile.overworldCheckpoint = PlayerProfile::OverworldCheckpoint {
+            .topologyFingerprint = overworldFingerprint_,
+            .activeScreen = activeOverworldScreen_,
+            .session = snapshot,
+        };
     } else {
         profile.worldContext = PlayerProfile::WorldContext::Puzzle;
         profile.setCurrentScreen(current_.level, current_.screen);
@@ -276,6 +360,31 @@ int CampaignSession::screenCount(int level) const
     return levelScreenCounts_[static_cast<std::size_t>(level)];
 }
 
+bool CampaignSession::overworldScreenExists(
+    OverworldScreenId screen) const
+{
+    return std::ranges::binary_search(overworldScreens_, screen);
+}
+
+bool CampaignSession::validateOverworldCheckpoint(PlayerProfile& profile)
+{
+    if (!profile.overworldCheckpoint) {
+        activeOverworldScreen_ = overworldStartScreen_;
+        return true;
+    }
+    if (profile.overworldCheckpoint->topologyFingerprint !=
+            overworldFingerprint_ ||
+        !overworldScreenExists(
+            profile.overworldCheckpoint->activeScreen)) {
+        profile.overworldCheckpoint.reset();
+        activeOverworldScreen_ = overworldStartScreen_;
+        return false;
+    }
+    activeOverworldScreen_ =
+        profile.overworldCheckpoint->activeScreen;
+    return true;
+}
+
 void CampaignSession::validateOverworldCoverage(
     const std::vector<LevelLocation>& targets) const
 {
@@ -306,6 +415,7 @@ void CampaignSession::clearRunState()
     deferredCheckpointPending_ = false;
     inOverworld_ = true;
     gameLoaded_ = false;
+    activeOverworldScreen_ = overworldStartScreen_;
 }
 
 } // namespace sokoban

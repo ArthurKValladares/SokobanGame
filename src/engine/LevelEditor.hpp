@@ -2,15 +2,19 @@
 
 #include "engine/Level.hpp"
 #include "engine/LevelProjectStore.hpp"
+#include "engine/OverworldMap.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace sokoban {
+
+class OverworldMapEditor;
 
 // Headless editor state and commands. UI layers should only read this state and
 // invoke these operations; no presentation framework is required to use it.
@@ -80,8 +84,14 @@ public:
     void deleteActiveLayer();
     [[nodiscard]] bool loadDocument(const std::filesystem::path& path, bool recordHistory = true);
     [[nodiscard]] bool saveDocument(const std::filesystem::path& path);
+    [[nodiscard]] Level::Definition documentDefinition() const;
     [[nodiscard]] Level documentToLevel() const;
-    [[nodiscard]] std::optional<Level> beginDraftPlayback();
+    [[nodiscard]] std::optional<Level> beginDraftPlayback(
+        const OverworldMapEditor* topologyDraft = nullptr);
+    [[nodiscard]] const OverworldMap* draftOverworldMap() const
+    {
+        return draftOverworldMap_ ? &*draftOverworldMap_ : nullptr;
+    }
 
     void paintCell(GridPosition3 position);
     void eraseCell(GridPosition3 position);
@@ -171,6 +181,14 @@ public:
     // what is rendered.
     [[nodiscard]] const std::filesystem::path& loadedDocumentPath() const;
     [[nodiscard]] const std::filesystem::path& browserRoot() const;
+    [[nodiscard]] const std::filesystem::path& sourceLevelRoot() const;
+    [[nodiscard]] const std::filesystem::path& runtimeLevelRoot() const;
+    [[nodiscard]] std::optional<OverworldScreenId> overworldScreenId() const;
+    [[nodiscard]] std::optional<OverworldScreenId> selectorLevelOwner(
+        int puzzleLevel) const;
+    [[nodiscard]] std::optional<GridPosition3> overworldStartCell() const;
+    [[nodiscard]] std::vector<std::pair<GridPosition3, OverworldScreenId>>
+        overworldConnectionEndpoints() const;
     [[nodiscard]] const std::string& status() const;
 
 private:
@@ -239,11 +257,14 @@ private:
     void loadFirstAvailableScreen();
     [[nodiscard]] bool validDecorationTransform(
         const Level::Decoration& decoration) const;
+    [[nodiscard]] std::optional<OverworldScreenId> overworldScreenIdForPath(
+        const std::filesystem::path& path) const;
 
     Document document_;
     std::vector<EditActionRecord> editHistory_;
     std::optional<DocumentSnapshot> decorationTransformBefore_;
     std::optional<MoveObject> pendingMove_;
+    std::optional<OverworldMap> draftOverworldMap_;
 };
 
 } // namespace sokoban

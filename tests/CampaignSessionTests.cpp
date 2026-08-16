@@ -134,8 +134,10 @@ void testSelectorEntryAndBothCheckpointKinds()
     overworld.playerMoveCount = 6;
     CHECK(campaign.enterSelector(profile, { 1, 0 }, overworld));
     CHECK(!campaign.inOverworld());
-    CHECK(profile.overworldSession.has_value());
-    CHECK(profile.overworldSession->playerMoveCount == 6);
+    CHECK(profile.overworldCheckpoint.has_value());
+    CHECK(profile.overworldCheckpoint->topologyFingerprint == 0);
+    CHECK(profile.overworldCheckpoint->activeScreen == 1);
+    CHECK(profile.overworldCheckpoint->session.playerMoveCount == 6);
     CHECK(profile.worldContext == PlayerProfile::WorldContext::Puzzle);
 
     campaign.finishWorldLoad(profile);
@@ -165,6 +167,42 @@ void testSelectorEntryAndBothCheckpointKinds()
     CHECK(overworldRestore.checkpointMatched);
     CHECK(overworldRestore.snapshot.has_value());
     CHECK(overworldRestore.snapshot->playerMoveCount == 6);
+}
+
+void testOverworldTopologyCheckpointValidation()
+{
+    TEST("overworldTopologyCheckpointValidation");
+    CampaignSession campaign = configuredCampaign();
+    campaign.setOverworldTopology(1234, { 9, 4 }, 4);
+    PlayerProfile profile;
+    campaign.startNewGame(profile);
+    CHECK(campaign.activeOverworldScreen() == 4);
+    CHECK(!campaign.transitionOverworldScreen(7));
+    CHECK(campaign.transitionOverworldScreen(9));
+
+    GameplaySession::Snapshot snapshot;
+    snapshot.playerMoveCount = 12;
+    campaign.writeCheckpoint(profile, snapshot);
+    CHECK(profile.overworldCheckpoint.has_value());
+    CHECK(profile.overworldCheckpoint->topologyFingerprint == 1234);
+    CHECK(profile.overworldCheckpoint->activeScreen == 9);
+
+    CampaignSession resumed = configuredCampaign();
+    resumed.setOverworldTopology(1234, { 4, 9 }, 4);
+    CHECK(resumed.restoreProfileLocation(profile));
+    CHECK(resumed.activeOverworldScreen() == 9);
+    const CampaignSession::WorldRestore restore =
+        resumed.prepareWorldLoad(profile);
+    CHECK(restore.checkpointMatched);
+    CHECK(restore.snapshot.has_value());
+    CHECK(restore.snapshot->playerMoveCount == 12);
+
+    CampaignSession changed = configuredCampaign();
+    changed.setOverworldTopology(5678, { 4, 9 }, 4);
+    CHECK(!changed.restoreProfileLocation(profile));
+    CHECK(changed.activeOverworldScreen() == 4);
+    CHECK(!profile.overworldCheckpoint.has_value());
+    CHECK(profile.worldContext == PlayerProfile::WorldContext::Overworld);
 }
 
 void testIndependentCompletionAndAllTargets()
@@ -267,6 +305,7 @@ int main()
     testOverworldMustCoverEveryScreen();
     testSelectorInteractionRequiresAllLivingPlayersTogether();
     testSelectorEntryAndBothCheckpointKinds();
+    testOverworldTopologyCheckpointValidation();
     testIndependentCompletionAndAllTargets();
     testDebugCompletionDoesNotRecordBests();
     testPuzzleOnlyTimingAndDeferredCheckpoint();

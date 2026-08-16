@@ -225,5 +225,14 @@ void renderAssetRequirementsForFrame(
     requirements.requireTexture(frame.groundSplat.base);
     requirements.requireTexture(frame.groundSplat.detail);
     requirements.requireTexture(frame.groundSplat.splatMap);
+    for (std::size_t index = 0;
+         index < frame.groundSplatRegionCount;
+         ++index) {
+        const GroundSplatTextures& textures =
+            frame.groundSplatRegions[index].textures;
+        requirements.requireTexture(textures.base);
+        requirements.requireTexture(textures.detail);
+        requirements.requireTexture(textures.splatMap);
+    }
 }
 } // namespace sokoban

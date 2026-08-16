@@ -6,6 +6,7 @@
 #include "engine/AssetManifest.hpp"
 #include "engine/Level.hpp"
 #include "engine/LevelCatalog.hpp"
+#include "engine/OverworldMap.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/ui/UiConfig.hpp"
@@ -348,26 +349,66 @@ private:
             }
         };
 
-        const std::filesystem::path overworldPath =
+        const std::filesystem::path legacyOverworldPath =
             roots_.levels / "overworld.scr";
-        if (!std::filesystem::is_regular_file(overworldPath)) {
-            throw std::runtime_error(
-                "overworld screen is missing: " + overworldPath.string());
+        const std::filesystem::path overworldRoot =
+            roots_.levels / "overworld";
+        const std::filesystem::path layoutPath =
+            overworldRoot / "layout.json";
+        const bool composedOverworld =
+            std::filesystem::is_regular_file(layoutPath);
+        std::optional<OverworldMap> overworldMap;
+        std::optional<Level> legacyOverworld;
+        const Level* overworld = nullptr;
+        const std::filesystem::path* overworldDiagnosticPath = nullptr;
+        if (composedOverworld) {
+            overworldMap = OverworldMap::load(overworldRoot);
+            overworld = &overworldMap->level();
+            overworldDiagnosticPath = &layoutPath;
+            addFile(
+                overworldRoot,
+                "layout.json",
+                std::filesystem::path("levels") / "overworld" /
+                    "layout.json",
+                "overworld layout");
+            for (const OverworldScreenRuntime& screen :
+                 overworldMap->screens()) {
+                addFile(
+                    overworldRoot,
+                    screen.file,
+                    std::filesystem::path("levels") / "overworld" /
+                        screen.file,
+                    "overworld component screen");
+            }
+        } else {
+            if (!std::filesystem::is_regular_file(legacyOverworldPath)) {
+                throw std::runtime_error(
+                    "overworld screen or layout is missing: " +
+                    legacyOverworldPath.string());
+            }
+            legacyOverworld = Level::loadFromFile(legacyOverworldPath);
+            overworld = &*legacyOverworld;
+            overworldDiagnosticPath = &legacyOverworldPath;
+            addFile(
+                roots_.levels,
+                "overworld.scr",
+                std::filesystem::path("levels") / "overworld.scr",
+                "overworld screen");
         }
-        const Level overworld = Level::loadFromFile(overworldPath);
-        validateDecorations(overworld, overworldPath);
-        if (overworld.selectors().empty()) {
+
+        validateDecorations(*overworld, *overworldDiagnosticPath);
+        if (overworld->selectors().empty()) {
             throw std::runtime_error(
                 "overworld must contain at least one screen selector: " +
-                overworldPath.string());
+                overworldDiagnosticPath->string());
         }
-        for (uint32_t z = 0; z < overworld.depth(); ++z) {
-            for (uint32_t y = 0; y < overworld.height(); ++y) {
-                for (uint32_t x = 0; x < overworld.width(); ++x) {
-                    if (overworld.authoredTileAt(x, y, z) == TileType::End) {
+        for (uint32_t z = 0; z < overworld->depth(); ++z) {
+            for (uint32_t y = 0; y < overworld->height(); ++y) {
+                for (uint32_t x = 0; x < overworld->width(); ++x) {
+                    if (overworld->authoredTileAt(x, y, z) == TileType::End) {
                         throw std::runtime_error(
                             "end tiles are not allowed in the overworld: " +
-                            overworldPath.string());
+                            overworldDiagnosticPath->string());
                     }
                 }
             }
@@ -381,14 +422,11 @@ private:
                 "overworld selectors require all flag A/B playable, solved, "
                 "and unavailable manifest models");
         }
-        addFile(
-            roots_.levels,
-            "overworld.scr",
-            std::filesystem::path("levels") / "overworld.scr",
-            "overworld screen");
-
         for (const auto& levelDirectory : std::filesystem::directory_iterator(roots_.levels)) {
-            if (!levelDirectory.is_directory() || levelDirectory.path().filename() == "Deleted") {
+            if (!levelDirectory.is_directory() ||
+                levelDirectory.path().filename() == "Deleted" ||
+                (composedOverworld &&
+                    levelDirectory.path().filename() == "overworld")) {
                 continue;
             }
             std::smatch levelMatch;
@@ -461,12 +499,25 @@ private:
             }
         }
 
+        if (overworldMap) {
+            std::vector<int> screenCounts;
+            screenCounts.reserve(screens.size());
+            for (const auto& [level, levelScreens] : screens) {
+                (void)level;
+                screenCounts.push_back(
+                    static_cast<int>(levelScreens.size()));
+            }
+            overworldMap->validatePuzzleSelectors(
+                screenCounts, OverworldValidationMode::Production);
+            return;
+        }
+
         std::set<std::pair<int, int>> selectorTargets;
-        for (const Level::ScreenSelector& selector : overworld.selectors()) {
+        for (const Level::ScreenSelector& selector : overworld->selectors()) {
             if (!selector.target) {
                 throw std::runtime_error(
                     "overworld selector " + std::to_string(selector.id) +
-                    " is unassigned: " + overworldPath.string());
+                    " is unassigned: " + legacyOverworldPath.string());
             }
             const auto level = screens.find(selector.target->level);
             if (level == screens.end() ||
@@ -476,7 +527,7 @@ private:
                     " targets missing level " +
                     std::to_string(selector.target->level) + " screen " +
                     std::to_string(selector.target->screen) + ": " +
-                    overworldPath.string());
+                    legacyOverworldPath.string());
             }
             selectorTargets.emplace(
                 selector.target->level,
@@ -489,7 +540,7 @@ private:
                         "overworld has no selector for level " +
                         std::to_string(level) + " screen " +
                         std::to_string(screen) + ": " +
-                        overworldPath.string());
+                        legacyOverworldPath.string());
                 }
             }
         }
@@ -524,13 +575,43 @@ void ensureSafeOutputRoot(
     if (outputRoot.empty() || outputRoot == outputRoot.root_path()) {
         throw std::runtime_error("refusing to stage content into an unsafe output path");
     }
-    std::error_code error;
-    const std::filesystem::path output = std::filesystem::weakly_canonical(outputRoot, error);
-    if (error) {
-        throw std::runtime_error("cannot resolve content output path: " + outputRoot.string());
-    }
+    auto resolvePotentialPath = [](const std::filesystem::path& path) {
+        std::filesystem::path existing =
+            std::filesystem::absolute(path).lexically_normal();
+        std::vector<std::filesystem::path> missing;
+        std::error_code error;
+        while (!std::filesystem::exists(existing, error)) {
+            if (error) {
+                throw std::runtime_error(
+                    "cannot inspect content output path: " +
+                    path.string() + ": " + error.message());
+            }
+            const std::filesystem::path parent = existing.parent_path();
+            if (parent.empty() || parent == existing) {
+                throw std::runtime_error(
+                    "cannot resolve content output path: " + path.string());
+            }
+            missing.push_back(existing.filename());
+            existing = parent;
+        }
+        std::filesystem::path resolved =
+            std::filesystem::canonical(existing, error);
+        if (error) {
+            throw std::runtime_error(
+                "cannot resolve content output path: " + path.string() +
+                ": " + error.message());
+        }
+        for (auto component = missing.rbegin();
+             component != missing.rend();
+             ++component) {
+            resolved /= *component;
+        }
+        return resolved.lexically_normal();
+    };
+    const std::filesystem::path output = resolvePotentialPath(outputRoot);
     for (const auto& source : { roots.assets, roots.levels, roots.shaders }) {
-        const std::filesystem::path canonicalSource = std::filesystem::weakly_canonical(source);
+        const std::filesystem::path canonicalSource =
+            std::filesystem::canonical(source);
         if (output == canonicalSource ||
             isWithin(output, canonicalSource) ||
             isWithin(canonicalSource, output)) {
@@ -597,7 +678,7 @@ ContentInventory stageContent(
             std::filesystem::rename(outputRoot, backupRoot);
         }
         try {
-            std::filesystem::rename(stagingRoot, outputRoot);
+        std::filesystem::rename(stagingRoot, outputRoot);
         } catch (...) {
             if (hadPreviousOutput && !std::filesystem::exists(outputRoot)) {
                 std::filesystem::rename(backupRoot, outputRoot, error);

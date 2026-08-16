@@ -649,6 +649,20 @@ void migrate18to19(Json& root)
     }
 }
 
+// The old single-overworld snapshot had neither stable screen identity nor a
+// topology fingerprint. It cannot be safely interpreted against a composed
+// map, so preserve all puzzle progress/settings while dropping only that
+// checkpoint. An active puzzle remains resumable and returns to a fresh map.
+void migrate19to20(Json& root)
+{
+    if (!root.contains("progress") || !root["progress"].is_object()) {
+        return;
+    }
+    Json& progress = root["progress"];
+    progress.erase("overworldSession");
+    progress["overworldCheckpoint"] = nullptr;
+}
+
 } // namespace
 
 void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
@@ -673,6 +687,7 @@ void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
         migrate16to17,
         migrate17to18,
         migrate18to19,
+        migrate19to20,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

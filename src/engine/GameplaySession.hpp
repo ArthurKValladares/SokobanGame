@@ -9,7 +9,9 @@
 
 #include <cstddef>
 #include <deque>
+#include <functional>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace sokoban {
@@ -122,6 +124,19 @@ public:
 
     void setStepDurationSeconds(float durationSeconds);
     void setStepRates(rules::StepRates rates) { stepRates_ = rates; }
+    // Optional world-level invariant checked against the state projected after
+    // each newly planned action. Composed overworlds use this to prevent one
+    // input from leaving living players owned by different screens.
+    //
+    // The policy is runtime configuration, not checkpoint state. Reset and
+    // restore deliberately preserve it so Application can install the map
+    // invariant once for the currently loaded world.
+    using ActionAdmissionPolicy = std::function<bool(const GameState&)>;
+    void setActionAdmissionPolicy(ActionAdmissionPolicy policy)
+    {
+        actionAdmissionPolicy_ = std::move(policy);
+    }
+    void clearActionAdmissionPolicy() { actionAdmissionPolicy_ = {}; }
     // Both target the oldest in-flight action. `GameplayLoop` installs a
     // timeline on the action it has just started, which is the oldest only
     // because it starts one at a time; the id overloads are what a caller
@@ -223,6 +238,9 @@ private:
         std::vector<GameState> legs = {},
         std::size_t causalGroup = 0,
         ActionDeferral deferral = {});
+    [[nodiscard]] bool actionAdmissionAllows(const Action& action) const;
+    [[nodiscard]] bool actionAdmissionAllows(
+        const std::vector<ActionScheduler::Pending>& actions) const;
     // Everything the scheduler needs to admit one plan, including the claims
     // derived from the cells its entities pass through.
     [[nodiscard]] ActionScheduler::Pending makePending(
@@ -308,6 +326,7 @@ private:
     // Rewinding freezes pending slides and conveyors until the next
     // input-driven step.
     bool autoMotionPaused_ = false;
+    ActionAdmissionPolicy actionAdmissionPolicy_;
 };
 
 } // namespace sokoban

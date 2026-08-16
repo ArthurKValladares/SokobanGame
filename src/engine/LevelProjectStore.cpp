@@ -2,6 +2,7 @@
 
 #include "engine/Level.hpp"
 #include "engine/LevelCatalog.hpp"
+#include "engine/OverworldMap.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -181,7 +182,7 @@ std::vector<IndexedPath> validateProject(const std::filesystem::path& root)
                 Level::loadFromFile(screens[screenIndex].path);
             if (!screen.selectors().empty()) {
                 throw std::runtime_error(
-                    "screen selectors are only allowed in overworld.scr: " +
+                    "screen selectors are only allowed in overworld content: " +
                     screens[screenIndex].path.string());
             }
         }
@@ -191,8 +192,23 @@ std::vector<IndexedPath> validateProject(const std::filesystem::path& root)
         screensByLevel.push_back(screens);
     }
 
-    const std::filesystem::path overworldPath = root / "overworld.scr";
-    if (std::filesystem::is_regular_file(overworldPath)) {
+    const std::filesystem::path overworldRoot = root / "overworld";
+    const std::filesystem::path layoutPath = overworldRoot / "layout.json";
+    if (std::filesystem::is_regular_file(layoutPath)) {
+        const OverworldMap overworld = OverworldMap::load(overworldRoot);
+        std::vector<int> puzzleScreenCounts;
+        puzzleScreenCounts.reserve(screensByLevel.size());
+        for (const std::vector<IndexedPath>& screens : screensByLevel) {
+            puzzleScreenCounts.push_back(static_cast<int>(screens.size()));
+        }
+        overworld.validatePuzzleSelectors(
+            puzzleScreenCounts,
+            OverworldValidationMode::Structural);
+    } else {
+        const std::filesystem::path overworldPath = root / "overworld.scr";
+        if (!std::filesystem::is_regular_file(overworldPath)) {
+            return levels;
+        }
         const Level overworld = Level::loadFromFile(overworldPath);
         for (uint32_t z = 0; z < overworld.depth(); ++z) {
             for (uint32_t y = 0; y < overworld.height(); ++y) {
@@ -245,18 +261,46 @@ void prepareRuntimeMirror(
                 "cannot prepare runtime level mirror: " + error.message());
         }
     }
-    const std::filesystem::path overworld = projectStage / "overworld.scr";
-    if (std::filesystem::is_regular_file(overworld)) {
-        std::error_code error;
-        std::filesystem::copy_file(
-            overworld,
-            runtimeStage / "overworld.scr",
-            std::filesystem::copy_options::overwrite_existing,
-            error);
-        if (error) {
-            throw std::runtime_error(
-                "cannot prepare runtime overworld mirror: " +
-                error.message());
+    const std::filesystem::path overworldRoot = projectStage / "overworld";
+    if (std::filesystem::is_directory(overworldRoot)) {
+        const std::filesystem::path runtimeOverworld =
+            runtimeStage / "overworld";
+        std::filesystem::create_directories(runtimeOverworld);
+        const OverworldLayout layout = loadOverworldLayout(
+            overworldRoot / "layout.json");
+        std::vector<std::filesystem::path> files {
+            std::filesystem::path("layout.json"),
+        };
+        for (const OverworldScreenSpec& screen : layout.screens) {
+            files.push_back(screen.file);
+        }
+        for (const std::filesystem::path& file : files) {
+            std::error_code error;
+            std::filesystem::copy_file(
+                overworldRoot / file,
+                runtimeOverworld / file,
+                std::filesystem::copy_options::overwrite_existing,
+                error);
+            if (error) {
+                throw std::runtime_error(
+                    "cannot prepare runtime overworld mirror: " +
+                    error.message());
+            }
+        }
+    } else {
+        const std::filesystem::path overworld = projectStage / "overworld.scr";
+        if (std::filesystem::is_regular_file(overworld)) {
+            std::error_code error;
+            std::filesystem::copy_file(
+                overworld,
+                runtimeStage / "overworld.scr",
+                std::filesystem::copy_options::overwrite_existing,
+                error);
+            if (error) {
+                throw std::runtime_error(
+                    "cannot prepare runtime overworld mirror: " +
+                    error.message());
+            }
         }
     }
 }

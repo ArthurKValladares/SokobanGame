@@ -135,10 +135,12 @@ void LevelEditorDebugUi::initialize(const LevelEditor& editor)
     browserRootBuffer_ = editor.browserRoot().string();
     requestedWidth_ = editor.requestedWidth();
     requestedHeight_ = editor.requestedHeight();
+    overworldEditorRoot_ = editor.sourceLevelRoot();
 }
 
 void LevelEditorDebugUi::draw(
     LevelEditor& editor,
+    OverworldMapEditor& overworldEditor,
     SplatPainter& painter,
     const InputBindings& bindings,
     const Callbacks& callbacks)
@@ -162,7 +164,9 @@ void LevelEditorDebugUi::draw(
     }
     ImGui::SameLine();
     if (ImGui::Button("Play Draft")) {
-        if (std::optional<Level> level = editor.beginDraftPlayback(); level && callbacks.playDraft) {
+        if (std::optional<Level> level =
+                editor.beginDraftPlayback(&overworldEditor);
+            level && callbacks.playDraft) {
             callbacks.playDraft(std::move(*level));
         }
     }
@@ -176,6 +180,7 @@ void LevelEditorDebugUi::draw(
 
     ImGui::Separator();
     ImGui::Text("View: %s", editor.editingDocument() ? "editing draft" : editor.playingDraft() ? "playing draft" : "current screen");
+    ImGui::BeginDisabled(editor.editingOverworld());
     const bool widthChanged = ImGui::InputInt("Width", &requestedWidth_);
     const bool heightChanged = ImGui::InputInt("Height", &requestedHeight_);
     if (widthChanged || heightChanged) {
@@ -189,6 +194,11 @@ void LevelEditorDebugUi::draw(
     ImGui::SameLine();
     if (ImGui::Button("Resize")) {
         editor.resizeDocument(requestedWidth_, requestedHeight_);
+    }
+    ImGui::EndDisabled();
+    if (editor.editingOverworld()) {
+        ImGui::TextDisabled(
+            "Screen size is fixed by the active overworld layout.");
     }
 
     ImGui::Separator();
@@ -277,7 +287,7 @@ void LevelEditorDebugUi::draw(
     ImGui::Separator();
     drawGroundPaintTab(painter, callbacks);
     ImGui::Separator();
-    drawFileBrowser(editor);
+    drawFileBrowser(editor, overworldEditor);
 
     if (!editor.status().empty()) {
         ImGui::Separator();
@@ -285,6 +295,7 @@ void LevelEditorDebugUi::draw(
     }
 #else
     (void)editor;
+    (void)overworldEditor;
     (void)painter;
     (void)bindings;
     (void)callbacks;
@@ -425,7 +436,9 @@ void LevelEditorDebugUi::drawTilePalette(
     int column = 0;
     for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
         if (definition.type == TileType::Water ||
-            (definition.type == TileType::End && editor.editingOverworld())) {
+            (editor.editingOverworld() &&
+             (definition.type == TileType::End ||
+              definition.type == TileType::Player))) {
             continue;
         }
         if (column % perRow != 0) {
@@ -684,8 +697,17 @@ void LevelEditorDebugUi::drawSelectorPalette(LevelEditor& editor)
     }
     if (ImGui::BeginCombo("Level", levelPreview.c_str())) {
         for (const LevelEditor::LevelDirectory& level : levels) {
-            const std::string label = levelLabel(level);
+            std::string label = levelLabel(level);
+            const std::optional<OverworldScreenId> owner =
+                editor.selectorLevelOwner(level.index);
+            const bool blocked = owner &&
+                owner != editor.overworldScreenId();
+            if (blocked) {
+                label += " (owned by overworld screen " +
+                    std::to_string(*owner) + ")";
+            }
             const bool current = target && target->level == level.index;
+            ImGui::BeginDisabled(blocked);
             if (ImGui::Selectable(label.c_str(), current)) {
                 target = LevelLocation {
                     .level = level.index,
@@ -695,6 +717,7 @@ void LevelEditorDebugUi::drawSelectorPalette(LevelEditor& editor)
                 };
                 (void)editor.updateSelectedSelectorTarget(target);
             }
+            ImGui::EndDisabled();
         }
         ImGui::EndCombo();
     }
@@ -749,7 +772,9 @@ void LevelEditorDebugUi::drawSelectorPalette(LevelEditor& editor)
 #endif
 }
 
-void LevelEditorDebugUi::drawFileBrowser(LevelEditor& editor)
+void LevelEditorDebugUi::drawFileBrowser(
+    LevelEditor& editor,
+    OverworldMapEditor& overworldEditor)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
     ImGui::InputText("Root", &browserRootBuffer_);
@@ -764,7 +789,7 @@ void LevelEditorDebugUi::drawFileBrowser(LevelEditor& editor)
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Overworld")) {
-            drawOverworldTab(editor);
+            drawOverworldTab(editor, overworldEditor);
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Deleted")) {
@@ -779,50 +804,328 @@ void LevelEditorDebugUi::drawFileBrowser(LevelEditor& editor)
     drawRenamePopup(editor);
 #else
     (void)editor;
+    (void)overworldEditor;
 #endif
 }
 
-void LevelEditorDebugUi::drawOverworldTab(LevelEditor& editor)
+void LevelEditorDebugUi::drawOverworldTab(
+    LevelEditor& editor,
+    OverworldMapEditor& overworldEditor)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    const std::filesystem::path overworldPath =
-        editor.browserRoot() / "overworld.scr";
-    const bool exists = std::filesystem::is_regular_file(overworldPath);
-    const bool loaded = editor.loadedDocumentPath() == overworldPath;
+    const std::filesystem::path root = editor.browserRoot().lexically_normal();
+    if (overworldEditorRoot_.lexically_normal() != root) {
+        overworldEditorRoot_ = root;
+        std::optional<std::filesystem::path> runtimeRoot;
+        if (editor.sourceLevelRoot().lexically_normal() == root) {
+            runtimeRoot = editor.runtimeLevelRoot();
+        }
+        overworldEditor.initialize(root, runtimeRoot);
+    }
 
-    if (ImGui::BeginChild("OverworldFile", ImVec2(0.0f, 210.0f), true)) {
-        ImGui::TextUnformatted("overworld.scr");
-        ImGui::TextWrapped(
-            "Edit the overworld with the same tile, decoration, layer, and "
-            "play-draft tools as a normal screen. Screen Selectors are only "
-            "available in this document; End tiles are not allowed.");
-        ImGui::TextDisabled("%s", overworldPath.string().c_str());
-        ImGui::Spacing();
+    ImGui::Text("Overworld Map%s", overworldEditor.dirty() ? " (modified)" : "");
+    ImGui::SameLine();
+    if (ImGui::Button("Reload Map")) {
+        (void)overworldEditor.reload();
+    }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!overworldEditor.dirty());
+    if (ImGui::Button("Save Map")) {
+        (void)overworldEditor.save();
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!overworldEditor.canUndo());
+    if (ImGui::Button("Undo Map")) {
+        (void)overworldEditor.undo();
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!overworldEditor.canRedo());
+    if (ImGui::Button("Redo Map")) {
+        (void)overworldEditor.redo();
+    }
+    ImGui::EndDisabled();
 
-        if (exists) {
-            if (!loaded && ImGui::Button("Open Overworld")) {
-                editor.selectDocument(overworldPath);
-                if (editor.loadDocument(overworldPath)) {
+    if (!overworldEditor.loaded()) {
+        ImGui::TextWrapped("%s", overworldEditor.status().c_str());
+        const std::filesystem::path legacyPath = root / "overworld.scr";
+        if (std::filesystem::is_regular_file(legacyPath)) {
+            ImGui::TextDisabled(
+                "This project still uses legacy overworld.scr; migrate it "
+                "before using the topology editor.");
+        }
+        return;
+    }
+
+    const std::vector<OverworldMapEditor::ScreenSummary> screens =
+        overworldEditor.screens();
+    int minX = 0;
+    int maxX = 0;
+    int minY = 0;
+    int maxY = 0;
+    for (const auto& screen : screens) {
+        minX = std::min(minX, screen.slot.x);
+        maxX = std::max(maxX, screen.slot.x);
+        minY = std::min(minY, screen.slot.y);
+        maxY = std::max(maxY, screen.slot.y);
+    }
+
+    constexpr float cardWidth = 112.0f;
+    constexpr float cardHeight = 62.0f;
+    constexpr float gap = 28.0f;
+    constexpr float margin = 18.0f;
+    const float cellWidth = cardWidth + gap;
+    const float cellHeight = cardHeight + gap;
+    const ImVec2 canvasSize {
+        margin * 2.0f + static_cast<float>(maxX - minX + 1) * cellWidth,
+        margin * 2.0f + static_cast<float>(maxY - minY + 1) * cellHeight,
+    };
+    if (ImGui::BeginChild(
+            "OverworldMapCanvas",
+            ImVec2(0.0f, 250.0f),
+            true,
+            ImGuiWindowFlags_HorizontalScrollbar)) {
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        ImGui::Dummy(canvasSize);
+        auto cardPosition = [&](OverworldSlot slot) {
+            return ImVec2 {
+                origin.x + margin + static_cast<float>(slot.x - minX) * cellWidth,
+                origin.y + margin + static_cast<float>(slot.y - minY) * cellHeight,
+            };
+        };
+        auto summaryFor = [&](OverworldScreenId id)
+            -> const OverworldMapEditor::ScreenSummary* {
+            const auto found = std::ranges::find(
+                screens, id, &OverworldMapEditor::ScreenSummary::id);
+            return found == screens.end() ? nullptr : &*found;
+        };
+
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        for (const OverworldConnection& connection :
+             overworldEditor.layout().connections) {
+            const auto* a = summaryFor(connection.a.screen);
+            const auto* b = summaryFor(connection.b.screen);
+            if (!a || !b) {
+                continue;
+            }
+            const ImVec2 aPosition = cardPosition(a->slot);
+            const ImVec2 bPosition = cardPosition(b->slot);
+            drawList->AddLine(
+                ImVec2(aPosition.x + cardWidth * 0.5f,
+                    aPosition.y + cardHeight * 0.5f),
+                ImVec2(bPosition.x + cardWidth * 0.5f,
+                    bPosition.y + cardHeight * 0.5f),
+                IM_COL32(112, 190, 255, 255),
+                4.0f);
+        }
+
+        for (const auto& screen : screens) {
+            ImGui::PushID(static_cast<int>(screen.id));
+            const ImVec2 position = cardPosition(screen.slot);
+            ImGui::SetCursorScreenPos(position);
+            if (screen.selected) {
+                ImGui::PushStyleColor(
+                    ImGuiCol_Button,
+                    ImVec4(0.20f, 0.48f, 0.76f, 1.0f));
+            }
+            std::string label = screen.start ? "START  " : "";
+            label += "Screen " + std::to_string(screen.id) + "\n(" +
+                std::to_string(screen.slot.x) + ", " +
+                std::to_string(screen.slot.y) + ")  " +
+                std::to_string(screen.selectorCount) + " flags";
+            if (ImGui::Button(label.c_str(), ImVec2(cardWidth, cardHeight))) {
+                (void)overworldEditor.selectScreen(screen.id);
+                overworldMoveSlot_[0] = screen.slot.x;
+                overworldMoveSlot_[1] = screen.slot.y;
+            }
+            const bool open = ImGui::IsItemHovered() &&
+                ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+            if (screen.selected) {
+                ImGui::PopStyleColor();
+            }
+            if (open && std::filesystem::is_regular_file(screen.path)) {
+                editor.selectDocument(screen.path);
+                if (editor.loadDocument(screen.path)) {
                     syncDocumentPath(editor);
                 }
             }
-            if (loaded) {
-                ImGui::TextUnformatted("Currently editing");
-            }
-        } else {
-            ImGui::TextDisabled("No overworld exists in this level project.");
-            if (ImGui::Button("Create Overworld")) {
-                editor.newDocument(requestedWidth_, requestedHeight_);
-                editor.selectDocument(overworldPath);
-                if (editor.saveDocument(overworldPath)) {
-                    syncDocumentPath(editor);
-                }
-            }
+            ImGui::PopID();
         }
     }
     ImGui::EndChild();
+
+    if (const auto selectedId = overworldEditor.selectedScreen()) {
+        const OverworldScreenSpec* selected =
+            overworldEditor.screen(*selectedId);
+        if (selected) {
+            ImGui::SeparatorText(
+                ("Screen " + std::to_string(*selectedId)).c_str());
+            const std::filesystem::path path =
+                overworldEditor.screenPath(*selectedId);
+            auto openSelectedScreen = [&]() {
+                if (editor.overworldScreenId() == *selectedId) {
+                    editor.setEditingDocument(true);
+                    return true;
+                }
+                if (!std::filesystem::is_regular_file(path)) {
+                    return false;
+                }
+                editor.selectDocument(path);
+                if (!editor.loadDocument(path)) {
+                    return false;
+                }
+                syncDocumentPath(editor);
+                return true;
+            };
+            if (ImGui::Button("Open Screen") &&
+                std::filesystem::is_regular_file(path)) {
+                (void)openSelectedScreen();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Delete Screen")) {
+                (void)overworldEditor.deleteScreen(*selectedId);
+            }
+
+            ImGui::InputInt2("Move To Slot", overworldMoveSlot_);
+            if (ImGui::Button("Move Disconnected Screen")) {
+                (void)overworldEditor.moveScreen(
+                    *selectedId,
+                    { overworldMoveSlot_[0], overworldMoveSlot_[1] });
+            }
+
+            const bool canPickInScreen =
+                std::filesystem::is_regular_file(path) ||
+                editor.overworldScreenId() == *selectedId;
+            ImGui::BeginDisabled(!canPickInScreen);
+            if (ImGui::Button("Pick Start Cell in 3D") &&
+                openSelectedScreen()) {
+                (void)overworldEditor.beginSetStartCell(*selectedId);
+            }
+            ImGui::EndDisabled();
+
+            ImGui::TextUnformatted("Add connected screen (then pick its edge cell):");
+            const struct DirectionButton {
+                const char* label;
+                int dx;
+                int dy;
+            } directions[] {
+                { "North", 0, -1 },
+                { "East", 1, 0 },
+                { "South", 0, 1 },
+                { "West", -1, 0 },
+            };
+            for (std::size_t index = 0; index < std::size(directions); ++index) {
+                if (index != 0) {
+                    ImGui::SameLine();
+                }
+                ImGui::BeginDisabled(!canPickInScreen);
+                if (ImGui::Button(directions[index].label) &&
+                    openSelectedScreen()) {
+                    (void)overworldEditor.beginAddConnectedScreenCell(
+                        *selectedId,
+                        {
+                            selected->slot.x + directions[index].dx,
+                            selected->slot.y + directions[index].dy,
+                        });
+                }
+                ImGui::EndDisabled();
+            }
+
+            std::string targetPreview = overworldConnectionTarget_ > 0
+                ? "Screen " + std::to_string(overworldConnectionTarget_)
+                : "Choose screen";
+            if (ImGui::BeginCombo(
+                    "Connect Existing", targetPreview.c_str())) {
+                for (const auto& candidate : screens) {
+                    if (candidate.id == *selectedId) {
+                        continue;
+                    }
+                    const std::string candidateLabel =
+                        "Screen " + std::to_string(candidate.id);
+                    if (ImGui::Selectable(
+                            candidateLabel.c_str(),
+                            overworldConnectionTarget_ ==
+                                static_cast<int>(candidate.id))) {
+                        overworldConnectionTarget_ =
+                            static_cast<int>(candidate.id);
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::BeginDisabled(
+                overworldConnectionTarget_ <= 0 || !canPickInScreen);
+            if (ImGui::Button("Pick Connection Cell in 3D") &&
+                openSelectedScreen()) {
+                (void)overworldEditor.beginConnectCell(
+                    *selectedId,
+                    static_cast<OverworldScreenId>(
+                        overworldConnectionTarget_));
+            }
+            ImGui::EndDisabled();
+        }
+    }
+
+    if (overworldEditor.cellTool()) {
+        ImGui::SeparatorText("3D Cell Picking");
+        ImGui::TextWrapped("%s", overworldEditor.cellToolPrompt().c_str());
+        if (ImGui::Button("Cancel Cell Picking")) {
+            overworldEditor.cancelCellTool();
+        }
+    }
+
+    if (!overworldEditor.layout().connections.empty()) {
+        ImGui::SeparatorText("Connections");
+        for (std::size_t index = 0;
+             index < overworldEditor.layout().connections.size();
+             ++index) {
+            const OverworldConnection& connection =
+                overworldEditor.layout().connections[index];
+            ImGui::PushID(static_cast<int>(index));
+            ImGui::Text(
+                "%u (%d,%d,%d) <-> %u (%d,%d,%d)",
+                static_cast<unsigned>(connection.a.screen),
+                connection.a.cell.x,
+                connection.a.cell.y,
+                connection.a.cell.z,
+                static_cast<unsigned>(connection.b.screen),
+                connection.b.cell.x,
+                connection.b.cell.y,
+                connection.b.cell.z);
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Disconnect")) {
+                (void)overworldEditor.disconnect(index);
+                ImGui::PopID();
+                break;
+            }
+            ImGui::PopID();
+        }
+    }
+
+    const std::vector<OverworldScreenId> deleted =
+        overworldEditor.deletedScreens();
+    if (!deleted.empty()) {
+        ImGui::SeparatorText("Deleted Screens");
+        ImGui::InputInt2("Restore To Slot", overworldRestoreSlot_);
+        for (OverworldScreenId id : deleted) {
+            ImGui::PushID(static_cast<int>(id));
+            ImGui::Text("Screen %u", static_cast<unsigned>(id));
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Restore")) {
+                (void)overworldEditor.restoreDeletedScreen(
+                    id,
+                    { overworldRestoreSlot_[0], overworldRestoreSlot_[1] });
+            }
+            ImGui::PopID();
+        }
+    }
+
+    if (!overworldEditor.status().empty()) {
+        ImGui::TextWrapped("%s", overworldEditor.status().c_str());
+    }
 #else
     (void)editor;
+    (void)overworldEditor;
 #endif
 }
 

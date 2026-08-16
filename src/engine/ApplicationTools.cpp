@@ -37,6 +37,9 @@ void ApplicationTools::initialize(
         runtimeAssetRoot / "levels",
         currentLevel,
         currentScreen);
+    overworldMapEditor.initialize(
+        sourceLevelRoot,
+        runtimeAssetRoot / "levels");
     levelEditorDebugUi.initialize(levelEditor);
     animationPreviewDebugUi.initialize(sourceAssetRoot);
     if (animationCatalogEditor.initialize(
@@ -82,6 +85,11 @@ bool ApplicationTools::openGroundPainting(
             .boardTilesHigh = levelEditor.documentHeight(),
             .sourceAssetRoot = sourceAssetRoot,
             .runtimeAssetRoot = runtimeAssetRoot,
+            .textureName = levelEditor.overworldScreenId()
+                ? std::optional<std::string> {
+                      groundSplatMapTextureNameForOverworldScreen(
+                          *levelEditor.overworldScreenId()) }
+                : std::nullopt,
         },
         manifest);
     if (opened) {
@@ -101,26 +109,36 @@ bool ApplicationTools::createGroundSplatMap(
 {
     const std::optional<LevelLocation> location =
         levelLocationFromScreenPath(levelEditor.loadedDocumentPath());
-    if (!location) {
+    const std::optional<OverworldScreenId> overworldScreen =
+        levelEditor.overworldScreenId();
+    if (!location && !overworldScreen) {
         log::warning(log::Category::Assets)
             << "Ground painting needs a saved screen; save the document as "
-               "levels/level<N>/screen<M>.scr first.";
+               "a puzzle or composed-overworld screen first.";
         return false;
     }
 
-    const CreatedSplatMap created = createBlankSplatMap(
-        *location,
-        levelEditor.documentWidth(),
-        levelEditor.documentHeight(),
-        sourceAssetRoot,
-        runtimeAssetRoot);
+    const CreatedSplatMap created = overworldScreen
+        ? createBlankSplatMapAt(
+              groundSplatMapAssetPathForOverworldScreen(*overworldScreen),
+              levelEditor.documentWidth(),
+              levelEditor.documentHeight(),
+              sourceAssetRoot,
+              runtimeAssetRoot)
+        : createBlankSplatMap(
+              *location,
+              levelEditor.documentWidth(),
+              levelEditor.documentHeight(),
+              sourceAssetRoot,
+              runtimeAssetRoot);
     log::info(log::Category::Assets) << created.message;
     if (!created.created) {
         return false;
     }
 
-    const std::string textureName =
-        groundSplatMapTextureNameForScreen(*location);
+    const std::string textureName = overworldScreen
+        ? groundSplatMapTextureNameForOverworldScreen(*overworldScreen)
+        : groundSplatMapTextureNameForScreen(*location);
     if (manifest.findTextureIdByName(textureName).isNone()) {
         const RenderTexture added = manifest.addTexture({
             .name = textureName,
@@ -425,6 +443,105 @@ void ApplicationTools::drawSelectorLabels(
         drawList->AddText(position, IM_COL32(245, 247, 250, 255),
             label.text.c_str());
     }
+
+    auto drawTopologyLabel = [&](GridPosition3 cell,
+                                 const std::string& text,
+                                 ImU32 color) {
+        const std::optional<Vec2> anchor = renderer.projectToPixels(
+            *frame,
+            {
+                static_cast<float>(cell.x) + 0.5f,
+                static_cast<float>(cell.y) + 0.5f,
+                static_cast<float>(cell.z) + 1.35f,
+            });
+        if (!anchor) {
+            return;
+        }
+        const ImVec2 size = ImGui::CalcTextSize(text.c_str());
+        const ImVec2 position {
+            anchor->x - size.x * 0.5f,
+            anchor->y - size.y * 0.5f,
+        };
+        drawList->AddRectFilled(
+            ImVec2(position.x - 5.0f, position.y - 3.0f),
+            ImVec2(position.x + size.x + 5.0f,
+                position.y + size.y + 3.0f),
+            IM_COL32(13, 18, 26, 220),
+            4.0f);
+        drawList->AddRect(
+            ImVec2(position.x - 5.0f, position.y - 3.0f),
+            ImVec2(position.x + size.x + 5.0f,
+                position.y + size.y + 3.0f),
+            color,
+            4.0f,
+            0,
+            2.0f);
+        drawList->AddText(position, color, text.c_str());
+    };
+    bool drewDraftTopology = false;
+    if (const std::optional<OverworldScreenId> visibleScreen =
+            levelEditor.overworldScreenId();
+        visibleScreen && overworldMapEditor.loaded() &&
+        overworldMapEditor.projectLevelRoot().lexically_normal() ==
+            levelEditor.browserRoot().lexically_normal() &&
+        overworldMapEditor.screen(*visibleScreen)) {
+        drewDraftTopology = true;
+        const OverworldLayout& layout = overworldMapEditor.layout();
+        if (layout.start.screen == *visibleScreen) {
+            drawTopologyLabel(
+                layout.start.cell,
+                "OVERWORLD START",
+                IM_COL32(102, 235, 145, 255));
+        }
+        for (const OverworldConnection& connection : layout.connections) {
+            if (connection.a.screen == *visibleScreen) {
+                drawTopologyLabel(
+                    connection.a.cell,
+                    "TO SCREEN " + std::to_string(connection.b.screen),
+                    IM_COL32(112, 190, 255, 255));
+            } else if (connection.b.screen == *visibleScreen) {
+                drawTopologyLabel(
+                    connection.b.cell,
+                    "TO SCREEN " + std::to_string(connection.a.screen),
+                    IM_COL32(112, 190, 255, 255));
+            }
+        }
+    }
+    if (!drewDraftTopology) {
+        if (const std::optional<GridPosition3> start =
+                levelEditor.overworldStartCell()) {
+            drawTopologyLabel(
+                *start,
+                "OVERWORLD START",
+                IM_COL32(102, 235, 145, 255));
+        }
+        for (const auto& [cell, neighbor] :
+             levelEditor.overworldConnectionEndpoints()) {
+            drawTopologyLabel(
+                cell,
+                "TO SCREEN " + std::to_string(neighbor),
+                IM_COL32(112, 190, 255, 255));
+        }
+    }
+    if (const auto& tool = overworldMapEditor.cellTool();
+        tool && hoverCell) {
+        std::string text;
+        ImU32 color = IM_COL32(255, 211, 92, 255);
+        switch (tool->kind) {
+        case OverworldMapEditor::CellToolKind::SetStart:
+            text = "CLICK: SET START";
+            color = IM_COL32(102, 235, 145, 255);
+            break;
+        case OverworldMapEditor::CellToolKind::AddConnectedScreen:
+            text = "CLICK: ADD CONNECTION";
+            break;
+        case OverworldMapEditor::CellToolKind::ConnectExisting:
+            text = "CLICK: CONNECT TO SCREEN " +
+                std::to_string(*tool->target);
+            break;
+        }
+        drawTopologyLabel(*hoverCell, text, color);
+    }
 #else
     (void)renderer;
     (void)frame;
@@ -581,6 +698,10 @@ void ApplicationTools::updateEditorInteraction(
         levelEditor.cancelMove();
     }
     if (input.undoPressed) {
+        if (overworldMapEditor.cellTool()) {
+            overworldMapEditor.cancelCellTool();
+            return;
+        }
         if (decorationGizmo.dragging()) {
             decorationGizmo.endDrag();
             (void)levelEditor.endSelectedDecorationTransform(false);
@@ -616,6 +737,25 @@ void ApplicationTools::updateEditorInteraction(
 
     const Vec2 pointerPixels = EditorInteraction::pointerPixels(
         input.pointerPosition, windowSize, pixelSize);
+    if (overworldMapEditor.cellTool()) {
+        if (const std::optional<GridPosition3> clicked =
+                renderer.pickIsoGridCell(
+                    *previousRenderFrame, pointerPixels)) {
+            const GridPosition3 target = levelEditor.resolveEditTarget(
+                *clicked, false, false);
+            hoverCell = target;
+            if (input.primaryPressed) {
+                if (const std::optional<OverworldScreenId> visibleScreen =
+                        levelEditor.overworldScreenId()) {
+                    const Level::Definition visibleDefinition =
+                        levelEditor.documentDefinition();
+                    (void)overworldMapEditor.applyCellTool(
+                        *visibleScreen, target, &visibleDefinition);
+                }
+            }
+        }
+        return;
+    }
     if (updateGroundPainting(
             input, *previousRenderFrame, pointerPixels, renderer)) {
         return;
@@ -746,8 +886,8 @@ bool ApplicationTools::updateGroundPainting(
     if (!splatPainter.active()) {
         return false;
     }
-    if (levelLocationFromScreenPath(levelEditor.loadedDocumentPath()) !=
-        splatPainter.location()) {
+    if (levelEditor.loadedDocumentPath().lexically_normal() !=
+        splatPainter.documentPath().lexically_normal()) {
         splatPainter.close();
         return false;
     }

@@ -47,7 +47,9 @@ const AssetManifest& testManifest()
         { "name": "GroundSplatMap", "path": "splat.png" },
         { "name": "GroundSplatMap0_0", "path": "splat0_0.png" },
         { "name": "GroundSplatMap0_1", "path": "splat0_1.png" },
-        { "name": "GroundSplatMap2_0", "path": "splat2_0.png" }
+        { "name": "GroundSplatMap2_0", "path": "splat2_0.png" },
+        { "name": "GroundSplatMapOverworld1", "path": "overworld1.png" },
+        { "name": "GroundSplatMapOverworld2", "path": "overworld2.png" }
       ],
       "models": [
         { "name": "Stone", "path": "stone.gltf" },
@@ -278,6 +280,25 @@ void testGroundSplatTexturesAreRequired()
     CHECK(frameRequirements.contains(frame.groundSplat.detail));
     CHECK(frameRequirements.contains(frame.groundSplat.splatMap));
 
+    frame.groundSplatRegionCount = 1;
+    frame.groundSplatRegions[0] = {
+        .origin = { 9, 0 },
+        .width = 9,
+        .height = 7,
+        .textures = groundSplatTexturesForOverworldScreen(
+            [&manifest](std::string_view name) {
+                return manifest.findTextureIdByName(name);
+            },
+            1),
+    };
+    const RenderAssetRequirements regionRequirements =
+        renderAssetRequirementsForFrame(frame);
+    CHECK(regionRequirements.contains(
+        manifest.textureIdByName("GroundSplatMapOverworld1")));
+    CHECK(frame.groundSplatRegionAt({ 10, 2, 1 }) ==
+        &frame.groundSplatRegions[0]);
+    CHECK(frame.groundSplatRegionAt({ 8, 2, 1 }) == nullptr);
+
     // Unset ids stay absent, so a manifest without the textures is fine.
     const RenderAssetRequirements empty =
         renderAssetRequirementsForFrame(RenderFrameData {});
@@ -353,6 +374,10 @@ void testPerScreenSplatMapsAreSelectedAndFallBack()
     // every screen silently falls back to the shared map.
     CHECK(groundSplatMapTextureNameForScreen({ 0, 0 }) == "GroundSplatMap0_0");
     CHECK(groundSplatMapTextureNameForScreen({ 12, 3 }) == "GroundSplatMap12_3");
+    CHECK(groundSplatMapTextureNameForOverworldScreen(42) ==
+        "GroundSplatMapOverworld42");
+    CHECK(groundSplatMapAssetPathForOverworldScreen(42) ==
+        "custom/textures/ground_splat_overworld_42.png");
     // Level/screen must not be ambiguous once concatenated: 1:23 and 12:3 are
     // different screens and must not resolve to the same texture name.
     CHECK(groundSplatMapTextureNameForScreen({ 1, 23 }) !=

@@ -208,9 +208,11 @@ IsoRenderLayout calculateIsoLayout(
         std::max(frameData.cameraDistanceMultiplier.value_or(1.0f), 0.01f);
     const Vec3 target {
         static_cast<float>(cameraExtent.originX) +
-            static_cast<float>(cameraExtent.width) * 0.5f,
+            static_cast<float>(cameraExtent.width) * 0.5f +
+            frameData.cameraOffset.x,
         static_cast<float>(cameraExtent.originY) +
-            static_cast<float>(cameraExtent.height) * 0.5f,
+            static_cast<float>(cameraExtent.height) * 0.5f +
+            frameData.cameraOffset.y,
         static_cast<float>(cameraExtent.originZ) +
             static_cast<float>(std::max(cameraExtent.depth, 1U) - 1U) * 0.5f,
     };
@@ -262,8 +264,10 @@ IsoRenderLayout calculateIsoLayout(
         farthestDepth = std::max(farthestDepth, cameraDepth);
     };
 
-    const float left = static_cast<float>(cameraExtent.originX);
-    const float nearY = static_cast<float>(cameraExtent.originY);
+    const float left = static_cast<float>(cameraExtent.originX) +
+        frameData.cameraOffset.x;
+    const float nearY = static_cast<float>(cameraExtent.originY) +
+        frameData.cameraOffset.y;
     const float right = left + static_cast<float>(cameraExtent.width);
     const float farY = nearY + static_cast<float>(cameraExtent.height);
     const float bottom = static_cast<float>(cameraExtent.originZ);

@@ -2,6 +2,7 @@
 // No SDL, Vulkan, ImGui, rendering, or window dependencies.
 
 #include "engine/LevelEditor.hpp"
+#include "engine/OverworldMapEditor.hpp"
 #include "engine/TileTypes.hpp"
 
 #include <algorithm>
@@ -882,6 +883,159 @@ void testMoveTileIsAtomicAndUndoable()
         tileTypeToChar(TileType::Wall));
 }
 
+void testComposedOverworldDocumentsArePathAwareAndTransactional()
+{
+    TEST("composedOverworldDocumentsArePathAwareAndTransactional");
+    TemporaryProject project;
+    const auto write = [](const std::filesystem::path& path,
+                           std::string_view text) {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream file(path, std::ios::trunc);
+        file << text;
+    };
+    write(project.source / "level0/screen0.scr",
+        "@layer 0\n...\n...\n...\n"
+        "@layer 1\n   \n C \n E \n");
+    write(project.source / "overworld/screen1.scr",
+        "@selector {\"cell\":[0,0,1],\"id\":1,"
+        "\"target\":{\"level\":0,\"screen\":0}}\n\n"
+        "@layer 0\n...\n...\n...\n"
+        "@layer 1\n   \n   \n   \n");
+    write(project.source / "overworld/layout.json",
+        "{\n"
+        "  \"format\": 1,\n"
+        "  \"screenSize\": [3, 3],\n"
+        "  \"start\": {\"screen\": 1, \"cell\": [1, 1, 1]},\n"
+        "  \"screens\": ["
+        "{\"id\": 1, \"file\": \"screen1.scr\", \"slot\": [0, 0]}],\n"
+        "  \"connections\": []\n"
+        "}\n");
+
+    LevelEditor editor = makeEditor(project);
+    const std::filesystem::path screen =
+        project.source / "overworld/screen1.scr";
+    CHECK(editor.loadDocument(screen));
+    CHECK(editor.editingOverworld());
+    CHECK(editor.overworldScreenId() == 1U);
+    CHECK(editor.sourceLevelRoot() == project.source);
+    CHECK(editor.runtimeLevelRoot() == project.runtime);
+
+    editor.setCell({ 1, 1, 1 }, TileType::Player);
+    CHECK(editor.documentLayers()[1][1][1] == tileTypeToChar(TileType::Air));
+    editor.resizeDocument(4, 4);
+    CHECK(editor.documentWidth() == 3);
+    CHECK(editor.documentHeight() == 3);
+
+    const TreeSnapshot before = snapshotTree(project.source);
+    editor.setCell({ 1, 1, 1 }, TileType::Wall);
+    CHECK(editor.documentLayers()[1][1][1] == tileTypeToChar(TileType::Air));
+    CHECK(editor.status().find("start") != std::string::npos);
+    CHECK(snapshotTree(project.source) == before);
+    editor.setCell({ 2, 2, 1 }, TileType::Wall);
+    CHECK(editor.saveDocument(screen));
+    CHECK(std::filesystem::exists(
+        project.runtime / "overworld/layout.json"));
+    CHECK(std::filesystem::exists(
+        project.runtime / "overworld/screen1.scr"));
+
+    const std::optional<Level> overworldDraft = editor.beginDraftPlayback();
+    CHECK(overworldDraft.has_value());
+    CHECK(editor.draftOverworldMap() != nullptr);
+    CHECK(editor.playingDraft());
+    CHECK(overworldDraft &&
+        overworldDraft->playerStart() == GridPosition3({ 1, 1, 1 }));
+    editor.setPlayingDraft(false);
+    CHECK(editor.draftOverworldMap() == nullptr);
+
+    OverworldMapEditor topologyDraft;
+    topologyDraft.initialize(project.source, std::nullopt);
+    CHECK(topologyDraft.beginAddConnectedScreenCell(1, { 1, 0 }));
+    CHECK(topologyDraft.applyCellTool(1, { 2, 1, 1 }));
+    CHECK(!std::filesystem::exists(
+        project.source / "overworld/screen2.scr"));
+    editor.setCell({ 0, 2, 1 }, TileType::Wall);
+    CHECK(editor.dirty());
+    const std::optional<Level> unsavedTopologyDraft =
+        editor.beginDraftPlayback(&topologyDraft);
+    CHECK(unsavedTopologyDraft.has_value());
+    CHECK(editor.draftOverworldMap() != nullptr);
+    if (editor.draftOverworldMap()) {
+        CHECK(editor.draftOverworldMap()->screens().size() == 2);
+        CHECK(editor.draftOverworldMap()->connections().size() == 1);
+        const OverworldScreenRuntime* activeDraft =
+            editor.draftOverworldMap()->screen(1);
+        CHECK(activeDraft != nullptr);
+        CHECK(activeDraft && activeDraft->definition.layers[1][2][0] ==
+            tileTypeToChar(TileType::Wall));
+    }
+    editor.setPlayingDraft(false);
+
+    std::vector<LevelEditor::LevelDirectory> levels =
+        editor.collectLevelDirectories();
+    editor.addScreenAt(levels[0], 0);
+    const Level::Definition remapped = Level::loadDefinitionFromFile(screen);
+    CHECK(remapped.selectors[0].target ==
+        std::optional<LevelLocation>({ .level = 0, .screen = 1 }));
+
+    write(project.source / "overworld/scratch.scr",
+        "@layer 0\n...\n...\n...\n"
+        "@layer 1\n   \n C \n   \n");
+    CHECK(editor.loadDocument(project.source / "overworld/scratch.scr"));
+    CHECK(!editor.editingOverworld());
+}
+
+void testComposedSelectorOwnershipIsEnforcedBeforeSave()
+{
+    TEST("composedSelectorOwnershipIsEnforcedBeforeSave");
+    TemporaryProject project;
+    const auto write = [](const std::filesystem::path& path,
+                           std::string_view text) {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream file(path, std::ios::trunc);
+        file << text;
+    };
+    write(project.source / "level0/screen0.scr",
+        "@layer 0\n...\n...\n...\n"
+        "@layer 1\n   \n C \n E \n");
+    write(project.source / "overworld/screen1.scr",
+        "@layer 0\n...\n...\n...\n"
+        "@layer 1\n  #\n   \n  #\n");
+    write(project.source / "overworld/screen2.scr",
+        "@selector {\"cell\":[1,1,1],\"id\":1,"
+        "\"target\":{\"level\":0,\"screen\":0}}\n\n"
+        "@layer 0\n...\n...\n...\n"
+        "@layer 1\n#  \n   \n#  \n");
+    write(project.source / "overworld/layout.json",
+        "{\n"
+        "  \"format\": 1,\n"
+        "  \"screenSize\": [3, 3],\n"
+        "  \"start\": {\"screen\": 1, \"cell\": [1, 1, 1]},\n"
+        "  \"screens\": [\n"
+        "    {\"id\": 1, \"file\": \"screen1.scr\", \"slot\": [0, 0]},\n"
+        "    {\"id\": 2, \"file\": \"screen2.scr\", \"slot\": [1, 0]}\n"
+        "  ],\n"
+        "  \"connections\": [{\n"
+        "    \"a\": {\"screen\": 1, \"cell\": [2, 1, 1]},\n"
+        "    \"b\": {\"screen\": 2, \"cell\": [0, 1, 1]}\n"
+        "  }]\n"
+        "}\n");
+
+    LevelEditor editor = makeEditor(project);
+    CHECK(editor.loadDocument(project.source / "overworld/screen1.scr"));
+    CHECK(editor.overworldStartCell() ==
+        std::optional<GridPosition3>({ 1, 1, 1 }));
+    CHECK(editor.overworldConnectionEndpoints().size() == 1);
+    CHECK((editor.overworldConnectionEndpoints()[0].first ==
+        GridPosition3 { 2, 1, 1 }));
+    CHECK(editor.overworldConnectionEndpoints()[0].second == 2U);
+    CHECK(editor.selectorLevelOwner(0) == 2U);
+    CHECK(editor.placeSelector({ 0, 0, 1 }));
+    CHECK(!editor.updateSelectedSelectorTarget(
+        LevelLocation { .level = 0, .screen = 0 }));
+    CHECK(!editor.selectors()[0].target);
+    CHECK(editor.status().find("screen 2") != std::string::npos);
+}
+
 } // namespace
 
 int main()
@@ -905,6 +1059,8 @@ int main()
     testDecorationTransformSessionCoalescesUndoAndCanCancel();
     testSelectorEditingPersistenceUndoAndProjectRemapping();
     testMoveTileIsAtomicAndUndoable();
+    testComposedOverworldDocumentsArePathAwareAndTransactional();
+    testComposedSelectorOwnershipIsEnforcedBeforeSave();
 
     if (failures == 0) {
         std::cout << "LevelEditorTests: " << checks << " checks passed\n";

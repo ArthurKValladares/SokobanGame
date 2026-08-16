@@ -1,6 +1,9 @@
 #include "engine/LevelEditor.hpp"
 
+#include "engine/OverworldMapEditor.hpp"
+
 #include "engine/LevelCatalog.hpp"
+#include "engine/OverworldMap.hpp"
 
 #include <algorithm>
 #include <array>
@@ -96,26 +99,38 @@ void rewriteOverworldSelectors(
     const std::filesystem::path& root,
     Mutate&& mutate)
 {
-    const std::filesystem::path path = root / "overworld.scr";
-    if (!std::filesystem::is_regular_file(path)) {
+    auto rewriteFile = [&](const std::filesystem::path& path) {
+        std::ifstream file(path);
+        if (!file) {
+            throw std::runtime_error("cannot read overworld " + path.string());
+        }
+        std::vector<std::string> lines;
+        std::string line;
+        while (std::getline(file, line)) {
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
+            lines.push_back(line);
+        }
+        Level::Definition definition =
+            Level::parseDefinition(lines, path.string());
+        mutate(definition.selectors);
+        writeScreenRows(path, Level::serializeDefinition(definition));
+    };
+
+    const std::filesystem::path layoutPath = root / "overworld/layout.json";
+    if (std::filesystem::is_regular_file(layoutPath)) {
+        const OverworldLayout layout = loadOverworldLayout(layoutPath);
+        for (const OverworldScreenSpec& screen : layout.screens) {
+            rewriteFile(root / "overworld" / screen.file);
+        }
         return;
     }
-    std::ifstream file(path);
-    if (!file) {
-        throw std::runtime_error("cannot read overworld " + path.string());
+
+    const std::filesystem::path path = root / "overworld.scr";
+    if (std::filesystem::is_regular_file(path)) {
+        rewriteFile(path);
     }
-    std::vector<std::string> lines;
-    std::string line;
-    while (std::getline(file, line)) {
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-        }
-        lines.push_back(line);
-    }
-    Level::Definition definition =
-        Level::parseDefinition(lines, path.string());
-    mutate(definition.selectors);
-    writeScreenRows(path, Level::serializeDefinition(definition));
 }
 
 } // namespace
@@ -147,6 +162,9 @@ void LevelEditor::initialize(
 void LevelEditor::setPlayingDraft(bool playingDraft)
 {
     document_.playingDraft = playingDraft;
+    if (!playingDraft) {
+        draftOverworldMap_.reset();
+    }
     if (playingDraft) {
         document_.editingDocument = false;
         pendingMove_.reset();
@@ -311,6 +329,18 @@ bool LevelEditor::updateSelectedSelectorTarget(
     if (target && (target->level < 0 || target->screen < 0)) {
         document_.status = "Selector targets must not be negative.";
         return false;
+    }
+    if (target) {
+        const std::optional<OverworldScreenId> current = overworldScreenId();
+        const std::optional<OverworldScreenId> owner =
+            selectorLevelOwner(target->level);
+        if (current && owner && *owner != *current) {
+            document_.status =
+                "Puzzle level " + std::to_string(target->level) +
+                " is already assigned to overworld screen " +
+                std::to_string(*owner) + ".";
+            return false;
+        }
     }
     Level::ScreenSelector& selector =
         document_.selectors[*document_.selectedSelector];
@@ -654,9 +684,72 @@ void LevelEditor::setCell(GridPosition3 position, TileType tile)
     if (document_.layers.empty() || position.z < 0) {
         return;
     }
-    if (editingOverworld() && tile == TileType::End) {
-        document_.status = "End tiles are not allowed in overworld.scr.";
+    if (editingOverworld() &&
+        (tile == TileType::End || tile == TileType::Player)) {
+        document_.status =
+            "Player and End tiles are not allowed in overworld screens; "
+            "the player start is layout metadata.";
         return;
+    }
+    if (editingOverworld() &&
+        (position.x < 0 || position.y < 0 ||
+         position.x >= static_cast<int>(documentWidth()) ||
+         position.y >= static_cast<int>(documentHeight()))) {
+        document_.status =
+            "Overworld screen dimensions are fixed by layout.json.";
+        return;
+    }
+    if (const std::optional<OverworldScreenId> screenId =
+            overworldScreenId()) {
+        try {
+            const OverworldLayout layout = loadOverworldLayout(
+                document_.browserRoot / "overworld/layout.json");
+            std::vector<GridPosition3> protectedEndpoints;
+            if (layout.start.screen == *screenId) {
+                if (position == layout.start.cell && tile != TileType::Air) {
+                    document_.status =
+                        "The overworld start must remain authored Air; move "
+                        "the start metadata before changing this cell.";
+                    return;
+                }
+                GridPosition3 support = layout.start.cell;
+                --support.z;
+                if (position == support && !tileTypeSupportsEntity(tile)) {
+                    document_.status =
+                        "That tile supports the overworld start and cannot "
+                        "be removed first.";
+                    return;
+                }
+            }
+            for (const OverworldConnection& connection : layout.connections) {
+                if (connection.a.screen == *screenId) {
+                    protectedEndpoints.push_back(connection.a.cell);
+                }
+                if (connection.b.screen == *screenId) {
+                    protectedEndpoints.push_back(connection.b.cell);
+                }
+            }
+            for (GridPosition3 endpoint : protectedEndpoints) {
+                if (position == endpoint && !tileTypeAllowsEntity(tile)) {
+                    document_.status =
+                        "That cell is an overworld start/connection endpoint; "
+                        "move the metadata before blocking it.";
+                    return;
+                }
+                --endpoint.z;
+                if (position == endpoint && !tileTypeSupportsEntity(tile)) {
+                    document_.status =
+                        "That tile supports an overworld start/connection "
+                        "endpoint and cannot be removed first.";
+                    return;
+                }
+            }
+        } catch (const std::exception& error) {
+            document_.status =
+                "Cannot validate overworld metadata: " +
+                std::string(error.what());
+            return;
+        }
     }
 
     const int oldHeight = static_cast<int>(documentHeight());
@@ -1090,8 +1183,98 @@ const Level::ScreenSelector* LevelEditor::selectedSelector() const
 
 bool LevelEditor::editingOverworld() const
 {
-    return !document_.loadedPath.empty() &&
-        document_.loadedPath.filename() == "overworld.scr";
+    if (document_.loadedPath.empty()) {
+        return false;
+    }
+    if (document_.loadedPath.filename() == "overworld.scr") {
+        return true;
+    }
+    return overworldScreenIdForPath(document_.loadedPath).has_value();
+}
+
+std::optional<OverworldScreenId> LevelEditor::overworldScreenId() const
+{
+    return overworldScreenIdForPath(document_.loadedPath);
+}
+
+std::optional<OverworldScreenId> LevelEditor::selectorLevelOwner(
+    int puzzleLevel) const
+{
+    if (puzzleLevel < 0) {
+        return std::nullopt;
+    }
+    const std::filesystem::path layoutPath =
+        document_.browserRoot / "overworld/layout.json";
+    if (!std::filesystem::is_regular_file(layoutPath)) {
+        return std::nullopt;
+    }
+    try {
+        const OverworldLayout layout = loadOverworldLayout(layoutPath);
+        const std::optional<OverworldScreenId> loadedId = overworldScreenId();
+        for (const OverworldScreenSpec& spec : layout.screens) {
+            const std::vector<Level::ScreenSelector>* selectors = nullptr;
+            Level::Definition definition;
+            if (loadedId == spec.id) {
+                selectors = &document_.selectors;
+            } else {
+                definition = Level::loadDefinitionFromFile(
+                    document_.browserRoot / "overworld" / spec.file);
+                selectors = &definition.selectors;
+            }
+            if (std::ranges::any_of(
+                    *selectors,
+                    [puzzleLevel](const Level::ScreenSelector& selector) {
+                        return selector.target &&
+                            selector.target->level == puzzleLevel;
+                    })) {
+                return spec.id;
+            }
+        }
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+std::optional<GridPosition3> LevelEditor::overworldStartCell() const
+{
+    const std::optional<OverworldScreenId> id = overworldScreenId();
+    if (!id) {
+        return std::nullopt;
+    }
+    try {
+        const OverworldLayout layout = loadOverworldLayout(
+            document_.browserRoot / "overworld/layout.json");
+        return layout.start.screen == *id
+            ? std::optional<GridPosition3> { layout.start.cell }
+            : std::nullopt;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
+std::vector<std::pair<GridPosition3, OverworldScreenId>>
+LevelEditor::overworldConnectionEndpoints() const
+{
+    std::vector<std::pair<GridPosition3, OverworldScreenId>> result;
+    const std::optional<OverworldScreenId> id = overworldScreenId();
+    if (!id) {
+        return result;
+    }
+    try {
+        const OverworldLayout layout = loadOverworldLayout(
+            document_.browserRoot / "overworld/layout.json");
+        for (const OverworldConnection& connection : layout.connections) {
+            if (connection.a.screen == *id) {
+                result.emplace_back(connection.a.cell, connection.b.screen);
+            } else if (connection.b.screen == *id) {
+                result.emplace_back(connection.b.cell, connection.a.screen);
+            }
+        }
+    } catch (const std::exception&) {
+        result.clear();
+    }
+    return result;
 }
 
 bool LevelEditor::dirty() const
@@ -1114,9 +1297,48 @@ const std::filesystem::path& LevelEditor::browserRoot() const
     return document_.browserRoot;
 }
 
+const std::filesystem::path& LevelEditor::sourceLevelRoot() const
+{
+    return document_.sourceLevelRoot;
+}
+
+const std::filesystem::path& LevelEditor::runtimeLevelRoot() const
+{
+    return document_.runtimeLevelRoot;
+}
+
 const std::string& LevelEditor::status() const
 {
     return document_.status;
+}
+
+std::optional<OverworldScreenId> LevelEditor::overworldScreenIdForPath(
+    const std::filesystem::path& path) const
+{
+    if (path.empty()) {
+        return std::nullopt;
+    }
+    const std::filesystem::path normalizedPath = normalizedAbsolutePath(path);
+    for (const std::filesystem::path& root : {
+             document_.browserRoot,
+             document_.sourceLevelRoot }) {
+        const std::filesystem::path layoutPath = root / "overworld/layout.json";
+        if (!std::filesystem::is_regular_file(layoutPath)) {
+            continue;
+        }
+        try {
+            const OverworldLayout layout = loadOverworldLayout(layoutPath);
+            for (const OverworldScreenSpec& screen : layout.screens) {
+                if (normalizedAbsolutePath(root / "overworld" / screen.file) ==
+                    normalizedPath) {
+                    return screen.id;
+                }
+            }
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
+    }
+    return std::nullopt;
 }
 
 void LevelEditor::newDocument(int width, int height, bool recordHistory)
@@ -1157,6 +1379,13 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
 
 void LevelEditor::resizeDocument(int width, int height, bool recordHistory)
 {
+    if (editingOverworld() &&
+        (width != static_cast<int>(documentWidth()) ||
+         height != static_cast<int>(documentHeight()))) {
+        document_.status =
+            "Overworld screen dimensions are fixed by layout.json.";
+        return;
+    }
     const DocumentSnapshot before = captureDocumentSnapshot();
     width = std::max(width, 1);
     height = std::max(height, 1);
@@ -1306,8 +1535,16 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     Level::Definition definition;
     try {
         definition = Level::parseDefinition(rows, path.string());
-        Level::loadFromDefinition(definition, path.string());
+        if (overworldScreenIdForPath(path)) {
+            // Component definitions intentionally contain no Player tile.
+            // Validate them through the complete composed map, which injects
+            // the one layout-owned start and checks cross-file topology.
+            (void)OverworldMap::load(path.parent_path());
+        } else {
+            (void)Level::loadFromDefinition(definition, path.string());
+        }
     } catch (const std::exception& error) {
+        draftOverworldMap_.reset();
         document_.status = error.what();
         return false;
     }
@@ -1364,6 +1601,43 @@ bool LevelEditor::saveDocument(const std::filesystem::path& path)
     }
 
     const std::filesystem::path sourcePath = normalizedAbsolutePath(path);
+    const std::vector<std::string> serialized =
+        Level::serializeDefinition({
+            .layers = document_.layers,
+            .waterLayer = document_.waterLayer,
+            .decorations = document_.decorations,
+            .selectors = document_.selectors,
+        });
+
+    // A component edit can invalidate a start, connection endpoint, common
+    // dimensions, water metadata, or an undeclared seam. Route it through the
+    // same whole-project validator as topology edits so source and runtime can
+    // never disagree or expose a half-valid map.
+    if (overworldScreenIdForPath(sourcePath)) {
+        const std::filesystem::path projectRoot =
+            normalizedAbsolutePath(document_.browserRoot);
+        const std::filesystem::path relative =
+            sourcePath.lexically_relative(projectRoot);
+        if (relative.empty() ||
+            (relative.begin() != relative.end() && *relative.begin() == "..")) {
+            document_.status =
+                "Overworld screen is outside the active level project.";
+            return false;
+        }
+        if (!applyProjectMutation(
+                [relative, serialized](const std::filesystem::path& root) {
+                    writeScreenRows(root / relative, serialized);
+                })) {
+            return false;
+        }
+        document_.filePath = sourcePath;
+        document_.loadedPath = sourcePath;
+        document_.dirty = false;
+        document_.status =
+            "Saved overworld screen and validated the complete map.";
+        return true;
+    }
+
     std::error_code error;
     if (sourcePath.has_parent_path()) {
         std::filesystem::create_directories(sourcePath.parent_path(), error);
@@ -1379,13 +1653,6 @@ bool LevelEditor::saveDocument(const std::filesystem::path& path)
         return false;
     }
 
-    const std::vector<std::string> serialized =
-        Level::serializeDefinition({
-            .layers = document_.layers,
-            .waterLayer = document_.waterLayer,
-            .decorations = document_.decorations,
-            .selectors = document_.selectors,
-        });
     for (const std::string& line : serialized) {
         file << line << '\n';
     }
@@ -1800,22 +2067,56 @@ void LevelEditor::applyDocumentSnapshot(const DocumentSnapshot& snapshot)
 
 Level LevelEditor::documentToLevel() const
 {
-    return Level::loadFromLayers(
-        document_.layers,
-        "level editor draft",
-        document_.waterLayer,
-        document_.decorations,
-        document_.selectors);
+    return Level::loadFromDefinition(
+        documentDefinition(), "level editor draft");
 }
 
-std::optional<Level> LevelEditor::beginDraftPlayback()
+Level::Definition LevelEditor::documentDefinition() const
+{
+    return {
+        .layers = document_.layers,
+        .waterLayer = document_.waterLayer,
+        .decorations = document_.decorations,
+        .selectors = document_.selectors,
+    };
+}
+
+std::optional<Level> LevelEditor::beginDraftPlayback(
+    const OverworldMapEditor* topologyDraft)
 {
     try {
-        Level level = documentToLevel();
+        Level level;
+        if (const std::optional<OverworldScreenId> screenId =
+                overworldScreenId()) {
+            OverworldDefinitionOverride activeDefinition {
+                .screen = *screenId,
+                .definition = documentDefinition(),
+            };
+            OverworldDraftOverride draft;
+            if (topologyDraft && topologyDraft->loaded() &&
+                normalizedAbsolutePath(topologyDraft->projectLevelRoot()) ==
+                    normalizedAbsolutePath(document_.browserRoot)) {
+                draft = topologyDraft->draftOverride(
+                    std::move(activeDefinition));
+            } else {
+                draft.definitions.push_back(std::move(activeDefinition));
+            }
+            OverworldMap map = OverworldMap::load(
+                document_.browserRoot / "overworld",
+                std::move(draft));
+            level = map.level();
+            draftOverworldMap_ = std::move(map);
+        } else {
+            level = documentToLevel();
+            draftOverworldMap_.reset();
+        }
         setPlayingDraft(true);
-        document_.status = "Playing editor draft.";
+        document_.status = draftOverworldMap_
+            ? "Playing composed overworld draft; selectors are disabled."
+            : "Playing editor draft.";
         return level;
     } catch (const std::exception& error) {
+        draftOverworldMap_.reset();
         document_.status = error.what();
         return std::nullopt;
     }

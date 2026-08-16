@@ -563,6 +563,11 @@ private:
         for (std::size_t faceIndex : faceIndices) {
             const PreparedIsoFace& face =
                 scene.isoFaces[faceIndex];
+            const RenderFrameData::GroundSplatRegion* splatRegion =
+                frameData.groundSplatRegionAt(face.cell);
+            const GroundSplatTextures& splatTextures = splatRegion
+                ? splatRegion->textures
+                : frameData.groundSplat;
             const VkPipeline desiredPipeline = [&] {
                 switch (face.material) {
                 case PreparedSurfaceMaterial::Water:
@@ -572,7 +577,7 @@ private:
                 case PreparedSurfaceMaterial::GroundSplat:
                     // Falls back to the flat tile shader when the manifest
                     // does not provide the ground textures.
-                    return frameData.groundSplat.valid()
+                    return splatTextures.valid()
                         ? pipelines_.groundSplat()
                         : pipelines_.scene();
                 case PreparedSurfaceMaterial::Standard:
@@ -623,7 +628,15 @@ private:
                     frameData.effectAnimationTimeSeconds);
             } else if (
                 face.material == PreparedSurfaceMaterial::GroundSplat &&
-                frameData.groundSplat.valid()) {
+                splatTextures.valid()) {
+                const Vec2 splatOrigin = splatRegion
+                    ? Vec2 {
+                          face.worldOrigin.x -
+                              static_cast<float>(splatRegion->origin.x),
+                          face.worldOrigin.y -
+                              static_cast<float>(splatRegion->origin.y),
+                      }
+                    : face.worldOrigin;
                 drawGroundSplatFace(
                     commandBuffer,
                     face.vertices,
@@ -631,14 +644,14 @@ private:
                     face.color,
                     face.normal,
                     frameData.lighting,
-                    face.worldOrigin,
+                    splatOrigin,
                     face.gridSize,
                     face.showGrid
                         ? frameData.gridOverlay.color
                         : Vec4 {},
                     frameData.gridOverlay.width,
                     face.isEditorPreview,
-                    frameData.groundSplat);
+                    splatTextures);
             } else {
                 drawFace(
                     commandBuffer,

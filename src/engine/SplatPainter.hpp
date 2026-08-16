@@ -44,6 +44,10 @@ public:
         // painted map survives a restart without re-running the content
         // pipeline. Empty to skip.
         std::filesystem::path runtimeAssetRoot;
+        // Composed-overworld screens use stable screen IDs rather than a
+        // puzzle LevelLocation. Supplying the stable texture name lets the
+        // same painter edit either kind of document.
+        std::optional<std::string> textureName;
     };
 
     // Opens the map for `request`'s screen, creating a blank one if the file
@@ -56,6 +60,10 @@ public:
 
     [[nodiscard]] bool active() const { return active_; }
     [[nodiscard]] std::optional<LevelLocation> location() const;
+    [[nodiscard]] const std::filesystem::path& documentPath() const
+    {
+        return documentPath_;
+    }
     [[nodiscard]] RenderTexture texture() const { return texture_; }
     [[nodiscard]] const SplatCanvas& canvas() const { return canvas_; }
     [[nodiscard]] const std::string& status() const { return status_; }
@@ -107,6 +115,7 @@ private:
     std::vector<uint8_t> strokeSnapshot_;
     std::filesystem::path sourcePath_;
     std::filesystem::path runtimePath_;
+    std::filesystem::path documentPath_;
     std::string status_;
     uint64_t revision_ = 0;
 };
@@ -133,6 +142,13 @@ struct CreatedSplatMap {
 // entry to exist.
 [[nodiscard]] CreatedSplatMap createBlankSplatMap(
     LevelLocation location,
+    uint32_t boardTilesWide,
+    uint32_t boardTilesHigh,
+    const std::filesystem::path& sourceAssetRoot,
+    const std::filesystem::path& runtimeAssetRoot);
+
+[[nodiscard]] CreatedSplatMap createBlankSplatMapAt(
+    std::string relativePath,
     uint32_t boardTilesWide,
     uint32_t boardTilesHigh,
     const std::filesystem::path& sourceAssetRoot,

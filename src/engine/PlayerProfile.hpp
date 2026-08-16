@@ -5,6 +5,7 @@
 #include "engine/ScreenSelectorState.hpp"
 #include "engine/SettingsTypes.hpp"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -12,7 +13,7 @@
 
 namespace sokoban {
 
-inline constexpr int currentPlayerProfileFormat = 19;
+inline constexpr int currentPlayerProfileFormat = 20;
 
 // Which top-level sections serialize() writes. Save-slot files carry only
 // progress and the shared settings file only settings; both sections are
@@ -66,13 +67,25 @@ struct PlayerProfile {
         bool operator==(const ActiveScreen&) const = default;
     };
 
+    struct OverworldCheckpoint {
+        // Zero is reserved for the transitional legacy single-overworld
+        // runtime. A composed OverworldMap supplies its non-zero fingerprint.
+        uint64_t topologyFingerprint = 0;
+        // Stable positive OverworldScreenId. Kept as a fixed-width primitive
+        // here so the save schema does not depend on editor/map headers.
+        uint32_t activeScreen = 0;
+        GameplaySession::Snapshot session;
+
+        bool operator==(const OverworldCheckpoint&) const = default;
+    };
+
     int unlockedLevel = 0;
     int currentLevel = 0;
     int currentScreen = 0;
     std::vector<LevelProgress> levels;
     std::vector<ScreenProgress> screens;
     std::optional<ActiveScreen> activeScreen;
-    std::optional<GameplaySession::Snapshot> overworldSession;
+    std::optional<OverworldCheckpoint> overworldCheckpoint;
     WorldContext worldContext = WorldContext::Overworld;
     UserSettings settings;
 

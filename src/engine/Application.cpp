@@ -16,6 +16,8 @@
 
 #include <algorithm>
 #include <exception>
+#include <functional>
+#include <ranges>
 #include <utility>
 #include <vector>
 
@@ -85,7 +87,9 @@ Application::Application()
     openTitleScreen();
     RenderAssetRequirements initialRequirements =
         renderAssetRequirementsForLevel(
-            Level::loadFromFile(overworldPath()), assetManifest_);
+            overworldMap_ ? overworldMap_->level()
+                          : Level::loadFromFile(overworldPath()),
+            assetManifest_);
     initialRequirements.merge(levelAssetRequirements(campaign_.currentLevel()));
     renderer_.preloadAssets(initialRequirements);
 
@@ -136,6 +140,7 @@ Application::Application()
     DebugUi::addTab("Level Editor", [this] {
         tools_->levelEditorDebugUi.draw(
             tools_->levelEditor,
+            tools_->overworldMapEditor,
             tools_->splatPainter,
             settingsCoordinator_.userSettings().input,
             {
@@ -145,6 +150,15 @@ Application::Application()
                 // being played.
                 tools_->splatPainter.close();
                 (void)applyLevel(std::move(level));
+                if (tools_->levelEditor.draftOverworldMap()) {
+                    gameplaySession_.setActionAdmissionPolicy(
+                        [this](const GameState& state) {
+                            const OverworldMap* map =
+                                tools_->levelEditor.draftOverworldMap();
+                            return map &&
+                                overworldActionStateAllowed(*map, state);
+                        });
+                }
             },
             .returnToCurrentScreen = [this] {
                 tools_->splatPainter.close();
@@ -453,6 +467,19 @@ void Application::update(
         input.gameplay,
         dt,
         tools_->levelEditor.playingDraft());
+    if (gameplayResult.stateCommitted && campaign_.inOverworld() &&
+        overworldMap_ && !tools_->levelEditor.playingDraft()) {
+        const std::optional<OverworldScreenId> playerScreen =
+            CampaignSession::sharedPlayerScreen(
+                *overworldMap_, gameplaySession_.state());
+        if (playerScreen &&
+            *playerScreen != campaign_.activeOverworldScreen() &&
+            !campaign_.transitionOverworldScreen(*playerScreen)) {
+            log::error(log::Category::Gameplay)
+                << "Could not commit overworld screen transition to "
+                << *playerScreen;
+        }
+    }
     if (gameplayResult.mirrorActivated) {
         audioSystem_.playOneShot("mirror-swap");
         for (GridPosition3 destination :
@@ -509,19 +536,24 @@ void Application::loadCurrentScreen()
         ? std::nullopt
         : std::optional<LevelLocation> { campaign_.location() };
     const std::filesystem::path path = campaign_.inOverworld()
-        ? overworldPath()
+        ? (overworldMap_ ? overworldRoot() : overworldPath())
         : screenPath(campaign_.currentLevel(), campaign_.currentScreen());
 
+    Level loadedLevel = campaign_.inOverworld() && overworldMap_
+        ? overworldMap_->level()
+        : Level::loadFromFile(path);
+
     const bool restored = applyLevel(
-        Level::loadFromFile(path),
+        std::move(loadedLevel),
         restore.snapshot ? &*restore.snapshot : nullptr,
-        location);
+        location,
+        campaign_.inOverworld() && overworldMap_.has_value());
     if (restore.checkpointMatched && !restored) {
         log::warning(log::Category::Persistence)
             << "Discarded invalid gameplay checkpoint for "
             << (campaign_.inOverworld() ? "the overworld" : "puzzle");
         if (campaign_.inOverworld()) {
-            playerProfile_.overworldSession.reset();
+            playerProfile_.overworldCheckpoint.reset();
         } else {
             playerProfile_.activeScreen.reset();
         }
@@ -543,19 +575,47 @@ void Application::loadCurrentScreen()
 bool Application::applyLevel(
     Level level,
     const GameplaySession::Snapshot* snapshot,
-    std::optional<LevelLocation> location)
+    std::optional<LevelLocation> location,
+    bool composedOverworld)
 {
     // Same location the render frame will use, so the splat map this screen
     // draws with is the one guaranteed resident here.
-    renderer_.ensureAssets(renderAssetRequirementsForLevel(
+    RenderAssetRequirements requirements = renderAssetRequirementsForLevel(
         level,
         assetManifest_,
         location,
-        &animationCatalog_));
+        &animationCatalog_);
+    if (composedOverworld && overworldMap_) {
+        for (OverworldScreenId screenId : overworldMap_->visibleNeighborhood(
+                 campaign_.activeOverworldScreen())) {
+            const GroundSplatTextures textures =
+                groundSplatTexturesForOverworldScreen(
+                    [this](std::string_view name) {
+                        return assetManifest_.findTextureIdByName(name);
+                    },
+                    screenId);
+            requirements.requireTexture(textures.base);
+            requirements.requireTexture(textures.detail);
+            requirements.requireTexture(textures.splatMap);
+        }
+    }
+    renderer_.ensureAssets(requirements);
     level_ = std::move(level);
-    const bool restored = snapshot && gameplaySession_.restore(level_, *snapshot);
+    bool restored = snapshot && gameplaySession_.restore(level_, *snapshot);
+    if (restored && composedOverworld && overworldMap_ &&
+        !overworldActionStateAllowed(*overworldMap_, gameplaySession_.state())) {
+        restored = false;
+    }
     if (!restored) {
         gameplaySession_.reset(level_);
+    }
+    if (composedOverworld && overworldMap_) {
+        gameplaySession_.setActionAdmissionPolicy([this](const GameState& state) {
+            return overworldMap_ &&
+                overworldActionStateAllowed(*overworldMap_, state);
+        });
+    } else {
+        gameplaySession_.clearActionAdmissionPolicy();
     }
     presentation_.resetEntities(gameplaySession_.state());
     particleSystem_.reset();
@@ -957,6 +1017,11 @@ std::filesystem::path Application::overworldPath() const
     return assetRoot_ / "levels" / "overworld.scr";
 }
 
+std::filesystem::path Application::overworldRoot() const
+{
+    return assetRoot_ / "levels" / "overworld";
+}
+
 void Application::buildLevelCatalog()
 {
     std::vector<int> screenCounts;
@@ -975,28 +1040,59 @@ void Application::buildLevelCatalog()
                 ("level" + std::to_string(level)),
             static_cast<std::size_t>(screens)));
     }
-    campaign_.setLevelScreenCounts(std::move(screenCounts));
-
     std::vector<LevelLocation> selectorTargets;
-    const Level overworld = Level::loadFromFile(overworldPath());
-    for (const Level::ScreenSelector& selector : overworld.selectors()) {
-        if (selector.target) {
-            selectorTargets.push_back(*selector.target);
+    const std::filesystem::path layoutPath = overworldRoot() / "layout.json";
+    if (std::filesystem::exists(layoutPath)) {
+        overworldMap_ = OverworldMap::load(overworldRoot());
+        overworldMap_->validatePuzzleSelectors(
+            screenCounts, OverworldValidationMode::Production);
+        std::vector<OverworldScreenId> screenIds;
+        screenIds.reserve(overworldMap_->screens().size());
+        for (const OverworldScreenRuntime& screen : overworldMap_->screens()) {
+            screenIds.push_back(screen.id);
+        }
+        campaign_.setOverworldTopology(
+            overworldMap_->fingerprint(),
+            std::move(screenIds),
+            overworldMap_->startScreen());
+        for (const OverworldSelectorRuntime& selector :
+             overworldMap_->selectors()) {
+            if (selector.target) {
+                selectorTargets.push_back(*selector.target);
+            }
+        }
+    } else {
+        overworldMap_.reset();
+        campaign_.setOverworldTopology(0, { 1 }, 1);
+        const Level overworld = Level::loadFromFile(overworldPath());
+        for (const Level::ScreenSelector& selector : overworld.selectors()) {
+            if (selector.target) {
+                selectorTargets.push_back(*selector.target);
+            }
         }
     }
+    campaign_.setLevelScreenCounts(std::move(screenCounts));
     campaign_.setOverworldTargets(std::move(selectorTargets));
 }
 
 void Application::restoreProfileLocation()
 {
+    const bool restoringOverworld =
+        playerProfile_.worldContext == PlayerProfile::WorldContext::Overworld;
     const LevelLocation saved {
         .level = playerProfile_.currentLevel,
         .screen = playerProfile_.currentScreen,
     };
     if (!campaign_.restoreProfileLocation(playerProfile_)) {
-        log::warning(log::Category::Persistence)
-            << "Saved level location " << saved.level << ':' <<
-            saved.screen << " does not exist; falling back to the overworld";
+        if (restoringOverworld) {
+            log::warning(log::Category::Persistence)
+                << "Saved overworld checkpoint does not match the current "
+                   "topology; returning to the authored start";
+        } else {
+            log::warning(log::Category::Persistence)
+                << "Saved level location " << saved.level << ':' <<
+                saved.screen << " does not exist; falling back to the overworld";
+        }
     }
 }
 
@@ -1032,7 +1128,9 @@ void Application::preloadUpcomingAssets()
     } else {
         requirements = levelAssetRequirements(campaign_.currentLevel());
         requirements.merge(renderAssetRequirementsForLevel(
-            Level::loadFromFile(overworldPath()), assetManifest_));
+            overworldMap_ ? overworldMap_->level()
+                          : Level::loadFromFile(overworldPath()),
+            assetManifest_));
     }
     renderer_.preloadAssets(requirements);
 }
@@ -1081,6 +1179,7 @@ RenderFrameData Application::buildRenderFrame(
             .conveyorBeltScrollOffset = beltScrollOffset,
             .levelLocation =
                 levelLocationFromScreenPath(tools_->levelEditor.loadedDocumentPath()),
+            .overworldScreen = tools_->levelEditor.overworldScreenId(),
             .selectorState = [this, &editorLevels](LevelLocation target) {
                 const auto level = std::ranges::find(
                     editorLevels,
@@ -1110,6 +1209,59 @@ RenderFrameData Application::buildRenderFrame(
 
     // Held by reference for the duration of the call, so it has to outlive it.
     const GameState projectedState = gameplaySession_.projectedState();
+    const OverworldMap* draftOverworld =
+        tools_->levelEditor.draftOverworldMap();
+    const OverworldMap* renderedOverworld = draftOverworld
+        ? draftOverworld
+        : (campaign_.inOverworld() && overworldMap_
+              ? &*overworldMap_
+              : nullptr);
+    std::optional<OverworldView> overworldView;
+    std::optional<OverworldScreenId> renderedActiveScreen;
+    if (renderedOverworld && !presentation_.players().empty()) {
+        renderedActiveScreen = draftOverworld
+            ? CampaignSession::sharedPlayerScreen(
+                  *renderedOverworld, gameplaySession_.state())
+            : std::optional<OverworldScreenId> {
+                  campaign_.activeOverworldScreen() };
+    }
+    if (renderedOverworld && renderedActiveScreen &&
+        !presentation_.players().empty()) {
+        overworldView = calculateOverworldView(
+            *renderedOverworld,
+            *renderedActiveScreen,
+            gameplaySession_.state(),
+            projectedState,
+            presentation_.players().front().motion.renderPosition);
+    }
+    std::function<bool(GridPosition3)> visibleOverworldCell;
+    std::vector<RenderFrameBuilder::GameplayInput::GroundSplatRegion>
+        groundSplatRegions;
+    if (overworldView && renderedOverworld) {
+        visibleOverworldCell = [
+            renderedOverworld,
+            visibleScreens = overworldView->visibleScreens
+        ](GridPosition3 cell) {
+            const std::optional<OverworldScreenId> owner =
+                renderedOverworld->screenAt(cell);
+            return owner && std::ranges::find(visibleScreens, *owner) !=
+                visibleScreens.end();
+        };
+        groundSplatRegions.reserve(overworldView->visibleScreens.size());
+        for (OverworldScreenId screenId : overworldView->visibleScreens) {
+            const OverworldScreenRuntime* screen =
+                renderedOverworld->screen(screenId);
+            if (screen == nullptr) {
+                continue;
+            }
+            groundSplatRegions.push_back({
+                .screenId = screenId,
+                .origin = screen->origin,
+                .width = renderedOverworld->layout().screenWidth,
+                .height = renderedOverworld->layout().screenHeight,
+            });
+        }
+    }
     renderFrameArena_.reset();
     RenderFrameData frame = RenderFrameBuilder::buildGameplay({
         .manifest = assetManifest_,
@@ -1122,7 +1274,16 @@ RenderFrameData Application::buildRenderFrame(
         .animations = &animationCatalog_,
         .conveyorBeltScrollOffset = beltScrollOffset,
         .cameraPitchDegrees = presentation_.cameraPitchDegrees(),
-        .levelLocation = campaign_.inOverworld()
+        .cameraExtent = overworldView
+            ? std::optional<RenderFrameData::CameraExtent> {
+                  overworldView->cameraExtent }
+            : std::nullopt,
+        .cameraOffset = overworldView
+            ? overworldView->cameraOffset
+            : Vec2 {},
+        .visibleCell = std::move(visibleOverworldCell),
+        .groundSplatRegions = groundSplatRegions,
+        .levelLocation = campaign_.inOverworld() || draftOverworld
             ? std::nullopt
             : std::optional<LevelLocation> { campaign_.location() },
         .selectorState = [this](LevelLocation target) {

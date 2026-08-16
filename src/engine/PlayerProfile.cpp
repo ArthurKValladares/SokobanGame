@@ -104,7 +104,7 @@ void PlayerProfile::resetProgress()
     levels.clear();
     screens.clear();
     activeScreen.reset();
-    overworldSession.reset();
+    overworldCheckpoint.reset();
     worldContext = WorldContext::Overworld;
     normalize();
 }
@@ -114,7 +114,7 @@ bool PlayerProfile::progressEmpty() const
     return levels.empty() &&
         screens.empty() &&
         !activeScreen &&
-        !overworldSession &&
+        !overworldCheckpoint &&
         unlockedLevel == 0 &&
         currentLevel == 0 &&
         currentScreen == 0;

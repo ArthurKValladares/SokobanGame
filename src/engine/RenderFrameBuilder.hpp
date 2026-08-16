@@ -10,6 +10,7 @@
 
 #include <optional>
 #include <functional>
+#include <span>
 
 namespace sokoban {
 
@@ -34,6 +35,13 @@ class AnimationCatalog;
 class RenderFrameBuilder {
 public:
     struct GameplayInput {
+        struct GroundSplatRegion {
+            uint32_t screenId = 0;
+            GridPosition origin {};
+            uint32_t width = 0;
+            uint32_t height = 0;
+        };
+
         const AssetManifest& manifest;
         const Level& level;
         const GameState& state;
@@ -53,6 +61,15 @@ public:
         const AnimationCatalog* animations = nullptr;
         float conveyorBeltScrollOffset = 0.0f;
         std::optional<float> cameraPitchDegrees;
+        // Optional authored viewport. Composed overworlds provide a fixed 3x3
+        // screen extent and a sub-cell offset while crossing a seam.
+        std::optional<RenderFrameData::CameraExtent> cameraExtent;
+        Vec2 cameraOffset {};
+        // Optional composed-world render eligibility. Cells outside the
+        // active (or transitioning source/destination) neighborhood are not
+        // emitted into the frame at all.
+        std::function<bool(GridPosition3)> visibleCell;
+        std::span<const GroundSplatRegion> groundSplatRegions;
         // Selects this screen's ground splat map. Unset falls back to the
         // shared map, which is also what draft playback outside a campaign
         // gets.
@@ -76,6 +93,7 @@ public:
         // editor previews (and paints on) that screen's own splat map rather
         // than the shared fallback; unset for scratch documents.
         std::optional<LevelLocation> levelLocation;
+        std::optional<OverworldScreenId> overworldScreen;
         std::function<ScreenSelectorViewState(LevelLocation)> selectorState;
     };
 

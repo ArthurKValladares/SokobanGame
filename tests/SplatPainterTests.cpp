@@ -65,6 +65,9 @@ const AssetManifest& testManifest()
         { "name": "GroundSplatMap", "path": "custom/textures/splat.png" },
         { "name": "GroundSplatMap2_1",
           "path": "custom/textures/ground_splat_level2_screen1.png",
+          "filter": "linear", "colorSpace": "linear" },
+        { "name": "GroundSplatMapOverworld7",
+          "path": "custom/textures/ground_splat_overworld_7.png",
           "filter": "linear", "colorSpace": "linear" }
       ],
       "models": [
@@ -179,6 +182,28 @@ void testOpenCreatesABlankMapWhenTheFileIsMissing()
     CHECK(painter.canvas().width() == 13 * SplatCanvas::texelsPerTile);
     CHECK(painter.canvas().height() == 7 * SplatCanvas::texelsPerTile);
     CHECK(painter.canvas().weightAt(0, 0) == 0);
+}
+
+void testOpenUsesStableOverworldTextureIdentity()
+{
+    TEST("openUsesStableOverworldTextureIdentity");
+    const TemporaryDirectory directory;
+    SplatPainter painter;
+    SplatPainter::OpenRequest request =
+        requestFor(directory, "overworld/screen7.scr", 9, 7);
+    request.textureName = "GroundSplatMapOverworld7";
+
+    CHECK(painter.open(request, testManifest()));
+    CHECK(painter.active());
+    CHECK(!painter.location().has_value());
+    CHECK(painter.documentPath() == request.documentPath);
+    CHECK(painter.canvas().width() == 9 * SplatCanvas::texelsPerTile);
+    painter.brush() = solidWhite;
+    CHECK(painter.beginStroke({ 4.0f, 3.0f }));
+    painter.endStroke();
+    CHECK(painter.save());
+    CHECK(std::filesystem::exists(
+        directory.path() / "assets/custom/textures/ground_splat_overworld_7.png"));
 }
 
 void testOpenLoadsAnExistingMap()
@@ -603,6 +628,7 @@ int main()
     testOpenRejectsDocumentsThatAreNotScreens();
     testOpenReportsAMissingManifestEntry();
     testOpenCreatesABlankMapWhenTheFileIsMissing();
+    testOpenUsesStableOverworldTextureIdentity();
     testOpenLoadsAnExistingMap();
     testStrokesPaintAndMarkDirty();
     testUndoRevertsWholeStrokesNotSamples();

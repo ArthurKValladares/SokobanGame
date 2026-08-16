@@ -313,6 +313,51 @@ void testInventoryAndStaging()
     check(!std::filesystem::exists(output / "stale.file"), "stale output removed");
 }
 
+void testComposedOverworldIsValidatedAndStaged()
+{
+    TempDirectory temp;
+    const auto roots = createValidContent(temp.path());
+    std::filesystem::remove(roots.levels / "overworld.scr");
+    writeFile(
+        roots.levels / "overworld/screen1.scr",
+        "@selector {\"id\":1,\"cell\":[1,0,1],"
+        "\"target\":{\"level\":0,\"screen\":0}}\n\n"
+        "@layer 0\n...\n\n@layer 1\n   \n");
+    writeFile(
+        roots.levels / "overworld/layout.json",
+        R"json({
+          "format":1,
+          "screenSize":[3,1],
+          "start":{"screen":1,"cell":[0,0,1]},
+          "screens":[{"id":1,"file":"screen1.scr","slot":[0,0]}],
+          "connections":[]
+        })json");
+
+    const sokoban::ContentInventory inventory =
+        sokoban::collectContentInventory(roots);
+    check(
+        contains(inventory, "levels/overworld/layout.json"),
+        "composed overworld layout included");
+    check(
+        contains(inventory, "levels/overworld/screen1.scr"),
+        "composed overworld screen included");
+    check(
+        !contains(inventory, "levels/overworld.scr"),
+        "legacy overworld omitted when layout exists");
+
+    const std::filesystem::path output =
+        temp.path() / "composed-package/assets";
+    (void)sokoban::stageContent(roots, output, "1.2.3");
+    check(
+        std::filesystem::is_regular_file(
+            output / "levels/overworld/layout.json"),
+        "composed layout staged");
+    check(
+        std::filesystem::is_regular_file(
+            output / "levels/overworld/screen1.scr"),
+        "composed screen staged");
+}
+
 void testBakedThumbnailsAreStaged()
 {
     TempDirectory temp;
@@ -462,6 +507,7 @@ void testValidationFailures()
 int main()
 {
     testInventoryAndStaging();
+    testComposedOverworldIsValidatedAndStaged();
     testBakedThumbnailsAreStaged();
     testMissingThumbnailsAreNotFatal();
     testValidationFailures();

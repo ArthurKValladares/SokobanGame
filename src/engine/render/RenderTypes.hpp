@@ -119,6 +119,22 @@ inline constexpr std::string_view groundSplatMapTextureName = "GroundSplatMap";
         std::to_string(location.screen) + ".png";
 }
 
+// Stable-ID naming for separately authored overworld screens. These must not
+// use layout slots: moving a screen in the topology must preserve its paint.
+[[nodiscard]] inline std::string groundSplatMapTextureNameForOverworldScreen(
+    uint32_t screenId)
+{
+    return std::string(groundSplatMapTextureName) +
+        "Overworld" + std::to_string(screenId);
+}
+
+[[nodiscard]] inline std::string groundSplatMapAssetPathForOverworldScreen(
+    uint32_t screenId)
+{
+    return "custom/textures/ground_splat_overworld_" +
+        std::to_string(screenId) + ".png";
+}
+
 // Textures blended on splatted ground tops. Unset ids fall back to the flat
 // tile color, so a manifest without these entries still renders.
 struct GroundSplatTextures {
@@ -154,11 +170,28 @@ template <typename FindTextureByName>
     };
 }
 
+template <typename FindTextureByName>
+[[nodiscard]] GroundSplatTextures groundSplatTexturesForOverworldScreen(
+    FindTextureByName findTextureByName,
+    uint32_t screenId)
+{
+    const RenderTexture screenMap = findTextureByName(
+        groundSplatMapTextureNameForOverworldScreen(screenId));
+    return {
+        .base = findTextureByName(groundSplatBaseTextureName),
+        .detail = findTextureByName(groundSplatDetailTextureName),
+        .splatMap = screenMap.isNone()
+            ? findTextureByName(groundSplatMapTextureName)
+            : screenMap,
+    };
+}
+
 struct RenderFrameData {
     static constexpr std::size_t tileCapacity = 16384;
     static constexpr std::size_t waterSurfaceCapacity = 8192;
     static constexpr std::size_t isoFaceCapacity = 65536;
     static constexpr std::size_t particleCapacity = 8192;
+    static constexpr std::size_t groundSplatRegionCapacity = 18;
     enum class EditorDecorationHighlight {
         None,
         Hovered,
@@ -179,6 +212,20 @@ struct RenderFrameData {
         int32_t originY = 0;
         uint32_t width = 0;
         uint32_t height = 0;
+    };
+
+    struct GroundSplatRegion {
+        GridPosition origin {};
+        uint32_t width = 0;
+        uint32_t height = 0;
+        GroundSplatTextures textures;
+
+        [[nodiscard]] bool contains(GridPosition3 cell) const
+        {
+            return cell.x >= origin.x && cell.y >= origin.y &&
+                cell.x < origin.x + static_cast<int>(width) &&
+                cell.y < origin.y + static_cast<int>(height);
+        }
     };
 
     struct DirectionalLight {
@@ -348,6 +395,10 @@ struct RenderFrameData {
     uint32_t levelDepth = 1;
     uint32_t gridPickBorder = 0;
     std::optional<CameraExtent> cameraExtent;
+    // Translates an explicit fitted extent without quantizing its origin to a
+    // cell. Composed overworld transitions use this to pan one 3x3 screen
+    // window smoothly between adjacent screen centers.
+    Vec2 cameraOffset {};
     WaterGridBounds waterGridBounds;
     Vec2 playerPosition {};
     FrameArray<Tile> tiles;
@@ -355,6 +406,22 @@ struct RenderFrameData {
     FrameArray<IsoFace> isoFaces;
     FrameArray<Particle> particles;
     GroundSplatTextures groundSplat {};
+    std::array<GroundSplatRegion, groundSplatRegionCapacity>
+        groundSplatRegions {};
+    std::size_t groundSplatRegionCount = 0;
+
+    [[nodiscard]] const GroundSplatRegion* groundSplatRegionAt(
+        GridPosition3 cell) const
+    {
+        for (std::size_t index = 0;
+             index < groundSplatRegionCount;
+             ++index) {
+            if (groundSplatRegions[index].contains(cell)) {
+                return &groundSplatRegions[index];
+            }
+        }
+        return nullptr;
+    }
     float waterAnimationTimeSeconds = 0.0f;
     float effectAnimationTimeSeconds = 0.0f;
 };

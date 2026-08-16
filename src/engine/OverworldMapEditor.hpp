@@ -1,0 +1,162 @@
+#pragma once
+
+#include "engine/LevelProjectStore.hpp"
+#include "engine/OverworldMap.hpp"
+
+#include <filesystem>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace sokoban {
+
+// Headless project-level editor for the composed overworld. It deliberately
+// owns topology rather than tile editing; LevelEditor remains the authority
+// for one component definition at a time.
+class OverworldMapEditor {
+public:
+    enum class CellToolKind {
+        SetStart,
+        AddConnectedScreen,
+        ConnectExisting,
+    };
+
+    struct CellTool {
+        CellToolKind kind = CellToolKind::SetStart;
+        OverworldScreenId source = 0;
+        std::optional<OverworldScreenId> target;
+        std::optional<OverworldSlot> newScreenSlot;
+    };
+
+    struct ScreenSummary {
+        OverworldScreenId id = 0;
+        OverworldSlot slot {};
+        std::filesystem::path path;
+        std::size_t selectorCount = 0;
+        bool start = false;
+        bool selected = false;
+    };
+
+    void initialize(
+        const std::filesystem::path& projectLevelRoot,
+        std::optional<std::filesystem::path> runtimeLevelRoot = std::nullopt);
+    [[nodiscard]] bool reload();
+
+    [[nodiscard]] bool loaded() const { return loaded_; }
+    [[nodiscard]] bool dirty() const;
+    [[nodiscard]] bool canUndo() const { return !undo_.empty(); }
+    [[nodiscard]] bool canRedo() const { return !redo_.empty(); }
+    [[nodiscard]] const OverworldLayout& layout() const { return state_.layout; }
+    [[nodiscard]] std::optional<OverworldScreenId> selectedScreen() const
+    {
+        return state_.selected;
+    }
+    [[nodiscard]] const std::string& status() const { return status_; }
+    [[nodiscard]] const std::filesystem::path& projectLevelRoot() const
+    {
+        return projectLevelRoot_;
+    }
+
+    [[nodiscard]] std::vector<ScreenSummary> screens() const;
+    [[nodiscard]] std::vector<OverworldScreenId> deletedScreens() const;
+    [[nodiscard]] const OverworldScreenSpec* screen(
+        OverworldScreenId id) const;
+    [[nodiscard]] const Level::Definition* definition(
+        OverworldScreenId id) const;
+    [[nodiscard]] std::filesystem::path screenPath(
+        OverworldScreenId id) const;
+    [[nodiscard]] OverworldDraftOverride draftOverride(
+        std::optional<OverworldDefinitionOverride> activeDefinition =
+            std::nullopt) const;
+
+    [[nodiscard]] const std::optional<CellTool>& cellTool() const
+    {
+        return cellTool_;
+    }
+    [[nodiscard]] std::string cellToolPrompt() const;
+    [[nodiscard]] bool beginSetStartCell(OverworldScreenId source);
+    [[nodiscard]] bool beginAddConnectedScreenCell(
+        OverworldScreenId source,
+        OverworldSlot slot);
+    [[nodiscard]] bool beginConnectCell(
+        OverworldScreenId source,
+        OverworldScreenId target);
+    void cancelCellTool();
+    [[nodiscard]] bool applyCellTool(
+        OverworldScreenId visibleScreen,
+        GridPosition3 cell,
+        const Level::Definition* visibleDefinition = nullptr);
+
+    [[nodiscard]] bool selectScreen(OverworldScreenId id);
+    [[nodiscard]] bool addScreen(OverworldSlot slot);
+    [[nodiscard]] bool addConnectedScreen(
+        OverworldScreenId from,
+        OverworldSlot slot,
+        GridPosition3 fromCell,
+        const Level::Definition* sourceDefinition = nullptr);
+    [[nodiscard]] bool moveScreen(OverworldScreenId id, OverworldSlot slot);
+    [[nodiscard]] bool deleteScreen(OverworldScreenId id);
+    [[nodiscard]] bool restoreDeletedScreen(
+        OverworldScreenId id,
+        OverworldSlot slot);
+    [[nodiscard]] bool setStart(
+        OverworldScreenId screenId,
+        GridPosition3 cell,
+        const Level::Definition* sourceDefinition = nullptr);
+    [[nodiscard]] bool connect(
+        OverworldScreenId from,
+        OverworldScreenId to,
+        GridPosition3 fromCell,
+        const Level::Definition* sourceDefinition = nullptr);
+    [[nodiscard]] bool disconnect(std::size_t connectionIndex);
+
+    [[nodiscard]] bool undo();
+    [[nodiscard]] bool redo();
+    [[nodiscard]] bool save();
+
+private:
+    struct DraftScreen {
+        OverworldScreenSpec spec;
+        Level::Definition definition;
+
+        bool operator==(const DraftScreen&) const = default;
+    };
+
+    struct State {
+        OverworldLayout layout;
+        std::vector<DraftScreen> screens;
+        std::optional<OverworldScreenId> selected;
+        std::vector<OverworldScreenId> retiredIds;
+        std::vector<OverworldScreenId> restoredIds;
+
+        bool operator==(const State&) const = default;
+    };
+
+    [[nodiscard]] DraftScreen* draftScreen(OverworldScreenId id);
+    [[nodiscard]] const DraftScreen* draftScreen(OverworldScreenId id) const;
+    [[nodiscard]] bool slotAvailable(
+        OverworldSlot slot,
+        std::optional<OverworldScreenId> ignore = std::nullopt) const;
+    [[nodiscard]] OverworldScreenId nextScreenId() const;
+    [[nodiscard]] Level::Definition defaultDefinition() const;
+    [[nodiscard]] std::optional<GridPosition3> matchingEndpoint(
+        const OverworldScreenSpec& from,
+        const OverworldScreenSpec& to,
+        GridPosition3 fromCell) const;
+    [[nodiscard]] bool supportedWalkable(
+        const Level::Definition& definition,
+        GridPosition3 cell) const;
+    void record(State before, std::string status);
+
+    std::filesystem::path projectLevelRoot_;
+    std::optional<std::filesystem::path> runtimeLevelRoot_;
+    State state_;
+    State savedState_;
+    std::vector<State> undo_;
+    std::vector<State> redo_;
+    std::string status_;
+    bool loaded_ = false;
+    std::optional<CellTool> cellTool_;
+};
+
+} // namespace sokoban

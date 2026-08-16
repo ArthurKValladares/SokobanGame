@@ -2,6 +2,7 @@
 
 #include "engine/GameplaySession.hpp"
 #include "engine/LevelCatalog.hpp"
+#include "engine/OverworldMap.hpp"
 #include "engine/PlayerProfile.hpp"
 
 #include <optional>
@@ -32,6 +33,10 @@ public:
 
     void setLevelScreenCounts(std::vector<int> screenCounts);
     void setOverworldTargets(std::vector<LevelLocation> targets);
+    void setOverworldTopology(
+        uint64_t fingerprint,
+        std::vector<OverworldScreenId> screens,
+        OverworldScreenId startScreen);
     [[nodiscard]] bool restoreProfileLocation(PlayerProfile& profile);
     void resetForProfile(PlayerProfile& profile);
 
@@ -48,6 +53,16 @@ public:
     [[nodiscard]] static const Level::ScreenSelector* selectorForInteraction(
         const Level& level,
         const GameState& state);
+    // Returns one deterministic owner only when every player is alive and all
+    // occupy the same authored overworld screen. Used for transition admission
+    // and checkpoint validation in the composed-map runtime.
+    [[nodiscard]] static std::optional<OverworldScreenId> sharedPlayerScreen(
+        const OverworldMap& map,
+        const GameState& state);
+    // Commits navigation metadata after the corresponding gameplay action has
+    // committed. The next checkpoint persists this active screen.
+    [[nodiscard]] bool transitionOverworldScreen(
+        OverworldScreenId destination);
     [[nodiscard]] WorldRestore prepareWorldLoad(
         const PlayerProfile& profile);
     void finishWorldLoad(PlayerProfile& profile);
@@ -76,6 +91,18 @@ public:
     [[nodiscard]] bool screenExists(int level, int screen) const;
     [[nodiscard]] int levelCount() const;
     [[nodiscard]] int screenCount(int level) const;
+    [[nodiscard]] OverworldScreenId activeOverworldScreen() const
+    {
+        return activeOverworldScreen_;
+    }
+    [[nodiscard]] OverworldScreenId overworldStartScreen() const
+    {
+        return overworldStartScreen_;
+    }
+    [[nodiscard]] uint64_t overworldFingerprint() const
+    {
+        return overworldFingerprint_;
+    }
 
     [[nodiscard]] bool inOverworld() const { return inOverworld_; }
     [[nodiscard]] int currentLevel() const { return current_.level; }
@@ -97,9 +124,20 @@ private:
     void clearRunState();
     void validateOverworldCoverage(
         const std::vector<LevelLocation>& targets) const;
+    [[nodiscard]] bool overworldScreenExists(
+        OverworldScreenId screen) const;
+    [[nodiscard]] bool validateOverworldCheckpoint(
+        PlayerProfile& profile);
 
     std::vector<int> levelScreenCounts_;
     std::vector<LevelLocation> overworldTargets_;
+    // Screen 1/fingerprint 0 is the temporary identity of the legacy
+    // levels/overworld.scr path. Application replaces this with map metadata
+    // when runtime integration switches to OverworldMap.
+    std::vector<OverworldScreenId> overworldScreens_ { 1 };
+    uint64_t overworldFingerprint_ = 0;
+    OverworldScreenId overworldStartScreen_ = 1;
+    OverworldScreenId activeOverworldScreen_ = 1;
     LevelLocation current_ {};
     double puzzleElapsedSeconds_ = 0.0;
     double deferredCheckpointAgeSeconds_ = 0.0;

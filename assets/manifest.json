@@ -88,6 +88,12 @@
       "colorSpace": "linear"
     },
     {
+      "name": "GroundSplatMapOverworld1",
+      "path": "custom/textures/ground_splat_overworld_1.png",
+      "filter": "linear",
+      "colorSpace": "linear"
+    },
+    {
       "name": "GroundSplatMap0_0",
       "path": "custom/textures/ground_splat_level0_screen0.png",
       "filter": "linear",

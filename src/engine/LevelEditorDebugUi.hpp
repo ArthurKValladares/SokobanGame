@@ -2,6 +2,7 @@
 
 #include "engine/DecorationMeshCatalog.hpp"
 #include "engine/LevelEditor.hpp"
+#include "engine/OverworldMapEditor.hpp"
 #include "engine/InputBindings.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/SplatPainter.hpp"
@@ -48,6 +49,7 @@ public:
     void initialize(const LevelEditor& editor);
     void draw(
         LevelEditor& editor,
+        OverworldMapEditor& overworldEditor,
         SplatPainter& painter,
         const InputBindings& bindings,
         const Callbacks& callbacks);
@@ -60,8 +62,12 @@ private:
         LevelEditor& editor,
         const Callbacks& callbacks);
     void drawSelectorPalette(LevelEditor& editor);
-    void drawFileBrowser(LevelEditor& editor);
-    void drawOverworldTab(LevelEditor& editor);
+    void drawFileBrowser(
+        LevelEditor& editor,
+        OverworldMapEditor& overworldEditor);
+    void drawOverworldTab(
+        LevelEditor& editor,
+        OverworldMapEditor& overworldEditor);
     void drawActiveLevelsTab(LevelEditor& editor);
     void drawDeletedLevelsTab(LevelEditor& editor);
     void drawRenamePopup(LevelEditor& editor);
@@ -82,6 +88,10 @@ private:
     bool deleteLevelConfirmationOpen_ = false;
     std::filesystem::path pendingPermanentDeletePath_;
     bool permanentDeleteConfirmationOpen_ = false;
+    std::filesystem::path overworldEditorRoot_;
+    int overworldMoveSlot_[2] { 0, 0 };
+    int overworldRestoreSlot_[2] { 0, 0 };
+    int overworldConnectionTarget_ = 0;
 };
 
 } // namespace sokoban

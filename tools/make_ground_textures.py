@@ -9,17 +9,19 @@ Produces PNGs in `assets/custom/textures/`:
   one of its own.
 - `ground_splat_level<N>_screen<M>.png` — one blend map per screen, so every
   screen gets its own grass/rock layout.
+- `ground_splat_overworld_<ID>.png` — one blend map per stable overworld screen
+  ID declared by `levels/overworld/layout.json`.
 
 The two material layers tile; the splat maps deliberately do not. Each splat
 map covers exactly one screen's board at SPLAT_TEXELS_PER_TILE texels per tile,
 which is what makes it paintable in the level editor: a repeating map would
 echo every brush stroke across the board.
 
-The per-screen maps are discovered from `levels/level<N>/screen<M>.scr`, not
-hard-coded: after adding or removing a screen, re-run this script and add or
-remove the matching `GroundSplatMap<N>_<M>` manifest entry. A screen with no map
-of its own falls back to the shared `ground_splat.png`, so a missing file
-degrades to the old look rather than to untextured ground.
+The per-screen maps are discovered from `levels/level<N>/screen<M>.scr` and the
+overworld layout, not hard-coded: after adding or removing a screen, re-run
+this script and update the matching manifest entry. A screen with no map of
+its own falls back to the shared `ground_splat.png`, so a missing file degrades
+to the old look rather than to untextured ground.
 
 The material layers must tile seamlessly, because the world-grid UVs used by
 `shaders/ground_splat.frag.glsl` wrap across tile boundaries: any seam would
@@ -97,6 +99,7 @@ SPLAT_BIAS = -0.04
 # what keeps two different (level, screen) pairs off the same seed. Changing
 # either constant re-rolls every screen's layout.
 LEVEL_SEED_STRIDE = 1000
+OVERWORLD_SEED_OFFSET = 10_000_000
 
 SEED = 20240607
 SPLAT_SEED = SEED + 2027
@@ -303,23 +306,43 @@ def discover_screens(root: pathlib.Path) -> list[tuple[int, int]]:
     return screens
 
 
+def discover_overworld_screens(
+    root: pathlib.Path,
+) -> list[tuple[int, pathlib.Path]]:
+    """Stable `(id, component path)` pairs from the composed layout."""
+    layout_path = root / "overworld" / "layout.json"
+    if not layout_path.is_file():
+        return []
+    layout = json.loads(layout_path.read_text(encoding="utf-8"))
+    result: list[tuple[int, pathlib.Path]] = []
+    for screen in layout.get("screens", []):
+        screen_id = screen.get("id")
+        file = screen.get("file")
+        if not isinstance(screen_id, int) or screen_id <= 0 or not isinstance(file, str):
+            raise ValueError(f"{layout_path}: invalid overworld screen entry")
+        component = layout_path.parent / file
+        if not component.is_file():
+            raise ValueError(f"{layout_path}: missing component {file}")
+        result.append((screen_id, component))
+    return sorted(result)
+
+
 def board_size(path: pathlib.Path) -> tuple[int, int]:
     """`(width, height)` of a `.scr` board, in tiles.
 
-    Mirrors `Level::parseDefinition`: `@layer`/`@water` directives and empty
-    lines are skipped, every other line is a row, and the board is as wide as
-    its longest row and as tall as its tallest layer. Rows of spaces are real
-    rows - only truly empty lines separate layers.
+    Mirrors `Level::parseDefinition`: metadata/directive lines and empty lines
+    are skipped, every other line is a row, and the board is as wide as its
+    longest row and as tall as its tallest layer. Rows of spaces are real rows
+    - only truly empty lines separate layers.
     """
     width = 0
     height = 0
     rows_in_layer = 0
     for raw in path.read_text(encoding="utf-8").splitlines():
-        if raw.startswith("@water"):
-            continue
-        if raw.startswith("@layer"):
-            height = max(height, rows_in_layer)
-            rows_in_layer = 0
+        if raw.startswith("@"):
+            if raw.startswith("@layer"):
+                height = max(height, rows_in_layer)
+                rows_in_layer = 0
             continue
         if not raw:
             continue
@@ -423,6 +446,25 @@ def main(argv: list[str] | None = None) -> int:
         write_png(destination, screen_splat, width, height, grayscale=True)
         print(f"  wrote {name}: {tiles_wide}x{tiles_high} tiles -> {width}x{height}px")
 
+    overworld_screens = discover_overworld_screens(LEVEL_DIRECTORY)
+    for screen_id, source in overworld_screens:
+        name = f"ground_splat_overworld_{screen_id}.png"
+        written.append(name)
+        destination = OUTPUT_DIRECTORY / name
+        if destination.is_file() and not arguments.force:
+            kept += 1
+            continue
+        tiles_wide, tiles_high = board_size(source)
+        width = tiles_wide * SPLAT_TEXELS_PER_TILE
+        height = tiles_high * SPLAT_TEXELS_PER_TILE
+        screen_splat = generate_splat(
+            width,
+            height,
+            SPLAT_SEED + OVERWORLD_SEED_OFFSET + screen_id,
+        )
+        write_png(destination, screen_splat, width, height, grayscale=True)
+        print(f"  wrote {name}: {tiles_wide}x{tiles_high} tiles -> {width}x{height}px")
+
     if kept:
         print(f"kept {kept} existing splat map(s); pass --force to regenerate "
               "(this discards anything painted in the level editor)")
@@ -433,6 +475,9 @@ def main(argv: list[str] | None = None) -> int:
     stale = sorted(
         path for path in OUTPUT_DIRECTORY.glob("ground_splat_level*.png")
         if path.name not in written)
+    stale.extend(sorted(
+        path for path in OUTPUT_DIRECTORY.glob("ground_splat_overworld_*.png")
+        if path.name not in written))
     for path in stale:
         if arguments.prune:
             path.unlink()
@@ -445,7 +490,7 @@ def main(argv: list[str] | None = None) -> int:
         path = OUTPUT_DIRECTORY / name
         print(f"{path}: {path.stat().st_size} bytes")
 
-    return check_manifest(screens) | check_texel_density()
+    return check_manifest(screens, overworld_screens) | check_texel_density()
 
 
 def check_texel_density() -> int:
@@ -487,7 +532,10 @@ def check_texel_density() -> int:
     return failed
 
 
-def check_manifest(screens: list[tuple[int, int]]) -> int:
+def check_manifest(
+    screens: list[tuple[int, int]],
+    overworld_screens: list[tuple[int, pathlib.Path]],
+) -> int:
     """Report screens whose manifest entry is missing, and stale entries.
 
     Writing the PNG is only half the job: without a `GroundSplatMap<N>_<M>`
@@ -508,9 +556,20 @@ def check_manifest(screens: list[tuple[int, int]]) -> int:
         if re.fullmatch(r"GroundSplatMap\d+_\d+", texture["name"])
     }
     expected = {f"GroundSplatMap{level}_{screen}" for level, screen in screens}
+    declared_overworld = {
+        texture["name"]
+        for texture in manifest.get("textures", [])
+        if re.fullmatch(r"GroundSplatMapOverworld\d+", texture["name"])
+    }
+    expected_overworld = {
+        f"GroundSplatMapOverworld{screen_id}"
+        for screen_id, _ in overworld_screens
+    }
 
-    missing = sorted(expected - declared)
-    stale = sorted(declared - expected)
+    missing = sorted(
+        (expected - declared) | (expected_overworld - declared_overworld))
+    stale = sorted(
+        (declared - expected) | (declared_overworld - expected_overworld))
     for name in missing:
         print(f"warning: {MANIFEST_PATH} has no texture named {name}; "
               "that screen will fall back to the shared splat map",
@@ -521,7 +580,9 @@ def check_manifest(screens: list[tuple[int, int]]) -> int:
               file=sys.stderr)
     if missing or stale:
         return 1
-    print(f"manifest: {len(expected)} per-screen splat maps declared")
+    print(
+        f"manifest: {len(expected)} puzzle and "
+        f"{len(expected_overworld)} overworld splat maps declared")
     return 0
 
 

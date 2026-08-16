@@ -5,9 +5,10 @@
 // shadowing, grid overlay, and editor-preview dithering as the standard tile
 // shader so splatted ground sits seamlessly beside every other surface.
 //
-// UVs are world-grid based (one texture repeat spans GROUND_UV_TILES tiles)
-// rather than per-face, so the pattern is continuous across adjacent tiles
-// and stable while the camera moves.
+// Material UVs are world-grid based (one texture repeat spans
+// GROUND_UV_TILES tiles), so the pattern is continuous across adjacent tiles
+// and stable while the camera moves. Splat UVs are region-local so each
+// composed-overworld screen can own an independent paint map.
 
 layout(set = 0, binding = 0) uniform sampler2D shadowMap;
 layout(set = 0, binding = 2) uniform sampler2D modelTextures[MODEL_TEXTURE_COUNT];
@@ -27,21 +28,23 @@ layout(push_constant) uniform PushConstants
     vec4 sunDirectionAndAmbientGreen;
     vec4 sunRadianceAndAmbientBlue;
     vec4 shadowOptions;
-    // x: world origin X, y/z: face size in tiles, w: editor-preview dither sign
+    // x: splat-region-local origin X, y/z: face size in tiles,
+    // w: editor-preview dither sign
     vec4 materialOptions;
     vec4 gridColor;
     // Texture handles are one-based; 0 means "unresolved", which falls back to
     // the flat tile color. The standard tile path leaves this vector free on
     // ground faces, so the splat pass repurposes it without growing the
     // 256-byte push-constant block.
-    // x: base texture, y: detail texture, z: splat map, w: world origin Y.
+    // x: base texture, y: detail texture, z: splat map,
+    // w: splat-region-local origin Y.
     // (UV tile span is a shader constant below.)
     vec4 textureOptions;
 } pc;
 
-// World origin of this face: X rides in the blur slot (opaque ground never
-// blurs) and Y in the last texture slot.
-#define WORLD_ORIGIN (vec2(pc.materialOptions.x, pc.textureOptions.w))
+// Local origin of this face inside its splat region: X rides in the blur slot
+// (opaque ground never blurs) and Y in the last texture slot.
+#define SPLAT_LOCAL_ORIGIN (vec2(pc.materialOptions.x, pc.textureOptions.w))
 
 // One texture repeat spans this many board tiles. Larger = coarser detail.
 // This applies to the tiling grass/rock material layers only.
@@ -145,13 +148,18 @@ void main()
 {
     applyEditorPreviewDither();
 
-    // Face-local coords span the face's size in tiles, so adding the world
-    // origin yields continuous world-tile coordinates across the board.
+    // Face-local coords span the face's size in tiles. The recorder supplies
+    // a region-local origin for splat lookup, while the actual face vertices
+    // retain global coordinates for continuous material-layer tiling.
     vec2 faceTiles = vec2(
         max(pc.materialOptions.y, 0.0001),
         max(pc.materialOptions.z, 0.0001));
-    vec2 worldTile =
-        WORLD_ORIGIN + vec2(inFaceCoordU, inFaceCoordV) * faceTiles;
+    vec2 faceCoord = vec2(inFaceCoordU, inFaceCoordV) * faceTiles;
+    vec2 splatLocalTile = SPLAT_LOCAL_ORIGIN + faceCoord;
+    vec2 globalOrigin = min(
+        min(pc.vertices[0].xy, pc.vertices[1].xy),
+        min(pc.vertices[2].xy, pc.vertices[3].xy));
+    vec2 worldTile = globalOrigin + faceCoord;
     vec2 uv = worldTile / GROUND_UV_TILES;
 
     vec4 materialColor = pc.color;
@@ -174,7 +182,8 @@ void main()
                 // Clamped, not wrapped: ground outside the board (the
                 // continuation skirt) holds the edge weight instead of
                 // repeating the board's pattern back over itself.
-                vec2 splatUv = clamp(worldTile / splatBoardTiles, 0.0, 1.0);
+                vec2 splatUv = clamp(
+                    splatLocalTile / splatBoardTiles, 0.0, 1.0);
                 weight = texture(modelTextures[splatIndex], splatUv).r;
             }
             blended = mix(baseColor, detailColor, clamp(weight, 0.0, 1.0));

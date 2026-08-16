@@ -279,7 +279,8 @@ void appendWaterEdgeFaces(
     uint32_t width,
     uint32_t height,
     float layerElevation,
-    const auto& isUnfilledWaterAt)
+    const auto& isUnfilledWaterAt,
+    const auto& shouldAppendAt)
 {
     const float bottom = layerElevation - config::waterDepthBelowGround;
     const float top = layerElevation;
@@ -302,7 +303,7 @@ void appendWaterEdgeFaces(
                 static_cast<int>(x),
                 static_cast<int>(y),
             };
-            if (!isUnfilledWaterAt(position)) {
+            if (!shouldAppendAt(position) || !isUnfilledWaterAt(position)) {
                 continue;
             }
             const float left = static_cast<float>(x);
@@ -853,9 +854,19 @@ void appendDecorations(
     const AssetManifest& manifest,
     std::optional<std::size_t> selected = std::nullopt,
     std::optional<std::size_t> hovered = std::nullopt,
-    bool editorDecorations = false)
+    bool editorDecorations = false,
+    const std::function<bool(GridPosition3)>& visibleCell = {})
 {
     for (std::size_t index = 0; index < decorations.size(); ++index) {
+        const Level::Decoration& decoration = decorations[index];
+        const GridPosition3 cell {
+            static_cast<int>(std::floor(decoration.position.x)),
+            static_cast<int>(std::floor(decoration.position.y)),
+            static_cast<int>(std::floor(decoration.position.z)),
+        };
+        if (visibleCell && !visibleCell(cell)) {
+            continue;
+        }
         const RenderFrameData::EditorDecorationHighlight highlight =
             selected == index
             ? RenderFrameData::EditorDecorationHighlight::Selected
@@ -907,7 +918,28 @@ RenderFrameData initializeGameplayFrame(
     frame.waterGridBounds = waterGridBoundsFor(authoredGameplayExtent);
     frame.cameraExtent = authoredGameplayExtent.value_or(
         RenderFrameData::CameraExtent {});
+    if (input.cameraExtent) {
+        frame.cameraExtent = input.cameraExtent;
+    }
+    frame.cameraOffset = input.cameraOffset;
     frame.groundSplat = groundSplatTextures(input.manifest, input.levelLocation);
+    for (const RenderFrameBuilder::GameplayInput::GroundSplatRegion& source :
+         input.groundSplatRegions) {
+        if (frame.groundSplatRegionCount >=
+            RenderFrameData::groundSplatRegionCapacity) {
+            break;
+        }
+        frame.groundSplatRegions[frame.groundSplatRegionCount++] = {
+            .origin = source.origin,
+            .width = source.width,
+            .height = source.height,
+            .textures = groundSplatTexturesForOverworldScreen(
+                [&input](std::string_view name) {
+                    return input.manifest.findTextureIdByName(name);
+                },
+                source.screenId),
+        };
+    }
     frame.waterAnimationTimeSeconds =
         input.presentation.worldAnimationTimeSeconds();
     frame.effectAnimationTimeSeconds =
@@ -987,9 +1019,13 @@ void appendSelectors(
     const AssetManifest& manifest,
     const std::function<ScreenSelectorViewState(LevelLocation)>& stateFor,
     std::optional<uint32_t> previewId = std::nullopt,
-    bool pickable = false)
+    bool pickable = false,
+    const std::function<bool(GridPosition3)>& visibleCell = {})
 {
     for (const Level::ScreenSelector& selector : selectors) {
+        if (visibleCell && !visibleCell(selector.cell)) {
+            continue;
+        }
         appendSelector(
             frame,
             selector,
@@ -1026,6 +1062,9 @@ void appendGameplayWorld(
                 static_cast<int>(y),
                 static_cast<int>(z),
             };
+            if (input.visibleCell && !input.visibleCell(position)) {
+                return StaticRenderCell { .tile = TileType::Air };
+            }
             if (input.level.tileAt(x, y, z) == TileType::Water) {
                 const GridPosition3 entityPosition {
                     position.x,
@@ -1073,12 +1112,21 @@ void appendGameplayWorld(
             return input.settings.tileScale(tile);
         });
     appendDecorations(
-        frame, input.level.decorations(), input.manifest);
+        frame,
+        input.level.decorations(),
+        input.manifest,
+        std::nullopt,
+        std::nullopt,
+        false,
+        input.visibleCell);
     appendSelectors(
         frame,
         input.level.selectors(),
         input.manifest,
-        input.selectorState);
+        input.selectorState,
+        std::nullopt,
+        false,
+        input.visibleCell);
 
     auto levelTileAt = [&](GridPosition3 position) {
         if (!input.level.inBounds(position)) {
@@ -1109,16 +1157,17 @@ void appendGameplayWorld(
     for (uint32_t z = 0; z < input.level.depth(); ++z) {
         for (uint32_t y = 0; y < input.level.height(); ++y) {
             for (uint32_t x = 0; x < input.level.width(); ++x) {
-                if (rules::isUnfilledWater(input.level, state, {
-                        static_cast<int>(x),
-                        static_cast<int>(y),
-                        static_cast<int>(z) + 1,
+                const GridPosition3 waterCell {
+                    static_cast<int>(x),
+                    static_cast<int>(y),
+                    static_cast<int>(z),
+                };
+                if ((!input.visibleCell || input.visibleCell(waterCell)) &&
+                    rules::isUnfilledWater(input.level, state, {
+                        waterCell.x,
+                        waterCell.y,
+                        waterCell.z + 1,
                     })) {
-                    const GridPosition3 waterCell {
-                        static_cast<int>(x),
-                        static_cast<int>(y),
-                        static_cast<int>(z),
-                    };
                     appendWaterCellSurface(
                         frame,
                         waterCell,
@@ -1130,7 +1179,7 @@ void appendGameplayWorld(
             }
         }
     }
-    if (input.level.waterLayer()) {
+    if (input.level.waterLayer() && !input.visibleCell) {
         appendUnboundedWaterExterior(
             frame,
             input.level.width(),
@@ -1143,13 +1192,17 @@ void appendGameplayWorld(
     for (uint32_t z = 0; z < input.level.depth(); ++z) {
         for (uint32_t y = 0; y < input.level.height(); ++y) {
             for (uint32_t x = 0; x < input.level.width(); ++x) {
+                const GridPosition3 cell {
+                    static_cast<int>(x),
+                    static_cast<int>(y),
+                    static_cast<int>(z),
+                };
+                if (input.visibleCell && !input.visibleCell(cell)) {
+                    continue;
+                }
                 appendLadderRungsForCell(
                     frame,
-                    {
-                        static_cast<int>(x),
-                        static_cast<int>(y),
-                        static_cast<int>(z),
-                    },
+                    cell,
                     levelTileAt);
             }
         }
@@ -1173,6 +1226,13 @@ void appendGameplayWorld(
                     position.y,
                     static_cast<int>(z) + 1,
                 });
+            },
+            [&, z](GridPosition position) {
+                return !input.visibleCell || input.visibleCell({
+                    position.x,
+                    position.y,
+                    static_cast<int>(z),
+                });
             });
     }
 }
@@ -1189,6 +1249,10 @@ void appendGameplayEntities(
          playerIndex < state.players.size() &&
          playerIndex < playerVisuals.size();
          ++playerIndex) {
+        if (input.visibleCell &&
+            !input.visibleCell(state.players[playerIndex].cell)) {
+            continue;
+        }
         const GameplayPresentation::PlayerVisual& visual = playerVisuals[playerIndex];
         const AnimationUse animationUse = visual.animationUse;
         RenderAnimation animation = animationFor(
@@ -1205,6 +1269,7 @@ void appendGameplayEntities(
             : noAnimation;
 
         RenderFrameData::Tile playerTile {
+            .cell = state.players[playerIndex].cell,
             .position = {
                 visual.motion.renderPosition.x,
                 visual.motion.renderPosition.y,
@@ -1241,7 +1306,11 @@ void appendGameplayEntities(
         if (enemy.fallen && !visual.motion.moving) {
             continue;
         }
+        if (input.visibleCell && !input.visibleCell(enemy.cell)) {
+            continue;
+        }
         RenderFrameData::Tile enemyTile {
+            .cell = enemy.cell,
             .position = {
                 visual.motion.renderPosition.x,
                 visual.motion.renderPosition.y,
@@ -1296,12 +1365,21 @@ void appendGameplayEntities(
         if (movable.fallen && !visual.moving && !movingOutOfWater) {
             continue;
         }
+        const bool projectedVisible =
+            movableIndex < input.projectedState.movables.size() &&
+            (!input.visibleCell || input.visibleCell(
+                input.projectedState.movables[movableIndex].cell));
+        if (input.visibleCell && !input.visibleCell(movable.cell) &&
+            !projectedVisible) {
+            continue;
+        }
 
         Vec4 color = tileColor(movable.type);
         if (movable.type == TileType::Ice) {
             color.w = config::iceTintAlpha;
         }
         RenderFrameData::Tile movableTile {
+            .cell = movable.cell,
             .position = {
                 visual.renderPosition.x,
                 visual.renderPosition.y,
@@ -1699,8 +1777,13 @@ private:
         // Previews the edited screen's own map, so what the brush paints is
         // what is on screen. A scratch document belongs to no screen and falls
         // back to the shared map.
-        frame.groundSplat =
-            groundSplatTextures(input_.manifest, input_.levelLocation);
+        frame.groundSplat = input_.overworldScreen
+            ? groundSplatTexturesForOverworldScreen(
+                  [&manifest = input_.manifest](std::string_view name) {
+                      return manifest.findTextureIdByName(name);
+                  },
+                  *input_.overworldScreen)
+            : groundSplatTextures(input_.manifest, input_.levelLocation);
         frame.waterAnimationTimeSeconds = input_.worldAnimationTimeSeconds;
         frame.effectAnimationTimeSeconds = input_.worldAnimationTimeSeconds;
         frame.tiles.reserve(
@@ -1999,7 +2082,8 @@ private:
                                static_cast<uint32_t>(position.x),
                                static_cast<uint32_t>(position.y),
                                z) == TileType::Water;
-                });
+                },
+                [](GridPosition) { return true; });
         }
     }
 

@@ -175,6 +175,9 @@ add_library(sokoban_core STATIC
     src/engine/InputBindings.cpp
     src/engine/Level.cpp
     src/engine/LevelCatalog.cpp
+    src/engine/OverworldMap.cpp
+    src/engine/OverworldMapEditor.cpp
+    src/engine/OverworldView.cpp
     src/engine/LevelEditor.cpp
     src/engine/LevelProjectStore.cpp
     src/engine/Log.cpp
@@ -419,6 +422,10 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/LevelCatalogTests.cpp
     )
+    sokoban_add_test(NAME overworld_map TARGET sokoban_overworld_map_tests
+        LIBS sokoban_core
+        SOURCES tests/OverworldMapTests.cpp
+    )
     sokoban_add_test(NAME gameplay_session TARGET sokoban_gameplay_session_tests
         LIBS sokoban_core
         SOURCES tests/GameplaySessionTests.cpp
@@ -564,6 +571,10 @@ if(SOKOBAN_BUILD_TESTS)
     )
     target_compile_definitions(sokoban_level_project_store_tests PRIVATE
         SOKOBAN_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    sokoban_add_test(NAME overworld_map_editor TARGET sokoban_overworld_map_editor_tests
+        LIBS sokoban_core sokoban_json
+        SOURCES tests/OverworldMapEditorTests.cpp
     )
     sokoban_add_test(NAME content_pipeline TARGET sokoban_content_pipeline_tests
         LIBS sokoban_core

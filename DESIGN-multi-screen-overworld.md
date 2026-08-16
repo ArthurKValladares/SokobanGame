@@ -1,6 +1,29 @@
 # Multi-Screen Connected Overworld Design
 
-Status: design and implementation plan only. This document does not implement the feature or change game content.
+Status: implementation in progress. Topology/composition, format-20 persistence/campaign state, runtime action admission, composed-map application loading, committed screen changes, synchronized fixed-3x3 camera movement, neighborhood-gated frame construction, per-screen splat materials, production staging, the initial content migration, and the core editor topology phase are implemented. The editor now authors start/connection cells directly in the 3D view and Play Draft composes both unsaved topology and the unsaved active component. Authoring production multi-screen content and full visual crossing validation remain.
+
+Implemented foundation (2026-08-16):
+
+- `OverworldMap.*` defines stable screen IDs, slots, endpoints, connections, strict versioned layout JSON, canonical serialization, topology limits, and selector ownership validation.
+- Separately authored component definitions compose into one normal `Level`, with translated decorations/selectors, a single injected start, global/local coordinate lookups, visible-neighborhood queries, and a deterministic content fingerprint.
+- Validation covers common dimensions/water metadata, forbidden component `C`/`E` tiles, cardinal endpoint geometry, unique endpoint use, reachability, supported walkable endpoints, and undeclared traversable seams.
+- `OverworldMapTests.cpp` exercises canonical I/O, composition, real `GameplaySession` movement/undo across a seam, negative slot normalization, invalid topology, fingerprint stability, selector coverage, and the one-overworld-screen-per-puzzle-level invariant.
+- Player profile format 20 replaces the untyped single-overworld snapshot with a checkpoint containing the topology fingerprint, stable active overworld-screen ID, and exact gameplay snapshot. Format-19 migration preserves puzzle progress/settings and deliberately discards only the unsafe legacy overworld snapshot.
+- `CampaignSession` owns configured overworld topology identity and active-screen state, validates checkpoints against current screen IDs/fingerprint, restores stale checkpoints to the authored start, persists typed checkpoints at normal save boundaries, and exposes shared-player-screen/committed-transition helpers for the upcoming runtime crossing path.
+- `GameplaySession` accepts an optional projected-state admission invariant. The composed runtime rejects a player action, automatic movement, mirror, undo, or restart result that would leave living players split across authored screens, before the scheduler owns the action.
+- `OverworldView.*` derives a fixed three-screen-by-three-screen camera extent, source/destination neighborhood union, and sub-cell camera translation from committed/projected player ownership and the same interpolated player position used by presentation. `RenderFrameData::cameraOffset` carries that translation through `RenderFrameBuilder` into `IsoScenePreparer` without integer snapping or zoom pumping.
+- `RenderFrameBuilder::GameplayInput::visibleCell` gates composed static tiles, water cells/edges, ladder faces, decorations, selectors, and gameplay actors to the settled 3x3 neighborhood or the source/destination union while moving.
+- `RenderFrameData` carries a bounded ground-splat region table. `RenderFrameBuilder` resolves stable-ID texture names for visible overworld screens, and `VulkanSceneRecorder` selects a region per ground face and supplies region-local splat coordinates while preserving global material-layer UV continuity.
+- `Application` automatically loads and composes `levels/overworld/layout.json` when present, configures the real topology fingerprint and screen catalog, installs action admission, restores the composed checkpoint, updates the active screen after an action commits, and feeds the overworld view to rendering. When the layout is absent, transitional fingerprint `0`/screen `1` keeps the legacy `levels/overworld.scr` path and existing saves working.
+- `ContentPipeline` validates and stages `levels/overworld/layout.json` plus every referenced component, applies production selector ownership/coverage validation, and retains the root-file path only as a compatibility fallback. `make_ground_textures.py` discovers stable overworld screen IDs and checks their manifest entries.
+- Production content now uses a one-screen composed layout (`screen ID 1`) with the former start moved into layout metadata and the existing selectors unchanged. Its dedicated 9x7 splat map is `GroundSplatMapOverworld1`.
+- `OverworldMapEditor.*` owns the in-memory topology draft, selection, stable-ID connected-screen creation, disconnected moves, start/connection editing, soft delete/restore, undo/redo, and rollback-capable saves. Its Debug UI presents a spatial slot canvas, connection lines, screen cards, and the corresponding commands.
+- `LevelProjectStore` validates structural composed-map rules and selector targets before atomically replacing source/runtime trees. Puzzle renumbering rewrites selectors across every component, while runtime mirroring includes only the active layout and referenced screens—not soft-deleted authoring files.
+- `LevelEditor` recognizes only layout-referenced component paths, locks shared dimensions, blocks `C`/`E`, protects start/connection cells and their supports, rejects puzzle levels owned by another overworld screen, previews/paints stable-ID splat maps, and exposes start/connection overlays. Component saves validate the entire map before touching source or runtime.
+- Draft play composes the complete in-memory `OverworldMapEditor` layout/component set, substitutes the unsaved active `LevelEditor` component, and uses the real action-admission, fixed-camera, visible-neighborhood, and per-screen-splat runtime path while selector activation remains disabled. Brand-new screens can therefore be crossed in draft play before their files are saved.
+- `OverworldMapTests.cpp` also covers pre-scheduler rejection, living-player ownership, fixed 3x3 framing, half-transition camera progress, and actual isometric camera translation. The full 49-test Debug suite passes, production staging emits 167 reachable files, and an application startup smoke test reaches normal Vulkan initialization with the composed map and editor integration.
+
+The shipped/staged content now exercises the composed path by default, but contains only one overworld screen. Real cardinal crossings and diagonal-neighbor presentation still require additional authored screens before they can be visually validated end to end.
 
 This design builds on the existing playable overworld and screen-selector system described in `DESIGN-overworld-screen-selectors.md`. In this document, **overworld screen** means one spatial chunk of the overworld. **Puzzle screen** means a playable `levelN/screenM.scr` selected by a flag. Keeping those terms distinct is important because both are currently called “screens” in parts of the codebase.
 
@@ -418,7 +441,7 @@ struct GroundSplatRegion {
 };
 ```
 
-Each ground instance references a region index. Instance data supplies the region’s global origin and inverse local width/height so the shader derives screen-local UVs. A missing dedicated map falls back to the shared ground splat map for that region only.
+The render frame stores each region’s global bounds and resolved textures. The recorder finds the containing region for each ground face and supplies its region-local origin to the shader. The shader derives coverage from the splat texture dimensions while using the face’s global vertices for continuous grass/rock material UVs. A missing dedicated map falls back to the shared ground splat map for that region only.
 
 This avoids rebuilding an atlas when a screen moves, preserves existing per-screen painting resolution, and makes editor paint identity stable across layout changes.
 
@@ -428,7 +451,7 @@ Unbounded water exterior currently expands around one authored board. In the com
 
 ### 11.4 Asset residency
 
-For the first implementation, merge asset requirements for all overworld screens when the overworld loads. This is the safest way to guarantee a seamless connection and is consistent with the current policy of aggressively preloading selector target assets.
+The first implementation preloads the active screen’s visible 3x3 neighborhood. Frame-derived requirements cover the source/destination neighborhood union while a crossing is in flight, providing a draw-time safety net for every splat region actually emitted.
 
 If memory measurements later require streaming:
 
@@ -636,7 +659,7 @@ Adds:
 
 ## 16. Content pipeline and tools
 
-`ContentPipeline::addLevels()` must stop looking for `levels/overworld.scr` and instead:
+`ContentPipeline::addLevels()` now prefers the composed layout and:
 
 1. add and validate `levels/overworld/layout.json`;
 2. add every referenced screen file;
@@ -693,7 +716,7 @@ Crossing an overworld seam does not restart music or reset particles. It is move
 
 Implement as vertical, independently tested stages.
 
-### Phase 1: Topology types, parser, and validator
+### Phase 1: Topology types, parser, and validator — complete
 
 - Add stable screen, slot, endpoint, connection, and layout types.
 - Add strict layout JSON load/write.
@@ -701,7 +724,7 @@ Implement as vertical, independently tested stages.
 - Validate screen files, common dimensions, graph connectivity, start, connections, seams, water-layer compatibility, and allocation limits.
 - Add focused `OverworldMapTests` before runtime integration.
 
-### Phase 2: Composition
+### Phase 2: Composition — complete
 
 - Translate definitions into a global composed definition.
 - Inject the global player start.
@@ -709,7 +732,7 @@ Implement as vertical, independently tested stages.
 - Build ownership lookups, visible-neighborhood queries, targets, and fingerprint.
 - Prove that a normal `GameplaySession` can move, push, auto-move, undo, and restore across a seam in headless tests.
 
-### Phase 3: Persistence and campaign metadata
+### Phase 3: Persistence and campaign metadata — complete
 
 - Add `OverworldCheckpoint`, active screen, and fingerprint validation.
 - Bump player profile format 19 to 20 and migrate old overworld checkpoints to null.
@@ -718,39 +741,39 @@ Implement as vertical, independently tested stages.
 
 Land this before runtime writes the new checkpoint format.
 
-### Phase 4: Camera transition and neighborhood rendering
+### Phase 4: Camera transition and neighborhood rendering — substantially complete
 
-- Add explicit floating-point camera view support to render-frame preparation.
-- Add overworld camera tracks synchronized to action timelines and undo.
-- Filter rendering by source/destination neighborhood union.
-- Add per-screen splat regions and shader instance data.
+- Add explicit floating-point camera view support to render-frame preparation. **Done:** a fixed integer fit extent plus floating camera offset preserves the footprint while translating smoothly.
+- Add overworld camera tracks synchronized to action timelines and undo. **Done for current movement actions:** camera progress is sampled from the primary player's presentation position against committed/projected cells, so forward and reversed movement share the same clock.
+- Filter rendering by source/destination neighborhood union. **Done for composed world geometry, authored instances, selectors, gameplay actors, and per-screen material regions.**
+- Add per-screen splat regions and shader instance data. **Done:** stable-ID texture selection is stored in a frame region table and resolved per ground face with local splat UVs.
 - Update water, particles, projection, shadows, and picking to use the same view.
 - Add headless layout/projection/render-frame tests and visual captures.
 
-### Phase 5: Application integration
+### Phase 5: Application integration — core runtime complete
 
-- Replace single-file loading with the composed map.
-- Aggregate selectors and asset requirements across screens.
-- Detect/admit committed screen crossings and multi-player restrictions.
-- Preserve selector entry/return, music, checkpointing, and profile repair.
+- Replace single-file loading with the composed map. **Done when `layout.json` exists, with legacy fallback.**
+- Aggregate selectors and asset requirements across screens. **Done, including visible per-screen splat requirements.**
+- Detect/admit committed screen crossings and multi-player restrictions. **Done.**
+- Preserve selector entry/return, music, checkpointing, and profile repair. **Done in the runtime path; multi-screen content still needs end-to-end playtesting.**
 - Update Debug Engine diagnostics.
 
-### Phase 6: Editor model and topology UI
+### Phase 6: Editor model and topology UI — complete
 
-- Add `OverworldMapEditor` and project-level history.
-- Add the map canvas, stable screen CRUD, start tool, and connection tool.
-- Make `LevelEditor` edit referenced overworld definitions without `C`/`E`.
-- Add whole-map draft composition with the in-memory document override.
-- Update selector target ownership diagnostics and cross-file remapping.
-- Extend source/runtime transaction and soft-delete behavior.
+- Add `OverworldMapEditor` and project-level history. **Done, including undo/redo and rollback-capable save.**
+- Add the map canvas, stable screen CRUD, start tool, and connection tool. **Done. Start and connection commands arm a headless cell-picking mode, open the source component, preview the hovered cell in 3D, validate the click, and remain armed after an invalid click for retry or explicit cancellation.**
+- Make `LevelEditor` edit referenced overworld definitions without `C`/`E`. **Done, including fixed dimensions and protected topology cells.**
+- Add whole-map draft composition with the in-memory document override. **Done for the complete unsaved topology draft plus the active unsaved component, including newly created component definitions that do not yet exist on disk.**
+- Update selector target ownership diagnostics and cross-file remapping. **Done.**
+- Extend source/runtime transaction and soft-delete behavior. **Done; deleted component files remain source-only and keep their stable IDs for restoration.**
 
-### Phase 7: Content and migration
+### Phase 7: Initial content and migration — complete
 
-- Add `levels/overworld/layout.json` and move the current overworld into its first stable screen file.
-- Move the old player start into layout metadata and remove `C` from the component file.
-- Update content staging and ground texture tools.
-- Keep all existing selectors and puzzle targets unchanged.
-- Remove the old root-file special cases only after migration tests pass.
+- Add `levels/overworld/layout.json` and move the current overworld into its first stable screen file. **Done.**
+- Move the old player start into layout metadata and remove `C` from the component file. **Done.**
+- Update content staging and ground texture tools. **Done.**
+- Keep all existing selectors and puzzle targets unchanged. **Done.**
+- Remove the old root-file special cases only after migration tests pass. **The production asset is removed; the loader/stager fallback remains intentionally for old installations and fixture coverage.**
 
 ### Phase 8: Regression and performance pass
 
@@ -817,6 +840,7 @@ Land this before runtime writes the new checkpoint format.
 - Connection preview computes the matching endpoint.
 - Invalid endpoint edits cannot create an invalid runtime mirror.
 - Whole-map draft substitutes unsaved active document content.
+- Whole-map draft substitutes unsaved layout, connections, start metadata, added/deleted screens, and the active document together.
 - Source/runtime commit rollback remains atomic on failure.
 - Production inventory includes layout, every referenced screen, dependencies, and per-screen splat maps.
 - Production rejects incomplete coverage and cross-screen puzzle-level ownership.

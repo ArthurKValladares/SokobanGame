@@ -7,6 +7,7 @@
 #include "engine/AudioSystem.hpp"
 #include "engine/MirrorParticleEffect.hpp"
 #include "engine/ParticleSystem.hpp"
+#include "engine/OverworldView.hpp"
 #include "engine/CampaignSession.hpp"
 #include "engine/GameplayLoop.hpp"
 #include "engine/GameplayPresentation.hpp"
@@ -70,7 +71,8 @@ private:
     [[nodiscard]] bool applyLevel(
         Level level,
         const GameplaySession::Snapshot* snapshot = nullptr,
-        std::optional<LevelLocation> location = std::nullopt);
+        std::optional<LevelLocation> location = std::nullopt,
+        bool composedOverworld = false);
     void advanceScreen();
     void solveCurrentScreenForDebug();
     void handlePuzzleCompleted(const CampaignSession::PuzzleCompleted& completed);
@@ -85,6 +87,7 @@ private:
     [[nodiscard]] InputRouter::RoutingContext inputRoutingContext() const;
     [[nodiscard]] std::filesystem::path screenPath(int levelIndex, int screenIndex) const;
     [[nodiscard]] std::filesystem::path overworldPath() const;
+    [[nodiscard]] std::filesystem::path overworldRoot() const;
     // Scans levels/ once into CampaignSession; the level set is fixed
     // staged content, so title/progress queries read the cache instead of
     // hitting the filesystem per open. Rebuilt on screen loads so the debug
@@ -119,6 +122,7 @@ private:
     ParticleSystem particleSystem_;
     ParticleEffectDefinition mirrorSwapParticleEffect_;
     Level level_;
+    std::optional<OverworldMap> overworldMap_;
     GameplaySession gameplaySession_;
     CampaignSession campaign_;
     std::vector<LevelMetadata> levelMetadata_;

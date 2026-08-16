@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <string_view>
 #include <system_error>
+#include <utility>
 
 namespace sokoban {
 namespace {
@@ -68,8 +69,23 @@ CreatedSplatMap createBlankSplatMap(
     const std::filesystem::path& sourceAssetRoot,
     const std::filesystem::path& runtimeAssetRoot)
 {
+    return createBlankSplatMapAt(
+        groundSplatMapAssetPathForScreen(location),
+        boardTilesWide,
+        boardTilesHigh,
+        sourceAssetRoot,
+        runtimeAssetRoot);
+}
+
+CreatedSplatMap createBlankSplatMapAt(
+    std::string relativePath,
+    uint32_t boardTilesWide,
+    uint32_t boardTilesHigh,
+    const std::filesystem::path& sourceAssetRoot,
+    const std::filesystem::path& runtimeAssetRoot)
+{
     CreatedSplatMap result;
-    result.relativePath = groundSplatMapAssetPathForScreen(location);
+    result.relativePath = std::move(relativePath);
     if (boardTilesWide == 0 || boardTilesHigh == 0) {
         result.message = "That document has no board to make a map for.";
         return result;
@@ -136,9 +152,9 @@ bool SplatPainter::open(
 
     const std::optional<LevelLocation> location =
         levelLocationFromScreenPath(request.documentPath);
-    if (!location) {
+    if (!location && !request.textureName) {
         status_ = "Ground painting needs a saved screen: open a "
-                  "level<N>/screen<M>.scr document first.";
+                  "puzzle or composed-overworld screen document first.";
         return false;
     }
     if (request.boardTilesWide == 0 || request.boardTilesHigh == 0) {
@@ -148,8 +164,9 @@ bool SplatPainter::open(
 
     // The manifest owns the file name, so the convention lives in one place
     // (and in the generator that writes it) rather than being rebuilt here.
-    const std::string textureName =
-        groundSplatMapTextureNameForScreen(*location);
+    const std::string textureName = request.textureName
+        ? *request.textureName
+        : groundSplatMapTextureNameForScreen(*location);
     const RenderTexture texture = manifest.findTextureIdByName(textureName);
     if (texture.isNone()) {
         status_ = "No '" + textureName +
@@ -165,6 +182,7 @@ bool SplatPainter::open(
     runtimePath_ = request.runtimeAssetRoot.empty()
         ? std::filesystem::path {}
         : request.runtimeAssetRoot / relative;
+    documentPath_ = request.documentPath;
 
     std::optional<SplatCanvas> loaded;
     std::error_code error;
@@ -231,6 +249,7 @@ void SplatPainter::close()
     strokeSnapshot_.clear();
     sourcePath_.clear();
     runtimePath_.clear();
+    documentPath_.clear();
     ++revision_;
 }
 

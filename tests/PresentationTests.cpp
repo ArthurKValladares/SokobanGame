@@ -71,7 +71,11 @@ const AssetManifest& testManifest()
     static const AssetManifest manifest = AssetManifest::parse(R"json({
       "format": 1,
       "textures": [
-        { "name": "Tex", "path": "t.png" }
+        { "name": "Tex", "path": "t.png" },
+        { "name": "GroundGrass", "path": "grass.png" },
+        { "name": "GroundRock", "path": "rock.png" },
+        { "name": "GroundSplatMap", "path": "splat.png" },
+        { "name": "GroundSplatMapOverworld7", "path": "overworld7.png" }
       ],
       "models": [
         { "name": "Stone", "path": "stone.gltf" },
@@ -782,6 +786,59 @@ void testGameplayCameraExtentComesOnlyFromAuthoredLayout()
     }
 }
 
+void testGameplayVisibleCellFiltersComposedWorldFrame()
+{
+    TEST("gameplayVisibleCellFiltersComposedWorldFrame");
+    const Level level = Level::loadFromLayers({
+        { "...." },
+        { "C  R" },
+    }, "visible composed neighborhood");
+    const GameState state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+    const std::array overworldRegions {
+        RenderFrameBuilder::GameplayInput::GroundSplatRegion {
+            .screenId = 77,
+            .origin = { 0, 0 },
+            .width = 2,
+            .height = 1,
+        },
+    };
+
+    const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+        .manifest = testManifest(),
+        .level = level,
+        .state = state,
+        .moving = false,
+        .projectedState = state,
+        .presentation = presentation,
+        .settings = {},
+        .cameraExtent = RenderFrameData::CameraExtent {
+            .originX = -2,
+            .width = 6,
+            .height = 3,
+            .depth = 2,
+        },
+        .cameraOffset = { 0.5f, 0.0f },
+        .visibleCell = [](GridPosition3 cell) { return cell.x < 2; },
+        .groundSplatRegions = overworldRegions,
+    });
+
+    CHECK(frame.cameraExtent.has_value());
+    CHECK(frame.cameraExtent->originX == -2);
+    CHECK(near(frame.cameraOffset.x, 0.5f));
+    CHECK(frame.groundSplatRegionCount == 1);
+    CHECK(frame.groundSplatRegions[0].origin == GridPosition({ 0, 0 }));
+    CHECK(frame.groundSplatRegions[0].textures.splatMap ==
+        frame.groundSplat.splatMap);
+    CHECK(std::ranges::none_of(frame.tiles, [](const RenderFrameData::Tile& tile) {
+        return tile.cell.x >= 2;
+    }));
+    CHECK(std::ranges::none_of(frame.tiles, [](const RenderFrameData::Tile& tile) {
+        return tile.model == testManifest().modelForTile(TileType::Rock);
+    }));
+}
+
 void testEditorFrameProvidesInvisibleExpansionBorderAndPreview()
 {
     TEST("editorFrameProvidesInvisibleExpansionBorderAndPreview");
@@ -795,12 +852,15 @@ void testEditorFrameProvidesInvisibleExpansionBorderAndPreview()
         .settings = {},
         .hoverCell = GridPosition3 { -1, 0, 0 },
         .worldAnimationTimeSeconds = 1.25f,
+        .overworldScreen = 7,
     });
 
     CHECK(frame.levelWidth == 2);
     CHECK(frame.levelHeight == 2);
     CHECK(frame.gridPickBorder == 1);
     CHECK(near(frame.effectAnimationTimeSeconds, 1.25f));
+    CHECK(frame.groundSplat.splatMap ==
+        testManifest().findTextureIdByName("GroundSplatMapOverworld7"));
     const auto pickCell = std::ranges::find_if(
         frame.tiles,
         [](const RenderFrameData::Tile& tile) {
@@ -2111,6 +2171,7 @@ int main()
     testSelectorFlagReflectsTargetCompletion();
     testDecorativeTileRendersWithoutChangingCameraExtent();
     testGameplayCameraExtentComesOnlyFromAuthoredLayout();
+    testGameplayVisibleCellFiltersComposedWorldFrame();
     testEditorFrameProvidesInvisibleExpansionBorderAndPreview();
     testEditorSelectorMoveUsesFlagPreviews();
     testMirrorTilesUseTheirModelAndOrientation();

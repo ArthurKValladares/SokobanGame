@@ -66,6 +66,8 @@ public:
     };
 
     static Level loadFromFile(const std::filesystem::path& path);
+    [[nodiscard]] static Definition loadDefinitionFromFile(
+        const std::filesystem::path& path);
     static Level loadFromLines(const std::vector<std::string>& lines, std::string_view sourceName);
     static Level loadFromDefinition(const Definition& definition, std::string_view sourceName);
     static Level loadFromLayers(
