@@ -186,6 +186,7 @@ While editing an overworld component:
 - dimensions are locked to the map;
 - Player is available and End is disabled;
 - selectors and decorations remain screen-local;
+- a **Show Neighboring Screens** toggle renders occupied cardinal and diagonal slots as read-only context while keeping camera fit and picking on the active component;
 - placing Player moves the tile within the current component, and complete-map validation requires exactly one across all components;
 - ordinary edge tile edits directly open or close implicit crossings;
 - a component save validates the complete composed draft before replacing source or runtime files.

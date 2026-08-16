@@ -15,6 +15,7 @@
 #include "engine/render/MirrorConfig.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -1061,6 +1062,83 @@ void testEditorFrameProvidesInvisibleExpansionBorderAndPreview()
         CHECK(enemyPreview->animation == testManifest().playerIdleAnimation());
         CHECK(enemyPreview->animationInstanceId != 0);
         CHECK(near(enemyPreview->animationTimeSeconds, 1.25f));
+    }
+}
+
+void testEditorFrameShowsReadOnlyOverworldNeighbors()
+{
+    TEST("editorFrameShowsReadOnlyOverworldNeighbors");
+    LevelEditor editor;
+    editor.newDocument(2, 2, false);
+    CHECK(!editor.showOverworldNeighbors());
+    editor.setShowOverworldNeighbors(true);
+    CHECK(editor.showOverworldNeighbors());
+
+    const RenderFrameData activeOnly = RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(),
+        .editor = editor,
+        .settings = {},
+        .overworldScreen = 7,
+    });
+    Level::Definition easternDefinition;
+    easternDefinition.layers = {{
+        std::string {
+            tileTypeToChar(TileType::Rock),
+            tileTypeToChar(TileType::Air),
+        },
+        std::string(2, tileTypeToChar(TileType::Air)),
+    }};
+    const std::array neighbors {
+        RenderFrameBuilder::EditorInput::OverworldNeighbor {
+            .screen = 8,
+            .origin = { 2, 0 },
+            .width = 2,
+            .height = 2,
+            .definition = &easternDefinition,
+        },
+    };
+    const RenderFrameData withNeighbor = RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(),
+        .editor = editor,
+        .settings = {},
+        .overworldScreen = 7,
+        .overworldNeighbors = neighbors,
+    });
+
+    CHECK(withNeighbor.levelWidth == 2);
+    CHECK(withNeighbor.levelHeight == 2);
+    CHECK(withNeighbor.cameraExtent.has_value());
+    CHECK(activeOnly.cameraExtent.has_value());
+    if (withNeighbor.cameraExtent && activeOnly.cameraExtent) {
+        CHECK(withNeighbor.cameraExtent->originX ==
+            activeOnly.cameraExtent->originX);
+        CHECK(withNeighbor.cameraExtent->originY ==
+            activeOnly.cameraExtent->originY);
+        CHECK(withNeighbor.cameraExtent->originZ ==
+            activeOnly.cameraExtent->originZ);
+        CHECK(withNeighbor.cameraExtent->width ==
+            activeOnly.cameraExtent->width);
+        CHECK(withNeighbor.cameraExtent->height ==
+            activeOnly.cameraExtent->height);
+        CHECK(withNeighbor.cameraExtent->depth ==
+            activeOnly.cameraExtent->depth);
+    }
+    CHECK(withNeighbor.groundSplatRegionCount == 1);
+    CHECK(withNeighbor.groundSplatRegions[0].origin ==
+        GridPosition({ 2, 0 }));
+    CHECK(withNeighbor.groundSplatRegions[0].width == 2);
+    CHECK(withNeighbor.groundSplatRegions[0].height == 2);
+    const auto neighborRock = std::ranges::find_if(
+        withNeighbor.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.cell == GridPosition3 { 2, 0, 0 } &&
+                tile.model == testManifest().modelForTile(TileType::Rock) &&
+                !tile.pickOnly;
+        });
+    CHECK(neighborRock != withNeighbor.tiles.end());
+    if (neighborRock != withNeighbor.tiles.end()) {
+        CHECK(!neighborRock->pickable);
+        CHECK(!neighborRock->affectsCameraFit);
     }
 }
 
@@ -2173,6 +2251,7 @@ int main()
     testGameplayCameraExtentComesOnlyFromAuthoredLayout();
     testGameplayVisibleCellFiltersComposedWorldFrame();
     testEditorFrameProvidesInvisibleExpansionBorderAndPreview();
+    testEditorFrameShowsReadOnlyOverworldNeighbors();
     testEditorSelectorMoveUsesFlagPreviews();
     testMirrorTilesUseTheirModelAndOrientation();
     testMirrorActivationBuildsBeamAndDestinationGhost();

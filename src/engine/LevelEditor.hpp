@@ -71,6 +71,7 @@ public:
     void setActiveLayer(int layer);
     void setWaterLayer(std::optional<uint32_t> layer);
     void setLayerLocked(bool locked);
+    void setShowOverworldNeighbors(bool show);
     void setSelectedTile(TileType tile);
     void setTool(Tool tool);
     void setSelectedDecorationModel(std::string modelName);
@@ -157,6 +158,7 @@ public:
     [[nodiscard]] uint32_t activeLayer() const;
     [[nodiscard]] std::optional<uint32_t> waterLayer() const;
     [[nodiscard]] bool layerLocked() const;
+    [[nodiscard]] bool showOverworldNeighbors() const;
     [[nodiscard]] bool dirty() const;
     [[nodiscard]] const std::vector<std::string>& documentRows() const;
     [[nodiscard]] const Level::LayerRows& documentLayers() const;
@@ -262,6 +264,7 @@ private:
     std::optional<DocumentSnapshot> decorationTransformBefore_;
     std::optional<MoveObject> pendingMove_;
     std::optional<OverworldMap> draftOverworldMap_;
+    bool showOverworldNeighbors_ = false;
 };
 
 } // namespace sokoban

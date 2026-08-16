@@ -199,6 +199,16 @@ void LevelEditorDebugUi::draw(
     if (editor.editingOverworld()) {
         ImGui::TextDisabled(
             "Screen size is fixed by the active overworld layout.");
+        bool showNeighbors = editor.showOverworldNeighbors();
+        if (ImGui::Checkbox("Show Neighboring Screens", &showNeighbors)) {
+            editor.setShowOverworldNeighbors(showNeighbors);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Shows adjacent cardinal and diagonal screens as read-only "
+                "context. Camera framing and editing remain limited to the "
+                "current screen.");
+        }
     }
 
     ImGui::Separator();

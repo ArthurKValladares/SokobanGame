@@ -1158,6 +1158,48 @@ RenderFrameData Application::buildRenderFrame(
                 pendingMove->kind == LevelEditor::MoveObject::Kind::Tile
             ? std::optional<TileType> { pendingMove->tile }
             : std::nullopt;
+        std::vector<RenderFrameBuilder::EditorInput::OverworldNeighbor>
+            overworldNeighbors;
+        const std::optional<OverworldScreenId> editedOverworldScreen =
+            tools_->levelEditor.overworldScreenId();
+        const OverworldMapEditor& topology = tools_->overworldMapEditor;
+        const bool matchingTopologyRoot =
+            std::filesystem::absolute(topology.projectLevelRoot())
+                .lexically_normal() ==
+            std::filesystem::absolute(tools_->levelEditor.browserRoot())
+                .lexically_normal();
+        if (tools_->levelEditor.showOverworldNeighbors() &&
+            editedOverworldScreen && topology.loaded() &&
+            matchingTopologyRoot) {
+            const OverworldScreenSpec* active =
+                topology.screen(*editedOverworldScreen);
+            if (active) {
+                for (const OverworldMapEditor::ScreenSummary& candidate :
+                     topology.screens()) {
+                    const int deltaX = candidate.slot.x - active->slot.x;
+                    const int deltaY = candidate.slot.y - active->slot.y;
+                    if ((deltaX == 0 && deltaY == 0) ||
+                        std::abs(deltaX) > 1 || std::abs(deltaY) > 1) {
+                        continue;
+                    }
+                    if (const Level::Definition* definition =
+                            topology.definition(candidate.id)) {
+                        overworldNeighbors.push_back({
+                            .screen = candidate.id,
+                            .origin = {
+                                deltaX * static_cast<int>(
+                                    topology.layout().screenWidth),
+                                deltaY * static_cast<int>(
+                                    topology.layout().screenHeight),
+                            },
+                            .width = topology.layout().screenWidth,
+                            .height = topology.layout().screenHeight,
+                            .definition = definition,
+                        });
+                    }
+                }
+            }
+        }
         renderFrameArena_.reset();
         return RenderFrameBuilder::buildEditor({
             .manifest = assetManifest_,
@@ -1179,7 +1221,8 @@ RenderFrameData Application::buildRenderFrame(
             .conveyorBeltScrollOffset = beltScrollOffset,
             .levelLocation =
                 levelLocationFromScreenPath(tools_->levelEditor.loadedDocumentPath()),
-            .overworldScreen = tools_->levelEditor.overworldScreenId(),
+            .overworldScreen = editedOverworldScreen,
+            .overworldNeighbors = overworldNeighbors,
             .selectorState = [this, &editorLevels](LevelLocation target) {
                 const auto level = std::ranges::find(
                     editorLevels,

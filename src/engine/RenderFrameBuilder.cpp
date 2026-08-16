@@ -1734,6 +1734,7 @@ public:
     [[nodiscard]] RenderFrameData build()
     {
         RenderFrameData frame = initializeEditorFrame();
+        appendOverworldNeighbors(frame);
         appendEditorLayers(frame);
         appendEditorPreviews(frame);
         appendEditorCamera(frame);
@@ -1773,7 +1774,10 @@ private:
         frame.levelWidth = input_.editor.documentWidth();
         frame.levelHeight = input_.editor.documentHeight();
         frame.levelDepth = std::max(layerCount_, 1U);
-        frame.gridPickBorder = 1;
+        // Ordinary levels can be expanded by painting the one-cell border.
+        // Overworld component dimensions are fixed by layout.json, and a
+        // border would make a displayed neighbor look editable.
+        frame.gridPickBorder = input_.editor.editingOverworld() ? 0U : 1U;
         // Previews the edited screen's own map, so what the brush paints is
         // what is on screen. A scratch document belongs to no screen and falls
         // back to the shared map.
@@ -1837,6 +1841,183 @@ private:
             static_cast<uint32_t>(position.x),
             static_cast<uint32_t>(position.y),
             static_cast<uint32_t>(position.z));
+    }
+
+    [[nodiscard]] static TileType definitionTileAt(
+        const Level::Definition& definition,
+        GridPosition3 position)
+    {
+        if (position.x < 0 || position.y < 0 || position.z < 0 ||
+            position.z >= static_cast<int>(definition.layers.size())) {
+            return TileType::Air;
+        }
+        const std::vector<std::string>& layer =
+            definition.layers[static_cast<std::size_t>(position.z)];
+        if (position.y >= static_cast<int>(layer.size()) ||
+            position.x >= static_cast<int>(
+                layer[static_cast<std::size_t>(position.y)].size())) {
+            return TileType::Air;
+        }
+        const TileType authored = charToTileType(
+            layer[static_cast<std::size_t>(position.y)]
+                 [static_cast<std::size_t>(position.x)])
+                                      .value_or(TileType::Air);
+        if (authored == TileType::Air && definition.waterLayer &&
+            *definition.waterLayer == static_cast<uint32_t>(position.z)) {
+            return TileType::Water;
+        }
+        return authored;
+    }
+
+    void appendOverworldNeighborTile(
+        RenderFrameData& frame,
+        const Level::Definition& definition,
+        GridPosition origin,
+        GridPosition3 localCell,
+        TileType tile) const
+    {
+        if (tile == TileType::Air) {
+            return;
+        }
+        const GridPosition3 cell {
+            localCell.x + origin.x,
+            localCell.y + origin.y,
+            localCell.z,
+        };
+        const auto neighborTileAt = [&](GridPosition3 globalCell) {
+            return definitionTileAt(definition, {
+                globalCell.x - origin.x,
+                globalCell.y - origin.y,
+                globalCell.z,
+            });
+        };
+        if (tile == TileType::Water) {
+            appendWaterCellSurface(
+                frame,
+                cell,
+                false,
+                shorelineMaskForWaterCell(
+                    cell,
+                    [&](GridPosition3 adjacent) {
+                        return tileTypeIsSolidBlock(
+                            neighborTileAt(adjacent));
+                    }),
+                false);
+            return;
+        }
+        if (tile == TileType::Ladder) {
+            const std::size_t firstTile = frame.tiles.size();
+            appendLadderRungsForCell(
+                frame, cell, neighborTileAt, false);
+            for (std::size_t index = firstTile;
+                 index < frame.tiles.size();
+                 ++index) {
+                frame.tiles[index].pickable = false;
+                frame.tiles[index].affectsCameraFit = false;
+            }
+            return;
+        }
+
+        RenderFrameData::Tile renderTile = tileVisual(
+            tile, cell, input_.manifest, input_.settings);
+        renderTile.pickable = false;
+        renderTile.affectsCameraFit = false;
+        const bool animatedActor =
+            tile == TileType::Player || tile == TileType::Enemy;
+        const AnimationUse editorUse = tile == TileType::Enemy
+            ? AnimationUse::EditorEnemyIdle
+            : AnimationUse::EditorPlayerIdle;
+        renderTile.animation = animatedActor
+            ? animationFor(
+                  input_.animations,
+                  editorUse,
+                  input_.manifest.playerIdleAnimation())
+            : noAnimation;
+        renderTile.animationTimeSeconds = animatedActor
+            ? animationTimeFor(
+                  input_.animations,
+                  editorUse,
+                  input_.worldAnimationTimeSeconds)
+            : 0.0f;
+        frame.tiles.push_back(renderTile);
+    }
+
+    void appendOverworldNeighbors(RenderFrameData& frame) const
+    {
+        for (const RenderFrameBuilder::EditorInput::OverworldNeighbor& neighbor :
+             input_.overworldNeighbors) {
+            if (neighbor.definition == nullptr) {
+                continue;
+            }
+            const Level::Definition& definition = *neighbor.definition;
+            if (frame.groundSplatRegionCount <
+                RenderFrameData::groundSplatRegionCapacity) {
+                frame.groundSplatRegions[frame.groundSplatRegionCount++] = {
+                    .origin = neighbor.origin,
+                    .width = neighbor.width,
+                    .height = neighbor.height,
+                    .textures = groundSplatTexturesForOverworldScreen(
+                        [&manifest = input_.manifest](std::string_view name) {
+                            return manifest.findTextureIdByName(name);
+                        },
+                        neighbor.screen),
+                };
+            }
+
+            for (std::size_t z = 0; z < definition.layers.size(); ++z) {
+                if (layerLocked_ && z != activeLayer_) {
+                    continue;
+                }
+                const std::vector<std::string>& layer = definition.layers[z];
+                for (std::size_t y = 0; y < layer.size(); ++y) {
+                    for (std::size_t x = 0; x < layer[y].size(); ++x) {
+                        const GridPosition3 localCell {
+                            static_cast<int>(x),
+                            static_cast<int>(y),
+                            static_cast<int>(z),
+                        };
+                        appendOverworldNeighborTile(
+                            frame,
+                            definition,
+                            neighbor.origin,
+                            localCell,
+                            definitionTileAt(definition, localCell));
+                    }
+                }
+            }
+
+            std::vector<Level::Decoration> decorations =
+                definition.decorations;
+            for (Level::Decoration& decoration : decorations) {
+                decoration.position.x +=
+                    static_cast<float>(neighbor.origin.x);
+                decoration.position.y +=
+                    static_cast<float>(neighbor.origin.y);
+            }
+            appendDecorations(
+                frame,
+                decorations,
+                input_.manifest,
+                std::nullopt,
+                std::nullopt,
+                false);
+
+            for (Level::ScreenSelector selector : definition.selectors) {
+                if (layerLocked_ &&
+                    selector.cell.z != static_cast<int>(activeLayer_)) {
+                    continue;
+                }
+                selector.cell.x += neighbor.origin.x;
+                selector.cell.y += neighbor.origin.y;
+                appendSelector(
+                    frame,
+                    selector,
+                    input_.manifest,
+                    input_.selectorState,
+                    false,
+                    false);
+            }
+        }
     }
 
     void appendEditorTile(
@@ -1962,6 +2143,9 @@ private:
 
     void appendExpansionPickCells(RenderFrameData& frame) const
     {
+        if (input_.editor.editingOverworld()) {
+            return;
+        }
         const int expansionPickLayer = layerLocked_
             ? static_cast<int>(activeLayer_)
             : 0;

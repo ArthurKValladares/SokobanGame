@@ -191,6 +191,16 @@ bool LevelEditor::editingDocument() const
     return document_.editingDocument;
 }
 
+void LevelEditor::setShowOverworldNeighbors(bool show)
+{
+    showOverworldNeighbors_ = show;
+}
+
+bool LevelEditor::showOverworldNeighbors() const
+{
+    return showOverworldNeighbors_;
+}
+
 void LevelEditor::markDraftSolved()
 {
     document_.status = "Draft solved.";

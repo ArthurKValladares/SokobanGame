@@ -78,6 +78,14 @@ public:
     };
 
     struct EditorInput {
+        struct OverworldNeighbor {
+            OverworldScreenId screen = 0;
+            GridPosition origin {};
+            uint32_t width = 0;
+            uint32_t height = 0;
+            const Level::Definition* definition = nullptr;
+        };
+
         const AssetManifest& manifest;
         const LevelEditor& editor;
         const PresentationSettings& settings;
@@ -94,6 +102,9 @@ public:
         // than the shared fallback; unset for scratch documents.
         std::optional<LevelLocation> levelLocation;
         std::optional<OverworldScreenId> overworldScreen;
+        // Optional read-only context around the actively edited overworld
+        // screen. Origins are relative to the active screen's local origin.
+        std::span<const OverworldNeighbor> overworldNeighbors;
         std::function<ScreenSelectorViewState(LevelLocation)> selectorState;
     };
 
