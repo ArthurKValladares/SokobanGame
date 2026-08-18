@@ -156,6 +156,7 @@ void LevelEditor::initialize(
     document_.playingDraft = false;
     document_.editingDocument = false;
     editHistory_.clear();
+    drafts_.clear();
     pendingMove_.reset();
 }
 
@@ -398,6 +399,32 @@ void LevelEditor::selectDocument(const std::filesystem::path& path)
 {
     document_.filePath = path;
     document_.status = "Selected " + path.string();
+}
+
+std::filesystem::path LevelEditor::draftKey(
+    const std::filesystem::path& path)
+{
+    return path.empty()
+        ? std::filesystem::path {}
+        : normalizedAbsolutePath(path);
+}
+
+void LevelEditor::cacheActiveDraft()
+{
+    const std::filesystem::path key = draftKey(document_.loadedPath);
+    if (key.empty()) {
+        return;
+    }
+    if (!document_.dirty) {
+        drafts_.erase(key);
+        return;
+    }
+    drafts_.insert_or_assign(
+        key,
+        DraftState {
+            .document = document_,
+            .editHistory = editHistory_,
+        });
 }
 
 bool LevelEditor::setBrowserRoot(const std::filesystem::path& path)
@@ -1196,6 +1223,17 @@ bool LevelEditor::dirty() const
     return document_.dirty;
 }
 
+bool LevelEditor::hasInProgressDraft(
+    const std::filesystem::path& path) const
+{
+    const std::filesystem::path key = draftKey(path);
+    if (key.empty()) {
+        return false;
+    }
+    return (document_.dirty && draftKey(document_.loadedPath) == key) ||
+        drafts_.contains(key);
+}
+
 const std::filesystem::path& LevelEditor::documentPath() const
 {
     return document_.filePath;
@@ -1427,6 +1465,59 @@ void LevelEditor::deleteActiveLayer()
     recordDocumentChange(before);
 }
 
+bool LevelEditor::openDocument(const std::filesystem::path& path)
+{
+    const std::filesystem::path targetKey = draftKey(path);
+    if (targetKey.empty()) {
+        document_.status = "Cannot open an empty document path.";
+        return false;
+    }
+
+    const std::filesystem::path activeKey = draftKey(document_.loadedPath);
+    if (activeKey == targetKey) {
+        document_.filePath = path;
+        document_.playingDraft = false;
+        document_.editingDocument = true;
+        document_.status = "Editing " + path.string();
+        return true;
+    }
+
+    cacheActiveDraft();
+    if (auto found = drafts_.find(targetKey); found != drafts_.end()) {
+        DraftState draft = std::move(found->second);
+        drafts_.erase(found);
+
+        const std::filesystem::path sourceRoot = document_.sourceLevelRoot;
+        const std::filesystem::path runtimeRoot = document_.runtimeLevelRoot;
+        const std::filesystem::path browserRoot = document_.browserRoot;
+        document_ = std::move(draft.document);
+        document_.sourceLevelRoot = sourceRoot;
+        document_.runtimeLevelRoot = runtimeRoot;
+        document_.browserRoot = browserRoot;
+        document_.filePath = path;
+        document_.loadedPath = path;
+        document_.playingDraft = false;
+        document_.editingDocument = true;
+        document_.status = "Restored in-progress draft " + path.string();
+        editHistory_ = std::move(draft.editHistory);
+        decorationTransformBefore_.reset();
+        pendingMove_.reset();
+        draftOverworldMap_.reset();
+        return true;
+    }
+
+    if (!loadDocument(path, false)) {
+        // The current document is still active after a failed load. It owns
+        // the cached copy again, so avoid reporting the same draft twice.
+        if (!activeKey.empty()) {
+            drafts_.erase(activeKey);
+        }
+        return false;
+    }
+    editHistory_.clear();
+    return true;
+}
+
 bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHistory)
 {
     const DocumentSnapshot before = captureDocumentSnapshot();
@@ -1500,6 +1591,7 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     document_.playingDraft = false;
     document_.editingDocument = true;
     document_.status = "Loaded " + path.string();
+    drafts_.erase(draftKey(path));
     if (recordHistory) {
         recordDocumentChange(before);
     }
@@ -1590,6 +1682,7 @@ bool LevelEditor::saveDocument(const std::filesystem::path& path)
         document_.filePath = sourcePath;
         document_.loadedPath = sourcePath;
         document_.dirty = false;
+        drafts_.erase(draftKey(sourcePath));
         document_.status =
             "Saved overworld screen and validated the complete map.";
         return true;
@@ -1651,6 +1744,7 @@ bool LevelEditor::saveDocument(const std::filesystem::path& path)
     // that screen, so it gains that screen's splat map from here on.
     document_.loadedPath = sourcePath;
     document_.dirty = false;
+    drafts_.erase(draftKey(sourcePath));
     document_.status = mirrorPath.empty()
         ? "Saved " + sourcePath.string()
         : "Saved " + sourcePath.string() + " and updated runtime mirror.";

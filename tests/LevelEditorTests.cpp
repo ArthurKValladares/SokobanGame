@@ -276,6 +276,50 @@ void testSelectedPathIsSeparateFromTheLoadedDocument()
     CHECK(editor.loadedDocumentPath() == first);
 }
 
+void testOpeningScreensPreservesIndependentDraftsAndUndoHistory()
+{
+    TEST("openingScreensPreservesIndependentDraftsAndUndoHistory");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+
+    const std::filesystem::path first =
+        project.source / "level0" / "screen0.scr";
+    const std::filesystem::path second =
+        project.source / "level0" / "screen1.scr";
+    editor.newDocument(5, 4, false);
+    CHECK(editor.saveDocument(first));
+    editor.newDocument(6, 5, false);
+    CHECK(editor.saveDocument(second));
+
+    CHECK(editor.openDocument(first));
+    editor.setCell({ 2, 2, 1 }, TileType::Wall);
+    CHECK(editor.dirty());
+    CHECK(editor.hasInProgressDraft(first));
+
+    CHECK(editor.openDocument(second));
+    CHECK(editor.documentWidth() == 6);
+    CHECK(editor.documentLayers()[1][2][2] ==
+        tileTypeToChar(TileType::Air));
+    CHECK(editor.hasInProgressDraft(first));
+    editor.setCell({ 3, 3, 1 }, TileType::Decorative);
+    CHECK(editor.hasInProgressDraft(second));
+
+    CHECK(editor.openDocument(first));
+    CHECK(editor.documentWidth() == 5);
+    CHECK(editor.documentLayers()[1][2][2] ==
+        tileTypeToChar(TileType::Wall));
+    CHECK(editor.hasInProgressDraft(second));
+    CHECK(editor.tryUndoEdit());
+    CHECK(editor.documentLayers()[1][2][2] ==
+        tileTypeToChar(TileType::Air));
+
+    CHECK(editor.openDocument(second));
+    CHECK(editor.documentLayers()[1][3][3] ==
+        tileTypeToChar(TileType::Decorative));
+    CHECK(editor.saveDocument(second));
+    CHECK(!editor.hasInProgressDraft(second));
+}
+
 void testUndoRestoresTheLoadedDocumentPath()
 {
     TEST("undoRestoresTheLoadedDocumentPath");
@@ -1012,7 +1056,11 @@ void testComposedSelectorOwnershipIsEnforcedBeforeSave()
         "}\n");
 
     LevelEditor editor = makeEditor(project);
-    CHECK(editor.loadDocument(project.source / "overworld/screen1.scr"));
+    const std::filesystem::path screen1 =
+        project.source / "overworld/screen1.scr";
+    const std::filesystem::path screen2 =
+        project.source / "overworld/screen2.scr";
+    CHECK(editor.loadDocument(screen1));
     CHECK(editor.documentLayers()[1][1][1] ==
         tileTypeToChar(TileType::Player));
     CHECK(editor.selectorLevelOwner(0) == 2U);
@@ -1021,6 +1069,13 @@ void testComposedSelectorOwnershipIsEnforcedBeforeSave()
         LevelLocation { .level = 0, .screen = 0 }));
     CHECK(!editor.selectors()[0].target);
     CHECK(editor.status().find("screen 2") != std::string::npos);
+
+    CHECK(editor.openDocument(screen2));
+    CHECK(editor.overworldScreenId() == 2U);
+    CHECK(editor.hasInProgressDraft(screen1));
+    CHECK(editor.openDocument(screen1));
+    CHECK(editor.overworldScreenId() == 1U);
+    CHECK(editor.selectors().size() == 1);
 }
 
 void testOverworldPlayerTileMovesAcrossComponents()
@@ -1079,6 +1134,7 @@ int main()
     testAddLayerBelowShiftsContentAndWaterAndIsUndoable();
     testSaveLoadAndRuntimeMirror();
     testSelectedPathIsSeparateFromTheLoadedDocument();
+    testOpeningScreensPreservesIndependentDraftsAndUndoHistory();
     testUndoRestoresTheLoadedDocumentPath();
     testWaterLayerEditingPersistenceAndLayerRenumbering();
     testProjectRenumberDeleteAndRestore();

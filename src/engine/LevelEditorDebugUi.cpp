@@ -153,7 +153,7 @@ void LevelEditorDebugUi::draw(
     ImGui::InputText("Path", &filePathBuffer_);
 
     if (ImGui::Button("Load")) {
-        if (editor.loadDocument(filePathBuffer_)) {
+        if (editor.openDocument(filePathBuffer_)) {
             syncDocumentPath(editor);
         }
     }
@@ -203,16 +203,6 @@ void LevelEditorDebugUi::draw(
     if (editor.editingOverworld()) {
         ImGui::TextDisabled(
             "Screen size is fixed by the active overworld layout.");
-        bool showNeighbors = editor.showOverworldNeighbors();
-        if (ImGui::Checkbox("Show Neighboring Screens", &showNeighbors)) {
-            editor.setShowOverworldNeighbors(showNeighbors);
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(
-                "Shows adjacent cardinal and diagonal screens as read-only "
-                "context. Camera framing and editing remain limited to the "
-                "current screen.");
-        }
     }
 
     ImGui::Separator();
@@ -917,7 +907,7 @@ void LevelEditorDebugUi::drawOverworldTab(
                 return false;
             }
             editor.selectDocument(screen.path);
-            if (!editor.loadDocument(screen.path)) {
+            if (!editor.openDocument(screen.path)) {
                 return false;
             }
             syncDocumentPath(editor);
@@ -979,6 +969,9 @@ void LevelEditorDebugUi::drawOverworldTab(
                 std::to_string(screen.slot.x) + ", " +
                 std::to_string(screen.slot.y) + ")  " +
                 std::to_string(screen.selectorCount) + " flags";
+            if (editor.hasInProgressDraft(screen.path)) {
+                label += " *";
+            }
             if (ImGui::Button(label.c_str(), ImVec2(cardWidth, cardHeight))) {
                 (void)overworldEditor.selectScreen(screen.id);
                 overworldMoveSlot_[0] = screen.slot.x;
@@ -1038,6 +1031,19 @@ void LevelEditorDebugUi::drawOverworldTab(
     }
     ImGui::EndChild();
 
+    if (editor.editingOverworld()) {
+        bool showNeighbors = editor.showOverworldNeighbors();
+        if (ImGui::Checkbox("Show Neighboring Screens", &showNeighbors)) {
+            editor.setShowOverworldNeighbors(showNeighbors);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Shows adjacent cardinal and diagonal screens as read-only "
+                "context. Camera framing and editing remain limited to the "
+                "current screen.");
+        }
+    }
+
     if (const auto selectedId = overworldEditor.selectedScreen()) {
         const OverworldScreenSpec* selected =
             overworldEditor.screen(*selectedId);
@@ -1055,7 +1061,7 @@ void LevelEditorDebugUi::drawOverworldTab(
                     return false;
                 }
                 editor.selectDocument(path);
-                if (!editor.loadDocument(path)) {
+                if (!editor.openDocument(path)) {
                     return false;
                 }
                 syncDocumentPath(editor);
@@ -1180,11 +1186,21 @@ void LevelEditorDebugUi::drawActiveLevelsTab(LevelEditor& editor)
                         ImGui::PushID(screen.path.string().c_str());
                         ImGui::TableNextRow();
                         ImGui::TableSetColumnIndex(0);
-                        const std::string screenLabel = screen.name.empty()
+                        std::string screenLabel = screen.name.empty()
                             ? screen.path.filename().string()
                             : screen.path.filename().string() + ": " + screen.name;
-                        if (ImGui::Selectable(screenLabel.c_str(), screen.path == editor.documentPath())) {
+                        if (editor.hasInProgressDraft(screen.path)) {
+                            screenLabel += " *";
+                        }
+                        if (ImGui::Selectable(
+                                screenLabel.c_str(),
+                                screen.path == editor.documentPath(),
+                                ImGuiSelectableFlags_AllowDoubleClick)) {
                             editor.selectDocument(screen.path);
+                            if (ImGui::IsMouseDoubleClicked(
+                                    ImGuiMouseButton_Left)) {
+                                (void)editor.openDocument(screen.path);
+                            }
                             syncDocumentPath(editor);
                         }
 

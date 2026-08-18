@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <utility>
@@ -83,6 +84,10 @@ public:
     void addLayerAbove();
     void addLayerBelow();
     void deleteActiveLayer();
+    // Opens a path for editing without discarding unsaved work in the current
+    // path. Returning to a previously opened dirty path restores its draft
+    // and its document-local undo history.
+    [[nodiscard]] bool openDocument(const std::filesystem::path& path);
     [[nodiscard]] bool loadDocument(const std::filesystem::path& path, bool recordHistory = true);
     [[nodiscard]] bool saveDocument(const std::filesystem::path& path);
     [[nodiscard]] Level::Definition documentDefinition() const;
@@ -160,6 +165,8 @@ public:
     [[nodiscard]] bool layerLocked() const;
     [[nodiscard]] bool showOverworldNeighbors() const;
     [[nodiscard]] bool dirty() const;
+    [[nodiscard]] bool hasInProgressDraft(
+        const std::filesystem::path& path) const;
     [[nodiscard]] const std::vector<std::string>& documentRows() const;
     [[nodiscard]] const Level::LayerRows& documentLayers() const;
     [[nodiscard]] TileType selectedTile() const;
@@ -241,7 +248,15 @@ private:
         DocumentSnapshot after;
     };
 
+    struct DraftState {
+        Document document;
+        std::vector<EditActionRecord> editHistory;
+    };
+
     void recordDocumentChange(const DocumentSnapshot& before);
+    void cacheActiveDraft();
+    [[nodiscard]] static std::filesystem::path draftKey(
+        const std::filesystem::path& path);
     void insertLayerAt(int insertionIndex, const char* status);
     void applyDocumentSnapshot(const DocumentSnapshot& snapshot);
     [[nodiscard]] DocumentSnapshot captureDocumentSnapshot() const;
@@ -261,6 +276,7 @@ private:
 
     Document document_;
     std::vector<EditActionRecord> editHistory_;
+    std::map<std::filesystem::path, DraftState> drafts_;
     std::optional<DocumentSnapshot> decorationTransformBefore_;
     std::optional<MoveObject> pendingMove_;
     std::optional<OverworldMap> draftOverworldMap_;
