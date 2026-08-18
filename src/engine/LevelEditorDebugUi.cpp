@@ -136,6 +136,7 @@ void LevelEditorDebugUi::initialize(const LevelEditor& editor)
     requestedWidth_ = editor.requestedWidth();
     requestedHeight_ = editor.requestedHeight();
     overworldEditorRoot_ = editor.sourceLevelRoot();
+    selectedToolTab_.reset();
 }
 
 void LevelEditorDebugUi::draw(
@@ -177,6 +178,9 @@ void LevelEditorDebugUi::draw(
             callbacks.returnToCurrentScreen();
         }
     }
+
+    ImGui::Separator();
+    drawFileBrowser(editor, overworldEditor);
 
     ImGui::Separator();
     ImGui::Text("View: %s", editor.editingDocument() ? "editing draft" : editor.playingDraft() ? "playing draft" : "current screen");
@@ -235,6 +239,81 @@ void LevelEditorDebugUi::draw(
     if (ImGui::Checkbox("Lock Edits To Current Layer", &layerLocked)) {
         editor.setLayerLocked(layerLocked);
     }
+    if (ImGui::Button("+ Layer Below")) {
+        editor.addLayerBelow();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("+ Layer Above")) {
+        editor.addLayerAbove();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Delete Layer")) {
+        editor.deleteActiveLayer();
+    }
+
+    if (editor.editingOverworld() &&
+        editor.tool() != LevelEditor::Tool::Selectors &&
+        ImGui::Button("Assign Screens To Flags...")) {
+        editor.setTool(LevelEditor::Tool::Selectors);
+    }
+    const LevelEditor::Tool requestedTool = editor.tool();
+    const bool selectRequestedTool =
+        !selectedToolTab_ || *selectedToolTab_ != requestedTool;
+    if (selectRequestedTool) {
+        selectedToolTab_ = requestedTool;
+    }
+    const auto toolTabFlags = [&](LevelEditor::Tool tool) {
+        return selectRequestedTool && requestedTool == tool
+            ? ImGuiTabItemFlags_SetSelected
+            : ImGuiTabItemFlags_None;
+    };
+    const auto activateToolTab = [&](LevelEditor::Tool tool) {
+        // While a programmatic selection is queued, ImGui can expose the old
+        // tab's contents for one frame. Do not let that stale tab overwrite
+        // the requested tool before the new selection becomes visible.
+        if (!selectRequestedTool || requestedTool == tool) {
+            selectedToolTab_ = tool;
+            if (editor.tool() != tool) {
+                editor.setTool(tool);
+            }
+        }
+    };
+    if (ImGui::BeginTabBar("LevelEditorToolTabs")) {
+        if (ImGui::BeginTabItem(
+                "Tiles",
+                nullptr,
+                toolTabFlags(LevelEditor::Tool::Tiles))) {
+            activateToolTab(LevelEditor::Tool::Tiles);
+            drawTilePalette(editor, callbacks);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem(
+                "Mesh Decorations",
+                nullptr,
+                toolTabFlags(LevelEditor::Tool::Decorations))) {
+            activateToolTab(LevelEditor::Tool::Decorations);
+            drawDecorationPalette(editor, callbacks);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem(
+                "Screen Selectors",
+                nullptr,
+                toolTabFlags(LevelEditor::Tool::Selectors))) {
+            activateToolTab(LevelEditor::Tool::Selectors);
+            drawSelectorPalette(editor);
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+    ImGui::Separator();
+    drawGroundPaintTab(painter, callbacks);
+
+    if (!editor.status().empty()) {
+        ImGui::Separator();
+        ImGui::TextWrapped("%s", editor.status().c_str());
+    }
+
+    ImGui::Separator();
     if (ImGui::CollapsingHeader(
             "Tile Editing Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::BulletText("Click: paint above the resolved tile");
@@ -255,53 +334,6 @@ void LevelEditorDebugUi::draw(
             actionBindingsDisplay(bindings, InputAction::Undo).c_str());
         ImGui::TextDisabled(
             "Rebind under Options > Controls > Editor Controls.");
-    }
-    if (ImGui::Button("+ Layer Below")) {
-        editor.addLayerBelow();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("+ Layer Above")) {
-        editor.addLayerAbove();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Delete Layer")) {
-        editor.deleteActiveLayer();
-    }
-
-    ImGui::TextUnformatted("Editor Tool");
-    int editorTool = editor.tool() == LevelEditor::Tool::Tiles
-        ? 0
-        : (editor.tool() == LevelEditor::Tool::Decorations ? 1 : 2);
-    if (ImGui::RadioButton("Tiles", &editorTool, 0)) {
-        editor.setTool(LevelEditor::Tool::Tiles);
-    }
-    ImGui::SameLine();
-    if (ImGui::RadioButton("Mesh Decorations", &editorTool, 1)) {
-        editor.setTool(LevelEditor::Tool::Decorations);
-    }
-    if (ImGui::RadioButton("Screen Selectors", &editorTool, 2)) {
-        editor.setTool(LevelEditor::Tool::Selectors);
-    }
-    if (editor.editingOverworld() &&
-        editor.tool() != LevelEditor::Tool::Selectors &&
-        ImGui::Button("Assign Screens To Flags...")) {
-        editor.setTool(LevelEditor::Tool::Selectors);
-    }
-    if (editor.tool() == LevelEditor::Tool::Tiles) {
-        drawTilePalette(editor, callbacks);
-    } else if (editor.tool() == LevelEditor::Tool::Decorations) {
-        drawDecorationPalette(editor, callbacks);
-    } else {
-        drawSelectorPalette(editor);
-    }
-    ImGui::Separator();
-    drawGroundPaintTab(painter, callbacks);
-    ImGui::Separator();
-    drawFileBrowser(editor, overworldEditor);
-
-    if (!editor.status().empty()) {
-        ImGui::Separator();
-        ImGui::TextWrapped("%s", editor.status().c_str());
     }
 #else
     (void)editor;
@@ -786,22 +818,28 @@ void LevelEditorDebugUi::drawFileBrowser(
     OverworldMapEditor& overworldEditor)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    ImGui::InputText("Root", &browserRootBuffer_);
-    ImGui::SameLine();
-    if (ImGui::Button("Set Root") && editor.setBrowserRoot(browserRootBuffer_)) {
-        browserRootBuffer_ = editor.browserRoot().string();
-    }
+    const auto drawRootSelector = [&]() {
+        ImGui::InputText("Root", &browserRootBuffer_);
+        ImGui::SameLine();
+        if (ImGui::Button("Set Root") &&
+            editor.setBrowserRoot(browserRootBuffer_)) {
+            browserRootBuffer_ = editor.browserRoot().string();
+        }
+    };
 
     if (ImGui::BeginTabBar("LevelBrowserTabs")) {
         if (ImGui::BeginTabItem("Levels")) {
+            drawRootSelector();
             drawActiveLevelsTab(editor);
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Overworld")) {
+            drawRootSelector();
             drawOverworldTab(editor, overworldEditor);
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Deleted")) {
+            drawRootSelector();
             drawDeletedLevelsTab(editor);
             ImGui::EndTabItem();
         }
