@@ -14,10 +14,13 @@ public:
 #if SOKOBAN_ENABLE_DEBUG_UI
     using DrawCallback = std::function<void()>;
 
+    static void initialize();
     static void addTab(std::string name, DrawCallback callback);
     static void clearTabs();
     static void draw();
 #else
+    static void initialize() {}
+
     template <typename Callback>
     static void addTab(std::string, Callback&&)
     {

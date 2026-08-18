@@ -94,6 +94,7 @@ Application::Application()
     renderer_.preloadAssets(initialRequirements);
 
 #if SOKOBAN_ENABLE_DEBUG_UI
+    DebugUi::initialize();
     tools_->initialize(
         SOKOBAN_SOURCE_LEVEL_DIR,
         SOKOBAN_SOURCE_ASSET_DIR,
