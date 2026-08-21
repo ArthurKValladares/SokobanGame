@@ -1221,7 +1221,7 @@ void Application::buildLevelCatalog()
     if (std::filesystem::exists(layoutPath)) {
         overworldMap_ = OverworldMap::load(overworldRoot());
         overworldMap_->validatePuzzleSelectors(
-            screenCounts, OverworldValidationMode::Production);
+            screenCounts, OverworldValidationMode::Structural);
         std::vector<OverworldScreenId> screenIds;
         screenIds.reserve(overworldMap_->screens().size());
         for (const OverworldScreenRuntime& screen : overworldMap_->screens()) {

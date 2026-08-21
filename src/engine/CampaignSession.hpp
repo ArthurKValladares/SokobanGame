@@ -122,7 +122,7 @@ private:
     static constexpr double autosaveIntervalSeconds_ = 2.0;
 
     void clearRunState();
-    void validateOverworldCoverage(
+    void validateOverworldTargets(
         const std::vector<LevelLocation>& targets) const;
     [[nodiscard]] bool overworldScreenExists(
         OverworldScreenId screen) const;

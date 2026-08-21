@@ -18,7 +18,7 @@ void CampaignSession::setOverworldTargets(std::vector<LevelLocation> targets)
             std::pair { right.level, right.screen };
     });
     targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
-    validateOverworldCoverage(targets);
+    validateOverworldTargets(targets);
     overworldTargets_ = std::move(targets);
 }
 
@@ -320,11 +320,20 @@ bool CampaignSession::updateDeferredCheckpoint(
 
 bool CampaignSession::allTargetsCompleted(const PlayerProfile& profile) const
 {
-    return !overworldTargets_.empty() && std::ranges::all_of(
-        overworldTargets_,
-        [&](LevelLocation target) {
-            return profile.screenCompleted(target);
-        });
+    if (overworldTargets_.empty()) {
+        return false;
+    }
+    for (int level = 0; level < levelCount(); ++level) {
+        for (int screen = 0; screen < screenCount(level); ++screen) {
+            const LevelLocation required { .level = level, .screen = screen };
+            if (std::ranges::find(overworldTargets_, required) ==
+                    overworldTargets_.end() ||
+                !profile.screenCompleted(required)) {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 ScreenSelectorViewState CampaignSession::selectorViewState(
@@ -385,7 +394,7 @@ bool CampaignSession::validateOverworldCheckpoint(PlayerProfile& profile)
     return true;
 }
 
-void CampaignSession::validateOverworldCoverage(
+void CampaignSession::validateOverworldTargets(
     const std::vector<LevelLocation>& targets) const
 {
     if (std::ranges::any_of(targets, [&](LevelLocation target) {
@@ -393,17 +402,6 @@ void CampaignSession::validateOverworldCoverage(
         })) {
         throw std::invalid_argument(
             "overworld selector targets a screen outside the catalog");
-    }
-    for (int level = 0; level < levelCount(); ++level) {
-        for (int screen = 0; screen < screenCount(level); ++screen) {
-            const LevelLocation required { .level = level, .screen = screen };
-            if (std::ranges::find(targets, required) == targets.end()) {
-                throw std::invalid_argument(
-                    "overworld has no selector for level " +
-                    std::to_string(level) + " screen " +
-                    std::to_string(screen));
-            }
-        }
     }
 }
 

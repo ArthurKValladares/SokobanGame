@@ -1,49 +1,40 @@
 @water 1
 
 @layer 0
-DDDDDDDDDDDDDDDDDDDDDD
-DDDDDDDDDDDDDDDDDDDDDD
-DDDDDDDDDDDDDDDDDDDDDD
- DDDDD          DDDDD 
- DDDDD          DDDDD 
- DDDDD          DDDDD 
- DDDDDDD      DDDDDDD 
- DDDDDDD      DDDDDDD 
-  DDDDDD      DDDDDD  
-  DDDDDD      DDDDDD  
-  DDDD          DDDD  
-  DDDD          DDDD  
-  DDDD          DDDD  
-   DDDDDDDDDDDDDDDD   
+DDDDDDDDDDDDDDDDD
+DDDDDDDDDDDDDDDDD
+ DDDDDDDDDDDDDDD 
+ DDDDDDDDDDDDDDD 
+ DD     D     DD 
+ DD     D DDD DD 
+ DD     D D D DD 
+ DD       D D DD 
+ DD       D   DD 
+ DDDDDDDDDDDDDDD 
+  DDDDDDDDDDDDD  
 
 @layer 1
-                      
-                      
-                      
-      ..........      
-      ..........      
-      ..........      
-        ......        
-      . ...... .      
-      . ...... .      
-        ......        
-      ..........      
-      ..........      
-      ..........      
-                      
+                 
+                 
+                 
+                 
+   ..... .....   
+   ..... .   .   
+   ..... . . .   
+   ..... . . .   
+   ....... ...   
+                 
+                 
 
 @layer 2
-                      
-                      
-                      
-                      
-       R      R       
-                      
-                      
-      P   12   E      
-      P   34   P      
-                      
-                      
-       C      R       
-                      
-                      
+                 
+                 
+                 
+                 
+         >>>>v   
+         ^   v   
+     E   ^ P v   
+       C ^ ^ v   
+        R^ ^<<   
+                 
+                 

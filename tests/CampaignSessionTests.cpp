@@ -61,21 +61,20 @@ void testCatalogAndProfileRestore()
     CHECK(invalidPuzzle.worldContext == PlayerProfile::WorldContext::Overworld);
 }
 
-void testOverworldMustCoverEveryScreen()
+void testIncompleteOverworldTargetsRemainRepairable()
 {
-    TEST("overworldMustCoverEveryScreen");
+    TEST("incompleteOverworldTargetsRemainRepairable");
     CampaignSession campaign;
     campaign.setLevelScreenCounts({ 2, 1 });
-    bool rejected = false;
-    try {
-        campaign.setOverworldTargets({ { 0, 0 }, { 1, 0 } });
-    } catch (const std::invalid_argument&) {
-        rejected = true;
-    }
-    CHECK(rejected);
+    campaign.setOverworldTargets({ { 0, 0 }, { 1, 0 } });
+    CHECK(campaign.overworldTargets().size() == 2);
 
-    campaign.setOverworldTargets({ { 0, 0 }, { 0, 1 }, { 1, 0 } });
-    rejected = false;
+    PlayerProfile profile;
+    profile.recordScreenCompletion({ 0, 0 }, 3, 1.0);
+    profile.recordScreenCompletion({ 1, 0 }, 3, 1.0);
+    CHECK(!campaign.allTargetsCompleted(profile));
+
+    bool rejected = false;
     try {
         campaign.setOverworldTargets(
             { { 0, 0 }, { 0, 1 }, { 1, 0 }, { 9, 0 } });
@@ -83,7 +82,11 @@ void testOverworldMustCoverEveryScreen()
         rejected = true;
     }
     CHECK(rejected);
-    CHECK(campaign.overworldTargets().size() == 3);
+    CHECK(campaign.overworldTargets().size() == 2);
+
+    campaign.setOverworldTargets({ { 0, 0 }, { 0, 1 }, { 1, 0 } });
+    profile.recordScreenCompletion({ 0, 1 }, 3, 1.0);
+    CHECK(campaign.allTargetsCompleted(profile));
 }
 
 void testSelectorInteractionRequiresAllLivingPlayersTogether()
@@ -302,7 +305,7 @@ int main()
 {
     try {
     testCatalogAndProfileRestore();
-    testOverworldMustCoverEveryScreen();
+    testIncompleteOverworldTargetsRemainRepairable();
     testSelectorInteractionRequiresAllLivingPlayersTogether();
     testSelectorEntryAndBothCheckpointKinds();
     testOverworldTopologyCheckpointValidation();

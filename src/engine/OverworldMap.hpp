@@ -49,8 +49,9 @@ enum class OverworldValidationMode {
     // Allows unassigned selectors and incomplete puzzle-screen coverage while
     // authors build the map. Every assigned target must still exist.
     Structural,
-    // Shipping content: every selector is assigned, every puzzle screen is
-    // covered, and one puzzle level may belong to only one overworld screen.
+    // Playable/shipping content: unassigned selectors remain inert so authors
+    // can repair orphaned flags in the editor. Every puzzle screen must still
+    // be covered, and one puzzle level may belong to only one overworld screen.
     Production,
 };
 

@@ -708,12 +708,9 @@ void OverworldMap::validatePuzzleSelectors(
 
     for (const OverworldSelectorRuntime& selector : selectors_) {
         if (!selector.target) {
-            if (mode == OverworldValidationMode::Production) {
-                throw std::runtime_error(
-                    "overworld selector " + std::to_string(selector.screen) +
-                    ":" + std::to_string(selector.localId) +
-                    " is unassigned");
-            }
+            // Deleting a puzzle level or screen deliberately leaves its flag
+            // in place for the author to reassign or remove. It is inert in
+            // gameplay and remains editable after the game starts.
             continue;
         }
         if (!levelLocationExists(puzzleScreenCounts, *selector.target)) {

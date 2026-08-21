@@ -420,6 +420,7 @@ void testSelectorOwnershipAndCoverage()
               .target = LevelLocation { 0, 1 } },
             { .id = 3, .cell = { 1, 1, 1 },
               .target = LevelLocation { 1, 0 } },
+            { .id = 4, .cell = { 0, 1, 1 }, .target = std::nullopt },
         }));
         project.writeScreen(2, eastDefinition());
         project.writeLayout(eastWestLayout());
@@ -467,7 +468,7 @@ void testSelectorOwnershipAndCoverage()
                     puzzleScreens,
                     OverworldValidationMode::Production);
             },
-            "unassigned");
+            "no selector for puzzle level 0 screen 1");
     }
 }
 

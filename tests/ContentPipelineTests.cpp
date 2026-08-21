@@ -313,15 +313,41 @@ void testInventoryAndStaging()
     check(!std::filesystem::exists(output / "stale.file"), "stale output removed");
 }
 
+void testUnassignedLegacySelectorIsStaged()
+{
+    TempDirectory temp;
+    const auto roots = createValidContent(temp.path());
+    writeFile(
+        roots.levels / "overworld.scr",
+        "@selector {\"id\":1,\"cell\":[1,0,1],"
+        "\"target\":{\"level\":0,\"screen\":0}}\n"
+        "@selector {\"id\":2,\"cell\":[2,0,1],\"target\":null}\n\n"
+        "@layer 0\n...\n\n@layer 1\nC  \n");
+
+    const std::filesystem::path output =
+        temp.path() / "unassigned-legacy-package/assets";
+    (void)sokoban::stageContent(roots, output, "1.2.3");
+    check(
+        std::filesystem::is_regular_file(output / "levels/overworld.scr"),
+        "legacy overworld with an unassigned selector is staged");
+}
+
 void testComposedOverworldIsValidatedAndStaged()
 {
     TempDirectory temp;
     const auto roots = createValidContent(temp.path());
     std::filesystem::remove(roots.levels / "overworld.scr");
     writeFile(
+        roots.levels / "level0/screen1.scr",
+        "@layer 0\n...\n\n@layer 1\n.CE\n");
+    writeFile(
+        roots.levels / "level0/metadata.json",
+        R"json({"format":1,"name":"First Light","screens":["Arrival","Repair Me"]})json");
+    writeFile(
         roots.levels / "overworld/screen1.scr",
         "@selector {\"id\":1,\"cell\":[1,0,1],"
-        "\"target\":{\"level\":0,\"screen\":0}}\n\n"
+        "\"target\":{\"level\":0,\"screen\":0}}\n"
+        "@selector {\"id\":2,\"cell\":[2,0,1],\"target\":null}\n\n"
         "@layer 0\n...\n\n@layer 1\nC  \n");
     writeFile(
         roots.levels / "overworld/layout.json",
@@ -339,6 +365,9 @@ void testComposedOverworldIsValidatedAndStaged()
     check(
         contains(inventory, "levels/overworld/screen1.scr"),
         "composed overworld screen included");
+    check(
+        contains(inventory, "levels/level0/screen1.scr"),
+        "uncovered puzzle screen does not block composed staging");
     check(
         !contains(inventory, "levels/overworld.scr"),
         "legacy overworld omitted when layout exists");
@@ -458,9 +487,11 @@ void testValidationFailures()
         roots.levels / "overworld.scr",
         "@selector {\"id\":1,\"cell\":[1,0,1],\"target\":null}\n\n"
         "@layer 0\n...\n\n@layer 1\nC  \n");
-    checkThrows(
-        [&] { (void)sokoban::collectContentInventory(roots); },
-        "unassigned overworld selector");
+    check(
+        contains(
+            sokoban::collectContentInventory(roots),
+            "levels/overworld.scr"),
+        "an overworld with only an unassigned selector remains stageable");
     writeFile(
         roots.levels / "overworld.scr",
         "@selector {\"id\":1,\"cell\":[1,0,1],"
@@ -486,9 +517,11 @@ void testValidationFailures()
     writeFile(
         roots.levels / "level0/screen1.scr",
         "@layer 0\n...\n\n@layer 1\n.CE\n");
-    checkThrows(
-        [&] { (void)sokoban::collectContentInventory(roots); },
-        "overworld missing selector for a playable screen");
+    check(
+        contains(
+            sokoban::collectContentInventory(roots),
+            "levels/level0/screen1.scr"),
+        "missing selector coverage remains repairable after startup");
     std::filesystem::remove(roots.levels / "level0/screen1.scr");
 
     std::filesystem::create_directories(roots.levels / "level2");
@@ -505,6 +538,7 @@ void testValidationFailures()
 int main()
 {
     testInventoryAndStaging();
+    testUnassignedLegacySelectorIsStaged();
     testComposedOverworldIsValidatedAndStaged();
     testBakedThumbnailsAreStaged();
     testMissingThumbnailsAreNotFatal();

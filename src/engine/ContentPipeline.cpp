@@ -508,16 +508,16 @@ private:
                     static_cast<int>(levelScreens.size()));
             }
             overworldMap->validatePuzzleSelectors(
-                screenCounts, OverworldValidationMode::Production);
+                screenCounts, OverworldValidationMode::Structural);
             return;
         }
 
-        std::set<std::pair<int, int>> selectorTargets;
         for (const Level::ScreenSelector& selector : overworld->selectors()) {
             if (!selector.target) {
-                throw std::runtime_error(
-                    "overworld selector " + std::to_string(selector.id) +
-                    " is unassigned: " + legacyOverworldPath.string());
+                // Project mutations preserve orphaned flags so they can be
+                // reassigned or removed in the editor after the game starts.
+                // They do not count toward playable-screen coverage.
+                continue;
             }
             const auto level = screens.find(selector.target->level);
             if (level == screens.end() ||
@@ -528,20 +528,6 @@ private:
                     std::to_string(selector.target->level) + " screen " +
                     std::to_string(selector.target->screen) + ": " +
                     legacyOverworldPath.string());
-            }
-            selectorTargets.emplace(
-                selector.target->level,
-                selector.target->screen);
-        }
-        for (const auto& [level, levelScreens] : screens) {
-            for (int screen : levelScreens) {
-                if (!selectorTargets.contains({ level, screen })) {
-                    throw std::runtime_error(
-                        "overworld has no selector for level " +
-                        std::to_string(level) + " screen " +
-                        std::to_string(screen) + ": " +
-                        legacyOverworldPath.string());
-                }
             }
         }
     }
