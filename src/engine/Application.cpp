@@ -1430,9 +1430,15 @@ RenderFrameData Application::buildRenderFrame(
     const GameState projectedState = gameplaySession_.projectedState();
     const OverworldMap* draftOverworld =
         tools_->levelEditor.draftOverworldMap();
+    // A regular editor draft does not change the campaign location. Do not
+    // let an overworld underneath that draft contribute its camera,
+    // visibility mask, or splat regions to the draft frame.
+    const bool renderCampaignOverworld =
+        !tools_->levelEditor.playingDraft() &&
+        campaign_.inOverworld() && overworldMap_;
     const OverworldMap* renderedOverworld = draftOverworld
         ? draftOverworld
-        : (campaign_.inOverworld() && overworldMap_
+        : (renderCampaignOverworld
               ? &*overworldMap_
               : nullptr);
     std::optional<OverworldView> overworldView;
