@@ -1,17 +1,40 @@
-@water 0
+@water 1
 
 @layer 0
-..... .....
-..... .   .
-..... . . .
-..... . . .
-....... ...
-           
+DDDDDDDDDDDDDDDDD
+DDDDDDDDDDDDDDDDD
+ DDDDDDDDDDDDDDD 
+ DDDDDDDDDDDDDDD 
+ DD     D     DD 
+ DD     D DDD DD 
+ DD     D D D DD 
+ DD       D D DD 
+ DD       D   DD 
+ DDDDDDDDDDDDDDD 
+  DDDDDDDDDDDDD  
 
 @layer 1
-      >>>>v
-      ^   v
-  E   ^ P v
-    C ^ ^ v
-     R^ ^<<
-           
+                 
+                 
+                 
+                 
+   ..... .....   
+   ..... .   .   
+   ..... . . .   
+   ..... . . .   
+   ....... ...   
+                 
+                 
+
+@layer 2
+                 
+                 
+                 
+                 
+         >>>>v   
+         ^   v   
+     E   ^ P v   
+       C ^ ^ v   
+        R^ ^<<   
+                 
+                 
