@@ -284,6 +284,10 @@ struct RenderFrameData {
         bool showGrid = true;
         bool isEditorPreview = false;
         bool affectsCameraFit = true;
+        // Identifies the actor an in-world UI prompt should follow. This is
+        // deliberately presentation data: overlays must anchor to the same
+        // prepared tile that is rendered, not to a live gameplay cell.
+        bool isPrimaryPlayer = false;
         RenderModel model = cubeModel;
         RenderAnimation animation = noAnimation;
         RenderAnimation animationFallback = noAnimation;

@@ -1279,6 +1279,7 @@ void appendGameplayEntities(
             .height = 1.0f,
             .showGrid = false,
             .affectsCameraFit = false,
+            .isPrimaryPlayer = playerIndex == 0,
             .model = input.manifest.playerModel(),
             .animation = animation,
             .animationFallback = fallback,

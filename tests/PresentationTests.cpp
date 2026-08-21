@@ -593,6 +593,10 @@ void testGameplayFrameUsesSettingsAndPresentation()
     CHECK(frame.levelWidth == 3);
     CHECK(frame.levelHeight == 1);
     CHECK(frame.levelDepth == 2);
+    CHECK(near(frame.playerPosition.x,
+        presentation.players().front().motion.renderPosition.x));
+    CHECK(near(frame.playerPosition.y,
+        presentation.players().front().motion.renderPosition.y));
     CHECK(near(frame.lighting.sun.color.x, 0.1f));
     CHECK(near(frame.gridOverlay.width, 4.0f));
 
@@ -611,6 +615,12 @@ void testGameplayFrameUsesSettingsAndPresentation()
     CHECK(player != nullptr);
     CHECK(conveyor != nullptr);
     CHECK(rock != nullptr);
+    CHECK(player->isPrimaryPlayer);
+    CHECK(std::ranges::count_if(
+        frame.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.isPrimaryPlayer;
+        }) == 1);
     CHECK(near(player->size.x, 2.0f));
     CHECK(near(player->position.x, -0.5f));
     CHECK(player->animation == testManifest().playerIdleAnimation());

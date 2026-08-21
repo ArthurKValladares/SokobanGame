@@ -766,6 +766,77 @@ std::optional<Vec2> VulkanRenderer::projectToPixels(
     };
 }
 
+std::optional<UiRect> VulkanRenderer::primaryPlayerBoundsToPixels(
+    const PreparedFrame& frame) const
+{
+    const PreparedFrameScratch& prepared = resolvePreparedFrame(frame);
+    if (prepared.frameData.viewMode != RenderViewMode::Isometric3D) {
+        return std::nullopt;
+    }
+    const VkExtent2D outputExtent = activeResources_.swapchain->extent();
+    if (outputExtent.width == 0 || outputExtent.height == 0) {
+        return std::nullopt;
+    }
+
+    const auto player = std::ranges::find_if(
+        prepared.frameData.tiles,
+        [](const RenderFrameData::Tile& tile) {
+            return tile.isPrimaryPlayer;
+        });
+    if (player == prepared.frameData.tiles.end()) {
+        return std::nullopt;
+    }
+
+    const ModelTransformPoints transform =
+        IsoScenePreparer::modelTransformPoints(*player);
+    constexpr std::array<Vec3, 8> localCorners {
+        Vec3 { 0.0f, 0.0f, 0.0f },
+        Vec3 { 1.0f, 0.0f, 0.0f },
+        Vec3 { 0.0f, 1.0f, 0.0f },
+        Vec3 { 1.0f, 1.0f, 0.0f },
+        Vec3 { 0.0f, 0.0f, 1.0f },
+        Vec3 { 1.0f, 0.0f, 1.0f },
+        Vec3 { 0.0f, 1.0f, 1.0f },
+        Vec3 { 1.0f, 1.0f, 1.0f },
+    };
+    Vec2 minimum {
+        std::numeric_limits<float>::max(),
+        std::numeric_limits<float>::max(),
+    };
+    Vec2 maximum {
+        std::numeric_limits<float>::lowest(),
+        std::numeric_limits<float>::lowest(),
+    };
+    for (const Vec3 localCorner : localCorners) {
+        const Vec3 clip = IsoScenePreparer::projectIsoPoint(
+            prepared.scene.isoLayout,
+            prepared.scene.renderExtent,
+            transformedModelPoint(transform, localCorner));
+        const Vec2 normalized {
+            (clip.x + 1.0f) * 0.5f,
+            (1.0f - clip.y) * 0.5f,
+        };
+        // SelectorPrompt is part of UiDrawData, which is composited into the
+        // game image before that image is displayed in the Debug viewport.
+        // Its coordinates therefore belong to the game UI's full output
+        // extent. Mapping them to gameViewportDisplay_ here would apply the
+        // viewport translation and scale twice and make the prompt drift as
+        // the player moves across the board.
+        const Vec2 pixel {
+            normalized.x * static_cast<float>(outputExtent.width),
+            normalized.y * static_cast<float>(outputExtent.height),
+        };
+        minimum.x = std::min(minimum.x, pixel.x);
+        minimum.y = std::min(minimum.y, pixel.y);
+        maximum.x = std::max(maximum.x, pixel.x);
+        maximum.y = std::max(maximum.y, pixel.y);
+    }
+    return UiRect {
+        .position = minimum,
+        .size = { maximum.x - minimum.x, maximum.y - minimum.y },
+    };
+}
+
 void VulkanRenderer::waitIdle() const
 {
     deviceContext_.waitIdle();

@@ -77,6 +77,7 @@ private:
     void solveCurrentScreenForDebug();
     void handlePuzzleCompleted(const CampaignSession::PuzzleCompleted& completed);
     void tryEnterSelector();
+    void drawSelectorPrompt(const VulkanRenderer::PreparedFrame* frame);
     void checkpointCurrentScreen(bool immediateSave);
     void applySettingsEffects(const SettingsEffects& effects);
     void persistProfile(bool immediate);

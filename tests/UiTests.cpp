@@ -1,5 +1,6 @@
 #include "engine/ui/FontAtlas.hpp"
 #include "engine/ui/OptionsMenu.hpp"
+#include "engine/ui/SelectorPrompt.hpp"
 #include "engine/ui/Ui.hpp"
 #include "engine/ui/UiConfig.hpp"
 #include "engine/ui/UiControls.hpp"
@@ -406,6 +407,40 @@ void drawRects(sokoban::UiContext& ui, std::size_t count)
     ui.endFrame();
 }
 
+void testSelectorPromptUsesCurrentBindingAndOnlyDrawsAKeyAndArrow()
+{
+    sokoban::InputBindings bindings = sokoban::defaultInputBindings();
+    CHECK(sokoban::SelectorPrompt::bindingLabel(
+        bindings, sokoban::BindingDeviceClass::Keyboard) == "Space");
+    CHECK(sokoban::SelectorPrompt::bindingLabel(
+        bindings, sokoban::BindingDeviceClass::Gamepad) == "A");
+
+    sokoban::assignBinding(
+        bindings,
+        sokoban::InputAction::MenuConfirm,
+        sokoban::KeyboardBinding { "X" });
+    CHECK(sokoban::SelectorPrompt::bindingLabel(
+        bindings, sokoban::BindingDeviceClass::Keyboard) == "X");
+
+    const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
+    sokoban::UiContext ui(font);
+    ui.beginFrame({ 400.0f, 240.0f }, {}, false, false);
+    sokoban::SelectorPrompt::draw(ui, { 200.0f, 160.0f }, "X");
+    ui.endFrame();
+
+    const auto& commands = ui.drawData().commands;
+    CHECK(std::ranges::count_if(commands, [](const auto& command) {
+        return command.kind == sokoban::UiDrawKind::FontGlyph;
+    }) == 1);
+    CHECK(std::ranges::count_if(commands, [](const auto& command) {
+        return command.kind == sokoban::UiDrawKind::Solid;
+    }) == 8);
+    CHECK(std::ranges::any_of(commands, [](const auto& command) {
+        return command.kind == sokoban::UiDrawKind::Solid &&
+            command.rect.position.y + command.rect.size.y == 160.0f;
+    }));
+}
+
 #if SOKOBAN_ENABLE_DEBUG_UI
 void testDebugEditorControlBindings()
 {
@@ -670,6 +705,7 @@ int main()
     testFontAtlasAndText();
     testUiFrameArenaCommandBudget();
     testReusableControls();
+    testSelectorPromptUsesCurrentBindingAndOnlyDrawsAKeyAndArrow();
     testLayoutTree();
     testOptionsNavigationAndSettings();
     testControlsRemapping();

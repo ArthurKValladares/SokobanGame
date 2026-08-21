@@ -135,6 +135,10 @@ public:
     [[nodiscard]] std::optional<Vec2> projectToPixels(
         const PreparedFrame& frame,
         Vec3 worldPoint) const;
+    // Pixel bounds of the primary player tile as it appears in this prepared
+    // frame, including its presentation position, scale and current camera.
+    [[nodiscard]] std::optional<UiRect> primaryPlayerBoundsToPixels(
+        const PreparedFrame& frame) const;
     void waitIdle() const;
     [[nodiscard]] AntiAliasingMode antiAliasingMode() const;
     [[nodiscard]] VkSampleCountFlagBits activeSampleCount() const;

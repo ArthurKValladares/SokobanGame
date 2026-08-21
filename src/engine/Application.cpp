@@ -10,6 +10,7 @@
 #include "engine/Rules.hpp"
 #include "engine/RuntimeContent.hpp"
 #include "engine/UserSettingsConfig.hpp"
+#include "engine/ui/SelectorPrompt.hpp"
 #include "engine/ui/UiConfig.hpp"
 
 #include <SDL3/SDL.h>
@@ -404,6 +405,8 @@ void Application::run()
             renderer_.setGameViewportDisplay(std::nullopt);
         }
 #endif
+        drawSelectorPrompt(
+            preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
         tools_->drawDraftExitConfirmation();
         tools_->drawBrushPreview(
             renderer_,
@@ -691,35 +694,10 @@ void Application::solveCurrentScreenForDebug()
 }
 
 void Application::handlePuzzleCompleted(
-    const CampaignSession::PuzzleCompleted& completed)
+    const CampaignSession::PuzzleCompleted&)
 {
-    const LevelCompleteStats stats {
-        .level = completed.location.level,
-        .moves = completed.moves,
-        .timeSeconds = completed.timeSeconds,
-        .previousBestMoves = completed.previousBestMoves,
-        .previousBestTimeSeconds = completed.previousBestTimeSeconds,
-        .newBestMoves = completed.newBestMoves,
-        .newBestTime = completed.newBestTime,
-        // Continue now means returning to the saved overworld position.
-        .hasNextLevel = true,
-    };
     persistProfile(true);
-    if (completed.gameCompleted) {
-        std::vector<GameCompleteLevelStats> levels;
-        for (LevelLocation target : campaign_.overworldTargets()) {
-            const PlayerProfile::ScreenProgress* screenProgress =
-                playerProfile_.progressForScreen(target);
-            levels.push_back({
-                .bestMoves = screenProgress ? screenProgress->bestMoves : std::nullopt,
-                .bestTimeSeconds =
-                    screenProgress ? screenProgress->bestTimeSeconds : std::nullopt,
-            });
-        }
-        levelCompleteOverlay_.openGameComplete(std::move(levels));
-        return;
-    }
-    levelCompleteOverlay_.open(stats);
+    loadCurrentScreen();
 }
 
 void Application::tryEnterSelector()
@@ -757,6 +735,53 @@ void Application::tryEnterSelector()
     checkpointCurrentScreen(true);
     if (campaign_.startPuzzle(playerProfile_, *sharedSelector->target)) {
         loadCurrentScreen();
+    }
+}
+
+void Application::drawSelectorPrompt(
+    const VulkanRenderer::PreparedFrame* frame)
+{
+    if (!frame || !campaign_.gameLoaded() || !campaign_.inOverworld() ||
+        shellMenuOpen() || tools_->levelEditor.editingDocument() ||
+        gameplaySession_.moving() ||
+        rules::hasPendingMotion(level_, gameplaySession_.state())) {
+        return;
+    }
+
+    const GameState& state = gameplaySession_.state();
+    const Level::ScreenSelector* selector =
+        CampaignSession::selectorForInteraction(level_, state);
+    if (!selector || !selector->target ||
+        !campaign_.screenExists(
+            selector->target->level, selector->target->screen) ||
+        campaign_.selectorViewState(
+            playerProfile_, *selector->target).status ==
+            ScreenSelectorStatus::Unavailable ||
+        presentation_.players().empty()) {
+        return;
+    }
+
+    const std::optional<UiRect> playerBounds =
+        renderer_.primaryPlayerBoundsToPixels(*frame);
+    std::optional<Vec2> arrowTip;
+    if (playerBounds) {
+        constexpr float gapAbovePlayer = 10.0f;
+        constexpr float minimumArrowTipY = 56.0f;
+        arrowTip = Vec2 {
+            playerBounds->position.x + playerBounds->size.x * 0.5f,
+            std::max(
+                playerBounds->position.y - gapAbovePlayer,
+                minimumArrowTipY),
+        };
+    }
+    const BindingDeviceClass device =
+        input_.activeDevice() == ActiveInputDevice::Gamepad
+        ? BindingDeviceClass::Gamepad
+        : BindingDeviceClass::Keyboard;
+    const std::optional<std::string> binding =
+        SelectorPrompt::bindingLabel(input_.bindings(), device);
+    if (arrowTip && binding) {
+        SelectorPrompt::draw(ui_, *arrowTip, *binding);
     }
 }
 
