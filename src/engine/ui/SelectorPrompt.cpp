@@ -155,68 +155,35 @@ UiRect ScreenPreviewOverlay::previewRect(Vec2 viewport)
 void ScreenPreviewOverlay::draw(UiContext& ui, Vec2 viewport)
 {
     const UiRect inset = previewRect(viewport);
-    constexpr Vec4 veil { 0.01f, 0.015f, 0.018f, 0.16f };
-    ui.rect({ {}, { viewport.x, inset.position.y } }, veil);
-    ui.rect({
-        { 0.0f, inset.position.y + inset.size.y },
-        { viewport.x, viewport.y - inset.position.y - inset.size.y },
-    }, veil);
-    ui.rect({
-        { 0.0f, inset.position.y }, { inset.position.x, inset.size.y },
-    }, veil);
-    ui.rect({
-        { inset.position.x + inset.size.x, inset.position.y },
-        { viewport.x - inset.position.x - inset.size.x, inset.size.y },
-    }, veil);
 
-    constexpr int fadeSteps = 8;
-    constexpr float step = 3.0f;
-    for (int index = 0; index < fadeSteps; ++index) {
-        const float distance = static_cast<float>(fadeSteps - index) * step;
-        const float alpha = 0.012f + 0.010f * static_cast<float>(index);
-        const Vec4 shadow { 0.005f, 0.008f, 0.010f, alpha };
-        const UiRect outer {
-            { inset.position.x - distance, inset.position.y - distance },
-            { inset.size.x + distance * 2.0f, inset.size.y + distance * 2.0f },
-        };
-        ui.rect({ outer.position, { outer.size.x, step } }, shadow);
-        ui.rect({
-            { outer.position.x, outer.position.y + outer.size.y - step },
-            { outer.size.x, step },
-        }, shadow);
-        ui.rect({ outer.position, { step, outer.size.y } }, shadow);
-        ui.rect({
-            { outer.position.x + outer.size.x - step, outer.position.y },
-            { step, outer.size.y },
-        }, shadow);
-    }
-
-    // Fade a few pixels into the preview as well, so the composited scene
-    // does not end on a single hard pixel row.
-    for (int index = 0; index < fadeSteps; ++index) {
-        const float offset = static_cast<float>(index) * step;
-        const float alpha = 0.075f *
-            (1.0f - static_cast<float>(index) / fadeSteps);
-        const Vec4 shade { 0.01f, 0.015f, 0.018f, alpha };
-        ui.rect({
-            { inset.position.x + offset, inset.position.y + offset },
-            { inset.size.x - offset * 2.0f, step },
-        }, shade);
-        ui.rect({
-            { inset.position.x + offset,
-              inset.position.y + inset.size.y - offset - step },
-            { inset.size.x - offset * 2.0f, step },
-        }, shade);
-        ui.rect({
-            { inset.position.x + offset, inset.position.y + offset },
-            { step, inset.size.y - offset * 2.0f },
-        }, shade);
-        ui.rect({
-            { inset.position.x + inset.size.x - offset - step,
-              inset.position.y + offset },
-            { step, inset.size.y - offset * 2.0f },
-        }, shade);
-    }
+    // Composite the untouched main scene over the entire preview through one
+    // continuous rounded-rectangle mask. The shader keeps the preview fully
+    // transparent at the rounded perimeter, then smoothly reveals it inward.
+    // Scale the feather with the window so larger previews do not regain a
+    // comparatively narrow, harsh edge.
+    const float fadeWidth = std::clamp(
+        std::min(viewport.x, viewport.y) * 0.08f,
+        64.0f,
+        104.0f);
+    // Keep the radius larger than the feather. Otherwise the inward opacity
+    // contours run out of curvature before the fade finishes and the fully
+    // visible preview regains a subtly square corner.
+    const float cornerRadius = fadeWidth * 1.5f;
+    const UiRect sceneUv {
+        {
+            inset.position.x / viewport.x,
+            inset.position.y / viewport.y,
+        },
+        {
+            inset.size.x / viewport.x,
+            inset.size.y / viewport.y,
+        },
+    };
+    ui.sceneImage(
+        inset,
+        sceneUv,
+        { 1.0f, 1.0f, 1.0f, 1.0f },
+        { inset.size.x, inset.size.y, fadeWidth, cornerRadius });
 }
 
 } // namespace sokoban

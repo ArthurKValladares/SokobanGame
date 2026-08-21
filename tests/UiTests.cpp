@@ -464,13 +464,23 @@ void testScreenPreviewOverlayUsesCenteredSeventyFivePercentInset()
     ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
     sokoban::ScreenPreviewOverlay::draw(ui, { 1280.0f, 720.0f });
     ui.endFrame();
-    CHECK(ui.drawData().commands.size() > 50);
-    CHECK(std::ranges::all_of(
-        ui.drawData().commands,
-        [](const sokoban::UiDrawCommand& command) {
-            return command.kind == sokoban::UiDrawKind::Solid &&
-                command.color.w > 0.0f;
-        }));
+    CHECK(ui.drawData().commands.size() == 1);
+    const sokoban::UiDrawCommand& command =
+        ui.drawData().commands.front();
+    CHECK(command.kind == sokoban::UiDrawKind::SceneImage);
+    CHECK(command.rect.position.x == inset.position.x);
+    CHECK(command.rect.position.y == inset.position.y);
+    CHECK(command.rect.size.x == inset.size.x);
+    CHECK(command.rect.size.y == inset.size.y);
+    CHECK(command.color.w == 1.0f);
+    CHECK(command.effectOptions.x == inset.size.x);
+    CHECK(command.effectOptions.y == inset.size.y);
+    CHECK(command.effectOptions.z == 64.0f);
+    CHECK(command.effectOptions.w == 96.0f);
+    CHECK(command.uvRect.position.x >= 0.0f);
+    CHECK(command.uvRect.position.y >= 0.0f);
+    CHECK(command.uvRect.position.x + command.uvRect.size.x <= 1.0f);
+    CHECK(command.uvRect.position.y + command.uvRect.size.y <= 1.0f);
 }
 
 #if SOKOBAN_ENABLE_DEBUG_UI

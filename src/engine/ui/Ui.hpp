@@ -22,6 +22,7 @@ enum class UiDrawKind {
     Solid,
     FontGlyph,
     Image,
+    SceneImage,
 };
 
 struct UiDrawCommand {
@@ -29,6 +30,7 @@ struct UiDrawCommand {
     UiRect rect {};
     UiRect uvRect {};
     Vec4 color {};
+    Vec4 effectOptions {};
 };
 
 struct UiDrawData {
@@ -81,6 +83,13 @@ public:
         UiRect rect,
         UiRect uvRect = { {}, { 1.0f, 1.0f } },
         Vec4 color = { 1.0f, 1.0f, 1.0f, 1.0f });
+    // Samples the renderer's preserved main-scene image. Used when UI needs
+    // to composite the live world back over a later scene pass.
+    void sceneImage(
+        UiRect rect,
+        UiRect uvRect = { {}, { 1.0f, 1.0f } },
+        Vec4 color = { 1.0f, 1.0f, 1.0f, 1.0f },
+        Vec4 effectOptions = {});
     void panel(UiRect rect);
     void divider(UiRect rect);
     void text(Vec2 position, std::string_view text, Vec4 color, float size = 24.0f);

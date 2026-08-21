@@ -170,6 +170,10 @@ public:
             },
             stats_);
         if (previewFrameData && previewScene) {
+            // Preserve the completed main view before the preview replaces
+            // the inset. ScreenPreviewOverlay samples this copy to feather
+            // the main view back over the preview at its perimeter.
+            swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
             recordPreviewRendering(
                 commandBuffer,
                 swapchain_.renderColorView(),
@@ -359,7 +363,9 @@ private:
         if (!scene.hasTranslucentContent) {
             return;
         }
-        swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
+        // Keep sceneColor as the untouched main view for the opacity feather.
+        // Preview translucency can also sample it naturally as the world
+        // visible behind the portal-like inset.
         recordScenePass(
             commandBuffer,
             colorView,
@@ -1680,10 +1686,9 @@ private:
         ++stats_.drawCalls;
         stats_.vertices += 6;
         stats_.triangles += 2;
-        const float materialMode =
-            command.kind == UiDrawKind::FontGlyph
+        const float materialMode = command.kind == UiDrawKind::FontGlyph
             ? 3.0f
-            : 4.0f;
+            : (command.kind == UiDrawKind::SceneImage ? 6.0f : 4.0f);
         const TilePushConstants constants {
             .vertices = {
                 Vec4 { left, top, 0.0f, 1.0f },
@@ -1692,6 +1697,7 @@ private:
                 Vec4 { left, bottom, 0.0f, 1.0f },
             },
             .color = command.color,
+            .shadowOptions = command.effectOptions,
             .materialOptions = {
                 0.0f,
                 command.uvRect.size.x,

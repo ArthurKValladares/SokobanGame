@@ -131,6 +131,47 @@ void main()
     if (materialMode == 3) {
         vec2 uv = pc.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
         materialColor.a *= texture(uiFont, uv).r;
+    } else if (materialMode == 6) {
+        vec2 uv = pc.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
+        materialColor *= texture(sceneColor, uv);
+
+        // Scene-image UI is the preserved main view composited over the
+        // preview. A signed-distance rounded rectangle makes the preview's
+        // outside edge genuinely transparent and gives corners one smooth,
+        // continuous curve instead of a stack of rectangular bands.
+        vec2 uvSpan = max(pc.materialOptions.yz, vec2(0.00001));
+        vec2 localPosition =
+            vec2(inFaceCoordU, inFaceCoordV) / uvSpan;
+        vec2 rectSize = max(pc.shadowOptions.xy, vec2(1.0));
+        float featherWidth = max(pc.shadowOptions.z, 0.001);
+        float cornerRadius = clamp(
+            pc.shadowOptions.w,
+            0.0,
+            min(rectSize.x, rectSize.y) * 0.5);
+        vec2 centeredPosition =
+            localPosition * rectSize - rectSize * 0.5;
+        vec2 distanceToCorner = abs(centeredPosition) -
+            (rectSize * 0.5 - vec2(cornerRadius));
+        float signedDistance =
+            length(max(distanceToCorner, vec2(0.0))) +
+            min(max(distanceToCorner.x, distanceToCorner.y), 0.0) -
+            cornerRadius;
+        float normalizedDistance = clamp(
+            -signedDistance / featherWidth,
+            0.0,
+            1.0);
+        float endpointSoftened = smoothstep(
+            0.0,
+            1.0,
+            normalizedDistance);
+        // A normalized logarithmic remap lifts the quiet first part of the
+        // Hermite curve and softens its abrupt-looking middle without losing
+        // the zero-slope endpoints that prevent visible seams.
+        const float logarithmicStrength = 2.0;
+        float previewOpacity = log(
+            1.0 + logarithmicStrength * endpointSoftened) /
+            log(1.0 + logarithmicStrength);
+        materialColor.a *= 1.0 - previewOpacity;
     } else if (materialMode == 4) {
         vec2 uv = pc.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
         materialColor *= texture(titleBackground, uv);
