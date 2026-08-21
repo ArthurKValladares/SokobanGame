@@ -148,11 +148,22 @@ Application::Application()
             settingsCoordinator_.userSettings().input,
             {
             .playDraft = [this](Level level) {
+                // A puzzle draft keeps the campaign wherever it currently is,
+                // so derive its render assets from the edited document rather
+                // than from the unrelated campaign location. Composed
+                // overworld drafts select maps through their per-screen
+                // regions instead.
+                const std::optional<LevelLocation> draftLocation =
+                    tools_->levelEditor.draftOverworldMap()
+                    ? std::nullopt
+                    : levelLocationFromScreenPath(
+                          tools_->levelEditor.loadedDocumentPath());
                 // Playing a draft leaves the document view; a half-finished
                 // paint session would otherwise keep painting on the level
                 // being played.
                 tools_->splatPainter.close();
-                (void)applyLevel(std::move(level));
+                (void)applyLevel(
+                    std::move(level), nullptr, draftLocation);
                 if (tools_->levelEditor.draftOverworldMap()) {
                     gameplaySession_.setActionAdmissionPolicy(
                         [this](const GameState& state) {
@@ -1508,9 +1519,15 @@ RenderFrameData Application::buildRenderFrame(
             : Vec2 {},
         .visibleCell = std::move(visibleOverworldCell),
         .groundSplatRegions = groundSplatRegions,
-        .levelLocation = campaign_.inOverworld() || draftOverworld
-            ? std::nullopt
-            : std::optional<LevelLocation> { campaign_.location() },
+        // Draft play does not move the campaign. Select the map belonging to
+        // the edited puzzle even when the campaign is in the overworld or on
+        // another screen, matching the editor preview above.
+        .levelLocation = tools_->levelEditor.playingDraft()
+            ? levelLocationFromScreenPath(
+                  tools_->levelEditor.loadedDocumentPath())
+            : campaign_.inOverworld()
+                ? std::nullopt
+                : std::optional<LevelLocation> { campaign_.location() },
         .selectorState = [this](LevelLocation target) {
             return campaign_.selectorViewState(playerProfile_, target);
         },
