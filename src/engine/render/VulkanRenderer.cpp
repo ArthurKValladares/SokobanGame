@@ -201,7 +201,8 @@ VulkanRenderer::~VulkanRenderer()
 }
 
 VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
-    RenderFrameData frameData)
+    RenderFrameData frameData,
+    std::optional<RenderFrameData> previewFrameData)
 {
     const VkExtent2D extent =
         activeResources_.swapchain->renderExtent();
@@ -216,6 +217,18 @@ VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
             static_cast<float>(extent.height),
         },
         scratch->scene);
+    scratch->previewFrameData = std::move(previewFrameData);
+    scratch->previewScene.reset();
+    if (scratch->previewFrameData) {
+        scratch->previewScene.emplace();
+        scenePreparer_.prepare(
+            *scratch->previewFrameData,
+            {
+                static_cast<float>(extent.width) * 0.75f,
+                static_cast<float>(extent.height) * 0.75f,
+            },
+            *scratch->previewScene);
+    }
 
     PreparedFrame frame;
     frame.levelWidth = scratch->frameData.levelWidth;
@@ -247,6 +260,12 @@ void VulkanRenderer::drawFrame(
         resolvePreparedFrame(preparedFrame);
     const RenderFrameData& frameData = prepared.frameData;
     renderAssetRequirementsForFrame(frameData, frameAssetRequirements_);
+    if (prepared.previewFrameData) {
+        RenderAssetRequirements previewRequirements;
+        renderAssetRequirementsForFrame(
+            *prepared.previewFrameData, previewRequirements);
+        frameAssetRequirements_.merge(previewRequirements);
+    }
     ensureAssets(frameAssetRequirements_);
 
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -276,6 +295,10 @@ void VulkanRenderer::drawFrame(
         descriptorSync_.markUpdated(currentFrame_);
     }
     modelResources_.updateAnimations(frameData, currentFrame_);
+    if (prepared.previewFrameData) {
+        modelResources_.updateAnimations(
+            *prepared.previewFrameData, currentFrame_);
+    }
 
     uint32_t imageIndex = 0;
     VkResult acquired = activeResources_.swapchain->acquire(
@@ -335,6 +358,10 @@ void VulkanRenderer::drawFrame(
         imageIndex,
         frameData,
         prepared.scene,
+        prepared.previewFrameData
+            ? &*prepared.previewFrameData
+            : nullptr,
+        prepared.previewScene ? &*prepared.previewScene : nullptr,
         uiDrawData);
 
     VkSemaphoreSubmitInfo waitSemaphore {

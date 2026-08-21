@@ -77,7 +77,11 @@ private:
     void solveCurrentScreenForDebug();
     void handlePuzzleCompleted(const CampaignSession::PuzzleCompleted& completed);
     void tryEnterSelector();
+    [[nodiscard]] bool updateScreenPreview(bool requested, float dt);
+    [[nodiscard]] std::optional<RenderFrameData>
+        buildScreenPreviewRenderFrame() const;
     void drawSelectorPrompt(const VulkanRenderer::PreparedFrame* frame);
+    void drawScreenPreviewOverlay(Vec2 viewport);
     void checkpointCurrentScreen(bool immediateSave);
     void applySettingsEffects(const SettingsEffects& effects);
     void persistProfile(bool immediate);
@@ -125,6 +129,10 @@ private:
     Level level_;
     std::optional<OverworldMap> overworldMap_;
     GameplaySession gameplaySession_;
+    std::optional<LevelLocation> screenPreviewTarget_;
+    std::optional<Level> screenPreviewLevel_;
+    GameplaySession screenPreviewSession_;
+    GameplayPresentation screenPreviewPresentation_;
     CampaignSession campaign_;
     std::vector<LevelMetadata> levelMetadata_;
     InputState input_;
@@ -136,6 +144,7 @@ private:
     std::unique_ptr<ApplicationTools> tools_;
     FrameArena renderFrameArena_;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;
+    bool screenPreviewActive_ = false;
     bool running_ = true;
 };
 

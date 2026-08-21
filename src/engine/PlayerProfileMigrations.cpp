@@ -663,6 +663,22 @@ void migrate19to20(Json& root)
     progress["overworldCheckpoint"] = nullptr;
 }
 
+void migrate20to21(Json& root)
+{
+    if (!root.contains("settings") || !root["settings"].is_object()) {
+        return;
+    }
+    Json& input = root["settings"]["input"];
+    if (!input.is_object() || input.contains("previewScreen")) {
+        return;
+    }
+    const OrderedJson defaults =
+        playerProfileMigrationSupport::inputBindingsToJson(
+            defaultInputBindings());
+    input["previewScreen"] =
+        Json::parse(defaults.at("previewScreen").dump());
+}
+
 } // namespace
 
 void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
@@ -688,6 +704,7 @@ void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
         migrate17to18,
         migrate18to19,
         migrate19to20,
+        migrate20to21,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

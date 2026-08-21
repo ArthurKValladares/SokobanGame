@@ -388,7 +388,7 @@ void testControlsRemapping()
     menu.back();
 
     // Reset restores the defaults.
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < 9; ++i) {
         draw({ .down = true });
     }
     const auto reset = draw({ .confirm = true });
@@ -407,38 +407,70 @@ void drawRects(sokoban::UiContext& ui, std::size_t count)
     ui.endFrame();
 }
 
-void testSelectorPromptUsesCurrentBindingAndOnlyDrawsAKeyAndArrow()
+void testSelectorPromptShowsEnterAndPreviewBindings()
 {
     sokoban::InputBindings bindings = sokoban::defaultInputBindings();
     CHECK(sokoban::SelectorPrompt::bindingLabel(
-        bindings, sokoban::BindingDeviceClass::Keyboard) == "Space");
+        bindings, sokoban::InputAction::MenuConfirm,
+        sokoban::BindingDeviceClass::Keyboard) == "Space");
     CHECK(sokoban::SelectorPrompt::bindingLabel(
-        bindings, sokoban::BindingDeviceClass::Gamepad) == "A");
+        bindings, sokoban::InputAction::MenuConfirm,
+        sokoban::BindingDeviceClass::Gamepad) == "A");
+    CHECK(sokoban::SelectorPrompt::bindingLabel(
+        bindings, sokoban::InputAction::PreviewScreen,
+        sokoban::BindingDeviceClass::Keyboard) == "V");
+    CHECK(sokoban::SelectorPrompt::bindingLabel(
+        bindings, sokoban::InputAction::PreviewScreen,
+        sokoban::BindingDeviceClass::Gamepad) == "RB");
 
     sokoban::assignBinding(
         bindings,
         sokoban::InputAction::MenuConfirm,
         sokoban::KeyboardBinding { "X" });
     CHECK(sokoban::SelectorPrompt::bindingLabel(
-        bindings, sokoban::BindingDeviceClass::Keyboard) == "X");
+        bindings, sokoban::InputAction::MenuConfirm,
+        sokoban::BindingDeviceClass::Keyboard) == "X");
 
     const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
     sokoban::UiContext ui(font);
     ui.beginFrame({ 400.0f, 240.0f }, {}, false, false);
-    sokoban::SelectorPrompt::draw(ui, { 200.0f, 160.0f }, "X");
+    sokoban::SelectorPrompt::draw(ui, { 200.0f, 160.0f }, "X", "V");
     ui.endFrame();
 
     const auto& commands = ui.drawData().commands;
     CHECK(std::ranges::count_if(commands, [](const auto& command) {
         return command.kind == sokoban::UiDrawKind::FontGlyph;
-    }) == 1);
+    }) == 2);
     CHECK(std::ranges::count_if(commands, [](const auto& command) {
         return command.kind == sokoban::UiDrawKind::Solid;
-    }) == 8);
+    }) >= 16);
     CHECK(std::ranges::any_of(commands, [](const auto& command) {
         return command.kind == sokoban::UiDrawKind::Solid &&
             command.rect.position.y + command.rect.size.y == 160.0f;
     }));
+}
+
+void testScreenPreviewOverlayUsesCenteredSeventyFivePercentInset()
+{
+    const sokoban::UiRect inset =
+        sokoban::ScreenPreviewOverlay::previewRect({ 1280.0f, 720.0f });
+    CHECK(inset.position.x == 160.0f);
+    CHECK(inset.position.y == 90.0f);
+    CHECK(inset.size.x == 960.0f);
+    CHECK(inset.size.y == 540.0f);
+
+    const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
+    sokoban::UiContext ui(font);
+    ui.beginFrame({ 1280.0f, 720.0f }, {}, false, false);
+    sokoban::ScreenPreviewOverlay::draw(ui, { 1280.0f, 720.0f });
+    ui.endFrame();
+    CHECK(ui.drawData().commands.size() > 50);
+    CHECK(std::ranges::all_of(
+        ui.drawData().commands,
+        [](const sokoban::UiDrawCommand& command) {
+            return command.kind == sokoban::UiDrawKind::Solid &&
+                command.color.w > 0.0f;
+        }));
 }
 
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -705,7 +737,8 @@ int main()
     testFontAtlasAndText();
     testUiFrameArenaCommandBudget();
     testReusableControls();
-    testSelectorPromptUsesCurrentBindingAndOnlyDrawsAKeyAndArrow();
+    testSelectorPromptShowsEnterAndPreviewBindings();
+    testScreenPreviewOverlayUsesCenteredSeventyFivePercentInset();
     testLayoutTree();
     testOptionsNavigationAndSettings();
     testControlsRemapping();

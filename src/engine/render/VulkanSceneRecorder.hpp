@@ -54,6 +54,8 @@ public:
         uint32_t imageIndex,
         const RenderFrameData& frameData,
         const PreparedRenderScene& scene,
+        const RenderFrameData* previewFrameData,
+        const PreparedRenderScene* previewScene,
         const UiDrawData& uiDrawData) const;
 };
 

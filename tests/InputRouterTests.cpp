@@ -80,6 +80,7 @@ void testModalFrameRouting()
     pressKey(router, input, SDL_SCANCODE_W);
     pressKey(router, input, SDL_SCANCODE_F);
     pressKey(router, input, SDL_SCANCODE_T);
+    pressKey(router, input, SDL_SCANCODE_V);
     pressKey(router, input, SDL_SCANCODE_RETURN);
 
     sokoban::InputRouter::Frame frame = router.routeFrame(
@@ -91,6 +92,7 @@ void testModalFrameRouting()
     CHECK(!frame.gameplay.up.pressed);
     CHECK(!frame.gameplay.interactPressed);
     CHECK(!frame.showTopDownView);
+    CHECK(!frame.previewScreen);
 
     frame = router.routeFrame(input, { .titleOpen = true });
     CHECK(frame.title.up);
@@ -99,6 +101,7 @@ void testModalFrameRouting()
     CHECK(!frame.gameplay.up.pressed);
     CHECK(!frame.gameplay.interactPressed);
     CHECK(!frame.showTopDownView);
+    CHECK(!frame.previewScreen);
 
     frame = router.routeFrame(input, {});
     CHECK(frame.gameplay.up.pressed);
@@ -106,6 +109,7 @@ void testModalFrameRouting()
     CHECK(frame.gameplay.mirrorPressed);
     CHECK(frame.gameplay.interactPressed);
     CHECK(frame.showTopDownView);
+    CHECK(frame.previewScreen);
 }
 
 void testBackPriority()

@@ -46,6 +46,7 @@ enum class OptionsMenuRowId {
     Restart,
     ShowTopDownView,
     ConfirmInteract,
+    PreviewScreen,
     EditorControls,
     EditorReplaceTile,
     EditorDeleteTile,

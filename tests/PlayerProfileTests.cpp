@@ -1017,6 +1017,23 @@ void testFormat18AddsEditorBindings()
         "format 18 receives the editor move default");
 }
 
+void testFormat20AddsScreenPreviewBinding()
+{
+    nlohmann::json format20 = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    format20["format"] = 20;
+    format20["settings"]["input"].erase("previewScreen");
+
+    const sokoban::DecodedPlayerProfile migrated =
+        sokoban::decodePlayerProfile(format20.dump());
+    check(migrated.sourceFormat == 20, "format 20 source is reported");
+    check(sokoban::actionBindingsDisplay(
+              migrated.profile.settings.input,
+              sokoban::InputAction::PreviewScreen) ==
+            "V / Pad rightshoulder",
+        "format 20 receives the screen preview defaults");
+}
+
 int main()
 {
     try {
@@ -1027,6 +1044,7 @@ int main()
     testNormalizationAndMigration();
     testScreenProgressOverworldCheckpointAndFormat17Migration();
         testFormat18AddsEditorBindings();
+        testFormat20AddsScreenPreviewBinding();
         testStoreBackupsAndRecovery();
         testSaveSlotStems();
         testMigrationAndDoubleCorruption();

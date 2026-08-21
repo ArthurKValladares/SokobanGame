@@ -23,6 +23,7 @@ enum class InputAction {
     EditorReplaceTile,
     EditorDeleteTile,
     EditorMoveTile,
+    PreviewScreen,
     Count,
 };
 

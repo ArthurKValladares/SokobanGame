@@ -57,6 +57,8 @@ void testDefaultKeyboardBindings()
     CHECK(input.keyBoundToAction(
         SDL_SCANCODE_T, sokoban::InputAction::ShowTopDownView));
     CHECK(input.keyBoundToAction(
+        SDL_SCANCODE_V, sokoban::InputAction::PreviewScreen));
+    CHECK(input.keyBoundToAction(
         SDL_SCANCODE_R, sokoban::InputAction::EditorReplaceTile));
     CHECK(input.keyBoundToAction(
         SDL_SCANCODE_D, sokoban::InputAction::EditorDeleteTile));

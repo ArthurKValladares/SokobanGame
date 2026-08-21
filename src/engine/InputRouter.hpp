@@ -75,6 +75,7 @@ public:
     struct Frame {
         GameplayLoop::InputFrame gameplay;
         bool showTopDownView = false;
+        bool previewScreen = false;
         TitleScreenInput title;
         LevelCompleteInput overlay;
         OptionsMenuInput options;

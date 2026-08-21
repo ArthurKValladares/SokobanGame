@@ -78,6 +78,11 @@ constexpr std::array bindingRows {
         InputAction::MenuConfirm,
         "Confirm / Interact",
     },
+    BindingRow {
+        OptionsMenuRowId::PreviewScreen,
+        InputAction::PreviewScreen,
+        "Preview screen",
+    },
 };
 
 constexpr std::array editorBindingRows {
@@ -239,6 +244,7 @@ std::optional<OptionsAction> activateRow(
     case OptionsMenuRowId::Restart:
     case OptionsMenuRowId::ShowTopDownView:
     case OptionsMenuRowId::ConfirmInteract:
+    case OptionsMenuRowId::PreviewScreen:
     case OptionsMenuRowId::EditorReplaceTile:
     case OptionsMenuRowId::EditorDeleteTile:
     case OptionsMenuRowId::EditorMoveTile:
@@ -955,7 +961,7 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             rowLayout.primary = layout.tree.item(
                 layout.tree.root(),
                 state.page == OptionsMenuPage::Controls
-                    ? 42.0f
+                    ? 38.0f
                     : (compactGraphics ? 44.0f : 52.0f));
             break;
         }
@@ -966,7 +972,7 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
                 state.page == OptionsMenuPage::Main
                     ? 16.0f
                     : (state.page == OptionsMenuPage::Controls
-                            ? 6.0f
+                            ? 3.0f
                             : (compactGraphics ? 6.0f : 10.0f)));
         }
     }

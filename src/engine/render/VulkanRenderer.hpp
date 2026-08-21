@@ -76,7 +76,9 @@ public:
     VulkanRenderer(const VulkanRenderer&) = delete;
     VulkanRenderer& operator=(const VulkanRenderer&) = delete;
 
-    [[nodiscard]] PreparedFrame prepareFrame(RenderFrameData frameData);
+    [[nodiscard]] PreparedFrame prepareFrame(
+        RenderFrameData frameData,
+        std::optional<RenderFrameData> previewFrameData = std::nullopt);
     void drawFrame(
         const PreparedFrame& frame,
         const UiDrawData& uiDrawData,
@@ -175,6 +177,8 @@ private:
     struct PreparedFrameScratch {
         RenderFrameData frameData;
         PreparedRenderScene scene;
+        std::optional<RenderFrameData> previewFrameData;
+        std::optional<PreparedRenderScene> previewScene;
         uint64_t generation = 0;
     };
 

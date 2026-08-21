@@ -169,6 +169,10 @@ InputBindings defaultInputBindings()
     bindings.forAction(InputAction::EditorMoveTile) = {
         KeyboardBinding { "M" },
     };
+    bindings.forAction(InputAction::PreviewScreen) = {
+        KeyboardBinding { "V" },
+        GamepadButtonBinding { "rightshoulder" },
+    };
     return bindings;
 }
 
@@ -188,6 +192,7 @@ std::string_view inputActionName(InputAction action)
     case InputAction::EditorReplaceTile: return "editorReplaceTile";
     case InputAction::EditorDeleteTile: return "editorDeleteTile";
     case InputAction::EditorMoveTile: return "editorMoveTile";
+    case InputAction::PreviewScreen: return "previewScreen";
     case InputAction::Count: break;
     }
     throw std::invalid_argument("invalid input action");

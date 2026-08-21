@@ -83,6 +83,7 @@ Application::Application()
     presentationSettings_.applyTileScales(assetManifest_);
     presentationSettings_.normalize();
     presentation_.setAnimationCatalog(&animationCatalog_);
+    screenPreviewPresentation_.setAnimationCatalog(&animationCatalog_);
     // The world stays unloaded until the title's Continue/New Game, but its
     // assets warm up in the background so that first load doesn't block.
     openTitleScreen();
@@ -405,8 +406,12 @@ void Application::run()
             renderer_.setGameViewportDisplay(std::nullopt);
         }
 #endif
-        drawSelectorPrompt(
-            preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
+        if (screenPreviewActive_) {
+            drawScreenPreviewOverlay(pixelSize);
+        } else {
+            drawSelectorPrompt(
+                preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
+        }
         tools_->drawDraftExitConfirmation();
         tools_->drawBrushPreview(
             renderer_,
@@ -455,7 +460,8 @@ void Application::run()
         tools_->animationPreviewDebugUi.update(dt, renderer_);
         ui_.endFrame();
         preparedRenderFrame_ = renderer_.prepareFrame(
-            buildRenderFrame(routedInput.editor));
+            buildRenderFrame(routedInput.editor),
+            buildScreenPreviewRenderFrame());
         renderer_.drawFrame(
             *preparedRenderFrame_,
             ui_.drawData(),
@@ -468,6 +474,7 @@ void Application::update(
     const InputRouter::Frame& input,
     const VulkanRenderer::PreparedFrame* previousRenderFrame)
 {
+    screenPreviewActive_ = false;
 #if !SOKOBAN_ENABLE_DEBUG_UI
     (void)previousRenderFrame;
 #endif
@@ -502,6 +509,11 @@ void Application::update(
         return;
     }
 #endif
+
+    if (updateScreenPreview(input.previewScreen, dt)) {
+        audioSystem_.update(dt, false, false);
+        return;
+    }
 
     campaign_.addElapsedTime(dt);
     particleSystem_.update(dt);
@@ -738,6 +750,93 @@ void Application::tryEnterSelector()
     }
 }
 
+bool Application::updateScreenPreview(bool requested, float dt)
+{
+    if (!requested || !campaign_.gameLoaded() || !campaign_.inOverworld() ||
+        gameplaySession_.moving() ||
+        rules::hasPendingMotion(level_, gameplaySession_.state())) {
+        return false;
+    }
+
+    const Level::ScreenSelector* selector =
+        CampaignSession::selectorForInteraction(
+            level_, gameplaySession_.state());
+    if (!selector || !selector->target ||
+        !campaign_.screenExists(
+            selector->target->level, selector->target->screen) ||
+        campaign_.selectorViewState(
+            playerProfile_, *selector->target).status ==
+            ScreenSelectorStatus::Unavailable) {
+        return false;
+    }
+
+    if (!screenPreviewLevel_ ||
+        screenPreviewTarget_ != selector->target) {
+        try {
+            Level preview = Level::loadFromFile(screenPath(
+                selector->target->level,
+                selector->target->screen));
+            screenPreviewSession_.reset(preview);
+            screenPreviewPresentation_.resetEntities(
+                screenPreviewSession_.state());
+            screenPreviewLevel_ = std::move(preview);
+            screenPreviewTarget_ = *selector->target;
+        } catch (const std::exception& error) {
+            log::error(log::Category::Gameplay)
+                << "Could not preview screen "
+                << selector->target->level << ':'
+                << selector->target->screen << ": " << error.what();
+            screenPreviewLevel_.reset();
+            screenPreviewTarget_.reset();
+            return false;
+        }
+    }
+
+    screenPreviewPresentation_.advanceClocks(dt, false);
+    screenPreviewActive_ = true;
+    return true;
+}
+
+std::optional<RenderFrameData>
+Application::buildScreenPreviewRenderFrame() const
+{
+    if (!screenPreviewActive_ || !screenPreviewLevel_ ||
+        !screenPreviewTarget_) {
+        return std::nullopt;
+    }
+
+    const GameState projectedState =
+        screenPreviewSession_.projectedState();
+    RenderFrameData frame = RenderFrameBuilder::buildGameplay({
+        .manifest = assetManifest_,
+        .level = *screenPreviewLevel_,
+        .state = screenPreviewSession_.state(),
+        .moving = false,
+        .projectedState = projectedState,
+        .presentation = screenPreviewPresentation_,
+        .settings = presentationSettings_,
+        .animations = &animationCatalog_,
+        .conveyorBeltScrollOffset =
+            screenPreviewPresentation_.conveyorBeltScrollOffset(
+                screenPreviewSession_.stepDurationSeconds()),
+        .cameraPitchDegrees = screenPreviewPresentation_.cameraPitchDegrees(),
+        .levelLocation = *screenPreviewTarget_,
+        .selectorState = [this](LevelLocation target) {
+            return campaign_.selectorViewState(playerProfile_, target);
+        },
+    });
+    // The preview and live world can contain the same stable actor IDs. Keep
+    // their GPU animation instances independent so one idle pose cannot
+    // overwrite the other's skinning buffers.
+    constexpr uint64_t previewInstanceNamespace = uint64_t { 1 } << 63;
+    for (RenderFrameData::Tile& tile : frame.tiles) {
+        if (tile.animationInstanceId != 0) {
+            tile.animationInstanceId |= previewInstanceNamespace;
+        }
+    }
+    return frame;
+}
+
 void Application::drawSelectorPrompt(
     const VulkanRenderer::PreparedFrame* frame)
 {
@@ -778,11 +877,21 @@ void Application::drawSelectorPrompt(
         input_.activeDevice() == ActiveInputDevice::Gamepad
         ? BindingDeviceClass::Gamepad
         : BindingDeviceClass::Keyboard;
-    const std::optional<std::string> binding =
-        SelectorPrompt::bindingLabel(input_.bindings(), device);
-    if (arrowTip && binding) {
-        SelectorPrompt::draw(ui_, *arrowTip, *binding);
+    const std::optional<std::string> enterBinding =
+        SelectorPrompt::bindingLabel(
+            input_.bindings(), InputAction::MenuConfirm, device);
+    const std::optional<std::string> previewBinding =
+        SelectorPrompt::bindingLabel(
+            input_.bindings(), InputAction::PreviewScreen, device);
+    if (arrowTip && enterBinding && previewBinding) {
+        SelectorPrompt::draw(
+            ui_, *arrowTip, *enterBinding, *previewBinding);
     }
+}
+
+void Application::drawScreenPreviewOverlay(Vec2 viewport)
+{
+    ScreenPreviewOverlay::draw(ui_, viewport);
 }
 
 void Application::resolveLevelComplete(bool toTitle)

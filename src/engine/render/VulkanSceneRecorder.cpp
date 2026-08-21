@@ -85,6 +85,8 @@ public:
         uint32_t imageIndex,
         const RenderFrameData& frameData,
         const PreparedRenderScene& scene,
+        const RenderFrameData* previewFrameData,
+        const PreparedRenderScene* previewScene,
         const UiDrawData& uiDrawData)
     {
         const VkExtent2D extent = swapchain_.extent();
@@ -92,17 +94,28 @@ public:
         stats_ = {
             .frameIndex = configuration_.statsFrameIndex,
             .totalTiles = static_cast<uint32_t>(
-                frameData.tiles.size() + frameData.waterSurfaces.size()),
-            .scenePreparations = 1,
+                frameData.tiles.size() + frameData.waterSurfaces.size() +
+                (previewFrameData
+                    ? previewFrameData->tiles.size() +
+                        previewFrameData->waterSurfaces.size()
+                    : 0)),
+            .scenePreparations = previewFrameData ? 2U : 1U,
             .preparedIsoFaces =
-                static_cast<uint32_t>(scene.isoFaces.size()),
+                static_cast<uint32_t>(scene.isoFaces.size() +
+                    (previewScene ? previewScene->isoFaces.size() : 0)),
             .preparedShadowFaces =
-                static_cast<uint32_t>(scene.shadowFaces.size()),
+                static_cast<uint32_t>(scene.shadowFaces.size() +
+                    (previewScene ? previewScene->shadowFaces.size() : 0)),
             .preparedModels = static_cast<uint32_t>(
                 scene.opaqueModelIndices.size() +
-                scene.translucentModelIndices.size()),
+                scene.translucentModelIndices.size() +
+                (previewScene
+                    ? previewScene->opaqueModelIndices.size() +
+                        previewScene->translucentModelIndices.size()
+                    : 0)),
             .preparedParticles =
-                static_cast<uint32_t>(scene.particles.size()),
+                static_cast<uint32_t>(scene.particles.size() +
+                    (previewScene ? previewScene->particles.size() : 0)),
             .swapchainWidth = extent.width,
             .swapchainHeight = extent.height,
             .swapchainImages = swapchain_.imageCount(),
@@ -156,6 +169,14 @@ public:
                 .visualize = pipelines_.ssaoVisualize(),
             },
             stats_);
+        if (previewFrameData && previewScene) {
+            recordPreviewRendering(
+                commandBuffer,
+                swapchain_.renderColorView(),
+                swapchain_.resolveColorView(),
+                *previewFrameData,
+                *previewScene);
+        }
         if (configuration_.developerWorkspaceVisible) {
             // Compose the game's own UI into the off-screen render first, then
             // publish that image for ImGui's dockable Game Viewport. The
@@ -274,7 +295,8 @@ private:
             false,
             scene.hasTranslucentContent || !resolveView,
             false,
-            true);
+            true,
+            { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });
         swapchain_.copyResolvedSceneDepth(
             commandBuffer, stats_);
         if (!scene.hasTranslucentContent) {
@@ -292,7 +314,64 @@ private:
             true,
             !resolveView,
             true,
-            false);
+            false,
+            { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });
+    }
+
+    void recordPreviewRendering(
+        VkCommandBuffer commandBuffer,
+        VkImageView colorView,
+        VkImageView resolveView,
+        const RenderFrameData& frameData,
+        const PreparedRenderScene& scene)
+    {
+        const VkExtent2D full = swapchain_.renderExtent();
+        const VkExtent2D extent {
+            std::max(1U, static_cast<uint32_t>(
+                static_cast<float>(full.width) * 0.75f)),
+            std::max(1U, static_cast<uint32_t>(
+                static_cast<float>(full.height) * 0.75f)),
+        };
+        const VkRect2D inset {
+            .offset = {
+                static_cast<int32_t>((full.width - extent.width) / 2U),
+                static_cast<int32_t>((full.height - extent.height) / 2U),
+            },
+            .extent = extent,
+        };
+
+        if (shadowPass_.valid() && pipelines_.shadow()) {
+            recordShadowMapRendering(commandBuffer, frameData, scene);
+        }
+        recordScenePass(
+            commandBuffer,
+            colorView,
+            resolveView,
+            frameData,
+            scene,
+            false,
+            false,
+            scene.hasTranslucentContent || !resolveView,
+            false,
+            true,
+            inset);
+        swapchain_.copyResolvedSceneDepth(commandBuffer, stats_);
+        if (!scene.hasTranslucentContent) {
+            return;
+        }
+        swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
+        recordScenePass(
+            commandBuffer,
+            colorView,
+            resolveView,
+            frameData,
+            scene,
+            true,
+            true,
+            !resolveView,
+            true,
+            false,
+            inset);
     }
 
     void recordScenePass(
@@ -305,7 +384,8 @@ private:
         bool loadColor,
         bool storeColor,
         bool loadDepth,
-        bool writeDepth)
+        bool writeDepth,
+        VkRect2D renderArea)
     {
         const VkClearValue clearValue {
             .color = { { 0.03f, 0.04f, 0.06f, 1.0f } },
@@ -357,8 +437,8 @@ private:
         const VkRenderingInfo renderingInfo {
             .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
             .renderArea = {
-                .offset = { 0, 0 },
-                .extent = swapchain_.renderExtent(),
+                .offset = renderArea.offset,
+                .extent = renderArea.extent,
             },
             .layerCount = 1,
             .colorAttachmentCount = 1,
@@ -371,20 +451,16 @@ private:
         ++stats_.renderPasses;
 
         const VkViewport viewport {
-            .x = 0.0f,
+            .x = static_cast<float>(renderArea.offset.x),
             .y = static_cast<float>(
-                swapchain_.renderExtent().height),
-            .width = static_cast<float>(
-                swapchain_.renderExtent().width),
-            .height = -static_cast<float>(
-                swapchain_.renderExtent().height),
+                renderArea.offset.y +
+                static_cast<int32_t>(renderArea.extent.height)),
+            .width = static_cast<float>(renderArea.extent.width),
+            .height = -static_cast<float>(renderArea.extent.height),
             .minDepth = 0.0f,
             .maxDepth = 1.0f,
         };
-        const VkRect2D scissor {
-            .offset = { 0, 0 },
-            .extent = swapchain_.renderExtent(),
-        };
+        const VkRect2D scissor = renderArea;
         vkCmdBindPipeline(
             commandBuffer,
             VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -1661,6 +1737,8 @@ RenderStats VulkanSceneRecorder::record(
     uint32_t imageIndex,
     const RenderFrameData& frameData,
     const PreparedRenderScene& scene,
+    const RenderFrameData* previewFrameData,
+    const PreparedRenderScene* previewScene,
     const UiDrawData& uiDrawData) const
 {
     return SceneRecordingSession(resources, configuration).record(
@@ -1668,6 +1746,8 @@ RenderStats VulkanSceneRecorder::record(
         imageIndex,
         frameData,
         scene,
+        previewFrameData,
+        previewScene,
         uiDrawData);
 }
 

@@ -792,13 +792,14 @@ InputBindings inputBindingsFromJson(
             "moveUp", "moveDown", "moveLeft", "moveRight",
             "mirror", "undo", "restart", "showTopDownView",
             "menuBack", "menuConfirm", "editorReplaceTile",
-            "editorDeleteTile", "editorMoveTile",
+            "editorDeleteTile", "editorMoveTile", "previewScreen",
         }, context);
     } else {
         rejectUnknownProperties(value, {
             "moveUp", "moveDown", "moveLeft", "moveRight",
             "mirror", "undo", "restart", "showTopDownView", "menuBack",
             "editorReplaceTile", "editorDeleteTile", "editorMoveTile",
+            "previewScreen",
         }, context);
     }
     InputBindings result;
