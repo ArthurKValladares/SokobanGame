@@ -264,7 +264,9 @@ void ApplicationTools::drawBrushPreview(
     const ImU32 tint = white
         ? IM_COL32(255, 255, 255, 0)
         : IM_COL32(15, 15, 15, 0);
-    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
+    ImDrawList* drawList = renderer.hasGameViewportDisplay()
+        ? ImGui::GetForegroundDrawList()
+        : ImGui::GetBackgroundDrawList();
     const std::size_t indexLimit =
         static_cast<std::size_t>(std::numeric_limits<ImDrawIdx>::max());
     if (static_cast<std::size_t>(drawList->_VtxCurrentIdx) +
@@ -336,7 +338,9 @@ void ApplicationTools::drawDecorationGizmo(
         IM_COL32(80, 210, 105, 255),
         IM_COL32(72, 135, 245, 255),
     };
-    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
+    ImDrawList* drawList = renderer.hasGameViewportDisplay()
+        ? ImGui::GetForegroundDrawList()
+        : ImGui::GetBackgroundDrawList();
     const auto point = [](Vec2 value) { return ImVec2(value.x, value.y); };
     const auto colorFor = [&](std::size_t axis) {
         const DecorationGizmo::Axis value =
@@ -428,7 +432,9 @@ void ApplicationTools::drawSelectorLabels(
                 return "Selector " + std::to_string(selector.id) + ": " +
                     LevelEditor::selectorTargetLabel(selector, levels);
             });
-    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
+    ImDrawList* drawList = renderer.hasGameViewportDisplay()
+        ? ImGui::GetForegroundDrawList()
+        : ImGui::GetBackgroundDrawList();
     for (const EditorInteraction::SelectorLabel& label : labels) {
         const ImVec2 size = ImGui::CalcTextSize(label.text.c_str());
         const ImVec2 position {

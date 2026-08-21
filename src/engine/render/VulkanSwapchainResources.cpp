@@ -355,6 +355,27 @@ void VulkanSwapchainResources::copyResolvedSceneColor(
     ++stats.imageBarriers;
 }
 
+void VulkanSwapchainResources::prepareSwapchainForUi(
+    VkCommandBuffer commandBuffer,
+    uint32_t imageIndex,
+    RenderStats& stats) const
+{
+    // The developer workspace owns the whole swapchain image. Discard its
+    // previous presentation contents; ImGui will clear and redraw it below.
+    vulkanResources::transitionImage(
+        commandBuffer,
+        image(imageIndex),
+        vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+        {},
+        {
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        });
+    ++stats.imageBarriers;
+}
+
 void VulkanSwapchainResources::copyResolvedSceneDepth(
     VkCommandBuffer commandBuffer,
     RenderStats& stats)

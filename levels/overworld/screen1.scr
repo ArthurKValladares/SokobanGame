@@ -1,15 +1,8 @@
-@selector {"cell":[1,1,2],"id":1,"target":{"level":0,"screen":0}}
-@selector {"cell":[2,1,2],"id":2,"target":{"level":0,"screen":1}}
-@selector {"cell":[1,2,2],"id":3,"target":{"level":1,"screen":0}}
-@selector {"cell":[2,2,2],"id":4,"target":{"level":1,"screen":1}}
-@selector {"cell":[3,2,2],"id":5,"target":{"level":1,"screen":2}}
-@selector {"cell":[1,3,2],"id":6,"target":{"level":2,"screen":0}}
-@selector {"cell":[2,3,2],"id":7,"target":{"level":2,"screen":1}}
-@selector {"cell":[3,3,2],"id":8,"target":{"level":2,"screen":2}}
-@selector {"cell":[1,4,2],"id":9,"target":{"level":3,"screen":0}}
-@selector {"cell":[2,4,2],"id":10,"target":{"level":3,"screen":1}}
-@selector {"cell":[3,4,2],"id":11,"target":{"level":3,"screen":2}}
-@selector {"cell":[4,4,2],"id":12,"target":{"level":3,"screen":3}}
+@selector {"cell":[1,2,2],"id":1,"target":{"level":0,"screen":0}}
+@selector {"cell":[2,2,2],"id":2,"target":{"level":0,"screen":1}}
+@selector {"cell":[1,4,2],"id":3,"target":{"level":1,"screen":0}}
+@selector {"cell":[2,4,2],"id":4,"target":{"level":1,"screen":1}}
+@selector {"cell":[3,4,2],"id":5,"target":{"level":1,"screen":2}}
 
 @layer 0
 .........

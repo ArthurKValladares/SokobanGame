@@ -156,13 +156,44 @@ public:
                 .visualize = pipelines_.ssaoVisualize(),
             },
             stats_);
-        swapchain_.upscaleSceneToSwapchain(
-            commandBuffer, imageIndex, stats_);
-        recordOverlayRendering(
-            commandBuffer,
-            swapchain_.image(imageIndex),
-            swapchain_.imageView(imageIndex),
-            uiDrawData);
+        if (configuration_.developerWorkspaceVisible) {
+            // Compose the game's own UI into the off-screen render first, then
+            // publish that image for ImGui's dockable Game Viewport. The
+            // swapchain is reserved for the docking workspace itself.
+            recordOverlayRendering(
+                commandBuffer,
+                swapchain_.resolvedColorImage(),
+                swapchain_.resolvedColorView(),
+                renderExtent,
+                uiDrawData,
+                true,
+                false,
+                false);
+            swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
+            swapchain_.prepareSwapchainForUi(
+                commandBuffer, imageIndex, stats_);
+            recordOverlayRendering(
+                commandBuffer,
+                swapchain_.image(imageIndex),
+                swapchain_.imageView(imageIndex),
+                extent,
+                uiDrawData,
+                false,
+                true,
+                true);
+        } else {
+            swapchain_.upscaleSceneToSwapchain(
+                commandBuffer, imageIndex, stats_);
+            recordOverlayRendering(
+                commandBuffer,
+                swapchain_.image(imageIndex),
+                swapchain_.imageView(imageIndex),
+                extent,
+                uiDrawData,
+                true,
+                true,
+                false);
+        }
         swapchain_.endFrame(commandBuffer, imageIndex, stats_);
         vkCheck(
             vkEndCommandBuffer(commandBuffer),
@@ -415,33 +446,46 @@ private:
         VkCommandBuffer commandBuffer,
         VkImage colorImage,
         VkImageView colorView,
-        const UiDrawData& uiDrawData)
+        VkExtent2D targetExtent,
+        const UiDrawData& uiDrawData,
+        bool renderGameUi,
+        bool renderImGui,
+        bool clearTarget)
     {
+#if !SOKOBAN_ENABLE_DEBUG_UI
+        renderImGui = false;
+#endif
         const bool hasGameUi =
+            renderGameUi &&
             !uiDrawData.commands.empty() &&
             uiDrawData.viewportSize.x > 0.0f &&
             uiDrawData.viewportSize.y > 0.0f;
-#if !SOKOBAN_ENABLE_DEBUG_UI
-        if (!hasGameUi) {
+        if (!hasGameUi && !renderImGui) {
             return;
         }
-#endif
-        vulkanResources::transitionImage(
-            commandBuffer,
-            colorImage,
-            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
-            {
-                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                VK_ACCESS_2_MEMORY_WRITE_BIT,
-                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            },
-            {
-                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
-                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            },
-            VK_DEPENDENCY_BY_REGION_BIT);
-        ++stats_.imageBarriers;
+        if (!clearTarget) {
+            vulkanResources::transitionImage(
+                commandBuffer,
+                colorImage,
+                vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+                {
+                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                    VK_ACCESS_2_MEMORY_WRITE_BIT,
+                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                },
+                {
+                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                    VK_ACCESS_2_MEMORY_READ_BIT |
+                        VK_ACCESS_2_MEMORY_WRITE_BIT,
+                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                },
+                VK_DEPENDENCY_BY_REGION_BIT);
+            ++stats_.imageBarriers;
+        }
+
+        const VkClearValue clearValue {
+            .color = { { 0.025f, 0.03f, 0.04f, 1.0f } },
+        };
 
         const VkRenderingAttachmentInfo colorAttachment {
             .sType =
@@ -449,14 +493,17 @@ private:
             .imageView = colorView,
             .imageLayout =
                 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+            .loadOp = clearTarget
+                ? VK_ATTACHMENT_LOAD_OP_CLEAR
+                : VK_ATTACHMENT_LOAD_OP_LOAD,
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+            .clearValue = clearValue,
         };
         const VkRenderingInfo renderingInfo {
             .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
             .renderArea = {
                 .offset = { 0, 0 },
-                .extent = swapchain_.extent(),
+                .extent = targetExtent,
             },
             .layerCount = 1,
             .colorAttachmentCount = 1,
@@ -469,17 +516,17 @@ private:
             const VkViewport viewport {
                 .x = 0.0f,
                 .y = static_cast<float>(
-                    swapchain_.extent().height),
+                    targetExtent.height),
                 .width = static_cast<float>(
-                    swapchain_.extent().width),
+                    targetExtent.width),
                 .height = -static_cast<float>(
-                    swapchain_.extent().height),
+                    targetExtent.height),
                 .minDepth = 0.0f,
                 .maxDepth = 1.0f,
             };
             const VkRect2D scissor {
                 .offset = { 0, 0 },
-                .extent = swapchain_.extent(),
+                .extent = targetExtent,
             };
             vkCmdBindPipeline(
                 commandBuffer,
@@ -512,7 +559,9 @@ private:
                     unlit);
             }
         }
-        renderDebugUi(commandBuffer);
+        if (renderImGui) {
+            renderDebugUi(commandBuffer);
+        }
         vkCmdEndRendering(commandBuffer);
     }
 

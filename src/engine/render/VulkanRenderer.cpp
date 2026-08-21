@@ -240,7 +240,8 @@ VulkanRenderer::resolvePreparedFrame(const PreparedFrame& frame) const
 
 void VulkanRenderer::drawFrame(
     const PreparedFrame& preparedFrame,
-    const UiDrawData& uiDrawData)
+    const UiDrawData& uiDrawData,
+    bool developerWorkspaceVisible)
 {
     const PreparedFrameScratch& prepared =
         resolvePreparedFrame(preparedFrame);
@@ -328,6 +329,7 @@ void VulkanRenderer::drawFrame(
                 reconfigurationQueue_
                     .plan(swapchainRecreationRequested_)
                     .has_value(),
+            .developerWorkspaceVisible = developerWorkspaceVisible,
         },
         frame.commandBuffer,
         imageIndex,
@@ -422,6 +424,16 @@ VkExtent2D VulkanRenderer::renderExtent() const
         : VkExtent2D { 0, 0 };
 }
 
+uint64_t VulkanRenderer::gameViewportTexture() const
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    return reinterpret_cast<uint64_t>(
+        activeResources_.gameViewportTexture);
+#else
+    return 0;
+#endif
+}
+
 ImageData VulkanRenderer::captureRenderedFrame(std::optional<VkRect2D> region)
 {
     if (!activeResources_.swapchain) {
@@ -498,7 +510,10 @@ void VulkanRenderer::beginDebugUiFrame()
 bool VulkanRenderer::wantsKeyboardCapture() const
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    return ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard;
+    const bool gameViewportFocused =
+        gameViewportDisplay_ && gameViewportDisplay_->focused;
+    return ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard &&
+        !gameViewportFocused;
 #else
     return false;
 #endif
@@ -507,10 +522,50 @@ bool VulkanRenderer::wantsKeyboardCapture() const
 bool VulkanRenderer::wantsMouseCapture() const
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    return ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureMouse;
+    const bool gameViewportHovered =
+        gameViewportDisplay_ && gameViewportDisplay_->hovered;
+    return ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureMouse &&
+        !gameViewportHovered;
 #else
     return false;
 #endif
+}
+
+void VulkanRenderer::setGameViewportDisplay(
+    std::optional<GameViewportDisplay> display)
+{
+    if (display &&
+        (display->size.x <= 0.0f || display->size.y <= 0.0f)) {
+        display.reset();
+    }
+    gameViewportDisplay_ = std::move(display);
+}
+
+bool VulkanRenderer::hasGameViewportDisplay() const
+{
+    return gameViewportDisplay_.has_value();
+}
+
+Vec2 VulkanRenderer::mapPointerToGameViewport(
+    Vec2 pointer,
+    Vec2 gameUiExtent) const
+{
+    if (!gameViewportDisplay_) {
+        return pointer;
+    }
+    const GameViewportDisplay& display = *gameViewportDisplay_;
+    const Vec2 local {
+        pointer.x - display.position.x,
+        pointer.y - display.position.y,
+    };
+    if (local.x < 0.0f || local.y < 0.0f ||
+        local.x > display.size.x || local.y > display.size.y) {
+        return { -1.0f, -1.0f };
+    }
+    return {
+        local.x * gameUiExtent.x / display.size.x,
+        local.y * gameUiExtent.y / display.size.y,
+    };
 }
 
 std::optional<GridPosition3> VulkanRenderer::pickIsoGridCell(
@@ -529,9 +584,18 @@ std::optional<GridPosition3> VulkanRenderer::pickIsoGridCell(
 
     const VkExtent2D outputExtent =
         activeResources_.swapchain->extent();
+    const Vec2 mappedPosition = mapPointerToGameViewport(
+        pixelPosition,
+        {
+            static_cast<float>(outputExtent.width),
+            static_cast<float>(outputExtent.height),
+        });
+    if (mappedPosition.x < 0.0f || mappedPosition.y < 0.0f) {
+        return std::nullopt;
+    }
     return scenePreparer_.pickGridCell(
         prepared.scene,
-        pixelPosition,
+        mappedPosition,
         {
             static_cast<float>(outputExtent.width),
             static_cast<float>(outputExtent.height),
@@ -554,9 +618,18 @@ std::optional<Vec3> VulkanRenderer::pickIsoGroundPoint(
     }
 
     const VkExtent2D outputExtent = activeResources_.swapchain->extent();
+    const Vec2 mappedPosition = mapPointerToGameViewport(
+        pixelPosition,
+        {
+            static_cast<float>(outputExtent.width),
+            static_cast<float>(outputExtent.height),
+        });
+    if (mappedPosition.x < 0.0f || mappedPosition.y < 0.0f) {
+        return std::nullopt;
+    }
     return scenePreparer_.pickGroundPoint(
         prepared.scene,
-        pixelPosition,
+        mappedPosition,
         {
             static_cast<float>(outputExtent.width),
             static_cast<float>(outputExtent.height),
@@ -573,6 +646,15 @@ std::optional<std::size_t> VulkanRenderer::pickDecoration(
     }
     const VkExtent2D outputExtent = activeResources_.swapchain->extent();
     if (outputExtent.width == 0 || outputExtent.height == 0) {
+        return std::nullopt;
+    }
+    const Vec2 mappedPosition = mapPointerToGameViewport(
+        pixelPosition,
+        {
+            static_cast<float>(outputExtent.width),
+            static_cast<float>(outputExtent.height),
+        });
+    if (mappedPosition.x < 0.0f || mappedPosition.y < 0.0f) {
         return std::nullopt;
     }
 
@@ -634,13 +716,13 @@ std::optional<std::size_t> VulkanRenderer::pickDecoration(
             depth += projected.z;
         }
         constexpr float pickPaddingPixels = 3.0f;
-        if (pixelPosition.x < minimum.x - pickPaddingPixels ||
-            pixelPosition.y < minimum.y - pickPaddingPixels ||
-            pixelPosition.x > maximum.x + pickPaddingPixels ||
-            pixelPosition.y > maximum.y + pickPaddingPixels) {
+        if (mappedPosition.x < minimum.x - pickPaddingPixels ||
+            mappedPosition.y < minimum.y - pickPaddingPixels ||
+            mappedPosition.x > maximum.x + pickPaddingPixels ||
+            mappedPosition.y > maximum.y + pickPaddingPixels) {
             continue;
         }
-        if (!pointInConvexHull(projectedCorners, pixelPosition)) {
+        if (!pointInConvexHull(projectedCorners, mappedPosition)) {
             continue;
         }
         depth /= static_cast<float>(localCorners.size());
@@ -666,9 +748,21 @@ std::optional<Vec2> VulkanRenderer::projectToPixels(
     }
     const Vec3 clip = IsoScenePreparer::projectIsoPoint(
         prepared.scene.isoLayout, prepared.scene.renderExtent, worldPoint);
+    const Vec2 normalized {
+        (clip.x + 1.0f) * 0.5f,
+        (1.0f - clip.y) * 0.5f,
+    };
+    if (gameViewportDisplay_) {
+        return Vec2 {
+            gameViewportDisplay_->position.x +
+                normalized.x * gameViewportDisplay_->size.x,
+            gameViewportDisplay_->position.y +
+                normalized.y * gameViewportDisplay_->size.y,
+        };
+    }
     return Vec2 {
-        (clip.x + 1.0f) * 0.5f * static_cast<float>(outputExtent.width),
-        (1.0f - clip.y) * 0.5f * static_cast<float>(outputExtent.height),
+        normalized.x * static_cast<float>(outputExtent.width),
+        normalized.y * static_cast<float>(outputExtent.height),
     };
 }
 
@@ -912,8 +1006,12 @@ void VulkanRenderer::destroyCompletedRetirements()
     }
     std::erase_if(
         retiredResources_,
-        [](const RetiredRenderResources& retired) {
-            return retired.pendingFrameMask == 0;
+        [this](RetiredRenderResources& retired) {
+            if (retired.pendingFrameMask != 0) {
+                return false;
+            }
+            releaseGameViewportTexture(retired.resources);
+            return true;
         });
 }
 
@@ -949,6 +1047,7 @@ void VulkanRenderer::applyPendingReconfiguration()
 
         RenderResourceSet replacement =
             createRenderResources(plan->settings);
+        registerGameViewportTexture(replacement);
         RenderResourceSet retired = std::move(activeResources_);
         activeResources_ = std::move(replacement);
         activeSampleCount_ = sampleCountForMode(
@@ -1037,7 +1136,8 @@ void VulkanRenderer::initializeDebugUi()
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard |
+        ImGuiConfigFlags_DockingEnable;
     ImGui::StyleColorsDark();
 
     if (!ImGui_ImplSDL3_InitForVulkan(window_)) {
@@ -1070,7 +1170,37 @@ void VulkanRenderer::initializeDebugUi()
     if (!ImGui_ImplVulkan_Init(&initInfo)) {
         throw std::runtime_error("ImGui_ImplVulkan_Init failed");
     }
+    registerGameViewportTexture(activeResources_);
 #endif
+}
+
+void VulkanRenderer::registerGameViewportTexture(
+    RenderResourceSet& resources)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (resources.gameViewportTexture || !resources.swapchain ||
+        !ImGui::GetCurrentContext() ||
+        ImGui::GetIO().BackendRendererUserData == nullptr) {
+        return;
+    }
+    resources.gameViewportTexture = ImGui_ImplVulkan_AddTexture(
+        resources.swapchain->sceneColorView(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+#else
+    (void)resources;
+#endif
+}
+
+void VulkanRenderer::releaseGameViewportTexture(
+    RenderResourceSet& resources)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (resources.gameViewportTexture && ImGui::GetCurrentContext() &&
+        ImGui::GetIO().BackendRendererUserData != nullptr) {
+        ImGui_ImplVulkan_RemoveTexture(resources.gameViewportTexture);
+    }
+#endif
+    resources.gameViewportTexture = VK_NULL_HANDLE;
 }
 
 void VulkanRenderer::shutdownDebugUi()
@@ -1081,6 +1211,10 @@ void VulkanRenderer::shutdownDebugUi()
     thumbnailPass_.destroy();
 
     if (ImGui::GetCurrentContext()) {
+        releaseGameViewportTexture(activeResources_);
+        for (RetiredRenderResources& retired : retiredResources_) {
+            releaseGameViewportTexture(retired.resources);
+        }
         ImGui_ImplVulkan_Shutdown();
         ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext();

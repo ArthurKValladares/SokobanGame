@@ -44,6 +44,7 @@ public:
         uint64_t presentQueueRetirementWaits = 0;
         uint32_t retiredRenderResourceSets = 0;
         bool rendererReconfigurationPending = false;
+        bool developerWorkspaceVisible = false;
     };
 
     [[nodiscard]] RenderStats record(

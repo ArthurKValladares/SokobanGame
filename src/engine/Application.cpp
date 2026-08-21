@@ -346,6 +346,15 @@ void Application::run()
             preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
         const Vec2 windowSize = window_.size();
         const Vec2 pixelSize = window_.sizeInPixels();
+#if SOKOBAN_ENABLE_DEBUG_UI
+        const bool developerWorkspaceVisible =
+            !optionsMenu_.isOpen() && !titleScreen_.isOpen();
+        if (!developerWorkspaceVisible) {
+            renderer_.setGameViewportDisplay(std::nullopt);
+        }
+#else
+        constexpr bool developerWorkspaceVisible = false;
+#endif
         const Vec2 mouse = routedInput.pointer.position;
         const Vec2 mousePixels {
             windowSize.x > 0.0f
@@ -355,17 +364,46 @@ void Application::run()
                 ? mouse.y * pixelSize.y / windowSize.y
                 : mouse.y,
         };
+        const Vec2 gameMousePixels = renderer_.mapPointerToGameViewport(
+            mousePixels, pixelSize);
 
         ui_.beginFrame(
             pixelSize,
-            mousePixels,
+            gameMousePixels,
             routedInput.pointer.primaryDown,
             routedInput.pointer.primaryPressed);
 
         renderer_.beginDebugUiFrame();
-        if (!optionsMenu_.isOpen() && !titleScreen_.isOpen()) {
-            DebugUi::draw();
+#if SOKOBAN_ENABLE_DEBUG_UI
+        if (developerWorkspaceVisible) {
+            const VkExtent2D gameExtent = renderer_.renderExtent();
+            const DebugUi::DrawResult workspace = DebugUi::draw({
+                .texture = renderer_.gameViewportTexture(),
+                .width = gameExtent.width,
+                .height = gameExtent.height,
+            });
+            if (workspace.viewportWidth > 0.0f &&
+                workspace.viewportHeight > 0.0f) {
+                renderer_.setGameViewportDisplay(
+                    VulkanRenderer::GameViewportDisplay {
+                        .position = {
+                            workspace.viewportX,
+                            workspace.viewportY,
+                        },
+                        .size = {
+                            workspace.viewportWidth,
+                            workspace.viewportHeight,
+                        },
+                        .hovered = workspace.viewportHovered,
+                        .focused = workspace.viewportFocused,
+                    });
+            } else {
+                renderer_.setGameViewportDisplay(std::nullopt);
+            }
+        } else {
+            renderer_.setGameViewportDisplay(std::nullopt);
         }
+#endif
         tools_->drawDraftExitConfirmation();
         tools_->drawBrushPreview(
             renderer_,
@@ -415,7 +453,10 @@ void Application::run()
         ui_.endFrame();
         preparedRenderFrame_ = renderer_.prepareFrame(
             buildRenderFrame(routedInput.editor));
-        renderer_.drawFrame(*preparedRenderFrame_, ui_.drawData());
+        renderer_.drawFrame(
+            *preparedRenderFrame_,
+            ui_.drawData(),
+            developerWorkspaceVisible);
     }
 }
 

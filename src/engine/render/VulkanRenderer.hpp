@@ -43,6 +43,13 @@ private:
     struct PreparedFrameScratch;
 
 public:
+    struct GameViewportDisplay {
+        Vec2 position {};
+        Vec2 size {};
+        bool hovered = false;
+        bool focused = false;
+    };
+
     struct PreparedFrame {
         uint32_t levelWidth = 0;
         uint32_t levelHeight = 0;
@@ -72,7 +79,8 @@ public:
     [[nodiscard]] PreparedFrame prepareFrame(RenderFrameData frameData);
     void drawFrame(
         const PreparedFrame& frame,
-        const UiDrawData& uiDrawData);
+        const UiDrawData& uiDrawData,
+        bool developerWorkspaceVisible = false);
     void preloadAssets(const RenderAssetRequirements& requirements);
     void ensureAssets(const RenderAssetRequirements& requirements);
     void handleEvent(const SDL_Event& event);
@@ -106,6 +114,15 @@ public:
     [[nodiscard]] ImageData captureRenderedFrame(
         std::optional<VkRect2D> region = std::nullopt);
     [[nodiscard]] VkExtent2D renderExtent() const;
+    // ImGui descriptor for the latest completed game render. Zero in builds
+    // without the developer workspace.
+    [[nodiscard]] uint64_t gameViewportTexture() const;
+    void setGameViewportDisplay(
+        std::optional<GameViewportDisplay> display);
+    [[nodiscard]] bool hasGameViewportDisplay() const;
+    [[nodiscard]] Vec2 mapPointerToGameViewport(
+        Vec2 pointer,
+        Vec2 gameUiExtent) const;
     // Rendered preview of a tile type for the editor palette, or nullptr when
     // thumbnails are unavailable or the tile has no model of its own (the
     // caller should fall back to a swatch).
@@ -162,6 +179,7 @@ private:
         std::unique_ptr<VulkanSsaoPass> ssaoPass;
         std::unique_ptr<VulkanSceneDescriptors> sceneDescriptors;
         std::unique_ptr<VulkanPipelineFactory> pipelines;
+        VkDescriptorSet gameViewportTexture = VK_NULL_HANDLE;
     };
 
     struct RetiredRenderResources {
@@ -190,6 +208,8 @@ private:
     void createFrameResources();
     void initializeDebugUi();
     void shutdownDebugUi();
+    void registerGameViewportTexture(RenderResourceSet& resources);
+    void releaseGameViewportTexture(RenderResourceSet& resources);
     void logRenderConfiguration() const;
     [[nodiscard]] VkSampleCountFlagBits sampleCountForMode(AntiAliasingMode mode) const;
     [[nodiscard]] uint32_t sampleCountValue() const;
@@ -229,6 +249,7 @@ private:
     bool vsync_ = false;
     RenderStats lastStats_ {};
     uint64_t nextStatsFrameIndex_ = 1;
+    std::optional<GameViewportDisplay> gameViewportDisplay_;
     uint64_t pipelineRebuilds_ = 0;
     uint64_t swapchainRecreations_ = 0;
     uint64_t swapchainRecreationDeferrals_ = 0;

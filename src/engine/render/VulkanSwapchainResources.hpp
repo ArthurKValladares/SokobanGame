@@ -51,6 +51,10 @@ public:
 
     void beginFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex, RenderStats& stats);
     void endFrame(VkCommandBuffer commandBuffer, uint32_t imageIndex, RenderStats& stats) const;
+    void prepareSwapchainForUi(
+        VkCommandBuffer commandBuffer,
+        uint32_t imageIndex,
+        RenderStats& stats) const;
     void ensureSceneColorReadable(VkCommandBuffer commandBuffer, RenderStats& stats);
     void copyResolvedSceneColor(
         VkCommandBuffer commandBuffer,
