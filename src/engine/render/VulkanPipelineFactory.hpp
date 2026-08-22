@@ -43,6 +43,7 @@ public:
     [[nodiscard]] VkPipeline ssao() const { return ssao_; }
     [[nodiscard]] VkPipeline ssaoComposite() const { return ssaoComposite_; }
     [[nodiscard]] VkPipeline ssaoVisualize() const { return ssaoVisualize_; }
+    [[nodiscard]] VkPipeline worldTransition() const { return worldTransition_; }
 
 private:
     enum class VertexLayout {
@@ -84,6 +85,7 @@ private:
     VkPipeline ssao_ = VK_NULL_HANDLE;
     VkPipeline ssaoComposite_ = VK_NULL_HANDLE;
     VkPipeline ssaoVisualize_ = VK_NULL_HANDLE;
+    VkPipeline worldTransition_ = VK_NULL_HANDLE;
 };
 
 } // namespace sokoban

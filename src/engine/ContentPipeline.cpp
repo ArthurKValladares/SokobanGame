@@ -28,7 +28,7 @@
 namespace sokoban {
 namespace {
 
-constexpr std::array<std::string_view, 11> requiredShaders {
+constexpr std::array<std::string_view, 12> requiredShaders {
     "triangle.vert.glsl.spv",
     "triangle.frag.glsl.spv",
     "water.frag.glsl.spv",
@@ -40,6 +40,7 @@ constexpr std::array<std::string_view, 11> requiredShaders {
     "fullscreen.vert.glsl.spv",
     "ssao.frag.glsl.spv",
     "ssao_composite.frag.glsl.spv",
+    "world_transition.frag.glsl.spv",
 };
 
 std::filesystem::path normalizedRelativePath(

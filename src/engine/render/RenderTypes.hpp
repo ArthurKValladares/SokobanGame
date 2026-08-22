@@ -428,6 +428,9 @@ struct RenderFrameData {
     }
     float waterAnimationTimeSeconds = 0.0f;
     float effectAnimationTimeSeconds = 0.0f;
+    // Fullscreen close/reveal amount for world replacement. Kept in the
+    // prepared frame so command recording never reaches back into Application.
+    float levelTransitionAmount = 0.0f;
 };
 
 [[nodiscard]] constexpr std::size_t renderFrameArenaBytes()

@@ -100,6 +100,7 @@ set(SHADER_SOURCES
     "${SHADER_SOURCE_DIR}/fullscreen.vert.glsl"
     "${SHADER_SOURCE_DIR}/ssao.frag.glsl"
     "${SHADER_SOURCE_DIR}/ssao_composite.frag.glsl"
+    "${SHADER_SOURCE_DIR}/world_transition.frag.glsl"
 )
 
 set(SHADER_OUTPUTS)
@@ -173,6 +174,7 @@ add_library(sokoban_core STATIC
     src/engine/GameplaySession.cpp
     src/engine/Input.cpp
     src/engine/InputBindings.cpp
+    src/engine/LevelTransition.cpp
     src/engine/Level.cpp
     src/engine/LevelCatalog.cpp
     src/engine/OverworldMap.cpp
@@ -477,6 +479,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME campaign_session TARGET sokoban_campaign_session_tests
         LIBS sokoban_core
         SOURCES tests/CampaignSessionTests.cpp
+    )
+    sokoban_add_test(NAME level_transition TARGET sokoban_level_transition_tests
+        LIBS sokoban_core
+        SOURCES tests/LevelTransitionTests.cpp
     )
     sokoban_add_test(NAME gameplay_loop TARGET sokoban_gameplay_loop_tests
         LIBS sokoban_core

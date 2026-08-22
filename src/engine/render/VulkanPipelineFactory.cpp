@@ -56,7 +56,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
     vkCheck(vkCreatePipelineLayout(device_, &layoutInfo, nullptr, &layout_),
         "vkCreatePipelineLayout failed");
 
-    std::array<VkShaderModule, 11> shaders {};
+    std::array<VkShaderModule, 12> shaders {};
     try {
         shaders[0] = createShaderModule(createInfo.assetRoot / "shaders/triangle.vert.glsl.spv");
         shaders[1] = createShaderModule(createInfo.assetRoot / "shaders/triangle.frag.glsl.spv");
@@ -71,6 +71,8 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             createInfo.assetRoot / "shaders/mirror_energy.frag.glsl.spv");
         shaders[10] = createShaderModule(
             createInfo.assetRoot / "shaders/ground_splat.frag.glsl.spv");
+        shaders[11] = createShaderModule(
+            createInfo.assetRoot / "shaders/world_transition.frag.glsl.spv");
 
         scene_ = createScenePipeline(
             shaders[0], shaders[1], VertexLayout::None,
@@ -101,6 +103,8 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             shaders[5], shaders[7], createInfo.colorFormat, true);
         ssaoVisualize_ = createPostProcessPipeline(
             shaders[5], shaders[7], createInfo.colorFormat, false);
+        worldTransition_ = createPostProcessPipeline(
+            shaders[5], shaders[11], createInfo.colorFormat, false);
     } catch (...) {
         for (VkShaderModule shader : shaders) {
             if (shader) {
@@ -122,7 +126,7 @@ void VulkanPipelineFactory::destroy()
             scene_, water_, mirrorEnergy_, groundSplat_, ui_, model_,
             mirrorEnergyModel_,
             shadow_, modelShadow_,
-            ssao_, ssaoComposite_, ssaoVisualize_,
+            ssao_, ssaoComposite_, ssaoVisualize_, worldTransition_,
         };
         for (VkPipeline pipeline : pipelines) {
             if (pipeline) {
@@ -145,6 +149,7 @@ void VulkanPipelineFactory::destroy()
     ssao_ = VK_NULL_HANDLE;
     ssaoComposite_ = VK_NULL_HANDLE;
     ssaoVisualize_ = VK_NULL_HANDLE;
+    worldTransition_ = VK_NULL_HANDLE;
     layout_ = VK_NULL_HANDLE;
     shadowFormat_ = VK_FORMAT_UNDEFINED;
     colorFormat_ = VK_FORMAT_UNDEFINED;

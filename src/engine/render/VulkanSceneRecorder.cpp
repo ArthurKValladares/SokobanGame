@@ -181,6 +181,8 @@ public:
                 *previewFrameData,
                 *previewScene);
         }
+        recordLevelTransition(
+            commandBuffer, frameData.levelTransitionAmount);
         if (configuration_.developerWorkspaceVisible) {
             // Compose the game's own UI into the off-screen render first, then
             // publish that image for ImGui's dockable Game Viewport. The
@@ -378,6 +380,66 @@ private:
             true,
             false,
             inset);
+    }
+
+    void recordLevelTransition(
+        VkCommandBuffer commandBuffer,
+        float amount)
+    {
+        const VkPipeline pipeline = pipelines_.worldTransition();
+        if (amount <= 0.0f || !pipeline) {
+            return;
+        }
+
+        // Sample a copy: Vulkan does not permit the transition shader to read
+        // and overwrite resolvedColorImage in the same draw.
+        swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
+
+        const VkExtent2D extent = swapchain_.renderExtent();
+        const VkRenderingAttachmentInfo attachment {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .imageView = swapchain_.resolvedColorView(),
+            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        };
+        const VkRenderingInfo renderingInfo {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+            .renderArea = { .offset = { 0, 0 }, .extent = extent },
+            .layerCount = 1,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = &attachment,
+        };
+        const VkViewport viewport {
+            .x = 0.0f,
+            .y = static_cast<float>(extent.height),
+            .width = static_cast<float>(extent.width),
+            .height = -static_cast<float>(extent.height),
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+        };
+        const VkRect2D scissor { .offset = { 0, 0 }, .extent = extent };
+        TilePushConstants pushConstants {};
+        pushConstants.color.x = std::clamp(amount, 0.0f, 1.0f);
+
+        vkCmdBeginRendering(commandBuffer, &renderingInfo);
+        ++stats_.renderPasses;
+        vkCmdBindPipeline(
+            commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+        ++stats_.pipelineBinds;
+        bindDescriptorSet(commandBuffer);
+        vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+        vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+        vkCmdPushConstants(
+            commandBuffer,
+            pipelines_.layout(),
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            sizeof(TilePushConstants),
+            &pushConstants);
+        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+        ++stats_.drawCalls;
+        vkCmdEndRendering(commandBuffer);
     }
 
     void recordScenePass(

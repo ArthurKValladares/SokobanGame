@@ -15,6 +15,7 @@
 #include "engine/Input.hpp"
 #include "engine/GameplaySession.hpp"
 #include "engine/Level.hpp"
+#include "engine/LevelTransition.hpp"
 #include "engine/LevelCatalog.hpp"
 #include "engine/Math.hpp"
 #include "engine/PresentationSettings.hpp"
@@ -29,6 +30,7 @@
 #include "engine/ui/TitleScreen.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -76,6 +78,8 @@ private:
     void advanceScreen();
     void solveCurrentScreenForDebug();
     void handlePuzzleCompleted(const CampaignSession::PuzzleCompleted& completed);
+    void beginLevelTransition(std::function<void()> midpointAction);
+    void updateLevelTransition(float dt);
     void tryEnterSelector();
     [[nodiscard]] bool updateScreenPreview(bool requested, float dt);
     [[nodiscard]] std::optional<RenderFrameData>
@@ -141,6 +145,8 @@ private:
     PresentationSettings presentationSettings_;
     SettingsCoordinator settingsCoordinator_;
     GameplayPresentation presentation_;
+    LevelTransition levelTransition_;
+    std::function<void()> levelTransitionMidpointAction_;
     std::unique_ptr<ApplicationTools> tools_;
     FrameArena renderFrameArena_;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;

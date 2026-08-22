@@ -14,6 +14,8 @@ pipeline, and a headless editor model exposed through Debug ImGui tools.
 - Immobile animated enemies that track and attack adjacent players, can be
   pushed by blocks, and support skeleton-driven held-item attachments.
 - Animated mirror beams, destination ghosts, sound, and particle effects.
+- Pixel-blur world transitions when entering a puzzle from the overworld and
+  returning after completion.
 - Stylized procedural water with cellular ripples, two-tone shading,
   shorelines, tile borders, and submerged-entity rendering.
 - Vulkan shadows, SSAO, MSAA, internal render scaling, deferred renderer

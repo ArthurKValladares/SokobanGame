@@ -336,7 +336,10 @@ void Application::run()
             }
         }
 
-        switch (inputRouter_.backAction(input_, inputRoutingContext())) {
+        const InputRouter::BackAction backAction = levelTransition_.active()
+            ? InputRouter::BackAction::None
+            : inputRouter_.backAction(input_, inputRoutingContext());
+        switch (backAction) {
         case InputRouter::BackAction::CloseDraftConfirmation:
             tools_->draftExitConfirmationOpen = false;
             break;
@@ -521,6 +524,12 @@ void Application::update(
     }
 #endif
 
+    if (levelTransition_.active()) {
+        updateLevelTransition(dt);
+        audioSystem_.update(dt, false, false);
+        return;
+    }
+
     if (updateScreenPreview(input.previewScreen, dt)) {
         audioSystem_.update(dt, false, false);
         return;
@@ -699,8 +708,11 @@ void Application::advanceScreen()
                "contain End tiles";
         return;
     }
-    handlePuzzleCompleted(campaign_.completePuzzle(
-        playerProfile_, gameplaySession_.playerMoveCount()));
+    const int moveCount = gameplaySession_.playerMoveCount();
+    beginLevelTransition([this, moveCount] {
+        handlePuzzleCompleted(campaign_.completePuzzle(
+            playerProfile_, moveCount));
+    });
 }
 
 void Application::solveCurrentScreenForDebug()
@@ -712,8 +724,11 @@ void Application::solveCurrentScreenForDebug()
     if (campaign_.inOverworld()) {
         return;
     }
-    handlePuzzleCompleted(campaign_.completePuzzle(
-        playerProfile_, gameplaySession_.playerMoveCount(), false));
+    const int moveCount = gameplaySession_.playerMoveCount();
+    beginLevelTransition([this, moveCount] {
+        handlePuzzleCompleted(campaign_.completePuzzle(
+            playerProfile_, moveCount, false));
+    });
 }
 
 void Application::handlePuzzleCompleted(
@@ -721,6 +736,29 @@ void Application::handlePuzzleCompleted(
 {
     persistProfile(true);
     loadCurrentScreen();
+}
+
+void Application::beginLevelTransition(
+    std::function<void()> midpointAction)
+{
+    if (!midpointAction || !levelTransition_.start()) {
+        return;
+    }
+    levelTransitionMidpointAction_ = std::move(midpointAction);
+    screenPreviewActive_ = false;
+}
+
+void Application::updateLevelTransition(float dt)
+{
+    const LevelTransition::UpdateResult result = levelTransition_.update(dt);
+    if (!result.midpointReached || !levelTransitionMidpointAction_) {
+        return;
+    }
+
+    std::function<void()> action =
+        std::move(levelTransitionMidpointAction_);
+    levelTransitionMidpointAction_ = {};
+    action();
 }
 
 void Application::tryEnterSelector()
@@ -756,9 +794,12 @@ void Application::tryEnterSelector()
 
     // Make the return point durable before changing the profile context.
     checkpointCurrentScreen(true);
-    if (campaign_.startPuzzle(playerProfile_, *sharedSelector->target)) {
-        loadCurrentScreen();
-    }
+    const LevelLocation target = *sharedSelector->target;
+    beginLevelTransition([this, target] {
+        if (campaign_.startPuzzle(playerProfile_, target)) {
+            loadCurrentScreen();
+        }
+    });
 }
 
 bool Application::updateScreenPreview(bool requested, float dt)
@@ -851,7 +892,8 @@ Application::buildScreenPreviewRenderFrame() const
 void Application::drawSelectorPrompt(
     const VulkanRenderer::PreparedFrame* frame)
 {
-    if (!frame || !campaign_.gameLoaded() || !campaign_.inOverworld() ||
+    if (!frame || levelTransition_.active() ||
+        !campaign_.gameLoaded() || !campaign_.inOverworld() ||
         shellMenuOpen() || tools_->levelEditor.editingDocument() ||
         gameplaySession_.moving() ||
         rules::hasPendingMotion(level_, gameplaySession_.state())) {
@@ -1533,6 +1575,7 @@ RenderFrameData Application::buildRenderFrame(
         },
     }, renderFrameArena_);
     particleSystem_.appendRenderData(frame);
+    frame.levelTransitionAmount = levelTransition_.amount();
     return frame;
 }
 

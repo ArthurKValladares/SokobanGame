@@ -257,6 +257,7 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
         "fullscreen.vert.glsl.spv",
         "ssao.frag.glsl.spv",
         "ssao_composite.frag.glsl.spv",
+        "world_transition.frag.glsl.spv",
     };
     for (const char* shader : shaderNames) {
         writeFile(shaders / shader);
