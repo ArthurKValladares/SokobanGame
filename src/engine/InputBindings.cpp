@@ -82,6 +82,24 @@ std::string actionBindingsDisplay(const InputBindings& bindings, InputAction act
     return result.empty() ? "Unbound" : result;
 }
 
+std::string actionBindingsDisplay(
+    const InputBindings& bindings,
+    InputAction action,
+    BindingDeviceClass deviceClass)
+{
+    std::string result;
+    for (const InputBinding& binding : bindings.forAction(action)) {
+        if (bindingDeviceClass(binding) != deviceClass) {
+            continue;
+        }
+        if (!result.empty()) {
+            result += " / ";
+        }
+        result += bindingDisplayName(binding);
+    }
+    return result.empty() ? "Unbound" : result;
+}
+
 void assignBinding(
     InputBindings& bindings,
     InputAction action,
@@ -136,10 +154,6 @@ InputBindings defaultInputBindings()
         GamepadButtonBinding { "dpright" },
         GamepadAxisBinding { "leftx", AxisDirection::Positive },
     };
-    bindings.forAction(InputAction::Mirror) = {
-        KeyboardBinding { "F" },
-        GamepadButtonBinding { "east" },
-    };
     bindings.forAction(InputAction::Undo) = {
         KeyboardBinding { "Z" },
         GamepadButtonBinding { "west" },
@@ -156,7 +170,6 @@ InputBindings defaultInputBindings()
         GamepadButtonBinding { "start" },
     };
     bindings.forAction(InputAction::MenuConfirm) = {
-        KeyboardBinding { "Return" },
         KeyboardBinding { "Space" },
         GamepadButtonBinding { "south" },
     };
@@ -183,7 +196,6 @@ std::string_view inputActionName(InputAction action)
     case InputAction::MoveDown: return "moveDown";
     case InputAction::MoveLeft: return "moveLeft";
     case InputAction::MoveRight: return "moveRight";
-    case InputAction::Mirror: return "mirror";
     case InputAction::Undo: return "undo";
     case InputAction::Restart: return "restart";
     case InputAction::ShowTopDownView: return "showTopDownView";

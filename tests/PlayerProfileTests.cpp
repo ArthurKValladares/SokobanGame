@@ -534,10 +534,6 @@ void testNormalizationAndMigration()
         sokoban::decodePlayerProfile(format9Root.dump());
     check(migratedFormat9.sourceFormat == 9, "format 9 source reported");
     migratedKeyboard = keyboardBinding(
-        migratedFormat9.profile.settings.input, sokoban::InputAction::Mirror);
-    check(migratedKeyboard && migratedKeyboard->scancode == "F",
-        "format 9 receives mirror default");
-    migratedKeyboard = keyboardBinding(
         migratedFormat9.profile.settings.input, sokoban::InputAction::Undo);
     check(migratedKeyboard && migratedKeyboard->scancode == "Z",
         "format 9 keeps the original undo default");
@@ -558,10 +554,6 @@ void testNormalizationAndMigration()
         sokoban::decodePlayerProfile(format10Root.dump());
     check(migratedFormat10.sourceFormat == 10, "format 10 source reported");
     migratedKeyboard = keyboardBinding(
-        migratedFormat10.profile.settings.input, sokoban::InputAction::Mirror);
-    check(migratedKeyboard && migratedKeyboard->scancode == "F",
-        "format 10 default mirror moves to F");
-    migratedKeyboard = keyboardBinding(
         migratedFormat10.profile.settings.input, sokoban::InputAction::Undo);
     check(migratedKeyboard && migratedKeyboard->scancode == "Z",
         "format 10 default undo returns to Z");
@@ -572,11 +564,10 @@ void testNormalizationAndMigration()
     });
     const sokoban::DecodedPlayerProfile migratedCustomFormat10 =
         sokoban::decodePlayerProfile(format10Root.dump());
-    migratedKeyboard = keyboardBinding(
-        migratedCustomFormat10.profile.settings.input,
-        sokoban::InputAction::Mirror);
-    check(migratedKeyboard && migratedKeyboard->scancode == "G",
-        "format 10 custom mirror binding is preserved");
+    const nlohmann::json migratedCustomFormat10Json = nlohmann::json::parse(
+        migratedCustomFormat10.profile.serialize());
+    check(!migratedCustomFormat10Json["settings"]["input"].contains("mirror"),
+        "retired custom mirror binding is removed");
 
     nlohmann::json format11Root = nlohmann::json::parse(
         sokoban::PlayerProfile {}.serialize());
@@ -1034,6 +1025,59 @@ void testFormat20AddsScreenPreviewBinding()
         "format 20 receives the screen preview defaults");
 }
 
+void testFormat21ConsolidatesInteractBinding()
+{
+    nlohmann::json format21 = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    format21["format"] = 21;
+    format21["settings"]["input"]["mirror"] = nlohmann::json::array({
+        nlohmann::json { { "type", "keyboard" }, { "control", "F" } },
+        nlohmann::json { { "type", "gamepadButton" }, { "control", "east" } },
+    });
+    format21["settings"]["input"]["menuConfirm"] = nlohmann::json::array({
+        nlohmann::json { { "type", "keyboard" }, { "control", "Return" } },
+        nlohmann::json { { "type", "keyboard" }, { "control", "Space" } },
+        nlohmann::json { { "type", "gamepadButton" }, { "control", "south" } },
+    });
+
+    const sokoban::DecodedPlayerProfile migrated =
+        sokoban::decodePlayerProfile(format21.dump());
+    check(migrated.sourceFormat == 21, "format 21 source is reported");
+    check(sokoban::actionBindingsDisplay(
+              migrated.profile.settings.input,
+              sokoban::InputAction::MenuConfirm) ==
+            "Space / Pad south",
+        "format 21 receives the consolidated interact default");
+    const nlohmann::json current = nlohmann::json::parse(
+        migrated.profile.serialize());
+    check(!current["settings"]["input"].contains("mirror"),
+        "format 21 mirror binding is retired");
+
+    format21["settings"]["input"]["mirror"] = nlohmann::json::array({
+        nlohmann::json { { "type", "keyboard" }, { "control", "G" } },
+        nlohmann::json { { "type", "gamepadButton" }, { "control", "east" } },
+    });
+    const sokoban::DecodedPlayerProfile migratedMirrorCustom =
+        sokoban::decodePlayerProfile(format21.dump());
+    check(sokoban::actionBindingsDisplay(
+              migratedMirrorCustom.profile.settings.input,
+              sokoban::InputAction::MenuConfirm) ==
+            "G / Pad south",
+        "format 21 carries a customized mirror key into interact");
+
+    format21["settings"]["input"]["menuConfirm"] = nlohmann::json::array({
+        nlohmann::json { { "type", "keyboard" }, { "control", "G" } },
+        nlohmann::json { { "type", "gamepadButton" }, { "control", "south" } },
+    });
+    const sokoban::DecodedPlayerProfile migratedCustom =
+        sokoban::decodePlayerProfile(format21.dump());
+    check(sokoban::actionBindingsDisplay(
+              migratedCustom.profile.settings.input,
+              sokoban::InputAction::MenuConfirm) ==
+            "G / Pad south",
+        "format 21 preserves a customized interact binding");
+}
+
 int main()
 {
     try {
@@ -1045,6 +1089,7 @@ int main()
     testScreenProgressOverworldCheckpointAndFormat17Migration();
         testFormat18AddsEditorBindings();
         testFormat20AddsScreenPreviewBinding();
+        testFormat21ConsolidatesInteractBinding();
         testStoreBackupsAndRecovery();
         testSaveSlotStems();
         testMigrationAndDoubleCorruption();

@@ -215,7 +215,7 @@ void testMirrorInputCommitsAnInstantAction()
         level,
         session,
         presentation,
-        { .mirrorPressed = true },
+        { .interactPressed = true },
         0.01f,
         false);
     CHECK(result.stateCommitted);
@@ -245,7 +245,7 @@ void testRejectedMirrorInputDoesNotEmitActivation()
         level,
         session,
         presentation,
-        { .mirrorPressed = true },
+        { .interactPressed = true },
         0.01f,
         false);
 
@@ -302,7 +302,7 @@ void testMirrorDuplicationRequiresEveryPlayerOnAnEnd()
             level,
             session,
             presentation,
-            { .mirrorPressed = true },
+            { .interactPressed = true },
             0.01f,
             false);
     };

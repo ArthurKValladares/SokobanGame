@@ -790,14 +790,14 @@ InputBindings inputBindingsFromJson(
     if (includeMenuConfirm) {
         rejectUnknownProperties(value, {
             "moveUp", "moveDown", "moveLeft", "moveRight",
-            "mirror", "undo", "restart", "showTopDownView",
+            "undo", "restart", "showTopDownView",
             "menuBack", "menuConfirm", "editorReplaceTile",
             "editorDeleteTile", "editorMoveTile", "previewScreen",
         }, context);
     } else {
         rejectUnknownProperties(value, {
             "moveUp", "moveDown", "moveLeft", "moveRight",
-            "mirror", "undo", "restart", "showTopDownView", "menuBack",
+            "undo", "restart", "showTopDownView", "menuBack",
             "editorReplaceTile", "editorDeleteTile", "editorMoveTile",
             "previewScreen",
         }, context);

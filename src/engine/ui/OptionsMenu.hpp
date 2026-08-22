@@ -37,11 +37,11 @@ enum class OptionsMenuRowId {
     Display,
     MasterVolume,
     MusicVolume,
+    BindingDevice,
     MoveUp,
     MoveDown,
     MoveLeft,
     MoveRight,
-    Mirror,
     Undo,
     Restart,
     ShowTopDownView,
@@ -64,6 +64,7 @@ enum class OptionsMenuRowKind {
     Toggle,
     Slider,
     CustomRenderScale,
+    Tabs,
     Binding,
 };
 
@@ -100,6 +101,8 @@ struct OptionsMenuState {
     bool allowLevelSelect = false;
     OptionsMenuPage page = OptionsMenuPage::Main;
     int selectedRow = 0;
+    BindingDeviceClass controlsBindingDevice =
+        BindingDeviceClass::Keyboard;
     std::optional<InputAction> capturingAction;
     std::optional<int> customRenderScalePreview;
 

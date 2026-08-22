@@ -14,7 +14,6 @@ enum class InputAction {
     MoveDown,
     MoveLeft,
     MoveRight,
-    Mirror,
     Undo,
     Restart,
     ShowTopDownView,
@@ -85,6 +84,12 @@ enum class BindingDeviceClass {
 [[nodiscard]] std::string actionBindingsDisplay(
     const InputBindings& bindings,
     InputAction action);
+// One display string for bindings from a single device class; "Unbound" when
+// the action has no binding for that class.
+[[nodiscard]] std::string actionBindingsDisplay(
+    const InputBindings& bindings,
+    InputAction action,
+    BindingDeviceClass deviceClass);
 // Rebinds `action`: bindings identical to `candidate` are removed from every
 // action active in the same input context, and the action's bindings of the
 // candidate's exact kind (keyboard / pad button / pad axis) are replaced by

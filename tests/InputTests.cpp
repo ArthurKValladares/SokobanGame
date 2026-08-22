@@ -52,7 +52,10 @@ void testDefaultKeyboardBindings()
     sokoban::InputState input(false);
     CHECK(input.invalidBindingCount() == 0);
     CHECK(input.keyBoundToAction(SDL_SCANCODE_W, sokoban::InputAction::MoveUp));
-    CHECK(input.keyBoundToAction(SDL_SCANCODE_F, sokoban::InputAction::Mirror));
+    CHECK(input.keyBoundToAction(
+        SDL_SCANCODE_SPACE, sokoban::InputAction::MenuConfirm));
+    CHECK(!input.keyBoundToAction(
+        SDL_SCANCODE_RETURN, sokoban::InputAction::MenuConfirm));
     CHECK(input.keyBoundToAction(SDL_SCANCODE_Z, sokoban::InputAction::Undo));
     CHECK(input.keyBoundToAction(
         SDL_SCANCODE_T, sokoban::InputAction::ShowTopDownView));
@@ -64,7 +67,6 @@ void testDefaultKeyboardBindings()
         SDL_SCANCODE_D, sokoban::InputAction::EditorDeleteTile));
     CHECK(input.keyBoundToAction(
         SDL_SCANCODE_M, sokoban::InputAction::EditorMoveTile));
-    CHECK(!input.keyBoundToAction(SDL_SCANCODE_Z, sokoban::InputAction::Mirror));
     CHECK(!input.keyBoundToAction(SDL_SCANCODE_F, sokoban::InputAction::Undo));
 
     input.beginFrame();
@@ -79,10 +81,6 @@ void testDefaultKeyboardBindings()
     input.handleEvent(keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_W));
     CHECK(!input.actionDown(sokoban::InputAction::MoveUp));
 
-    input.beginFrame();
-    input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_F));
-    CHECK(input.actionPressed(sokoban::InputAction::Mirror));
-
     input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_T));
     CHECK(input.actionPressed(sokoban::InputAction::ShowTopDownView));
     CHECK(input.actionDown(sokoban::InputAction::ShowTopDownView));
@@ -93,10 +91,14 @@ void testMenuConfirmBindings()
     sokoban::InputState input(false);
     input.beginFrame();
     input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_RETURN));
+    CHECK(!input.actionPressed(sokoban::InputAction::MenuConfirm));
+
+    input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_SPACE));
     CHECK(input.actionPressed(sokoban::InputAction::MenuConfirm));
 
     input.beginFrame();
     input.handleEvent(keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_RETURN));
+    input.handleEvent(keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_SPACE));
     input.handleEvent(gamepadButtonEvent(
         SDL_EVENT_GAMEPAD_BUTTON_DOWN,
         SDL_GAMEPAD_BUTTON_SOUTH));

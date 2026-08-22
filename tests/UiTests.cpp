@@ -308,6 +308,8 @@ void testControlsRemapping()
     draw({ .confirm = true });
     CHECK(menu.page() == sokoban::OptionsMenu::Page::Controls);
     CHECK(!menu.capturingBinding());
+    CHECK(menu.state().controlsBindingDevice ==
+        sokoban::BindingDeviceClass::Keyboard);
 
     ui.beginFrame({ 580.0f, 718.0f }, {}, false, false);
     (void)view.draw(ui, { 580.0f, 718.0f }, menu.state(), settings);
@@ -326,6 +328,9 @@ void testControlsRemapping()
                 command.rect.position.y + command.rect.size.y <=
                     718.0f + tolerance;
         }));
+
+    // The tabs are the first row; move into the first keyboard binding.
+    draw({ .down = true });
 
     // Rebind Move up to P: same-kind keyboard binding replaced, pad kept.
     draw({ .confirm = true });
@@ -388,7 +393,7 @@ void testControlsRemapping()
     menu.back();
 
     // Reset restores the defaults.
-    for (int i = 0; i < 9; ++i) {
+    for (int i = 0; i < 8; ++i) {
         draw({ .down = true });
     }
     const auto reset = draw({ .confirm = true });
@@ -407,7 +412,7 @@ void drawRects(sokoban::UiContext& ui, std::size_t count)
     ui.endFrame();
 }
 
-void testSelectorPromptShowsEnterAndPreviewBindings()
+void testSelectorPromptShowsInteractAndPreviewBindings()
 {
     sokoban::InputBindings bindings = sokoban::defaultInputBindings();
     CHECK(sokoban::SelectorPrompt::bindingLabel(
@@ -715,6 +720,29 @@ void testOptionsReducerDraftAndBindingSemantics()
         .open = true,
         .page = sokoban::OptionsMenuPage::Controls,
     };
+    const std::vector<sokoban::OptionsMenuRow> keyboardRows =
+        sokoban::optionsMenuRows(controls, settings);
+    CHECK(keyboardRows.front().id ==
+        sokoban::OptionsMenuRowId::BindingDevice);
+    CHECK(keyboardRows.front().kind ==
+        sokoban::OptionsMenuRowKind::Tabs);
+    CHECK(keyboardRows.front().choiceValue == 0);
+    CHECK(sokoban::actionBindingsDisplay(
+        settings.input,
+        sokoban::InputAction::MoveUp,
+        sokoban::BindingDeviceClass::Keyboard) == "W");
+    CHECK(sokoban::actionBindingsDisplay(
+        settings.input,
+        sokoban::InputAction::MoveUp,
+        sokoban::BindingDeviceClass::Gamepad) ==
+        "Pad dpup / Pad lefty-");
+    const auto adjustedTab = sokoban::reduceOptionsMenu(
+        controls,
+        settings,
+        sokoban::options::intent::AdjustSelected { 1 });
+    CHECK(adjustedTab.state.controlsBindingDevice ==
+        sokoban::BindingDeviceClass::Gamepad);
+
     reduction = sokoban::reduceOptionsMenu(
         controls,
         settings,
@@ -738,6 +766,55 @@ void testOptionsReducerDraftAndBindingSemantics()
             sokoban::InputAction::MoveUp),
         sokoban::InputBinding {
             sokoban::KeyboardBinding { "P" } }) == 1);
+
+    reduction = sokoban::reduceOptionsMenu(
+        controls,
+        settings,
+        sokoban::options::intent::SelectChoice {
+            sokoban::OptionsMenuRowId::BindingDevice,
+            1,
+        });
+    CHECK(reduction.state.controlsBindingDevice ==
+        sokoban::BindingDeviceClass::Gamepad);
+    CHECK(!reduction.action.has_value());
+    const std::vector<sokoban::OptionsMenuRow> controllerRows =
+        sokoban::optionsMenuRows(reduction.state, settings);
+    CHECK(controllerRows.front().choiceValue == 1);
+
+    reduction = sokoban::reduceOptionsMenu(
+        reduction.state,
+        settings,
+        sokoban::options::intent::ActivateRow {
+            sokoban::OptionsMenuRowId::MoveUp });
+    reduction = sokoban::reduceOptionsMenu(
+        reduction.state,
+        settings,
+        sokoban::options::intent::ProvideBinding {
+            sokoban::KeyboardBinding { "P" },
+        });
+    CHECK(reduction.state.capturingAction ==
+        sokoban::InputAction::MoveUp);
+    CHECK(!reduction.action.has_value());
+
+    reduction = sokoban::reduceOptionsMenu(
+        reduction.state,
+        settings,
+        sokoban::options::intent::ProvideBinding {
+            sokoban::GamepadButtonBinding { "rightshoulder" },
+        });
+    CHECK(!reduction.state.capturingAction.has_value());
+    changed = std::get_if<sokoban::options::SettingsChanged>(
+        &*reduction.action);
+    CHECK(changed != nullptr);
+    CHECK(sokoban::actionBindingsDisplay(
+        changed->settings.input,
+        sokoban::InputAction::MoveUp,
+        sokoban::BindingDeviceClass::Gamepad) ==
+        "Pad lefty- / Pad rightshoulder");
+    CHECK(sokoban::actionBindingsDisplay(
+        changed->settings.input,
+        sokoban::InputAction::MoveUp,
+        sokoban::BindingDeviceClass::Keyboard) == "W");
 }
 
 } // namespace
@@ -747,7 +824,7 @@ int main()
     testFontAtlasAndText();
     testUiFrameArenaCommandBudget();
     testReusableControls();
-    testSelectorPromptShowsEnterAndPreviewBindings();
+    testSelectorPromptShowsInteractAndPreviewBindings();
     testScreenPreviewOverlayUsesCenteredSeventyFivePercentInset();
     testLayoutTree();
     testOptionsNavigationAndSettings();

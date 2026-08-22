@@ -146,7 +146,7 @@ GameplayLoop::UpdateResult GameplayLoop::update(
     float dt,
     bool playingDraft)
 {
-    if (input.mirrorPressed) {
+    if (input.interactPressed) {
         session.queueMirror();
     }
     if (input.undoPressed) {

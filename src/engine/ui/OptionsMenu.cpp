@@ -54,6 +54,23 @@ constexpr std::array displayChoices {
     displayModes[4].choice,
 };
 
+constexpr std::array bindingDeviceChoices {
+    OptionsMenuChoice { 0, "Keyboard" },
+    OptionsMenuChoice { 1, "Controller" },
+};
+
+int bindingDeviceChoice(BindingDeviceClass deviceClass)
+{
+    return deviceClass == BindingDeviceClass::Keyboard ? 0 : 1;
+}
+
+BindingDeviceClass bindingDeviceFromChoice(int value)
+{
+    return value == 1
+        ? BindingDeviceClass::Gamepad
+        : BindingDeviceClass::Keyboard;
+}
+
 struct BindingRow {
     OptionsMenuRowId row;
     InputAction action;
@@ -65,7 +82,6 @@ constexpr std::array bindingRows {
     BindingRow { OptionsMenuRowId::MoveDown, InputAction::MoveDown, "Move down" },
     BindingRow { OptionsMenuRowId::MoveLeft, InputAction::MoveLeft, "Move left" },
     BindingRow { OptionsMenuRowId::MoveRight, InputAction::MoveRight, "Move right" },
-    BindingRow { OptionsMenuRowId::Mirror, InputAction::Mirror, "Activate mirrors" },
     BindingRow { OptionsMenuRowId::Undo, InputAction::Undo, "Undo" },
     BindingRow { OptionsMenuRowId::Restart, InputAction::Restart, "Restart" },
     BindingRow {
@@ -239,7 +255,6 @@ std::optional<OptionsAction> activateRow(
     case OptionsMenuRowId::MoveDown:
     case OptionsMenuRowId::MoveLeft:
     case OptionsMenuRowId::MoveRight:
-    case OptionsMenuRowId::Mirror:
     case OptionsMenuRowId::Undo:
     case OptionsMenuRowId::Restart:
     case OptionsMenuRowId::ShowTopDownView:
@@ -274,6 +289,7 @@ std::optional<OptionsAction> activateRow(
     case OptionsMenuRowId::Display:
     case OptionsMenuRowId::MasterVolume:
     case OptionsMenuRowId::MusicVolume:
+    case OptionsMenuRowId::BindingDevice:
         break;
     }
     return std::nullopt;
@@ -328,6 +344,13 @@ std::optional<OptionsAction> adjustRow(
         settings.video.ambientOcclusionStrength +=
             direction < 0 ? -0.05f : 0.05f;
         break;
+    case OptionsMenuRowId::BindingDevice:
+        state.controlsBindingDevice = bindingDeviceFromChoice(
+            cycleChoice(
+                bindingDeviceChoices,
+                bindingDeviceChoice(state.controlsBindingDevice),
+                direction));
+        return std::nullopt;
     default:
         return std::nullopt;
     }
@@ -558,6 +581,13 @@ std::vector<OptionsMenuRow> optionsMenuRows(
         };
         break;
     case OptionsMenuPage::Controls:
+        rows.push_back({
+            .id = OptionsMenuRowId::BindingDevice,
+            .kind = OptionsMenuRowKind::Tabs,
+            .choices = bindingDeviceChoices,
+            .choiceValue = bindingDeviceChoice(
+                state.controlsBindingDevice),
+        });
         for (const BindingRow& binding : bindingRows) {
             rows.push_back({
                 .id = binding.row,
@@ -575,11 +605,14 @@ std::vector<OptionsMenuRow> optionsMenuRows(
             .flexibleSpaceBefore = true,
         });
 #if SOKOBAN_ENABLE_DEBUG_UI
-        rows.push_back({
-            .id = OptionsMenuRowId::EditorControls,
-            .kind = OptionsMenuRowKind::Button,
-            .label = "Editor Controls",
-        });
+        if (state.controlsBindingDevice ==
+            BindingDeviceClass::Keyboard) {
+            rows.push_back({
+                .id = OptionsMenuRowId::EditorControls,
+                .kind = OptionsMenuRowKind::Button,
+                .label = "Editor Controls",
+            });
+        }
 #endif
         rows.push_back({
             .id = OptionsMenuRowId::Back,
@@ -716,6 +749,10 @@ OptionsMenuReduction reduceOptionsMenu(
             case OptionsMenuRowId::Display:
                 applyDisplayMode(settings, selection.value);
                 break;
+            case OptionsMenuRowId::BindingDevice:
+                result.state.controlsBindingDevice =
+                    bindingDeviceFromChoice(selection.value);
+                return;
             default:
                 return;
             }
@@ -783,6 +820,10 @@ OptionsMenuReduction reduceOptionsMenu(
                     std::get_if<GamepadButtonBinding>(&provided.binding);
                 button != nullptr && button->button == "start") {
                 result.state.capturingAction.reset();
+                return;
+            }
+            if (bindingDeviceClass(provided.binding) !=
+                result.state.controlsBindingDevice) {
                 return;
             }
             UserSettings settings = currentSettings;
@@ -927,6 +968,10 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             layout.tree.spacer(layout.tree.root(), 20.0f);
         }
         switch (row.kind) {
+        case OptionsMenuRowKind::Tabs:
+            rowLayout.primary = layout.tree.item(
+                layout.tree.root(), 44.0f);
+            break;
         case OptionsMenuRowKind::SegmentedChoice:
         case OptionsMenuRowKind::StepperChoice:
         case OptionsMenuRowKind::Slider: {
@@ -991,7 +1036,7 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             layout.tree.rect(controlsPrompt),
             state.capturingAction
                 ? "Esc or Start cancels. Rebinding steals duplicates."
-                : "Confirm a row to change its binding.",
+                : "Choose a tab, then confirm a row to remap it.",
             { 0.58f, 0.63f, 0.62f, 1.0f },
             17.0f);
     }
@@ -1006,6 +1051,24 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             ui.divider(layout.tree.rect(rowLayout.divider));
         }
         switch (row.kind) {
+        case OptionsMenuRowKind::Tabs: {
+            std::vector<uiControls::ChoiceOption> choices;
+            choices.reserve(row.choices.size());
+            for (const OptionsMenuChoice& choice : row.choices) {
+                choices.push_back({ choice.value, choice.label });
+            }
+            int value = row.choiceValue;
+            if (uiControls::segmentedControl(
+                    ui,
+                    layout.tree.rect(rowLayout.primary),
+                    choices,
+                    value,
+                    { .focused = focused })) {
+                intent = options::intent::SelectChoice {
+                    row.id, value };
+            }
+            break;
+        }
         case OptionsMenuRowKind::Button:
             if (uiControls::button(
                     ui,
@@ -1193,8 +1256,14 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
                 bindingRow,
                 row.label,
                 capturing
-                    ? "Press a key or button..."
-                    : actionBindingsDisplay(settings.input, *action),
+                    ? (state.controlsBindingDevice ==
+                              BindingDeviceClass::Keyboard
+                            ? "Press a key..."
+                            : "Press a controller input...")
+                    : actionBindingsDisplay(
+                          settings.input,
+                          *action,
+                          state.controlsBindingDevice),
                 capturing
                     ? Vec4 { 0.98f, 0.84f, 0.42f, 1.0f }
                     : (focused

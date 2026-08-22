@@ -137,7 +137,7 @@ Overworld moves do not contribute to puzzle best-move or best-time records.
 
 ### 5.3 Activating a selector
 
-Space is already part of the remappable `MenuConfirm` action and is inactive as a gameplay command. Preserve save/settings compatibility by exposing that same semantic action as `interactPressed` in the gameplay routing context rather than adding a new serialized input action immediately. The Controls UI label should become **Confirm / Interact**. Return remains a default confirm key; Space remains the required default selector key.
+Space is the keyboard default for the remappable `MenuConfirm` action. Expose that same semantic action as `interactPressed` in the gameplay routing context so it drives selectors and mirror activation without a separate serialized Mirror action. The Controls UI label is **Confirm / Interact**; Space is its sole keyboard default.
 
 Activation is accepted only when all of the following are true:
 

@@ -78,15 +78,15 @@ engine implementation files.
 | Action | Keyboard | Gamepad |
 | --- | --- | --- |
 | Move | `W`, `A`, `S`, `D` | D-pad or left stick |
-| Activate mirrors | `F` | East button |
 | Undo | `Z` | West button |
 | Restart | `R` | North button |
 | Hold top-down view | `T` | Remappable |
-| Menu confirm | `Enter` or `Space` | South button |
+| Confirm / interact (including mirrors) | `Space` | South button |
 | Menu back/options | `Escape` | Start button |
 
 Bindings can be changed from Options > Controls and are persisted in the
-shared settings profile.
+shared settings profile. Keyboard and Controller tabs show and remap their
+respective bindings independently.
 
 ## Level Format
 

@@ -310,10 +310,14 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/AudioSystem.*`: miniaudio-backed sound playback behind a pimpl (`EngineHandle`), so no miniaudio types leak into headers. Preloads manifest sound sets from the staged runtime content tree with `MA_SOUND_FLAG_DECODE` into stable `std::vector<ma_sound>` storage. `playOneShot(name)` handles reusable randomized effects; `update(dt, playerWalking, pushingStone)` retains specialized footstep cadence and seamless stone-drag loops with short fades. Music streams one looping track per level with a 600 ms crossfade. Manifest gains remain authored in the Asset Manifest window; profile-backed master, music, and sound-effect bus gains are previewed live and persisted when Debug UI sliders are committed. Audio degrades gracefully to silence if the device or files are missing.
 - `src/engine/GameplaySession.*`: headless gameplay orchestration between input and `Rules`. Owns the authoritative `GameState`, buffered move/undo/restart commands, active action timing, action history, a branch-safe undo stack, automatic world steps, the post-undo automatic-motion pause, and solution-move snapshots that restore correctly across undo/restart. An optional runtime-only projected-state admission policy can reject a planned player batch, ambient action, mirror, undo, or restart before scheduling; the composed overworld uses it to prevent living players from splitting across authored screens. Each committed `Action` owns its complete Vulkan-free `ActionPresentationTimeline`; inversion preserves that transaction and runs it backward for its resolved full duration. Its committed-state snapshot/restore API persists exact player/movable/enemy state, stable IDs, presentation ordering, and the usable undo chain; restore rejects disconnected or impossible rules transitions without mutating the live session. `reset` always clears undo state at a loaded-world boundary. Tested by `tests/GameplaySessionTests.cpp` (`sokoban_gameplay_session_tests`).
 - `src/engine/InputBindings.*`: platform-neutral semantic action and binding model. Each action owns an ordered list of keyboard, gamepad-button, and signed gamepad-axis bindings, allowing keyboard+D-pad+stick defaults. `assignBinding` removes an identical binding from actions active in the same context, then replaces only the action's bindings of the same kind, so editor-only modifiers can reuse gameplay defaults and a d-pad rebind keeps a stick binding; `bindingDisplayName`/`actionBindingsDisplay` provide UI labels.
+- Options > Controls separates remapping into Keyboard and Controller tabs.
+  Each tab displays only its device class and rejects capture candidates from
+  the other class; reset-to-defaults remains shared. Debug editor bindings are
+  keyboard-only and are linked from the Keyboard tab.
 - `src/engine/Input.*`: SDL3 device owner and action mapper. Tracks raw keyboard/mouse state for editor tooling, hot-plugs gamepads, selects the most recently used controller, normalizes stick axes with threshold/pressed-edge semantics, clears stuck input on focus loss, reports active-device diagnostics, and converts raw SDL events into typed remapping candidates. `InputRouter` controls event admission and distributes its state to active consumers. Covered by `tests/InputTests.cpp` (`sokoban_input_tests`).
 - `src/engine/PlayerProfile.*` + `src/engine/PlayerProfileCodec.cpp`:
-  current format-20 player progress model plus one owned `UserSettings` value.
-  Forward JSON patches (`migrate1to2` through `migrate19to20`) feed one strict
+  current format-22 player progress model plus one owned `UserSettings` value.
+  Forward JSON patches (`migrate1to2` through `migrate21to22`) feed one strict
   current-format parse. Format 9 made progress/settings independently optional
   for split slot and shared-settings files; format 10 added Mirror bindings,
   format 11 restored the intended `Z` Undo / `F` Mirror defaults, and format 12
@@ -324,7 +328,10 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   format-16 checkpoints and undo history. Format 18 introduced per-screen and
   overworld progress, format 19 added the three editor tile bindings, and
   format 20 replaced the untyped single-overworld snapshot with a topology-
-  fingerprinted checkpoint carrying a stable active overworld-screen ID.
+  fingerprinted checkpoint carrying a stable active overworld-screen ID,
+  format 21 added the screen-preview binding, and format 22 retired the
+  dedicated Mirror action in favor of Confirm / Interact and removed Return
+  from that action's keyboard default.
   Stores exact active-screen
   gameplay/undo state including action presentation transactions, progress,
   bests, reached screens, typed input bindings,
@@ -615,12 +622,12 @@ Core movement (discrete step system):
   in the Debug UI under Tile Geometry > Step Rates.
 - WASD moves the player by default (one tile per step; held keys step repeatedly).
 - `Z` undoes one step by default; undoing pauses pending world motion until the
-  next input-driven step. `R` restarts, `F` activates mirrors, and holding `T`
-  animates the camera to a straight-down pitch. These eight gameplay bindings
-  are loaded from `PlayerProfile::settings.input`. Gamepads use D-pad or left
-  stick for movement, east/B for mirrors, west/X for undo, north/Y for restart,
-  and Start for menu/back; the top-down action is remappable but has no default
-  gamepad binding.
+  next input-driven step. `R` restarts, Space interacts (including activating
+  mirrors), and holding `T` animates the camera to a straight-down pitch. These
+  gameplay bindings are loaded from `PlayerProfile::settings.input`. Gamepads
+  use D-pad or left stick for movement, south/A for interactions, west/X for
+  undo, north/Y for restart, and Start for menu/back; the top-down action is
+  remappable but has no default gamepad binding.
 - `GameplaySession` stores one action record per completed step for undo; the
   authoritative state commits only after `Application` finishes animating the
   action.
@@ -714,9 +721,9 @@ Mirrors:
 - `1`, `2`, `3`, and `4` pair the north-west, north-east, south-west, and
   south-east orthogonal rays. Reflection is bidirectional between each pair;
   distance from the mirror is preserved.
-- The configurable `Mirror` action defaults to keyboard `F` and gamepad East;
-  Undo defaults to keyboard `Z` and gamepad West. Profile migrations preserve
-  the one-binding/one-active-context rule.
+- Mirror activation uses the contextual Confirm / Interact action, defaulting
+  to keyboard Space and gamepad South. Undo defaults to keyboard `Z` and
+  gamepad West. Profile migrations retire the old dedicated Mirror binding.
 - `rules::activateMirrors` is pure and transactional. It reflects the player,
   rocks, and ice; the nearest entity occludes entities behind it; chains may
   use each mirror once; ambiguous, obstructed, unsupported, and overlapping
@@ -1454,7 +1461,7 @@ The custom UI currently provides:
   records). Standalone level select closes on Back straight into the game.
   Escape at the title opens Options; Escape inside title sub-pages backs
   out.
-- Semantic W/S or D-pad/stick navigation, Enter/Space or controller South
+- Semantic W/S or D-pad/stick navigation, Space or controller South
   confirmation, and Escape/Start back navigation.
 
 It still lacks wrapping, kerning, localization, accessibility-driven scaling,
@@ -1973,9 +1980,9 @@ Engineering:
   keeps the pick quad coincident with a full-height preview block's top under
   perspective; using `z` creates parallax that grows toward the far side of
   the board. `IsoScenePreparerTests` covers the projected-face invariant.
-- Default keyboard bindings are `Z` for Undo and `F` for the Mirror action.
-  Player-profile format 11 migrates only the exact accidental format-10
-  defaults (`Mirror=Z`, `Undo=X`) and preserves customized controls.
+- Player-profile format 11 migrated only the exact accidental format-10
+  defaults (`Mirror=Z`, `Undo=X`); format 22 later retired the Mirror action
+  and consolidated mirror activation under Confirm / Interact (Space).
 - `Show Top-Down View` is a remappable hold action, defaulted to `T`. It is
   routed only while gameplay is active and smoothly moves the regular 3D
   camera pitch between `config::cameraPitchDegrees` and zero; it does not use

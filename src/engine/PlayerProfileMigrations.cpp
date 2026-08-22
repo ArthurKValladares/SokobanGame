@@ -237,7 +237,10 @@ void migrate9to10(Json& root)
 
     // Keep the one-binding/one-action invariant when introducing the new
     // defaults into profiles whose bindings may have been customized.
-    const Json mirrorDefaults = Json::parse(defaults.at("mirror").dump());
+    const Json mirrorDefaults = Json::array({
+        Json { { "type", "keyboard" }, { "control", "F" } },
+        Json { { "type", "gamepadButton" }, { "control", "east" } },
+    });
     for (auto& [action, bindings] : input.items()) {
         if (action == "mirror" || !bindings.is_array()) {
             continue;
@@ -297,49 +300,41 @@ void migrate10to11(Json& root)
         }
     }
 
-    InputBindings bindings =
-        playerProfileMigrationSupport::inputBindingsFromJson(input, "settings.input");
-    if (migrateMirror) {
-        bindings.forAction(InputAction::Mirror) = {
-            GamepadButtonBinding { "east" },
-        };
-    }
-    if (migrateUndo) {
-        bindings.forAction(InputAction::Undo) = {
-            GamepadButtonBinding { "west" },
-        };
-    }
-
-    auto bindingUsedOutside = [&bindings](
-                                  InputAction action,
-                                  const InputBinding& candidate) {
-        for (std::size_t i = 0; i < inputActionCount; ++i) {
-            if (static_cast<InputAction>(i) == action) {
+    auto bindingUsedOutside = [&input](
+                                  std::string_view action,
+                                  const Json& candidate) {
+        for (const auto& [name, bindings] : input.items()) {
+            if (name == action || !bindings.is_array()) {
                 continue;
             }
-            const auto& actionBindings = bindings.actions[i];
-            if (std::ranges::find(actionBindings, candidate) !=
-                actionBindings.end()) {
+            if (std::ranges::find(bindings, candidate) != bindings.end()) {
                 return true;
             }
         }
         return false;
     };
     if (migrateMirror) {
-        const InputBinding key = KeyboardBinding { "F" };
-        if (!bindingUsedOutside(InputAction::Mirror, key)) {
-            bindings.forAction(InputAction::Mirror).insert(
-                bindings.forAction(InputAction::Mirror).begin(), key);
+        const Json key {
+            { "type", "keyboard" }, { "control", "F" },
+        };
+        input["mirror"] = Json::array({
+            Json { { "type", "gamepadButton" }, { "control", "east" } },
+        });
+        if (!bindingUsedOutside("mirror", key)) {
+            input["mirror"].insert(input["mirror"].begin(), key);
         }
     }
     if (migrateUndo) {
-        const InputBinding key = KeyboardBinding { "Z" };
-        if (!bindingUsedOutside(InputAction::Undo, key)) {
-            bindings.forAction(InputAction::Undo).insert(
-                bindings.forAction(InputAction::Undo).begin(), key);
+        const Json key {
+            { "type", "keyboard" }, { "control", "Z" },
+        };
+        input["undo"] = Json::array({
+            Json { { "type", "gamepadButton" }, { "control", "west" } },
+        });
+        if (!bindingUsedOutside("undo", key)) {
+            input["undo"].insert(input["undo"].begin(), key);
         }
     }
-    input = playerProfileMigrationSupport::inputBindingsToJson(bindings);
 }
 
 void migrate11to12(Json& root)
@@ -679,6 +674,68 @@ void migrate20to21(Json& root)
         Json::parse(defaults.at("previewScreen").dump());
 }
 
+void migrate21to22(Json& root)
+{
+    if (!root.contains("settings") || !root["settings"].is_object()) {
+        return;
+    }
+    Json& input = root["settings"]["input"];
+    if (!input.is_object()) {
+        return;
+    }
+
+    const Json oldDefaultInteract = Json::array({
+        Json { { "type", "keyboard" }, { "control", "Return" } },
+        Json { { "type", "keyboard" }, { "control", "Space" } },
+        Json { { "type", "gamepadButton" }, { "control", "south" } },
+    });
+    if (input.contains("menuConfirm") &&
+        input["menuConfirm"] == oldDefaultInteract) {
+        const OrderedJson defaults =
+            playerProfileMigrationSupport::inputBindingsToJson(
+                defaultInputBindings());
+        const Json newDefaultInteract =
+            Json::parse(defaults.at("menuConfirm").dump());
+        const Json oldDefaultMirror = Json::array({
+            Json { { "type", "keyboard" }, { "control", "F" } },
+            Json { { "type", "gamepadButton" }, { "control", "east" } },
+        });
+        const Json oldMirror = input.value("mirror", oldDefaultMirror);
+        auto bindingsOfType = [](const Json& bindings, std::string_view type) {
+            Json result = Json::array();
+            if (!bindings.is_array()) {
+                return result;
+            }
+            for (const Json& binding : bindings) {
+                if (binding.is_object() &&
+                    binding.value("type", std::string {}) == type) {
+                    result.push_back(binding);
+                }
+            }
+            return result;
+        };
+
+        Json consolidated = Json::array();
+        for (const std::string_view type : {
+                 std::string_view("keyboard"),
+                 std::string_view("gamepadButton"),
+                 std::string_view("gamepadAxis"),
+             }) {
+            const Json legacy = bindingsOfType(oldMirror, type);
+            const Json oldDefault = bindingsOfType(oldDefaultMirror, type);
+            const Json newDefault = bindingsOfType(newDefaultInteract, type);
+            const Json& selected = !legacy.empty() && legacy != oldDefault
+                ? legacy
+                : newDefault;
+            for (const Json& binding : selected) {
+                consolidated.push_back(binding);
+            }
+        }
+        input["menuConfirm"] = std::move(consolidated);
+    }
+    input.erase("mirror");
+}
+
 } // namespace
 
 void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
@@ -705,6 +762,7 @@ void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
         migrate18to19,
         migrate19to20,
         migrate20to21,
+        migrate21to22,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

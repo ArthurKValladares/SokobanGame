@@ -24,12 +24,12 @@ public:
         ButtonState down;
         ButtonState left;
         ButtonState right;
-        bool mirrorPressed = false;
         bool undoPressed = false;
         bool undoDown = false;
         bool restartPressed = false;
-        // Contextual world interaction. GameplayLoop deliberately ignores
-        // this; Application owns transitions such as entering a selector.
+        // Contextual world interaction. GameplayLoop handles mirror
+        // activation; Application handles transitions such as entering a
+        // selector.
         bool interactPressed = false;
     };
 
