@@ -12,8 +12,8 @@ public:
         bool finished = false;
     };
 
-    static constexpr float closingDurationSeconds = 0.30f;
-    static constexpr float openingDurationSeconds = 0.38f;
+    static constexpr float closingDurationSeconds = 0.42f;
+    static constexpr float openingDurationSeconds = 0.48f;
 
     [[nodiscard]] bool start();
     [[nodiscard]] UpdateResult update(float dt);
