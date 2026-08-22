@@ -12,6 +12,8 @@
 namespace sokoban {
 
 class UiContext;
+class InputPromptCatalog;
+struct GamepadPresentation;
 
 enum class OptionsMenuPage {
     Main,
@@ -247,7 +249,9 @@ public:
         UiContext& ui,
         Vec2 viewport,
         const OptionsMenuState& state,
-        const UserSettings& settings) const;
+        const UserSettings& settings,
+        const InputPromptCatalog* inputPrompts = nullptr,
+        const GamepadPresentation* gamepad = nullptr) const;
 };
 
 } // namespace sokoban

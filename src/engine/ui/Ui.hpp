@@ -3,6 +3,7 @@
 #include "engine/ArenaArray.hpp"
 #include "engine/FrameArena.hpp"
 #include "engine/Math.hpp"
+#include "engine/render/RenderTypes.hpp"
 #include "engine/ui/UiConfig.hpp"
 
 #include <cstddef>
@@ -22,6 +23,7 @@ enum class UiDrawKind {
     Solid,
     FontGlyph,
     Image,
+    TextureImage,
     SceneImage,
 };
 
@@ -31,6 +33,7 @@ struct UiDrawCommand {
     UiRect uvRect {};
     Vec4 color {};
     Vec4 effectOptions {};
+    RenderTexture texture = noTexture;
 };
 
 struct UiDrawData {
@@ -81,6 +84,11 @@ public:
     void rect(UiRect rect, Vec4 color);
     void image(
         UiRect rect,
+        UiRect uvRect = { {}, { 1.0f, 1.0f } },
+        Vec4 color = { 1.0f, 1.0f, 1.0f, 1.0f });
+    void textureImage(
+        UiRect rect,
+        RenderTexture texture,
         UiRect uvRect = { {}, { 1.0f, 1.0f } },
         Vec4 color = { 1.0f, 1.0f, 1.0f, 1.0f });
     // Samples the renderer's preserved main-scene image. Used when UI needs

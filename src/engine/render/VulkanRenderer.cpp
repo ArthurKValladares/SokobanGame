@@ -266,6 +266,9 @@ void VulkanRenderer::drawFrame(
             *prepared.previewFrameData, previewRequirements);
         frameAssetRequirements_.merge(previewRequirements);
     }
+    for (const UiDrawCommand& command : uiDrawData.commands) {
+        frameAssetRequirements_.requireTexture(command.texture);
+    }
     ensureAssets(frameAssetRequirements_);
 
 #if SOKOBAN_ENABLE_DEBUG_UI

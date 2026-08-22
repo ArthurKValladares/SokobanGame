@@ -26,6 +26,7 @@
 #include "engine/render/VulkanRenderer.hpp"
 #include "engine/ui/FontAtlas.hpp"
 #include "engine/ui/LevelCompleteOverlay.hpp"
+#include "engine/ui/InputPrompts.hpp"
 #include "engine/ui/OptionsMenu.hpp"
 #include "engine/ui/TitleScreen.hpp"
 
@@ -119,6 +120,7 @@ private:
     AssetManifest assetManifest_;
     AnimationCatalog animationCatalog_;
     FontAtlas uiFont_;
+    InputPromptCatalog inputPrompts_;
     VulkanRenderer renderer_;
     UiContext ui_;
     OptionsMenu optionsMenu_;

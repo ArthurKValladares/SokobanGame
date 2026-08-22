@@ -30,6 +30,41 @@
       "path": "KayKit Board Game Bits 1.0/Assets/gltf/boardgame_bits_texture.png"
     },
     {
+      "name": "InputPromptsKeyboard",
+      "path": "kenney_input-prompts_1.5/Keyboard & Mouse/keyboard-&-mouse_sheet_default.png",
+      "filter": "linear"
+    },
+    {
+      "name": "InputPromptsGeneric",
+      "path": "kenney_input-prompts_1.5/Generic/generic_sheet_default.png",
+      "filter": "linear"
+    },
+    {
+      "name": "InputPromptsXbox",
+      "path": "kenney_input-prompts_1.5/Xbox Series/xbox-series_sheet_default.png",
+      "filter": "linear"
+    },
+    {
+      "name": "InputPromptsPlayStation",
+      "path": "kenney_input-prompts_1.5/PlayStation Series/playstation-series_sheet_default.png",
+      "filter": "linear"
+    },
+    {
+      "name": "InputPromptsSwitch",
+      "path": "kenney_input-prompts_1.5/Nintendo Switch/nintendo-switch_sheet_default.png",
+      "filter": "linear"
+    },
+    {
+      "name": "InputPromptsGameCube",
+      "path": "kenney_input-prompts_1.5/Nintendo Gamecube/nintendo-gamecube_sheet_default.png",
+      "filter": "linear"
+    },
+    {
+      "name": "InputPromptsSteamDeck",
+      "path": "kenney_input-prompts_1.5/Steam Deck/steam-deck_sheet_default.png",
+      "filter": "linear"
+    },
+    {
       "name": "Smoke01",
       "path": "kenney_particle-pack/PNG (Transparent)/smoke_01.png"
     },

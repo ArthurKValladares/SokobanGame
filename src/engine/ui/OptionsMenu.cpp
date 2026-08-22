@@ -1,5 +1,7 @@
 #include "engine/ui/OptionsMenu.hpp"
 
+#include "engine/ui/InputPrompts.hpp"
+
 #include "engine/Flow.hpp"
 #include "engine/render/RenderResolution.hpp"
 #include "engine/ui/MenuKit.hpp"
@@ -462,6 +464,60 @@ void drawBindingRowText(
     }, binding, bindingColor, bindingSize);
 }
 
+bool drawBindingRowPrompts(
+    UiContext& ui,
+    UiRect row,
+    std::string_view label,
+    const InputBindings& bindings,
+    InputAction action,
+    BindingDeviceClass device,
+    const InputPromptCatalog& prompts,
+    const GamepadPresentation& gamepad,
+    bool focused)
+{
+    std::vector<InputPromptGlyph> glyphs;
+    for (const InputBinding& binding : bindings.forAction(action)) {
+        if (bindingDeviceClass(binding) != device) continue;
+        const std::optional<InputPromptGlyph> glyph =
+            prompts.glyphForBinding(binding, gamepad);
+        if (!glyph) return false;
+        glyphs.push_back(*glyph);
+    }
+    if (glyphs.empty()) return false;
+
+    constexpr float horizontalPadding = 16.0f;
+    constexpr float columnGap = 12.0f;
+    const float contentWidth = std::max(
+        row.size.x - horizontalPadding * 2.0f - columnGap,
+        0.0f);
+    const float labelWidth = contentWidth * 0.43f;
+    const UiRect labelRect {
+        { row.position.x + horizontalPadding, row.position.y },
+        { labelWidth, row.size.y },
+    };
+    const float labelSize = fittedTextSize(ui, label, 20.0f, labelRect.size.x);
+    const Vec2 labelMeasure = ui.measureText(label, labelSize);
+    ui.text({
+        labelRect.position.x,
+        labelRect.position.y + (labelRect.size.y - labelMeasure.y) * 0.5f,
+    }, label, { 0.92f, 0.94f, 0.92f, 1.0f }, labelSize);
+
+    constexpr float glyphSize = 36.0f;
+    constexpr float glyphGap = 5.0f;
+    const float totalWidth = glyphs.size() * glyphSize +
+        (glyphs.size() - 1) * glyphGap;
+    float x = row.position.x + row.size.x - horizontalPadding - totalWidth;
+    const float y = row.position.y + (row.size.y - glyphSize) * 0.5f;
+    const Vec4 color = focused
+        ? Vec4 { 1.0f, 1.0f, 1.0f, 1.0f }
+        : Vec4 { 0.86f, 0.89f, 0.88f, 0.9f };
+    for (const InputPromptGlyph& glyph : glyphs) {
+        drawInputPromptGlyph(ui, { { x, y }, { glyphSize, glyphSize } }, glyph, color);
+        x += glyphSize + glyphGap;
+    }
+    return true;
+}
+
 } // namespace
 
 std::vector<OptionsMenuRow> optionsMenuRows(
@@ -921,7 +977,9 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
     UiContext& ui,
     Vec2 viewport,
     const OptionsMenuState& state,
-    const UserSettings& settings) const
+    const UserSettings& settings,
+    const InputPromptCatalog* inputPrompts,
+    const GamepadPresentation* gamepad) const
 {
     if (!state.open) {
         return std::nullopt;
@@ -1251,24 +1309,38 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             }
             const bool capturing = action &&
                 state.capturingAction == action;
-            drawBindingRowText(
-                ui,
-                bindingRow,
-                row.label,
-                capturing
-                    ? (state.controlsBindingDevice ==
-                              BindingDeviceClass::Keyboard
-                            ? "Press a key..."
-                            : "Press a controller input...")
-                    : actionBindingsDisplay(
-                          settings.input,
-                          *action,
-                          state.controlsBindingDevice),
-                capturing
-                    ? Vec4 { 0.98f, 0.84f, 0.42f, 1.0f }
-                    : (focused
-                            ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
-                            : Vec4 { 0.62f, 0.67f, 0.65f, 1.0f }));
+            const GamepadPresentation noGamepad;
+            const bool drewPrompts = !capturing && action && inputPrompts &&
+                drawBindingRowPrompts(
+                    ui,
+                    bindingRow,
+                    row.label,
+                    settings.input,
+                    *action,
+                    state.controlsBindingDevice,
+                    *inputPrompts,
+                    gamepad ? *gamepad : noGamepad,
+                    focused);
+            if (!drewPrompts) {
+                drawBindingRowText(
+                    ui,
+                    bindingRow,
+                    row.label,
+                    capturing
+                        ? (state.controlsBindingDevice ==
+                                  BindingDeviceClass::Keyboard
+                                ? "Press a key..."
+                                : "Press a controller input...")
+                        : actionBindingsDisplay(
+                              settings.input,
+                              *action,
+                              state.controlsBindingDevice),
+                    capturing
+                        ? Vec4 { 0.98f, 0.84f, 0.42f, 1.0f }
+                        : (focused
+                                ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
+                                : Vec4 { 0.62f, 0.67f, 0.65f, 1.0f }));
+            }
             break;
         }
         }

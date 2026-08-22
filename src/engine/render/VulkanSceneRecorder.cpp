@@ -1750,7 +1750,9 @@ private:
         stats_.triangles += 2;
         const float materialMode = command.kind == UiDrawKind::FontGlyph
             ? 3.0f
-            : (command.kind == UiDrawKind::SceneImage ? 6.0f : 4.0f);
+            : (command.kind == UiDrawKind::SceneImage
+                    ? 6.0f
+                    : (command.kind == UiDrawKind::TextureImage ? 7.0f : 4.0f));
         const TilePushConstants constants {
             .vertices = {
                 Vec4 { left, top, 0.0f, 1.0f },
@@ -1773,7 +1775,7 @@ private:
                 0.0f,
             },
             .textureOptions = {
-                materialMode, 0.0f, 0.0f, 1.0f },
+                materialMode, static_cast<float>(command.texture.value), 0.0f, 1.0f },
         };
         vkCmdPushConstants(
             commandBuffer,

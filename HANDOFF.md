@@ -314,6 +314,14 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   Each tab displays only its device class and rejects capture candidates from
   the other class; reset-to-defaults remains shared. Debug editor bindings are
   keyboard-only and are linked from the Keyboard tab.
+- `src/engine/ui/InputPrompts.*` parses the staged Kenney Input Prompts 1.5
+  spritesheet metadata and resolves stable SDL bindings to keyboard or
+  controller-specific atlas regions. `InputState` exposes SDL3's real gamepad
+  type and per-device face-button labels; Xbox, PlayStation, Switch, GameCube,
+  and Steam Deck themes are selected without changing persisted generic
+  bindings, with a generic theme and text fallback for unknown controls.
+  Controls binding rows and the overworld screen-selector prompt render these
+  manifest-backed glyphs through `UiDrawKind::TextureImage`.
 - `src/engine/Input.*`: SDL3 device owner and action mapper. Tracks raw keyboard/mouse state for editor tooling, hot-plugs gamepads, selects the most recently used controller, normalizes stick axes with threshold/pressed-edge semantics, clears stuck input on focus loss, reports active-device diagnostics, and converts raw SDL events into typed remapping candidates. `InputRouter` controls event admission and distributes its state to active consumers. Covered by `tests/InputTests.cpp` (`sokoban_input_tests`).
 - `src/engine/PlayerProfile.*` + `src/engine/PlayerProfileCodec.cpp`:
   current format-22 player progress model plus one owned `UserSettings` value.
@@ -910,6 +918,9 @@ CMake asset pipeline:
   game version before reading `manifest.json`.
 - CMake `install` and CPack ZIP rules consume this same staged tree and include
   SDL, miniaudio, ImGui, and discovered asset license/readme files.
+- The reachable Kenney Input Prompts spritesheets, XML atlas metadata, and CC0
+  license are staged explicitly; the remainder of the vendor pack stays out
+  of packaged builds.
 - Shaders compile with `MODEL_TEXTURE_COUNT` read out of
   `sokoban::maxModelTextures` (`AssetManifest.hpp`) at configure time, so the
   two cannot drift; descriptor writes pad the texture array with a fallback

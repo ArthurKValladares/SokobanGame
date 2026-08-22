@@ -44,8 +44,21 @@ std::optional<std::string> SelectorPrompt::bindingLabel(
     InputAction action,
     BindingDeviceClass activeDevice)
 {
-    const std::vector<InputBinding>& actionBindings =
-        bindings.forAction(action);
+    const std::optional<InputBinding> selected = binding(
+        bindings, action, activeDevice);
+    if (!selected) return std::nullopt;
+    std::string label = compactBindingLabel(*selected);
+    return label.empty()
+        ? std::nullopt
+        : std::optional<std::string> { std::move(label) };
+}
+
+std::optional<InputBinding> SelectorPrompt::binding(
+    const InputBindings& bindings,
+    InputAction action,
+    BindingDeviceClass activeDevice)
+{
+    const std::vector<InputBinding>& actionBindings = bindings.forAction(action);
     auto found = action == InputAction::MenuConfirm &&
             activeDevice == BindingDeviceClass::Keyboard
         ? std::ranges::find_if(
@@ -69,10 +82,7 @@ std::optional<std::string> SelectorPrompt::bindingLabel(
     if (found == actionBindings.end()) {
         return std::nullopt;
     }
-    std::string label = compactBindingLabel(*found);
-    return label.empty()
-        ? std::nullopt
-        : std::optional<std::string> { std::move(label) };
+    return *found;
 }
 
 void SelectorPrompt::draw(
@@ -132,6 +142,48 @@ void SelectorPrompt::draw(
 
     // A small pixel-built eye stays crisp at every render scale and uses the
     // same geometry-only language as the existing arrow.
+    const float eyeY = arrowTip.y - 13.0f;
+    ui.rect({ { previewCenter - 9.0f, eyeY + 4.0f }, { 18.0f, 6.0f } },
+        arrowColor);
+    ui.rect({ { previewCenter - 6.0f, eyeY + 1.0f }, { 12.0f, 12.0f } },
+        arrowColor);
+    ui.rect({ { previewCenter - 3.0f, eyeY + 4.0f }, { 6.0f, 6.0f } },
+        { 0.075f, 0.09f, 0.095f, 1.0f });
+    ui.rect({ { previewCenter - 1.0f, eyeY + 6.0f }, { 2.0f, 2.0f } },
+        { 0.96f, 0.98f, 0.97f, 1.0f });
+}
+
+void SelectorPrompt::draw(
+    UiContext& ui,
+    Vec2 arrowTip,
+    const InputPromptGlyph& enterBinding,
+    const InputPromptGlyph& previewBinding)
+{
+    constexpr float glyphSize = 46.0f;
+    constexpr float iconHeight = 20.0f;
+    constexpr float optionGap = 14.0f;
+    const float totalWidth = glyphSize * 2.0f + optionGap;
+    const float glyphY = arrowTip.y - iconHeight - glyphSize - 3.0f;
+    const float left = arrowTip.x - totalWidth * 0.5f;
+    drawInputPromptGlyph(
+        ui, { { left, glyphY }, { glyphSize, glyphSize } }, enterBinding);
+    drawInputPromptGlyph(
+        ui,
+        { { left + glyphSize + optionGap, glyphY }, { glyphSize, glyphSize } },
+        previewBinding);
+
+    const float enterCenter = left + glyphSize * 0.5f;
+    const float previewCenter = left + glyphSize + optionGap + glyphSize * 0.5f;
+    constexpr Vec4 arrowColor { 0.96f, 0.78f, 0.31f, 1.0f };
+    ui.rect({ { enterCenter - 2.0f, arrowTip.y - 15.0f }, { 4.0f, 7.0f } },
+        arrowColor);
+    ui.rect({ { enterCenter - 8.0f, arrowTip.y - 9.0f }, { 16.0f, 3.0f } },
+        arrowColor);
+    ui.rect({ { enterCenter - 5.0f, arrowTip.y - 6.0f }, { 10.0f, 3.0f } },
+        arrowColor);
+    ui.rect({ { enterCenter - 2.0f, arrowTip.y - 3.0f }, { 4.0f, 3.0f } },
+        arrowColor);
+
     const float eyeY = arrowTip.y - 13.0f;
     ui.rect({ { previewCenter - 9.0f, eyeY + 4.0f }, { 18.0f, 6.0f } },
         arrowColor);

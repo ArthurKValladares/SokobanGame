@@ -279,6 +279,28 @@ bool InputState::mouseButtonPressed(Uint8 button) const
     return button < mouseButtonsPressed_.size() && mouseButtonsPressed_[button];
 }
 
+GamepadPresentation InputState::activeGamepadPresentation() const
+{
+    GamepadPresentation result;
+    result.name = activeGamepadName_;
+    SDL_Gamepad* handle = gamepadHandle(activeGamepadId_);
+    if (!handle) return result;
+    result.type = SDL_GetRealGamepadType(handle);
+    if (result.type == SDL_GAMEPAD_TYPE_UNKNOWN) {
+        result.type = SDL_GetGamepadType(handle);
+    }
+    constexpr std::array buttons {
+        SDL_GAMEPAD_BUTTON_SOUTH,
+        SDL_GAMEPAD_BUTTON_EAST,
+        SDL_GAMEPAD_BUTTON_WEST,
+        SDL_GAMEPAD_BUTTON_NORTH,
+    };
+    for (std::size_t i = 0; i < buttons.size(); ++i) {
+        result.faceButtonLabels[i] = SDL_GetGamepadButtonLabel(handle, buttons[i]);
+    }
+    return result;
+}
+
 void InputState::openConnectedGamepads()
 {
     int count = 0;

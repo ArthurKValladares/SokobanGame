@@ -1,4 +1,6 @@
+#include "engine/AssetManifest.hpp"
 #include "engine/ui/FontAtlas.hpp"
+#include "engine/ui/InputPrompts.hpp"
 #include "engine/ui/OptionsMenu.hpp"
 #include "engine/ui/SelectorPrompt.hpp"
 #include "engine/ui/Ui.hpp"
@@ -51,6 +53,8 @@ void applySettingsChange(
 
 const std::filesystem::path fontPath =
     std::filesystem::path(SOKOBAN_TEST_ASSET_DIR) / "ui/Karla-Regular.ttf";
+const std::filesystem::path assetRoot =
+    std::filesystem::path(SOKOBAN_TEST_ASSET_DIR);
 
 void testFontAtlasAndText()
 {
@@ -455,6 +459,114 @@ void testSelectorPromptShowsInteractAndPreviewBindings()
     }));
 }
 
+void testInputPromptCatalogUsesKeyboardAndControllerSpecificGlyphs()
+{
+    const sokoban::AssetManifest manifest =
+        sokoban::AssetManifest::loadFromFile(assetRoot / "manifest.json");
+    const sokoban::InputPromptCatalog prompts(assetRoot, manifest);
+
+    const auto space = prompts.glyphForBinding(
+        sokoban::KeyboardBinding { "Space" });
+    const auto letter = prompts.glyphForBinding(
+        sokoban::KeyboardBinding { "V" });
+    const auto moveUp = prompts.glyphForBinding(
+        sokoban::KeyboardBinding { "W" });
+    CHECK(space.has_value());
+    CHECK(letter.has_value());
+    CHECK(moveUp.has_value());
+    CHECK(space->texture == manifest.textureIdByName("InputPromptsKeyboard"));
+    CHECK(space->uvRect.position.x != letter->uvRect.position.x ||
+        space->uvRect.position.y != letter->uvRect.position.y);
+    // Kenney XML uses bottom-origin Y. W is declared at y=832 in a 1024px
+    // sheet, so its top-origin PNG row begins at 128, not 832.
+    CHECK(std::abs(
+        moveUp->uvRect.position.y - (128.5f / 1024.0f)) < 0.00001f);
+    CHECK(std::abs(
+        space->uvRect.position.y - (256.5f / 1024.0f)) < 0.00001f);
+
+    sokoban::GamepadPresentation xbox {
+        .type = SDL_GAMEPAD_TYPE_XBOXONE,
+        .name = "Xbox Wireless Controller",
+        .faceButtonLabels = {
+            SDL_GAMEPAD_BUTTON_LABEL_A,
+            SDL_GAMEPAD_BUTTON_LABEL_B,
+            SDL_GAMEPAD_BUTTON_LABEL_X,
+            SDL_GAMEPAD_BUTTON_LABEL_Y,
+        },
+    };
+    const auto xboxSouth = prompts.glyphForBinding(
+        sokoban::GamepadButtonBinding { "south" }, xbox);
+    const auto xboxShoulder = prompts.glyphForBinding(
+        sokoban::GamepadButtonBinding { "rightshoulder" }, xbox);
+    CHECK(prompts.themeForGamepad(xbox) == sokoban::InputPromptTheme::Xbox);
+    CHECK(xboxSouth.has_value());
+    CHECK(xboxShoulder.has_value());
+    CHECK(xboxSouth->texture == manifest.textureIdByName("InputPromptsXbox"));
+    // Xbox A is declared at bottom-origin y=0 in a 640px sheet, while RB is
+    // at y=448. Both must be converted to their top-origin PNG rows.
+    CHECK(std::abs(
+        xboxSouth->uvRect.position.y - (576.5f / 640.0f)) < 0.00001f);
+    CHECK(std::abs(
+        xboxShoulder->uvRect.position.y - (128.5f / 640.0f)) < 0.00001f);
+
+    sokoban::GamepadPresentation playStation = xbox;
+    playStation.type = SDL_GAMEPAD_TYPE_PS5;
+    playStation.name = "DualSense Wireless Controller";
+    playStation.faceButtonLabels = {
+        SDL_GAMEPAD_BUTTON_LABEL_CROSS,
+        SDL_GAMEPAD_BUTTON_LABEL_CIRCLE,
+        SDL_GAMEPAD_BUTTON_LABEL_SQUARE,
+        SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE,
+    };
+    const auto cross = prompts.glyphForBinding(
+        sokoban::GamepadButtonBinding { "south" }, playStation);
+    CHECK(cross.has_value());
+    CHECK(cross->texture ==
+        manifest.textureIdByName("InputPromptsPlayStation"));
+
+    sokoban::GamepadPresentation switchPad = xbox;
+    switchPad.type = SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO;
+    switchPad.name = "Nintendo Switch Pro Controller";
+    switchPad.faceButtonLabels = {
+        SDL_GAMEPAD_BUTTON_LABEL_B,
+        SDL_GAMEPAD_BUTTON_LABEL_A,
+        SDL_GAMEPAD_BUTTON_LABEL_Y,
+        SDL_GAMEPAD_BUTTON_LABEL_X,
+    };
+    const auto switchSouth = prompts.glyphForBinding(
+        sokoban::GamepadButtonBinding { "south" }, switchPad);
+    CHECK(switchSouth.has_value());
+    CHECK(switchSouth->texture == manifest.textureIdByName("InputPromptsSwitch"));
+
+    const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
+    sokoban::UiContext ui(font);
+    ui.beginFrame({ 400.0f, 240.0f }, {}, false, false);
+    sokoban::SelectorPrompt::draw(ui, { 200.0f, 160.0f }, *space, *letter);
+    ui.endFrame();
+    CHECK(std::ranges::count_if(ui.drawData().commands, [](const auto& command) {
+        return command.kind == sokoban::UiDrawKind::TextureImage;
+    }) == 2);
+    CHECK(std::ranges::all_of(ui.drawData().commands, [](const auto& command) {
+        return command.kind != sokoban::UiDrawKind::TextureImage ||
+            !command.texture.isNone();
+    }));
+
+    sokoban::OptionsMenuState controls {
+        .open = true,
+        .page = sokoban::OptionsMenuPage::Controls,
+    };
+    sokoban::UserSettings settings;
+    settings.input = sokoban::defaultInputBindings();
+    sokoban::OptionsMenuView optionsView;
+    ui.beginFrame({ 1280.0f, 900.0f }, {}, false, false);
+    (void)optionsView.draw(
+        ui, { 1280.0f, 900.0f }, controls, settings, &prompts, &xbox);
+    ui.endFrame();
+    CHECK(std::ranges::count_if(ui.drawData().commands, [](const auto& command) {
+        return command.kind == sokoban::UiDrawKind::TextureImage;
+    }) >= 8);
+}
+
 void testScreenPreviewOverlayUsesCenteredSeventyFivePercentInset()
 {
     const sokoban::UiRect inset =
@@ -825,6 +937,7 @@ int main()
     testUiFrameArenaCommandBudget();
     testReusableControls();
     testSelectorPromptShowsInteractAndPreviewBindings();
+    testInputPromptCatalogUsesKeyboardAndControllerSpecificGlyphs();
     testScreenPreviewOverlayUsesCenteredSeventyFivePercentInset();
     testLayoutTree();
     testOptionsNavigationAndSettings();

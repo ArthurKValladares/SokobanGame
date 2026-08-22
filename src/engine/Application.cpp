@@ -52,6 +52,7 @@ Application::Application()
           assetRoot_ / config::uiFontPath,
           config::uiFontPixelHeight,
           config::uiFontAtlasSize))
+    , inputPrompts_(assetRoot_, assetManifest_)
     , renderer_(
           window_.nativeHandle(),
           assetRoot_,
@@ -458,12 +459,16 @@ void Application::run()
                     routedInput.options)) {
             handleShellEvent(ShellOptionsAction { *optionsAction });
         }
+        const GamepadPresentation gamepadPresentation =
+            input_.activeGamepadPresentation();
         if (const std::optional<OptionsMenuIntent> intent =
                 optionsMenuView_.draw(
                     ui_,
                     pixelSize,
                     optionsMenu_.state(),
-                    settingsCoordinator_.userSettings())) {
+                    settingsCoordinator_.userSettings(),
+                    &inputPrompts_,
+                    &gamepadPresentation)) {
             if (const std::optional<OptionsAction> optionsAction =
                     optionsMenu_.dispatch(
                         settingsCoordinator_.userSettings(),
@@ -930,15 +935,31 @@ void Application::drawSelectorPrompt(
         input_.activeDevice() == ActiveInputDevice::Gamepad
         ? BindingDeviceClass::Gamepad
         : BindingDeviceClass::Keyboard;
-    const std::optional<std::string> enterBinding =
-        SelectorPrompt::bindingLabel(
+    const std::optional<InputBinding> enterBinding =
+        SelectorPrompt::binding(
             input_.bindings(), InputAction::MenuConfirm, device);
-    const std::optional<std::string> previewBinding =
-        SelectorPrompt::bindingLabel(
+    const std::optional<InputBinding> previewBinding =
+        SelectorPrompt::binding(
             input_.bindings(), InputAction::PreviewScreen, device);
     if (arrowTip && enterBinding && previewBinding) {
-        SelectorPrompt::draw(
-            ui_, *arrowTip, *enterBinding, *previewBinding);
+        const GamepadPresentation gamepad = input_.activeGamepadPresentation();
+        const std::optional<InputPromptGlyph> enterGlyph =
+            inputPrompts_.glyphForBinding(*enterBinding, gamepad);
+        const std::optional<InputPromptGlyph> previewGlyph =
+            inputPrompts_.glyphForBinding(*previewBinding, gamepad);
+        if (enterGlyph && previewGlyph) {
+            SelectorPrompt::draw(ui_, *arrowTip, *enterGlyph, *previewGlyph);
+        } else {
+            const std::optional<std::string> enterLabel =
+                SelectorPrompt::bindingLabel(
+                    input_.bindings(), InputAction::MenuConfirm, device);
+            const std::optional<std::string> previewLabel =
+                SelectorPrompt::bindingLabel(
+                    input_.bindings(), InputAction::PreviewScreen, device);
+            if (enterLabel && previewLabel) {
+                SelectorPrompt::draw(ui_, *arrowTip, *enterLabel, *previewLabel);
+            }
+        }
     }
 }
 

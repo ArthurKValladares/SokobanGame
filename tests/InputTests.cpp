@@ -50,6 +50,10 @@ SDL_Event gamepadAxisEvent(SDL_GamepadAxis axis, Sint16 value)
 void testDefaultKeyboardBindings()
 {
     sokoban::InputState input(false);
+    const sokoban::GamepadPresentation gamepad =
+        input.activeGamepadPresentation();
+    CHECK(gamepad.type == SDL_GAMEPAD_TYPE_UNKNOWN);
+    CHECK(gamepad.name.empty());
     CHECK(input.invalidBindingCount() == 0);
     CHECK(input.keyBoundToAction(SDL_SCANCODE_W, sokoban::InputAction::MoveUp));
     CHECK(input.keyBoundToAction(

@@ -235,6 +235,21 @@ private:
         addAssetPath(
             std::filesystem::path(config::titleBackgroundPath),
             "title background");
+        constexpr std::array<std::string_view, 7> inputPromptAtlases {
+            "kenney_input-prompts_1.5/Keyboard & Mouse/keyboard-&-mouse_sheet_default.xml",
+            "kenney_input-prompts_1.5/Generic/generic_sheet_default.xml",
+            "kenney_input-prompts_1.5/Xbox Series/xbox-series_sheet_default.xml",
+            "kenney_input-prompts_1.5/PlayStation Series/playstation-series_sheet_default.xml",
+            "kenney_input-prompts_1.5/Nintendo Switch/nintendo-switch_sheet_default.xml",
+            "kenney_input-prompts_1.5/Nintendo Gamecube/nintendo-gamecube_sheet_default.xml",
+            "kenney_input-prompts_1.5/Steam Deck/steam-deck_sheet_default.xml",
+        };
+        for (std::string_view atlas : inputPromptAtlases) {
+            addAssetPath(std::filesystem::path(atlas), "input prompt atlas");
+        }
+        addAssetPath(
+            "kenney_input-prompts_1.5/License.txt",
+            "Kenney Input Prompts license");
         manifest_ = AssetManifest::loadFromFile(
             roots_.assets / "manifest.json");
         const AssetManifest& manifest = *manifest_;

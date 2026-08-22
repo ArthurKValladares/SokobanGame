@@ -21,6 +21,17 @@ enum class ActiveInputDevice {
     Gamepad,
 };
 
+struct GamepadPresentation {
+    SDL_GamepadType type = SDL_GAMEPAD_TYPE_UNKNOWN;
+    std::string name;
+    std::array<SDL_GamepadButtonLabel, 4> faceButtonLabels {
+        SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN,
+        SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN,
+        SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN,
+        SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN,
+    };
+};
+
 // Owns SDL device state and maps raw controls to semantic actions. Gameplay
 // consumes actions; raw keyboard/mouse queries remain available for editor UI.
 class InputState {
@@ -51,6 +62,7 @@ public:
     [[nodiscard]] ActiveInputDevice activeDevice() const { return activeDevice_; }
     [[nodiscard]] std::size_t connectedGamepadCount() const { return gamepads_.size(); }
     [[nodiscard]] const std::string& activeGamepadName() const { return activeGamepadName_; }
+    [[nodiscard]] GamepadPresentation activeGamepadPresentation() const;
     [[nodiscard]] std::size_t invalidBindingCount() const { return invalidBindingCount_; }
 
 private:

@@ -101,6 +101,25 @@ void UiContext::image(UiRect rectValue, UiRect uvRectValue, Vec4 color)
     });
 }
 
+void UiContext::textureImage(
+    UiRect rectValue,
+    RenderTexture texture,
+    UiRect uvRectValue,
+    Vec4 color)
+{
+    if (texture.isNone() || rectValue.size.x <= 0.0f ||
+        rectValue.size.y <= 0.0f || color.w <= 0.0f) {
+        return;
+    }
+    drawData_.commands.push_back({
+        .kind = UiDrawKind::TextureImage,
+        .rect = rectValue,
+        .uvRect = uvRectValue,
+        .color = color,
+        .texture = texture,
+    });
+}
+
 void UiContext::sceneImage(
     UiRect rectValue,
     UiRect uvRectValue,

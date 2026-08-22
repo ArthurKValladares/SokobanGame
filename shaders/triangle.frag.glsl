@@ -175,6 +175,13 @@ void main()
     } else if (materialMode == 4) {
         vec2 uv = pc.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
         materialColor *= texture(titleBackground, uv);
+    } else if (materialMode == 7) {
+        vec2 uv = pc.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
+        int textureIndex = clamp(
+            int(pc.textureOptions.y + 0.5) - 1,
+            0,
+            MODEL_TEXTURE_COUNT - 1);
+        materialColor *= texture(modelTextures[textureIndex], uv);
     } else if (materialMode == 2) {
         if (inTextureIndex != 0u) {
             int textureIndex = clamp(int(inTextureIndex - 1u), 0, MODEL_TEXTURE_COUNT - 1);

@@ -86,7 +86,11 @@ engine implementation files.
 
 Bindings can be changed from Options > Controls and are persisted in the
 shared settings profile. Keyboard and Controller tabs show and remap their
-respective bindings independently.
+respective bindings independently. Binding rows and contextual gameplay
+prompts use Kenney Input Prompts glyphs. SDL3 identifies the active controller
+and supplies its physical face-button labels, so Xbox, PlayStation, Nintendo
+Switch, GameCube, and Steam Deck controls use their matching symbols; unknown
+controllers fall back to the generic glyph set.
 
 ## Level Format
 

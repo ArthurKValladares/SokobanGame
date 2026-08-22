@@ -2,6 +2,7 @@
 
 #include "engine/InputBindings.hpp"
 #include "engine/Math.hpp"
+#include "engine/ui/InputPrompts.hpp"
 
 #include <optional>
 #include <string>
@@ -16,6 +17,10 @@ struct UiRect;
 // down arrow. The arrow tip is the world-projected point above the actor.
 class SelectorPrompt {
 public:
+    [[nodiscard]] static std::optional<InputBinding> binding(
+        const InputBindings& bindings,
+        InputAction action,
+        BindingDeviceClass activeDevice);
     [[nodiscard]] static std::optional<std::string> bindingLabel(
         const InputBindings& bindings,
         InputAction action,
@@ -26,6 +31,11 @@ public:
         Vec2 arrowTip,
         std::string_view enterBindingLabel,
         std::string_view previewBindingLabel);
+    static void draw(
+        UiContext& ui,
+        Vec2 arrowTip,
+        const InputPromptGlyph& enterBinding,
+        const InputPromptGlyph& previewBinding);
 };
 
 // The preview scene itself is rendered by Vulkan. This UI layer supplies the
