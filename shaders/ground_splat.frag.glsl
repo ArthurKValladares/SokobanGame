@@ -12,12 +12,30 @@
 
 layout(set = 0, binding = 0) uniform sampler2D shadowMap;
 layout(set = 0, binding = 2) uniform sampler2D modelTextures[MODEL_TEXTURE_COUNT];
+layout(set = 0, binding = 8) uniform samplerCubeArray pointShadowMaps;
 
 layout(location = 0) in vec4 inShadowPosition;
 layout(location = 1) in float inFaceCoordU;
 layout(location = 2) in float inFaceCoordV;
 layout(location = 3) in vec3 inNormal;
+layout(location = 6) in vec3 inWorldPosition;
 layout(location = 0) out vec4 outColor;
+
+struct PointLightData
+{
+    vec4 positionAndRange;
+    vec4 colorAndIntensity;
+    vec4 shadowOptions;
+};
+layout(std140, set = 0, binding = 7) uniform SceneLighting
+{
+    vec4 sunShadowRightAndHalfWidth;
+    vec4 sunShadowUpAndHalfHeight;
+    vec4 sunShadowForwardAndDepthRange;
+    vec4 sunShadowCenterAndNearestDepth;
+    PointLightData pointLights[8];
+    vec4 pointLightMeta;
+} lighting;
 
 layout(push_constant) uniform PushConstants
 {
@@ -134,6 +152,46 @@ float shadowFactor(vec4 shadowPosition, float diffuse)
     return 1.0 - shadowAmount * pc.shadowOptions.y;
 }
 
+float pointShadowWorldDistance(
+    float depth, float nearPlane, float farPlane)
+{
+    float denominator = farPlane - depth * (farPlane - nearPlane);
+    return denominator > 0.000001
+        ? farPlane * nearPlane / denominator
+        : farPlane;
+}
+
+float pointShadowFactor(
+    int lightIndex, vec3 fromLight, vec3 surfaceNormal)
+{
+    PointLightData light = lighting.pointLights[lightIndex];
+    if (light.shadowOptions.x <= 0.5) {
+        return 1.0;
+    }
+    const float nearPlane = 0.05;
+    float farPlane = max(light.positionAndRange.w, nearPlane + 0.001);
+    float majorDistance = max(
+        abs(fromLight.x), max(abs(fromLight.y), abs(fromLight.z)));
+    if (majorDistance <= nearPlane || majorDistance >= farPlane) {
+        return 1.0;
+    }
+    vec3 direction = normalize(fromLight);
+    // The authored bias is a world-space minimum. Increase it at grazing
+    // angles, where rasterized depth changes fastest across the surface.
+    float facing = clamp(dot(normalize(surfaceNormal), -direction), 0.0, 1.0);
+    float worldBias = max(light.shadowOptions.z, 0.0) *
+        (1.0 + 2.0 * (1.0 - facing));
+    float closestDepth = texture(
+        pointShadowMaps,
+        vec4(direction, light.shadowOptions.y)).r;
+    float closestDistance = pointShadowWorldDistance(
+        closestDepth, nearPlane, farPlane);
+    float shadowed = majorDistance - worldBias > closestDistance
+        ? 1.0
+        : 0.0;
+    return 1.0 - shadowed * clamp(light.shadowOptions.w, 0.0, 1.0);
+}
+
 // One-based handle -> texture array index; returns false when unresolved.
 bool resolveTexture(float handle, out int index)
 {
@@ -209,7 +267,31 @@ void main()
             pc.sunRadianceAndAmbientBlue.w);
         float shadow = shadowFactor(inShadowPosition, lambertDiffuse);
         float skyFill = smoothstep(-0.35, 1.0, normal.z);
-        vec3 diffuseLighting = ambient * (1.0 + skyFill * 0.35) + pc.sunRadianceAndAmbientBlue.rgb * diffuse * shadow;
+        vec3 pointDiffuseLighting = vec3(0.0);
+        int pointLightCount = clamp(int(lighting.pointLightMeta.x + 0.5), 0, 8);
+        for (int lightIndex = 0; lightIndex < pointLightCount; ++lightIndex) {
+            PointLightData pointLight = lighting.pointLights[lightIndex];
+            vec3 toLight = pointLight.positionAndRange.xyz - inWorldPosition;
+            float distanceToLight = length(toLight);
+            float range = max(pointLight.positionAndRange.w, 0.001);
+            if (distanceToLight <= 0.0001 || distanceToLight >= range) {
+                continue;
+            }
+            float pointLambert = max(
+                dot(normal, toLight / distanceToLight), 0.0);
+            float normalizedDistance = distanceToLight / range;
+            float rangeWindow = max(
+                1.0 - pow(normalizedDistance, 4.0), 0.0);
+            float attenuation = rangeWindow * rangeWindow /
+                max(distanceToLight * distanceToLight, 0.04);
+            pointDiffuseLighting += pointLight.colorAndIntensity.rgb *
+                pointLight.colorAndIntensity.w * attenuation *
+                pointLambert * pointShadowFactor(
+                    lightIndex, -toLight, normal);
+        }
+        vec3 diffuseLighting = ambient * (1.0 + skyFill * 0.35) +
+            pc.sunRadianceAndAmbientBlue.rgb * diffuse * shadow +
+            pointDiffuseLighting;
         color *= diffuseLighting;
     }
 

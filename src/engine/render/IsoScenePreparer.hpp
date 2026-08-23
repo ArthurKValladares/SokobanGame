@@ -101,7 +101,7 @@ struct PreparedRenderScene {
     std::vector<std::size_t> opaqueModelIndices;
     std::vector<std::size_t> translucentModelIndices;
     std::vector<PreparedParticle> particles;
-    std::vector<std::array<Vec4, 4>> shadowFaces;
+    std::vector<std::array<Vec3, 4>> shadowFaces;
     std::vector<std::size_t> shadowModelIndices;
 };
 

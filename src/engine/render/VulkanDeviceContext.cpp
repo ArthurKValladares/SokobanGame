@@ -310,6 +310,7 @@ void VulkanDeviceContext::createDevice()
         : std::array<float, 2> { 1.0f, 1.0f };
 
     const VkPhysicalDeviceFeatures enabledFeatures {
+        .imageCubeArray = VK_TRUE,
         .fillModeNonSolid = VK_TRUE,
         .wideLines = wideLinesSupported_ ? VK_TRUE : VK_FALSE,
     };
@@ -465,6 +466,7 @@ bool VulkanDeviceContext::isDeviceSuitable(VkPhysicalDevice device) const
     vkGetPhysicalDeviceFeatures2(device, &features);
     return vulkan13.dynamicRendering &&
         vulkan13.synchronization2 &&
+        features.features.imageCubeArray &&
         features.features.fillModeNonSolid &&
         extendedDynamicState.extendedDynamicState;
 }

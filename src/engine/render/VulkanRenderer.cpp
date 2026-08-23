@@ -971,6 +971,11 @@ VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources(
             .imageView = shadowPass_.imageView(),
             .imageLayout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
         },
+        .pointShadows = {
+            .sampler = shadowPass_.pointSampler(),
+            .imageView = shadowPass_.pointImageView(),
+            .imageLayout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+        },
         .sceneColor = {
             .sampler = resources.swapchain->sceneColorSampler(),
             .imageView = resources.swapchain->sceneColorView(),
@@ -1036,6 +1041,7 @@ VulkanRenderer::createRenderResources(
     resources.sceneDescriptors =
         std::make_unique<VulkanSceneDescriptors>();
     resources.sceneDescriptors->create(
+        deviceContext_.physicalDevice(),
         deviceContext_.device(),
         descriptorResources(resources),
         maxFramesInFlight_);

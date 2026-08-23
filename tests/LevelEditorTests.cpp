@@ -693,11 +693,24 @@ void testDecorationEditingPersistenceAndUndo()
     transformed.position = { 0.25f, 1.75f, 2.5f };
     transformed.rotationDegrees = { 10.0f, 20.0f, 30.0f };
     transformed.scale = { 0.5f, 1.5f, 2.0f };
+    transformed.pointLight = Level::Decoration::PointLight {
+        .offset = { 0.0f, 0.0f, 0.75f },
+        .color = { 1.0f, 0.4f, 0.1f },
+        .intensity = 4.0f,
+        .range = 6.5f,
+        .castsShadows = true,
+        .shadowBias = 0.003f,
+        .shadowOpacity = 0.8f,
+    };
     CHECK(editor.updateSelectedDecoration(transformed));
     CHECK(*editor.selectedDecoration() == transformed);
     CHECK(editor.tryUndoEdit());
     CHECK(editor.selectedDecoration()->position.x == 1.5f);
     CHECK(editor.selectedDecoration()->scale.x == 1.0f);
+
+    Level::Decoration lit = *editor.selectedDecoration();
+    lit.pointLight = transformed.pointLight;
+    CHECK(editor.updateSelectedDecoration(lit));
 
     CHECK(editor.duplicateSelectedDecoration());
     CHECK(editor.decorations().size() == 2);
@@ -712,6 +725,9 @@ void testDecorationEditingPersistenceAndUndo()
     LevelEditor loaded = makeEditor(project);
     CHECK(loaded.decorations().size() == 2);
     CHECK(loaded.documentToLevel().decorations().size() == 2);
+    CHECK(loaded.decorations()[1].pointLight.has_value());
+    CHECK(loaded.decorations()[1].pointLight->color.y == 0.4f);
+    CHECK(loaded.decorations()[1].pointLight->range == 6.5f);
 
     const float oldX = loaded.decorations()[0].position.x;
     loaded.setSelectedTile(TileType::Wall);

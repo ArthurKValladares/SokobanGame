@@ -5,6 +5,8 @@
 
 #include <vulkan/vulkan.h>
 
+#include <array>
+
 namespace sokoban {
 
 class VulkanShadowPass {
@@ -24,18 +26,37 @@ public:
         VkPipeline modelPipeline,
         RenderStats& stats) const;
     void end(VkCommandBuffer commandBuffer, RenderStats& stats);
+    void beginPointFace(
+        VkCommandBuffer commandBuffer,
+        uint32_t lightIndex,
+        uint32_t cubeFace,
+        VkPipeline tilePipeline,
+        RenderStats& stats);
+    void endPointFace(VkCommandBuffer commandBuffer) const;
+    void finishPointShadows(
+        VkCommandBuffer commandBuffer,
+        RenderStats& stats);
 
     [[nodiscard]] bool valid() const;
     [[nodiscard]] VkFormat format() const { return format_; }
     [[nodiscard]] VkImageView imageView() const { return image_.view; }
     [[nodiscard]] VkSampler sampler() const { return sampler_; }
+    [[nodiscard]] VkImageView pointImageView() const {
+        return pointImage_.view;
+    }
+    [[nodiscard]] VkSampler pointSampler() const { return pointSampler_; }
 
 private:
     VkDevice device_ = VK_NULL_HANDLE;
     VkFormat format_ = VK_FORMAT_UNDEFINED;
     vulkanResources::OwnedImage image_ {};
+    vulkanResources::OwnedImage pointImage_ {};
+    std::array<VkImageView, RenderFrameData::pointLightCapacity * 6>
+        pointLayerViews_ {};
     VkSampler sampler_ = VK_NULL_HANDLE;
+    VkSampler pointSampler_ = VK_NULL_HANDLE;
     VkImageLayout imageLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImageLayout pointImageLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
 };
 
 } // namespace sokoban

@@ -490,6 +490,42 @@
       "name": "Decoration_Rig_Medium_General",
       "path": "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/Rig_Medium_General.glb",
       "preserveSourceScale": true
+    },
+    {
+      "name": "Decoration_star_yellow",
+      "path": "KayKit Platformer Pack 1.0/Assets/gltf/yellow/star_yellow.gltf",
+      "material": {
+        "mode": "texture",
+        "texture": "PlatformerYellow"
+      },
+      "preserveSourceScale": true
+    },
+    {
+      "name": "Decoration_spring_pad_yellow",
+      "path": "KayKit Platformer Pack 1.0/Assets/gltf/yellow/spring_pad_yellow.gltf",
+      "material": {
+        "mode": "texture",
+        "texture": "PlatformerYellow"
+      },
+      "preserveSourceScale": true
+    },
+    {
+      "name": "Decoration_coin_2_gold",
+      "path": "KayKit Board Game Bits 1.0/Assets/gltf/coin_2_gold.gltf",
+      "material": {
+        "mode": "texture",
+        "texture": "BoardGameBits"
+      },
+      "preserveSourceScale": true
+    },
+    {
+      "name": "Decoration_coin_2_copper",
+      "path": "KayKit Board Game Bits 1.0/Assets/gltf/coin_2_copper.gltf",
+      "material": {
+        "mode": "texture",
+        "texture": "BoardGameBits"
+      },
+      "preserveSourceScale": true
     }
   ],
   "animations": [

@@ -192,6 +192,7 @@ struct RenderFrameData {
     static constexpr std::size_t isoFaceCapacity = 65536;
     static constexpr std::size_t particleCapacity = 8192;
     static constexpr std::size_t groundSplatRegionCapacity = 18;
+    static constexpr std::size_t pointLightCapacity = 8;
     enum class EditorDecorationHighlight {
         None,
         Hovered,
@@ -239,6 +240,28 @@ struct RenderFrameData {
         float intensity = 0.0f;
     };
 
+    struct PointLight {
+        Vec3 position {};
+        Vec3 color { 1.0f, 1.0f, 1.0f };
+        float intensity = 0.0f;
+        float range = 1.0f;
+        bool castsShadows = true;
+        // Minimum receiver offset in world units; point-shadow shaders add a
+        // slope-scaled component for grazing surfaces.
+        float shadowBias = 0.01f;
+        float shadowOpacity = 1.0f;
+        // A decoration-mounted light must not shadow itself. This is a
+        // frame-local tile index so the same mesh can still cast into the
+        // sun and every other point light's shadow map.
+        std::optional<std::size_t> emitterTileIndex;
+
+        [[nodiscard]] bool excludesShadowCaster(
+            std::size_t tileIndex) const
+        {
+            return emitterTileIndex && *emitterTileIndex == tileIndex;
+        }
+    };
+
     struct Lighting {
         struct Shadows {
             bool enabled = false;
@@ -254,6 +277,8 @@ struct RenderFrameData {
 
         DirectionalLight sun {};
         AmbientLight ambient {};
+        std::array<PointLight, pointLightCapacity> pointLights {};
+        std::size_t pointLightCount = 0;
         Shadows shadows {};
         AmbientOcclusion ambientOcclusion {};
         float specularStrength = 0.0f;

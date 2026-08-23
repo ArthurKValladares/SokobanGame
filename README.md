@@ -31,6 +31,8 @@ pipeline, and a headless editor model exposed through Debug ImGui tools.
 - Manifest-backed mesh decorations with free translation, Euler rotation, and
   non-uniform scale; they render without participating in gameplay or camera
   framing.
+- Colored point lights attachable to mesh decorations, with per-light local
+  offset, intensity, range, and omnidirectional shadows that add to the sun.
 
 ## Requirements
 
@@ -103,6 +105,7 @@ provide authored transforms. Metadata must appear before `@layer 0`.
 ```text
 @water 0
 @decoration {"model":"Tree","position":[4.5,2.5,1.0],"rotation":[0.0,0.0,30.0],"scale":[1.0,1.0,1.25]}
+@decoration {"light":{"castsShadows":true,"color":[1.0,0.55,0.2],"intensity":3.0,"offset":[0.0,0.0,1.2],"range":6.0,"shadowBias":0.004,"shadowOpacity":0.9},"model":"Lantern","position":[2.5,1.5,1.0],"rotation":[0.0,0.0,0.0],"scale":[1.0,1.0,1.0]}
 
 @layer 0
 .....
@@ -135,6 +138,12 @@ Mesh decoration positions are world-space tile coordinates, rotations are XYZ
 Euler degrees, and scales must be positive. Their `model` names must exist in
 the `models` section of `assets/manifest.json`. Decorations are non-pickable
 during gameplay and do not alter level bounds, rules, support, or camera fit.
+An optional `light` object attaches a point light in the decoration's local
+space, so its offset follows the mesh's scale and XYZ rotation. Up to eight
+visible point lights are active in one rendered view; each has independent
+color, intensity, range, shadow bias, and shadow opacity. Point-light shadow
+bias is measured in world units and is automatically increased at grazing
+surface angles to suppress shadow acne without erasing distant shadows.
 
 ## Level Editor
 
@@ -166,7 +175,8 @@ editor commands but does not own document or filesystem policy.
   `[1,1,1]` retains the mesh's exported units and origin instead of fitting
   its bounds into one tile. Meshes can be placed on the top surface under the
   cursor, selected, translated, rotated, non-uniformly scaled, duplicated,
-  deleted, and undone.
+  deleted, and undone. A selected decoration can attach or detach a point
+  light and edit all of its lighting and shadow settings in place.
 - Source saves, runtime mirroring, screen/level insertion and renumbering,
   soft deletion, restore, and guarded permanent deletion are handled by the
   tested editor/project APIs.

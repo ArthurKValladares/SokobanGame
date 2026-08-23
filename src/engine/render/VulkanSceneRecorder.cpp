@@ -1,6 +1,7 @@
 #include "engine/render/VulkanSceneRecorder.hpp"
 
 #include "engine/render/MirrorConfig.hpp"
+#include "engine/render/LightingConfig.hpp"
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
 #include "engine/render/VulkanModelResources.hpp"
@@ -52,6 +53,47 @@ std::array<Vec4, 4> affineTransformColumns(
         subtract(yPoint, origin),
         subtract(zPoint, origin),
         origin,
+    };
+}
+
+Vec4 projectPointShadow(
+    const RenderFrameData::PointLight& light,
+    uint32_t cubeFace,
+    Vec3 point)
+{
+    static constexpr std::array<Vec3, 6> forward {
+        Vec3 { 1.0f, 0.0f, 0.0f }, Vec3 { -1.0f, 0.0f, 0.0f },
+        Vec3 { 0.0f, 1.0f, 0.0f }, Vec3 { 0.0f, -1.0f, 0.0f },
+        Vec3 { 0.0f, 0.0f, 1.0f }, Vec3 { 0.0f, 0.0f, -1.0f },
+    };
+    static constexpr std::array<Vec3, 6> right {
+        Vec3 { 0.0f, 0.0f, -1.0f }, Vec3 { 0.0f, 0.0f, 1.0f },
+        Vec3 { 1.0f, 0.0f, 0.0f }, Vec3 { 1.0f, 0.0f, 0.0f },
+        Vec3 { 1.0f, 0.0f, 0.0f }, Vec3 { -1.0f, 0.0f, 0.0f },
+    };
+    static constexpr std::array<Vec3, 6> up {
+        Vec3 { 0.0f, -1.0f, 0.0f }, Vec3 { 0.0f, -1.0f, 0.0f },
+        Vec3 { 0.0f, 0.0f, 1.0f }, Vec3 { 0.0f, 0.0f, -1.0f },
+        Vec3 { 0.0f, -1.0f, 0.0f }, Vec3 { 0.0f, -1.0f, 0.0f },
+    };
+    const Vec3 relative {
+        point.x - light.position.x,
+        point.y - light.position.y,
+        point.z - light.position.z,
+    };
+    const auto dot3 = [](Vec3 a, Vec3 b) {
+        return a.x * b.x + a.y * b.y + a.z * b.z;
+    };
+    const float depth = dot3(relative, forward[cubeFace]);
+    const float nearPlane = config::pointShadowNearPlane;
+    const float farPlane = std::max(light.range, nearPlane + 0.001f);
+    const float denominator = farPlane - nearPlane;
+    return {
+        dot3(relative, right[cubeFace]),
+        dot3(relative, up[cubeFace]),
+        farPlane / denominator * depth -
+            farPlane * nearPlane / denominator,
+        depth,
     };
 }
 
@@ -144,6 +186,17 @@ public:
                 configuration_.rendererReconfigurationPending,
         };
 
+        descriptors_.updateLighting(
+            configuration_.descriptorFrameIndex,
+            frameData.lighting,
+            scene.shadowLayout,
+            false);
+        descriptors_.updateLighting(
+            configuration_.descriptorFrameIndex,
+            previewFrameData ? previewFrameData->lighting : frameData.lighting,
+            previewScene ? previewScene->shadowLayout : scene.shadowLayout,
+            true);
+
         const VkCommandBufferBeginInfo beginInfo {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         };
@@ -232,7 +285,8 @@ private:
     VkDescriptorSet descriptorSet() const
     {
         return descriptors_.set(
-            configuration_.descriptorFrameIndex);
+            configuration_.descriptorFrameIndex,
+            previewDescriptor_);
     }
 
     void bindDescriptorSet(VkCommandBuffer commandBuffer) const
@@ -258,8 +312,8 @@ private:
     {
         shadowPass_.begin(
             commandBuffer, pipelines_.shadow(), stats_);
-        for (const std::array<Vec4, 4>& face : scene.shadowFaces) {
-            drawShadowFace(commandBuffer, face);
+        for (const std::array<Vec3, 4>& face : scene.shadowFaces) {
+            drawShadowFace(commandBuffer, scene.shadowLayout, face);
         }
         bool modelPipelineBound = false;
         for (std::size_t tileIndex : scene.shadowModelIndices) {
@@ -276,6 +330,56 @@ private:
                 frameData.tiles[tileIndex]);
         }
         shadowPass_.end(commandBuffer, stats_);
+
+        const std::size_t pointLightCount = std::min(
+            frameData.lighting.pointLightCount,
+            RenderFrameData::pointLightCapacity);
+        bool renderedPointShadow = false;
+        for (std::size_t lightIndex = 0;
+             lightIndex < pointLightCount;
+             ++lightIndex) {
+            const RenderFrameData::PointLight& light =
+                frameData.lighting.pointLights[lightIndex];
+            if (!light.castsShadows || light.intensity <= 0.0f ||
+                light.range <= config::pointShadowNearPlane) {
+                continue;
+            }
+            renderedPointShadow = true;
+            for (uint32_t cubeFace = 0; cubeFace < 6; ++cubeFace) {
+                shadowPass_.beginPointFace(
+                    commandBuffer,
+                    static_cast<uint32_t>(lightIndex),
+                    cubeFace,
+                    pipelines_.shadow(),
+                    stats_);
+                for (const std::array<Vec3, 4>& face : scene.shadowFaces) {
+                    drawPointShadowFace(
+                        commandBuffer, light, cubeFace, face);
+                }
+                bool pointModelPipelineBound = false;
+                for (std::size_t tileIndex : scene.shadowModelIndices) {
+                    if (light.excludesShadowCaster(tileIndex)) {
+                        continue;
+                    }
+                    if (!pointModelPipelineBound) {
+                        shadowPass_.bindModelPipeline(
+                            commandBuffer,
+                            pipelines_.modelShadow(),
+                            stats_);
+                        pointModelPipelineBound = true;
+                    }
+                    drawPointModelShadow(
+                        commandBuffer,
+                        light,
+                        cubeFace,
+                        frameData.tiles[tileIndex]);
+                }
+                shadowPass_.endPointFace(commandBuffer);
+            }
+        }
+        if (renderedPointShadow) {
+            shadowPass_.finishPointShadows(commandBuffer, stats_);
+        }
     }
 
     void recordGameRendering(
@@ -331,6 +435,7 @@ private:
         const RenderFrameData& frameData,
         const PreparedRenderScene& scene)
     {
+        previewDescriptor_ = true;
         const VkExtent2D full = swapchain_.renderExtent();
         const VkExtent2D extent {
             std::max(1U, static_cast<uint32_t>(
@@ -1480,8 +1585,14 @@ private:
 
     void drawShadowFace(
         VkCommandBuffer commandBuffer,
-        const std::array<Vec4, 4>& shadowVertices)
+        const ShadowRenderLayout& layout,
+        const std::array<Vec3, 4>& worldVertices)
     {
+        std::array<Vec4, 4> shadowVertices {};
+        for (std::size_t i = 0; i < worldVertices.size(); ++i) {
+            shadowVertices[i] = IsoScenePreparer::projectShadowPoint(
+                layout, worldVertices[i]);
+        }
         const TilePushConstants constants {
             .shadowVertices = shadowVertices,
         };
@@ -1490,6 +1601,30 @@ private:
             pipelines_.layout(),
             VK_SHADER_STAGE_VERTEX_BIT |
                 VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            sizeof(TilePushConstants),
+            &constants);
+        vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+    }
+
+    void drawPointShadowFace(
+        VkCommandBuffer commandBuffer,
+        const RenderFrameData::PointLight& light,
+        uint32_t cubeFace,
+        const std::array<Vec3, 4>& worldVertices)
+    {
+        std::array<Vec4, 4> shadowVertices {};
+        for (std::size_t i = 0; i < worldVertices.size(); ++i) {
+            shadowVertices[i] = projectPointShadow(
+                light, cubeFace, worldVertices[i]);
+        }
+        const TilePushConstants constants {
+            .shadowVertices = shadowVertices,
+        };
+        vkCmdPushConstants(
+            commandBuffer,
+            pipelines_.layout(),
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             0,
             sizeof(TilePushConstants),
             &constants);
@@ -1705,6 +1840,40 @@ private:
             commandBuffer, mesh.indexCount, 1, 0, 0, 0);
     }
 
+    void drawPointModelShadow(
+        VkCommandBuffer commandBuffer,
+        const RenderFrameData::PointLight& light,
+        uint32_t cubeFace,
+        const RenderFrameData::Tile& tile)
+    {
+        const VulkanModelResources::MeshView mesh =
+            models_.meshForTile(tile, configuration_.descriptorFrameIndex);
+        const ModelTransformPoints transform =
+            IsoScenePreparer::modelTransformPoints(tile);
+        const TilePushConstants constants {
+            .shadowVertices = affineTransformColumns(
+                projectPointShadow(light, cubeFace, transform.origin),
+                projectPointShadow(light, cubeFace, transform.xPoint),
+                projectPointShadow(light, cubeFace, transform.yPoint),
+                projectPointShadow(light, cubeFace, transform.zPoint)),
+        };
+        const VkBuffer vertexBuffer = mesh.vertexBuffer;
+        constexpr VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(
+            commandBuffer, 0, 1, &vertexBuffer, &offset);
+        vkCmdBindIndexBuffer(
+            commandBuffer, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdPushConstants(
+            commandBuffer,
+            pipelines_.layout(),
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            sizeof(TilePushConstants),
+            &constants);
+        vkCmdDrawIndexed(
+            commandBuffer, mesh.indexCount, 1, 0, 0, 0);
+    }
+
     void drawUiRect(
         VkCommandBuffer commandBuffer,
         const UiDrawCommand& command,
@@ -1790,6 +1959,7 @@ private:
 
     VulkanSwapchainResources& swapchain_;
     VulkanShadowPass& shadowPass_;
+    bool previewDescriptor_ = false;
     VulkanSsaoPass& ssaoPass_;
     VulkanSceneDescriptors& descriptors_;
     VulkanPipelineFactory& pipelines_;

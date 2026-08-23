@@ -39,5 +39,7 @@ inline constexpr float shadowBias = 0.010f;
 inline constexpr float maximumShadowBias = 0.05f;
 inline constexpr float shadowMapPadding = 1.0f;
 inline constexpr uint32_t shadowMapSize = 2048;
+inline constexpr uint32_t pointShadowMapSize = 512;
+inline constexpr float pointShadowNearPlane = 0.05f;
 
 } // namespace sokoban::config

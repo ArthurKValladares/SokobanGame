@@ -904,12 +904,7 @@ void IsoScenePreparer::prepare(
     };
 
     auto appendShadowFace = [&](const std::array<Vec3, 4>& vertices) {
-        std::array<Vec4, 4> projected {};
-        for (std::size_t i = 0; i < vertices.size(); ++i) {
-            projected[i] =
-                projectShadowPoint(scene.shadowLayout, vertices[i]);
-        }
-        scene.shadowFaces.push_back(projected);
+        scene.shadowFaces.push_back(vertices);
     };
 
     if (frameData.viewMode == RenderViewMode::Isometric3D) {

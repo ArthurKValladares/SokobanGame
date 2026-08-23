@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/Math.hpp"
+#include "engine/render/RenderTypes.hpp"
 
 #include <array>
 #include <cstdint>
@@ -11,7 +12,26 @@ namespace sokoban {
 // the resolved scene color, and the post-processing inputs. The model texture
 // array is the remaining binding. Kept here so the descriptor pool sizing and
 // the device sampled-image limit check agree on the count.
-inline constexpr uint32_t sceneSingleImageBindings = 6;
+inline constexpr uint32_t sceneSingleImageBindings = 7;
+
+struct PointLightUniform {
+    Vec4 positionAndRange {};
+    Vec4 colorAndIntensity {};
+    Vec4 shadowOptions {};
+};
+
+struct SceneLightingUniform {
+    Vec4 sunShadowRightAndHalfWidth {};
+    Vec4 sunShadowUpAndHalfHeight {};
+    Vec4 sunShadowForwardAndDepthRange {};
+    Vec4 sunShadowCenterAndNearestDepth {};
+    std::array<PointLightUniform, RenderFrameData::pointLightCapacity>
+        pointLights {};
+    Vec4 pointLightMeta {};
+};
+
+static_assert(sizeof(PointLightUniform) == 48);
+static_assert(sizeof(SceneLightingUniform) == 464);
 
 struct TilePushConstants {
     std::array<Vec4, 4> vertices;

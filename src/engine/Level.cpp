@@ -119,6 +119,25 @@ void validateDecoration(
             "Decoration scale components must be greater than zero: " +
             std::string(sourceName));
     }
+    if (decoration.pointLight) {
+        const Level::Decoration::PointLight& light = *decoration.pointLight;
+        if (!finite(light.offset) || !finite(light.color) ||
+            !std::isfinite(light.intensity) || !std::isfinite(light.range) ||
+            !std::isfinite(light.shadowBias) ||
+            !std::isfinite(light.shadowOpacity)) {
+            throw std::runtime_error(
+                "Decoration point-light settings must contain finite values: " +
+                std::string(sourceName));
+        }
+        if (light.color.x < 0.0f || light.color.y < 0.0f ||
+            light.color.z < 0.0f || light.intensity < 0.0f ||
+            light.range <= 0.0f || light.shadowBias < 0.0f ||
+            light.shadowOpacity < 0.0f || light.shadowOpacity > 1.0f) {
+            throw std::runtime_error(
+                "Decoration point-light color, intensity, range, and shadow settings are out of range: " +
+                std::string(sourceName));
+        }
+    }
 }
 
 Level::Decoration parseDecoration(
@@ -143,6 +162,36 @@ Level::Decoration parseDecoration(
             .scale = parseDecorationVec3(
                 object, "scale", sourceName),
         };
+        if (const auto light = object.find("light");
+            light != object.end() && !light->is_null()) {
+            if (!light->is_object()) {
+                throw std::runtime_error(
+                    "decoration 'light' must be an object or null");
+            }
+            const auto number = [&](std::string_view field) {
+                const auto value = light->find(field);
+                if (value == light->end() || !value->is_number()) {
+                    throw std::runtime_error(
+                        "decoration light '" + std::string(field) +
+                        "' must be a number");
+                }
+                return value->get<float>();
+            };
+            const auto castsShadows = light->find("castsShadows");
+            if (castsShadows == light->end() || !castsShadows->is_boolean()) {
+                throw std::runtime_error(
+                    "decoration light 'castsShadows' must be a boolean");
+            }
+            decoration.pointLight = Level::Decoration::PointLight {
+                .offset = parseDecorationVec3(*light, "offset", sourceName),
+                .color = parseDecorationVec3(*light, "color", sourceName),
+                .intensity = number("intensity"),
+                .range = number("range"),
+                .castsShadows = castsShadows->get<bool>(),
+                .shadowBias = number("shadowBias"),
+                .shadowOpacity = number("shadowOpacity"),
+            };
+        }
         validateDecoration(decoration, sourceName);
         return decoration;
     } catch (const nlohmann::json::exception& error) {
@@ -159,7 +208,7 @@ Level::Decoration parseDecoration(
 std::string serializeDecoration(const Level::Decoration& decoration)
 {
     validateDecoration(decoration, "serialized level");
-    const Json object {
+    Json object {
         { "model", decoration.model },
         { "position", {
               decoration.position.x,
@@ -175,8 +224,20 @@ std::string serializeDecoration(const Level::Decoration& decoration)
               decoration.scale.x,
               decoration.scale.y,
               decoration.scale.z,
-          } },
+        } },
     };
+    if (decoration.pointLight) {
+        const Level::Decoration::PointLight& light = *decoration.pointLight;
+        object["light"] = {
+            { "offset", { light.offset.x, light.offset.y, light.offset.z } },
+            { "color", { light.color.x, light.color.y, light.color.z } },
+            { "intensity", light.intensity },
+            { "range", light.range },
+            { "castsShadows", light.castsShadows },
+            { "shadowBias", light.shadowBias },
+            { "shadowOpacity", light.shadowOpacity },
+        };
+    }
     return std::string(decorationPrefix) + object.dump();
 }
 

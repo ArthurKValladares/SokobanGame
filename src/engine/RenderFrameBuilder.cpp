@@ -848,6 +848,43 @@ RenderFrameData::Tile decorationVisual(
     };
 }
 
+Vec3 decorationLightPosition(const Level::Decoration& decoration)
+{
+    if (!decoration.pointLight) {
+        return decoration.position;
+    }
+    constexpr float radiansPerDegree =
+        3.14159265358979323846f / 180.0f;
+    Vec3 offset {
+        decoration.pointLight->offset.x * decoration.scale.x,
+        decoration.pointLight->offset.y * decoration.scale.y,
+        decoration.pointLight->offset.z * decoration.scale.z,
+    };
+    const Vec3 rotation {
+        decoration.rotationDegrees.x * radiansPerDegree,
+        decoration.rotationDegrees.y * radiansPerDegree,
+        decoration.rotationDegrees.z * radiansPerDegree,
+    };
+    float cosine = std::cos(rotation.x);
+    float sine = std::sin(rotation.x);
+    offset = { offset.x,
+        cosine * offset.y - sine * offset.z,
+        sine * offset.y + cosine * offset.z };
+    cosine = std::cos(rotation.y);
+    sine = std::sin(rotation.y);
+    offset = { cosine * offset.x + sine * offset.z,
+        offset.y,
+        -sine * offset.x + cosine * offset.z };
+    cosine = std::cos(rotation.z);
+    sine = std::sin(rotation.z);
+    offset = { cosine * offset.x - sine * offset.y,
+        sine * offset.x + cosine * offset.y,
+        offset.z };
+    return { decoration.position.x + offset.x,
+        decoration.position.y + offset.y,
+        decoration.position.z + offset.z };
+}
+
 void appendDecorations(
     RenderFrameData& frame,
     const std::vector<Level::Decoration>& decorations,
@@ -866,6 +903,23 @@ void appendDecorations(
         };
         if (visibleCell && !visibleCell(cell)) {
             continue;
+        }
+        const std::size_t decorationTileIndex = frame.tiles.size();
+        if (decoration.pointLight &&
+            frame.lighting.pointLightCount <
+                RenderFrameData::pointLightCapacity) {
+            const Level::Decoration::PointLight& source =
+                *decoration.pointLight;
+            frame.lighting.pointLights[frame.lighting.pointLightCount++] = {
+                .position = decorationLightPosition(decoration),
+                .color = source.color,
+                .intensity = source.intensity,
+                .range = source.range,
+                .castsShadows = source.castsShadows,
+                .shadowBias = source.shadowBias,
+                .shadowOpacity = source.shadowOpacity,
+                .emitterTileIndex = decorationTileIndex,
+            };
         }
         const RenderFrameData::EditorDecorationHighlight highlight =
             selected == index

@@ -12,6 +12,23 @@ layout(location = 2) out float outFaceCoordV;
 layout(location = 3) out vec3 outNormal;
 layout(location = 4) flat out uint outTextureIndex;
 layout(location = 5) flat out uint outMaterialFlags;
+layout(location = 6) out vec3 outWorldPosition;
+
+struct PointLightData
+{
+    vec4 positionAndRange;
+    vec4 colorAndIntensity;
+    vec4 shadowOptions;
+};
+layout(std140, set = 0, binding = 7) uniform SceneLighting
+{
+    vec4 sunShadowRightAndHalfWidth;
+    vec4 sunShadowUpAndHalfHeight;
+    vec4 sunShadowForwardAndDepthRange;
+    vec4 sunShadowCenterAndNearestDepth;
+    PointLightData pointLights[8];
+    vec4 pointLightMeta;
+} lighting;
 
 layout(push_constant) uniform PushConstants
 {
@@ -26,6 +43,22 @@ layout(push_constant) uniform PushConstants
     vec4 gridColor;
     vec4 textureOptions;
 } pc;
+
+vec3 worldFromSunShadow(vec4 shadowPosition)
+{
+    vec3 clip = shadowPosition.xyz / max(abs(shadowPosition.w), 0.0001);
+    vec3 center = lighting.sunShadowCenterAndNearestDepth.xyz;
+    vec3 forward = lighting.sunShadowForwardAndDepthRange.xyz;
+    float worldForward = lighting.sunShadowCenterAndNearestDepth.w +
+        clip.z * lighting.sunShadowForwardAndDepthRange.w;
+    float relativeForward = worldForward - dot(center, forward);
+    return center +
+        lighting.sunShadowRightAndHalfWidth.xyz *
+            (clip.x * lighting.sunShadowRightAndHalfWidth.w) +
+        lighting.sunShadowUpAndHalfHeight.xyz *
+            (clip.y * lighting.sunShadowUpAndHalfHeight.w) +
+        forward * relativeForward;
+}
 
 void main()
 {
@@ -42,6 +75,7 @@ void main()
 
     gl_Position = clipTransform * vec4(inPosition, 1.0);
     outShadowPosition = shadowTransform * vec4(inPosition, 1.0);
+    outWorldPosition = worldFromSunShadow(outShadowPosition);
     outFaceCoordU = inUv.x;
     outFaceCoordV = inUv.y;
     outTextureIndex = inTextureIndex;

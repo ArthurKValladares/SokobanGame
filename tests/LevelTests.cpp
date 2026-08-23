@@ -122,6 +122,15 @@ void testDecorationMetadataRoundTrip()
         .position = { 1.5f, 2.25f, 3.0f },
         .rotationDegrees = { 15.0f, -25.0f, 90.0f },
         .scale = { 0.5f, 1.25f, 2.0f },
+        .pointLight = Level::Decoration::PointLight {
+            .offset = { 0.1f, -0.2f, 0.8f },
+            .color = { 0.25f, 0.5f, 1.0f },
+            .intensity = 3.5f,
+            .range = 7.0f,
+            .castsShadows = true,
+            .shadowBias = 0.004f,
+            .shadowOpacity = 0.7f,
+        },
     };
     const Level::Definition definition {
         .layers = {
@@ -134,6 +143,7 @@ void testDecorationMetadataRoundTrip()
     const std::vector<std::string> serialized =
         Level::serializeDefinition(definition);
     CHECK(serialized.front().starts_with("@decoration {"));
+    CHECK(serialized.front().find("\"light\"") != std::string::npos);
     CHECK(serialized[1].empty());
     CHECK(serialized[2] == "@layer 0");
     const Level::Definition parsed =
@@ -253,6 +263,16 @@ void testParserRejectsMalformedStructure()
               "@layer 0", "C" },
             "zero decoration scale");
     }, "greater than zero");
+    checkThrowsContaining([] {
+        (void)Level::parseDefinition(
+            { "@decoration {\"model\":\"Lamp\",\"position\":[0,0,0],"
+              "\"rotation\":[0,0,0],\"scale\":[1,1,1],"
+              "\"light\":{\"offset\":[0,0,1],\"color\":[1,1,1],"
+              "\"intensity\":2,\"range\":0,\"castsShadows\":true,"
+              "\"shadowBias\":0.01,\"shadowOpacity\":1}}",
+              "@layer 0", "C" },
+            "zero point light range");
+    }, "out of range");
     checkThrowsContaining([] {
         (void)Level::parseDefinition(
             { "@layer 0", "C",

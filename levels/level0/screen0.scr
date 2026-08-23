@@ -1,4 +1,5 @@
 @water 1
+@decoration {"light":{"castsShadows":true,"color":[1.0,0.8500000238418579,0.6499999761581421],"intensity":10.0,"offset":[0.0,0.0,1.0],"range":10.0,"shadowBias":0.10000000149011612,"shadowOpacity":1.0},"model":"Decoration_coin_2_copper","position":[7.76677131652832,3.189566135406494,4.4615373611450195],"rotation":[0.0,0.0,0.0],"scale":[1.0,1.0,1.0]}
 
 @layer 0
              

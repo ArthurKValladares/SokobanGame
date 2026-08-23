@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/render/VulkanModelResources.hpp"
+#include "engine/render/RenderTypes.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -8,6 +9,8 @@
 #include <vector>
 
 namespace sokoban {
+
+struct ShadowRenderLayout;
 
 class VulkanSceneDescriptors {
 public:
@@ -21,6 +24,7 @@ public:
 
     struct Resources {
         ImageBinding shadow;
+        ImageBinding pointShadows;
         ImageBinding sceneColor;
         ImageBinding sceneDepth;
         ImageBinding ssao;
@@ -36,21 +40,43 @@ public:
     VulkanSceneDescriptors& operator=(const VulkanSceneDescriptors&) = delete;
 
     void create(
+        VkPhysicalDevice physicalDevice,
         VkDevice device,
         const Resources& resources,
         uint32_t setCount = 1);
     void update(const Resources& resources) const;
     void update(uint32_t setIndex, const Resources& resources) const;
     void destroy();
+    void updateLighting(
+        uint32_t setIndex,
+        const RenderFrameData::Lighting& lighting,
+        const ShadowRenderLayout& shadowLayout,
+        bool preview = false) const;
 
     [[nodiscard]] VkDescriptorSetLayout layout() const { return layout_; }
-    [[nodiscard]] const VkDescriptorSet& set(uint32_t setIndex = 0) const;
+    [[nodiscard]] const VkDescriptorSet& set(
+        uint32_t setIndex = 0,
+        bool preview = false) const;
 
 private:
+    struct OwnedBuffer {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+        void* mapped = nullptr;
+    };
+
+    [[nodiscard]] OwnedBuffer createLightingBuffer(
+        VkPhysicalDevice physicalDevice) const;
+    void updateInternal(
+        uint32_t internalSetIndex,
+        const Resources& resources) const;
+
     VkDevice device_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout layout_ = VK_NULL_HANDLE;
     VkDescriptorPool pool_ = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> sets_;
+    std::vector<OwnedBuffer> lightingBuffers_;
+    uint32_t frameSetCount_ = 0;
     uint32_t modelTextureCount_ = 0;
 };
 

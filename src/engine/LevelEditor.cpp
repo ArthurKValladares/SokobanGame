@@ -1009,13 +1009,29 @@ bool LevelEditor::validDecorationTransform(
             std::isfinite(value.y) &&
             std::isfinite(value.z);
     };
+    const bool lightValid = !decoration.pointLight ||
+        (finite(decoration.pointLight->offset) &&
+         finite(decoration.pointLight->color) &&
+         std::isfinite(decoration.pointLight->intensity) &&
+         std::isfinite(decoration.pointLight->range) &&
+         std::isfinite(decoration.pointLight->shadowBias) &&
+         std::isfinite(decoration.pointLight->shadowOpacity) &&
+         decoration.pointLight->color.x >= 0.0f &&
+         decoration.pointLight->color.y >= 0.0f &&
+         decoration.pointLight->color.z >= 0.0f &&
+         decoration.pointLight->intensity >= 0.0f &&
+         decoration.pointLight->range > 0.0f &&
+         decoration.pointLight->shadowBias >= 0.0f &&
+         decoration.pointLight->shadowOpacity >= 0.0f &&
+         decoration.pointLight->shadowOpacity <= 1.0f);
     return !decoration.model.empty() &&
         finite(decoration.position) &&
         finite(decoration.rotationDegrees) &&
         finite(decoration.scale) &&
         decoration.scale.x > 0.0f &&
         decoration.scale.y > 0.0f &&
-        decoration.scale.z > 0.0f;
+        decoration.scale.z > 0.0f &&
+        lightValid;
 }
 
 bool LevelEditor::duplicateSelectedDecoration()

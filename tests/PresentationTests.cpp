@@ -2017,8 +2017,17 @@ void testGameplayFrameBuildsManifestDecorationInstances()
             Level::Decoration {
                 .model = "Decoration",
                 .position = { 1.5f, 0.5f, 1.0f },
-                .rotationDegrees = { 10.0f, 20.0f, 90.0f },
+                .rotationDegrees = { 0.0f, 0.0f, 90.0f },
                 .scale = { 0.5f, 1.5f, 2.0f },
+                .pointLight = Level::Decoration::PointLight {
+                    .offset = { 1.0f, 0.0f, 0.25f },
+                    .color = { 0.2f, 0.6f, 1.0f },
+                    .intensity = 3.0f,
+                    .range = 4.5f,
+                    .castsShadows = true,
+                    .shadowBias = 0.002f,
+                    .shadowOpacity = 0.75f,
+                },
             },
         });
     GameState state = stateWithPlayer(level.playerStart());
@@ -2054,6 +2063,30 @@ void testGameplayFrameBuildsManifestDecorationInstances()
         CHECK(near(
             found->modelTransform->rotationRadians.z,
             1.57079632679f));
+    }
+    CHECK(frame.lighting.pointLightCount == 1);
+    if (frame.lighting.pointLightCount == 1) {
+        const RenderFrameData::PointLight& light =
+            frame.lighting.pointLights[0];
+        // Local X is scaled by 0.5 and then follows the decoration's 90
+        // degree Z rotation; local Z is scaled by 2.
+        CHECK(near(light.position.x, 1.5f));
+        CHECK(near(light.position.y, 1.0f));
+        CHECK(near(light.position.z, 1.5f));
+        CHECK(near(light.color.y, 0.6f));
+        CHECK(near(light.intensity, 3.0f));
+        CHECK(near(light.range, 4.5f));
+        CHECK(light.castsShadows);
+        CHECK(near(light.shadowOpacity, 0.75f));
+        CHECK(light.emitterTileIndex.has_value());
+        if (found != frame.tiles.end()) {
+            const std::size_t decorationTileIndex =
+                static_cast<std::size_t>(
+                    std::distance(frame.tiles.begin(), found));
+            CHECK(light.excludesShadowCaster(decorationTileIndex));
+            CHECK(!light.excludesShadowCaster(
+                decorationTileIndex + 1));
+        }
     }
 }
 

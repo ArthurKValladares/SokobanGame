@@ -26,6 +26,36 @@ public:
     };
 
     struct Decoration {
+        struct PointLight {
+            // Offset in the decoration's local space. It is scaled and
+            // rotated with the mesh, so the light remains attached while the
+            // decoration is transformed in the editor.
+            Vec3 offset { 0.0f, 0.0f, 1.0f };
+            Vec3 color { 1.0f, 0.85f, 0.65f };
+            float intensity = 2.0f;
+            float range = 5.0f;
+            bool castsShadows = true;
+            // Minimum receiver offset in world units. Shaders increase it
+            // automatically on surfaces viewed at a grazing light angle.
+            float shadowBias = 0.01f;
+            float shadowOpacity = 1.0f;
+
+            bool operator==(const PointLight& other) const
+            {
+                return offset.x == other.offset.x &&
+                    offset.y == other.offset.y &&
+                    offset.z == other.offset.z &&
+                    color.x == other.color.x &&
+                    color.y == other.color.y &&
+                    color.z == other.color.z &&
+                    intensity == other.intensity &&
+                    range == other.range &&
+                    castsShadows == other.castsShadows &&
+                    shadowBias == other.shadowBias &&
+                    shadowOpacity == other.shadowOpacity;
+            }
+        };
+
         // Stable manifest model name. Screen files never embed source asset
         // paths or renderer ids, so manifest reordering cannot corrupt them.
         std::string model;
@@ -35,6 +65,7 @@ public:
         // Euler angles in degrees, applied X then Y then Z.
         Vec3 rotationDegrees {};
         Vec3 scale { 1.0f, 1.0f, 1.0f };
+        std::optional<PointLight> pointLight;
 
         bool operator==(const Decoration& other) const
         {
@@ -47,7 +78,8 @@ public:
                 rotationDegrees.z == other.rotationDegrees.z &&
                 scale.x == other.scale.x &&
                 scale.y == other.scale.y &&
-                scale.z == other.scale.z;
+                scale.z == other.scale.z &&
+                pointLight == other.pointLight;
         }
     };
 

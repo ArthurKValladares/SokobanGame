@@ -1,6 +1,7 @@
 #include "engine/LevelEditorDebugUi.hpp"
 
 #include "engine/TileTypes.hpp"
+#include "engine/render/RenderTypes.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -635,6 +636,59 @@ void LevelEditorDebugUi::drawDecorationPalette(
     edited.scale.z = std::max(edited.scale.z, 0.001f);
     if (changed) {
         (void)editor.updateSelectedDecoration(edited);
+    }
+
+    ImGui::Separator();
+    ImGui::TextDisabled(
+        "Up to %zu point lights are active in one view.",
+        RenderFrameData::pointLightCapacity);
+    bool hasPointLight = edited.pointLight.has_value();
+    if (ImGui::Checkbox("Attach Point Light", &hasPointLight)) {
+        edited.pointLight = hasPointLight
+            ? std::optional<Level::Decoration::PointLight> {
+                  Level::Decoration::PointLight {} }
+            : std::nullopt;
+        (void)editor.updateSelectedDecoration(edited);
+    }
+    if (edited.pointLight) {
+        Level::Decoration::PointLight& light = *edited.pointLight;
+        bool lightChanged = ImGui::ColorEdit3("Light Color", &light.color.x);
+        lightChanged = ImGui::DragFloat(
+                           "Intensity", &light.intensity, 0.05f,
+                           0.0f, 100.0f, "%.2f") ||
+            lightChanged;
+        lightChanged = ImGui::DragFloat(
+                           "Range", &light.range, 0.05f,
+                           0.05f, 100.0f, "%.2f") ||
+            lightChanged;
+        lightChanged = ImGui::DragFloat3(
+                           "Local Offset", &light.offset.x, 0.02f,
+                           -100.0f, 100.0f, "%.3f") ||
+            lightChanged;
+        lightChanged = ImGui::Checkbox(
+                           "Cast Shadows", &light.castsShadows) ||
+            lightChanged;
+        if (light.castsShadows) {
+            lightChanged = ImGui::DragFloat(
+                               "Shadow Bias (World Units)",
+                               &light.shadowBias, 0.001f,
+                               0.0f, 0.25f, "%.3f") ||
+                lightChanged;
+            lightChanged = ImGui::SliderFloat(
+                               "Shadow Opacity", &light.shadowOpacity,
+                               0.0f, 1.0f, "%.2f") ||
+                lightChanged;
+        }
+        light.color.x = std::max(light.color.x, 0.0f);
+        light.color.y = std::max(light.color.y, 0.0f);
+        light.color.z = std::max(light.color.z, 0.0f);
+        light.intensity = std::max(light.intensity, 0.0f);
+        light.range = std::max(light.range, 0.05f);
+        light.shadowBias = std::max(light.shadowBias, 0.0f);
+        light.shadowOpacity = std::clamp(light.shadowOpacity, 0.0f, 1.0f);
+        if (lightChanged) {
+            (void)editor.updateSelectedDecoration(edited);
+        }
     }
 
     if (ImGui::Button("Reset Transform")) {
