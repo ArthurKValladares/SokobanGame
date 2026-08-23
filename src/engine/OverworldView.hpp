@@ -19,6 +19,8 @@ struct OverworldView {
     std::optional<OverworldScreenId> destinationScreen;
     float transitionProgress = 0.0f;
     RenderFrameData::CameraExtent cameraExtent;
+    RenderFrameData::CameraExtent overviewCameraExtent;
+    float overviewProgress = 0.0f;
     Vec2 cameraOffset {};
     std::vector<OverworldScreenId> visibleScreens;
 };
@@ -34,6 +36,7 @@ struct OverworldView {
     OverworldScreenId activeScreen,
     const GameState& committedState,
     const GameState& projectedState,
-    Vec3 primaryPlayerRenderPosition);
+    Vec3 primaryPlayerRenderPosition,
+    float overviewProgress = 0.0f);
 
 } // namespace sokoban

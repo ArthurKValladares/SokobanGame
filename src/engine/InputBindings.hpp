@@ -17,6 +17,7 @@ enum class InputAction {
     Undo,
     Restart,
     ShowTopDownView,
+    ShowOverworldMap,
     MenuBack,
     MenuConfirm,
     EditorReplaceTile,

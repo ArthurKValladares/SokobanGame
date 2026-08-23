@@ -502,10 +502,21 @@ void Application::update(
         gameplaySession_.moving() &&
         gameplaySession_.activeAction().reversed;
     presentation_.advanceClocks(dt, reversed);
+    const bool showOverworldMap =
+        input.showOverworldMap && campaign_.inOverworld() &&
+        !tools_->levelEditor.playingDraft();
     presentation_.updateCameraPitch(
-        input.showTopDownView ? 0.0f : config::cameraPitchDegrees,
+        (input.showTopDownView || showOverworldMap)
+            ? 0.0f
+            : config::cameraPitchDegrees,
         dt,
         config::cameraPitchTransitionSeconds);
+    const float overviewStep = config::cameraPitchTransitionSeconds <= 0.0f
+        ? 1.0f
+        : std::max(dt, 0.0f) / config::cameraPitchTransitionSeconds;
+    overworldOverviewProgress_ = showOverworldMap
+        ? std::min(overworldOverviewProgress_ + overviewStep, 1.0f)
+        : std::max(overworldOverviewProgress_ - overviewStep, 0.0f);
 
     if (shellMenuOpen()) {
         audioSystem_.update(dt, false, false);
@@ -1531,7 +1542,8 @@ RenderFrameData Application::buildRenderFrame(
             *renderedActiveScreen,
             gameplaySession_.state(),
             projectedState,
-            presentation_.players().front().motion.renderPosition);
+            presentation_.players().front().motion.renderPosition,
+            overworldOverviewProgress_);
     }
     std::function<bool(GridPosition3)> visibleOverworldCell;
     std::vector<RenderFrameBuilder::GameplayInput::GroundSplatRegion>
@@ -1577,6 +1589,13 @@ RenderFrameData Application::buildRenderFrame(
             ? std::optional<RenderFrameData::CameraExtent> {
                   overworldView->cameraExtent }
             : std::nullopt,
+        .cameraExtentTransitionTarget = overworldView
+            ? std::optional<RenderFrameData::CameraExtent> {
+                  overworldView->overviewCameraExtent }
+            : std::nullopt,
+        .cameraExtentTransitionProgress = overworldView
+            ? overworldView->overviewProgress
+            : 0.0f,
         .cameraOffset = overworldView
             ? overworldView->cameraOffset
             : Vec2 {},

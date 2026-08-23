@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -19,6 +20,15 @@ bool futureReady(std::future<Result>& future)
 {
     return future.valid() &&
         future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+}
+
+uint32_t mipLevelCount(uint32_t width, uint32_t height)
+{
+    const uint32_t largestDimension = std::max(width, height);
+    return largestDimension == 0
+        ? 1U
+        : 1U + static_cast<uint32_t>(
+              std::floor(std::log2(static_cast<double>(largestDimension))));
 }
 
 } // namespace
@@ -861,16 +871,30 @@ void VulkanModelResources::beginTextureUpload(
         sampling.colorSpace == TextureColorSpace::Linear
         ? VK_FORMAT_R8G8B8A8_UNORM
         : VK_FORMAT_R8G8B8A8_SRGB;
+    VkFormatProperties formatProperties {};
+    vkGetPhysicalDeviceFormatProperties(
+        physicalDevice_, textureFormat, &formatProperties);
+    const VkFormatFeatureFlags requiredBlitFeatures =
+        VK_FORMAT_FEATURE_BLIT_SRC_BIT |
+        VK_FORMAT_FEATURE_BLIT_DST_BIT |
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    const bool supportsMipmaps = sampling.filter == TextureFilter::Linear &&
+        (formatProperties.optimalTilingFeatures & requiredBlitFeatures) ==
+            requiredBlitFeatures;
+    textureImage.mipLevels = supportsMipmaps
+        ? mipLevelCount(image.width, image.height)
+        : 1U;
     VkImageCreateInfo imageInfo {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = VK_IMAGE_TYPE_2D,
         .format = textureFormat,
         .extent = { image.width, image.height, 1 },
-        .mipLevels = 1,
+        .mipLevels = textureImage.mipLevels,
         .arrayLayers = 1,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
@@ -894,7 +918,8 @@ void VulkanModelResources::beginTextureUpload(
     textureImage.view = createImageView(
         textureImage.image,
         textureFormat,
-        VK_IMAGE_ASPECT_COLOR_BIT);
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        textureImage.mipLevels);
     // Address mode and filtering are independent: the ground material layers
     // repeat and filter smoothly, the splat map clamps but still filters
     // smoothly (it spans the board once), and atlases do neither.
@@ -908,14 +933,14 @@ void VulkanModelResources::beginTextureUpload(
         .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
         .magFilter = filter,
         .minFilter = filter,
-        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
         .addressModeU = addressMode,
         .addressModeV = addressMode,
         .addressModeW = addressMode,
         .anisotropyEnable = VK_FALSE,
         .compareEnable = VK_FALSE,
         .minLod = 0.0f,
-        .maxLod = 0.0f,
+        .maxLod = static_cast<float>(textureImage.mipLevels - 1U),
     };
     vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &sampler),
         "vkCreateSampler model texture failed");
@@ -956,10 +981,17 @@ void VulkanModelResources::recordTextureCopy(
     vkCheck(vkBeginCommandBuffer(upload.commandBuffer, &beginInfo),
         "vkBeginCommandBuffer texture upload failed");
 
+    const VkImageSubresourceRange allMipLevels {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel = 0,
+        .levelCount = textureImage.mipLevels,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+    };
     vulkanResources::transitionImage(
         upload.commandBuffer,
         textureImage.image,
-        vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+        allMipLevels,
         {},
         {
             VK_PIPELINE_STAGE_2_TRANSFER_BIT,
@@ -979,10 +1011,84 @@ void VulkanModelResources::recordTextureCopy(
         1,
         &copyRegion);
 
+    int32_t sourceWidth = static_cast<int32_t>(image.width);
+    int32_t sourceHeight = static_cast<int32_t>(image.height);
+    for (uint32_t level = 1; level < textureImage.mipLevels; ++level) {
+        const VkImageSubresourceRange sourceLevel {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = level - 1,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        };
+        vulkanResources::transitionImage(
+            upload.commandBuffer,
+            textureImage.image,
+            sourceLevel,
+            {
+                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            },
+            {
+                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                VK_ACCESS_2_TRANSFER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            });
+
+        const int32_t destinationWidth = std::max(sourceWidth / 2, 1);
+        const int32_t destinationHeight = std::max(sourceHeight / 2, 1);
+        const VkImageBlit blit {
+            .srcSubresource = {
+                VK_IMAGE_ASPECT_COLOR_BIT, level - 1, 0, 1 },
+            .srcOffsets = {
+                VkOffset3D { 0, 0, 0 },
+                VkOffset3D { sourceWidth, sourceHeight, 1 },
+            },
+            .dstSubresource = {
+                VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1 },
+            .dstOffsets = {
+                VkOffset3D { 0, 0, 0 },
+                VkOffset3D { destinationWidth, destinationHeight, 1 },
+            },
+        };
+        vkCmdBlitImage(
+            upload.commandBuffer,
+            textureImage.image,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            textureImage.image,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1,
+            &blit,
+            VK_FILTER_LINEAR);
+        vulkanResources::transitionImage(
+            upload.commandBuffer,
+            textureImage.image,
+            sourceLevel,
+            {
+                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                VK_ACCESS_2_TRANSFER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            },
+            {
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            });
+        sourceWidth = destinationWidth;
+        sourceHeight = destinationHeight;
+    }
+    const VkImageSubresourceRange finalLevel {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel = textureImage.mipLevels - 1,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+    };
     vulkanResources::transitionImage(
         upload.commandBuffer,
         textureImage.image,
-        vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+        finalLevel,
         {
             VK_PIPELINE_STAGE_2_TRANSFER_BIT,
             VK_ACCESS_2_TRANSFER_WRITE_BIT,
@@ -1136,6 +1242,7 @@ void VulkanModelResources::destroyTexture(
         vkFreeMemory(device_, textureImage.memory, nullptr);
         textureImage.memory = VK_NULL_HANDLE;
     }
+    textureImage.mipLevels = 1;
 }
 
 void VulkanModelResources::destroyMesh(GpuMesh& mesh) const
@@ -1228,7 +1335,8 @@ VulkanModelResources::OwnedBuffer VulkanModelResources::createBuffer(
 VkImageView VulkanModelResources::createImageView(
     VkImage image,
     VkFormat format,
-    VkImageAspectFlags aspectMask) const
+    VkImageAspectFlags aspectMask,
+    uint32_t mipLevels) const
 {
     VkImageViewCreateInfo createInfo {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -1241,7 +1349,7 @@ VkImageView VulkanModelResources::createImageView(
             VK_COMPONENT_SWIZZLE_IDENTITY,
             VK_COMPONENT_SWIZZLE_IDENTITY,
         },
-        .subresourceRange = { aspectMask, 0, 1, 0, 1 },
+        .subresourceRange = { aspectMask, 0, mipLevels, 0, 1 },
     };
     VkImageView imageView = VK_NULL_HANDLE;
     vkCheck(vkCreateImageView(device_, &createInfo, nullptr, &imageView),

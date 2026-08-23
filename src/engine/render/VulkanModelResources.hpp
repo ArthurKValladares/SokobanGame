@@ -155,6 +155,7 @@ private:
         VkImage image = VK_NULL_HANDLE;
         VkDeviceMemory memory = VK_NULL_HANDLE;
         VkImageView view = VK_NULL_HANDLE;
+        uint32_t mipLevels = 1;
     };
 
     struct GpuMesh {
@@ -267,7 +268,8 @@ private:
     [[nodiscard]] VkImageView createImageView(
         VkImage image,
         VkFormat format,
-        VkImageAspectFlags aspectMask) const;
+        VkImageAspectFlags aspectMask,
+        uint32_t mipLevels) const;
 
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkDevice device_ = VK_NULL_HANDLE;

@@ -399,6 +399,11 @@ struct RenderFrameData {
     uint32_t levelDepth = 1;
     uint32_t gridPickBorder = 0;
     std::optional<CameraExtent> cameraExtent;
+    // Optional second fitted extent for a continuous zoom between two views.
+    // The overworld uses this to move from one authored screen to the bounds
+    // of the whole composed map without integer-quantized camera steps.
+    std::optional<CameraExtent> cameraExtentTransitionTarget;
+    float cameraExtentTransitionProgress = 0.0f;
     // Translates an explicit fitted extent without quantizing its origin to a
     // cell. Composed overworld transitions use this to pan one screen-sized
     // view smoothly between adjacent screen centers.

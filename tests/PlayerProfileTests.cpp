@@ -583,7 +583,7 @@ void testNormalizationAndMigration()
         migratedFormat11.profile.settings.input,
         sokoban::InputAction::ShowTopDownView);
     check(migratedKeyboard && migratedKeyboard->scancode == "T",
-        "format 11 receives top-down view default");
+        "format 11 receives current-screen top-down default");
     migratedKeyboard = keyboardBinding(
         migratedFormat11.profile.settings.input, sokoban::InputAction::Undo);
     check(migratedKeyboard && migratedKeyboard->scancode == "Z",
@@ -1078,6 +1078,76 @@ void testFormat21ConsolidatesInteractBinding()
         "format 21 preserves a customized interact binding");
 }
 
+void testFormat22UpdatesOverworldViewBinding()
+{
+    nlohmann::json format22 = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    format22["format"] = 22;
+    format22["settings"]["input"]["showTopDownView"] =
+        nlohmann::json::array({
+            nlohmann::json {
+                { "type", "keyboard" }, { "control", "T" } },
+        });
+
+    const sokoban::DecodedPlayerProfile migrated =
+        sokoban::decodePlayerProfile(format22.dump());
+    check(migrated.sourceFormat == 22, "format 22 source is reported");
+    check(sokoban::actionBindingsDisplay(
+              migrated.profile.settings.input,
+              sokoban::InputAction::ShowTopDownView) ==
+            "T",
+        "format 22 receives the current-screen top-down default");
+    check(sokoban::actionBindingsDisplay(
+              migrated.profile.settings.input,
+              sokoban::InputAction::ShowOverworldMap) ==
+            "Tab / Pad lefttrigger+",
+        "format 22 receives TAB and left-trigger overworld defaults");
+
+    format22["settings"]["input"]["showTopDownView"] =
+        nlohmann::json::array({
+            nlohmann::json {
+                { "type", "keyboard" }, { "control", "Q" } },
+        });
+    const sokoban::DecodedPlayerProfile custom =
+        sokoban::decodePlayerProfile(format22.dump());
+    check(sokoban::actionBindingsDisplay(
+              custom.profile.settings.input,
+              sokoban::InputAction::ShowTopDownView) == "Q",
+        "format 22 preserves a customized overview binding");
+    check(sokoban::actionBindingsDisplay(
+              custom.profile.settings.input,
+              sokoban::InputAction::ShowOverworldMap) ==
+            "Tab / Pad lefttrigger+",
+        "format 22 custom top-down binding still receives overworld map defaults");
+
+    nlohmann::json format23 = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    format23["format"] = 23;
+    format23["settings"]["input"].erase("showOverworldMap");
+    format23["settings"]["input"]["showTopDownView"] =
+        nlohmann::json::array({
+            nlohmann::json {
+                { "type", "keyboard" }, { "control", "Tab" } },
+            nlohmann::json {
+                { "type", "gamepadAxis" },
+                { "control", "lefttrigger" },
+                { "direction", "positive" },
+                { "threshold", 0.5f },
+            },
+        });
+    const sokoban::DecodedPlayerProfile split =
+        sokoban::decodePlayerProfile(format23.dump());
+    check(sokoban::actionBindingsDisplay(
+              split.profile.settings.input,
+              sokoban::InputAction::ShowTopDownView) == "T",
+        "format 23 combined binding migrates back to T for current screen");
+    check(sokoban::actionBindingsDisplay(
+              split.profile.settings.input,
+              sokoban::InputAction::ShowOverworldMap) ==
+            "Tab / Pad lefttrigger+",
+        "format 23 combined binding migrates to the whole-map action");
+}
+
 int main()
 {
     try {
@@ -1090,6 +1160,7 @@ int main()
         testFormat18AddsEditorBindings();
         testFormat20AddsScreenPreviewBinding();
         testFormat21ConsolidatesInteractBinding();
+        testFormat22UpdatesOverworldViewBinding();
         testStoreBackupsAndRecovery();
         testSaveSlotStems();
         testMigrationAndDoubleCorruption();

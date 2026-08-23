@@ -165,6 +165,11 @@ InputBindings defaultInputBindings()
     bindings.forAction(InputAction::ShowTopDownView) = {
         KeyboardBinding { "T" },
     };
+    bindings.forAction(InputAction::ShowOverworldMap) = {
+        KeyboardBinding { "Tab" },
+        GamepadAxisBinding {
+            "lefttrigger", AxisDirection::Positive, 0.5f },
+    };
     bindings.forAction(InputAction::MenuBack) = {
         KeyboardBinding { "Escape" },
         GamepadButtonBinding { "start" },
@@ -199,6 +204,7 @@ std::string_view inputActionName(InputAction action)
     case InputAction::Undo: return "undo";
     case InputAction::Restart: return "restart";
     case InputAction::ShowTopDownView: return "showTopDownView";
+    case InputAction::ShowOverworldMap: return "showOverworldMap";
     case InputAction::MenuBack: return "menuBack";
     case InputAction::MenuConfirm: return "menuConfirm";
     case InputAction::EditorReplaceTile: return "editorReplaceTile";

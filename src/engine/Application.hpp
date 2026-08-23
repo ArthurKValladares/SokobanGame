@@ -152,6 +152,7 @@ private:
     std::unique_ptr<ApplicationTools> tools_;
     FrameArena renderFrameArena_;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;
+    float overworldOverviewProgress_ = 0.0f;
     bool screenPreviewActive_ = false;
     bool running_ = true;
 };

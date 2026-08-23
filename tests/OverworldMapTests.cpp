@@ -280,6 +280,16 @@ void testActionAdmissionAndCameraTransition()
     CHECK(halfway.visibleScreens ==
         std::vector<OverworldScreenId>({ 1, 2 }));
 
+    const OverworldView overview = calculateOverworldView(
+        map, 1, committed, committed, { 2.0f, 1.0f, 1.0f }, 1.0f);
+    CHECK(overview.overviewProgress == 1.0f);
+    CHECK(overview.overviewCameraExtent.originX == 0);
+    CHECK(overview.overviewCameraExtent.originY == 0);
+    CHECK(overview.overviewCameraExtent.width == 6);
+    CHECK(overview.overviewCameraExtent.height == 2);
+    CHECK(overview.visibleScreens ==
+        std::vector<OverworldScreenId>({ 1, 2 }));
+
     RenderFrameData settledFrame;
     settledFrame.viewMode = RenderViewMode::Isometric3D;
     settledFrame.levelWidth = map.level().width();
@@ -288,17 +298,26 @@ void testActionAdmissionAndCameraTransition()
     settledFrame.cameraExtent = halfway.cameraExtent;
     RenderFrameData movingFrame = settledFrame;
     movingFrame.cameraOffset = halfway.cameraOffset;
+    RenderFrameData overviewFrame = settledFrame;
+    overviewFrame.cameraExtentTransitionTarget =
+        overview.overviewCameraExtent;
+    overviewFrame.cameraExtentTransitionProgress = 1.0f;
     IsoScenePreparer preparer;
     PreparedRenderScene settledScene;
     PreparedRenderScene movingScene;
+    PreparedRenderScene overviewScene;
     preparer.prepare(settledFrame, { 1280.0f, 720.0f }, settledScene);
     preparer.prepare(movingFrame, { 1280.0f, 720.0f }, movingScene);
+    preparer.prepare(overviewFrame, { 1280.0f, 720.0f }, overviewScene);
     CHECK(std::abs(
         movingScene.isoLayout.cameraPosition.x -
         settledScene.isoLayout.cameraPosition.x - 1.5f) < 0.0001f);
     CHECK(std::abs(
         movingScene.isoLayout.cameraPosition.y -
         settledScene.isoLayout.cameraPosition.y) < 0.0001f);
+    CHECK(std::abs(overviewScene.isoLayout.cameraPosition.x - 3.0f) < 0.0001f);
+    CHECK(overviewScene.isoLayout.cameraPosition.z >
+        settledScene.isoLayout.cameraPosition.z);
 
     GameState split = projected;
     split.players.push_back(split.players.front());

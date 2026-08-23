@@ -354,8 +354,11 @@ void migrate11to12(Json& root)
     }
 
     const OrderedJson defaults = playerProfileMigrationSupport::inputBindingsToJson(defaultInputBindings());
-    const Json topDownDefaults =
-        Json::parse(defaults.at("showTopDownView").dump());
+    // Keep this migration's historical format-12 default. A later migration
+    // deliberately replaces it with the current TAB/LT overview binding.
+    const Json topDownDefaults = Json::array({
+        Json { { "type", "keyboard" }, { "control", "T" } },
+    });
 
     // A physical control drives only one action. The newly introduced
     // default owns T, while any action emptied by that transfer recovers its
@@ -736,6 +739,60 @@ void migrate21to22(Json& root)
     input.erase("mirror");
 }
 
+void migrate22to23(Json& root)
+{
+    if (!root.contains("settings") || !root["settings"].is_object()) {
+        return;
+    }
+    Json& input = root["settings"]["input"];
+    if (!input.is_object()) {
+        return;
+    }
+    const Json oldDefault = Json::array({
+        Json { { "type", "keyboard" }, { "control", "T" } },
+    });
+    if (input.value("showTopDownView", Json::array()) == oldDefault) {
+        const OrderedJson defaults =
+            playerProfileMigrationSupport::inputBindingsToJson(
+                defaultInputBindings());
+        input["showTopDownView"] =
+            Json::parse(defaults.at("showTopDownView").dump());
+    }
+}
+
+void migrate23to24(Json& root)
+{
+    if (!root.contains("settings") || !root["settings"].is_object()) {
+        return;
+    }
+    Json& input = root["settings"]["input"];
+    if (!input.is_object()) {
+        return;
+    }
+
+    const OrderedJson defaults =
+        playerProfileMigrationSupport::inputBindingsToJson(
+            defaultInputBindings());
+    const Json combinedFormat23Default = Json::array({
+        Json { { "type", "keyboard" }, { "control", "Tab" } },
+        Json {
+            { "type", "gamepadAxis" },
+            { "control", "lefttrigger" },
+            { "direction", "positive" },
+            { "threshold", 0.5f },
+        },
+    });
+    if (input.value("showTopDownView", Json::array()) ==
+        combinedFormat23Default) {
+        input["showTopDownView"] =
+            Json::parse(defaults.at("showTopDownView").dump());
+    }
+    if (!input.contains("showOverworldMap")) {
+        input["showOverworldMap"] =
+            Json::parse(defaults.at("showOverworldMap").dump());
+    }
+}
+
 } // namespace
 
 void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
@@ -763,6 +820,8 @@ void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
         migrate19to20,
         migrate20to21,
         migrate21to22,
+        migrate22to23,
+        migrate23to24,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

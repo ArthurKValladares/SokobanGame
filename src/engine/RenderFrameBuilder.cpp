@@ -921,6 +921,10 @@ RenderFrameData initializeGameplayFrame(
     if (input.cameraExtent) {
         frame.cameraExtent = input.cameraExtent;
     }
+    frame.cameraExtentTransitionTarget =
+        input.cameraExtentTransitionTarget;
+    frame.cameraExtentTransitionProgress =
+        input.cameraExtentTransitionProgress;
     frame.cameraOffset = input.cameraOffset;
     frame.groundSplat = groundSplatTextures(input.manifest, input.levelLocation);
     for (const RenderFrameBuilder::GameplayInput::GroundSplatRegion& source :

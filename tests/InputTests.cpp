@@ -63,6 +63,10 @@ void testDefaultKeyboardBindings()
     CHECK(input.keyBoundToAction(SDL_SCANCODE_Z, sokoban::InputAction::Undo));
     CHECK(input.keyBoundToAction(
         SDL_SCANCODE_T, sokoban::InputAction::ShowTopDownView));
+    CHECK(!input.keyBoundToAction(
+        SDL_SCANCODE_TAB, sokoban::InputAction::ShowTopDownView));
+    CHECK(input.keyBoundToAction(
+        SDL_SCANCODE_TAB, sokoban::InputAction::ShowOverworldMap));
     CHECK(input.keyBoundToAction(
         SDL_SCANCODE_V, sokoban::InputAction::PreviewScreen));
     CHECK(input.keyBoundToAction(
@@ -88,6 +92,16 @@ void testDefaultKeyboardBindings()
     input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_T));
     CHECK(input.actionPressed(sokoban::InputAction::ShowTopDownView));
     CHECK(input.actionDown(sokoban::InputAction::ShowTopDownView));
+
+    input.handleEvent(keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_TAB));
+    CHECK(input.actionPressed(sokoban::InputAction::ShowOverworldMap));
+    CHECK(input.actionDown(sokoban::InputAction::ShowOverworldMap));
+
+    input.beginFrame();
+    input.handleEvent(gamepadAxisEvent(
+        SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 24000));
+    CHECK(input.actionPressed(sokoban::InputAction::ShowOverworldMap));
+    CHECK(input.actionDown(sokoban::InputAction::ShowOverworldMap));
 }
 
 void testMenuConfirmBindings()

@@ -110,6 +110,8 @@ InputRouter::Frame InputRouter::routeFrame(
     if (gameplayActive) {
         frame.showTopDownView =
             input.actionDown(InputAction::ShowTopDownView);
+        frame.showOverworldMap =
+            input.actionDown(InputAction::ShowOverworldMap);
         frame.previewScreen =
             input.actionDown(InputAction::PreviewScreen);
         frame.gameplay = {

@@ -79,6 +79,7 @@ void testModalFrameRouting()
     input.beginFrame();
     pressKey(router, input, SDL_SCANCODE_W);
     pressKey(router, input, SDL_SCANCODE_T);
+    pressKey(router, input, SDL_SCANCODE_TAB);
     pressKey(router, input, SDL_SCANCODE_V);
     pressKey(router, input, SDL_SCANCODE_SPACE);
 
@@ -91,6 +92,7 @@ void testModalFrameRouting()
     CHECK(!frame.gameplay.up.pressed);
     CHECK(!frame.gameplay.interactPressed);
     CHECK(!frame.showTopDownView);
+    CHECK(!frame.showOverworldMap);
     CHECK(!frame.previewScreen);
 
     frame = router.routeFrame(input, { .titleOpen = true });
@@ -100,6 +102,7 @@ void testModalFrameRouting()
     CHECK(!frame.gameplay.up.pressed);
     CHECK(!frame.gameplay.interactPressed);
     CHECK(!frame.showTopDownView);
+    CHECK(!frame.showOverworldMap);
     CHECK(!frame.previewScreen);
 
     frame = router.routeFrame(input, {});
@@ -107,6 +110,7 @@ void testModalFrameRouting()
     CHECK(frame.gameplay.up.down);
     CHECK(frame.gameplay.interactPressed);
     CHECK(frame.showTopDownView);
+    CHECK(frame.showOverworldMap);
     CHECK(frame.previewScreen);
 }
 

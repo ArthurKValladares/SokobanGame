@@ -64,6 +64,9 @@ public:
         // Optional authored viewport. Composed overworlds provide the current
         // screen extent and a sub-cell offset while crossing a seam.
         std::optional<RenderFrameData::CameraExtent> cameraExtent;
+        std::optional<RenderFrameData::CameraExtent>
+            cameraExtentTransitionTarget;
+        float cameraExtentTransitionProgress = 0.0f;
         Vec2 cameraOffset {};
         // Optional composed-world render eligibility. Cells outside the
         // active (or transitioning source/destination) neighborhood are not

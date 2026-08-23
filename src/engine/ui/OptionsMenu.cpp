@@ -89,7 +89,12 @@ constexpr std::array bindingRows {
     BindingRow {
         OptionsMenuRowId::ShowTopDownView,
         InputAction::ShowTopDownView,
-        "Show Top-Down View",
+        "Current Screen Top-Down",
+    },
+    BindingRow {
+        OptionsMenuRowId::ShowOverworldMap,
+        InputAction::ShowOverworldMap,
+        "Whole Overworld Map",
     },
     BindingRow {
         OptionsMenuRowId::ConfirmInteract,
@@ -260,6 +265,7 @@ std::optional<OptionsAction> activateRow(
     case OptionsMenuRowId::Undo:
     case OptionsMenuRowId::Restart:
     case OptionsMenuRowId::ShowTopDownView:
+    case OptionsMenuRowId::ShowOverworldMap:
     case OptionsMenuRowId::ConfirmInteract:
     case OptionsMenuRowId::PreviewScreen:
     case OptionsMenuRowId::EditorReplaceTile:
@@ -1064,7 +1070,7 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             rowLayout.primary = layout.tree.item(
                 layout.tree.root(),
                 state.page == OptionsMenuPage::Controls
-                    ? 38.0f
+                    ? 35.0f
                     : (compactGraphics ? 44.0f : 52.0f));
             break;
         }
@@ -1075,7 +1081,7 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
                 state.page == OptionsMenuPage::Main
                     ? 16.0f
                     : (state.page == OptionsMenuPage::Controls
-                            ? 3.0f
+                            ? 2.0f
                             : (compactGraphics ? 6.0f : 10.0f)));
         }
     }

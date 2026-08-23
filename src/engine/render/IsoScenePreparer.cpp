@@ -195,26 +195,59 @@ IsoRenderLayout calculateIsoLayout(
     const float pitch = frameData.cameraPitchDegrees.value_or(
         config::cameraPitchDegrees) * radiansPerDegree;
     const float yaw = config::cameraYawDegrees * radiansPerDegree;
-    const RenderFrameData::CameraExtent cameraExtent =
+    const RenderFrameData::CameraExtent sourceCameraExtent =
         frameData.cameraExtent.value_or(RenderFrameData::CameraExtent {
             .width = frameData.levelWidth,
             .height = frameData.levelHeight,
             .depth = frameData.levelDepth,
         });
+    struct ContinuousCameraExtent {
+        float originX = 0.0f;
+        float originY = 0.0f;
+        float originZ = 0.0f;
+        float width = 1.0f;
+        float height = 1.0f;
+        float depth = 1.0f;
+    } cameraExtent {
+        static_cast<float>(sourceCameraExtent.originX) +
+            frameData.cameraOffset.x,
+        static_cast<float>(sourceCameraExtent.originY) +
+            frameData.cameraOffset.y,
+        static_cast<float>(sourceCameraExtent.originZ),
+        static_cast<float>(sourceCameraExtent.width),
+        static_cast<float>(sourceCameraExtent.height),
+        static_cast<float>(sourceCameraExtent.depth),
+    };
+    if (frameData.cameraExtentTransitionTarget) {
+        const RenderFrameData::CameraExtent& target =
+            *frameData.cameraExtentTransitionTarget;
+        const float progress = std::clamp(
+            frameData.cameraExtentTransitionProgress, 0.0f, 1.0f);
+        const auto interpolate = [progress](float from, float to) {
+            return from + (to - from) * progress;
+        };
+        cameraExtent.originX = interpolate(
+            cameraExtent.originX, static_cast<float>(target.originX));
+        cameraExtent.originY = interpolate(
+            cameraExtent.originY, static_cast<float>(target.originY));
+        cameraExtent.originZ = interpolate(
+            cameraExtent.originZ, static_cast<float>(target.originZ));
+        cameraExtent.width = interpolate(
+            cameraExtent.width, static_cast<float>(target.width));
+        cameraExtent.height = interpolate(
+            cameraExtent.height, static_cast<float>(target.height));
+        cameraExtent.depth = interpolate(
+            cameraExtent.depth, static_cast<float>(target.depth));
+    }
     const float cameraDistance = std::max(
-        static_cast<float>(
-            std::max(cameraExtent.width, cameraExtent.height)),
+        std::max(cameraExtent.width, cameraExtent.height),
         1.0f) * config::cameraDistanceScale *
         std::max(frameData.cameraDistanceMultiplier.value_or(1.0f), 0.01f);
     const Vec3 target {
-        static_cast<float>(cameraExtent.originX) +
-            static_cast<float>(cameraExtent.width) * 0.5f +
-            frameData.cameraOffset.x,
-        static_cast<float>(cameraExtent.originY) +
-            static_cast<float>(cameraExtent.height) * 0.5f +
-            frameData.cameraOffset.y,
-        static_cast<float>(cameraExtent.originZ) +
-            static_cast<float>(std::max(cameraExtent.depth, 1U) - 1U) * 0.5f,
+        cameraExtent.originX + cameraExtent.width * 0.5f,
+        cameraExtent.originY + cameraExtent.height * 0.5f,
+        cameraExtent.originZ +
+            (std::max(cameraExtent.depth, 1.0f) - 1.0f) * 0.5f,
     };
     const float horizontalDistance =
         std::sin(pitch) * cameraDistance;
@@ -264,15 +297,12 @@ IsoRenderLayout calculateIsoLayout(
         farthestDepth = std::max(farthestDepth, cameraDepth);
     };
 
-    const float left = static_cast<float>(cameraExtent.originX) +
-        frameData.cameraOffset.x;
-    const float nearY = static_cast<float>(cameraExtent.originY) +
-        frameData.cameraOffset.y;
-    const float right = left + static_cast<float>(cameraExtent.width);
-    const float farY = nearY + static_cast<float>(cameraExtent.height);
-    const float bottom = static_cast<float>(cameraExtent.originZ);
-    const float top = bottom +
-        static_cast<float>(std::max(cameraExtent.depth, 1U));
+    const float left = cameraExtent.originX;
+    const float nearY = cameraExtent.originY;
+    const float right = left + cameraExtent.width;
+    const float farY = nearY + cameraExtent.height;
+    const float bottom = cameraExtent.originZ;
+    const float top = bottom + std::max(cameraExtent.depth, 1.0f);
     for (Vec3 point : std::array<Vec3, 8> {
              Vec3 { left, nearY, bottom },
              Vec3 { right, nearY, bottom },

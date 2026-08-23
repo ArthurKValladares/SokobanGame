@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <ranges>
 #include <stdexcept>
 
@@ -74,6 +75,34 @@ void includeNeighborhood(
     }
 }
 
+RenderFrameData::CameraExtent wholeMapExtent(const OverworldMap& map)
+{
+    int32_t minimumX = std::numeric_limits<int32_t>::max();
+    int32_t minimumY = std::numeric_limits<int32_t>::max();
+    int32_t maximumX = std::numeric_limits<int32_t>::lowest();
+    int32_t maximumY = std::numeric_limits<int32_t>::lowest();
+    uint32_t maximumDepth = 1;
+    for (const OverworldScreenRuntime& screen : map.screens()) {
+        minimumX = std::min(minimumX, screen.origin.x);
+        minimumY = std::min(minimumY, screen.origin.y);
+        maximumX = std::max(
+            maximumX,
+            screen.origin.x + static_cast<int32_t>(map.layout().screenWidth));
+        maximumY = std::max(
+            maximumY,
+            screen.origin.y + static_cast<int32_t>(map.layout().screenHeight));
+        maximumDepth = std::max(maximumDepth, screen.depth);
+    }
+    return {
+        .originX = minimumX,
+        .originY = minimumY,
+        .originZ = 0,
+        .width = static_cast<uint32_t>(maximumX - minimumX),
+        .height = static_cast<uint32_t>(maximumY - minimumY),
+        .depth = maximumDepth,
+    };
+}
+
 } // namespace
 
 bool overworldActionStateAllowed(
@@ -99,7 +128,8 @@ OverworldView calculateOverworldView(
     OverworldScreenId activeScreen,
     const GameState& committedState,
     const GameState& projectedState,
-    Vec3 primaryPlayerRenderPosition)
+    Vec3 primaryPlayerRenderPosition,
+    float overviewProgress)
 {
     const OverworldScreenRuntime* active = map.screen(activeScreen);
     if (active == nullptr) {
@@ -118,8 +148,18 @@ OverworldView calculateOverworldView(
             .height = screenHeight,
             .depth = active->depth,
         },
+        .overviewCameraExtent = wholeMapExtent(map),
+        .overviewProgress = std::clamp(overviewProgress, 0.0f, 1.0f),
     };
     includeNeighborhood(view.visibleScreens, map, activeScreen);
+    if (view.overviewProgress > 0.0001f) {
+        view.visibleScreens.clear();
+        view.visibleScreens.reserve(map.screens().size());
+        for (const OverworldScreenRuntime& screen : map.screens()) {
+            view.visibleScreens.push_back(screen.id);
+        }
+        std::ranges::sort(view.visibleScreens);
+    }
 
     const std::optional<OverworldScreenId> committedOwner =
         sharedScreen(map, committedState);
