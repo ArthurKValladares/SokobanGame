@@ -685,6 +685,10 @@ void testDecorationEditingPersistenceAndUndo()
     CHECK(editor.decorations()[0].position.y == 1.5f);
     CHECK(editor.decorations()[0].position.z == 1.0f);
 
+    editor.cancelDecorationPlacement();
+    CHECK(editor.selectedDecorationModel().empty());
+    CHECK(editor.selectedDecorationIndex() == 0U);
+
     Level::Decoration transformed = *editor.selectedDecoration();
     transformed.position = { 0.25f, 1.75f, 2.5f };
     transformed.rotationDegrees = { 10.0f, 20.0f, 30.0f };

@@ -312,6 +312,8 @@
         "mode": "texture",
         "texture": "Barbarian"
       },
+      "preserveAspectRatio": true,
+      "rotateHalfTurn": true,
       "attachments": [
         {
           "path": "KayKit Adventurers 2.0/Assets/gltf/axe_1handed.gltf",
@@ -319,8 +321,6 @@
           "rotateHalfTurn": true
         }
       ],
-      "preserveAspectRatio": true,
-      "rotateHalfTurn": true,
       "role": "enemy"
     },
     {
@@ -475,6 +475,21 @@
         "texture": "FurnitureBits"
       },
       "preserveSourceScale": true
+    },
+    {
+      "name": "Decoration_Rig_Large_MovementBasic",
+      "path": "KayKit Adventurers 2.0/Animations/gltf/Rig_Large/Rig_Large_MovementBasic.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "Decoration_Rig_Large_General",
+      "path": "KayKit Adventurers 2.0/Animations/gltf/Rig_Large/Rig_Large_General.glb",
+      "preserveSourceScale": true
+    },
+    {
+      "name": "Decoration_Rig_Medium_General",
+      "path": "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/Rig_Medium_General.glb",
+      "preserveSourceScale": true
     }
   ],
   "animations": [
@@ -567,7 +582,7 @@
     {
       "tile": "Enemy",
       "model": "Barbarian",
-      "scale": 1.1
+      "scale": 1.100000023841858
     },
     {
       "tile": "Player",

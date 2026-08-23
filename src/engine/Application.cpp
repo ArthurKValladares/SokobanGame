@@ -347,6 +347,9 @@ void Application::run()
         case InputRouter::BackAction::OpenDraftConfirmation:
             tools_->draftExitConfirmationOpen = true;
             break;
+        case InputRouter::BackAction::CancelDecorationPlacement:
+            tools_->levelEditor.cancelDecorationPlacement();
+            break;
         case InputRouter::BackAction::ShellBack:
             handleShellEvent(ShellBackPressed {});
             break;
@@ -1257,6 +1260,10 @@ InputRouter::RoutingContext Application::inputRoutingContext() const
     };
 #if SOKOBAN_ENABLE_DEBUG_UI
     context.editorEditing = tools_->levelEditor.editingDocument();
+    context.decorationPlacementReady =
+        context.editorEditing &&
+        tools_->levelEditor.tool() == LevelEditor::Tool::Decorations &&
+        !tools_->levelEditor.selectedDecorationModel().empty();
     context.draftPlaying = tools_->levelEditor.playingDraft();
     context.draftExitConfirmationOpen = tools_->draftExitConfirmationOpen;
 #endif

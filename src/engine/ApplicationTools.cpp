@@ -625,6 +625,15 @@ void ApplicationTools::updateEditorInteraction(
         }
         return;
     }
+    if (levelEditor.tool() == LevelEditor::Tool::Decorations &&
+        input.secondaryPressed && levelEditor.selectedDecoration()) {
+        if (decorationGizmo.dragging()) {
+            decorationGizmo.endDrag();
+            (void)levelEditor.endSelectedDecorationTransform(false);
+        }
+        levelEditor.clearDecorationSelection();
+        return;
+    }
     if (!previousRenderFrame) {
         return;
     }

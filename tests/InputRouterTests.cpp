@@ -129,6 +129,10 @@ void testBackPriority()
         sokoban::InputRouter::BackAction::CloseDraftConfirmation);
     CHECK(router.backAction(input, {}) ==
         sokoban::InputRouter::BackAction::ShellBack);
+    CHECK(router.backAction(
+        input,
+        { .editorEditing = true, .decorationPlacementReady = true }) ==
+        sokoban::InputRouter::BackAction::CancelDecorationPlacement);
 
     input.beginFrame();
     CHECK(router.backAction(input, {}) ==
@@ -231,6 +235,26 @@ void testEditorPointerExposesPressAndHold()
     CHECK(!frame.editor.primaryDown);
 }
 
+void testEditorPointerExposesSecondaryPress()
+{
+    sokoban::InputRouter router;
+    sokoban::InputState input(false);
+    input.beginFrame();
+
+    SDL_Event press {};
+    press.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    press.button.button = SDL_BUTTON_RIGHT;
+    (void)router.routeEvent(press, input, {});
+
+    sokoban::InputRouter::Frame frame =
+        router.routeFrame(input, { .editorEditing = true });
+    CHECK(frame.editor.secondaryPressed);
+
+    input.beginFrame();
+    frame = router.routeFrame(input, { .editorEditing = true });
+    CHECK(!frame.editor.secondaryPressed);
+}
+
 } // namespace
 
 int main()
@@ -241,6 +265,7 @@ int main()
     testEditorFrameUsesConfiguredControls();
     testEditorFrameRespectsRemappedTileControls();
     testEditorPointerExposesPressAndHold();
+    testEditorPointerExposesSecondaryPress();
     testEditorGizmoShortcutsRespectKeyboardCapture();
 
     if (failures == 0) {

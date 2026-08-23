@@ -902,6 +902,12 @@ bool LevelEditor::placeDecoration(GridPosition3 surfaceCell)
     return true;
 }
 
+void LevelEditor::cancelDecorationPlacement()
+{
+    document_.selectedDecorationModel.clear();
+    document_.status = "Cancelled decoration placement.";
+}
+
 bool LevelEditor::selectDecoration(std::size_t index)
 {
     if (index >= document_.decorations.size()) {

@@ -109,6 +109,7 @@ public:
     [[nodiscard]] GridPosition3 resolveMoveTarget(
         GridPosition3 pickedCell) const;
     [[nodiscard]] bool placeDecoration(GridPosition3 surfaceCell);
+    void cancelDecorationPlacement();
     [[nodiscard]] bool selectDecoration(std::size_t index);
     void clearDecorationSelection();
     [[nodiscard]] bool updateSelectedDecoration(

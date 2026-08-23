@@ -34,6 +34,7 @@ public:
         None,
         CloseDraftConfirmation,
         OpenDraftConfirmation,
+        CancelDecorationPlacement,
         ShellBack,
     };
 
@@ -42,6 +43,7 @@ public:
         bool titleOpen = false;
         bool overlayOpen = false;
         bool editorEditing = false;
+        bool decorationPlacementReady = false;
         bool draftPlaying = false;
         bool draftExitConfirmationOpen = false;
         bool keyboardCaptured = false;
@@ -62,6 +64,7 @@ public:
         // Level: true for as long as the button is held. Brush strokes want
         // this, so a drag keeps painting instead of stopping after one frame.
         bool primaryDown = false;
+        bool secondaryPressed = false;
         bool undoPressed = false;
         bool deleting = false;
         bool replaceLayer = false;

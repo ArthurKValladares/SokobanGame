@@ -88,6 +88,9 @@ InputRouter::BackAction InputRouter::backAction(
     if (context.draftPlaying) {
         return BackAction::OpenDraftConfirmation;
     }
+    if (context.editorEditing && context.decorationPlacementReady) {
+        return BackAction::CancelDecorationPlacement;
+    }
     return BackAction::ShellBack;
 }
 
@@ -146,6 +149,7 @@ InputRouter::Frame InputRouter::routeFrame(
             .pointerPosition = input.mousePosition(),
             .primaryPressed = input.mouseButtonPressed(SDL_BUTTON_LEFT),
             .primaryDown = input.mouseButtonDown(SDL_BUTTON_LEFT),
+            .secondaryPressed = input.mouseButtonPressed(SDL_BUTTON_RIGHT),
             .undoPressed = input.actionPressed(InputAction::Undo),
             .deleting = input.actionDown(InputAction::EditorDeleteTile),
             .replaceLayer = input.actionDown(InputAction::EditorReplaceTile),
