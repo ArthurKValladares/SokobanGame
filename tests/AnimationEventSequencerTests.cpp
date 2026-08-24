@@ -29,6 +29,10 @@ std::filesystem::path assetRoot()
         std::free(root);
         return result;
     }
+#else
+    if (const char* root = std::getenv("SOKOBAN_ASSETS")) {
+        return root;
+    }
 #endif
     return "assets";
 }
