@@ -273,6 +273,10 @@ void VulkanRenderer::drawFrame(
     const UiDrawData& uiDrawData,
     bool developerWorkspaceVisible)
 {
+    if (fatalFailure_) {
+        return;
+    }
+    try {
     const PreparedFrameScratch& prepared =
         resolvePreparedFrame(preparedFrame);
     const RenderFrameData& frameData = prepared.frameData;
@@ -446,6 +450,14 @@ void VulkanRenderer::drawFrame(
 
     currentFrame_ = (currentFrame_ + 1) % maxFramesInFlight_;
     applyPendingReconfiguration();
+    } catch (const VulkanError& error) {
+        if (const std::optional<VulkanFailure> failure =
+                vulkanFailureForResult(error.result())) {
+            reportFatalFailure(*failure);
+            return;
+        }
+        throw;
+    }
 }
 
 void VulkanRenderer::preloadAssets(const RenderAssetRequirements& requirements)
@@ -900,6 +912,25 @@ std::optional<UiRect> VulkanRenderer::primaryPlayerBoundsToPixels(
 void VulkanRenderer::waitIdle() const
 {
     deviceContext_.waitIdle();
+}
+
+std::string_view VulkanRenderer::fatalFailureMessage() const
+{
+    return fatalFailure_
+        ? vulkanFailureMessage(*fatalFailure_)
+        : std::string_view {};
+}
+
+void VulkanRenderer::reportFatalFailure(VulkanFailure failure) noexcept
+{
+    if (fatalFailure_) {
+        return;
+    }
+    fatalFailure_ = failure;
+    log::error(log::Category::Rendering)
+        << vulkanFailureTitle(failure) << ": "
+        << vulkanFailureMessage(failure);
+    showVulkanFailureDialog(window_, failure);
 }
 
 AntiAliasingMode VulkanRenderer::antiAliasingMode() const

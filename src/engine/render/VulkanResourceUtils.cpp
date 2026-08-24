@@ -10,7 +10,9 @@ namespace sokoban {
 void vkCheck(VkResult result, const char* message)
 {
     if (result != VK_SUCCESS) {
-        throw std::runtime_error(std::string(message) + " (VkResult " + std::to_string(result) + ")");
+        throw VulkanError(
+            result,
+            std::string(message) + " (VkResult " + std::to_string(result) + ")");
     }
 }
 

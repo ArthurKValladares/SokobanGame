@@ -1,7 +1,9 @@
 #include "engine/render/VulkanDeviceSelection.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
+#include "engine/render/VulkanDiagnostics.hpp"
 #include "engine/render/VulkanGpuProfiler.hpp"
 #include "engine/render/VulkanPipelineCache.hpp"
+#include "engine/render/VulkanResourceUtils.hpp"
 #include "engine/render/RenderResolution.hpp"
 
 #include <array>
@@ -230,6 +232,30 @@ int main()
             VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) ==
             sokoban::log::Level::Debug,
         "verbose validation messages stay at debug severity");
+
+    check(
+        sokoban::vulkanFailureForResult(VK_ERROR_DEVICE_LOST) ==
+            sokoban::VulkanFailure::DeviceLost,
+        "device loss is classified for a user-facing shutdown");
+    check(
+        sokoban::vulkanFailureForResult(VK_ERROR_SURFACE_LOST_KHR) ==
+            sokoban::VulkanFailure::SurfaceLost,
+        "surface loss is classified for a user-facing shutdown");
+    check(!sokoban::vulkanFailureForResult(VK_ERROR_OUT_OF_DATE_KHR),
+        "ordinary swapchain recreation does not become a fatal graphics error");
+    check(
+        sokoban::vulkanFailureMessage(
+            sokoban::VulkanFailure::UnsupportedHardware).find("Vulkan 1.3") !=
+            std::string_view::npos,
+        "unsupported hardware diagnostics state the minimum API contract");
+    bool preservedDeviceLossResult = false;
+    try {
+        sokoban::vkCheck(VK_ERROR_DEVICE_LOST, "test device loss");
+    } catch (const sokoban::VulkanError& error) {
+        preservedDeviceLossResult = error.result() == VK_ERROR_DEVICE_LOST;
+    }
+    check(preservedDeviceLossResult,
+        "Vulkan errors preserve their result for renderer recovery diagnostics");
 
     check(
         sokoban::vulkanTimestampDeltaMilliseconds(100, 350, 2.0f, 64) ==

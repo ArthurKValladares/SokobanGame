@@ -314,6 +314,15 @@ shutdown, the merged driver payload is durably atomically replaced; write
 failures remain non-fatal. Headless tests cover binary round trips, device
 mismatch, truncation, tampering, and schema-version drift.
 
+**Device and surface failures: Fixed on 2026-08-24.** Unsupported GPUs now
+produce a native dialog that explains the Vulkan 1.3 release contract and
+suggests a driver update or supported hardware. At runtime,
+`VK_ERROR_DEVICE_LOST` and `VK_ERROR_SURFACE_LOST_KHR` are distinguished from
+ordinary swapchain recreation, logged, shown in a native dialog, and then
+exit through the normal save/shutdown path rather than continuing to submit
+work to invalid Vulkan objects. Headless tests cover error classification and
+the user-facing hardware requirement text.
+
 Previously, [`VulkanDeviceContext`](src/engine/render/VulkanDeviceContext.cpp)
 requested Vulkan 1.4 and made `fillModeNonSolid` mandatory alongside the
 release renderer's push-constant footprint, cube arrays, extended dynamic
@@ -517,8 +526,8 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 3. [Complete] Add validation messenger integration and GPU object names.
 4. [Complete] Add GPU debug markers and timestamp queries.
 5. [Complete] Persist a Vulkan pipeline cache.
-6. Provide user-facing diagnostics for device/surface loss and unsupported
-   hardware.
+6. [Complete] Provide user-facing diagnostics for device/surface loss and
+   unsupported hardware.
 
 ### Phase 3 — Rendering and asset scalability
 

@@ -3,9 +3,26 @@
 #include <vulkan/vulkan.h>
 
 #include <span>
+#include <stdexcept>
+#include <string>
 #include <string_view>
+#include <utility>
 
 namespace sokoban {
+
+class VulkanError final : public std::runtime_error {
+public:
+    VulkanError(VkResult result, std::string message)
+        : std::runtime_error(std::move(message))
+        , result_(result)
+    {
+    }
+
+    [[nodiscard]] VkResult result() const { return result_; }
+
+private:
+    VkResult result_ = VK_SUCCESS;
+};
 
 void vkCheck(VkResult result, const char* message);
 

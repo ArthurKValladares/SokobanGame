@@ -9,6 +9,7 @@
 #include "engine/render/RenderTypes.hpp"
 #include "engine/render/ReusableScratchPool.hpp"
 #include "engine/render/VulkanDeviceContext.hpp"
+#include "engine/render/VulkanDiagnostics.hpp"
 #include "engine/render/VulkanGpuProfiler.hpp"
 #include "engine/render/VulkanModelResources.hpp"
 #include "engine/render/VulkanPipelineCache.hpp"
@@ -145,6 +146,10 @@ public:
     [[nodiscard]] std::optional<UiRect> primaryPlayerBoundsToPixels(
         const PreparedFrame& frame) const;
     void waitIdle() const;
+    [[nodiscard]] bool hasFatalFailure() const {
+        return fatalFailure_.has_value();
+    }
+    [[nodiscard]] std::string_view fatalFailureMessage() const;
     [[nodiscard]] AntiAliasingMode antiAliasingMode() const;
     [[nodiscard]] VkSampleCountFlagBits activeSampleCount() const;
     [[nodiscard]] RenderStats renderStats() const;
@@ -223,6 +228,7 @@ private:
     void registerGameViewportTexture(RenderResourceSet& resources);
     void releaseGameViewportTexture(RenderResourceSet& resources);
     void logRenderConfiguration() const;
+    void reportFatalFailure(VulkanFailure failure) noexcept;
     [[nodiscard]] VkSampleCountFlagBits sampleCountForMode(AntiAliasingMode mode) const;
     [[nodiscard]] uint32_t sampleCountValue() const;
 
@@ -260,6 +266,7 @@ private:
     float wireframeLineWidth_ = 1.0f;
     uint64_t activeResourceGeneration_ = 1;
     bool swapchainRecreationRequested_ = false;
+    std::optional<VulkanFailure> fatalFailure_;
     bool vsync_ = false;
     RenderStats lastStats_ {};
     uint64_t nextStatsFrameIndex_ = 1;

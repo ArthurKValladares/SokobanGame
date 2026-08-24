@@ -4,6 +4,7 @@
 #include "engine/render/RendererConfig.hpp"
 #include "engine/Log.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
+#include "engine/render/VulkanDiagnostics.hpp"
 #include "engine/render/VulkanDeviceSelection.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
@@ -277,7 +278,9 @@ void VulkanDeviceContext::pickPhysicalDevice()
         vkEnumeratePhysicalDevices(instance_, &deviceCount, nullptr),
         "vkEnumeratePhysicalDevices failed");
     if (deviceCount == 0) {
-        throw std::runtime_error("No Vulkan-capable GPU found");
+        showVulkanFailureDialog(window_, VulkanFailure::UnsupportedHardware);
+        throw std::runtime_error(std::string(vulkanFailureMessage(
+            VulkanFailure::UnsupportedHardware)));
     }
 
     std::vector<VkPhysicalDevice> devices(deviceCount);
@@ -301,8 +304,9 @@ void VulkanDeviceContext::pickPhysicalDevice()
     }
 
     if (!physicalDevice_) {
-        throw std::runtime_error(
-            "No GPU supports the required Vulkan 1.3 release feature tier");
+        showVulkanFailureDialog(window_, VulkanFailure::UnsupportedHardware);
+        throw std::runtime_error(std::string(vulkanFailureMessage(
+            VulkanFailure::UnsupportedHardware)));
     }
 
     queueFamilies_ = findQueueFamilies(physicalDevice_);

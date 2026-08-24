@@ -521,6 +521,11 @@ void Application::run()
             *preparedRenderFrame_,
             ui_.drawData(),
             developerWorkspaceVisible);
+        if (renderer_.hasFatalFailure()) {
+            log::error(log::Category::Application)
+                << "Rendering stopped: " << renderer_.fatalFailureMessage();
+            running_ = false;
+        }
     }
 }
 

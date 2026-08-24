@@ -263,6 +263,7 @@ add_library(sokoban_render_vulkan STATIC
     src/engine/render/SkinnedMeshUpdater.cpp
     src/engine/render/VulkanDeviceContext.cpp
     src/engine/render/VulkanDebugUtils.cpp
+    src/engine/render/VulkanDiagnostics.cpp
     src/engine/render/VulkanDeviceSelection.cpp
     src/engine/render/VulkanGpuProfiler.cpp
     src/engine/render/VulkanModelResources.cpp
