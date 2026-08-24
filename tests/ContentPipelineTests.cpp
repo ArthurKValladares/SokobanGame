@@ -2,6 +2,7 @@
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/TileTypes.hpp"
 
+#include <array>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -169,6 +170,21 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
     writeFile(assets / "ui/Karla-Regular.ttf");
     writeFile(assets / "ui/OFL.txt", "font license");
     writeFile(assets / "custom/ui/main-menu-rogue-pushing-rock-4k.png");
+    constexpr std::array<std::string_view, 7> inputPromptAtlases {
+        "kenney_input-prompts_1.5/Keyboard & Mouse/keyboard-&-mouse_sheet_default.xml",
+        "kenney_input-prompts_1.5/Generic/generic_sheet_default.xml",
+        "kenney_input-prompts_1.5/Xbox Series/xbox-series_sheet_default.xml",
+        "kenney_input-prompts_1.5/PlayStation Series/playstation-series_sheet_default.xml",
+        "kenney_input-prompts_1.5/Nintendo Switch/nintendo-switch_sheet_default.xml",
+        "kenney_input-prompts_1.5/Nintendo Gamecube/nintendo-gamecube_sheet_default.xml",
+        "kenney_input-prompts_1.5/Steam Deck/steam-deck_sheet_default.xml",
+    };
+    for (const std::string_view atlas : inputPromptAtlases) {
+        writeFile(assets / atlas, "<TextureAtlas imagePath=\"fixture.png\"/>");
+    }
+    writeFile(
+        assets / "kenney_input-prompts_1.5/License.txt",
+        "input prompt license");
     writeFile(assets / "models/hero.gltf", R"({"buffers":[{"uri":"hero.bin"}]})");
     writeFile(assets / "models/hero.bin");
     writeFile(assets / "models/sword.gltf", R"({"buffers":[{"uri":"sword.bin"}]})");
@@ -295,6 +311,14 @@ void testInventoryAndStaging()
     check(
         contains(inventory, "custom/ui/main-menu-rogue-pushing-rock-4k.png"),
         "title background included");
+    check(
+        contains(
+            inventory,
+            "kenney_input-prompts_1.5/Keyboard & Mouse/keyboard-&-mouse_sheet_default.xml"),
+        "input prompt atlas included");
+    check(
+        contains(inventory, "kenney_input-prompts_1.5/License.txt"),
+        "input prompt license included");
     check(contains(inventory, "levels/level0/screen0.scr"), "playable level included");
     check(contains(inventory, "levels/overworld.scr"), "overworld included");
     check(contains(inventory, "levels/level0/metadata.json"),
@@ -538,12 +562,20 @@ void testValidationFailures()
 
 int main()
 {
-    testInventoryAndStaging();
-    testUnassignedLegacySelectorIsStaged();
-    testComposedOverworldIsValidatedAndStaged();
-    testBakedThumbnailsAreStaged();
-    testMissingThumbnailsAreNotFatal();
-    testValidationFailures();
+    try {
+        testInventoryAndStaging();
+        testUnassignedLegacySelectorIsStaged();
+        testComposedOverworldIsValidatedAndStaged();
+        testBakedThumbnailsAreStaged();
+        testMissingThumbnailsAreNotFatal();
+        testValidationFailures();
+    } catch (const std::exception& error) {
+        std::cerr << "UNEXPECTED EXCEPTION: " << error.what() << '\n';
+        return 1;
+    } catch (...) {
+        std::cerr << "UNEXPECTED NON-STANDARD EXCEPTION\n";
+        return 1;
+    }
 
     if (failures != 0) {
         std::cerr << failures << " content pipeline checks failed\n";

@@ -10,10 +10,10 @@ This is a solid bespoke engine for a small 3D puzzle game. Its deterministic
 gameplay architecture, save-versioning discipline, editor tooling, content
 reachability checks, and breadth of headless tests are notably mature.
 
-It is not quite ship-ready. There are two immediate release gates, several
-reliability defects, and renderer/asset-system choices that work for
-Sokoban-sized scenes but will not scale to a more content-heavy modern 3D
-game.
+It is not quite ship-ready. The initial review found two immediate release
+gates; both P0 items are now fixed. Several reliability defects remain, along
+with renderer/asset-system choices that work for Sokoban-sized scenes but will
+not scale to a more content-heavy modern 3D game.
 
 The right course is to harden the current architecture, not replace it or add
 an ECS merely for convention. The highest-priority work is:
@@ -33,10 +33,12 @@ an ECS merely for convention. The highest-priority work is:
 - Debug build: succeeded.
 - Release build: succeeded.
 - Staged runtime content: 196 files, 27,593,015 bytes.
-- Debug tests: 49 of 50 passed.
-- Release tests: 49 of 50 passed.
-- Failing suite: `content_pipeline`.
-- Release failure: Windows fast-fail exit code `0xc0000409`.
+- Initial Debug tests: 49 of 50 passed.
+- Initial Release tests: 49 of 50 passed.
+- Initial failing suite: `content_pipeline`, with Windows fast-fail exit code
+  `0xc0000409` in Release.
+- Current Debug tests after the P0 fixes: 50 of 50 passed.
+- Current Release tests after the P0 fixes: 50 of 50 passed.
 - Production compilation emitted no warnings during the review.
 - `tests/GameplayLoopTests.cpp` emitted three ignored-`[[nodiscard]]`
   warnings.
@@ -91,6 +93,11 @@ path, or conservatively `ALL_COMMANDS`. Validate both editor and release frame
 paths with synchronization validation enabled.
 
 ### P0 — The committed test matrix is not green
+
+**Status: Fixed on 2026-08-24.** The fixture now creates all seven code-owned
+input-prompt atlas XML files plus the Kenney license, asserts that representative
+prompt content is staged, and reports unexpected standard and non-standard
+exceptions at the test entry point. All 50 tests pass in Debug and Release.
 
 The content builder now requires seven input-prompt atlases in
 [`ContentPipeline.cpp`](src/engine/ContentPipeline.cpp#L238), but
@@ -392,8 +399,8 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 
 ### Phase 0 — Restore correctness and a reliable release gate
 
-1. Fix the swapchain semaphore wait stage.
-2. Repair the content-pipeline fixture and test exception reporting.
+1. [Complete] Fix the swapchain semaphore wait stage.
+2. [Complete] Repair the content-pipeline fixture and test exception reporting.
 3. Make `parallelFor` exception-safe.
 4. Clamp/reset simulation timing and add suspend/minimize tests.
 5. Make both Debug and Release test runs mandatory and green.
