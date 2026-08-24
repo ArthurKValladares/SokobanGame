@@ -39,6 +39,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
 {
     destroy();
     device_ = createInfo.device;
+    pipelineCache_ = createInfo.pipelineCache;
     colorFormat_ = createInfo.colorFormat;
     shadowFormat_ = createInfo.shadowFormat;
 
@@ -175,6 +176,7 @@ void VulkanPipelineFactory::destroy()
     layout_ = VK_NULL_HANDLE;
     shadowFormat_ = VK_FORMAT_UNDEFINED;
     colorFormat_ = VK_FORMAT_UNDEFINED;
+    pipelineCache_ = VK_NULL_HANDLE;
     device_ = VK_NULL_HANDLE;
 }
 
@@ -349,7 +351,7 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
     };
     VkPipeline result = VK_NULL_HANDLE;
     vkCheck(vkCreateGraphicsPipelines(
-        device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &result),
+        device_, pipelineCache_, 1, &pipelineInfo, nullptr, &result),
         "vkCreateGraphicsPipelines scene pipeline failed");
     return result;
 }
@@ -444,7 +446,7 @@ VkPipeline VulkanPipelineFactory::createShadowPipeline(
     };
     VkPipeline result = VK_NULL_HANDLE;
     vkCheck(vkCreateGraphicsPipelines(
-        device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &result),
+        device_, pipelineCache_, 1, &pipelineInfo, nullptr, &result),
         "vkCreateGraphicsPipelines shadow pipeline failed");
     return result;
 }
@@ -538,7 +540,7 @@ VkPipeline VulkanPipelineFactory::createPostProcessPipeline(
     };
     VkPipeline result = VK_NULL_HANDLE;
     vkCheck(vkCreateGraphicsPipelines(
-        device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &result),
+        device_, pipelineCache_, 1, &pipelineInfo, nullptr, &result),
         "vkCreateGraphicsPipelines post-process pipeline failed");
     return result;
 }

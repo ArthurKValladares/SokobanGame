@@ -1,12 +1,16 @@
 #include "engine/render/VulkanDeviceSelection.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanGpuProfiler.hpp"
+#include "engine/render/VulkanPipelineCache.hpp"
 #include "engine/render/RenderResolution.hpp"
 
+#include <array>
+#include <cstddef>
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -49,6 +53,18 @@ sokoban::VulkanDeviceFeatureSupport releaseFeatureSupport()
         .imageCubeArray = true,
         .extendedDynamicState = true,
     };
+}
+
+sokoban::VulkanPipelineCacheIdentity pipelineCacheIdentity()
+{
+    sokoban::VulkanPipelineCacheIdentity identity {
+        .vendorId = 0x1234,
+        .deviceId = 0x5678,
+    };
+    for (std::size_t index = 0; index < identity.uuid.size(); ++index) {
+        identity.uuid[index] = static_cast<uint8_t>(index);
+    }
+    return identity;
 }
 
 } // namespace
@@ -226,6 +242,39 @@ int main()
     check(
         sokoban::vulkanTimestampDeltaMilliseconds(1, 2, 0.0f, 64) == 0.0,
         "unavailable timestamps report no duration");
+
+    const auto cacheIdentity = pipelineCacheIdentity();
+    const std::array<std::byte, 4> cachePayload {
+        std::byte { 0x01 }, std::byte { 0x00 },
+        std::byte { 0x7f }, std::byte { 0xff },
+    };
+    const std::vector<std::byte> cacheFile =
+        sokoban::encodeVulkanPipelineCacheFile(cacheIdentity, cachePayload);
+    const auto decodedPayload = sokoban::decodeVulkanPipelineCacheFile(
+        cacheFile, cacheIdentity);
+    check(decodedPayload && *decodedPayload ==
+            std::vector<std::byte>(cachePayload.begin(), cachePayload.end()),
+        "a versioned pipeline cache envelope round-trips binary driver data");
+
+    auto wrongDevice = cacheIdentity;
+    ++wrongDevice.deviceId;
+    check(!sokoban::decodeVulkanPipelineCacheFile(cacheFile, wrongDevice),
+        "pipeline cache data from another device is ignored");
+
+    auto corruptCacheFile = cacheFile;
+    corruptCacheFile.pop_back();
+    check(!sokoban::decodeVulkanPipelineCacheFile(corruptCacheFile, cacheIdentity),
+        "truncated pipeline cache data is ignored");
+
+    auto tamperedCacheFile = cacheFile;
+    tamperedCacheFile.back() = std::byte { 0x00 };
+    check(!sokoban::decodeVulkanPipelineCacheFile(tamperedCacheFile, cacheIdentity),
+        "tampered pipeline cache data is ignored");
+
+    auto oldFormatCacheFile = cacheFile;
+    oldFormatCacheFile[8] = std::byte { 0x00 };
+    check(!sokoban::decodeVulkanPipelineCacheFile(oldFormatCacheFile, cacheIdentity),
+        "pipeline cache data from an unsupported envelope version is ignored");
 
     std::cout << "Vulkan device selection tests passed\n";
     return 0;

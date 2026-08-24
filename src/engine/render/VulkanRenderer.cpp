@@ -110,6 +110,7 @@ bool pointInConvexHull(std::array<Vec2, 8> points, Vec2 point)
 VulkanRenderer::VulkanRenderer(
     SDL_Window* window,
     std::filesystem::path assetRoot,
+    std::filesystem::path pipelineCachePath,
     const AssetManifest& manifest,
     const FontAtlas& uiFont,
     AntiAliasingMode antiAliasingMode,
@@ -125,6 +126,10 @@ VulkanRenderer::VulkanRenderer(
       })
     , vsync_(vsync)
 {
+    pipelineCache_.create(
+        deviceContext_.device(),
+        deviceContext_.physicalDeviceProperties(),
+        std::move(pipelineCachePath));
     wireframeLineWidth_ = std::clamp(
         wireframeLineWidth_,
         1.0f,
@@ -177,6 +182,7 @@ VulkanRenderer::VulkanRenderer(
 VulkanRenderer::~VulkanRenderer()
 {
     deviceContext_.waitIdle();
+    pipelineCache_.persist();
 
     shutdownDebugUi();
 
@@ -208,6 +214,7 @@ VulkanRenderer::~VulkanRenderer()
 
     shadowPass_.destroy();
     gpuProfiler_.destroy();
+    pipelineCache_.destroy();
 }
 
 VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
@@ -1086,6 +1093,7 @@ VulkanRenderer::createPipelines(
     auto pipelines = std::make_unique<VulkanPipelineFactory>();
     pipelines->create({
         .device = deviceContext_.device(),
+        .pipelineCache = pipelineCache_.handle(),
         .assetRoot = assetRoot_,
         .descriptorSetLayout =
             resources.sceneDescriptors->layout(),

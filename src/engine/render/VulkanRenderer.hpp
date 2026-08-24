@@ -11,6 +11,7 @@
 #include "engine/render/VulkanDeviceContext.hpp"
 #include "engine/render/VulkanGpuProfiler.hpp"
 #include "engine/render/VulkanModelResources.hpp"
+#include "engine/render/VulkanPipelineCache.hpp"
 #include "engine/render/VulkanPipelineFactory.hpp"
 #include "engine/render/VulkanSceneRecorder.hpp"
 #include "engine/render/VulkanSceneDescriptors.hpp"
@@ -67,6 +68,7 @@ public:
     VulkanRenderer(
         SDL_Window* window,
         std::filesystem::path assetRoot,
+        std::filesystem::path pipelineCachePath,
         const AssetManifest& manifest,
         const FontAtlas& uiFont,
         AntiAliasingMode antiAliasingMode = AntiAliasingMode::Msaa8x,
@@ -227,6 +229,7 @@ private:
     SDL_Window* window_ = nullptr;
     std::filesystem::path assetRoot_;
     VulkanDeviceContext deviceContext_;
+    VulkanPipelineCache pipelineCache_;
     VulkanGpuProfiler gpuProfiler_;
 
     VkFormat depthFormat_ = VK_FORMAT_D32_SFLOAT;

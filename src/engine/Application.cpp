@@ -80,6 +80,7 @@ Application::Application()
     , renderer_(
           window_.nativeHandle(),
           assetRoot_,
+          saveSlots_.directory() / "vulkan_pipeline_cache.bin",
           assetManifest_,
           uiFont_,
           antiAliasingModeForSamples(

@@ -304,6 +304,16 @@ Debug rendering stats. Devices without graphics timestamp support simply
 report it as unavailable. Headless tests cover period conversion and counter
 wrap handling.
 
+**Pipeline cache: Fixed on 2026-08-24.** The renderer now loads and persists
+a versioned Vulkan pipeline-cache envelope beside the user profiles. The
+envelope carries the vendor ID, device ID, Vulkan pipeline-cache UUID, and an
+integrity checksum, so corrupt, stale, and wrong-GPU payloads are discarded
+before Vulkan receives them. All graphics pipeline creation, including live
+AA/swapchain rebuilds, uses the same cache. After the device is idle at
+shutdown, the merged driver payload is durably atomically replaced; write
+failures remain non-fatal. Headless tests cover binary round trips, device
+mismatch, truncation, tampering, and schema-version drift.
+
 Previously, [`VulkanDeviceContext`](src/engine/render/VulkanDeviceContext.cpp)
 requested Vulkan 1.4 and made `fillModeNonSolid` mandatory alongside the
 release renderer's push-constant footprint, cube arrays, extended dynamic
@@ -506,7 +516,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 2. [Complete] Establish Vulkan feature tiers and reduce debug-only requirements.
 3. [Complete] Add validation messenger integration and GPU object names.
 4. [Complete] Add GPU debug markers and timestamp queries.
-5. Persist a Vulkan pipeline cache.
+5. [Complete] Persist a Vulkan pipeline cache.
 6. Provide user-facing diagnostics for device/surface loss and unsupported
    hardware.
 

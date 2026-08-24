@@ -10,6 +10,7 @@ class VulkanPipelineFactory {
 public:
     struct CreateInfo {
         VkDevice device = VK_NULL_HANDLE;
+        VkPipelineCache pipelineCache = VK_NULL_HANDLE;
         std::filesystem::path assetRoot;
         VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
         VkFormat colorFormat = VK_FORMAT_UNDEFINED;
@@ -70,6 +71,7 @@ private:
         bool multiplyBlend) const;
 
     VkDevice device_ = VK_NULL_HANDLE;
+    VkPipelineCache pipelineCache_ = VK_NULL_HANDLE;
     VkFormat colorFormat_ = VK_FORMAT_UNDEFINED;
     VkFormat shadowFormat_ = VK_FORMAT_UNDEFINED;
     VkPipelineLayout layout_ = VK_NULL_HANDLE;
