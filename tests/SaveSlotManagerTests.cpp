@@ -75,6 +75,43 @@ void testFreshInstallWritesNothing()
     check(directoryEmpty(directory.path()), "fresh install writes no files");
 }
 
+void testInterruptedActiveSlotMarkerRecovery()
+{
+    TemporaryDirectory temporary;
+    const std::filesystem::path marker = temporary.path() / "active-slot.txt";
+    {
+        std::ofstream stream(marker.string() + ".tmp");
+        stream << "2\n";
+    }
+
+    sokoban::SaveSlotManager temporaryRecovered(temporary.path(), instantWrites);
+    check(temporaryRecovered.activeSlot() == 1,
+        "temporary active-slot marker is promoted at startup");
+    check(!std::filesystem::exists(marker.string() + ".tmp"),
+        "promoted active-slot temporary is removed");
+
+    TemporaryDirectory displacedDirectory;
+    const std::filesystem::path displacedMarker =
+        displacedDirectory.path() / "active-slot.txt";
+    {
+        std::ofstream stream(displacedMarker.string() + ".tmp");
+        stream << "invalid";
+    }
+    {
+        std::ofstream stream(displacedMarker.string() + ".replace-old");
+        stream << "3\n";
+    }
+
+    sokoban::SaveSlotManager displacedRecovered(
+        displacedDirectory.path(), instantWrites);
+    check(displacedRecovered.activeSlot() == 2,
+        "displaced active-slot marker restores after a corrupt temporary");
+    check(!std::filesystem::exists(displacedMarker.string() + ".tmp") &&
+            !std::filesystem::exists(
+                displacedMarker.string() + ".replace-old"),
+        "active-slot fallback cleans both artifacts");
+}
+
 void testOverworldTargetSummaries()
 {
     TemporaryDirectory directory;
@@ -395,6 +432,7 @@ void testFailedMarkerCommitRollsBackSwitch()
 int main()
 {
     testFreshInstallWritesNothing();
+    testInterruptedActiveSlotMarkerRecovery();
     testOverworldTargetSummaries();
     testPreSplitSettingsMigration();
     testSummariesSwitchingAndDeletion();

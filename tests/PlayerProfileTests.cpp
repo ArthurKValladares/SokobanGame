@@ -788,6 +788,106 @@ void testStoreBackupsAndRecovery()
     check(foundCorruptArchive, "corrupt primary archived for diagnostics");
 }
 
+void testInterruptedWriteRecovery()
+{
+    TemporaryDirectory temporary;
+    sokoban::SaveStore store(temporary.path());
+
+    sokoban::PlayerProfile interrupted;
+    interrupted.unlockedLevel = 3;
+    interrupted.setCurrentLevel(3);
+    writeFile(store.primaryPath().string() + ".tmp", interrupted.serialize());
+
+    const sokoban::SaveStore::LoadResult temporaryRecovered = store.load();
+    check(temporaryRecovered.disposition ==
+            sokoban::SaveStore::LoadDisposition::RecoveredInterruptedWrite,
+        "valid temporary profile is promoted at startup");
+    check(temporaryRecovered.profile == interrupted,
+        "temporary recovery returns its saved profile");
+    check(!std::filesystem::exists(store.primaryPath().string() + ".tmp"),
+        "temporary recovery removes consumed artifact");
+
+    TemporaryDirectory displacedDirectory;
+    sokoban::SaveStore displacedStore(displacedDirectory.path());
+    sokoban::PlayerProfile displaced;
+    displaced.unlockedLevel = 2;
+    displaced.setCurrentLevel(2);
+    writeFile(
+        displacedStore.primaryPath().string() + ".replace-old",
+        displaced.serialize());
+
+    const sokoban::SaveStore::LoadResult displacedRecovered = displacedStore.load();
+    check(displacedRecovered.disposition ==
+            sokoban::SaveStore::LoadDisposition::RecoveredInterruptedWrite,
+        "displaced profile is restored when the live file is absent");
+    check(displacedRecovered.profile == displaced,
+        "displaced recovery returns its saved profile");
+    check(!std::filesystem::exists(
+            displacedStore.primaryPath().string() + ".replace-old"),
+        "displaced recovery removes consumed artifact");
+
+    TemporaryDirectory fallbackDirectory;
+    sokoban::SaveStore fallbackStore(fallbackDirectory.path());
+    sokoban::PlayerProfile fallback;
+    fallback.unlockedLevel = 1;
+    fallback.setCurrentLevel(1);
+    writeFile(fallbackStore.primaryPath().string() + ".tmp", "truncated");
+    writeFile(
+        fallbackStore.primaryPath().string() + ".replace-old",
+        fallback.serialize());
+
+    const sokoban::SaveStore::LoadResult fallbackRecovered = fallbackStore.load();
+    check(fallbackRecovered.disposition ==
+            sokoban::SaveStore::LoadDisposition::RecoveredInterruptedWrite,
+        "valid displaced profile is used when the temporary file is corrupt");
+    check(fallbackRecovered.profile == fallback,
+        "displaced fallback returns its saved profile");
+    check(!std::filesystem::exists(fallbackStore.primaryPath().string() + ".tmp") &&
+            !std::filesystem::exists(
+                fallbackStore.primaryPath().string() + ".replace-old"),
+        "fallback recovery cleans both artifacts");
+
+    TemporaryDirectory backupDirectory;
+    sokoban::SaveStore backupStore(backupDirectory.path());
+    sokoban::PlayerProfile backup;
+    backup.unlockedLevel = 6;
+    backup.setCurrentLevel(6);
+    writeFile(backupStore.backupPath().string() + ".tmp", backup.serialize());
+
+    const sokoban::SaveStore::LoadResult backupRecovered = backupStore.load();
+    check(backupRecovered.disposition == sokoban::SaveStore::LoadDisposition::RecoveredBackup,
+        "interrupted backup write remains available for normal backup recovery");
+    check(backupRecovered.profile == backup,
+        "recovered backup temporary returns its saved profile");
+    check(!std::filesystem::exists(backupStore.backupPath().string() + ".tmp") &&
+            std::filesystem::is_regular_file(backupStore.primaryPath()),
+        "backup recovery removes its artifact and repairs the primary");
+
+    TemporaryDirectory liveDirectory;
+    sokoban::SaveStore liveStore(liveDirectory.path());
+    sokoban::PlayerProfile live;
+    live.unlockedLevel = 4;
+    live.setCurrentLevel(4);
+    check(liveStore.save(live), "live profile saves before stale-artifact recovery");
+    sokoban::PlayerProfile stale = live;
+    stale.unlockedLevel = 5;
+    stale.setCurrentLevel(5);
+    writeFile(liveStore.primaryPath().string() + ".tmp", stale.serialize());
+    writeFile(
+        liveStore.primaryPath().string() + ".replace-old",
+        stale.serialize());
+
+    const sokoban::SaveStore::LoadResult liveLoaded = liveStore.load();
+    check(liveLoaded.disposition == sokoban::SaveStore::LoadDisposition::Loaded,
+        "valid live profile remains authoritative");
+    check(liveLoaded.profile == live,
+        "stale artifacts never overwrite a valid live profile");
+    check(!std::filesystem::exists(liveStore.primaryPath().string() + ".tmp") &&
+            !std::filesystem::exists(
+                liveStore.primaryPath().string() + ".replace-old"),
+        "valid live profile cleans stale artifacts");
+}
+
 void testSaveSlotStems()
 {
     TemporaryDirectory directory;
@@ -1162,6 +1262,7 @@ int main()
         testFormat21ConsolidatesInteractBinding();
         testFormat22UpdatesOverworldViewBinding();
         testStoreBackupsAndRecovery();
+        testInterruptedWriteRecovery();
         testSaveSlotStems();
         testMigrationAndDoubleCorruption();
         testAsyncSaveCoalescingAndFlush();

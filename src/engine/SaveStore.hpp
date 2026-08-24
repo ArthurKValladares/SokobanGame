@@ -16,6 +16,7 @@ public:
         // Nothing on disk; defaults returned without writing any file.
         CreatedDefault,
         Migrated,
+        RecoveredInterruptedWrite,
         RecoveredBackup,
         ResetCorrupt,
         StorageUnavailable,
@@ -69,6 +70,8 @@ public:
     [[nodiscard]] const std::string& status() const { return status_; }
 
 private:
+    [[nodiscard]] bool recoverInterruptedWrites();
+    [[nodiscard]] bool recoverInterruptedWrite(const std::filesystem::path& path);
     void writePrimary(const PlayerProfile& profile, bool updateBackup);
     void archiveCorruptFile(const std::filesystem::path& path);
 

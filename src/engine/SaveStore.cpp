@@ -40,6 +40,50 @@ std::string corruptSuffix()
         std::to_string(sequence.fetch_add(1, std::memory_order_relaxed));
 }
 
+enum class ProfileFileState {
+    Missing,
+    Valid,
+    Invalid,
+};
+
+ProfileFileState profileFileState(const std::filesystem::path& path)
+{
+    std::error_code error;
+    const bool exists = std::filesystem::exists(path, error);
+    if (error) {
+        throw std::system_error(error, "cannot inspect " + path.string());
+    }
+    if (!exists) {
+        return ProfileFileState::Missing;
+    }
+
+    const bool regular = std::filesystem::is_regular_file(path, error);
+    if (error) {
+        throw std::system_error(error, "cannot inspect " + path.string());
+    }
+    if (!regular) {
+        throw std::runtime_error("profile artifact is not a regular file: " +
+            path.string());
+    }
+
+    const std::string contents = readFile(path);
+    try {
+        (void)decodePlayerProfile(contents);
+        return ProfileFileState::Valid;
+    } catch (const std::exception&) {
+        return ProfileFileState::Invalid;
+    }
+}
+
+void removeArtifact(const std::filesystem::path& path)
+{
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    if (error) {
+        throw std::system_error(error, "cannot remove stale save artifact " + path.string());
+    }
+}
+
 } // namespace
 
 SaveStore::SaveStore(
@@ -73,6 +117,7 @@ SaveStore::LoadResult SaveStore::load()
 {
     try {
         std::filesystem::create_directories(root_);
+        const bool recoveredInterruptedWrite = recoverInterruptedWrites();
 
         if (std::filesystem::is_regular_file(primaryPath_)) {
             try {
@@ -87,10 +132,14 @@ SaveStore::LoadResult SaveStore::load()
                         .message = status_,
                     };
                 }
-                status_ = "Loaded player profile.";
+                status_ = recoveredInterruptedWrite
+                    ? "Recovered interrupted player profile write."
+                    : "Loaded player profile.";
                 return {
                     .profile = std::move(decoded.profile),
-                    .disposition = LoadDisposition::Loaded,
+                    .disposition = recoveredInterruptedWrite
+                        ? LoadDisposition::RecoveredInterruptedWrite
+                        : LoadDisposition::Loaded,
                     .message = status_,
                 };
             } catch (const std::exception&) {
@@ -149,6 +198,50 @@ SaveStore::LoadResult SaveStore::load()
             .message = status_,
         };
     }
+}
+
+bool SaveStore::recoverInterruptedWrites()
+{
+    const bool primaryRecovered = recoverInterruptedWrite(primaryPath_);
+    const bool backupRecovered = recoverInterruptedWrite(backupPath_);
+    return primaryRecovered || backupRecovered;
+}
+
+bool SaveStore::recoverInterruptedWrite(const std::filesystem::path& path)
+{
+    const std::filesystem::path temporary = path.string() + ".tmp";
+    const std::filesystem::path displaced = path.string() + ".replace-old";
+
+    const ProfileFileState live = profileFileState(path);
+    const ProfileFileState temporaryState = profileFileState(temporary);
+    const ProfileFileState displacedState = profileFileState(displaced);
+
+    if (live == ProfileFileState::Valid) {
+        // A committed profile is authoritative. Any artifacts are stale data
+        // from an interrupted write that never reached the live path.
+        removeArtifact(temporary);
+        removeArtifact(displaced);
+        return false;
+    }
+
+    const std::filesystem::path* recoverySource = nullptr;
+    if (temporaryState == ProfileFileState::Valid) {
+        // The temporary file is the newest candidate: it was produced for the
+        // attempted replacement and was fully written before the old fallback
+        // could have displaced the live file.
+        recoverySource = &temporary;
+    } else if (displacedState == ProfileFileState::Valid) {
+        recoverySource = &displaced;
+    }
+
+    if (recoverySource == nullptr) {
+        return false;
+    }
+
+    atomicFile::replace(path, *recoverySource);
+    removeArtifact(temporary);
+    removeArtifact(displaced);
+    return true;
 }
 
 SaveStore::InspectionResult SaveStore::inspect() const

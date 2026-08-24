@@ -186,6 +186,13 @@ replace and write-through flags followed by a destination flush; POSIX uses
 now use the same path, and the atomic-file tests cover closed-temporary
 replacement and failed installation preservation.
 
+**Interrupted-write recovery: Fixed on 2026-08-24.** Startup now validates the
+live, `.tmp`, and `.replace-old` variants for both primary and backup profile
+files. A valid live file remains authoritative; otherwise a valid temporary is
+promoted first and a valid displaced file is used as fallback. The active-slot
+marker follows the same rule. Recovery tests cover every precedence path and
+preserve storage errors instead of misclassifying unreadable files as corrupt.
+
 Before this change, [`AtomicFile::write`](src/engine/AtomicFile.cpp#L156)
 wrote the temporary file and called `replace()` while the output stream was
 still open.
@@ -432,7 +439,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 ### Phase 1 — Persistence and startup reliability
 
 1. [Complete] Flush, close, and durably replace save files.
-2. Recover interrupted `.tmp` and `.replace-old` writes.
+2. [Complete] Recover interrupted `.tmp` and `.replace-old` writes.
 3. Report save deletion failures and preserve live state on failure.
 4. Parse and validate the complete content index.
 5. Add corruption, interrupted-write, permissions, and disk-full tests.

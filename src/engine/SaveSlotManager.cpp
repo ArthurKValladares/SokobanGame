@@ -18,6 +18,74 @@ std::string slotFileStem(int slot)
 
 constexpr const char* activeSlotMarkerName = "active-slot.txt";
 
+std::optional<int> validMarkerSlot(const std::filesystem::path& path)
+{
+    std::error_code error;
+    const bool exists = std::filesystem::exists(path, error);
+    if (error) {
+        throw std::system_error(error, "cannot inspect active-slot marker " + path.string());
+    }
+    if (!exists) {
+        return std::nullopt;
+    }
+    if (!std::filesystem::is_regular_file(path, error)) {
+        if (error) {
+            throw std::system_error(
+                error, "cannot inspect active-slot marker " + path.string());
+        }
+        return std::nullopt;
+    }
+
+    std::ifstream stream(path);
+    if (!stream) {
+        throw std::runtime_error("cannot open active-slot marker " + path.string());
+    }
+    int slot = 0;
+    stream >> slot;
+    if (stream.bad()) {
+        throw std::runtime_error("cannot read active-slot marker " + path.string());
+    }
+    if (slot < 1 || slot > SaveSlotManager::slotCount) {
+        return std::nullopt;
+    }
+    return slot - 1;
+}
+
+void removeMarkerArtifact(const std::filesystem::path& path)
+{
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    if (error) {
+        throw std::system_error(
+            error, "cannot remove stale active-slot artifact " + path.string());
+    }
+}
+
+void recoverActiveSlotMarker(const std::filesystem::path& marker)
+{
+    const std::filesystem::path temporary = marker.string() + ".tmp";
+    const std::filesystem::path displaced = marker.string() + ".replace-old";
+    const std::optional<int> liveSlot = validMarkerSlot(marker);
+    const std::optional<int> temporarySlot = validMarkerSlot(temporary);
+    const std::optional<int> displacedSlot = validMarkerSlot(displaced);
+
+    if (liveSlot) {
+        removeMarkerArtifact(temporary);
+        removeMarkerArtifact(displaced);
+        return;
+    }
+
+    if (temporarySlot) {
+        atomicFile::replace(marker, temporary);
+    } else if (displacedSlot) {
+        atomicFile::replace(marker, displaced);
+    } else {
+        return;
+    }
+    removeMarkerArtifact(temporary);
+    removeMarkerArtifact(displaced);
+}
+
 } // namespace
 
 SaveSlotManager::SaveSlotManager(
@@ -334,10 +402,9 @@ AsyncSaveStore::Diagnostics SaveSlotManager::settingsDiagnostics() const
 
 int SaveSlotManager::readActiveSlotMarker() const
 {
-    std::ifstream stream(directory_ / activeSlotMarkerName);
-    int slot = 1;
-    stream >> slot;
-    return (slot >= 1 && slot <= slotCount) ? slot - 1 : 0;
+    const std::filesystem::path marker = directory_ / activeSlotMarkerName;
+    recoverActiveSlotMarker(marker);
+    return validMarkerSlot(marker).value_or(0);
 }
 
 void SaveSlotManager::writeActiveSlotMarker(int slot) const
