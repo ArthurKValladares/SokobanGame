@@ -143,6 +143,7 @@ private:
     std::vector<LevelMetadata> levelMetadata_;
     InputState input_;
     InputRouter inputRouter_;
+    SimulationTiming simulationTiming_;
     FrameTimer frameTimer_;
     PresentationSettings presentationSettings_;
     SettingsCoordinator settingsCoordinator_;

@@ -1,7 +1,9 @@
 #include "engine/GameplayLoop.hpp"
+#include "engine/Time.hpp"
 
 #include <algorithm>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -50,6 +52,68 @@ void testOpposingDirectionsAreNeutral()
     CHECK(!GameplayLoop::pressedHorizontal(input).has_value());
     CHECK(!GameplayLoop::heldVertical(input).has_value());
     CHECK(!GameplayLoop::heldHorizontal(input).has_value());
+}
+
+void testSimulationTimingClampsLongFrames()
+{
+    TEST("simulationTimingClampsLongFrames");
+    SimulationTiming timing;
+
+    CHECK(timing.frameDelta(1.0f / 60.0f) == 1.0f / 60.0f);
+    CHECK(timing.frameDelta(5.0f) ==
+        SimulationTiming::maximumDeltaSeconds);
+    CHECK(timing.frameDelta(-1.0f) == 0.0f);
+    CHECK(timing.frameDelta(
+        std::numeric_limits<float>::infinity()) == 0.0f);
+}
+
+void testSimulationTimingResetsAcrossMinimize()
+{
+    TEST("simulationTimingResetsAcrossMinimize");
+    SimulationTiming timing;
+
+    timing.setSuspended(SimulationSuspension::Minimized, true);
+    CHECK(timing.suspended());
+    CHECK(timing.frameDelta(30.0f) == 0.0f);
+    CHECK(timing.frameDelta(1.0f / 60.0f) == 0.0f);
+
+    timing.setSuspended(SimulationSuspension::Minimized, false);
+    CHECK(!timing.suspended());
+    CHECK(timing.frameDelta(30.0f) == 0.0f);
+    CHECK(timing.frameDelta(1.0f / 60.0f) == 1.0f / 60.0f);
+}
+
+void testSimulationTimingTracksOverlappingSuspensions()
+{
+    TEST("simulationTimingTracksOverlappingSuspensions");
+    SimulationTiming timing;
+
+    timing.setSuspended(SimulationSuspension::Backgrounded, true);
+    timing.setSuspended(SimulationSuspension::Minimized, true);
+    CHECK(timing.suspended());
+    CHECK(timing.frameDelta(60.0f) == 0.0f);
+
+    timing.setSuspended(SimulationSuspension::Backgrounded, false);
+    CHECK(timing.suspended());
+    CHECK(timing.frameDelta(60.0f) == 0.0f);
+
+    timing.setSuspended(SimulationSuspension::Minimized, false);
+    CHECK(!timing.suspended());
+    CHECK(timing.frameDelta(60.0f) == 0.0f);
+    CHECK(timing.frameDelta(0.02f) == 0.02f);
+}
+
+void testSimulationTimingObservesTransientSuspendCycle()
+{
+    TEST("simulationTimingObservesTransientSuspendCycle");
+    SimulationTiming timing;
+
+    timing.setSuspended(SimulationSuspension::Minimized, true);
+    timing.setSuspended(SimulationSuspension::Minimized, false);
+    CHECK(!timing.suspended());
+    CHECK(timing.frameDelta(30.0f) == 0.0f);
+    CHECK(timing.frameDelta(30.0f) ==
+        SimulationTiming::maximumDeltaSeconds);
 }
 
 void testRenderedPlayerNeverGoesBackwards()
@@ -333,6 +397,10 @@ void testMirrorDuplicationRequiresEveryPlayerOnAnEnd()
 int main()
 {
     testOpposingDirectionsAreNeutral();
+    testSimulationTimingClampsLongFrames();
+    testSimulationTimingResetsAcrossMinimize();
+    testSimulationTimingTracksOverlappingSuspensions();
+    testSimulationTimingObservesTransientSuspendCycle();
     testRenderedPlayerNeverGoesBackwards();
     testChainedSlideIsDrawnTileByTile();
     testMoveAdvancesSessionAndPresentation();

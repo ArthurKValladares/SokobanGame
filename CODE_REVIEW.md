@@ -145,8 +145,15 @@ prevent a defective raw task from killing the process.
 
 ### P1 — Unbounded frame delta can fast-forward gameplay
 
-[`FrameTimer::tick()`](src/engine/Time.hpp#L9) returns the entire wall-clock
-interval. [`Application`](src/engine/Application.cpp#L362) passes it directly
+**Status: Fixed on 2026-08-24.** Active frame deltas are capped at 100 ms.
+SDL minimize and application-background events set independent, thread-safe
+suspension reasons; simulation receives zero delta while suspended and on the
+first frame after every lifecycle transition. Tests cover long frames,
+minimize/restore, overlapping background/minimize state, and a complete
+suspend/resume cycle between rendered frames.
+
+[`FrameTimer::tick()`](src/engine/Time.hpp#L89) previously returned the entire wall-clock
+interval. [`Application`](src/engine/Application.cpp#L394) passes it directly
 into simulation, and [`GameplayLoop`](src/engine/GameplayLoop.cpp#L184)
 deliberately consumes the full delta in a catch-up loop.
 
@@ -407,7 +414,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 1. [Complete] Fix the swapchain semaphore wait stage.
 2. [Complete] Repair the content-pipeline fixture and test exception reporting.
 3. [Complete] Make `parallelFor` exception-safe.
-4. Clamp/reset simulation timing and add suspend/minimize tests.
+4. [Complete] Clamp/reset simulation timing and add suspend/minimize tests.
 5. Make both Debug and Release test runs mandatory and green.
 
 ### Phase 1 — Persistence and startup reliability

@@ -19,6 +19,7 @@
 #include <exception>
 #include <functional>
 #include <ranges>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -33,6 +34,29 @@ AntiAliasingMode antiAliasingModeForSamples(int samples)
     case 4: return AntiAliasingMode::Msaa4x;
     default: return AntiAliasingMode::Msaa8x;
     }
+}
+
+bool SDLCALL simulationTimingEventWatch(void* userdata, SDL_Event* event)
+{
+    auto& timing = *static_cast<SimulationTiming*>(userdata);
+    switch (event->type) {
+    case SDL_EVENT_WINDOW_MINIMIZED:
+        timing.setSuspended(SimulationSuspension::Minimized, true);
+        break;
+    case SDL_EVENT_WINDOW_RESTORED:
+        timing.setSuspended(SimulationSuspension::Minimized, false);
+        break;
+    case SDL_EVENT_WILL_ENTER_BACKGROUND:
+    case SDL_EVENT_DID_ENTER_BACKGROUND:
+        timing.setSuspended(SimulationSuspension::Backgrounded, true);
+        break;
+    case SDL_EVENT_DID_ENTER_FOREGROUND:
+        timing.setSuspended(SimulationSuspension::Backgrounded, false);
+        break;
+    default:
+        break;
+    }
+    return true;
 }
 
 } // namespace
@@ -239,10 +263,18 @@ Application::Application()
         }
     });
 #endif
+
+    if (!SDL_AddEventWatch(
+            simulationTimingEventWatch, &simulationTiming_)) {
+        throw std::runtime_error(
+            std::string("SDL_AddEventWatch failed: ") + SDL_GetError());
+    }
 }
 
 Application::~Application()
 {
+    SDL_RemoveEventWatch(simulationTimingEventWatch, &simulationTiming_);
+
     // No longer waits for the world to go quiet.
     //
     // The gate was there because a snapshot taken mid-action would have caught
@@ -359,7 +391,7 @@ void Application::run()
 
         const InputRouter::Frame routedInput =
             inputRouter_.routeFrame(input_, inputRoutingContext());
-        const float dt = frameTimer_.tick();
+        const float dt = frameTimer_.tick(simulationTiming_);
         update(
             dt,
             routedInput,
