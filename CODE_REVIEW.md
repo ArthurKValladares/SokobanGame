@@ -97,7 +97,10 @@ paths with synchronization validation enabled.
 **Status: Fixed on 2026-08-24.** The fixture now creates all seven code-owned
 input-prompt atlas XML files plus the Kenney license, asserts that representative
 prompt content is staged, and reports unexpected standard and non-standard
-exceptions at the test entry point. All 50 tests pass in Debug and Release.
+exceptions at the test entry point. All 50 tests pass in Debug and Release. The
+`Required Tests` GitHub Actions workflow now performs clean builds and runs the
+complete CTest registry in both configurations on every push and pull request;
+the two matrix jobs are the checks to require in branch protection.
 
 The content builder now requires seven input-prompt atlases in
 [`ContentPipeline.cpp`](src/engine/ContentPipeline.cpp#L238), but
@@ -415,7 +418,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 2. [Complete] Repair the content-pipeline fixture and test exception reporting.
 3. [Complete] Make `parallelFor` exception-safe.
 4. [Complete] Clamp/reset simulation timing and add suspend/minimize tests.
-5. Make both Debug and Release test runs mandatory and green.
+5. [Complete] Make both Debug and Release test runs mandatory and green.
 
 ### Phase 1 — Persistence and startup reliability
 

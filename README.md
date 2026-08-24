@@ -61,15 +61,22 @@ executable-relative assets.
 
 ## Tests
 
-The project currently registers 39 CTest suites covering rules, level parsing,
+The project currently registers 50 CTest suites covering rules, level parsing,
 campaign and gameplay sessions, persistence and migrations, input routing,
 player UI, renderer state, scene preparation and picking, editor transactions,
 assets, animation, particles, tasks, logging, and content packaging.
 
 ```powershell
 cmake --build build --config Debug
-ctest --test-dir build -C Debug --output-on-failure
+ctest --test-dir build -C Debug --output-on-failure --no-tests=error
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure --no-tests=error
 ```
+
+The `Required Tests` GitHub Actions workflow performs clean, independent Debug
+and Release builds on every push and pull request, then runs the complete CTest
+registry in both configurations. Repository branch protection should require
+both `Tests (Debug)` and `Tests (Release)` checks before merging to `main`.
 
 Production code is compiled once into `sokoban_core`, `sokoban_ui`, and
 `sokoban_render_vulkan`; tests link those libraries rather than recompiling
