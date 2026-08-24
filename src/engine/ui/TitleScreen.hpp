@@ -100,6 +100,13 @@ public:
     void open(std::vector<TitleLevelInfo> levels);
     // Slot summaries shown on the Save Slots page; activeSlot is 0-based.
     void setSaveSlots(std::vector<SaveSlotInfo> slots, int activeSlot);
+    // A recoverable persistence failure shown while the player remains on
+    // the Save Slots page. An empty message clears the notice.
+    void setSaveSlotError(std::string message);
+    [[nodiscard]] const std::string& saveSlotError() const
+    {
+        return saveSlotError_;
+    }
     // Opens straight onto the level-select page with fresh level data; in
     // this standalone mode Back/back() close the screen instead of falling
     // through to the title's main menu.
@@ -161,6 +168,7 @@ private:
     std::vector<TitleLevelInfo> levels_;
     std::vector<SaveSlotInfo> saveSlots_;
     int activeSlot_ = 0;
+    std::string saveSlotError_;
 };
 
 } // namespace sokoban

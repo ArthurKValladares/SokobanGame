@@ -58,6 +58,11 @@ void TitleScreen::setSaveSlots(std::vector<SaveSlotInfo> slots, int activeSlot)
         activeSlot, 0, std::max(static_cast<int>(saveSlots_.size()) - 1, 0));
 }
 
+void TitleScreen::setSaveSlotError(std::string message)
+{
+    saveSlotError_ = std::move(message);
+}
+
 void TitleScreen::openLevelSelect(std::vector<TitleLevelInfo> levels)
 {
     levels_ = std::move(levels);
@@ -107,6 +112,7 @@ void TitleScreen::setPage(Page page)
     }
     if (page != Page::SaveSlots && page != Page::SlotDeleteConfirmation) {
         slotPickForNewGame_ = false;
+        saveSlotError_.clear();
     }
 }
 
@@ -452,7 +458,7 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
         tree.spacer(tree.root(), 12.0f);
     }
     tree.spacer(tree.root(), 6.0f);
-    const UiLayoutNode hint = tree.item(tree.root(), 24.0f);
+    const UiLayoutNode notice = tree.item(tree.root(), 24.0f);
     tree.flexibleSpacer(tree.root());
     const UiLayoutNode backRow = tree.item(tree.root(), 52.0f);
     tree.arrange(panel);
@@ -556,11 +562,17 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
             18.0f, 18.0f);
     }
 
-    ui.centeredText(tree.rect(hint),
-        slotPickForNewGame_
-            ? ""
-            : "Right focuses a slot's Delete button",
-        { 0.58f, 0.63f, 0.62f, 1.0f }, 15.0f);
+    const bool hasError = !saveSlotError_.empty();
+    ui.centeredText(tree.rect(notice),
+        hasError
+            ? saveSlotError_
+            : (slotPickForNewGame_
+                    ? ""
+                    : "Right focuses a slot's Delete button"),
+        hasError
+            ? Vec4 { 0.95f, 0.48f, 0.40f, 1.0f }
+            : Vec4 { 0.58f, 0.63f, 0.62f, 1.0f },
+        15.0f);
 
     const bool backFocused = selectedRow_ == backRowIndex;
     if (uiControls::button(

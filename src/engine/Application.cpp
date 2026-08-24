@@ -1089,14 +1089,28 @@ void Application::deleteSaveSlot(int slot)
     if (slot < 0 || slot >= SaveSlotManager::slotCount) {
         return;
     }
+    const SaveSlotManager::DeleteResult deletion = saveSlots_.deleteSlot(slot);
+    if (!deletion.succeeded) {
+        const std::string message =
+            "Could not delete save slot " + std::to_string(slot + 1) +
+            ": " + deletion.message;
+        log::error(log::Category::Persistence) << message;
+        // Keep the current profile and world exactly as they were. Refreshing
+        // the summaries retains the saved slot instead of presenting a false
+        // empty state.
+        titleScreen_.setSaveSlots(saveSlotInfos(), saveSlots_.activeSlot());
+        titleScreen_.setSaveSlotError(message);
+        return;
+    }
+
     if (slot == saveSlots_.activeSlot()) {
         // The file stays absent until the player starts playing again.
         playerProfile_.resetProgress();
         levelCompleteOverlay_.close();
         campaign_.resetForProfile(playerProfile_);
     }
-    saveSlots_.deleteSlot(slot);
     titleScreen_.setSaveSlots(saveSlotInfos(), saveSlots_.activeSlot());
+    titleScreen_.setSaveSlotError({});
 }
 
 void Application::persistSettings(bool immediate)

@@ -244,7 +244,7 @@ void testSummariesSwitchingAndDeletion()
     // Deletion removes files without touching neighbours; a pending write
     // must not resurrect the deleted save.
     manager.saveProgress(*switched, true);
-    manager.deleteSlot(1);
+    check(manager.deleteSlot(1).succeeded, "slot 2 deletion succeeds");
     check(!std::filesystem::exists(directory.path() / "profile-slot2.json"),
         "deleted slot primary removed");
     check(!std::filesystem::exists(directory.path() / "profile-slot2.backup.json"),
@@ -303,7 +303,7 @@ void testSummaryCacheInvalidation()
     // Deleting a non-active slot invalidates just that entry to empty.
     check(manager.slotSummaries(*switched, 4)[2].currentLevel == 1,
         "slot 3 primed before delete");
-    manager.deleteSlot(2);
+    check(manager.deleteSlot(2).succeeded, "slot 3 deletion succeeds");
     check(manager.slotSummaries(*switched, 4)[2].state ==
             sokoban::SaveSlotState::Empty,
         "delete invalidates the slot's cached summary");
@@ -427,6 +427,44 @@ void testFailedMarkerCommitRollsBackSwitch()
         "failed destination is not used by later saves");
 }
 
+void testDeletionFailurePreservesSummaryAndFiles()
+{
+    TemporaryDirectory directory;
+    sokoban::SaveSlotManager manager(directory.path(), instantWrites);
+    const sokoban::PlayerProfile active = manager.loadActiveProfile();
+    const std::filesystem::path primary = directory.path() / "profile-slot2.json";
+    const std::filesystem::path backup =
+        directory.path() / "profile-slot2.backup.json";
+
+    {
+        sokoban::SaveStore second(directory.path(), "profile-slot2");
+        check(second.save(profileWithProgress(1)), "slot 2 seeded for delete failure");
+    }
+    check(manager.slotSummaries(active, 4)[1].state ==
+            sokoban::SaveSlotState::Ready,
+        "slot 2 summary is primed before deletion failure");
+
+    // A non-empty directory cannot be removed by std::filesystem::remove.
+    // It deterministically exercises the error path without relying on OS
+    // file-lock or permission behavior.
+    std::filesystem::remove(primary);
+    std::filesystem::create_directories(primary);
+    std::ofstream(primary / "blocker.txt") << "blocked";
+    std::ofstream(backup) << "backup must remain";
+
+    const sokoban::SaveSlotManager::DeleteResult result = manager.deleteSlot(1);
+    check(!result.succeeded, "delete failure is reported");
+    check(result.message.find("profile-slot2.json") != std::string::npos,
+        "delete failure identifies the path");
+    check(std::filesystem::exists(primary / "blocker.txt"),
+        "failed primary deletion preserves primary artifact");
+    check(std::filesystem::is_regular_file(backup),
+        "failed primary deletion leaves backup untouched");
+    check(manager.slotSummaries(active, 4)[1].state ==
+            sokoban::SaveSlotState::Ready,
+        "failed deletion preserves cached slot summary");
+}
+
 } // namespace
 
 int main()
@@ -439,6 +477,7 @@ int main()
     testSummaryCacheInvalidation();
     testSlotInspectionIsNonMutating();
     testFailedMarkerCommitRollsBackSwitch();
+    testDeletionFailurePreservesSummaryAndFiles();
 
     if (failures == 0) {
         std::cout << "SaveSlotManagerTests: " << checks << " checks passed\n";

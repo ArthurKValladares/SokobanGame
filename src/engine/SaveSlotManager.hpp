@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace sokoban {
@@ -29,6 +30,11 @@ public:
         bool completed = false;
         int currentLevel = 0; // Legacy summary compatibility.
         int completedLevels = 0; // Selector targets in overworld mode.
+    };
+
+    struct DeleteResult {
+        bool succeeded = false;
+        std::string message;
     };
 
     explicit SaveSlotManager(
@@ -67,9 +73,10 @@ public:
         const PlayerProfile& currentProfile);
 
     // Removes the slot's save files (primary and backup). Deleting the
-    // active slot drains pending writes first; the caller resets its live
-    // profile's progress alongside.
-    void deleteSlot(int slot);
+    // active slot drains pending writes first. The summary cache is changed
+    // only after both paths have been removed or confirmed absent, so callers
+    // can keep their live profile intact and present a recoverable error.
+    [[nodiscard]] DeleteResult deleteSlot(int slot);
 
     void saveProgress(const PlayerProfile& profile, bool immediate);
     // Persists only the settings sections into the shared settings file.

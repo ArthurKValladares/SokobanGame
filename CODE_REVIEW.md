@@ -216,7 +216,15 @@ startup.
 
 ### P1 — Save deletion silently succeeds when filesystem deletion fails
 
-[`SaveSlotManager::deleteSlot`](src/engine/SaveSlotManager.cpp#L285) ignores
+**Status: Fixed on 2026-08-24.** `SaveSlotManager::deleteSlot` now returns a
+descriptive result and stops at the first failed removal, leaving its summary
+cache untouched. `Application` only resets an active profile after a successful
+deletion; on failure it preserves the campaign and displays the persistence
+error on the Save Slots screen. Tests cover a deterministic non-empty-directory
+deletion failure, including preservation of the primary artifact, backup, and
+cached summary.
+
+[`SaveSlotManager::deleteSlot`](src/engine/SaveSlotManager.cpp#L343) ignores
 errors from deleting the primary and backup files and immediately marks the
 summary cache empty.
 
@@ -440,7 +448,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 
 1. [Complete] Flush, close, and durably replace save files.
 2. [Complete] Recover interrupted `.tmp` and `.replace-old` writes.
-3. Report save deletion failures and preserve live state on failure.
+3. [Complete] Report save deletion failures and preserve live state on failure.
 4. Parse and validate the complete content index.
 5. Add corruption, interrupted-write, permissions, and disk-full tests.
 

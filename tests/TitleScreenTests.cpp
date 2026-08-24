@@ -309,6 +309,9 @@ void testSaveSlotsPage()
     CHECK(deletedSlot != nullptr && deletedSlot->slot == 0);
     CHECK(title.page() == sokoban::TitleScreen::Page::SaveSlots);
 
+    title.setSaveSlotError("Could not delete save slot 1: access denied");
+    CHECK(title.saveSlotError().find("access denied") != std::string::npos);
+
     // Empty slots have no delete column: Right stays on the slot button.
     draw({ .down = true });
     draw({ .right = true });
@@ -321,6 +324,7 @@ void testSaveSlotsPage()
     draw({ .up = true });
     draw({ .confirm = true });
     CHECK(title.page() == sokoban::TitleScreen::Page::Main);
+    CHECK(title.saveSlotError().empty());
 }
 
 void testDamagedSaveSlotBehavior()
