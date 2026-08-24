@@ -1,5 +1,7 @@
 #include "engine/render/VulkanResourceUtils.hpp"
 
+#include "engine/render/VulkanDebugUtils.hpp"
+
 #include <stdexcept>
 #include <string>
 
@@ -85,7 +87,8 @@ VkImageView createImageView(
     VkDevice device,
     VkImage image,
     VkFormat format,
-    VkImageAspectFlags aspectMask)
+    VkImageAspectFlags aspectMask,
+    std::string_view debugName)
 {
     VkImageViewCreateInfo createInfo {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -109,6 +112,8 @@ VkImageView createImageView(
 
     VkImageView view = VK_NULL_HANDLE;
     vkCheck(vkCreateImageView(device, &createInfo, nullptr, &view), "vkCreateImageView failed");
+    vulkanDebug::setObjectName(
+        device, VK_OBJECT_TYPE_IMAGE_VIEW, view, debugName);
     return view;
 }
 
@@ -116,10 +121,13 @@ OwnedImage createImage(
     VkPhysicalDevice physicalDevice,
     VkDevice device,
     const VkImageCreateInfo& imageInfo,
-    VkImageAspectFlags aspectMask)
+    VkImageAspectFlags aspectMask,
+    std::string_view debugName)
 {
     OwnedImage result;
     vkCheck(vkCreateImage(device, &imageInfo, nullptr, &result.image), "vkCreateImage failed");
+    vulkanDebug::setObjectName(
+        device, VK_OBJECT_TYPE_IMAGE, result.image, debugName);
     try {
         VkMemoryRequirements requirements {};
         vkGetImageMemoryRequirements(device, result.image, &requirements);
@@ -133,9 +141,25 @@ OwnedImage createImage(
         };
         vkCheck(vkAllocateMemory(device, &allocateInfo, nullptr, &result.memory),
             "vkAllocateMemory image failed");
+        const std::string memoryName = debugName.empty()
+            ? std::string {}
+            : std::string(debugName) + " memory";
+        vulkanDebug::setObjectName(
+            device,
+            VK_OBJECT_TYPE_DEVICE_MEMORY,
+            result.memory,
+            memoryName);
         vkCheck(vkBindImageMemory(device, result.image, result.memory, 0),
             "vkBindImageMemory failed");
-        result.view = createImageView(device, result.image, imageInfo.format, aspectMask);
+        const std::string viewName = debugName.empty()
+            ? std::string {}
+            : std::string(debugName) + " view";
+        result.view = createImageView(
+            device,
+            result.image,
+            imageInfo.format,
+            aspectMask,
+            viewName);
     } catch (...) {
         destroyImage(device, result);
         throw;

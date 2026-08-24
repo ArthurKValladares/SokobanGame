@@ -1,4 +1,5 @@
 #include "engine/render/VulkanDeviceSelection.hpp"
+#include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/RenderResolution.hpp"
 
 #include <cstdlib>
@@ -196,6 +197,22 @@ int main()
                requiredPushConstants,
                requiredSampledImages).releaseCompatible,
         "descriptor capacity remains part of the release contract");
+
+    check(
+        sokoban::vulkanDebug::validationMessageLogLevel(
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) ==
+            sokoban::log::Level::Error,
+        "validation errors are reported at error severity");
+    check(
+        sokoban::vulkanDebug::validationMessageLogLevel(
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) ==
+            sokoban::log::Level::Warning,
+        "validation warnings are reported at warning severity");
+    check(
+        sokoban::vulkanDebug::validationMessageLogLevel(
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) ==
+            sokoban::log::Level::Debug,
+        "verbose validation messages stay at debug severity");
 
     std::cout << "Vulkan device selection tests passed\n";
     return 0;

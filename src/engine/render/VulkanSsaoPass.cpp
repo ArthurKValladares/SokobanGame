@@ -1,6 +1,7 @@
 #include "engine/render/VulkanSsaoPass.hpp"
 
 #include "engine/render/LightingConfig.hpp"
+#include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 
@@ -36,6 +37,8 @@ void VulkanSsaoPass::create(VkPhysicalDevice physicalDevice, VkDevice device, Vk
         };
         vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &sampler_),
             "vkCreateSampler ssao failed");
+        vulkanDebug::setObjectName(
+            device_, VK_OBJECT_TYPE_SAMPLER, sampler_, "SSAO sampler");
     } catch (...) {
         destroy();
         throw;
@@ -246,7 +249,11 @@ void VulkanSsaoPass::createImage()
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
     image_ = vulkanResources::createImage(
-        physicalDevice_, device_, imageInfo, VK_IMAGE_ASPECT_COLOR_BIT);
+        physicalDevice_,
+        device_,
+        imageInfo,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        "SSAO buffer");
 }
 
 void VulkanSsaoPass::destroyImage()

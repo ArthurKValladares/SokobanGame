@@ -51,6 +51,7 @@ public:
 private:
     void createInstance();
     void createSurface();
+    void createValidationMessenger();
     void pickPhysicalDevice();
     void createDevice();
     void createCommandPool();
@@ -64,6 +65,7 @@ private:
 
     SDL_Window* window_ = nullptr;
     VkInstance instance_ = VK_NULL_HANDLE;
+    VkDebugUtilsMessengerEXT validationMessenger_ = VK_NULL_HANDLE;
     VkSurfaceKHR surface_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkPhysicalDeviceProperties physicalDeviceProperties_ {};

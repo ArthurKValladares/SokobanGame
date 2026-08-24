@@ -2,6 +2,7 @@
 
 #include "engine/Log.hpp"
 #include "engine/render/ImageData.hpp"
+#include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanDeviceSelection.hpp"
 #include "engine/render/VulkanFrameCapture.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
@@ -22,6 +23,7 @@
 #include <optional>
 #include <ranges>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 #ifndef SOKOBAN_ENABLE_DEBUG_UI
@@ -1223,6 +1225,12 @@ void VulkanRenderer::createFrameResources()
 
     for (size_t i = 0; i < frames_.size(); ++i) {
         frames_[i].commandBuffer = commandBuffers[i];
+        const std::string frameLabel = "Frame " + std::to_string(i);
+        vulkanDebug::setObjectName(
+            deviceContext_.device(),
+            VK_OBJECT_TYPE_COMMAND_BUFFER,
+            frames_[i].commandBuffer,
+            frameLabel + " command buffer");
         vkCheck(
             vkCreateSemaphore(
                 deviceContext_.device(),
@@ -1230,6 +1238,11 @@ void VulkanRenderer::createFrameResources()
                 nullptr,
                 &frames_[i].imageAvailable),
             "vkCreateSemaphore failed");
+        vulkanDebug::setObjectName(
+            deviceContext_.device(),
+            VK_OBJECT_TYPE_SEMAPHORE,
+            frames_[i].imageAvailable,
+            frameLabel + " image available");
         vkCheck(
             vkCreateSemaphore(
                 deviceContext_.device(),
@@ -1237,6 +1250,11 @@ void VulkanRenderer::createFrameResources()
                 nullptr,
                 &frames_[i].renderFinished),
             "vkCreateSemaphore failed");
+        vulkanDebug::setObjectName(
+            deviceContext_.device(),
+            VK_OBJECT_TYPE_SEMAPHORE,
+            frames_[i].renderFinished,
+            frameLabel + " render finished");
         vkCheck(
             vkCreateFence(
                 deviceContext_.device(),
@@ -1244,6 +1262,11 @@ void VulkanRenderer::createFrameResources()
                 nullptr,
                 &frames_[i].inFlight),
             "vkCreateFence failed");
+        vulkanDebug::setObjectName(
+            deviceContext_.device(),
+            VK_OBJECT_TYPE_FENCE,
+            frames_[i].inFlight,
+            frameLabel + " in flight fence");
     }
 }
 
@@ -1270,7 +1293,7 @@ void VulkanRenderer::initializeDebugUi()
     };
 
     ImGui_ImplVulkan_InitInfo initInfo {};
-    initInfo.ApiVersion = VK_API_VERSION_1_4;
+    initInfo.ApiVersion = VK_API_VERSION_1_3;
     initInfo.Instance = deviceContext_.instance();
     initInfo.PhysicalDevice = deviceContext_.physicalDevice();
     initInfo.Device = deviceContext_.device();

@@ -3,6 +3,7 @@
 #include <vulkan/vulkan.h>
 
 #include <span>
+#include <string_view>
 
 namespace sokoban {
 
@@ -59,12 +60,14 @@ struct OwnedImage {
     VkDevice device,
     VkImage image,
     VkFormat format,
-    VkImageAspectFlags aspectMask);
+    VkImageAspectFlags aspectMask,
+    std::string_view debugName = {});
 [[nodiscard]] OwnedImage createImage(
     VkPhysicalDevice physicalDevice,
     VkDevice device,
     const VkImageCreateInfo& imageInfo,
-    VkImageAspectFlags aspectMask);
+    VkImageAspectFlags aspectMask,
+    std::string_view debugName = {});
 void destroyImage(VkDevice device, OwnedImage& image);
 
 } // namespace vulkanResources

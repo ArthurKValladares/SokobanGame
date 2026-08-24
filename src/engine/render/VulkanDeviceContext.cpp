@@ -3,6 +3,7 @@
 #include "engine/AssetManifest.hpp"
 #include "engine/render/RendererConfig.hpp"
 #include "engine/Log.hpp"
+#include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanDeviceSelection.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
@@ -199,11 +200,25 @@ void VulkanDeviceContext::createInstance()
 
     std::vector<const char*> layers = validationLayers();
     if (!layers.empty() && !supportsValidationLayer()) {
+        log::warning(log::Category::Rendering)
+            << "VK_LAYER_KHRONOS_validation is unavailable; Vulkan validation is disabled";
         layers.clear();
     }
+    const bool enableDebugUtils =
+        !layers.empty() && vulkanDebug::debugUtilsExtensionAvailable();
+    if (!layers.empty() && !enableDebugUtils) {
+        log::warning(log::Category::Rendering)
+            << "VK_EXT_debug_utils is unavailable; Vulkan validation messages will not be captured";
+    }
+    if (enableDebugUtils) {
+        extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    }
+    const VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo =
+        vulkanDebug::validationMessengerCreateInfo();
 
     const VkInstanceCreateInfo createInfo {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pNext = enableDebugUtils ? &debugCreateInfo : nullptr,
         .pApplicationInfo = &appInfo,
         .enabledLayerCount = static_cast<uint32_t>(layers.size()),
         .ppEnabledLayerNames = layers.data(),
@@ -213,6 +228,9 @@ void VulkanDeviceContext::createInstance()
     vkCheck(
         vkCreateInstance(&createInfo, nullptr, &instance_),
         "vkCreateInstance failed");
+    if (enableDebugUtils) {
+        createValidationMessenger();
+    }
 }
 
 void VulkanDeviceContext::createSurface()
@@ -223,6 +241,17 @@ void VulkanDeviceContext::createSurface()
             std::string("SDL_Vulkan_CreateSurface failed: ") +
             SDL_GetError());
     }
+}
+
+void VulkanDeviceContext::createValidationMessenger()
+{
+    const VkDebugUtilsMessengerCreateInfoEXT createInfo =
+        vulkanDebug::validationMessengerCreateInfo();
+    vkCheck(
+        vulkanDebug::createValidationMessenger(
+            instance_, createInfo, validationMessenger_),
+        "vkCreateDebugUtilsMessengerEXT failed");
+    vulkanDebug::initializeObjectNaming(instance_);
 }
 
 void VulkanDeviceContext::pickPhysicalDevice()
@@ -337,6 +366,8 @@ void VulkanDeviceContext::createDevice()
         vkCreateDevice(
             physicalDevice_, &createInfo, nullptr, &device_),
         "vkCreateDevice failed");
+    vulkanDebug::setObjectName(
+        device_, VK_OBJECT_TYPE_DEVICE, device_, "Sokoban logical device");
 
     vkGetDeviceQueue(
         device_, queueFamilies_.graphics, 0, &graphicsQueue_);
@@ -354,6 +385,9 @@ void VulkanDeviceContext::createCommandPool()
     vkCheck(
         vkCreateCommandPool(device_, &createInfo, nullptr, &commandPool_),
         "vkCreateCommandPool failed");
+    vulkanDebug::setObjectName(
+        device_, VK_OBJECT_TYPE_COMMAND_POOL, commandPool_,
+        "Sokoban graphics command pool");
 }
 
 void VulkanDeviceContext::destroy() noexcept
@@ -371,6 +405,10 @@ void VulkanDeviceContext::destroy() noexcept
         surface_ = VK_NULL_HANDLE;
     }
     if (instance_) {
+        vulkanDebug::shutdownObjectNaming();
+        vulkanDebug::destroyValidationMessenger(
+            instance_, validationMessenger_);
+        validationMessenger_ = VK_NULL_HANDLE;
         vkDestroyInstance(instance_, nullptr);
         instance_ = VK_NULL_HANDLE;
     }

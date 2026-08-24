@@ -195,7 +195,11 @@ bool VulkanThumbnailPass::loadThumbnail(TileType tile, Thumbnail& target)
             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         };
         target.image = vulkanResources::createImage(
-            physicalDevice_, device_, imageInfo, VK_IMAGE_ASPECT_COLOR_BIT);
+            physicalDevice_,
+            device_,
+            imageInfo,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            "Tile thumbnail render target");
 
         const VkBufferCreateInfo bufferInfo {
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,

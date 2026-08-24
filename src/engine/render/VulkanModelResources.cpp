@@ -2,6 +2,7 @@
 
 #include "engine/Log.hpp"
 #include "engine/TaskSystem.hpp"
+#include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 
 #include <algorithm>
@@ -800,11 +801,13 @@ VulkanModelResources::GpuMesh VulkanModelResources::uploadMesh(
     result.vertexBuffer = createBuffer(
         vertexBytes,
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        "Model vertex buffer");
     result.indexBuffer = createBuffer(
         indexBytes,
         VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        "Model index buffer");
 
     void* mapped = nullptr;
     vkCheck(vkMapMemory(device_, result.vertexBuffer.memory, 0, vertexBytes, 0, &mapped),
@@ -900,6 +903,8 @@ void VulkanModelResources::beginTextureUpload(
     };
     vkCheck(vkCreateImage(device_, &imageInfo, nullptr, &textureImage.image),
         "vkCreateImage model texture failed");
+    vulkanDebug::setObjectName(
+        device_, VK_OBJECT_TYPE_IMAGE, textureImage.image, "Model texture");
 
     VkMemoryRequirements requirements {};
     vkGetImageMemoryRequirements(device_, textureImage.image, &requirements);
@@ -912,6 +917,11 @@ void VulkanModelResources::beginTextureUpload(
     };
     vkCheck(vkAllocateMemory(device_, &allocationInfo, nullptr, &textureImage.memory),
         "vkAllocateMemory model texture failed");
+    vulkanDebug::setObjectName(
+        device_,
+        VK_OBJECT_TYPE_DEVICE_MEMORY,
+        textureImage.memory,
+        "Model texture memory");
     vkCheck(vkBindImageMemory(device_, textureImage.image, textureImage.memory, 0),
         "vkBindImageMemory model texture failed");
 
@@ -920,6 +930,8 @@ void VulkanModelResources::beginTextureUpload(
         textureFormat,
         VK_IMAGE_ASPECT_COLOR_BIT,
         textureImage.mipLevels);
+    vulkanDebug::setObjectName(
+        device_, VK_OBJECT_TYPE_IMAGE_VIEW, textureImage.view, "Model texture view");
     // Address mode and filtering are independent: the ground material layers
     // repeat and filter smoothly, the splat map clamps but still filters
     // smoothly (it spans the board once), and atlases do neither.
@@ -944,6 +956,8 @@ void VulkanModelResources::beginTextureUpload(
     };
     vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &sampler),
         "vkCreateSampler model texture failed");
+    vulkanDebug::setObjectName(
+        device_, VK_OBJECT_TYPE_SAMPLER, sampler, "Model texture sampler");
 
     recordTextureCopy(image, textureImage, upload);
 }
@@ -957,7 +971,8 @@ void VulkanModelResources::recordTextureCopy(
     upload.staging = createBuffer(
         imageBytes,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        "Model texture upload buffer");
 
     void* mapped = nullptr;
     vkCheck(vkMapMemory(device_, upload.staging.memory, 0, imageBytes, 0, &mapped),
@@ -974,6 +989,11 @@ void VulkanModelResources::recordTextureCopy(
     vkCheck(vkAllocateCommandBuffers(
             device_, &commandBufferInfo, &upload.commandBuffer),
         "vkAllocateCommandBuffers texture upload failed");
+    vulkanDebug::setObjectName(
+        device_,
+        VK_OBJECT_TYPE_COMMAND_BUFFER,
+        upload.commandBuffer,
+        "Model texture upload command buffer");
     VkCommandBufferBeginInfo beginInfo {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
@@ -1107,6 +1127,8 @@ void VulkanModelResources::recordTextureCopy(
     };
     vkCheck(vkCreateFence(device_, &fenceInfo, nullptr, &upload.fence),
         "vkCreateFence texture upload failed");
+    vulkanDebug::setObjectName(
+        device_, VK_OBJECT_TYPE_FENCE, upload.fence, "Model texture upload fence");
 
     VkCommandBufferSubmitInfo commandBufferSubmit {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
@@ -1297,7 +1319,8 @@ uint32_t VulkanModelResources::findMemoryType(
 VulkanModelResources::OwnedBuffer VulkanModelResources::createBuffer(
     VkDeviceSize size,
     VkBufferUsageFlags usage,
-    VkMemoryPropertyFlags properties) const
+    VkMemoryPropertyFlags properties,
+    std::string_view debugName) const
 {
     OwnedBuffer result;
     VkBufferCreateInfo bufferInfo {
@@ -1308,6 +1331,8 @@ VulkanModelResources::OwnedBuffer VulkanModelResources::createBuffer(
     };
     vkCheck(vkCreateBuffer(device_, &bufferInfo, nullptr, &result.buffer),
         "vkCreateBuffer model resource failed");
+    vulkanDebug::setObjectName(
+        device_, VK_OBJECT_TYPE_BUFFER, result.buffer, debugName);
 
     VkMemoryRequirements requirements {};
     vkGetBufferMemoryRequirements(device_, result.buffer, &requirements);
@@ -1322,6 +1347,11 @@ VulkanModelResources::OwnedBuffer VulkanModelResources::createBuffer(
         vkDestroyBuffer(device_, result.buffer, nullptr);
         vkCheck(allocationResult, "vkAllocateMemory model buffer failed");
     }
+    vulkanDebug::setObjectName(
+        device_,
+        VK_OBJECT_TYPE_DEVICE_MEMORY,
+        result.memory,
+        "Model resource memory");
     const VkResult bindResult =
         vkBindBufferMemory(device_, result.buffer, result.memory, 0);
     if (bindResult != VK_SUCCESS) {

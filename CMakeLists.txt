@@ -262,6 +262,7 @@ add_library(sokoban_render_vulkan STATIC
     src/engine/render/VulkanRenderer.cpp
     src/engine/render/SkinnedMeshUpdater.cpp
     src/engine/render/VulkanDeviceContext.cpp
+    src/engine/render/VulkanDebugUtils.cpp
     src/engine/render/VulkanDeviceSelection.cpp
     src/engine/render/VulkanModelResources.cpp
     src/engine/render/VulkanPipelineFactory.cpp
@@ -296,13 +297,9 @@ target_link_libraries(sokoban_render_vulkan
 target_compile_definitions(sokoban_render_vulkan PRIVATE
     $<$<CONFIG:Debug>:SOKOBAN_ENABLE_DEBUG_UI=1>
 )
-if(SOKOBAN_ENABLE_VALIDATION)
-    target_compile_definitions(
-        sokoban_render_vulkan PRIVATE SOKOBAN_ENABLE_VALIDATION=1)
-else()
-    target_compile_definitions(
-        sokoban_render_vulkan PRIVATE SOKOBAN_ENABLE_VALIDATION=0)
-endif()
+target_compile_definitions(sokoban_render_vulkan PRIVATE
+    SOKOBAN_ENABLE_VALIDATION=$<IF:$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_VALIDATION}>>,1,0>
+)
 sokoban_enable_warnings(sokoban_render_vulkan)
 
 target_link_libraries(sokoban_content_tool PRIVATE sokoban_core)

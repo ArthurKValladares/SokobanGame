@@ -1,6 +1,7 @@
 #include "engine/render/VulkanPipelineFactory.hpp"
 
 #include "engine/render/GltfMesh.hpp"
+#include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 
@@ -55,6 +56,8 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
     };
     vkCheck(vkCreatePipelineLayout(device_, &layoutInfo, nullptr, &layout_),
         "vkCreatePipelineLayout failed");
+    vulkanDebug::setObjectName(
+        device_, VK_OBJECT_TYPE_PIPELINE_LAYOUT, layout_, "Scene pipeline layout");
 
     std::array<VkShaderModule, 12> shaders {};
     try {
@@ -105,6 +108,25 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             shaders[5], shaders[7], createInfo.colorFormat, false);
         worldTransition_ = createPostProcessPipeline(
             shaders[5], shaders[11], createInfo.colorFormat, false);
+        const std::array namedPipelines {
+            std::pair { scene_, "Scene pipeline" },
+            std::pair { water_, "Water pipeline" },
+            std::pair { mirrorEnergy_, "Mirror energy pipeline" },
+            std::pair { groundSplat_, "Ground splat pipeline" },
+            std::pair { ui_, "UI pipeline" },
+            std::pair { model_, "Model pipeline" },
+            std::pair { mirrorEnergyModel_, "Mirror energy model pipeline" },
+            std::pair { shadow_, "Directional shadow pipeline" },
+            std::pair { modelShadow_, "Model shadow pipeline" },
+            std::pair { ssao_, "SSAO pipeline" },
+            std::pair { ssaoComposite_, "SSAO composite pipeline" },
+            std::pair { ssaoVisualize_, "SSAO visualize pipeline" },
+            std::pair { worldTransition_, "World transition pipeline" },
+        };
+        for (const auto& [pipeline, name] : namedPipelines) {
+            vulkanDebug::setObjectName(
+                device_, VK_OBJECT_TYPE_PIPELINE, pipeline, name);
+        }
     } catch (...) {
         for (VkShaderModule shader : shaders) {
             if (shader) {
@@ -168,6 +190,11 @@ VkShaderModule VulkanPipelineFactory::createShaderModule(
     VkShaderModule result = VK_NULL_HANDLE;
     vkCheck(vkCreateShaderModule(device_, &createInfo, nullptr, &result),
         "vkCreateShaderModule failed");
+    vulkanDebug::setObjectName(
+        device_,
+        VK_OBJECT_TYPE_SHADER_MODULE,
+        result,
+        path.filename().string());
     return result;
 }
 

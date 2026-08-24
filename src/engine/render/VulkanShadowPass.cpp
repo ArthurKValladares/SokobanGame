@@ -1,6 +1,7 @@
 #include "engine/render/VulkanShadowPass.hpp"
 
 #include "engine/render/LightingConfig.hpp"
+#include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 
 #include <stdexcept>
@@ -39,7 +40,11 @@ void VulkanShadowPass::create(
             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         };
         image_ = vulkanResources::createImage(
-            physicalDevice, device_, imageInfo, VK_IMAGE_ASPECT_DEPTH_BIT);
+            physicalDevice,
+            device_,
+            imageInfo,
+            VK_IMAGE_ASPECT_DEPTH_BIT,
+            "Directional shadow map");
 
         VkSamplerCreateInfo samplerInfo {
             .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -58,6 +63,8 @@ void VulkanShadowPass::create(
         };
         vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &sampler_),
             "vkCreateSampler shadow map failed");
+        vulkanDebug::setObjectName(
+            device_, VK_OBJECT_TYPE_SAMPLER, sampler_, "Directional shadow sampler");
 
         constexpr uint32_t pointLayerCount =
             static_cast<uint32_t>(RenderFrameData::pointLightCapacity * 6);
@@ -83,6 +90,9 @@ void VulkanShadowPass::create(
         vkCheck(vkCreateImage(
                     device_, &pointImageInfo, nullptr, &pointImage_.image),
             "vkCreateImage point shadow array failed");
+        vulkanDebug::setObjectName(
+            device_, VK_OBJECT_TYPE_IMAGE, pointImage_.image,
+            "Point shadow cube array");
         VkMemoryRequirements pointRequirements {};
         vkGetImageMemoryRequirements(
             device_, pointImage_.image, &pointRequirements);
@@ -97,6 +107,9 @@ void VulkanShadowPass::create(
         vkCheck(vkAllocateMemory(
                     device_, &pointAllocation, nullptr, &pointImage_.memory),
             "vkAllocateMemory point shadow array failed");
+        vulkanDebug::setObjectName(
+            device_, VK_OBJECT_TYPE_DEVICE_MEMORY, pointImage_.memory,
+            "Point shadow cube array memory");
         vkCheck(vkBindImageMemory(
                     device_, pointImage_.image, pointImage_.memory, 0),
             "vkBindImageMemory point shadow array failed");
@@ -117,6 +130,9 @@ void VulkanShadowPass::create(
         vkCheck(vkCreateImageView(
                     device_, &pointViewInfo, nullptr, &pointImage_.view),
             "vkCreateImageView point shadow cube array failed");
+        vulkanDebug::setObjectName(
+            device_, VK_OBJECT_TYPE_IMAGE_VIEW, pointImage_.view,
+            "Point shadow cube array view");
         pointViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
         pointViewInfo.subresourceRange.layerCount = 1;
         for (uint32_t layer = 0; layer < pointLayerCount; ++layer) {
@@ -129,6 +145,8 @@ void VulkanShadowPass::create(
         vkCheck(vkCreateSampler(
                     device_, &samplerInfo, nullptr, &pointSampler_),
             "vkCreateSampler point shadow map failed");
+        vulkanDebug::setObjectName(
+            device_, VK_OBJECT_TYPE_SAMPLER, pointSampler_, "Point shadow sampler");
     } catch (...) {
         destroy();
         throw;

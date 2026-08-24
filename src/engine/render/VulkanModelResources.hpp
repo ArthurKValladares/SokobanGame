@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <string_view>
 #include <future>
 #include <memory>
 #include <optional>
@@ -264,7 +265,8 @@ private:
     [[nodiscard]] OwnedBuffer createBuffer(
         VkDeviceSize size,
         VkBufferUsageFlags usage,
-        VkMemoryPropertyFlags properties) const;
+        VkMemoryPropertyFlags properties,
+        std::string_view debugName) const;
     [[nodiscard]] VkImageView createImageView(
         VkImage image,
         VkFormat format,

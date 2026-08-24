@@ -1,6 +1,7 @@
 #include "engine/render/VulkanSwapchainResources.hpp"
 
 #include "engine/render/RenderResolution.hpp"
+#include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanDeviceSelection.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 
@@ -10,6 +11,7 @@
 #include <array>
 #include <limits>
 #include <stdexcept>
+#include <string>
 
 namespace sokoban {
 VulkanSwapchainResources::~VulkanSwapchainResources()
@@ -669,6 +671,8 @@ void VulkanSwapchainResources::createSwapchain(
     };
     vkCheck(vkCreateSwapchainKHR(device_, &createInfo, nullptr, &swapchain_),
         "vkCreateSwapchainKHR failed");
+    vulkanDebug::setObjectName(
+        device_, VK_OBJECT_TYPE_SWAPCHAIN_KHR, swapchain_, "Main swapchain");
 
     uint32_t actualImageCount = 0;
     vkCheck(vkGetSwapchainImagesKHR(device_, swapchain_, &actualImageCount, nullptr),
@@ -679,8 +683,15 @@ void VulkanSwapchainResources::createSwapchain(
     images_.resize(rawImages.size());
     for (std::size_t i = 0; i < rawImages.size(); ++i) {
         images_[i].image = rawImages[i];
+        const std::string imageName = "Swapchain image " + std::to_string(i);
+        vulkanDebug::setObjectName(
+            device_, VK_OBJECT_TYPE_IMAGE, images_[i].image, imageName);
         images_[i].view = vulkanResources::createImageView(
-            device_, rawImages[i], colorFormat_, VK_IMAGE_ASPECT_COLOR_BIT);
+            device_,
+            rawImages[i],
+            colorFormat_,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            imageName + " view");
     }
 }
 
@@ -719,7 +730,11 @@ void VulkanSwapchainResources::createResolvedColor()
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
     resolvedColorImage_ = vulkanResources::createImage(
-        physicalDevice_, device_, imageInfo, VK_IMAGE_ASPECT_COLOR_BIT);
+        physicalDevice_,
+        device_,
+        imageInfo,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        "Resolved scene color");
 }
 
 void VulkanSwapchainResources::createMsaaColor()
@@ -741,7 +756,11 @@ void VulkanSwapchainResources::createMsaaColor()
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
     msaaColorImage_ = vulkanResources::createImage(
-        physicalDevice_, device_, imageInfo, VK_IMAGE_ASPECT_COLOR_BIT);
+        physicalDevice_,
+        device_,
+        imageInfo,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        "MSAA scene color");
 }
 
 void VulkanSwapchainResources::createDepth()
@@ -765,11 +784,19 @@ void VulkanSwapchainResources::createDepth()
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
     depthImage_ = vulkanResources::createImage(
-        physicalDevice_, device_, imageInfo, VK_IMAGE_ASPECT_DEPTH_BIT);
+        physicalDevice_,
+        device_,
+        imageInfo,
+        VK_IMAGE_ASPECT_DEPTH_BIT,
+        "Scene depth");
     if (msaaEnabled()) {
         imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
         resolveDepthImage_ = vulkanResources::createImage(
-            physicalDevice_, device_, imageInfo, VK_IMAGE_ASPECT_DEPTH_BIT);
+            physicalDevice_,
+            device_,
+            imageInfo,
+            VK_IMAGE_ASPECT_DEPTH_BIT,
+            "Resolved scene depth");
     }
 }
 
@@ -792,7 +819,11 @@ void VulkanSwapchainResources::createSceneColor()
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
     sceneColorImage_ = vulkanResources::createImage(
-        physicalDevice_, device_, imageInfo, VK_IMAGE_ASPECT_COLOR_BIT);
+        physicalDevice_,
+        device_,
+        imageInfo,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        "Sampled scene color");
 
     VkSamplerCreateInfo samplerInfo {
         .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -810,6 +841,9 @@ void VulkanSwapchainResources::createSceneColor()
     };
     vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &sceneColorSampler_),
         "vkCreateSampler scene color failed");
+    vulkanDebug::setObjectName(
+        device_, VK_OBJECT_TYPE_SAMPLER, sceneColorSampler_,
+        "Sampled scene color sampler");
 }
 
 void VulkanSwapchainResources::createSceneDepth()
@@ -836,7 +870,11 @@ void VulkanSwapchainResources::createSceneDepth()
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
     sceneDepthImage_ = vulkanResources::createImage(
-        physicalDevice_, device_, imageInfo, VK_IMAGE_ASPECT_DEPTH_BIT);
+        physicalDevice_,
+        device_,
+        imageInfo,
+        VK_IMAGE_ASPECT_DEPTH_BIT,
+        "Sampled scene depth");
 }
 
 void VulkanSwapchainResources::destroyAttachments()

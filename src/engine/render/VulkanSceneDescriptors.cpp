@@ -2,6 +2,7 @@
 
 #include "engine/render/IsoScenePreparer.hpp"
 #include "engine/render/LightingConfig.hpp"
+#include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 
@@ -101,6 +102,11 @@ void VulkanSceneDescriptors::create(
         };
         vkCheck(vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &layout_),
             "vkCreateDescriptorSetLayout failed");
+        vulkanDebug::setObjectName(
+            device_,
+            VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT,
+            layout_,
+            "Scene descriptor set layout");
 
         std::array<VkDescriptorPoolSize, 2> poolSizes {
             VkDescriptorPoolSize {
@@ -121,6 +127,8 @@ void VulkanSceneDescriptors::create(
         };
         vkCheck(vkCreateDescriptorPool(device_, &poolInfo, nullptr, &pool_),
             "vkCreateDescriptorPool failed");
+        vulkanDebug::setObjectName(
+            device_, VK_OBJECT_TYPE_DESCRIPTOR_POOL, pool_, "Scene descriptor pool");
 
         std::vector<VkDescriptorSetLayout> layouts(setCount, layout_);
         sets_.resize(setCount);
@@ -353,6 +361,8 @@ VulkanSceneDescriptors::createLightingBuffer(
     };
     vkCheck(vkCreateBuffer(device_, &info, nullptr, &result.buffer),
         "vkCreateBuffer scene lighting failed");
+    vulkanDebug::setObjectName(
+        device_, VK_OBJECT_TYPE_BUFFER, result.buffer, "Scene lighting buffer");
     try {
         VkMemoryRequirements requirements {};
         vkGetBufferMemoryRequirements(device_, result.buffer, &requirements);
@@ -368,6 +378,11 @@ VulkanSceneDescriptors::createLightingBuffer(
         vkCheck(vkAllocateMemory(
                     device_, &allocation, nullptr, &result.memory),
             "vkAllocateMemory scene lighting failed");
+        vulkanDebug::setObjectName(
+            device_,
+            VK_OBJECT_TYPE_DEVICE_MEMORY,
+            result.memory,
+            "Scene lighting buffer memory");
         vkCheck(vkBindBufferMemory(
                     device_, result.buffer, result.memory, 0),
             "vkBindBufferMemory scene lighting failed");

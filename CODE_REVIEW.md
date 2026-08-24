@@ -285,6 +285,15 @@ the renderer's Vulkan 1.3 contract uses its promoted commands while enabling
 the required feature structure. Headless tests cover baseline acceptance,
 optional debug augmentation, and baseline rejection.
 
+**Validation and names: Fixed on 2026-08-24.** Debug builds now enable
+`VK_LAYER_KHRONOS_validation` only when it is installed and attach a
+`VK_EXT_debug_utils` messenger while the Vulkan instance is created. Messages
+are categorized through the engine renderer log without allowing exceptions to
+cross Vulkan's callback boundary. The same optional extension names the device,
+command pool, per-frame command/synchronization objects, swapchain and
+attachments, shadow and SSAO resources, descriptors, shader modules, and
+pipelines. Release builds do not request validation or debug utils.
+
 Previously, [`VulkanDeviceContext`](src/engine/render/VulkanDeviceContext.cpp)
 requested Vulkan 1.4 and made `fillModeNonSolid` mandatory alongside the
 release renderer's push-constant footprint, cube arrays, extended dynamic
@@ -485,7 +494,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 
 1. [Complete] Select only supported surface and composite-alpha modes.
 2. [Complete] Establish Vulkan feature tiers and reduce debug-only requirements.
-3. Add validation messenger integration and GPU object names.
+3. [Complete] Add validation messenger integration and GPU object names.
 4. Add GPU debug markers and timestamp queries.
 5. Persist a Vulkan pipeline cache.
 6. Provide user-facing diagnostics for device/surface loss and unsupported

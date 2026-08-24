@@ -98,7 +98,11 @@ vulkanResources::OwnedImage uploadImage(
             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         };
         image = vulkanResources::createImage(
-            physicalDevice, device, imageInfo, VK_IMAGE_ASPECT_COLOR_BIT);
+            physicalDevice,
+            device,
+            imageInfo,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            "UI texture");
 
         const VkCommandBufferAllocateInfo allocateInfo {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
