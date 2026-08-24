@@ -645,10 +645,11 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             renderStats.wireframeLineWidth);
         ImGui::Text("Render tiles %u", renderStats.totalTiles);
         ImGui::Text(
-            "Scene preparations %u (iso %u, shadow %u, models %u, particles %u)",
+            "Scene preparations %u (iso %u, shadow %u, models %u/%u ready, particles %u)",
             renderStats.scenePreparations,
             renderStats.preparedIsoFaces,
             renderStats.preparedShadowFaces,
+            renderStats.preparedModels - renderStats.unavailableModels,
             renderStats.preparedModels,
             renderStats.preparedParticles);
         ImGui::Text("Visible faces %u", renderStats.visibleFaces);

@@ -137,6 +137,23 @@ public:
     {
         const VkExtent2D extent = swapchain_.extent();
         const VkExtent2D renderExtent = swapchain_.renderExtent();
+        const auto unavailableModelCount = [this](
+                                               const RenderFrameData& data,
+                                               const PreparedRenderScene& prepared) {
+            uint32_t result = 0;
+            const auto countUnavailable = [&](std::size_t tileIndex) {
+                if (!models_.modelReady(data.tiles[tileIndex].model)) {
+                    ++result;
+                }
+            };
+            for (std::size_t tileIndex : prepared.opaqueModelIndices) {
+                countUnavailable(tileIndex);
+            }
+            for (std::size_t tileIndex : prepared.translucentModelIndices) {
+                countUnavailable(tileIndex);
+            }
+            return result;
+        };
         stats_ = {
             .frameIndex = configuration_.statsFrameIndex,
             .totalTiles = static_cast<uint32_t>(
@@ -159,6 +176,10 @@ public:
                     ? previewScene->opaqueModelIndices.size() +
                         previewScene->translucentModelIndices.size()
                     : 0)),
+            .unavailableModels = unavailableModelCount(frameData, scene) +
+                (previewFrameData && previewScene
+                    ? unavailableModelCount(*previewFrameData, *previewScene)
+                    : 0),
             .preparedParticles =
                 static_cast<uint32_t>(scene.particles.size() +
                     (previewScene ? previewScene->particles.size() : 0)),
@@ -347,6 +368,9 @@ private:
         }
         bool modelPipelineBound = false;
         for (std::size_t tileIndex : scene.shadowModelIndices) {
+            if (!models_.modelReady(frameData.tiles[tileIndex].model)) {
+                continue;
+            }
             if (!modelPipelineBound) {
                 shadowPass_.bindModelPipeline(
                     commandBuffer,
@@ -387,6 +411,9 @@ private:
                 bool pointModelPipelineBound = false;
                 for (std::size_t tileIndex : scene.shadowModelIndices) {
                     if (light.excludesShadowCaster(tileIndex)) {
+                        continue;
+                    }
+                    if (!models_.modelReady(frameData.tiles[tileIndex].model)) {
                         continue;
                     }
                     if (!pointModelPipelineBound) {
@@ -1006,6 +1033,9 @@ private:
         for (std::size_t tileIndex : modelIndices) {
             const RenderFrameData::Tile& tile =
                 frameData.tiles[tileIndex];
+            if (!models_.modelReady(tile.model)) {
+                continue;
+            }
             const bool mirrorGhost =
                 tile.effect == RenderSurfaceEffect::MirrorEnergy;
             if (mirrorGhost != mirrorGhostState) {

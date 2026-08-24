@@ -87,8 +87,12 @@ public:
         const PreparedFrame& frame,
         const UiDrawData& uiDrawData,
         bool developerWorkspaceVisible = false);
+    // Queues missing content and returns immediately. Ready assets are
+    // published incrementally during drawFrame().
     void preloadAssets(const RenderAssetRequirements& requirements);
     void ensureAssets(const RenderAssetRequirements& requirements);
+    // Deliberately blocking path for offline tools; never use for gameplay.
+    void waitForAssets(const RenderAssetRequirements& requirements);
     void handleEvent(const SDL_Event& event);
     void beginDebugUiFrame();
     [[nodiscard]] bool wantsKeyboardCapture() const;

@@ -84,10 +84,11 @@ public:
 
     // Starts independent CPU tasks and returns immediately.
     void requestAssets(const RenderAssetRequirements& requirements);
-    // Publishes every required asset, waiting for CPU tasks when necessary.
+    // Explicitly blocking path for offline tooling such as thumbnail baking.
+    // Normal gameplay must use requestAssets() and publishReadyAssets().
     // Texture uploads are queued but never waited here. Returns true when
     // frame-local texture descriptors must be refreshed.
-    [[nodiscard]] bool ensureAssets(const RenderAssetRequirements& requirements);
+    [[nodiscard]] bool waitForAssets(const RenderAssetRequirements& requirements);
 
     // Grows the per-texture slots to match a manifest that gained entries at
     // runtime (the level editor creating a splat map). Returns true when it
@@ -112,7 +113,8 @@ public:
     // `updated = false` when the texture is not resident.
     TextureUpdate updateTexture(RenderTexture texture, const ImageData& image);
     // Publishes up to maxPublications completed background tasks without
-    // waiting. Failed preloads are retained and rethrown if later required.
+    // waiting. Failed resources stay observable in LoadingStats while frames
+    // continue using available content and fallback textures.
     [[nodiscard]] bool publishReadyAssets(std::size_t maxPublications);
     // Reclaims upload command buffers and staging resources whose GPU fences
     // have signaled. This never waits for GPU work.

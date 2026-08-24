@@ -186,7 +186,7 @@ void VulkanModelResources::requestAssets(const RenderAssetRequirements& requirem
     }
 }
 
-bool VulkanModelResources::ensureAssets(const RenderAssetRequirements& requirements)
+bool VulkanModelResources::waitForAssets(const RenderAssetRequirements& requirements)
 {
     requestAssets(requirements);
 
@@ -658,10 +658,14 @@ void VulkanModelResources::updateAnimations(
 {
     for (const AnimationController::InstanceSkinningRequest& request :
          animationController_.updateInstances(frameData)) {
-        ModelSlot& model = models_.at(request.model.index());
-        if (!model.skinnedSource) {
-            throw std::runtime_error(
-                "Animated tile references a model without skinned source data");
+        if (request.model.isCube() || request.model.index() >= models_.size()) {
+            continue;
+        }
+        ModelSlot& model = models_[request.model.index()];
+        if (model.state != LoadState::Ready || !model.skinnedSource) {
+            // The animation data or skinned mesh is still loading. The scene
+            // recorder will skip this tile until its GPU mesh is ready.
+            continue;
         }
         const AnimatedMeshKey key {
             frameIndex,

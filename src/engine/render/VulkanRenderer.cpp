@@ -467,7 +467,12 @@ void VulkanRenderer::preloadAssets(const RenderAssetRequirements& requirements)
 
 void VulkanRenderer::ensureAssets(const RenderAssetRequirements& requirements)
 {
-    if (modelResources_.ensureAssets(requirements)) {
+    modelResources_.requestAssets(requirements);
+}
+
+void VulkanRenderer::waitForAssets(const RenderAssetRequirements& requirements)
+{
+    if (modelResources_.waitForAssets(requirements)) {
         descriptorSync_.resourcesChanged();
     }
 }

@@ -355,21 +355,31 @@ and pipeline caching before undertaking larger rendering optimization.
 
 ### P2 — Asset loading still blocks the render thread
 
-[`VulkanModelResources::ensureAssets`](src/engine/render/VulkanModelResources.cpp#L188)
-starts asynchronous requests and then publishes every required animation,
-model, and texture with `wait=true`.
+**Status: Fixed on 2026-08-24.** Gameplay and level transitions now only
+queue requirements; they never wait on asset parsing, image decode, animation
+load, or texture upload. The render thread publishes at most one completed
+asset per frame, uses fallback texture descriptors while uploads are pending,
+and skips only model instances whose GPU mesh is not ready. Loading statistics
+expose loaded, pending, failed, and uploading resources, and Debug rendering
+stats distinguish prepared models from models still awaiting readiness.
+Blocking publication remains explicitly limited to offline thumbnail baking
+and the editor's ground-painting tool.
 
-Preloading masks this for known transitions, but a cache miss or dynamically
-introduced asset blocks the render thread on glTF parsing, image decoding,
-animation parsing, and GPU resource publication.
+Previously, the requirement path started asynchronous work and then waited to
+publish every required animation, model, and texture. That behavior now lives
+only in the explicitly named
+[`waitForAssets`](src/engine/render/VulkanModelResources.cpp#L189) method for
+offline tools.
 
-There are no explicit loading states, placeholders, cancellation, priorities,
-memory budgets, or eviction.
+Preloading still improves transition quality, but cache misses and dynamically
+introduced assets no longer block the render thread on glTF parsing, image
+decoding, animation parsing, or GPU publication.
 
-**Required fix:** Preserve the existing request/publish split but make
-requirement resolution non-blocking. Expose pending/ready/failed states and let
-a loading state continue rendering while publication completes incrementally.
-Add per-category residency accounting before the asset set grows substantially.
+There is not yet a player-facing loading presentation, cancellation,
+priorities, memory budgets, or eviction.
+
+**Next fix:** Add a player-facing loading presentation, cancellation,
+priorities, and residency budgets before the asset set grows substantially.
 
 ### P2 — GPU memory and animation architecture will not scale
 
@@ -531,7 +541,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 
 ### Phase 3 — Rendering and asset scalability
 
-1. Make asset readiness non-blocking.
+1. [Complete] Make asset readiness non-blocking.
 2. Add loading-state presentation, cancellation, priorities, and budgets.
 3. Introduce device-local suballocated geometry storage and staging uploads.
 4. Add persistently mapped upload rings.

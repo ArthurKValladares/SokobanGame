@@ -95,7 +95,7 @@ bool ApplicationTools::openGroundPainting(
     if (opened) {
         RenderAssetRequirements requirements;
         requirements.requireTexture(splatPainter.texture());
-        renderer.ensureAssets(requirements);
+        renderer.waitForAssets(requirements);
         uploadedSplatRevision = splatPainter.revision();
     }
     return opened;
@@ -515,7 +515,7 @@ bool ApplicationTools::bakeTileThumbnails(
         manifest.findTextureIdByName(groundSplatDetailTextureName));
     requirements.requireTexture(
         manifest.findTextureIdByName(groundSplatMapTextureName));
-    renderer.ensureAssets(requirements);
+    renderer.waitForAssets(requirements);
 
     bool allSucceeded = true;
     int baked = 0;

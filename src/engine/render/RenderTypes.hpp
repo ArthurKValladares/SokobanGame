@@ -481,6 +481,7 @@ struct RenderStats {
     uint32_t preparedIsoFaces = 0;
     uint32_t preparedShadowFaces = 0;
     uint32_t preparedModels = 0;
+    uint32_t unavailableModels = 0;
     uint32_t preparedParticles = 0;
     uint32_t visibleFaces = 0;
     uint32_t drawCalls = 0;
