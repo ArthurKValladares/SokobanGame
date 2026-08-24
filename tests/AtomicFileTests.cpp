@@ -68,6 +68,27 @@ void testWriteCreatesAndReplacesFiles()
     CHECK(!std::filesystem::exists(destination.string() + ".replace-old"));
 }
 
+void testReplaceInstallsClosedTemporaryFile()
+{
+    TemporaryDirectory temporary;
+    const auto destination = temporary.root / "settings.json";
+    const auto replacement = temporary.root / "settings.json.tmp";
+    writeRaw(destination, "old");
+
+    {
+        std::ofstream stream(replacement, std::ios::binary | std::ios::trunc);
+        stream << "new";
+        stream.flush();
+        CHECK(static_cast<bool>(stream));
+    }
+
+    sokoban::atomicFile::replace(destination, replacement);
+
+    CHECK(readRaw(destination) == "new");
+    CHECK(!std::filesystem::exists(replacement));
+    CHECK(!std::filesystem::exists(destination.string() + ".replace-old"));
+}
+
 void testFailedInstallRestoresDisplacedDestination()
 {
     TemporaryDirectory temporary;
@@ -110,6 +131,7 @@ void testWriteFailureCleansTemporaryFile()
 int main()
 {
     testWriteCreatesAndReplacesFiles();
+    testReplaceInstallsClosedTemporaryFile();
     testFailedInstallRestoresDisplacedDestination();
     testWriteFailureCleansTemporaryFile();
 

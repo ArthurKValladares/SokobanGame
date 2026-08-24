@@ -6,7 +6,6 @@
 #include <array>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
 #include <numeric>
 #include <stdexcept>
 #include <string>
@@ -430,23 +429,11 @@ void writePng(
 {
     const std::vector<std::byte> png =
         encodePng(width, height, channels, pixels);
-
-    std::filesystem::path temporary = path;
-    temporary += ".tmp";
-    {
-        std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-        if (!stream) {
-            throw std::runtime_error(
-                "Failed to open for writing: " + temporary.string());
-        }
-        stream.write(
+    atomicFile::write(
+        path,
+        std::string_view(
             reinterpret_cast<const char*>(png.data()),
-            static_cast<std::streamsize>(png.size()));
-        if (!stream) {
-            throw std::runtime_error("Failed to write: " + temporary.string());
-        }
-    }
-    atomicFile::replace(path, temporary);
+            png.size()));
 }
 
 } // namespace

@@ -178,8 +178,17 @@ accumulator with a maximum catch-up count and a separate presentation clock.
 
 ### P1 — Atomic saves can install data before it is fully flushed
 
-[`AtomicFile::write`](src/engine/AtomicFile.cpp#L42) writes the temporary file
-and calls `replace()` while the output stream is still open.
+**Status: Fixed on 2026-08-24.** `AtomicFile` now flushes and closes its
+temporary stream before it can replace the live file, synchronizes the
+temporary data, and only then installs it. Windows uses `MoveFileExW` with
+replace and write-through flags followed by a destination flush; POSIX uses
+`fsync` on the temporary file and its containing directory. Direct PNG writes
+now use the same path, and the atomic-file tests cover closed-temporary
+replacement and failed installation preservation.
+
+Before this change, [`AtomicFile::write`](src/engine/AtomicFile.cpp#L156)
+wrote the temporary file and called `replace()` while the output stream was
+still open.
 
 Consequences:
 
@@ -422,7 +431,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 
 ### Phase 1 — Persistence and startup reliability
 
-1. Flush, close, and durably replace save files.
+1. [Complete] Flush, close, and durably replace save files.
 2. Recover interrupted `.tmp` and `.replace-old` writes.
 3. Report save deletion failures and preserve live state on failure.
 4. Parse and validate the complete content index.

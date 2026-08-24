@@ -5,9 +5,10 @@
 
 namespace sokoban::atomicFile {
 
-// Replaces destination with a fully written same-directory temporary file.
-// On platforms that cannot rename over an existing file, the old destination
-// is displaced and restored if the second rename fails.
+// Durably replaces destination with a fully written same-directory temporary
+// file. The temporary file is synchronized before installation; the installed
+// file and its containing directory are then synchronized as supported by the
+// host platform. Callers must close the temporary file before calling this.
 void replace(
     const std::filesystem::path& destination,
     const std::filesystem::path& temporary);
