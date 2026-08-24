@@ -1,6 +1,8 @@
 #include "engine/render/VulkanDeviceSelection.hpp"
 
 #include <algorithm>
+#include <array>
+#include <stdexcept>
 
 namespace sokoban {
 
@@ -43,6 +45,53 @@ const char* vulkanDeviceTypeName(VkPhysicalDeviceType type)
     case VK_PHYSICAL_DEVICE_TYPE_OTHER:
     default: return "other";
     }
+}
+
+VkSurfaceTransformFlagBitsKHR chooseSurfaceTransform(
+    const VkSurfaceCapabilitiesKHR& capabilities)
+{
+    const auto supported = capabilities.supportedTransforms;
+    const VkSurfaceTransformFlagsKHR currentTransform =
+        static_cast<VkSurfaceTransformFlagsKHR>(capabilities.currentTransform);
+    if (currentTransform != 0 &&
+        (supported & currentTransform) == currentTransform) {
+        return capabilities.currentTransform;
+    }
+
+    constexpr std::array<VkSurfaceTransformFlagBitsKHR, 9> preferred {
+        VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+        VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR,
+        VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR,
+        VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR,
+        VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_BIT_KHR,
+        VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_90_BIT_KHR,
+        VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_180_BIT_KHR,
+        VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_270_BIT_KHR,
+        VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR,
+    };
+    for (const VkSurfaceTransformFlagBitsKHR transform : preferred) {
+        if ((supported & transform) != 0) {
+            return transform;
+        }
+    }
+    throw std::runtime_error("surface advertises no supported pre-transform");
+}
+
+VkCompositeAlphaFlagBitsKHR chooseCompositeAlpha(
+    const VkSurfaceCapabilitiesKHR& capabilities)
+{
+    constexpr std::array<VkCompositeAlphaFlagBitsKHR, 4> preferred {
+        VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
+        VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
+        VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
+    };
+    for (const VkCompositeAlphaFlagBitsKHR alpha : preferred) {
+        if ((capabilities.supportedCompositeAlpha & alpha) != 0) {
+            return alpha;
+        }
+    }
+    throw std::runtime_error("surface advertises no supported composite alpha mode");
 }
 
 } // namespace sokoban

@@ -10,4 +10,11 @@ namespace sokoban {
     const VkPhysicalDeviceProperties& properties);
 [[nodiscard]] const char* vulkanDeviceTypeName(VkPhysicalDeviceType type);
 
+// Chooses values that are present in the surface capability masks for
+// VkSwapchainCreateInfoKHR. Throws when the surface advertises no legal mode.
+[[nodiscard]] VkSurfaceTransformFlagBitsKHR chooseSurfaceTransform(
+    const VkSurfaceCapabilitiesKHR& capabilities);
+[[nodiscard]] VkCompositeAlphaFlagBitsKHR chooseCompositeAlpha(
+    const VkSurfaceCapabilitiesKHR& capabilities);
+
 } // namespace sokoban

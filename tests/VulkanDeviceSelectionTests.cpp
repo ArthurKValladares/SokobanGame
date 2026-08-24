@@ -3,6 +3,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <stdexcept>
 #include <string_view>
 
 namespace {
@@ -23,6 +24,16 @@ VkPhysicalDeviceProperties properties(
     result.deviceType = type;
     result.limits.maxImageDimension2D = maxImageDimension2D;
     return result;
+}
+
+bool throwsForNoSurfaceMode(const VkSurfaceCapabilitiesKHR& capabilities)
+{
+    try {
+        (void)sokoban::chooseCompositeAlpha(capabilities);
+        return false;
+    } catch (const std::runtime_error&) {
+        return true;
+    }
 }
 
 } // namespace
@@ -81,6 +92,55 @@ int main()
         "custom scales clamp to the maximum");
     check(sokoban::normalizedRenderScalePresetPercent(42) == 100,
         "unsupported presets normalize to native resolution");
+
+    VkSurfaceCapabilitiesKHR currentTransformSupported {};
+    currentTransformSupported.supportedTransforms =
+        VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR |
+        VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
+    currentTransformSupported.currentTransform =
+        VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
+    check(
+        sokoban::chooseSurfaceTransform(currentTransformSupported) ==
+            VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR,
+        "surface uses its supported current transform");
+
+    VkSurfaceCapabilitiesKHR fallbackTransform {};
+    fallbackTransform.supportedTransforms =
+        VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR |
+        VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR;
+    fallbackTransform.currentTransform = VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
+    check(
+        sokoban::chooseSurfaceTransform(fallbackTransform) ==
+            VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+        "unsupported current transform falls back to supported identity");
+
+    VkSurfaceCapabilitiesKHR rotationOnlyTransform {};
+    rotationOnlyTransform.supportedTransforms =
+        VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR;
+    check(
+        sokoban::chooseSurfaceTransform(rotationOnlyTransform) ==
+            VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR,
+        "surface without identity uses an advertised transform");
+
+    VkSurfaceCapabilitiesKHR opaqueAlpha {};
+    opaqueAlpha.supportedCompositeAlpha =
+        VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR |
+        VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
+    check(
+        sokoban::chooseCompositeAlpha(opaqueAlpha) ==
+            VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        "opaque alpha is preferred when supported");
+
+    VkSurfaceCapabilitiesKHR fallbackAlpha {};
+    fallbackAlpha.supportedCompositeAlpha =
+        VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR;
+    check(
+        sokoban::chooseCompositeAlpha(fallbackAlpha) ==
+            VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
+        "composite alpha falls back to an advertised mode");
+
+    check(throwsForNoSurfaceMode({}),
+        "surface with no composite alpha support is rejected");
 
     std::cout << "Vulkan device selection tests passed\n";
     return 0;

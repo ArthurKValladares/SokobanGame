@@ -285,7 +285,12 @@ an otherwise release-capable GPU.
 
 Related issues:
 
-- [`compositeAlpha`](src/engine/render/VulkanSwapchainResources.cpp#L660) is
+**Status: Fixed on 2026-08-24.** Swapchain creation now chooses the supported
+current transform (or a supported fallback) and prefers opaque composite alpha
+only when the surface advertises it. Headless capability-mask tests cover
+identity/rotation fallback and each composite-alpha selection path.
+
+- [`compositeAlpha`](src/engine/render/VulkanSwapchainResources.cpp#L664) was
   set to opaque without checking `supportedCompositeAlpha`.
 - There are no `VK_ERROR_DEVICE_LOST` or `VK_ERROR_SURFACE_LOST_KHR` recovery
   paths.
@@ -468,7 +473,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 
 ### Phase 2 — Renderer hardening
 
-1. Select only supported surface and composite-alpha modes.
+1. [Complete] Select only supported surface and composite-alpha modes.
 2. Establish Vulkan feature tiers and reduce debug-only requirements.
 3. Add validation messenger integration and GPU object names.
 4. Add GPU debug markers and timestamp queries.

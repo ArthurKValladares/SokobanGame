@@ -1,6 +1,7 @@
 #include "engine/render/VulkanSwapchainResources.hpp"
 
 #include "engine/render/RenderResolution.hpp"
+#include "engine/render/VulkanDeviceSelection.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 
 #include <SDL3/SDL_video.h>
@@ -643,6 +644,10 @@ void VulkanSwapchainResources::createSwapchain(
     extent_ = chooseExtent(capabilities);
     colorFormat_ = surfaceFormat.format;
     presentMode_ = choosePresentMode(presentModes);
+    const VkSurfaceTransformFlagBitsKHR surfaceTransform =
+        chooseSurfaceTransform(capabilities);
+    const VkCompositeAlphaFlagBitsKHR compositeAlpha =
+        chooseCompositeAlpha(capabilities);
 
     VkSwapchainCreateInfoKHR createInfo {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -656,8 +661,8 @@ void VulkanSwapchainResources::createSwapchain(
         .imageSharingMode = sharedQueues ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE,
         .queueFamilyIndexCount = sharedQueues ? static_cast<uint32_t>(familyIndices.size()) : 0U,
         .pQueueFamilyIndices = sharedQueues ? familyIndices.data() : nullptr,
-        .preTransform = capabilities.currentTransform,
-        .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        .preTransform = surfaceTransform,
+        .compositeAlpha = compositeAlpha,
         .presentMode = presentMode_,
         .clipped = VK_TRUE,
         .oldSwapchain = oldSwapchain,
