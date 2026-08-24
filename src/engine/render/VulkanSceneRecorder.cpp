@@ -334,7 +334,6 @@ private:
         const std::size_t pointLightCount = std::min(
             frameData.lighting.pointLightCount,
             RenderFrameData::pointLightCapacity);
-        bool renderedPointShadow = false;
         for (std::size_t lightIndex = 0;
              lightIndex < pointLightCount;
              ++lightIndex) {
@@ -344,7 +343,6 @@ private:
                 light.range <= config::pointShadowNearPlane) {
                 continue;
             }
-            renderedPointShadow = true;
             for (uint32_t cubeFace = 0; cubeFace < 6; ++cubeFace) {
                 shadowPass_.beginPointFace(
                     commandBuffer,
@@ -377,9 +375,10 @@ private:
                 shadowPass_.endPointFace(commandBuffer);
             }
         }
-        if (renderedPointShadow) {
-            shadowPass_.finishPointShadows(commandBuffer, stats_);
-        }
+        // The descriptor exposes the complete cube array. Even when no point
+        // light rendered this frame, every layer must be in its declared
+        // shader-read layout before any scene draw can access the descriptor.
+        shadowPass_.finishPointShadows(commandBuffer, stats_);
     }
 
     void recordGameRendering(

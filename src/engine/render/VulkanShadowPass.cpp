@@ -376,8 +376,13 @@ void VulkanShadowPass::finishPointShadows(
     VkCommandBuffer commandBuffer,
     RenderStats& stats)
 {
-    if (pointImageLayout_ != VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL) {
+    if (pointImageLayout_ == VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL) {
         return;
+    }
+    if (pointImageLayout_ != VK_IMAGE_LAYOUT_UNDEFINED &&
+        pointImageLayout_ != VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL) {
+        throw std::runtime_error(
+            "Point-shadow array has an unexpected image layout");
     }
     const VkImageSubresourceRange range {
         .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
@@ -392,9 +397,13 @@ void VulkanShadowPass::finishPointShadows(
         pointImage_.image,
         range,
         {
-            VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+            pointImageLayout_ == VK_IMAGE_LAYOUT_UNDEFINED
+                ? VK_PIPELINE_STAGE_2_NONE
+                : VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+            pointImageLayout_ == VK_IMAGE_LAYOUT_UNDEFINED
+                ? VK_ACCESS_2_NONE
+                : VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+            pointImageLayout_,
         },
         {
             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,

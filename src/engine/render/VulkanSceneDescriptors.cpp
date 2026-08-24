@@ -1,8 +1,9 @@
 #include "engine/render/VulkanSceneDescriptors.hpp"
 
+#include "engine/render/IsoScenePreparer.hpp"
+#include "engine/render/LightingConfig.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
-#include "engine/render/IsoScenePreparer.hpp"
 
 #include <array>
 #include <algorithm>
@@ -431,6 +432,9 @@ void VulkanSceneDescriptors::updateLighting(
         RenderFrameData::pointLightCapacity);
     for (std::size_t i = 0; i < count; ++i) {
         const RenderFrameData::PointLight& light = lighting.pointLights[i];
+        const bool shadowMapRendered = light.castsShadows &&
+            light.intensity > 0.0f &&
+            light.range > config::pointShadowNearPlane;
         uniform.pointLights[i] = {
             .positionAndRange = {
                 light.position.x, light.position.y, light.position.z,
@@ -443,7 +447,7 @@ void VulkanSceneDescriptors::updateLighting(
                 std::max(light.intensity, 0.0f),
             },
             .shadowOptions = {
-                light.castsShadows ? 1.0f : 0.0f,
+                shadowMapRendered ? 1.0f : 0.0f,
                 static_cast<float>(i),
                 std::max(light.shadowBias, 0.0f),
                 std::clamp(light.shadowOpacity, 0.0f, 1.0f),
