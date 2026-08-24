@@ -370,7 +370,11 @@ void VulkanRenderer::drawFrame(
     VkSemaphoreSubmitInfo waitSemaphore {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .semaphore = frame.imageAvailable,
-        .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        // The shipping path first writes the acquired image during the
+        // upscale blit, while the developer workspace first uses it as a
+        // colour attachment. Gate both possible first accesses.
+        .stageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT |
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
     };
 
     VkCommandBufferSubmitInfo commandBuffer {
