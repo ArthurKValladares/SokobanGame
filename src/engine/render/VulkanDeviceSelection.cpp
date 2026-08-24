@@ -6,6 +6,27 @@
 
 namespace sokoban {
 
+VulkanFeatureTier chooseVulkanFeatureTier(
+    const VulkanDeviceFeatureSupport& support,
+    uint32_t requiredPushConstantsSize,
+    uint32_t requiredSampledImages)
+{
+    const bool releaseCompatible =
+        support.apiVersion >= VK_API_VERSION_1_3 &&
+        support.maxPushConstantsSize >= requiredPushConstantsSize &&
+        support.maxPerStageDescriptorSampledImages >= requiredSampledImages &&
+        support.dynamicRendering &&
+        support.synchronization2 &&
+        support.imageCubeArray &&
+        support.extendedDynamicState;
+    return {
+        .releaseCompatible = releaseCompatible,
+        .wireframeSupported = releaseCompatible && support.fillModeNonSolid,
+        .wideLinesSupported =
+            releaseCompatible && support.fillModeNonSolid && support.wideLines,
+    };
+}
+
 int vulkanDevicePreferenceScore(const VkPhysicalDeviceProperties& properties)
 {
     int score = 0;

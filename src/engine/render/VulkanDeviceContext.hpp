@@ -1,5 +1,7 @@
 #pragma once
 
+#include "engine/render/VulkanDeviceSelection.hpp"
+
 #include <SDL3/SDL_video.h>
 #include <vulkan/vulkan.h>
 
@@ -39,6 +41,7 @@ public:
     [[nodiscard]] VkQueue presentQueue() const;
     [[nodiscard]] VkCommandPool commandPool() const;
 
+    [[nodiscard]] bool wireframeSupported() const;
     [[nodiscard]] bool wideLinesSupported() const;
     [[nodiscard]] std::array<float, 2> wireframeLineWidthRange() const;
     [[nodiscard]] VkSampleCountFlagBits supportedSampleCount(
@@ -56,6 +59,8 @@ private:
     [[nodiscard]] VulkanQueueFamilyIndices findQueueFamilies(
         VkPhysicalDevice device) const;
     [[nodiscard]] bool isDeviceSuitable(VkPhysicalDevice device) const;
+    [[nodiscard]] VulkanDeviceFeatureSupport queryFeatureSupport(
+        VkPhysicalDevice device) const;
 
     SDL_Window* window_ = nullptr;
     VkInstance instance_ = VK_NULL_HANDLE;
@@ -67,6 +72,7 @@ private:
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     VkQueue presentQueue_ = VK_NULL_HANDLE;
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
+    VulkanFeatureTier featureTier_ {};
     bool wideLinesSupported_ = false;
     std::array<float, 2> wireframeLineWidthRange_ { 1.0f, 1.0f };
 };

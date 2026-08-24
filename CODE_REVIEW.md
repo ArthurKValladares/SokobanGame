@@ -273,15 +273,25 @@ content archive is a sensible longer-term evolution.
 
 ### P1 — Vulkan support is unnecessarily narrow and lacks recovery
 
-[`VulkanDeviceContext`](src/engine/render/VulkanDeviceContext.cpp#L182)
-requests Vulkan 1.4 and rejects anything below it. Device selection also makes
-the full push-constant footprint, `fillModeNonSolid`, cube arrays, extended
-dynamic state, synchronization2, and dynamic rendering mandatory in
-[`isDeviceSuitable`](src/engine/render/VulkanDeviceContext.cpp#L401).
+**Status: Partially fixed on 2026-08-24.** The renderer now has an explicit
+Vulkan 1.3 release tier: swapchain support, dynamic rendering,
+synchronization2, cube-map arrays, extended dynamic state, and the documented
+push-constant/descriptor limits remain mandatory because normal rendering uses
+them. `fillModeNonSolid` (wireframe) and `wideLines` are separate optional
+developer capabilities. A GPU which cannot render wireframe is therefore no
+longer rejected or asked to enable that feature. The obsolete
+`VK_EXT_extended_dynamic_state` device-extension requirement was removed:
+the renderer's Vulkan 1.3 contract uses its promoted commands while enabling
+the required feature structure. Headless tests cover baseline acceptance,
+optional debug augmentation, and baseline rejection.
 
-That can be acceptable for a controlled hardware target, but it is too rigid
-for broad desktop distribution. Debug wireframe support should not disqualify
-an otherwise release-capable GPU.
+Previously, [`VulkanDeviceContext`](src/engine/render/VulkanDeviceContext.cpp)
+requested Vulkan 1.4 and made `fillModeNonSolid` mandatory alongside the
+release renderer's push-constant footprint, cube arrays, extended dynamic
+state, synchronization2, and dynamic rendering. That unnecessarily excluded
+an otherwise release-capable GPU merely because it could not draw developer
+wireframes. The completed tiering change fixes that admission rule; recovery
+and diagnostics work below is still outstanding.
 
 Related issues:
 
@@ -474,7 +484,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 ### Phase 2 — Renderer hardening
 
 1. [Complete] Select only supported surface and composite-alpha modes.
-2. Establish Vulkan feature tiers and reduce debug-only requirements.
+2. [Complete] Establish Vulkan feature tiers and reduce debug-only requirements.
 3. Add validation messenger integration and GPU object names.
 4. Add GPU debug markers and timestamp queries.
 5. Persist a Vulkan pipeline cache.

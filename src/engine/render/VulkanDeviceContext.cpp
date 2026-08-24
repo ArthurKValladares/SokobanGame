@@ -26,9 +26,8 @@
 namespace sokoban {
 namespace {
 
-constexpr std::array<const char*, 2> requiredDeviceExtensions {
+constexpr std::array<const char*, 1> requiredDeviceExtensions {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-    VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME,
 };
 
 std::vector<const char*> validationLayers()
@@ -129,6 +128,11 @@ VkCommandPool VulkanDeviceContext::commandPool() const
     return commandPool_;
 }
 
+bool VulkanDeviceContext::wireframeSupported() const
+{
+    return featureTier_.wireframeSupported;
+}
+
 bool VulkanDeviceContext::wideLinesSupported() const
 {
     return wideLinesSupported_;
@@ -179,7 +183,7 @@ void VulkanDeviceContext::createInstance()
         .applicationVersion = VK_MAKE_API_VERSION(0, 0, 1, 0),
         .pEngineName = "Sokoban Engine",
         .engineVersion = VK_MAKE_API_VERSION(0, 0, 1, 0),
-        .apiVersion = VK_API_VERSION_1_4,
+        .apiVersion = VK_API_VERSION_1_3,
     };
 
     uint32_t sdlExtensionCount = 0;
@@ -253,16 +257,22 @@ void VulkanDeviceContext::pickPhysicalDevice()
 
     if (!physicalDevice_) {
         throw std::runtime_error(
-            "No GPU supports the required Vulkan 1.4 feature set");
+            "No GPU supports the required Vulkan 1.3 release feature tier");
     }
 
     queueFamilies_ = findQueueFamilies(physicalDevice_);
     vkGetPhysicalDeviceProperties(
         physicalDevice_, &physicalDeviceProperties_);
+    featureTier_ = chooseVulkanFeatureTier(
+        queryFeatureSupport(physicalDevice_),
+        sizeof(TilePushConstants),
+        maxModelTextures + sceneSingleImageBindings);
     log::info(log::Category::Rendering) << "Vulkan GPU: "
         << physicalDeviceProperties_.deviceName << " ("
         << vulkanDeviceTypeName(physicalDeviceProperties_.deviceType)
-        << ")";
+        << ")" << (featureTier_.wireframeSupported
+            ? " with debug wireframe support"
+            : " without debug wireframe support");
 }
 
 void VulkanDeviceContext::createDevice()
@@ -294,9 +304,7 @@ void VulkanDeviceContext::createDevice()
         .dynamicRendering = VK_TRUE,
     };
 
-    VkPhysicalDeviceFeatures supportedFeatures {};
-    vkGetPhysicalDeviceFeatures(physicalDevice_, &supportedFeatures);
-    wideLinesSupported_ = supportedFeatures.wideLines == VK_TRUE;
+    wideLinesSupported_ = featureTier_.wideLinesSupported;
     const float minLineWidth = std::max(
         physicalDeviceProperties_.limits.lineWidthRange[0], 1.0f);
     const float maxPracticalLineWidth = std::max(
@@ -311,7 +319,7 @@ void VulkanDeviceContext::createDevice()
 
     const VkPhysicalDeviceFeatures enabledFeatures {
         .imageCubeArray = VK_TRUE,
-        .fillModeNonSolid = VK_TRUE,
+        .fillModeNonSolid = featureTier_.wireframeSupported ? VK_TRUE : VK_FALSE,
         .wideLines = wideLinesSupported_ ? VK_TRUE : VK_FALSE,
     };
     const VkDeviceCreateInfo createInfo {
@@ -400,19 +408,10 @@ VulkanQueueFamilyIndices VulkanDeviceContext::findQueueFamilies(
 
 bool VulkanDeviceContext::isDeviceSuitable(VkPhysicalDevice device) const
 {
-    VkPhysicalDeviceProperties properties {};
-    vkGetPhysicalDeviceProperties(device, &properties);
-    if (VK_API_VERSION_MAJOR(properties.apiVersion) < 1 ||
-        (VK_API_VERSION_MAJOR(properties.apiVersion) == 1 &&
-         VK_API_VERSION_MINOR(properties.apiVersion) < 4) ||
-        properties.limits.maxPushConstantsSize <
-            sizeof(TilePushConstants) ||
-        // The scene descriptor set binds maxModelTextures samplers in one
-        // array plus a handful of single-image bindings. Growing that array
-        // is a one-line edit in AssetManifest.hpp, so check it here rather
-        // than discovering the overflow as validation-layer noise.
-        properties.limits.maxPerStageDescriptorSampledImages <
-            maxModelTextures + sceneSingleImageBindings) {
+    if (!chooseVulkanFeatureTier(
+            queryFeatureSupport(device),
+            sizeof(TilePushConstants),
+            maxModelTextures + sceneSingleImageBindings).releaseCompatible) {
         return false;
     }
 
@@ -451,6 +450,14 @@ bool VulkanDeviceContext::isDeviceSuitable(VkPhysicalDevice device) const
         return false;
     }
 
+    return true;
+}
+
+VulkanDeviceFeatureSupport VulkanDeviceContext::queryFeatureSupport(
+    VkPhysicalDevice device) const
+{
+    VkPhysicalDeviceProperties properties {};
+    vkGetPhysicalDeviceProperties(device, &properties);
     VkPhysicalDeviceExtendedDynamicStateFeaturesEXT extendedDynamicState {
         .sType =
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT,
@@ -464,11 +471,19 @@ bool VulkanDeviceContext::isDeviceSuitable(VkPhysicalDevice device) const
         .pNext = &vulkan13,
     };
     vkGetPhysicalDeviceFeatures2(device, &features);
-    return vulkan13.dynamicRendering &&
-        vulkan13.synchronization2 &&
-        features.features.imageCubeArray &&
-        features.features.fillModeNonSolid &&
-        extendedDynamicState.extendedDynamicState;
+    return {
+        .apiVersion = properties.apiVersion,
+        .maxPushConstantsSize = properties.limits.maxPushConstantsSize,
+        .maxPerStageDescriptorSampledImages =
+            properties.limits.maxPerStageDescriptorSampledImages,
+        .dynamicRendering = vulkan13.dynamicRendering == VK_TRUE,
+        .synchronization2 = vulkan13.synchronization2 == VK_TRUE,
+        .imageCubeArray = features.features.imageCubeArray == VK_TRUE,
+        .extendedDynamicState =
+            extendedDynamicState.extendedDynamicState == VK_TRUE,
+        .fillModeNonSolid = features.features.fillModeNonSolid == VK_TRUE,
+        .wideLines = features.features.wideLines == VK_TRUE,
+    };
 }
 
 } // namespace sokoban

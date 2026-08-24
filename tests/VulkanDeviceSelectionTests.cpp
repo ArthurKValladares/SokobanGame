@@ -36,6 +36,19 @@ bool throwsForNoSurfaceMode(const VkSurfaceCapabilitiesKHR& capabilities)
     }
 }
 
+sokoban::VulkanDeviceFeatureSupport releaseFeatureSupport()
+{
+    return {
+        .apiVersion = VK_API_VERSION_1_3,
+        .maxPushConstantsSize = 128,
+        .maxPerStageDescriptorSampledImages = 32,
+        .dynamicRendering = true,
+        .synchronization2 = true,
+        .imageCubeArray = true,
+        .extendedDynamicState = true,
+    };
+}
+
 } // namespace
 
 int main()
@@ -141,6 +154,48 @@ int main()
 
     check(throwsForNoSurfaceMode({}),
         "surface with no composite alpha support is rejected");
+
+    constexpr uint32_t requiredPushConstants = 128;
+    constexpr uint32_t requiredSampledImages = 32;
+    const auto releaseOnlyTier = sokoban::chooseVulkanFeatureTier(
+        releaseFeatureSupport(), requiredPushConstants, requiredSampledImages);
+    check(releaseOnlyTier.releaseCompatible,
+        "the Vulkan 1.3 release feature tier accepts its documented baseline");
+    check(!releaseOnlyTier.wireframeSupported && !releaseOnlyTier.wideLinesSupported,
+        "debug rasterization features do not gate the release tier");
+
+    auto debugFeatureSupport = releaseFeatureSupport();
+    debugFeatureSupport.fillModeNonSolid = true;
+    debugFeatureSupport.wideLines = true;
+    const auto debugTier = sokoban::chooseVulkanFeatureTier(
+        debugFeatureSupport, requiredPushConstants, requiredSampledImages);
+    check(debugTier.releaseCompatible && debugTier.wireframeSupported &&
+            debugTier.wideLinesSupported,
+        "supported debug features augment but do not replace the release tier");
+
+    auto oldApiSupport = releaseFeatureSupport();
+    oldApiSupport.apiVersion = VK_API_VERSION_1_2;
+    check(!sokoban::chooseVulkanFeatureTier(
+               oldApiSupport, requiredPushConstants, requiredSampledImages)
+               .releaseCompatible,
+        "Vulkan 1.2 is below the renderer's release contract");
+
+    auto missingBaselineFeature = releaseFeatureSupport();
+    missingBaselineFeature.extendedDynamicState = false;
+    check(!sokoban::chooseVulkanFeatureTier(
+               missingBaselineFeature,
+               requiredPushConstants,
+               requiredSampledImages).releaseCompatible,
+        "ordinary draw-path features remain required for release");
+
+    auto insufficientLimits = releaseFeatureSupport();
+    insufficientLimits.maxPerStageDescriptorSampledImages =
+        requiredSampledImages - 1;
+    check(!sokoban::chooseVulkanFeatureTier(
+               insufficientLimits,
+               requiredPushConstants,
+               requiredSampledImages).releaseCompatible,
+        "descriptor capacity remains part of the release contract");
 
     std::cout << "Vulkan device selection tests passed\n";
     return 0;

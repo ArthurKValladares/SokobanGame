@@ -203,9 +203,11 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             static_cast<AntiAliasingMode>(antiAliasingIndex));
     }
     bool wireframeEnabled = context.renderer.wireframeEnabled();
+    ImGui::BeginDisabled(!context.renderer.wireframeSupported());
     if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
         context.renderer.setWireframeEnabled(wireframeEnabled);
     }
+    ImGui::EndDisabled();
     ImGui::SameLine();
     float wireframeLineWidth = context.renderer.wireframeLineWidth();
     const auto lineWidthRange = context.renderer.wireframeLineWidthRange();

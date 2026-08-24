@@ -154,6 +154,7 @@ public:
     void setRenderScalePercent(int percent);
     [[nodiscard]] bool wireframeEnabled() const;
     void setWireframeEnabled(bool enabled);
+    [[nodiscard]] bool wireframeSupported() const;
     [[nodiscard]] bool wideLinesSupported() const;
     [[nodiscard]] float wireframeLineWidth() const;
     [[nodiscard]] std::array<float, 2> wireframeLineWidthRange() const;

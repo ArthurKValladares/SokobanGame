@@ -925,7 +925,13 @@ bool VulkanRenderer::wireframeEnabled() const
 
 void VulkanRenderer::setWireframeEnabled(bool enabled)
 {
-    reconfigurationQueue_.requestWireframe(enabled);
+    reconfigurationQueue_.requestWireframe(
+        enabled && deviceContext_.wireframeSupported());
+}
+
+bool VulkanRenderer::wireframeSupported() const
+{
+    return deviceContext_.wireframeSupported();
 }
 
 bool VulkanRenderer::wideLinesSupported() const
@@ -1069,7 +1075,7 @@ VulkanRenderer::createPipelines(
         .shadowFormat = shadowFormat_,
         .sampleCount =
             sampleCountForMode(settings.antiAliasing),
-        .wireframe = settings.wireframe,
+        .wireframe = settings.wireframe && deviceContext_.wireframeSupported(),
     });
     ++pipelineRebuilds_;
     return pipelines;
