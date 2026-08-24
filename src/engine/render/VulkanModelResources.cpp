@@ -100,6 +100,8 @@ void VulkanModelResources::create(
         manifest.playerModel(), manifest.playerIdleAnimation());
 
     try {
+        geometryArena_.create(
+            physicalDevice_, device_, commandPool_, graphicsQueue_);
         ImageData fallback {
             .width = 1,
             .height = 1,
@@ -125,6 +127,11 @@ void VulkanModelResources::destroy()
 {
     if (device_) {
         std::vector<VkFence> uploadFences;
+        for (const ModelSlot& model : models_) {
+            if (model.upload.submitted && model.upload.fence) {
+                uploadFences.push_back(model.upload.fence);
+            }
+        }
         for (const TextureSlot& texture : textures_) {
             if (texture.upload.submitted && texture.upload.fence) {
                 uploadFences.push_back(texture.upload.fence);
@@ -146,8 +153,10 @@ void VulkanModelResources::destroy()
         }
         destroyTexture(fallbackTexture_.image, fallbackTexture_.sampler);
         for (auto model = models_.rbegin(); model != models_.rend(); ++model) {
+            geometryArena_.destroyUpload(model->upload);
             destroyMesh(model->gpu);
         }
+        geometryArena_.destroy();
     }
 
     models_.clear();
@@ -235,6 +244,7 @@ bool VulkanModelResources::waitForAssets(const RenderAssetRequirements& requirem
             }
         }
     }
+    retireCompletedGeometryUploads(true);
 
     if (requirements.contains(manifest_->playerModel())) {
         (void)publishAnimation(manifest_->playerIdleAnimation(), true);
@@ -328,6 +338,7 @@ bool VulkanModelResources::publishReadyAssets(std::size_t maxPublications)
 
 void VulkanModelResources::retireCompletedUploads()
 {
+    retireCompletedGeometryUploads(false);
     for (TextureSlot& slot : textures_) {
         if (slot.state != LoadState::Uploading) {
             continue;
@@ -341,6 +352,25 @@ void VulkanModelResources::retireCompletedUploads()
         destroyTextureUpload(slot.upload);
         slot.state = LoadState::Ready;
         ++textureUploadCompletions_;
+    }
+}
+
+void VulkanModelResources::retireCompletedGeometryUploads(bool wait)
+{
+    for (ModelSlot& slot : models_) {
+        if (slot.state != LoadState::Uploading || !slot.upload.submitted) {
+            continue;
+        }
+        if (wait) {
+            vkCheck(
+                vkWaitForFences(device_, 1, &slot.upload.fence, VK_TRUE, UINT64_MAX),
+                "vkWaitForFences geometry upload failed");
+        }
+        if (!geometryArena_.uploadComplete(slot.upload)) {
+            continue;
+        }
+        geometryArena_.destroyUpload(slot.upload);
+        slot.state = LoadState::Ready;
     }
 }
 
@@ -600,15 +630,18 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                     return false;
                 }
                 slot.bounds = boundsOf(mesh.vertices);
-                slot.gpu = uploadMesh(mesh);
+                slot.gpu = uploadMesh(mesh, slot.upload);
                 slot.gpuBytes = bytes;
                 modelResidencyBytes_ += bytes;
+                slot.state = LoadState::Uploading;
             } else {
                 slot.skinnedSource = std::make_shared<SkinnedMeshData>(
                     std::move(std::get<SkinnedMeshData>(*slot.prepared)));
             }
             slot.prepared.reset();
-            slot.state = LoadState::Ready;
+            if (slot.state != LoadState::Uploading) {
+                slot.state = LoadState::Ready;
+            }
         } catch (...) {
             slot.failure = std::current_exception();
             slot.state = LoadState::Failed;
@@ -619,7 +652,9 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                 << "Background model publication failed: "
                 << (assetRoot_ / definition.path).string();
         }
-        return slot.state == LoadState::Ready || slot.state == LoadState::Failed;
+        return slot.state == LoadState::Ready ||
+            slot.state == LoadState::Uploading ||
+            slot.state == LoadState::Failed;
     }
     if (slot.state != LoadState::Loading ||
         (!wait && !futureReady(slot.future))) {
@@ -1049,8 +1084,10 @@ VulkanModelResources::MeshView VulkanModelResources::meshForTile(
     }
     const GpuMesh& mesh = gpuMeshForModel(tile.model);
     return {
-        .vertexBuffer = mesh.vertexBuffer.buffer,
-        .indexBuffer = mesh.indexBuffer.buffer,
+        .vertexBuffer = geometryArena_.vertexBuffer(mesh.allocation),
+        .vertexOffset = geometryArena_.vertexOffset(mesh.allocation),
+        .indexBuffer = geometryArena_.indexBuffer(mesh.allocation),
+        .indexOffset = geometryArena_.indexOffset(mesh.allocation),
         .indexCount = mesh.indexCount,
     };
 }
@@ -1147,7 +1184,8 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
 }
 
 VulkanModelResources::GpuMesh VulkanModelResources::uploadMesh(
-    const MeshData& mesh) const
+    const MeshData& mesh,
+    VulkanGeometryArena::Upload& upload)
 {
     if (mesh.vertices.empty() || mesh.indices.empty()) {
         throw std::runtime_error("glTF mesh contains no geometry");
@@ -1156,31 +1194,15 @@ VulkanModelResources::GpuMesh VulkanModelResources::uploadMesh(
     const VkDeviceSize vertexBytes = sizeof(MeshVertex) * mesh.vertices.size();
     const VkDeviceSize indexBytes = sizeof(uint32_t) * mesh.indices.size();
     GpuMesh result;
-    result.vertexBuffer = createBuffer(
-        vertexBytes,
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        "Model vertex buffer");
-    result.indexBuffer = createBuffer(
-        indexBytes,
-        VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        "Model index buffer");
-
-    void* mapped = nullptr;
-    vkCheck(vkMapMemory(device_, result.vertexBuffer.memory, 0, vertexBytes, 0, &mapped),
-        "vkMapMemory model vertex buffer failed");
-    std::memcpy(mapped, mesh.vertices.data(), static_cast<std::size_t>(vertexBytes));
-    vkUnmapMemory(device_, result.vertexBuffer.memory);
-
-    mapped = nullptr;
-    vkCheck(vkMapMemory(device_, result.indexBuffer.memory, 0, indexBytes, 0, &mapped),
-        "vkMapMemory model index buffer failed");
-    std::memcpy(mapped, mesh.indices.data(), static_cast<std::size_t>(indexBytes));
-    vkUnmapMemory(device_, result.indexBuffer.memory);
-
-    result.indexCount = static_cast<uint32_t>(mesh.indices.size());
-    return result;
+    result.allocation = geometryArena_.allocate(vertexBytes, indexBytes);
+    try {
+        upload = geometryArena_.beginUpload(result.allocation, mesh);
+        result.indexCount = static_cast<uint32_t>(mesh.indices.size());
+        return result;
+    } catch (...) {
+        geometryArena_.release(result.allocation);
+        throw;
+    }
 }
 
 VulkanModelResources::TextureSampling VulkanModelResources::samplingFor(
@@ -1625,19 +1647,10 @@ void VulkanModelResources::destroyTexture(
     textureImage.mipLevels = 1;
 }
 
-void VulkanModelResources::destroyMesh(GpuMesh& mesh) const
+void VulkanModelResources::destroyMesh(GpuMesh& mesh)
 {
-    if (mesh.indexBuffer.buffer) {
-        vkDestroyBuffer(device_, mesh.indexBuffer.buffer, nullptr);
-    }
-    if (mesh.indexBuffer.memory) {
-        vkFreeMemory(device_, mesh.indexBuffer.memory, nullptr);
-    }
-    if (mesh.vertexBuffer.buffer) {
-        vkDestroyBuffer(device_, mesh.vertexBuffer.buffer, nullptr);
-    }
-    if (mesh.vertexBuffer.memory) {
-        vkFreeMemory(device_, mesh.vertexBuffer.memory, nullptr);
+    if (mesh.allocation.valid()) {
+        geometryArena_.release(mesh.allocation);
     }
     mesh = {};
 }
@@ -1652,8 +1665,9 @@ const VulkanModelResources::GpuMesh& VulkanModelResources::gpuMeshForModel(
     }
     const ModelSlot& slot = models_[model.index()];
     if (slot.state != LoadState::Ready ||
-        !slot.gpu.vertexBuffer.buffer ||
-        !slot.gpu.indexBuffer.buffer) {
+        !slot.gpu.allocation.valid() ||
+        !geometryArena_.vertexBuffer(slot.gpu.allocation) ||
+        !geometryArena_.indexBuffer(slot.gpu.allocation)) {
         throw std::runtime_error("Render model mesh was used before it was ready");
     }
     return slot.gpu;

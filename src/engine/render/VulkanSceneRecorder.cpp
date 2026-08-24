@@ -1834,13 +1834,13 @@ private:
             },
         };
         const VkBuffer vertexBuffer = mesh.vertexBuffer;
-        constexpr VkDeviceSize offset = 0;
+        const VkDeviceSize offset = mesh.vertexOffset;
         vkCmdBindVertexBuffers(
             commandBuffer, 0, 1, &vertexBuffer, &offset);
         vkCmdBindIndexBuffer(
             commandBuffer,
             mesh.indexBuffer,
-            0,
+            mesh.indexOffset,
             VK_INDEX_TYPE_UINT32);
         vkCmdPushConstants(
             commandBuffer,
@@ -1879,13 +1879,13 @@ private:
                     layout, transform.zPoint)),
         };
         const VkBuffer vertexBuffer = mesh.vertexBuffer;
-        constexpr VkDeviceSize offset = 0;
+        const VkDeviceSize offset = mesh.vertexOffset;
         vkCmdBindVertexBuffers(
             commandBuffer, 0, 1, &vertexBuffer, &offset);
         vkCmdBindIndexBuffer(
             commandBuffer,
             mesh.indexBuffer,
-            0,
+            mesh.indexOffset,
             VK_INDEX_TYPE_UINT32);
         vkCmdPushConstants(
             commandBuffer,
@@ -1917,11 +1917,11 @@ private:
                 projectPointShadow(light, cubeFace, transform.zPoint)),
         };
         const VkBuffer vertexBuffer = mesh.vertexBuffer;
-        constexpr VkDeviceSize offset = 0;
+        const VkDeviceSize offset = mesh.vertexOffset;
         vkCmdBindVertexBuffers(
             commandBuffer, 0, 1, &vertexBuffer, &offset);
         vkCmdBindIndexBuffer(
-            commandBuffer, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+            commandBuffer, mesh.indexBuffer, mesh.indexOffset, VK_INDEX_TYPE_UINT32);
         vkCmdPushConstants(
             commandBuffer,
             pipelines_.layout(),

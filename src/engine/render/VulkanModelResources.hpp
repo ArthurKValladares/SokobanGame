@@ -5,6 +5,7 @@
 #include "engine/render/ImageData.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/SkinnedMeshUpdater.hpp"
+#include "engine/render/VulkanGeometryArena.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -181,8 +182,7 @@ private:
     };
 
     struct GpuMesh {
-        OwnedBuffer vertexBuffer {};
-        OwnedBuffer indexBuffer {};
+        VulkanGeometryArena::Allocation allocation {};
         uint32_t indexCount = 0;
     };
 
@@ -216,6 +216,7 @@ private:
         ModelBounds bounds {};
         uint64_t lastRequested = 0;
         uint64_t gpuBytes = 0;
+        VulkanGeometryArena::Upload upload {};
     };
 
     struct TextureSlot {
@@ -247,6 +248,7 @@ private:
     void startAnimation(RenderAnimation animation);
     void resetCancelledAsset(AssetLoadKey key);
     void completeCpuJob(AssetLoadKey key);
+    void retireCompletedGeometryUploads(bool wait);
     [[nodiscard]] bool makeModelResident(
         RenderModel protectedModel,
         uint64_t requiredBytes);
@@ -270,7 +272,9 @@ private:
 
     [[nodiscard]] static ModelBounds boundsOf(
         const std::vector<MeshVertex>& vertices);
-    [[nodiscard]] GpuMesh uploadMesh(const MeshData& mesh) const;
+    [[nodiscard]] GpuMesh uploadMesh(
+        const MeshData& mesh,
+        VulkanGeometryArena::Upload& upload);
     // Address mode, filtering, and colour space all come from the manifest
     // (see AssetManifest::Texture). Passed explicitly rather than defaulted:
     // a nested type's default member initializers are not usable in a default
@@ -301,7 +305,7 @@ private:
         PendingTextureUpload& upload);
     void destroyTextureUpload(PendingTextureUpload& upload) const;
     void destroyTexture(OwnedImage& image, VkSampler& sampler);
-    void destroyMesh(GpuMesh& mesh) const;
+    void destroyMesh(GpuMesh& mesh);
     [[nodiscard]] const GpuMesh& gpuMeshForModel(RenderModel model) const;
     [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
     [[nodiscard]] OwnedBuffer createBuffer(
@@ -326,6 +330,7 @@ private:
     std::vector<AnimationSlot> animations_; // indexed by RenderAnimation::index()
     std::vector<TextureSlot> textures_;
     TextureResource fallbackTexture_ {};
+    VulkanGeometryArena geometryArena_ {};
     AnimationController animationController_ {};
     struct AnimatedMeshKey {
         uint32_t frameIndex = 0;

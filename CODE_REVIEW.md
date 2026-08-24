@@ -394,6 +394,15 @@ though total residency is now bounded.
 
 ### P2 — GPU memory and animation architecture will not scale
 
+**Static geometry storage: Fixed on 2026-08-24.** Static meshes now occupy
+aligned slices of lazily-created device-local vertex and index blocks rather
+than owning a pair of host-visible allocations. Each mesh is copied through a
+short-lived staging buffer and transfer submission, then becomes drawable only
+after its upload fence signals. The copy command includes an explicit
+transfer-write to vertex/index-read barrier, and eviction returns slices to a
+unit-tested, coalescing free-list allocator. Skinned meshes intentionally
+retain their dynamic CPU-upload path until the later GPU-skinning milestone.
+
 Static mesh upload in
 [`VulkanModelResources::uploadMesh`](src/engine/render/VulkanModelResources.cpp#L790):
 
@@ -415,7 +424,7 @@ without mesh/material batching or instancing.
 
 This is adequate for the current board sizes. The recommended upgrade path is:
 
-1. Suballocated device-local static vertex/index heaps with staging uploads.
+1. [Complete] Suballocated device-local static vertex/index heaps with staging uploads.
 2. Persistently mapped per-frame upload rings.
 3. Joint-matrix skinning in the vertex shader or compute shader.
 4. Opaque draw sorting by pipeline, material, and mesh.
@@ -555,7 +564,8 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 1. [Complete] Make asset readiness non-blocking.
 2. [Complete] Add loading-state presentation, cancellation, priorities, and
    budgets.
-3. Introduce device-local suballocated geometry storage and staging uploads.
+3. [Complete] Introduce device-local suballocated geometry storage and staging
+   uploads.
 4. Add persistently mapped upload rings.
 5. Move skinning to the GPU.
 6. Sort and instance repeated opaque draws.

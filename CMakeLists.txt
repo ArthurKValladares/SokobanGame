@@ -211,6 +211,7 @@ add_library(sokoban_core STATIC
     src/engine/render/AssetLoadScheduler.cpp
     src/engine/render/GltfMesh.cpp
     src/engine/render/FrameResourceTracker.cpp
+    src/engine/render/GeometrySuballocator.cpp
     src/engine/render/ImageData.cpp
     src/engine/render/PngWriter.cpp
     src/engine/render/RenderAssetRequirements.cpp
@@ -267,6 +268,7 @@ add_library(sokoban_render_vulkan STATIC
     src/engine/render/VulkanDiagnostics.cpp
     src/engine/render/VulkanDeviceSelection.cpp
     src/engine/render/VulkanGpuProfiler.cpp
+    src/engine/render/VulkanGeometryArena.cpp
     src/engine/render/VulkanModelResources.cpp
     src/engine/render/VulkanPipelineCache.cpp
     src/engine/render/VulkanPipelineFactory.cpp
@@ -563,6 +565,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME asset_load_scheduler TARGET sokoban_asset_load_scheduler_tests
         LIBS sokoban_core
         SOURCES tests/AssetLoadSchedulerTests.cpp
+    )
+    sokoban_add_test(NAME geometry_suballocator TARGET sokoban_geometry_suballocator_tests
+        LIBS sokoban_core
+        SOURCES tests/GeometrySuballocatorTests.cpp
     )
     sokoban_add_test(NAME tasks TARGET sokoban_task_tests
         LIBS sokoban_core

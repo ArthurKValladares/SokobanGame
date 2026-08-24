@@ -17,7 +17,9 @@ class SkinnedMeshUpdater {
 public:
     struct MeshView {
         VkBuffer vertexBuffer = VK_NULL_HANDLE;
+        VkDeviceSize vertexOffset = 0;
         VkBuffer indexBuffer = VK_NULL_HANDLE;
+        VkDeviceSize indexOffset = 0;
         uint32_t indexCount = 0;
     };
 
