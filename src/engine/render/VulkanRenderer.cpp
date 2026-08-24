@@ -152,6 +152,13 @@ VulkanRenderer::VulkanRenderer(
         reconfigurationQueue_.active());
     descriptorSync_.markAllUpdated();
     logRenderConfiguration();
+    if (deviceContext_.graphicsTimestampsSupported()) {
+        gpuProfiler_.create(
+            deviceContext_.device(),
+            deviceContext_.timestampPeriodNanoseconds(),
+            deviceContext_.graphicsTimestampValidBits(),
+            maxFramesInFlight_);
+    }
     createFrameResources();
     initializeDebugUi();
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -200,6 +207,7 @@ VulkanRenderer::~VulkanRenderer()
     uiResources_.destroy();
 
     shadowPass_.destroy();
+    gpuProfiler_.destroy();
 }
 
 VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
@@ -289,6 +297,7 @@ void VulkanRenderer::drawFrame(
             UINT64_MAX),
         "vkWaitForFences failed");
     completeFrame(currentFrame_);
+    gpuProfiler_.collectCompletedFrame(currentFrame_);
     modelResources_.retireCompletedUploads();
     if (modelResources_.publishReadyAssets(1)) {
         descriptorSync_.resourcesChanged();
@@ -328,6 +337,8 @@ void VulkanRenderer::drawFrame(
 
     lastStats_ = sceneRecorder_.record(
         {
+            .device = deviceContext_.device(),
+            .gpuProfiler = gpuProfiler_,
             .swapchain = *activeResources_.swapchain,
             .shadowPass = shadowPass_,
             .ssaoPass = *activeResources_.ssaoPass,
@@ -368,6 +379,11 @@ void VulkanRenderer::drawFrame(
             : nullptr,
         prepared.previewScene ? &*prepared.previewScene : nullptr,
         uiDrawData);
+    lastStats_.gpuTimestampsSupported = gpuProfiler_.supported();
+    if (const auto timing = gpuProfiler_.latestFrameMilliseconds()) {
+        lastStats_.gpuFrameTimingAvailable = true;
+        lastStats_.gpuFrameMilliseconds = *timing;
+    }
 
     VkSemaphoreSubmitInfo waitSemaphore {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
@@ -409,6 +425,7 @@ void VulkanRenderer::drawFrame(
         "vkQueueSubmit2 failed");
     frameResourceTracker_.markSubmitted(
         currentFrame_, activeResourceGeneration_);
+    gpuProfiler_.markSubmitted(currentFrame_);
 
     const VkResult presented = activeResources_.swapchain->present(
         deviceContext_.presentQueue(),

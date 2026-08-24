@@ -294,6 +294,16 @@ command pool, per-frame command/synchronization objects, swapchain and
 attachments, shadow and SSAO resources, descriptors, shader modules, and
 pipelines. Release builds do not request validation or debug utils.
 
+**Markers and timing: Fixed on 2026-08-24.** When debug utils are active,
+command buffers are labelled by major frame phases (swapchain setup, game and
+preview rendering, SSAO, transitions, UI, and present preparation), making
+GPU captures navigable. A timestamp-query pair per in-flight frame measures
+completed GPU frame duration without a new wait; the renderer consumes results
+only after its pre-existing frame fence signals and displays the result in the
+Debug rendering stats. Devices without graphics timestamp support simply
+report it as unavailable. Headless tests cover period conversion and counter
+wrap handling.
+
 Previously, [`VulkanDeviceContext`](src/engine/render/VulkanDeviceContext.cpp)
 requested Vulkan 1.4 and made `fillModeNonSolid` mandatory alongside the
 release renderer's push-constant footprint, cube arrays, extended dynamic
@@ -495,7 +505,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 1. [Complete] Select only supported surface and composite-alpha modes.
 2. [Complete] Establish Vulkan feature tiers and reduce debug-only requirements.
 3. [Complete] Add validation messenger integration and GPU object names.
-4. Add GPU debug markers and timestamp queries.
+4. [Complete] Add GPU debug markers and timestamp queries.
 5. Persist a Vulkan pipeline cache.
 6. Provide user-facing diagnostics for device/surface loss and unsupported
    hardware.

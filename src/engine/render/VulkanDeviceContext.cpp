@@ -139,6 +139,22 @@ bool VulkanDeviceContext::wideLinesSupported() const
     return wideLinesSupported_;
 }
 
+bool VulkanDeviceContext::graphicsTimestampsSupported() const
+{
+    return graphicsTimestampValidBits_ != 0 &&
+        physicalDeviceProperties_.limits.timestampComputeAndGraphics == VK_TRUE;
+}
+
+float VulkanDeviceContext::timestampPeriodNanoseconds() const
+{
+    return physicalDeviceProperties_.limits.timestampPeriod;
+}
+
+uint32_t VulkanDeviceContext::graphicsTimestampValidBits() const
+{
+    return graphicsTimestampValidBits_;
+}
+
 std::array<float, 2>
 VulkanDeviceContext::wireframeLineWidthRange() const
 {
@@ -292,6 +308,14 @@ void VulkanDeviceContext::pickPhysicalDevice()
     queueFamilies_ = findQueueFamilies(physicalDevice_);
     vkGetPhysicalDeviceProperties(
         physicalDevice_, &physicalDeviceProperties_);
+    uint32_t queueFamilyCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(
+        physicalDevice_, &queueFamilyCount, nullptr);
+    std::vector<VkQueueFamilyProperties> queueFamilyProperties(queueFamilyCount);
+    vkGetPhysicalDeviceQueueFamilyProperties(
+        physicalDevice_, &queueFamilyCount, queueFamilyProperties.data());
+    graphicsTimestampValidBits_ =
+        queueFamilyProperties[queueFamilies_.graphics].timestampValidBits;
     featureTier_ = chooseVulkanFeatureTier(
         queryFeatureSupport(physicalDevice_),
         sizeof(TilePushConstants),

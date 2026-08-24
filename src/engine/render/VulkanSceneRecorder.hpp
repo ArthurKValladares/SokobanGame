@@ -11,6 +11,7 @@
 namespace sokoban {
 
 class VulkanModelResources;
+class VulkanGpuProfiler;
 class VulkanPipelineFactory;
 class VulkanSceneDescriptors;
 class VulkanShadowPass;
@@ -23,6 +24,8 @@ class VulkanSwapchainResources;
 class VulkanSceneRecorder {
 public:
     struct Resources {
+        VkDevice device = VK_NULL_HANDLE;
+        VulkanGpuProfiler& gpuProfiler;
         VulkanSwapchainResources& swapchain;
         VulkanShadowPass& shadowPass;
         VulkanSsaoPass& ssaoPass;

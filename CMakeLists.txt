@@ -264,6 +264,7 @@ add_library(sokoban_render_vulkan STATIC
     src/engine/render/VulkanDeviceContext.cpp
     src/engine/render/VulkanDebugUtils.cpp
     src/engine/render/VulkanDeviceSelection.cpp
+    src/engine/render/VulkanGpuProfiler.cpp
     src/engine/render/VulkanModelResources.cpp
     src/engine/render/VulkanPipelineFactory.cpp
     src/engine/render/VulkanResourceUtils.cpp

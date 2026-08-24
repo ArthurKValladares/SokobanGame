@@ -1,5 +1,6 @@
 #include "engine/render/VulkanDeviceSelection.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
+#include "engine/render/VulkanGpuProfiler.hpp"
 #include "engine/render/RenderResolution.hpp"
 
 #include <cstdlib>
@@ -213,6 +214,18 @@ int main()
             VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) ==
             sokoban::log::Level::Debug,
         "verbose validation messages stay at debug severity");
+
+    check(
+        sokoban::vulkanTimestampDeltaMilliseconds(100, 350, 2.0f, 64) ==
+            0.0005,
+        "timestamp deltas convert device nanoseconds to milliseconds");
+    check(
+        sokoban::vulkanTimestampDeltaMilliseconds(250, 5, 1.0f, 8) ==
+            0.000011,
+        "timestamp deltas account for a valid-bit counter wrap");
+    check(
+        sokoban::vulkanTimestampDeltaMilliseconds(1, 2, 0.0f, 64) == 0.0,
+        "unavailable timestamps report no duration");
 
     std::cout << "Vulkan device selection tests passed\n";
     return 0;

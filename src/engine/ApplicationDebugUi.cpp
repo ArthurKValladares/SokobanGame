@@ -598,6 +598,15 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             "Frame %.3f ms (%.1f FPS)",
             io.DeltaTime * 1000.0f,
             io.Framerate);
+        if (renderStats.gpuFrameTimingAvailable) {
+            ImGui::Text(
+                "GPU frame %.3f ms",
+                renderStats.gpuFrameMilliseconds);
+        } else if (!renderStats.gpuTimestampsSupported) {
+            ImGui::TextUnformatted("GPU timestamps unavailable");
+        } else {
+            ImGui::TextUnformatted("GPU frame timing pending");
+        }
         ImGui::Text(
             "Recorded frame %llu",
             static_cast<unsigned long long>(renderStats.frameIndex));

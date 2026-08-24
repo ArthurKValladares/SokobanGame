@@ -5,6 +5,7 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <array>
 #include <string_view>
 #include <type_traits>
 
@@ -30,6 +31,13 @@ void setObjectName(
     VkObjectType objectType,
     uint64_t objectHandle,
     std::string_view name) noexcept;
+
+void beginLabel(
+    VkDevice device,
+    VkCommandBuffer commandBuffer,
+    std::string_view name,
+    std::array<float, 4> color = { 0.3f, 0.7f, 1.0f, 1.0f }) noexcept;
+void endLabel(VkDevice device, VkCommandBuffer commandBuffer) noexcept;
 
 [[nodiscard]] log::Level validationMessageLogLevel(
     VkDebugUtilsMessageSeverityFlagBitsEXT severity);

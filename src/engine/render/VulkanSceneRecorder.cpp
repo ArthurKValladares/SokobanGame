@@ -1,5 +1,7 @@
 #include "engine/render/VulkanSceneRecorder.hpp"
 
+#include "engine/render/VulkanDebugUtils.hpp"
+#include "engine/render/VulkanGpuProfiler.hpp"
 #include "engine/render/MirrorConfig.hpp"
 #include "engine/render/LightingConfig.hpp"
 #include "engine/render/SceneConfig.hpp"
@@ -112,7 +114,9 @@ public:
     SceneRecordingSession(
         VulkanSceneRecorder::Resources resources,
         const VulkanSceneRecorder::FrameConfiguration& configuration)
-        : swapchain_(resources.swapchain)
+        : device_(resources.device)
+        , gpuProfiler_(resources.gpuProfiler)
+        , swapchain_(resources.swapchain)
         , shadowPass_(resources.shadowPass)
         , ssaoPass_(resources.ssaoPass)
         , descriptors_(resources.sceneDescriptors)
@@ -203,13 +207,24 @@ public:
         vkCheck(
             vkBeginCommandBuffer(commandBuffer, &beginInfo),
             "vkBeginCommandBuffer failed");
+        vulkanDebug::beginLabel(
+            device_, commandBuffer, "Sokoban frame", { 0.1f, 0.4f, 1.0f, 1.0f });
+        gpuProfiler_.beginFrame(commandBuffer, configuration_.descriptorFrameIndex);
+        vulkanDebug::beginLabel(
+            device_, commandBuffer, "Swapchain setup", { 0.3f, 0.7f, 1.0f, 1.0f });
         swapchain_.beginFrame(commandBuffer, imageIndex, stats_);
+        vulkanDebug::endLabel(device_, commandBuffer);
+        vulkanDebug::beginLabel(
+            device_, commandBuffer, "Game rendering", { 0.2f, 0.9f, 0.4f, 1.0f });
         recordGameRendering(
             commandBuffer,
             swapchain_.renderColorView(),
             swapchain_.resolveColorView(),
             frameData,
             scene);
+        vulkanDebug::endLabel(device_, commandBuffer);
+        vulkanDebug::beginLabel(
+            device_, commandBuffer, "SSAO", { 0.8f, 0.4f, 1.0f, 1.0f });
         ssaoPass_.record(
             commandBuffer,
             swapchain_.resolvedColorView(),
@@ -222,10 +237,13 @@ public:
                 .visualize = pipelines_.ssaoVisualize(),
             },
             stats_);
+        vulkanDebug::endLabel(device_, commandBuffer);
         if (previewFrameData && previewScene) {
             // Preserve the completed main view before the preview replaces
             // the inset. ScreenPreviewOverlay samples this copy to feather
             // the main view back over the preview at its perimeter.
+            vulkanDebug::beginLabel(
+                device_, commandBuffer, "Preview rendering", { 1.0f, 0.7f, 0.2f, 1.0f });
             swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
             recordPreviewRendering(
                 commandBuffer,
@@ -233,9 +251,15 @@ public:
                 swapchain_.resolveColorView(),
                 *previewFrameData,
                 *previewScene);
+            vulkanDebug::endLabel(device_, commandBuffer);
         }
+        vulkanDebug::beginLabel(
+            device_, commandBuffer, "Level transition", { 1.0f, 0.4f, 0.2f, 1.0f });
         recordLevelTransition(
             commandBuffer, frameData.levelTransitionAmount);
+        vulkanDebug::endLabel(device_, commandBuffer);
+        vulkanDebug::beginLabel(
+            device_, commandBuffer, "UI composition", { 0.9f, 0.9f, 0.2f, 1.0f });
         if (configuration_.developerWorkspaceVisible) {
             // Compose the game's own UI into the off-screen render first, then
             // publish that image for ImGui's dockable Game Viewport. The
@@ -274,7 +298,13 @@ public:
                 true,
                 false);
         }
+        vulkanDebug::endLabel(device_, commandBuffer);
+        vulkanDebug::beginLabel(
+            device_, commandBuffer, "Present transition", { 0.3f, 0.7f, 1.0f, 1.0f });
         swapchain_.endFrame(commandBuffer, imageIndex, stats_);
+        vulkanDebug::endLabel(device_, commandBuffer);
+        gpuProfiler_.endFrame(commandBuffer, configuration_.descriptorFrameIndex);
+        vulkanDebug::endLabel(device_, commandBuffer);
         vkCheck(
             vkEndCommandBuffer(commandBuffer),
             "vkEndCommandBuffer failed");
@@ -1956,6 +1986,8 @@ private:
         vkCmdDraw(commandBuffer, 6, 1, 0, 0);
     }
 
+    VkDevice device_ = VK_NULL_HANDLE;
+    VulkanGpuProfiler& gpuProfiler_;
     VulkanSwapchainResources& swapchain_;
     VulkanShadowPass& shadowPass_;
     bool previewDescriptor_ = false;

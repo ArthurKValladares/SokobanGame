@@ -496,6 +496,9 @@ struct RenderStats {
     uint32_t renderHeight = 0;
     uint32_t renderScalePercent = 100;
     uint32_t activeSamples = 1;
+    bool gpuTimestampsSupported = false;
+    bool gpuFrameTimingAvailable = false;
+    double gpuFrameMilliseconds = 0.0;
     bool wireframeEnabled = false;
     float wireframeLineWidth = 1.0f;
     uint64_t pipelineRebuilds = 0;

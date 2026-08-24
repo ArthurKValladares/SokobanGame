@@ -9,6 +9,7 @@
 #include "engine/render/RenderTypes.hpp"
 #include "engine/render/ReusableScratchPool.hpp"
 #include "engine/render/VulkanDeviceContext.hpp"
+#include "engine/render/VulkanGpuProfiler.hpp"
 #include "engine/render/VulkanModelResources.hpp"
 #include "engine/render/VulkanPipelineFactory.hpp"
 #include "engine/render/VulkanSceneRecorder.hpp"
@@ -226,6 +227,7 @@ private:
     SDL_Window* window_ = nullptr;
     std::filesystem::path assetRoot_;
     VulkanDeviceContext deviceContext_;
+    VulkanGpuProfiler gpuProfiler_;
 
     VkFormat depthFormat_ = VK_FORMAT_D32_SFLOAT;
     VkFormat shadowFormat_ = VK_FORMAT_D32_SFLOAT;

@@ -43,6 +43,9 @@ public:
 
     [[nodiscard]] bool wireframeSupported() const;
     [[nodiscard]] bool wideLinesSupported() const;
+    [[nodiscard]] bool graphicsTimestampsSupported() const;
+    [[nodiscard]] float timestampPeriodNanoseconds() const;
+    [[nodiscard]] uint32_t graphicsTimestampValidBits() const;
     [[nodiscard]] std::array<float, 2> wireframeLineWidthRange() const;
     [[nodiscard]] VkSampleCountFlagBits supportedSampleCount(
         VkSampleCountFlagBits requested) const;
@@ -76,6 +79,7 @@ private:
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VulkanFeatureTier featureTier_ {};
     bool wideLinesSupported_ = false;
+    uint32_t graphicsTimestampValidBits_ = 0;
     std::array<float, 2> wireframeLineWidthRange_ { 1.0f, 1.0f };
 };
 
