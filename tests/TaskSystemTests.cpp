@@ -43,6 +43,12 @@ void testEnqueueReturnsValues()
     // sum of squares 0..99
     CHECK(total == 328350);
     CHECK(system.workerCount() == 4);
+    const auto counterDeadline = std::chrono::steady_clock::now() +
+        std::chrono::seconds(1);
+    while (system.executedTaskCount() != 100 &&
+        std::chrono::steady_clock::now() < counterDeadline) {
+        std::this_thread::yield();
+    }
     CHECK(system.executedTaskCount() == 100);
 }
 
@@ -115,6 +121,95 @@ void testParallelForComputesDeterministicResult()
     CHECK(total == 3 * (n * (n - 1) / 2) - n);
 }
 
+void testParallelForPropagatesInlineExceptions()
+{
+    TEST("parallelForPropagatesInlineExceptions");
+    sokoban::TaskSystem system(2);
+
+    bool threw = false;
+    try {
+        system.parallelFor(8, 64, [](size_t, size_t) {
+            throw std::runtime_error("inline boom");
+        });
+    } catch (const std::runtime_error& error) {
+        threw = std::string(error.what()) == "inline boom";
+    }
+    CHECK(threw);
+}
+
+void testParallelForWaitsBeforeRethrowingCallerException()
+{
+    TEST("parallelForWaitsBeforeRethrowingCallerException");
+    sokoban::TaskSystem system(4);
+
+    const std::thread::id caller = std::this_thread::get_id();
+    std::atomic<bool> workerEntered { false };
+    std::atomic<bool> callerThrowing { false };
+    bool threw = false;
+    try {
+        system.parallelFor(1000, 1, [&](size_t, size_t) {
+            if (std::this_thread::get_id() != caller) {
+                workerEntered.store(true, std::memory_order_release);
+                while (!callerThrowing.load(std::memory_order_acquire)) {
+                    std::this_thread::yield();
+                }
+                return;
+            }
+
+            while (!workerEntered.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            callerThrowing.store(true, std::memory_order_release);
+            throw std::runtime_error("caller boom");
+        });
+    } catch (const std::runtime_error& error) {
+        threw = std::string(error.what()) == "caller boom";
+    }
+
+    CHECK(threw);
+    CHECK(workerEntered.load(std::memory_order_acquire));
+    auto future = system.enqueue([] { return 17; });
+    CHECK(future.get() == 17);
+}
+
+void testParallelForPropagatesWorkerException()
+{
+    TEST("parallelForPropagatesWorkerException");
+    sokoban::TaskSystem system(4);
+
+    const std::thread::id caller = std::this_thread::get_id();
+    std::atomic<bool> callerEntered { false };
+    std::atomic<bool> workerThrowing { false };
+    bool threw = false;
+    try {
+        system.parallelFor(1000, 1, [&](size_t, size_t) {
+            if (std::this_thread::get_id() == caller) {
+                callerEntered.store(true, std::memory_order_release);
+                while (!workerThrowing.load(std::memory_order_acquire)) {
+                    std::this_thread::yield();
+                }
+                return;
+            }
+
+            while (!callerEntered.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            workerThrowing.store(true, std::memory_order_release);
+            throw std::runtime_error("worker boom");
+        });
+    } catch (const std::runtime_error& error) {
+        threw = std::string(error.what()) == "worker boom";
+    }
+
+    CHECK(threw);
+    CHECK(workerThrowing.load(std::memory_order_acquire));
+    std::atomic<size_t> completed { 0 };
+    system.parallelFor(128, 8, [&](size_t begin, size_t end) {
+        completed.fetch_add(end - begin, std::memory_order_relaxed);
+    });
+    CHECK(completed.load(std::memory_order_relaxed) == 128);
+}
+
 void testGlobalInstance()
 {
     TEST("globalInstance");
@@ -156,6 +251,9 @@ int main()
     testParallelForCoversEveryIndexOnce();
     testParallelForSmallCountsRunInline();
     testParallelForComputesDeterministicResult();
+    testParallelForPropagatesInlineExceptions();
+    testParallelForWaitsBeforeRethrowingCallerException();
+    testParallelForPropagatesWorkerException();
     testGlobalInstance();
     testManyConcurrentParallelFors();
 

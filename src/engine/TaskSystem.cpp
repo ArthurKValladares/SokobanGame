@@ -1,9 +1,91 @@
 #include "engine/TaskSystem.hpp"
 
 #include <algorithm>
+#include <exception>
 #include <latch>
+#include <memory>
 
 namespace sokoban {
+namespace {
+
+class ParallelForState {
+public:
+    ParallelForState(
+        size_t count,
+        size_t chunkSize,
+        size_t helperCount,
+        const std::function<void(size_t, size_t)>& fn)
+        : count_(count)
+        , chunkSize_(chunkSize)
+        , helpersDone_(static_cast<ptrdiff_t>(helperCount))
+        , fn_(fn)
+    {
+    }
+
+    void runChunks() noexcept
+    {
+        while (!cancelled_.load(std::memory_order_acquire)) {
+            const size_t begin = nextIndex_.fetch_add(
+                chunkSize_, std::memory_order_relaxed);
+            if (begin >= count_) {
+                return;
+            }
+            try {
+                fn_(begin, std::min(begin + chunkSize_, count_));
+            } catch (...) {
+                recordFailure(std::current_exception());
+                return;
+            }
+        }
+    }
+
+    void recordFailure(std::exception_ptr failure) noexcept
+    {
+        bool expected = false;
+        if (failureRecorded_.compare_exchange_strong(
+                expected,
+                true,
+                std::memory_order_acq_rel,
+                std::memory_order_acquire)) {
+            firstFailure_ = std::move(failure);
+        }
+        cancelled_.store(true, std::memory_order_release);
+    }
+
+    void helperComplete() noexcept
+    {
+        helpersDone_.count_down();
+    }
+
+    void helpersNotQueued(size_t count) noexcept
+    {
+        helpersDone_.count_down(static_cast<ptrdiff_t>(count));
+    }
+
+    void waitForHelpers() const
+    {
+        helpersDone_.wait();
+    }
+
+    void rethrowFailure() const
+    {
+        if (firstFailure_) {
+            std::rethrow_exception(firstFailure_);
+        }
+    }
+
+private:
+    const size_t count_;
+    const size_t chunkSize_;
+    std::atomic<size_t> nextIndex_ { 0 };
+    std::atomic<bool> cancelled_ { false };
+    std::atomic<bool> failureRecorded_ { false };
+    std::exception_ptr firstFailure_;
+    std::latch helpersDone_;
+    const std::function<void(size_t, size_t)>& fn_;
+};
+
+} // namespace
 
 TaskSystem::TaskSystem(unsigned threadCount)
 {
@@ -73,28 +155,26 @@ void TaskSystem::parallelFor(size_t count, size_t minChunk, const std::function<
     const size_t threads = workers_.size() + 1; // workers + calling thread
     const size_t chunkSize = std::max(minChunk, (count + threads * 4 - 1) / (threads * 4));
 
-    std::atomic<size_t> nextIndex { 0 };
-    auto runChunks = [&] {
-        while (true) {
-            const size_t begin = nextIndex.fetch_add(chunkSize, std::memory_order_relaxed);
-            if (begin >= count) {
-                return;
-            }
-            fn(begin, std::min(begin + chunkSize, count));
-        }
-    };
-
     const size_t helperCount = std::min(workers_.size(), (count + chunkSize - 1) / chunkSize);
-    std::latch helpersDone(static_cast<ptrdiff_t>(helperCount));
-    for (size_t i = 0; i < helperCount; ++i) {
-        push([&runChunks, &helpersDone] {
-            runChunks();
-            helpersDone.count_down();
-        });
+    const auto state = std::make_shared<ParallelForState>(
+        count, chunkSize, helperCount, fn);
+
+    size_t queuedHelpers = 0;
+    try {
+        for (; queuedHelpers < helperCount; ++queuedHelpers) {
+            push([state] {
+                state->runChunks();
+                state->helperComplete();
+            });
+        }
+    } catch (...) {
+        state->recordFailure(std::current_exception());
+        state->helpersNotQueued(helperCount - queuedHelpers);
     }
 
-    runChunks(); // the calling thread participates
-    helpersDone.wait();
+    state->runChunks(); // the calling thread participates
+    state->waitForHelpers();
+    state->rethrowFailure();
 }
 
 TaskSystem& taskSystem()

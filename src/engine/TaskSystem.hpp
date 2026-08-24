@@ -6,6 +6,7 @@
 #include <deque>
 #include <functional>
 #include <future>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <type_traits>
@@ -22,7 +23,8 @@ namespace sokoban {
 //     result. Exceptions thrown by fn surface on future.get().
 //   - parallelFor(count, minChunk, fn): runs fn(begin, end) over contiguous
 //     chunks of [0, count) across the workers; the calling thread
-//     participates, and the call returns once every index is processed.
+//     participates. If a chunk throws, no new chunks are started, in-flight
+//     chunks finish, and one captured exception is rethrown on the caller.
 //
 // Tasks must not block waiting on other tasks (there is no dependency
 // tracking or work stealing yet); keep them independent. That constraint is
@@ -49,7 +51,8 @@ public:
 
     // Chunked parallel loop. fn is invoked as fn(begin, end) with disjoint
     // ranges covering [0, count). minChunk bounds scheduling overhead: counts
-    // at or below it run inline on the calling thread.
+    // at or below it run inline on the calling thread. The call does not return
+    // or rethrow until every helper scheduled by this invocation has finished.
     void parallelFor(size_t count, size_t minChunk, const std::function<void(size_t, size_t)>& fn);
 
     [[nodiscard]] unsigned workerCount() const { return static_cast<unsigned>(workers_.size()); }

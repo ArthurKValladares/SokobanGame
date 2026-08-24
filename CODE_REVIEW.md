@@ -116,7 +116,12 @@ Release tests.
 
 ### P1 — `TaskSystem::parallelFor` is not exception-safe
 
-[`parallelFor`](src/engine/TaskSystem.cpp#L60) creates worker lambdas that
+**Status: Fixed on 2026-08-24.** Parallel work now uses heap-owned shared
+coordination state, stops assigning chunks after the first failure, waits for
+every queued helper, and rethrows the captured exception on the caller. Tests
+cover inline, caller-thread, and worker-thread failures plus pool reuse.
+
+[`parallelFor`](src/engine/TaskSystem.cpp#L60) previously created worker lambdas that
 capture its local `runChunks` closure and latch by reference.
 
 Two fatal cases follow:
@@ -401,7 +406,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 
 1. [Complete] Fix the swapchain semaphore wait stage.
 2. [Complete] Repair the content-pipeline fixture and test exception reporting.
-3. Make `parallelFor` exception-safe.
+3. [Complete] Make `parallelFor` exception-safe.
 4. Clamp/reset simulation timing and add suspend/minimize tests.
 5. Make both Debug and Release test runs mandatory and green.
 
