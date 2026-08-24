@@ -462,12 +462,17 @@ void VulkanRenderer::drawFrame(
 
 void VulkanRenderer::preloadAssets(const RenderAssetRequirements& requirements)
 {
-    modelResources_.requestAssets(requirements);
+    modelResources_.requestAssets(requirements, AssetLoadPriority::Prefetch);
+}
+
+void VulkanRenderer::cancelQueuedAssetPrefetches()
+{
+    modelResources_.cancelQueuedPrefetches();
 }
 
 void VulkanRenderer::ensureAssets(const RenderAssetRequirements& requirements)
 {
-    modelResources_.requestAssets(requirements);
+    modelResources_.requestAssets(requirements, AssetLoadPriority::Visible);
 }
 
 void VulkanRenderer::waitForAssets(const RenderAssetRequirements& requirements)

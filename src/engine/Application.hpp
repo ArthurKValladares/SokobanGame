@@ -87,6 +87,7 @@ private:
         buildScreenPreviewRenderFrame() const;
     void drawSelectorPrompt(const VulkanRenderer::PreparedFrame* frame);
     void drawScreenPreviewOverlay(Vec2 viewport);
+    void drawAssetLoadingOverlay(Vec2 viewport);
     void checkpointCurrentScreen(bool immediateSave);
     void applySettingsEffects(const SettingsEffects& effects);
     void persistProfile(bool immediate);

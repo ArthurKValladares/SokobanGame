@@ -20,6 +20,7 @@
 #include <functional>
 #include <ranges>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -512,6 +513,7 @@ void Application::run()
                 handleShellEvent(ShellOptionsAction { *optionsAction });
             }
         }
+        drawAssetLoadingOverlay(pixelSize);
         tools_->animationPreviewDebugUi.update(dt, renderer_);
         ui_.endFrame();
         preparedRenderFrame_ = renderer_.prepareFrame(
@@ -712,6 +714,10 @@ bool Application::applyLevel(
     std::optional<LevelLocation> location,
     bool composedOverworld)
 {
+    // A level change makes speculative work for the prior world irrelevant.
+    // Running tasks may finish, but queued disk work is discarded before it
+    // competes with the assets the player is about to see.
+    renderer_.cancelQueuedAssetPrefetches();
     // Same location the render frame will use, so the splat map this screen
     // draws with is the one guaranteed resident here.
     RenderAssetRequirements requirements = renderAssetRequirementsForLevel(
@@ -1012,6 +1018,64 @@ void Application::drawSelectorPrompt(
                 SelectorPrompt::draw(ui_, *arrowTip, *enterLabel, *previewLabel);
             }
         }
+    }
+}
+
+void Application::drawAssetLoadingOverlay(Vec2 viewport)
+{
+    const VulkanModelResources::LoadingStats stats =
+        renderer_.assetLoadingStats();
+    const uint32_t pending = stats.pendingModels + stats.pendingTextures +
+        stats.pendingAnimations;
+    if (pending == 0 && stats.failedAssets == 0) {
+        return;
+    }
+
+    const float width = std::min(460.0f, std::max(260.0f, viewport.x - 32.0f));
+    const UiRect panel {
+        .position = { (viewport.x - width) * 0.5f, 22.0f },
+        .size = { width, stats.failedAssets > 0 ? 104.0f : 78.0f },
+    };
+    ui_.rect(panel, { 0.025f, 0.035f, 0.045f, 0.90f });
+    ui_.rect({
+        .position = panel.position,
+        .size = { panel.size.x, 2.0f },
+    }, { 0.24f, 0.70f, 0.95f, 0.95f });
+    ui_.centeredText({
+        .position = { panel.position.x, panel.position.y + 8.0f },
+        .size = { panel.size.x, 24.0f },
+    }, "Loading world assets", { 0.91f, 0.95f, 1.0f, 1.0f }, 19.0f);
+
+    const float progress = stats.requestedAssets == 0
+        ? 0.0f
+        : std::clamp(
+            static_cast<float>(stats.readyRequestedAssets) /
+                static_cast<float>(stats.requestedAssets),
+            0.0f,
+            1.0f);
+    const UiRect track {
+        .position = { panel.position.x + 18.0f, panel.position.y + 39.0f },
+        .size = { panel.size.x - 36.0f, 10.0f },
+    };
+    ui_.rect(track, { 0.12f, 0.16f, 0.20f, 1.0f });
+    ui_.rect({
+        .position = track.position,
+        .size = { track.size.x * progress, track.size.y },
+    }, { 0.24f, 0.70f, 0.95f, 1.0f });
+
+    const std::string detail = std::to_string(stats.readyRequestedAssets) +
+        " / " + std::to_string(stats.requestedAssets) +
+        " ready  -  " + std::to_string(pending) + " pending";
+    ui_.centeredText({
+        .position = { panel.position.x, panel.position.y + 53.0f },
+        .size = { panel.size.x, 20.0f },
+    }, detail, { 0.76f, 0.82f, 0.88f, 1.0f }, 15.0f);
+    if (stats.failedAssets > 0) {
+        ui_.centeredText({
+            .position = { panel.position.x, panel.position.y + 76.0f },
+            .size = { panel.size.x, 20.0f },
+        }, "Some art failed to load; fallback visuals are in use.",
+            { 1.0f, 0.72f, 0.38f, 1.0f }, 14.0f);
     }
 }
 
@@ -1440,6 +1504,7 @@ RenderAssetRequirements Application::levelAssetRequirements(int levelIndex) cons
 
 void Application::preloadUpcomingAssets()
 {
+    renderer_.cancelQueuedAssetPrefetches();
     RenderAssetRequirements requirements;
     if (campaign_.inOverworld()) {
         for (int level = 0; level < campaign_.levelCount(); ++level) {

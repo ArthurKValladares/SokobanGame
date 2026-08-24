@@ -375,11 +375,22 @@ Preloading still improves transition quality, but cache misses and dynamically
 introduced assets no longer block the render thread on glTF parsing, image
 decoding, animation parsing, or GPU publication.
 
-There is not yet a player-facing loading presentation, cancellation,
-priorities, memory budgets, or eviction.
+**Streaming controls: Fixed on 2026-08-24.** The player now sees a compact
+loading panel with ready/pending progress and a clear fallback-art warning
+when an asset fails. A bounded scheduler permits two concurrent CPU
+prepare/decode jobs, always promotes frame-visible work over prefetches, and
+cancels untouched prefetches when the active level changes. GPU publication
+remains limited to one resource per frame. Static meshes and sampled textures
+have independent 128 MiB and 256 MiB residency budgets; when a cap is reached,
+the renderer safely evicts least-recently-visible resources after the device
+is idle, refreshes texture descriptors, and leaves the new asset pending when
+all resident assets are still visible. Debug rendering statistics expose the
+queue, active jobs, cancellations, residency use, evictions, and capacity
+blocking.
 
-**Next fix:** Add a player-facing loading presentation, cancellation,
-priorities, and residency budgets before the asset set grows substantially.
+The next scalability step is device-local, suballocated geometry and upload
+rings; the current per-resource allocations remain a throughput concern even
+though total residency is now bounded.
 
 ### P2 — GPU memory and animation architecture will not scale
 
@@ -542,7 +553,8 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 ### Phase 3 — Rendering and asset scalability
 
 1. [Complete] Make asset readiness non-blocking.
-2. Add loading-state presentation, cancellation, priorities, and budgets.
+2. [Complete] Add loading-state presentation, cancellation, priorities, and
+   budgets.
 3. Introduce device-local suballocated geometry storage and staging uploads.
 4. Add persistently mapped upload rings.
 5. Move skinning to the GPU.

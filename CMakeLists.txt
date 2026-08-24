@@ -208,6 +208,7 @@ add_library(sokoban_core STATIC
     src/engine/TileTypes.cpp
     src/engine/Window.cpp
     src/engine/render/AnimationController.cpp
+    src/engine/render/AssetLoadScheduler.cpp
     src/engine/render/GltfMesh.cpp
     src/engine/render/FrameResourceTracker.cpp
     src/engine/render/ImageData.cpp
@@ -558,6 +559,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME asset_requirements TARGET sokoban_asset_requirements_tests
         LIBS sokoban_core
         SOURCES tests/AssetRequirementsTests.cpp
+    )
+    sokoban_add_test(NAME asset_load_scheduler TARGET sokoban_asset_load_scheduler_tests
+        LIBS sokoban_core
+        SOURCES tests/AssetLoadSchedulerTests.cpp
     )
     sokoban_add_test(NAME tasks TARGET sokoban_task_tests
         LIBS sokoban_core

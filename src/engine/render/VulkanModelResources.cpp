@@ -163,32 +163,78 @@ void VulkanModelResources::destroy()
     physicalDevice_ = VK_NULL_HANDLE;
     textureUploadSubmissions_ = 0;
     textureUploadCompletions_ = 0;
+    scheduler_.clear();
+    visibleRequestStamp_ = 0;
+    modelResidencyBytes_ = 0;
+    textureResidencyBytes_ = 0;
+    residencyEvictions_ = 0;
+    residencyBudgetBlocked_ = false;
+    textureDescriptorsDirty_ = false;
 }
 
-void VulkanModelResources::requestAssets(const RenderAssetRequirements& requirements)
+void VulkanModelResources::requestAssets(
+    const RenderAssetRequirements& requirements,
+    AssetLoadPriority priority)
 {
+    if (priority == AssetLoadPriority::Visible) {
+        ++visibleRequestStamp_;
+    }
     for (uint32_t i = 0; i < models_.size(); ++i) {
         const RenderModel model { i + 1 };
         if (requirements.contains(model)) {
-            requestModel(model);
+            queueModel(model, priority);
         }
     }
     for (uint32_t i = 0; i < animations_.size(); ++i) {
         const RenderAnimation animation { i + 1 };
         if (requirements.contains(animation)) {
-            requestAnimation(animation);
+            queueAnimation(animation, priority);
         }
     }
     for (uint32_t i = 0; i < textures_.size(); ++i) {
         if (requirements.contains(RenderTexture { i + 1 })) {
-            requestTexture(i);
+            queueTexture(i, priority);
         }
+    }
+}
+
+void VulkanModelResources::cancelQueuedPrefetches()
+{
+    for (const AssetLoadKey key : scheduler_.cancelQueuedPrefetches()) {
+        resetCancelledAsset(key);
     }
 }
 
 bool VulkanModelResources::waitForAssets(const RenderAssetRequirements& requirements)
 {
     requestAssets(requirements);
+
+    // This is an offline-only path. Let the normal bounded scheduler drain as
+    // each completed job is published; gameplay never waits here.
+    while (scheduler_.queuedCount() != 0 || scheduler_.activeCount() != 0) {
+        startQueuedAssets();
+
+        for (uint32_t i = 0; i < animations_.size(); ++i) {
+            const RenderAnimation animation { i + 1 };
+            if (animations_[i].state == LoadState::Loading) {
+                (void)publishAnimation(animation, true);
+                break;
+            }
+        }
+        for (uint32_t i = 0; i < models_.size(); ++i) {
+            const RenderModel model { i + 1 };
+            if (models_[i].state == LoadState::Loading) {
+                (void)publishModel(model, true);
+                break;
+            }
+        }
+        for (std::size_t i = 0; i < textures_.size(); ++i) {
+            if (textures_[i].state == LoadState::Loading) {
+                (void)publishTexture(i, true);
+                break;
+            }
+        }
+    }
 
     if (requirements.contains(manifest_->playerModel())) {
         (void)publishAnimation(manifest_->playerIdleAnimation(), true);
@@ -206,7 +252,7 @@ bool VulkanModelResources::waitForAssets(const RenderAssetRequirements& requirem
         }
     }
 
-    bool descriptorsChanged = false;
+    bool descriptorsChanged = std::exchange(textureDescriptorsDirty_, false);
     const std::vector<bool> textureRequirements = requiredTextures(requirements);
     for (std::size_t i = 0; i < textureRequirements.size(); ++i) {
         if (!textureRequirements[i]) {
@@ -215,7 +261,8 @@ bool VulkanModelResources::waitForAssets(const RenderAssetRequirements& requirem
         const bool wasPublished = textures_[i].gpu.image.view != VK_NULL_HANDLE;
         (void)publishTexture(i, true);
         descriptorsChanged = descriptorsChanged ||
-            (!wasPublished && textures_[i].gpu.image.view != VK_NULL_HANDLE);
+            (!wasPublished && textures_[i].gpu.image.view != VK_NULL_HANDLE) ||
+            std::exchange(textureDescriptorsDirty_, false);
     }
 
     if (!assetsReady(requirements)) {
@@ -226,6 +273,7 @@ bool VulkanModelResources::waitForAssets(const RenderAssetRequirements& requirem
 
 bool VulkanModelResources::publishReadyAssets(std::size_t maxPublications)
 {
+    startQueuedAssets();
     std::size_t publications = 0;
     bool descriptorsChanged = false;
 
@@ -260,16 +308,21 @@ bool VulkanModelResources::publishReadyAssets(std::size_t maxPublications)
             return descriptorsChanged;
         }
         TextureSlot& slot = textures_[i];
-        if (slot.state != LoadState::Loading || !futureReady(slot.future)) {
+        const bool canPublish =
+            (slot.state == LoadState::Loading && futureReady(slot.future)) ||
+            slot.state == LoadState::CpuReady;
+        if (!canPublish) {
             continue;
         }
         const bool wasPublished = slot.gpu.image.view != VK_NULL_HANDLE;
         if (publishTexture(i, false)) {
             ++publications;
             descriptorsChanged = descriptorsChanged ||
-                (!wasPublished && slot.gpu.image.view != VK_NULL_HANDLE);
+                (!wasPublished && slot.gpu.image.view != VK_NULL_HANDLE) ||
+                std::exchange(textureDescriptorsDirty_, false);
         }
     }
+    startQueuedAssets();
     return descriptorsChanged;
 }
 
@@ -291,13 +344,36 @@ void VulkanModelResources::retireCompletedUploads()
     }
 }
 
-void VulkanModelResources::requestModel(RenderModel model)
+void VulkanModelResources::queueModel(
+    RenderModel model,
+    AssetLoadPriority priority)
+{
+    ModelSlot& slot = models_[model.index()];
+    if (priority == AssetLoadPriority::Visible) {
+        slot.lastRequested = visibleRequestStamp_;
+    }
+    if (slot.state == LoadState::Unrequested) {
+        slot.state = LoadState::Queued;
+        scheduler_.request({
+            AssetLoadKind::Model,
+            static_cast<uint32_t>(model.index()),
+        }, priority);
+    } else if (slot.state == LoadState::Queued) {
+        scheduler_.request({
+            AssetLoadKind::Model,
+            static_cast<uint32_t>(model.index()),
+        }, priority);
+    }
+
+    queueModelDependencies(model, priority);
+}
+
+void VulkanModelResources::startModel(RenderModel model)
 {
     const AssetManifest::Model& definition = manifest_->model(model);
     ModelSlot& slot = models_[model.index()];
-    if (slot.state != LoadState::Unrequested) {
-        requestModelDependencies(model);
-        return;
+    if (slot.state != LoadState::Queued) {
+        throw std::logic_error("Started a model asset that was not queued");
     }
 
     const std::filesystem::path path = assetRoot_ / definition.path;
@@ -338,17 +414,38 @@ void VulkanModelResources::requestModel(RenderModel model)
             return loadGltfMesh(path, options);
         });
     slot.state = LoadState::Loading;
-    requestModelDependencies(model);
 }
 
-void VulkanModelResources::requestTexture(std::size_t textureIndex)
+void VulkanModelResources::queueTexture(
+    std::size_t textureIndex,
+    AssetLoadPriority priority)
 {
     if (textureIndex >= textures_.size()) {
         throw std::runtime_error("Model material references an invalid texture index");
     }
     TextureSlot& slot = textures_[textureIndex];
-    if (slot.state != LoadState::Unrequested) {
-        return;
+    if (priority == AssetLoadPriority::Visible) {
+        slot.lastRequested = visibleRequestStamp_;
+    }
+    if (slot.state == LoadState::Unrequested) {
+        slot.state = LoadState::Queued;
+        scheduler_.request({
+            AssetLoadKind::Texture,
+            static_cast<uint32_t>(textureIndex),
+        }, priority);
+    } else if (slot.state == LoadState::Queued) {
+        scheduler_.request({
+            AssetLoadKind::Texture,
+            static_cast<uint32_t>(textureIndex),
+        }, priority);
+    }
+}
+
+void VulkanModelResources::startTexture(std::size_t textureIndex)
+{
+    TextureSlot& slot = textures_[textureIndex];
+    if (slot.state != LoadState::Queued) {
+        throw std::logic_error("Started a texture asset that was not queued");
     }
 
     const std::filesystem::path path =
@@ -359,12 +456,34 @@ void VulkanModelResources::requestTexture(std::size_t textureIndex)
     slot.state = LoadState::Loading;
 }
 
-void VulkanModelResources::requestAnimation(RenderAnimation animation)
+void VulkanModelResources::queueAnimation(
+    RenderAnimation animation,
+    AssetLoadPriority priority)
+{
+    AnimationSlot& slot = animations_[animation.index()];
+    if (priority == AssetLoadPriority::Visible) {
+        slot.lastRequested = visibleRequestStamp_;
+    }
+    if (slot.state == LoadState::Unrequested) {
+        slot.state = LoadState::Queued;
+        scheduler_.request({
+            AssetLoadKind::Animation,
+            static_cast<uint32_t>(animation.index()),
+        }, priority);
+    } else if (slot.state == LoadState::Queued) {
+        scheduler_.request({
+            AssetLoadKind::Animation,
+            static_cast<uint32_t>(animation.index()),
+        }, priority);
+    }
+}
+
+void VulkanModelResources::startAnimation(RenderAnimation animation)
 {
     const AssetManifest::Animation& definition = manifest_->animation(animation);
     AnimationSlot& slot = animations_[animation.index()];
-    if (slot.state != LoadState::Unrequested) {
-        return;
+    if (slot.state != LoadState::Queued) {
+        throw std::logic_error("Started an animation asset that was not queued");
     }
 
     const std::filesystem::path path = assetRoot_ / definition.path;
@@ -376,20 +495,80 @@ void VulkanModelResources::requestAnimation(RenderAnimation animation)
     slot.state = LoadState::Loading;
 }
 
-void VulkanModelResources::requestModelDependencies(RenderModel model)
+void VulkanModelResources::queueModelDependencies(
+    RenderModel model,
+    AssetLoadPriority priority)
 {
     const AssetManifest::Model& definition = manifest_->model(model);
     if (definition.materialMode == ModelMaterialMode::SingleTexture) {
-        requestTexture(definition.textureIndex);
+        queueTexture(definition.textureIndex, priority);
     } else if (definition.materialMode == ModelMaterialMode::PrimitiveMaterials) {
         for (const AssetManifest::Model::PrimitiveMaterial& material :
              definition.primitiveMaterials) {
-            requestTexture(material.textureIndex);
+            queueTexture(material.textureIndex, priority);
         }
     }
     if (definition.geometry == ModelGeometry::Skinned) {
-        requestAnimation(manifest_->playerIdleAnimation());
+        queueAnimation(manifest_->playerIdleAnimation(), priority);
     }
+}
+
+void VulkanModelResources::startQueuedAssets()
+{
+    while (const std::optional<AssetLoadKey> key = scheduler_.beginNext()) {
+        try {
+            startAsset(*key);
+        } catch (...) {
+            scheduler_.complete(*key);
+            resetCancelledAsset(*key);
+            throw;
+        }
+    }
+}
+
+void VulkanModelResources::startAsset(AssetLoadKey key)
+{
+    switch (key.kind) {
+    case AssetLoadKind::Model:
+        startModel(RenderModel { key.index + 1 });
+        return;
+    case AssetLoadKind::Animation:
+        startAnimation(RenderAnimation { key.index + 1 });
+        return;
+    case AssetLoadKind::Texture:
+        startTexture(key.index);
+        return;
+    }
+    throw std::logic_error("Unknown queued asset type");
+}
+
+void VulkanModelResources::resetCancelledAsset(AssetLoadKey key)
+{
+    switch (key.kind) {
+    case AssetLoadKind::Model:
+        if (key.index < models_.size() &&
+            models_[key.index].state == LoadState::Queued) {
+            models_[key.index] = {};
+        }
+        return;
+    case AssetLoadKind::Animation:
+        if (key.index < animations_.size() &&
+            animations_[key.index].state == LoadState::Queued) {
+            animations_[key.index] = {};
+        }
+        return;
+    case AssetLoadKind::Texture:
+        if (key.index < textures_.size() &&
+            textures_[key.index].state == LoadState::Queued) {
+            textures_[key.index] = {};
+        }
+        return;
+    }
+}
+
+void VulkanModelResources::completeCpuJob(AssetLoadKey key)
+{
+    scheduler_.complete(key);
 }
 
 bool VulkanModelResources::publishModel(RenderModel model, bool wait)
@@ -405,21 +584,29 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
         }
         return false;
     }
-    if (slot.state == LoadState::Unrequested) {
-        if (!wait) {
-            return false;
-        }
-        requestModel(model);
+    if (slot.state == LoadState::Unrequested ||
+        slot.state == LoadState::Queued) {
+        return false;
     }
     if (slot.state == LoadState::CpuReady) {
         try {
-            if (!slot.prepared ||
-                !std::holds_alternative<SkinnedMeshData>(*slot.prepared)) {
-                throw std::runtime_error(
-                    "Skinned manifest entry did not prepare a skinned mesh");
+            if (!slot.prepared) {
+                throw std::runtime_error("Model publication lost its prepared mesh");
             }
-            slot.skinnedSource = std::make_shared<SkinnedMeshData>(
-                std::move(std::get<SkinnedMeshData>(*slot.prepared)));
+            if (std::holds_alternative<MeshData>(*slot.prepared)) {
+                const MeshData& mesh = std::get<MeshData>(*slot.prepared);
+                const uint64_t bytes = meshBytes(mesh);
+                if (!makeModelResident(model, bytes)) {
+                    return false;
+                }
+                slot.bounds = boundsOf(mesh.vertices);
+                slot.gpu = uploadMesh(mesh);
+                slot.gpuBytes = bytes;
+                modelResidencyBytes_ += bytes;
+            } else {
+                slot.skinnedSource = std::make_shared<SkinnedMeshData>(
+                    std::move(std::get<SkinnedMeshData>(*slot.prepared)));
+            }
             slot.prepared.reset();
             slot.state = LoadState::Ready;
         } catch (...) {
@@ -434,24 +621,19 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
         }
         return slot.state == LoadState::Ready || slot.state == LoadState::Failed;
     }
-    if (!wait && !futureReady(slot.future)) {
+    if (slot.state != LoadState::Loading ||
+        (!wait && !futureReady(slot.future))) {
         return false;
     }
 
     try {
+        completeCpuJob({
+            AssetLoadKind::Model,
+            static_cast<uint32_t>(model.index()),
+        });
         slot.prepared = slot.future.get();
         slot.state = LoadState::CpuReady;
-        if (std::holds_alternative<MeshData>(*slot.prepared)) {
-            const MeshData& mesh = std::get<MeshData>(*slot.prepared);
-            // Last chance: prepared is released on the next line.
-            slot.bounds = boundsOf(mesh.vertices);
-            slot.gpu = uploadMesh(mesh);
-            slot.prepared.reset();
-            slot.state = LoadState::Ready;
-        } else {
-            // Skinned meshes keep their own source extent, and take a
-            // different path to Ready - without this the player would never
-            // get bounds and so never get a palette thumbnail.
+        if (std::holds_alternative<SkinnedMeshData>(*slot.prepared)) {
             const SkinnedMeshData& skinned =
                 std::get<SkinnedMeshData>(*slot.prepared);
             slot.bounds = {
@@ -459,11 +641,8 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                 .maximum = skinned.sourceMaximum,
                 .valid = true,
             };
-            slot.skinnedSource = std::make_shared<SkinnedMeshData>(
-                std::move(std::get<SkinnedMeshData>(*slot.prepared)));
-            slot.prepared.reset();
-            slot.state = LoadState::Ready;
         }
+        return publishModel(model, wait);
     } catch (...) {
         slot.failure = std::current_exception();
         slot.state = LoadState::Failed;
@@ -491,18 +670,50 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
         }
         return false;
     }
-    if (slot.state == LoadState::Unrequested) {
-        if (!wait) {
-            return false;
-        }
-        requestTexture(textureIndex);
+    if (slot.state == LoadState::Unrequested ||
+        slot.state == LoadState::Queued) {
+        return false;
     }
-    if (!wait && !futureReady(slot.future)) {
+    if (slot.state == LoadState::Loading &&
+        !wait && !futureReady(slot.future)) {
+        return false;
+    }
+
+    if (slot.state == LoadState::Loading) {
+        try {
+            completeCpuJob({
+                AssetLoadKind::Texture,
+                static_cast<uint32_t>(textureIndex),
+            });
+            slot.prepared = slot.future.get();
+            slot.state = LoadState::CpuReady;
+        } catch (...) {
+            if (!slot.upload.submitted) {
+                destroyTextureUpload(slot.upload);
+                destroyTexture(slot.gpu.image, slot.gpu.sampler);
+            }
+            slot.failure = std::current_exception();
+            slot.state = LoadState::Failed;
+            if (wait) {
+                throwIfFailed(slot.state, slot.failure, path, "texture");
+            }
+            log::error(log::Category::Assets)
+                << "Background texture preparation failed: "
+                << path.string();
+            return true;
+        }
+    }
+
+    if (slot.state != LoadState::CpuReady || !slot.prepared) {
         return false;
     }
 
     try {
-        const ImageData image = slot.future.get();
+        const ImageData& image = *slot.prepared;
+        const uint64_t bytes = textureBytes(image);
+        if (!makeTextureResident(textureIndex, bytes)) {
+            return false;
+        }
         beginTextureUpload(
             image,
             slot.gpu.image,
@@ -511,6 +722,9 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
             samplingFor(manifest_->textures()[textureIndex]));
         slot.gpu.width = image.width;
         slot.gpu.height = image.height;
+        slot.gpuBytes = bytes;
+        textureResidencyBytes_ += bytes;
+        slot.prepared.reset();
         slot.state = LoadState::Uploading;
         ++textureUploadSubmissions_;
     } catch (...) {
@@ -530,6 +744,130 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
     return true;
 }
 
+uint64_t VulkanModelResources::meshBytes(const MeshData& mesh)
+{
+    return static_cast<uint64_t>(sizeof(MeshVertex)) * mesh.vertices.size() +
+        static_cast<uint64_t>(sizeof(uint32_t)) * mesh.indices.size();
+}
+
+uint64_t VulkanModelResources::textureBytes(const ImageData& image)
+{
+    // Linear-filtered textures may generate a full mip chain. Four thirds of
+    // the base level is a conservative estimate and keeps the residency cap
+    // meaningful even before the Vulkan allocation is created.
+    const uint64_t base = image.rgba.size();
+    return base + base / 3U;
+}
+
+bool VulkanModelResources::makeModelResident(
+    RenderModel protectedModel,
+    uint64_t requiredBytes)
+{
+    const uint64_t budget = scheduler_.budget().modelResidencyBytes;
+    if (requiredBytes > budget) {
+        residencyBudgetBlocked_ = true;
+        return false;
+    }
+    if (modelResidencyBytes_ + requiredBytes <= budget) {
+        return true;
+    }
+
+    auto findVictim = [&]() -> std::optional<std::size_t> {
+        std::optional<std::size_t> victim;
+        for (std::size_t index = 0; index < models_.size(); ++index) {
+            const ModelSlot& slot = models_[index];
+            if (index == protectedModel.index() ||
+                slot.state != LoadState::Ready || slot.gpuBytes == 0 ||
+                (visibleRequestStamp_ != 0 &&
+                    slot.lastRequested == visibleRequestStamp_)) {
+                continue;
+            }
+            if (!victim ||
+                slot.lastRequested < models_[*victim].lastRequested) {
+                victim = index;
+            }
+        }
+        return victim;
+    };
+    if (!findVictim()) {
+        residencyBudgetBlocked_ = true;
+        return false;
+    }
+
+    // A descriptor set in another in-flight frame may still reference a
+    // candidate. Eviction is rare and only happens at the hard cap, so the
+    // explicit idle is a safer trade-off than use-after-free GPU resources.
+    vkCheck(vkDeviceWaitIdle(device_), "vkDeviceWaitIdle model residency eviction failed");
+    while (modelResidencyBytes_ + requiredBytes > budget) {
+        const std::optional<std::size_t> victim = findVictim();
+        if (!victim) {
+            residencyBudgetBlocked_ = true;
+            return false;
+        }
+        ModelSlot& slot = models_[*victim];
+        modelResidencyBytes_ -= slot.gpuBytes;
+        destroyMesh(slot.gpu);
+        slot = {};
+        ++residencyEvictions_;
+    }
+    residencyBudgetBlocked_ = false;
+    return true;
+}
+
+bool VulkanModelResources::makeTextureResident(
+    std::size_t protectedTexture,
+    uint64_t requiredBytes)
+{
+    const uint64_t budget = scheduler_.budget().textureResidencyBytes;
+    if (requiredBytes > budget) {
+        residencyBudgetBlocked_ = true;
+        return false;
+    }
+    if (textureResidencyBytes_ + requiredBytes <= budget) {
+        return true;
+    }
+
+    auto findVictim = [&]() -> std::optional<std::size_t> {
+        std::optional<std::size_t> victim;
+        for (std::size_t index = 0; index < textures_.size(); ++index) {
+            const TextureSlot& slot = textures_[index];
+            if (index == protectedTexture ||
+                slot.state != LoadState::Ready || slot.gpuBytes == 0 ||
+                (visibleRequestStamp_ != 0 &&
+                    slot.lastRequested == visibleRequestStamp_)) {
+                continue;
+            }
+            if (!victim ||
+                slot.lastRequested < textures_[*victim].lastRequested) {
+                victim = index;
+            }
+        }
+        return victim;
+    };
+    if (!findVictim()) {
+        residencyBudgetBlocked_ = true;
+        return false;
+    }
+
+    vkCheck(vkDeviceWaitIdle(device_), "vkDeviceWaitIdle texture residency eviction failed");
+    retireCompletedUploads();
+    while (textureResidencyBytes_ + requiredBytes > budget) {
+        const std::optional<std::size_t> victim = findVictim();
+        if (!victim) {
+            residencyBudgetBlocked_ = true;
+            return false;
+        }
+        TextureSlot& slot = textures_[*victim];
+        textureResidencyBytes_ -= slot.gpuBytes;
+        destroyTexture(slot.gpu.image, slot.gpu.sampler);
+        slot = {};
+        textureDescriptorsDirty_ = true;
+        ++residencyEvictions_;
+    }
+    residencyBudgetBlocked_ = false;
+    return true;
+}
+
 bool VulkanModelResources::publishAnimation(RenderAnimation animation, bool wait)
 {
     AnimationSlot& slot = animations_[animation.index()];
@@ -544,17 +882,19 @@ bool VulkanModelResources::publishAnimation(RenderAnimation animation, bool wait
         }
         return false;
     }
-    if (slot.state == LoadState::Unrequested) {
-        if (!wait) {
-            return false;
-        }
-        requestAnimation(animation);
+    if (slot.state == LoadState::Unrequested ||
+        slot.state == LoadState::Queued) {
+        return false;
     }
     if (!wait && !futureReady(slot.future)) {
         return false;
     }
 
     try {
+        completeCpuJob({
+            AssetLoadKind::Animation,
+            static_cast<uint32_t>(animation.index()),
+        });
         animationController_.setClip(animation, slot.future.get());
         slot.state = LoadState::Ready;
     } catch (...) {
@@ -767,7 +1107,9 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
     auto countState = [&result](LoadState state, uint32_t& loaded, uint32_t& pending) {
         if (state == LoadState::Ready) {
             ++loaded;
+            ++result.readyRequestedAssets;
         } else if (state == LoadState::Loading ||
+            state == LoadState::Queued ||
             state == LoadState::CpuReady ||
             state == LoadState::Uploading) {
             ++pending;
@@ -777,16 +1119,28 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
     };
     for (const ModelSlot& model : models_) {
         countState(model.state, result.loadedModels, result.pendingModels);
+        result.requestedAssets += model.state != LoadState::Unrequested;
     }
     for (const TextureSlot& texture : textures_) {
         countState(texture.state, result.loadedTextures, result.pendingTextures);
+        result.requestedAssets += texture.state != LoadState::Unrequested;
         if (texture.state == LoadState::Uploading) {
             ++result.uploadingTextures;
         }
     }
     for (const AnimationSlot& animation : animations_) {
         countState(animation.state, result.loadedAnimations, result.pendingAnimations);
+        result.requestedAssets += animation.state != LoadState::Unrequested;
     }
+    result.queuedAssets = static_cast<uint32_t>(scheduler_.queuedCount());
+    result.activeCpuJobs = static_cast<uint32_t>(scheduler_.activeCount());
+    result.cancelledPrefetches = scheduler_.cancelledPrefetchCount();
+    result.modelResidencyBytes = modelResidencyBytes_;
+    result.textureResidencyBytes = textureResidencyBytes_;
+    result.modelResidencyBudgetBytes = scheduler_.budget().modelResidencyBytes;
+    result.textureResidencyBudgetBytes = scheduler_.budget().textureResidencyBytes;
+    result.residencyEvictions = residencyEvictions_;
+    result.residencyBudgetBlocked = residencyBudgetBlocked_;
     result.textureUploadSubmissions = textureUploadSubmissions_;
     result.textureUploadCompletions = textureUploadCompletions_;
     return result;

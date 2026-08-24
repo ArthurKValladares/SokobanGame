@@ -90,6 +90,9 @@ public:
     // Queues missing content and returns immediately. Ready assets are
     // published incrementally during drawFrame().
     void preloadAssets(const RenderAssetRequirements& requirements);
+    // Cancels only prefetch jobs that have not started. Visible work and
+    // already-running preparation are preserved.
+    void cancelQueuedAssetPrefetches();
     void ensureAssets(const RenderAssetRequirements& requirements);
     // Deliberately blocking path for offline tools; never use for gameplay.
     void waitForAssets(const RenderAssetRequirements& requirements);

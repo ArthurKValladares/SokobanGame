@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/AssetManifest.hpp"
+#include "engine/render/AssetLoadScheduler.hpp"
 #include "engine/render/ImageData.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/SkinnedMeshUpdater.hpp"
@@ -60,6 +61,17 @@ public:
         uint32_t pendingAnimations = 0;
         uint32_t totalAnimations = 0;
         uint32_t failedAssets = 0;
+        uint32_t requestedAssets = 0;
+        uint32_t readyRequestedAssets = 0;
+        uint32_t queuedAssets = 0;
+        uint32_t activeCpuJobs = 0;
+        uint64_t cancelledPrefetches = 0;
+        uint64_t modelResidencyBytes = 0;
+        uint64_t textureResidencyBytes = 0;
+        uint64_t modelResidencyBudgetBytes = 0;
+        uint64_t textureResidencyBudgetBytes = 0;
+        uint64_t residencyEvictions = 0;
+        bool residencyBudgetBlocked = false;
         uint32_t uploadingTextures = 0;
         uint64_t textureUploadSubmissions = 0;
         uint64_t textureUploadCompletions = 0;
@@ -82,8 +94,14 @@ public:
         const AssetManifest& manifest);
     void destroy();
 
-    // Starts independent CPU tasks and returns immediately.
-    void requestAssets(const RenderAssetRequirements& requirements);
+    // Queues independent CPU work and returns immediately. Visible requests
+    // always preempt speculative prefetches when a worker slot opens.
+    void requestAssets(
+        const RenderAssetRequirements& requirements,
+        AssetLoadPriority priority = AssetLoadPriority::Visible);
+    // Drops prefetches that have not started, such as those for a screen the
+    // player just left. Active filesystem work is allowed to finish safely.
+    void cancelQueuedPrefetches();
     // Explicitly blocking path for offline tooling such as thumbnail baking.
     // Normal gameplay must use requestAssets() and publishReadyAssets().
     // Texture uploads are queued but never waited here. Returns true when
@@ -142,6 +160,7 @@ public:
 private:
     enum class LoadState {
         Unrequested,
+        Queued,
         Loading,
         CpuReady,
         Uploading,
@@ -195,6 +214,8 @@ private:
         // Captured at upload, because the CPU mesh is released immediately
         // afterwards and nothing else keeps it.
         ModelBounds bounds {};
+        uint64_t lastRequested = 0;
+        uint64_t gpuBytes = 0;
     };
 
     struct TextureSlot {
@@ -202,19 +223,38 @@ private:
         TextureResource gpu {};
         PendingTextureUpload upload {};
         std::future<ImageData> future;
+        std::optional<ImageData> prepared;
         std::exception_ptr failure;
+        uint64_t lastRequested = 0;
+        uint64_t gpuBytes = 0;
     };
 
     struct AnimationSlot {
         LoadState state = LoadState::Unrequested;
         std::future<GltfAnimationClip> future;
         std::exception_ptr failure;
+        uint64_t lastRequested = 0;
     };
 
-    void requestModel(RenderModel model);
-    void requestTexture(std::size_t textureIndex);
-    void requestAnimation(RenderAnimation animation);
-    void requestModelDependencies(RenderModel model);
+    void queueModel(RenderModel model, AssetLoadPriority priority);
+    void queueTexture(std::size_t textureIndex, AssetLoadPriority priority);
+    void queueAnimation(RenderAnimation animation, AssetLoadPriority priority);
+    void queueModelDependencies(RenderModel model, AssetLoadPriority priority);
+    void startQueuedAssets();
+    void startAsset(AssetLoadKey key);
+    void startModel(RenderModel model);
+    void startTexture(std::size_t textureIndex);
+    void startAnimation(RenderAnimation animation);
+    void resetCancelledAsset(AssetLoadKey key);
+    void completeCpuJob(AssetLoadKey key);
+    [[nodiscard]] bool makeModelResident(
+        RenderModel protectedModel,
+        uint64_t requiredBytes);
+    [[nodiscard]] bool makeTextureResident(
+        std::size_t protectedTexture,
+        uint64_t requiredBytes);
+    [[nodiscard]] static uint64_t meshBytes(const MeshData& mesh);
+    [[nodiscard]] static uint64_t textureBytes(const ImageData& image);
 
     [[nodiscard]] bool publishModel(RenderModel model, bool wait);
     [[nodiscard]] bool publishTexture(std::size_t textureIndex, bool wait);
@@ -310,6 +350,13 @@ private:
         skinnedInstances_;
     uint64_t textureUploadSubmissions_ = 0;
     uint64_t textureUploadCompletions_ = 0;
+    AssetLoadScheduler scheduler_ {};
+    uint64_t visibleRequestStamp_ = 0;
+    uint64_t modelResidencyBytes_ = 0;
+    uint64_t textureResidencyBytes_ = 0;
+    uint64_t residencyEvictions_ = 0;
+    bool residencyBudgetBlocked_ = false;
+    bool textureDescriptorsDirty_ = false;
 };
 
 } // namespace sokoban

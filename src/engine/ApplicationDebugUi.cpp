@@ -681,6 +681,24 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             assetStats.loadedAnimations,
             assetStats.totalAnimations,
             assetStats.pendingAnimations);
+        ImGui::Text(
+            "Streaming %u requested, %u ready, %u queued, %u CPU jobs",
+            assetStats.requestedAssets,
+            assetStats.readyRequestedAssets,
+            assetStats.queuedAssets,
+            assetStats.activeCpuJobs);
+        ImGui::Text(
+            "Cancelled stale prefetches %llu",
+            static_cast<unsigned long long>(
+                assetStats.cancelledPrefetches));
+        ImGui::Text(
+            "Asset residency %.1f / %.1f MiB meshes, %.1f / %.1f MiB textures (%llu evictions)%s",
+            static_cast<double>(assetStats.modelResidencyBytes) / (1024.0 * 1024.0),
+            static_cast<double>(assetStats.modelResidencyBudgetBytes) / (1024.0 * 1024.0),
+            static_cast<double>(assetStats.textureResidencyBytes) / (1024.0 * 1024.0),
+            static_cast<double>(assetStats.textureResidencyBudgetBytes) / (1024.0 * 1024.0),
+            static_cast<unsigned long long>(assetStats.residencyEvictions),
+            assetStats.residencyBudgetBlocked ? ", capacity blocked" : "");
         if (assetStats.failedAssets > 0) {
             ImGui::Text("Asset load failures %u", assetStats.failedAssets);
         }
