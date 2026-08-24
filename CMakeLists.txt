@@ -216,6 +216,7 @@ add_library(sokoban_core STATIC
     src/engine/render/PngWriter.cpp
     src/engine/render/RenderAssetRequirements.cpp
     src/engine/render/RenderResolution.cpp
+    src/engine/render/UploadRingAllocator.cpp
     src/engine/render/RendererReconfiguration.cpp
     src/engine/render/IsoScenePreparer.cpp
 )
@@ -270,6 +271,7 @@ add_library(sokoban_render_vulkan STATIC
     src/engine/render/VulkanGpuProfiler.cpp
     src/engine/render/VulkanGeometryArena.cpp
     src/engine/render/VulkanModelResources.cpp
+    src/engine/render/VulkanUploadRing.cpp
     src/engine/render/VulkanPipelineCache.cpp
     src/engine/render/VulkanPipelineFactory.cpp
     src/engine/render/VulkanResourceUtils.cpp
@@ -569,6 +571,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME geometry_suballocator TARGET sokoban_geometry_suballocator_tests
         LIBS sokoban_core
         SOURCES tests/GeometrySuballocatorTests.cpp
+    )
+    sokoban_add_test(NAME upload_ring_allocator TARGET sokoban_upload_ring_allocator_tests
+        LIBS sokoban_core
+        SOURCES tests/UploadRingAllocatorTests.cpp
     )
     sokoban_add_test(NAME tasks TARGET sokoban_task_tests
         LIBS sokoban_core

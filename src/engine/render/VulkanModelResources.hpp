@@ -6,6 +6,7 @@
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/SkinnedMeshUpdater.hpp"
 #include "engine/render/VulkanGeometryArena.hpp"
+#include "engine/render/VulkanUploadRing.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -14,7 +15,6 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
-#include <string_view>
 #include <future>
 #include <memory>
 #include <optional>
@@ -169,11 +169,6 @@ private:
         Failed,
     };
 
-    struct OwnedBuffer {
-        VkBuffer buffer = VK_NULL_HANDLE;
-        VkDeviceMemory memory = VK_NULL_HANDLE;
-    };
-
     struct OwnedImage {
         VkImage image = VK_NULL_HANDLE;
         VkDeviceMemory memory = VK_NULL_HANDLE;
@@ -196,7 +191,7 @@ private:
     };
 
     struct PendingTextureUpload {
-        OwnedBuffer staging {};
+        VulkanUploadRing::Reservation staging {};
         VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
         VkFence fence = VK_NULL_HANDLE;
         bool submitted = false;
@@ -303,16 +298,11 @@ private:
         const ImageData& image,
         OwnedImage& gpuImage,
         PendingTextureUpload& upload);
-    void destroyTextureUpload(PendingTextureUpload& upload) const;
+    void destroyTextureUpload(PendingTextureUpload& upload);
     void destroyTexture(OwnedImage& image, VkSampler& sampler);
     void destroyMesh(GpuMesh& mesh);
     [[nodiscard]] const GpuMesh& gpuMeshForModel(RenderModel model) const;
     [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
-    [[nodiscard]] OwnedBuffer createBuffer(
-        VkDeviceSize size,
-        VkBufferUsageFlags usage,
-        VkMemoryPropertyFlags properties,
-        std::string_view debugName) const;
     [[nodiscard]] VkImageView createImageView(
         VkImage image,
         VkFormat format,
@@ -330,6 +320,7 @@ private:
     std::vector<AnimationSlot> animations_; // indexed by RenderAnimation::index()
     std::vector<TextureSlot> textures_;
     TextureResource fallbackTexture_ {};
+    VulkanUploadRing uploadRing_ {};
     VulkanGeometryArena geometryArena_ {};
     AnimationController animationController_ {};
     struct AnimatedMeshKey {

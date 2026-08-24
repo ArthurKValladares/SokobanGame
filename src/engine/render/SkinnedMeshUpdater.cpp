@@ -44,11 +44,10 @@ void SkinnedMeshUpdater::create(
 
         uploadVertices(initialMesh.vertices);
         const VkDeviceSize indexBytes = sizeof(uint32_t) * initialMesh.indices.size();
-        void* mapped = nullptr;
-        vkCheck(vkMapMemory(device_, indexBuffer_.memory, 0, indexBytes, 0, &mapped),
-            "vkMapMemory skinned index buffer failed");
-        std::memcpy(mapped, initialMesh.indices.data(), static_cast<std::size_t>(indexBytes));
-        vkUnmapMemory(device_, indexBuffer_.memory);
+        std::memcpy(
+            indexBuffer_.mapped,
+            initialMesh.indices.data(),
+            static_cast<std::size_t>(indexBytes));
     } catch (...) {
         destroy();
         throw;
@@ -58,11 +57,17 @@ void SkinnedMeshUpdater::create(
 void SkinnedMeshUpdater::destroy()
 {
     if (device_) {
+        if (indexBuffer_.mapped) {
+            vkUnmapMemory(device_, indexBuffer_.memory);
+        }
         if (indexBuffer_.buffer) {
             vkDestroyBuffer(device_, indexBuffer_.buffer, nullptr);
         }
         if (indexBuffer_.memory) {
             vkFreeMemory(device_, indexBuffer_.memory, nullptr);
+        }
+        if (vertexBuffer_.mapped) {
+            vkUnmapMemory(device_, vertexBuffer_.memory);
         }
         if (vertexBuffer_.buffer) {
             vkDestroyBuffer(device_, vertexBuffer_.buffer, nullptr);
@@ -101,8 +106,8 @@ void SkinnedMeshUpdater::update(const AnimationController::SkinningRequest& requ
 
 bool SkinnedMeshUpdater::valid() const
 {
-    return vertexBuffer_.buffer && vertexBuffer_.memory &&
-        indexBuffer_.buffer && indexBuffer_.memory &&
+    return vertexBuffer_.buffer && vertexBuffer_.memory && vertexBuffer_.mapped &&
+        indexBuffer_.buffer && indexBuffer_.memory && indexBuffer_.mapped &&
         vertexCount_ > 0 && indexCount_ > 0;
 }
 
@@ -173,6 +178,14 @@ SkinnedMeshUpdater::OwnedBuffer SkinnedMeshUpdater::createBuffer(
         vkDestroyBuffer(device_, result.buffer, nullptr);
         vkCheck(bindResult, "vkBindBufferMemory skinned mesh failed");
     }
+    const VkResult mapResult =
+        vkMapMemory(device_, result.memory, 0, size, 0, &result.mapped);
+    if (mapResult != VK_SUCCESS) {
+        vkFreeMemory(device_, result.memory, nullptr);
+        vkDestroyBuffer(device_, result.buffer, nullptr);
+        result = {};
+        vkCheck(mapResult, "vkMapMemory skinned mesh failed");
+    }
     return result;
 }
 
@@ -183,11 +196,10 @@ void SkinnedMeshUpdater::uploadVertices(const std::vector<MeshVertex>& vertices)
     }
 
     const VkDeviceSize vertexBytes = sizeof(MeshVertex) * vertices.size();
-    void* mapped = nullptr;
-    vkCheck(vkMapMemory(device_, vertexBuffer_.memory, 0, vertexBytes, 0, &mapped),
-        "vkMapMemory skinned vertex buffer failed");
-    std::memcpy(mapped, vertices.data(), static_cast<std::size_t>(vertexBytes));
-    vkUnmapMemory(device_, vertexBuffer_.memory);
+    std::memcpy(
+        vertexBuffer_.mapped,
+        vertices.data(),
+        static_cast<std::size_t>(vertexBytes));
 }
 
 } // namespace sokoban

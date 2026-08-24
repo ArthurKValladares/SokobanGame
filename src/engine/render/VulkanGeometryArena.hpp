@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/render/GeometrySuballocator.hpp"
+#include "engine/render/VulkanUploadRing.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -12,8 +13,8 @@ namespace sokoban {
 struct MeshData;
 
 // Owns lazily-created device-local geometry blocks. Static meshes receive
-// suballocated slices and arrive there through a short-lived host-visible
-// staging upload. Dynamic skinning intentionally remains separate until its
+// suballocated slices and arrive there through a shared persistently mapped
+// upload ring. Dynamic skinning intentionally remains separate until its
 // GPU implementation replaces the CPU updater.
 class VulkanGeometryArena {
 public:
@@ -30,8 +31,7 @@ public:
     };
 
     struct Upload {
-        VkBuffer stagingBuffer = VK_NULL_HANDLE;
-        VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+        VulkanUploadRing::Reservation staging {};
         VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
         VkFence fence = VK_NULL_HANDLE;
         bool submitted = false;
@@ -47,7 +47,8 @@ public:
         VkPhysicalDevice physicalDevice,
         VkDevice device,
         VkCommandPool commandPool,
-        VkQueue graphicsQueue);
+        VkQueue graphicsQueue,
+        VulkanUploadRing& uploadRing);
     void destroy();
 
     [[nodiscard]] Allocation allocate(
@@ -92,6 +93,7 @@ private:
     VkDevice device_ = VK_NULL_HANDLE;
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
+    VulkanUploadRing* uploadRing_ = nullptr;
     std::vector<Block> vertexBlocks_;
     std::vector<Block> indexBlocks_;
 };

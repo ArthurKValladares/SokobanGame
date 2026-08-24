@@ -12,7 +12,8 @@ namespace sokoban {
 
 // Owns one skinned source mesh and its dynamic Vulkan vertex/index buffers.
 // AnimationController decides what to sample; this class performs the CPU
-// skinning and uploads the resulting vertices.
+// skinning and writes the resulting vertices into persistently mapped dynamic
+// buffers. GPU skinning will replace this CPU path in the next phase.
 class SkinnedMeshUpdater {
 public:
     struct MeshView {
@@ -44,6 +45,7 @@ private:
     struct OwnedBuffer {
         VkBuffer buffer = VK_NULL_HANDLE;
         VkDeviceMemory memory = VK_NULL_HANDLE;
+        void* mapped = nullptr;
     };
 
     [[nodiscard]] uint32_t findMemoryType(

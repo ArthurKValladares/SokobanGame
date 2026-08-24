@@ -388,35 +388,30 @@ all resident assets are still visible. Debug rendering statistics expose the
 queue, active jobs, cancellations, residency use, evictions, and capacity
 blocking.
 
-The next scalability step is device-local, suballocated geometry and upload
-rings; the current per-resource allocations remain a throughput concern even
-though total residency is now bounded.
+The device-local geometry and mapped upload-ring work resolves the current
+per-resource allocation churn. The next material scalability work is GPU
+skinning, then batching and instancing.
 
 ### P2 — GPU memory and animation architecture will not scale
 
-**Static geometry storage: Fixed on 2026-08-24.** Static meshes now occupy
-aligned slices of lazily-created device-local vertex and index blocks rather
-than owning a pair of host-visible allocations. Each mesh is copied through a
-short-lived staging buffer and transfer submission, then becomes drawable only
-after its upload fence signals. The copy command includes an explicit
-transfer-write to vertex/index-read barrier, and eviction returns slices to a
-unit-tested, coalescing free-list allocator. Skinned meshes intentionally
-retain their dynamic CPU-upload path until the later GPU-skinning milestone.
+**Static geometry and texture uploads: Fixed on 2026-08-24.** Static meshes
+occupy aligned slices of lazily-created device-local vertex and index blocks.
+Geometry and texture publication share one 64 MiB host-visible, coherent
+transfer buffer that stays mapped for the renderer lifetime. A reservation is
+committed only after its transfer submission succeeds and is reclaimed only
+after that submission's fence signals. The allocator handles out-of-order
+completion notifications without exposing an earlier range for reuse first.
+This removes the per-upload staging-buffer allocation, memory allocation, and
+map/unmap churn. The geometry copy still includes an explicit transfer-write to
+vertex/index-read barrier, and eviction returns slices to a unit-tested,
+coalescing free-list allocator.
 
-Static mesh upload in
-[`VulkanModelResources::uploadMesh`](src/engine/render/VulkanModelResources.cpp#L790):
-
-- allocates separate vertex and index buffers for every mesh;
-- performs a dedicated `vkAllocateMemory` for every buffer; and
-- stores static geometry in host-visible coherent memory rather than
-  device-local memory.
-
-Skinned models in [`SkinnedMeshUpdater`](src/engine/render/SkinnedMeshUpdater.cpp#L84):
-
-- skin every vertex on the CPU each frame;
-- allocate dedicated host-visible buffers per animated instance/frame slot;
-- map, copy, and unmap the complete vertex stream each update; and
-- retain instance resources without an active-instance pruning pass.
+CPU-skinned models in
+[`SkinnedMeshUpdater`](src/engine/render/SkinnedMeshUpdater.cpp#L84) still
+skin every vertex on the CPU and retain dedicated host-visible dynamic buffers
+per active instance, but those buffers are now mapped for their lifetime rather
+than mapped and unmapped every update. GPU skinning and active-instance pruning
+remain the next milestone.
 
 Rendering issues one `vkCmdDrawIndexed` per visible model in
 [`VulkanSceneRecorder`](src/engine/render/VulkanSceneRecorder.cpp#L1779),
@@ -425,7 +420,7 @@ without mesh/material batching or instancing.
 This is adequate for the current board sizes. The recommended upgrade path is:
 
 1. [Complete] Suballocated device-local static vertex/index heaps with staging uploads.
-2. Persistently mapped per-frame upload rings.
+2. [Complete] Persistently mapped, fence-owned upload rings.
 3. Joint-matrix skinning in the vertex shader or compute shader.
 4. Opaque draw sorting by pipeline, material, and mesh.
 5. Instancing for repeated board pieces and decorations.
@@ -566,7 +561,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
    budgets.
 3. [Complete] Introduce device-local suballocated geometry storage and staging
    uploads.
-4. Add persistently mapped upload rings.
+4. [Complete] Add persistently mapped upload rings.
 5. Move skinning to the GPU.
 6. Sort and instance repeated opaque draws.
 7. Add resource residency and frame-time telemetry before further

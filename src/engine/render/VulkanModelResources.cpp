@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -100,8 +99,9 @@ void VulkanModelResources::create(
         manifest.playerModel(), manifest.playerIdleAnimation());
 
     try {
+        uploadRing_.create(physicalDevice_, device_);
         geometryArena_.create(
-            physicalDevice_, device_, commandPool_, graphicsQueue_);
+            physicalDevice_, device_, commandPool_, graphicsQueue_, uploadRing_);
         ImageData fallback {
             .width = 1,
             .height = 1,
@@ -157,6 +157,7 @@ void VulkanModelResources::destroy()
             destroyMesh(model->gpu);
         }
         geometryArena_.destroy();
+        uploadRing_.destroy();
     }
 
     models_.clear();
@@ -1348,17 +1349,12 @@ void VulkanModelResources::recordTextureCopy(
     PendingTextureUpload& upload)
 {
     const VkDeviceSize imageBytes = image.rgba.size();
-    upload.staging = createBuffer(
-        imageBytes,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        "Model texture upload buffer");
-
-    void* mapped = nullptr;
-    vkCheck(vkMapMemory(device_, upload.staging.memory, 0, imageBytes, 0, &mapped),
-        "vkMapMemory texture staging failed");
-    std::memcpy(mapped, image.rgba.data(), image.rgba.size());
-    vkUnmapMemory(device_, upload.staging.memory);
+    const auto staging = uploadRing_.reserve(imageBytes, 4);
+    if (!staging) {
+        throw std::runtime_error("Shared upload ring is full for texture upload");
+    }
+    upload.staging = *staging;
+    uploadRing_.write(upload.staging, 0, image.rgba.data(), image.rgba.size());
 
     VkCommandBufferAllocateInfo commandBufferInfo {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -1400,12 +1396,13 @@ void VulkanModelResources::recordTextureCopy(
         });
 
     VkBufferImageCopy copyRegion {
+        .bufferOffset = upload.staging.offset,
         .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
         .imageExtent = { image.width, image.height, 1 },
     };
     vkCmdCopyBufferToImage(
         upload.commandBuffer,
-        upload.staging.buffer,
+        uploadRing_.buffer(),
         textureImage.image,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         1,
@@ -1521,6 +1518,7 @@ void VulkanModelResources::recordTextureCopy(
     };
     vkCheck(vkQueueSubmit2(graphicsQueue_, 1, &submit, upload.fence),
         "vkQueueSubmit2 texture upload failed");
+    uploadRing_.commit(upload.staging);
     upload.submitted = true;
 }
 
@@ -1563,8 +1561,8 @@ VulkanModelResources::TextureUpdate VulkanModelResources::updateTexture(
 
     // Frames in flight may still be sampling this texture. Painting happens
     // only in the editor and only when something actually changed, so a full
-    // idle here is far simpler than per-frame staging rings and costs nothing
-    // during normal play.
+    // idle here is far simpler than tracking each sampled descriptor lifetime
+    // and costs nothing during normal play.
     vkDeviceWaitIdle(device_);
 
     const bool sizeChanged =
@@ -1606,20 +1604,21 @@ VulkanModelResources::TextureUpdate VulkanModelResources::updateTexture(
 }
 
 void VulkanModelResources::destroyTextureUpload(
-    PendingTextureUpload& upload) const
+    PendingTextureUpload& upload)
 {
+    if (upload.staging.valid()) {
+        if (upload.submitted) {
+            uploadRing_.complete(upload.staging);
+        } else {
+            uploadRing_.abandon(upload.staging);
+        }
+    }
     if (upload.fence) {
         vkDestroyFence(device_, upload.fence, nullptr);
     }
     if (upload.commandBuffer) {
         vkFreeCommandBuffers(
             device_, commandPool_, 1, &upload.commandBuffer);
-    }
-    if (upload.staging.buffer) {
-        vkDestroyBuffer(device_, upload.staging.buffer, nullptr);
-    }
-    if (upload.staging.memory) {
-        vkFreeMemory(device_, upload.staging.memory, nullptr);
     }
     upload = {};
 }
@@ -1686,52 +1685,6 @@ uint32_t VulkanModelResources::findMemoryType(
         }
     }
     throw std::runtime_error("No suitable Vulkan memory type found for model resource");
-}
-
-VulkanModelResources::OwnedBuffer VulkanModelResources::createBuffer(
-    VkDeviceSize size,
-    VkBufferUsageFlags usage,
-    VkMemoryPropertyFlags properties,
-    std::string_view debugName) const
-{
-    OwnedBuffer result;
-    VkBufferCreateInfo bufferInfo {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = size,
-        .usage = usage,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-    };
-    vkCheck(vkCreateBuffer(device_, &bufferInfo, nullptr, &result.buffer),
-        "vkCreateBuffer model resource failed");
-    vulkanDebug::setObjectName(
-        device_, VK_OBJECT_TYPE_BUFFER, result.buffer, debugName);
-
-    VkMemoryRequirements requirements {};
-    vkGetBufferMemoryRequirements(device_, result.buffer, &requirements);
-    VkMemoryAllocateInfo allocationInfo {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = requirements.size,
-        .memoryTypeIndex = findMemoryType(requirements.memoryTypeBits, properties),
-    };
-    const VkResult allocationResult =
-        vkAllocateMemory(device_, &allocationInfo, nullptr, &result.memory);
-    if (allocationResult != VK_SUCCESS) {
-        vkDestroyBuffer(device_, result.buffer, nullptr);
-        vkCheck(allocationResult, "vkAllocateMemory model buffer failed");
-    }
-    vulkanDebug::setObjectName(
-        device_,
-        VK_OBJECT_TYPE_DEVICE_MEMORY,
-        result.memory,
-        "Model resource memory");
-    const VkResult bindResult =
-        vkBindBufferMemory(device_, result.buffer, result.memory, 0);
-    if (bindResult != VK_SUCCESS) {
-        vkFreeMemory(device_, result.memory, nullptr);
-        vkDestroyBuffer(device_, result.buffer, nullptr);
-        vkCheck(bindResult, "vkBindBufferMemory model buffer failed");
-    }
-    return result;
 }
 
 VkImageView VulkanModelResources::createImageView(

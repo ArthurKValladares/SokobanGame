@@ -5,7 +5,6 @@
 #include "engine/render/VulkanResourceUtils.hpp"
 
 #include <algorithm>
-#include <cstring>
 #include <iterator>
 #include <stdexcept>
 
@@ -27,13 +26,15 @@ void VulkanGeometryArena::create(
     VkPhysicalDevice physicalDevice,
     VkDevice device,
     VkCommandPool commandPool,
-    VkQueue graphicsQueue)
+    VkQueue graphicsQueue,
+    VulkanUploadRing& uploadRing)
 {
     destroy();
     physicalDevice_ = physicalDevice;
     device_ = device;
     commandPool_ = commandPool;
     graphicsQueue_ = graphicsQueue;
+    uploadRing_ = &uploadRing;
 }
 
 void VulkanGeometryArena::destroy()
@@ -50,6 +51,7 @@ void VulkanGeometryArena::destroy()
     indexBlocks_.clear();
     graphicsQueue_ = VK_NULL_HANDLE;
     commandPool_ = VK_NULL_HANDLE;
+    uploadRing_ = nullptr;
     device_ = VK_NULL_HANDLE;
     physicalDevice_ = VK_NULL_HANDLE;
 }
@@ -116,47 +118,28 @@ VulkanGeometryArena::Upload VulkanGeometryArena::beginUpload(
         throw std::invalid_argument("Geometry upload size does not match its allocation");
     }
 
+    if (!uploadRing_) {
+        throw std::logic_error("Geometry arena upload ring is not initialized");
+    }
+
     Upload upload;
     try {
         const VkDeviceSize stagingBytes = vertexBytes + indexBytes;
-        VkBufferCreateInfo stagingInfo {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .size = stagingBytes,
-            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        };
-        vkCheck(vkCreateBuffer(device_, &stagingInfo, nullptr, &upload.stagingBuffer),
-            "vkCreateBuffer geometry staging failed");
-        vulkanDebug::setObjectName(
-            device_, VK_OBJECT_TYPE_BUFFER, upload.stagingBuffer,
-            "Static geometry staging buffer");
-
-        VkMemoryRequirements requirements {};
-        vkGetBufferMemoryRequirements(device_, upload.stagingBuffer, &requirements);
-        const VkMemoryAllocateInfo allocationInfo {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            .allocationSize = requirements.size,
-            .memoryTypeIndex = findMemoryType(
-                requirements.memoryTypeBits,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
-        };
-        vkCheck(vkAllocateMemory(
-                    device_, &allocationInfo, nullptr, &upload.stagingMemory),
-            "vkAllocateMemory geometry staging failed");
-        vkCheck(vkBindBufferMemory(
-                    device_, upload.stagingBuffer, upload.stagingMemory, 0),
-            "vkBindBufferMemory geometry staging failed");
-
-        void* mapped = nullptr;
-        vkCheck(vkMapMemory(device_, upload.stagingMemory, 0, stagingBytes, 0, &mapped),
-            "vkMapMemory geometry staging failed");
-        std::memcpy(mapped, mesh.vertices.data(), static_cast<std::size_t>(vertexBytes));
-        std::memcpy(
-            static_cast<std::byte*>(mapped) + vertexBytes,
+        const auto staging = uploadRing_->reserve(stagingBytes, geometryAlignment);
+        if (!staging) {
+            throw std::runtime_error("Shared upload ring is full for geometry upload");
+        }
+        upload.staging = *staging;
+        uploadRing_->write(
+            upload.staging,
+            0,
+            mesh.vertices.data(),
+            static_cast<std::size_t>(vertexBytes));
+        uploadRing_->write(
+            upload.staging,
+            vertexBytes,
             mesh.indices.data(),
             static_cast<std::size_t>(indexBytes));
-        vkUnmapMemory(device_, upload.stagingMemory);
 
         const VkCommandBufferAllocateInfo commandBufferInfo {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -175,24 +158,24 @@ VulkanGeometryArena::Upload VulkanGeometryArena::beginUpload(
             "vkBeginCommandBuffer geometry upload failed");
 
         const VkBufferCopy vertexCopy {
-            .srcOffset = 0,
+            .srcOffset = upload.staging.offset,
             .dstOffset = allocation.vertex.offset,
             .size = vertexBytes,
         };
         const VkBufferCopy indexCopy {
-            .srcOffset = vertexBytes,
+            .srcOffset = upload.staging.offset + vertexBytes,
             .dstOffset = allocation.index.offset,
             .size = indexBytes,
         };
         vkCmdCopyBuffer(
             upload.commandBuffer,
-            upload.stagingBuffer,
+            uploadRing_->buffer(),
             vertexBlocks_[allocation.vertexBlock].buffer,
             1,
             &vertexCopy);
         vkCmdCopyBuffer(
             upload.commandBuffer,
-            upload.stagingBuffer,
+            uploadRing_->buffer(),
             indexBlocks_[allocation.indexBlock].buffer,
             1,
             &indexCopy);
@@ -244,6 +227,7 @@ VulkanGeometryArena::Upload VulkanGeometryArena::beginUpload(
         };
         vkCheck(vkQueueSubmit2(graphicsQueue_, 1, &submit, upload.fence),
             "vkQueueSubmit2 geometry upload failed");
+        uploadRing_->commit(upload.staging);
         upload.submitted = true;
         return upload;
     } catch (...) {
@@ -267,17 +251,18 @@ bool VulkanGeometryArena::uploadComplete(const Upload& upload) const
 
 void VulkanGeometryArena::destroyUpload(Upload& upload) const
 {
+    if (upload.staging.valid() && uploadRing_) {
+        if (upload.submitted) {
+            uploadRing_->complete(upload.staging);
+        } else {
+            uploadRing_->abandon(upload.staging);
+        }
+    }
     if (upload.fence) {
         vkDestroyFence(device_, upload.fence, nullptr);
     }
     if (upload.commandBuffer) {
         vkFreeCommandBuffers(device_, commandPool_, 1, &upload.commandBuffer);
-    }
-    if (upload.stagingBuffer) {
-        vkDestroyBuffer(device_, upload.stagingBuffer, nullptr);
-    }
-    if (upload.stagingMemory) {
-        vkFreeMemory(device_, upload.stagingMemory, nullptr);
     }
     upload = {};
 }
