@@ -412,6 +412,7 @@ function(sokoban_add_test)
 endfunction()
 
 if(SOKOBAN_BUILD_TESTS)
+    target_compile_definitions(sokoban_core PRIVATE SOKOBAN_ENABLE_TEST_HOOKS=1)
     enable_testing()
 
     sokoban_add_test(NAME rules TARGET sokoban_rules_tests
@@ -438,6 +439,7 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core sokoban_json
         SOURCES tests/PlayerProfileTests.cpp
     )
+    target_compile_definitions(sokoban_profile_tests PRIVATE SOKOBAN_ENABLE_TEST_HOOKS=1)
     sokoban_add_test(NAME save_slots TARGET sokoban_save_slot_tests
         LIBS sokoban_core sokoban_json
         SOURCES tests/SaveSlotManagerTests.cpp
@@ -573,6 +575,7 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/AtomicFileTests.cpp
     )
+    target_compile_definitions(sokoban_atomic_file_tests PRIVATE SOKOBAN_ENABLE_TEST_HOOKS=1)
     sokoban_add_test(NAME level_project_store TARGET sokoban_level_project_store_tests
         LIBS sokoban_core
         SOURCES tests/LevelProjectStoreTests.cpp

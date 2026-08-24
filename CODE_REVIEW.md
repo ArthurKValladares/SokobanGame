@@ -193,6 +193,13 @@ promoted first and a valid displaced file is used as fallback. The active-slot
 marker follows the same rule. Recovery tests cover every precedence path and
 preserve storage errors instead of misclassifying unreadable files as corrupt.
 
+**Failure-mode coverage: Fixed on 2026-08-24.** The persistence tests now
+exercise corrupt primary/backup files, every interrupted-write recovery
+precedence path, and deterministic permission-denied and disk-full writes.
+The test-only atomic-write seam fails before installation, letting the tests
+verify that temporary artifacts are removed and `SaveStore` retains the last
+committed primary (and valid backup) after either storage error.
+
 Before this change, [`AtomicFile::write`](src/engine/AtomicFile.cpp#L156)
 wrote the temporary file and called `replace()` while the output stream was
 still open.
@@ -457,7 +464,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 2. [Complete] Recover interrupted `.tmp` and `.replace-old` writes.
 3. [Complete] Report save deletion failures and preserve live state on failure.
 4. [Complete] Parse and validate the complete content index.
-5. Add corruption, interrupted-write, permissions, and disk-full tests.
+5. [Complete] Add corruption, interrupted-write, permissions, and disk-full tests.
 
 ### Phase 2 — Renderer hardening
 

@@ -1,4 +1,5 @@
 #include "engine/AsyncSaveStore.hpp"
+#include "engine/AtomicFile.hpp"
 #include "engine/PlayerProfile.hpp"
 #include "engine/SaveStore.hpp"
 
@@ -888,6 +889,48 @@ void testInterruptedWriteRecovery()
         "valid live profile cleans stale artifacts");
 }
 
+void testStorageFailuresPreserveCommittedProfile()
+{
+    TemporaryDirectory temporary;
+    sokoban::SaveStore store(temporary.path());
+    sokoban::PlayerProfile committed;
+    committed.unlockedLevel = 2;
+    committed.setCurrentLevel(2);
+    committed.settings.audio.musicVolume = 0.25f;
+    committed.normalize();
+    check(store.save(committed), "committed profile saves before fault injection");
+
+    sokoban::PlayerProfile replacement = committed;
+    replacement.unlockedLevel = 4;
+    replacement.setCurrentLevel(4);
+    replacement.settings.audio.musicVolume = 0.8f;
+    replacement.normalize();
+
+    sokoban::atomicFile::failWriteAfterForTesting(
+        0, std::errc::permission_denied);
+    check(!store.save(replacement), "permission-denied save reports failure");
+    check(store.status().starts_with("Player profile save failed:"),
+        "permission-denied save records a diagnostic");
+    check(store.load().profile == committed,
+        "permission-denied save preserves committed profile");
+    check(!std::filesystem::exists(store.primaryPath().string() + ".tmp") &&
+            !std::filesystem::exists(store.backupPath().string() + ".tmp"),
+        "permission-denied save cleans temporary artifacts");
+
+    // A replacement save writes the prior primary to the backup first. Let
+    // that write finish, then simulate ENOSPC while writing the live file.
+    sokoban::atomicFile::failWriteAfterForTesting(
+        1, std::errc::no_space_on_device);
+    check(!store.save(replacement), "disk-full save reports failure");
+    check(store.load().profile == committed,
+        "disk-full save preserves committed profile");
+    check(std::filesystem::is_regular_file(store.backupPath()),
+        "disk-full save retains the valid backup");
+    check(!std::filesystem::exists(store.primaryPath().string() + ".tmp") &&
+            !std::filesystem::exists(store.backupPath().string() + ".tmp"),
+        "disk-full save cleans temporary artifacts");
+}
+
 void testSaveSlotStems()
 {
     TemporaryDirectory directory;
@@ -1263,6 +1306,7 @@ int main()
         testFormat22UpdatesOverworldViewBinding();
         testStoreBackupsAndRecovery();
         testInterruptedWriteRecovery();
+        testStorageFailuresPreserveCommittedProfile();
         testSaveSlotStems();
         testMigrationAndDoubleCorruption();
         testAsyncSaveCoalescingAndFlush();

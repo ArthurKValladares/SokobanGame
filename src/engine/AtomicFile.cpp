@@ -2,6 +2,8 @@
 
 #include <cerrno>
 #include <fstream>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <stdexcept>
 #include <system_error>
@@ -16,6 +18,40 @@
 
 namespace sokoban::atomicFile {
 namespace {
+
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+struct WriteFailureForTesting {
+    std::uint32_t successfulWritesBeforeFailure = 0;
+    std::errc error {};
+};
+
+std::mutex writeFailureMutex;
+std::optional<WriteFailureForTesting> writeFailureForTesting;
+
+void maybeFailWriteForTesting(const std::filesystem::path& path)
+{
+    std::optional<std::errc> failure;
+    {
+        const std::scoped_lock lock(writeFailureMutex);
+        if (!writeFailureForTesting) {
+            return;
+        }
+        if (writeFailureForTesting->successfulWritesBeforeFailure != 0) {
+            --writeFailureForTesting->successfulWritesBeforeFailure;
+            return;
+        }
+        failure = writeFailureForTesting->error;
+        writeFailureForTesting.reset();
+    }
+    throw std::system_error(
+        std::make_error_code(*failure),
+        "test-injected write failure " + path.string());
+}
+#else
+void maybeFailWriteForTesting(const std::filesystem::path&)
+{
+}
+#endif
 
 #ifdef _WIN32
 
@@ -171,6 +207,7 @@ void write(
         if (!stream) {
             throw std::runtime_error("cannot open " + temporary.string());
         }
+        maybeFailWriteForTesting(temporary);
         stream.write(contents.data(), static_cast<std::streamsize>(contents.size()));
         stream.flush();
         if (!stream) {
@@ -186,5 +223,18 @@ void write(
         throw;
     }
 }
+
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+void failWriteAfterForTesting(
+    std::uint32_t successfulWritesBeforeFailure,
+    std::errc error)
+{
+    const std::scoped_lock lock(writeFailureMutex);
+    writeFailureForTesting = WriteFailureForTesting {
+        .successfulWritesBeforeFailure = successfulWritesBeforeFailure,
+        .error = error,
+    };
+}
+#endif
 
 } // namespace sokoban::atomicFile

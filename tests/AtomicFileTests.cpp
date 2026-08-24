@@ -126,6 +126,39 @@ void testWriteFailureCleansTemporaryFile()
     CHECK(!std::filesystem::exists(destination.string() + ".tmp"));
 }
 
+void testInjectedPermissionAndDiskFullFailuresPreserveDestination()
+{
+    TemporaryDirectory temporary;
+    const auto destination = temporary.root / "profile.json";
+    writeRaw(destination, "committed");
+
+    sokoban::atomicFile::failWriteAfterForTesting(
+        0, std::errc::permission_denied);
+    bool permissionDenied = false;
+    try {
+        sokoban::atomicFile::write(destination, "replacement");
+    } catch (const std::system_error& error) {
+        permissionDenied = error.code() ==
+            std::make_error_code(std::errc::permission_denied);
+    }
+    CHECK(permissionDenied);
+    CHECK(readRaw(destination) == "committed");
+    CHECK(!std::filesystem::exists(destination.string() + ".tmp"));
+
+    sokoban::atomicFile::failWriteAfterForTesting(
+        0, std::errc::no_space_on_device);
+    bool diskFull = false;
+    try {
+        sokoban::atomicFile::write(destination, "replacement");
+    } catch (const std::system_error& error) {
+        diskFull = error.code() ==
+            std::make_error_code(std::errc::no_space_on_device);
+    }
+    CHECK(diskFull);
+    CHECK(readRaw(destination) == "committed");
+    CHECK(!std::filesystem::exists(destination.string() + ".tmp"));
+}
+
 } // namespace
 
 int main()
@@ -134,6 +167,7 @@ int main()
     testReplaceInstallsClosedTemporaryFile();
     testFailedInstallRestoresDisplacedDestination();
     testWriteFailureCleansTemporaryFile();
+    testInjectedPermissionAndDiskFullFailuresPreserveDestination();
 
     if (failures != 0) {
         std::cerr << "AtomicFileTests: " << failures << " failure(s) of "
