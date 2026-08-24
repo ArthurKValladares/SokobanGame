@@ -243,6 +243,13 @@ absent. Surface a recoverable UI error.
 
 ### P1 — The runtime content index is mostly decorative
 
+**Status: Fixed on 2026-08-24.** The content index is now parsed in full at
+staging and at runtime startup. Validation checks the format/version, declared
+file count and byte total, canonical relative paths, duplicate entries, every
+listed regular file and its size, and rejects unindexed or symbolic-link
+artifacts. Tests cover version drift, missing files, changed sizes, unindexed
+files, and truncated indexes.
+
 The package writer emits format, game version, file count, total size, and
 every file entry in [`ContentPipeline.cpp`](src/engine/ContentPipeline.cpp#L662).
 Startup reads only format and game version in
@@ -449,7 +456,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 1. [Complete] Flush, close, and durably replace save files.
 2. [Complete] Recover interrupted `.tmp` and `.replace-old` writes.
 3. [Complete] Report save deletion failures and preserve live state on failure.
-4. Parse and validate the complete content index.
+4. [Complete] Parse and validate the complete content index.
 5. Add corruption, interrupted-write, permissions, and disk-full tests.
 
 ### Phase 2 — Renderer hardening

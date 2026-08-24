@@ -13,9 +13,11 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cctype>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <optional>
 #include <regex>
@@ -23,6 +25,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
+#include <unordered_set>
 #include <utility>
 
 namespace sokoban {
@@ -78,6 +82,41 @@ bool isWithin(const std::filesystem::path& root, const std::filesystem::path& ca
     return relative.empty() || *relative.begin() != "..";
 }
 
+[[nodiscard]] std::uintmax_t parseIndexNumber(
+    std::string_view text,
+    std::string_view field,
+    const std::filesystem::path& indexPath)
+{
+    std::uintmax_t value = 0;
+    const auto [end, error] = std::from_chars(
+        text.data(), text.data() + text.size(), value);
+    if (text.empty() || error != std::errc {} || end != text.data() + text.size()) {
+        throw std::runtime_error(
+            "invalid " + std::string(field) + " in runtime content index: " +
+            indexPath.string());
+    }
+    return value;
+}
+
+[[nodiscard]] std::filesystem::path indexEntryPath(
+    std::string_view text,
+    const std::filesystem::path& indexPath)
+{
+    const std::filesystem::path parsed { std::string(text) };
+    const std::filesystem::path normalized =
+        normalizedRelativePath(parsed, "content index path");
+    if (normalized.generic_string() != parsed.generic_string()) {
+        throw std::runtime_error(
+            "non-canonical file path in runtime content index: " +
+            indexPath.string());
+    }
+    if (normalized == "content.index") {
+        throw std::runtime_error(
+            "runtime content index cannot list itself: " + indexPath.string());
+    }
+    return normalized;
+}
+
 std::filesystem::path sourceFile(
     const std::filesystem::path& root,
     const std::filesystem::path& relative,
@@ -112,6 +151,15 @@ std::string lowercase(std::string value)
         return static_cast<char>(std::tolower(character));
     });
     return value;
+}
+
+std::string contentPathKey(const std::filesystem::path& path)
+{
+    std::string key = path.generic_string();
+#ifdef _WIN32
+    key = lowercase(std::move(key));
+#endif
+    return key;
 }
 
 bool isNoticeFile(const std::filesystem::path& path)
@@ -624,6 +672,141 @@ void ensureSafeOutputRoot(
 
 } // namespace
 
+void validateContentPackage(
+    const std::filesystem::path& root,
+    std::string_view expectedGameVersion)
+{
+    const std::filesystem::path packageRoot = canonicalRoot(root, "runtime content");
+    const std::filesystem::path indexPath = packageRoot / "content.index";
+    const std::filesystem::path manifestPath = packageRoot / "manifest.json";
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(indexPath, error) || error) {
+        throw std::runtime_error(
+            "runtime content is missing or was not staged: " + indexPath.string());
+    }
+    if (!std::filesystem::is_regular_file(manifestPath, error) || error) {
+        throw std::runtime_error(
+            "runtime asset manifest is missing: " + manifestPath.string());
+    }
+
+    std::ifstream index(indexPath, std::ios::binary);
+    if (!index) {
+        throw std::runtime_error("cannot read runtime content index: " + indexPath.string());
+    }
+    const auto readExpectedLine = [&index, &indexPath](std::string_view expected) {
+        std::string line;
+        if (!std::getline(index, line) || line != expected) {
+            throw std::runtime_error(
+                "unsupported or corrupt runtime content index: " + indexPath.string());
+        }
+    };
+    readExpectedLine("format 1");
+    readExpectedLine("game-version " + std::string(expectedGameVersion));
+
+    const auto readNumberLine = [&index, &indexPath](std::string_view field) {
+        std::string line;
+        const std::string prefix = std::string(field) + ' ';
+        if (!std::getline(index, line) || !line.starts_with(prefix)) {
+            throw std::runtime_error(
+                "invalid " + std::string(field) + " in runtime content index: " +
+                indexPath.string());
+        }
+        return parseIndexNumber(
+            std::string_view(line).substr(prefix.size()), field, indexPath);
+    };
+    const std::uintmax_t declaredCount = readNumberLine("file-count");
+    const std::uintmax_t declaredTotal = readNumberLine("total-bytes");
+
+    std::unordered_set<std::string> declaredFiles;
+    std::uintmax_t actualTotal = 0;
+    for (std::uintmax_t fileIndex = 0; fileIndex < declaredCount; ++fileIndex) {
+        std::string line;
+        if (!std::getline(index, line) || !line.starts_with("file ")) {
+            throw std::runtime_error(
+                "truncated runtime content index: " + indexPath.string());
+        }
+        const std::size_t sizeEnd = line.find(' ', 5);
+        if (sizeEnd == std::string::npos || sizeEnd + 1 == line.size()) {
+            throw std::runtime_error(
+                "invalid file entry in runtime content index: " + indexPath.string());
+        }
+        const std::uintmax_t declaredSize = parseIndexNumber(
+            std::string_view(line).substr(5, sizeEnd - 5), "file size", indexPath);
+        const std::filesystem::path relative = indexEntryPath(
+            std::string_view(line).substr(sizeEnd + 1), indexPath);
+        const std::string key = contentPathKey(relative);
+        if (!declaredFiles.insert(key).second) {
+            throw std::runtime_error(
+                "duplicate file entry in runtime content index: " + indexPath.string());
+        }
+
+        const std::filesystem::path candidate =
+            std::filesystem::weakly_canonical(packageRoot / relative, error);
+        if (error || !isWithin(packageRoot, candidate) ||
+            !std::filesystem::is_regular_file(candidate, error) || error) {
+            throw std::runtime_error(
+                "runtime content file is missing or invalid: " + relative.string());
+        }
+        const std::uintmax_t actualSize = std::filesystem::file_size(candidate, error);
+        if (error || actualSize != declaredSize) {
+            throw std::runtime_error(
+                "runtime content file size does not match index: " +
+                relative.string());
+        }
+        if (actualTotal > std::numeric_limits<std::uintmax_t>::max() - actualSize) {
+            throw std::runtime_error("runtime content byte total overflows: " + indexPath.string());
+        }
+        actualTotal += actualSize;
+    }
+    std::string extraLine;
+    if (std::getline(index, extraLine) || !index.eof()) {
+        throw std::runtime_error(
+            "runtime content index has unexpected trailing data: " + indexPath.string());
+    }
+    if (actualTotal != declaredTotal) {
+        throw std::runtime_error(
+            "runtime content byte total does not match index: " + indexPath.string());
+    }
+
+    std::uintmax_t discoveredCount = 0;
+    for (std::filesystem::recursive_directory_iterator it(packageRoot, error), end;
+         it != end;
+         it.increment(error)) {
+        if (error) {
+            throw std::runtime_error(
+                "cannot enumerate runtime content: " + error.message());
+        }
+        const std::filesystem::directory_entry& entry = *it;
+        if (entry.is_symlink(error) || error) {
+            throw std::runtime_error(
+                "runtime content package contains a symbolic link: " +
+                entry.path().string());
+        }
+        if (entry.is_directory(error) && !error) {
+            continue;
+        }
+        if (error || !entry.is_regular_file(error) || error) {
+            throw std::runtime_error(
+                "runtime content package contains an unsupported artifact: " +
+                entry.path().string());
+        }
+        const std::filesystem::path relative =
+            entry.path().lexically_relative(packageRoot);
+        if (relative == "content.index") {
+            continue;
+        }
+        if (!declaredFiles.contains(contentPathKey(relative))) {
+            throw std::runtime_error(
+                "runtime content file is missing from index: " + relative.string());
+        }
+        ++discoveredCount;
+    }
+    if (discoveredCount != declaredCount) {
+        throw std::runtime_error(
+            "runtime content file count does not match index: " + indexPath.string());
+    }
+}
+
 ContentInventory collectContentInventory(const ContentSourceRoots& roots)
 {
     return InventoryBuilder(roots).build();
@@ -670,6 +853,7 @@ ContentInventory stageContent(
         if (!index) {
             throw std::runtime_error("cannot finish staged content index");
         }
+        validateContentPackage(stagingRoot, gameVersion);
 
         std::filesystem::remove_all(backupRoot, error);
         if (error) {

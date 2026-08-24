@@ -62,6 +62,12 @@ void writeFile(const std::filesystem::path& path, std::string_view contents = "d
     stream << contents;
 }
 
+std::string readFile(const std::filesystem::path& path)
+{
+    std::ifstream stream(path, std::ios::binary);
+    return { std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>() };
+}
+
 std::string manifest(std::string_view texturePath = "textures/hero.png")
 {
     return R"json({
@@ -338,6 +344,45 @@ void testInventoryAndStaging()
     check(!std::filesystem::exists(output / "stale.file"), "stale output removed");
 }
 
+void testStagedContentIndexValidation()
+{
+    TempDirectory temp;
+    const auto roots = createValidContent(temp.path());
+    const std::filesystem::path output = temp.path() / "package/assets";
+
+    (void)sokoban::stageContent(roots, output, "1.2.3");
+    sokoban::validateContentPackage(output, "1.2.3");
+    checkThrows(
+        [&] { sokoban::validateContentPackage(output, "wrong-version"); },
+        "content index rejects a different game version");
+
+    std::filesystem::remove(output / "textures/hero.png");
+    checkThrows(
+        [&] { sokoban::validateContentPackage(output, "1.2.3"); },
+        "content index rejects a missing declared file");
+
+    (void)sokoban::stageContent(roots, output, "1.2.3");
+    std::ofstream(output / "textures/hero.png", std::ios::app | std::ios::binary)
+        << "tampered";
+    checkThrows(
+        [&] { sokoban::validateContentPackage(output, "1.2.3"); },
+        "content index rejects a changed declared size");
+
+    (void)sokoban::stageContent(roots, output, "1.2.3");
+    writeFile(output / "unindexed-artifact.bin");
+    checkThrows(
+        [&] { sokoban::validateContentPackage(output, "1.2.3"); },
+        "content index rejects an unindexed package file");
+
+    (void)sokoban::stageContent(roots, output, "1.2.3");
+    const std::string validIndex = readFile(output / "content.index");
+    const std::size_t finalEntry = validIndex.rfind("file ");
+    writeFile(output / "content.index", validIndex.substr(0, finalEntry));
+    checkThrows(
+        [&] { sokoban::validateContentPackage(output, "1.2.3"); },
+        "content index rejects a truncated file list");
+}
+
 void testUnassignedLegacySelectorIsStaged()
 {
     TempDirectory temp;
@@ -564,6 +609,7 @@ int main()
 {
     try {
         testInventoryAndStaging();
+        testStagedContentIndexValidation();
         testUnassignedLegacySelectorIsStaged();
         testComposedOverworldIsValidatedAndStaged();
         testBakedThumbnailsAreStaged();

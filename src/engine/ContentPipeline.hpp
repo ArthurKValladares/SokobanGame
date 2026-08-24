@@ -37,4 +37,11 @@ struct ContentInventory {
     const std::filesystem::path& outputRoot,
     std::string_view gameVersion);
 
+// Parses a staged content.index and verifies its version, declared count and
+// total size, every listed regular file, and that no package file is omitted
+// from the index. `root` must be the runtime assets directory.
+void validateContentPackage(
+    const std::filesystem::path& root,
+    std::string_view expectedGameVersion);
+
 } // namespace sokoban
