@@ -75,6 +75,24 @@ struct SkinnedMeshData {
     bool rotateHalfTurn = false;
 };
 
+// The source vertex layout consumed by the GPU skinning pipelines. Attachment
+// vertices use attachmentNodeIndex; regular skin vertices leave it at UINT32_MAX.
+struct GpuSkinnedVertex {
+    Vec3 position {};
+    Vec3 normal {};
+    Vec2 uv {};
+    uint32_t textureIndex = 0;
+    uint32_t materialFlags = 0;
+    std::array<uint16_t, 4> joints {};
+    std::array<float, 4> weights {};
+    uint32_t attachmentNodeIndex = UINT32_MAX;
+};
+
+struct SkinnedPoseMatrices {
+    std::vector<Mat4> jointMatrices;
+    std::vector<Mat4> nodeMatrices;
+};
+
 struct AnimationKeyframes {
     std::vector<float> times;
     std::vector<Vec4> values;
@@ -139,6 +157,20 @@ void addSkinnedAttachment(
 // Skins with a pose blended between two clips (0 = from, 1 = to); used for
 // short crossfades when the active animation changes.
 [[nodiscard]] MeshData skinGltfMeshBlended(
+    const SkinnedMeshData& mesh,
+    const GltfAnimationClip& fromAnimation,
+    float fromTimeSeconds,
+    const GltfAnimationClip& toAnimation,
+    float toTimeSeconds,
+    float blend);
+
+// Samples the skeleton without transforming vertices. GPU skinning uploads
+// these palettes instead of rebuilding every vertex on the CPU.
+[[nodiscard]] SkinnedPoseMatrices sampleGltfSkinPose(
+    const SkinnedMeshData& mesh,
+    const GltfAnimationClip& animation,
+    float timeSeconds);
+[[nodiscard]] SkinnedPoseMatrices sampleGltfSkinPoseBlended(
     const SkinnedMeshData& mesh,
     const GltfAnimationClip& fromAnimation,
     float fromTimeSeconds,

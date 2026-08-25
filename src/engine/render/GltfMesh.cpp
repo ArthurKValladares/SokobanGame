@@ -1493,42 +1493,17 @@ Vec4 blendRotation(Vec4 a, Vec4 b, float t)
     });
 }
 
+SkinnedPoseMatrices poseMatricesFromPoses(
+    const SkinnedMeshData& mesh,
+    const std::vector<NodePose>& poses);
+
 MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>& poses)
 {
     if (mesh.nodes.empty() || mesh.jointNodeIndices.empty() || mesh.inverseBindMatrices.size() != mesh.jointNodeIndices.size()) {
         throw std::runtime_error("Cannot skin an incomplete glTF mesh");
     }
 
-    std::vector<Mat4> localMatrices(mesh.nodes.size(), identityMatrix());
-    std::vector<Mat4> globalMatrices(mesh.nodes.size(), identityMatrix());
-    for (size_t i = 0; i < mesh.nodes.size(); ++i) {
-        localMatrices[i] = matrixFromTrs(poses[i].translation, poses[i].rotation, poses[i].scale);
-    }
-    std::vector<bool> globalComputed(mesh.nodes.size(), false);
-    auto computeGlobal = [&](auto&& self, size_t nodeIndex) -> Mat4 {
-        if (globalComputed[nodeIndex]) {
-            return globalMatrices[nodeIndex];
-        }
-
-        const int parent = mesh.nodes[nodeIndex].parent;
-        globalMatrices[nodeIndex] = parent >= 0 && static_cast<size_t>(parent) < globalMatrices.size()
-            ? multiply(self(self, static_cast<size_t>(parent)), localMatrices[nodeIndex])
-            : localMatrices[nodeIndex];
-        globalComputed[nodeIndex] = true;
-        return globalMatrices[nodeIndex];
-    };
-    for (size_t i = 0; i < mesh.nodes.size(); ++i) {
-        computeGlobal(computeGlobal, i);
-    }
-
-    std::vector<Mat4> jointMatrices;
-    jointMatrices.reserve(mesh.jointNodeIndices.size());
-    for (size_t i = 0; i < mesh.jointNodeIndices.size(); ++i) {
-        const uint32_t nodeIndex = mesh.jointNodeIndices[i];
-        jointMatrices.push_back(nodeIndex < globalMatrices.size()
-                ? multiply(globalMatrices[nodeIndex], mesh.inverseBindMatrices[i])
-                : identityMatrix());
-    }
+    const SkinnedPoseMatrices pose = poseMatricesFromPoses(mesh, poses);
 
     SourceBounds bounds;
     bounds.minimum = mesh.sourceMinimum;
@@ -1552,11 +1527,11 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
             for (size_t i = 0; i < 4; ++i) {
                 const float weight = source.weights[i];
                 const uint16_t joint = source.joints[i];
-                if (weight <= 0.0f || joint >= jointMatrices.size()) {
+                if (weight <= 0.0f || joint >= pose.jointMatrices.size()) {
                     continue;
                 }
-                skinnedPosition = add(skinnedPosition, multiply(transformPoint(jointMatrices[joint], source.position), weight));
-                skinnedNormal = add(skinnedNormal, multiply(transformVector(jointMatrices[joint], source.normal), weight));
+                skinnedPosition = add(skinnedPosition, multiply(transformPoint(pose.jointMatrices[joint], source.position), weight));
+                skinnedNormal = add(skinnedNormal, multiply(transformVector(pose.jointMatrices[joint], source.normal), weight));
             }
             if (skinnedNormal.x == 0.0f && skinnedNormal.y == 0.0f && skinnedNormal.z == 0.0f) {
                 skinnedNormal = source.normal;
@@ -1572,7 +1547,7 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
     });
 
     for (const SkinnedAttachment& attachment : mesh.attachments) {
-        if (attachment.nodeIndex >= globalMatrices.size()) {
+        if (attachment.nodeIndex >= pose.nodeMatrices.size()) {
             throw std::runtime_error("Skinned attachment references an invalid node");
         }
         const uint32_t baseVertex = static_cast<uint32_t>(result.vertices.size());
@@ -1594,9 +1569,9 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
             };
             MeshVertex transformed = normalizedVertex(
                 transformPoint(
-                    globalMatrices[attachment.nodeIndex], sourcePosition),
+                    pose.nodeMatrices[attachment.nodeIndex], sourcePosition),
                 normalize(transformVector(
-                    globalMatrices[attachment.nodeIndex], sourceNormal)),
+                    pose.nodeMatrices[attachment.nodeIndex], sourceNormal)),
                 vertex.uv,
                 vertex.textureIndex,
                 bounds,
@@ -1615,6 +1590,48 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
         }
     }
 
+    return result;
+}
+
+SkinnedPoseMatrices poseMatricesFromPoses(
+    const SkinnedMeshData& mesh,
+    const std::vector<NodePose>& poses)
+{
+    if (poses.size() != mesh.nodes.size() || mesh.nodes.empty() ||
+        mesh.jointNodeIndices.empty() ||
+        mesh.inverseBindMatrices.size() != mesh.jointNodeIndices.size()) {
+        throw std::runtime_error("Cannot sample an incomplete glTF skeleton");
+    }
+    std::vector<Mat4> localMatrices(mesh.nodes.size(), identityMatrix());
+    SkinnedPoseMatrices result;
+    result.nodeMatrices.assign(mesh.nodes.size(), identityMatrix());
+    for (size_t i = 0; i < mesh.nodes.size(); ++i) {
+        localMatrices[i] = matrixFromTrs(
+            poses[i].translation, poses[i].rotation, poses[i].scale);
+    }
+    std::vector<bool> globalComputed(mesh.nodes.size(), false);
+    auto computeGlobal = [&](auto&& self, size_t nodeIndex) -> Mat4 {
+        if (globalComputed[nodeIndex]) {
+            return result.nodeMatrices[nodeIndex];
+        }
+        const int parent = mesh.nodes[nodeIndex].parent;
+        result.nodeMatrices[nodeIndex] =
+            parent >= 0 && static_cast<size_t>(parent) < result.nodeMatrices.size()
+            ? multiply(self(self, static_cast<size_t>(parent)), localMatrices[nodeIndex])
+            : localMatrices[nodeIndex];
+        globalComputed[nodeIndex] = true;
+        return result.nodeMatrices[nodeIndex];
+    };
+    for (size_t i = 0; i < mesh.nodes.size(); ++i) {
+        computeGlobal(computeGlobal, i);
+    }
+    result.jointMatrices.reserve(mesh.jointNodeIndices.size());
+    for (size_t i = 0; i < mesh.jointNodeIndices.size(); ++i) {
+        const uint32_t nodeIndex = mesh.jointNodeIndices[i];
+        result.jointMatrices.push_back(nodeIndex < result.nodeMatrices.size()
+                ? multiply(result.nodeMatrices[nodeIndex], mesh.inverseBindMatrices[i])
+                : identityMatrix());
+    }
     return result;
 }
 
@@ -1642,6 +1659,35 @@ MeshData skinGltfMeshBlended(
         poses[i].scale = lerpVec3(poses[i].scale, target[i].scale, blend);
     }
     return skinWithPoses(mesh, poses);
+}
+
+SkinnedPoseMatrices sampleGltfSkinPose(
+    const SkinnedMeshData& mesh,
+    const GltfAnimationClip& animation,
+    float timeSeconds)
+{
+    return poseMatricesFromPoses(mesh, sampleAnimationPoses(mesh, animation, timeSeconds));
+}
+
+SkinnedPoseMatrices sampleGltfSkinPoseBlended(
+    const SkinnedMeshData& mesh,
+    const GltfAnimationClip& fromAnimation,
+    float fromTimeSeconds,
+    const GltfAnimationClip& toAnimation,
+    float toTimeSeconds,
+    float blend)
+{
+    blend = std::clamp(blend, 0.0f, 1.0f);
+    std::vector<NodePose> poses =
+        sampleAnimationPoses(mesh, fromAnimation, fromTimeSeconds);
+    const std::vector<NodePose> target =
+        sampleAnimationPoses(mesh, toAnimation, toTimeSeconds);
+    for (size_t i = 0; i < poses.size() && i < target.size(); ++i) {
+        poses[i].translation = lerpVec3(poses[i].translation, target[i].translation, blend);
+        poses[i].rotation = blendRotation(poses[i].rotation, target[i].rotation, blend);
+        poses[i].scale = lerpVec3(poses[i].scale, target[i].scale, blend);
+    }
+    return poseMatricesFromPoses(mesh, poses);
 }
 
 } // namespace sokoban

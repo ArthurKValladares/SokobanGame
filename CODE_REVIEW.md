@@ -406,12 +406,16 @@ map/unmap churn. The geometry copy still includes an explicit transfer-write to
 vertex/index-read barrier, and eviction returns slices to a unit-tested,
 coalescing free-list allocator.
 
-CPU-skinned models in
-[`SkinnedMeshUpdater`](src/engine/render/SkinnedMeshUpdater.cpp#L84) still
-skin every vertex on the CPU and retain dedicated host-visible dynamic buffers
-per active instance, but those buffers are now mapped for their lifetime rather
-than mapped and unmapped every update. GPU skinning and active-instance pruning
-remain the next milestone.
+**GPU skinning: Fixed on 2026-08-24.** Skinned meshes now retain their raw
+vertices in device-local geometry storage. Each reused frame slot receives only
+the sampled joint and skeleton-node matrices in a persistently mapped storage
+buffer after its fence has completed; dedicated skinned vertex and shadow
+pipelines apply the palette at draw time. Cross-fades and attachments remain
+supported, and attachment vertices use their sampled node transform from the
+same palette. The fixed palette currently supports 128 joints, 128 skeleton
+nodes, and 256 skinned instances per frame; content beyond those bounds fails
+publication with an actionable error rather than rendering with corrupted
+indices.
 
 Rendering issues one `vkCmdDrawIndexed` per visible model in
 [`VulkanSceneRecorder`](src/engine/render/VulkanSceneRecorder.cpp#L1779),
@@ -421,7 +425,7 @@ This is adequate for the current board sizes. The recommended upgrade path is:
 
 1. [Complete] Suballocated device-local static vertex/index heaps with staging uploads.
 2. [Complete] Persistently mapped, fence-owned upload rings.
-3. Joint-matrix skinning in the vertex shader or compute shader.
+3. [Complete] Joint-matrix skinning in the vertex shader.
 4. Opaque draw sorting by pipeline, material, and mesh.
 5. Instancing for repeated board pieces and decorations.
 6. Indirect drawing only if profiling later justifies it.
@@ -562,7 +566,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 3. [Complete] Introduce device-local suballocated geometry storage and staging
    uploads.
 4. [Complete] Add persistently mapped upload rings.
-5. Move skinning to the GPU.
+5. [Complete] Move skinning to the GPU.
 6. Sort and instance repeated opaque draws.
 7. Add resource residency and frame-time telemetry before further
    optimization.

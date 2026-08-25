@@ -1,10 +1,11 @@
 #pragma once
 
 #include "engine/AssetManifest.hpp"
+#include "engine/render/AnimationController.hpp"
 #include "engine/render/AssetLoadScheduler.hpp"
+#include "engine/render/GpuSkinning.hpp"
 #include "engine/render/ImageData.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
-#include "engine/render/SkinnedMeshUpdater.hpp"
 #include "engine/render/VulkanGeometryArena.hpp"
 #include "engine/render/VulkanUploadRing.hpp"
 
@@ -28,7 +29,22 @@ namespace sokoban {
 // meshes, textures, and animation clips. Worker tasks never touch Vulkan.
 class VulkanModelResources {
 public:
-    using MeshView = SkinnedMeshUpdater::MeshView;
+    struct MeshView {
+        VkBuffer vertexBuffer = VK_NULL_HANDLE;
+        VkDeviceSize vertexOffset = 0;
+        VkBuffer indexBuffer = VK_NULL_HANDLE;
+        VkDeviceSize indexOffset = 0;
+        uint32_t indexCount = 0;
+        uint32_t firstInstance = 0;
+        bool skinned = false;
+    };
+
+    struct SkinningBufferView {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VkDeviceSize range = 0;
+
+        [[nodiscard]] bool valid() const { return buffer && range > 0; }
+    };
 
     struct TextureView {
         VkImageView imageView = VK_NULL_HANDLE;
@@ -144,6 +160,9 @@ public:
         const GltfAnimationClip* clip,
         float timeSeconds);
     void updateAnimations(const RenderFrameData& frameData, uint32_t frameIndex);
+    // Called after this frame index's fence is complete and before its main
+    // and preview animation requests are populated.
+    void beginAnimationFrame(uint32_t frameIndex);
 
     [[nodiscard]] MeshView meshForTile(
         const RenderFrameData::Tile& tile,
@@ -153,10 +172,12 @@ public:
     [[nodiscard]] ModelBounds boundsForModel(RenderModel model) const;
     // True once the model's mesh is on the GPU and safe to draw.
     [[nodiscard]] bool modelReady(RenderModel model) const;
+    [[nodiscard]] bool modelUsesGpuSkinning(RenderModel model) const;
     [[nodiscard]] const AssetManifest& manifest() const { return *manifest_; }
     [[nodiscard]] std::vector<TextureView> textures() const;
     [[nodiscard]] uint32_t textureCount() const;
     [[nodiscard]] LoadingStats loadingStats() const;
+    [[nodiscard]] SkinningBufferView skinningBuffer() const;
 
 private:
     enum class LoadState {
@@ -181,6 +202,17 @@ private:
         uint32_t indexCount = 0;
     };
 
+    struct GpuSkinnedMesh {
+        VulkanGeometryArena::Allocation allocation {};
+        uint32_t indexCount = 0;
+    };
+
+    struct SkinningBuffer {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+        void* mapped = nullptr;
+    };
+
     struct TextureResource {
         OwnedImage image {};
         VkSampler sampler = VK_NULL_HANDLE;
@@ -202,6 +234,7 @@ private:
     struct ModelSlot {
         LoadState state = LoadState::Unrequested;
         GpuMesh gpu {};
+        GpuSkinnedMesh skinnedGpu {};
         std::future<PreparedModel> future;
         std::optional<PreparedModel> prepared;
         std::shared_ptr<const SkinnedMeshData> skinnedSource;
@@ -270,6 +303,16 @@ private:
     [[nodiscard]] GpuMesh uploadMesh(
         const MeshData& mesh,
         VulkanGeometryArena::Upload& upload);
+    [[nodiscard]] GpuSkinnedMesh uploadSkinnedMesh(
+        const SkinnedMeshData& mesh,
+        VulkanGeometryArena::Upload& upload);
+    void createSkinningBuffer();
+    void destroySkinningBuffer();
+    void writeSkinningInstance(
+        uint32_t frameIndex,
+        uint32_t instanceSlot,
+        const SkinnedMeshData& mesh,
+        const AnimationController::SkinningRequest& request);
     // Address mode, filtering, and colour space all come from the manifest
     // (see AssetManifest::Texture). Passed explicitly rather than defaulted:
     // a nested type's default member initializers are not usable in a default
@@ -301,6 +344,7 @@ private:
     void destroyTextureUpload(PendingTextureUpload& upload);
     void destroyTexture(OwnedImage& image, VkSampler& sampler);
     void destroyMesh(GpuMesh& mesh);
+    void destroySkinnedMesh(GpuSkinnedMesh& mesh);
     [[nodiscard]] const GpuMesh& gpuMeshForModel(RenderModel model) const;
     [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
     [[nodiscard]] VkImageView createImageView(
@@ -322,6 +366,7 @@ private:
     TextureResource fallbackTexture_ {};
     VulkanUploadRing uploadRing_ {};
     VulkanGeometryArena geometryArena_ {};
+    SkinningBuffer skinningBuffer_ {};
     AnimationController animationController_ {};
     struct AnimatedMeshKey {
         uint32_t frameIndex = 0;
@@ -339,11 +384,10 @@ private:
                 (static_cast<uint64_t>(key.modelValue) << 24));
         }
     };
-    std::unordered_map<
-        AnimatedMeshKey,
-        std::unique_ptr<SkinnedMeshUpdater>,
-        AnimatedMeshKeyHash>
+    std::unordered_map<AnimatedMeshKey, uint32_t, AnimatedMeshKeyHash>
         skinnedInstances_;
+    uint32_t activeSkinningFrame_ = UINT32_MAX;
+    uint32_t skinningInstanceCount_ = 0;
     uint64_t textureUploadSubmissions_ = 0;
     uint64_t textureUploadCompletions_ = 0;
     AssetLoadScheduler scheduler_ {};

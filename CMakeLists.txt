@@ -97,6 +97,8 @@ set(SHADER_SOURCES
     "${SHADER_SOURCE_DIR}/shadow.vert.glsl"
     "${SHADER_SOURCE_DIR}/model.vert.glsl"
     "${SHADER_SOURCE_DIR}/model_shadow.vert.glsl"
+    "${SHADER_SOURCE_DIR}/skinned_model.vert.glsl"
+    "${SHADER_SOURCE_DIR}/skinned_model_shadow.vert.glsl"
     "${SHADER_SOURCE_DIR}/fullscreen.vert.glsl"
     "${SHADER_SOURCE_DIR}/ssao.frag.glsl"
     "${SHADER_SOURCE_DIR}/ssao_composite.frag.glsl"
@@ -120,7 +122,7 @@ foreach(shader_source IN LISTS SHADER_SOURCES)
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${SHADER_OUTPUT_DIR}"
         # MODEL_TEXTURE_COUNT is read from sokoban::maxModelTextures above;
         # descriptor writes pad to this size.
-        COMMAND "${GLSLC_EXECUTABLE}" --target-env=vulkan1.4 -DMODEL_TEXTURE_COUNT=${MODEL_TEXTURE_COUNT} -fshader-stage=${shader_stage} "${shader_source}" -o "${shader_output}"
+        COMMAND "${GLSLC_EXECUTABLE}" --target-env=vulkan1.4 -DMODEL_TEXTURE_COUNT=${MODEL_TEXTURE_COUNT} -DMAX_SKIN_JOINTS=128 -fshader-stage=${shader_stage} "${shader_source}" -o "${shader_output}"
         DEPENDS "${shader_source}"
         VERBATIM
     )
@@ -212,6 +214,7 @@ add_library(sokoban_core STATIC
     src/engine/render/GltfMesh.cpp
     src/engine/render/FrameResourceTracker.cpp
     src/engine/render/GeometrySuballocator.cpp
+    src/engine/render/GpuSkinning.cpp
     src/engine/render/ImageData.cpp
     src/engine/render/PngWriter.cpp
     src/engine/render/RenderAssetRequirements.cpp
@@ -263,7 +266,6 @@ sokoban_enable_warnings(sokoban_ui)
 
 add_library(sokoban_render_vulkan STATIC
     src/engine/render/VulkanRenderer.cpp
-    src/engine/render/SkinnedMeshUpdater.cpp
     src/engine/render/VulkanDeviceContext.cpp
     src/engine/render/VulkanDebugUtils.cpp
     src/engine/render/VulkanDiagnostics.cpp
@@ -575,6 +577,11 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME upload_ring_allocator TARGET sokoban_upload_ring_allocator_tests
         LIBS sokoban_core
         SOURCES tests/UploadRingAllocatorTests.cpp
+    )
+    sokoban_add_test(NAME gpu_skinning TARGET sokoban_gpu_skinning_tests
+        LIBS sokoban_core
+        ASSET_DIR
+        SOURCES tests/GpuSkinningTests.cpp
     )
     sokoban_add_test(NAME tasks TARGET sokoban_task_tests
         LIBS sokoban_core

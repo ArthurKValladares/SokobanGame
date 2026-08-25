@@ -1,6 +1,7 @@
 #include "engine/render/VulkanPipelineFactory.hpp"
 
 #include "engine/render/GltfMesh.hpp"
+#include "engine/render/GpuSkinning.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
@@ -60,7 +61,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
     vulkanDebug::setObjectName(
         device_, VK_OBJECT_TYPE_PIPELINE_LAYOUT, layout_, "Scene pipeline layout");
 
-    std::array<VkShaderModule, 12> shaders {};
+    std::array<VkShaderModule, 14> shaders {};
     try {
         shaders[0] = createShaderModule(createInfo.assetRoot / "shaders/triangle.vert.glsl.spv");
         shaders[1] = createShaderModule(createInfo.assetRoot / "shaders/triangle.frag.glsl.spv");
@@ -77,6 +78,10 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             createInfo.assetRoot / "shaders/ground_splat.frag.glsl.spv");
         shaders[11] = createShaderModule(
             createInfo.assetRoot / "shaders/world_transition.frag.glsl.spv");
+        shaders[12] = createShaderModule(
+            createInfo.assetRoot / "shaders/skinned_model.vert.glsl.spv");
+        shaders[13] = createShaderModule(
+            createInfo.assetRoot / "shaders/skinned_model_shadow.vert.glsl.spv");
 
         scene_ = createScenePipeline(
             shaders[0], shaders[1], VertexLayout::None,
@@ -99,8 +104,16 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         mirrorEnergyModel_ = createScenePipeline(
             shaders[3], shaders[9], VertexLayout::Mesh,
             createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
+        skinnedModel_ = createScenePipeline(
+            shaders[12], shaders[1], VertexLayout::SkinnedMesh,
+            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
+        skinnedMirrorEnergyModel_ = createScenePipeline(
+            shaders[12], shaders[9], VertexLayout::SkinnedMesh,
+            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
         shadow_ = createShadowPipeline(shaders[2], VertexLayout::None);
         modelShadow_ = createShadowPipeline(shaders[4], VertexLayout::MeshPosition);
+        skinnedModelShadow_ = createShadowPipeline(
+            shaders[13], VertexLayout::SkinnedMeshPosition);
         ssao_ = createPostProcessPipeline(
             shaders[5], shaders[6], VK_FORMAT_R8_UNORM, false);
         ssaoComposite_ = createPostProcessPipeline(
@@ -117,8 +130,11 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             std::pair { ui_, "UI pipeline" },
             std::pair { model_, "Model pipeline" },
             std::pair { mirrorEnergyModel_, "Mirror energy model pipeline" },
+            std::pair { skinnedModel_, "Skinned model pipeline" },
+            std::pair { skinnedMirrorEnergyModel_, "Skinned mirror energy model pipeline" },
             std::pair { shadow_, "Directional shadow pipeline" },
             std::pair { modelShadow_, "Model shadow pipeline" },
+            std::pair { skinnedModelShadow_, "Skinned model shadow pipeline" },
             std::pair { ssao_, "SSAO pipeline" },
             std::pair { ssaoComposite_, "SSAO composite pipeline" },
             std::pair { ssaoVisualize_, "SSAO visualize pipeline" },
@@ -147,8 +163,8 @@ void VulkanPipelineFactory::destroy()
     if (device_) {
         const std::array pipelines {
             scene_, water_, mirrorEnergy_, groundSplat_, ui_, model_,
-            mirrorEnergyModel_,
-            shadow_, modelShadow_,
+            mirrorEnergyModel_, skinnedModel_, skinnedMirrorEnergyModel_,
+            shadow_, modelShadow_, skinnedModelShadow_,
             ssao_, ssaoComposite_, ssaoVisualize_, worldTransition_,
         };
         for (VkPipeline pipeline : pipelines) {
@@ -167,8 +183,11 @@ void VulkanPipelineFactory::destroy()
     ui_ = VK_NULL_HANDLE;
     model_ = VK_NULL_HANDLE;
     mirrorEnergyModel_ = VK_NULL_HANDLE;
+    skinnedModel_ = VK_NULL_HANDLE;
+    skinnedMirrorEnergyModel_ = VK_NULL_HANDLE;
     shadow_ = VK_NULL_HANDLE;
     modelShadow_ = VK_NULL_HANDLE;
+    skinnedModelShadow_ = VK_NULL_HANDLE;
     ssao_ = VK_NULL_HANDLE;
     ssaoComposite_ = VK_NULL_HANDLE;
     ssaoVisualize_ = VK_NULL_HANDLE;
@@ -222,9 +241,14 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
             .pName = "main",
         },
     };
-    const VkVertexInputBindingDescription binding {
+    const VkVertexInputBindingDescription meshBinding {
         .binding = 0,
         .stride = sizeof(MeshVertex),
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+    };
+    const VkVertexInputBindingDescription skinnedBinding {
+        .binding = 0,
+        .stride = sizeof(GpuSkinnedVertex),
         .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
     };
     const std::array<VkVertexInputAttributeDescription, 5> attributes {
@@ -259,16 +283,24 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
             .offset = offsetof(MeshVertex, materialFlags),
         },
     };
+    const std::array<VkVertexInputAttributeDescription, 8> skinnedAttributes {
+        VkVertexInputAttributeDescription { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuSkinnedVertex, position) },
+        VkVertexInputAttributeDescription { 1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuSkinnedVertex, normal) },
+        VkVertexInputAttributeDescription { 2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(GpuSkinnedVertex, uv) },
+        VkVertexInputAttributeDescription { 3, 0, VK_FORMAT_R32_UINT, offsetof(GpuSkinnedVertex, textureIndex) },
+        VkVertexInputAttributeDescription { 4, 0, VK_FORMAT_R32_UINT, offsetof(GpuSkinnedVertex, materialFlags) },
+        VkVertexInputAttributeDescription { 5, 0, VK_FORMAT_R16G16B16A16_UINT, offsetof(GpuSkinnedVertex, joints) },
+        VkVertexInputAttributeDescription { 6, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(GpuSkinnedVertex, weights) },
+        VkVertexInputAttributeDescription { 7, 0, VK_FORMAT_R32_UINT, offsetof(GpuSkinnedVertex, attachmentNodeIndex) },
+    };
+    const bool meshLayout = vertexLayout == VertexLayout::Mesh;
+    const bool skinnedLayout = vertexLayout == VertexLayout::SkinnedMesh;
     VkPipelineVertexInputStateCreateInfo vertexInput {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount = vertexLayout == VertexLayout::Mesh ? 1U : 0U,
-        .pVertexBindingDescriptions = vertexLayout == VertexLayout::Mesh ? &binding : nullptr,
-        .vertexAttributeDescriptionCount = vertexLayout == VertexLayout::Mesh
-            ? static_cast<uint32_t>(attributes.size())
-            : 0U,
-        .pVertexAttributeDescriptions = vertexLayout == VertexLayout::Mesh
-            ? attributes.data()
-            : nullptr,
+        .vertexBindingDescriptionCount = (meshLayout || skinnedLayout) ? 1U : 0U,
+        .pVertexBindingDescriptions = meshLayout ? &meshBinding : skinnedLayout ? &skinnedBinding : nullptr,
+        .vertexAttributeDescriptionCount = meshLayout ? static_cast<uint32_t>(attributes.size()) : skinnedLayout ? static_cast<uint32_t>(skinnedAttributes.size()) : 0U,
+        .pVertexAttributeDescriptions = meshLayout ? attributes.data() : skinnedLayout ? skinnedAttributes.data() : nullptr,
     };
     VkPipelineInputAssemblyStateCreateInfo inputAssembly {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -371,18 +403,31 @@ VkPipeline VulkanPipelineFactory::createShadowPipeline(
         .stride = sizeof(MeshVertex),
         .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
     };
+    const VkVertexInputBindingDescription skinnedBinding {
+        .binding = 0,
+        .stride = sizeof(GpuSkinnedVertex),
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+    };
     const VkVertexInputAttributeDescription attribute {
         .location = 0,
         .binding = 0,
         .format = VK_FORMAT_R32G32B32_SFLOAT,
         .offset = offsetof(MeshVertex, position),
     };
+    const std::array<VkVertexInputAttributeDescription, 4> skinnedAttributes {
+        VkVertexInputAttributeDescription { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuSkinnedVertex, position) },
+        VkVertexInputAttributeDescription { 5, 0, VK_FORMAT_R16G16B16A16_UINT, offsetof(GpuSkinnedVertex, joints) },
+        VkVertexInputAttributeDescription { 6, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(GpuSkinnedVertex, weights) },
+        VkVertexInputAttributeDescription { 7, 0, VK_FORMAT_R32_UINT, offsetof(GpuSkinnedVertex, attachmentNodeIndex) },
+    };
+    const bool meshPositionLayout = vertexLayout == VertexLayout::MeshPosition;
+    const bool skinnedPositionLayout = vertexLayout == VertexLayout::SkinnedMeshPosition;
     VkPipelineVertexInputStateCreateInfo vertexInput {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount = vertexLayout == VertexLayout::MeshPosition ? 1U : 0U,
-        .pVertexBindingDescriptions = vertexLayout == VertexLayout::MeshPosition ? &binding : nullptr,
-        .vertexAttributeDescriptionCount = vertexLayout == VertexLayout::MeshPosition ? 1U : 0U,
-        .pVertexAttributeDescriptions = vertexLayout == VertexLayout::MeshPosition ? &attribute : nullptr,
+        .vertexBindingDescriptionCount = (meshPositionLayout || skinnedPositionLayout) ? 1U : 0U,
+        .pVertexBindingDescriptions = meshPositionLayout ? &binding : skinnedPositionLayout ? &skinnedBinding : nullptr,
+        .vertexAttributeDescriptionCount = meshPositionLayout ? 1U : skinnedPositionLayout ? static_cast<uint32_t>(skinnedAttributes.size()) : 0U,
+        .pVertexAttributeDescriptions = meshPositionLayout ? &attribute : skinnedPositionLayout ? skinnedAttributes.data() : nullptr,
     };
     VkPipelineInputAssemblyStateCreateInfo inputAssembly {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,

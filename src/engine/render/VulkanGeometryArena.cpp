@@ -106,15 +106,27 @@ VulkanGeometryArena::Upload VulkanGeometryArena::beginUpload(
     const Allocation& allocation,
     const MeshData& mesh) const
 {
+    return beginUpload(
+        allocation,
+        mesh.vertices.data(),
+        sizeof(MeshVertex) * static_cast<VkDeviceSize>(mesh.vertices.size()),
+        mesh.indices.data(),
+        sizeof(uint32_t) * static_cast<VkDeviceSize>(mesh.indices.size()));
+}
+
+VulkanGeometryArena::Upload VulkanGeometryArena::beginUpload(
+    const Allocation& allocation,
+    const void* vertexData,
+    VkDeviceSize vertexBytes,
+    const void* indexData,
+    VkDeviceSize indexBytes) const
+{
     if (!allocation.valid() || allocation.vertexBlock >= vertexBlocks_.size() ||
         allocation.indexBlock >= indexBlocks_.size()) {
         throw std::invalid_argument("Invalid geometry allocation upload");
     }
-    const VkDeviceSize vertexBytes =
-        sizeof(MeshVertex) * static_cast<VkDeviceSize>(mesh.vertices.size());
-    const VkDeviceSize indexBytes =
-        sizeof(uint32_t) * static_cast<VkDeviceSize>(mesh.indices.size());
-    if (vertexBytes != allocation.vertex.size || indexBytes != allocation.index.size) {
+    if (!vertexData || !indexData || vertexBytes != allocation.vertex.size ||
+        indexBytes != allocation.index.size) {
         throw std::invalid_argument("Geometry upload size does not match its allocation");
     }
 
@@ -133,12 +145,12 @@ VulkanGeometryArena::Upload VulkanGeometryArena::beginUpload(
         uploadRing_->write(
             upload.staging,
             0,
-            mesh.vertices.data(),
+            vertexData,
             static_cast<std::size_t>(vertexBytes));
         uploadRing_->write(
             upload.staging,
             vertexBytes,
-            mesh.indices.data(),
+            indexData,
             static_cast<std::size_t>(indexBytes));
 
         const VkCommandBufferAllocateInfo commandBufferInfo {

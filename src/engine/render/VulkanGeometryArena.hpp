@@ -58,6 +58,12 @@ public:
     [[nodiscard]] Upload beginUpload(
         const Allocation& allocation,
         const MeshData& mesh) const;
+    [[nodiscard]] Upload beginUpload(
+        const Allocation& allocation,
+        const void* vertexData,
+        VkDeviceSize vertexBytes,
+        const void* indexData,
+        VkDeviceSize indexBytes) const;
     [[nodiscard]] bool uploadComplete(const Upload& upload) const;
     void destroyUpload(Upload& upload) const;
 

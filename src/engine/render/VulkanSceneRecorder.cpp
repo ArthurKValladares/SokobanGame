@@ -366,17 +366,22 @@ private:
         for (const std::array<Vec3, 4>& face : scene.shadowFaces) {
             drawShadowFace(commandBuffer, scene.shadowLayout, face);
         }
-        bool modelPipelineBound = false;
+        VkPipeline boundModelPipeline = VK_NULL_HANDLE;
         for (std::size_t tileIndex : scene.shadowModelIndices) {
             if (!models_.modelReady(frameData.tiles[tileIndex].model)) {
                 continue;
             }
-            if (!modelPipelineBound) {
+            const VkPipeline modelPipeline =
+                models_.modelUsesGpuSkinning(frameData.tiles[tileIndex].model)
+                ? pipelines_.skinnedModelShadow()
+                : pipelines_.modelShadow();
+            if (boundModelPipeline != modelPipeline) {
                 shadowPass_.bindModelPipeline(
                     commandBuffer,
-                    pipelines_.modelShadow(),
+                    modelPipeline,
                     stats_);
-                modelPipelineBound = true;
+                bindDescriptorSet(commandBuffer);
+                boundModelPipeline = modelPipeline;
             }
             drawModelShadow(
                 commandBuffer,
@@ -408,7 +413,7 @@ private:
                     drawPointShadowFace(
                         commandBuffer, light, cubeFace, face);
                 }
-                bool pointModelPipelineBound = false;
+                VkPipeline pointModelPipeline = VK_NULL_HANDLE;
                 for (std::size_t tileIndex : scene.shadowModelIndices) {
                     if (light.excludesShadowCaster(tileIndex)) {
                         continue;
@@ -416,12 +421,17 @@ private:
                     if (!models_.modelReady(frameData.tiles[tileIndex].model)) {
                         continue;
                     }
-                    if (!pointModelPipelineBound) {
+                    const VkPipeline modelPipeline =
+                        models_.modelUsesGpuSkinning(frameData.tiles[tileIndex].model)
+                        ? pipelines_.skinnedModelShadow()
+                        : pipelines_.modelShadow();
+                    if (pointModelPipeline != modelPipeline) {
                         shadowPass_.bindModelPipeline(
                             commandBuffer,
-                            pipelines_.modelShadow(),
+                            modelPipeline,
                             stats_);
-                        pointModelPipelineBound = true;
+                        bindDescriptorSet(commandBuffer);
+                        pointModelPipeline = modelPipeline;
                     }
                     drawPointModelShadow(
                         commandBuffer,
@@ -1051,10 +1061,11 @@ private:
                         : VK_CULL_MODE_NONE);
                 mirrorGhostState = mirrorGhost;
             }
-            const VkPipeline desiredPipeline =
-                mirrorGhost
-                ? pipelines_.mirrorEnergyModel()
-                : pipelines_.model();
+            const bool skinned = models_.modelUsesGpuSkinning(tile.model);
+            const VkPipeline desiredPipeline = mirrorGhost
+                ? (skinned ? pipelines_.skinnedMirrorEnergyModel()
+                           : pipelines_.mirrorEnergyModel())
+                : (skinned ? pipelines_.skinnedModel() : pipelines_.model());
             if (boundModelPipeline != desiredPipeline) {
                 vkCmdBindPipeline(
                     commandBuffer,
@@ -1851,7 +1862,7 @@ private:
             sizeof(TilePushConstants),
             &constants);
         vkCmdDrawIndexed(
-            commandBuffer, mesh.indexCount, 1, 0, 0, 0);
+            commandBuffer, mesh.indexCount, 1, 0, 0, mesh.firstInstance);
         stats_.visibleFaces += mesh.indexCount / 3;
         ++stats_.drawCalls;
         stats_.vertices += mesh.indexCount;
@@ -1896,7 +1907,7 @@ private:
             sizeof(TilePushConstants),
             &constants);
         vkCmdDrawIndexed(
-            commandBuffer, mesh.indexCount, 1, 0, 0, 0);
+            commandBuffer, mesh.indexCount, 1, 0, 0, mesh.firstInstance);
     }
 
     void drawPointModelShadow(
@@ -1930,7 +1941,7 @@ private:
             sizeof(TilePushConstants),
             &constants);
         vkCmdDrawIndexed(
-            commandBuffer, mesh.indexCount, 1, 0, 0, 0);
+            commandBuffer, mesh.indexCount, 1, 0, 0, mesh.firstInstance);
     }
 
     void drawUiRect(

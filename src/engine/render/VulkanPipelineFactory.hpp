@@ -39,8 +39,15 @@ public:
     [[nodiscard]] VkPipeline mirrorEnergyModel() const {
         return mirrorEnergyModel_;
     }
+    [[nodiscard]] VkPipeline skinnedModel() const { return skinnedModel_; }
+    [[nodiscard]] VkPipeline skinnedMirrorEnergyModel() const {
+        return skinnedMirrorEnergyModel_;
+    }
     [[nodiscard]] VkPipeline shadow() const { return shadow_; }
     [[nodiscard]] VkPipeline modelShadow() const { return modelShadow_; }
+    [[nodiscard]] VkPipeline skinnedModelShadow() const {
+        return skinnedModelShadow_;
+    }
     [[nodiscard]] VkPipeline ssao() const { return ssao_; }
     [[nodiscard]] VkPipeline ssaoComposite() const { return ssaoComposite_; }
     [[nodiscard]] VkPipeline ssaoVisualize() const { return ssaoVisualize_; }
@@ -51,6 +58,8 @@ private:
         None,
         Mesh,
         MeshPosition,
+        SkinnedMesh,
+        SkinnedMeshPosition,
     };
 
     [[nodiscard]] VkShaderModule createShaderModule(const std::filesystem::path& path) const;
@@ -82,8 +91,11 @@ private:
     VkPipeline ui_ = VK_NULL_HANDLE;
     VkPipeline model_ = VK_NULL_HANDLE;
     VkPipeline mirrorEnergyModel_ = VK_NULL_HANDLE;
+    VkPipeline skinnedModel_ = VK_NULL_HANDLE;
+    VkPipeline skinnedMirrorEnergyModel_ = VK_NULL_HANDLE;
     VkPipeline shadow_ = VK_NULL_HANDLE;
     VkPipeline modelShadow_ = VK_NULL_HANDLE;
+    VkPipeline skinnedModelShadow_ = VK_NULL_HANDLE;
     VkPipeline ssao_ = VK_NULL_HANDLE;
     VkPipeline ssaoComposite_ = VK_NULL_HANDLE;
     VkPipeline ssaoVisualize_ = VK_NULL_HANDLE;

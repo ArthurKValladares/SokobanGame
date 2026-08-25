@@ -319,6 +319,7 @@ void VulkanRenderer::drawFrame(
             descriptorResources(activeResources_));
         descriptorSync_.markUpdated(currentFrame_);
     }
+    modelResources_.beginAnimationFrame(currentFrame_);
     modelResources_.updateAnimations(frameData, currentFrame_);
     if (prepared.previewFrameData) {
         modelResources_.updateAnimations(
@@ -1074,6 +1075,7 @@ VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources(
             .imageView = uiResources_.titleBackgroundImageView(),
         },
         .modelTextures = modelResources_.textures(),
+        .skinning = modelResources_.skinningBuffer(),
     };
 }
 

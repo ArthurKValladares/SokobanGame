@@ -276,6 +276,8 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
         "shadow.vert.glsl.spv",
         "model.vert.glsl.spv",
         "model_shadow.vert.glsl.spv",
+        "skinned_model.vert.glsl.spv",
+        "skinned_model_shadow.vert.glsl.spv",
         "fullscreen.vert.glsl.spv",
         "ssao.frag.glsl.spv",
         "ssao_composite.frag.glsl.spv",

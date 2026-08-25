@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -72,6 +73,13 @@ bool VulkanModelResources::modelReady(RenderModel model) const
     return models_[model.index()].state == LoadState::Ready;
 }
 
+bool VulkanModelResources::modelUsesGpuSkinning(RenderModel model) const
+{
+    return !model.isCube() && manifest_ != nullptr &&
+        model.index() < models_.size() &&
+        manifest_->model(model).geometry == ModelGeometry::Skinned;
+}
+
 VulkanModelResources::~VulkanModelResources()
 {
     destroy();
@@ -102,6 +110,7 @@ void VulkanModelResources::create(
         uploadRing_.create(physicalDevice_, device_);
         geometryArena_.create(
             physicalDevice_, device_, commandPool_, graphicsQueue_, uploadRing_);
+        createSkinningBuffer();
         ImageData fallback {
             .width = 1,
             .height = 1,
@@ -155,7 +164,9 @@ void VulkanModelResources::destroy()
         for (auto model = models_.rbegin(); model != models_.rend(); ++model) {
             geometryArena_.destroyUpload(model->upload);
             destroyMesh(model->gpu);
+            destroySkinnedMesh(model->skinnedGpu);
         }
+        destroySkinningBuffer();
         geometryArena_.destroy();
         uploadRing_.destroy();
     }
@@ -180,6 +191,8 @@ void VulkanModelResources::destroy()
     residencyEvictions_ = 0;
     residencyBudgetBlocked_ = false;
     textureDescriptorsDirty_ = false;
+    activeSkinningFrame_ = UINT32_MAX;
+    skinningInstanceCount_ = 0;
 }
 
 void VulkanModelResources::requestAssets(
@@ -638,11 +651,27 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
             } else {
                 slot.skinnedSource = std::make_shared<SkinnedMeshData>(
                     std::move(std::get<SkinnedMeshData>(*slot.prepared)));
+                const std::vector<GpuSkinnedVertex> vertices =
+                    makeGpuSkinnedVertices(*slot.skinnedSource);
+                const std::vector<uint32_t> indices =
+                    makeGpuSkinnedIndices(*slot.skinnedSource);
+                if (vertices.empty() || indices.empty()) {
+                    throw std::runtime_error("glTF skinned mesh contains no geometry");
+                }
+                const uint64_t bytes =
+                    static_cast<uint64_t>(vertices.size()) * sizeof(GpuSkinnedVertex) +
+                    static_cast<uint64_t>(indices.size()) *
+                        sizeof(uint32_t);
+                if (!makeModelResident(model, bytes)) {
+                    slot.skinnedSource.reset();
+                    return false;
+                }
+                slot.skinnedGpu = uploadSkinnedMesh(*slot.skinnedSource, slot.upload);
+                slot.gpuBytes = bytes;
+                modelResidencyBytes_ += bytes;
+                slot.state = LoadState::Uploading;
             }
             slot.prepared.reset();
-            if (slot.state != LoadState::Uploading) {
-                slot.state = LoadState::Ready;
-            }
         } catch (...) {
             slot.failure = std::current_exception();
             slot.state = LoadState::Failed;
@@ -843,6 +872,7 @@ bool VulkanModelResources::makeModelResident(
         ModelSlot& slot = models_[*victim];
         modelResidencyBytes_ -= slot.gpuBytes;
         destroyMesh(slot.gpu);
+        destroySkinnedMesh(slot.skinnedGpu);
         slot = {};
         ++residencyEvictions_;
     }
@@ -1032,6 +1062,9 @@ void VulkanModelResources::updateAnimations(
     const RenderFrameData& frameData,
     uint32_t frameIndex)
 {
+    if (activeSkinningFrame_ != frameIndex) {
+        beginAnimationFrame(frameIndex);
+    }
     for (const AnimationController::InstanceSkinningRequest& request :
          animationController_.updateInstances(frameData)) {
         if (request.model.isCube() || request.model.index() >= models_.size()) {
@@ -1048,17 +1081,35 @@ void VulkanModelResources::updateAnimations(
             request.instanceId,
             request.model.value,
         };
-        auto& instance = skinnedInstances_[key];
-        if (!instance) {
-            instance = std::make_unique<SkinnedMeshUpdater>();
-            instance->create(
-                physicalDevice_,
-                device_,
-                model.skinnedSource,
-                *request.skinning.toClip);
+        auto [instance, inserted] = skinnedInstances_.try_emplace(key, 0);
+        if (inserted) {
+            if (skinningInstanceCount_ >= maxSkinnedInstancesPerFrame) {
+                throw std::runtime_error("GPU skinning instance budget exceeded");
+            }
+            instance->second = skinningInstanceCount_++;
         }
-        instance->update(request.skinning);
+        writeSkinningInstance(
+            frameIndex,
+            instance->second,
+            *model.skinnedSource,
+            request.skinning);
     }
+}
+
+void VulkanModelResources::beginAnimationFrame(uint32_t frameIndex)
+{
+    if (frameIndex >= gpuSkinningFrameCount) {
+        throw std::out_of_range("GPU skinning frame index is out of range");
+    }
+    for (auto it = skinnedInstances_.begin(); it != skinnedInstances_.end();) {
+        if (it->first.frameIndex == frameIndex) {
+            it = skinnedInstances_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    activeSkinningFrame_ = frameIndex;
+    skinningInstanceCount_ = 0;
 }
 
 VulkanModelResources::MeshView VulkanModelResources::meshForTile(
@@ -1081,7 +1132,20 @@ VulkanModelResources::MeshView VulkanModelResources::meshForTile(
                 std::to_string(tile.animationInstanceId) + ", frame=" +
                 std::to_string(frameIndex) + ")");
         }
-        return instance->second->mesh();
+        const ModelSlot& slot = models_[tile.model.index()];
+        if (!slot.skinnedGpu.allocation.valid()) {
+            throw std::runtime_error("Skinned model has no GPU geometry");
+        }
+        return {
+            .vertexBuffer = geometryArena_.vertexBuffer(slot.skinnedGpu.allocation),
+            .vertexOffset = geometryArena_.vertexOffset(slot.skinnedGpu.allocation),
+            .indexBuffer = geometryArena_.indexBuffer(slot.skinnedGpu.allocation),
+            .indexOffset = geometryArena_.indexOffset(slot.skinnedGpu.allocation),
+            .indexCount = slot.skinnedGpu.indexCount,
+            .firstInstance = frameIndex * maxSkinnedInstancesPerFrame +
+                instance->second,
+            .skinned = true,
+        };
     }
     const GpuMesh& mesh = gpuMeshForModel(tile.model);
     return {
@@ -1133,6 +1197,15 @@ std::vector<VulkanModelResources::TextureView> VulkanModelResources::textures() 
 uint32_t VulkanModelResources::textureCount() const
 {
     return maxModelTextures;
+}
+
+VulkanModelResources::SkinningBufferView VulkanModelResources::skinningBuffer() const
+{
+    return {
+        .buffer = skinningBuffer_.buffer,
+        .range = static_cast<VkDeviceSize>(gpuSkinningFrameCount) *
+            maxSkinnedInstancesPerFrame * sizeof(GpuSkinningInstance),
+    };
 }
 
 VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
@@ -1204,6 +1277,116 @@ VulkanModelResources::GpuMesh VulkanModelResources::uploadMesh(
         geometryArena_.release(result.allocation);
         throw;
     }
+}
+
+VulkanModelResources::GpuSkinnedMesh VulkanModelResources::uploadSkinnedMesh(
+    const SkinnedMeshData& mesh,
+    VulkanGeometryArena::Upload& upload)
+{
+    const std::vector<GpuSkinnedVertex> vertices = makeGpuSkinnedVertices(mesh);
+    const std::vector<uint32_t> indices = makeGpuSkinnedIndices(mesh);
+    if (vertices.empty() || indices.empty()) {
+        throw std::runtime_error("glTF skinned mesh contains no geometry");
+    }
+    const VkDeviceSize vertexBytes = sizeof(GpuSkinnedVertex) * vertices.size();
+    const VkDeviceSize indexBytes = sizeof(uint32_t) * indices.size();
+    GpuSkinnedMesh result;
+    result.allocation = geometryArena_.allocate(vertexBytes, indexBytes);
+    try {
+        upload = geometryArena_.beginUpload(
+            result.allocation,
+            vertices.data(),
+            vertexBytes,
+            indices.data(),
+            indexBytes);
+        result.indexCount = static_cast<uint32_t>(indices.size());
+        return result;
+    } catch (...) {
+        geometryArena_.release(result.allocation);
+        throw;
+    }
+}
+
+void VulkanModelResources::createSkinningBuffer()
+{
+    const VkDeviceSize size = static_cast<VkDeviceSize>(gpuSkinningFrameCount) *
+        maxSkinnedInstancesPerFrame * sizeof(GpuSkinningInstance);
+    const VkBufferCreateInfo bufferInfo {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = size,
+        .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+    vkCheck(vkCreateBuffer(device_, &bufferInfo, nullptr, &skinningBuffer_.buffer),
+        "vkCreateBuffer GPU skinning palette failed");
+    try {
+        VkMemoryRequirements requirements {};
+        vkGetBufferMemoryRequirements(device_, skinningBuffer_.buffer, &requirements);
+        const VkMemoryAllocateInfo allocationInfo {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            .allocationSize = requirements.size,
+            .memoryTypeIndex = findMemoryType(
+                requirements.memoryTypeBits,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
+        };
+        vkCheck(vkAllocateMemory(
+                    device_, &allocationInfo, nullptr, &skinningBuffer_.memory),
+            "vkAllocateMemory GPU skinning palette failed");
+        vkCheck(vkBindBufferMemory(
+                    device_, skinningBuffer_.buffer, skinningBuffer_.memory, 0),
+            "vkBindBufferMemory GPU skinning palette failed");
+        vkCheck(vkMapMemory(device_, skinningBuffer_.memory, 0, size, 0,
+                    &skinningBuffer_.mapped),
+            "vkMapMemory GPU skinning palette failed");
+        std::memset(skinningBuffer_.mapped, 0, static_cast<std::size_t>(size));
+    } catch (...) {
+        destroySkinningBuffer();
+        throw;
+    }
+}
+
+void VulkanModelResources::destroySkinningBuffer()
+{
+    if (device_ && skinningBuffer_.mapped) {
+        vkUnmapMemory(device_, skinningBuffer_.memory);
+    }
+    if (device_ && skinningBuffer_.buffer) {
+        vkDestroyBuffer(device_, skinningBuffer_.buffer, nullptr);
+    }
+    if (device_ && skinningBuffer_.memory) {
+        vkFreeMemory(device_, skinningBuffer_.memory, nullptr);
+    }
+    skinningBuffer_ = {};
+}
+
+void VulkanModelResources::writeSkinningInstance(
+    uint32_t frameIndex,
+    uint32_t instanceSlot,
+    const SkinnedMeshData& mesh,
+    const AnimationController::SkinningRequest& request)
+{
+    if (!skinningBuffer_.mapped || instanceSlot >= maxSkinnedInstancesPerFrame ||
+        request.toClip == nullptr) {
+        throw std::runtime_error("GPU skinning palette write is invalid");
+    }
+    const SkinnedPoseMatrices pose = request.blended()
+        ? sampleGltfSkinPoseBlended(
+            mesh,
+            *request.fromClip,
+            request.fromTimeSeconds,
+            *request.toClip,
+            request.toTimeSeconds,
+            request.blend)
+        : sampleGltfSkinPose(mesh, *request.toClip, request.toTimeSeconds);
+    const GpuSkinningInstance instance = makeGpuSkinningInstance(mesh, pose);
+    const uint64_t linearIndex =
+        static_cast<uint64_t>(frameIndex) * maxSkinnedInstancesPerFrame + instanceSlot;
+    std::memcpy(
+        static_cast<std::byte*>(skinningBuffer_.mapped) +
+            linearIndex * sizeof(GpuSkinningInstance),
+        &instance,
+        sizeof(instance));
 }
 
 VulkanModelResources::TextureSampling VulkanModelResources::samplingFor(
@@ -1647,6 +1830,14 @@ void VulkanModelResources::destroyTexture(
 }
 
 void VulkanModelResources::destroyMesh(GpuMesh& mesh)
+{
+    if (mesh.allocation.valid()) {
+        geometryArena_.release(mesh.allocation);
+    }
+    mesh = {};
+}
+
+void VulkanModelResources::destroySkinnedMesh(GpuSkinnedMesh& mesh)
 {
     if (mesh.allocation.valid()) {
         geometryArena_.release(mesh.allocation);

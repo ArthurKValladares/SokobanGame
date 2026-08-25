@@ -31,6 +31,7 @@ public:
         ImageBinding uiFont;
         ImageBinding titleBackground;
         std::vector<VulkanModelResources::TextureView> modelTextures;
+        VulkanModelResources::SkinningBufferView skinning;
     };
 
     VulkanSceneDescriptors() = default;
