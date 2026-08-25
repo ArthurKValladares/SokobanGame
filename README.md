@@ -114,10 +114,6 @@ PowerShell package gate verifies the final ZIP from a fresh extraction and
 launches it briefly; the accompanying Windows and GPU-driver matrix is the
 required human acceptance record.
 
-P4-7 acceptance for the current release was manually verified on 2026-08-25.
-Repeat the package gate and collect fresh hardware/driver evidence for every
-new Runtime ZIP, installer, or supported-driver change.
-
 For a shareable validation report from each test machine, run
 `packaging/CollectReleaseValidationEvidence.ps1`; it packages the package-gate
 result, GPU/driver/monitor details, Vulkan and DirectX diagnostics, hashes,
