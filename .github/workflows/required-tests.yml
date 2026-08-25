@@ -10,11 +10,15 @@ permissions:
 
 env:
   VULKAN_SDK_VERSION: 1.4.357.0
+  # Both pins were checked against LunarG's published checksums, which live at
+  #   https://sdk.lunarg.com/sdk/sha/<version>/<platform>/<file>.txt
+  # On a version bump, re-pin from there rather than from whatever a CI run
+  # happened to download - a hash taken from the download only proves the
+  # download was self-consistent, not that it came from LunarG:
+  #   curl -sS https://sdk.lunarg.com/sdk/sha/$VER/linux/vulkan_sdk.tar.xz.txt
+  #   curl -sS https://sdk.lunarg.com/sdk/sha/$VER/windows/vulkan_sdk.exe.txt
   VULKAN_SDK_SHA256: 0f09bf6a0625e346bf004be70b92907e934a4c76606b323441b2baf3a5a0e66d
-  # Pin the Windows installer the same way. Leave empty and the Windows job
-  # fails on its first run printing the hash it downloaded, so this can be
-  # filled in once from a run you trust rather than from an unverified paste.
-  VULKAN_SDK_WINDOWS_SHA256: ""
+  VULKAN_SDK_WINDOWS_SHA256: 81f474711e9042f4cd22b31b2f7a8870db2e428b21586fb43dd80150be97310d
   # Frames the headless render gate draws before exiting. Enough to cross the
   # asset-publication ramp (one asset publishes per frame) and reach a steady
   # state where every pass is recording real work.
@@ -256,7 +260,7 @@ jobs:
           $actual = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower()
           $expected = "$env:VULKAN_SDK_WINDOWS_SHA256".Trim().ToLower()
           if ([string]::IsNullOrEmpty($expected)) {
-            Write-Host "::error::VULKAN_SDK_WINDOWS_SHA256 is unset. Verify this download, then set it in the workflow env to: $actual"
+            Write-Host "::error::VULKAN_SDK_WINDOWS_SHA256 is unset. Pin it from https://sdk.lunarg.com/sdk/sha/$env:VULKAN_SDK_VERSION/windows/vulkan_sdk.exe.txt (this download hashed to $actual)"
             exit 1
           }
           if ($actual -ne $expected) {
