@@ -19,6 +19,12 @@ if(MSVC)
 endif()
 
 option(SOKOBAN_ENABLE_VALIDATION "Enable Vulkan validation layers in debug builds" ON)
+option(SOKOBAN_ENABLE_SANITIZERS
+    "Instrument Sokoban targets with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+option(SOKOBAN_ENABLE_CLANG_TIDY
+    "Run the selected clang-tidy checks while compiling Sokoban targets" OFF)
+option(SOKOBAN_BUILD_FUZZ_TESTS
+    "Build libFuzzer harnesses for hostile serialized input" OFF)
 
 find_package(Vulkan REQUIRED)
 find_package(Threads REQUIRED)
@@ -130,6 +136,44 @@ endforeach()
 
 add_custom_target(sokoban_shaders DEPENDS ${SHADER_OUTPUTS})
 
+function(sokoban_enable_warnings target)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    if(SOKOBAN_ENABLE_SANITIZERS)
+        if(MSVC)
+            message(FATAL_ERROR
+                "SOKOBAN_ENABLE_SANITIZERS currently requires a Clang or GCC toolchain")
+        elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+            target_compile_options(${target} PRIVATE
+                -fsanitize=address,undefined
+                -fno-omit-frame-pointer
+            )
+            target_link_options(${target} PRIVATE -fsanitize=address,undefined)
+        else()
+            message(FATAL_ERROR
+                "SOKOBAN_ENABLE_SANITIZERS requires a Clang or GCC toolchain")
+        endif()
+    endif()
+
+    if(SOKOBAN_ENABLE_CLANG_TIDY)
+        if(NOT SOKOBAN_CLANG_TIDY_EXECUTABLE)
+            find_program(SOKOBAN_CLANG_TIDY_EXECUTABLE NAMES clang-tidy)
+        endif()
+        if(NOT SOKOBAN_CLANG_TIDY_EXECUTABLE)
+            message(FATAL_ERROR
+                "SOKOBAN_ENABLE_CLANG_TIDY is ON but clang-tidy was not found")
+        endif()
+        # Keep this a high-signal gate. Broader style check sets belong in a
+        # separately agreed formatting policy rather than blocking every build.
+        set_property(TARGET ${target} PROPERTY CXX_CLANG_TIDY
+            "${SOKOBAN_CLANG_TIDY_EXECUTABLE};-checks=-*,clang-analyzer-*;-warnings-as-errors=*")
+    endif()
+endfunction()
+
 add_executable(sokoban_content_tool
     tools/ContentTool.cpp
 )
@@ -137,19 +181,7 @@ target_include_directories(sokoban_content_tool PRIVATE src)
 set_target_properties(sokoban_content_tool PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tools/$<CONFIG>"
 )
-if(MSVC)
-    target_compile_options(sokoban_content_tool PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(sokoban_content_tool PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-function(sokoban_enable_warnings target)
-    if(MSVC)
-        target_compile_options(${target} PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-endfunction()
+sokoban_enable_warnings(sokoban_content_tool)
 
 add_library(sokoban_core STATIC
     src/engine/ActionPlan.cpp
@@ -377,6 +409,8 @@ target_compile_definitions(sokoban PRIVATE
 sokoban_enable_warnings(sokoban)
 
 option(SOKOBAN_BUILD_TESTS "Build headless engine tests" ON)
+option(SOKOBAN_BUILD_VULKAN_SMOKE_TESTS
+    "Build the hidden-window Vulkan device and submission smoke test" ON)
 
 # Declares one headless test executable with the project's include path and
 # warning set, registered with CTest.
@@ -408,11 +442,7 @@ function(sokoban_add_test)
         target_compile_definitions(${ARG_TARGET} PRIVATE
             SOKOBAN_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
     endif()
-    if(MSVC)
-        target_compile_options(${ARG_TARGET} PRIVATE /W4 /permissive-)
-    else()
-        target_compile_options(${ARG_TARGET} PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
+    sokoban_enable_warnings(${ARG_TARGET})
     add_test(NAME ${ARG_NAME} COMMAND ${ARG_TARGET})
     if(ARG_ASSETS_ENV)
         set_tests_properties(${ARG_NAME} PROPERTIES
@@ -423,6 +453,18 @@ endfunction()
 if(SOKOBAN_BUILD_TESTS)
     target_compile_definitions(sokoban_core PRIVATE SOKOBAN_ENABLE_TEST_HOOKS=1)
     enable_testing()
+
+    if(SOKOBAN_BUILD_VULKAN_SMOKE_TESTS)
+        sokoban_add_test(NAME vulkan_smoke TARGET sokoban_vulkan_smoke_tests
+            LIBS sokoban_render_vulkan
+            SOURCES tests/VulkanSmokeTests.cpp
+        )
+        set_tests_properties(vulkan_smoke PROPERTIES
+            LABELS "vulkan;smoke"
+            TIMEOUT 30
+            SKIP_RETURN_CODE 77
+        )
+    endif()
 
     sokoban_add_test(NAME rules TARGET sokoban_rules_tests
         LIBS sokoban_core
@@ -661,6 +703,33 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/TileThumbnailBakeTests.cpp
     )
+endif()
+
+if(SOKOBAN_BUILD_FUZZ_TESTS)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR
+            "SOKOBAN_BUILD_FUZZ_TESTS requires Clang's libFuzzer runtime")
+    endif()
+
+    # The harness receives the libFuzzer main at link time; core gets coverage
+    # instrumentation but remains usable by ordinary executables.
+    target_compile_options(sokoban_core PRIVATE
+        -fsanitize=fuzzer-no-link,address,undefined
+        -fno-omit-frame-pointer
+    )
+    add_executable(sokoban_player_profile_fuzz
+        tests/fuzz/PlayerProfileFuzz.cpp
+    )
+    target_include_directories(sokoban_player_profile_fuzz PRIVATE src)
+    target_link_libraries(sokoban_player_profile_fuzz PRIVATE sokoban_core)
+    target_compile_options(sokoban_player_profile_fuzz PRIVATE
+        -fsanitize=fuzzer,address,undefined
+        -fno-omit-frame-pointer
+    )
+    target_link_options(sokoban_player_profile_fuzz PRIVATE
+        -fsanitize=fuzzer,address,undefined
+    )
+    sokoban_enable_warnings(sokoban_player_profile_fuzz)
 endif()
 
 install(TARGETS sokoban RUNTIME DESTINATION . COMPONENT Runtime)

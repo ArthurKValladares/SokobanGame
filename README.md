@@ -61,7 +61,7 @@ executable-relative assets.
 
 ## Tests
 
-The project currently registers 50 CTest suites covering rules, level parsing,
+The project currently registers CTest suites covering rules, level parsing,
 campaign and gameplay sessions, persistence and migrations, input routing,
 player UI, renderer state, scene preparation and picking, editor transactions,
 assets, animation, particles, tasks, logging, and content packaging.
@@ -74,9 +74,27 @@ ctest --test-dir build -C Release --output-on-failure --no-tests=error
 ```
 
 The `Required Tests` GitHub Actions workflow performs clean, independent Debug
-and Release builds on every push and pull request, then runs the complete CTest
-registry in both configurations. Repository branch protection should require
-both `Tests (Debug)` and `Tests (Release)` checks before merging to `main`.
+and Release builds on every push and pull request, runs the complete CTest
+registry (including a hidden-window Vulkan device/submission smoke test) in
+both configurations, and separately gates AddressSanitizer/UBSan,
+clang-tidy's static analyzer, and a bounded libFuzzer run against hostile
+player-profile input. Repository branch protection should require every
+workflow check before merging to `main`.
+
+For local diagnostics with a Clang or GCC toolchain:
+
+```powershell
+cmake -S . -B build-sanitize -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Debug -DSOKOBAN_ENABLE_SANITIZERS=ON
+cmake --build build-sanitize --parallel
+ctest --test-dir build-sanitize --output-on-failure --no-tests=error
+
+cmake -S . -B build-tidy -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Debug -DSOKOBAN_ENABLE_CLANG_TIDY=ON
+cmake --build build-tidy --target sokoban --parallel
+
+cmake -S . -B build-fuzz -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Debug -DSOKOBAN_BUILD_TESTS=OFF -DSOKOBAN_BUILD_FUZZ_TESTS=ON
+cmake --build build-fuzz --target sokoban_player_profile_fuzz --parallel
+.\build-fuzz\sokoban_player_profile_fuzz.exe -max_len=65536 -max_total_time=60
+```
 
 Production code is compiled once into `sokoban_core`, `sokoban_ui`, and
 `sokoban_render_vulkan`; tests link those libraries rather than recompiling

@@ -17,16 +17,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Tests (${{ matrix.configuration }})
+  quality:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        configuration:
-          - Debug
-          - Release
+        include:
+          - name: Tests (Debug)
+            build_type: Debug
+            cmake_options: -DSOKOBAN_BUILD_TESTS=ON
+            build_target: all
+            run_tests: true
+            run_fuzz: false
+          - name: Tests (Release)
+            build_type: Release
+            cmake_options: -DSOKOBAN_BUILD_TESTS=ON
+            build_target: all
+            run_tests: true
+            run_fuzz: false
+          - name: Sanitizers (ASan + UBSan)
+            build_type: Debug
+            cmake_options: -DSOKOBAN_BUILD_TESTS=ON -DSOKOBAN_ENABLE_SANITIZERS=ON
+            build_target: all
+            run_tests: true
+            run_fuzz: false
+            compiler_options: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          - name: Static analysis (clang-tidy)
+            build_type: Debug
+            cmake_options: -DSOKOBAN_BUILD_TESTS=OFF -DSOKOBAN_ENABLE_CLANG_TIDY=ON
+            build_target: sokoban
+            run_tests: false
+            run_fuzz: false
+            compiler_options: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          - name: Fuzzing (player profile)
+            build_type: Debug
+            cmake_options: -DSOKOBAN_BUILD_TESTS=OFF -DSOKOBAN_BUILD_FUZZ_TESTS=ON
+            build_target: sokoban_player_profile_fuzz
+            run_tests: false
+            run_fuzz: true
+            compiler_options: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
 
     steps:
       - name: Check out source
@@ -37,6 +68,8 @@ jobs:
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential \
+            clang \
+            clang-tidy \
             libasound2-dev \
             libdbus-1-dev \
             libdecor-0-dev \
@@ -66,9 +99,12 @@ jobs:
             libxrandr-dev \
             libxss-dev \
             libxtst-dev \
+            mesa-vulkan-drivers \
             ninja-build \
             pkg-config \
+            vulkan-validationlayers \
             wayland-protocols \
+            xvfb \
             xz-utils
 
       - name: Restore Vulkan SDK
@@ -100,19 +136,32 @@ jobs:
           echo "CMAKE_PREFIX_PATH=${sdk}:${sdk}/lib/VulkanLoader" >> "${GITHUB_ENV}"
           echo "${sdk}/bin" >> "${GITHUB_PATH}"
 
-      - name: Configure ${{ matrix.configuration }}
+      - name: Configure ${{ matrix.name }}
         run: >-
           cmake -S . -B build -G Ninja
-          -DCMAKE_BUILD_TYPE=${{ matrix.configuration }}
-          -DSOKOBAN_BUILD_TESTS=ON
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          ${{ matrix.compiler_options }}
+          ${{ matrix.cmake_options }}
 
-      - name: Build ${{ matrix.configuration }}
-        run: cmake --build build --parallel
+      - name: Build ${{ matrix.name }}
+        run: cmake --build build --target ${{ matrix.build_target }} --parallel
 
-      - name: Test ${{ matrix.configuration }}
+      - name: Test ${{ matrix.name }}
+        if: matrix.run_tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: >-
+          xvfb-run --auto-servernum
           ctest --test-dir build
-          --build-config ${{ matrix.configuration }}
-          --output-on-failure
-          --no-tests=error
-          --timeout 60
+          --build-config ${{ matrix.build_type }}
+          --output-on-failure --no-tests=error --timeout 60
+
+      - name: Fuzz player-profile decoding
+        if: matrix.run_fuzz
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: >-
+          ./build/sokoban_player_profile_fuzz
+          -max_len=65536 -max_total_time=60 -print_final_stats=1
