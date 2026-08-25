@@ -7,6 +7,8 @@
 
 namespace sokoban {
 
+// Keep this translation unit's settings projection coupled to the versioned
+// UserSettings layout used by profile copy/adoption operations.
 void PlayerProfile::normalize()
 {
     unlockedLevel = std::max(unlockedLevel, 0);

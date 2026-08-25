@@ -39,6 +39,9 @@ void testInitializationProducesAllStartupEffects()
     CHECK(effects.stepDurationSeconds == 0.05f);
     CHECK(!effects.antiAliasingSamples.has_value());
     CHECK(!effects.renderScalePercent.has_value());
+    CHECK(effects.presentation.has_value());
+    CHECK(effects.presentation->vsync == profile.settings.video.vsync);
+    CHECK(effects.frameRateLimit == profile.settings.video.frameRateLimit);
     CHECK(!effects.saveProgress);
     CHECK(!effects.saveSettings);
     CHECK(!presentation.lighting.ambientOcclusionEnabled);
@@ -105,6 +108,8 @@ void testUnchangedDomainsDoNotProduceRuntimeEffects()
     CHECK(!effects.window.has_value());
     CHECK(!effects.antiAliasingSamples.has_value());
     CHECK(!effects.renderScalePercent.has_value());
+    CHECK(!effects.presentation.has_value());
+    CHECK(!effects.frameRateLimit.has_value());
     CHECK(!effects.audio.has_value());
     CHECK(!effects.input.has_value());
     CHECK(effects.saveProgress);
@@ -112,6 +117,28 @@ void testUnchangedDomainsDoNotProduceRuntimeEffects()
     CHECK(presentation.lighting.ambientOcclusionEnabled ==
         settings.video.ambientOcclusion);
     CHECK(presentation.lighting.ambientOcclusionStrength == 0.25f);
+}
+
+void testPresentationAndPacingProduceTargetedEffects()
+{
+    sokoban::PlayerProfile profile;
+    sokoban::PresentationSettings presentation;
+    sokoban::SettingsCoordinator coordinator(profile, presentation);
+    (void)coordinator.initialize();
+
+    sokoban::UserSettings settings = coordinator.userSettings();
+    settings.video.vsync = false;
+    settings.video.allowTearing = true;
+    settings.video.frameRateLimit = 120;
+    const sokoban::SettingsEffects effects =
+        coordinator.applyUserSettings(settings);
+
+    CHECK(effects.presentation.has_value());
+    CHECK(!effects.presentation->vsync);
+    CHECK(effects.presentation->allowTearing);
+    CHECK(effects.frameRateLimit == 120);
+    CHECK(!effects.window.has_value());
+    CHECK(!effects.antiAliasingSamples.has_value());
 }
 
 void testAudioPersistencePolicy()
@@ -142,6 +169,7 @@ int main()
     testInitializationProducesAllStartupEffects();
     testMenuProjectionAndChangePlan();
     testUnchangedDomainsDoNotProduceRuntimeEffects();
+    testPresentationAndPacingProduceTargetedEffects();
     testAudioPersistencePolicy();
 
     if (failures == 0) {

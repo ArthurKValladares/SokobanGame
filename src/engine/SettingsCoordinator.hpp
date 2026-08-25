@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/PlayerProfile.hpp"
+#include "engine/PresentationPolicy.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/SettingsTypes.hpp"
 
@@ -20,6 +21,8 @@ struct SettingsEffects {
     std::optional<WindowState> window;
     std::optional<int> antiAliasingSamples;
     std::optional<int> renderScalePercent;
+    std::optional<PresentationPolicy> presentation;
+    std::optional<int> frameRateLimit;
     std::optional<PlayerProfile::AudioSettings> audio;
     std::optional<InputBindings> input;
     std::optional<float> stepDurationSeconds;

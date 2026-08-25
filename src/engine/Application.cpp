@@ -41,20 +41,33 @@ AntiAliasingMode antiAliasingModeForSamples(int samples)
 
 bool SDLCALL simulationTimingEventWatch(void* userdata, SDL_Event* event)
 {
-    auto& timing = *static_cast<SimulationTiming*>(userdata);
+    const auto& state = *static_cast<ApplicationTimingEventWatchState*>(
+        userdata);
+    auto& timing = *state.simulation;
+    auto& framePacer = *state.framePacer;
     switch (event->type) {
     case SDL_EVENT_WINDOW_MINIMIZED:
         timing.setSuspended(SimulationSuspension::Minimized, true);
+        framePacer.setSuspended(FramePacingSuspension::Minimized, true);
         break;
     case SDL_EVENT_WINDOW_RESTORED:
         timing.setSuspended(SimulationSuspension::Minimized, false);
+        framePacer.setSuspended(FramePacingSuspension::Minimized, false);
+        break;
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+        framePacer.setSuspended(FramePacingSuspension::Unfocused, true);
+        break;
+    case SDL_EVENT_WINDOW_FOCUS_GAINED:
+        framePacer.setSuspended(FramePacingSuspension::Unfocused, false);
         break;
     case SDL_EVENT_WILL_ENTER_BACKGROUND:
     case SDL_EVENT_DID_ENTER_BACKGROUND:
         timing.setSuspended(SimulationSuspension::Backgrounded, true);
+        framePacer.setSuspended(FramePacingSuspension::Backgrounded, true);
         break;
     case SDL_EVENT_DID_ENTER_FOREGROUND:
         timing.setSuspended(SimulationSuspension::Backgrounded, false);
+        framePacer.setSuspended(FramePacingSuspension::Backgrounded, false);
         break;
     default:
         break;
@@ -89,7 +102,10 @@ Application::Application()
           antiAliasingModeForSamples(
               playerProfile_.settings.video.antiAliasingSamples),
           playerProfile_.settings.video.effectiveRenderScalePercent(),
-          playerProfile_.settings.video.vsync)
+          {
+              .vsync = playerProfile_.settings.video.vsync,
+              .allowTearing = playerProfile_.settings.video.allowTearing,
+          })
     , ui_(uiFont_)
     , audioSystem_(assetRoot_, assetManifest_)
     , mirrorSwapParticleEffect_(
@@ -265,7 +281,7 @@ Application::Application()
 #endif
 
     if (!SDL_AddEventWatch(
-            simulationTimingEventWatch, &simulationTiming_)) {
+            simulationTimingEventWatch, &timingEventWatchState_)) {
         throw std::runtime_error(
             std::string("SDL_AddEventWatch failed: ") + SDL_GetError());
     }
@@ -273,7 +289,8 @@ Application::Application()
 
 Application::~Application()
 {
-    SDL_RemoveEventWatch(simulationTimingEventWatch, &simulationTiming_);
+    SDL_RemoveEventWatch(
+        simulationTimingEventWatch, &timingEventWatchState_);
 
     // No longer waits for the world to go quiet.
     //
@@ -332,6 +349,7 @@ bool Application::bakeTileThumbnails()
 void Application::run()
 {
     while (running_) {
+        framePacer_.beginFrame();
 #if SOKOBAN_ENABLE_DEBUG_UI
         // Serviced here, between frames, where no ImGui or UI frame is open.
         if (tools_->bakeThumbnailsRequested) {
@@ -541,6 +559,9 @@ void Application::run()
             log::error(log::Category::Application)
                 << "Rendering stopped: " << renderer_.fatalFailureMessage();
             running_ = false;
+        }
+        if (running_) {
+            framePacer_.pace();
         }
     }
 }
@@ -1370,6 +1391,12 @@ void Application::applySettingsEffects(const SettingsEffects& effects)
     }
     if (effects.renderScalePercent) {
         renderer_.setRenderScalePercent(*effects.renderScalePercent);
+    }
+    if (effects.presentation) {
+        renderer_.setPresentationPolicy(*effects.presentation);
+    }
+    if (effects.frameRateLimit) {
+        framePacer_.setFrameRateLimit(*effects.frameRateLimit);
     }
     if (effects.audio) {
         audioSystem_.setMasterVolume(effects.audio->masterVolume);

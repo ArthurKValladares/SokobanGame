@@ -5,8 +5,15 @@
 namespace sokoban::config {
 
 inline constexpr bool fullscreen = false;
-// False preserves the engine's mailbox-first presentation behavior.
-inline constexpr bool vsync = false;
+// FIFO is available on every Vulkan presentation surface and provides stable
+// pacing out of the box. Mailbox is used only when the player opts out.
+inline constexpr bool vsync = true;
+inline constexpr bool allowTearing = false;
+// Zero means no CPU cap: FIFO/mailbox remains responsible for pacing.
+inline constexpr int frameRateLimit = 0;
+inline constexpr std::array frameRateLimitOptions { 0, 30, 60, 120, 144, 240 };
+inline constexpr int unfocusedFrameRateLimit = 20;
+inline constexpr int minimizedFrameRateLimit = 5;
 inline constexpr std::array antiAliasingSampleOptions { 1, 2, 4, 8 };
 inline constexpr int antiAliasingSamples = 8;
 inline constexpr int renderScalePercent = 100;

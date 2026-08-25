@@ -18,6 +18,8 @@ struct UserSettings {
     struct Video {
         bool fullscreen = config::fullscreen;
         bool vsync = config::vsync;
+        bool allowTearing = config::allowTearing;
+        int frameRateLimit = config::frameRateLimit;
         int antiAliasingSamples = config::antiAliasingSamples;
         int renderScalePercent = config::renderScalePercent;
         bool customRenderScale = config::customRenderScale;

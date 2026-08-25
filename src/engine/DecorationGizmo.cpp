@@ -10,6 +10,11 @@ namespace {
 constexpr float axisHitRadiusPixels = 11.0f;
 constexpr float ringHitRadiusPixels = 9.0f;
 constexpr float rotationDegreesPerPixel = 0.75f;
+constexpr std::array<DecorationGizmo::Axis, 3> gizmoAxes {
+    DecorationGizmo::Axis::X,
+    DecorationGizmo::Axis::Y,
+    DecorationGizmo::Axis::Z,
+};
 
 float dot(Vec2 left, Vec2 right)
 {
@@ -87,7 +92,8 @@ std::optional<DecorationGizmo::Axis> DecorationGizmo::hoveredAxis(
 {
     float nearestDistance = std::numeric_limits<float>::max();
     std::optional<Axis> nearest;
-    for (std::size_t index = 0; index < geometry.axes.size(); ++index) {
+    for (const Axis axis : gizmoAxes) {
+        const std::size_t index = axisIndex(axis);
         float distance = std::numeric_limits<float>::max();
         if (mode_ == Mode::Rotate) {
             const std::vector<Vec2>& ring = geometry.rings[index];
@@ -107,7 +113,7 @@ std::optional<DecorationGizmo::Axis> DecorationGizmo::hoveredAxis(
             : axisHitRadiusPixels;
         if (distance <= radius && distance < nearestDistance) {
             nearestDistance = distance;
-            nearest = static_cast<Axis>(index);
+            nearest = axis;
         }
     }
     return nearest;

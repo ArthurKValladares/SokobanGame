@@ -19,7 +19,8 @@ pipeline, and a headless editor model exposed through Debug ImGui tools.
 - Stylized procedural water with cellular ripples, two-tone shading,
   shorelines, tile borders, and submerged-entity rendering.
 - Vulkan shadows, SSAO, MSAA, internal render scaling, deferred renderer
-  reconfiguration, GLTF models, skeletal animation, and real-font UI.
+  reconfiguration, FIFO-by-default VSync, optional tearing/frame caps,
+  GLTF models, skeletal animation, and real-font UI.
 - Main menu, save-slot selection, options, remappable SDL3 keyboard/gamepad
   input, and animated top-down camera pitch.
 - Versioned profiles with atomic writes, backups, corrupt-save recovery,

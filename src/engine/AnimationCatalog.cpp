@@ -255,6 +255,8 @@ AnimationCatalog AnimationCatalog::parse(
                 .animation = manifest.animationIdByName(
                     requiredString(uses[i], "animation", context)),
                 .speed = optionalSpeed(uses[i], context),
+                .events = {},
+                .startAfter = std::nullopt
             };
             if (const auto events = uses[i].find("events");
                 events != uses[i].end()) {

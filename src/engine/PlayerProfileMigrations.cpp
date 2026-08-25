@@ -793,6 +793,26 @@ void migrate23to24(Json& root)
     }
 }
 
+// Format 25 made presentation policy explicit. Existing VSync choices remain
+// intact; newly introduced tearing and cap controls receive safe defaults.
+void migrate24to25(Json& root)
+{
+    if (!root.contains("settings") || !root["settings"].is_object()) {
+        return;
+    }
+    Json& video = root["settings"]["video"];
+    if (!video.is_object()) {
+        return;
+    }
+    const UserSettings defaults;
+    if (!video.contains("allowTearing")) {
+        video["allowTearing"] = defaults.video.allowTearing;
+    }
+    if (!video.contains("frameRateLimit")) {
+        video["frameRateLimit"] = defaults.video.frameRateLimit;
+    }
+}
+
 } // namespace
 
 void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
@@ -822,6 +842,7 @@ void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
         migrate21to22,
         migrate22to23,
         migrate23to24,
+        migrate24to25,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

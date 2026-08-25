@@ -333,6 +333,11 @@ void ApplicationTools::drawDecorationGizmo(
         : decorationGizmo.hoveredAxis(*geometry, pointerAtPixels);
     const std::optional<DecorationGizmo::Axis> active =
         decorationGizmo.activeAxis();
+    constexpr std::array<DecorationGizmo::Axis, 3> gizmoAxes {
+        DecorationGizmo::Axis::X,
+        DecorationGizmo::Axis::Y,
+        DecorationGizmo::Axis::Z,
+    };
     constexpr std::array<ImU32, 3> axisColors {
         IM_COL32(235, 75, 72, 255),
         IM_COL32(80, 210, 105, 255),
@@ -342,17 +347,17 @@ void ApplicationTools::drawDecorationGizmo(
         ? ImGui::GetForegroundDrawList()
         : ImGui::GetBackgroundDrawList();
     const auto point = [](Vec2 value) { return ImVec2(value.x, value.y); };
-    const auto colorFor = [&](std::size_t axis) {
-        const DecorationGizmo::Axis value =
-            static_cast<DecorationGizmo::Axis>(axis);
-        return active == value || hovered == value
+    const auto colorFor = [&](DecorationGizmo::Axis axis) {
+        const std::size_t index = static_cast<std::size_t>(axis);
+        return active == axis || hovered == axis
             ? IM_COL32(255, 226, 92, 255)
-            : axisColors[axis];
+            : axisColors[index];
     };
 
     if (decorationGizmo.mode() == DecorationGizmo::Mode::Rotate) {
-        for (std::size_t axis = 0; axis < geometry->rings.size(); ++axis) {
-            const std::vector<Vec2>& ring = geometry->rings[axis];
+        for (const DecorationGizmo::Axis axis : gizmoAxes) {
+            const std::size_t axisIndex = static_cast<std::size_t>(axis);
+            const std::vector<Vec2>& ring = geometry->rings[axisIndex];
             for (std::size_t index = 1; index < ring.size(); ++index) {
                 drawList->AddLine(
                     point(ring[index - 1]), point(ring[index]),
@@ -365,8 +370,9 @@ void ApplicationTools::drawDecorationGizmo(
         return;
     }
 
-    for (std::size_t axis = 0; axis < geometry->axes.size(); ++axis) {
-        const DecorationGizmo::AxisHandle& handle = geometry->axes[axis];
+    for (const DecorationGizmo::Axis axis : gizmoAxes) {
+        const std::size_t axisIndex = static_cast<std::size_t>(axis);
+        const DecorationGizmo::AxisHandle& handle = geometry->axes[axisIndex];
         const Vec2 delta {
             handle.end.x - handle.start.x,
             handle.end.y - handle.start.y,

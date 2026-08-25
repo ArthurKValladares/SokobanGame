@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 
@@ -28,7 +29,7 @@ void VulkanSwapchainResources::create(
     VkSampleCountFlagBits sampleCount,
     int renderScalePercent,
     VkFormat depthFormat,
-    bool vsync,
+    PresentationPolicy presentationPolicy,
     VkSwapchainKHR oldSwapchain)
 {
     destroy();
@@ -40,7 +41,7 @@ void VulkanSwapchainResources::create(
     sampleCount_ = sampleCount;
     renderScalePercent_ = normalizedRenderScalePercent(renderScalePercent);
     depthFormat_ = depthFormat;
-    vsync_ = vsync;
+    presentationPolicy_ = presentationPolicy;
 
     try {
         createSwapchain(oldSwapchain);
@@ -913,19 +914,22 @@ VkSurfaceFormatKHR VulkanSwapchainResources::chooseSurfaceFormat(
 VkPresentModeKHR VulkanSwapchainResources::choosePresentMode(
     const std::vector<VkPresentModeKHR>& modes) const
 {
-    if (vsync_) {
+    const auto has = [&modes](VkPresentModeKHR candidate) {
+        return std::ranges::find(modes, candidate) != modes.end();
+    };
+    switch (choosePresentationMode({
+                .fifo = true,
+                .mailbox = has(VK_PRESENT_MODE_MAILBOX_KHR),
+                .immediate = has(VK_PRESENT_MODE_IMMEDIATE_KHR),
+            }, presentationPolicy_)) {
+    case PresentationMode::Mailbox:
+        return VK_PRESENT_MODE_MAILBOX_KHR;
+    case PresentationMode::Immediate:
+        return VK_PRESENT_MODE_IMMEDIATE_KHR;
+    case PresentationMode::Fifo:
         return VK_PRESENT_MODE_FIFO_KHR;
     }
-    for (VkPresentModeKHR mode : modes) {
-        if (mode == VK_PRESENT_MODE_MAILBOX_KHR) {
-            return mode;
-        }
-    }
-    for (VkPresentModeKHR mode : modes) {
-        if (mode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
-            return mode;
-        }
-    }
+    // Keeps compilers happy if PresentationMode grows before this mapping.
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 

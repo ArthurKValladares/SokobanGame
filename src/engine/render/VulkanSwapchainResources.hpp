@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/PresentationPolicy.hpp"
 #include "engine/render/RenderTypes.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 
@@ -34,7 +35,7 @@ public:
         VkSampleCountFlagBits sampleCount,
         int renderScalePercent,
         VkFormat depthFormat,
-        bool vsync,
+        PresentationPolicy presentationPolicy,
         VkSwapchainKHR oldSwapchain = VK_NULL_HANDLE);
     void recreate();
     void recreateAttachments(
@@ -125,7 +126,7 @@ private:
     VkPresentModeKHR presentMode_ = VK_PRESENT_MODE_FIFO_KHR;
     VkSampleCountFlagBits sampleCount_ = VK_SAMPLE_COUNT_1_BIT;
     int renderScalePercent_ = 100;
-    bool vsync_ = false;
+    PresentationPolicy presentationPolicy_ {};
     std::vector<SwapchainImage> images_;
     vulkanResources::OwnedImage resolvedColorImage_ {};
     vulkanResources::OwnedImage msaaColorImage_ {};

@@ -448,20 +448,20 @@ skinning, and batching will provide most of the benefit first.
 
 ### P2 — Frame pacing is incomplete
 
-[`vsync`](src/engine/UserSettingsConfig.hpp#L9) defaults to false. Present mode
-selection uses mailbox, otherwise immediate, otherwise FIFO in
-[`choosePresentMode`](src/engine/render/VulkanSwapchainResources.cpp#L870).
+**Status: Fixed on 2026-08-24.** The player-facing Graphics menu now exposes
+VSync, optional tearing, and an explicit foreground cap (unlimited, 30, 60,
+120, 144, or 240 FPS). New installs select FIFO/VSync by default. With VSync
+off, the renderer prefers mailbox; immediate presentation is selected only
+when the player explicitly permits tearing, and FIFO remains the portable
+fallback. Changes recreate the swapchain safely at a frame boundary.
 
-There is no CPU frame limiter or minimized/unfocused throttle. On hardware
-without mailbox, the default can become uncapped immediate presentation,
-wasting CPU/GPU power and producing uneven pacing.
-
-VSync is persisted and read during renderer construction, but it is not
-exposed in the current options UI and has no runtime reconfiguration path.
-
-**Required fix:** Implement an explicit presentation policy covering FIFO,
-mailbox, optional tearing, a configurable frame cap, and unfocused/minimized
-throttling. Add CPU and GPU frame-time telemetry.
+`FramePacer` applies the chosen foreground cap without a busy wait, throttles
+unfocused rendering to 20 FPS, and throttles minimized or backgrounded
+rendering to 5 FPS. Simulation remains suspended during minimize/background
+and resets its wall-clock baseline when it resumes. The profile schema is now
+format 25 so existing settings retain their VSync preference while receiving
+safe tearing/cap defaults. Headless tests cover mode selection, lifecycle
+priority, intervals, settings effects, UI behavior, and format-24 migration.
 
 ### P2 — Release packaging remains developer-oriented
 
@@ -602,7 +602,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 3. [Complete] Add application metadata, icon/version resources, installer,
    and signing.
 4. [Complete] Add crash dumps, rotating logs, and actionable fatal-error UI.
-5. Complete frame-pacing controls and minimize/unfocused behavior.
+5. [Complete] Complete frame-pacing controls and minimize/unfocused behavior.
 6. Implement or remove placeholder accessibility settings.
 7. Validate the final package on clean supported machines and GPU drivers.
 

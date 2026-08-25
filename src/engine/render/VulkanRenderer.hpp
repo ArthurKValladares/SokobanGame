@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/Math.hpp"
+#include "engine/PresentationPolicy.hpp"
 #include "engine/render/GltfMesh.hpp"
 #include "engine/render/FrameDescriptorSync.hpp"
 #include "engine/render/FrameResourceTracker.hpp"
@@ -75,7 +76,7 @@ public:
         const FontAtlas& uiFont,
         AntiAliasingMode antiAliasingMode = AntiAliasingMode::Msaa8x,
         int renderScalePercent = 100,
-        bool vsync = false);
+        PresentationPolicy presentationPolicy = {});
     ~VulkanRenderer();
 
     VulkanRenderer(const VulkanRenderer&) = delete;
@@ -168,6 +169,7 @@ public:
     void setAntiAliasingMode(AntiAliasingMode mode);
     [[nodiscard]] int renderScalePercent() const;
     void setRenderScalePercent(int percent);
+    void setPresentationPolicy(PresentationPolicy policy);
     [[nodiscard]] bool wireframeEnabled() const;
     void setWireframeEnabled(bool enabled);
     [[nodiscard]] bool wireframeSupported() const;
@@ -275,7 +277,7 @@ private:
     uint64_t activeResourceGeneration_ = 1;
     bool swapchainRecreationRequested_ = false;
     std::optional<VulkanFailure> fatalFailure_;
-    bool vsync_ = false;
+    PresentationPolicy presentationPolicy_ {};
     RenderStats lastStats_ {};
     FrameTimeTelemetry cpuFrameTimeTelemetry_ {};
     uint64_t nextStatsFrameIndex_ = 1;

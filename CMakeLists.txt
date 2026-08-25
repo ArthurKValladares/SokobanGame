@@ -14,6 +14,9 @@ if(MSVC)
     # and make binaries produced from different workspaces more reproducible.
     add_compile_options(
         /experimental:deterministic
+        # CMake/MSBuild may compile a static library with /MP. /FS prevents
+        # concurrent compiler instances from racing the shared Debug PDB.
+        /FS
         "/pathmap:${CMAKE_SOURCE_DIR}=."
     )
 endif()
@@ -707,6 +710,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME gameplay_loop TARGET sokoban_gameplay_loop_tests
         LIBS sokoban_core
         SOURCES tests/GameplayLoopTests.cpp
+    )
+    sokoban_add_test(NAME frame_pacing TARGET sokoban_frame_pacing_tests
+        LIBS sokoban_core
+        SOURCES tests/FramePacingTests.cpp
     )
     sokoban_add_test(NAME frame_descriptor_sync TARGET sokoban_frame_descriptor_sync_tests
         LIBS sokoban_render_vulkan

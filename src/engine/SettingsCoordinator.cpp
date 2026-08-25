@@ -25,6 +25,11 @@ SettingsEffects SettingsCoordinator::initialize()
     };
     effects.audio = profile_.settings.audio;
     effects.input = profile_.settings.input;
+    effects.presentation = PresentationPolicy {
+        .vsync = profile_.settings.video.vsync,
+        .allowTearing = profile_.settings.video.allowTearing,
+    };
+    effects.frameRateLimit = profile_.settings.video.frameRateLimit;
     effects.stepDurationSeconds = profile_.settings.accessibility.reducedMotion
         ? 0.05f
         : config::stepDurationSeconds;
@@ -54,6 +59,18 @@ SettingsEffects SettingsCoordinator::applyUserSettings(
         profile_.settings.video.effectiveRenderScalePercent()) {
         effects.renderScalePercent =
             profile_.settings.video.effectiveRenderScalePercent();
+    }
+    if (oldSettings.video.vsync != profile_.settings.video.vsync ||
+        oldSettings.video.allowTearing !=
+            profile_.settings.video.allowTearing) {
+        effects.presentation = PresentationPolicy {
+            .vsync = profile_.settings.video.vsync,
+            .allowTearing = profile_.settings.video.allowTearing,
+        };
+    }
+    if (oldSettings.video.frameRateLimit !=
+        profile_.settings.video.frameRateLimit) {
+        effects.frameRateLimit = profile_.settings.video.frameRateLimit;
     }
     if (oldSettings.video.fullscreen !=
             profile_.settings.video.fullscreen ||

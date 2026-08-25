@@ -116,7 +116,7 @@ VulkanRenderer::VulkanRenderer(
     const FontAtlas& uiFont,
     AntiAliasingMode antiAliasingMode,
     int renderScalePercent,
-    bool vsync)
+    PresentationPolicy presentationPolicy)
     : window_(window)
     , assetRoot_(std::move(assetRoot))
     , deviceContext_(window)
@@ -125,7 +125,7 @@ VulkanRenderer::VulkanRenderer(
           .renderScalePercent = renderScalePercent,
           .wireframe = false,
       })
-    , vsync_(vsync)
+    , presentationPolicy_(presentationPolicy)
 {
     pipelineCache_.create(
         deviceContext_.device(),
@@ -1057,6 +1057,17 @@ void VulkanRenderer::setRenderScalePercent(int percent)
     reconfigurationQueue_.requestRenderScalePercent(percent);
 }
 
+void VulkanRenderer::setPresentationPolicy(PresentationPolicy policy)
+{
+    if (presentationPolicy_ == policy) {
+        return;
+    }
+    presentationPolicy_ = policy;
+    // Present modes are selected only while creating a swapchain. Queue a
+    // normal fence-safe replacement instead of mutating a live swapchain.
+    swapchainRecreationRequested_ = true;
+}
+
 VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources(
     const RenderResourceSet& resources) const
 {
@@ -1126,7 +1137,7 @@ VulkanRenderer::createRenderResources(
         sampleCount,
         settings.renderScalePercent,
         depthFormat_,
-        vsync_,
+        presentationPolicy_,
         activeResources_.swapchain
             ? activeResources_.swapchain->handle()
             : VK_NULL_HANDLE);

@@ -235,6 +235,9 @@ void testOptionsNavigationAndSettings()
     CHECK(settingsChanged(graphicsChange));
     CHECK(settings.video.antiAliasingSamples == 4);
     draw({ .down = true });
+    draw({ .down = true });
+    draw({ .down = true });
+    draw({ .down = true });
     const auto scaleChange = draw({ .right = true });
     CHECK(settingsChanged(scaleChange));
     CHECK(settings.video.renderScalePercent == 75);
@@ -248,6 +251,9 @@ void testOptionsNavigationAndSettings()
     settings.video.customRenderScalePercent = 100;
     menu.open();
     draw({ .confirm = true });
+    draw({ .down = true });
+    draw({ .down = true });
+    draw({ .down = true });
     draw({ .down = true });
     draw({ .down = true });
     const auto customChange = draw({ .left = true });
@@ -711,12 +717,15 @@ void testOptionsReducerAndDeclarativeRows()
     CHECK(state.page == sokoban::OptionsMenuPage::Graphics);
     const std::vector<sokoban::OptionsMenuRow> graphicsRows =
         sokoban::optionsMenuRows(state, settings);
-    CHECK(graphicsRows.size() == 7);
-    CHECK(graphicsRows[3].id ==
+    CHECK(graphicsRows.size() == 10);
+    CHECK(graphicsRows[1].id == sokoban::OptionsMenuRowId::Vsync);
+    CHECK(!graphicsRows[2].enabled);
+    CHECK(graphicsRows[3].id == sokoban::OptionsMenuRowId::FrameRateLimit);
+    CHECK(graphicsRows[6].id ==
         sokoban::OptionsMenuRowId::AmbientOcclusion);
-    CHECK(graphicsRows[4].id ==
+    CHECK(graphicsRows[7].id ==
         sokoban::OptionsMenuRowId::AmbientOcclusionStrength);
-    CHECK(graphicsRows[4].enabled);
+    CHECK(graphicsRows[7].enabled);
 
     reduction = sokoban::reduceOptionsMenu(
         state,
@@ -729,6 +738,26 @@ void testOptionsReducerAndDeclarativeRows()
             &*reduction.action);
     CHECK(changed != nullptr);
     CHECK(changed->settings.video.antiAliasingSamples == 4);
+
+    reduction = sokoban::reduceOptionsMenu(
+        state,
+        settings,
+        sokoban::options::intent::SetToggle {
+            sokoban::OptionsMenuRowId::Vsync, false });
+    changed = std::get_if<sokoban::options::SettingsChanged>(
+        &*reduction.action);
+    CHECK(changed != nullptr);
+    CHECK(!changed->settings.video.vsync);
+
+    reduction = sokoban::reduceOptionsMenu(
+        state,
+        changed->settings,
+        sokoban::options::intent::SetToggle {
+            sokoban::OptionsMenuRowId::AllowTearing, true });
+    changed = std::get_if<sokoban::options::SettingsChanged>(
+        &*reduction.action);
+    CHECK(changed != nullptr);
+    CHECK(changed->settings.video.allowTearing);
 
     settings.video.customRenderScale = true;
     reduction = sokoban::reduceOptionsMenu(
@@ -803,7 +832,7 @@ void testOptionsReducerDraftAndBindingSemantics()
     CHECK(changed != nullptr);
     CHECK(changed->settings.video.ambientOcclusionStrength == 0.8f);
 
-    graphics.selectedRow = 4;
+    graphics.selectedRow = 7;
     reduction = sokoban::reduceOptionsMenu(
         graphics,
         settings,
@@ -817,7 +846,7 @@ void testOptionsReducerDraftAndBindingSemantics()
     settings.video.ambientOcclusion = false;
     const std::vector<sokoban::OptionsMenuRow> disabledRows =
         sokoban::optionsMenuRows(graphics, settings);
-    CHECK(!disabledRows[4].enabled);
+    CHECK(!disabledRows[7].enabled);
     const auto disabledStrength = sokoban::reduceOptionsMenu(
         graphics,
         settings,

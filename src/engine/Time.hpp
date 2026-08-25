@@ -5,12 +5,112 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <thread>
 
 namespace sokoban {
 
 enum class SimulationSuspension : std::uint64_t {
     Minimized = 1U << 0,
     Backgrounded = 1U << 1,
+};
+
+enum class FramePacingSuspension : std::uint64_t {
+    Unfocused = 1U << 0,
+    Minimized = 1U << 1,
+    Backgrounded = 1U << 2,
+};
+
+enum class FramePacingActivity {
+    Focused,
+    Unfocused,
+    Minimized,
+    Backgrounded,
+};
+
+// Keeps the foreground cap player-configurable while avoiding unnecessary
+// rendering work in states where the game cannot be interacted with. Lifecycle
+// updates are lock-free because SDL event watches may run off the main thread;
+// beginFrame()/pace() remain main-thread-only.
+class FramePacer {
+public:
+    static constexpr int unfocusedFrameRateLimit = 20;
+    static constexpr int minimizedFrameRateLimit = 5;
+
+    void setSuspended(
+        FramePacingSuspension reason,
+        bool suspended) noexcept
+    {
+        const std::uint64_t bit = static_cast<std::uint64_t>(reason);
+        if (suspended) {
+            suspensions_.fetch_or(bit, std::memory_order_release);
+        } else {
+            suspensions_.fetch_and(~bit, std::memory_order_release);
+        }
+    }
+
+    void setFrameRateLimit(int framesPerSecond) noexcept
+    {
+        frameRateLimit_.store(
+            std::clamp(framesPerSecond, 0, 1000),
+            std::memory_order_release);
+    }
+
+    [[nodiscard]] int frameRateLimit() const noexcept
+    {
+        return frameRateLimit_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] FramePacingActivity activity() const noexcept
+    {
+        const std::uint64_t state = suspensions_.load(std::memory_order_acquire);
+        if ((state & static_cast<std::uint64_t>(
+                FramePacingSuspension::Backgrounded)) != 0) {
+            return FramePacingActivity::Backgrounded;
+        }
+        if ((state & static_cast<std::uint64_t>(
+                FramePacingSuspension::Minimized)) != 0) {
+            return FramePacingActivity::Minimized;
+        }
+        if ((state & static_cast<std::uint64_t>(
+                FramePacingSuspension::Unfocused)) != 0) {
+            return FramePacingActivity::Unfocused;
+        }
+        return FramePacingActivity::Focused;
+    }
+
+    [[nodiscard]] static constexpr std::chrono::nanoseconds targetInterval(
+        FramePacingActivity activity,
+        int foregroundFrameRateLimit) noexcept
+    {
+        const int framesPerSecond =
+            activity == FramePacingActivity::Backgrounded ||
+                activity == FramePacingActivity::Minimized
+            ? minimizedFrameRateLimit
+            : activity == FramePacingActivity::Unfocused
+            ? unfocusedFrameRateLimit
+            : foregroundFrameRateLimit;
+        return framesPerSecond <= 0
+            ? std::chrono::nanoseconds::zero()
+            : std::chrono::nanoseconds { 1'000'000'000LL / framesPerSecond };
+    }
+
+    void beginFrame() noexcept { frameStart_ = Clock::now(); }
+
+    void pace() const
+    {
+        const std::chrono::nanoseconds interval = targetInterval(
+            activity(), frameRateLimit());
+        if (interval != std::chrono::nanoseconds::zero()) {
+            std::this_thread::sleep_until(frameStart_ + interval);
+        }
+    }
+
+private:
+    using Clock = std::chrono::steady_clock;
+
+    std::atomic<std::uint64_t> suspensions_ { 0 };
+    std::atomic<int> frameRateLimit_ { 0 };
+    Clock::time_point frameStart_ = Clock::now();
 };
 
 // Main-thread simulation timing policy with thread-safe lifecycle updates.

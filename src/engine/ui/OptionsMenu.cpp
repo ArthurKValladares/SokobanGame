@@ -33,6 +33,15 @@ constexpr std::array renderScaleChoices {
     OptionsMenuChoice { 25, "25%" },
 };
 
+constexpr std::array frameRateLimitChoices {
+    OptionsMenuChoice { 0, "Unlimited" },
+    OptionsMenuChoice { 30, "30 FPS" },
+    OptionsMenuChoice { 60, "60 FPS" },
+    OptionsMenuChoice { 120, "120 FPS" },
+    OptionsMenuChoice { 144, "144 FPS" },
+    OptionsMenuChoice { 240, "240 FPS" },
+};
+
 struct DisplayMode {
     OptionsMenuChoice choice;
     bool fullscreen = false;
@@ -258,6 +267,15 @@ std::optional<OptionsAction> activateRow(
         settings.video.ambientOcclusion =
             !settings.video.ambientOcclusion;
         return changedSettings(std::move(settings), current);
+    case OptionsMenuRowId::Vsync:
+        settings.video.vsync = !settings.video.vsync;
+        return changedSettings(std::move(settings), current);
+    case OptionsMenuRowId::AllowTearing:
+        if (!settings.video.vsync) {
+            settings.video.allowTearing = !settings.video.allowTearing;
+            return changedSettings(std::move(settings), current);
+        }
+        break;
     case OptionsMenuRowId::MoveUp:
     case OptionsMenuRowId::MoveDown:
     case OptionsMenuRowId::MoveLeft:
@@ -292,6 +310,7 @@ std::optional<OptionsAction> activateRow(
     case OptionsMenuRowId::ConfirmQuit:
         return options::Quit {};
     case OptionsMenuRowId::AntiAliasing:
+    case OptionsMenuRowId::FrameRateLimit:
     case OptionsMenuRowId::RenderScalePreset:
     case OptionsMenuRowId::AmbientOcclusionStrength:
     case OptionsMenuRowId::Display:
@@ -318,6 +337,12 @@ std::optional<OptionsAction> adjustRow(
         settings.video.antiAliasingSamples = cycleChoice(
             sampleCountChoices,
             settings.video.antiAliasingSamples,
+            direction);
+        break;
+    case OptionsMenuRowId::FrameRateLimit:
+        settings.video.frameRateLimit = cycleChoice(
+            frameRateLimitChoices,
+            settings.video.frameRateLimit,
             direction);
         break;
     case OptionsMenuRowId::RenderScalePreset:
@@ -575,6 +600,26 @@ std::vector<OptionsMenuRow> optionsMenuRows(
                 .choiceValue = settings.video.antiAliasingSamples,
             },
             {
+                .id = OptionsMenuRowId::Vsync,
+                .kind = OptionsMenuRowKind::Toggle,
+                .label = "VSync",
+                .toggleValue = settings.video.vsync,
+            },
+            {
+                .id = OptionsMenuRowId::AllowTearing,
+                .kind = OptionsMenuRowKind::Toggle,
+                .label = "Allow tearing",
+                .toggleValue = settings.video.allowTearing,
+                .enabled = !settings.video.vsync,
+            },
+            {
+                .id = OptionsMenuRowId::FrameRateLimit,
+                .kind = OptionsMenuRowKind::StepperChoice,
+                .label = "Frame rate limit",
+                .choices = frameRateLimitChoices,
+                .choiceValue = settings.video.frameRateLimit,
+            },
+            {
                 .id = OptionsMenuRowId::RenderScalePreset,
                 .kind = OptionsMenuRowKind::SegmentedChoice,
                 .label = "Render scale",
@@ -803,6 +848,9 @@ OptionsMenuReduction reduceOptionsMenu(
             case OptionsMenuRowId::AntiAliasing:
                 settings.video.antiAliasingSamples = selection.value;
                 break;
+            case OptionsMenuRowId::FrameRateLimit:
+                settings.video.frameRateLimit = selection.value;
+                break;
             case OptionsMenuRowId::RenderScalePreset:
                 settings.video.renderScalePercent = selection.value;
                 settings.video.customRenderScale = false;
@@ -830,6 +878,15 @@ OptionsMenuReduction reduceOptionsMenu(
                 break;
             case OptionsMenuRowId::AmbientOcclusion:
                 settings.video.ambientOcclusion = toggle.value;
+                break;
+            case OptionsMenuRowId::Vsync:
+                settings.video.vsync = toggle.value;
+                break;
+            case OptionsMenuRowId::AllowTearing:
+                if (settings.video.vsync) {
+                    return;
+                }
+                settings.video.allowTearing = toggle.value;
                 break;
             default:
                 return;
@@ -1045,23 +1102,23 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
                     ? (compactGraphics ? 4.0f : 8.0f)
                     : 4.0f);
             rowLayout.primary = layout.tree.item(
-                group, compactGraphics ? 24.0f : 30.0f);
+                group, compactGraphics ? 20.0f : 30.0f);
             rowLayout.control = layout.tree.item(
                 group,
                 row.kind == OptionsMenuRowKind::Slider
-                    ? (compactGraphics ? 28.0f : 34.0f)
-                    : (compactGraphics ? 44.0f : 52.0f));
+                    ? (compactGraphics ? 24.0f : 34.0f)
+                    : (compactGraphics ? 28.0f : 52.0f));
             break;
         }
         case OptionsMenuRowKind::CustomRenderScale: {
             const UiLayoutNode group = layout.tree.column(
                 layout.tree.root(), UiLayoutSize::content(), 4.0f);
             rowLayout.primary = layout.tree.item(
-                group, compactGraphics ? 40.0f : 44.0f);
+                group, compactGraphics ? 32.0f : 44.0f);
             rowLayout.control = layout.tree.item(
-                group, compactGraphics ? 28.0f : 32.0f);
+                group, compactGraphics ? 24.0f : 32.0f);
             rowLayout.detail = layout.tree.item(
-                group, compactGraphics ? 20.0f : 24.0f);
+                group, compactGraphics ? 16.0f : 24.0f);
             break;
         }
         case OptionsMenuRowKind::Button:
@@ -1071,7 +1128,7 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
                 layout.tree.root(),
                 state.page == OptionsMenuPage::Controls
                     ? 35.0f
-                    : (compactGraphics ? 44.0f : 52.0f));
+                    : (compactGraphics ? 32.0f : 52.0f));
             break;
         }
         if (index + 1 < rows.size() &&
@@ -1082,7 +1139,7 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
                     ? 16.0f
                     : (state.page == OptionsMenuPage::Controls
                             ? 2.0f
-                            : (compactGraphics ? 6.0f : 10.0f)));
+                            : (compactGraphics ? 3.0f : 10.0f)));
         }
     }
     layout.tree.arrange(panel);
@@ -1152,7 +1209,7 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
                     layout.tree.rect(rowLayout.primary),
                     row.label,
                     value,
-                    focused)) {
+                    focused && row.enabled)) {
                 intent = options::intent::SetToggle { row.id, value };
             }
             break;

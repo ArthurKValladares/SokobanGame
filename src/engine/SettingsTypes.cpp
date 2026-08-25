@@ -30,6 +30,17 @@ void UserSettings::normalize()
         config::antiAliasingSampleOptions.end()) {
         video.antiAliasingSamples = config::antiAliasingSamples;
     }
+    if (std::find(
+            config::frameRateLimitOptions.begin(),
+            config::frameRateLimitOptions.end(),
+            video.frameRateLimit) == config::frameRateLimitOptions.end()) {
+        video.frameRateLimit = config::frameRateLimit;
+    }
+    // Tearing is an explicit opt-in only; while VSync is enabled it has no
+    // useful meaning and keeping it false makes persisted state unambiguous.
+    if (video.vsync) {
+        video.allowTearing = false;
+    }
     video.renderScalePercent = normalizedRenderScalePresetPercent(
         video.renderScalePercent);
     video.customRenderScalePercent = normalizedRenderScalePercent(

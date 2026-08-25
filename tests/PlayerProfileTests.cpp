@@ -82,6 +82,8 @@ void testRoundTripAndBests()
     profile.settings.video = {
         .fullscreen = true,
         .vsync = true,
+        .allowTearing = false,
+        .frameRateLimit = 120,
         .antiAliasingSamples = 4,
         .renderScalePercent = 50,
         .customRenderScale = true,
@@ -496,6 +498,20 @@ void testNormalizationAndMigration()
     check(migratedFormat4.profile.settings.video.windowWidth == 1280 &&
             migratedFormat4.profile.settings.video.windowHeight == 720,
         "format 4 receives window-size defaults");
+
+    nlohmann::json format24 = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    format24["format"] = 24;
+    format24["settings"]["video"].erase("allowTearing");
+    format24["settings"]["video"].erase("frameRateLimit");
+    const sokoban::DecodedPlayerProfile migratedFormat24 =
+        sokoban::decodePlayerProfile(format24.dump());
+    check(migratedFormat24.sourceFormat == 24,
+        "format 24 source reported");
+    check(!migratedFormat24.profile.settings.video.allowTearing,
+        "format 24 receives safe tearing default");
+    check(migratedFormat24.profile.settings.video.frameRateLimit == 0,
+        "format 24 receives unlimited foreground cap default");
 
     nlohmann::json format5Root = nlohmann::json::parse(
         sokoban::PlayerProfile {}.serialize());

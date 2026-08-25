@@ -42,6 +42,11 @@
 
 namespace sokoban {
 
+struct ApplicationTimingEventWatchState {
+    SimulationTiming* simulation = nullptr;
+    FramePacer* framePacer = nullptr;
+};
+
 #if SOKOBAN_ENABLE_DEBUG_UI
 class ApplicationTools;
 #endif
@@ -156,6 +161,9 @@ private:
     InputRouter inputRouter_;
     SimulationTiming simulationTiming_;
     FrameTimer frameTimer_;
+    FramePacer framePacer_;
+    ApplicationTimingEventWatchState timingEventWatchState_ {
+        &simulationTiming_, &framePacer_ };
     PresentationSettings presentationSettings_;
     SettingsCoordinator settingsCoordinator_;
     GameplayPresentation presentation_;

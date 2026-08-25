@@ -1086,7 +1086,8 @@ void parseSettingsSection(PlayerProfile& profile, const Json& settings)
 
     const Json& video = requiredProperty(settings, "video", "settings");
     rejectUnknownProperties(video, {
-        "fullscreen", "vsync", "antiAliasingSamples", "renderScalePercent",
+        "fullscreen", "vsync", "allowTearing", "frameRateLimit",
+        "antiAliasingSamples", "renderScalePercent",
         "customRenderScale", "customRenderScalePercent", "ambientOcclusion",
         "ambientOcclusionStrength", "windowWidth", "windowHeight",
     }, "settings.video");
@@ -1094,6 +1095,10 @@ void parseSettingsSection(PlayerProfile& profile, const Json& settings)
         boolProperty(video, "fullscreen", "settings.video");
     profile.settings.video.vsync =
         boolProperty(video, "vsync", "settings.video");
+    profile.settings.video.allowTearing =
+        boolProperty(video, "allowTearing", "settings.video");
+    profile.settings.video.frameRateLimit = nonNegativeIntegerProperty(
+        video, "frameRateLimit", "settings.video");
     profile.settings.video.antiAliasingSamples = nonNegativeIntegerProperty(
         video, "antiAliasingSamples", "settings.video");
     profile.settings.video.renderScalePercent = nonNegativeIntegerProperty(
@@ -1264,6 +1269,8 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
             { "video", {
                 { "fullscreen", normalized.settings.video.fullscreen },
                 { "vsync", normalized.settings.video.vsync },
+                { "allowTearing", normalized.settings.video.allowTearing },
+                { "frameRateLimit", normalized.settings.video.frameRateLimit },
                 { "antiAliasingSamples", normalized.settings.video.antiAliasingSamples },
                 { "renderScalePercent", normalized.settings.video.renderScalePercent },
                 { "customRenderScale", normalized.settings.video.customRenderScale },
