@@ -608,7 +608,14 @@ before being exposed.
 4. [Complete] Add crash dumps, rotating logs, and actionable fatal-error UI.
 5. [Complete] Complete frame-pacing controls and minimize/unfocused behavior.
 6. [Complete] Implement or remove placeholder accessibility settings.
-7. Validate the final package on clean supported machines and GPU drivers.
+7. [In progress] Validate the final package on clean supported machines and
+   GPU drivers. The reproducible Runtime ZIP gate and the required hardware
+   matrix are documented in
+   [`packaging/ReleaseValidation.md`](packaging/ReleaseValidation.md). Final
+   sign-off requires recorded passes on the listed external machines and
+   driver versions. The locally generated 0.1.0 Runtime ZIP passed the gate on
+   2026-08-24 (198 indexed assets and a ten-second packaged launch); this is
+   not a substitute for clean-machine acceptance.
 
 ## Ship assessment
 

@@ -108,6 +108,12 @@ It disables validation, tests, the Debug ImGui workspace, and all content
 editing source files; enables MSVC LTO; and emits the optimized executable's
 PDB into a separate Symbols ZIP rather than the player-facing Runtime ZIP.
 
+Before publishing a build, follow
+[`packaging/ReleaseValidation.md`](packaging/ReleaseValidation.md). Its
+PowerShell package gate verifies the final ZIP from a fresh extraction and
+launches it briefly; the accompanying Windows and GPU-driver matrix is the
+required human acceptance record.
+
 ```powershell
 cmake --preset shipping
 cmake --build --preset shipping
