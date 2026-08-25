@@ -12,7 +12,9 @@ enum class AntiAliasingMode {
 };
 
 struct RendererSettingsSnapshot {
-    AntiAliasingMode antiAliasing = AntiAliasingMode::Msaa8x;
+    // Matches config::antiAliasingSamples. See UserSettingsConfig.hpp for why
+    // the shipping default is 4x rather than 8x.
+    AntiAliasingMode antiAliasing = AntiAliasingMode::Msaa4x;
     int renderScalePercent = 100;
     bool wireframe = false;
 

@@ -1138,7 +1138,18 @@ void IsoScenePreparer::prepare(
         auto fartherFirst = [&](std::size_t left, std::size_t right) {
             return scene.isoFaces[left].depth > scene.isoFaces[right].depth;
         };
-        std::ranges::sort(scene.opaqueFaceIndices, fartherFirst);
+        auto nearerFirst = [&](std::size_t left, std::size_t right) {
+            return scene.isoFaces[left].depth < scene.isoFaces[right].depth;
+        };
+        // Opaque geometry draws nearest first so the depth test rejects
+        // occluded fragments before they are shaded. Back-to-front is the
+        // painter's-algorithm order, which guarantees the opposite: every
+        // hidden surface is shaded and then overwritten. Picking is unaffected
+        // - it walks pickFaceIndices, which is unsorted and compares depth
+        // explicitly.
+        std::ranges::sort(scene.opaqueFaceIndices, nearerFirst);
+        // Translucent geometry has no such freedom: blending is order
+        // dependent, so it must stay farthest first.
         std::ranges::sort(scene.translucentFaceIndices, fartherFirst);
 
         for (const RenderFrameData::Particle& source : frameData.particles) {

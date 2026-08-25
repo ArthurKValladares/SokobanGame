@@ -38,6 +38,13 @@ public:
         uint32_t descriptorFrameIndex = 0;
         uint32_t activeSamples = 1;
         bool wireframeEnabled = false;
+        // Back-face culling for glTF model draws. Tile quads are excluded:
+        // they are already rejected on the CPU by IsoScenePreparer and their
+        // winding after CPU projection is not guaranteed. Exposed as a
+        // developer toggle because a model authored with inverted winding
+        // disappears rather than degrading, and that is worth being able to
+        // A/B in one click rather than by editing code.
+        bool modelBackfaceCulling = true;
         float wireframeLineWidth = 1.0f;
         uint64_t statsFrameIndex = 0;
         uint64_t pipelineRebuilds = 0;

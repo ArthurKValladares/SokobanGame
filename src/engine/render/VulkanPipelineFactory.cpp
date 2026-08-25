@@ -86,6 +86,10 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         scene_ = createScenePipeline(
             shaders[0], shaders[1], VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
+        sceneOpaque_ = createScenePipeline(
+            shaders[0], shaders[1], VertexLayout::None,
+            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe,
+            BlendMode::Opaque);
         water_ = createScenePipeline(
             shaders[0], shaders[8], VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
@@ -95,18 +99,30 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         groundSplat_ = createScenePipeline(
             shaders[0], shaders[10], VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
+        groundSplatOpaque_ = createScenePipeline(
+            shaders[0], shaders[10], VertexLayout::None,
+            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe,
+            BlendMode::Opaque);
         ui_ = createScenePipeline(
             shaders[0], shaders[1], VertexLayout::None,
             VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_UNDEFINED, createInfo.wireframe);
         model_ = createScenePipeline(
             shaders[3], shaders[1], VertexLayout::Mesh,
             createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
+        modelOpaque_ = createScenePipeline(
+            shaders[3], shaders[1], VertexLayout::Mesh,
+            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe,
+            BlendMode::Opaque);
         mirrorEnergyModel_ = createScenePipeline(
             shaders[3], shaders[9], VertexLayout::Mesh,
             createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
         skinnedModel_ = createScenePipeline(
             shaders[12], shaders[1], VertexLayout::SkinnedMesh,
             createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
+        skinnedModelOpaque_ = createScenePipeline(
+            shaders[12], shaders[1], VertexLayout::SkinnedMesh,
+            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe,
+            BlendMode::Opaque);
         skinnedMirrorEnergyModel_ = createScenePipeline(
             shaders[12], shaders[9], VertexLayout::SkinnedMesh,
             createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
@@ -124,6 +140,11 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             shaders[5], shaders[11], createInfo.colorFormat, false);
         const std::array namedPipelines {
             std::pair { scene_, "Scene pipeline" },
+            std::pair { sceneOpaque_, "Scene pipeline (opaque)" },
+            std::pair { groundSplatOpaque_, "Ground splat pipeline (opaque)" },
+            std::pair { modelOpaque_, "Model pipeline (opaque)" },
+            std::pair {
+                skinnedModelOpaque_, "Skinned model pipeline (opaque)" },
             std::pair { water_, "Water pipeline" },
             std::pair { mirrorEnergy_, "Mirror energy pipeline" },
             std::pair { groundSplat_, "Ground splat pipeline" },
@@ -162,8 +183,10 @@ void VulkanPipelineFactory::destroy()
 {
     if (device_) {
         const std::array pipelines {
-            scene_, water_, mirrorEnergy_, groundSplat_, ui_, model_,
-            mirrorEnergyModel_, skinnedModel_, skinnedMirrorEnergyModel_,
+            scene_, sceneOpaque_, water_, mirrorEnergy_, groundSplat_,
+            groundSplatOpaque_, ui_, model_, modelOpaque_,
+            mirrorEnergyModel_, skinnedModel_, skinnedModelOpaque_,
+            skinnedMirrorEnergyModel_,
             shadow_, modelShadow_, skinnedModelShadow_,
             ssao_, ssaoComposite_, ssaoVisualize_, worldTransition_,
         };
@@ -177,6 +200,10 @@ void VulkanPipelineFactory::destroy()
         }
     }
     scene_ = VK_NULL_HANDLE;
+    sceneOpaque_ = VK_NULL_HANDLE;
+    groundSplatOpaque_ = VK_NULL_HANDLE;
+    modelOpaque_ = VK_NULL_HANDLE;
+    skinnedModelOpaque_ = VK_NULL_HANDLE;
     water_ = VK_NULL_HANDLE;
     mirrorEnergy_ = VK_NULL_HANDLE;
     groundSplat_ = VK_NULL_HANDLE;
@@ -225,7 +252,8 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
     VertexLayout vertexLayout,
     VkSampleCountFlagBits sampleCount,
     VkFormat depthFormat,
-    bool wireframe) const
+    bool wireframe,
+    BlendMode blendMode) const
 {
     std::array<VkPipelineShaderStageCreateInfo, 2> stages {
         VkPipelineShaderStageCreateInfo {
@@ -329,7 +357,7 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
         .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
     };
     VkPipelineColorBlendAttachmentState blendAttachment {
-        .blendEnable = VK_TRUE,
+        .blendEnable = blendMode == BlendMode::AlphaBlend ? VK_TRUE : VK_FALSE,
         .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
         .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
         .colorBlendOp = VK_BLEND_OP_ADD,

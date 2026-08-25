@@ -11,6 +11,14 @@ permissions:
 env:
   VULKAN_SDK_VERSION: 1.4.357.0
   VULKAN_SDK_SHA256: 0f09bf6a0625e346bf004be70b92907e934a4c76606b323441b2baf3a5a0e66d
+  # Pin the Windows installer the same way. Leave empty and the Windows job
+  # fails on its first run printing the hash it downloaded, so this can be
+  # filled in once from a run you trust rather than from an unverified paste.
+  VULKAN_SDK_WINDOWS_SHA256: ""
+  # Frames the headless render gate draws before exiting. Enough to cross the
+  # asset-publication ramp (one asset publishes per frame) and reach a steady
+  # state where every pass is recording real work.
+  SMOKE_FRAMES: 240
 
 concurrency:
   group: required-tests-${{ github.workflow }}-${{ github.ref }}
@@ -27,22 +35,30 @@ jobs:
         include:
           - name: Tests (Debug)
             build_type: Debug
-            cmake_options: -DSOKOBAN_BUILD_TESTS=ON
+            # Validation layers are compiled in only for Debug, so this is the
+            # one configuration that can host the render gate below. The Vulkan
+            # smoke test defaults to OFF and had never been switched on here,
+            # which meant mesa-vulkan-drivers and vulkan-validationlayers were
+            # installed for nothing.
+            cmake_options: -DSOKOBAN_BUILD_TESTS=ON -DSOKOBAN_BUILD_VULKAN_SMOKE_TESTS=ON
             build_target: all
             run_tests: true
             run_fuzz: false
+            run_smoke: true
           - name: Tests (Release)
             build_type: Release
             cmake_options: -DSOKOBAN_BUILD_TESTS=ON
             build_target: all
             run_tests: true
             run_fuzz: false
+            run_smoke: false
           - name: Sanitizers (ASan + UBSan)
             build_type: Debug
             cmake_options: -DSOKOBAN_BUILD_TESTS=ON -DSOKOBAN_ENABLE_SANITIZERS=ON
             build_target: all
             run_tests: true
             run_fuzz: false
+            run_smoke: false
             compiler_options: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           - name: Static analysis (clang-tidy)
             build_type: Debug
@@ -50,6 +66,7 @@ jobs:
             build_target: sokoban
             run_tests: false
             run_fuzz: false
+            run_smoke: false
             compiler_options: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           - name: Fuzzing (player profile)
             build_type: Debug
@@ -57,6 +74,7 @@ jobs:
             build_target: sokoban_player_profile_fuzz
             run_tests: false
             run_fuzz: true
+            run_smoke: false
             compiler_options: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
 
     steps:
@@ -165,3 +183,119 @@ jobs:
         run: >-
           ./build/sokoban_player_profile_fuzz
           -max_len=65536 -max_total_time=60 -print_final_stats=1
+
+      # The only step that exercises swapchain, pipelines, descriptors, the
+      # shadow and SSAO passes and real draws. Everything above it either does
+      # not link Vulkan or stops at device creation.
+      - name: Render frames under validation
+        if: matrix.run_smoke
+        env:
+          # Pin lavapipe explicitly. Left to its own devices the loader may
+          # find another ICD on the runner image, and "which driver ran" is
+          # something a render gate should state rather than discover.
+          VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        run: |
+          set -euo pipefail
+          test -f "${VK_DRIVER_FILES}" \
+            || { echo "::error::lavapipe ICD manifest missing; is mesa-vulkan-drivers installed?"; exit 1; }
+
+          # The SDK loader is first on LD_LIBRARY_PATH, so point it at the
+          # SDK's own layer manifests rather than mixing in the apt package's.
+          layer_dir="${VULKAN_SDK}/share/vulkan/explicit_layer.d"
+          if [ ! -f "${layer_dir}/VkLayer_khronos_validation.json" ]; then
+            layer_dir=/usr/share/vulkan/explicit_layer.d
+          fi
+          test -f "${layer_dir}/VkLayer_khronos_validation.json" \
+            || { echo "::error::VK_LAYER_KHRONOS_validation manifest not found"; exit 1; }
+          export VK_LAYER_PATH="${layer_dir}"
+          echo "Using ICD ${VK_DRIVER_FILES} and layers ${VK_LAYER_PATH}"
+
+          # A throwaway profile directory: a smoke run writes a checkpoint on
+          # level load, and that must not land in the runner's real prefs.
+          saves="${RUNNER_TEMP}/smoke-profile"
+          mkdir -p "${saves}"
+
+          # --require-validation makes a missing layer a failure rather than a
+          # silent pass; the binary exits non-zero if validation reports
+          # anything, so no log grepping is involved.
+          xvfb-run --auto-servernum \
+            ./build/sokoban \
+              --smoke-frames "${SMOKE_FRAMES}" \
+              --require-validation \
+              --save-directory "${saves}"
+
+  windows:
+    name: Tests (MSVC ${{ matrix.build_type }})
+    runs-on: windows-2022
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Restore Vulkan SDK
+        id: vulkan-sdk-cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.tool_cache }}\vulkan-sdk\${{ env.VULKAN_SDK_VERSION }}
+          key: vulkan-sdk-windows-x64-${{ env.VULKAN_SDK_VERSION }}
+
+      - name: Install Vulkan SDK
+        if: steps.vulkan-sdk-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Join-Path $env:RUNNER_TEMP 'vulkan_sdk.exe'
+          $uri = "https://sdk.lunarg.com/sdk/download/$env:VULKAN_SDK_VERSION/windows/vulkan_sdk.exe"
+          Invoke-WebRequest -Uri $uri -OutFile $installer -MaximumRetryCount 3
+
+          $actual = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower()
+          $expected = "$env:VULKAN_SDK_WINDOWS_SHA256".Trim().ToLower()
+          if ([string]::IsNullOrEmpty($expected)) {
+            Write-Host "::error::VULKAN_SDK_WINDOWS_SHA256 is unset. Verify this download, then set it in the workflow env to: $actual"
+            exit 1
+          }
+          if ($actual -ne $expected) {
+            Write-Host "::error::Vulkan SDK checksum mismatch. Expected $expected, downloaded $actual"
+            exit 1
+          }
+
+          $root = Join-Path $env:RUNNER_TOOL_CACHE "vulkan-sdk\$env:VULKAN_SDK_VERSION"
+          & $installer --root $root --accept-licenses --default-answer --confirm-command install
+          if ($LASTEXITCODE -ne 0) { throw "Vulkan SDK installer exited $LASTEXITCODE" }
+
+      - name: Expose Vulkan SDK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sdk = Join-Path $env:RUNNER_TOOL_CACHE "vulkan-sdk\$env:VULKAN_SDK_VERSION"
+          if (-not (Test-Path (Join-Path $sdk 'Bin\glslc.exe'))) {
+            throw "glslc.exe missing under $sdk"
+          }
+          "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Join-Path $sdk 'Bin' | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Configure
+        shell: pwsh
+        run: >-
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+          -DSOKOBAN_BUILD_TESTS=ON
+          -DSOKOBAN_BUILD_VULKAN_SMOKE_TESTS=OFF
+
+      - name: Build ${{ matrix.build_type }}
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel
+
+      # The Vulkan device path is deliberately not built here: hosted Windows
+      # runners ship no Vulkan ICD, so vulkan_smoke could only ever fail for
+      # reasons that say nothing about this change. That path is covered by the
+      # lavapipe render gate in the Linux job; what this job is for is proving
+      # the code compiles and behaves under the compiler that actually ships.
+      - name: Test ${{ matrix.build_type }}
+        run: >-
+          ctest --test-dir build
+          --build-config ${{ matrix.build_type }}
+          --output-on-failure --no-tests=error --timeout 120

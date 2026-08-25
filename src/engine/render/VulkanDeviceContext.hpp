@@ -43,6 +43,9 @@ public:
 
     [[nodiscard]] bool wireframeSupported() const;
     [[nodiscard]] bool wideLinesSupported() const;
+    // Highest anisotropy the device allows, or 1.0 when unsupported - which is
+    // the value a sampler uses to mean "off", so callers need no branch.
+    [[nodiscard]] float maxSamplerAnisotropy() const;
     [[nodiscard]] bool graphicsTimestampsSupported() const;
     [[nodiscard]] float timestampPeriodNanoseconds() const;
     [[nodiscard]] uint32_t graphicsTimestampValidBits() const;

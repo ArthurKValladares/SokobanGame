@@ -241,7 +241,24 @@ void testPassListsAreDepthSorted()
     const sokoban::PreparedRenderScene scene =
         prepareScene(
             sceneFrame(), { 1280.0f, 720.0f });
-    auto sorted = [&](const std::vector<std::size_t>& indices) {
+    // The two lists sort in opposite directions, and each direction is load
+    // bearing, so they are pinned separately rather than by one shared
+    // predicate.
+    //
+    // Opaque draws nearest first so the depth test can reject occluded
+    // fragments before they are shaded. Translucent draws farthest first
+    // because alpha blending is order dependent; reversing it is a visible
+    // correctness bug, not a performance regression.
+    auto nearestFirst = [&](const std::vector<std::size_t>& indices) {
+        for (std::size_t i = 1; i < indices.size(); ++i) {
+            if (scene.isoFaces[indices[i - 1]].depth >
+                scene.isoFaces[indices[i]].depth) {
+                return false;
+            }
+        }
+        return true;
+    };
+    auto farthestFirst = [&](const std::vector<std::size_t>& indices) {
         for (std::size_t i = 1; i < indices.size(); ++i) {
             if (scene.isoFaces[indices[i - 1]].depth <
                 scene.isoFaces[indices[i]].depth) {
@@ -250,8 +267,12 @@ void testPassListsAreDepthSorted()
         }
         return true;
     };
-    CHECK(sorted(scene.opaqueFaceIndices));
-    CHECK(sorted(scene.translucentFaceIndices));
+    CHECK(nearestFirst(scene.opaqueFaceIndices));
+    CHECK(farthestFirst(scene.translucentFaceIndices));
+    // A list of one or zero satisfies both predicates, which would make the
+    // checks above vacuous. This scene must exercise a real ordering.
+    CHECK(scene.opaqueFaceIndices.size() > 1);
+    CHECK(scene.translucentFaceIndices.size() > 1);
 }
 
 void testPickingConsumesPreparedFaces()

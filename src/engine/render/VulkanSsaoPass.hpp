@@ -15,6 +15,20 @@ public:
         VkPipeline visualize = VK_NULL_HANDLE;
     };
 
+    // Whether these settings make the occlusion pass sample scene depth.
+    //
+    // The recorder copies resolved depth into the sampled depth image purely
+    // so this pass can read it, and that copy is a full render-extent
+    // vkCmdCopyImage plus four barriers. Both decisions must key off the same
+    // predicate, or a frame either pays for a copy nothing reads or samples a
+    // stale one.
+    [[nodiscard]] static constexpr bool samplesSceneDepth(
+        const RenderFrameData::Lighting::AmbientOcclusion& settings)
+    {
+        return settings.enabled &&
+            (settings.strength > 0.0f || settings.visualize);
+    }
+
     VulkanSsaoPass() = default;
     ~VulkanSsaoPass();
 

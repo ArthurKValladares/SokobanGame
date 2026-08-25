@@ -113,13 +113,18 @@ public:
 
     // The manifest must outlive this object; it defines every model,
     // texture, and animation slot.
+    // maxSamplerAnisotropy is the device's limit when the samplerAnisotropy
+    // feature was enabled, and 1.0 otherwise. Passing a value above 1.0
+    // without that feature enabled is a validation error, so this must come
+    // from VulkanDeviceContext rather than be re-derived from device limits.
     void create(
         VkPhysicalDevice physicalDevice,
         VkDevice device,
         VkCommandPool commandPool,
         VkQueue graphicsQueue,
         std::filesystem::path assetRoot,
-        const AssetManifest& manifest);
+        const AssetManifest& manifest,
+        float maxSamplerAnisotropy = 1.0f);
     void destroy();
 
     // Queues independent CPU work and returns immediately. Visible requests
@@ -387,6 +392,7 @@ private:
         uint32_t mipLevels) const;
 
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
+    float maxSamplerAnisotropy_ = 1.0f;
     VkDevice device_ = VK_NULL_HANDLE;
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;

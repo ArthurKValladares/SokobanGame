@@ -15,7 +15,13 @@ inline constexpr std::array frameRateLimitOptions { 0, 30, 60, 120, 144, 240 };
 inline constexpr int unfocusedFrameRateLimit = 20;
 inline constexpr int minimizedFrameRateLimit = 5;
 inline constexpr std::array antiAliasingSampleOptions { 1, 2, 4, 8 };
-inline constexpr int antiAliasingSamples = 8;
+// 4x is the default because the scene pass is fragment-bound: opaque geometry
+// is depth-prepassed by ordering rather than by a prepass, and every extra
+// sample multiplies shading the rasterizer cannot reject. 8x stays available
+// and is worth re-measuring now that opaque draws no longer blend and models
+// cull back faces. Existing profiles keep whatever they already stored; only
+// a fresh profile picks this up.
+inline constexpr int antiAliasingSamples = 4;
 inline constexpr int renderScalePercent = 100;
 inline constexpr bool customRenderScale = false;
 inline constexpr int customRenderScalePercent = 100;

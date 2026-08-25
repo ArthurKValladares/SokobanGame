@@ -2,6 +2,7 @@
 #include "engine/AtomicFile.hpp"
 #include "engine/PlayerProfile.hpp"
 #include "engine/SaveStore.hpp"
+#include "engine/UserSettingsConfig.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -386,7 +387,9 @@ void testNormalizationAndMigration()
         "current level is independent of legacy unlock progression");
     check(profile.settings.audio.masterVolume == 0.0f, "master volume clamps low");
     check(profile.settings.audio.musicVolume == 1.0f, "music volume clamps high");
-    check(profile.settings.video.antiAliasingSamples == 8, "invalid MSAA receives default");
+    check(profile.settings.video.antiAliasingSamples ==
+            sokoban::config::antiAliasingSamples,
+        "invalid MSAA receives default");
     check(profile.settings.video.renderScalePercent == 100, "invalid render scale receives default");
     check(profile.settings.video.customRenderScalePercent == 25,
         "custom render scale clamps to its minimum");
@@ -484,7 +487,8 @@ void testNormalizationAndMigration()
     check(!migratedFormat4.profile.settings.input.forAction(
             sokoban::InputAction::MenuConfirm).empty(),
         "format 4 receives menu-confirm defaults");
-    check(migratedFormat4.profile.settings.video.antiAliasingSamples == 8,
+    check(migratedFormat4.profile.settings.video.antiAliasingSamples ==
+            sokoban::config::antiAliasingSamples,
         "format 4 receives MSAA default");
     check(migratedFormat4.profile.settings.video.windowWidth == 1280 &&
             migratedFormat4.profile.settings.video.windowHeight == 720,

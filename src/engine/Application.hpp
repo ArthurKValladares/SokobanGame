@@ -30,6 +30,7 @@
 #include "engine/ui/OptionsMenu.hpp"
 #include "engine/ui/TitleScreen.hpp"
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -42,6 +43,22 @@
 
 namespace sokoban {
 
+// Non-default ways to start the process. Both fields exist for the headless
+// smoke run: CI needs the real frame loop to execute and then stop, and it
+// must not write into a real player profile to do it.
+struct ApplicationOptions {
+    // Render this many frames through the ordinary loop, start a game so the
+    // scene pass is actually exercised, and exit. Zero runs until quit.
+    //
+    // A title-screen-only run would be close to worthless as a smoke test:
+    // buildRenderFrame returns an empty RenderFrameData while no game is
+    // loaded, so no tiles, models, shadows or SSAO are recorded at all.
+    std::uint64_t smokeFrames = 0;
+    // Roots saves, settings and the pipeline cache here instead of the user's
+    // preference path. Empty keeps the normal location.
+    std::filesystem::path saveDirectoryOverride;
+};
+
 struct ApplicationTimingEventWatchState {
     SimulationTiming* simulation = nullptr;
     FramePacer* framePacer = nullptr;
@@ -53,7 +70,7 @@ class ApplicationTools;
 
 class Application {
 public:
-    Application();
+    explicit Application(ApplicationOptions options = {});
     ~Application();
 
     Application(const Application&) = delete;
@@ -173,6 +190,7 @@ private:
     std::unique_ptr<ApplicationTools> tools_;
 #endif
     FrameArena renderFrameArena_;
+    std::uint64_t smokeFrames_ = 0;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;
     float overworldOverviewProgress_ = 0.0f;
     bool screenPreviewActive_ = false;

@@ -24,6 +24,8 @@ VulkanFeatureTier chooseVulkanFeatureTier(
         .wireframeSupported = releaseCompatible && support.fillModeNonSolid,
         .wideLinesSupported =
             releaseCompatible && support.fillModeNonSolid && support.wideLines,
+        .anisotropicFilteringSupported =
+            releaseCompatible && support.samplerAnisotropy,
     };
 }
 

@@ -39,6 +39,24 @@ void beginLabel(
     std::array<float, 4> color = { 0.3f, 0.7f, 1.0f, 1.0f }) noexcept;
 void endLabel(VkDevice device, VkCommandBuffer commandBuffer) noexcept;
 
+// Whether the debug-utils messenger is currently installed - that is, whether
+// the validation layer actually loaded.
+//
+// This is what keeps a validation gate from passing vacuously. A missing
+// layer, a stale VK_LAYER_PATH or a Release build all produce zero errors for
+// the same uninteresting reason: nothing was watching.
+[[nodiscard]] bool validationActive() noexcept;
+
+// Validation errors reported since process start, or since the last reset.
+//
+// The messenger already logs every message; this exists so a run can *fail*
+// on one. Validation output is easy to lose in a wall of stderr, and a
+// headless CI job needs a signal it can gate on. Zero when the validation
+// layer is unavailable, which is the case in shipping builds - callers should
+// treat "no errors" as meaningful only when validation was actually enabled.
+[[nodiscard]] std::uint64_t validationErrorCount() noexcept;
+void resetValidationErrorCount() noexcept;
+
 [[nodiscard]] log::Level validationMessageLogLevel(
     VkDebugUtilsMessageSeverityFlagBitsEXT severity);
 

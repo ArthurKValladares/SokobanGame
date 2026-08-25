@@ -77,12 +77,15 @@ bool SDLCALL simulationTimingEventWatch(void* userdata, SDL_Event* event)
 
 } // namespace
 
-Application::Application()
+Application::Application(ApplicationOptions options)
     : window_(
           "Sokoban 3D",
           config::windowWidth,
           config::windowHeight)
-    , saveSlots_(SaveStore::preferencePath("Sokoban3D", "Sokoban3D"))
+    , saveSlots_(
+          options.saveDirectoryOverride.empty()
+              ? SaveStore::preferencePath("Sokoban3D", "Sokoban3D")
+              : options.saveDirectoryOverride)
     , playerProfile_(saveSlots_.loadActiveProfile())
     , assetRoot_(runtimeContentRoot())
     , assetManifest_(AssetManifest::loadFromFile(assetRoot_ / "manifest.json"))
@@ -115,6 +118,7 @@ Application::Application()
     , tools_(std::make_unique<ApplicationTools>())
 #endif
     , renderFrameArena_("render frame", renderFrameArenaBytes())
+    , smokeFrames_(options.smokeFrames)
 {
     log::info(log::Category::Persistence)
         << saveSlots_.progressStatus();
@@ -348,6 +352,16 @@ bool Application::bakeTileThumbnails()
 
 void Application::run()
 {
+    if (smokeFrames_ > 0) {
+        // Nobody is here to press New Game, and the title screen draws no
+        // world behind it, so a smoke run that stayed on the title would
+        // never record a tile, model, shadow or AO pass.
+        log::info(log::Category::Application)
+            << "Smoke run: starting a new game and rendering "
+            << smokeFrames_ << " frames.";
+        startNewGame();
+    }
+    std::uint64_t renderedFrames = 0;
     while (running_) {
         framePacer_.beginFrame();
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -558,6 +572,13 @@ void Application::run()
         if (renderer_.hasFatalFailure()) {
             log::error(log::Category::Application)
                 << "Rendering stopped: " << renderer_.fatalFailureMessage();
+            running_ = false;
+        }
+        ++renderedFrames;
+        if (smokeFrames_ > 0 && renderedFrames >= smokeFrames_) {
+            log::info(log::Category::Application)
+                << "Smoke run finished after " << renderedFrames
+                << " frames.";
             running_ = false;
         }
         if (running_) {

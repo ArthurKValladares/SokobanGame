@@ -3,12 +3,20 @@
 #include "engine/Log.hpp"
 
 #include <atomic>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace sokoban::vulkanDebug {
 namespace {
+
+// Validation errors are counted, not just logged, so a headless run can turn
+// them into a process exit code. Relaxed ordering is enough: nothing is
+// published through this counter, and the only reader runs after the frames
+// it is reporting on have finished.
+std::atomic<std::uint64_t> validationErrors { 0 };
+std::atomic_bool validationMessengerActive { false };
 
 std::atomic_bool objectNamingEnabled { false };
 std::atomic<PFN_vkSetDebugUtilsObjectNameEXT> setObjectNameFunction { nullptr };
@@ -21,6 +29,12 @@ VKAPI_ATTR VkBool32 VKAPI_CALL validationCallback(
     const VkDebugUtilsMessengerCallbackDataEXT* callbackData,
     void*)
 {
+    if (severity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+        // Before the logging below, which is allowed to fail: the count is the
+        // part a CI gate depends on, so it must not be lost to a formatting or
+        // allocation failure inside a C callback.
+        validationErrors.fetch_add(1, std::memory_order_relaxed);
+    }
     try {
         const char* const message = callbackData && callbackData->pMessage
             ? callbackData->pMessage
@@ -99,9 +113,15 @@ VkResult createValidationMessenger(
     const auto createMessenger =
         reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
             vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
-    return createMessenger
-        ? createMessenger(instance, &createInfo, nullptr, &messenger)
-        : VK_ERROR_EXTENSION_NOT_PRESENT;
+    if (!createMessenger) {
+        return VK_ERROR_EXTENSION_NOT_PRESENT;
+    }
+    const VkResult result =
+        createMessenger(instance, &createInfo, nullptr, &messenger);
+    if (result == VK_SUCCESS) {
+        validationMessengerActive.store(true, std::memory_order_relaxed);
+    }
+    return result;
 }
 
 void destroyValidationMessenger(
@@ -117,6 +137,7 @@ void destroyValidationMessenger(
     if (destroyMessenger) {
         destroyMessenger(instance, messenger, nullptr);
     }
+    validationMessengerActive.store(false, std::memory_order_relaxed);
 }
 
 void initializeObjectNaming(VkInstance instance)
@@ -212,6 +233,21 @@ void endLabel(VkDevice device, VkCommandBuffer commandBuffer) noexcept
     if (end) {
         end(commandBuffer);
     }
+}
+
+bool validationActive() noexcept
+{
+    return validationMessengerActive.load(std::memory_order_relaxed);
+}
+
+std::uint64_t validationErrorCount() noexcept
+{
+    return validationErrors.load(std::memory_order_relaxed);
+}
+
+void resetValidationErrorCount() noexcept
+{
+    validationErrors.store(0, std::memory_order_relaxed);
 }
 
 log::Level validationMessageLogLevel(

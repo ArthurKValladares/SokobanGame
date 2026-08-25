@@ -108,6 +108,88 @@ bool pointInConvexHull(std::array<Vec2, 8> points, Vec2 point)
 
 } // namespace
 
+SwapchainPresentSemaphores::SwapchainPresentSemaphores(
+    VkDevice device,
+    uint32_t imageCount)
+    : device_(device)
+{
+    const VkSemaphoreCreateInfo semaphoreInfo {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+    };
+    semaphores_.reserve(imageCount);
+    try {
+        for (uint32_t index = 0; index < imageCount; ++index) {
+            VkSemaphore semaphore = VK_NULL_HANDLE;
+            vkCheck(
+                vkCreateSemaphore(
+                    device_, &semaphoreInfo, nullptr, &semaphore),
+                "vkCreateSemaphore render finished failed");
+            semaphores_.push_back(semaphore);
+            vulkanDebug::setObjectName(
+                device_,
+                VK_OBJECT_TYPE_SEMAPHORE,
+                semaphore,
+                "Swapchain image " + std::to_string(index) +
+                    " render finished");
+        }
+    } catch (...) {
+        destroy();
+        throw;
+    }
+}
+
+SwapchainPresentSemaphores::~SwapchainPresentSemaphores()
+{
+    destroy();
+}
+
+SwapchainPresentSemaphores::SwapchainPresentSemaphores(
+    SwapchainPresentSemaphores&& other) noexcept
+    : device_(other.device_)
+    , semaphores_(std::move(other.semaphores_))
+{
+    other.device_ = VK_NULL_HANDLE;
+    other.semaphores_.clear();
+}
+
+SwapchainPresentSemaphores& SwapchainPresentSemaphores::operator=(
+    SwapchainPresentSemaphores&& other) noexcept
+{
+    if (this != &other) {
+        destroy();
+        device_ = other.device_;
+        semaphores_ = std::move(other.semaphores_);
+        other.device_ = VK_NULL_HANDLE;
+        other.semaphores_.clear();
+    }
+    return *this;
+}
+
+VkSemaphore SwapchainPresentSemaphores::forImage(uint32_t imageIndex) const
+{
+    // The caller only ever passes an index vkAcquireNextImageKHR produced for
+    // the swapchain this set was sized from, so an out-of-range index is a
+    // programming error rather than a runtime condition.
+    if (imageIndex >= semaphores_.size()) {
+        throw std::runtime_error(
+            "Swapchain image index has no render-finished semaphore");
+    }
+    return semaphores_[imageIndex];
+}
+
+void SwapchainPresentSemaphores::destroy() noexcept
+{
+    if (device_) {
+        for (VkSemaphore semaphore : semaphores_) {
+            if (semaphore) {
+                vkDestroySemaphore(device_, semaphore, nullptr);
+            }
+        }
+    }
+    semaphores_.clear();
+    device_ = VK_NULL_HANDLE;
+}
+
 VulkanRenderer::VulkanRenderer(
     SDL_Window* window,
     std::filesystem::path assetRoot,
@@ -153,7 +235,8 @@ VulkanRenderer::VulkanRenderer(
         deviceContext_.device(),
         deviceContext_.commandPool(),
         deviceContext_.graphicsQueue(),
-        assetRoot_, manifest);
+        assetRoot_, manifest,
+        deviceContext_.maxSamplerAnisotropy());
     activeResources_ = createRenderResources(
         reconfigurationQueue_.active());
     descriptorSync_.markAllUpdated();
@@ -192,12 +275,6 @@ VulkanRenderer::~VulkanRenderer()
             vkDestroySemaphore(
                 deviceContext_.device(),
                 frame.imageAvailable,
-                nullptr);
-        }
-        if (frame.renderFinished) {
-            vkDestroySemaphore(
-                deviceContext_.device(),
-                frame.renderFinished,
                 nullptr);
         }
         if (frame.inFlight) {
@@ -366,6 +443,7 @@ void VulkanRenderer::drawFrame(
             .activeSamples = sampleCountValue(),
             .wireframeEnabled =
                 reconfigurationQueue_.active().wireframe,
+            .modelBackfaceCulling = modelBackfaceCulling_,
             .wireframeLineWidth = wireframeLineWidth_,
             .statsFrameIndex = nextStatsFrameIndex_++,
             .pipelineRebuilds = pipelineRebuilds_,
@@ -419,9 +497,15 @@ void VulkanRenderer::drawFrame(
         .commandBuffer = frame.commandBuffer,
     };
 
+    // Signalled per swapchain image, not per frame slot: the present that
+    // consumes it is bound to the image, and nothing here proves an earlier
+    // present on a different image has stopped waiting.
+    const VkSemaphore renderFinished =
+        activeResources_.presentSemaphores.forImage(imageIndex);
+
     VkSemaphoreSubmitInfo signalSemaphore {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .semaphore = frame.renderFinished,
+        .semaphore = renderFinished,
         .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
     };
 
@@ -448,7 +532,7 @@ void VulkanRenderer::drawFrame(
 
     const VkResult presented = activeResources_.swapchain->present(
         deviceContext_.presentQueue(),
-        frame.renderFinished,
+        renderFinished,
         imageIndex);
     if (presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR) {
         swapchainRecreationRequested_ = true;
@@ -1019,6 +1103,19 @@ bool VulkanRenderer::wireframeSupported() const
     return deviceContext_.wireframeSupported();
 }
 
+bool VulkanRenderer::modelBackfaceCullingEnabled() const
+{
+    return modelBackfaceCulling_;
+}
+
+void VulkanRenderer::setModelBackfaceCullingEnabled(bool enabled)
+{
+    // Pure dynamic state: no pipeline rebuild, no resource replacement, so
+    // this does not go through the reconfiguration queue the way wireframe
+    // does. The next recorded frame picks it up.
+    modelBackfaceCulling_ = enabled;
+}
+
 bool VulkanRenderer::wideLinesSupported() const
 {
     return deviceContext_.wideLinesSupported();
@@ -1141,6 +1238,10 @@ VulkanRenderer::createRenderResources(
         activeResources_.swapchain
             ? activeResources_.swapchain->handle()
             : VK_NULL_HANDLE);
+    // Must follow swapchain creation: the count comes from the images the
+    // driver actually handed back, not from the requested minimum.
+    resources.presentSemaphores = SwapchainPresentSemaphores(
+        deviceContext_.device(), resources.swapchain->imageCount());
     resources.ssaoPass = std::make_unique<VulkanSsaoPass>();
     resources.ssaoPass->create(
         deviceContext_.physicalDevice(),
@@ -1340,18 +1441,6 @@ void VulkanRenderer::createFrameResources()
             VK_OBJECT_TYPE_SEMAPHORE,
             frames_[i].imageAvailable,
             frameLabel + " image available");
-        vkCheck(
-            vkCreateSemaphore(
-                deviceContext_.device(),
-                &semaphoreInfo,
-                nullptr,
-                &frames_[i].renderFinished),
-            "vkCreateSemaphore failed");
-        vulkanDebug::setObjectName(
-            deviceContext_.device(),
-            VK_OBJECT_TYPE_SEMAPHORE,
-            frames_[i].renderFinished,
-            frameLabel + " render finished");
         vkCheck(
             vkCreateFence(
                 deviceContext_.device(),

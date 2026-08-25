@@ -107,10 +107,12 @@ void VulkanModelResources::create(
     VkCommandPool commandPool,
     VkQueue graphicsQueue,
     std::filesystem::path assetRoot,
-    const AssetManifest& manifest)
+    const AssetManifest& manifest,
+    float maxSamplerAnisotropy)
 {
     destroy();
     physicalDevice_ = physicalDevice;
+    maxSamplerAnisotropy_ = std::max(maxSamplerAnisotropy, 1.0f);
     device_ = device;
     commandPool_ = commandPool;
     graphicsQueue_ = graphicsQueue;
@@ -1623,6 +1625,10 @@ void VulkanModelResources::beginTextureUpload(
     const VkFilter filter = sampling.filter == TextureFilter::Linear
         ? VK_FILTER_LINEAR
         : VK_FILTER_NEAREST;
+    const float anisotropy = supportsMipmaps &&
+            sampling.filter == TextureFilter::Linear
+        ? maxSamplerAnisotropy_
+        : 1.0f;
     VkSamplerCreateInfo samplerInfo {
         .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
         .magFilter = filter,
@@ -1631,7 +1637,11 @@ void VulkanModelResources::beginTextureUpload(
         .addressModeU = addressMode,
         .addressModeV = addressMode,
         .addressModeW = addressMode,
-        .anisotropyEnable = VK_FALSE,
+        // Anisotropy only earns its cost where a mip chain exists and the
+        // surface is viewed obliquely - the splatted ground being the case
+        // that motivated it. Point-sampled atlases keep their crisp texels.
+        .anisotropyEnable = anisotropy > 1.0f ? VK_TRUE : VK_FALSE,
+        .maxAnisotropy = anisotropy,
         .compareEnable = VK_FALSE,
         .minLod = 0.0f,
         .maxLod = static_cast<float>(textureImage.mipLevels - 1U),

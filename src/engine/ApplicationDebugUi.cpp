@@ -223,6 +223,19 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
     }
     ImGui::EndDisabled();
 
+    bool modelBackfaceCulling =
+        context.renderer.modelBackfaceCullingEnabled();
+    if (ImGui::Checkbox("Cull Model Back Faces", &modelBackfaceCulling)) {
+        context.renderer.setModelBackfaceCullingEnabled(
+            modelBackfaceCulling);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Skips the interior of closed glTF meshes. Turn this off if a "
+            "model looks hollow or partly missing: that means its triangles "
+            "are wound the other way. Tile quads are unaffected.");
+    }
+
     if (ImGui::CollapsingHeader("Tile Grid")) {
         float gridColor[3] {
             settings.grid.color.x,

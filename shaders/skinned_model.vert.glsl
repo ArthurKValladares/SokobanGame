@@ -53,26 +53,36 @@ vec3 worldFromSunShadow(vec4 shadowPosition) {
     return center + lighting.sunShadowRightAndHalfWidth.xyz * (clip.x * lighting.sunShadowRightAndHalfWidth.w) + lighting.sunShadowUpAndHalfHeight.xyz * (clip.y * lighting.sunShadowUpAndHalfHeight.w) + forward * (worldForward - dot(center, forward));
 }
 
+// SkinningInstance is 258 mat4 (16512 bytes). Never bind one to a local:
+// `SkinningInstance instance = skinning.instances[i]` is a whole-struct
+// OpLoad per vertex invocation, and drivers that fail to scalarize it spill
+// catastrophically. Index the members through the buffer instead; the
+// per-matrix loads below are the only reads that should reach memory.
 void main() {
-    SkinningInstance instance = skinning.instances[gl_InstanceIndex];
     vec4 sourcePosition = vec4(0.0);
     vec3 sourceNormal = vec3(0.0);
     if (inAttachmentNode != 0xffffffffu) {
-        mat4 matrix = instance.palette[MAX_SKIN_JOINTS + inAttachmentNode];
+        mat4 matrix = skinning.instances[gl_InstanceIndex]
+                          .palette[MAX_SKIN_JOINTS + inAttachmentNode];
         sourcePosition = matrix * vec4(inPosition, 1.0);
         sourceNormal = mat3(matrix) * inNormal;
     } else {
         for (uint i = 0; i < 4; ++i) {
             if (inWeights[i] > 0.0 && inJoints[i] < MAX_SKIN_JOINTS) {
-                mat4 matrix = instance.palette[inJoints[i]];
+                mat4 matrix = skinning.instances[gl_InstanceIndex]
+                                  .palette[inJoints[i]];
                 sourcePosition += (matrix * vec4(inPosition, 1.0)) * inWeights[i];
                 sourceNormal += (mat3(matrix) * inNormal) * inWeights[i];
             }
         }
         if (length(sourceNormal) < 0.000001) { sourceNormal = inNormal; }
     }
-    vec3 position = (instance.modelFromSource * sourcePosition).xyz;
-    vec3 normal = normalize(mat3(instance.normalFromSource) * normalize(sourceNormal));
+    vec3 position =
+        (skinning.instances[gl_InstanceIndex].modelFromSource * sourcePosition)
+            .xyz;
+    vec3 normal = normalize(
+        mat3(skinning.instances[gl_InstanceIndex].normalFromSource) *
+        normalize(sourceNormal));
     mat4 clipTransform = mat4(pc.clipFromModel[0], pc.clipFromModel[1], pc.clipFromModel[2], pc.clipFromModel[3]);
     mat4 shadowTransform = mat4(pc.shadowFromModel[0], pc.shadowFromModel[1], pc.shadowFromModel[2], pc.shadowFromModel[3]);
     gl_Position = clipTransform * vec4(position, 1.0);

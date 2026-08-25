@@ -75,8 +75,7 @@ void VulkanSsaoPass::record(
     Pipelines pipelines,
     RenderStats& stats) const
 {
-    if (!settings.enabled ||
-        (settings.strength <= 0.0f && !settings.visualize) ||
+    if (!samplesSceneDepth(settings) ||
         !valid() ||
         !targetView ||
         !descriptorSet ||

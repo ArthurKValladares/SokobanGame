@@ -196,7 +196,17 @@ foreach(shader_source IN LISTS SHADER_SOURCES)
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${SHADER_OUTPUT_DIR}"
         # MODEL_TEXTURE_COUNT is read from sokoban::maxModelTextures above;
         # descriptor writes pad to this size.
-        COMMAND "${GLSLC_EXECUTABLE}" --target-env=vulkan1.4 -DMODEL_TEXTURE_COUNT=${MODEL_TEXTURE_COUNT} -DMAX_SKIN_JOINTS=128 -fshader-stage=${shader_stage} "${shader_source}" -o "${shader_output}"
+        #
+        # --target-env must match the device contract in VulkanDeviceContext
+        # (Vulkan 1.3). Declaring a newer environment lets glslc emit SPIR-V a
+        # conforming 1.3 driver is allowed to reject.
+        #
+        # -O is deliberately not per-configuration. SHADER_OUTPUT_DIR has no
+        # $<CONFIG> component, so Debug and Release share one .spv tree; a
+        # config-dependent flag would bake in whichever config compiled first
+        # and never rebuild. Optimize always, and pass -g by hand when a
+        # specific shader needs to be stepped through.
+        COMMAND "${GLSLC_EXECUTABLE}" --target-env=vulkan1.3 -O -DMODEL_TEXTURE_COUNT=${MODEL_TEXTURE_COUNT} -DMAX_SKIN_JOINTS=128 -fshader-stage=${shader_stage} "${shader_source}" -o "${shader_output}"
         DEPENDS "${shader_source}"
         VERBATIM
     )
@@ -651,6 +661,11 @@ if(SOKOBAN_BUILD_TESTS)
         endif()
     endif()
 
+    # Header-only and dependency-free, so it links nothing: the point is that
+    # the flags a CI gate is built on cannot silently mean nothing.
+    sokoban_add_test(NAME command_line TARGET sokoban_command_line_tests
+        SOURCES tests/CommandLineOptionsTests.cpp
+    )
     sokoban_add_test(NAME rules TARGET sokoban_rules_tests
         LIBS sokoban_core
         SOURCES tests/RulesTests.cpp

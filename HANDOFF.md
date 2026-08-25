@@ -128,6 +128,53 @@ call, not a copy-pasted block. Production sources compile once into
 library and compile only their test `.cpp`. The helper rejects `src/` entries
 at configure time to prevent target-definition drift from returning.
 
+Command-line flags (all builds unless noted):
+
+```powershell
+.\sokoban.exe --smoke-frames 240 --require-validation --save-directory C:\temp\smoke
+```
+
+- `--smoke-frames <n>` starts a new game, renders `n` frames through the
+  ordinary loop, and exits. It starts a game deliberately: the title screen
+  draws no world (`buildRenderFrame` returns an empty `RenderFrameData` while
+  none is loaded), so a title-only run records no tiles, models, shadows or
+  SSAO and would prove almost nothing.
+- `--require-validation` refuses to run unless `VK_LAYER_KHRONOS_validation`
+  actually loaded, and exits 4 if it did not. Without it a validation gate is
+  theatre - a missing layer, a stale `VK_LAYER_PATH`, a Release build and a
+  genuinely clean frame all report zero errors.
+- `--save-directory <path>` roots saves, settings and the pipeline cache
+  somewhere other than the preference path, so a smoke run cannot write into a
+  real player profile.
+- `--bake-tile-thumbnails` is Debug-only and rejected with exit 2 elsewhere.
+- Exit codes: 0 clean, 1 fatal error, 2 bad arguments, 3 validation reported
+  at least one error, 4 validation was required but inactive.
+
+Parsing lives in the header-only `src/engine/CommandLineOptions.hpp` and is
+covered by `tests/CommandLineOptionsTests.cpp` (ctest name `command_line`).
+It is deliberately strict - a missing value, a non-numeric or zero count,
+trailing garbage, and unknown flags are all rejected - because a CI gate is
+only as trustworthy as the flag that starts it.
+
+Continuous integration (`.github/workflows/required-tests.yml`):
+
+- The Linux `quality` matrix runs Debug/Release tests, ASan+UBSan, clang-tidy
+  and the profile fuzzer, as before.
+- The Debug entry additionally builds `SOKOBAN_BUILD_VULKAN_SMOKE_TESTS=ON`
+  and runs a **Render frames under validation** step: lavapipe pinned through
+  `VK_DRIVER_FILES`, validation layers located explicitly, `xvfb-run`, and
+  `--smoke-frames`/`--require-validation`. Before this, `mesa-vulkan-drivers`
+  and `vulkan-validationlayers` were installed by CI and nothing used them -
+  the Vulkan smoke test defaults to OFF and had never been switched on.
+- A `windows` job builds Debug and Release with MSVC and runs ctest. It is the
+  only job that uses the compiler releases actually ship with. It configures
+  `SOKOBAN_BUILD_VULKAN_SMOKE_TESTS=OFF` on purpose: hosted Windows runners
+  have no Vulkan ICD, so that test could only fail for reasons unrelated to
+  the change under test. Device coverage is the Linux lavapipe job's job.
+- `VULKAN_SDK_WINDOWS_SHA256` starts empty. The first Windows run fails and
+  prints the hash it downloaded; verify that download, paste the hash in, and
+  the installer is pinned the same way the Linux tarball already is.
+
 Headless rules tests (no SDL/Vulkan needed at runtime; built by default via `SOKOBAN_BUILD_TESTS`):
 
 ```powershell
@@ -912,7 +959,71 @@ Renderer:
   developer-only features.
 - Uses SDL3 window/Vulkan integration.
 - Has a shadow pass and scene pass.
-- Supports MSAA modes (default is MSAA 8x, automatically falling back to the highest count the device's color+depth framebuffers support; the Debug UI combo shows the requested mode, Rendering Stats shows the active sample count), internal render-scale presets of 100%, 75%, 67% (exact two-thirds), 50%, and 25%, plus custom percentages from 25-100%, wireframe, line width controls, lighting controls, grid overlay, and render stats in Debug UI. The 3D scene renders into scaled offscreen attachments and is linearly upscaled to the native swapchain before player/debug UI, so a 4K window can render the scene at exact 1440p or 1080p while UI remains crisp.
+- The opaque and translucent scene passes use different pipelines and
+  different sort orders, and both halves matter:
+  - Opaque geometry binds blend-disabled twins (`sceneOpaque`,
+    `groundSplatOpaque`, `modelOpaque`, `skinnedModelOpaque`) and
+    `IsoScenePreparer` sorts `opaqueFaceIndices` **nearest first**, so the
+    depth test rejects occluded fragments before shading and the blend unit
+    never reads the colour attachment back.
+  - Translucent geometry keeps the blended pipelines and stays sorted
+    **farthest first**. Reversing that order is a correctness bug, not a
+    performance regression. `IsoScenePreparerTests` pins each direction
+    separately.
+  - A face in the opaque list may still carry a sub-1.0 alpha - the editor's
+    ladder-rung preview does - so the pipeline is chosen per face from
+    `face.color.w`, not per pass. Editor dither previews are `discard`, not
+    blending, and stay on the opaque pipeline.
+- Model draws cull back faces (`VK_CULL_MODE_BACK_BIT`) with
+  **`VK_FRONT_FACE_CLOCKWISE`**; tile quads do neither.
+  - The clockwise front face is not a quirk of the assets. glTF authors front
+    faces counter-clockwise and nothing from object space to clip space
+    reverses that - the camera basis is right-handed, `projectIsoPointToClip`
+    applies no sign flip, and decoration scale is clamped positive. The scene
+    pass viewport is what reverses it: it has a **negative height** to put +Y
+    up in Vulkan's Y-down NDC, and a negative viewport height flips the
+    winding the rasterizer sees. Culling BACK against the pass-level
+    COUNTER_CLOCKWISE therefore removes the outside of every mesh and keeps
+    the inside - models render hollow. If the projection or the viewport sign
+    ever changes, this constant changes with it.
+  - Tile quads stay `CULL_MODE_NONE`: they are already rejected on the CPU by
+    `faceVisible`, and their winding after CPU projection is not guaranteed.
+  - Mirror ghosts cull back faces too, and are the one model kind that culls
+    in the *translucent* pass. Before the winding fix they culled BACK under
+    the inverted convention, which meant the effect had always been drawn
+    inside-out; that was a bug, not a style. `mirror_energy.frag.glsl` needed
+    no retuning because its rim term uses
+    `1 - abs(dot(normal, viewDirection))`, which is sign-independent - the
+    surface being shaded changed, the rim response did not. Ghosts write
+    depth, so that depth now comes from the near surface rather than the far
+    one.
+  - Blur-behind ice is *not* culled: it is the other occupant of the
+    translucent list and its look depends on what its own back faces
+    contribute, which is a visual decision rather than a free win.
+  - Debug UI > Engine has a "Cull Model Back Faces" checkbox, because a model
+    wound the other way disappears rather than degrading. It gates every
+    culled model draw including ghosts, so it is a true escape hatch, and
+    culling is forced off while wireframe is on.
+- The `renderFinished` semaphore is per swapchain **image**, not per
+  frame-in-flight (`SwapchainPresentSemaphores`). A present carries no fence,
+  so nothing else proves the presentation engine has stopped waiting on it;
+  with `minImageCount + 1` images and two frames in flight, the old
+  per-frame-slot semaphore could be re-signalled under a queued present. The
+  set is owned by `RenderResourceSet` and retired with its swapchain, which
+  is what makes the present-queue wait in `destroyCompletedRetirements()` the
+  guarantee that destroying it is safe.
+- `copyResolvedSceneDepth` runs only when `VulkanSsaoPass::samplesSceneDepth`
+  says the occlusion pass will read it. The sampled depth image has exactly
+  one reader; with AO off that copy was a full render-extent `vkCmdCopyImage`
+  plus four barriers per frame that nothing consumed. Both the copy and the
+  pass key off that one predicate so they cannot drift.
+- Texture samplers use anisotropic filtering at the device maximum when
+  `samplerAnisotropy` is available (`VulkanDeviceContext::maxSamplerAnisotropy`
+  returns 1.0 - the "off" value - when it is not, so callers need no branch).
+  It is applied only to mipped, linear-filtered textures, so the pixel-art
+  atlases are unaffected. Like wireframe, it is an optional tier feature: a
+  device without it still passes the release contract.
+- Supports MSAA modes (default is MSAA 4x, automatically falling back to the highest count the device's color+depth framebuffers support; the Debug UI combo shows the requested mode, Rendering Stats shows the active sample count), internal render-scale presets of 100%, 75%, 67% (exact two-thirds), 50%, and 25%, plus custom percentages from 25-100%, wireframe, line width controls, lighting controls, grid overlay, and render stats in Debug UI. The 3D scene renders into scaled offscreen attachments and is linearly upscaled to the native swapchain before player/debug UI, so a 4K window can render the scene at exact 1440p or 1080p while UI remains crisp.
 - MSAA, render-scale, wireframe, and swapchain requests are coalesced and applied once at a frame boundary. Replacement resources are constructed before publication, superseded resource generations remain alive until all referencing frame fences complete, and swapchain retirement uses a presentation-queue wait instead of stopping the whole device. Rendering Stats exposes replacement count, pending state, retired-bundle count, and presentation-retirement waits.
 - Screen-space ambient occlusion (SSAO) applies to all geometry, tiles and GLTF models alike. `VulkanSwapchainResources` provides sampled or resolved scene depth, and `VulkanSsaoPass` records the fullscreen depth-only AO pass (12-tap golden-angle spiral, range falloff to avoid halos, `config::ssaoRadiusPixels/DepthRange`) into an R8 target before multiply-compositing the blurred result onto the lit image. Descriptor bindings 5 (scene depth) and 6 (AO) live in `VulkanSceneDescriptors`. Toggle, strength, and raw-AO visualization are mutable `PresentationSettings` edited by Debug UI > Lighting.
 - Renders simple tile faces procedurally and GLTF models for certain tiles/entities.

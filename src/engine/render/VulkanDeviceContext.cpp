@@ -140,6 +140,15 @@ bool VulkanDeviceContext::wideLinesSupported() const
     return wideLinesSupported_;
 }
 
+float VulkanDeviceContext::maxSamplerAnisotropy() const
+{
+    // 1.0 is the "disabled" value every sampler accepts, so callers can pass
+    // this straight through without branching on support.
+    return featureTier_.anisotropicFilteringSupported
+        ? std::max(physicalDeviceProperties_.limits.maxSamplerAnisotropy, 1.0f)
+        : 1.0f;
+}
+
 bool VulkanDeviceContext::graphicsTimestampsSupported() const
 {
     return graphicsTimestampValidBits_ != 0 &&
@@ -378,6 +387,8 @@ void VulkanDeviceContext::createDevice()
         .imageCubeArray = VK_TRUE,
         .fillModeNonSolid = featureTier_.wireframeSupported ? VK_TRUE : VK_FALSE,
         .wideLines = wideLinesSupported_ ? VK_TRUE : VK_FALSE,
+        .samplerAnisotropy =
+            featureTier_.anisotropicFilteringSupported ? VK_TRUE : VK_FALSE,
     };
     const VkDeviceCreateInfo createInfo {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
@@ -549,6 +560,7 @@ VulkanDeviceFeatureSupport VulkanDeviceContext::queryFeatureSupport(
             extendedDynamicState.extendedDynamicState == VK_TRUE,
         .fillModeNonSolid = features.features.fillModeNonSolid == VK_TRUE,
         .wideLines = features.features.wideLines == VK_TRUE,
+        .samplerAnisotropy = features.features.samplerAnisotropy == VK_TRUE,
     };
 }
 

@@ -20,12 +20,16 @@ struct VulkanDeviceFeatureSupport {
     bool extendedDynamicState = false;
     bool fillModeNonSolid = false;
     bool wideLines = false;
+    bool samplerAnisotropy = false;
 };
 
 struct VulkanFeatureTier {
     bool releaseCompatible = false;
     bool wireframeSupported = false;
     bool wideLinesSupported = false;
+    // Optional quality feature, like wireframe: a device without it renders
+    // correctly, just with more blurring on obliquely viewed surfaces.
+    bool anisotropicFilteringSupported = false;
 };
 
 [[nodiscard]] VulkanFeatureTier chooseVulkanFeatureTier(

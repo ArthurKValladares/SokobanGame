@@ -43,6 +43,45 @@ namespace sokoban {
 class AssetManifest;
 class FontAtlas;
 
+// One render-finished semaphore per swapchain image.
+//
+// A present carries no fence. The only things that prove the presentation
+// engine has finished waiting on a semaphore are that its image came back
+// out of vkAcquireNextImageKHR, or that the present queue went idle. Indexing
+// these by frame-in-flight rather than by image therefore lets a submission
+// re-signal a semaphore that a queued present is still waiting on, whenever
+// the swapchain holds more images than there are frames in flight - which is
+// the normal case, since the image count is minImageCount + 1.
+//
+// The set belongs to one swapchain generation and is retired with it, so the
+// present-queue wait in destroyCompletedRetirements() is what makes
+// destruction safe.
+class SwapchainPresentSemaphores {
+public:
+    SwapchainPresentSemaphores() = default;
+    SwapchainPresentSemaphores(VkDevice device, uint32_t imageCount);
+    ~SwapchainPresentSemaphores();
+
+    SwapchainPresentSemaphores(SwapchainPresentSemaphores&& other) noexcept;
+    SwapchainPresentSemaphores& operator=(
+        SwapchainPresentSemaphores&& other) noexcept;
+    SwapchainPresentSemaphores(const SwapchainPresentSemaphores&) = delete;
+    SwapchainPresentSemaphores& operator=(
+        const SwapchainPresentSemaphores&) = delete;
+
+    [[nodiscard]] VkSemaphore forImage(uint32_t imageIndex) const;
+    [[nodiscard]] uint32_t size() const
+    {
+        return static_cast<uint32_t>(semaphores_.size());
+    }
+
+private:
+    void destroy() noexcept;
+
+    VkDevice device_ = VK_NULL_HANDLE;
+    std::vector<VkSemaphore> semaphores_;
+};
+
 class VulkanRenderer {
 private:
     struct PreparedFrameScratch;
@@ -74,7 +113,7 @@ public:
         std::filesystem::path pipelineCachePath,
         const AssetManifest& manifest,
         const FontAtlas& uiFont,
-        AntiAliasingMode antiAliasingMode = AntiAliasingMode::Msaa8x,
+        AntiAliasingMode antiAliasingMode = AntiAliasingMode::Msaa4x,
         int renderScalePercent = 100,
         PresentationPolicy presentationPolicy = {});
     ~VulkanRenderer();
@@ -173,6 +212,10 @@ public:
     [[nodiscard]] bool wireframeEnabled() const;
     void setWireframeEnabled(bool enabled);
     [[nodiscard]] bool wireframeSupported() const;
+    // Developer toggle for model back-face culling. Dynamic state, so it takes
+    // effect on the next recorded frame with no pipeline rebuild.
+    [[nodiscard]] bool modelBackfaceCullingEnabled() const;
+    void setModelBackfaceCullingEnabled(bool enabled);
     [[nodiscard]] bool wideLinesSupported() const;
     [[nodiscard]] float wireframeLineWidth() const;
     [[nodiscard]] std::array<float, 2> wireframeLineWidthRange() const;
@@ -189,9 +232,10 @@ private:
     struct FrameResources {
         VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
         VkSemaphore imageAvailable = VK_NULL_HANDLE;
-        VkSemaphore renderFinished = VK_NULL_HANDLE;
         VkFence inFlight = VK_NULL_HANDLE;
     };
+    // renderFinished deliberately does not live here: it is indexed by
+    // swapchain image, not by frame slot. See SwapchainPresentSemaphores.
 
     struct PreparedFrameScratch {
         RenderFrameData frameData;
@@ -203,6 +247,8 @@ private:
 
     struct RenderResourceSet {
         std::unique_ptr<VulkanSwapchainResources> swapchain;
+        // Sized by, and retired with, `swapchain`.
+        SwapchainPresentSemaphores presentSemaphores;
         std::unique_ptr<VulkanSsaoPass> ssaoPass;
         std::unique_ptr<VulkanSceneDescriptors> sceneDescriptors;
         std::unique_ptr<VulkanPipelineFactory> pipelines;
@@ -274,6 +320,7 @@ private:
     uint64_t nextPreparedFrameGeneration_ = 1;
     VkSampleCountFlagBits activeSampleCount_ = VK_SAMPLE_COUNT_1_BIT;
     float wireframeLineWidth_ = 1.0f;
+    bool modelBackfaceCulling_ = true;
     uint64_t activeResourceGeneration_ = 1;
     bool swapchainRecreationRequested_ = false;
     std::optional<VulkanFailure> fatalFailure_;

@@ -344,6 +344,13 @@ private:
             previewDescriptor_);
     }
 
+    // The flat tile shader in either blend mode. Same shaders and same
+    // dynamic state, so switching between them costs one pipeline bind.
+    [[nodiscard]] VkPipeline flatScenePipeline(bool opaque) const
+    {
+        return opaque ? pipelines_.sceneOpaque() : pipelines_.scene();
+    }
+
     void bindDescriptorSet(VkCommandBuffer commandBuffer) const
     {
         const VkDescriptorSet set = descriptorSet();
@@ -482,8 +489,14 @@ private:
             false,
             true,
             { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });
-        swapchain_.copyResolvedSceneDepth(
-            commandBuffer, stats_);
+        // The sampled depth image has exactly one reader, the SSAO occlusion
+        // pass. With ambient occlusion off, this copy is a full render-extent
+        // vkCmdCopyImage and four barriers that nothing consumes.
+        if (VulkanSsaoPass::samplesSceneDepth(
+                frameData.lighting.ambientOcclusion)) {
+            swapchain_.copyResolvedSceneDepth(
+                commandBuffer, stats_);
+        }
         if (!scene.hasTranslucentContent) {
             return;
         }
@@ -541,7 +554,10 @@ private:
             false,
             true,
             inset);
-        swapchain_.copyResolvedSceneDepth(commandBuffer, stats_);
+        if (VulkanSsaoPass::samplesSceneDepth(
+                frameData.lighting.ambientOcclusion)) {
+            swapchain_.copyResolvedSceneDepth(commandBuffer, stats_);
+        }
         if (!scene.hasTranslucentContent) {
             return;
         }
@@ -709,10 +725,15 @@ private:
             .maxDepth = 1.0f,
         };
         const VkRect2D scissor = renderArea;
+        // The opaque iso pass starts on the non-blended twin. The 2D path and
+        // the translucent pass keep the blended one: the former draws a
+        // blended grid overlay, the latter needs the blend unit by definition.
         vkCmdBindPipeline(
             commandBuffer,
             VK_PIPELINE_BIND_POINT_GRAPHICS,
-            pipelines_.scene());
+            flatScenePipeline(
+                frameData.viewMode == RenderViewMode::Isometric3D &&
+                !translucentPass));
         ++stats_.pipelineBinds;
         bindDescriptorSet(commandBuffer);
         vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
@@ -932,7 +953,8 @@ private:
             translucentPass
             ? scene.translucentFaceIndices
             : scene.opaqueFaceIndices;
-        VkPipeline boundFacePipeline = pipelines_.scene();
+        const bool opaquePass = !translucentPass;
+        VkPipeline boundFacePipeline = flatScenePipeline(opaquePass);
         for (std::size_t faceIndex : faceIndices) {
             const PreparedIsoFace& face =
                 scene.isoFaces[faceIndex];
@@ -941,6 +963,13 @@ private:
             const GroundSplatTextures& splatTextures = splatRegion
                 ? splatRegion->textures
                 : frameData.groundSplat;
+            // A face in the opaque list can still carry a sub-1.0 alpha - the
+            // editor's ladder-rung preview does - and those must keep the
+            // blend unit. Everything else in this pass writes coverage it
+            // fully owns. Alpha from a sampled texture is not visible here;
+            // there is no alpha mode in the material model yet, and adding one
+            // belongs with real materials rather than in this pass.
+            const bool opaqueSurface = opaquePass && face.color.w >= 1.0f;
             const VkPipeline desiredPipeline = [&] {
                 switch (face.material) {
                 case PreparedSurfaceMaterial::Water:
@@ -950,13 +979,16 @@ private:
                 case PreparedSurfaceMaterial::GroundSplat:
                     // Falls back to the flat tile shader when the manifest
                     // does not provide the ground textures.
-                    return splatTextures.valid()
-                        ? pipelines_.groundSplat()
-                        : pipelines_.scene();
+                    if (!splatTextures.valid()) {
+                        return flatScenePipeline(opaqueSurface);
+                    }
+                    return opaqueSurface
+                        ? pipelines_.groundSplatOpaque()
+                        : pipelines_.groundSplat();
                 case PreparedSurfaceMaterial::Standard:
-                    return pipelines_.scene();
+                    return flatScenePipeline(opaqueSurface);
                 }
-                return pipelines_.scene();
+                return flatScenePipeline(opaqueSurface);
             }();
             if (desiredPipeline != boundFacePipeline) {
                 vkCmdBindPipeline(
@@ -1088,18 +1120,25 @@ private:
             const bool mirrorGhost =
                 tile.effect == RenderSurfaceEffect::MirrorEnergy;
             const bool skinned = models_.modelUsesGpuSkinning(tile.model);
-            const uint32_t pipelineRank = (mirrorGhost ? 2U : 0U) +
-                (skinned ? 1U : 0U);
-            const VkPipeline pipeline = mirrorGhost
-                ? (skinned ? pipelines_.skinnedMirrorEnergyModel()
-                           : pipelines_.mirrorEnergyModel())
-                : (skinned ? pipelines_.skinnedModel() : pipelines_.model());
             const TilePushConstants constants = modelPushConstants(
                 scene.isoLayout,
                 scene.shadowLayout,
                 tile,
                 frameData.lighting,
                 frameData.effectAnimationTimeSeconds);
+            // Mirror ghosts are translucent by construction. Everything else
+            // in the opaque pass with a full-alpha tint skips the blend unit.
+            const bool opaqueModel =
+                opaquePass && !mirrorGhost && constants.color.w >= 1.0f;
+            const uint32_t pipelineRank = (mirrorGhost ? 2U : 0U) +
+                (skinned ? 1U : 0U) + (opaqueModel ? 0U : 4U);
+            const VkPipeline pipeline = mirrorGhost
+                ? (skinned ? pipelines_.skinnedMirrorEnergyModel()
+                           : pipelines_.mirrorEnergyModel())
+                : opaqueModel
+                ? (skinned ? pipelines_.skinnedModelOpaque()
+                           : pipelines_.modelOpaque())
+                : (skinned ? pipelines_.skinnedModel() : pipelines_.model());
             draws.push_back({
                 .tile = &tile,
                 .mesh = models_.meshForTile(
@@ -1140,6 +1179,49 @@ private:
             batches = sortOpaqueDraws(orderedDraws);
         }
 
+        // Front faces are CLOCKWISE here, not counter-clockwise.
+        //
+        // glTF authors front faces counter-clockwise, and nothing between
+        // object space and clip space reverses that: the camera basis is
+        // right-handed (cameraRight x cameraUp == cameraForward),
+        // projectIsoPointToClip applies no sign flip to x or y, and decoration
+        // scale is clamped positive so no instance carries a mirrored
+        // transform. What does reverse it is the scene pass viewport, which
+        // has a negative height to put +Y up in Vulkan's Y-down NDC. A
+        // negative viewport height flips the winding the rasterizer sees, so
+        // a counter-clockwise mesh arrives clockwise.
+        //
+        // Culling BACK against the pass-level COUNTER_CLOCKWISE front face
+        // therefore discards the outside of every mesh and keeps the inside,
+        // which is exactly the "hollow model" symptom.
+        constexpr VkFrontFace modelFrontFace = VK_FRONT_FACE_CLOCKWISE;
+
+        // Closed glTF meshes never need their interior rasterized.
+        //
+        // Wireframe opts out entirely: seeing through geometry is the whole
+        // point of that mode. The Debug UI toggle is the escape hatch for a
+        // model that turns out to be wound the other way, so it has to reach
+        // every culled draw, ghosts included.
+        const bool cullingAllowed = configuration_.modelBackfaceCulling &&
+            !configuration_.wireframeEnabled;
+        // Opaque models only. The translucent list also holds blur-behind
+        // ice, whose look depends on what its own back faces contribute;
+        // that is a visual decision, not a free win.
+        const VkCullModeFlags modelCullMode =
+            opaquePass && cullingAllowed
+            ? VK_CULL_MODE_BACK_BIT
+            : VK_CULL_MODE_NONE;
+        // Mirror ghosts are the exception that does cull in the translucent
+        // pass: they are closed meshes standing in for an actor, so their
+        // interior is no more meaningful than any other model's.
+        const VkCullModeFlags ghostCullMode = cullingAllowed
+            ? VK_CULL_MODE_BACK_BIT
+            : VK_CULL_MODE_NONE;
+        // recordScenePass left the command buffer on CULL_MODE_NONE and
+        // COUNTER_CLOCKWISE for the tile quads drawn above. Tile quads are
+        // unaffected by either: they are CPU-culled and never cull on the GPU.
+        VkCullModeFlags boundCullMode = VK_CULL_MODE_NONE;
+        VkFrontFace boundFrontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
         VkPipeline boundModelPipeline = VK_NULL_HANDLE;
         bool mirrorGhostState = false;
         for (const OpaqueDrawBatch& batch : batches) {
@@ -1151,12 +1233,22 @@ private:
                     draw.mirrorGhost && swapchain_.depthView()
                         ? VK_TRUE
                         : VK_FALSE);
-                vkCmdSetCullMode(
-                    commandBuffer,
-                    draw.mirrorGhost
-                        ? VK_CULL_MODE_BACK_BIT
-                        : VK_CULL_MODE_NONE);
                 mirrorGhostState = draw.mirrorGhost;
+            }
+            const VkCullModeFlags desiredCullMode = draw.mirrorGhost
+                ? ghostCullMode
+                : modelCullMode;
+            if (desiredCullMode != boundCullMode) {
+                vkCmdSetCullMode(commandBuffer, desiredCullMode);
+                boundCullMode = desiredCullMode;
+            }
+            const VkFrontFace desiredFrontFace =
+                desiredCullMode == VK_CULL_MODE_NONE
+                ? boundFrontFace
+                : modelFrontFace;
+            if (desiredFrontFace != boundFrontFace) {
+                vkCmdSetFrontFace(commandBuffer, desiredFrontFace);
+                boundFrontFace = desiredFrontFace;
             }
             if (boundModelPipeline != draw.pipeline) {
                 vkCmdBindPipeline(
@@ -1206,7 +1298,16 @@ private:
         }
         if (mirrorGhostState) {
             vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
+        }
+        // Particles and any later quad work assume no culling, and the pass
+        // entered on COUNTER_CLOCKWISE. Restore both so nothing downstream
+        // inherits model state.
+        if (boundCullMode != VK_CULL_MODE_NONE) {
             vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
+        }
+        if (boundFrontFace != VK_FRONT_FACE_COUNTER_CLOCKWISE) {
+            vkCmdSetFrontFace(
+                commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
         }
         if (translucentPass && !scene.particles.empty()) {
             vkCmdBindPipeline(
