@@ -236,6 +236,21 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             "are wound the other way. Tile quads are unaffected.");
     }
 
+    bool opaqueFrontToBack =
+        context.renderer.opaqueFrontToBackSortEnabled();
+    if (ImGui::Checkbox("Sort Opaque Front To Back", &opaqueFrontToBack)) {
+        context.renderer.setOpaqueFrontToBackSortEnabled(opaqueFrontToBack);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Draws opaque tile faces nearest first so the depth test can "
+            "reject hidden fragments before shading. Turn this off to go "
+            "back to the painter's order. Where two opaque surfaces are "
+            "exactly coincident the depth test lets the last one drawn win, "
+            "so a surface that flips between the two settings is a "
+            "coincident-geometry problem, not a culling one.");
+    }
+
     if (ImGui::CollapsingHeader("Tile Grid")) {
         float gridColor[3] {
             settings.grid.color.x,

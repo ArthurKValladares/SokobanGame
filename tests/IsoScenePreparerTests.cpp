@@ -269,10 +269,342 @@ void testPassListsAreDepthSorted()
     };
     CHECK(nearestFirst(scene.opaqueFaceIndices));
     CHECK(farthestFirst(scene.translucentFaceIndices));
+    // Every face in this scene is fully opaque, so the opaque list is one
+    // nearest-first run with no blended tail. The predicate above only
+    // covers the whole list while that stays true.
+    CHECK(scene.opaqueBlendedFirst == scene.opaqueFaceIndices.size());
     // A list of one or zero satisfies both predicates, which would make the
     // checks above vacuous. This scene must exercise a real ordering.
     CHECK(scene.opaqueFaceIndices.size() > 1);
     CHECK(scene.translucentFaceIndices.size() > 1);
+}
+
+void testOpaqueListEndsWithABackToFrontBlendedTail()
+{
+    using namespace sokoban;
+
+    // A face can sit in the opaque list and still need the blend unit; the
+    // editor's ladder-rung preview is the shipped case. Front-to-back is
+    // wrong for those, because they write depth: drawn early, such a face
+    // occludes the geometry it was supposed to blend with and the result is
+    // a hole rather than a tint. They are partitioned into a farthest-first
+    // tail behind everything fully opaque, which is the order the whole list
+    // used to be in.
+    RenderFrameData frame = sceneFrame();
+    RenderFrameData::Tile nearFaded = cube(0, 2);
+    nearFaded.color.w = 0.4f;
+    RenderFrameData::Tile farFaded = cube(3, 2);
+    farFaded.color.w = 0.4f;
+    frame.tiles.push_back(nearFaded);
+    frame.tiles.push_back(farFaded);
+
+    const PreparedRenderScene scene =
+        prepareScene(frame, { 1280.0f, 720.0f });
+
+    // Both halves must be non-empty or the split is not being exercised,
+    // and the tail needs more than one face for its order to mean anything.
+    CHECK(scene.opaqueBlendedFirst > 0);
+    CHECK(scene.opaqueBlendedFirst < scene.opaqueFaceIndices.size());
+    CHECK(scene.opaqueFaceIndices.size() - scene.opaqueBlendedFirst > 1);
+
+    // The boundary is exactly the alpha test the recorder picks its pipeline
+    // with, so the tail is also one uninterrupted run of blended draws.
+    for (std::size_t i = 0; i < scene.opaqueFaceIndices.size(); ++i) {
+        const float alpha =
+            scene.isoFaces[scene.opaqueFaceIndices[i]].color.w;
+        CHECK((i >= scene.opaqueBlendedFirst) == (alpha < 1.0f));
+    }
+    for (std::size_t i = 1; i < scene.opaqueBlendedFirst; ++i) {
+        CHECK(
+            scene.isoFaces[scene.opaqueFaceIndices[i - 1]].depth <=
+            scene.isoFaces[scene.opaqueFaceIndices[i]].depth);
+    }
+    for (std::size_t i = scene.opaqueBlendedFirst + 1;
+         i < scene.opaqueFaceIndices.size();
+         ++i) {
+        CHECK(
+            scene.isoFaces[scene.opaqueFaceIndices[i - 1]].depth >=
+            scene.isoFaces[scene.opaqueFaceIndices[i]].depth);
+    }
+
+    // With the developer toggle off the list returns to a single painter's
+    // order run and the recorder is told there is no LESS prefix to apply.
+    PreparedRenderScene legacy;
+    IsoScenePreparer legacyPreparer;
+    legacyPreparer.setOpaqueFrontToBackSort(false);
+    legacyPreparer.prepare(frame, { 1280.0f, 720.0f }, legacy);
+    CHECK(legacy.opaqueBlendedFirst == legacy.opaqueFaceIndices.size());
+    CHECK(legacy.opaqueFaceIndices.size() > 1);
+    for (std::size_t i = 1; i < legacy.opaqueFaceIndices.size(); ++i) {
+        CHECK(
+            legacy.isoFaces[legacy.opaqueFaceIndices[i - 1]].depth >=
+            legacy.isoFaces[legacy.opaqueFaceIndices[i]].depth);
+    }
+}
+
+void testDepthRangeCoversTilesOutsideTheAuthoredCameraFit()
+{
+    using namespace sokoban;
+
+    // projectIsoPoint clamps z to [0, 1] rather than clipping, so a surface
+    // past the far plane does not vanish - it lands on exactly 1.0 together
+    // with every other such surface, and the depth test can no longer order
+    // them against each other. Front-to-back then shows the farthest of them,
+    // back-to-front the nearest, which is why flipping the opaque sort turned
+    // the far row of a board inside out.
+    //
+    // An authored cameraExtent is what makes that reachable. It excludes
+    // tiles from the *fit* on purpose, so a decoration cannot zoom the board
+    // out - but the depth range must not inherit that exclusion, because
+    // those tiles are still drawn. Camera yaw is zero and the camera sits on
+    // +Y looking toward -Y, so the low-y rows here are the far ones: the top
+    // of the screen.
+    constexpr uint32_t rows = 6;
+    constexpr uint32_t columns = 4;
+    constexpr int firstFramedRow = 3;
+    const auto sceneryRows = [&](RenderFrameData& frame) {
+        for (uint32_t y = 0; y < rows; ++y) {
+            for (uint32_t x = 0; x < columns; ++x) {
+                RenderFrameData::Tile tile =
+                    cube(static_cast<int>(x), static_cast<int>(y));
+                tile.affectsCameraFit =
+                    static_cast<int>(y) >= firstFramedRow;
+                frame.tiles.push_back(tile);
+            }
+        }
+    };
+
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = columns;
+    frame.levelHeight = rows;
+    frame.levelDepth = 1;
+    frame.cameraExtent = RenderFrameData::CameraExtent {
+        .originX = 0,
+        .originY = firstFramedRow,
+        .originZ = 0,
+        .width = columns,
+        .height = rows - firstFramedRow,
+        .depth = 1,
+    };
+    sceneryRows(frame);
+
+    const PreparedRenderScene scene =
+        prepareScene(frame, { 1280.0f, 720.0f });
+
+    CHECK(!scene.opaqueFaceIndices.empty());
+    bool reachesPastTheAuthoredExtent = false;
+    for (std::size_t index : scene.opaqueFaceIndices) {
+        const PreparedIsoFace& face = scene.isoFaces[index];
+        for (Vec3 vertex : face.vertices) {
+            // Strict on both ends: a vertex sitting exactly on either plane
+            // is a clamped vertex, and clamped vertices are what collapse
+            // distinct surfaces onto one depth.
+            CHECK(vertex.z < 1.0f);
+            CHECK(vertex.z > 0.0f);
+        }
+        if (face.cell.y < firstFramedRow) {
+            reachesPastTheAuthoredExtent = true;
+        }
+    }
+    // Without a drawn face outside the authored extent the checks above are
+    // vacuous, and that is precisely the case the clamp used to collapse.
+    CHECK(reachesPastTheAuthoredExtent);
+
+    // Covering those tiles for depth must not let them frame the camera.
+    // The fit has to stay identical to a board that has only the framed
+    // rows in it, while the depth range grows to reach the scenery.
+    RenderFrameData framedOnly = frame;
+    framedOnly.tiles.clear();
+    for (uint32_t y = firstFramedRow; y < rows; ++y) {
+        for (uint32_t x = 0; x < columns; ++x) {
+            framedOnly.tiles.push_back(
+                cube(static_cast<int>(x), static_cast<int>(y)));
+        }
+    }
+    const PreparedRenderScene framed =
+        prepareScene(framedOnly, { 1280.0f, 720.0f });
+    CHECK(near(scene.isoLayout.fitScale, framed.isoLayout.fitScale));
+    CHECK(near(
+        scene.isoLayout.projectedCenter.x,
+        framed.isoLayout.projectedCenter.x));
+    CHECK(near(
+        scene.isoLayout.projectedCenter.y,
+        framed.isoLayout.projectedCenter.y));
+    CHECK(scene.isoLayout.farthestDepth > framed.isoLayout.farthestDepth);
+}
+
+void testCameraMatrixReproducesTheScalarProjection()
+{
+    using namespace sokoban;
+
+    // C1's premise: the GPU gets a camera. That is only safe if the matrix
+    // handed to it is the transform the CPU has been applying all along, so
+    // this walks a grid of points through both and requires them to agree.
+    //
+    // Points are placed on the camera basis rather than in world coordinates,
+    // which is what guarantees they sit in front of the near plane. That is
+    // the whole domain where the two forms are defined to agree:
+    // projectIsoPointToClip clamps view-space z to a small positive value and
+    // a matrix cannot, so behind-the-camera points are deliberately excluded.
+    // Nothing drawn is ever back there.
+    const std::array<Vec2, 3> extents {
+        Vec2 { 1280.0f, 720.0f },
+        Vec2 { 2560.0f, 1080.0f },
+        Vec2 { 800.0f, 1200.0f },
+    };
+    const std::array<uint32_t, 3> widths { 4, 9, 2 };
+    const std::array<uint32_t, 3> heights { 3, 2, 11 };
+
+    std::size_t comparisons = 0;
+    for (std::size_t variant = 0; variant < extents.size(); ++variant) {
+        RenderFrameData frame = sceneFrame();
+        frame.levelWidth = widths[variant];
+        frame.levelHeight = heights[variant];
+        frame.cameraPitchDegrees =
+            20.0f + 20.0f * static_cast<float>(variant);
+
+        const PreparedRenderScene scene =
+            prepareScene(frame, extents[variant]);
+        const IsoRenderLayout& layout = scene.isoLayout;
+        const Mat4 clipFromWorld =
+            isoClipFromWorld(layout, extents[variant]);
+
+        const float nearDepth = std::max(layout.nearestDepth, 0.001f);
+        const float farDepth =
+            std::max(layout.farthestDepth, nearDepth + 0.001f);
+        const std::array<float, 4> depths {
+            nearDepth,
+            nearDepth + (farDepth - nearDepth) * 0.25f,
+            nearDepth + (farDepth - nearDepth) * 0.75f,
+            farDepth,
+        };
+        for (float depth : depths) {
+            for (float across : { -4.0f, 0.0f, 2.5f }) {
+                for (float upward : { -3.0f, 0.0f, 1.5f }) {
+                    const Vec3 point = layout.cameraPosition +
+                        layout.cameraForward * depth +
+                        layout.cameraRight * across +
+                        layout.cameraUp * upward;
+
+                    const Vec3 scalar = IsoScenePreparer::projectIsoPoint(
+                        layout, extents[variant], point);
+                    const Vec4 clip = transform(
+                        clipFromWorld,
+                        Vec4 { point.x, point.y, point.z, 1.0f });
+                    CHECK(clip.w > 0.0f);
+                    const Vec3 viaMatrix {
+                        clip.x / clip.w,
+                        clip.y / clip.w,
+                        std::clamp(clip.z / clip.w, 0.0f, 1.0f),
+                    };
+
+                    CHECK(std::abs(scalar.x - viaMatrix.x) < 0.0005f);
+                    CHECK(std::abs(scalar.y - viaMatrix.y) < 0.0005f);
+                    CHECK(std::abs(scalar.z - viaMatrix.z) < 0.0005f);
+                    ++comparisons;
+                }
+            }
+        }
+
+        // The depth row is the ordinary Vulkan one, and the planes are where
+        // the layout says they are. A matrix that projected correctly in x
+        // and y but mapped depth differently would pass everything above and
+        // still ruin every depth test.
+        const Vec4 onNear = transform(
+            clipFromWorld,
+            toVec4(
+                layout.cameraPosition + layout.cameraForward * nearDepth,
+                1.0f));
+        const Vec4 onFar = transform(
+            clipFromWorld,
+            toVec4(
+                layout.cameraPosition + layout.cameraForward * farDepth,
+                1.0f));
+        CHECK(near(onNear.z / onNear.w, 0.0f));
+        CHECK(near(onFar.z / onFar.w, 1.0f));
+    }
+    CHECK(comparisons == 108);
+}
+
+void testShadowMatrixReproducesTheScalarProjection()
+{
+    using namespace sokoban;
+
+    // Same contract as the camera matrix, for the sun. The one asymmetry is
+    // the depth clamp: projectShadowPoint clamps z into [0, 1] and the matrix
+    // does not, so the comparison clamps the matrix result the way the
+    // shaders are required to.
+    const std::array<Vec2, 2> extents {
+        Vec2 { 1280.0f, 720.0f },
+        Vec2 { 1920.0f, 1200.0f },
+    };
+    std::size_t comparisons = 0;
+    for (Vec2 extent : extents) {
+        const PreparedRenderScene scene = prepareScene(sceneFrame(), extent);
+        const ShadowRenderLayout& layout = scene.shadowLayout;
+        const Mat4 matrix = shadowClipFromWorld(layout);
+
+        for (float x : { -2.0f, 0.5f, 3.0f, 9.0f }) {
+            for (float y : { -1.5f, 0.0f, 4.0f }) {
+                for (float z : { -1.0f, 0.0f, 2.5f }) {
+                    const Vec3 point { x, y, z };
+                    const Vec4 scalar =
+                        IsoScenePreparer::projectShadowPoint(layout, point);
+                    Vec4 viaMatrix =
+                        transform(matrix, Vec4 { x, y, z, 1.0f });
+                    viaMatrix.z = std::clamp(viaMatrix.z, 0.0f, 1.0f);
+
+                    CHECK(std::abs(scalar.x - viaMatrix.x) < 0.0005f);
+                    CHECK(std::abs(scalar.y - viaMatrix.y) < 0.0005f);
+                    CHECK(std::abs(scalar.z - viaMatrix.z) < 0.0005f);
+                    CHECK(near(viaMatrix.w, 1.0f));
+                    ++comparisons;
+                }
+            }
+        }
+    }
+    CHECK(comparisons == 72);
+}
+
+void testModelWorldTransformComposesToTheClipTransform()
+{
+    using namespace sokoban;
+
+    // Models ship worldFromModel to the GPU and the vertex shader applies the
+    // camera. That is only equivalent to the old baked clipFromModel if the
+    // projection is affine in homogeneous coordinates, which it is - so this
+    // pins the composition rather than trusting the argument.
+    const Vec2 extent { 1280.0f, 720.0f };
+    RenderFrameData frame = sceneFrame();
+    const PreparedRenderScene scene = prepareScene(frame, extent);
+    const Mat4 clipFromWorld = isoClipFromWorld(scene.isoLayout, extent);
+
+    std::size_t tilesChecked = 0;
+    for (const RenderFrameData::Tile& tile : frame.tiles) {
+        const std::array<Vec4, 4> world =
+            IsoScenePreparer::modelWorldTransform(tile);
+        const std::array<Vec4, 4> clip = IsoScenePreparer::modelClipTransform(
+            scene.isoLayout, extent, tile);
+        for (std::size_t column = 0; column < 4; ++column) {
+            const Vec4 composed = transform(clipFromWorld, world[column]);
+            CHECK(std::abs(composed.x - clip[column].x) < 0.002f);
+            CHECK(std::abs(composed.y - clip[column].y) < 0.002f);
+            CHECK(std::abs(composed.z - clip[column].z) < 0.002f);
+            CHECK(std::abs(composed.w - clip[column].w) < 0.002f);
+        }
+        ++tilesChecked;
+    }
+    CHECK(tilesChecked > 1);
+
+    // The world form has to actually be a world transform: its last column is
+    // the model's origin, and its axis columns are directions, not points.
+    const std::array<Vec4, 4> firstTile =
+        IsoScenePreparer::modelWorldTransform(frame.tiles.front());
+    CHECK(near(firstTile[0].w, 0.0f));
+    CHECK(near(firstTile[1].w, 0.0f));
+    CHECK(near(firstTile[2].w, 0.0f));
+    CHECK(near(firstTile[3].w, 1.0f));
 }
 
 void testPickingConsumesPreparedFaces()
@@ -965,6 +1297,11 @@ int main()
     testCameraLayoutUsesConfiguredAngles();
     testPreparationCategorizesOneSharedFacePool();
     testPassListsAreDepthSorted();
+    testOpaqueListEndsWithABackToFrontBlendedTail();
+    testDepthRangeCoversTilesOutsideTheAuthoredCameraFit();
+    testCameraMatrixReproducesTheScalarProjection();
+    testShadowMatrixReproducesTheScalarProjection();
+    testModelWorldTransformComposesToTheClipTransform();
     testPickingConsumesPreparedFaces();
     testModelBackedPickFacesUseLogicalBounds();
     testPickingHonorsConfiguredGridBorder();

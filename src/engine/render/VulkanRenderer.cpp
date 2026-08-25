@@ -63,10 +63,11 @@ Vec3 transformedModelPoint(
     };
 }
 
-float cross(Vec2 origin, Vec2 first, Vec2 second)
+// Orientation of the turn origin->first->second. Named apart from the shared
+// cross2D because it takes three points rather than two vectors.
+float turn(Vec2 origin, Vec2 first, Vec2 second)
 {
-    return (first.x - origin.x) * (second.y - origin.y) -
-        (first.y - origin.y) * (second.x - origin.x);
+    return cross2D(first - origin, second - origin);
 }
 
 bool pointInConvexHull(std::array<Vec2, 8> points, Vec2 point)
@@ -78,7 +79,7 @@ bool pointInConvexHull(std::array<Vec2, 8> points, Vec2 point)
     std::size_t count = 0;
     for (Vec2 candidate : points) {
         while (count >= 2 &&
-               cross(hull[count - 2], hull[count - 1], candidate) <= 0.0f) {
+               turn(hull[count - 2], hull[count - 1], candidate) <= 0.0f) {
             --count;
         }
         hull[count++] = candidate;
@@ -87,7 +88,7 @@ bool pointInConvexHull(std::array<Vec2, 8> points, Vec2 point)
     for (std::size_t index = points.size() - 1; index-- > 0;) {
         const Vec2 candidate = points[index];
         while (count > lowerCount &&
-               cross(hull[count - 2], hull[count - 1], candidate) <= 0.0f) {
+               turn(hull[count - 2], hull[count - 1], candidate) <= 0.0f) {
             --count;
         }
         hull[count++] = candidate;
@@ -98,7 +99,7 @@ bool pointInConvexHull(std::array<Vec2, 8> points, Vec2 point)
     --count;
     constexpr float edgeTolerancePixels = 1.5f;
     for (std::size_t index = 0; index < count; ++index) {
-        if (cross(hull[index], hull[(index + 1) % count], point) <
+        if (turn(hull[index], hull[(index + 1) % count], point) <
             -edgeTolerancePixels) {
             return false;
         }
@@ -1114,6 +1115,19 @@ void VulkanRenderer::setModelBackfaceCullingEnabled(bool enabled)
     // this does not go through the reconfiguration queue the way wireframe
     // does. The next recorded frame picks it up.
     modelBackfaceCulling_ = enabled;
+}
+
+bool VulkanRenderer::opaqueFrontToBackSortEnabled() const
+{
+    return scenePreparer_.opaqueFrontToBackSort();
+}
+
+void VulkanRenderer::setOpaqueFrontToBackSortEnabled(bool enabled)
+{
+    // Read by prepareFrame, which runs on whichever thread builds the frame.
+    // A torn read is not possible for a bool and the worst case is that one
+    // frame sorts the old way, which is exactly what this toggle is for.
+    scenePreparer_.setOpaqueFrontToBackSort(enabled);
 }
 
 bool VulkanRenderer::wideLinesSupported() const

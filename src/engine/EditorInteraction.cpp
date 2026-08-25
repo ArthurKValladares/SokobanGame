@@ -14,18 +14,7 @@ constexpr float brushPreviewAlpha = 0.72f;
 
 Vec3 addScaled(Vec3 origin, Vec3 axis, float amount)
 {
-    return {
-        origin.x + axis.x * amount,
-        origin.y + axis.y * amount,
-        origin.z + axis.z * amount,
-    };
-}
-
-float pixelDistance(Vec2 left, Vec2 right)
-{
-    const float x = left.x - right.x;
-    const float y = left.y - right.y;
-    return std::sqrt(x * x + y * y);
+    return origin + axis * amount;
 }
 
 } // namespace
@@ -124,7 +113,7 @@ EditorInteraction::decorationGizmoGeometry(
             return std::nullopt;
         }
         const float unitPixels = std::max(
-            pixelDistance(*projectedUnit, *projectedOrigin), 1.0f);
+            distance(*projectedUnit, *projectedOrigin), 1.0f);
         worldLengths[axis] = std::clamp(
             targetAxisLengthPixels / unitPixels, 0.05f, 100.0f);
         const std::optional<Vec2> endpoint = project(addScaled(

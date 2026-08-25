@@ -68,53 +68,6 @@ AnimationUse playerRestAnimation(const GameState::Player& player)
     return player.dead ? AnimationUse::PlayerDeadIdle : AnimationUse::PlayerIdle;
 }
 
-Vec4 normalizedQuaternion(Vec4 value)
-{
-    const float length = std::sqrt(
-        value.x * value.x + value.y * value.y +
-        value.z * value.z + value.w * value.w);
-    if (length <= 0.000001f) {
-        return { 0.0f, 0.0f, 0.0f, 1.0f };
-    }
-    return { value.x / length, value.y / length, value.z / length, value.w / length };
-}
-
-Vec4 yawQuaternion(float radians)
-{
-    return { 0.0f, 0.0f, std::sin(radians * 0.5f), std::cos(radians * 0.5f) };
-}
-
-Vec4 slerp(Vec4 from, Vec4 to, float amount)
-{
-    from = normalizedQuaternion(from);
-    to = normalizedQuaternion(to);
-    float dot = from.x * to.x + from.y * to.y +
-        from.z * to.z + from.w * to.w;
-    if (dot < 0.0f) {
-        to = { -to.x, -to.y, -to.z, -to.w };
-        dot = -dot;
-    }
-    amount = std::clamp(amount, 0.0f, 1.0f);
-    if (dot > 0.9995f) {
-        return normalizedQuaternion({
-            from.x + (to.x - from.x) * amount,
-            from.y + (to.y - from.y) * amount,
-            from.z + (to.z - from.z) * amount,
-            from.w + (to.w - from.w) * amount,
-        });
-    }
-    const float angle = std::acos(std::clamp(dot, -1.0f, 1.0f));
-    const float denominator = std::sin(angle);
-    const float fromWeight = std::sin((1.0f - amount) * angle) / denominator;
-    const float toWeight = std::sin(amount * angle) / denominator;
-    return {
-        from.x * fromWeight + to.x * toWeight,
-        from.y * fromWeight + to.y * toWeight,
-        from.z * fromWeight + to.z * toWeight,
-        from.w * fromWeight + to.w * toWeight,
-    };
-}
-
 float gridDistance(Vec3 from, Vec3 to)
 {
     return std::abs(to.x - from.x) +
@@ -277,16 +230,22 @@ void GameplayPresentation::advanceAnimations(float dt, const GameState& state)
         if (std::abs(dx) + std::abs(dy) <= 0.0001f) {
             continue;
         }
-        const Vec4 target = yawQuaternion(std::atan2(-dx, dy));
+        const Quat target =
+            quatFromAxisAngle({ 0.0f, 0.0f, 1.0f }, std::atan2(-dx, dy));
         const float blend = config::enemyFacingSlerpSeconds <= 0.0f
             ? 1.0f
             : 1.0f - std::exp(
                   -4.0f * std::max(dt, 0.0f) /
                   config::enemyFacingSlerpSeconds);
+        // The shared slerp does not clamp - that is the mathematical
+        // operation, and the local copy this replaced clamped while the glTF
+        // one did not. `blend` is 1 - exp(-k*dt), so it cannot leave [0, 1)
+        // for a non-negative dt; the clamp is kept anyway to preserve exactly
+        // what this call site used to guarantee for itself.
         enemies_[enemyIndex].orientation = slerp(
             enemies_[enemyIndex].orientation,
             target,
-            blend);
+            std::clamp(blend, 0.0f, 1.0f));
     }
 }
 

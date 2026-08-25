@@ -20,20 +20,18 @@ struct PointLightData
     vec4 colorAndIntensity;
     vec4 shadowOptions;
 };
-layout(std140, set = 0, binding = 7) uniform SceneLighting
+layout(std140, set = 0, binding = 7) uniform SceneFrame
 {
-    vec4 sunShadowRightAndHalfWidth;
-    vec4 sunShadowUpAndHalfHeight;
-    vec4 sunShadowForwardAndDepthRange;
-    vec4 sunShadowCenterAndNearestDepth;
+    mat4 clipFromWorld;
+    mat4 shadowFromWorld;
+    vec4 cameraPositionAndNearPlane;
     PointLightData pointLights[8];
     vec4 pointLightMeta;
-} lighting;
+} frame;
 
 struct ModelInstance
 {
-    vec4 clipFromModel[4];
-    vec4 shadowFromModel[4];
+    vec4 worldFromModel[4];
     vec4 rotationRadians;
 };
 layout(std430, set = 0, binding = 10) readonly buffer ModelInstances
@@ -43,8 +41,10 @@ layout(std430, set = 0, binding = 10) readonly buffer ModelInstances
 
 layout(push_constant) uniform PushConstants
 {
-    vec4 clipFromModel[4];
-    vec4 shadowFromModel[4];
+    vec4 worldFromModel[4];
+    // See triangle.vert: one push block is shared by every pipeline, so this
+    // slot stays declared even where the pass does not use it.
+    vec4 passData[4];
     vec4 color;
     vec4 normalAndAmbientRed;
     vec4 sunDirectionAndAmbientGreen;
@@ -55,39 +55,30 @@ layout(push_constant) uniform PushConstants
     vec4 textureOptions;
 } pc;
 
-vec3 worldFromSunShadow(vec4 shadowPosition)
+// The sun transform is a matrix now, and a matrix cannot clamp. Its CPU
+// ancestor, projectShadowPoint, clamped depth into [0, 1]; without that,
+// geometry outside the sun's depth range samples past the edge of the shadow
+// map instead of at it.
+vec4 sunShadowFromWorld(vec3 worldPosition)
 {
-    vec3 clip = shadowPosition.xyz / max(abs(shadowPosition.w), 0.0001);
-    vec3 center = lighting.sunShadowCenterAndNearestDepth.xyz;
-    vec3 forward = lighting.sunShadowForwardAndDepthRange.xyz;
-    float worldForward = lighting.sunShadowCenterAndNearestDepth.w +
-        clip.z * lighting.sunShadowForwardAndDepthRange.w;
-    float relativeForward = worldForward - dot(center, forward);
-    return center +
-        lighting.sunShadowRightAndHalfWidth.xyz *
-            (clip.x * lighting.sunShadowRightAndHalfWidth.w) +
-        lighting.sunShadowUpAndHalfHeight.xyz *
-            (clip.y * lighting.sunShadowUpAndHalfHeight.w) +
-        forward * relativeForward;
+    vec4 shadow = frame.shadowFromWorld * vec4(worldPosition, 1.0);
+    shadow.z = clamp(shadow.z, 0.0, 1.0);
+    return shadow;
 }
 
 void main()
 {
     ModelInstance instance = modelInstances.instances[gl_InstanceIndex];
-    mat4 clipTransform = mat4(
-        instance.clipFromModel[0],
-        instance.clipFromModel[1],
-        instance.clipFromModel[2],
-        instance.clipFromModel[3]);
-    mat4 shadowTransform = mat4(
-        instance.shadowFromModel[0],
-        instance.shadowFromModel[1],
-        instance.shadowFromModel[2],
-        instance.shadowFromModel[3]);
+    mat4 worldTransform = mat4(
+        instance.worldFromModel[0],
+        instance.worldFromModel[1],
+        instance.worldFromModel[2],
+        instance.worldFromModel[3]);
 
-    gl_Position = clipTransform * vec4(inPosition, 1.0);
-    outShadowPosition = shadowTransform * vec4(inPosition, 1.0);
-    outWorldPosition = worldFromSunShadow(outShadowPosition);
+    vec3 worldPosition = (worldTransform * vec4(inPosition, 1.0)).xyz;
+    gl_Position = frame.clipFromWorld * vec4(worldPosition, 1.0);
+    outWorldPosition = worldPosition;
+    outShadowPosition = sunShadowFromWorld(worldPosition);
     outFaceCoordU = inUv.x;
     outFaceCoordV = inUv.y;
     outTextureIndex = inTextureIndex;

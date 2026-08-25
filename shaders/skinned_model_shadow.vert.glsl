@@ -11,7 +11,7 @@ layout(location = 7) in uint inAttachmentNode;
 
 struct SkinningInstance { mat4 palette[MAX_SKIN_JOINTS + 128]; mat4 modelFromSource; mat4 normalFromSource; };
 layout(std430, set = 0, binding = 9) readonly buffer SkinningPalette { SkinningInstance instances[]; } skinning;
-layout(push_constant) uniform PushConstants { vec4 clipFromModel[4]; vec4 shadowFromModel[4]; vec4 color; vec4 normalAndAmbientRed; vec4 sunDirectionAndAmbientGreen; vec4 sunRadianceAndAmbientBlue; vec4 shadowOptions; vec4 materialOptions; vec4 gridColor; vec4 textureOptions; } pc;
+layout(push_constant) uniform PushConstants { vec4 shadowFromModel[4]; vec4 passData[4]; vec4 color; vec4 normalAndAmbientRed; vec4 sunDirectionAndAmbientGreen; vec4 sunRadianceAndAmbientBlue; vec4 shadowOptions; vec4 materialOptions; vec4 gridColor; vec4 textureOptions; } pc;
 
 // SkinningInstance is 258 mat4 (16512 bytes). Never bind one to a local:
 // `SkinningInstance instance = skinning.instances[i]` is a whole-struct

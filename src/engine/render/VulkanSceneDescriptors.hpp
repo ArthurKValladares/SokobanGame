@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/render/VulkanModelResources.hpp"
+#include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/RenderTypes.hpp"
 
 #include <vulkan/vulkan.h>
@@ -9,8 +10,6 @@
 #include <vector>
 
 namespace sokoban {
-
-struct ShadowRenderLayout;
 
 class VulkanSceneDescriptors {
 public:
@@ -49,10 +48,11 @@ public:
     void update(const Resources& resources) const;
     void update(uint32_t setIndex, const Resources& resources) const;
     void destroy();
-    void updateLighting(
+    // Writes the whole per-frame uniform: camera, sun transform, lights.
+    void updateFrame(
         uint32_t setIndex,
         const RenderFrameData::Lighting& lighting,
-        const ShadowRenderLayout& shadowLayout,
+        const SceneCamera& camera,
         bool preview = false) const;
 
     [[nodiscard]] VkDescriptorSetLayout layout() const { return layout_; }
@@ -67,7 +67,7 @@ private:
         void* mapped = nullptr;
     };
 
-    [[nodiscard]] OwnedBuffer createLightingBuffer(
+    [[nodiscard]] OwnedBuffer createFrameBuffer(
         VkPhysicalDevice physicalDevice) const;
     void updateInternal(
         uint32_t internalSetIndex,
@@ -77,7 +77,7 @@ private:
     VkDescriptorSetLayout layout_ = VK_NULL_HANDLE;
     VkDescriptorPool pool_ = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> sets_;
-    std::vector<OwnedBuffer> lightingBuffers_;
+    std::vector<OwnedBuffer> frameBuffers_;
     uint32_t frameSetCount_ = 0;
     uint32_t modelTextureCount_ = 0;
 };

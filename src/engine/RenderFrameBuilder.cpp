@@ -770,7 +770,9 @@ void appendStaticTiles(
     }
 }
 
-float yawRadians(Vec4 orientation)
+// Extracts the yaw from a rotation that is known to be about z only, which
+// is what actor facing is. Not valid for a general orientation.
+float yawRadians(Quat orientation)
 {
     return 2.0f * std::atan2(orientation.z, orientation.w);
 }

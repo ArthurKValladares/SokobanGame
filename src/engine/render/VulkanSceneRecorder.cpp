@@ -36,16 +36,6 @@ namespace {
 
 constexpr float particleTextureMaterialMode = 5.0f;
 
-Vec4 subtract(Vec4 left, Vec4 right)
-{
-    return {
-        left.x - right.x,
-        left.y - right.y,
-        left.z - right.z,
-        left.w - right.w,
-    };
-}
-
 std::array<Vec4, 4> affineTransformColumns(
     Vec4 origin,
     Vec4 xPoint,
@@ -215,15 +205,27 @@ public:
                 configuration_.rendererReconfigurationPending,
         };
 
-        descriptors_.updateLighting(
+        // The camera the whole frame renders through. Built here rather than
+        // in the descriptor class so that nothing below the recorder has to
+        // know what an isometric layout is.
+        const auto cameraFor = [](const PreparedRenderScene& source) {
+            return SceneCamera {
+                .clipFromWorld =
+                    isoClipFromWorld(source.isoLayout, source.renderExtent),
+                .shadowFromWorld = shadowClipFromWorld(source.shadowLayout),
+                .position = source.isoLayout.cameraPosition,
+                .nearPlane = std::max(source.isoLayout.nearestDepth, 0.001f),
+            };
+        };
+        descriptors_.updateFrame(
             configuration_.descriptorFrameIndex,
             frameData.lighting,
-            scene.shadowLayout,
+            cameraFor(scene),
             false);
-        descriptors_.updateLighting(
+        descriptors_.updateFrame(
             configuration_.descriptorFrameIndex,
             previewFrameData ? previewFrameData->lighting : frameData.lighting,
-            previewScene ? previewScene->shadowLayout : scene.shadowLayout,
+            cameraFor(previewScene ? *previewScene : scene),
             true);
 
         const VkCommandBufferBeginInfo beginInfo {
@@ -937,10 +939,15 @@ private:
                     0.0f },
                 Vec3 { origin.x, origin.y + size.y, 0.0f },
             },
-            {},
             tile.color,
             {},
-            lighting);
+            lighting,
+            false,
+            {},
+            {},
+            0.0f,
+            false,
+            true);
     }
 
     void drawIsoFrame(
@@ -955,7 +962,25 @@ private:
             : scene.opaqueFaceIndices;
         const bool opaquePass = !translucentPass;
         VkPipeline boundFacePipeline = flatScenePipeline(opaquePass);
-        for (std::size_t faceIndex : faceIndices) {
+        // The whole pass stays on LESS_OR_EQUAL, deliberately.
+        //
+        // LESS is the textbook compare op for a front-to-back opaque pass and
+        // it was tried here. It is the wrong trade for this renderer, because
+        // projectIsoPoint clamps z to [0, 1] instead of clipping: anything
+        // that lands on the far plane arrives at exactly 1.0, and the depth
+        // buffer is cleared to exactly 1.0. Under LESS such a surface does
+        // not degrade, it vanishes - an entire row of tiles at a time, with
+        // nothing on screen to say why. Under LESS_OR_EQUAL it still draws.
+        //
+        // What made surfaces land on the far plane at all is fixed at the
+        // source, in calculateIsoLayout: the depth range now covers every
+        // drawn tile rather than only the ones that frame the camera, so
+        // nothing is clamped and no two surfaces share z = 1.0. That removes
+        // the ties instead of choosing a winner for them, which is why the
+        // stricter compare op is no longer buying anything.
+        for (std::size_t position = 0; position < faceIndices.size();
+             ++position) {
+            const std::size_t faceIndex = faceIndices[position];
             const PreparedIsoFace& face =
                 scene.isoFaces[faceIndex];
             const RenderFrameData::GroundSplatRegion* splatRegion =
@@ -1001,8 +1026,7 @@ private:
             if (face.material == PreparedSurfaceMaterial::Water) {
                 drawWaterFace(
                     commandBuffer,
-                    face.vertices,
-                    face.clipW,
+                    face.worldVertices,
                     face.color,
                     face.worldOrigin,
                     face.gridSize,
@@ -1027,7 +1051,7 @@ private:
                 face.material == PreparedSurfaceMaterial::MirrorEnergy) {
                 drawMirrorEnergyFace(
                     commandBuffer,
-                    face.vertices,
+                    face.worldVertices,
                     face.color,
                     face.normal,
                     frameData.effectAnimationTimeSeconds);
@@ -1044,8 +1068,7 @@ private:
                     : face.worldOrigin;
                 drawGroundSplatFace(
                     commandBuffer,
-                    face.vertices,
-                    face.shadowVertices,
+                    face.worldVertices,
                     face.color,
                     face.normal,
                     frameData.lighting,
@@ -1060,8 +1083,7 @@ private:
             } else {
                 drawFace(
                     commandBuffer,
-                    face.vertices,
-                    face.shadowVertices,
+                    face.worldVertices,
                     face.color,
                     face.normal,
                     frameData.lighting,
@@ -1121,8 +1143,6 @@ private:
                 tile.effect == RenderSurfaceEffect::MirrorEnergy;
             const bool skinned = models_.modelUsesGpuSkinning(tile.model);
             const TilePushConstants constants = modelPushConstants(
-                scene.isoLayout,
-                scene.shadowLayout,
                 tile,
                 frameData.lighting,
                 frameData.effectAnimationTimeSeconds);
@@ -1275,8 +1295,7 @@ private:
                     const uint32_t instance = models_.writeModelInstance(
                         configuration_.descriptorFrameIndex,
                         {
-                            .clipFromModel = constants.vertices,
-                            .shadowFromModel = constants.shadowVertices,
+                            .worldFromModel = constants.vertices,
                             .rotationRadians = {
                                 constants.normalAndAmbientRed.x,
                                 constants.normalAndAmbientRed.y,
@@ -1389,10 +1408,15 @@ private:
                     Vec3 { max.x, max.y, 0.0f },
                     Vec3 { min.x, max.y, 0.0f },
                 },
-                {},
                 frameData.gridOverlay.color,
                 {},
-                unlit);
+                unlit,
+                false,
+                {},
+                {},
+                0.0f,
+                false,
+                true);
         };
         for (uint32_t x = 0; x <= frameData.levelWidth; ++x) {
             const float center = static_cast<float>(x);
@@ -1433,10 +1457,10 @@ private:
 
         const TilePushConstants constants {
             .vertices = {
-                Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, 1.0f },
-                Vec4 { vertices[1].x, vertices[1].y, vertices[1].z, 1.0f },
-                Vec4 { vertices[2].x, vertices[2].y, vertices[2].z, 1.0f },
-                Vec4 { vertices[3].x, vertices[3].y, vertices[3].z, 1.0f },
+                Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, worldSpaceQuad },
+                Vec4 { vertices[1].x, vertices[1].y, vertices[1].z, worldSpaceQuad },
+                Vec4 { vertices[2].x, vertices[2].y, vertices[2].z, worldSpaceQuad },
+                Vec4 { vertices[3].x, vertices[3].y, vertices[3].z, worldSpaceQuad },
             },
             .color = color,
             .normalAndAmbientRed = {
@@ -1485,22 +1509,22 @@ private:
                     particle.vertices[0].x,
                     particle.vertices[0].y,
                     particle.vertices[0].z,
-                    1.0f },
+                    worldSpaceQuad },
                 Vec4 {
                     particle.vertices[1].x,
                     particle.vertices[1].y,
                     particle.vertices[1].z,
-                    1.0f },
+                    worldSpaceQuad },
                 Vec4 {
                     particle.vertices[2].x,
                     particle.vertices[2].y,
                     particle.vertices[2].z,
-                    1.0f },
+                    worldSpaceQuad },
                 Vec4 {
                     particle.vertices[3].x,
                     particle.vertices[3].y,
                     particle.vertices[3].z,
-                    1.0f },
+                    worldSpaceQuad },
             },
             .color = particle.color,
             .materialOptions = { 0.0f, 1.0f, 1.0f, 0.0f },
@@ -1522,10 +1546,12 @@ private:
         vkCmdDraw(commandBuffer, 6, 1, 0, 0);
     }
 
+    // `clipSpace` is for the callers whose quads are already in clip space -
+    // the UI and the top-down 2D board. They have no world position and must
+    // not be projected; see worldSpaceQuad in VulkanRenderConstants.hpp.
     void drawFace(
         VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
-        const std::array<Vec4, 4>& shadowVertices,
         Vec4 color,
         Vec3 normal,
         const RenderFrameData::Lighting& lighting,
@@ -1533,7 +1559,8 @@ private:
         Vec4 gridColor = {},
         Vec2 gridSize = {},
         float gridLineWidth = 0.0f,
-        bool isEditorPreview = false)
+        bool isEditorPreview = false,
+        bool clipSpace = false)
     {
         vkCmdSetPrimitiveTopology(
             commandBuffer,
@@ -1562,24 +1589,23 @@ private:
                     vertices[0].x,
                     vertices[0].y,
                     vertices[0].z,
-                    1.0f },
+                    clipSpace ? clipSpaceQuad : worldSpaceQuad },
                 Vec4 {
                     vertices[1].x,
                     vertices[1].y,
                     vertices[1].z,
-                    1.0f },
+                    clipSpace ? clipSpaceQuad : worldSpaceQuad },
                 Vec4 {
                     vertices[2].x,
                     vertices[2].y,
                     vertices[2].z,
-                    1.0f },
+                    clipSpace ? clipSpaceQuad : worldSpaceQuad },
                 Vec4 {
                     vertices[3].x,
                     vertices[3].y,
                     vertices[3].z,
-                    1.0f },
+                    clipSpace ? clipSpaceQuad : worldSpaceQuad },
             },
-            .shadowVertices = shadowVertices,
             .color = color,
             .normalAndAmbientRed = {
                 normal.x,
@@ -1646,7 +1672,6 @@ private:
     void drawGroundSplatFace(
         VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
-        const std::array<Vec4, 4>& shadowVertices,
         Vec4 color,
         Vec3 normal,
         const RenderFrameData::Lighting& lighting,
@@ -1677,12 +1702,11 @@ private:
         };
         const TilePushConstants constants {
             .vertices = {
-                Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, 1.0f },
-                Vec4 { vertices[1].x, vertices[1].y, vertices[1].z, 1.0f },
-                Vec4 { vertices[2].x, vertices[2].y, vertices[2].z, 1.0f },
-                Vec4 { vertices[3].x, vertices[3].y, vertices[3].z, 1.0f },
+                Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, worldSpaceQuad },
+                Vec4 { vertices[1].x, vertices[1].y, vertices[1].z, worldSpaceQuad },
+                Vec4 { vertices[2].x, vertices[2].y, vertices[2].z, worldSpaceQuad },
+                Vec4 { vertices[3].x, vertices[3].y, vertices[3].z, worldSpaceQuad },
             },
-            .shadowVertices = shadowVertices,
             .color = color,
             .normalAndAmbientRed = {
                 normal.x,
@@ -1743,7 +1767,6 @@ private:
     void drawWaterFace(
         VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
-        const std::array<float, 4>& clipW,
         Vec4 color,
         Vec2 worldOrigin,
         Vec2 size,
@@ -1768,32 +1791,14 @@ private:
 
         const TilePushConstants constants {
             .vertices = {
-                Vec4 {
-                    vertices[0].x * clipW[0],
-                    vertices[0].y * clipW[0],
-                    vertices[0].z * clipW[0],
-                    clipW[0],
-                },
-                Vec4 {
-                    vertices[1].x * clipW[1],
-                    vertices[1].y * clipW[1],
-                    vertices[1].z * clipW[1],
-                    clipW[1],
-                },
-                Vec4 {
-                    vertices[2].x * clipW[2],
-                    vertices[2].y * clipW[2],
-                    vertices[2].z * clipW[2],
-                    clipW[2],
-                },
-                Vec4 {
-                    vertices[3].x * clipW[3],
-                    vertices[3].y * clipW[3],
-                    vertices[3].z * clipW[3],
-                    clipW[3],
-                },
+                Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, worldSpaceQuad },
+                Vec4 { vertices[1].x, vertices[1].y, vertices[1].z, worldSpaceQuad },
+                Vec4 { vertices[2].x, vertices[2].y, vertices[2].z, worldSpaceQuad },
+                Vec4 { vertices[3].x, vertices[3].y, vertices[3].z, worldSpaceQuad },
             },
-            .shadowVertices = {
+            // Water is the pass that claims passData. These are its border
+            // and ripple parameters, not geometry.
+            .passData = {
                 Vec4 {
                     config::waterTileBorderColor.x,
                     config::waterTileBorderColor.y,
@@ -1886,8 +1891,12 @@ private:
             shadowVertices[i] = IsoScenePreparer::projectShadowPoint(
                 layout, worldVertices[i]);
         }
+        // Clip space, not world. A shadow pass has one camera per sun and six
+        // per point light, so there is no single transform a uniform could
+        // hold; these stay projected on the CPU and nothing in a shadow pass
+        // asks where it is in the world.
         const TilePushConstants constants {
-            .shadowVertices = shadowVertices,
+            .vertices = shadowVertices,
         };
         vkCmdPushConstants(
             commandBuffer,
@@ -1912,7 +1921,7 @@ private:
                 light, cubeFace, worldVertices[i]);
         }
         const TilePushConstants constants {
-            .shadowVertices = shadowVertices,
+            .vertices = shadowVertices,
         };
         vkCmdPushConstants(
             commandBuffer,
@@ -1924,22 +1933,17 @@ private:
         vkCmdDraw(commandBuffer, 6, 1, 0, 0);
     }
 
+    // Neither camera is a parameter any more. A model's push constants are
+    // now entirely about the model: where it is in the world and what it is
+    // made of. Where it lands on screen, and where the sun sees it, are the
+    // frame's business and live in the uniform buffer.
     [[nodiscard]] TilePushConstants modelPushConstants(
-        const IsoRenderLayout& layout,
-        const ShadowRenderLayout& shadowLayout,
         const RenderFrameData::Tile& tile,
         const RenderFrameData::Lighting& lighting,
         float effectAnimationTimeSeconds)
     {
         const VulkanModelResources::MaterialBinding material =
             models_.materialForModel(tile.model);
-        const ModelTransformPoints transform =
-            IsoScenePreparer::modelTransformPoints(tile);
-        const VkExtent2D extent = swapchain_.renderExtent();
-        const Vec2 renderExtent {
-            static_cast<float>(extent.width),
-            static_cast<float>(extent.height),
-        };
         const Vec3 sunRadiance {
             lighting.sun.color.x * lighting.sun.intensity,
             lighting.sun.color.y * lighting.sun.intensity,
@@ -1981,17 +1985,7 @@ private:
                   std::max(tile.height, 0.0001f),
               };
         const TilePushConstants constants {
-            .vertices = IsoScenePreparer::modelClipTransform(
-                layout, renderExtent, tile),
-            .shadowVertices = affineTransformColumns(
-                IsoScenePreparer::projectShadowPoint(
-                    shadowLayout, transform.origin),
-                IsoScenePreparer::projectShadowPoint(
-                    shadowLayout, transform.xPoint),
-                IsoScenePreparer::projectShadowPoint(
-                    shadowLayout, transform.yPoint),
-                IsoScenePreparer::projectShadowPoint(
-                    shadowLayout, transform.zPoint)),
+            .vertices = IsoScenePreparer::modelWorldTransform(tile),
             .color = tile.color,
             .normalAndAmbientRed = {
                 modelRotation.x,
@@ -2109,7 +2103,7 @@ private:
         const ModelTransformPoints transform =
             IsoScenePreparer::modelTransformPoints(tile);
         const TilePushConstants constants {
-            .shadowVertices = affineTransformColumns(
+            .vertices = affineTransformColumns(
                 IsoScenePreparer::projectShadowPoint(
                     layout, transform.origin),
                 IsoScenePreparer::projectShadowPoint(
@@ -2151,7 +2145,7 @@ private:
         const ModelTransformPoints transform =
             IsoScenePreparer::modelTransformPoints(tile);
         const TilePushConstants constants {
-            .shadowVertices = affineTransformColumns(
+            .vertices = affineTransformColumns(
                 projectPointShadow(light, cubeFace, transform.origin),
                 projectPointShadow(light, cubeFace, transform.xPoint),
                 projectPointShadow(light, cubeFace, transform.yPoint),
@@ -2206,10 +2200,15 @@ private:
             drawFace(
                 commandBuffer,
                 vertices,
-                {},
                 command.color,
                 {},
-                lighting);
+                lighting,
+                false,
+                {},
+                {},
+                0.0f,
+                false,
+                true);
             return;
         }
 
@@ -2224,10 +2223,10 @@ private:
                     : (command.kind == UiDrawKind::TextureImage ? 7.0f : 4.0f));
         const TilePushConstants constants {
             .vertices = {
-                Vec4 { left, top, 0.0f, 1.0f },
-                Vec4 { right, top, 0.0f, 1.0f },
-                Vec4 { right, bottom, 0.0f, 1.0f },
-                Vec4 { left, bottom, 0.0f, 1.0f },
+                Vec4 { left, top, 0.0f, clipSpaceQuad },
+                Vec4 { right, top, 0.0f, clipSpaceQuad },
+                Vec4 { right, bottom, 0.0f, clipSpaceQuad },
+                Vec4 { left, bottom, 0.0f, clipSpaceQuad },
             },
             .color = command.color,
             .shadowOptions = command.effectOptions,

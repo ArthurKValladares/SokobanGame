@@ -6,18 +6,6 @@
 namespace sokoban {
 namespace {
 
-Mat4 identity()
-{
-    Mat4 result;
-    result.values = {
-        1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f,
-    };
-    return result;
-}
-
 void negateOutputAxis(Mat4& matrix, uint32_t axis)
 {
     for (uint32_t column = 0; column < 4; ++column) {
@@ -39,7 +27,7 @@ Mat4 sourcePositionTransform(const SkinnedMeshData& mesh)
         (mesh.sourceMinimum.y + mesh.sourceMaximum.y) * 0.5f,
         (mesh.sourceMinimum.z + mesh.sourceMaximum.z) * 0.5f,
     };
-    Mat4 result = identity();
+    Mat4 result = mat4Identity;
     if (mesh.preserveSourceScale) {
         result.values[5] = 0.0f;
         result.values[6] = 1.0f;
@@ -81,7 +69,7 @@ Mat4 sourcePositionTransform(const SkinnedMeshData& mesh)
 
 Mat4 sourceNormalTransform(const SkinnedMeshData& mesh)
 {
-    Mat4 result = identity();
+    Mat4 result = mat4Identity;
     result.values[5] = 0.0f;
     result.values[6] = 1.0f;
     result.values[9] = -1.0f;
@@ -158,7 +146,7 @@ GpuSkinningInstance makeGpuSkinningInstance(
         throw std::runtime_error("Invalid GPU skinning palette");
     }
     GpuSkinningInstance result;
-    const Mat4 identityMatrix = identity();
+    const Mat4 identityMatrix = mat4Identity;
     result.palette.fill(identityMatrix);
     for (uint32_t index = 0; index < pose.jointMatrices.size(); ++index) {
         result.palette[index] = pose.jointMatrices[index];

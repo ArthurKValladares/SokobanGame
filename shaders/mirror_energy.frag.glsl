@@ -8,12 +8,30 @@ layout(location = 2) in float inFaceCoordV;
 layout(location = 3) in vec3 inNormal;
 layout(location = 4) flat in uint inTextureIndex;
 layout(location = 5) flat in uint inMaterialFlags;
+layout(location = 6) in vec3 inWorldPosition;
 layout(location = 0) out vec4 outColor;
+
+struct PointLightData
+{
+    vec4 positionAndRange;
+    vec4 colorAndIntensity;
+    vec4 shadowOptions;
+};
+layout(std140, set = 0, binding = 7) uniform SceneFrame
+{
+    mat4 clipFromWorld;
+    mat4 shadowFromWorld;
+    vec4 cameraPositionAndNearPlane;
+    PointLightData pointLights[8];
+    vec4 pointLightMeta;
+} frame;
 
 layout(push_constant) uniform PushConstants
 {
     vec4 vertices[4];
-    vec4 shadowVertices[4];
+    // See triangle.vert: one push block is shared by every pipeline, so this
+    // slot stays declared even where the pass does not use it.
+    vec4 passData[4];
     vec4 color;
     vec4 normalAndAmbientRed;
     vec4 sunDirectionAndAmbientGreen;
@@ -73,8 +91,11 @@ void main()
 
     float rim = 0.0;
     if (length(inNormal) > 0.0001) {
-        const vec3 viewDirection =
-            normalize(vec3(0.0, 0.25881904, 0.9659258));
+        // The rim term is sign-independent - it uses abs(dot(...)) - so
+        // this stayed plausible while it was a compiled-in isometric
+        // constant. It is the real view direction now.
+        vec3 viewDirection = normalize(
+            frame.cameraPositionAndNearPlane.xyz - inWorldPosition);
         rim = pow(
             1.0 - abs(dot(normalize(inNormal), viewDirection)),
             max(pc.gridColor.x, 0.01)) * pc.gridColor.y;

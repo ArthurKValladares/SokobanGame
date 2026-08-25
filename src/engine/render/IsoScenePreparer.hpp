@@ -27,6 +27,25 @@ struct IsoRenderLayout {
     float farthestDepth = 1.0f;
 };
 
+// The same transform as projectIsoPointToClip, as a matrix.
+//
+// The two exist together on purpose. The matrix is what the GPU gets, so that
+// vertices can arrive in world space and every shader can ask where it is.
+// The scalar form stays because the CPU still projects for picking and for
+// camera fitting, and because it clamps view-space z to a small positive
+// value where the matrix cannot - a matrix has no way to express "and if this
+// point is behind the camera, pretend it is just in front". Nothing rendered
+// is ever behind the camera, so the clamp does not change any drawn pixel;
+// picking rays are the case that relies on it.
+//
+// IsoScenePreparerTests pins the two against each other across a grid of
+// points and camera states. Change one and the test tells you about the
+// other.
+[[nodiscard]] Mat4 isoClipFromWorld(
+    const IsoRenderLayout& layout,
+    Vec2 renderExtent);
+
+
 struct ShadowRenderLayout {
     Vec3 lightRight {};
     Vec3 lightUp {};
@@ -37,6 +56,14 @@ struct ShadowRenderLayout {
     float nearestDepth = 0.0f;
     float farthestDepth = 1.0f;
 };
+
+// The sun's orthographic shadow transform, as a matrix. Same relationship to
+// projectShadowPoint that isoClipFromWorld has to projectIsoPointToClip, with
+// one caveat that matters: projectShadowPoint *clamps* the depth it returns to
+// [0, 1], and a matrix cannot. Whoever uses this has to clamp z themselves, or
+// geometry outside the sun's depth range samples past the edge of the shadow
+// map rather than at it. The shaders do it on the line after the multiply.
+[[nodiscard]] Mat4 shadowClipFromWorld(const ShadowRenderLayout& layout);
 
 struct ModelTransformPoints {
     Vec3 origin {};
@@ -55,9 +82,15 @@ enum class PreparedSurfaceMaterial {
 };
 
 struct PreparedIsoFace {
+    // What the GPU draws. World space since C1; the vertex shader applies the
+    // camera.
+    std::array<Vec3, 4> worldVertices {};
+    // What picking uses: the same corners in normalised device coordinates,
+    // with the view-space w that produced them. Rendering no longer reads
+    // these, but pickGridCell and pickGroundPoint work in screen space and
+    // still do.
     std::array<Vec3, 4> vertices {};
     std::array<float, 4> clipW { 1.0f, 1.0f, 1.0f, 1.0f };
-    std::array<Vec4, 4> shadowVertices {};
     Vec3 normal {};
     Vec4 color {};
     GridPosition3 cell {};
@@ -78,6 +111,9 @@ struct PreparedIsoFace {
 };
 
 struct PreparedParticle {
+    // World space, like every other scene quad since C1. The billboard is
+    // built from the camera basis, but the corners it produces are ordinary
+    // world points and the vertex shader projects them.
     std::array<Vec3, 4> vertices {};
     Vec4 color {};
     RenderTexture texture = noTexture;
@@ -97,6 +133,11 @@ struct PreparedRenderScene {
     std::vector<PreparedIsoFace> isoFaces;
     std::vector<std::size_t> opaqueFaceIndices;
     std::vector<std::size_t> translucentFaceIndices;
+    // Where the blended tail of opaqueFaceIndices begins. Faces before it
+    // are fully opaque and sorted nearest first; faces from it on carry a
+    // sub-1.0 alpha, need the blend unit, and are sorted farthest first.
+    // Equal to the list's size when the whole list is in painter's order.
+    std::size_t opaqueBlendedFirst = 0;
     std::vector<std::size_t> pickFaceIndices;
     std::vector<std::size_t> opaqueModelIndices;
     std::vector<std::size_t> translucentModelIndices;
@@ -114,6 +155,29 @@ public:
         const RenderFrameData& frameData,
         Vec2 renderExtent,
         PreparedRenderScene& output) const;
+
+    // Developer toggle for the opaque face order.
+    //
+    // Front-to-back is the default: it lets the depth test reject occluded
+    // fragments before the fragment shader runs. Back-to-front is the
+    // painter's order this renderer used previously, and it hides a whole
+    // class of defect, because with VK_COMPARE_OP_LESS_OR_EQUAL two
+    // coincident opaque surfaces are resolved by whichever draws last. Tiles
+    // emit all four sides with no neighbour-based face removal, and faces
+    // appended through RenderFrameData::isoFaces are not CPU back-face culled
+    // at all, so exact ties do occur - most often where faces are near
+    // edge-on, which is the far row at the top of the screen.
+    //
+    // Exposed so an ordering artefact can be ruled in or out in one click
+    // rather than by editing code and rebuilding.
+    [[nodiscard]] bool opaqueFrontToBackSort() const
+    {
+        return opaqueFrontToBackSort_;
+    }
+    void setOpaqueFrontToBackSort(bool enabled)
+    {
+        opaqueFrontToBackSort_ = enabled;
+    }
 
     [[nodiscard]] std::optional<GridPosition3> pickGridCell(
         const PreparedRenderScene& scene,
@@ -146,6 +210,16 @@ public:
         Vec3 point);
     [[nodiscard]] static ModelTransformPoints modelTransformPoints(
         const RenderFrameData::Tile& tile);
+    // worldFromModel for a model-backed tile: the three axis columns of the
+    // authored transform, then its origin. Composing this with the camera's
+    // clipFromWorld gives exactly what modelClipTransform returns, which is
+    // what IsoScenePreparerTests checks.
+    [[nodiscard]] static std::array<Vec4, 4> modelWorldTransform(
+        const RenderFrameData::Tile& tile);
+    // The same thing with the camera already baked in. The renderer stopped
+    // using this at C1 and it survives as the reference the world-space form
+    // is tested against, plus the CPU-side answer for anything that wants a
+    // model's screen position without a round trip through the GPU.
     [[nodiscard]] static std::array<Vec4, 4> modelClipTransform(
         const IsoRenderLayout& layout,
         Vec2 renderExtent,
@@ -153,6 +227,9 @@ public:
     [[nodiscard]] static Vec4 projectShadowPoint(
         const ShadowRenderLayout& layout,
         Vec3 point);
+
+private:
+    bool opaqueFrontToBackSort_ = true;
 };
 
 } // namespace sokoban

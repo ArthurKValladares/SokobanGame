@@ -2,8 +2,11 @@
 
 layout(push_constant) uniform PushConstants
 {
-    vec4 vertices[4];
+    // Clip space already. A shadow pass has one camera per sun and six per
+    // point light, so there is no single transform a uniform could hold and
+    // these stay projected on the CPU.
     vec4 shadowVertices[4];
+    vec4 passData[4];
     vec4 color;
     vec4 normalAndAmbientRed;
     vec4 sunDirectionAndAmbientGreen;

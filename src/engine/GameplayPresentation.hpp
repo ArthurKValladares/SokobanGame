@@ -37,7 +37,7 @@ public:
         bool animationCrossfades = true;
         // Unit quaternion. Actor presentation owns smooth orientation;
         // render data receives only the resulting yaw angle.
-        Vec4 orientation { 0.0f, 0.0f, 0.0f, 1.0f };
+        Quat orientation {};
     };
 
     struct PlayerVisual : AnimatedActorVisual {

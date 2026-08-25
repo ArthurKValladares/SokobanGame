@@ -666,6 +666,15 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME command_line TARGET sokoban_command_line_tests
         SOURCES tests/CommandLineOptionsTests.cpp
     )
+    # Also header-only. Math and Geometry underpin projection, skinning,
+    # picking and (soon) culling, so their conventions are pinned here rather
+    # than discovered from a wrong-looking frame.
+    sokoban_add_test(NAME math TARGET sokoban_math_tests
+        SOURCES tests/MathTests.cpp
+    )
+    sokoban_add_test(NAME geometry TARGET sokoban_geometry_tests
+        SOURCES tests/GeometryTests.cpp
+    )
     sokoban_add_test(NAME rules TARGET sokoban_rules_tests
         LIBS sokoban_core
         SOURCES tests/RulesTests.cpp

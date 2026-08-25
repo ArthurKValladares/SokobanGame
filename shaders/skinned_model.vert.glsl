@@ -32,25 +32,24 @@ layout(std430, set = 0, binding = 9) readonly buffer SkinningPalette
 } skinning;
 
 struct PointLightData { vec4 positionAndRange; vec4 colorAndIntensity; vec4 shadowOptions; };
-layout(std140, set = 0, binding = 7) uniform SceneLighting {
-    vec4 sunShadowRightAndHalfWidth; vec4 sunShadowUpAndHalfHeight;
-    vec4 sunShadowForwardAndDepthRange; vec4 sunShadowCenterAndNearestDepth;
+layout(std140, set = 0, binding = 7) uniform SceneFrame {
+    mat4 clipFromWorld; mat4 shadowFromWorld;
+    vec4 cameraPositionAndNearPlane;
     PointLightData pointLights[8]; vec4 pointLightMeta;
-} lighting;
+} frame;
 
 layout(push_constant) uniform PushConstants {
-    vec4 clipFromModel[4]; vec4 shadowFromModel[4]; vec4 color;
+    vec4 worldFromModel[4]; vec4 passData[4]; vec4 color;
     vec4 normalAndAmbientRed; vec4 sunDirectionAndAmbientGreen;
     vec4 sunRadianceAndAmbientBlue; vec4 shadowOptions; vec4 materialOptions;
     vec4 gridColor; vec4 textureOptions;
 } pc;
 
-vec3 worldFromSunShadow(vec4 shadowPosition) {
-    vec3 clip = shadowPosition.xyz / max(abs(shadowPosition.w), 0.0001);
-    vec3 center = lighting.sunShadowCenterAndNearestDepth.xyz;
-    vec3 forward = lighting.sunShadowForwardAndDepthRange.xyz;
-    float worldForward = lighting.sunShadowCenterAndNearestDepth.w + clip.z * lighting.sunShadowForwardAndDepthRange.w;
-    return center + lighting.sunShadowRightAndHalfWidth.xyz * (clip.x * lighting.sunShadowRightAndHalfWidth.w) + lighting.sunShadowUpAndHalfHeight.xyz * (clip.y * lighting.sunShadowUpAndHalfHeight.w) + forward * (worldForward - dot(center, forward));
+// See model.vert: the matrix cannot clamp the way projectShadowPoint did.
+vec4 sunShadowFromWorld(vec3 worldPosition) {
+    vec4 shadow = frame.shadowFromWorld * vec4(worldPosition, 1.0);
+    shadow.z = clamp(shadow.z, 0.0, 1.0);
+    return shadow;
 }
 
 // SkinningInstance is 258 mat4 (16512 bytes). Never bind one to a local:
@@ -83,11 +82,11 @@ void main() {
     vec3 normal = normalize(
         mat3(skinning.instances[gl_InstanceIndex].normalFromSource) *
         normalize(sourceNormal));
-    mat4 clipTransform = mat4(pc.clipFromModel[0], pc.clipFromModel[1], pc.clipFromModel[2], pc.clipFromModel[3]);
-    mat4 shadowTransform = mat4(pc.shadowFromModel[0], pc.shadowFromModel[1], pc.shadowFromModel[2], pc.shadowFromModel[3]);
-    gl_Position = clipTransform * vec4(position, 1.0);
-    outShadowPosition = shadowTransform * vec4(position, 1.0);
-    outWorldPosition = worldFromSunShadow(outShadowPosition);
+    mat4 worldTransform = mat4(pc.worldFromModel[0], pc.worldFromModel[1], pc.worldFromModel[2], pc.worldFromModel[3]);
+    vec3 worldPosition = (worldTransform * vec4(position, 1.0)).xyz;
+    gl_Position = frame.clipFromWorld * vec4(worldPosition, 1.0);
+    outWorldPosition = worldPosition;
+    outShadowPosition = sunShadowFromWorld(worldPosition);
     outFaceCoordU = inUv.x; outFaceCoordV = inUv.y;
     outTextureIndex = inTextureIndex; outMaterialFlags = inMaterialFlags;
     if (pc.gridColor.w < 0.0) { normal *= pc.gridColor.xyz; }

@@ -11,12 +11,6 @@
 namespace sokoban {
 namespace {
 
-float degreesToRadians(float degrees)
-{
-    constexpr float pi = 3.14159265358979323846f;
-    return degrees * pi / 180.0f;
-}
-
 float clampedTileScale(float scale)
 {
     return std::clamp(scale, config::minTileScale, config::maxTileScale);

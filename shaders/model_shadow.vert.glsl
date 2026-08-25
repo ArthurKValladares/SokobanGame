@@ -4,8 +4,8 @@ layout(location = 0) in vec3 inPosition;
 
 layout(push_constant) uniform PushConstants
 {
-    vec4 clipFromModel[4];
     vec4 shadowFromModel[4];
+    vec4 passData[4];
     vec4 color;
     vec4 normalAndAmbientRed;
     vec4 sunDirectionAndAmbientGreen;

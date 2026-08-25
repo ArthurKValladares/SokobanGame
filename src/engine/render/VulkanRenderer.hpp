@@ -216,6 +216,10 @@ public:
     // effect on the next recorded frame with no pipeline rebuild.
     [[nodiscard]] bool modelBackfaceCullingEnabled() const;
     void setModelBackfaceCullingEnabled(bool enabled);
+    // Developer toggle for the opaque face order. CPU-side, so it takes
+    // effect on the next prepared frame with no pipeline rebuild.
+    [[nodiscard]] bool opaqueFrontToBackSortEnabled() const;
+    void setOpaqueFrontToBackSortEnabled(bool enabled);
     [[nodiscard]] bool wideLinesSupported() const;
     [[nodiscard]] float wireframeLineWidth() const;
     [[nodiscard]] std::array<float, 2> wireframeLineWidthRange() const;

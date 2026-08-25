@@ -10,7 +10,10 @@ layout(location = 0) out vec4 outColor;
 layout(push_constant) uniform PushConstants
 {
     vec4 vertices[4];
-    vec4 shadowVertices[4];
+    // Water's parameter block: border colour and width, board bounds, ripple
+    // and caustic opacities. Named passData in the shared push block; this
+    // pass is the one that claims it.
+    vec4 passData[4];
     vec4 color;
     vec4 normalAndAmbientRed;
     vec4 sunDirectionAndAmbientGreen;
@@ -631,7 +634,7 @@ void main()
         1.0) * geometryPresent;
     diffractedScene *= 1.0 +
         underwaterCausticCoverage *
-            clamp(pc.shadowVertices[3].w, 0.0, 1.0);
+            clamp(pc.passData[3].w, 0.0, 1.0);
 
     // Debug view: retain the ripple-driven ray bend and focused light on the
     // copied opaque geometry, but bypass every visible water-surface layer.
@@ -683,26 +686,26 @@ void main()
             caustics.y * rippleCrestStrength,
         0.0,
         min(rippleHaloStrength + rippleCrestStrength, 1.0));
-    rippleStrength *= clamp(pc.shadowVertices[3].x, 0.0, 1.0);
+    rippleStrength *= clamp(pc.passData[3].x, 0.0, 1.0);
 
     vec3 finalWaterColor =
         mix(waterWithSecondaryRipples, rippleColor, rippleStrength);
     float tileBorder = waterTileBorderMask(
         worldPosition,
         pc.gridColor.z,
-        max(pc.shadowVertices[1].x, 0.0),
-        max(pc.shadowVertices[1].y, 0.0),
-        max(pc.shadowVertices[1].z, 0.01),
-        pc.shadowVertices[1].w);
+        max(pc.passData[1].x, 0.0),
+        max(pc.passData[1].y, 0.0),
+        max(pc.passData[1].z, 0.01),
+        pc.passData[1].w);
     tileBorder *= waterTileBorderBoardFade(
         worldPosition,
-        pc.shadowVertices[2].xy,
-        max(pc.shadowVertices[2].zw, vec2(0.0)),
+        pc.passData[2].xy,
+        max(pc.passData[2].zw, vec2(0.0)),
         tileBorderExteriorFadeDistance);
     finalWaterColor = mix(
         finalWaterColor,
-        pc.shadowVertices[0].rgb,
-        tileBorder * clamp(pc.shadowVertices[0].a, 0.0, 1.0));
+        pc.passData[0].rgb,
+        tileBorder * clamp(pc.passData[0].a, 0.0, 1.0));
     uint shorelineMask =
         uint(max(pc.textureOptions.w, 0.0) + 0.5);
     vec2 foamLayers = shorelineFoam(
@@ -715,9 +718,9 @@ void main()
         shorelineFarDistance,
         shorelineFarThickness);
     float nearFoamOpacity =
-        clamp(pc.shadowVertices[3].y, 0.0, 1.0);
+        clamp(pc.passData[3].y, 0.0, 1.0);
     float farFoamOpacity =
-        clamp(pc.shadowVertices[3].z, 0.0, 1.0);
+        clamp(pc.passData[3].z, 0.0, 1.0);
     float foamStrength =
         max(
             foamLayers.x * nearFoamOpacity,

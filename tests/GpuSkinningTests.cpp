@@ -25,29 +25,6 @@ void checkImpl(bool ok, const char* expression, int line)
 #define CHECK(expression) checkImpl((expression), #expression, __LINE__)
 #define TEST(name) currentTest = name
 
-Mat4 identity()
-{
-    Mat4 result;
-    result.values = {
-        1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f,
-    };
-    return result;
-}
-
-Vec3 transformPoint(const Mat4& matrix, Vec3 point)
-{
-    return {
-        matrix.values[0] * point.x + matrix.values[4] * point.y +
-            matrix.values[8] * point.z + matrix.values[12],
-        matrix.values[1] * point.x + matrix.values[5] * point.y +
-            matrix.values[9] * point.z + matrix.values[13],
-        matrix.values[2] * point.x + matrix.values[6] * point.y +
-            matrix.values[10] * point.z + matrix.values[14],
-    };
-}
 
 Vec3 gpuSkinnedPosition(
     const GpuSkinningInstance& instance,
@@ -98,7 +75,7 @@ void testPaletteAndAttachmentEncoding()
     SkinnedMeshData mesh;
     mesh.nodes = { SkeletonNode { .name = "root" } };
     mesh.jointNodeIndices = { 0 };
-    mesh.inverseBindMatrices = { identity() };
+    mesh.inverseBindMatrices = { mat4Identity };
     mesh.sourceMinimum = { 0.0f, 0.0f, 0.0f };
     mesh.sourceMaximum = { 2.0f, 4.0f, 6.0f };
     mesh.vertices = {
@@ -133,8 +110,8 @@ void testPaletteAndAttachmentEncoding()
     const GltfAnimationClip animation;
     const SkinnedPoseMatrices pose = sampleGltfSkinPose(mesh, animation, 0.0f);
     const GpuSkinningInstance instance = makeGpuSkinningInstance(mesh, pose);
-    CHECK(instance.palette[0].values == identity().values);
-    CHECK(instance.palette[maxSkinJoints].values == identity().values);
+    CHECK(instance.palette[0] == mat4Identity);
+    CHECK(instance.palette[maxSkinJoints] == mat4Identity);
     CHECK(std::abs(instance.modelFromSource.values[0] - 0.5f) < 0.0001f);
     CHECK(std::abs(instance.modelFromSource.values[9] + 1.0f / 6.0f) < 0.0001f);
 }

@@ -16,29 +16,6 @@ constexpr std::array<DecorationGizmo::Axis, 3> gizmoAxes {
     DecorationGizmo::Axis::Z,
 };
 
-float dot(Vec2 left, Vec2 right)
-{
-    return left.x * right.x + left.y * right.y;
-}
-
-Vec2 subtract(Vec2 left, Vec2 right)
-{
-    return { left.x - right.x, left.y - right.y };
-}
-
-float length(Vec2 value)
-{
-    return std::sqrt(dot(value, value));
-}
-
-Vec2 normalized(Vec2 value)
-{
-    const float magnitude = length(value);
-    return magnitude > 0.0001f
-        ? Vec2 { value.x / magnitude, value.y / magnitude }
-        : Vec2 { 1.0f, 0.0f };
-}
-
 float distanceToSegment(Vec2 point, Vec2 start, Vec2 end)
 {
     const Vec2 segment = subtract(end, start);
@@ -143,7 +120,7 @@ bool DecorationGizmo::beginDrag(
                 pointer, ring[point - 1], ring[point]);
             if (distance < nearestDistance) {
                 nearestDistance = distance;
-                direction = normalized(subtract(ring[point], ring[point - 1]));
+                direction = normalize(subtract(ring[point], ring[point - 1]));
             }
         }
         unitsPerPixel = rotationDegreesPerPixel;
@@ -151,7 +128,7 @@ bool DecorationGizmo::beginDrag(
         const AxisHandle& handle = geometry.axes[index];
         const Vec2 projectedAxis = subtract(handle.end, handle.start);
         const float projectedLength = std::max(length(projectedAxis), 1.0f);
-        direction = normalized(projectedAxis);
+        direction = normalize(projectedAxis);
         unitsPerPixel = mode_ == Mode::Translate
             ? handle.worldLength / projectedLength
             : 1.0f / projectedLength;

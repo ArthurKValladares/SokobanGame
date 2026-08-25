@@ -36,10 +36,6 @@ struct MeshData {
     std::vector<uint32_t> indices;
 };
 
-struct Mat4 {
-    std::array<float, 16> values {};
-};
-
 struct SkinnedVertex {
     Vec3 position {};
     Vec3 normal {};
@@ -52,7 +48,7 @@ struct SkeletonNode {
     std::string name;
     int parent = -1;
     Vec3 translation {};
-    Vec4 rotation { 0.0f, 0.0f, 0.0f, 1.0f };
+    Quat rotation {};
     Vec3 scale { 1.0f, 1.0f, 1.0f };
 };
 

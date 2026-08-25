@@ -958,6 +958,71 @@ Renderer:
   extended dynamic state. Wireframe and wide lines remain optional
   developer-only features.
 - Uses SDL3 window/Vulkan integration.
+- **The GPU has a camera** (review item C1). This is the fact most of the
+  renderer's shape now follows from, and it is worth reading before changing
+  anything in `shaders/` or `VulkanSceneRecorder`.
+  - `SceneFrameUniform` (set 0, binding 7, GLSL block `SceneFrame`, instance
+    `frame`) carries `clipFromWorld`, `shadowFromWorld` and the camera's world
+    position, alongside the point lights. It is written once per frame per
+    descriptor set by `VulkanSceneDescriptors::updateFrame`.
+  - `isoClipFromWorld` and `shadowClipFromWorld` build those two matrices from
+    the prepared layouts. They are **exact** equivalents of
+    `projectIsoPointToClip` and `projectShadowPoint`, which still exist for
+    picking and camera fitting, and `IsoScenePreparerTests` pins each pair
+    across a grid of points and camera states. The two forms differ only where
+    the scalar ones clamp - view-space z behind the camera, and shadow depth
+    outside the sun's range - because a matrix cannot clamp. The shaders clamp
+    the shadow depth on the line after the multiply; do not delete that.
+  - The isometric projection is an *off-axis* perspective:
+    `mat4PerspectiveOffCenter` folds the board's `fitScale` and
+    `projectedCenter` shear into the matrix, so framing behaves exactly as it
+    did. Its depth row is the ordinary Vulkan one. `mat4View` builds the view
+    from the layout's basis and assumes the renderer's conventions: **+z is
+    forward** and there is no Y flip, because the scene pass viewport already
+    has a negative height.
+  - Vertices reach the GPU in **world space**: tile quads as four world corners
+    in push constants, models as `worldFromModel` in the instance buffer or
+    push block. `PreparedIsoFace` keeps the projected corners too, under
+    `vertices`, because picking works in screen space; `worldVertices` is what
+    is drawn.
+  - **`triangle.vert` serves two spaces, and a quad has to say which.** The
+    scene's quads are world space; the UI, the top-down 2D board and its grid
+    overlay are authored directly in clip space and have no world position.
+    The w of each corner in `TilePushConstants::vertices` carries the answer -
+    `worldSpaceQuad` (1) or `clipSpaceQuad` (0) - and `drawFace` takes a
+    `clipSpace` flag for the callers that need it. Getting this wrong is not
+    subtle and does not look like a transform bug: every clip-space quad lands
+    off screen at once, so the window comes up empty and the game reads as
+    hung. It cost one grey-screen launch to find. The tidier end state is a
+    separate screen-space vertex shader and pipeline, which belongs with F4's
+    shader split rather than here.
+  - Particles were the other quad still arriving pre-projected and are world
+    space now like everything else. The billboard is still built from the
+    camera basis; the corners it produces are ordinary world points.
+  - `worldFromSunShadow` is gone from all four shaders. World position is an
+    interpolated vertex output now instead of being reconstructed by inverting
+    the sun's frustum, and the four `sunShadow*` uniform fields that existed
+    only to feed it are gone with it.
+  - `triangle.frag` and `mirror_energy.frag` derive `viewDirection` from the
+    camera position and the fragment's world position. It used to be
+    `normalize(vec3(0.0, 0.25881904, 0.9659258))`, compiled in - **specular
+    highlights will not look identical**, because they were previously correct
+    only for one fixed camera angle.
+  - The shadow pass is the deliberate exception: it has one camera per sun and
+    six per point light, so no single uniform could serve it. Its pipelines
+    still receive CPU-projected clip-space corners, in the push block's first
+    slot. Nothing in a shadow pass asks where it is in the world.
+  - Push constants are no longer full. The 64-byte second slot used to be a
+    shadow-space copy of the corners - the frame's sun transform restated once
+    per face - and is now `passData`, free unless a pass claims it. Water is
+    the one claimant, for its border and ripple parameters. It had already
+    been squatting there.
+  - One consequence worth knowing: tile faces used to be pushed pre-divided
+    with `w = 1`, so their attributes interpolated affinely. They go through a
+    real projection now, so interpolation is perspective-correct. Ground splat
+    UVs and grid lines on large quads will shift slightly, and the ground
+    splat shader's "global origin" - `min` over `pc.vertices[i].xy` - is
+    genuinely a world coordinate now rather than a normalised device one.
 - Has a shadow pass and scene pass.
 - The opaque and translucent scene passes use different pipelines and
   different sort orders, and both halves matter:
@@ -970,6 +1035,58 @@ Renderer:
     **farthest first**. Reversing that order is a correctness bug, not a
     performance regression. `IsoScenePreparerTests` pins each direction
     separately.
+  - A face in the opaque list may still be blended, and **blended faces
+    write depth**. Drawn front to back, such a face writes depth before the
+    geometry behind it is drawn, so it blends against the background instead
+    of against that geometry - a hole, not a tint. `IsoScenePreparer`
+    therefore partitions `opaqueFaceIndices` on `color.w >= 1.0f`: a
+    nearest-first fully opaque prefix, then a farthest-first blended tail,
+    with `scene.opaqueBlendedFirst` marking the boundary. That is the same
+    predicate the recorder picks its pipeline with, so the tail is also one
+    uninterrupted run of blended draws and costs one fewer pipeline bind
+    than the interleaved list did.
+  - **The depth range must cover every drawn tile, not only the ones that
+    frame the camera.** This is the invariant the opaque order depends on,
+    and it is worth understanding because violating it produced two
+    different bugs that both looked like something else.
+    `projectIsoPoint` **clamps** z to `[0, 1]` rather than clipping - the
+    quads are projected on the CPU and pushed as clip-space vertices, so
+    there is no near/far clipping to rely on. A surface past the far plane
+    therefore does not disappear: it arrives at exactly `z = 1.0`, sharing
+    that depth with every other such surface, and the depth test can no
+    longer order them at all.
+    - `calculateIsoLayout` used to derive near and far from the camera-fit
+      geometry alone. With an authored `cameraExtent` - which every gameplay
+      frame sets - that meant the eight corners of the extent box plus one
+      tile of padding, and any tile outside it landed on the far plane.
+    - Symptom one: flipping the opaque sort turned the far row inside out.
+      All those faces tie at 1.0, `LESS_OR_EQUAL` gives a tie to whichever
+      drew last, so back-to-front showed the nearest of them and
+      front-to-back showed the farthest. It reads exactly like a back-face
+      culling bug and is not - the culling toggle made no difference.
+    - Symptom two: `VK_COMPARE_OP_LESS` was tried as the fix for symptom
+      one, and it made the whole far row *vanish*, because the depth buffer
+      clears to exactly 1.0. A tile type change in that row brought it back,
+      since `includeCameraCell` then extended the extent past it.
+    - The fix separates the two questions. The on-screen fit stays authored:
+      only tiles with `affectsCameraFit` participate, and only when there is
+      no explicit `cameraExtent`, so a decoration still cannot zoom the
+      board out. The depth range walks **every** tile and iso face
+      unconditionally. Nothing clamps, no two surfaces share `z = 1.0`, and
+      the order is free again. `IsoScenePreparerTests` pins it: no drawable
+      vertex may sit on either plane, the fit must stay identical to a board
+      containing only the framed rows, and the depth range must reach past
+      them.
+    - The pass stays on `LESS_OR_EQUAL` throughout. `LESS` is the textbook
+      op for a front-to-back opaque pass, but here its failure mode is
+      silent disappearance rather than a wrong winner, and with the range
+      fixed it buys nothing.
+  - Debug UI > Engine has a "Sort Opaque Front To Back" checkbox. Turning it
+    off restores one painter-ordered list, which is the pre-Phase-0
+    behaviour. Together with "Cull Model Back Faces" it separates an
+    ordering problem from a winding one in one click, which is the whole
+    reason both exist - the first bug here was reported as culling and was
+    not.
   - A face in the opaque list may still carry a sub-1.0 alpha - the editor's
     ladder-rung preview does - so the pipeline is chosen per face from
     `face.color.w`, not per pass. Editor dither previews are `discard`, not
@@ -2014,6 +2131,65 @@ cmake --build out\visual-studio --config Release --target package
 ```
 
 The `rg` command above should return no matches.
+
+## Math And Geometry
+
+`src/engine/Math.hpp` is the engine's linear algebra and the only definition
+of it. `src/engine/Geometry.hpp` adds the bounding volumes on top. Both are
+header-only and pinned by `tests/MathTests.cpp` and `tests/GeometryTests.cpp`
+(ctest names `math` and `geometry`).
+
+Conventions, all of which are silent when violated:
+
+- **Matrices are column-major**, `values[column * 4 + row]`, so a `Mat4`
+  uploads to GLSL without transposing. This matches the layout the glTF loader
+  already produced.
+- **`a * b` applies b first.** A model-view-projection is
+  `projection * view * model`. Quaternion composition follows the same rule.
+- **Quaternions are (x, y, z, w)**, w last, matching glTF.
+- **Every type is an aggregate** with no user-declared constructors, because
+  brace initialization is used at hundreds of call sites.
+- `Frustum` extraction assumes **Vulkan's 0..z..w clip volume**: the near
+  plane is row 2 alone, not row2 + row3. The OpenGL form puts the near plane
+  in the wrong place and the symptom looks like something else entirely.
+- Frustum plane names follow clip space, not the screen. The scene pass draws
+  through a negative-height viewport, so clip-space "top" appears at the
+  bottom of the window.
+
+Before this module the engine had the same operations written out separately
+in about a dozen translation units, including **three quaternion slerps** and
+**two identity matrices**. Two differences were behavioural rather than
+cosmetic, and both are preserved deliberately rather than merged away:
+
+- `normalize(Vec3)` existed twice with different epsilons (1e-6 and 1e-4) and
+  different degenerate results (`{0,0,1}` and `{0,0,0}`). The shared
+  `normalize` returns the zero vector; a caller that needs a specific axis
+  back says so through `normalizeOr(v, fallback)`. The glTF loader's vertex
+  normals use `normalizeOr(v, {0,0,1})` because that is what its own copy
+  returned. The threshold is now uniformly 1e-6 on length, so vectors between
+  1e-6 and 1e-4 long normalize where `IsoScenePreparer` previously zeroed
+  them - in this codebase that range means "degenerate either way".
+- `slerp` existed twice, once clamping `t` and once not. The shared one does
+  **not** clamp, because that is the mathematical operation.
+  `GameplayPresentation` clamps at its call site, visibly, so the enemy-facing
+  blend keeps exactly the guarantee it used to make for itself.
+
+`add`/`subtract`/`multiply` exist as named forms beside the operators. That is
+not an accident: rewriting several hundred existing call sites to reach one
+definition would have been a large silent-transcription risk in projection
+code for a cosmetic gain. New code should prefer the operators. Both spellings
+resolve to the same definition, which is the point.
+
+`Mat4` no longer lives in `GltfMesh.hpp`. Rotations that are rotations are
+now `Quat`: `SkeletonNode::rotation`, `NodePose::rotation`, and
+`GameplayPresentation`'s actor `orientation`. `AnimationKeyframes::values`
+stays `Vec4` because that buffer is untyped four-float data - translation,
+scale and rotation all live in it - and is interpreted as a quaternion only on
+the branch that knows it is one.
+
+The camera's own matrices (perspective, look-at) are deliberately *not* here.
+Choosing a depth range and a handedness belongs with the camera, and that
+decision lands with the real-camera work rather than being guessed at now.
 
 ## Important Design Decisions
 

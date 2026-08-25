@@ -22,20 +22,23 @@ struct PointLightData
     vec4 colorAndIntensity;
     vec4 shadowOptions;
 };
-layout(std140, set = 0, binding = 7) uniform SceneLighting
+layout(std140, set = 0, binding = 7) uniform SceneFrame
 {
-    vec4 sunShadowRightAndHalfWidth;
-    vec4 sunShadowUpAndHalfHeight;
-    vec4 sunShadowForwardAndDepthRange;
-    vec4 sunShadowCenterAndNearestDepth;
+    mat4 clipFromWorld;
+    mat4 shadowFromWorld;
+    vec4 cameraPositionAndNearPlane;
     PointLightData pointLights[8];
     vec4 pointLightMeta;
-} lighting;
+} frame;
 
 layout(push_constant) uniform PushConstants
 {
     vec4 vertices[4];
-    vec4 shadowVertices[4];
+    // 64 bytes of per-draw space. Water claims it for its border and ripple
+    // parameters; every other pass leaves it alone. Must stay declared even
+    // where unused: this is one push block shared by every pipeline, so
+    // dropping it here would shift every member below it.
+    vec4 passData[4];
     vec4 color;
     vec4 normalAndAmbientRed;
     vec4 sunDirectionAndAmbientGreen;
@@ -152,7 +155,7 @@ float pointShadowWorldDistance(
 float pointShadowFactor(
     int lightIndex, vec3 fromLight, vec3 surfaceNormal)
 {
-    PointLightData light = lighting.pointLights[lightIndex];
+    PointLightData light = frame.pointLights[lightIndex];
     if (light.shadowOptions.x <= 0.5) {
         return 1.0;
     }
@@ -298,10 +301,15 @@ void main()
         vec3 pointDiffuseLighting = vec3(0.0);
         vec3 pointSpecularLighting = vec3(0.0);
         float specularStrength = max(pc.textureOptions.z, 0.0);
-        const vec3 viewDirection = normalize(vec3(0.0, 0.25881904, 0.9659258));
-        int pointLightCount = clamp(int(lighting.pointLightMeta.x + 0.5), 0, 8);
+        // The real direction from the surface to the camera. This used
+        // to be a compiled-in constant matching one fixed isometric camera,
+        // so every specular highlight was correct only from that angle and
+        // wrong everywhere else the camera could go.
+        vec3 viewDirection = normalize(
+            frame.cameraPositionAndNearPlane.xyz - inWorldPosition);
+        int pointLightCount = clamp(int(frame.pointLightMeta.x + 0.5), 0, 8);
         for (int lightIndex = 0; lightIndex < pointLightCount; ++lightIndex) {
-            PointLightData pointLight = lighting.pointLights[lightIndex];
+            PointLightData pointLight = frame.pointLights[lightIndex];
             vec3 toLight = pointLight.positionAndRange.xyz - inWorldPosition;
             float distanceToLight = length(toLight);
             float range = max(pointLight.positionAndRange.w, 0.001);

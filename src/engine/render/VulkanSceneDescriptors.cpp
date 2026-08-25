@@ -156,9 +156,9 @@ void VulkanSceneDescriptors::create(
         };
         vkCheck(vkAllocateDescriptorSets(device_, &allocateInfo, sets_.data()),
             "vkAllocateDescriptorSets failed");
-        lightingBuffers_.reserve(setCount);
+        frameBuffers_.reserve(setCount);
         for (uint32_t i = 0; i < setCount; ++i) {
-            lightingBuffers_.push_back(createLightingBuffer(physicalDevice));
+            frameBuffers_.push_back(createFrameBuffer(physicalDevice));
         }
         update(resources);
     } catch (...) {
@@ -229,9 +229,9 @@ void VulkanSceneDescriptors::updateInternal(
         .imageLayout = resources.pointShadows.imageLayout,
     };
     const VkDescriptorBufferInfo lighting {
-        .buffer = lightingBuffers_[internalSetIndex].buffer,
+        .buffer = frameBuffers_[internalSetIndex].buffer,
         .offset = 0,
-        .range = sizeof(SceneLightingUniform),
+        .range = sizeof(SceneFrameUniform),
     };
     const VkDescriptorBufferInfo skinning {
         .buffer = resources.skinning.buffer,
@@ -364,7 +364,7 @@ void VulkanSceneDescriptors::updateInternal(
 void VulkanSceneDescriptors::destroy()
 {
     if (device_) {
-        for (OwnedBuffer& buffer : lightingBuffers_) {
+        for (OwnedBuffer& buffer : frameBuffers_) {
             if (buffer.mapped) {
                 vkUnmapMemory(device_, buffer.memory);
             }
@@ -383,7 +383,7 @@ void VulkanSceneDescriptors::destroy()
         }
     }
     sets_.clear();
-    lightingBuffers_.clear();
+    frameBuffers_.clear();
     frameSetCount_ = 0;
     pool_ = VK_NULL_HANDLE;
     layout_ = VK_NULL_HANDLE;
@@ -392,20 +392,20 @@ void VulkanSceneDescriptors::destroy()
 }
 
 VulkanSceneDescriptors::OwnedBuffer
-VulkanSceneDescriptors::createLightingBuffer(
+VulkanSceneDescriptors::createFrameBuffer(
     VkPhysicalDevice physicalDevice) const
 {
     OwnedBuffer result;
     const VkBufferCreateInfo info {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = sizeof(SceneLightingUniform),
+        .size = sizeof(SceneFrameUniform),
         .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
     vkCheck(vkCreateBuffer(device_, &info, nullptr, &result.buffer),
-        "vkCreateBuffer scene lighting failed");
+        "vkCreateBuffer scene frame uniform failed");
     vulkanDebug::setObjectName(
-        device_, VK_OBJECT_TYPE_BUFFER, result.buffer, "Scene lighting buffer");
+        device_, VK_OBJECT_TYPE_BUFFER, result.buffer, "Scene frame uniform buffer");
     try {
         VkMemoryRequirements requirements {};
         vkGetBufferMemoryRequirements(device_, result.buffer, &requirements);
@@ -420,20 +420,20 @@ VulkanSceneDescriptors::createLightingBuffer(
         };
         vkCheck(vkAllocateMemory(
                     device_, &allocation, nullptr, &result.memory),
-            "vkAllocateMemory scene lighting failed");
+            "vkAllocateMemory scene frame uniform failed");
         vulkanDebug::setObjectName(
             device_,
             VK_OBJECT_TYPE_DEVICE_MEMORY,
             result.memory,
-            "Scene lighting buffer memory");
+            "Scene frame uniform buffer memory");
         vkCheck(vkBindBufferMemory(
                     device_, result.buffer, result.memory, 0),
-            "vkBindBufferMemory scene lighting failed");
+            "vkBindBufferMemory scene frame uniform failed");
         vkCheck(vkMapMemory(
                     device_, result.memory, 0,
-                    sizeof(SceneLightingUniform), 0, &result.mapped),
-            "vkMapMemory scene lighting failed");
-        std::memset(result.mapped, 0, sizeof(SceneLightingUniform));
+                    sizeof(SceneFrameUniform), 0, &result.mapped),
+            "vkMapMemory scene frame uniform failed");
+        std::memset(result.mapped, 0, sizeof(SceneFrameUniform));
     } catch (...) {
         if (result.memory) {
             vkFreeMemory(device_, result.memory, nullptr);
@@ -446,43 +446,25 @@ VulkanSceneDescriptors::createLightingBuffer(
     return result;
 }
 
-void VulkanSceneDescriptors::updateLighting(
+void VulkanSceneDescriptors::updateFrame(
     uint32_t setIndex,
     const RenderFrameData::Lighting& lighting,
-    const ShadowRenderLayout& shadowLayout,
+    const SceneCamera& camera,
     bool preview) const
 {
     const uint32_t internalSetIndex = setIndex * 2 + (preview ? 1U : 0U);
-    if (internalSetIndex >= lightingBuffers_.size() ||
-        !lightingBuffers_[internalSetIndex].mapped) {
-        throw std::runtime_error("Scene lighting buffer is unavailable");
+    if (internalSetIndex >= frameBuffers_.size() ||
+        !frameBuffers_[internalSetIndex].mapped) {
+        throw std::runtime_error("Scene frame uniform buffer is unavailable");
     }
-    SceneLightingUniform uniform {
-        .sunShadowRightAndHalfWidth = {
-            shadowLayout.lightRight.x,
-            shadowLayout.lightRight.y,
-            shadowLayout.lightRight.z,
-            shadowLayout.halfWidth,
-        },
-        .sunShadowUpAndHalfHeight = {
-            shadowLayout.lightUp.x,
-            shadowLayout.lightUp.y,
-            shadowLayout.lightUp.z,
-            shadowLayout.halfHeight,
-        },
-        .sunShadowForwardAndDepthRange = {
-            shadowLayout.lightForward.x,
-            shadowLayout.lightForward.y,
-            shadowLayout.lightForward.z,
-            std::max(
-                shadowLayout.farthestDepth - shadowLayout.nearestDepth,
-                0.001f),
-        },
-        .sunShadowCenterAndNearestDepth = {
-            shadowLayout.center.x,
-            shadowLayout.center.y,
-            shadowLayout.center.z,
-            shadowLayout.nearestDepth,
+    SceneFrameUniform uniform {
+        .clipFromWorld = camera.clipFromWorld,
+        .shadowFromWorld = camera.shadowFromWorld,
+        .cameraPositionAndNearPlane = {
+            camera.position.x,
+            camera.position.y,
+            camera.position.z,
+            camera.nearPlane,
         },
     };
     const std::size_t count = std::min(
@@ -514,7 +496,7 @@ void VulkanSceneDescriptors::updateLighting(
     }
     uniform.pointLightMeta.x = static_cast<float>(count);
     std::memcpy(
-        lightingBuffers_[internalSetIndex].mapped,
+        frameBuffers_[internalSetIndex].mapped,
         &uniform,
         sizeof(uniform));
 }

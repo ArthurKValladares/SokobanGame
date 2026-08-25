@@ -27,20 +27,23 @@ struct PointLightData
     vec4 colorAndIntensity;
     vec4 shadowOptions;
 };
-layout(std140, set = 0, binding = 7) uniform SceneLighting
+layout(std140, set = 0, binding = 7) uniform SceneFrame
 {
-    vec4 sunShadowRightAndHalfWidth;
-    vec4 sunShadowUpAndHalfHeight;
-    vec4 sunShadowForwardAndDepthRange;
-    vec4 sunShadowCenterAndNearestDepth;
+    mat4 clipFromWorld;
+    mat4 shadowFromWorld;
+    vec4 cameraPositionAndNearPlane;
     PointLightData pointLights[8];
     vec4 pointLightMeta;
-} lighting;
+} frame;
 
 layout(push_constant) uniform PushConstants
 {
     vec4 vertices[4];
-    vec4 shadowVertices[4];
+    // 64 bytes of per-draw space. Water claims it for its border and ripple
+    // parameters; every other pass leaves it alone. Must stay declared even
+    // where unused: this is one push block shared by every pipeline, so
+    // dropping it here would shift every member below it.
+    vec4 passData[4];
     vec4 color;
     vec4 normalAndAmbientRed;
     vec4 sunDirectionAndAmbientGreen;
@@ -164,7 +167,7 @@ float pointShadowWorldDistance(
 float pointShadowFactor(
     int lightIndex, vec3 fromLight, vec3 surfaceNormal)
 {
-    PointLightData light = lighting.pointLights[lightIndex];
+    PointLightData light = frame.pointLights[lightIndex];
     if (light.shadowOptions.x <= 0.5) {
         return 1.0;
     }
@@ -214,6 +217,10 @@ void main()
         max(pc.materialOptions.z, 0.0001));
     vec2 faceCoord = vec2(inFaceCoordU, inFaceCoordV) * faceTiles;
     vec2 splatLocalTile = SPLAT_LOCAL_ORIGIN + faceCoord;
+    // Genuinely global since C1. These corners used to arrive already
+    // projected, so this "world tile origin" was really a corner of the face
+    // in normalised device coordinates, and the material tiling it drives
+    // drifted with the camera.
     vec2 globalOrigin = min(
         min(pc.vertices[0].xy, pc.vertices[1].xy),
         min(pc.vertices[2].xy, pc.vertices[3].xy));
@@ -268,9 +275,9 @@ void main()
         float shadow = shadowFactor(inShadowPosition, lambertDiffuse);
         float skyFill = smoothstep(-0.35, 1.0, normal.z);
         vec3 pointDiffuseLighting = vec3(0.0);
-        int pointLightCount = clamp(int(lighting.pointLightMeta.x + 0.5), 0, 8);
+        int pointLightCount = clamp(int(frame.pointLightMeta.x + 0.5), 0, 8);
         for (int lightIndex = 0; lightIndex < pointLightCount; ++lightIndex) {
-            PointLightData pointLight = lighting.pointLights[lightIndex];
+            PointLightData pointLight = frame.pointLights[lightIndex];
             vec3 toLight = pointLight.positionAndRange.xyz - inWorldPosition;
             float distanceToLight = length(toLight);
             float range = max(pointLight.positionAndRange.w, 0.001);

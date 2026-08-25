@@ -47,7 +47,7 @@ struct GltfNode {
     std::string name;
     std::vector<uint32_t> children;
     Vec3 translation {};
-    Vec4 rotation { 0.0f, 0.0f, 0.0f, 1.0f };
+    Quat rotation {};
     Vec3 scale { 1.0f, 1.0f, 1.0f };
 };
 
@@ -413,31 +413,6 @@ Vec4 vec4FromArray(const std::vector<float>& values, Vec4 fallback)
     return { values[0], values[1], values[2], values[3] };
 }
 
-Vec3 normalize(Vec3 value)
-{
-    const float length = std::sqrt(
-        value.x * value.x +
-        value.y * value.y +
-        value.z * value.z);
-    if (length <= 0.000001f) {
-        return { 0.0f, 0.0f, 1.0f };
-    }
-    return { value.x / length, value.y / length, value.z / length };
-}
-
-Vec4 normalize(Vec4 value)
-{
-    const float length = std::sqrt(
-        value.x * value.x +
-        value.y * value.y +
-        value.z * value.z +
-        value.w * value.w);
-    if (length <= 0.000001f) {
-        return { 0.0f, 0.0f, 0.0f, 1.0f };
-    }
-    return { value.x / length, value.y / length, value.z / length, value.w / length };
-}
-
 size_t componentCount(std::string_view type)
 {
     if (type == "SCALAR") {
@@ -644,134 +619,6 @@ uint32_t readIndex(
     }
 }
 
-Mat4 identityMatrix()
-{
-    Mat4 result;
-    result.values = {
-        1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f,
-    };
-    return result;
-}
-
-Mat4 multiply(Mat4 left, Mat4 right)
-{
-    Mat4 result;
-    for (size_t column = 0; column < 4; ++column) {
-        for (size_t row = 0; row < 4; ++row) {
-            float value = 0.0f;
-            for (size_t index = 0; index < 4; ++index) {
-                value += left.values[index * 4 + row] * right.values[column * 4 + index];
-            }
-            result.values[column * 4 + row] = value;
-        }
-    }
-    return result;
-}
-
-Mat4 matrixFromTrs(Vec3 translation, Vec4 rotation, Vec3 scale)
-{
-    rotation = normalize(rotation);
-    const float x = rotation.x;
-    const float y = rotation.y;
-    const float z = rotation.z;
-    const float w = rotation.w;
-    const float xx = x * x;
-    const float yy = y * y;
-    const float zz = z * z;
-    const float xy = x * y;
-    const float xz = x * z;
-    const float yz = y * z;
-    const float wx = w * x;
-    const float wy = w * y;
-    const float wz = w * z;
-
-    Mat4 result = identityMatrix();
-    result.values[0] = (1.0f - 2.0f * (yy + zz)) * scale.x;
-    result.values[1] = (2.0f * (xy + wz)) * scale.x;
-    result.values[2] = (2.0f * (xz - wy)) * scale.x;
-
-    result.values[4] = (2.0f * (xy - wz)) * scale.y;
-    result.values[5] = (1.0f - 2.0f * (xx + zz)) * scale.y;
-    result.values[6] = (2.0f * (yz + wx)) * scale.y;
-
-    result.values[8] = (2.0f * (xz + wy)) * scale.z;
-    result.values[9] = (2.0f * (yz - wx)) * scale.z;
-    result.values[10] = (1.0f - 2.0f * (xx + yy)) * scale.z;
-
-    result.values[12] = translation.x;
-    result.values[13] = translation.y;
-    result.values[14] = translation.z;
-    return result;
-}
-
-Vec3 transformPoint(Mat4 matrix, Vec3 point)
-{
-    return {
-        matrix.values[0] * point.x + matrix.values[4] * point.y + matrix.values[8] * point.z + matrix.values[12],
-        matrix.values[1] * point.x + matrix.values[5] * point.y + matrix.values[9] * point.z + matrix.values[13],
-        matrix.values[2] * point.x + matrix.values[6] * point.y + matrix.values[10] * point.z + matrix.values[14],
-    };
-}
-
-Vec3 transformVector(Mat4 matrix, Vec3 vector)
-{
-    return {
-        matrix.values[0] * vector.x + matrix.values[4] * vector.y + matrix.values[8] * vector.z,
-        matrix.values[1] * vector.x + matrix.values[5] * vector.y + matrix.values[9] * vector.z,
-        matrix.values[2] * vector.x + matrix.values[6] * vector.y + matrix.values[10] * vector.z,
-    };
-}
-
-Vec3 add(Vec3 left, Vec3 right)
-{
-    return { left.x + right.x, left.y + right.y, left.z + right.z };
-}
-
-Vec3 multiply(Vec3 value, float scalar)
-{
-    return { value.x * scalar, value.y * scalar, value.z * scalar };
-}
-
-Vec4 lerp(Vec4 left, Vec4 right, float t)
-{
-    return {
-        left.x + (right.x - left.x) * t,
-        left.y + (right.y - left.y) * t,
-        left.z + (right.z - left.z) * t,
-        left.w + (right.w - left.w) * t,
-    };
-}
-
-Vec4 slerp(Vec4 left, Vec4 right, float t)
-{
-    left = normalize(left);
-    right = normalize(right);
-    float dot = left.x * right.x + left.y * right.y + left.z * right.z + left.w * right.w;
-    if (dot < 0.0f) {
-        right = { -right.x, -right.y, -right.z, -right.w };
-        dot = -dot;
-    }
-    if (dot > 0.9995f) {
-        return normalize(lerp(left, right, t));
-    }
-
-    const float theta0 = std::acos(std::clamp(dot, -1.0f, 1.0f));
-    const float theta = theta0 * t;
-    const float sinTheta = std::sin(theta);
-    const float sinTheta0 = std::sin(theta0);
-    const float scaleLeft = std::cos(theta) - dot * sinTheta / sinTheta0;
-    const float scaleRight = sinTheta / sinTheta0;
-    return {
-        left.x * scaleLeft + right.x * scaleRight,
-        left.y * scaleLeft + right.y * scaleRight,
-        left.z * scaleLeft + right.z * scaleRight,
-        left.w * scaleLeft + right.w * scaleRight,
-    };
-}
-
 Vec4 sampleKeyframes(const AnimationKeyframes& keyframes, float timeSeconds, bool rotation)
 {
     if (keyframes.times.empty() || keyframes.values.empty()) {
@@ -792,9 +639,13 @@ Vec4 sampleKeyframes(const AnimationKeyframes& keyframes, float timeSeconds, boo
     const float t = rightTime > leftTime
         ? (timeSeconds - leftTime) / (rightTime - leftTime)
         : 0.0f;
-    return rotation
-        ? slerp(keyframes.values[leftIndex], keyframes.values[rightIndex], t)
-        : lerp(keyframes.values[leftIndex], keyframes.values[rightIndex], t);
+    if (!rotation) {
+        return lerp(keyframes.values[leftIndex], keyframes.values[rightIndex], t);
+    }
+    return toVec4(slerp(
+        quatFromVec4(keyframes.values[leftIndex]),
+        quatFromVec4(keyframes.values[rightIndex]),
+        t));
 }
 
 void includeBounds(SourceBounds& bounds, Vec3 position)
@@ -847,11 +698,9 @@ MeshVertex normalizedVertex(
             (position.y - bounds.minimum.y) / extent.y,
         };
     }
-    vertex.normal = normalize(Vec3 {
-        normal.x,
-        -normal.z,
-        normal.y,
-    });
+    vertex.normal = normalizeOr(
+        Vec3 { normal.x, -normal.z, normal.y },
+        Vec3 { 0.0f, 0.0f, 1.0f });
     if (options.rotateHalfTurn) {
         if (options.preserveSourceScale) {
             vertex.position.x = -vertex.position.x;
@@ -912,7 +761,8 @@ std::vector<GltfNode> parseNodes(const std::string& json)
             .name = stringField(object, "name").value_or(""),
             .children = unsignedArrayField(object, "children"),
             .translation = vec3FromArray(floatArrayField(object, "translation"), {}),
-            .rotation = normalize(vec4FromArray(floatArrayField(object, "rotation"), { 0.0f, 0.0f, 0.0f, 1.0f })),
+            .rotation = normalize(quatFromVec4(vec4FromArray(
+                floatArrayField(object, "rotation"), { 0.0f, 0.0f, 0.0f, 1.0f }))),
             .scale = vec3FromArray(floatArrayField(object, "scale"), { 1.0f, 1.0f, 1.0f }),
         });
     }
@@ -1125,11 +975,9 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
                 (vertex.position.y - minimum.y) / extent.y,
             };
         }
-        vertex.normal = normalize(Vec3 {
-            vertex.normal.x,
-            -vertex.normal.z,
-            vertex.normal.y,
-        });
+        vertex.normal = normalizeOr(
+            Vec3 { vertex.normal.x, -vertex.normal.z, vertex.normal.y },
+            Vec3 { 0.0f, 0.0f, 1.0f });
         if (options.rotateHalfTurn) {
             if (options.preserveSourceScale) {
                 vertex.position.x = -vertex.position.x;
@@ -1401,7 +1249,8 @@ GltfAnimationClip loadGltfAnimationClip(const std::filesystem::path& path, uint3
             channel.keyframes.times.push_back(keyTime);
             clip.durationSeconds = std::max(clip.durationSeconds, keyTime);
             if (channelPath == AnimationChannelPath::Rotation) {
-                channel.keyframes.values.push_back(normalize(readVec4(output, bufferViews[output.bufferView], document.buffer, i)));
+                channel.keyframes.values.push_back(toVec4(normalize(quatFromVec4(
+                    readVec4(output, bufferViews[output.bufferView], document.buffer, i)))));
             } else {
                 const Vec3 value = readVec3(output, bufferViews[output.bufferView], document.buffer, i);
                 channel.keyframes.values.push_back({ value.x, value.y, value.z, 0.0f });
@@ -1417,7 +1266,7 @@ namespace {
 
 struct NodePose {
     Vec3 translation {};
-    Vec4 rotation { 0.0f, 0.0f, 0.0f, 1.0f };
+    Quat rotation {};
     Vec3 scale { 1.0f, 1.0f, 1.0f };
 };
 
@@ -1458,7 +1307,7 @@ std::vector<NodePose> sampleAnimationPoses(const SkinnedMeshData& mesh, const Gl
             pose.translation = { value.x, value.y, value.z };
             break;
         case AnimationChannelPath::Rotation:
-            pose.rotation = normalize(value);
+            pose.rotation = normalize(quatFromVec4(value));
             break;
         case AnimationChannelPath::Scale:
             pose.scale = { value.x, value.y, value.z };
@@ -1478,19 +1327,9 @@ Vec3 lerpVec3(Vec3 a, Vec3 b, float t)
     };
 }
 
-Vec4 blendRotation(Vec4 a, Vec4 b, float t)
+Quat blendRotation(Quat a, Quat b, float t)
 {
-    // Normalized lerp along the shortest arc; plenty for short crossfades.
-    const float dot = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
-    if (dot < 0.0f) {
-        b = { -b.x, -b.y, -b.z, -b.w };
-    }
-    return normalize(Vec4 {
-        a.x + (b.x - a.x) * t,
-        a.y + (b.y - a.y) * t,
-        a.z + (b.z - a.z) * t,
-        a.w + (b.w - a.w) * t,
-    });
+    return slerp(a, b, t);
 }
 
 SkinnedPoseMatrices poseMatricesFromPoses(
@@ -1530,15 +1369,17 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
                 if (weight <= 0.0f || joint >= pose.jointMatrices.size()) {
                     continue;
                 }
-                skinnedPosition = add(skinnedPosition, multiply(transformPoint(pose.jointMatrices[joint], source.position), weight));
-                skinnedNormal = add(skinnedNormal, multiply(transformVector(pose.jointMatrices[joint], source.normal), weight));
+                skinnedPosition +=
+                    transformPoint(pose.jointMatrices[joint], source.position) * weight;
+                skinnedNormal +=
+                    transformVector(pose.jointMatrices[joint], source.normal) * weight;
             }
             if (skinnedNormal.x == 0.0f && skinnedNormal.y == 0.0f && skinnedNormal.z == 0.0f) {
                 skinnedNormal = source.normal;
             }
             result.vertices[vertexIndex] = normalizedVertex(
                 skinnedPosition,
-                normalize(skinnedNormal),
+                normalizeOr(skinnedNormal, Vec3 { 0.0f, 0.0f, 1.0f }),
                 source.uv,
                 0u,
                 bounds,
@@ -1570,8 +1411,10 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
             MeshVertex transformed = normalizedVertex(
                 transformPoint(
                     pose.nodeMatrices[attachment.nodeIndex], sourcePosition),
-                normalize(transformVector(
-                    pose.nodeMatrices[attachment.nodeIndex], sourceNormal)),
+                normalizeOr(
+                    transformVector(
+                        pose.nodeMatrices[attachment.nodeIndex], sourceNormal),
+                    Vec3 { 0.0f, 0.0f, 1.0f }),
                 vertex.uv,
                 vertex.textureIndex,
                 bounds,
@@ -1602,11 +1445,11 @@ SkinnedPoseMatrices poseMatricesFromPoses(
         mesh.inverseBindMatrices.size() != mesh.jointNodeIndices.size()) {
         throw std::runtime_error("Cannot sample an incomplete glTF skeleton");
     }
-    std::vector<Mat4> localMatrices(mesh.nodes.size(), identityMatrix());
+    std::vector<Mat4> localMatrices(mesh.nodes.size(), mat4Identity);
     SkinnedPoseMatrices result;
-    result.nodeMatrices.assign(mesh.nodes.size(), identityMatrix());
+    result.nodeMatrices.assign(mesh.nodes.size(), mat4Identity);
     for (size_t i = 0; i < mesh.nodes.size(); ++i) {
-        localMatrices[i] = matrixFromTrs(
+        localMatrices[i] = mat4FromTrs(
             poses[i].translation, poses[i].rotation, poses[i].scale);
     }
     std::vector<bool> globalComputed(mesh.nodes.size(), false);
@@ -1617,7 +1460,7 @@ SkinnedPoseMatrices poseMatricesFromPoses(
         const int parent = mesh.nodes[nodeIndex].parent;
         result.nodeMatrices[nodeIndex] =
             parent >= 0 && static_cast<size_t>(parent) < result.nodeMatrices.size()
-            ? multiply(self(self, static_cast<size_t>(parent)), localMatrices[nodeIndex])
+            ? self(self, static_cast<size_t>(parent)) * localMatrices[nodeIndex]
             : localMatrices[nodeIndex];
         globalComputed[nodeIndex] = true;
         return result.nodeMatrices[nodeIndex];
@@ -1629,8 +1472,8 @@ SkinnedPoseMatrices poseMatricesFromPoses(
     for (size_t i = 0; i < mesh.jointNodeIndices.size(); ++i) {
         const uint32_t nodeIndex = mesh.jointNodeIndices[i];
         result.jointMatrices.push_back(nodeIndex < result.nodeMatrices.size()
-                ? multiply(result.nodeMatrices[nodeIndex], mesh.inverseBindMatrices[i])
-                : identityMatrix());
+                ? result.nodeMatrices[nodeIndex] * mesh.inverseBindMatrices[i]
+                : mat4Identity);
     }
     return result;
 }

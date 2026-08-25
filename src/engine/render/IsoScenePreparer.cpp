@@ -12,78 +12,6 @@
 namespace sokoban {
 namespace {
 
-Vec3 subtract(Vec3 left, Vec3 right)
-{
-    return { left.x - right.x, left.y - right.y, left.z - right.z };
-}
-
-Vec2 subtract(Vec2 left, Vec2 right)
-{
-    return { left.x - right.x, left.y - right.y };
-}
-
-Vec3 add(Vec3 left, Vec3 right)
-{
-    return { left.x + right.x, left.y + right.y, left.z + right.z };
-}
-
-Vec3 multiply(Vec3 value, float scalar)
-{
-    return { value.x * scalar, value.y * scalar, value.z * scalar };
-}
-
-Vec3 rotateEulerXyz(Vec3 value, Vec3 radians)
-{
-    const float cosineX = std::cos(radians.x);
-    const float sineX = std::sin(radians.x);
-    value = {
-        value.x,
-        cosineX * value.y - sineX * value.z,
-        sineX * value.y + cosineX * value.z,
-    };
-
-    const float cosineY = std::cos(radians.y);
-    const float sineY = std::sin(radians.y);
-    value = {
-        cosineY * value.x + sineY * value.z,
-        value.y,
-        -sineY * value.x + cosineY * value.z,
-    };
-
-    const float cosineZ = std::cos(radians.z);
-    const float sineZ = std::sin(radians.z);
-    return {
-        cosineZ * value.x - sineZ * value.y,
-        sineZ * value.x + cosineZ * value.y,
-        value.z,
-    };
-}
-
-float dot(Vec3 left, Vec3 right)
-{
-    return left.x * right.x + left.y * right.y + left.z * right.z;
-}
-
-Vec3 cross(Vec3 left, Vec3 right)
-{
-    return {
-        left.y * right.z - left.z * right.y,
-        left.z * right.x - left.x * right.z,
-        left.x * right.y - left.y * right.x,
-    };
-}
-
-float cross2D(Vec2 left, Vec2 right)
-{
-    return left.x * right.y - left.y * right.x;
-}
-
-Vec3 normalize(Vec3 value)
-{
-    const float length = std::sqrt(dot(value, value));
-    return length <= 0.0001f ? Vec3 {} : multiply(value, 1.0f / length);
-}
-
 Vec4 projectIsoPointToClip(
     const IsoRenderLayout& layout,
     Vec2 renderExtent,
@@ -115,6 +43,64 @@ Vec4 projectIsoPointToClip(
         cameraZ,
     };
 }
+
+} // namespace
+
+Mat4 isoClipFromWorld(const IsoRenderLayout& layout, Vec2 renderExtent)
+{
+    const float aspect =
+        std::max(renderExtent.x, 1.0f) / std::max(renderExtent.y, 1.0f);
+    const float nearDepth = std::max(layout.nearestDepth, 0.001f);
+    const float farDepth = std::max(layout.farthestDepth, nearDepth + 0.001f);
+    return mat4PerspectiveOffCenter(
+               layout.focalLength,
+               aspect,
+               nearDepth,
+               farDepth,
+               layout.projectedCenter,
+               layout.fitScale) *
+        mat4View(
+               layout.cameraPosition,
+               layout.cameraRight,
+               layout.cameraUp,
+               layout.cameraForward);
+}
+
+Mat4 shadowClipFromWorld(const ShadowRenderLayout& layout)
+{
+    const float halfWidth = std::max(layout.halfWidth, 0.001f);
+    const float halfHeight = std::max(layout.halfHeight, 0.001f);
+    const float depthRange = std::max(
+        layout.farthestDepth - layout.nearestDepth, 0.001f);
+    // Note the depth row measures along lightForward from the world origin,
+    // not from the layout's centre - that is what projectShadowPoint does, and
+    // the difference is a constant offset that would silently shift every
+    // shadow if it were "tidied up".
+    const Mat4 result { {
+        layout.lightRight.x / halfWidth,
+        layout.lightUp.x / halfHeight,
+        layout.lightForward.x / depthRange,
+        0.0f,
+
+        layout.lightRight.y / halfWidth,
+        layout.lightUp.y / halfHeight,
+        layout.lightForward.y / depthRange,
+        0.0f,
+
+        layout.lightRight.z / halfWidth,
+        layout.lightUp.z / halfHeight,
+        layout.lightForward.z / depthRange,
+        0.0f,
+
+        -dot(layout.center, layout.lightRight) / halfWidth,
+        -dot(layout.center, layout.lightUp) / halfHeight,
+        -layout.nearestDepth / depthRange,
+        1.0f,
+    } };
+    return result;
+}
+
+namespace {
 
 std::array<Vec3, 8> logicalTileCorners(const RenderFrameData::Tile& tile)
 {
@@ -282,6 +268,22 @@ IsoRenderLayout calculateIsoLayout(
     float nearestDepth = std::numeric_limits<float>::max();
     float farthestDepth = std::numeric_limits<float>::lowest();
 
+    // The depth range and the on-screen fit are separate questions and must
+    // stay separate. The fit is authored: an explicit cameraExtent decides
+    // what the camera frames, and tiles outside it are deliberately excluded
+    // so a decoration cannot zoom the board out. The depth range is not a
+    // matter of taste - it has to cover everything that will actually be
+    // drawn, because projectIsoPoint *clamps* z to [0, 1] rather than
+    // clipping. Geometry past the far plane therefore does not disappear, it
+    // lands on z = 1.0 exactly, along with every other such surface, and the
+    // depth test can no longer tell those surfaces apart.
+    auto includeDepth = [&](Vec3 worldPoint) {
+        const float cameraDepth =
+            dot(subtract(worldPoint, layout.cameraPosition),
+                layout.cameraForward);
+        nearestDepth = std::min(nearestDepth, cameraDepth);
+        farthestDepth = std::max(farthestDepth, cameraDepth);
+    };
     auto includePoint = [&](Vec3 worldPoint) {
         const Vec3 projected =
             IsoScenePreparer::projectIsoPoint(
@@ -290,11 +292,7 @@ IsoRenderLayout calculateIsoLayout(
         minPoint.y = std::min(minPoint.y, projected.y);
         maxPoint.x = std::max(maxPoint.x, projected.x);
         maxPoint.y = std::max(maxPoint.y, projected.y);
-        const float cameraDepth =
-            dot(subtract(worldPoint, layout.cameraPosition),
-                layout.cameraForward);
-        nearestDepth = std::min(nearestDepth, cameraDepth);
-        farthestDepth = std::max(farthestDepth, cameraDepth);
+        includeDepth(worldPoint);
     };
 
     const float left = cameraExtent.originX;
@@ -315,17 +313,26 @@ IsoRenderLayout calculateIsoLayout(
          }) {
         includePoint(point);
     }
-    if (!frameData.cameraExtent) {
-        for (const RenderFrameData::Tile& tile : frameData.tiles) {
-            if (!tile.isEditorPreview && tile.affectsCameraFit) {
-                for (Vec3 point : tileCorners(tile)) {
-                    includePoint(point);
-                }
+    // Every tile is walked for depth. Only the ones that own the framing are
+    // also walked for the fit, and only when the fit is not authored.
+    const bool fitToContent = !frameData.cameraExtent;
+    for (const RenderFrameData::Tile& tile : frameData.tiles) {
+        const bool framesTheCamera = fitToContent &&
+            !tile.isEditorPreview && tile.affectsCameraFit;
+        for (Vec3 point : tileCorners(tile)) {
+            if (framesTheCamera) {
+                includePoint(point);
+            } else {
+                includeDepth(point);
             }
         }
-        for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
-            for (Vec3 point : face.vertices) {
+    }
+    for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
+        for (Vec3 point : face.vertices) {
+            if (fitToContent) {
                 includePoint(point);
+            } else {
+                includeDepth(point);
             }
         }
     }
@@ -745,6 +752,26 @@ ModelTransformPoints IsoScenePreparer::modelTransformPoints(
     return result;
 }
 
+std::array<Vec4, 4> IsoScenePreparer::modelWorldTransform(
+    const RenderFrameData::Tile& tile)
+{
+    const ModelTransformPoints points = modelTransformPoints(tile);
+    const auto axis = [&points](Vec3 endPoint) {
+        return Vec4 {
+            endPoint.x - points.origin.x,
+            endPoint.y - points.origin.y,
+            endPoint.z - points.origin.z,
+            0.0f,
+        };
+    };
+    return {
+        axis(points.xPoint),
+        axis(points.yPoint),
+        axis(points.zPoint),
+        Vec4 { points.origin.x, points.origin.y, points.origin.z, 1.0f },
+    };
+}
+
 std::array<Vec4, 4> IsoScenePreparer::modelClipTransform(
     const IsoRenderLayout& layout,
     Vec2 renderExtent,
@@ -800,6 +827,7 @@ void IsoScenePreparer::prepare(
 {
     scene.isoFaces.clear();
     scene.opaqueFaceIndices.clear();
+    scene.opaqueBlendedFirst = 0;
     scene.translucentFaceIndices.clear();
     scene.pickFaceIndices.clear();
     scene.opaqueModelIndices.clear();
@@ -878,6 +906,7 @@ void IsoScenePreparer::prepare(
             .depth = faceDepth(scene.isoLayout, vertices),
         };
         for (std::size_t i = 0; i < vertices.size(); ++i) {
+            face.worldVertices[i] = vertices[i];
             face.vertices[i] = projectIsoPoint(
                 scene.isoLayout, scene.renderExtent, vertices[i]);
             face.clipW[i] = std::max(
@@ -885,8 +914,6 @@ void IsoScenePreparer::prepare(
                     subtract(vertices[i], scene.isoLayout.cameraPosition),
                     scene.isoLayout.cameraForward),
                 0.001f);
-            face.shadowVertices[i] =
-                projectShadowPoint(scene.shadowLayout, vertices[i]);
         }
         const std::size_t index = scene.isoFaces.size();
         scene.isoFaces.push_back(face);
@@ -1123,10 +1150,9 @@ void IsoScenePreparer::prepare(
                 .depth = faceDepth(scene.isoLayout, source.vertices),
             };
             for (std::size_t i = 0; i < source.vertices.size(); ++i) {
+                face.worldVertices[i] = source.vertices[i];
                 face.vertices[i] = projectIsoPoint(
                     scene.isoLayout, scene.renderExtent, source.vertices[i]);
-                face.shadowVertices[i] =
-                    projectShadowPoint(scene.shadowLayout, source.vertices[i]);
             }
             (face.material == PreparedSurfaceMaterial::MirrorEnergy
                     ? scene.translucentFaceIndices
@@ -1147,7 +1173,43 @@ void IsoScenePreparer::prepare(
         // hidden surface is shaded and then overwritten. Picking is unaffected
         // - it walks pickFaceIndices, which is unsorted and compares depth
         // explicitly.
-        std::ranges::sort(scene.opaqueFaceIndices, nearerFirst);
+        //
+        // Two things make the opaque order matter anyway, and front-to-back
+        // has to handle both or it silently breaks geometry that the
+        // painter's order was covering for:
+        //
+        // 1. A face in this list may carry a sub-1.0 alpha - the editor's
+        //    ladder-rung preview does. Those blend, and they write depth.
+        //    Drawn front to back, such a face writes depth before the
+        //    geometry behind it is drawn, so it blends against the
+        //    background instead of against that geometry, and the result is
+        //    a hole rather than a tint. They are partitioned off and drawn
+        //    last, farthest first, which is the order the whole list used to
+        //    be in.
+        // 2. Coincident fully opaque surfaces are resolved by the depth
+        //    test, and LESS_OR_EQUAL hands the pixel to whichever drew last.
+        //    Reversing the order therefore reverses every tie. The recorder
+        //    answers that by running this prefix on LESS; the partition is
+        //    what tells it where the prefix ends.
+        if (opaqueFrontToBackSort_) {
+            const auto blendedBegin = std::stable_partition(
+                scene.opaqueFaceIndices.begin(),
+                scene.opaqueFaceIndices.end(),
+                [&scene](std::size_t index) {
+                    return scene.isoFaces[index].color.w >= 1.0f;
+                });
+            std::sort(
+                scene.opaqueFaceIndices.begin(), blendedBegin, nearerFirst);
+            std::sort(
+                blendedBegin, scene.opaqueFaceIndices.end(), fartherFirst);
+            scene.opaqueBlendedFirst = static_cast<std::size_t>(
+                blendedBegin - scene.opaqueFaceIndices.begin());
+        } else {
+            // Legacy order: one back-to-front list, blended faces left
+            // interleaved, and no LESS prefix for the recorder to apply.
+            std::ranges::sort(scene.opaqueFaceIndices, fartherFirst);
+            scene.opaqueBlendedFirst = scene.opaqueFaceIndices.size();
+        }
         // Translucent geometry has no such freedom: blending is order
         // dependent, so it must stay farthest first.
         std::ranges::sort(scene.translucentFaceIndices, fartherFirst);
@@ -1189,12 +1251,7 @@ void IsoScenePreparer::prepare(
                     scene.isoLayout.cameraForward),
                 .drawOnTop = source.drawOnTop,
             };
-            for (std::size_t i = 0; i < worldVertices.size(); ++i) {
-                particle.vertices[i] = projectIsoPoint(
-                    scene.isoLayout,
-                    scene.renderExtent,
-                    worldVertices[i]);
-            }
+            particle.vertices = worldVertices;
             scene.particles.push_back(particle);
         }
         std::ranges::sort(
