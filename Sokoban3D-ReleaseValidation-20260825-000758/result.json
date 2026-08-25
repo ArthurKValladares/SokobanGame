@@ -1,9 +1,0 @@
-﻿{
-    "schema":  1,
-    "startedAt":  "2026-08-25T00:07:58.4628065-04:00",
-    "runtimePackage":  "C:\\Users\\arthu\\Documents\\Projects\\Sokoban Game\\out\\shipping\\Sokoban3D-0.1.0-Windows-x64-Runtime.zip",
-    "installer":  null,
-    "automatedPackageGate":  "pass",
-    "manualChecklist":  "pass",
-    "completedAt":  "2026-08-25T00:08:42.9945032-04:00"
-}
