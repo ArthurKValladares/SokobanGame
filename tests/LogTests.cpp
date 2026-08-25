@@ -254,6 +254,44 @@ void testShutdownDrainsWithoutExplicitFlush()
     CHECK(diagnostics.writtenMessages == 1);
 }
 
+void testFileRotationKeepsBoundedHistory()
+{
+    TemporaryDirectory directory;
+    const std::filesystem::path path = directory.path / "log.txt";
+
+    sokoban::log::reset();
+    sokoban::log::configure({
+        .queueCapacity = 64,
+        .flushInterval = std::chrono::seconds(30),
+        .maxFileBytes = 90,
+        .maxArchivedFiles = 2,
+        .stderrEnabled = false,
+    });
+    sokoban::log::addFileSink(path);
+    sokoban::log::info(sokoban::log::Category::Application)
+        << "rotation marker one with enough content to rotate";
+    sokoban::log::flush();
+    sokoban::log::info(sokoban::log::Category::Application)
+        << "rotation marker two with enough content to rotate";
+    sokoban::log::flush();
+    sokoban::log::info(sokoban::log::Category::Application)
+        << "rotation marker three with enough content to rotate";
+    sokoban::log::flush();
+    sokoban::log::info(sokoban::log::Category::Application)
+        << "rotation marker four with enough content to rotate";
+    sokoban::log::flush();
+
+    CHECK(readFile(path).find("rotation marker four") != std::string::npos);
+    CHECK(readFile(path.string() + ".1").find("rotation marker three") !=
+        std::string::npos);
+    CHECK(readFile(path.string() + ".2").find("rotation marker two") !=
+        std::string::npos);
+    CHECK(!std::filesystem::exists(path.string() + ".3"));
+    const sokoban::log::Diagnostics diagnostics = sokoban::log::diagnostics();
+    CHECK(diagnostics.fileRotations == 3);
+    CHECK(diagnostics.fileRotationFailures == 0);
+}
+
 } // namespace
 
 int main()
@@ -263,6 +301,7 @@ int main()
     testPeriodicAndErrorFlushWithoutCallerFlush();
     testConcurrentProducersAndDropDiagnostics();
     testShutdownDrainsWithoutExplicitFlush();
+    testFileRotationKeepsBoundedHistory();
     sokoban::log::reset();
 
     if (failures == 0) {

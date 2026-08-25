@@ -52,8 +52,9 @@ public:
         std::string fileStem = "profile",
         ProfileSections sections = ProfileSections::All);
 
-    // SDL must already be initialized. SDL owns the platform-specific choice
-    // of roaming/local preference storage.
+    // SDL owns the platform-specific choice of roaming/local preference
+    // storage. This query does not require the video subsystem to be running,
+    // allowing diagnostics to start before a window is created.
     [[nodiscard]] static std::filesystem::path preferencePath(
         std::string_view organization,
         std::string_view application);

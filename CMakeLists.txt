@@ -279,6 +279,7 @@ add_library(sokoban_core STATIC
     src/engine/CampaignSession.cpp
     src/engine/BoardLayout.cpp
     src/engine/ContentPipeline.cpp
+    src/engine/CrashDiagnostics.cpp
     src/engine/DecorationAssetRegistry.cpp
     src/engine/DecorationGizmo.cpp
     src/engine/DecorationMeshCatalog.cpp
@@ -345,6 +346,9 @@ target_link_libraries(sokoban_core
     PUBLIC SDL3::SDL3
     PRIVATE Threads::Threads sokoban_json sokoban_stb
 )
+if(WIN32)
+    target_link_libraries(sokoban_core PRIVATE dbghelp)
+endif()
 target_compile_definitions(sokoban_core PRIVATE
     SOKOBAN_GAME_VERSION="${PROJECT_VERSION}"
 )
@@ -804,6 +808,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME logging TARGET sokoban_log_tests
         LIBS sokoban_core
         SOURCES tests/LogTests.cpp
+    )
+    sokoban_add_test(NAME crash_diagnostics TARGET sokoban_crash_diagnostics_tests
+        LIBS sokoban_core
+        SOURCES tests/CrashDiagnosticsTests.cpp
     )
     sokoban_add_test(NAME frame_arena TARGET sokoban_frame_arena_tests
         LIBS sokoban_core

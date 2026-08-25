@@ -88,6 +88,57 @@ namespace {
         record.message + '\n';
 }
 
+[[nodiscard]] bool openLogFile(
+    std::ofstream& file,
+    const std::filesystem::path& path,
+    std::uintmax_t& size)
+{
+    file.open(path, std::ios::out | std::ios::app);
+    if (!file) {
+        return false;
+    }
+    std::error_code error;
+    size = std::filesystem::file_size(path, error);
+    if (error) {
+        // The stream is usable even when a filesystem provider cannot report
+        // its size. Start counting new output rather than abandoning logging.
+        size = 0;
+    }
+    return true;
+}
+
+[[nodiscard]] bool rotateLogFile(
+    const std::filesystem::path& path,
+    std::size_t archiveCount)
+{
+    std::error_code error;
+    const auto archivePath = [&path](std::size_t index) {
+        return std::filesystem::path(
+            path.string() + '.' + std::to_string(index));
+    };
+
+    std::filesystem::remove(archivePath(archiveCount), error);
+    if (error) {
+        return false;
+    }
+    for (std::size_t index = archiveCount; index > 1; --index) {
+        const std::filesystem::path source = archivePath(index - 1);
+        const std::filesystem::path destination = archivePath(index);
+        const bool exists = std::filesystem::exists(source, error);
+        if (error) {
+            return false;
+        }
+        if (exists) {
+            std::filesystem::rename(source, destination, error);
+            if (error) {
+                return false;
+            }
+        }
+    }
+    std::filesystem::rename(path, archivePath(1), error);
+    return !error;
+}
+
 class ProcessLogger {
 public:
     ProcessLogger()
@@ -151,6 +202,10 @@ public:
         configuration.flushInterval = std::max(
             configuration.flushInterval,
             std::chrono::milliseconds(1));
+        if (configuration.maxFileBytes != 0) {
+            configuration.maxArchivedFiles = std::max<std::size_t>(
+                configuration.maxArchivedFiles, 1);
+        }
         shutdown();
         std::lock_guard lock(mutex_);
         configuration_ = configuration;
@@ -274,6 +329,7 @@ private:
     void writerMain()
     {
         std::ofstream file;
+        std::uintmax_t fileSize = 0;
         uint64_t appliedFileConfiguration = 0;
         auto nextPeriodicFlush =
             std::chrono::steady_clock::now() +
@@ -324,17 +380,17 @@ private:
                 requestedFileConfiguration !=
                 appliedFileConfiguration;
             bool fileOpenFailed = false;
+            uint64_t fileRotations = 0;
+            uint64_t fileRotationFailures = 0;
             if (fileConfigurationChanged) {
                 file.close();
                 file.clear();
+                fileSize = 0;
                 if (!requestedPath.empty()) {
                     std::error_code error;
                     std::filesystem::create_directories(
                         requestedPath.parent_path(), error);
-                    file.open(
-                        requestedPath,
-                        std::ios::out | std::ios::app);
-                    if (!file) {
+                    if (error || !openLogFile(file, requestedPath, fileSize)) {
                         fileOpenFailed = true;
                         if (configuration.stderrEnabled) {
                             std::cerr
@@ -346,6 +402,40 @@ private:
                 appliedFileConfiguration =
                     requestedFileConfiguration;
             }
+
+            const auto writeLine = [&](const std::string& line) {
+                if (!file.is_open()) {
+                    return;
+                }
+                if (configuration.maxFileBytes != 0 &&
+                    fileSize != 0 &&
+                    line.size() > configuration.maxFileBytes -
+                        std::min(fileSize, configuration.maxFileBytes)) {
+                    file.flush();
+                    file.close();
+                    file.clear();
+                    if (rotateLogFile(
+                            requestedPath,
+                            configuration.maxArchivedFiles)) {
+                        ++fileRotations;
+                        file.open(requestedPath, std::ios::out | std::ios::trunc);
+                        fileSize = 0;
+                    } else {
+                        ++fileRotationFailures;
+                        (void)openLogFile(file, requestedPath, fileSize);
+                    }
+                    if (!file) {
+                        fileOpenFailed = true;
+                        return;
+                    }
+                }
+                file << line;
+                if (file) {
+                    fileSize += line.size();
+                } else {
+                    fileOpenFailed = true;
+                }
+            };
 
             if (dropped != 0) {
                 detail::Record report {
@@ -361,9 +451,7 @@ private:
                 if (configuration.stderrEnabled) {
                     std::cerr << line;
                 }
-                if (file.is_open()) {
-                    file << line;
-                }
+                writeLine(line);
             }
 
             bool containsError = false;
@@ -372,9 +460,7 @@ private:
                 if (configuration.stderrEnabled) {
                     std::cerr << line;
                 }
-                if (file.is_open()) {
-                    file << line;
-                }
+                writeLine(line);
                 containsError |= record.level == Level::Error;
             }
 
@@ -389,6 +475,9 @@ private:
                 }
                 if (file.is_open()) {
                     file.flush();
+                    if (!file) {
+                        fileOpenFailed = true;
+                    }
                 }
                 nextPeriodicFlush =
                     std::chrono::steady_clock::now() +
@@ -411,6 +500,8 @@ private:
                 if (fileOpenFailed) {
                     ++diagnostics_.fileSinkFailures;
                 }
+                diagnostics_.fileRotations += fileRotations;
+                diagnostics_.fileRotationFailures += fileRotationFailures;
                 diagnostics_.fileSinkOpen = file.is_open();
                 writerActive_ = false;
                 shouldStop = stopping_ &&

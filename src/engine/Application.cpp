@@ -100,12 +100,6 @@ Application::Application()
 #endif
     , renderFrameArena_("render frame", renderFrameArenaBytes())
 {
-    // Leave a diagnostic trail next to the profiles so shipped builds can be
-    // debugged from the save directory; Debug builds also emit debug traces.
-    log::addFileSink(saveSlots_.directory() / "log.txt");
-#if SOKOBAN_ENABLE_DEBUG_UI
-    log::setMinimumLevel(log::Level::Debug);
-#endif
     log::info(log::Category::Persistence)
         << saveSlots_.progressStatus();
     buildLevelCatalog();

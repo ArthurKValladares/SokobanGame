@@ -37,6 +37,10 @@ inline constexpr std::size_t categoryCount =
 struct Configuration {
     std::size_t queueCapacity = 4096;
     std::chrono::milliseconds flushInterval { 1000 };
+    // A zero limit deliberately disables file rotation. Otherwise the active
+    // log is capped and the newest archived logs use .1, .2, ... suffixes.
+    std::uintmax_t maxFileBytes = 2 * 1024 * 1024;
+    std::size_t maxArchivedFiles = 5;
     bool stderrEnabled = true;
 };
 
@@ -48,6 +52,8 @@ struct Diagnostics {
     uint64_t droppedMessageReports = 0;
     uint64_t flushes = 0;
     uint64_t fileSinkFailures = 0;
+    uint64_t fileRotations = 0;
+    uint64_t fileRotationFailures = 0;
     std::array<uint64_t, categoryCount> droppedByCategory {};
     std::size_t queuedMessages = 0;
     std::size_t queueCapacity = 0;

@@ -153,6 +153,19 @@ signs and verifies the final installer with SHA-256 and an RFC 3161 timestamp.
 It fails rather than emitting an unsigned artifact when the certificate or
 signing tools are unavailable.
 
+## Crash and Log Diagnostics
+
+At startup, the game opens its diagnostic log next to the player profile
+directory. `log.txt` is capped at 2 MiB and retains the five newest prior
+sessions as `log.txt.1` through `log.txt.5`, preventing a long-lived install
+from consuming unbounded disk space. Each session begins with the game version.
+
+On Windows, both unhandled crashes and fatal exceptions caught during startup
+or the game loop produce a local minidump in `crashes/`. The fatal dialog names
+the available log and dump paths and asks players to include them in a support
+report. The dump is intentionally kept out of the install folder; its matching
+PDB belongs in the separately retained Symbols ZIP.
+
 ## Default Controls
 
 | Action | Keyboard | Gamepad |

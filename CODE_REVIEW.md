@@ -483,8 +483,15 @@ publisher cache value before public release. The local environment did not
 have Inno Setup or a signing certificate, so installer compilation and a real
 Authenticode verification remain release-machine acceptance checks.
 
-The remaining productization gaps are crash dump/minidump collection, rotating
-logs, an actionable fatal-error UI, and a defined shader
+**Crash diagnostics: Fixed on 2026-08-24.** A top-level fatal path flushes the
+log, writes a Windows minidump, and opens a native dialog that explains the
+failure and names the support artifacts. An unhandled-exception filter and
+terminate handler also write a best-effort local minidump. Logs now start
+before `Application` construction, include a session/version record, cap the
+active file at 2 MiB, and retain five bounded rotations. Headless tests cover
+the report wording, a real minidump, and rotation/pruning behavior.
+
+The remaining productization gap here is a defined shader
 optimization/reflection policy. The product version is still `0.1.0` and must
 be advanced for an actual release.
 
@@ -531,8 +538,6 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
   `available - padding` in its error message when alignment padding exceeds
   remaining capacity. Allocation still fails correctly, but the diagnostic
   reports a huge bogus byte count.
-- [`Log`](src/engine/Log.cpp#L334) appends forever to one `log.txt`. Add bounded
-  rotation and session/build metadata.
 - [`AudioSystem::available`](src/engine/AudioSystem.cpp#L161) defines overall
   audio availability as engine initialization plus loaded footsteps,
   conflating subsystem health with one sound category.
@@ -596,7 +601,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
    symbols.
 3. [Complete] Add application metadata, icon/version resources, installer,
    and signing.
-4. Add crash dumps, rotating logs, and actionable fatal-error UI.
+4. [Complete] Add crash dumps, rotating logs, and actionable fatal-error UI.
 5. Complete frame-pacing controls and minimize/unfocused behavior.
 6. Implement or remove placeholder accessibility settings.
 7. Validate the final package on clean supported machines and GPU drivers.
