@@ -36,9 +36,15 @@
 #include <optional>
 #include <vector>
 
+#ifndef SOKOBAN_ENABLE_DEBUG_UI
+#define SOKOBAN_ENABLE_DEBUG_UI 0
+#endif
+
 namespace sokoban {
 
+#if SOKOBAN_ENABLE_DEBUG_UI
 class ApplicationTools;
+#endif
 
 class Application {
 public:
@@ -49,10 +55,12 @@ public:
     Application& operator=(const Application&) = delete;
 
     void run();
+#if SOKOBAN_ENABLE_DEBUG_UI
     // Renders each tile type through the normal frame path and writes the
     // captured result to the source and staged asset trees. Returns false if
     // any tile failed. Blocking; the process is expected to exit afterwards.
     [[nodiscard]] bool bakeTileThumbnails();
+#endif
 
 private:
     void loadCurrentScreen();
@@ -77,7 +85,9 @@ private:
         std::optional<LevelLocation> location = std::nullopt,
         bool composedOverworld = false);
     void advanceScreen();
+#if SOKOBAN_ENABLE_DEBUG_UI
     void solveCurrentScreenForDebug();
+#endif
     void handlePuzzleCompleted(const CampaignSession::PuzzleCompleted& completed);
     void beginLevelTransition(std::function<void()> midpointAction);
     void updateLevelTransition(float dt);
@@ -151,7 +161,9 @@ private:
     GameplayPresentation presentation_;
     LevelTransition levelTransition_;
     std::function<void()> levelTransitionMidpointAction_;
+#if SOKOBAN_ENABLE_DEBUG_UI
     std::unique_ptr<ApplicationTools> tools_;
+#endif
     FrameArena renderFrameArena_;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;
     float overworldOverviewProgress_ = 0.0f;

@@ -1,0 +1,42 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "shipping",
+      "displayName": "Shipping package (x64)",
+      "description": "Editor-free Release build with LTO and a separate PDB symbols package.",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/out/shipping",
+      "cacheVariables": {
+        "CMAKE_CONFIGURATION_TYPES": "Release",
+        "SOKOBAN_SHIPPING_BUILD": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "shipping",
+      "configurePreset": "shipping",
+      "configuration": "Release",
+      "targets": [
+        "sokoban"
+      ]
+    }
+  ],
+  "packagePresets": [
+    {
+      "name": "shipping",
+      "configurePreset": "shipping",
+      "configurations": ["Release"],
+      "generators": [
+        "ZIP"
+      ]
+    }
+  ]
+}

@@ -100,6 +100,24 @@ Production code is compiled once into `sokoban_core`, `sokoban_ui`, and
 `sokoban_render_vulkan`; tests link those libraries rather than recompiling
 engine implementation files.
 
+## Shipping Package
+
+The Windows `shipping` preset produces an optimized, editor-free x64 build.
+It disables validation, tests, the Debug ImGui workspace, and all content
+editing source files; enables MSVC LTO; and emits the optimized executable's
+PDB into a separate Symbols ZIP rather than the player-facing Runtime ZIP.
+
+```powershell
+cmake --preset shipping
+cmake --build --preset shipping
+cpack --preset shipping
+```
+
+The two ZIPs must be published together with matching version/build metadata:
+give players only the `-Runtime.zip` archive and retain the `-Symbols.zip`
+archive for crash-dump symbolication. The shipping preset is intentionally
+MSVC-only because PDB separation is part of its output contract.
+
 ## Default Controls
 
 | Action | Keyboard | Gamepad |

@@ -19,12 +19,58 @@ if(MSVC)
 endif()
 
 option(SOKOBAN_ENABLE_VALIDATION "Enable Vulkan validation layers in debug builds" ON)
+option(SOKOBAN_SHIPPING_BUILD
+    "Configure a player-facing, editor-free release package" OFF)
+option(SOKOBAN_ENABLE_DEVELOPER_TOOLS
+    "Compile the Debug-only ImGui workspace and content-editing tools" ON)
+option(SOKOBAN_ENABLE_LTO
+    "Enable interprocedural optimization for Release targets" OFF)
+option(SOKOBAN_INSTALL_EXTERNAL_SYMBOLS
+    "Install MSVC Program Database files in a separate symbols component" OFF)
 option(SOKOBAN_ENABLE_SANITIZERS
     "Instrument Sokoban targets with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(SOKOBAN_ENABLE_CLANG_TIDY
     "Run the selected clang-tidy checks while compiling Sokoban targets" OFF)
 option(SOKOBAN_BUILD_FUZZ_TESTS
     "Build libFuzzer harnesses for hostile serialized input" OFF)
+
+if(SOKOBAN_SHIPPING_BUILD)
+    if(NOT MSVC)
+        message(FATAL_ERROR
+            "SOKOBAN_SHIPPING_BUILD currently packages external symbols with MSVC")
+    endif()
+    # The shipping preset is intentionally opinionated. It creates only the
+    # player-facing Release configuration; tests and all authoring code live
+    # in their normal Debug/CI configurations instead.
+    set(CMAKE_CONFIGURATION_TYPES "Release" CACHE STRING
+        "Supported build configurations" FORCE)
+    set(SOKOBAN_ENABLE_VALIDATION OFF CACHE BOOL
+        "Enable Vulkan validation layers in debug builds" FORCE)
+    set(SOKOBAN_ENABLE_DEVELOPER_TOOLS OFF CACHE BOOL
+        "Compile the Debug-only ImGui workspace and content-editing tools" FORCE)
+    set(SOKOBAN_BUILD_TESTS OFF CACHE BOOL
+        "Build headless engine tests" FORCE)
+    set(SOKOBAN_BUILD_VULKAN_SMOKE_TESTS OFF CACHE BOOL
+        "Build the hidden-window Vulkan device and submission smoke test" FORCE)
+    set(SOKOBAN_ENABLE_LTO ON CACHE BOOL
+        "Enable interprocedural optimization for Release targets" FORCE)
+    set(SOKOBAN_INSTALL_EXTERNAL_SYMBOLS ON CACHE BOOL
+        "Install MSVC Program Database files in a separate symbols component" FORCE)
+endif()
+
+if(MSVC AND SOKOBAN_INSTALL_EXTERNAL_SYMBOLS)
+    # Keep full symbolic information out of the player package while still
+    # producing a PDB that exactly matches the optimized executable.
+    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
+        "$<$<CONFIG:Release>:ProgramDatabase>"
+        CACHE STRING "MSVC debug information format" FORCE)
+    # Release PDB generation is shared by parallel compiler invocations in a
+    # target. /FS serializes PDB access without giving up optimized symbols.
+    add_compile_options("$<$<CONFIG:Release>:/FS>")
+elseif(SOKOBAN_INSTALL_EXTERNAL_SYMBOLS)
+    message(FATAL_ERROR
+        "SOKOBAN_INSTALL_EXTERNAL_SYMBOLS currently requires MSVC PDB support")
+endif()
 
 find_package(Vulkan REQUIRED)
 find_package(Threads REQUIRED)
@@ -174,6 +220,25 @@ function(sokoban_enable_warnings target)
     endif()
 endfunction()
 
+if(SOKOBAN_ENABLE_LTO)
+    include(CheckIPOSupported)
+    check_ipo_supported(
+        RESULT SOKOBAN_LTO_SUPPORTED
+        OUTPUT SOKOBAN_LTO_ERROR
+        LANGUAGES CXX)
+    if(NOT SOKOBAN_LTO_SUPPORTED)
+        message(FATAL_ERROR
+            "SOKOBAN_ENABLE_LTO was requested but is unavailable: ${SOKOBAN_LTO_ERROR}")
+    endif()
+endif()
+
+function(sokoban_enable_lto target)
+    if(SOKOBAN_ENABLE_LTO)
+        set_property(TARGET ${target} PROPERTY
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    endif()
+endfunction()
+
 add_executable(sokoban_content_tool
     tools/ContentTool.cpp
 )
@@ -182,6 +247,7 @@ set_target_properties(sokoban_content_tool PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tools/$<CONFIG>"
 )
 sokoban_enable_warnings(sokoban_content_tool)
+sokoban_enable_lto(sokoban_content_tool)
 
 add_library(sokoban_core STATIC
     src/engine/ActionPlan.cpp
@@ -272,6 +338,7 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(sokoban_core PRIVATE ${CMAKE_DL_LIBS} m)
 endif()
 sokoban_enable_warnings(sokoban_core)
+sokoban_enable_lto(sokoban_core)
 
 add_library(sokoban_ui STATIC
     src/engine/InputRouter.cpp
@@ -294,9 +361,10 @@ target_link_libraries(sokoban_ui
     PRIVATE sokoban_stb
 )
 target_compile_definitions(sokoban_ui PUBLIC
-    $<$<CONFIG:Debug>:SOKOBAN_ENABLE_DEBUG_UI=1>
+    SOKOBAN_ENABLE_DEBUG_UI=$<IF:$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_DEVELOPER_TOOLS}>>,1,0>
 )
 sokoban_enable_warnings(sokoban_ui)
+sokoban_enable_lto(sokoban_ui)
 
 add_library(sokoban_render_vulkan STATIC
     src/engine/render/VulkanRenderer.cpp
@@ -321,9 +389,11 @@ add_library(sokoban_render_vulkan STATIC
     src/engine/render/VulkanUiResources.cpp
 )
 add_library(Sokoban::render_vulkan ALIAS sokoban_render_vulkan)
-foreach(imgui_source IN LISTS SOKOBAN_IMGUI_SOURCES)
-    target_sources(sokoban_render_vulkan PRIVATE $<$<CONFIG:Debug>:${imgui_source}>)
-endforeach()
+if(SOKOBAN_ENABLE_DEVELOPER_TOOLS)
+    foreach(imgui_source IN LISTS SOKOBAN_IMGUI_SOURCES)
+        target_sources(sokoban_render_vulkan PRIVATE $<$<CONFIG:Debug>:${imgui_source}>)
+    endforeach()
+endif()
 target_include_directories(sokoban_render_vulkan
     PUBLIC src
     PRIVATE
@@ -339,26 +409,32 @@ target_link_libraries(sokoban_render_vulkan
         SDL3::SDL3
 )
 target_compile_definitions(sokoban_render_vulkan PRIVATE
-    $<$<CONFIG:Debug>:SOKOBAN_ENABLE_DEBUG_UI=1>
+    SOKOBAN_ENABLE_DEBUG_UI=$<IF:$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_DEVELOPER_TOOLS}>>,1,0>
 )
 target_compile_definitions(sokoban_render_vulkan PRIVATE
     SOKOBAN_ENABLE_VALIDATION=$<IF:$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_VALIDATION}>>,1,0>
 )
 sokoban_enable_warnings(sokoban_render_vulkan)
+sokoban_enable_lto(sokoban_render_vulkan)
 
 target_link_libraries(sokoban_content_tool PRIVATE sokoban_core)
 
-add_executable(sokoban
+set(SOKOBAN_APPLICATION_SOURCES
     src/main.cpp
-    src/engine/AnimationCatalogDebugUi.cpp
-    src/engine/AnimationPreviewDebugUi.cpp
     src/engine/Application.cpp
-    src/engine/ApplicationTools.cpp
-    src/engine/ApplicationDebugUi.cpp
-    src/engine/AssetManifestDebugUi.cpp
-    src/engine/DebugUi.cpp
-    src/engine/LevelEditorDebugUi.cpp
 )
+if(SOKOBAN_ENABLE_DEVELOPER_TOOLS)
+    list(APPEND SOKOBAN_APPLICATION_SOURCES
+        $<$<CONFIG:Debug>:src/engine/AnimationCatalogDebugUi.cpp>
+        $<$<CONFIG:Debug>:src/engine/AnimationPreviewDebugUi.cpp>
+        $<$<CONFIG:Debug>:src/engine/ApplicationTools.cpp>
+        $<$<CONFIG:Debug>:src/engine/ApplicationDebugUi.cpp>
+        $<$<CONFIG:Debug>:src/engine/AssetManifestDebugUi.cpp>
+        $<$<CONFIG:Debug>:src/engine/DebugUi.cpp>
+        $<$<CONFIG:Debug>:src/engine/LevelEditorDebugUi.cpp>
+    )
+endif()
+add_executable(sokoban ${SOKOBAN_APPLICATION_SOURCES})
 
 set_target_properties(sokoban PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
@@ -401,12 +477,17 @@ target_link_libraries(sokoban PRIVATE
 target_compile_definitions(sokoban PRIVATE
     SDL_MAIN_USE_CALLBACKS=0
     SOKOBAN_GAME_VERSION="${PROJECT_VERSION}"
-    $<$<CONFIG:Debug>:SOKOBAN_SOURCE_LEVEL_DIR="${LEVEL_SOURCE_DIR}">
-    $<$<CONFIG:Debug>:SOKOBAN_SOURCE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets">
-    $<$<CONFIG:Debug>:SOKOBAN_ENABLE_DEBUG_UI=1>
+    SOKOBAN_ENABLE_DEBUG_UI=$<IF:$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_DEVELOPER_TOOLS}>>,1,0>
+    $<$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_DEVELOPER_TOOLS}>>:SOKOBAN_SOURCE_LEVEL_DIR="${LEVEL_SOURCE_DIR}">
+    $<$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_DEVELOPER_TOOLS}>>:SOKOBAN_SOURCE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets">
 )
 
+if(MSVC AND SOKOBAN_INSTALL_EXTERNAL_SYMBOLS)
+    target_link_options(sokoban PRIVATE "$<$<CONFIG:Release>:/DEBUG:FULL>")
+endif()
+
 sokoban_enable_warnings(sokoban)
+sokoban_enable_lto(sokoban)
 
 option(SOKOBAN_BUILD_TESTS "Build headless engine tests" ON)
 option(SOKOBAN_BUILD_VULKAN_SMOKE_TESTS
@@ -732,7 +813,15 @@ if(SOKOBAN_BUILD_FUZZ_TESTS)
     sokoban_enable_warnings(sokoban_player_profile_fuzz)
 endif()
 
-install(TARGETS sokoban RUNTIME DESTINATION . COMPONENT Runtime)
+install(TARGETS sokoban
+    RUNTIME DESTINATION . COMPONENT Runtime
+)
+if(MSVC AND SOKOBAN_INSTALL_EXTERNAL_SYMBOLS)
+    install(FILES "$<TARGET_PDB_FILE:sokoban>"
+        DESTINATION symbols
+        COMPONENT Symbols
+    )
+endif()
 install(
     DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/assets/"
     DESTINATION assets
@@ -792,4 +881,14 @@ string(REGEX REPLACE "[^A-Za-z0-9_.-]" "_"
 set(CPACK_PACKAGE_FILE_NAME
     "Sokoban3D-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${SOKOBAN_PACKAGE_ARCHITECTURE}")
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
+if(SOKOBAN_INSTALL_EXTERNAL_SYMBOLS)
+    # The Runtime ZIP is player-facing. The matching PDB is emitted to a
+    # distinct Symbols ZIP for crash reporting and is never bundled with it.
+    set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
+    set(CPACK_COMPONENTS_ALL Runtime Symbols)
+    set(CPACK_COMPONENT_RUNTIME_DISPLAY_NAME "Sokoban 3D Runtime")
+    set(CPACK_COMPONENT_SYMBOLS_DISPLAY_NAME "Sokoban 3D Debug Symbols")
+    set(CPACK_COMPONENT_SYMBOLS_DESCRIPTION
+        "PDB files for matching crash dumps to the optimized shipping build")
+endif()
 include(CPack)

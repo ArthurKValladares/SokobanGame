@@ -1,10 +1,12 @@
 #include "engine/Application.hpp"
+#if SOKOBAN_ENABLE_DEBUG_UI
 #include "engine/ApplicationTools.hpp"
+#include "engine/DebugUi.hpp"
+#endif
 
 #include "engine/ParticleConfig.hpp"
 #include "engine/render/CameraConfig.hpp"
 
-#include "engine/DebugUi.hpp"
 #include "engine/Log.hpp"
 #include "engine/RenderFrameBuilder.hpp"
 #include "engine/Rules.hpp"
@@ -93,7 +95,9 @@ Application::Application()
     , mirrorSwapParticleEffect_(
           makeMirrorSwapParticleEffect(assetManifest_))
     , settingsCoordinator_(playerProfile_, presentationSettings_)
+#if SOKOBAN_ENABLE_DEBUG_UI
     , tools_(std::make_unique<ApplicationTools>())
+#endif
     , renderFrameArena_("render frame", renderFrameArenaBytes())
 {
     // Leave a diagnostic trail next to the profiles so shipped builds can be
@@ -290,7 +294,13 @@ Application::~Application()
     // saves quietly became rare exactly when there was most to lose. The one
     // cost is undo granularity: a slide whose push had already committed
     // reappears as its own undo entry rather than folded into that push.
-    if (campaign_.gameLoaded() && !tools_->levelEditor.playingDraft()) {
+    const bool editorDraftPlaying =
+#if SOKOBAN_ENABLE_DEBUG_UI
+        tools_->levelEditor.playingDraft();
+#else
+        false;
+#endif
+    if (campaign_.gameLoaded() && !editorDraftPlaying) {
         checkpointCurrentScreen(false);
     } else if (!playerProfile_.progressEmpty()) {
         persistProfile(true);
@@ -304,13 +314,15 @@ Application::~Application()
         log::error(log::Category::Persistence)
             << saveSlots_.settingsStatus();
     }
+#if SOKOBAN_ENABLE_DEBUG_UI
     DebugUi::clearTabs();
+#endif
     renderer_.waitIdle();
 }
 
+#if SOKOBAN_ENABLE_DEBUG_UI
 bool Application::bakeTileThumbnails()
 {
-#if SOKOBAN_ENABLE_DEBUG_UI
     return tools_->bakeTileThumbnails(
         renderer_,
         ui_,
@@ -320,10 +332,8 @@ bool Application::bakeTileThumbnails()
         SOKOBAN_SOURCE_ASSET_DIR,
         assetRoot_,
         window_.sizeInPixels());
-#else
-    return false;
-#endif
 }
+#endif
 
 void Application::run()
 {
@@ -376,13 +386,19 @@ void Application::run()
             : inputRouter_.backAction(input_, inputRoutingContext());
         switch (backAction) {
         case InputRouter::BackAction::CloseDraftConfirmation:
+#if SOKOBAN_ENABLE_DEBUG_UI
             tools_->draftExitConfirmationOpen = false;
+#endif
             break;
         case InputRouter::BackAction::OpenDraftConfirmation:
+#if SOKOBAN_ENABLE_DEBUG_UI
             tools_->draftExitConfirmationOpen = true;
+#endif
             break;
         case InputRouter::BackAction::CancelDecorationPlacement:
+#if SOKOBAN_ENABLE_DEBUG_UI
             tools_->levelEditor.cancelDecorationPlacement();
+#endif
             break;
         case InputRouter::BackAction::ShellBack:
             handleShellEvent(ShellBackPressed {});
@@ -464,6 +480,7 @@ void Application::run()
             drawSelectorPrompt(
                 preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
         }
+#if SOKOBAN_ENABLE_DEBUG_UI
         tools_->drawDraftExitConfirmation();
         tools_->drawBrushPreview(
             renderer_,
@@ -478,6 +495,7 @@ void Application::run()
         tools_->drawSelectorLabels(
             renderer_,
             preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
+#endif
 
         if (const std::optional<TitleAction> titleAction = titleScreen_.draw(
                 ui_, pixelSize, routedInput.title)) {
@@ -514,7 +532,9 @@ void Application::run()
             }
         }
         drawAssetLoadingOverlay(pixelSize);
+#if SOKOBAN_ENABLE_DEBUG_UI
         tools_->animationPreviewDebugUi.update(dt, renderer_);
+#endif
         ui_.endFrame();
         preparedRenderFrame_ = renderer_.prepareFrame(
             buildRenderFrame(routedInput.editor),
@@ -545,9 +565,15 @@ void Application::update(
         gameplaySession_.moving() &&
         gameplaySession_.activeAction().reversed;
     presentation_.advanceClocks(dt, reversed);
+    const bool editorDraftPlaying =
+#if SOKOBAN_ENABLE_DEBUG_UI
+        tools_->levelEditor.playingDraft();
+#else
+        false;
+#endif
     const bool showOverworldMap =
         input.showOverworldMap && campaign_.inOverworld() &&
-        !tools_->levelEditor.playingDraft();
+        !editorDraftPlaying;
     presentation_.updateCameraPitch(
         (input.showTopDownView || showOverworldMap)
             ? 0.0f
@@ -602,9 +628,9 @@ void Application::update(
         presentation_,
         input.gameplay,
         dt,
-        tools_->levelEditor.playingDraft());
+        editorDraftPlaying);
     if (gameplayResult.stateCommitted && campaign_.inOverworld() &&
-        overworldMap_ && !tools_->levelEditor.playingDraft()) {
+        overworldMap_ && !editorDraftPlaying) {
         const std::optional<OverworldScreenId> playerScreen =
             CampaignSession::sharedPlayerScreen(
                 *overworldMap_, gameplaySession_.state());
@@ -631,7 +657,9 @@ void Application::update(
         }
     }
     if (gameplayResult.draftSolved) {
+#if SOKOBAN_ENABLE_DEBUG_UI
         tools_->levelEditor.markDraftSolved();
+#endif
     }
     if (gameplayResult.screenSolved) {
         advanceScreen();
@@ -646,7 +674,7 @@ void Application::update(
     if (campaign_.updateDeferredCheckpoint(
             dt,
             gameplaySession_.moving(),
-            tools_->levelEditor.playingDraft())) {
+            editorDraftPlaying)) {
         checkpointCurrentScreen(true);
     }
 
@@ -699,9 +727,11 @@ void Application::loadCurrentScreen()
     audioSystem_.playMusicForLevel(
         campaign_.inOverworld() ? 0 : campaign_.currentLevel());
     preloadUpcomingAssets();
+#if SOKOBAN_ENABLE_DEBUG_UI
     tools_->levelEditor.setPlayingDraft(false);
     tools_->levelEditor.setEditingDocument(false);
     tools_->hoverCell.reset();
+#endif
 
     log::debug(log::Category::Gameplay)
         << "player entered "
@@ -778,6 +808,7 @@ void Application::advanceScreen()
     });
 }
 
+#if SOKOBAN_ENABLE_DEBUG_UI
 void Application::solveCurrentScreenForDebug()
 {
     if (!campaign_.gameLoaded() || tools_->levelEditor.playingDraft() ||
@@ -793,6 +824,7 @@ void Application::solveCurrentScreenForDebug()
             playerProfile_, moveCount, false));
     });
 }
+#endif
 
 void Application::handlePuzzleCompleted(
     const CampaignSession::PuzzleCompleted&)
@@ -957,7 +989,11 @@ void Application::drawSelectorPrompt(
 {
     if (!frame || levelTransition_.active() ||
         !campaign_.gameLoaded() || !campaign_.inOverworld() ||
-        shellMenuOpen() || tools_->levelEditor.editingDocument() ||
+        shellMenuOpen()
+#if SOKOBAN_ENABLE_DEBUG_UI
+        || tools_->levelEditor.editingDocument()
+#endif
+        ||
         gameplaySession_.moving() ||
         rules::hasPendingMotion(level_, gameplaySession_.state())) {
         return;
@@ -1124,7 +1160,13 @@ void Application::switchSaveSlot(int slot)
 
     // Settle the outgoing slot on disk first. Not gated on the world being
     // idle - see the destructor for why that gate was wrong under concurrency.
-    if (campaign_.gameLoaded() && !tools_->levelEditor.playingDraft()) {
+    const bool editorDraftPlaying =
+#if SOKOBAN_ENABLE_DEBUG_UI
+        tools_->levelEditor.playingDraft();
+#else
+        false;
+#endif
+    if (campaign_.gameLoaded() && !editorDraftPlaying) {
         checkpointCurrentScreen(true);
     } else {
         persistProfile(true);
@@ -1637,13 +1679,19 @@ RenderFrameData Application::buildRenderFrame(
 
     // Held by reference for the duration of the call, so it has to outlive it.
     const GameState projectedState = gameplaySession_.projectedState();
+#if SOKOBAN_ENABLE_DEBUG_UI
     const OverworldMap* draftOverworld =
         tools_->levelEditor.draftOverworldMap();
+    const bool editorDraftPlaying = tools_->levelEditor.playingDraft();
+#else
+    constexpr const OverworldMap* draftOverworld = nullptr;
+    constexpr bool editorDraftPlaying = false;
+#endif
     // A regular editor draft does not change the campaign location. Do not
     // let an overworld underneath that draft contribute its camera,
     // visibility mask, or splat regions to the draft frame.
     const bool renderCampaignOverworld =
-        !tools_->levelEditor.playingDraft() &&
+        !editorDraftPlaying &&
         campaign_.inOverworld() && overworldMap_;
     const OverworldMap* renderedOverworld = draftOverworld
         ? draftOverworld
@@ -1728,12 +1776,18 @@ RenderFrameData Application::buildRenderFrame(
         // Draft play does not move the campaign. Select the map belonging to
         // the edited puzzle even when the campaign is in the overworld or on
         // another screen, matching the editor preview above.
-        .levelLocation = tools_->levelEditor.playingDraft()
+#if SOKOBAN_ENABLE_DEBUG_UI
+        .levelLocation = editorDraftPlaying
             ? levelLocationFromScreenPath(
                   tools_->levelEditor.loadedDocumentPath())
             : campaign_.inOverworld()
                 ? std::nullopt
                 : std::optional<LevelLocation> { campaign_.location() },
+#else
+        .levelLocation = campaign_.inOverworld()
+            ? std::nullopt
+            : std::optional<LevelLocation> { campaign_.location() },
+#endif
         .selectorState = [this](LevelLocation target) {
             return campaign_.selectorViewState(playerProfile_, target);
         },

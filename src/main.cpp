@@ -4,8 +4,13 @@
 #include <exception>
 #include <string_view>
 
+#ifndef SOKOBAN_ENABLE_DEBUG_UI
+#define SOKOBAN_ENABLE_DEBUG_UI 0
+#endif
+
 int main(int argc, char** argv)
 {
+#if SOKOBAN_ENABLE_DEBUG_UI
     // Renders every tile through the normal frame path and saves the result as
     // a PNG, then exits. Run it after changing tile models, materials or
     // lighting; the editor palette loads whatever it produced.
@@ -15,10 +20,21 @@ int main(int argc, char** argv)
             bakeThumbnails = true;
         }
     }
+#else
+    for (int i = 1; i < argc; ++i) {
+        if (std::string_view(argv[i]) == "--bake-tile-thumbnails") {
+            sokoban::log::error(sokoban::log::Category::Application)
+                << "--bake-tile-thumbnails is unavailable in a shipping build";
+            sokoban::log::shutdown();
+            return 2;
+        }
+    }
+#endif
 
     int exitCode = 0;
     try {
         sokoban::Application app;
+#if SOKOBAN_ENABLE_DEBUG_UI
         if (bakeThumbnails) {
             sokoban::log::info(sokoban::log::Category::Application)
                 << "Starting in tile thumbnail bake mode; the game will not "
@@ -27,6 +43,7 @@ int main(int argc, char** argv)
             sokoban::log::shutdown();
             return baked ? 0 : 1;
         }
+#endif
         // Said plainly, because "I passed the flag and it just opened the
         // game" is otherwise indistinguishable from the flag not arriving.
         sokoban::log::info(sokoban::log::Category::Application)

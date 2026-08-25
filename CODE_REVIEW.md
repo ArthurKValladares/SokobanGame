@@ -588,7 +588,8 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 
 1. [Complete] Add CI, sanitizers, static analysis, fuzzing, and Vulkan smoke
    tests.
-2. Create an editor-free shipping preset with LTO and external symbols.
+2. [Complete] Create an editor-free shipping preset with LTO and external
+   symbols.
 3. Add application metadata, icon/version resources, installer, and signing.
 4. Add crash dumps, rotating logs, and actionable fatal-error UI.
 5. Complete frame-pacing controls and minimize/unfocused behavior.
