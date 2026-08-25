@@ -80,6 +80,22 @@ bool VulkanModelResources::modelUsesGpuSkinning(RenderModel model) const
         manifest_->model(model).geometry == ModelGeometry::Skinned;
 }
 
+bool VulkanModelResources::tileReadyForDraw(
+    const RenderFrameData::Tile& tile,
+    uint32_t frameIndex) const
+{
+    const bool meshReady = modelReady(tile.model);
+    const bool requiresPublishedPose = modelUsesGpuSkinning(tile.model);
+    const bool posePublished = !requiresPublishedPose ||
+        skinnedInstances_.contains({
+            frameIndex,
+            tile.animationInstanceId,
+            tile.model.value,
+        });
+    return modelInstanceReadyForDraw(
+        meshReady, requiresPublishedPose, posePublished);
+}
+
 VulkanModelResources::~VulkanModelResources()
 {
     destroy();
@@ -1090,7 +1106,7 @@ void VulkanModelResources::updateAnimations(
         ModelSlot& model = models_[request.model.index()];
         if (model.state != LoadState::Ready || !model.skinnedSource) {
             // The animation data or skinned mesh is still loading. The scene
-            // recorder will skip this tile until its GPU mesh is ready.
+            // recorder will skip this instance until its pose is published.
             continue;
         }
         const AnimatedMeshKey key {

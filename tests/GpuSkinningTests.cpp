@@ -77,6 +77,21 @@ bool near(Vec3 left, Vec3 right)
         std::abs(left.z - right.z) < 0.0001f;
 }
 
+void testModelInstanceDrawReadiness()
+{
+    TEST("modelInstanceDrawReadiness");
+
+    // Static models do not publish animation poses.
+    CHECK(modelInstanceReadyForDraw(true, false, false));
+    CHECK(!modelInstanceReadyForDraw(false, false, true));
+
+    // Every skinned model is withheld until its current instance pose exists;
+    // this is independent of which actor or animation owns that instance.
+    CHECK(!modelInstanceReadyForDraw(true, true, false));
+    CHECK(modelInstanceReadyForDraw(true, true, true));
+    CHECK(!modelInstanceReadyForDraw(false, true, true));
+}
+
 void testPaletteAndAttachmentEncoding()
 {
     TEST("paletteAndAttachmentEncoding");
@@ -159,6 +174,7 @@ void testRoguePaletteMatchesCpuSkinning()
 
 int main()
 {
+    testModelInstanceDrawReadiness();
     testPaletteAndAttachmentEncoding();
     testRoguePaletteMatchesCpuSkinning();
     if (failures == 0) {

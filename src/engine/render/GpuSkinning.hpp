@@ -15,6 +15,14 @@ inline constexpr uint32_t maxSkinPaletteMatrices =
 inline constexpr uint32_t maxSkinnedInstancesPerFrame = 256;
 inline constexpr uint32_t gpuSkinningFrameCount = 2;
 
+[[nodiscard]] constexpr bool modelInstanceReadyForDraw(
+    bool meshReady,
+    bool requiresPublishedPose,
+    bool posePublished)
+{
+    return meshReady && (!requiresPublishedPose || posePublished);
+}
+
 struct alignas(16) GpuSkinningInstance {
     std::array<Mat4, maxSkinPaletteMatrices> palette {};
     Mat4 modelFromSource {};

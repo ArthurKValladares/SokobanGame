@@ -186,9 +186,16 @@ public:
     [[nodiscard]] MaterialBinding materialForModel(RenderModel model) const;
     // Invalid until the model has finished uploading.
     [[nodiscard]] ModelBounds boundsForModel(RenderModel model) const;
-    // True once the model's mesh is on the GPU and safe to draw.
+    // True once the model's mesh is resident. Skinned instances additionally
+    // need tileReadyForDraw(), because their pose is published per frame.
     [[nodiscard]] bool modelReady(RenderModel model) const;
     [[nodiscard]] bool modelUsesGpuSkinning(RenderModel model) const;
+    // Static models are ready with resident geometry. Every skinned model,
+    // regardless of its gameplay role, also requires this instance's pose for
+    // the current frame before any colour or shadow pass may draw it.
+    [[nodiscard]] bool tileReadyForDraw(
+        const RenderFrameData::Tile& tile,
+        uint32_t frameIndex) const;
     [[nodiscard]] const AssetManifest& manifest() const { return *manifest_; }
     [[nodiscard]] std::vector<TextureView> textures() const;
     [[nodiscard]] uint32_t textureCount() const;

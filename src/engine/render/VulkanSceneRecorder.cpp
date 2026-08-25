@@ -144,7 +144,9 @@ public:
                                                const PreparedRenderScene& prepared) {
             uint32_t result = 0;
             const auto countUnavailable = [&](std::size_t tileIndex) {
-                if (!models_.modelReady(data.tiles[tileIndex].model)) {
+                if (!models_.tileReadyForDraw(
+                        data.tiles[tileIndex],
+                        configuration_.descriptorFrameIndex)) {
                     ++result;
                 }
             };
@@ -370,11 +372,13 @@ private:
         }
         VkPipeline boundModelPipeline = VK_NULL_HANDLE;
         for (std::size_t tileIndex : scene.shadowModelIndices) {
-            if (!models_.modelReady(frameData.tiles[tileIndex].model)) {
+            const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
+            if (!models_.tileReadyForDraw(
+                    tile, configuration_.descriptorFrameIndex)) {
                 continue;
             }
             const VkPipeline modelPipeline =
-                models_.modelUsesGpuSkinning(frameData.tiles[tileIndex].model)
+                models_.modelUsesGpuSkinning(tile.model)
                 ? pipelines_.skinnedModelShadow()
                 : pipelines_.modelShadow();
             if (boundModelPipeline != modelPipeline) {
@@ -388,7 +392,7 @@ private:
             drawModelShadow(
                 commandBuffer,
                 scene.shadowLayout,
-                frameData.tiles[tileIndex]);
+                tile);
         }
         shadowPass_.end(commandBuffer, stats_);
 
@@ -420,11 +424,14 @@ private:
                     if (light.excludesShadowCaster(tileIndex)) {
                         continue;
                     }
-                    if (!models_.modelReady(frameData.tiles[tileIndex].model)) {
+                    const RenderFrameData::Tile& tile =
+                        frameData.tiles[tileIndex];
+                    if (!models_.tileReadyForDraw(
+                            tile, configuration_.descriptorFrameIndex)) {
                         continue;
                     }
                     const VkPipeline modelPipeline =
-                        models_.modelUsesGpuSkinning(frameData.tiles[tileIndex].model)
+                        models_.modelUsesGpuSkinning(tile.model)
                         ? pipelines_.skinnedModelShadow()
                         : pipelines_.modelShadow();
                     if (pointModelPipeline != modelPipeline) {
@@ -439,7 +446,7 @@ private:
                         commandBuffer,
                         light,
                         cubeFace,
-                        frameData.tiles[tileIndex]);
+                        tile);
                 }
                 shadowPass_.endPointFace(commandBuffer);
             }
@@ -1074,7 +1081,8 @@ private:
         draws.reserve(modelIndices.size());
         for (std::size_t tileIndex : modelIndices) {
             const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
-            if (!models_.modelReady(tile.model)) {
+            if (!models_.tileReadyForDraw(
+                    tile, configuration_.descriptorFrameIndex)) {
                 continue;
             }
             const bool mirrorGhost =
