@@ -1,6 +1,6 @@
 # Sokoban 3D
 
-Sokoban 3D is a C++20, SDL3, and Vulkan 1.4 puzzle game and small game-engine
+Sokoban 3D is a C++20, SDL3, and Vulkan 1.3 puzzle game and small game-engine
 codebase. It supports layered levels, animated 3D presentation, persistent save
 slots and settings, keyboard/gamepad remapping, a manifest-driven content
 pipeline, and a headless editor model exposed through Debug ImGui tools.
@@ -39,7 +39,7 @@ pipeline, and a headless editor model exposed through Debug ImGui tools.
 
 - CMake 3.25+
 - Visual Studio 2022 or another C++20 compiler
-- Vulkan SDK 1.4+ with `glslc` available
+- Vulkan SDK 1.3+ with `glslc` available
 - A Vulkan-capable GPU and driver
 
 SDL3, miniaudio, nlohmann/json, stb, ImGui, and the Karla UI font are vendored.
@@ -113,6 +113,10 @@ Before publishing a build, follow
 PowerShell package gate verifies the final ZIP from a fresh extraction and
 launches it briefly; the accompanying Windows and GPU-driver matrix is the
 required human acceptance record.
+
+P4-7 acceptance for the current release was manually verified on 2026-08-25.
+Repeat the package gate and collect fresh hardware/driver evidence for every
+new Runtime ZIP, installer, or supported-driver change.
 
 For a shareable validation report from each test machine, run
 `packaging/CollectReleaseValidationEvidence.ps1`; it packages the package-gate

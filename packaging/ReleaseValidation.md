@@ -1,8 +1,8 @@
 # Shipping Release Validation
 
-P4-7 is a release acceptance gate. It is not complete until each row in the
-hardware matrix below has a recorded passing result for the exact signed
-installer or Runtime ZIP that will be published.
+P4-7 was accepted for the current release on 2026-08-25. It remains a release
+acceptance gate: each future signed installer or Runtime ZIP must have recorded
+passing results for the applicable hardware-matrix rows below.
 
 ## Package gate
 

@@ -10,14 +10,52 @@ Treat the local checkout as the canonical project location:
 C:\Users\arthu\Documents\Projects\Sokoban Game
 ```
 
-This handoff reflects commit `4bc2e99` (`generic presentation/undo
-foundation`). The working tree was clean when this update began. The latest
-verified configuration is the `out/visual-studio` Debug tree: the full build
-and all 39 CTest suites pass.
+This handoff reflects the post-hardening baseline at commit `b287ebc4`
+(`remove unneeded file`). The latest verified `out/visual-studio`
+configurations are Debug and Release: all 59 CTest suites pass in each. P4-7
+clean-machine/GPU-driver acceptance was manually verified by the project owner
+on 2026-08-25. Treat the release-validation scripts and matrix as mandatory
+again for every new release artifact or supported-driver change.
 
 ## Project Idea
 
-This is a small C++20 Sokoban-like 3D puzzle game. It uses SDL3 for platform/window/input and Vulkan 1.4 for rendering. The game is tile/grid based, but rendered as an isometric-ish 3D board with GLTF assets, lighting, shadows, animated character movement, and an in-game ImGui level editor in Debug builds.
+This is a small C++20 Sokoban-like 3D puzzle game. It uses SDL3 for
+platform/window/input and a Vulkan 1.3 release renderer. The game is tile/grid
+based, but rendered as an isometric-ish 3D board with GLTF assets, lighting,
+shadows, animated character movement, and an in-game ImGui level editor in
+Debug builds.
+
+## Current Shipping Baseline
+
+The original engine review's Phase 0 through Phase 4 plan is complete. The
+important operational state for the next agent is:
+
+- Profiles are format 26. Their settings model contains only audio, video, and
+  input; the old incomplete accessibility block, including reduced motion, was
+  deliberately removed. Format-25 profiles discard that obsolete block during
+  migration.
+- VSync defaults to FIFO. Players can choose a foreground frame cap and may
+  allow tearing; the renderer selects only modes advertised by the surface.
+  Unfocused windows pace to 20 FPS and minimized/background windows to 5 FPS;
+  simulation timing clamps stalls and suspends safely.
+- The release device contract is Vulkan 1.3 with dynamic rendering,
+  synchronization2, cube-map arrays, extended dynamic state, and required
+  descriptor capacity. Wireframe and wide lines are optional developer
+  capabilities. Unsupported hardware and device/surface loss have actionable
+  diagnostics.
+- Shipping uses the editor-free `shipping` CMake preset with LTO and separate
+  Runtime/Symbols ZIPs. `shipping-installer` creates the per-user Inno Setup
+  installer; `shipping-signed` signs and verifies the executable and installer
+  when certificate tooling is available.
+- `packaging/ValidateShippingPackage.ps1` validates a Runtime ZIP or installed
+  runtime tree. `packaging/CollectReleaseValidationEvidence.ps1` collects the
+  automated result, GPU/driver/monitor/Vulkan/DirectX evidence, hashes,
+  signatures, log tail, and manual acceptance answers into a ZIP. Full usage
+  and the hardware matrix live in `packaging/ReleaseValidation.md`.
+- Asset publication is non-blocking and budgeted; static geometry uses
+  device-local suballocation plus mapped upload rings; skinning is GPU-based;
+  repeated opaque draws are sorted/instanced; telemetry exposes residency and
+  CPU/GPU frame-time summaries.
 
 The core loop is classic Sokoban-inspired:
 
@@ -36,7 +74,7 @@ The core loop is classic Sokoban-inspired:
 Main dependencies:
 
 - CMake 3.25+
-- Vulkan SDK 1.4+ with `glslc`
+- Vulkan SDK 1.3+ with `glslc`
 - Visual Studio 2022 / C++20 compiler
 - SDL3 is vendored in `third_party/SDL` and built statically.
 - ImGui is optional but used in Debug if `third_party/imgui` exists.
@@ -65,17 +103,19 @@ refresh content explicitly after editing `assets/manifest.json` or a level:
 cmake --build out\visual-studio --config Debug --target sokoban_content
 ```
 
-Release install and ZIP packaging:
+Shipping Runtime/Symbols ZIP packaging:
 
 ```powershell
-cmake --build out\visual-studio --config Release
-cmake --install out\visual-studio --config Release --prefix out\visual-studio\install
-cmake --build out\visual-studio --config Release --target package
+cmake --preset shipping
+cmake --build --preset shipping
+cpack --preset shipping
 ```
 
-The install contains `sokoban.exe`, its executable-relative `assets/` tree,
-and dependency licenses. MSVC builds use the static C/C++ runtime so the ZIP
-does not require a separately installed Visual C++ Redistributable.
+This emits separate Runtime and Symbols ZIPs in `out/shipping`; give players
+only the Runtime ZIP and retain Symbols for crash-dump symbolication. The
+runtime contains `sokoban.exe`, executable-relative `assets/`, and dependency
+licenses. MSVC builds use the static C/C++ runtime, so the ZIP does not require
+a separately installed Visual C++ Redistributable.
 
 Every test executable is declared with the `sokoban_add_test()` helper at the
 top of the `SOKOBAN_BUILD_TESTS` block (NAME/TARGET/SOURCES, optional LIBS,
@@ -114,8 +154,8 @@ cmake --build out\visual-studio --config Debug --target sokoban_gameplay_session
 .\out\visual-studio\Debug\sokoban_gameplay_session_tests.exe
 ```
 
-Player-profile tests cover format-17 round trips and the complete format-1
-through format-17 migration chain, exact active-screen/undo checkpoints,
+Player-profile tests cover format-26 round trips and the complete format-1
+through format-26 migration chain, exact active-screen/undo checkpoints,
 stable entity IDs, generic presentation transactions, completion bests,
 normalization, atomic writes,
 asynchronous save coalescing/shutdown flushing, prior-save backups,
@@ -226,7 +266,7 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
 - `src/engine/CampaignSession.*`: headless campaign/run state. Owns the cached puzzle catalog/selector targets, overworld topology fingerprint and stable screen catalog, active overworld-screen identity, validated current context, puzzle timing/completion/best policy, and deferred-checkpoint cadence while mutating only the supplied `PlayerProfile`. It rejects stale topology checkpoints, falls back to the authored overworld start, persists typed overworld checkpoints, and exposes shared-player-screen plus committed-transition helpers for composed-map integration. Application performs UI, audio, persistence, and loading effects. Covered by `tests/CampaignSessionTests.cpp`.
 - `src/engine/GameplayLoop.*`: headless per-frame bridge between semantic button states, `GameplaySession`, and `GameplayPresentation`. Owns opposing-direction resolution, command queueing, action time consumption, presentation begin/finish calls, and solved-screen/draft outcomes. Covered by `tests/GameplayLoopTests.cpp`.
 - `src/engine/InputRouter.*`: testable routing layer between raw `InputState` and context-specific gameplay, title, completion-overlay, options, pointer, and editor frames. Owns SDL event admission around ImGui capture, binding-candidate suppression, modal focus, and draft-exit Back precedence; `Application` only pumps events and executes the resulting intents. Covered by `tests/InputRouterTests.cpp` (`sokoban_input_router_tests`).
-- `src/engine/SettingsTypes.*` + `src/engine/SettingsCoordinator.*`: the UI-neutral, authoritative `UserSettings` value (`audio`, `video`, `input`, and `accessibility`) plus headless runtime-effect policy. `PlayerProfile` owns one `UserSettings`; menus, persistence, and the coordinator no longer maintain parallel field sets. The coordinator normalizes a replacement value, updates `PresentationSettings`, detects which external systems actually changed, and emits a data-only `SettingsEffects` plan for window, renderer, audio, input, animation cadence, and persistence. `Application` executes that plan without deciding settings policy. Covered by `tests/SettingsCoordinatorTests.cpp` (`sokoban_settings_coordinator_tests`).
+- `src/engine/SettingsTypes.*` + `src/engine/SettingsCoordinator.*`: the UI-neutral, authoritative `UserSettings` value (`audio`, `video`, and `input`) plus headless runtime-effect policy. `PlayerProfile` owns one `UserSettings`; menus, persistence, and the coordinator no longer maintain parallel field sets. The coordinator normalizes a replacement value, updates `PresentationSettings`, detects which external systems actually changed, and emits a data-only `SettingsEffects` plan for window, renderer, audio, input, presentation policy, and persistence. `Application` executes that plan without deciding settings policy. Covered by `tests/SettingsCoordinatorTests.cpp` (`sokoban_settings_coordinator_tests`).
 - Focused configuration headers replace the former `Config.hpp` umbrella:
   `AudioConfig.hpp`, `GameplayConfig.hpp`, `UserSettingsConfig.hpp`,
   `ui/UiConfig.hpp`, and the render-owned `AnimationConfig.hpp`,
@@ -324,8 +364,8 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   manifest-backed glyphs through `UiDrawKind::TextureImage`.
 - `src/engine/Input.*`: SDL3 device owner and action mapper. Tracks raw keyboard/mouse state for editor tooling, hot-plugs gamepads, selects the most recently used controller, normalizes stick axes with threshold/pressed-edge semantics, clears stuck input on focus loss, reports active-device diagnostics, and converts raw SDL events into typed remapping candidates. `InputRouter` controls event admission and distributes its state to active consumers. Covered by `tests/InputTests.cpp` (`sokoban_input_tests`).
 - `src/engine/PlayerProfile.*` + `src/engine/PlayerProfileCodec.cpp`:
-  current format-22 player progress model plus one owned `UserSettings` value.
-  Forward JSON patches (`migrate1to2` through `migrate21to22`) feed one strict
+  current format-26 player progress model plus one owned `UserSettings` value.
+  Forward JSON patches (`migrate1to2` through `migrate25to26`) feed one strict
   current-format parse. Format 9 made progress/settings independently optional
   for split slot and shared-settings files; format 10 added Mirror bindings,
   format 11 restored the intended `Z` Undo / `F` Mirror defaults, and format 12
@@ -339,11 +379,13 @@ Debug builds define `SOKOBAN_ENABLE_DEBUG_UI=1`, which enables one ImGui Develop
   fingerprinted checkpoint carrying a stable active overworld-screen ID,
   format 21 added the screen-preview binding, and format 22 retired the
   dedicated Mirror action in favor of Confirm / Interact and removed Return
-  from that action's keyboard default.
+  from that action's keyboard default. Formats 23-24 corrected top-down and
+  overworld-map input defaults, format 25 added safe tearing/frame-cap
+  defaults, and format 26 removed the obsolete accessibility block.
   Stores exact active-screen
   gameplay/undo state including action presentation transactions, progress,
   bests, reached screens, typed input bindings,
-  audio/video/accessibility settings, and normalized display/render settings.
+  audio/video/input settings, and normalized display/render settings.
   Covered with `SaveStore` by `tests/PlayerProfileTests.cpp`.
 - `src/engine/Flow.hpp`: minimal generic state-machine toolkit shared by UI
   flows and available to future gameplay flows. `flow::Machine<Derived,
@@ -865,7 +907,9 @@ Rough editor areas:
 
 Renderer:
 
-- Vulkan 1.4, dynamic rendering, synchronization2, and extended dynamic state.
+- Vulkan 1.3, dynamic rendering, synchronization2, cube-map arrays, and
+  extended dynamic state. Wireframe and wide lines remain optional
+  developer-only features.
 - Uses SDL3 window/Vulkan integration.
 - Has a shadow pass and scene pass.
 - Supports MSAA modes (default is MSAA 8x, automatically falling back to the highest count the device's color+depth framebuffers support; the Debug UI combo shows the requested mode, Rendering Stats shows the active sample count), internal render-scale presets of 100%, 75%, 67% (exact two-thirds), 50%, and 25%, plus custom percentages from 25-100%, wireframe, line width controls, lighting controls, grid overlay, and render stats in Debug UI. The 3D scene renders into scaled offscreen attachments and is linearly upscaled to the native swapchain before player/debug UI, so a 4K window can render the scene at exact 1440p or 1080p while UI remains crisp.
@@ -1447,7 +1491,7 @@ The custom UI currently provides:
   "New Game" (starting immediately when another save exists, or first asking
   which slot to begin on when no saves exist anywhere; the "Save Slot N" row
   is hidden entirely in that no-saves state). Settings
-  (audio/video/input/accessibility) are shared across slots in a
+  (audio/video/input) are shared across slots in a
   `settings.json` written through its own `AsyncSaveStore` (same atomic
   write/backup/recovery machinery); it bootstraps from the pre-split
   combined save's settings on first run, and slot files' settings copies are
@@ -1787,13 +1831,16 @@ Major recent additions and fixes:
 
 At the time this handoff was updated:
 
-- `4bc2e99` is the current commit and contains the generic presentation/undo
-  foundation described above. The working tree was clean before this handoff
-  edit.
-- The full Debug build passes from `out/visual-studio`. Release packaging and
-  clean-install startup passed during the earlier shippable-content work, but
-  were not rerun after the latest presentation changes.
-- All 39 CTest suites pass, including real-font/options UI, concurrent texture decoding,
+- `b287ebc4` is the handoff's baseline commit. It follows the complete
+  engine-hardening and productization program; check `git status --short`
+  before making changes because release-evidence and documentation work may be
+  intentionally uncommitted.
+- The full Debug and Release builds pass from `out/visual-studio`. The current
+  Runtime ZIP package gate passed with 198 indexed assets (10,059,860 bytes)
+  and a packaged Vulkan launch. The project owner also completed the external
+  clean-machine/GPU-driver acceptance. Repeat that evidence collection for
+  every release artifact or driver-support revision.
+- All 59 CTest suites pass in both Debug and Release, including real-font/options UI, concurrent texture decoding,
   input/gamepad mapping, profile
   migration/recovery, gameplay
   move-count semantics, mandatory validation of the shipped manifest,
@@ -1802,10 +1849,12 @@ At the time this handoff was updated:
   players, animation catalog events, generic presentation dependency/cycle
   handling, forward/reverse transaction playback, and the `content_pipeline`
   suite.
-- `cmake --build out\visual-studio --config Release --target package` produces
-  `out/visual-studio/Sokoban3D-0.1.0-Windows-x64.zip`. The latest verified
-  Debug content stage contains 148 reachable files (about 24.6 MiB) instead of
-  copying the complete source vendor packs.
+- `cmake --preset shipping`, `cmake --build --preset shipping`, and
+  `cpack --preset shipping` produce separate
+  `Sokoban3D-0.1.0-Windows-x64-Runtime.zip` and `-Symbols.zip` artifacts in
+  `out/shipping`. The runtime stage contains 198 reachable files
+  (10,059,860 bytes), not complete source vendor packs. Use
+  `packaging/ReleaseValidation.md` and its evidence collector before shipping.
 - Migrated the asset manifest from the custom indentation-based format to
   versioned strict JSON parsed by pinned nlohmann/json 3.11.3. The parser now
   rejects unknown schema properties and wrong JSON types before domain
