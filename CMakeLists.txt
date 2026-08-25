@@ -33,6 +33,21 @@ option(SOKOBAN_ENABLE_CLANG_TIDY
     "Run the selected clang-tidy checks while compiling Sokoban targets" OFF)
 option(SOKOBAN_BUILD_FUZZ_TESTS
     "Build libFuzzer harnesses for hostile serialized input" OFF)
+option(SOKOBAN_BUILD_INSTALLER
+    "Build a per-user Inno Setup installer from the shipping runtime component" OFF)
+option(SOKOBAN_SIGN_ARTIFACTS
+    "Sign Windows release artifacts using a current-user certificate" OFF)
+set(SOKOBAN_APP_PUBLISHER "Sokoban 3D" CACHE STRING
+    "Publisher shown in Windows metadata and the installer")
+set(SOKOBAN_SIGNING_CERTIFICATE_THUMBPRINT "" CACHE STRING
+    "SHA-1 thumbprint of the current-user code-signing certificate")
+set(SOKOBAN_SIGNING_TIMESTAMP_URL "http://timestamp.digicert.com" CACHE STRING
+    "RFC 3161 timestamp URL passed to signtool")
+
+if((SOKOBAN_BUILD_INSTALLER OR SOKOBAN_SIGN_ARTIFACTS) AND NOT WIN32)
+    message(FATAL_ERROR
+        "SOKOBAN_BUILD_INSTALLER and SOKOBAN_SIGN_ARTIFACTS are Windows-only")
+endif()
 
 if(SOKOBAN_SHIPPING_BUILD)
     if(NOT MSVC)
@@ -436,6 +451,38 @@ if(SOKOBAN_ENABLE_DEVELOPER_TOOLS)
 endif()
 add_executable(sokoban ${SOKOBAN_APPLICATION_SOURCES})
 
+if(WIN32)
+    # Keep Explorer properties, the executable icon, and high-DPI behavior in
+    # the binary instead of relying on developer-machine shortcuts.
+    set(SOKOBAN_PRODUCT_NAME "Sokoban 3D")
+    set(SOKOBAN_COPYRIGHT_YEAR "2026")
+    set(SOKOBAN_WINDOWS_VERSION_COMMAS
+        "${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSION_PATCH},0")
+    set(SOKOBAN_ICON_RESOURCE
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/Sokoban.ico")
+    set(SOKOBAN_MANIFEST_RESOURCE
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/Sokoban.manifest")
+    if(NOT EXISTS "${SOKOBAN_ICON_RESOURCE}")
+        message(FATAL_ERROR
+            "Missing ${SOKOBAN_ICON_RESOURCE}. Run tools/GenerateWindowsIcon.ps1 first.")
+    endif()
+    file(TO_CMAKE_PATH "${SOKOBAN_ICON_RESOURCE}" SOKOBAN_ICON_RESOURCE)
+    file(TO_CMAKE_PATH "${SOKOBAN_MANIFEST_RESOURCE}" SOKOBAN_MANIFEST_RESOURCE)
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    set(SOKOBAN_WINDOWS_RESOURCE_FILE
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/SokobanVersion.rc")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/SokobanVersion.rc.in"
+        "${SOKOBAN_WINDOWS_RESOURCE_FILE}"
+        @ONLY
+    )
+    target_sources(sokoban PRIVATE "${SOKOBAN_WINDOWS_RESOURCE_FILE}")
+    # MSVC already owns manifest resource 1. Let LINK merge our application
+    # manifest into that resource rather than defining a second one in .rc.
+    target_link_options(sokoban PRIVATE
+        "/MANIFESTINPUT:${SOKOBAN_MANIFEST_RESOURCE}")
+endif()
+
 set_target_properties(sokoban PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
 )
@@ -488,6 +535,40 @@ endif()
 
 sokoban_enable_warnings(sokoban)
 sokoban_enable_lto(sokoban)
+
+set(SOKOBAN_RUNTIME_SIGN_TARGET sokoban)
+if(WIN32 AND SOKOBAN_SIGN_ARTIFACTS)
+    if("${SOKOBAN_SIGNING_CERTIFICATE_THUMBPRINT}" STREQUAL "")
+        message(FATAL_ERROR
+            "SOKOBAN_SIGN_ARTIFACTS requires SOKOBAN_SIGNING_CERTIFICATE_THUMBPRINT. "
+            "Set it from the signing environment; do not commit a certificate identity.")
+    endif()
+    find_program(SOKOBAN_SIGNTOOL_EXECUTABLE NAMES signtool.exe signtool
+        HINTS "$ENV{WindowsSdkDir}/bin/x64")
+    if(NOT SOKOBAN_SIGNTOOL_EXECUTABLE)
+        file(GLOB SOKOBAN_SIGNTOOL_CANDIDATES
+            "C:/Program Files (x86)/Windows Kits/10/bin/*/x64/signtool.exe")
+        list(SORT SOKOBAN_SIGNTOOL_CANDIDATES ORDER DESCENDING)
+        if(SOKOBAN_SIGNTOOL_CANDIDATES)
+            list(GET SOKOBAN_SIGNTOOL_CANDIDATES 0 SOKOBAN_SIGNTOOL_EXECUTABLE)
+        endif()
+    endif()
+    if(NOT SOKOBAN_SIGNTOOL_EXECUTABLE OR NOT EXISTS "${SOKOBAN_SIGNTOOL_EXECUTABLE}")
+        message(FATAL_ERROR
+            "SOKOBAN_SIGN_ARTIFACTS requires signtool.exe from the Windows SDK")
+    endif()
+    add_custom_target(sokoban_sign_runtime
+        COMMAND "${CMAKE_COMMAND}"
+            "-DSIGNTOOL:FILEPATH=${SOKOBAN_SIGNTOOL_EXECUTABLE}"
+            "-DARTIFACT:FILEPATH=$<TARGET_FILE:sokoban>"
+            "-DTHUMBPRINT:STRING=${SOKOBAN_SIGNING_CERTIFICATE_THUMBPRINT}"
+            "-DTIMESTAMP_URL:STRING=${SOKOBAN_SIGNING_TIMESTAMP_URL}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SignWindowsArtifact.cmake"
+        DEPENDS sokoban
+        VERBATIM
+    )
+    set(SOKOBAN_RUNTIME_SIGN_TARGET sokoban_sign_runtime)
+endif()
 
 option(SOKOBAN_BUILD_TESTS "Build headless engine tests" ON)
 option(SOKOBAN_BUILD_VULKAN_SMOKE_TESTS
@@ -860,9 +941,63 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/LICENSE.txt")
     )
 endif()
 
+if(WIN32 AND SOKOBAN_BUILD_INSTALLER)
+    find_program(SOKOBAN_INNO_SETUP_COMPILER NAMES ISCC.exe ISCC
+        HINTS
+            "C:/Program Files (x86)/Inno Setup 6"
+            "$ENV{ProgramW6432}/Inno Setup 6"
+            "$ENV{ProgramFiles}/Inno Setup 6"
+    )
+    if(NOT SOKOBAN_INNO_SETUP_COMPILER)
+        message(FATAL_ERROR
+            "SOKOBAN_BUILD_INSTALLER requires Inno Setup 6 (ISCC.exe). "
+            "Install it, or use the shipping preset for ZIP-only packaging.")
+    endif()
+    # Stage through the Runtime install component so the installer's file list
+    # cannot accidentally include the optimized executable's external PDB.
+    set(SOKOBAN_INSTALLER_STAGE_DIR
+        "${CMAKE_CURRENT_BINARY_DIR}/installer-stage")
+    set(SOKOBAN_INSTALLER_OUTPUT_DIR
+        "${CMAKE_CURRENT_BINARY_DIR}/installer")
+    file(TO_CMAKE_PATH "${SOKOBAN_INSTALLER_STAGE_DIR}" SOKOBAN_INSTALLER_STAGE_DIR)
+    file(TO_CMAKE_PATH "${SOKOBAN_INSTALLER_OUTPUT_DIR}" SOKOBAN_INSTALLER_OUTPUT_DIR)
+    set(SOKOBAN_INSTALLER_CONFIG
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/Sokoban3D.iss")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/packaging/Sokoban3D.iss.in"
+        "${SOKOBAN_INSTALLER_CONFIG}"
+        @ONLY
+    )
+    set(SOKOBAN_INSTALLER_ARTIFACT
+        "${SOKOBAN_INSTALLER_OUTPUT_DIR}/Sokoban3D-${PROJECT_VERSION}-Windows-x64-Setup.exe")
+    add_custom_target(sokoban_installer
+        COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}"
+            --config Release --component Runtime
+            --prefix "${SOKOBAN_INSTALLER_STAGE_DIR}"
+        COMMAND "${SOKOBAN_INNO_SETUP_COMPILER}" "${SOKOBAN_INSTALLER_CONFIG}"
+        DEPENDS ${SOKOBAN_RUNTIME_SIGN_TARGET}
+        VERBATIM
+    )
+    if(SOKOBAN_SIGN_ARTIFACTS)
+        add_custom_target(sokoban_sign_installer
+            COMMAND "${CMAKE_COMMAND}"
+                "-DSIGNTOOL:FILEPATH=${SOKOBAN_SIGNTOOL_EXECUTABLE}"
+                "-DARTIFACT:FILEPATH=${SOKOBAN_INSTALLER_ARTIFACT}"
+                "-DTHUMBPRINT:STRING=${SOKOBAN_SIGNING_CERTIFICATE_THUMBPRINT}"
+                "-DTIMESTAMP_URL:STRING=${SOKOBAN_SIGNING_TIMESTAMP_URL}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SignWindowsArtifact.cmake"
+            DEPENDS sokoban_installer
+            VERBATIM
+        )
+    endif()
+endif()
+
 set(CPACK_GENERATOR ZIP)
 set(CPACK_PACKAGE_NAME "Sokoban3D")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_VENDOR "${SOKOBAN_APP_PUBLISHER}")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Sokoban 3D puzzle game")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "Sokoban 3D")
 if(CMAKE_GENERATOR_PLATFORM)
     set(SOKOBAN_PACKAGE_ARCHITECTURE "${CMAKE_GENERATOR_PLATFORM}")
 elseif(CMAKE_SYSTEM_PROCESSOR)

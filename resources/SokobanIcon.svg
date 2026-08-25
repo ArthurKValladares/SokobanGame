@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Sokoban 3D temporary application icon</title>
+  <rect width="256" height="256" rx="52" fill="#14213d"/>
+  <path d="M184 78c-13-11-32-17-54-17-34 0-58 17-58 43 0 24 17 35 52 43 24 6 33 10 33 20 0 9-10 15-28 15-17 0-33-7-45-19l-20 25c17 16 41 25 65 25 37 0 62-18 62-46 0-25-17-37-54-46-23-6-32-10-32-19 0-8 9-13 25-13 14 0 28 5 39 15z" fill="#f8f5ec"/>
+  <path d="M63 201h130" stroke="#e9a83a" stroke-width="12" stroke-linecap="round"/>
+</svg>

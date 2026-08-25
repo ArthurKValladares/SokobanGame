@@ -17,6 +17,27 @@
         "CMAKE_CONFIGURATION_TYPES": "Release",
         "SOKOBAN_SHIPPING_BUILD": "ON"
       }
+    },
+    {
+      "name": "shipping-installer",
+      "displayName": "Shipping installer (x64)",
+      "description": "Editor-free Release installer. Requires Inno Setup 6.",
+      "inherits": "shipping",
+      "binaryDir": "${sourceDir}/out/shipping-installer",
+      "cacheVariables": {
+        "SOKOBAN_BUILD_INSTALLER": "ON"
+      }
+    },
+    {
+      "name": "shipping-signed",
+      "displayName": "Signed shipping installer (x64)",
+      "description": "Installer with verified Authenticode signatures. Requires Inno Setup, signtool, and a certificate thumbprint.",
+      "inherits": "shipping-installer",
+      "binaryDir": "${sourceDir}/out/shipping-signed",
+      "cacheVariables": {
+        "SOKOBAN_SIGN_ARTIFACTS": "ON",
+        "SOKOBAN_SIGNING_CERTIFICATE_THUMBPRINT": "$env{SOKOBAN_SIGNING_CERTIFICATE_THUMBPRINT}"
+      }
     }
   ],
   "buildPresets": [
@@ -26,6 +47,22 @@
       "configuration": "Release",
       "targets": [
         "sokoban"
+      ]
+    },
+    {
+      "name": "shipping-installer",
+      "configurePreset": "shipping-installer",
+      "configuration": "Release",
+      "targets": [
+        "sokoban_installer"
+      ]
+    },
+    {
+      "name": "shipping-signed",
+      "configurePreset": "shipping-signed",
+      "configuration": "Release",
+      "targets": [
+        "sokoban_sign_installer"
       ]
     }
   ],

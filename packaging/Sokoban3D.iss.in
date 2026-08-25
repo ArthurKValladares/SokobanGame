@@ -1,0 +1,33 @@
+#define MyAppName "@SOKOBAN_PRODUCT_NAME@"
+#define MyAppVersion "@PROJECT_VERSION@"
+#define MyAppPublisher "@SOKOBAN_APP_PUBLISHER@"
+#define MyAppExeName "sokoban.exe"
+
+[Setup]
+AppId={{B7BE9D67-68E7-47D4-B740-8048AF65B68A}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+DefaultDirName={localappdata}\Programs\{#MyAppName}
+DefaultGroupName={#MyAppName}
+DisableProgramGroupPage=yes
+OutputDir=@SOKOBAN_INSTALLER_OUTPUT_DIR@
+OutputBaseFilename=Sokoban3D-@PROJECT_VERSION@-Windows-x64-Setup
+SetupIconFile=@SOKOBAN_ICON_RESOURCE@
+UninstallDisplayIcon={app}\{#MyAppExeName}
+Compression=lzma2
+SolidCompression=yes
+WizardStyle=modern
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+PrivilegesRequired=lowest
+
+[Files]
+Source: "@SOKOBAN_INSTALLER_STAGE_DIR@\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Icons]
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{autoprograms}\{#MyAppName}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
+
+[Run]
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent

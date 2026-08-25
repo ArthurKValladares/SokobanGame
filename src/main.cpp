@@ -1,6 +1,9 @@
 #include "engine/Application.hpp"
 #include "engine/Log.hpp"
 
+#include <SDL3/SDL_error.h>
+#include <SDL3/SDL_init.h>
+
 #include <exception>
 #include <string_view>
 
@@ -10,6 +13,14 @@
 
 int main(int argc, char** argv)
 {
+    // SDL uses this before its video subsystem starts to provide the platform
+    // integration points with a stable product identity and version.
+    if (!SDL_SetAppMetadata("Sokoban 3D", SOKOBAN_GAME_VERSION,
+            "com.sokoban3d.game")) {
+        sokoban::log::warning(sokoban::log::Category::Application)
+            << "Could not set SDL application metadata: " << SDL_GetError();
+    }
+
 #if SOKOBAN_ENABLE_DEBUG_UI
     // Renders every tile through the normal frame path and saves the result as
     // a PNG, then exits. Run it after changing tile models, materials or

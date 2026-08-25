@@ -118,6 +118,41 @@ give players only the `-Runtime.zip` archive and retain the `-Symbols.zip`
 archive for crash-dump symbolication. The shipping preset is intentionally
 MSVC-only because PDB separation is part of its output contract.
 
+Windows builds embed a version resource, a per-monitor-DPI manifest, and the
+temporary navy-and-gold `S` application icon from `resources/Sokoban.ico`.
+The icon has a checked-in generator (`tools/GenerateWindowsIcon.ps1`) and SVG
+source so it can be replaced deliberately rather than being a machine-local
+asset. Update `SOKOBAN_APP_PUBLISHER` before publishing under a real company
+or legal identity.
+
+To create the normal per-user Windows installer, install Inno Setup 6 and run:
+
+```powershell
+cmake --preset shipping-installer
+cmake --build --preset shipping-installer
+```
+
+This produces `out/shipping-installer/installer/Sokoban3D-<version>-Windows-x64-Setup.exe`.
+It stages CMake's `Runtime` component first, deliberately excluding the PDB
+symbols package. The installer supports upgrades and uninstalls without
+administrator privileges.
+
+For a public release, use a code-signing certificate in the current user's
+Windows certificate store. Keep its SHA-1 thumbprint in the release environment
+instead of source control; Inno Setup 6 and the Windows SDK's `signtool.exe`
+must be installed:
+
+```powershell
+$env:SOKOBAN_SIGNING_CERTIFICATE_THUMBPRINT = "YOUR_CERTIFICATE_THUMBPRINT"
+cmake --preset shipping-signed
+cmake --build --preset shipping-signed
+```
+
+The signed preset signs and verifies the game executable before staging, then
+signs and verifies the final installer with SHA-256 and an RFC 3161 timestamp.
+It fails rather than emitting an unsigned artifact when the certificate or
+signing tools are unavailable.
+
 ## Default Controls
 
 | Action | Keyboard | Gamepad |

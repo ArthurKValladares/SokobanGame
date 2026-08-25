@@ -465,24 +465,28 @@ throttling. Add CPU and GPU frame-time telemetry.
 
 ### P2 — Release packaging remains developer-oriented
 
-[`add_executable(sokoban ...)`](CMakeLists.txt#L310) creates a console
-executable. The Windows package also lacks:
+**Status: Partially fixed on 2026-08-24.** Windows executables now embed
+Explorer version fields, the temporary `S` application icon, and a
+per-monitor-DPI manifest. SDL receives the product name, semantic version, and
+stable application identifier before initialization. `shipping-installer`
+builds a modern per-user Inno Setup installer with a durable upgrade identity,
+Start-menu shortcut, uninstall entry, and a Runtime-component staging step
+that cannot include the external PDB. `shipping-signed` is deliberately
+opt-in: it takes the certificate thumbprint from the release environment,
+signs the game before staging, signs the final installer, and verifies both
+signatures using SHA-256 and an RFC 3161 timestamp. Missing tooling or signing
+identity is a hard failure, never a silently unsigned release.
 
-- icon and version resources;
-- `SDL_SetAppMetadata`;
-- an installer and upgrade/uninstall path;
-- code signing;
-- crash dump/minidump collection;
-- symbol packaging or a symbol-server process;
-- a fatal user-facing error dialog;
-- an LTO/IPO release option; and
-- a defined shader optimization/reflection policy.
+The checked-in `Sokoban.ico` is generated from the accompanying SVG and
+PowerShell source. It is a temporary visual identity; replace it and set the
+publisher cache value before public release. The local environment did not
+have Inno Setup or a signing certificate, so installer compilation and a real
+Authenticode verification remain release-machine acceptance checks.
 
-CPack emits a ZIP only, and the project version is still `0.1.0`.
-
-**Required fix:** Create a reproducible shipping preset that excludes
-editor/debug code, retains usable external symbols, packages notices, and can
-be smoke-tested from a clean machine without a Vulkan SDK or source checkout.
+The remaining productization gaps are crash dump/minidump collection, rotating
+logs, an actionable fatal-error UI, and a defined shader
+optimization/reflection policy. The product version is still `0.1.0` and must
+be advanced for an actual release.
 
 ### P2 — CI and diagnostic coverage trail the engine's maturity
 
@@ -590,7 +594,8 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
    tests.
 2. [Complete] Create an editor-free shipping preset with LTO and external
    symbols.
-3. Add application metadata, icon/version resources, installer, and signing.
+3. [Complete] Add application metadata, icon/version resources, installer,
+   and signing.
 4. Add crash dumps, rotating logs, and actionable fatal-error UI.
 5. Complete frame-pacing controls and minimize/unfocused behavior.
 6. Implement or remove placeholder accessibility settings.
