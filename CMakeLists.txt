@@ -213,6 +213,7 @@ add_library(sokoban_core STATIC
     src/engine/render/AssetLoadScheduler.cpp
     src/engine/render/GltfMesh.cpp
     src/engine/render/FrameResourceTracker.cpp
+    src/engine/render/FrameTimeTelemetry.cpp
     src/engine/render/GeometrySuballocator.cpp
     src/engine/render/GpuSkinning.cpp
     src/engine/render/ImageData.cpp
@@ -506,6 +507,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME frame_resource_tracker TARGET sokoban_frame_resource_tracker_tests
         LIBS sokoban_core
         SOURCES tests/FrameResourceTrackerTests.cpp
+    )
+    sokoban_add_test(NAME frame_time_telemetry TARGET sokoban_frame_time_telemetry_tests
+        LIBS sokoban_core
+        SOURCES tests/FrameTimeTelemetryTests.cpp
     )
     sokoban_add_test(NAME renderer_reconfiguration TARGET sokoban_renderer_reconfiguration_tests
         LIBS sokoban_core

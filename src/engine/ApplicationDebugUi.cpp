@@ -598,10 +598,25 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             "Frame %.3f ms (%.1f FPS)",
             io.DeltaTime * 1000.0f,
             io.Framerate);
+        if (renderStats.cpuFrameTimingAvailable) {
+            ImGui::Text(
+                "CPU frame %.3f ms (avg %.3f, p95 %.3f, worst %.3f; %u samples)",
+                renderStats.cpuFrameMilliseconds,
+                renderStats.cpuFrameAverageMilliseconds,
+                renderStats.cpuFrameP95Milliseconds,
+                renderStats.cpuFrameMaximumMilliseconds,
+                renderStats.cpuFrameTimingSamples);
+        } else {
+            ImGui::TextUnformatted("CPU frame timing pending");
+        }
         if (renderStats.gpuFrameTimingAvailable) {
             ImGui::Text(
-                "GPU frame %.3f ms",
-                renderStats.gpuFrameMilliseconds);
+                "GPU frame %.3f ms (avg %.3f, p95 %.3f, worst %.3f; %u samples)",
+                renderStats.gpuFrameMilliseconds,
+                renderStats.gpuFrameAverageMilliseconds,
+                renderStats.gpuFrameP95Milliseconds,
+                renderStats.gpuFrameMaximumMilliseconds,
+                renderStats.gpuFrameTimingSamples);
         } else if (!renderStats.gpuTimestampsSupported) {
             ImGui::TextUnformatted("GPU timestamps unavailable");
         } else {
@@ -692,12 +707,17 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             static_cast<unsigned long long>(
                 assetStats.cancelledPrefetches));
         ImGui::Text(
-            "Asset residency %.1f / %.1f MiB meshes, %.1f / %.1f MiB textures (%llu evictions)%s",
+            "Asset residency %.1f / %.1f MiB meshes (peak %.1f), %.1f / %.1f MiB textures (peak %.1f)",
             static_cast<double>(assetStats.modelResidencyBytes) / (1024.0 * 1024.0),
             static_cast<double>(assetStats.modelResidencyBudgetBytes) / (1024.0 * 1024.0),
+            static_cast<double>(assetStats.modelResidencyPeakBytes) / (1024.0 * 1024.0),
             static_cast<double>(assetStats.textureResidencyBytes) / (1024.0 * 1024.0),
             static_cast<double>(assetStats.textureResidencyBudgetBytes) / (1024.0 * 1024.0),
+            static_cast<double>(assetStats.textureResidencyPeakBytes) / (1024.0 * 1024.0));
+        ImGui::Text(
+            "Residency evictions %llu, capacity blocks %llu%s",
             static_cast<unsigned long long>(assetStats.residencyEvictions),
+            static_cast<unsigned long long>(assetStats.residencyBudgetBlocks),
             assetStats.residencyBudgetBlocked ? ", capacity blocked" : "");
         if (assetStats.failedAssets > 0) {
             ImGui::Text("Asset load failures %u", assetStats.failedAssets);

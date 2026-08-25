@@ -93,9 +93,12 @@ public:
         uint64_t cancelledPrefetches = 0;
         uint64_t modelResidencyBytes = 0;
         uint64_t textureResidencyBytes = 0;
+        uint64_t modelResidencyPeakBytes = 0;
+        uint64_t textureResidencyPeakBytes = 0;
         uint64_t modelResidencyBudgetBytes = 0;
         uint64_t textureResidencyBudgetBytes = 0;
         uint64_t residencyEvictions = 0;
+        uint64_t residencyBudgetBlocks = 0;
         bool residencyBudgetBlocked = false;
         uint32_t uploadingTextures = 0;
         uint64_t textureUploadSubmissions = 0;
@@ -303,6 +306,7 @@ private:
     [[nodiscard]] bool makeTextureResident(
         std::size_t protectedTexture,
         uint64_t requiredBytes);
+    void markResidencyBudgetBlocked();
     [[nodiscard]] static uint64_t meshBytes(const MeshData& mesh);
     [[nodiscard]] static uint64_t textureBytes(const ImageData& image);
 
@@ -418,7 +422,10 @@ private:
     uint64_t visibleRequestStamp_ = 0;
     uint64_t modelResidencyBytes_ = 0;
     uint64_t textureResidencyBytes_ = 0;
+    uint64_t modelResidencyPeakBytes_ = 0;
+    uint64_t textureResidencyPeakBytes_ = 0;
     uint64_t residencyEvictions_ = 0;
+    uint64_t residencyBudgetBlocks_ = 0;
     bool residencyBudgetBlocked_ = false;
     bool textureDescriptorsDirty_ = false;
 };

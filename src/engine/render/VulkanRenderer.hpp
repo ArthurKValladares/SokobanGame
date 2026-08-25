@@ -4,6 +4,7 @@
 #include "engine/render/GltfMesh.hpp"
 #include "engine/render/FrameDescriptorSync.hpp"
 #include "engine/render/FrameResourceTracker.hpp"
+#include "engine/render/FrameTimeTelemetry.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
 #include "engine/render/RendererReconfiguration.hpp"
 #include "engine/render/RenderTypes.hpp"
@@ -276,6 +277,7 @@ private:
     std::optional<VulkanFailure> fatalFailure_;
     bool vsync_ = false;
     RenderStats lastStats_ {};
+    FrameTimeTelemetry cpuFrameTimeTelemetry_ {};
     uint64_t nextStatsFrameIndex_ = 1;
     std::optional<GameViewportDisplay> gameViewportDisplay_;
     uint64_t pipelineRebuilds_ = 0;

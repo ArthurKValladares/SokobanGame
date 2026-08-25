@@ -190,7 +190,10 @@ void VulkanModelResources::destroy()
     visibleRequestStamp_ = 0;
     modelResidencyBytes_ = 0;
     textureResidencyBytes_ = 0;
+    modelResidencyPeakBytes_ = 0;
+    textureResidencyPeakBytes_ = 0;
     residencyEvictions_ = 0;
+    residencyBudgetBlocks_ = 0;
     residencyBudgetBlocked_ = false;
     textureDescriptorsDirty_ = false;
     activeSkinningFrame_ = UINT32_MAX;
@@ -649,6 +652,8 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                 slot.gpu = uploadMesh(mesh, slot.upload);
                 slot.gpuBytes = bytes;
                 modelResidencyBytes_ += bytes;
+                modelResidencyPeakBytes_ = std::max(
+                    modelResidencyPeakBytes_, modelResidencyBytes_);
                 slot.state = LoadState::Uploading;
             } else {
                 slot.skinnedSource = std::make_shared<SkinnedMeshData>(
@@ -671,6 +676,8 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                 slot.skinnedGpu = uploadSkinnedMesh(*slot.skinnedSource, slot.upload);
                 slot.gpuBytes = bytes;
                 modelResidencyBytes_ += bytes;
+                modelResidencyPeakBytes_ = std::max(
+                    modelResidencyPeakBytes_, modelResidencyBytes_);
                 slot.state = LoadState::Uploading;
             }
             slot.prepared.reset();
@@ -791,6 +798,8 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
         slot.gpu.height = image.height;
         slot.gpuBytes = bytes;
         textureResidencyBytes_ += bytes;
+        textureResidencyPeakBytes_ = std::max(
+            textureResidencyPeakBytes_, textureResidencyBytes_);
         slot.prepared.reset();
         slot.state = LoadState::Uploading;
         ++textureUploadSubmissions_;
@@ -826,13 +835,19 @@ uint64_t VulkanModelResources::textureBytes(const ImageData& image)
     return base + base / 3U;
 }
 
+void VulkanModelResources::markResidencyBudgetBlocked()
+{
+    residencyBudgetBlocked_ = true;
+    ++residencyBudgetBlocks_;
+}
+
 bool VulkanModelResources::makeModelResident(
     RenderModel protectedModel,
     uint64_t requiredBytes)
 {
     const uint64_t budget = scheduler_.budget().modelResidencyBytes;
     if (requiredBytes > budget) {
-        residencyBudgetBlocked_ = true;
+        markResidencyBudgetBlocked();
         return false;
     }
     if (modelResidencyBytes_ + requiredBytes <= budget) {
@@ -857,7 +872,7 @@ bool VulkanModelResources::makeModelResident(
         return victim;
     };
     if (!findVictim()) {
-        residencyBudgetBlocked_ = true;
+        markResidencyBudgetBlocked();
         return false;
     }
 
@@ -868,7 +883,7 @@ bool VulkanModelResources::makeModelResident(
     while (modelResidencyBytes_ + requiredBytes > budget) {
         const std::optional<std::size_t> victim = findVictim();
         if (!victim) {
-            residencyBudgetBlocked_ = true;
+            markResidencyBudgetBlocked();
             return false;
         }
         ModelSlot& slot = models_[*victim];
@@ -888,7 +903,7 @@ bool VulkanModelResources::makeTextureResident(
 {
     const uint64_t budget = scheduler_.budget().textureResidencyBytes;
     if (requiredBytes > budget) {
-        residencyBudgetBlocked_ = true;
+        markResidencyBudgetBlocked();
         return false;
     }
     if (textureResidencyBytes_ + requiredBytes <= budget) {
@@ -913,7 +928,7 @@ bool VulkanModelResources::makeTextureResident(
         return victim;
     };
     if (!findVictim()) {
-        residencyBudgetBlocked_ = true;
+        markResidencyBudgetBlocked();
         return false;
     }
 
@@ -922,7 +937,7 @@ bool VulkanModelResources::makeTextureResident(
     while (textureResidencyBytes_ + requiredBytes > budget) {
         const std::optional<std::size_t> victim = findVictim();
         if (!victim) {
-            residencyBudgetBlocked_ = true;
+            markResidencyBudgetBlocked();
             return false;
         }
         TextureSlot& slot = textures_[*victim];
@@ -1279,9 +1294,12 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
     result.cancelledPrefetches = scheduler_.cancelledPrefetchCount();
     result.modelResidencyBytes = modelResidencyBytes_;
     result.textureResidencyBytes = textureResidencyBytes_;
+    result.modelResidencyPeakBytes = modelResidencyPeakBytes_;
+    result.textureResidencyPeakBytes = textureResidencyPeakBytes_;
     result.modelResidencyBudgetBytes = scheduler_.budget().modelResidencyBytes;
     result.textureResidencyBudgetBytes = scheduler_.budget().textureResidencyBytes;
     result.residencyEvictions = residencyEvictions_;
+    result.residencyBudgetBlocks = residencyBudgetBlocks_;
     result.residencyBudgetBlocked = residencyBudgetBlocked_;
     result.textureUploadSubmissions = textureUploadSubmissions_;
     result.textureUploadCompletions = textureUploadCompletions_;

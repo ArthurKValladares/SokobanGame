@@ -1,5 +1,7 @@
 #pragma once
 
+#include "engine/render/FrameTimeTelemetry.hpp"
+
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
@@ -37,6 +39,7 @@ public:
     void endFrame(VkCommandBuffer commandBuffer, uint32_t frameIndex) const;
     void markSubmitted(uint32_t frameIndex);
     [[nodiscard]] std::optional<double> latestFrameMilliseconds() const;
+    [[nodiscard]] FrameTimeSummary frameTimeSummary() const;
 
 private:
     [[nodiscard]] uint32_t firstQuery(uint32_t frameIndex) const;
@@ -46,7 +49,7 @@ private:
     float timestampPeriodNanoseconds_ = 0.0f;
     uint32_t timestampValidBits_ = 0;
     uint32_t frameCount_ = 0;
-    std::optional<double> latestFrameMilliseconds_;
+    FrameTimeTelemetry frameTimeTelemetry_ {};
     std::vector<bool> submitted_;
 };
 

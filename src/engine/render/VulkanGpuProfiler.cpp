@@ -74,7 +74,7 @@ void VulkanGpuProfiler::destroy() noexcept
     timestampPeriodNanoseconds_ = 0.0f;
     timestampValidBits_ = 0;
     frameCount_ = 0;
-    latestFrameMilliseconds_.reset();
+    frameTimeTelemetry_.reset();
     submitted_.clear();
 }
 
@@ -94,11 +94,11 @@ void VulkanGpuProfiler::collectCompletedFrame(uint32_t frameIndex)
         sizeof(uint64_t),
         VK_QUERY_RESULT_64_BIT);
     if (result == VK_SUCCESS) {
-        latestFrameMilliseconds_ = vulkanTimestampDeltaMilliseconds(
+        frameTimeTelemetry_.record(vulkanTimestampDeltaMilliseconds(
             timestamps[0],
             timestamps[1],
             timestampPeriodNanoseconds_,
-            timestampValidBits_);
+            timestampValidBits_));
         submitted_[frameIndex] = false;
     } else if (result != VK_NOT_READY) {
         vkCheck(result, "vkGetQueryPoolResults timestamp profiler failed");
@@ -143,7 +143,15 @@ void VulkanGpuProfiler::markSubmitted(uint32_t frameIndex)
 
 std::optional<double> VulkanGpuProfiler::latestFrameMilliseconds() const
 {
-    return latestFrameMilliseconds_;
+    const FrameTimeSummary summary = frameTimeTelemetry_.summary();
+    return summary.available()
+        ? std::optional<double> { summary.latestMilliseconds }
+        : std::nullopt;
+}
+
+FrameTimeSummary VulkanGpuProfiler::frameTimeSummary() const
+{
+    return frameTimeTelemetry_.summary();
 }
 
 uint32_t VulkanGpuProfiler::firstQuery(uint32_t frameIndex) const

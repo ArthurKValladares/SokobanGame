@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <optional>
@@ -276,6 +277,7 @@ void VulkanRenderer::drawFrame(
     if (fatalFailure_) {
         return;
     }
+    const auto cpuFrameStart = std::chrono::steady_clock::now();
     try {
     const PreparedFrameScratch& prepared =
         resolvePreparedFrame(preparedFrame);
@@ -392,9 +394,14 @@ void VulkanRenderer::drawFrame(
         prepared.previewScene ? &*prepared.previewScene : nullptr,
         uiDrawData);
     lastStats_.gpuTimestampsSupported = gpuProfiler_.supported();
-    if (const auto timing = gpuProfiler_.latestFrameMilliseconds()) {
+    const FrameTimeSummary gpuTiming = gpuProfiler_.frameTimeSummary();
+    if (gpuTiming.available()) {
         lastStats_.gpuFrameTimingAvailable = true;
-        lastStats_.gpuFrameMilliseconds = *timing;
+        lastStats_.gpuFrameTimingSamples = gpuTiming.sampleCount;
+        lastStats_.gpuFrameMilliseconds = gpuTiming.latestMilliseconds;
+        lastStats_.gpuFrameAverageMilliseconds = gpuTiming.averageMilliseconds;
+        lastStats_.gpuFrameP95Milliseconds = gpuTiming.p95Milliseconds;
+        lastStats_.gpuFrameMaximumMilliseconds = gpuTiming.maximumMilliseconds;
     }
 
     VkSemaphoreSubmitInfo waitSemaphore {
@@ -448,6 +455,16 @@ void VulkanRenderer::drawFrame(
     } else {
         vkCheck(presented, "vkQueuePresentKHR failed");
     }
+
+    cpuFrameTimeTelemetry_.record(std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - cpuFrameStart).count());
+    const FrameTimeSummary cpuTiming = cpuFrameTimeTelemetry_.summary();
+    lastStats_.cpuFrameTimingAvailable = cpuTiming.available();
+    lastStats_.cpuFrameTimingSamples = cpuTiming.sampleCount;
+    lastStats_.cpuFrameMilliseconds = cpuTiming.latestMilliseconds;
+    lastStats_.cpuFrameAverageMilliseconds = cpuTiming.averageMilliseconds;
+    lastStats_.cpuFrameP95Milliseconds = cpuTiming.p95Milliseconds;
+    lastStats_.cpuFrameMaximumMilliseconds = cpuTiming.maximumMilliseconds;
 
     currentFrame_ = (currentFrame_ + 1) % maxFramesInFlight_;
     applyPendingReconfiguration();

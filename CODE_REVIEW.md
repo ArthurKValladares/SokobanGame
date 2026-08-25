@@ -426,6 +426,14 @@ The model shader reads each transform and normal rotation through
 so no visual state is accidentally shared. Skinned models retain their own
 palette-backed draw, and translucent work preserves its required order.
 
+**Residency and frame-time telemetry: Fixed on 2026-08-24.** Debug rendering
+statistics now report live and peak mesh/texture residency, their independent
+budgets, eviction count, and the number of capacity-blocked publications. CPU
+submission/present time and fence-safe GPU timestamp results each retain a
+bounded 120-frame latest, average, p95, and worst-frame summary. This makes
+streaming pressure and sustained versus one-off frame hitches observable
+without introducing a profiling synchronization point.
+
 This is adequate for the current board sizes. The recommended upgrade path is:
 
 1. [Complete] Suballocated device-local static vertex/index heaps with staging uploads.
@@ -573,7 +581,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
 4. [Complete] Add persistently mapped upload rings.
 5. [Complete] Move skinning to the GPU.
 6. [Complete] Sort and instance repeated opaque draws.
-7. Add resource residency and frame-time telemetry before further
+7. [Complete] Add resource residency and frame-time telemetry before further
    optimization.
 
 ### Phase 4 — Productization
