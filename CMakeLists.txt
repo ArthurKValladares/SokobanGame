@@ -633,6 +633,10 @@ if(SOKOBAN_BUILD_TESTS)
             TIMEOUT 30
             SKIP_RETURN_CODE 77
         )
+        if(SOKOBAN_ENABLE_SANITIZERS)
+            set_property(TEST vulkan_smoke APPEND PROPERTY ENVIRONMENT
+                "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan.supp")
+        endif()
     endif()
 
     sokoban_add_test(NAME rules TARGET sokoban_rules_tests

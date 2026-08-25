@@ -1,0 +1,5 @@
+# SDL's X11 backend retains process-lifetime display and keyboard allocations.
+leak:X11_VideoInit
+
+# The Vulkan loader/llvmpipe stack retains physical-device enumeration data.
+leak:setup_loader_term_phys_devs
