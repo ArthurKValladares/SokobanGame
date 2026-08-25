@@ -353,6 +353,49 @@ private:
         return opaque ? pipelines_.sceneOpaque() : pipelines_.scene();
     }
 
+    // Draws a run of quads that were written to consecutive draw-instance
+    // entries. This is where T1's throughput actually comes from: the whole
+    // point of moving per-draw parameters into a buffer was that neighbouring
+    // faces sharing a pipeline stop needing a draw call each.
+    void drawQuadRun(
+        VkCommandBuffer commandBuffer,
+        uint32_t firstInstance,
+        uint32_t instanceCount)
+    {
+        if (instanceCount == 0) {
+            return;
+        }
+        vkCmdDraw(commandBuffer, 6, instanceCount, 0, firstInstance);
+        ++stats_.drawCalls;
+    }
+
+    // Records one draw's parameters and returns the index a shader reads
+    // them back at. Scene pipelines take everything per-draw this way now;
+    // only the shadow pipelines still push it.
+    [[nodiscard]] uint32_t writeDrawInstance(const GpuDrawInstance& instance)
+    {
+        return models_.writeDrawInstance(
+            configuration_.descriptorFrameIndex, instance);
+    }
+
+    // Only the skinned-model pipeline reads this: its gl_InstanceIndex is
+    // already spoken for by the skinning palette, so it cannot carry the
+    // draw-instance index the way every other pipeline does.
+    void pushDrawInstanceIndex(
+        VkCommandBuffer commandBuffer, uint32_t drawInstance) const
+    {
+        const DrawInstanceIndexPushConstants indexConstants {
+            .drawInstance = drawInstance,
+        };
+        vkCmdPushConstants(
+            commandBuffer,
+            pipelines_.layout(),
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            sizeof(indexConstants),
+            &indexConstants);
+    }
+
     void bindDescriptorSet(VkCommandBuffer commandBuffer) const
     {
         const VkDescriptorSet set = descriptorSet();
@@ -617,7 +660,7 @@ private:
             .maxDepth = 1.0f,
         };
         const VkRect2D scissor { .offset = { 0, 0 }, .extent = extent };
-        TilePushConstants pushConstants {};
+        GpuDrawInstance pushConstants {};
         pushConstants.color.x = std::clamp(amount, 0.0f, 1.0f);
 
         vkCmdBeginRendering(commandBuffer, &renderingInfo);
@@ -633,7 +676,7 @@ private:
             pipelines_.layout(),
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             0,
-            sizeof(TilePushConstants),
+            sizeof(GpuDrawInstance),
             &pushConstants);
         vkCmdDraw(commandBuffer, 3, 1, 0, 0);
         ++stats_.drawCalls;
@@ -899,11 +942,14 @@ private:
             const RenderFrameData::Lighting unlit {};
             for (const UiDrawCommand& command :
                  uiDrawData.commands) {
-                drawUiRect(
+                drawQuadRun(
                     commandBuffer,
-                    command,
-                    uiDrawData.viewportSize,
-                    unlit);
+                    drawUiRect(
+                        commandBuffer,
+                        command,
+                        uiDrawData.viewportSize,
+                        unlit),
+                    1);
             }
         }
         if (renderImGui) {
@@ -928,7 +974,9 @@ private:
             layout.tileSize.x * tile.size.x,
             layout.tileSize.y * tile.size.y,
         };
-        drawFace(
+        drawQuadRun(
+            commandBuffer,
+            drawFace(
             commandBuffer,
             {
                 Vec3 { origin.x, origin.y, 0.0f },
@@ -947,7 +995,8 @@ private:
             {},
             0.0f,
             false,
-            true);
+            true),
+            1);
     }
 
     void drawIsoFrame(
@@ -962,6 +1011,12 @@ private:
             : scene.opaqueFaceIndices;
         const bool opaquePass = !translucentPass;
         VkPipeline boundFacePipeline = flatScenePipeline(opaquePass);
+        uint32_t runFirst = 0;
+        uint32_t runCount = 0;
+        const auto flushFaceRun = [&] {
+            drawQuadRun(commandBuffer, runFirst, runCount);
+            runCount = 0;
+        };
         // The whole pass stays on LESS_OR_EQUAL, deliberately.
         //
         // LESS is the textbook compare op for a front-to-back opaque pass and
@@ -1016,6 +1071,10 @@ private:
                 return flatScenePipeline(opaqueSurface);
             }();
             if (desiredPipeline != boundFacePipeline) {
+                // The run ends here: a pipeline change is the only thing that
+                // can interrupt one, because everything else that used to
+                // differ per draw now lives in the instance entry.
+                flushFaceRun();
                 vkCmdBindPipeline(
                     commandBuffer,
                     VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -1023,8 +1082,9 @@ private:
                 ++stats_.pipelineBinds;
                 boundFacePipeline = desiredPipeline;
             }
+            uint32_t faceInstance = 0;
             if (face.material == PreparedSurfaceMaterial::Water) {
-                drawWaterFace(
+                faceInstance = drawWaterFace(
                     commandBuffer,
                     face.worldVertices,
                     face.color,
@@ -1049,7 +1109,7 @@ private:
                     face.isEditorPreview);
             } else if (
                 face.material == PreparedSurfaceMaterial::MirrorEnergy) {
-                drawMirrorEnergyFace(
+                faceInstance = drawMirrorEnergyFace(
                     commandBuffer,
                     face.worldVertices,
                     face.color,
@@ -1066,7 +1126,7 @@ private:
                               static_cast<float>(splatRegion->origin.y),
                       }
                     : face.worldOrigin;
-                drawGroundSplatFace(
+                faceInstance = drawGroundSplatFace(
                     commandBuffer,
                     face.worldVertices,
                     face.color,
@@ -1081,7 +1141,7 @@ private:
                     face.isEditorPreview,
                     splatTextures);
             } else {
-                drawFace(
+                faceInstance = drawFace(
                     commandBuffer,
                     face.worldVertices,
                     face.color,
@@ -1095,19 +1155,31 @@ private:
                     frameData.gridOverlay.width,
                     face.isEditorPreview);
             }
+            // Entries are handed out in order, so a run is simply a
+            // contiguous span of them. The guard is defensive: if anything
+            // ever allocates an entry mid-loop the run breaks cleanly rather
+            // than drawing someone else's face.
+            if (runCount != 0 && faceInstance != runFirst + runCount) {
+                flushFaceRun();
+            }
+            if (runCount == 0) {
+                runFirst = faceInstance;
+            }
+            ++runCount;
         }
+        flushFaceRun();
 
         struct ModelDraw {
             const RenderFrameData::Tile* tile = nullptr;
             VulkanModelResources::MeshView mesh {};
-            TilePushConstants constants {};
+            GpuDrawInstance constants {};
             VkPipeline pipeline = VK_NULL_HANDLE;
             uint32_t pipelineRank = 0;
             std::array<uint32_t, 29> batchState {};
             bool mirrorGhost = false;
             bool skinned = false;
         };
-        const auto batchStateFor = [](const TilePushConstants& constants) {
+        const auto batchStateFor = [](const GpuDrawInstance& constants) {
             std::array<uint32_t, 29> result {};
             std::size_t index = 0;
             const auto append = [&result, &index](Vec4 value) {
@@ -1142,7 +1214,7 @@ private:
             const bool mirrorGhost =
                 tile.effect == RenderSurfaceEffect::MirrorEnergy;
             const bool skinned = models_.modelUsesGpuSkinning(tile.model);
-            const TilePushConstants constants = modelPushConstants(
+            const GpuDrawInstance constants = modelPushConstants(
                 tile,
                 frameData.lighting,
                 frameData.effectAnimationTimeSeconds);
@@ -1282,27 +1354,16 @@ private:
                 drawModel(
                     commandBuffer,
                     draw.mesh,
-                    draw.constants,
                     1,
-                    draw.mesh.firstInstance);
+                    draw.mesh.firstInstance,
+                    writeDrawInstance(draw.constants));
             } else {
                 uint32_t firstInstance = 0;
                 for (std::size_t itemIndex = batch.firstItem;
                      itemIndex < batch.firstItem + batch.itemCount;
                      ++itemIndex) {
-                    const TilePushConstants& constants =
-                        draws[orderedDraws[itemIndex].drawIndex].constants;
-                    const uint32_t instance = models_.writeModelInstance(
-                        configuration_.descriptorFrameIndex,
-                        {
-                            .worldFromModel = constants.vertices,
-                            .rotationRadians = {
-                                constants.normalAndAmbientRed.x,
-                                constants.normalAndAmbientRed.y,
-                                constants.normalAndAmbientRed.z,
-                                0.0f,
-                            },
-                        });
+                    const uint32_t instance = writeDrawInstance(
+                        draws[orderedDraws[itemIndex].drawIndex].constants);
                     if (itemIndex == batch.firstItem) {
                         firstInstance = instance;
                     }
@@ -1310,8 +1371,8 @@ private:
                 drawModel(
                     commandBuffer,
                     draw.mesh,
-                    draw.constants,
                     static_cast<uint32_t>(batch.itemCount),
+                    firstInstance,
                     firstInstance);
             }
         }
@@ -1345,7 +1406,8 @@ private:
                         desiredDepthTest ? VK_TRUE : VK_FALSE);
                     depthTestEnabled = desiredDepthTest;
                 }
-                drawParticle(commandBuffer, particle);
+                drawQuadRun(
+                    commandBuffer, drawParticle(commandBuffer, particle), 1);
             }
             if (!depthTestEnabled && swapchain_.depthView()) {
                 vkCmdSetDepthTestEnable(commandBuffer, VK_TRUE);
@@ -1400,7 +1462,9 @@ private:
                 layout.boardBottomLeft.y +
                     top * layout.tileSize.y,
             };
-            drawFace(
+            drawQuadRun(
+                commandBuffer,
+                drawFace(
                 commandBuffer,
                 {
                     Vec3 { min.x, min.y, 0.0f },
@@ -1416,7 +1480,8 @@ private:
                 {},
                 0.0f,
                 false,
-                true);
+                true),
+                1);
         };
         for (uint32_t x = 0; x <= frameData.levelWidth; ++x) {
             const float center = static_cast<float>(x);
@@ -1440,7 +1505,7 @@ private:
         }
     }
 
-    void drawMirrorEnergyFace(
+    [[nodiscard]] uint32_t drawMirrorEnergyFace(
         VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
         Vec4 color,
@@ -1451,11 +1516,10 @@ private:
             commandBuffer,
             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
         ++stats_.visibleFaces;
-        ++stats_.drawCalls;
         stats_.vertices += 6;
         stats_.triangles += 2;
 
-        const TilePushConstants constants {
+        const GpuDrawInstance constants {
             .vertices = {
                 Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, worldSpaceQuad },
                 Vec4 { vertices[1].x, vertices[1].y, vertices[1].z, worldSpaceQuad },
@@ -1480,18 +1544,10 @@ private:
                 config::mirrorEnergyPulseStrength,
             },
         };
-        vkCmdPushConstants(
-            commandBuffer,
-            pipelines_.layout(),
-            VK_SHADER_STAGE_VERTEX_BIT |
-                VK_SHADER_STAGE_FRAGMENT_BIT,
-            0,
-            sizeof(TilePushConstants),
-            &constants);
-        vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+        return writeDrawInstance(constants);
     }
 
-    void drawParticle(
+    [[nodiscard]] uint32_t drawParticle(
         VkCommandBuffer commandBuffer,
         const PreparedParticle& particle)
     {
@@ -1499,11 +1555,10 @@ private:
             commandBuffer,
             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
         ++stats_.visibleFaces;
-        ++stats_.drawCalls;
         stats_.vertices += 6;
         stats_.triangles += 2;
 
-        const TilePushConstants constants {
+        const GpuDrawInstance constants {
             .vertices = {
                 Vec4 {
                     particle.vertices[0].x,
@@ -1535,21 +1590,13 @@ private:
                 1.0f,
             },
         };
-        vkCmdPushConstants(
-            commandBuffer,
-            pipelines_.layout(),
-            VK_SHADER_STAGE_VERTEX_BIT |
-                VK_SHADER_STAGE_FRAGMENT_BIT,
-            0,
-            sizeof(TilePushConstants),
-            &constants);
-        vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+        return writeDrawInstance(constants);
     }
 
     // `clipSpace` is for the callers whose quads are already in clip space -
     // the UI and the top-down 2D board. They have no world position and must
     // not be projected; see worldSpaceQuad in VulkanRenderConstants.hpp.
-    void drawFace(
+    [[nodiscard]] uint32_t drawFace(
         VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
         Vec4 color,
@@ -1566,7 +1613,6 @@ private:
             commandBuffer,
             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
         ++stats_.visibleFaces;
-        ++stats_.drawCalls;
         stats_.vertices += 6;
         stats_.triangles += 2;
 
@@ -1583,7 +1629,7 @@ private:
             lighting.ambient.color.z *
                 lighting.ambient.intensity,
         };
-        const TilePushConstants constants {
+        const GpuDrawInstance constants {
             .vertices = {
                 Vec4 {
                     vertices[0].x,
@@ -1653,15 +1699,7 @@ private:
                 std::max(lighting.specularPower, 1.0f),
             },
         };
-        vkCmdPushConstants(
-            commandBuffer,
-            pipelines_.layout(),
-            VK_SHADER_STAGE_VERTEX_BIT |
-                VK_SHADER_STAGE_FRAGMENT_BIT,
-            0,
-            sizeof(TilePushConstants),
-            &constants);
-        vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+        return writeDrawInstance(constants);
     }
 
     // Ground tops blended from two textures via a splat map. Lighting,
@@ -1669,7 +1707,7 @@ private:
     // push-constant slots differ: materialOptions.x carries the face's world
     // origin X (opaque ground never blurs) and textureOptions carries the
     // three one-based texture handles plus world origin Y.
-    void drawGroundSplatFace(
+    [[nodiscard]] uint32_t drawGroundSplatFace(
         VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
         Vec4 color,
@@ -1686,7 +1724,6 @@ private:
             commandBuffer,
             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
         ++stats_.visibleFaces;
-        ++stats_.drawCalls;
         stats_.vertices += 6;
         stats_.triangles += 2;
 
@@ -1700,7 +1737,7 @@ private:
             lighting.ambient.color.y * lighting.ambient.intensity,
             lighting.ambient.color.z * lighting.ambient.intensity,
         };
-        const TilePushConstants constants {
+        const GpuDrawInstance constants {
             .vertices = {
                 Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, worldSpaceQuad },
                 Vec4 { vertices[1].x, vertices[1].y, vertices[1].z, worldSpaceQuad },
@@ -1753,18 +1790,10 @@ private:
                 worldOrigin.y,
             },
         };
-        vkCmdPushConstants(
-            commandBuffer,
-            pipelines_.layout(),
-            VK_SHADER_STAGE_VERTEX_BIT |
-                VK_SHADER_STAGE_FRAGMENT_BIT,
-            0,
-            sizeof(TilePushConstants),
-            &constants);
-        vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+        return writeDrawInstance(constants);
     }
 
-    void drawWaterFace(
+    [[nodiscard]] uint32_t drawWaterFace(
         VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
         Vec4 color,
@@ -1782,14 +1811,13 @@ private:
             commandBuffer,
             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
         ++stats_.visibleFaces;
-        ++stats_.drawCalls;
         stats_.vertices += 6;
         stats_.triangles += 2;
 
         const float waterRenderingMode =
             rendering.visualizeCausticsOnly ? 2.0f : 1.0f;
 
-        const TilePushConstants constants {
+        const GpuDrawInstance constants {
             .vertices = {
                 Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, worldSpaceQuad },
                 Vec4 { vertices[1].x, vertices[1].y, vertices[1].z, worldSpaceQuad },
@@ -1870,15 +1898,7 @@ private:
                 static_cast<float>(shorelineMask),
             },
         };
-        vkCmdPushConstants(
-            commandBuffer,
-            pipelines_.layout(),
-            VK_SHADER_STAGE_VERTEX_BIT |
-                VK_SHADER_STAGE_FRAGMENT_BIT,
-            0,
-            sizeof(TilePushConstants),
-            &constants);
-        vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+        return writeDrawInstance(constants);
     }
 
     void drawShadowFace(
@@ -1895,7 +1915,7 @@ private:
         // per point light, so there is no single transform a uniform could
         // hold; these stay projected on the CPU and nothing in a shadow pass
         // asks where it is in the world.
-        const TilePushConstants constants {
+        const GpuDrawInstance constants {
             .vertices = shadowVertices,
         };
         vkCmdPushConstants(
@@ -1904,7 +1924,7 @@ private:
             VK_SHADER_STAGE_VERTEX_BIT |
                 VK_SHADER_STAGE_FRAGMENT_BIT,
             0,
-            sizeof(TilePushConstants),
+            sizeof(GpuDrawInstance),
             &constants);
         vkCmdDraw(commandBuffer, 6, 1, 0, 0);
     }
@@ -1920,15 +1940,16 @@ private:
             shadowVertices[i] = projectPointShadow(
                 light, cubeFace, worldVertices[i]);
         }
-        const TilePushConstants constants {
+        const GpuDrawInstance constants {
             .vertices = shadowVertices,
         };
         vkCmdPushConstants(
             commandBuffer,
             pipelines_.layout(),
-            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            VK_SHADER_STAGE_VERTEX_BIT |
+                VK_SHADER_STAGE_FRAGMENT_BIT,
             0,
-            sizeof(TilePushConstants),
+            sizeof(GpuDrawInstance),
             &constants);
         vkCmdDraw(commandBuffer, 6, 1, 0, 0);
     }
@@ -1937,7 +1958,7 @@ private:
     // now entirely about the model: where it is in the world and what it is
     // made of. Where it lands on screen, and where the sun sees it, are the
     // frame's business and live in the uniform buffer.
-    [[nodiscard]] TilePushConstants modelPushConstants(
+    [[nodiscard]] GpuDrawInstance modelPushConstants(
         const RenderFrameData::Tile& tile,
         const RenderFrameData::Lighting& lighting,
         float effectAnimationTimeSeconds)
@@ -1984,7 +2005,7 @@ private:
                   tile.size.y,
                   std::max(tile.height, 0.0001f),
               };
-        const TilePushConstants constants {
+        const GpuDrawInstance constants {
             .vertices = IsoScenePreparer::modelWorldTransform(tile),
             .color = tile.color,
             .normalAndAmbientRed = {
@@ -2061,12 +2082,17 @@ private:
         return constants;
     }
 
+    // `firstInstance` is what gl_InstanceIndex starts at; for a static model
+    // that is its draw-instance entry, and for a skinned one it is its
+    // skinning-palette entry. `drawInstance` is the material and transform
+    // entry either way, pushed for the skinned pipeline that cannot reach it
+    // through gl_InstanceIndex.
     void drawModel(
         VkCommandBuffer commandBuffer,
         const VulkanModelResources::MeshView& mesh,
-        const TilePushConstants& constants,
         uint32_t instanceCount,
-        uint32_t firstInstance)
+        uint32_t firstInstance,
+        uint32_t drawInstance)
     {
         const VkBuffer vertexBuffer = mesh.vertexBuffer;
         const VkDeviceSize offset = mesh.vertexOffset;
@@ -2077,14 +2103,7 @@ private:
             mesh.indexBuffer,
             mesh.indexOffset,
             VK_INDEX_TYPE_UINT32);
-        vkCmdPushConstants(
-            commandBuffer,
-            pipelines_.layout(),
-            VK_SHADER_STAGE_VERTEX_BIT |
-                VK_SHADER_STAGE_FRAGMENT_BIT,
-            0,
-            sizeof(TilePushConstants),
-            &constants);
+        pushDrawInstanceIndex(commandBuffer, drawInstance);
         vkCmdDrawIndexed(
             commandBuffer, mesh.indexCount, instanceCount, 0, 0, firstInstance);
         stats_.visibleFaces += mesh.indexCount / 3 * instanceCount;
@@ -2102,7 +2121,7 @@ private:
             models_.meshForTile(tile, configuration_.descriptorFrameIndex);
         const ModelTransformPoints transform =
             IsoScenePreparer::modelTransformPoints(tile);
-        const TilePushConstants constants {
+        const GpuDrawInstance constants {
             .vertices = affineTransformColumns(
                 IsoScenePreparer::projectShadowPoint(
                     layout, transform.origin),
@@ -2128,7 +2147,7 @@ private:
             VK_SHADER_STAGE_VERTEX_BIT |
                 VK_SHADER_STAGE_FRAGMENT_BIT,
             0,
-            sizeof(TilePushConstants),
+            sizeof(GpuDrawInstance),
             &constants);
         vkCmdDrawIndexed(
             commandBuffer, mesh.indexCount, 1, 0, 0, mesh.firstInstance);
@@ -2144,7 +2163,7 @@ private:
             models_.meshForTile(tile, configuration_.descriptorFrameIndex);
         const ModelTransformPoints transform =
             IsoScenePreparer::modelTransformPoints(tile);
-        const TilePushConstants constants {
+        const GpuDrawInstance constants {
             .vertices = affineTransformColumns(
                 projectPointShadow(light, cubeFace, transform.origin),
                 projectPointShadow(light, cubeFace, transform.xPoint),
@@ -2162,13 +2181,13 @@ private:
             pipelines_.layout(),
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             0,
-            sizeof(TilePushConstants),
+            sizeof(GpuDrawInstance),
             &constants);
         vkCmdDrawIndexed(
             commandBuffer, mesh.indexCount, 1, 0, 0, mesh.firstInstance);
     }
 
-    void drawUiRect(
+    [[nodiscard]] uint32_t drawUiRect(
         VkCommandBuffer commandBuffer,
         const UiDrawCommand& command,
         Vec2 viewportSize,
@@ -2197,7 +2216,7 @@ private:
             Vec3 { left, bottom, 0.0f },
         };
         if (command.kind == UiDrawKind::Solid) {
-            drawFace(
+            return drawFace(
                 commandBuffer,
                 vertices,
                 command.color,
@@ -2209,11 +2228,9 @@ private:
                 0.0f,
                 false,
                 true);
-            return;
         }
 
         ++stats_.visibleFaces;
-        ++stats_.drawCalls;
         stats_.vertices += 6;
         stats_.triangles += 2;
         const float materialMode = command.kind == UiDrawKind::FontGlyph
@@ -2221,7 +2238,7 @@ private:
             : (command.kind == UiDrawKind::SceneImage
                     ? 6.0f
                     : (command.kind == UiDrawKind::TextureImage ? 7.0f : 4.0f));
-        const TilePushConstants constants {
+        const GpuDrawInstance constants {
             .vertices = {
                 Vec4 { left, top, 0.0f, clipSpaceQuad },
                 Vec4 { right, top, 0.0f, clipSpaceQuad },
@@ -2245,15 +2262,7 @@ private:
             .textureOptions = {
                 materialMode, static_cast<float>(command.texture.value), 0.0f, 1.0f },
         };
-        vkCmdPushConstants(
-            commandBuffer,
-            pipelines_.layout(),
-            VK_SHADER_STAGE_VERTEX_BIT |
-                VK_SHADER_STAGE_FRAGMENT_BIT,
-            0,
-            sizeof(TilePushConstants),
-            &constants);
-        vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+        return writeDrawInstance(constants);
     }
 
     VkDevice device_ = VK_NULL_HANDLE;

@@ -13,6 +13,7 @@ layout(location = 3) out vec3 outNormal;
 layout(location = 4) flat out uint outTextureIndex;
 layout(location = 5) flat out uint outMaterialFlags;
 layout(location = 6) out vec3 outWorldPosition;
+layout(location = 7) flat out uint outDrawInstance;
 
 struct PointLightData
 {
@@ -29,21 +30,9 @@ layout(std140, set = 0, binding = 7) uniform SceneFrame
     vec4 pointLightMeta;
 } frame;
 
-struct ModelInstance
+struct DrawInstance
 {
-    vec4 worldFromModel[4];
-    vec4 rotationRadians;
-};
-layout(std430, set = 0, binding = 10) readonly buffer ModelInstances
-{
-    ModelInstance instances[];
-} modelInstances;
-
-layout(push_constant) uniform PushConstants
-{
-    vec4 worldFromModel[4];
-    // See triangle.vert: one push block is shared by every pipeline, so this
-    // slot stays declared even where the pass does not use it.
+    vec4 vertices[4];
     vec4 passData[4];
     vec4 color;
     vec4 normalAndAmbientRed;
@@ -53,7 +42,13 @@ layout(push_constant) uniform PushConstants
     vec4 materialOptions;
     vec4 gridColor;
     vec4 textureOptions;
-} pc;
+};
+layout(std430, set = 0, binding = 10) readonly buffer DrawInstances
+{
+    DrawInstance instances[];
+} drawInstances;
+
+#define draw drawInstances.instances[gl_InstanceIndex]
 
 // The sun transform is a matrix now, and a matrix cannot clamp. Its CPU
 // ancestor, projectShadowPoint, clamped depth into [0, 1]; without that,
@@ -68,12 +63,12 @@ vec4 sunShadowFromWorld(vec3 worldPosition)
 
 void main()
 {
-    ModelInstance instance = modelInstances.instances[gl_InstanceIndex];
+    outDrawInstance = uint(gl_InstanceIndex);
     mat4 worldTransform = mat4(
-        instance.worldFromModel[0],
-        instance.worldFromModel[1],
-        instance.worldFromModel[2],
-        instance.worldFromModel[3]);
+        draw.vertices[0],
+        draw.vertices[1],
+        draw.vertices[2],
+        draw.vertices[3]);
 
     vec3 worldPosition = (worldTransform * vec4(inPosition, 1.0)).xyz;
     gl_Position = frame.clipFromWorld * vec4(worldPosition, 1.0);
@@ -87,11 +82,11 @@ void main()
     // Standard models use gridColor.xyz for inverse scale and a negative W
     // as the marker. Mirror-energy models need gridColor for their effect and
     // retain unit normal scaling.
-    if (pc.gridColor.w < 0.0) {
-        normal *= pc.gridColor.xyz;
+    if (draw.gridColor.w < 0.0) {
+        normal *= draw.gridColor.xyz;
     }
 
-    vec3 rotation = instance.rotationRadians.xyz;
+    vec3 rotation = draw.normalAndAmbientRed.xyz;
     float cosine = cos(rotation.x);
     float sine = sin(rotation.x);
     normal = vec3(

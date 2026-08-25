@@ -104,7 +104,10 @@ void VulkanSceneDescriptors::create(
                 .binding = 10,
                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+                // Fragment too since T1: the material half of a draw's
+                // parameters is read here rather than pushed.
+                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT |
+                    VK_SHADER_STAGE_FRAGMENT_BIT,
             },
         };
         VkDescriptorSetLayoutCreateInfo layoutInfo {
@@ -201,7 +204,7 @@ void VulkanSceneDescriptors::updateInternal(
         !resources.uiFont.valid() ||
         !resources.titleBackground.valid() ||
         resources.modelTextures.size() != modelTextureCount_ ||
-        !resources.skinning.valid() || !resources.modelInstances.valid()) {
+        !resources.skinning.valid() || !resources.drawInstances.valid()) {
         throw std::runtime_error("Scene descriptor resources are incomplete");
     }
 
@@ -238,10 +241,10 @@ void VulkanSceneDescriptors::updateInternal(
         .offset = 0,
         .range = resources.skinning.range,
     };
-    const VkDescriptorBufferInfo modelInstances {
-        .buffer = resources.modelInstances.buffer,
+    const VkDescriptorBufferInfo drawInstances {
+        .buffer = resources.drawInstances.buffer,
         .offset = 0,
-        .range = resources.modelInstances.range,
+        .range = resources.drawInstances.range,
     };
     const VkDescriptorImageInfo sceneColor {
         .sampler = resources.sceneColor.sampler,
@@ -355,7 +358,7 @@ void VulkanSceneDescriptors::updateInternal(
             .dstBinding = 10,
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .pBufferInfo = &modelInstances,
+            .pBufferInfo = &drawInstances,
         },
     };
     vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);

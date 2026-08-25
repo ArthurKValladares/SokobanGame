@@ -7,6 +7,30 @@ layout(location = 3) out vec3 outNormal;
 layout(location = 4) flat out uint outTextureIndex;
 layout(location = 5) flat out uint outMaterialFlags;
 layout(location = 6) out vec3 outWorldPosition;
+// Which draw this vertex belongs to. The fragment stage reads the same
+// entry; flat because it is constant across the primitive.
+layout(location = 7) flat out uint outDrawInstance;
+
+struct DrawInstance
+{
+    vec4 vertices[4];
+    vec4 passData[4];
+    vec4 color;
+    vec4 normalAndAmbientRed;
+    vec4 sunDirectionAndAmbientGreen;
+    vec4 sunRadianceAndAmbientBlue;
+    vec4 shadowOptions;
+    vec4 materialOptions;
+    vec4 gridColor;
+    vec4 textureOptions;
+};
+layout(std430, set = 0, binding = 10) readonly buffer DrawInstances
+{
+    DrawInstance instances[];
+} drawInstances;
+
+#define draw drawInstances.instances[gl_InstanceIndex]
+
 
 struct PointLightData
 {
@@ -22,24 +46,6 @@ layout(std140, set = 0, binding = 7) uniform SceneFrame
     PointLightData pointLights[8];
     vec4 pointLightMeta;
 } frame;
-layout(push_constant) uniform PushConstants
-{
-    vec4 vertices[4];
-    // 64 bytes of per-draw space. Water claims it for its border and ripple
-    // parameters; every other pass leaves it alone. Must stay declared even
-    // where unused: this is one push block shared by every pipeline, so
-    // dropping it here would shift every member below it.
-    vec4 passData[4];
-    vec4 color;
-    vec4 normalAndAmbientRed;
-    vec4 sunDirectionAndAmbientGreen;
-    vec4 sunRadianceAndAmbientBlue;
-    vec4 shadowOptions;
-    vec4 materialOptions;
-    vec4 gridColor;
-    vec4 textureOptions;
-} pc;
-
 const int indices[6] = int[6](0, 1, 2, 0, 2, 3);
 const vec2 faceCoords[4] = vec2[4](
     vec2(0.0, 0.0),
@@ -61,7 +67,8 @@ vec4 sunShadowFromWorld(vec3 worldPosition)
 void main()
 {
     const int index = indices[gl_VertexIndex];
-    vec4 corner = pc.vertices[index];
+    outDrawInstance = uint(gl_InstanceIndex);
+    vec4 corner = draw.vertices[index];
 
     // Scene corners arrive in world space and the camera is applied here. The
     // CPU used to hand this shader clip space and there was nothing left to
@@ -84,10 +91,10 @@ void main()
     outShadowPosition = worldSpace
         ? sunShadowFromWorld(worldPosition)
         : vec4(0.0);
-    vec2 faceCoord = faceCoords[index] * pc.materialOptions.yz;
+    vec2 faceCoord = faceCoords[index] * draw.materialOptions.yz;
     outFaceCoordU = faceCoord.x;
     outFaceCoordV = faceCoord.y;
-    outNormal = pc.normalAndAmbientRed.xyz;
+    outNormal = draw.normalAndAmbientRed.xyz;
     // Tile faces never use per-vertex texture indices (textureOptions.x is 0
     // on this path), but the shared fragment shader consumes location 4, so
     // the interface must still provide it.

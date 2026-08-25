@@ -19,7 +19,32 @@ layout(location = 1) in float inFaceCoordU;
 layout(location = 2) in float inFaceCoordV;
 layout(location = 3) in vec3 inNormal;
 layout(location = 6) in vec3 inWorldPosition;
+layout(location = 7) flat in uint inDrawInstance;
 layout(location = 0) out vec4 outColor;
+
+// One draw's parameters, read back by instance index. T1 moved these out of
+// push constants so that consecutive draws sharing a pipeline can collapse
+// into a single instanced draw.
+struct DrawInstance
+{
+    vec4 vertices[4];
+    vec4 passData[4];
+    vec4 color;
+    vec4 normalAndAmbientRed;
+    vec4 sunDirectionAndAmbientGreen;
+    vec4 sunRadianceAndAmbientBlue;
+    vec4 shadowOptions;
+    vec4 materialOptions;
+    vec4 gridColor;
+    vec4 textureOptions;
+};
+layout(std430, set = 0, binding = 10) readonly buffer DrawInstances
+{
+    DrawInstance instances[];
+} drawInstances;
+
+#define draw drawInstances.instances[inDrawInstance]
+
 
 struct PointLightData
 {
@@ -36,36 +61,9 @@ layout(std140, set = 0, binding = 7) uniform SceneFrame
     vec4 pointLightMeta;
 } frame;
 
-layout(push_constant) uniform PushConstants
-{
-    vec4 vertices[4];
-    // 64 bytes of per-draw space. Water claims it for its border and ripple
-    // parameters; every other pass leaves it alone. Must stay declared even
-    // where unused: this is one push block shared by every pipeline, so
-    // dropping it here would shift every member below it.
-    vec4 passData[4];
-    vec4 color;
-    vec4 normalAndAmbientRed;
-    vec4 sunDirectionAndAmbientGreen;
-    vec4 sunRadianceAndAmbientBlue;
-    vec4 shadowOptions;
-    // x: splat-region-local origin X, y/z: face size in tiles,
-    // w: editor-preview dither sign
-    vec4 materialOptions;
-    vec4 gridColor;
-    // Texture handles are one-based; 0 means "unresolved", which falls back to
-    // the flat tile color. The standard tile path leaves this vector free on
-    // ground faces, so the splat pass repurposes it without growing the
-    // 256-byte push-constant block.
-    // x: base texture, y: detail texture, z: splat map,
-    // w: splat-region-local origin Y.
-    // (UV tile span is a shader constant below.)
-    vec4 textureOptions;
-} pc;
-
 // Local origin of this face inside its splat region: X rides in the blur slot
 // (opaque ground never blurs) and Y in the last texture slot.
-#define SPLAT_LOCAL_ORIGIN (vec2(pc.materialOptions.x, pc.textureOptions.w))
+#define SPLAT_LOCAL_ORIGIN (vec2(draw.materialOptions.x, draw.textureOptions.w))
 
 // One texture repeat spans this many board tiles. Larger = coarser detail.
 // This applies to the tiling grass/rock material layers only.
@@ -97,7 +95,7 @@ float bayer8x8(ivec2 pixel)
 
 void applyEditorPreviewDither()
 {
-    if (pc.materialOptions.w >= 0.0) {
+    if (draw.materialOptions.w >= 0.0) {
         return;
     }
 
@@ -111,7 +109,7 @@ void applyEditorPreviewDither()
 
 float gridMask()
 {
-    if (pc.gridColor.a <= 0.0 || pc.shadowOptions.w <= 0.0 || pc.materialOptions.y <= 0.0 || pc.materialOptions.z <= 0.0) {
+    if (draw.gridColor.a <= 0.0 || draw.shadowOptions.w <= 0.0 || draw.materialOptions.y <= 0.0 || draw.materialOptions.z <= 0.0) {
         return 0.0;
     }
 
@@ -119,15 +117,15 @@ float gridMask()
     vec2 wrapped = fract(faceCoord);
     vec2 distanceToLine = min(wrapped, 1.0 - wrapped);
     vec2 coordPerPixel = max(fwidth(faceCoord), vec2(0.00001));
-    vec2 halfWidth = coordPerPixel * pc.shadowOptions.w * 0.5;
+    vec2 halfWidth = coordPerPixel * draw.shadowOptions.w * 0.5;
     vec2 feather = coordPerPixel;
     vec2 line = 1.0 - smoothstep(halfWidth, halfWidth + feather, distanceToLine);
-    return max(line.x, line.y) * pc.gridColor.a;
+    return max(line.x, line.y) * draw.gridColor.a;
 }
 
 float shadowFactor(vec4 shadowPosition, float diffuse)
 {
-    if (pc.shadowOptions.x <= 0.5 || diffuse <= 0.0 || abs(shadowPosition.w) <= 0.0001) {
+    if (draw.shadowOptions.x <= 0.5 || diffuse <= 0.0 || abs(shadowPosition.w) <= 0.0001) {
         return 1.0;
     }
 
@@ -141,7 +139,7 @@ float shadowFactor(vec4 shadowPosition, float diffuse)
         return 1.0;
     }
 
-    float bias = pc.shadowOptions.z;
+    float bias = draw.shadowOptions.z;
     vec2 texel = 1.0 / vec2(textureSize(shadowMap, 0));
     float shadowedSamples = 0.0;
     for (int y = -1; y <= 1; ++y) {
@@ -152,7 +150,7 @@ float shadowFactor(vec4 shadowPosition, float diffuse)
     }
 
     float shadowAmount = shadowedSamples / 9.0;
-    return 1.0 - shadowAmount * pc.shadowOptions.y;
+    return 1.0 - shadowAmount * draw.shadowOptions.y;
 }
 
 float pointShadowWorldDistance(
@@ -213,8 +211,8 @@ void main()
     // a region-local origin for splat lookup, while the actual face vertices
     // retain global coordinates for continuous material-layer tiling.
     vec2 faceTiles = vec2(
-        max(pc.materialOptions.y, 0.0001),
-        max(pc.materialOptions.z, 0.0001));
+        max(draw.materialOptions.y, 0.0001),
+        max(draw.materialOptions.z, 0.0001));
     vec2 faceCoord = vec2(inFaceCoordU, inFaceCoordV) * faceTiles;
     vec2 splatLocalTile = SPLAT_LOCAL_ORIGIN + faceCoord;
     // Genuinely global since C1. These corners used to arrive already
@@ -222,24 +220,24 @@ void main()
     // in normalised device coordinates, and the material tiling it drives
     // drifted with the camera.
     vec2 globalOrigin = min(
-        min(pc.vertices[0].xy, pc.vertices[1].xy),
-        min(pc.vertices[2].xy, pc.vertices[3].xy));
+        min(draw.vertices[0].xy, draw.vertices[1].xy),
+        min(draw.vertices[2].xy, draw.vertices[3].xy));
     vec2 worldTile = globalOrigin + faceCoord;
     vec2 uv = worldTile / GROUND_UV_TILES;
 
-    vec4 materialColor = pc.color;
+    vec4 materialColor = draw.color;
     int baseIndex = 0;
     int detailIndex = 0;
     int splatIndex = 0;
-    if (resolveTexture(pc.textureOptions.x, baseIndex)) {
+    if (resolveTexture(draw.textureOptions.x, baseIndex)) {
         vec3 baseColor = texture(modelTextures[baseIndex], uv).rgb;
         vec3 blended = baseColor;
-        if (resolveTexture(pc.textureOptions.y, detailIndex)) {
+        if (resolveTexture(draw.textureOptions.y, detailIndex)) {
             vec3 detailColor = texture(modelTextures[detailIndex], uv).rgb;
             // The splat map spans the board once. Its size tells us how many
             // tiles that is, so world tile -> 0..1 needs nothing pushed.
             float weight = 0.0;
-            if (resolveTexture(pc.textureOptions.z, splatIndex)) {
+            if (resolveTexture(draw.textureOptions.z, splatIndex)) {
                 vec2 splatBoardTiles = max(
                     vec2(textureSize(modelTextures[splatIndex], 0)) /
                         GROUND_SPLAT_TEXELS_PER_TILE,
@@ -258,20 +256,20 @@ void main()
         materialColor.rgb *= blended;
     }
 
-    vec3 color = mix(materialColor.rgb, pc.gridColor.rgb, gridMask());
+    vec3 color = mix(materialColor.rgb, draw.gridColor.rgb, gridMask());
     if (length(inNormal) > 0.0001) {
         vec3 normal = normalize(inNormal);
-        vec3 lightDirection = length(pc.sunDirectionAndAmbientGreen.xyz) > 0.0001
-            ? normalize(pc.sunDirectionAndAmbientGreen.xyz)
+        vec3 lightDirection = length(draw.sunDirectionAndAmbientGreen.xyz) > 0.0001
+            ? normalize(draw.sunDirectionAndAmbientGreen.xyz)
             : vec3(0.0, 0.0, 1.0);
         float rawDiffuse = dot(normal, lightDirection);
         float lambertDiffuse = max(rawDiffuse, 0.0);
         float wrappedDiffuse = clamp(rawDiffuse * 0.5 + 0.5, 0.0, 1.0);
         float diffuse = mix(lambertDiffuse, wrappedDiffuse * wrappedDiffuse, 0.65);
         vec3 ambient = vec3(
-            pc.normalAndAmbientRed.w,
-            pc.sunDirectionAndAmbientGreen.w,
-            pc.sunRadianceAndAmbientBlue.w);
+            draw.normalAndAmbientRed.w,
+            draw.sunDirectionAndAmbientGreen.w,
+            draw.sunRadianceAndAmbientBlue.w);
         float shadow = shadowFactor(inShadowPosition, lambertDiffuse);
         float skyFill = smoothstep(-0.35, 1.0, normal.z);
         vec3 pointDiffuseLighting = vec3(0.0);
@@ -297,7 +295,7 @@ void main()
                     lightIndex, -toLight, normal);
         }
         vec3 diffuseLighting = ambient * (1.0 + skyFill * 0.35) +
-            pc.sunRadianceAndAmbientBlue.rgb * diffuse * shadow +
+            draw.sunRadianceAndAmbientBlue.rgb * diffuse * shadow +
             pointDiffuseLighting;
         color *= diffuseLighting;
     }

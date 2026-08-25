@@ -60,7 +60,7 @@ struct SceneCamera {
     float nearPlane = 0.0f;
 };
 
-// What the w of a corner in TilePushConstants::vertices means.
+// What the w of a corner in GpuDrawInstance::vertices means.
 //
 // Most quads are scene geometry in world space and the vertex shader applies
 // the camera to them. The UI, the top-down 2D board and the grid overlay are
@@ -71,7 +71,19 @@ struct SceneCamera {
 inline constexpr float worldSpaceQuad = 1.0f;
 inline constexpr float clipSpaceQuad = 0.0f;
 
-struct TilePushConstants {
+// Everything one draw needs that is not shared by the frame.
+//
+// T1 moved this out of push constants and into a storage buffer: a scene draw
+// writes one entry and reads it back by instance index, which is what lets
+// consecutive draws sharing a pipeline collapse into a single instanced draw.
+// It was one vkCmdPushConstants(256) + vkCmdDraw(6) per quad before, and a
+// board of any size is on the order of a thousand quads.
+//
+// The shadow pipelines still receive this same block as *push constants*.
+// They are not instanced, they have one camera per pass, and nothing in a
+// shadow pass reads material state - so the transport differs while the
+// layout stays identical, and there is only one struct to keep in step.
+struct GpuDrawInstance {
     // Four **world-space** corners for a quad, or the four columns of
     // worldFromModel for a mesh. Before C1 these were clip-space corners and
     // a baked clipFromModel, which is why the vertex shaders had nothing to
@@ -101,6 +113,23 @@ struct TilePushConstants {
     Vec4 textureOptions;
 };
 
-static_assert(sizeof(TilePushConstants) == 256);
+static_assert(sizeof(GpuDrawInstance) == 256);
+
+// Which entry of the draw-instance buffer a draw should read. Only the
+// skinned-model pipeline needs it: gl_InstanceIndex is already spoken for
+// there, indexing the skinning palette. Everything else gets its entry from
+// gl_InstanceIndex via firstInstance, which is also what makes batching work.
+// How many draws one frame may record. Quads dominate: a tile emits up to
+// five faces, and particles, the grid overlay and the UI all take an entry
+// too. Four per tile of capacity is roughly thirty times what a real board
+// produces, and the buffer is host-visible, so this is the knob to turn if
+// "Draw instance buffer is exhausted" ever appears.
+inline constexpr uint32_t maxDrawInstancesPerFrame =
+    RenderFrameData::tileCapacity * 4;
+
+struct DrawInstanceIndexPushConstants {
+    uint32_t drawInstance = 0;
+    uint32_t padding[3] {};
+};
 
 } // namespace sokoban

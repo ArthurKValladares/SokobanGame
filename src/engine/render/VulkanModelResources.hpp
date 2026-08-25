@@ -3,10 +3,10 @@
 #include "engine/AssetManifest.hpp"
 #include "engine/render/AnimationController.hpp"
 #include "engine/render/AssetLoadScheduler.hpp"
-#include "engine/render/GpuModelInstance.hpp"
 #include "engine/render/GpuSkinning.hpp"
 #include "engine/render/ImageData.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
+#include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanGeometryArena.hpp"
 #include "engine/render/VulkanUploadRing.hpp"
 
@@ -47,7 +47,7 @@ public:
         [[nodiscard]] bool valid() const { return buffer && range > 0; }
     };
 
-    struct ModelInstanceBufferView {
+    struct DrawInstanceBufferView {
         VkBuffer buffer = VK_NULL_HANDLE;
         VkDeviceSize range = 0;
 
@@ -181,9 +181,9 @@ public:
     void beginAnimationFrame(uint32_t frameIndex);
     // Writes one static-model transform into the fence-owned region for the
     // current frame and returns the absolute gl_InstanceIndex for a draw.
-    [[nodiscard]] uint32_t writeModelInstance(
+    [[nodiscard]] uint32_t writeDrawInstance(
         uint32_t frameIndex,
-        const GpuModelInstance& instance);
+        const GpuDrawInstance& instance);
 
     [[nodiscard]] MeshView meshForTile(
         const RenderFrameData::Tile& tile,
@@ -206,7 +206,7 @@ public:
     [[nodiscard]] uint32_t textureCount() const;
     [[nodiscard]] LoadingStats loadingStats() const;
     [[nodiscard]] SkinningBufferView skinningBuffer() const;
-    [[nodiscard]] ModelInstanceBufferView modelInstanceBuffer() const;
+    [[nodiscard]] DrawInstanceBufferView drawInstanceBuffer() const;
 
 private:
     enum class LoadState {
@@ -406,7 +406,7 @@ private:
     VulkanUploadRing uploadRing_ {};
     VulkanGeometryArena geometryArena_ {};
     SkinningBuffer skinningBuffer_ {};
-    ModelInstanceBuffer modelInstanceBuffer_ {};
+    ModelInstanceBuffer drawInstanceBuffer_ {};
     AnimationController animationController_ {};
     struct AnimatedMeshKey {
         uint32_t frameIndex = 0;
@@ -428,7 +428,7 @@ private:
         skinnedInstances_;
     uint32_t activeSkinningFrame_ = UINT32_MAX;
     uint32_t skinningInstanceCount_ = 0;
-    uint32_t modelInstanceCount_ = 0;
+    uint32_t drawInstanceCount_ = 0;
     uint64_t textureUploadSubmissions_ = 0;
     uint64_t textureUploadCompletions_ = 0;
     AssetLoadScheduler scheduler_ {};

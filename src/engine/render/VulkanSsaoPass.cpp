@@ -113,7 +113,7 @@ void VulkanSsaoPass::record(
         .maxDepth = 1.0f,
     };
     VkRect2D scissor { .offset = { 0, 0 }, .extent = extent_ };
-    TilePushConstants pushConstants {};
+    GpuDrawInstance pushConstants {};
     pushConstants.color = {
         settings.strength,
         config::ssaoRadiusPixels,
@@ -156,7 +156,7 @@ void VulkanSsaoPass::record(
         pipelineLayout,
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
         0,
-        sizeof(TilePushConstants),
+        sizeof(GpuDrawInstance),
         &pushConstants);
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
     ++stats.drawCalls;
@@ -217,7 +217,7 @@ void VulkanSsaoPass::record(
         pipelineLayout,
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
         0,
-        sizeof(TilePushConstants),
+        sizeof(GpuDrawInstance),
         &pushConstants);
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
     ++stats.drawCalls;

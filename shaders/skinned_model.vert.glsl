@@ -20,6 +20,7 @@ layout(location = 3) out vec3 outNormal;
 layout(location = 4) flat out uint outTextureIndex;
 layout(location = 5) flat out uint outMaterialFlags;
 layout(location = 6) out vec3 outWorldPosition;
+layout(location = 7) flat out uint outDrawInstance;
 
 struct SkinningInstance {
     mat4 palette[MAX_SKIN_JOINTS + 128];
@@ -38,12 +39,21 @@ layout(std140, set = 0, binding = 7) uniform SceneFrame {
     PointLightData pointLights[8]; vec4 pointLightMeta;
 } frame;
 
-layout(push_constant) uniform PushConstants {
-    vec4 worldFromModel[4]; vec4 passData[4]; vec4 color;
+struct DrawInstance {
+    vec4 vertices[4]; vec4 passData[4]; vec4 color;
     vec4 normalAndAmbientRed; vec4 sunDirectionAndAmbientGreen;
     vec4 sunRadianceAndAmbientBlue; vec4 shadowOptions; vec4 materialOptions;
     vec4 gridColor; vec4 textureOptions;
-} pc;
+};
+layout(std430, set = 0, binding = 10) readonly buffer DrawInstances {
+    DrawInstance instances[];
+} drawInstances;
+
+// gl_InstanceIndex is spoken for here - it indexes the skinning palette - so
+// this pipeline is the one that still needs its draw-instance index pushed.
+layout(push_constant) uniform PushConstants { uint drawInstance; } pc;
+
+#define draw drawInstances.instances[pc.drawInstance]
 
 // See model.vert: the matrix cannot clamp the way projectShadowPoint did.
 vec4 sunShadowFromWorld(vec3 worldPosition) {
@@ -82,15 +92,16 @@ void main() {
     vec3 normal = normalize(
         mat3(skinning.instances[gl_InstanceIndex].normalFromSource) *
         normalize(sourceNormal));
-    mat4 worldTransform = mat4(pc.worldFromModel[0], pc.worldFromModel[1], pc.worldFromModel[2], pc.worldFromModel[3]);
+    outDrawInstance = pc.drawInstance;
+    mat4 worldTransform = mat4(draw.vertices[0], draw.vertices[1], draw.vertices[2], draw.vertices[3]);
     vec3 worldPosition = (worldTransform * vec4(position, 1.0)).xyz;
     gl_Position = frame.clipFromWorld * vec4(worldPosition, 1.0);
     outWorldPosition = worldPosition;
     outShadowPosition = sunShadowFromWorld(worldPosition);
     outFaceCoordU = inUv.x; outFaceCoordV = inUv.y;
     outTextureIndex = inTextureIndex; outMaterialFlags = inMaterialFlags;
-    if (pc.gridColor.w < 0.0) { normal *= pc.gridColor.xyz; }
-    vec3 rotation = pc.normalAndAmbientRed.xyz;
+    if (draw.gridColor.w < 0.0) { normal *= draw.gridColor.xyz; }
+    vec3 rotation = draw.normalAndAmbientRed.xyz;
     float cosine = cos(rotation.x); float sine = sin(rotation.x);
     normal = vec3(normal.x, cosine * normal.y - sine * normal.z, sine * normal.y + cosine * normal.z);
     cosine = cos(rotation.y); sine = sin(rotation.y);

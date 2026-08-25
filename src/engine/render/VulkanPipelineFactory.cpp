@@ -47,7 +47,10 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
     VkPushConstantRange pushConstantRange {
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
         .offset = 0,
-        .size = sizeof(TilePushConstants),
+        // Sized for the shadow pipelines, which still take a whole
+        // GpuDrawInstance this way. Scene pipelines push only a
+        // DrawInstanceIndexPushConstants into the front of the same range.
+        .size = sizeof(GpuDrawInstance),
     };
     VkPipelineLayoutCreateInfo layoutInfo {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,

@@ -331,7 +331,7 @@ void VulkanDeviceContext::pickPhysicalDevice()
         queueFamilyProperties[queueFamilies_.graphics].timestampValidBits;
     featureTier_ = chooseVulkanFeatureTier(
         queryFeatureSupport(physicalDevice_),
-        sizeof(TilePushConstants),
+        sizeof(GpuDrawInstance),
         maxModelTextures + sceneSingleImageBindings);
     log::info(log::Category::Rendering) << "Vulkan GPU: "
         << physicalDeviceProperties_.deviceName << " ("
@@ -487,7 +487,7 @@ bool VulkanDeviceContext::isDeviceSuitable(VkPhysicalDevice device) const
 {
     if (!chooseVulkanFeatureTier(
             queryFeatureSupport(device),
-            sizeof(TilePushConstants),
+            sizeof(GpuDrawInstance),
             maxModelTextures + sceneSingleImageBindings).releaseCompatible) {
         return false;
     }

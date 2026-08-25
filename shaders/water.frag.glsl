@@ -5,14 +5,15 @@ layout(set = 0, binding = 5) uniform sampler2D sceneDepth;
 
 layout(location = 1) in float inFaceCoordU;
 layout(location = 2) in float inFaceCoordV;
+layout(location = 7) flat in uint inDrawInstance;
 layout(location = 0) out vec4 outColor;
 
-layout(push_constant) uniform PushConstants
+// One draw's parameters, read back by instance index. T1 moved these out of
+// push constants so that consecutive draws sharing a pipeline can collapse
+// into a single instanced draw.
+struct DrawInstance
 {
     vec4 vertices[4];
-    // Water's parameter block: border colour and width, board bounds, ripple
-    // and caustic opacities. Named passData in the shared push block; this
-    // pass is the one that claims it.
     vec4 passData[4];
     vec4 color;
     vec4 normalAndAmbientRed;
@@ -22,7 +23,14 @@ layout(push_constant) uniform PushConstants
     vec4 materialOptions;
     vec4 gridColor;
     vec4 textureOptions;
-} pc;
+};
+layout(std430, set = 0, binding = 10) readonly buffer DrawInstances
+{
+    DrawInstance instances[];
+} drawInstances;
+
+#define draw drawInstances.instances[inDrawInstance]
+
 
 // These infrequently tuned shape values stay shader-local so the packed water
 // constants can carry camera/depth data for projected caustics.
@@ -535,24 +543,24 @@ vec2 shorelineFoam(
 void main()
 {
     bool visualizeCausticsOnly =
-        abs(pc.materialOptions.w) > 1.5;
-    if (pc.materialOptions.w < 0.0 && !visualizeCausticsOnly) {
+        abs(draw.materialOptions.w) > 1.5;
+    if (draw.materialOptions.w < 0.0 && !visualizeCausticsOnly) {
         ivec2 ditherPixel = ivec2(floor(gl_FragCoord.xy * 0.5));
         if (bayer8x8(ditherPixel) >= 0.56) {
             discard;
         }
     }
 
-    vec2 worldPosition = pc.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
-    float frequency = max(pc.textureOptions.x, 0.01);
-    float time = pc.gridColor.z * pc.textureOptions.y;
+    vec2 worldPosition = draw.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
+    float frequency = max(draw.textureOptions.x, 0.01);
+    float time = draw.gridColor.z * draw.textureOptions.y;
     float rippleCrestHalfWidth =
-        max(pc.normalAndAmbientRed.z, 0.001);
+        max(draw.normalAndAmbientRed.z, 0.001);
     float rippleHaloWidth =
-        max(pc.normalAndAmbientRed.w, rippleCrestHalfWidth);
+        max(draw.normalAndAmbientRed.w, rippleCrestHalfWidth);
 
     float secondaryThicknessScale =
-        max(pc.sunRadianceAndAmbientBlue.w, 0.05);
+        max(draw.sunRadianceAndAmbientBlue.w, 0.05);
     vec2 caustics;
     vec2 secondaryCaustics;
     waterRipplePatterns(
@@ -583,7 +591,7 @@ void main()
     vec2 sceneSize = vec2(textureSize(sceneColor, 0));
     vec2 sceneUv = gl_FragCoord.xy / sceneSize;
     vec2 refractionOffset =
-        diffractionFlow * pc.textureOptions.z *
+        diffractionFlow * draw.textureOptions.z *
         vec2(sceneSize.y / max(sceneSize.x, 1.0), 1.0);
     vec3 diffractedScene = texture(
         sceneColor,
@@ -593,8 +601,8 @@ void main()
     // actual point along the camera ray. This separates the illuminated bands
     // from the surface crests by an amount that grows with water depth and
     // changes naturally as the camera moves.
-    float nearDepth = max(pc.normalAndAmbientRed.x, 0.001);
-    float farDepth = max(pc.normalAndAmbientRed.y, nearDepth + 0.001);
+    float nearDepth = max(draw.normalAndAmbientRed.x, 0.001);
+    float farDepth = max(draw.normalAndAmbientRed.y, nearDepth + 0.001);
     float opaqueDeviceDepth = texture(sceneDepth, sceneUv).r;
     float waterCameraDepth = cameraDepthFromDeviceDepth(
         gl_FragCoord.z, nearDepth, farDepth);
@@ -605,8 +613,8 @@ void main()
         0.0);
     float geometryPresent = 1.0 - step(0.9999, opaqueDeviceDepth);
     vec2 cameraPosition = vec2(
-        pc.materialOptions.x,
-        pc.gridColor.w);
+        draw.materialOptions.x,
+        draw.gridColor.w);
     vec2 causticProjectionOffset =
         (worldPosition - cameraPosition) *
         (distanceBehindWater / max(waterCameraDepth, 0.001)) *
@@ -634,7 +642,7 @@ void main()
         1.0) * geometryPresent;
     diffractedScene *= 1.0 +
         underwaterCausticCoverage *
-            clamp(pc.passData[3].w, 0.0, 1.0);
+            clamp(draw.passData[3].w, 0.0, 1.0);
 
     // Debug view: retain the ripple-driven ray bend and focused light on the
     // copied opaque geometry, but bypass every visible water-surface layer.
@@ -645,20 +653,20 @@ void main()
 
     float bodyTone = broadWaterTone(
         worldPosition,
-        pc.gridColor.z,
-        pc.sunDirectionAndAmbientGreen.x,
-        pc.sunDirectionAndAmbientGreen.w,
-        pc.sunRadianceAndAmbientBlue.x);
+        draw.gridColor.z,
+        draw.sunDirectionAndAmbientGreen.x,
+        draw.sunDirectionAndAmbientGreen.w,
+        draw.sunRadianceAndAmbientBlue.x);
     float bodyToneMultiplier = mix(
-        pc.sunDirectionAndAmbientGreen.y,
-        pc.sunDirectionAndAmbientGreen.z,
+        draw.sunDirectionAndAmbientGreen.y,
+        draw.sunDirectionAndAmbientGreen.z,
         bodyTone);
     vec3 waterTint =
-        pc.color.rgb * bodyToneMultiplier;
+        draw.color.rgb * bodyToneMultiplier;
     vec3 waterColor = mix(
         diffractedScene,
         waterTint,
-        clamp(pc.color.a, 0.0, 0.95));
+        clamp(draw.color.a, 0.0, 0.95));
 
     float secondaryRippleCoverage = clamp(
         secondaryCaustics.x * 0.12 +
@@ -667,10 +675,10 @@ void main()
         1.0);
     float secondaryRippleStrength =
         secondaryRippleCoverage *
-        clamp(pc.shadowOptions.a, 0.0, 1.0);
+        clamp(draw.shadowOptions.a, 0.0, 1.0);
     vec3 waterWithSecondaryRipples = mix(
         waterColor,
-        pc.shadowOptions.rgb,
+        draw.shadowOptions.rgb,
         secondaryRippleStrength);
 
     vec3 rippleColor = mix(
@@ -678,49 +686,49 @@ void main()
         vec3(0.70, 0.88, 0.94),
         caustics.y);
     float rippleHaloStrength =
-        max(pc.sunRadianceAndAmbientBlue.y, 0.0);
+        max(draw.sunRadianceAndAmbientBlue.y, 0.0);
     float rippleCrestStrength =
-        max(pc.sunRadianceAndAmbientBlue.z, 0.0);
+        max(draw.sunRadianceAndAmbientBlue.z, 0.0);
     float rippleStrength = clamp(
         caustics.x * rippleHaloStrength +
             caustics.y * rippleCrestStrength,
         0.0,
         min(rippleHaloStrength + rippleCrestStrength, 1.0));
-    rippleStrength *= clamp(pc.passData[3].x, 0.0, 1.0);
+    rippleStrength *= clamp(draw.passData[3].x, 0.0, 1.0);
 
     vec3 finalWaterColor =
         mix(waterWithSecondaryRipples, rippleColor, rippleStrength);
     float tileBorder = waterTileBorderMask(
         worldPosition,
-        pc.gridColor.z,
-        max(pc.passData[1].x, 0.0),
-        max(pc.passData[1].y, 0.0),
-        max(pc.passData[1].z, 0.01),
-        pc.passData[1].w);
+        draw.gridColor.z,
+        max(draw.passData[1].x, 0.0),
+        max(draw.passData[1].y, 0.0),
+        max(draw.passData[1].z, 0.01),
+        draw.passData[1].w);
     tileBorder *= waterTileBorderBoardFade(
         worldPosition,
-        pc.passData[2].xy,
-        max(pc.passData[2].zw, vec2(0.0)),
+        draw.passData[2].xy,
+        max(draw.passData[2].zw, vec2(0.0)),
         tileBorderExteriorFadeDistance);
     finalWaterColor = mix(
         finalWaterColor,
-        pc.passData[0].rgb,
-        tileBorder * clamp(pc.passData[0].a, 0.0, 1.0));
+        draw.passData[0].rgb,
+        tileBorder * clamp(draw.passData[0].a, 0.0, 1.0));
     uint shorelineMask =
-        uint(max(pc.textureOptions.w, 0.0) + 0.5);
+        uint(max(draw.textureOptions.w, 0.0) + 0.5);
     vec2 foamLayers = shorelineFoam(
         shorelineMask,
         vec2(inFaceCoordU, inFaceCoordV),
-        pc.materialOptions.yz,
+        draw.materialOptions.yz,
         worldPosition,
         time,
         shorelineNearDistance,
         shorelineFarDistance,
         shorelineFarThickness);
     float nearFoamOpacity =
-        clamp(pc.passData[3].y, 0.0, 1.0);
+        clamp(draw.passData[3].y, 0.0, 1.0);
     float farFoamOpacity =
-        clamp(pc.passData[3].z, 0.0, 1.0);
+        clamp(draw.passData[3].z, 0.0, 1.0);
     float foamStrength =
         max(
             foamLayers.x * nearFoamOpacity,

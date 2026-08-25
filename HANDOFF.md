@@ -1012,6 +1012,46 @@ Renderer:
     six per point light, so no single uniform could serve it. Its pipelines
     still receive CPU-projected clip-space corners, in the push block's first
     slot. Nothing in a shadow pass asks where it is in the world.
+  - **A draw's parameters live in a storage buffer, not push constants**
+    (review item T1, step one). `GpuDrawInstance` in
+    `VulkanRenderConstants.hpp` is the whole per-draw block; a scene draw
+    calls `writeDrawInstance`, gets back an index, and passes it as
+    `firstInstance`, so every stage reads its parameters through
+    `gl_InstanceIndex`. There used to be one
+    `vkCmdPushConstants(256)` + `vkCmdDraw(6)` per quad, and a board of any
+    size is on the order of a thousand quads.
+    - One struct now serves quads, models and the shadow pipelines. What used
+      to be a separate `GpuModelInstance` is gone: a model's `worldFromModel`
+      is the same four columns a quad uses for its corners, and its rotation
+      was already duplicated in `normalAndAmbientRed.xyz`.
+    - The fragment stage reads the same entry through a `flat` varying at
+      location 7. Each fragment shader aliases it as `draw`, so `pc.color`
+      became `draw.color` and nothing else moved.
+    - Two exceptions, both deliberate. **Shadow pipelines** still receive the
+      block as push constants: they are not instanced, they have a camera per
+      pass, and nothing there reads material state. **`skinned_model.vert`**
+      gets its index pushed as `DrawInstanceIndexPushConstants`, because its
+      `gl_InstanceIndex` is already spoken for by the skinning palette.
+    - Binding 10's stage flags now include the fragment stage. Missing that
+      is a validation error, not a silent wrong result.
+    - Consecutive faces sharing a pipeline are now drawn as **one instanced
+      draw** (`drawQuadRun`). A pipeline change is the only thing that can
+      end a run, because everything that used to differ per draw lives in the
+      instance entry - which is why the entries a run covers are always a
+      contiguous span. There is a defensive check for that contiguity: if
+      anything ever allocates an entry mid-loop, the run breaks cleanly
+      rather than drawing the wrong face.
+    - The run is flushed before the model pass and before the UI, so nothing
+      reorders across them. Draw order within a run is entry order, which is
+      the sorted face order - the ordering invariants above are untouched.
+    - `stats_.drawCalls` counts real draws again rather than quads;
+      `visibleFaces`, `vertices` and `triangles` still count quads, so the
+      ratio between them is now a live measure of how well runs are merging.
+    - The UI, the 2D board and particles still draw one quad at a time. They
+      go through the same path (`drawQuadRun(..., 1)`) and could be batched
+      the same way; they are simply not where the draw calls were.
+    - `maxDrawInstancesPerFrame` is `tileCapacity * 4`. If "Draw instance
+      buffer is exhausted" ever appears, that is the knob.
   - Push constants are no longer full. The 64-byte second slot used to be a
     shadow-space copy of the corners - the frame's sun transform restated once
     per face - and is now `passData`, free unless a pass claims it. Water is

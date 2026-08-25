@@ -31,7 +31,7 @@ public:
         ImageBinding titleBackground;
         std::vector<VulkanModelResources::TextureView> modelTextures;
         VulkanModelResources::SkinningBufferView skinning;
-        VulkanModelResources::ModelInstanceBufferView modelInstances;
+        VulkanModelResources::DrawInstanceBufferView drawInstances;
     };
 
     VulkanSceneDescriptors() = default;
