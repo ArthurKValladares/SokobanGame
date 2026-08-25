@@ -126,6 +126,10 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/imgui.cpp")
         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/backends/imgui_impl_vulkan.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/misc/cpp/imgui_stdlib.cpp"
     )
+    # Vendored sources must still compile, but they are outside the scope of
+    # the project's lint policy. SKIP_LINTING is honored by CMake 3.27+ (the
+    # version available on the CI runner) for clang-tidy and other linters.
+    set_source_files_properties(${SOKOBAN_IMGUI_SOURCES} PROPERTIES SKIP_LINTING ON)
     if(MSVC)
         set_source_files_properties(${SOKOBAN_IMGUI_SOURCES} PROPERTIES COMPILE_OPTIONS /W0)
     endif()
@@ -233,8 +237,16 @@ function(sokoban_enable_warnings target)
         endif()
         # Keep this a high-signal gate. Broader style check sets belong in a
         # separately agreed formatting policy rather than blocking every build.
+        # Main files are always checked; restrict included-header diagnostics
+        # to project-owned code so findings in third_party never gate CI.
+        set(SOKOBAN_CLANG_TIDY_COMMAND
+            "${SOKOBAN_CLANG_TIDY_EXECUTABLE}"
+            "-checks=-*,clang-analyzer-*"
+            "-warnings-as-errors=*"
+            "--header-filter=^${CMAKE_CURRENT_SOURCE_DIR}/(src|tools)/"
+        )
         set_property(TARGET ${target} PROPERTY CXX_CLANG_TIDY
-            "${SOKOBAN_CLANG_TIDY_EXECUTABLE};-checks=-*,clang-analyzer-*;-warnings-as-errors=*")
+            "${SOKOBAN_CLANG_TIDY_COMMAND}")
     endif()
 endfunction()
 
