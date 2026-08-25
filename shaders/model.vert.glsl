@@ -30,6 +30,17 @@ layout(std140, set = 0, binding = 7) uniform SceneLighting
     vec4 pointLightMeta;
 } lighting;
 
+struct ModelInstance
+{
+    vec4 clipFromModel[4];
+    vec4 shadowFromModel[4];
+    vec4 rotationRadians;
+};
+layout(std430, set = 0, binding = 10) readonly buffer ModelInstances
+{
+    ModelInstance instances[];
+} modelInstances;
+
 layout(push_constant) uniform PushConstants
 {
     vec4 clipFromModel[4];
@@ -62,16 +73,17 @@ vec3 worldFromSunShadow(vec4 shadowPosition)
 
 void main()
 {
+    ModelInstance instance = modelInstances.instances[gl_InstanceIndex];
     mat4 clipTransform = mat4(
-        pc.clipFromModel[0],
-        pc.clipFromModel[1],
-        pc.clipFromModel[2],
-        pc.clipFromModel[3]);
+        instance.clipFromModel[0],
+        instance.clipFromModel[1],
+        instance.clipFromModel[2],
+        instance.clipFromModel[3]);
     mat4 shadowTransform = mat4(
-        pc.shadowFromModel[0],
-        pc.shadowFromModel[1],
-        pc.shadowFromModel[2],
-        pc.shadowFromModel[3]);
+        instance.shadowFromModel[0],
+        instance.shadowFromModel[1],
+        instance.shadowFromModel[2],
+        instance.shadowFromModel[3]);
 
     gl_Position = clipTransform * vec4(inPosition, 1.0);
     outShadowPosition = shadowTransform * vec4(inPosition, 1.0);
@@ -88,7 +100,7 @@ void main()
         normal *= pc.gridColor.xyz;
     }
 
-    vec3 rotation = pc.normalAndAmbientRed.xyz;
+    vec3 rotation = instance.rotationRadians.xyz;
     float cosine = cos(rotation.x);
     float sine = sin(rotation.x);
     normal = vec3(

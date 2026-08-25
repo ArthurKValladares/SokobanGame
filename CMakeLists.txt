@@ -216,6 +216,7 @@ add_library(sokoban_core STATIC
     src/engine/render/GeometrySuballocator.cpp
     src/engine/render/GpuSkinning.cpp
     src/engine/render/ImageData.cpp
+    src/engine/render/OpaqueDrawSorter.cpp
     src/engine/render/PngWriter.cpp
     src/engine/render/RenderAssetRequirements.cpp
     src/engine/render/RenderResolution.cpp
@@ -582,6 +583,10 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         ASSET_DIR
         SOURCES tests/GpuSkinningTests.cpp
+    )
+    sokoban_add_test(NAME opaque_draw_sorter TARGET sokoban_opaque_draw_sorter_tests
+        LIBS sokoban_core
+        SOURCES tests/OpaqueDrawSorterTests.cpp
     )
     sokoban_add_test(NAME tasks TARGET sokoban_task_tests
         LIBS sokoban_core

@@ -3,6 +3,7 @@
 #include "engine/AssetManifest.hpp"
 #include "engine/render/AnimationController.hpp"
 #include "engine/render/AssetLoadScheduler.hpp"
+#include "engine/render/GpuModelInstance.hpp"
 #include "engine/render/GpuSkinning.hpp"
 #include "engine/render/ImageData.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
@@ -40,6 +41,13 @@ public:
     };
 
     struct SkinningBufferView {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VkDeviceSize range = 0;
+
+        [[nodiscard]] bool valid() const { return buffer && range > 0; }
+    };
+
+    struct ModelInstanceBufferView {
         VkBuffer buffer = VK_NULL_HANDLE;
         VkDeviceSize range = 0;
 
@@ -163,6 +171,11 @@ public:
     // Called after this frame index's fence is complete and before its main
     // and preview animation requests are populated.
     void beginAnimationFrame(uint32_t frameIndex);
+    // Writes one static-model transform into the fence-owned region for the
+    // current frame and returns the absolute gl_InstanceIndex for a draw.
+    [[nodiscard]] uint32_t writeModelInstance(
+        uint32_t frameIndex,
+        const GpuModelInstance& instance);
 
     [[nodiscard]] MeshView meshForTile(
         const RenderFrameData::Tile& tile,
@@ -178,6 +191,7 @@ public:
     [[nodiscard]] uint32_t textureCount() const;
     [[nodiscard]] LoadingStats loadingStats() const;
     [[nodiscard]] SkinningBufferView skinningBuffer() const;
+    [[nodiscard]] ModelInstanceBufferView modelInstanceBuffer() const;
 
 private:
     enum class LoadState {
@@ -208,6 +222,12 @@ private:
     };
 
     struct SkinningBuffer {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+        void* mapped = nullptr;
+    };
+
+    struct ModelInstanceBuffer {
         VkBuffer buffer = VK_NULL_HANDLE;
         VkDeviceMemory memory = VK_NULL_HANDLE;
         void* mapped = nullptr;
@@ -308,6 +328,8 @@ private:
         VulkanGeometryArena::Upload& upload);
     void createSkinningBuffer();
     void destroySkinningBuffer();
+    void createModelInstanceBuffer();
+    void destroyModelInstanceBuffer();
     void writeSkinningInstance(
         uint32_t frameIndex,
         uint32_t instanceSlot,
@@ -367,6 +389,7 @@ private:
     VulkanUploadRing uploadRing_ {};
     VulkanGeometryArena geometryArena_ {};
     SkinningBuffer skinningBuffer_ {};
+    ModelInstanceBuffer modelInstanceBuffer_ {};
     AnimationController animationController_ {};
     struct AnimatedMeshKey {
         uint32_t frameIndex = 0;
@@ -388,6 +411,7 @@ private:
         skinnedInstances_;
     uint32_t activeSkinningFrame_ = UINT32_MAX;
     uint32_t skinningInstanceCount_ = 0;
+    uint32_t modelInstanceCount_ = 0;
     uint64_t textureUploadSubmissions_ = 0;
     uint64_t textureUploadCompletions_ = 0;
     AssetLoadScheduler scheduler_ {};

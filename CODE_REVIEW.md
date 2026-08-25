@@ -417,17 +417,22 @@ nodes, and 256 skinned instances per frame; content beyond those bounds fails
 publication with an actionable error rather than rendering with corrupted
 indices.
 
-Rendering issues one `vkCmdDrawIndexed` per visible model in
-[`VulkanSceneRecorder`](src/engine/render/VulkanSceneRecorder.cpp#L1779),
-without mesh/material batching or instancing.
+**Opaque sorting and instancing: Fixed on 2026-08-24.** Static opaque models
+are sorted by pipeline, material state, and mesh before recording. Compatible
+repeated meshes now share a single `vkCmdDrawIndexed` with consecutive
+per-instance transforms in a persistently mapped, fence-owned storage buffer.
+The model shader reads each transform and normal rotation through
+`gl_InstanceIndex`; fragment parameters remain the batching compatibility key,
+so no visual state is accidentally shared. Skinned models retain their own
+palette-backed draw, and translucent work preserves its required order.
 
 This is adequate for the current board sizes. The recommended upgrade path is:
 
 1. [Complete] Suballocated device-local static vertex/index heaps with staging uploads.
 2. [Complete] Persistently mapped, fence-owned upload rings.
 3. [Complete] Joint-matrix skinning in the vertex shader.
-4. Opaque draw sorting by pipeline, material, and mesh.
-5. Instancing for repeated board pieces and decorations.
+4. [Complete] Opaque draw sorting by pipeline, material, and mesh.
+5. [Complete] Instancing for repeated board pieces and decorations.
 6. Indirect drawing only if profiling later justifies it.
 
 A render graph or meshlet system is not the next priority; allocation,
@@ -567,7 +572,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
    uploads.
 4. [Complete] Add persistently mapped upload rings.
 5. [Complete] Move skinning to the GPU.
-6. Sort and instance repeated opaque draws.
+6. [Complete] Sort and instance repeated opaque draws.
 7. Add resource residency and frame-time telemetry before further
    optimization.
 

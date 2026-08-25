@@ -1076,6 +1076,7 @@ VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources(
         },
         .modelTextures = modelResources_.textures(),
         .skinning = modelResources_.skinningBuffer(),
+        .modelInstances = modelResources_.modelInstanceBuffer(),
     };
 }
 

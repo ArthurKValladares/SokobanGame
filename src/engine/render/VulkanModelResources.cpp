@@ -111,6 +111,7 @@ void VulkanModelResources::create(
         geometryArena_.create(
             physicalDevice_, device_, commandPool_, graphicsQueue_, uploadRing_);
         createSkinningBuffer();
+        createModelInstanceBuffer();
         ImageData fallback {
             .width = 1,
             .height = 1,
@@ -167,6 +168,7 @@ void VulkanModelResources::destroy()
             destroySkinnedMesh(model->skinnedGpu);
         }
         destroySkinningBuffer();
+        destroyModelInstanceBuffer();
         geometryArena_.destroy();
         uploadRing_.destroy();
     }
@@ -1110,6 +1112,25 @@ void VulkanModelResources::beginAnimationFrame(uint32_t frameIndex)
     }
     activeSkinningFrame_ = frameIndex;
     skinningInstanceCount_ = 0;
+    modelInstanceCount_ = 0;
+}
+
+uint32_t VulkanModelResources::writeModelInstance(
+    uint32_t frameIndex,
+    const GpuModelInstance& instance)
+{
+    if (frameIndex >= gpuSkinningFrameCount || !modelInstanceBuffer_.mapped ||
+        modelInstanceCount_ >= maxStaticModelInstancesPerFrame) {
+        throw std::runtime_error("Static model instance buffer is exhausted or invalid");
+    }
+    const uint32_t result = frameIndex * maxStaticModelInstancesPerFrame +
+        modelInstanceCount_++;
+    std::memcpy(
+        static_cast<std::byte*>(modelInstanceBuffer_.mapped) +
+            static_cast<uint64_t>(result) * sizeof(GpuModelInstance),
+        &instance,
+        sizeof(instance));
+    return result;
 }
 
 VulkanModelResources::MeshView VulkanModelResources::meshForTile(
@@ -1205,6 +1226,16 @@ VulkanModelResources::SkinningBufferView VulkanModelResources::skinningBuffer() 
         .buffer = skinningBuffer_.buffer,
         .range = static_cast<VkDeviceSize>(gpuSkinningFrameCount) *
             maxSkinnedInstancesPerFrame * sizeof(GpuSkinningInstance),
+    };
+}
+
+VulkanModelResources::ModelInstanceBufferView
+VulkanModelResources::modelInstanceBuffer() const
+{
+    return {
+        .buffer = modelInstanceBuffer_.buffer,
+        .range = static_cast<VkDeviceSize>(gpuSkinningFrameCount) *
+            maxStaticModelInstancesPerFrame * sizeof(GpuModelInstance),
     };
 }
 
@@ -1358,6 +1389,59 @@ void VulkanModelResources::destroySkinningBuffer()
         vkFreeMemory(device_, skinningBuffer_.memory, nullptr);
     }
     skinningBuffer_ = {};
+}
+
+void VulkanModelResources::createModelInstanceBuffer()
+{
+    const VkDeviceSize size = static_cast<VkDeviceSize>(gpuSkinningFrameCount) *
+        maxStaticModelInstancesPerFrame * sizeof(GpuModelInstance);
+    const VkBufferCreateInfo bufferInfo {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = size,
+        .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+    vkCheck(vkCreateBuffer(device_, &bufferInfo, nullptr, &modelInstanceBuffer_.buffer),
+        "vkCreateBuffer static model instances failed");
+    try {
+        VkMemoryRequirements requirements {};
+        vkGetBufferMemoryRequirements(device_, modelInstanceBuffer_.buffer, &requirements);
+        const VkMemoryAllocateInfo allocationInfo {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            .allocationSize = requirements.size,
+            .memoryTypeIndex = findMemoryType(
+                requirements.memoryTypeBits,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
+        };
+        vkCheck(vkAllocateMemory(
+                    device_, &allocationInfo, nullptr, &modelInstanceBuffer_.memory),
+            "vkAllocateMemory static model instances failed");
+        vkCheck(vkBindBufferMemory(
+                    device_, modelInstanceBuffer_.buffer, modelInstanceBuffer_.memory, 0),
+            "vkBindBufferMemory static model instances failed");
+        vkCheck(vkMapMemory(device_, modelInstanceBuffer_.memory, 0, size, 0,
+                    &modelInstanceBuffer_.mapped),
+            "vkMapMemory static model instances failed");
+        std::memset(modelInstanceBuffer_.mapped, 0, static_cast<std::size_t>(size));
+    } catch (...) {
+        destroyModelInstanceBuffer();
+        throw;
+    }
+}
+
+void VulkanModelResources::destroyModelInstanceBuffer()
+{
+    if (device_ && modelInstanceBuffer_.mapped) {
+        vkUnmapMemory(device_, modelInstanceBuffer_.memory);
+    }
+    if (device_ && modelInstanceBuffer_.buffer) {
+        vkDestroyBuffer(device_, modelInstanceBuffer_.buffer, nullptr);
+    }
+    if (device_ && modelInstanceBuffer_.memory) {
+        vkFreeMemory(device_, modelInstanceBuffer_.memory, nullptr);
+    }
+    modelInstanceBuffer_ = {};
 }
 
 void VulkanModelResources::writeSkinningInstance(

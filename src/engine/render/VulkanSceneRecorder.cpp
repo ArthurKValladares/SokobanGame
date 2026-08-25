@@ -4,6 +4,7 @@
 #include "engine/render/VulkanGpuProfiler.hpp"
 #include "engine/render/MirrorConfig.hpp"
 #include "engine/render/LightingConfig.hpp"
+#include "engine/render/OpaqueDrawSorter.hpp"
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
 #include "engine/render/VulkanModelResources.hpp"
@@ -22,6 +23,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <vector>
 
@@ -1034,53 +1036,165 @@ private:
             }
         }
 
-        VkPipeline boundModelPipeline = VK_NULL_HANDLE;
+        struct ModelDraw {
+            const RenderFrameData::Tile* tile = nullptr;
+            VulkanModelResources::MeshView mesh {};
+            TilePushConstants constants {};
+            VkPipeline pipeline = VK_NULL_HANDLE;
+            uint32_t pipelineRank = 0;
+            std::array<uint32_t, 29> batchState {};
+            bool mirrorGhost = false;
+            bool skinned = false;
+        };
+        const auto batchStateFor = [](const TilePushConstants& constants) {
+            std::array<uint32_t, 29> result {};
+            std::size_t index = 0;
+            const auto append = [&result, &index](Vec4 value) {
+                result[index++] = std::bit_cast<uint32_t>(value.x);
+                result[index++] = std::bit_cast<uint32_t>(value.y);
+                result[index++] = std::bit_cast<uint32_t>(value.z);
+                result[index++] = std::bit_cast<uint32_t>(value.w);
+            };
+            append(constants.color);
+            result[index++] = std::bit_cast<uint32_t>(
+                constants.normalAndAmbientRed.w);
+            append(constants.sunDirectionAndAmbientGreen);
+            append(constants.sunRadianceAndAmbientBlue);
+            append(constants.shadowOptions);
+            append(constants.materialOptions);
+            append(constants.gridColor);
+            append(constants.textureOptions);
+            return result;
+        };
         const std::vector<std::size_t>& modelIndices =
             translucentPass
             ? scene.translucentModelIndices
             : scene.opaqueModelIndices;
-        bool mirrorGhostState = false;
+        std::vector<ModelDraw> draws;
+        draws.reserve(modelIndices.size());
         for (std::size_t tileIndex : modelIndices) {
-            const RenderFrameData::Tile& tile =
-                frameData.tiles[tileIndex];
+            const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
             if (!models_.modelReady(tile.model)) {
                 continue;
             }
             const bool mirrorGhost =
                 tile.effect == RenderSurfaceEffect::MirrorEnergy;
-            if (mirrorGhost != mirrorGhostState) {
-                vkCmdSetDepthWriteEnable(
-                    commandBuffer,
-                    mirrorGhost && swapchain_.depthView()
-                        ? VK_TRUE
-                        : VK_FALSE);
-                vkCmdSetCullMode(
-                    commandBuffer,
-                    mirrorGhost
-                        ? VK_CULL_MODE_BACK_BIT
-                        : VK_CULL_MODE_NONE);
-                mirrorGhostState = mirrorGhost;
-            }
             const bool skinned = models_.modelUsesGpuSkinning(tile.model);
-            const VkPipeline desiredPipeline = mirrorGhost
+            const uint32_t pipelineRank = (mirrorGhost ? 2U : 0U) +
+                (skinned ? 1U : 0U);
+            const VkPipeline pipeline = mirrorGhost
                 ? (skinned ? pipelines_.skinnedMirrorEnergyModel()
                            : pipelines_.mirrorEnergyModel())
                 : (skinned ? pipelines_.skinnedModel() : pipelines_.model());
-            if (boundModelPipeline != desiredPipeline) {
-                vkCmdBindPipeline(
-                    commandBuffer,
-                    VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    desiredPipeline);
-                ++stats_.pipelineBinds;
-                boundModelPipeline = desiredPipeline;
-            }
-            drawModel(
-                commandBuffer,
+            const TilePushConstants constants = modelPushConstants(
                 scene.isoLayout,
                 scene.shadowLayout,
                 tile,
                 frameData.lighting,
                 frameData.effectAnimationTimeSeconds);
+            draws.push_back({
+                .tile = &tile,
+                .mesh = models_.meshForTile(
+                    tile, configuration_.descriptorFrameIndex),
+                .constants = constants,
+                .pipeline = pipeline,
+                .pipelineRank = pipelineRank,
+                .batchState = batchStateFor(constants),
+                .mirrorGhost = mirrorGhost,
+                .skinned = skinned,
+            });
+        }
+        std::vector<OpaqueDrawSortItem> orderedDraws;
+        orderedDraws.reserve(draws.size());
+        for (std::size_t drawIndex = 0; drawIndex < draws.size(); ++drawIndex) {
+            const ModelDraw& draw = draws[drawIndex];
+            orderedDraws.push_back({
+                .key = {
+                    .pipeline = draw.pipelineRank,
+                    .material = std::bit_cast<uint32_t>(
+                        draw.constants.textureOptions.x),
+                    .mesh = draw.tile->model.value,
+                    .fragmentState = draw.batchState,
+                },
+                .drawIndex = drawIndex,
+                .instancable = !draw.skinned,
+            });
+        }
+        std::vector<OpaqueDrawBatch> batches;
+        if (translucentPass) {
+            batches.reserve(orderedDraws.size());
+            for (std::size_t itemIndex = 0;
+                 itemIndex < orderedDraws.size();
+                 ++itemIndex) {
+                batches.push_back({ .firstItem = itemIndex, .itemCount = 1 });
+            }
+        } else {
+            batches = sortOpaqueDraws(orderedDraws);
+        }
+
+        VkPipeline boundModelPipeline = VK_NULL_HANDLE;
+        bool mirrorGhostState = false;
+        for (const OpaqueDrawBatch& batch : batches) {
+            const ModelDraw& draw =
+                draws[orderedDraws[batch.firstItem].drawIndex];
+            if (draw.mirrorGhost != mirrorGhostState) {
+                vkCmdSetDepthWriteEnable(
+                    commandBuffer,
+                    draw.mirrorGhost && swapchain_.depthView()
+                        ? VK_TRUE
+                        : VK_FALSE);
+                vkCmdSetCullMode(
+                    commandBuffer,
+                    draw.mirrorGhost
+                        ? VK_CULL_MODE_BACK_BIT
+                        : VK_CULL_MODE_NONE);
+                mirrorGhostState = draw.mirrorGhost;
+            }
+            if (boundModelPipeline != draw.pipeline) {
+                vkCmdBindPipeline(
+                    commandBuffer,
+                    VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    draw.pipeline);
+                ++stats_.pipelineBinds;
+                boundModelPipeline = draw.pipeline;
+            }
+            if (draw.skinned) {
+                drawModel(
+                    commandBuffer,
+                    draw.mesh,
+                    draw.constants,
+                    1,
+                    draw.mesh.firstInstance);
+            } else {
+                uint32_t firstInstance = 0;
+                for (std::size_t itemIndex = batch.firstItem;
+                     itemIndex < batch.firstItem + batch.itemCount;
+                     ++itemIndex) {
+                    const TilePushConstants& constants =
+                        draws[orderedDraws[itemIndex].drawIndex].constants;
+                    const uint32_t instance = models_.writeModelInstance(
+                        configuration_.descriptorFrameIndex,
+                        {
+                            .clipFromModel = constants.vertices,
+                            .shadowFromModel = constants.shadowVertices,
+                            .rotationRadians = {
+                                constants.normalAndAmbientRed.x,
+                                constants.normalAndAmbientRed.y,
+                                constants.normalAndAmbientRed.z,
+                                0.0f,
+                            },
+                        });
+                    if (itemIndex == batch.firstItem) {
+                        firstInstance = instance;
+                    }
+                }
+                drawModel(
+                    commandBuffer,
+                    draw.mesh,
+                    draw.constants,
+                    static_cast<uint32_t>(batch.itemCount),
+                    firstInstance);
+            }
         }
         if (mirrorGhostState) {
             vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
@@ -1701,16 +1815,13 @@ private:
         vkCmdDraw(commandBuffer, 6, 1, 0, 0);
     }
 
-    void drawModel(
-        VkCommandBuffer commandBuffer,
+    [[nodiscard]] TilePushConstants modelPushConstants(
         const IsoRenderLayout& layout,
         const ShadowRenderLayout& shadowLayout,
         const RenderFrameData::Tile& tile,
         const RenderFrameData::Lighting& lighting,
         float effectAnimationTimeSeconds)
     {
-        const VulkanModelResources::MeshView mesh =
-            models_.meshForTile(tile, configuration_.descriptorFrameIndex);
         const VulkanModelResources::MaterialBinding material =
             models_.materialForModel(tile.model);
         const ModelTransformPoints transform =
@@ -1844,6 +1955,16 @@ private:
                 std::max(lighting.specularPower, 1.0f),
             },
         };
+        return constants;
+    }
+
+    void drawModel(
+        VkCommandBuffer commandBuffer,
+        const VulkanModelResources::MeshView& mesh,
+        const TilePushConstants& constants,
+        uint32_t instanceCount,
+        uint32_t firstInstance)
+    {
         const VkBuffer vertexBuffer = mesh.vertexBuffer;
         const VkDeviceSize offset = mesh.vertexOffset;
         vkCmdBindVertexBuffers(
@@ -1862,11 +1983,11 @@ private:
             sizeof(TilePushConstants),
             &constants);
         vkCmdDrawIndexed(
-            commandBuffer, mesh.indexCount, 1, 0, 0, mesh.firstInstance);
-        stats_.visibleFaces += mesh.indexCount / 3;
+            commandBuffer, mesh.indexCount, instanceCount, 0, 0, firstInstance);
+        stats_.visibleFaces += mesh.indexCount / 3 * instanceCount;
         ++stats_.drawCalls;
-        stats_.vertices += mesh.indexCount;
-        stats_.triangles += mesh.indexCount / 3;
+        stats_.vertices += mesh.indexCount * instanceCount;
+        stats_.triangles += mesh.indexCount / 3 * instanceCount;
     }
 
     void drawModelShadow(

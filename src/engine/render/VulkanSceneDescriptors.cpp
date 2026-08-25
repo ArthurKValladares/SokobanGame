@@ -37,7 +37,7 @@ void VulkanSceneDescriptors::create(
     modelTextureCount_ = static_cast<uint32_t>(resources.modelTextures.size());
 
     try {
-        std::array<VkDescriptorSetLayoutBinding, sceneSingleImageBindings + 3>
+        std::array<VkDescriptorSetLayoutBinding, sceneSingleImageBindings + 4>
             bindings {
             VkDescriptorSetLayoutBinding {
                 .binding = 0,
@@ -100,6 +100,12 @@ void VulkanSceneDescriptors::create(
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
             },
+            VkDescriptorSetLayoutBinding {
+                .binding = 10,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+            },
         };
         VkDescriptorSetLayoutCreateInfo layoutInfo {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -126,7 +132,7 @@ void VulkanSceneDescriptors::create(
             },
             VkDescriptorPoolSize {
                 .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .descriptorCount = setCount,
+                .descriptorCount = 2 * setCount,
             },
         };
         VkDescriptorPoolCreateInfo poolInfo {
@@ -195,7 +201,7 @@ void VulkanSceneDescriptors::updateInternal(
         !resources.uiFont.valid() ||
         !resources.titleBackground.valid() ||
         resources.modelTextures.size() != modelTextureCount_ ||
-        !resources.skinning.valid()) {
+        !resources.skinning.valid() || !resources.modelInstances.valid()) {
         throw std::runtime_error("Scene descriptor resources are incomplete");
     }
 
@@ -232,6 +238,11 @@ void VulkanSceneDescriptors::updateInternal(
         .offset = 0,
         .range = resources.skinning.range,
     };
+    const VkDescriptorBufferInfo modelInstances {
+        .buffer = resources.modelInstances.buffer,
+        .offset = 0,
+        .range = resources.modelInstances.range,
+    };
     const VkDescriptorImageInfo sceneColor {
         .sampler = resources.sceneColor.sampler,
         .imageView = resources.sceneColor.imageView,
@@ -257,7 +268,7 @@ void VulkanSceneDescriptors::updateInternal(
         .imageView = resources.titleBackground.imageView,
         .imageLayout = resources.titleBackground.imageLayout,
     };
-    std::array<VkWriteDescriptorSet, 10> writes {
+    std::array<VkWriteDescriptorSet, 11> writes {
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = descriptorSet,
@@ -337,6 +348,14 @@ void VulkanSceneDescriptors::updateInternal(
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .pBufferInfo = &skinning,
+        },
+        VkWriteDescriptorSet {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = descriptorSet,
+            .dstBinding = 10,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .pBufferInfo = &modelInstances,
         },
     };
     vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
