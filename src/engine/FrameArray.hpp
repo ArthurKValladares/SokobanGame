@@ -26,12 +26,26 @@ public:
     {
     }
 
+    // Copying an arena-backed array **moves it to the heap**. That is a
+    // performance cliff on a per-frame structure, and it is silent - the type
+    // does not change, only where its bytes live.
+    //
+    // It is deliberate rather than an oversight: the heap copy is what makes
+    // a RenderFrameData safe to outlive the arena it was built in, which is
+    // the other half of the frame-arena lifetime story (see
+    // Application::beginRenderFrameArena). Copy when you mean to escape the
+    // arena; move, or take a reference, when you do not. `clone()` says so at
+    // the call site.
     FrameArray(const FrameArray& other)
         : storage_(std::in_place_type<std::vector<T>>,
               other.begin(), other.end())
     {
     }
 
+    // An explicit copy, for the places that want the heap copy on purpose.
+    [[nodiscard]] FrameArray clone() const { return FrameArray(*this); }
+
+    // Same cliff as the copy constructor above.
     FrameArray& operator=(const FrameArray& other)
     {
         if (this == &other) {

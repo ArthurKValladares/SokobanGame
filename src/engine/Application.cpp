@@ -117,7 +117,10 @@ Application::Application(ApplicationOptions options)
 #if SOKOBAN_ENABLE_DEBUG_UI
     , tools_(std::make_unique<ApplicationTools>())
 #endif
-    , renderFrameArena_("render frame", renderFrameArenaBytes())
+    , renderFrameArenas_ {
+          FrameArena("render frame A", renderFrameArenaBytes()),
+          FrameArena("render frame B", renderFrameArenaBytes()),
+      }
     , smokeFrames_(options.smokeFrames)
 {
     log::info(log::Category::Persistence)
@@ -1600,6 +1603,15 @@ void Application::preloadUpcomingAssets()
     renderer_.preloadAssets(requirements);
 }
 
+FrameArena& Application::beginRenderFrameArena()
+{
+    renderFrameArenaIndex_ =
+        (renderFrameArenaIndex_ + 1) % renderFrameArenas_.size();
+    FrameArena& arena = renderFrameArenas_[renderFrameArenaIndex_];
+    arena.reset();
+    return arena;
+}
+
 RenderFrameData Application::buildRenderFrame(
     const InputRouter::EditorInput& editorInput)
 {
@@ -1665,7 +1677,7 @@ RenderFrameData Application::buildRenderFrame(
                 }
             }
         }
-        renderFrameArena_.reset();
+        FrameArena& arena = beginRenderFrameArena();
         return RenderFrameBuilder::buildEditor({
             .manifest = assetManifest_,
             .editor = tools_->levelEditor,
@@ -1706,7 +1718,7 @@ RenderFrameData Application::buildRenderFrame(
                         level->screens.back().index == target.screen,
                 };
             },
-        }, renderFrameArena_);
+        }, arena);
     }
 #endif
 
@@ -1783,7 +1795,7 @@ RenderFrameData Application::buildRenderFrame(
             });
         }
     }
-    renderFrameArena_.reset();
+    FrameArena& arena = beginRenderFrameArena();
     RenderFrameData frame = RenderFrameBuilder::buildGameplay({
         .manifest = assetManifest_,
         .level = level_,
@@ -1829,7 +1841,7 @@ RenderFrameData Application::buildRenderFrame(
         .selectorState = [this](LevelLocation target) {
             return campaign_.selectorViewState(playerProfile_, target);
         },
-    }, renderFrameArena_);
+    }, arena);
     particleSystem_.appendRenderData(frame);
     frame.levelTransitionAmount = levelTransition_.amount();
     return frame;

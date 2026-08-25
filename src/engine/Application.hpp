@@ -30,6 +30,7 @@
 #include "engine/ui/OptionsMenu.hpp"
 #include "engine/ui/TitleScreen.hpp"
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -139,6 +140,9 @@ private:
     void restoreProfileLocation();
     [[nodiscard]] RenderAssetRequirements levelAssetRequirements(int levelIndex) const;
     void preloadUpcomingAssets();
+    // Advances to the arena the previous prepared frame does not reference,
+    // clears it, and returns it. The only place a render-frame arena is reset.
+    [[nodiscard]] FrameArena& beginRenderFrameArena();
     [[nodiscard]] RenderFrameData buildRenderFrame(
         const InputRouter::EditorInput& editorInput);
 
@@ -189,7 +193,23 @@ private:
 #if SOKOBAN_ENABLE_DEBUG_UI
     std::unique_ptr<ApplicationTools> tools_;
 #endif
-    FrameArena renderFrameArena_;
+    // Two arenas, alternating. The previous frame's PreparedFrame still holds
+    // a RenderFrameData whose arrays point into the arena it was built from,
+    // and the update step reads those tiles - decoration picking and player
+    // bounds - before the next frame is built.
+    //
+    // One arena made that safe only by accident of ordering: every such read
+    // happened earlier in the loop than the reset buried inside
+    // buildRenderFrame. Moving that reset to the top of the loop, which is the
+    // natural place for it, would have turned it into a use-after-free that
+    // Linux CI cannot catch, because the render path never runs there.
+    // Alternating means the arena being reset is never the one the previous
+    // prepared frame points into, and the invariant stops being invisible.
+    //
+    // The cost is a second arena's worth of memory. Only one frame is ever
+    // read back, so two is enough.
+    std::array<FrameArena, 2> renderFrameArenas_;
+    std::size_t renderFrameArenaIndex_ = 0;
     std::uint64_t smokeFrames_ = 0;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;
     float overworldOverviewProgress_ = 0.0f;

@@ -957,6 +957,22 @@ Renderer:
 - Vulkan 1.3, dynamic rendering, synchronization2, cube-map arrays, and
   extended dynamic state. Wireframe and wide lines remain optional
   developer-only features.
+- **The render-frame arena is double-buffered** (review item S4).
+  `Application::beginRenderFrameArena` alternates between two arenas and is
+  the only place either is reset. The previous frame's `PreparedFrame` holds a
+  `RenderFrameData` whose arrays point into the arena it was built from, and
+  the update step reads those tiles - decoration picking, player bounds -
+  before the next frame is built. With one arena that was safe only by
+  accident of ordering: every read happened earlier in the loop than the reset
+  buried inside `buildRenderFrame`. Moving that reset to the top of the loop,
+  the natural place for it, would have been a use-after-free that Linux CI
+  cannot catch, because the render path never runs there. Only one frame is
+  ever read back, so two arenas are enough; the cost is a second arena's
+  memory.
+  - `FrameArray`'s copy constructor moves arena storage to the heap. That is
+    a silent performance cliff on a per-frame structure, and also the
+    mechanism that lets a `RenderFrameData` outlive its arena on purpose.
+    `clone()` exists to say which you meant at the call site.
 - Uses SDL3 window/Vulkan integration.
 - **The GPU has a camera** (review item C1). This is the fact most of the
   renderer's shape now follows from, and it is worth reading before changing
