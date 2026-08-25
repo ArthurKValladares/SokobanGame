@@ -36,6 +36,73 @@ Do not clear an existing player's data to simulate a clean install. Use a new
 Windows user account, a VM snapshot, or a physical machine with no prior
 Sokoban 3D profile.
 
+## Evidence bundle
+
+Use the evidence collector for each matrix machine. It runs the package gate,
+collects Windows, display-adapter, driver, monitor, `vulkaninfo`, `dxdiag`,
+artifact-hash, signature, and game-log evidence, then asks you to record the
+manual checks below. It produces one ZIP suitable for release sign-off:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\packaging\CollectReleaseValidationEvidence.ps1 `
+  -RuntimePackage .\out\shipping\Sokoban3D-0.1.0-Windows-x64-Runtime.zip
+```
+
+Pass `-Installer <setup.exe>` when validating an installer; its SHA-256 and
+Authenticode result are included. Pass `-IncludeReleaseArtifacts` only when
+the report must carry copies of the runtime and installer, since the evidence
+ZIP normally contains hashes rather than duplicating release binaries. Use
+`-SkipManualChecklist` only for an automated preflight, never for final
+hardware-matrix sign-off.
+
+### Installer workflow
+
+Build the installer first. The unsigned variant is useful for internal QA;
+the signed variant requires the certificate environment variable described in
+the README and is the only acceptable public-release artifact:
+
+```powershell
+# Internal/unsigned installer
+cmake --preset shipping-installer
+cmake --build --preset shipping-installer
+
+# Public/signed installer
+$env:SOKOBAN_SIGNING_CERTIFICATE_THUMBPRINT = 'YOUR_CERTIFICATE_THUMBPRINT'
+cmake --preset shipping-signed
+cmake --build --preset shipping-signed
+```
+
+Copy the resulting `Sokoban3D-<version>-Windows-x64-Setup.exe` to the clean
+test machine and run it normally as the standard test user. Inno Setup installs
+per-user by default, without elevation, at:
+
+```powershell
+$installedRuntime = "$env:LOCALAPPDATA\Programs\Sokoban 3D"
+```
+
+Then collect one report that validates the *installed* runtime tree and records
+the installer hash/signature. The collector also records the installed
+`sokoban.exe` signature when the runtime argument is a directory:
+
+```powershell
+# For shipping-signed, replace shipping-installer with shipping-signed.
+$installer = '.\out\shipping-installer\installer\Sokoban3D-0.1.0-Windows-x64-Setup.exe'
+$installedRuntime = "$env:LOCALAPPDATA\Programs\Sokoban 3D"
+
+powershell -ExecutionPolicy Bypass -File .\packaging\CollectReleaseValidationEvidence.ps1 `
+  -RuntimePackage $installedRuntime `
+  -Installer $installer
+```
+
+For upgrade coverage, install a previously released build, create progress and
+change at least one setting, then run the candidate installer over it. Complete
+the collector's `installer-lifecycle` prompt only after confirming that the
+candidate retained the progress/settings. Finally use the Start-menu uninstall
+entry, verify the installed files are gone while the profile remains, and
+record the outcome in that prompt. The collector never installs or uninstalls
+automatically: those actions are deliberately manual because they mutate the
+test user's installation and must be observed.
+
 ## Manual acceptance
 
 For every matrix row, use a fresh profile and verify all of the following:

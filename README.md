@@ -114,6 +114,11 @@ PowerShell package gate verifies the final ZIP from a fresh extraction and
 launches it briefly; the accompanying Windows and GPU-driver matrix is the
 required human acceptance record.
 
+For a shareable validation report from each test machine, run
+`packaging/CollectReleaseValidationEvidence.ps1`; it packages the package-gate
+result, GPU/driver/monitor details, Vulkan and DirectX diagnostics, hashes,
+log tail, and your manual-checklist answers into one ZIP.
+
 ```powershell
 cmake --preset shipping
 cmake --build --preset shipping
@@ -143,6 +148,9 @@ This produces `out/shipping-installer/installer/Sokoban3D-<version>-Windows-x64-
 It stages CMake's `Runtime` component first, deliberately excluding the PDB
 symbols package. The installer supports upgrades and uninstalls without
 administrator privileges.
+
+The exact installer validation and evidence-collection commands are documented
+in [`packaging/ReleaseValidation.md`](packaging/ReleaseValidation.md#installer-workflow).
 
 For a public release, use a code-signing certificate in the current user's
 Windows certificate store. Keep its SHA-1 thumbprint in the release environment

@@ -1,0 +1,32 @@
+﻿[
+    {
+        "id":  "title-and-save",
+        "prompt":  "Title screen appears; start a game, finish a puzzle, restart, and confirm the save resumes.",
+        "result":  "pass",
+        "notes":  ""
+    },
+    {
+        "id":  "display-settings",
+        "prompt":  "Change display mode, VSync, frame cap, and anti-aliasing; confirm stable rebuilds and persistence.",
+        "result":  "pass",
+        "notes":  ""
+    },
+    {
+        "id":  "focus-and-window",
+        "prompt":  "Minimize for 30 seconds, restore, alt-tab, resize, and use available monitor/DPI changes without a hang or input burst.",
+        "result":  "pass",
+        "notes":  ""
+    },
+    {
+        "id":  "extended-play",
+        "prompt":  "Play at least ten minutes with keyboard/mouse and controller; exercise level transitions, previews, loading, and animation.",
+        "result":  "pass",
+        "notes":  ""
+    },
+    {
+        "id":  "installer-lifecycle",
+        "prompt":  "For an installer build: verify uninstall retains saves and upgrade retains saves/settings. Otherwise mark skipped.",
+        "result":  "pass",
+        "notes":  ""
+    }
+]
