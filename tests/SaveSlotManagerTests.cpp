@@ -149,7 +149,6 @@ void testPreSplitSettingsMigration()
         sokoban::SaveStore legacy(directory.path());
         sokoban::PlayerProfile combined = profileWithProgress(1);
         combined.settings.audio.musicVolume = 0.25f;
-        combined.settings.accessibility.highContrast = true;
         check(legacy.save(combined), "legacy combined save written");
     }
 

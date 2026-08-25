@@ -94,13 +94,6 @@ void migrate1to2(Json& root)
         { "audio", std::move(audio) },
         { "video", { { "fullscreen", false }, { "vsync", false } } },
         { "input", legacyInputDefaultsJson() },
-        { "accessibility", {
-            { "reducedMotion", false },
-            { "highContrast", false },
-            { "largeText", false },
-            { "subtitles", true },
-            { "screenShake", true },
-        } },
     };
 }
 
@@ -813,6 +806,16 @@ void migrate24to25(Json& root)
     }
 }
 
+// Format 26 removes the incomplete accessibility surface. Historical values
+// intentionally have no runtime replacement; preserving the rest of the
+// settings document is sufficient for a lossless gameplay migration.
+void migrate25to26(Json& root)
+{
+    if (root.contains("settings") && root["settings"].is_object()) {
+        root["settings"].erase("accessibility");
+    }
+}
+
 } // namespace
 
 void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
@@ -843,6 +846,7 @@ void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
         migrate22to23,
         migrate23to24,
         migrate24to25,
+        migrate25to26,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

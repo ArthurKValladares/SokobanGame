@@ -1,7 +1,5 @@
 #include "engine/SettingsCoordinator.hpp"
 
-#include "engine/GameplayConfig.hpp"
-
 namespace sokoban {
 
 SettingsCoordinator::SettingsCoordinator(
@@ -30,9 +28,6 @@ SettingsEffects SettingsCoordinator::initialize()
         .allowTearing = profile_.settings.video.allowTearing,
     };
     effects.frameRateLimit = profile_.settings.video.frameRateLimit;
-    effects.stepDurationSeconds = profile_.settings.accessibility.reducedMotion
-        ? 0.05f
-        : config::stepDurationSeconds;
     return effects;
 }
 

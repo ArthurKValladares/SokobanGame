@@ -23,7 +23,6 @@ void testInitializationProducesAllStartupEffects()
     sokoban::PlayerProfile profile;
     profile.settings.video.fullscreen = true;
     profile.settings.audio.masterVolume = 0.7f;
-    profile.settings.accessibility.reducedMotion = true;
     profile.settings.video.ambientOcclusion = false;
     profile.settings.video.ambientOcclusionStrength = 0.35f;
     sokoban::PresentationSettings presentation;
@@ -36,7 +35,6 @@ void testInitializationProducesAllStartupEffects()
     CHECK(effects.audio.has_value());
     CHECK(effects.audio->masterVolume == 0.7f);
     CHECK(effects.input.has_value());
-    CHECK(effects.stepDurationSeconds == 0.05f);
     CHECK(!effects.antiAliasingSamples.has_value());
     CHECK(!effects.renderScalePercent.has_value());
     CHECK(effects.presentation.has_value());

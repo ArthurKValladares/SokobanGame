@@ -25,7 +25,6 @@ struct SettingsEffects {
     std::optional<int> frameRateLimit;
     std::optional<PlayerProfile::AudioSettings> audio;
     std::optional<InputBindings> input;
-    std::optional<float> stepDurationSeconds;
     bool saveProgress = false;
     bool saveSettings = false;
     bool immediatePersistence = false;

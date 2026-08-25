@@ -13,7 +13,7 @@
 
 namespace sokoban {
 
-inline constexpr int currentPlayerProfileFormat = 25;
+inline constexpr int currentPlayerProfileFormat = 26;
 
 // Which top-level sections serialize() writes. Save-slot files carry only
 // progress and the shared settings file only settings; both sections are
@@ -55,8 +55,6 @@ struct PlayerProfile {
 
     using AudioSettings = UserSettings::Audio;
     using VideoSettings = UserSettings::Video;
-    using AccessibilitySettings = UserSettings::Accessibility;
-
     struct ActiveScreen {
         int level = 0;
         int screen = 0;
@@ -95,7 +93,7 @@ struct PlayerProfile {
     // Records that the player entered a screen, for level-select unlocking.
     void recordReachedScreen(int level, int screen);
     // Clears all progress (levels, unlocks, checkpoint) while keeping audio,
-    // video, input, and accessibility settings.
+    // video, and input settings.
     void resetProgress();
     // True when the profile carries no progress at all (fresh or reset).
     [[nodiscard]] bool progressEmpty() const;

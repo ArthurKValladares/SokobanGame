@@ -1069,7 +1069,7 @@ void parseSettingsSection(PlayerProfile& profile, const Json& settings)
 {
     rejectUnknownProperties(
         settings,
-        { "audio", "video", "input", "accessibility" },
+        { "audio", "video", "input" },
         "settings");
 
     const Json& audio = requiredProperty(settings, "audio", "settings");
@@ -1120,21 +1120,6 @@ void parseSettingsSection(PlayerProfile& profile, const Json& settings)
         requiredProperty(settings, "input", "settings"),
         "settings.input");
 
-    const Json& accessibility = requiredProperty(settings, "accessibility", "settings");
-    rejectUnknownProperties(
-        accessibility,
-        { "reducedMotion", "highContrast", "largeText", "subtitles", "screenShake" },
-        "settings.accessibility");
-    profile.settings.accessibility.reducedMotion =
-        boolProperty(accessibility, "reducedMotion", "settings.accessibility");
-    profile.settings.accessibility.highContrast =
-        boolProperty(accessibility, "highContrast", "settings.accessibility");
-    profile.settings.accessibility.largeText =
-        boolProperty(accessibility, "largeText", "settings.accessibility");
-    profile.settings.accessibility.subtitles =
-        boolProperty(accessibility, "subtitles", "settings.accessibility");
-    profile.settings.accessibility.screenShake =
-        boolProperty(accessibility, "screenShake", "settings.accessibility");
 }
 
 PlayerProfile parseCurrent(const Json& root)
@@ -1281,13 +1266,6 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
                 { "windowHeight", normalized.settings.video.windowHeight },
             } },
             { "input", inputBindingsToJson(normalized.settings.input) },
-            { "accessibility", {
-                { "reducedMotion", normalized.settings.accessibility.reducedMotion },
-                { "highContrast", normalized.settings.accessibility.highContrast },
-                { "largeText", normalized.settings.accessibility.largeText },
-                { "subtitles", normalized.settings.accessibility.subtitles },
-                { "screenShake", normalized.settings.accessibility.screenShake },
-            } },
         };
     }
 

@@ -30,10 +30,4 @@ inline constexpr int maximumWindowWidth = 7680;
 inline constexpr int minimumWindowHeight = 480;
 inline constexpr int maximumWindowHeight = 4320;
 
-inline constexpr bool reducedMotion = false;
-inline constexpr bool highContrast = false;
-inline constexpr bool largeText = false;
-inline constexpr bool subtitles = true;
-inline constexpr bool screenShake = true;
-
 } // namespace sokoban::config

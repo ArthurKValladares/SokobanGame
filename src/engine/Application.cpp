@@ -1406,10 +1406,6 @@ void Application::applySettingsEffects(const SettingsEffects& effects)
     if (effects.input) {
         input_.setBindings(*effects.input);
     }
-    if (effects.stepDurationSeconds) {
-        gameplaySession_.setStepDurationSeconds(
-            *effects.stepDurationSeconds);
-    }
     if (effects.saveProgress) {
         persistProfile(effects.immediatePersistence);
     }

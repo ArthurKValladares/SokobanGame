@@ -34,20 +34,9 @@ struct UserSettings {
         bool operator==(const Video&) const = default;
     };
 
-    struct Accessibility {
-        bool reducedMotion = config::reducedMotion;
-        bool highContrast = config::highContrast;
-        bool largeText = config::largeText;
-        bool subtitles = config::subtitles;
-        bool screenShake = config::screenShake;
-
-        bool operator==(const Accessibility&) const = default;
-    };
-
     Audio audio;
     Video video;
     InputBindings input = defaultInputBindings();
-    Accessibility accessibility;
 
     void normalize();
     bool operator==(const UserSettings&) const = default;

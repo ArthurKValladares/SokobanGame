@@ -103,8 +103,6 @@ void testRoundTripAndBests()
         sokoban::KeyboardBinding { "Backspace" },
         sokoban::GamepadButtonBinding { "south" },
     };
-    profile.settings.accessibility.reducedMotion = true;
-    profile.settings.accessibility.highContrast = true;
     profile.recordLevelCompletion(0, 30, 48.5, true);
     profile.recordLevelCompletion(0, 35, 40.0, true);
 
@@ -164,7 +162,6 @@ void testReachedScreensAndProgressReset()
 
     sokoban::PlayerProfile populated = profile;
     populated.settings.audio.musicVolume = 0.25f;
-    populated.settings.accessibility.highContrast = true;
     check(!populated.progressEmpty(), "populated profile has progress");
     populated.resetProgress();
     check(populated.unlockedLevel == 0 && populated.currentLevel == 0 &&
@@ -172,20 +169,17 @@ void testReachedScreensAndProgressReset()
         "reset clears position");
     check(populated.levels.empty() && !populated.activeScreen, "reset clears records");
     check(populated.settings.audio.musicVolume == 0.25f, "reset keeps audio settings");
-    check(populated.settings.accessibility.highContrast, "reset keeps accessibility settings");
     check(populated.progressEmpty(), "reset profile reads as empty");
 
     // Settings split: settingsOnly strips progress, adoptSettingsFrom keeps it.
     const sokoban::PlayerProfile settings = populated.settingsOnly();
     check(settings.progressEmpty(), "settingsOnly has no progress");
     check(settings.settings.audio.musicVolume == 0.25f, "settingsOnly keeps audio");
-    check(settings.settings.accessibility.highContrast, "settingsOnly keeps accessibility");
 
     sokoban::PlayerProfile target = profile;
     const int levelsBefore = static_cast<int>(target.levels.size());
     target.adoptSettingsFrom(settings);
     check(target.settings.audio.musicVolume == 0.25f, "adopt applies audio settings");
-    check(target.settings.accessibility.highContrast, "adopt applies accessibility");
     check(static_cast<int>(target.levels.size()) == levelsBefore,
         "adopt keeps progress records");
 }
@@ -197,7 +191,6 @@ void testSectionedSerialization()
     profile.recordReachedScreen(0, 1);
     profile.recordLevelCompletion(0, 12, 30.0, true);
     profile.settings.audio.musicVolume = 0.25f;
-    profile.settings.accessibility.highContrast = true;
     profile.normalize();
 
     // Progress-only files carry no settings section and decode with default
@@ -225,8 +218,6 @@ void testSectionedSerialization()
     check(settingsDecoded.progressEmpty(), "settings-only decodes empty progress");
     check(settingsDecoded.settings.audio.musicVolume == 0.25f,
         "settings-only round-trips settings");
-    check(settingsDecoded.settings.accessibility.highContrast,
-        "settings-only round-trips accessibility");
 
     // A bare format-9 document decodes as a fully default profile.
     const sokoban::PlayerProfile bare =
@@ -512,6 +503,24 @@ void testNormalizationAndMigration()
         "format 24 receives safe tearing default");
     check(migratedFormat24.profile.settings.video.frameRateLimit == 0,
         "format 24 receives unlimited foreground cap default");
+
+    nlohmann::json format25 = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    format25["format"] = 25;
+    format25["settings"]["accessibility"] = {
+        { "reducedMotion", true },
+        { "highContrast", true },
+        { "largeText", true },
+        { "subtitles", false },
+        { "screenShake", false },
+    };
+    const sokoban::DecodedPlayerProfile migratedFormat25 =
+        sokoban::decodePlayerProfile(format25.dump());
+    check(migratedFormat25.sourceFormat == 25,
+        "format 25 source reported");
+    check(migratedFormat25.profile.serialize().find("\"accessibility\"") ==
+            std::string::npos,
+        "format 25 accessibility settings are removed during migration");
 
     nlohmann::json format5Root = nlohmann::json::parse(
         sokoban::PlayerProfile {}.serialize());

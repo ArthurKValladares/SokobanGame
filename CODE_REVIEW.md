@@ -520,17 +520,21 @@ Important missing gates include:
 Fix the three ignored-`[[nodiscard]]` test warnings and consider warnings as
 errors in CI.
 
-### P2 — Accessibility settings are mostly placeholders
+### P2 — Accessibility settings were mostly placeholders
 
-`highContrast`, `largeText`, `subtitles`, and `screenShake` are versioned and
-persisted but have no runtime consumers outside serialization and tests. Only
-`reducedMotion` changes behavior through
-[`SettingsCoordinator`](src/engine/SettingsCoordinator.cpp#L28).
+**Status: Removed on 2026-08-24.** The unimplemented `highContrast`,
+`largeText`, `subtitles`, and `screenShake` settings—and the partial
+`reducedMotion` simulation-speed adjustment—have been removed from the
+runtime model, persistence schema, configuration, and settings coordinator.
+Profile format 26 migrates format-25 data by discarding the obsolete
+`settings.accessibility` block while retaining supported audio, video, and
+input values. The current schema no longer advertises an incomplete
+accessibility feature set.
 
-**Required fix:** Either implement these settings before exposing them or
-defer them from the public schema. Shipping accessibility should also cover UI
-scaling, clear remapping conflicts, color-independent puzzle cues,
-screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
+Accessibility should return only as a cohesive, designed feature set: scalable
+UI, clear remapping conflicts, color-independent puzzle cues, subtitles, and
+motion controls should each have an owning runtime consumer and focused tests
+before being exposed.
 
 ### P3 — Lower-severity cleanup
 
@@ -603,7 +607,7 @@ screen-shake intensity, subtitle presentation, and pause-on-focus-loss.
    and signing.
 4. [Complete] Add crash dumps, rotating logs, and actionable fatal-error UI.
 5. [Complete] Complete frame-pacing controls and minimize/unfocused behavior.
-6. Implement or remove placeholder accessibility settings.
+6. [Complete] Implement or remove placeholder accessibility settings.
 7. Validate the final package on clean supported machines and GPU drivers.
 
 ## Ship assessment
