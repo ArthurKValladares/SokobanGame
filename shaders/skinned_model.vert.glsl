@@ -12,6 +12,8 @@ layout(location = 4) in uint inMaterialFlags;
 layout(location = 5) in uvec4 inJoints;
 layout(location = 6) in vec4 inWeights;
 layout(location = 7) in uint inAttachmentNode;
+layout(location = 8) in vec4 inTangent;
+layout(location = 9) in vec2 inUv1;
 
 layout(location = 0) out vec4 outShadowPosition;
 layout(location = 1) out float outFaceCoordU;
@@ -21,6 +23,8 @@ layout(location = 4) flat out uint outTextureIndex;
 layout(location = 5) flat out uint outMaterialFlags;
 layout(location = 6) out vec3 outWorldPosition;
 layout(location = 7) flat out uint outDrawInstance;
+layout(location = 8) out vec4 outTangent;
+layout(location = 9) out vec2 outUv1;
 
 struct SkinningInstance {
     mat4 palette[MAX_SKIN_JOINTS + 128];
@@ -67,14 +71,30 @@ vec4 sunShadowFromWorld(vec3 worldPosition) {
 // OpLoad per vertex invocation, and drivers that fail to scalarize it spill
 // catastrophically. Index the members through the buffer instead; the
 // per-matrix loads below are the only reads that should reach memory.
+// See model.vert: the same Euler triple, applied to whatever needs it.
+vec3 rotateByEuler(vec3 value, vec3 rotation)
+{
+    float cosine = cos(rotation.x);
+    float sine = sin(rotation.x);
+    value = vec3(value.x, cosine * value.y - sine * value.z, sine * value.y + cosine * value.z);
+    cosine = cos(rotation.y);
+    sine = sin(rotation.y);
+    value = vec3(cosine * value.x + sine * value.z, value.y, -sine * value.x + cosine * value.z);
+    cosine = cos(rotation.z);
+    sine = sin(rotation.z);
+    return vec3(cosine * value.x - sine * value.y, sine * value.x + cosine * value.y, value.z);
+}
+
 void main() {
     vec4 sourcePosition = vec4(0.0);
     vec3 sourceNormal = vec3(0.0);
+    vec3 sourceTangent = vec3(0.0);
     if (inAttachmentNode != 0xffffffffu) {
         mat4 matrix = skinning.instances[gl_InstanceIndex]
                           .palette[MAX_SKIN_JOINTS + inAttachmentNode];
         sourcePosition = matrix * vec4(inPosition, 1.0);
         sourceNormal = mat3(matrix) * inNormal;
+        sourceTangent = mat3(matrix) * inTangent.xyz;
     } else {
         for (uint i = 0; i < 4; ++i) {
             if (inWeights[i] > 0.0 && inJoints[i] < MAX_SKIN_JOINTS) {
@@ -82,6 +102,7 @@ void main() {
                                   .palette[inJoints[i]];
                 sourcePosition += (matrix * vec4(inPosition, 1.0)) * inWeights[i];
                 sourceNormal += (mat3(matrix) * inNormal) * inWeights[i];
+                sourceTangent += (mat3(matrix) * inTangent.xyz) * inWeights[i];
             }
         }
         if (length(sourceNormal) < 0.000001) { sourceNormal = inNormal; }
@@ -100,6 +121,11 @@ void main() {
     outShadowPosition = sunShadowFromWorld(worldPosition);
     outFaceCoordU = inUv.x; outFaceCoordV = inUv.y;
     outTextureIndex = inTextureIndex; outMaterialFlags = inMaterialFlags;
+    outUv1 = inUv1;
+    // modelFromSource, not normalFromSource: a tangent transforms by the
+    // matrix, a normal by its inverse transpose.
+    vec3 tangent = mat3(skinning.instances[gl_InstanceIndex].modelFromSource) *
+        sourceTangent;
     if (draw.gridColor.w < 0.0) { normal *= draw.gridColor.xyz; }
     vec3 rotation = draw.normalAndAmbientRed.xyz;
     float cosine = cos(rotation.x); float sine = sin(rotation.x);
@@ -108,4 +134,5 @@ void main() {
     normal = vec3(cosine * normal.x + sine * normal.z, normal.y, -sine * normal.x + cosine * normal.z);
     cosine = cos(rotation.z); sine = sin(rotation.z);
     outNormal = normalize(vec3(cosine * normal.x - sine * normal.y, sine * normal.x + cosine * normal.y, normal.z));
+    outTangent = vec4(rotateByEuler(tangent, rotation), inTangent.w);
 }

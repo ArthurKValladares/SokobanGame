@@ -96,7 +96,9 @@ std::vector<GpuSkinnedVertex> makeGpuSkinnedVertices(const SkinnedMeshData& mesh
         result.push_back({
             .position = vertex.position,
             .normal = vertex.normal,
+            .tangent = vertex.tangent,
             .uv = vertex.uv,
+            .uv1 = vertex.uv1,
             .joints = vertex.joints,
             .weights = vertex.weights,
         });
@@ -109,7 +111,12 @@ std::vector<GpuSkinnedVertex> makeGpuSkinnedVertices(const SkinnedMeshData& mesh
             result.push_back({
                 .position = { vertex.position.x, vertex.position.z, -vertex.position.y },
                 .normal = { vertex.normal.x, vertex.normal.z, -vertex.normal.y },
+                // Same axis swap as the normal, and the handedness rides
+                // along untouched: swapping axes this way is a rotation.
+                .tangent = { vertex.tangent.x, vertex.tangent.z,
+                    -vertex.tangent.y, vertex.tangent.w },
                 .uv = vertex.uv,
+                .uv1 = vertex.uv1,
                 .textureIndex = vertex.textureIndex,
                 .materialFlags = vertex.materialFlags,
                 .attachmentNodeIndex = attachment.nodeIndex,

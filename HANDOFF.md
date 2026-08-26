@@ -25,10 +25,10 @@ started**:
   with the "AO modulates ambient rather than the composite" half of V7 pulled
   forward into it. F2c - a real curve and a user-facing exposure control - is
   deliberately not done; see below.
-- Phase 2: A1 **step one** - cgltf replaces the hand-rolled glTF scanner
-  behind an unchanged `GltfMesh.hpp`. Byte-identical output on the whole asset
-  corpus; step two, which takes the limits the old loader could not, has not
-  been done. See below.
+- Phase 2: A1, in two steps. **Step one** put cgltf behind an unchanged
+  `GltfMesh.hpp`, byte-identical on the whole asset corpus. **Step two** read
+  the animation `interpolation` field the loader had always ignored, and put
+  `cgltf_validate` in front of every load. See below.
 
 Each has its own section in this file explaining the invariants it
 established. Read the C1 and T1 notes under the renderer section before
@@ -186,18 +186,137 @@ Decisions; do not re-litigate it from scratch.
   all four weights, and the caller divides by their sum immediately, so the
   result is identical either way.
 
-### Next: A1 step two
+### What A1 step two established
 
-Step one changed the parser and nothing else. Step two takes what the old
-loader could not do and what cgltf now makes cheap:
+- **All three glTF interpolation modes are read and sampled.**
+  `AnimationKeyframes` gained an `interpolation` field, and it changes the
+  layout of `values`: LINEAR and STEP keep one value per time, **CUBICSPLINE
+  keeps three** - in-tangent, value, out-tangent, glTF's own order - so
+  `values` is three times as long as `times` and must never be indexed by key
+  directly. `keyframeValue()` is the only correct way to reach a key.
+- **Two bugs went with it.** A STEP curve used to play as LERP with nothing
+  saying so, and a CUBICSPLINE clip used to fail to load at all, because the
+  loader insisted a sampler's input and output counts match.
+- **Cubic-spline tangents are not quaternions.** On a rotation channel the
+  loader normalizes the value slots and leaves the tangents either side of
+  them alone; normalizing a tangent bends the curve. The sample is normalized
+  afterwards instead, which `posesForAnimation` already did. Tangents are also
+  per second, so the sampler scales them by the segment's duration.
+- **`cgltf_validate` runs on every load**, not only in the content pipeline.
+  It walks the accessors rather than the data, so it is cheap, and it is the
+  difference between "cgltf parsed the JSON" and "every accessor actually fits
+  inside the buffer it points at". `ContentPipeline` loads every animation at
+  build time, so this also keeps a truncated asset out of a package.
+- **None of it changes a single shipped frame.** Every sampler the manifest
+  reaches is LINEAR, every primitive is a triangle list, every file has one
+  buffer and no sparse accessor - 39 files, 2,301 samplers, checked. The
+  corpus digest is byte-identical to step one across all 734 lines, pose
+  sampling included.
 
-- **Animation `interpolation` is still not read.** A STEP curve plays as LERP
-  and nobody is told; a CUBICSPLINE sampler throws "Incompatible glTF
-  animation sampler accessors", because its output holds three values per key.
-  `cgltf_animation_sampler::interpolation` is right there.
-- **`cgltf_validate` in the content pipeline.** `ContentPipeline` already
-  walks every animation at build time to catch a stale catalog duration. One
-  call upgrades that from "it parsed" to a real structural check.
+Which is exactly why these paths carry **unit tests rather than an asset**:
+nothing in the project exercises them. `testAnimationInterpolationModes` in
+`tests/AnimationControllerTests.cpp` states each rule as "this is where linear
+would have put it", so the assertions do not restate the coordinate transform.
+They were checked by mutation - step falling through to linear, the key value
+read as its in-tangent, tangents unscaled, the arriving tangent read from the
+wrong slot - and every mutation is caught. Two things that cost time and are
+worth knowing:
+
+- **Sampling wraps on `durationSeconds`, it does not clamp.** A clip that ends
+  exactly on its last key loops back to the first, so the hold either side of
+  a curve is unreachable unless the clip outlasts its keys. A first attempt at
+  those assertions was silently testing the wrap.
+- **Test data has to differ in the slot under test.** The first cubic fixture
+  had zeroes in every tangent, so reading a tangent instead of a value made no
+  difference and the mutation survived. The tangents are distinctive numbers
+  now for that reason.
+
+### What F3a established
+
+F3 is being landed in three steps: the vertex format, then the material
+model, then the BRDF. **Only the first is done.**
+
+- **`MeshVertex`, `SkinnedVertex` and `GpuSkinnedVertex` carry a tangent and a
+  second UV set.** The tangent is `Vec4` in glTF's own layout - xyz plus the
+  bitangent's handedness in w. Vertex attribute **locations 8 and 9** in both
+  the static and skinned layouts, deliberately not 5 and 6: 5 to 7 are the
+  skinning attributes, and a tangent whose location moved with the pipeline
+  would be a trap in two vertex shaders instead of a number in one table.
+- **Nothing samples them yet.** `triangle.frag` declares both inputs and reads
+  neither. The point of stopping here is that the vertex format, the pipeline
+  descriptions and the interface between the stages are all in place and
+  provably unchanged before the lighting changes everything at once.
+- **The loader reads TANGENT when a file has one and derives it otherwise.**
+  Derivation is the standard per-triangle accumulate plus Gram-Schmidt, and it
+  runs **after** the source-to-engine transform, because the aspect-ratio and
+  unit-box modes scale the axes unevenly and a tangent derived before that
+  would not lie in the surface afterwards. The skinned path derives in source
+  space instead, since those vertices are posed before they are normalized.
+  - It is **not MikkTSpace**. The two agree on ordinary geometry and can
+    disagree where UV seams and mirrored islands meet, so a model whose normal
+    map was baked against MikkTSpace should ship its own TANGENT, which this
+    then leaves alone. Vendoring MikkTSpace is a dependency decision nobody
+    has taken.
+- **Nothing in this pipeline flips handedness**, and the code says so rather
+  than carrying untested flip logic: the axis swap has determinant +1, every
+  scale factor is positive, and `rotateHalfTurn` negates two axes, which is a
+  rotation and not a reflection.
+- **`normalizedVertex` now takes and returns a whole vertex.** It used to
+  exist twice - once for the skinning path and once inlined in `loadGltfMesh`
+  - which was tolerable while it moved two vectors and stopped being so the
+  moment a tangent had to travel the same road. The duplicate is gone, and so
+  is the `transformed.materialFlags = vertex.materialFlags` afterthought that
+  patched up what the old signature dropped.
+- **A quad's tangent is the edge from corner 0 to corner 1.** Tile faces have
+  no authored tangent but do have a known UV axis, so `triangle.vert` derives
+  one; clip-space quads are drawn unlit and get zero.
+- **The Euler normal rotation is still there.** `model.vert` and
+  `skinned_model.vert` rotate normals with three sin/cos pairs from
+  `normalAndAmbientRed.xyz`, and the tangent now takes the same rotation
+  through a shared `rotateByEuler`. `worldFromModel` would do this in one
+  multiply and is right there in `draw.vertices`; replacing it is F1's
+  unfinished business, and doing it inside F3 would move every model's shading
+  at the same time as F3 changes it for other reasons.
+
+**Verified**: every field that existed before F3a is byte-identical across all
+734 digest lines, checked by hashing field-wise rather than by struct so the
+same harness builds against both vertex layouts. Across the 650 lines that
+carry vertex data, the new fields come out with **zero** degenerate tangents,
+zero non-unit tangents, zero tangents that are not perpendicular to their
+normal, and zero handedness values that are not exactly plus or minus one.
+`uv1` equals `uv` everywhere, which is correct: no asset has TEXCOORD_1, and
+the documented fallback is the first set. Those invariants were mutation
+tested - dropping Gram-Schmidt puts 421,682 tangents out of the surface, and
+dropping the normalize puts 509,216 off unit length - so they are load
+bearing rather than decorative.
+
+### Next: F3b and F3c
+
+- **F3b, the material model.** Parse `cgltf_material` into a real `Material`
+  (baseColor factor and texture, metallic-roughness, normal, emissive,
+  occlusion, alpha mode and cutoff, double-sided), upload it as a storage
+  buffer, and index it per draw. The vertex's `textureIndex` and
+  `materialFlags` are per-vertex today only because there was nowhere else to
+  put per-primitive state; a material index replaces both. Note what the
+  corpus actually contains: 40 materials, all with `baseColorFactor`,
+  `metallicFactor` and `roughnessFactor`, 35 with a `baseColorTexture`, one
+  `BLEND`, four `doubleSided`, and **no** normal, metallic-roughness,
+  emissive or occlusion textures anywhere. The map slots will be real and
+  unexercised until there is content for them.
+- **F3c, Cook-Torrance GGX**, as a straight swap for the wrapped-diffuse
+  Blinn-Phong, with normal mapping where a material supplies a map. This is
+  the step that changes how the game looks, and it is the reason F3a stops
+  where it does.
+
+### Still open on the loader
+
+- **The loader's cubic-spline path has no test.** The sampling side is
+  covered; what is not is the loader reading a real CUBICSPLINE sampler -
+  `valuesPerKey`, and the rule that only every third output entry is a
+  quaternion to normalize. No asset exercises it, so covering it needs a
+  synthetic glTF fixture written to a temp directory the way
+  `ContentPipelineTests` writes its content tree. Do that before shipping an
+  asset that uses cubic splines, not after.
 - **Materials for F3.** `cgltf_material` carries `pbrMetallicRoughness`,
   normal, emissive and occlusion textures, alpha mode and double-sidedness.
   None of it is read yet, and F3 is what needs it.

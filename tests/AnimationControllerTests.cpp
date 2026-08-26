@@ -388,6 +388,191 @@ void testSkinnedAttachmentsInheritAnimatedNodeTransforms()
     CHECK(missingNodeThrew);
 }
 
+// A rig whose only job is to report where one attached vertex ended up, so
+// that a sampling rule can be stated as "this is where linear would have put
+// it" instead of as a coordinate nobody can check by eye.
+SkinnedMeshData interpolationRig()
+{
+    Mat4 identity {};
+    identity.values[0] = 1.0f;
+    identity.values[5] = 1.0f;
+    identity.values[10] = 1.0f;
+    identity.values[15] = 1.0f;
+
+    SkinnedMeshData rig;
+    rig.nodes = {
+        SkeletonNode { .name = "root" },
+        SkeletonNode { .name = "handslot.r", .parent = 0 },
+    };
+    rig.jointNodeIndices = { 0 };
+    rig.inverseBindMatrices = { identity };
+    rig.sourceMinimum = { -10.0f, -10.0f, -10.0f };
+    rig.sourceMaximum = { 10.0f, 10.0f, 10.0f };
+    rig.preserveSourceScale = true;
+    rig.vertices.resize(3);
+    for (SkinnedVertex& vertex : rig.vertices) {
+        vertex.normal = { 0.0f, 1.0f, 0.0f };
+        vertex.joints = { 0, 0, 0, 0 };
+        vertex.weights = { 1.0f, 0.0f, 0.0f, 0.0f };
+    }
+    rig.indices = { 0, 1, 2 };
+
+    MeshData marker;
+    marker.vertices.resize(3);
+    for (MeshVertex& vertex : marker.vertices) {
+        vertex.normal = { 0.0f, 0.0f, 1.0f };
+    }
+    marker.indices = { 0, 1, 2 };
+    addSkinnedAttachment(rig, std::move(marker), "handslot.r");
+    return rig;
+}
+
+// durationSeconds is separate from the last key time on purpose. Sampling
+// wraps on the duration, so a clip that ends exactly on its last key loops
+// back to the first rather than holding it, and the hold either side of a
+// curve is unreachable unless the clip outlasts its keys.
+GltfAnimationClip translationClip(
+    AnimationInterpolation interpolation,
+    std::vector<float> times,
+    std::vector<Vec4> values,
+    float durationSeconds = 0.0f)
+{
+    GltfAnimationClip clip;
+    clip.durationSeconds =
+        durationSeconds > 0.0f ? durationSeconds : times.back();
+    clip.channels = {
+        AnimationChannel {
+            .targetNodeName = "handslot.r",
+            .path = AnimationChannelPath::Translation,
+            .keyframes = {
+                .times = std::move(times),
+                .values = std::move(values),
+                .interpolation = interpolation,
+            },
+        },
+    };
+    return clip;
+}
+
+Vec3 markerPosition(
+    const SkinnedMeshData& rig,
+    const GltfAnimationClip& clip,
+    float timeSeconds)
+{
+    // Index 3 is the first attachment vertex: the rig's own three come first.
+    return skinGltfMesh(rig, clip, timeSeconds).vertices[3].position;
+}
+
+bool samePosition(Vec3 left, Vec3 right)
+{
+    return near(left.x, right.x) && near(left.y, right.y) &&
+        near(left.z, right.z);
+}
+
+// No asset in the project uses STEP or CUBICSPLINE - every sampler in the
+// manifest's reach is LINEAR - so nothing about these two paths is covered by
+// loading real content. They are covered here or they are not covered.
+void testAnimationInterpolationModes()
+{
+    TEST("animationInterpolationModes");
+    const SkinnedMeshData rig = interpolationRig();
+    const std::vector<Vec4> endpoints {
+        Vec4 {},
+        Vec4 { 4.0f, 0.0f, 0.0f, 0.0f },
+    };
+    const GltfAnimationClip linear = translationClip(
+        AnimationInterpolation::Linear, { 0.0f, 1.0f }, endpoints);
+
+    // Step holds the left key until the next one arrives, so a quarter of the
+    // way in it reads exactly what the start of the clip reads. Until the
+    // loader read glTF's interpolation field this behaved as linear, and
+    // nothing said so.
+    const GltfAnimationClip step = translationClip(
+        AnimationInterpolation::Step, { 0.0f, 1.0f }, endpoints);
+    CHECK(samePosition(
+        markerPosition(rig, step, 0.25f),
+        markerPosition(rig, linear, 0.0f)));
+    CHECK(!samePosition(
+        markerPosition(rig, step, 0.25f),
+        markerPosition(rig, linear, 0.25f)));
+
+    // Cubic spline with flat tangents is a Hermite ease rather than a
+    // straight line: a quarter of the way along it has covered 0.15625 of the
+    // distance. The layout is glTF's - in-tangent, value, out-tangent - so
+    // this also pins the indexing.
+    // The first key's in-tangent is deliberately nothing like its value: it
+    // sits immediately before the value in the same array, and reading one
+    // for the other is the mistake this layout invites.
+    const std::vector<Vec4> cubicValues {
+        Vec4 { 9.0f, 0.0f, 0.0f, 0.0f }, Vec4 {}, Vec4 {},
+        Vec4 {}, Vec4 { 4.0f, 0.0f, 0.0f, 0.0f }, Vec4 {},
+    };
+    const GltfAnimationClip cubic = translationClip(
+        AnimationInterpolation::CubicSpline, { 0.0f, 1.0f }, cubicValues);
+    CHECK(samePosition(
+        markerPosition(rig, cubic, 0.25f),
+        markerPosition(rig, linear, 0.15625f)));
+    CHECK(samePosition(
+        markerPosition(rig, cubic, 0.0f),
+        markerPosition(rig, linear, 0.0f)));
+
+    // Past the last key the curve holds its final value. Both clips run to
+    // three seconds so that two seconds is genuinely past the end rather than
+    // wrapped back to the start.
+    const GltfAnimationClip heldLinear = translationClip(
+        AnimationInterpolation::Linear, { 0.0f, 1.0f }, endpoints, 3.0f);
+    const GltfAnimationClip heldCubic = translationClip(
+        AnimationInterpolation::CubicSpline, { 0.0f, 1.0f }, cubicValues,
+        3.0f);
+    CHECK(samePosition(
+        markerPosition(rig, heldCubic, 2.0f),
+        markerPosition(rig, heldLinear, 2.0f)));
+    CHECK(!samePosition(
+        markerPosition(rig, heldCubic, 2.0f),
+        markerPosition(rig, heldLinear, 0.0f)));
+
+    // The tangent on the far side of a segment is the in-tangent of the key
+    // being arrived at, not that key's out-tangent. Both are non-zero here
+    // and they differ, so reading the wrong one moves the marker. Both values
+    // are zero, which leaves the tangents as the only thing in play.
+    const auto atTranslation = [&](float x) {
+        return markerPosition(
+            rig,
+            translationClip(
+                AnimationInterpolation::Linear,
+                { 0.0f, 1.0f },
+                {
+                    Vec4 { x, 0.0f, 0.0f, 0.0f },
+                    Vec4 { x, 0.0f, 0.0f, 0.0f },
+                }),
+            0.5f);
+    };
+    const GltfAnimationClip arriving = translationClip(
+        AnimationInterpolation::CubicSpline,
+        { 0.0f, 1.0f },
+        {
+            Vec4 { 9.0f, 0.0f, 0.0f, 0.0f }, Vec4 {}, Vec4 {},
+            Vec4 { 6.0f, 0.0f, 0.0f, 0.0f }, Vec4 {},
+            Vec4 { 7.0f, 0.0f, 0.0f, 0.0f },
+        });
+    CHECK(samePosition(
+        markerPosition(rig, arriving, 0.5f), atTranslation(-0.75f)));
+
+    // Tangents are per second, so a two-second segment scales them by two.
+    // Both keys sit at the origin here: the entire excursion is the
+    // out-tangent, which makes the scaling the only thing under test.
+    const GltfAnimationClip tangents = translationClip(
+        AnimationInterpolation::CubicSpline,
+        { 0.0f, 2.0f },
+        {
+            Vec4 {}, Vec4 {}, Vec4 { 1.0f, 0.0f, 0.0f, 0.0f },
+            Vec4 {}, Vec4 {}, Vec4 {},
+        });
+    CHECK(samePosition(
+        markerPosition(rig, tangents, 1.0f),
+        markerPosition(rig, linear, 0.0625f)));
+}
+
 } // namespace
 
 int main()
@@ -401,6 +586,7 @@ int main()
     testClipValidationAndClear();
     testAnimatedInstancesKeepIndependentPlayback();
     testSkinnedAttachmentsInheritAnimatedNodeTransforms();
+    testAnimationInterpolationModes();
 
     if (failures == 0) {
         std::cout << "AnimationControllerTests: " << checks << " checks passed\n";

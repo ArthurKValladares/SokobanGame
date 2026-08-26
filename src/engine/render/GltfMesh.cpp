@@ -189,6 +189,18 @@ Document loadDocument(const std::filesystem::path& path)
             "Failed to open glTF buffer: " + path.string() + " (" +
             std::string(resultName(result)) + ")");
     }
+
+    // Cheap - it walks the accessors, not the data - and it is the difference
+    // between "cgltf could parse the JSON" and "every accessor actually fits
+    // inside the buffer it points at". ContentPipeline loads every animation
+    // at build time, so this is also what keeps a truncated or mis-sized
+    // asset out of a package instead of out of a frame.
+    const cgltf_result validation = cgltf_validate(document.get());
+    if (validation != cgltf_result_success) {
+        throw std::runtime_error(
+            "Invalid glTF file: " + path.string() + " (" +
+            std::string(resultName(validation)) + ")");
+    }
     return document;
 }
 
@@ -287,19 +299,34 @@ uint32_t readIndex(const cgltf_accessor& accessor, size_t index)
     return static_cast<uint32_t>(cgltf_accessor_read_index(&accessor, index));
 }
 
+// `set` is glTF's attribute suffix: TEXCOORD_0 is set 0, TEXCOORD_1 set 1.
+// Only UVs use anything but set 0 here; a second joint influence set would
+// need a wider vertex than the skinning palette is built for.
 const cgltf_accessor* findAttribute(
     const cgltf_primitive& primitive,
-    cgltf_attribute_type type)
+    cgltf_attribute_type type,
+    cgltf_int set = 0)
 {
     for (cgltf_size i = 0; i < primitive.attributes_count; ++i) {
         const cgltf_attribute& attribute = primitive.attributes[i];
-        // Set 0 only. A second UV set or a second joint influence set is F3's
-        // problem, not this file's.
-        if (attribute.type == type && attribute.index == 0) {
+        if (attribute.type == type && attribute.index == set) {
             return attribute.data;
         }
     }
     return nullptr;
+}
+
+// TANGENT and TEXCOORD_1 are both optional, and both have a defined answer
+// when a file omits them: a tangent is derived from the UVs afterwards, and a
+// second UV set falls back to the first.
+Vec4 optionalTangent(const cgltf_accessor* accessor, size_t index)
+{
+    return accessor ? readVec4(*accessor, index) : Vec4 {};
+}
+
+Vec2 optionalUv(const cgltf_accessor* accessor, size_t index, Vec2 fallback)
+{
+    return accessor ? readVec2(*accessor, index) : fallback;
 }
 
 const cgltf_accessor& requiredAttribute(
@@ -350,6 +377,18 @@ std::vector<SkeletonNode> skeletonNodes(const cgltf_data& data)
     return nodes;
 }
 
+AnimationInterpolation interpolationFrom(cgltf_interpolation_type type)
+{
+    switch (type) {
+    case cgltf_interpolation_type_step:
+        return AnimationInterpolation::Step;
+    case cgltf_interpolation_type_cubic_spline:
+        return AnimationInterpolation::CubicSpline;
+    default:
+        return AnimationInterpolation::Linear;
+    }
+}
+
 // Which manifest slot a primitive's material maps to. A primitive with no
 // material resolves to slot 0, which is what the previous loader did.
 uint32_t materialSlotIndex(
@@ -374,16 +413,53 @@ struct SourceBounds {
     };
 };
 
+// One keyframe's value, whichever layout the channel uses. A cubic-spline
+// channel keeps a tangent either side of every value, so key N is at 3N + 1.
+Vec4 keyframeValue(const AnimationKeyframes& keyframes, size_t index)
+{
+    return keyframes.interpolation == AnimationInterpolation::CubicSpline
+        ? keyframes.values[index * 3 + 1]
+        : keyframes.values[index];
+}
+
+// glTF's cubic spline is a Hermite curve whose stored tangents are per second
+// and so are scaled by the segment's duration.
+//
+// Nothing here is slerped, even on a rotation channel: a tangent is a free
+// vector beside a quaternion rather than a quaternion itself, and treating it
+// as one bends the curve. The caller normalizes the result instead, which it
+// already did.
+Vec4 sampleCubicSpline(
+    const AnimationKeyframes& keyframes,
+    size_t leftIndex,
+    size_t rightIndex,
+    float t,
+    float segmentSeconds)
+{
+    const Vec4 startValue = keyframes.values[leftIndex * 3 + 1];
+    const Vec4 startTangent = keyframes.values[leftIndex * 3 + 2] * segmentSeconds;
+    const Vec4 endTangent = keyframes.values[rightIndex * 3] * segmentSeconds;
+    const Vec4 endValue = keyframes.values[rightIndex * 3 + 1];
+
+    const float t2 = t * t;
+    const float t3 = t2 * t;
+    return startValue * (2.0f * t3 - 3.0f * t2 + 1.0f) +
+        startTangent * (t3 - 2.0f * t2 + t) +
+        endValue * (-2.0f * t3 + 3.0f * t2) +
+        endTangent * (t3 - t2);
+}
+
 Vec4 sampleKeyframes(const AnimationKeyframes& keyframes, float timeSeconds, bool rotation)
 {
-    if (keyframes.times.empty() || keyframes.values.empty()) {
+    const size_t keyCount = keyframes.times.size();
+    if (keyCount == 0 || keyframes.values.empty()) {
         return rotation ? Vec4 { 0.0f, 0.0f, 0.0f, 1.0f } : Vec4 {};
     }
-    if (keyframes.times.size() == 1 || timeSeconds <= keyframes.times.front()) {
-        return keyframes.values.front();
+    if (keyCount == 1 || timeSeconds <= keyframes.times.front()) {
+        return keyframeValue(keyframes, 0);
     }
     if (timeSeconds >= keyframes.times.back()) {
-        return keyframes.values.back();
+        return keyframeValue(keyframes, keyCount - 1);
     }
 
     const auto upper = std::upper_bound(keyframes.times.begin(), keyframes.times.end(), timeSeconds);
@@ -394,6 +470,19 @@ Vec4 sampleKeyframes(const AnimationKeyframes& keyframes, float timeSeconds, boo
     const float t = rightTime > leftTime
         ? (timeSeconds - leftTime) / (rightTime - leftTime)
         : 0.0f;
+
+    switch (keyframes.interpolation) {
+    case AnimationInterpolation::Step:
+        // The value holds until the next key. Reading a step curve as linear
+        // is the bug this had for as long as the field went unread.
+        return keyframeValue(keyframes, leftIndex);
+    case AnimationInterpolation::CubicSpline:
+        return sampleCubicSpline(
+            keyframes, leftIndex, rightIndex, t, rightTime - leftTime);
+    case AnimationInterpolation::Linear:
+        break;
+    }
+
     if (!rotation) {
         return lerp(keyframes.values[leftIndex], keyframes.values[rightIndex], t);
     }
@@ -413,14 +502,23 @@ void includeBounds(SourceBounds& bounds, Vec3 position)
     bounds.maximum.z = std::max(bounds.maximum.z, position.z);
 }
 
+// Source space to engine space, for one vertex.
+//
+// This used to exist twice - once here for the skinning path and once inlined
+// in loadGltfMesh - which was tolerable while it moved two vectors and stopped
+// being so the moment a tangent had to travel the same road.
+//
+// Nothing here flips handedness, and that is worth stating because a mirrored
+// transform would: the axis swap below has determinant +1, every scale factor
+// is positive, and rotateHalfTurn negates two axes, which is a rotation and
+// not a reflection. So `tangent.w` passes through untouched.
 MeshVertex normalizedVertex(
-    Vec3 position,
-    Vec3 normal,
-    Vec2 uv,
-    uint32_t textureIndex,
+    MeshVertex source,
     SourceBounds bounds,
     GltfMeshLoadOptions options)
 {
+    const Vec3 position = source.position;
+    const Vec3 normal = source.normal;
     const float sourceHeight = std::max(bounds.maximum.y - bounds.minimum.y, 0.000001f);
     const Vec3 extent {
         std::max(bounds.maximum.x - bounds.minimum.x, 0.000001f),
@@ -433,7 +531,7 @@ MeshVertex normalizedVertex(
         (bounds.minimum.z + bounds.maximum.z) * 0.5f,
     };
 
-    MeshVertex vertex;
+    MeshVertex vertex = source;
     if (options.preserveSourceScale) {
         vertex.position = {
             position.x,
@@ -456,6 +554,10 @@ MeshVertex normalizedVertex(
     vertex.normal = normalizeOr(
         Vec3 { normal.x, -normal.z, normal.y },
         Vec3 { 0.0f, 0.0f, 1.0f });
+    const Vec3 tangent = normalizeOr(
+        Vec3 { source.tangent.x, -source.tangent.z, source.tangent.y },
+        Vec3 {});
+    vertex.tangent = { tangent.x, tangent.y, tangent.z, source.tangent.w };
     if (options.rotateHalfTurn) {
         if (options.preserveSourceScale) {
             vertex.position.x = -vertex.position.x;
@@ -466,10 +568,86 @@ MeshVertex normalizedVertex(
         }
         vertex.normal.x = -vertex.normal.x;
         vertex.normal.y = -vertex.normal.y;
+        vertex.tangent.x = -vertex.tangent.x;
+        vertex.tangent.y = -vertex.tangent.y;
     }
-    vertex.uv = uv;
-    vertex.textureIndex = textureIndex;
     return vertex;
+}
+
+// Derives a tangent frame from the UVs for every vertex that has no usable
+// one. Runs after the transform above, so it works in the space the shader
+// will see: the aspect-ratio and unit-box modes scale the axes unevenly, and
+// a tangent derived before that would not lie in the surface afterwards.
+//
+// This is the standard per-triangle accumulate and Gram-Schmidt, not
+// MikkTSpace. It agrees with MikkTSpace on ordinary geometry and can disagree
+// where UV seams and mirrored islands meet, so a model whose normal map was
+// baked against MikkTSpace should ship its own TANGENT and this will leave it
+// alone. Vendoring MikkTSpace is a dependency decision nobody has taken yet.
+template <typename Vertex>
+void deriveMissingTangents(
+    std::vector<Vertex>& vertices,
+    const std::vector<uint32_t>& indices)
+{
+    if (vertices.empty() || indices.size() < 3) {
+        return;
+    }
+    std::vector<Vec3> tangents(vertices.size(), Vec3 {});
+    std::vector<Vec3> bitangents(vertices.size(), Vec3 {});
+
+    for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+        const uint32_t i0 = indices[i];
+        const uint32_t i1 = indices[i + 1];
+        const uint32_t i2 = indices[i + 2];
+        if (i0 >= vertices.size() || i1 >= vertices.size() ||
+            i2 >= vertices.size()) {
+            continue;
+        }
+        const Vec3 edge1 = vertices[i1].position - vertices[i0].position;
+        const Vec3 edge2 = vertices[i2].position - vertices[i0].position;
+        const Vec2 uv1 = vertices[i1].uv - vertices[i0].uv;
+        const Vec2 uv2 = vertices[i2].uv - vertices[i0].uv;
+        const float determinant = uv1.x * uv2.y - uv2.x * uv1.y;
+        // A degenerate UV triangle says nothing about the surface's
+        // orientation. Skipping it leaves its vertices to their other
+        // triangles, and to the fallback below if they have none.
+        if (std::abs(determinant) < 1e-12f) {
+            continue;
+        }
+        const float inverse = 1.0f / determinant;
+        const Vec3 tangent = (edge1 * uv2.y - edge2 * uv1.y) * inverse;
+        const Vec3 bitangent = (edge2 * uv1.x - edge1 * uv2.x) * inverse;
+        for (const uint32_t index : { i0, i1, i2 }) {
+            tangents[index] += tangent;
+            bitangents[index] += bitangent;
+        }
+    }
+
+    for (size_t i = 0; i < vertices.size(); ++i) {
+        Vertex& vertex = vertices[i];
+        if (vertex.tangent.x != 0.0f || vertex.tangent.y != 0.0f ||
+            vertex.tangent.z != 0.0f) {
+            continue;
+        }
+        const Vec3 normal = vertex.normal;
+        // Gram-Schmidt: the accumulated tangent is only approximately in the
+        // surface, and a normal map wants it exactly there.
+        const Vec3 projected =
+            tangents[i] - normal * dot(normal, tangents[i]);
+        Vec3 tangent = normalizeOr(projected, Vec3 {});
+        if (tangent.x == 0.0f && tangent.y == 0.0f && tangent.z == 0.0f) {
+            // No UV information reached this vertex. Any tangent lying in the
+            // surface will do; a normal map on it would be wrong either way,
+            // and a zero frame would be wrong everywhere else too.
+            const Vec3 axis = std::abs(normal.z) < 0.9f
+                ? Vec3 { 0.0f, 0.0f, 1.0f }
+                : Vec3 { 1.0f, 0.0f, 0.0f };
+            tangent = normalizeOr(cross(axis, normal), Vec3 { 1.0f, 0.0f, 0.0f });
+        }
+        const float handedness =
+            dot(cross(normal, tangent), bitangents[i]) < 0.0f ? -1.0f : 1.0f;
+        vertex.tangent = { tangent.x, tangent.y, tangent.z, handedness };
+    }
 }
 
 } // namespace
@@ -510,6 +688,10 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
                 primitive, cgltf_attribute_type_normal, "NORMAL");
             const cgltf_accessor& uvs = requiredAttribute(
                 primitive, cgltf_attribute_type_texcoord, "TEXCOORD_0");
+            const cgltf_accessor* tangents =
+                findAttribute(primitive, cgltf_attribute_type_tangent);
+            const cgltf_accessor* secondUvs =
+                findAttribute(primitive, cgltf_attribute_type_texcoord, 1);
             const cgltf_accessor& indices = *primitive.indices;
 
             uint32_t textureIndex = 0;
@@ -538,10 +720,13 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
             mesh.vertices.reserve(mesh.vertices.size() + positions.count);
             for (size_t index = 0; index < positions.count; ++index) {
                 const Vec3 position = readVec3(positions, index);
+                const Vec2 uv = readVec2(uvs, index);
                 mesh.vertices.push_back({
                     .position = position,
                     .normal = readVec3(normals, index),
-                    .uv = readVec2(uvs, index),
+                    .tangent = optionalTangent(tangents, index),
+                    .uv = uv,
+                    .uv1 = optionalUv(secondUvs, index, uv),
                     .textureIndex = textureIndex,
                     .materialFlags = materialFlags,
                 });
@@ -570,55 +755,13 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
     // whole file, not of one primitive. Spliced verbatim from the loader this
     // replaced - the arithmetic is what decides where every static model
     // sits, and rewriting it was not part of changing the parser.
-    const Vec3 minimum = bounds.minimum;
-    const Vec3 maximum = bounds.maximum;
-    const float sourceHeight = std::max(maximum.y - minimum.y, 0.000001f);
-    const Vec3 extent {
-        std::max(maximum.x - minimum.x, 0.000001f),
-        sourceHeight,
-        std::max(maximum.z - minimum.z, 0.000001f),
-    };
-    const Vec3 center {
-        (minimum.x + maximum.x) * 0.5f,
-        (minimum.y + maximum.y) * 0.5f,
-        (minimum.z + maximum.z) * 0.5f,
-    };
-
     for (MeshVertex& vertex : mesh.vertices) {
-        if (options.preserveSourceScale) {
-            vertex.position = {
-                vertex.position.x,
-                -vertex.position.z,
-                vertex.position.y,
-            };
-        } else if (options.preserveAspectRatio) {
-            vertex.position = {
-                0.5f + (vertex.position.x - center.x) / sourceHeight,
-                0.5f - (vertex.position.z - center.z) / sourceHeight,
-                (vertex.position.y - minimum.y) / sourceHeight,
-            };
-        } else {
-            vertex.position = {
-                (vertex.position.x - minimum.x) / extent.x,
-                (maximum.z - vertex.position.z) / extent.z,
-                (vertex.position.y - minimum.y) / extent.y,
-            };
-        }
-        vertex.normal = normalizeOr(
-            Vec3 { vertex.normal.x, -vertex.normal.z, vertex.normal.y },
-            Vec3 { 0.0f, 0.0f, 1.0f });
-        if (options.rotateHalfTurn) {
-            if (options.preserveSourceScale) {
-                vertex.position.x = -vertex.position.x;
-                vertex.position.y = -vertex.position.y;
-            } else {
-                vertex.position.x = 1.0f - vertex.position.x;
-                vertex.position.y = 1.0f - vertex.position.y;
-            }
-            vertex.normal.x = -vertex.normal.x;
-            vertex.normal.y = -vertex.normal.y;
-        }
+        vertex = normalizedVertex(vertex, bounds, options);
     }
+    // After the transform, not before: the aspect-ratio and unit-box modes
+    // scale the axes unevenly, and a tangent derived in source space would
+    // not lie in the surface once they had.
+    deriveMissingTangents(mesh.vertices, mesh.indices);
     return mesh;
 }
 
@@ -689,6 +832,10 @@ SkinnedMeshData loadGltfSkinnedMesh(
                 primitive, cgltf_attribute_type_joints, "JOINTS_0");
             const cgltf_accessor& weights = requiredAttribute(
                 primitive, cgltf_attribute_type_weights, "WEIGHTS_0");
+            const cgltf_accessor* tangents =
+                findAttribute(primitive, cgltf_attribute_type_tangent);
+            const cgltf_accessor* secondUvs =
+                findAttribute(primitive, cgltf_attribute_type_texcoord, 1);
             const cgltf_accessor& indices = *primitive.indices;
 
             if (positions.count != normals.count ||
@@ -716,10 +863,13 @@ SkinnedMeshData loadGltfSkinnedMesh(
                     jointValues = {};
                     weightValues = { 1.0f, 0.0f, 0.0f, 0.0f };
                 }
+                const Vec2 uv = readVec2(uvs, index);
                 mesh.vertices.push_back({
                     .position = position,
                     .normal = readVec3(normals, index),
-                    .uv = readVec2(uvs, index),
+                    .tangent = optionalTangent(tangents, index),
+                    .uv = uv,
+                    .uv1 = optionalUv(secondUvs, index, uv),
                     .joints = jointValues,
                     .weights = weightValues,
                 });
@@ -743,6 +893,9 @@ SkinnedMeshData loadGltfSkinnedMesh(
         throw std::runtime_error(
             "Only non-empty triangle-list skinned glTF meshes are supported");
     }
+    // In source space here, unlike the static path: these vertices are posed
+    // before they are normalized, so their tangents have to travel with them.
+    deriveMissingTangents(mesh.vertices, mesh.indices);
     mesh.sourceMinimum = bounds.minimum;
     mesh.sourceMaximum = bounds.maximum;
     return mesh;
@@ -843,12 +996,20 @@ GltfAnimationClip loadGltfAnimationClip(
         }
 
         const cgltf_animation_sampler& sampler = *source.sampler;
-        if (!sampler.input || !sampler.output ||
-            sampler.input->count != sampler.output->count) {
-            // A CUBICSPLINE sampler fails here, because its output holds an
-            // in-tangent and an out-tangent alongside every value. That is a
-            // known gap rather than a corrupt file; sampler.interpolation is
-            // still not read at all.
+        if (!sampler.input || !sampler.output) {
+            throw std::runtime_error(
+                "Incompatible glTF animation sampler accessors");
+        }
+
+        const AnimationInterpolation interpolation =
+            interpolationFrom(sampler.interpolation);
+        // A cubic-spline sampler stores an in-tangent and an out-tangent
+        // either side of every value, so its output is three times as long as
+        // its input. Insisting the two counts match is what used to make
+        // these clips fail to load rather than play.
+        const size_t valuesPerKey =
+            interpolation == AnimationInterpolation::CubicSpline ? 3U : 1U;
+        if (sampler.output->count != sampler.input->count * valuesPerKey) {
             throw std::runtime_error(
                 "Incompatible glTF animation sampler accessors");
         }
@@ -858,15 +1019,25 @@ GltfAnimationClip loadGltfAnimationClip(
             ? std::string(source.target_node->name)
             : std::string();
         channel.path = channelPath;
+        channel.keyframes.interpolation = interpolation;
         channel.keyframes.times.reserve(sampler.input->count);
         channel.keyframes.values.reserve(sampler.output->count);
         for (size_t i = 0; i < sampler.input->count; ++i) {
             const float keyTime = readScalarFloat(*sampler.input, i);
             channel.keyframes.times.push_back(keyTime);
             clip.durationSeconds = std::max(clip.durationSeconds, keyTime);
+        }
+        for (size_t i = 0; i < sampler.output->count; ++i) {
             if (channelPath == AnimationChannelPath::Rotation) {
-                channel.keyframes.values.push_back(toVec4(normalize(
-                    quatFromVec4(readVec4(*sampler.output, i)))));
+                const Vec4 value = readVec4(*sampler.output, i);
+                // Only a stored value is a quaternion. A cubic-spline tangent
+                // sits either side of one and is a free vector; normalizing
+                // it would bend the curve, so the sample is normalized after
+                // the spline instead.
+                const bool isQuaternion = valuesPerKey == 1U || (i % 3U) == 1U;
+                channel.keyframes.values.push_back(isQuaternion
+                    ? toVec4(normalize(quatFromVec4(value)))
+                    : value);
             } else {
                 const Vec3 value = readVec3(*sampler.output, i);
                 channel.keyframes.values.push_back(
@@ -980,6 +1151,7 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
             const SkinnedVertex& source = mesh.vertices[vertexIndex];
             Vec3 skinnedPosition {};
             Vec3 skinnedNormal {};
+            Vec3 skinnedTangent {};
             for (size_t i = 0; i < 4; ++i) {
                 const float weight = source.weights[i];
                 const uint16_t joint = source.joints[i];
@@ -990,15 +1162,25 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
                     transformPoint(pose.jointMatrices[joint], source.position) * weight;
                 skinnedNormal +=
                     transformVector(pose.jointMatrices[joint], source.normal) * weight;
+                skinnedTangent += transformVector(
+                    pose.jointMatrices[joint],
+                    Vec3 { source.tangent.x, source.tangent.y,
+                        source.tangent.z }) * weight;
             }
             if (skinnedNormal.x == 0.0f && skinnedNormal.y == 0.0f && skinnedNormal.z == 0.0f) {
                 skinnedNormal = source.normal;
             }
+            const Vec3 tangent = normalizeOr(skinnedTangent, Vec3 {});
             result.vertices[vertexIndex] = normalizedVertex(
-                skinnedPosition,
-                normalizeOr(skinnedNormal, Vec3 { 0.0f, 0.0f, 1.0f }),
-                source.uv,
-                0u,
+                MeshVertex {
+                    .position = skinnedPosition,
+                    .normal =
+                        normalizeOr(skinnedNormal, Vec3 { 0.0f, 0.0f, 1.0f }),
+                    .tangent = { tangent.x, tangent.y, tangent.z,
+                        source.tangent.w },
+                    .uv = source.uv,
+                    .uv1 = source.uv1,
+                },
                 bounds,
                 options);
         }
@@ -1025,19 +1207,36 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
                 vertex.normal.z,
                 -vertex.normal.y,
             };
-            MeshVertex transformed = normalizedVertex(
-                transformPoint(
-                    pose.nodeMatrices[attachment.nodeIndex], sourcePosition),
-                normalizeOr(
-                    transformVector(
-                        pose.nodeMatrices[attachment.nodeIndex], sourceNormal),
-                    Vec3 { 0.0f, 0.0f, 1.0f }),
-                vertex.uv,
-                vertex.textureIndex,
+            const Vec3 sourceTangent {
+                vertex.tangent.x,
+                vertex.tangent.z,
+                -vertex.tangent.y,
+            };
+            const Vec3 posedTangent = normalizeOr(
+                transformVector(
+                    pose.nodeMatrices[attachment.nodeIndex], sourceTangent),
+                Vec3 {});
+            result.vertices.push_back(normalizedVertex(
+                MeshVertex {
+                    .position = transformPoint(
+                        pose.nodeMatrices[attachment.nodeIndex],
+                        sourcePosition),
+                    .normal = normalizeOr(
+                        transformVector(
+                            pose.nodeMatrices[attachment.nodeIndex],
+                            sourceNormal),
+                        Vec3 { 0.0f, 0.0f, 1.0f }),
+                    .tangent = { posedTangent.x, posedTangent.y,
+                        posedTangent.z, vertex.tangent.w },
+                    .uv = vertex.uv,
+                    .uv1 = vertex.uv1,
+                    .textureIndex = vertex.textureIndex,
+                    // Carried explicitly, where it used to be patched back on
+                    // after the fact because the old signature dropped it.
+                    .materialFlags = vertex.materialFlags,
+                },
                 bounds,
-                options);
-            transformed.materialFlags = vertex.materialFlags;
-            result.vertices.push_back(transformed);
+                options));
         }
         result.indices.reserve(
             result.indices.size() + attachment.mesh.indices.size());

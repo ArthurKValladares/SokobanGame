@@ -15,6 +15,11 @@ layout(location = 4) flat in uint inTextureIndex;
 layout(location = 5) flat in uint inMaterialFlags;
 layout(location = 6) in vec3 inWorldPosition;
 layout(location = 7) flat in uint inDrawInstance;
+// Not read yet. They arrive here so that the vertex format, the pipelines and
+// the interface between the stages are all in place and provably unchanged
+// before the lighting that uses them changes everything at once.
+layout(location = 8) in vec4 inTangent;
+layout(location = 9) in vec2 inUv1;
 layout(location = 0) out vec4 outColor;
 
 // One draw's parameters, read back by instance index. T1 moved these out of

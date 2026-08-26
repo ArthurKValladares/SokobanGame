@@ -5,6 +5,8 @@ layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inUv;
 layout(location = 3) in uint inTextureIndex;
 layout(location = 4) in uint inMaterialFlags;
+layout(location = 8) in vec4 inTangent;
+layout(location = 9) in vec2 inUv1;
 
 layout(location = 0) out vec4 outShadowPosition;
 layout(location = 1) out float outFaceCoordU;
@@ -14,6 +16,11 @@ layout(location = 4) flat out uint outTextureIndex;
 layout(location = 5) flat out uint outMaterialFlags;
 layout(location = 6) out vec3 outWorldPosition;
 layout(location = 7) flat out uint outDrawInstance;
+// xyz is the tangent in the same frame as outNormal; w is the bitangent's
+// handedness. The fragment stage re-orthogonalizes against the interpolated
+// normal, which is what absorbs the scale this rotation deliberately skips.
+layout(location = 8) out vec4 outTangent;
+layout(location = 9) out vec2 outUv1;
 
 struct PointLightData
 {
@@ -61,6 +68,33 @@ vec4 sunShadowFromWorld(vec3 worldPosition)
     return shadow;
 }
 
+// The Euler triple in normalAndAmbientRed.xyz, applied the same way to
+// whatever needs it. worldFromModel would do this in one multiply and is
+// right there in draw.vertices; replacing the Euler path is F1's unfinished
+// business, and doing it here would move every model's shading at the same
+// time as F3 changes it for other reasons.
+vec3 rotateByEuler(vec3 value, vec3 rotation)
+{
+    float cosine = cos(rotation.x);
+    float sine = sin(rotation.x);
+    value = vec3(
+        value.x,
+        cosine * value.y - sine * value.z,
+        sine * value.y + cosine * value.z);
+    cosine = cos(rotation.y);
+    sine = sin(rotation.y);
+    value = vec3(
+        cosine * value.x + sine * value.z,
+        value.y,
+        -sine * value.x + cosine * value.z);
+    cosine = cos(rotation.z);
+    sine = sin(rotation.z);
+    return vec3(
+        cosine * value.x - sine * value.y,
+        sine * value.x + cosine * value.y,
+        value.z);
+}
+
 void main()
 {
     outDrawInstance = uint(gl_InstanceIndex);
@@ -78,6 +112,7 @@ void main()
     outFaceCoordV = inUv.y;
     outTextureIndex = inTextureIndex;
     outMaterialFlags = inMaterialFlags;
+    outUv1 = inUv1;
     vec3 normal = inNormal;
     // Standard models use gridColor.xyz for inverse scale and a negative W
     // as the marker. Mirror-energy models need gridColor for their effect and
@@ -105,4 +140,10 @@ void main()
         cosine * normal.x - sine * normal.y,
         sine * normal.x + cosine * normal.y,
         normal.z));
+
+    // The same Euler rotation the normal just took, and deliberately not the
+    // inverse scale above it: a normal transforms by the inverse transpose, a
+    // tangent by the matrix itself. For a uniform scale the two agree up to
+    // length, and the fragment stage normalizes anyway.
+    outTangent = vec4(rotateByEuler(inTangent.xyz, rotation), inTangent.w);
 }

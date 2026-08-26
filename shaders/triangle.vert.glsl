@@ -10,6 +10,8 @@ layout(location = 6) out vec3 outWorldPosition;
 // Which draw this vertex belongs to. The fragment stage reads the same
 // entry; flat because it is constant across the primitive.
 layout(location = 7) flat out uint outDrawInstance;
+layout(location = 8) out vec4 outTangent;
+layout(location = 9) out vec2 outUv1;
 
 struct DrawInstance
 {
@@ -100,4 +102,12 @@ void main()
     // the interface must still provide it.
     outTextureIndex = 0u;
     outMaterialFlags = 0u;
+    // A quad's tangent is the direction its first UV axis runs, which for
+    // these corners is the edge from 0 to 1. Clip-space quads are drawn unlit
+    // and get nothing. Handedness is +1: faceCoords runs U left-to-right and
+    // V bottom-to-top in the same winding for every quad the recorder emits.
+    outTangent = worldSpace
+        ? vec4(normalize(draw.vertices[1].xyz - draw.vertices[0].xyz), 1.0)
+        : vec4(0.0);
+    outUv1 = faceCoord;
 }

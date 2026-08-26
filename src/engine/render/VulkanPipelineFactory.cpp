@@ -327,7 +327,11 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
         .stride = sizeof(GpuSkinnedVertex),
         .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
     };
-    const std::array<VkVertexInputAttributeDescription, 5> attributes {
+    // Locations 8 and 9 rather than 5 and 6 so that a static mesh and a
+    // skinned one name the same thing the same way: 5 to 7 are the skinning
+    // attributes, and a tangent that moved depending on the pipeline would be
+    // a trap in two vertex shaders instead of a number in one table.
+    const std::array<VkVertexInputAttributeDescription, 7> attributes {
         VkVertexInputAttributeDescription {
             .location = 0,
             .binding = 0,
@@ -358,8 +362,20 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
             .format = VK_FORMAT_R32_UINT,
             .offset = offsetof(MeshVertex, materialFlags),
         },
+        VkVertexInputAttributeDescription {
+            .location = 8,
+            .binding = 0,
+            .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+            .offset = offsetof(MeshVertex, tangent),
+        },
+        VkVertexInputAttributeDescription {
+            .location = 9,
+            .binding = 0,
+            .format = VK_FORMAT_R32G32_SFLOAT,
+            .offset = offsetof(MeshVertex, uv1),
+        },
     };
-    const std::array<VkVertexInputAttributeDescription, 8> skinnedAttributes {
+    const std::array<VkVertexInputAttributeDescription, 10> skinnedAttributes {
         VkVertexInputAttributeDescription { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuSkinnedVertex, position) },
         VkVertexInputAttributeDescription { 1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuSkinnedVertex, normal) },
         VkVertexInputAttributeDescription { 2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(GpuSkinnedVertex, uv) },
@@ -368,6 +384,8 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
         VkVertexInputAttributeDescription { 5, 0, VK_FORMAT_R16G16B16A16_UINT, offsetof(GpuSkinnedVertex, joints) },
         VkVertexInputAttributeDescription { 6, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(GpuSkinnedVertex, weights) },
         VkVertexInputAttributeDescription { 7, 0, VK_FORMAT_R32_UINT, offsetof(GpuSkinnedVertex, attachmentNodeIndex) },
+        VkVertexInputAttributeDescription { 8, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(GpuSkinnedVertex, tangent) },
+        VkVertexInputAttributeDescription { 9, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(GpuSkinnedVertex, uv1) },
     };
     const bool meshLayout = vertexLayout == VertexLayout::Mesh;
     const bool skinnedLayout = vertexLayout == VertexLayout::SkinnedMesh;

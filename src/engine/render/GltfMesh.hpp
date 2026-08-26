@@ -14,7 +14,18 @@ namespace sokoban {
 struct MeshVertex {
     Vec3 position {};
     Vec3 normal {};
+    // xyz is the tangent; w is the bitangent's handedness, +1 or -1. That is
+    // glTF's own layout, and it is what a normal map needs to be read in the
+    // space it was baked in. The loader reads TANGENT when a file supplies
+    // one and derives it from the UVs otherwise, so this is never zero on a
+    // mesh with usable texture coordinates.
+    Vec4 tangent {};
     Vec2 uv {};
+    // The second UV set, for a material that lights and textures a surface
+    // from different unwraps. Falls back to `uv` when a file has only one,
+    // so a material asking for set 1 on a single-set mesh reads something
+    // sensible rather than nothing.
+    Vec2 uv1 {};
     // One-based global descriptor index; zero means untextured.
     uint32_t textureIndex = 0;
     // Bitwise PrimitiveMaterialFlag values resolved from manifest metadata.
@@ -39,7 +50,10 @@ struct MeshData {
 struct SkinnedVertex {
     Vec3 position {};
     Vec3 normal {};
+    // Bind-pose tangent, skinned by the same palette as the normal.
+    Vec4 tangent {};
     Vec2 uv {};
+    Vec2 uv1 {};
     std::array<uint16_t, 4> joints {};
     std::array<float, 4> weights {};
 };
@@ -76,7 +90,9 @@ struct SkinnedMeshData {
 struct GpuSkinnedVertex {
     Vec3 position {};
     Vec3 normal {};
+    Vec4 tangent {};
     Vec2 uv {};
+    Vec2 uv1 {};
     uint32_t textureIndex = 0;
     uint32_t materialFlags = 0;
     std::array<uint16_t, 4> joints {};
@@ -89,9 +105,23 @@ struct SkinnedPoseMatrices {
     std::vector<Mat4> nodeMatrices;
 };
 
+// How a channel reads between its keyframes. The loader ignored glTF's
+// `interpolation` field entirely until A1 step two, so a STEP curve played as
+// though it were LERP and nothing said so, and a CUBICSPLINE clip failed to
+// load at all.
+enum class AnimationInterpolation {
+    Linear,
+    Step,
+    CubicSpline,
+};
+
 struct AnimationKeyframes {
     std::vector<float> times;
+    // Linear and Step store one value per time. CubicSpline stores three, in
+    // glTF's own order - in-tangent, value, out-tangent - so `values` is
+    // three times as long as `times` and must not be indexed by key directly.
     std::vector<Vec4> values;
+    AnimationInterpolation interpolation = AnimationInterpolation::Linear;
 };
 
 enum class AnimationChannelPath {
