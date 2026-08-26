@@ -11,22 +11,26 @@ class VulkanSsaoPass {
 public:
     struct Pipelines {
         VkPipeline occlusion = VK_NULL_HANDLE;
+        // Also draws the debug visualization. Same shader, same state since
+        // the composite stopped blending; params.w picks which.
         VkPipeline composite = VK_NULL_HANDLE;
-        VkPipeline visualize = VK_NULL_HANDLE;
     };
 
-    // Whether these settings make the occlusion pass sample scene depth.
+    // Whether these settings make this pass run at all.
     //
     // The recorder copies resolved depth into the sampled depth image purely
-    // so this pass can read it, and that copy is a full render-extent
-    // vkCmdCopyImage plus four barriers. Both decisions must key off the same
-    // predicate, or a frame either pays for a copy nothing reads or samples a
-    // stale one.
+    // so the occlusion pass can read it, and copies resolved colour so the
+    // composite has something to read that is not the attachment it writes.
+    // Each is a full render-extent vkCmdCopyImage plus barriers. Every one of
+    // those decisions must key off this same predicate, or a frame either
+    // pays for a copy nothing reads or samples a stale one.
     [[nodiscard]] static constexpr bool samplesSceneDepth(
         const RenderFrameData::Lighting::AmbientOcclusion& settings)
     {
         return settings.enabled &&
-            (settings.strength > 0.0f || settings.visualize);
+            (settings.strength > 0.0f ||
+                settings.debug !=
+                    RenderFrameData::Lighting::AmbientOcclusion::Debug::Off);
     }
 
     VulkanSsaoPass() = default;

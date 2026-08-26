@@ -252,6 +252,13 @@ public:
         vulkanDebug::endLabel(device_, commandBuffer);
         vulkanDebug::beginLabel(
             device_, commandBuffer, "SSAO", { 0.8f, 0.4f, 1.0f, 1.0f });
+        // The composite reads the scene and writes it back, which it cannot
+        // do to the attachment it is bound to. Same predicate as the depth
+        // copy above: with ambient occlusion off, neither copy happens.
+        if (VulkanSsaoPass::samplesSceneDepth(
+                frameData.lighting.ambientOcclusion)) {
+            swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
+        }
         ssaoPass_.record(
             commandBuffer,
             swapchain_.resolvedColorView(),
@@ -261,7 +268,6 @@ public:
             {
                 .occlusion = pipelines_.ssao(),
                 .composite = pipelines_.ssaoComposite(),
-                .visualize = pipelines_.ssaoVisualize(),
             },
             stats_);
         vulkanDebug::endLabel(device_, commandBuffer);
@@ -286,21 +292,29 @@ public:
             commandBuffer, frameData.levelTransitionAmount);
         vulkanDebug::endLabel(device_, commandBuffer);
         vulkanDebug::beginLabel(
+            device_, commandBuffer, "Tonemap", { 0.6f, 0.5f, 1.0f, 1.0f });
+        recordTonemap(commandBuffer);
+        vulkanDebug::endLabel(device_, commandBuffer);
+        vulkanDebug::beginLabel(
             device_, commandBuffer, "UI composition", { 0.9f, 0.9f, 0.2f, 1.0f });
         if (configuration_.developerWorkspaceVisible) {
-            // Compose the game's own UI into the off-screen render first, then
-            // publish that image for ImGui's dockable Game Viewport. The
+            // Compose the game's own UI onto the tonemapped display image,
+            // then publish that image for ImGui's dockable Game Viewport. The
             // swapchain is reserved for the docking workspace itself.
+            //
+            // The UI belongs on this side of the tonemap in both paths: it is
+            // authored in display colours and would otherwise be graded along
+            // with the scene.
             recordOverlayRendering(
                 commandBuffer,
-                swapchain_.resolvedColorImage(),
-                swapchain_.resolvedColorView(),
+                swapchain_.displayColorImage(),
+                swapchain_.displayColorView(),
                 renderExtent,
                 uiDrawData,
                 true,
                 false,
                 false);
-            swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
+            swapchain_.publishDisplayColor(commandBuffer, stats_);
             swapchain_.prepareSwapchainForUi(
                 commandBuffer, imageIndex, stats_);
             recordOverlayRendering(
@@ -623,6 +637,79 @@ private:
             inset);
     }
 
+    // Scene target -> display image: linear scene light in, a presentable
+    // colour out. Every reader downstream of this point wants the display
+    // image rather than the scene target - the upscale blit, the developer
+    // workspace's game viewport, and captureRenderedFrame - because the scene
+    // target holds range and a format none of them can handle.
+    //
+    // This is also the frame's only sRGB encode. It happens because the
+    // display image is an _SRGB format and the hardware does it on write; see
+    // tonemap.frag.glsl before adding any gamma of your own.
+    void recordTonemap(VkCommandBuffer commandBuffer)
+    {
+        // Unconditionally, and before the guard below: the blit, the game
+        // viewport and the capture all assume the display image is a colour
+        // attachment by now. Skipping the transition would make a missing
+        // pipeline present as a layout error somewhere else entirely.
+        swapchain_.beginTonemap(commandBuffer, stats_);
+
+        const VkPipeline pipeline = pipelines_.tonemap();
+        if (!pipeline) {
+            return;
+        }
+
+        const VkExtent2D extent = swapchain_.renderExtent();
+        const VkRenderingAttachmentInfo attachment {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .imageView = swapchain_.displayColorView(),
+            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            // The pass covers every pixel of the target, so its previous
+            // contents are worth nothing.
+            .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        };
+        const VkRenderingInfo renderingInfo {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+            .renderArea = { .offset = { 0, 0 }, .extent = extent },
+            .layerCount = 1,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = &attachment,
+        };
+        const VkViewport viewport {
+            .x = 0.0f,
+            .y = static_cast<float>(extent.height),
+            .width = static_cast<float>(extent.width),
+            .height = -static_cast<float>(extent.height),
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+        };
+        const VkRect2D scissor { .offset = { 0, 0 }, .extent = extent };
+        GpuDrawInstance pushConstants {};
+        // x is exposure, y selects the curve. F2c gives both a home in the
+        // user's settings; until then the pass is a straight passthrough.
+        pushConstants.color = { 1.0f, 0.0f, 0.0f, 0.0f };
+
+        vkCmdBeginRendering(commandBuffer, &renderingInfo);
+        ++stats_.renderPasses;
+        vkCmdBindPipeline(
+            commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+        ++stats_.pipelineBinds;
+        bindDescriptorSet(commandBuffer);
+        vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+        vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+        vkCmdPushConstants(
+            commandBuffer,
+            pipelines_.layout(),
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            sizeof(GpuDrawInstance),
+            &pushConstants);
+        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+        ++stats_.drawCalls;
+        vkCmdEndRendering(commandBuffer);
+    }
+
     void recordLevelTransition(
         VkCommandBuffer commandBuffer,
         float amount)
@@ -696,8 +783,14 @@ private:
         bool writeDepth,
         VkRect2D renderArea)
     {
+        // Alpha is the ambient mask, not an opacity: a pixel no geometry
+        // covered has no ambient term to occlude, so it clears to zero and
+        // the SSAO composite leaves it alone. That matters beyond the
+        // background - the 2D board's opaque pass runs on the *blended*
+        // pipeline (see flatScenePipeline below), which writes no alpha at
+        // all, so the clear is the only value those pixels ever get.
         const VkClearValue clearValue {
-            .color = { { 0.03f, 0.04f, 0.06f, 1.0f } },
+            .color = { { 0.03f, 0.04f, 0.06f, 0.0f } },
         };
         const VkRenderingAttachmentInfo colorAttachment {
             .sType =

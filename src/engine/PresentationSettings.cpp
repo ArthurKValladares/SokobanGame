@@ -31,7 +31,8 @@ PresentationSettings::PresentationSettings()
           .modelShadowReceive = config::modelShadowReceive,
           .ambientOcclusionEnabled = config::ambientOcclusionEnabled,
           .ambientOcclusionStrength = config::ambientOcclusionStrength,
-          .ambientOcclusionVisualize = false,
+          .ambientOcclusionDebug =
+              RenderFrameData::Lighting::AmbientOcclusion::Debug::Off,
           .shadowsEnabled = config::shadowsEnabled,
           .shadowOpacity = config::shadowOpacity,
           .shadowBias = config::shadowBias,
@@ -203,7 +204,7 @@ RenderFrameData::Lighting PresentationSettings::renderLighting() const
         .ambientOcclusion = {
             .enabled = lighting.ambientOcclusionEnabled,
             .strength = lighting.ambientOcclusionStrength,
-            .visualize = lighting.ambientOcclusionVisualize,
+            .debug = lighting.ambientOcclusionDebug,
         },
         .specularStrength = lighting.specularStrength,
         .specularPower = lighting.specularPower,

@@ -1,6 +1,7 @@
 #include "engine/ContentPipeline.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/TileTypes.hpp"
+#include "engine/render/ShaderCatalog.hpp"
 
 #include <array>
 #include <chrono>
@@ -267,24 +268,11 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
         R"json({"format":1,"name":"First Light","screens":["Arrival"]})json");
     writeFile(levels / "Deleted/level9/screen0.scr", "not shipped");
 
-    constexpr const char* shaderNames[] {
-        "triangle.vert.glsl.spv",
-        "triangle.frag.glsl.spv",
-        "water.frag.glsl.spv",
-        "mirror_energy.frag.glsl.spv",
-        "ground_splat.frag.glsl.spv",
-        "shadow.vert.glsl.spv",
-        "model.vert.glsl.spv",
-        "model_shadow.vert.glsl.spv",
-        "skinned_model.vert.glsl.spv",
-        "skinned_model_shadow.vert.glsl.spv",
-        "fullscreen.vert.glsl.spv",
-        "ssao.frag.glsl.spv",
-        "ssao_composite.frag.glsl.spv",
-        "world_transition.frag.glsl.spv",
-    };
-    for (const char* shader : shaderNames) {
-        writeFile(shaders / shader);
+    // From the catalog rather than a copy of it: a fixture that restates the
+    // list would keep passing after someone adds a shader and forgets to
+    // stage it, which is the failure this test is here to catch.
+    for (const std::string_view shader : sokoban::shaderCatalog::sources) {
+        writeFile(shaders / sokoban::shaderCatalog::compiledName(shader));
     }
     return { assets, levels, shaders };
 }

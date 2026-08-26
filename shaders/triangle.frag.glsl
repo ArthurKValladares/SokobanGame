@@ -58,6 +58,22 @@ layout(std140, set = 0, binding = 7) uniform SceneFrame
 
 const int MATERIAL_MODE_PROCEDURAL_TEXTURE = 5;
 
+// Set on the opaque pipelines only. Screen-space occlusion estimates *ambient*
+// visibility, so multiplying the finished pixel by it - which is what the AO
+// composite used to do - darkens direct sunlight as well, which no amount of
+// occlusion should. When this is set the alpha channel stops carrying the
+// material's alpha and carries the share of this pixel's light that came from
+// the ambient term instead, and the composite scales its effect by it.
+//
+// Only the opaque pipelines can do this: a blended draw needs alpha to mean
+// alpha. Those pipelines are created with the alpha channel masked out of
+// their colour writes, so a translucent surface inherits the mask of whatever
+// opaque geometry it sits in front of, which is the right answer anyway.
+layout(constant_id = 0) const bool writeAmbientMask = false;
+
+const vec3 luminanceWeights = vec3(0.2126, 0.7152, 0.0722);
+
+
 vec3 gaussianBlurredScene(vec2 uv)
 {
     const float weights[5] = float[5](1.0, 4.0, 6.0, 4.0, 1.0);
@@ -215,7 +231,10 @@ void main()
         materialColor.a *= texture(uiFont, uv).r;
     } else if (materialMode == 6) {
         vec2 uv = draw.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
-        materialColor *= texture(sceneColor, uv);
+        // Colour only. The scene target's alpha is the ambient mask now, not
+        // an opacity, and folding it into this composite would feather the
+        // preview by how much ambient light happened to reach it.
+        materialColor.rgb *= texture(sceneColor, uv).rgb;
 
         // Scene-image UI is the preserved main view composited over the
         // preview. A signed-distance rounded rectangle makes the preview's
@@ -290,6 +309,9 @@ void main()
         materialColor *= texture(modelTextures[textureIndex], vec2(inFaceCoordU, inFaceCoordV));
     }
     vec3 color = mix(materialColor.rgb, draw.gridColor.rgb, gridMask());
+    // Stays zero for anything unlit - the grid overlay, the 2D board, UI -
+    // so occlusion cannot touch surfaces that have no ambient term to occlude.
+    float ambientMask = 0.0;
     if (length(inNormal) > 0.0001) {
         vec3 normal = normalize(inNormal);
         vec3 lightDirection = length(draw.sunDirectionAndAmbientGreen.xyz) > 0.0001
@@ -349,10 +371,19 @@ void main()
                     pointShadow * specularStrength;
             }
         }
-        vec3 diffuseLighting = ambient * (1.0 + skyFill * 0.35) +
+        vec3 ambientTerm = ambient * (1.0 + skyFill * 0.35);
+        vec3 diffuseLighting = ambientTerm +
             draw.sunRadianceAndAmbientBlue.rgb * diffuse * shadow +
             pointDiffuseLighting;
         color *= diffuseLighting;
+        // Diffuse only: specular is a direct reflection and occlusion has no
+        // business scaling it. It is added below and deliberately left out of
+        // both sides of this ratio.
+        ambientMask = clamp(
+            dot(ambientTerm, luminanceWeights) /
+                max(dot(diffuseLighting, luminanceWeights), 0.0001),
+            0.0,
+            1.0);
 
         if (specularStrength > 0.0 && lambertDiffuse > 0.0) {
             vec3 halfDirection = normalize(lightDirection + viewDirection);
@@ -382,16 +413,19 @@ void main()
 
         color = mix(color, highlightColor, tintStrength + pulse * 0.04);
         color += mix(vec3(1.0), highlightColor, 0.35) * glimmer * 0.32;
-        outColor = vec4(color, 1.0);
+        outColor = vec4(color, writeAmbientMask ? ambientMask : 1.0);
         return;
     }
 
     if (draw.materialOptions.x > 0.5) {
         vec2 uv = gl_FragCoord.xy / vec2(textureSize(sceneColor, 0));
         vec3 blurred = gaussianBlurredScene(uv);
-        outColor = vec4(mix(blurred, color, materialColor.a), 1.0);
+        outColor = vec4(
+            mix(blurred, color, materialColor.a),
+            writeAmbientMask ? ambientMask : 1.0);
         return;
     }
 
-    outColor = vec4(color, materialColor.a);
+    outColor = vec4(
+        color, writeAmbientMask ? ambientMask : materialColor.a);
 }

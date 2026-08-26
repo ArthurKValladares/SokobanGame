@@ -3,6 +3,7 @@
 #include "engine/render/GltfMesh.hpp"
 #include "engine/render/GpuSkinning.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
+#include "engine/render/ShaderCatalog.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 
@@ -41,7 +42,6 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
     destroy();
     device_ = createInfo.device;
     pipelineCache_ = createInfo.pipelineCache;
-    colorFormat_ = createInfo.colorFormat;
     shadowFormat_ = createInfo.shadowFormat;
 
     VkPushConstantRange pushConstantRange {
@@ -64,83 +64,109 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
     vulkanDebug::setObjectName(
         device_, VK_OBJECT_TYPE_PIPELINE_LAYOUT, layout_, "Scene pipeline layout");
 
-    std::array<VkShaderModule, 14> shaders {};
+    // Which attachment each pipeline draws into. Scene geometry and the
+    // post-process passes that run before the tonemap write the scene target;
+    // the tonemap and the UI write a display image.
+    const VkFormat sceneFormat = createInfo.sceneColorFormat;
+    const VkFormat displayFormat = createInfo.colorFormat;
+
+    // Named through the catalog rather than spelled again here. A path typed
+    // out at this call site is a file-not-found on the first launch after the
+    // change, with nothing between the typo and the user; a wrong catalog
+    // name does not compile.
+    const auto shaderModule = [&](std::string_view name) {
+        return createShaderModule(
+            createInfo.assetRoot / "shaders" /
+            shaderCatalog::compiledName(name));
+    };
+
+    // Indices are positional only so that the cleanup loop below has one
+    // array to walk; nothing else depends on the order.
+    std::array<VkShaderModule, 15> shaders {};
     try {
-        shaders[0] = createShaderModule(createInfo.assetRoot / "shaders/triangle.vert.glsl.spv");
-        shaders[1] = createShaderModule(createInfo.assetRoot / "shaders/triangle.frag.glsl.spv");
-        shaders[2] = createShaderModule(createInfo.assetRoot / "shaders/shadow.vert.glsl.spv");
-        shaders[3] = createShaderModule(createInfo.assetRoot / "shaders/model.vert.glsl.spv");
-        shaders[4] = createShaderModule(createInfo.assetRoot / "shaders/model_shadow.vert.glsl.spv");
-        shaders[5] = createShaderModule(createInfo.assetRoot / "shaders/fullscreen.vert.glsl.spv");
-        shaders[6] = createShaderModule(createInfo.assetRoot / "shaders/ssao.frag.glsl.spv");
-        shaders[7] = createShaderModule(createInfo.assetRoot / "shaders/ssao_composite.frag.glsl.spv");
-        shaders[8] = createShaderModule(createInfo.assetRoot / "shaders/water.frag.glsl.spv");
-        shaders[9] = createShaderModule(
-            createInfo.assetRoot / "shaders/mirror_energy.frag.glsl.spv");
-        shaders[10] = createShaderModule(
-            createInfo.assetRoot / "shaders/ground_splat.frag.glsl.spv");
-        shaders[11] = createShaderModule(
-            createInfo.assetRoot / "shaders/world_transition.frag.glsl.spv");
-        shaders[12] = createShaderModule(
-            createInfo.assetRoot / "shaders/skinned_model.vert.glsl.spv");
-        shaders[13] = createShaderModule(
-            createInfo.assetRoot / "shaders/skinned_model_shadow.vert.glsl.spv");
+        shaders[0] = shaderModule(shaderCatalog::triangleVert);
+        shaders[1] = shaderModule(shaderCatalog::triangleFrag);
+        shaders[2] = shaderModule(shaderCatalog::shadowVert);
+        shaders[3] = shaderModule(shaderCatalog::modelVert);
+        shaders[4] = shaderModule(shaderCatalog::modelShadowVert);
+        shaders[5] = shaderModule(shaderCatalog::fullscreenVert);
+        shaders[6] = shaderModule(shaderCatalog::ssaoFrag);
+        shaders[7] = shaderModule(shaderCatalog::ssaoCompositeFrag);
+        shaders[8] = shaderModule(shaderCatalog::waterFrag);
+        shaders[9] = shaderModule(shaderCatalog::mirrorEnergyFrag);
+        shaders[10] = shaderModule(shaderCatalog::groundSplatFrag);
+        shaders[11] = shaderModule(shaderCatalog::worldTransitionFrag);
+        shaders[12] = shaderModule(shaderCatalog::skinnedModelVert);
+        shaders[13] = shaderModule(shaderCatalog::skinnedModelShadowVert);
+        shaders[14] = shaderModule(shaderCatalog::tonemapFrag);
 
         scene_ = createScenePipeline(
             shaders[0], shaders[1], VertexLayout::None,
-            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
+            createInfo.wireframe);
         sceneOpaque_ = createScenePipeline(
             shaders[0], shaders[1], VertexLayout::None,
-            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe,
-            BlendMode::Opaque);
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
+            createInfo.wireframe, Target::SceneOpaque);
         water_ = createScenePipeline(
             shaders[0], shaders[8], VertexLayout::None,
-            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
+            createInfo.wireframe);
         mirrorEnergy_ = createScenePipeline(
             shaders[0], shaders[9], VertexLayout::None,
-            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
+            createInfo.wireframe);
         groundSplat_ = createScenePipeline(
             shaders[0], shaders[10], VertexLayout::None,
-            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
+            createInfo.wireframe);
         groundSplatOpaque_ = createScenePipeline(
             shaders[0], shaders[10], VertexLayout::None,
-            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe,
-            BlendMode::Opaque);
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
+            createInfo.wireframe, Target::SceneOpaque);
+        // The only scene-shader pipeline that draws a display image: the
+        // game's UI composites after the tonemap, onto the swapchain or onto
+        // the display image the developer workspace publishes.
         ui_ = createScenePipeline(
             shaders[0], shaders[1], VertexLayout::None,
-            VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_UNDEFINED, createInfo.wireframe);
+            VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_UNDEFINED, displayFormat,
+            createInfo.wireframe, Target::Display);
         model_ = createScenePipeline(
             shaders[3], shaders[1], VertexLayout::Mesh,
-            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
+            createInfo.wireframe);
         modelOpaque_ = createScenePipeline(
             shaders[3], shaders[1], VertexLayout::Mesh,
-            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe,
-            BlendMode::Opaque);
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
+            createInfo.wireframe, Target::SceneOpaque);
         mirrorEnergyModel_ = createScenePipeline(
             shaders[3], shaders[9], VertexLayout::Mesh,
-            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
+            createInfo.wireframe);
         skinnedModel_ = createScenePipeline(
             shaders[12], shaders[1], VertexLayout::SkinnedMesh,
-            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
+            createInfo.wireframe);
         skinnedModelOpaque_ = createScenePipeline(
             shaders[12], shaders[1], VertexLayout::SkinnedMesh,
-            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe,
-            BlendMode::Opaque);
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
+            createInfo.wireframe, Target::SceneOpaque);
         skinnedMirrorEnergyModel_ = createScenePipeline(
             shaders[12], shaders[9], VertexLayout::SkinnedMesh,
-            createInfo.sampleCount, createInfo.depthFormat, createInfo.wireframe);
+            createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
+            createInfo.wireframe);
         shadow_ = createShadowPipeline(shaders[2], VertexLayout::None);
         modelShadow_ = createShadowPipeline(shaders[4], VertexLayout::MeshPosition);
         skinnedModelShadow_ = createShadowPipeline(
             shaders[13], VertexLayout::SkinnedMeshPosition);
         ssao_ = createPostProcessPipeline(
-            shaders[5], shaders[6], VK_FORMAT_R8_UNORM, false);
+            shaders[5], shaders[6], VK_FORMAT_R8_UNORM);
         ssaoComposite_ = createPostProcessPipeline(
-            shaders[5], shaders[7], createInfo.colorFormat, true);
-        ssaoVisualize_ = createPostProcessPipeline(
-            shaders[5], shaders[7], createInfo.colorFormat, false);
+            shaders[5], shaders[7], sceneFormat);
         worldTransition_ = createPostProcessPipeline(
-            shaders[5], shaders[11], createInfo.colorFormat, false);
+            shaders[5], shaders[11], sceneFormat);
+        tonemap_ = createPostProcessPipeline(
+            shaders[5], shaders[14], displayFormat);
         const std::array namedPipelines {
             std::pair { scene_, "Scene pipeline" },
             std::pair { sceneOpaque_, "Scene pipeline (opaque)" },
@@ -161,8 +187,8 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             std::pair { skinnedModelShadow_, "Skinned model shadow pipeline" },
             std::pair { ssao_, "SSAO pipeline" },
             std::pair { ssaoComposite_, "SSAO composite pipeline" },
-            std::pair { ssaoVisualize_, "SSAO visualize pipeline" },
             std::pair { worldTransition_, "World transition pipeline" },
+            std::pair { tonemap_, "Tonemap pipeline" },
         };
         for (const auto& [pipeline, name] : namedPipelines) {
             vulkanDebug::setObjectName(
@@ -191,7 +217,7 @@ void VulkanPipelineFactory::destroy()
             mirrorEnergyModel_, skinnedModel_, skinnedModelOpaque_,
             skinnedMirrorEnergyModel_,
             shadow_, modelShadow_, skinnedModelShadow_,
-            ssao_, ssaoComposite_, ssaoVisualize_, worldTransition_,
+            ssao_, ssaoComposite_, worldTransition_, tonemap_,
         };
         for (VkPipeline pipeline : pipelines) {
             if (pipeline) {
@@ -220,11 +246,10 @@ void VulkanPipelineFactory::destroy()
     skinnedModelShadow_ = VK_NULL_HANDLE;
     ssao_ = VK_NULL_HANDLE;
     ssaoComposite_ = VK_NULL_HANDLE;
-    ssaoVisualize_ = VK_NULL_HANDLE;
     worldTransition_ = VK_NULL_HANDLE;
+    tonemap_ = VK_NULL_HANDLE;
     layout_ = VK_NULL_HANDLE;
     shadowFormat_ = VK_FORMAT_UNDEFINED;
-    colorFormat_ = VK_FORMAT_UNDEFINED;
     pipelineCache_ = VK_NULL_HANDLE;
     device_ = VK_NULL_HANDLE;
 }
@@ -255,8 +280,9 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
     VertexLayout vertexLayout,
     VkSampleCountFlagBits sampleCount,
     VkFormat depthFormat,
+    VkFormat colorFormat,
     bool wireframe,
-    BlendMode blendMode) const
+    Target target) const
 {
     std::array<VkPipelineShaderStageCreateInfo, 2> stages {
         VkPipelineShaderStageCreateInfo {
@@ -272,6 +298,25 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
             .pName = "main",
         },
     };
+    // Tells triangle.frag / ground_splat.frag to put the ambient mask in
+    // alpha. Attached to every scene pipeline rather than only the opaque
+    // ones so that each states its answer instead of leaning on the default;
+    // a shader that does not declare the constant is unaffected by it.
+    const VkBool32 writeAmbientMask =
+        target == Target::SceneOpaque ? VK_TRUE : VK_FALSE;
+    const VkSpecializationMapEntry ambientMaskEntry {
+        .constantID = 0,
+        .offset = 0,
+        .size = sizeof(VkBool32),
+    };
+    const VkSpecializationInfo specialization {
+        .mapEntryCount = 1,
+        .pMapEntries = &ambientMaskEntry,
+        .dataSize = sizeof(writeAmbientMask),
+        .pData = &writeAmbientMask,
+    };
+    stages[1].pSpecializationInfo = &specialization;
+
     const VkVertexInputBindingDescription meshBinding {
         .binding = 0,
         .stride = sizeof(MeshVertex),
@@ -359,16 +404,25 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
         .depthWriteEnable = depthFormat != VK_FORMAT_UNDEFINED,
         .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
     };
+    // A blended scene draw uses its alpha and writes none: the destination
+    // alpha is the ambient mask of whatever opaque surface it sits in front
+    // of, and blending over it would destroy the one channel the SSAO
+    // composite reads.
+    VkColorComponentFlags colorWriteMask =
+        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+        VK_COLOR_COMPONENT_B_BIT;
+    if (target != Target::SceneBlended) {
+        colorWriteMask |= VK_COLOR_COMPONENT_A_BIT;
+    }
     VkPipelineColorBlendAttachmentState blendAttachment {
-        .blendEnable = blendMode == BlendMode::AlphaBlend ? VK_TRUE : VK_FALSE,
+        .blendEnable = target == Target::SceneOpaque ? VK_FALSE : VK_TRUE,
         .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
         .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
         .colorBlendOp = VK_BLEND_OP_ADD,
         .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
         .dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
         .alphaBlendOp = VK_BLEND_OP_ADD,
-        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-            VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+        .colorWriteMask = colorWriteMask,
     };
     VkPipelineColorBlendStateCreateInfo colorBlending {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
@@ -394,7 +448,7 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
     VkPipelineRenderingCreateInfo rendering {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
         .colorAttachmentCount = 1,
-        .pColorAttachmentFormats = &colorFormat_,
+        .pColorAttachmentFormats = &colorFormat,
         .depthAttachmentFormat = depthFormat,
     };
     VkGraphicsPipelineCreateInfo pipelineInfo {
@@ -530,8 +584,7 @@ VkPipeline VulkanPipelineFactory::createShadowPipeline(
 VkPipeline VulkanPipelineFactory::createPostProcessPipeline(
     VkShaderModule vertexShader,
     VkShaderModule fragmentShader,
-    VkFormat colorFormat,
-    bool multiplyBlend) const
+    VkFormat colorFormat) const
 {
     std::array<VkPipelineShaderStageCreateInfo, 2> stages {
         VkPipelineShaderStageCreateInfo {
@@ -571,13 +624,7 @@ VkPipeline VulkanPipelineFactory::createPostProcessPipeline(
         .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
     };
     VkPipelineColorBlendAttachmentState blendAttachment {
-        .blendEnable = multiplyBlend ? VK_TRUE : VK_FALSE,
-        .srcColorBlendFactor = VK_BLEND_FACTOR_DST_COLOR,
-        .dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
-        .colorBlendOp = VK_BLEND_OP_ADD,
-        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-        .alphaBlendOp = VK_BLEND_OP_ADD,
+        .blendEnable = VK_FALSE,
         .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
             VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
     };

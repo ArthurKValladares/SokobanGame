@@ -22,6 +22,22 @@ layout(location = 6) in vec3 inWorldPosition;
 layout(location = 7) flat in uint inDrawInstance;
 layout(location = 0) out vec4 outColor;
 
+// Set on the opaque pipelines only. Screen-space occlusion estimates *ambient*
+// visibility, so multiplying the finished pixel by it - which is what the AO
+// composite used to do - darkens direct sunlight as well, which no amount of
+// occlusion should. When this is set the alpha channel stops carrying the
+// material's alpha and carries the share of this pixel's light that came from
+// the ambient term instead, and the composite scales its effect by it.
+//
+// Only the opaque pipelines can do this: a blended draw needs alpha to mean
+// alpha. Those pipelines are created with the alpha channel masked out of
+// their colour writes, so a translucent surface inherits the mask of whatever
+// opaque geometry it sits in front of, which is the right answer anyway.
+layout(constant_id = 0) const bool writeAmbientMask = false;
+
+const vec3 luminanceWeights = vec3(0.2126, 0.7152, 0.0722);
+
+
 // One draw's parameters, read back by instance index. T1 moved these out of
 // push constants so that consecutive draws sharing a pipeline can collapse
 // into a single instanced draw.
@@ -257,6 +273,9 @@ void main()
     }
 
     vec3 color = mix(materialColor.rgb, draw.gridColor.rgb, gridMask());
+    // Stays zero for anything unlit, so occlusion cannot touch a surface with
+    // no ambient term to occlude.
+    float ambientMask = 0.0;
     if (length(inNormal) > 0.0001) {
         vec3 normal = normalize(inNormal);
         vec3 lightDirection = length(draw.sunDirectionAndAmbientGreen.xyz) > 0.0001
@@ -294,11 +313,18 @@ void main()
                 pointLambert * pointShadowFactor(
                     lightIndex, -toLight, normal);
         }
-        vec3 diffuseLighting = ambient * (1.0 + skyFill * 0.35) +
+        vec3 ambientTerm = ambient * (1.0 + skyFill * 0.35);
+        vec3 diffuseLighting = ambientTerm +
             draw.sunRadianceAndAmbientBlue.rgb * diffuse * shadow +
             pointDiffuseLighting;
         color *= diffuseLighting;
+        ambientMask = clamp(
+            dot(ambientTerm, luminanceWeights) /
+                max(dot(diffuseLighting, luminanceWeights), 0.0001),
+            0.0,
+            1.0);
     }
 
-    outColor = vec4(color, materialColor.a);
+    outColor = vec4(
+        color, writeAmbientMask ? ambientMask : materialColor.a);
 }

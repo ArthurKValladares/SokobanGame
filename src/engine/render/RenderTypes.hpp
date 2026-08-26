@@ -270,9 +270,23 @@ struct RenderFrameData {
         };
 
         struct AmbientOcclusion {
+            // What the composite draws instead of the shaded scene.
+            //
+            // AmbientMask exists because V7's first half gave the scene
+            // target's alpha a meaning - the share of a pixel's light that
+            // came from the ambient term - that is invisible in the finished
+            // image. A wrong mask does not look like a bug; it looks like
+            // someone tuned the occlusion differently. This is the one click
+            // that separates the two.
+            enum class Debug {
+                Off,
+                Occlusion,
+                AmbientMask,
+            };
+
             bool enabled = false;
             float strength = 0.0f;
-            bool visualize = false;
+            Debug debug = Debug::Off;
         };
 
         DirectionalLight sun {};

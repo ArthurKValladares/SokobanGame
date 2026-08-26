@@ -592,9 +592,19 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             0.0f,
             config::maximumAmbientOcclusionStrength,
             "%.2f");
-        ImGui::Checkbox(
-            "Visualize SSAO",
-            &lighting.ambientOcclusionVisualize);
+        // Two views, not one. The occlusion buffer was always inspectable;
+        // the ambient mask is the channel V7's first half added to the scene
+        // target's alpha, and it is invisible in the finished image.
+        using AmbientOcclusionDebug =
+            RenderFrameData::Lighting::AmbientOcclusion::Debug;
+        int debugView = static_cast<int>(lighting.ambientOcclusionDebug);
+        if (ImGui::Combo(
+                "SSAO Debug View",
+                &debugView,
+                "Off\0Occlusion\0Ambient Mask\0")) {
+            lighting.ambientOcclusionDebug =
+                static_cast<AmbientOcclusionDebug>(debugView);
+        }
         ImGui::EndDisabled();
 
         ImGui::Checkbox("Shadows", &lighting.shadowsEnabled);

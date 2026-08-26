@@ -1,5 +1,6 @@
 #include "engine/render/VulkanSwapchainResources.hpp"
 
+#include "engine/Log.hpp"
 #include "engine/render/RenderResolution.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanDeviceSelection.hpp"
@@ -98,6 +99,7 @@ void VulkanSwapchainResources::destroy()
     renderExtent_ = {};
     presentMode_ = VK_PRESENT_MODE_FIFO_KHR;
     colorFormat_ = VK_FORMAT_UNDEFINED;
+    sceneColorFormat_ = VK_FORMAT_UNDEFINED;
     depthFormat_ = VK_FORMAT_D32_SFLOAT;
     sampleCount_ = VK_SAMPLE_COUNT_1_BIT;
     renderScalePercent_ = 100;
@@ -259,6 +261,92 @@ void VulkanSwapchainResources::ensureSceneColorReadable(
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         });
     sceneColorLayout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    ++stats.imageBarriers;
+}
+
+void VulkanSwapchainResources::beginTonemap(
+    VkCommandBuffer commandBuffer,
+    RenderStats& stats)
+{
+    // The scene target stops being written and starts being read. Nothing
+    // draws into it again this frame; beginFrame discards it from UNDEFINED
+    // next frame, so no transition back is needed here.
+    const std::array<VkImageMemoryBarrier2, 2> barriers {
+        vulkanResources::imageBarrier(
+            resolvedColorImage_.image,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+            {
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            },
+            {
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            }),
+        // The pass overwrites every pixel, so the old contents are worth
+        // nothing - but the *read* of them is not. Whichever of the two
+        // consumers had it last is named here so this write waits for it.
+        vulkanResources::imageBarrier(
+            displayColorImage_.image,
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+            displayColorSourceState(),
+            {
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            }),
+    };
+    vulkanResources::transitionImages(commandBuffer, barriers);
+    displayColorLayout_ = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    stats.imageBarriers += static_cast<uint32_t>(barriers.size());
+}
+
+// What the display image was last used for, in the form a barrier wants. The
+// two terminal states are the blit's transfer read in the shipping path and
+// ImGui's sampled read in the developer workspace; the first frame after a
+// swapchain rebuild has neither.
+vulkanResources::ImageState
+VulkanSwapchainResources::displayColorSourceState() const
+{
+    switch (displayColorLayout_) {
+    case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+        return {
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            VK_ACCESS_2_TRANSFER_READ_BIT,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        };
+    case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+        return {
+            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        };
+    default:
+        return {};
+    }
+}
+
+void VulkanSwapchainResources::publishDisplayColor(
+    VkCommandBuffer commandBuffer,
+    RenderStats& stats)
+{
+    vulkanResources::transitionImage(
+        commandBuffer,
+        displayColorImage_.image,
+        vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+        {
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        },
+        {
+            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        });
+    displayColorLayout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     ++stats.imageBarriers;
 }
 
@@ -484,14 +572,18 @@ void VulkanSwapchainResources::copyResolvedSceneDepth(
     ++stats.imageBarriers;
 }
 
+// Scales the tonemapped display image onto the swapchain. The source is the
+// display image rather than the scene target: the scene target may hold
+// values and a format the surface cannot present, and a blit would have no
+// way to convert them.
 void VulkanSwapchainResources::upscaleSceneToSwapchain(
     VkCommandBuffer commandBuffer,
     uint32_t imageIndex,
-    RenderStats& stats) const
+    RenderStats& stats)
 {
     const std::array<VkImageMemoryBarrier2, 2> toTransfer {
         vulkanResources::imageBarrier(
-            resolvedColorImage_.image,
+            displayColorImage_.image,
             vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
             {
                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -514,6 +606,9 @@ void VulkanSwapchainResources::upscaleSceneToSwapchain(
             }),
     };
     vulkanResources::transitionImages(commandBuffer, toTransfer);
+    // Left here deliberately: captureRenderedFrame reads the display image in
+    // this layout, and the next frame's tonemap waits on this read.
+    displayColorLayout_ = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     stats.imageBarriers += static_cast<uint32_t>(toTransfer.size());
 
     VkImageBlit2 region {
@@ -549,7 +644,7 @@ void VulkanSwapchainResources::upscaleSceneToSwapchain(
     };
     VkBlitImageInfo2 blitInfo {
         .sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2,
-        .srcImage = resolvedColorImage_.image,
+        .srcImage = displayColorImage_.image,
         .srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
         .dstImage = image(imageIndex),
         .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -705,11 +800,53 @@ void VulkanSwapchainResources::createAttachments()
     depthLayoutInitialized_ = false;
     sceneColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     sceneDepthLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    displayColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    // Decided once here, before anything that renders into the scene is
+    // created, because every scene attachment and every pipeline that targets
+    // one has to agree on it.
+    sceneColorFormat_ = chooseSceneColorFormat();
     createResolvedColor();
     createMsaaColor();
     createDepth();
     createSceneColor();
     createSceneDepth();
+    createDisplayColor();
+}
+
+// The scene target's format.
+//
+// Lighting has always been computed in linear space here and the sRGB
+// attachment encoded it correctly on write, so gamma was never the problem.
+// Range was: an 8-bit target has nothing above 1.0, so a bright surface
+// clipped and the sun-intensity slider saturated instead of brightening.
+// Half float is the smallest format with real headroom, and the tonemap pass
+// is what brings it back down to something the surface can present.
+//
+// The fallback is not ceremony. Every feature asked for here is one this
+// class then relies on - the scene blends into this image, the tonemap pass
+// samples it, and copyResolvedSceneColor copies it - and a driver missing any
+// of them would otherwise fail somewhere much further from the cause.
+VkFormat VulkanSwapchainResources::chooseSceneColorFormat() const
+{
+    constexpr VkFormat preferred = VK_FORMAT_R16G16B16A16_SFLOAT;
+    constexpr VkFormatFeatureFlags required =
+        VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+        VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT |
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+        VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
+        VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+
+    VkFormatProperties properties {};
+    vkGetPhysicalDeviceFormatProperties(
+        physicalDevice_, preferred, &properties);
+    if ((properties.optimalTilingFeatures & required) == required) {
+        return preferred;
+    }
+    log::warning(log::Category::Rendering)
+        << "R16G16B16A16_SFLOAT is not usable as a scene render target on "
+           "this device; falling back to the surface format, which clips "
+           "above 1.0";
+    return colorFormat_;
 }
 
 void VulkanSwapchainResources::createResolvedColor()
@@ -720,13 +857,19 @@ void VulkanSwapchainResources::createResolvedColor()
     VkImageCreateInfo imageInfo {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = VK_IMAGE_TYPE_2D,
-        .format = colorFormat_,
+        .format = sceneColorFormat_,
         .extent = { .width = renderExtent_.width, .height = renderExtent_.height, .depth = 1 },
         .mipLevels = 1,
         .arrayLayers = 1,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        // SAMPLED because the tonemap pass reads this image directly rather
+        // than a copy of it. TRANSFER_SRC stays for copyResolvedSceneColor,
+        // which still feeds the shaders that need a readable snapshot of the
+        // scene mid-pass.
+        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+            VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+            VK_IMAGE_USAGE_SAMPLED_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
@@ -746,7 +889,7 @@ void VulkanSwapchainResources::createMsaaColor()
     VkImageCreateInfo imageInfo {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = VK_IMAGE_TYPE_2D,
-        .format = colorFormat_,
+        .format = sceneColorFormat_,
         .extent = { .width = renderExtent_.width, .height = renderExtent_.height, .depth = 1 },
         .mipLevels = 1,
         .arrayLayers = 1,
@@ -809,7 +952,7 @@ void VulkanSwapchainResources::createSceneColor()
     VkImageCreateInfo imageInfo {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = VK_IMAGE_TYPE_2D,
-        .format = colorFormat_,
+        .format = sceneColorFormat_,
         .extent = { .width = renderExtent_.width, .height = renderExtent_.height, .depth = 1 },
         .mipLevels = 1,
         .arrayLayers = 1,
@@ -878,6 +1021,42 @@ void VulkanSwapchainResources::createSceneDepth()
         "Sampled scene depth");
 }
 
+// What the tonemap pass writes: the scene at render extent, in the surface's
+// format, before any UI. Three readers want exactly that image and no other -
+// the upscale blit, the developer workspace's game viewport, and
+// captureRenderedFrame, whose thumbnails must not contain the interface.
+void VulkanSwapchainResources::createDisplayColor()
+{
+    if (renderExtent_.width == 0 || renderExtent_.height == 0) {
+        return;
+    }
+    const VkImageCreateInfo imageInfo {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = colorFormat_,
+        .extent = {
+            .width = renderExtent_.width,
+            .height = renderExtent_.height,
+            .depth = 1,
+        },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+            VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+            VK_IMAGE_USAGE_SAMPLED_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    displayColorImage_ = vulkanResources::createImage(
+        physicalDevice_,
+        device_,
+        imageInfo,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        "Display color");
+}
+
 void VulkanSwapchainResources::destroyAttachments()
 {
     if (!device_) {
@@ -887,6 +1066,7 @@ void VulkanSwapchainResources::destroyAttachments()
         vkDestroySampler(device_, sceneColorSampler_, nullptr);
     }
     sceneColorSampler_ = VK_NULL_HANDLE;
+    vulkanResources::destroyImage(device_, displayColorImage_);
     vulkanResources::destroyImage(device_, sceneDepthImage_);
     vulkanResources::destroyImage(device_, sceneColorImage_);
     vulkanResources::destroyImage(device_, resolveDepthImage_);
@@ -896,6 +1076,7 @@ void VulkanSwapchainResources::destroyAttachments()
     renderExtent_ = {};
     sceneColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     sceneDepthLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    displayColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     depthLayoutInitialized_ = false;
 }
 

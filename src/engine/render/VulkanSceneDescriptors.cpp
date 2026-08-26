@@ -109,6 +109,12 @@ void VulkanSceneDescriptors::create(
                 .stageFlags = VK_SHADER_STAGE_VERTEX_BIT |
                     VK_SHADER_STAGE_FRAGMENT_BIT,
             },
+            VkDescriptorSetLayoutBinding {
+                .binding = 11,
+                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+            },
         };
         VkDescriptorSetLayoutCreateInfo layoutInfo {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -199,6 +205,7 @@ void VulkanSceneDescriptors::updateInternal(
     if (!resources.shadow.valid() ||
         !resources.pointShadows.valid() ||
         !resources.sceneColor.valid() ||
+        !resources.sceneHdrColor.valid() ||
         !resources.sceneDepth.valid() ||
         !resources.ssao.valid() ||
         !resources.uiFont.valid() ||
@@ -251,6 +258,11 @@ void VulkanSceneDescriptors::updateInternal(
         .imageView = resources.sceneColor.imageView,
         .imageLayout = resources.sceneColor.imageLayout,
     };
+    const VkDescriptorImageInfo sceneHdrColor {
+        .sampler = resources.sceneHdrColor.sampler,
+        .imageView = resources.sceneHdrColor.imageView,
+        .imageLayout = resources.sceneHdrColor.imageLayout,
+    };
     const VkDescriptorImageInfo sceneDepth {
         .sampler = resources.sceneDepth.sampler,
         .imageView = resources.sceneDepth.imageView,
@@ -271,7 +283,7 @@ void VulkanSceneDescriptors::updateInternal(
         .imageView = resources.titleBackground.imageView,
         .imageLayout = resources.titleBackground.imageLayout,
     };
-    std::array<VkWriteDescriptorSet, 11> writes {
+    std::array<VkWriteDescriptorSet, 12> writes {
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = descriptorSet,
@@ -359,6 +371,14 @@ void VulkanSceneDescriptors::updateInternal(
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .pBufferInfo = &drawInstances,
+        },
+        VkWriteDescriptorSet {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = descriptorSet,
+            .dstBinding = 11,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &sceneHdrColor,
         },
     };
     vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);

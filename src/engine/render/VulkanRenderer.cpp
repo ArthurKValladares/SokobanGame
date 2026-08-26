@@ -635,11 +635,16 @@ ImageData VulkanRenderer::captureRenderedFrame(std::optional<VkRect2D> region)
         deviceContext_.device(),
         deviceContext_.commandPool(),
         deviceContext_.graphicsQueue(),
-        activeResources_.swapchain->resolvedColorImage(),
+        // The display image, not the scene target: it is tonemapped and in a
+        // format PngWriter understands.
+        activeResources_.swapchain->displayColorImage(),
         activeResources_.swapchain->colorFormat(),
-        // The final upscale leaves the resolve target as a transfer source.
-        // Capture preserves that layout; the next frame deliberately discards
-        // and transitions it back to a color attachment in beginFrame().
+        // Both of the things this assumes hold only with the developer
+        // workspace hidden, which is how the thumbnail bake drives the
+        // renderer: the upscale blit leaves the display image a transfer
+        // source, and the game's UI composites onto the swapchain rather
+        // than onto this image. With the workspace visible the image is in
+        // SHADER_READ_ONLY_OPTIMAL and has the UI drawn on it.
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
         rect.offset,
         rect.extent);
@@ -1197,6 +1202,13 @@ VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources(
             .sampler = resources.swapchain->sceneColorSampler(),
             .imageView = resources.swapchain->sceneColorView(),
         },
+        // The scene target itself, for the tonemap pass. It is a colour
+        // attachment for most of the frame; beginTonemap is what puts it in
+        // the shader-read layout this binding declares.
+        .sceneHdrColor = {
+            .sampler = resources.swapchain->sceneColorSampler(),
+            .imageView = resources.swapchain->resolvedColorView(),
+        },
         .sceneDepth = {
             .sampler = shadowPass_.sampler(),
             .imageView = resources.swapchain->sceneDepthView(),
@@ -1285,6 +1297,7 @@ VulkanRenderer::createPipelines(
         .descriptorSetLayout =
             resources.sceneDescriptors->layout(),
         .colorFormat = resources.swapchain->colorFormat(),
+        .sceneColorFormat = resources.swapchain->sceneColorFormat(),
         .depthFormat = depthFormat_,
         .shadowFormat = shadowFormat_,
         .sampleCount =
@@ -1524,7 +1537,7 @@ void VulkanRenderer::registerGameViewportTexture(
         return;
     }
     resources.gameViewportTexture = ImGui_ImplVulkan_AddTexture(
-        resources.swapchain->sceneColorView(),
+        resources.swapchain->displayColorView(),
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 #else
     (void)resources;

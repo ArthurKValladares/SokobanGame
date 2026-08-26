@@ -26,7 +26,9 @@ public:
         float modelShadowReceive = 0.0f;
         bool ambientOcclusionEnabled = false;
         float ambientOcclusionStrength = 0.0f;
-        bool ambientOcclusionVisualize = false;
+        RenderFrameData::Lighting::AmbientOcclusion::Debug
+            ambientOcclusionDebug =
+                RenderFrameData::Lighting::AmbientOcclusion::Debug::Off;
         bool shadowsEnabled = false;
         float shadowOpacity = 0.0f;
         float shadowBias = 0.0f;

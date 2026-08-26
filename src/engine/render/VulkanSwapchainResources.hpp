@@ -57,6 +57,17 @@ public:
         uint32_t imageIndex,
         RenderStats& stats) const;
     void ensureSceneColorReadable(VkCommandBuffer commandBuffer, RenderStats& stats);
+    // Hands the scene target to the tonemap pass and its display image to the
+    // rasterizer. Everything that used to read the scene target directly -
+    // the upscale blit, the developer workspace's game viewport, the frame
+    // capture - reads the display image now, which is what lets the two
+    // carry different formats.
+    void beginTonemap(VkCommandBuffer commandBuffer, RenderStats& stats);
+    // Only the developer workspace needs this: ImGui samples the display
+    // image for its Game Viewport instead of presenting it.
+    void publishDisplayColor(
+        VkCommandBuffer commandBuffer,
+        RenderStats& stats);
     void copyResolvedSceneColor(
         VkCommandBuffer commandBuffer,
         RenderStats& stats);
@@ -66,10 +77,15 @@ public:
     void upscaleSceneToSwapchain(
         VkCommandBuffer commandBuffer,
         uint32_t imageIndex,
-        RenderStats& stats) const;
+        RenderStats& stats);
 
     [[nodiscard]] VkSwapchainKHR handle() const { return swapchain_; }
+    // The swapchain's own format, and the format of the display image the
+    // tonemap pass writes. Both are what the surface wants presented.
     [[nodiscard]] VkFormat colorFormat() const { return colorFormat_; }
+    // What the scene renders into. Decoupled from colorFormat() so that the
+    // scene can carry range the surface cannot.
+    [[nodiscard]] VkFormat sceneColorFormat() const { return sceneColorFormat_; }
     [[nodiscard]] VkFormat depthFormat() const { return depthFormat_; }
     [[nodiscard]] VkExtent2D extent() const { return extent_; }
     [[nodiscard]] VkExtent2D renderExtent() const { return renderExtent_; }
@@ -89,6 +105,8 @@ public:
     [[nodiscard]] VkImageView resolveDepthView() const { return resolveDepthImage_.view; }
     [[nodiscard]] VkImage resolvedColorImage() const { return resolvedColorImage_.image; }
     [[nodiscard]] VkImageView resolvedColorView() const { return resolvedColorImage_.view; }
+    [[nodiscard]] VkImage displayColorImage() const { return displayColorImage_.image; }
+    [[nodiscard]] VkImageView displayColorView() const { return displayColorImage_.view; }
     [[nodiscard]] VkImageView renderColorView() const;
     [[nodiscard]] VkImageView resolveColorView() const;
 
@@ -105,7 +123,10 @@ private:
     void createDepth();
     void createSceneColor();
     void createSceneDepth();
+    void createDisplayColor();
     void destroyAttachments();
+    [[nodiscard]] VkFormat chooseSceneColorFormat() const;
+    [[nodiscard]] vulkanResources::ImageState displayColorSourceState() const;
     [[nodiscard]] VkSurfaceFormatKHR chooseSurfaceFormat(
         const std::vector<VkSurfaceFormatKHR>& formats) const;
     [[nodiscard]] VkPresentModeKHR choosePresentMode(
@@ -120,6 +141,7 @@ private:
     QueueFamilies queueFamilies_ {};
     VkSwapchainKHR swapchain_ = VK_NULL_HANDLE;
     VkFormat colorFormat_ = VK_FORMAT_UNDEFINED;
+    VkFormat sceneColorFormat_ = VK_FORMAT_UNDEFINED;
     VkFormat depthFormat_ = VK_FORMAT_D32_SFLOAT;
     VkExtent2D extent_ {};
     VkExtent2D renderExtent_ {};
@@ -134,8 +156,14 @@ private:
     vulkanResources::OwnedImage resolveDepthImage_ {};
     vulkanResources::OwnedImage sceneColorImage_ {};
     vulkanResources::OwnedImage sceneDepthImage_ {};
+    vulkanResources::OwnedImage displayColorImage_ {};
     VkSampler sceneColorSampler_ = VK_NULL_HANDLE;
     VkImageLayout sceneColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+    // There is one display image and more than one frame in flight, and in
+    // the developer workspace ImGui samples it at the end of every frame.
+    // The next frame's tonemap has to name that read as the thing it is
+    // waiting on, or its write races a sample still in progress.
+    VkImageLayout displayColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     VkImageLayout sceneDepthLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     bool depthLayoutInitialized_ = false;
 };

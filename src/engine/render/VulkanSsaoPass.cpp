@@ -81,8 +81,7 @@ void VulkanSsaoPass::record(
         !descriptorSet ||
         !pipelineLayout ||
         !pipelines.occlusion ||
-        !pipelines.composite ||
-        !pipelines.visualize) {
+        !pipelines.composite) {
         return;
     }
 
@@ -113,12 +112,18 @@ void VulkanSsaoPass::record(
         .maxDepth = 1.0f,
     };
     VkRect2D scissor { .offset = { 0, 0 }, .extent = extent_ };
+    using Debug = RenderFrameData::Lighting::AmbientOcclusion::Debug;
+    // Both draws read the same block. x-z belong to the occlusion pass; w is
+    // the composite's debug mode, which the occlusion pass ignores.
+    const float debugMode = settings.debug == Debug::AmbientMask
+        ? 2.0f
+        : (settings.debug == Debug::Occlusion ? 1.0f : 0.0f);
     GpuDrawInstance pushConstants {};
     pushConstants.color = {
         settings.strength,
         config::ssaoRadiusPixels,
         config::ssaoDepthRange,
-        settings.visualize ? 1.0f : 0.0f,
+        debugMode,
     };
 
     VkRenderingAttachmentInfo ssaoAttachment {
@@ -180,11 +185,14 @@ void VulkanSsaoPass::record(
     vulkanResources::transitionImages(commandBuffer, afterBarriers);
     ++stats.imageBarriers;
 
+    // The composite covers every pixel and no longer blends with what is
+    // already there - it samples the copy the recorder took instead - so the
+    // attachment's previous contents are worth nothing to it.
     VkRenderingAttachmentInfo compositeAttachment {
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
         .imageView = targetView,
         .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
     };
     VkRenderingInfo compositeRenderingInfo {
@@ -197,9 +205,7 @@ void VulkanSsaoPass::record(
     vkCmdBeginRendering(commandBuffer, &compositeRenderingInfo);
     ++stats.renderPasses;
     vkCmdBindPipeline(
-        commandBuffer,
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        settings.visualize ? pipelines.visualize : pipelines.composite);
+        commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.composite);
     ++stats.pipelineBinds;
     vkCmdBindDescriptorSets(
         commandBuffer,

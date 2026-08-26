@@ -162,22 +162,53 @@ set(SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders")
 set(LEVEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/levels")
 
-set(SHADER_SOURCES
-    "${SHADER_SOURCE_DIR}/triangle.vert.glsl"
-    "${SHADER_SOURCE_DIR}/triangle.frag.glsl"
-    "${SHADER_SOURCE_DIR}/water.frag.glsl"
-    "${SHADER_SOURCE_DIR}/mirror_energy.frag.glsl"
-    "${SHADER_SOURCE_DIR}/ground_splat.frag.glsl"
-    "${SHADER_SOURCE_DIR}/shadow.vert.glsl"
-    "${SHADER_SOURCE_DIR}/model.vert.glsl"
-    "${SHADER_SOURCE_DIR}/model_shadow.vert.glsl"
-    "${SHADER_SOURCE_DIR}/skinned_model.vert.glsl"
-    "${SHADER_SOURCE_DIR}/skinned_model_shadow.vert.glsl"
-    "${SHADER_SOURCE_DIR}/fullscreen.vert.glsl"
-    "${SHADER_SOURCE_DIR}/ssao.frag.glsl"
-    "${SHADER_SOURCE_DIR}/ssao_composite.frag.glsl"
-    "${SHADER_SOURCE_DIR}/world_transition.frag.glsl"
-)
+# Which shaders exist is sokoban::shaderCatalog's business, not this file's.
+# Read the list back out of it rather than repeating it: the same list decides
+# what gets compiled here, what ContentPipeline stages into the runtime asset
+# tree, and what VulkanPipelineFactory loads, and a shader that reaches only
+# some of those builds clean and then fails at launch. CMAKE_CONFIGURE_DEPENDS
+# re-runs configure when the catalog changes, so a new shader is picked up
+# without a manual reconfigure.
+set(SHADER_CATALOG_HEADER
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/render/ShaderCatalog.hpp")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${SHADER_CATALOG_HEADER}")
+file(READ "${SHADER_CATALOG_HEADER}" SHADER_CATALOG_TEXT)
+string(REGEX MATCHALL "\"[A-Za-z0-9_]+\\.(vert|frag)\\.glsl\""
+    SHADER_CATALOG_NAMES "${SHADER_CATALOG_TEXT}")
+string(REGEX MATCH "std::array<std::string_view,[ \t\r\n]*([0-9]+)>[ \t\r\n]*sources"
+    SHADER_CATALOG_SIZE_MATCH "${SHADER_CATALOG_TEXT}")
+if(NOT CMAKE_MATCH_1)
+    message(FATAL_ERROR
+        "Could not read the shader catalog size from ${SHADER_CATALOG_HEADER}.")
+endif()
+set(SHADER_CATALOG_SIZE ${CMAKE_MATCH_1})
+list(LENGTH SHADER_CATALOG_NAMES SHADER_CATALOG_NAME_COUNT)
+# A half-finished addition - a name without an array entry, or the reverse -
+# is the exact mistake this catalog exists to prevent, so it fails configure
+# rather than producing a build that is missing a shader.
+if(NOT SHADER_CATALOG_NAME_COUNT EQUAL SHADER_CATALOG_SIZE)
+    message(FATAL_ERROR
+        "${SHADER_CATALOG_HEADER} spells ${SHADER_CATALOG_NAME_COUNT} shader "
+        "filenames but declares sources as an array of ${SHADER_CATALOG_SIZE}. "
+        "Every name needs a constant and an entry in sources, and nothing "
+        "else in that header may quote a shader filename.")
+endif()
+set(SHADER_SOURCES)
+foreach(quoted_shader_name IN LISTS SHADER_CATALOG_NAMES)
+    string(REPLACE "\"" "" shader_catalog_name "${quoted_shader_name}")
+    set(shader_catalog_path "${SHADER_SOURCE_DIR}/${shader_catalog_name}")
+    # Say which file is missing and where it was named. Left to the custom
+    # command's DEPENDS, this surfaces as "No rule to make target" from the
+    # generator, which does not point at the catalog.
+    if(NOT EXISTS "${shader_catalog_path}")
+        message(FATAL_ERROR
+            "${SHADER_CATALOG_HEADER} names ${shader_catalog_name}, but "
+            "${shader_catalog_path} does not exist.")
+    endif()
+    list(APPEND SHADER_SOURCES "${shader_catalog_path}")
+endforeach()
+message(STATUS "Shader catalog: ${SHADER_CATALOG_SIZE} shaders")
 
 set(SHADER_OUTPUTS)
 foreach(shader_source IN LISTS SHADER_SOURCES)

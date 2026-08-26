@@ -7,6 +7,7 @@
 #include "engine/Level.hpp"
 #include "engine/LevelCatalog.hpp"
 #include "engine/OverworldMap.hpp"
+#include "engine/render/ShaderCatalog.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/ui/UiConfig.hpp"
@@ -31,23 +32,6 @@
 
 namespace sokoban {
 namespace {
-
-constexpr std::array<std::string_view, 14> requiredShaders {
-    "triangle.vert.glsl.spv",
-    "triangle.frag.glsl.spv",
-    "water.frag.glsl.spv",
-    "mirror_energy.frag.glsl.spv",
-    "ground_splat.frag.glsl.spv",
-    "shadow.vert.glsl.spv",
-    "model.vert.glsl.spv",
-    "model_shadow.vert.glsl.spv",
-    "skinned_model.vert.glsl.spv",
-    "skinned_model_shadow.vert.glsl.spv",
-    "fullscreen.vert.glsl.spv",
-    "ssao.frag.glsl.spv",
-    "ssao_composite.frag.glsl.spv",
-    "world_transition.frag.glsl.spv",
-};
 
 std::filesystem::path normalizedRelativePath(
     const std::filesystem::path& path,
@@ -598,13 +582,18 @@ private:
         }
     }
 
+    // A catalog entry whose module is not on disk throws out of sourceFile
+    // ("compiled shader is missing: ..."), so the build fails here rather
+    // than the game failing at launch. The false is includeNotices: the
+    // generated SPIR-V tree has no licence files to carry.
     void addShaders()
     {
-        for (const std::string_view shader : requiredShaders) {
+        for (const std::string_view shader : shaderCatalog::sources) {
+            const std::string compiled = shaderCatalog::compiledName(shader);
             addFile(
                 roots_.shaders,
-                std::filesystem::path(shader),
-                std::filesystem::path("shaders") / shader,
+                std::filesystem::path(compiled),
+                std::filesystem::path("shaders") / compiled,
                 "compiled shader",
                 false);
         }

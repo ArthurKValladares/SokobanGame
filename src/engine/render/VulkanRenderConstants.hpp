@@ -9,10 +9,11 @@
 namespace sokoban {
 
 // Scene descriptor set bindings that hold a single image each: the shadow map,
-// the resolved scene color, and the post-processing inputs. The model texture
-// array is the remaining binding. Kept here so the descriptor pool sizing and
-// the device sampled-image limit check agree on the count.
-inline constexpr uint32_t sceneSingleImageBindings = 7;
+// the sampled scene color copy, the post-processing inputs, and the scene
+// target itself, which the tonemap pass reads. The model texture array is the
+// remaining binding. Kept here so the descriptor pool sizing and the device
+// sampled-image limit check agree on the count.
+inline constexpr uint32_t sceneSingleImageBindings = 8;
 
 struct PointLightUniform {
     Vec4 positionAndRange {};

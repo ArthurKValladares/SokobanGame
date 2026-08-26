@@ -11,7 +11,8 @@ Engine Review"), whose own Phase 0-4 plan is the live one.
 
 ### Done
 
-Engine review **Phase 0 and Phase 1 are complete**:
+Engine review **Phase 0 and Phase 1 are complete, and Phase 2 has
+started**:
 
 - Phase 0: V5 shader compile flags, V1 per-image present semaphores, V3 stop
   binding the 16 KB skinning struct, V6 anisotropic filtering, T7 gate the
@@ -20,6 +21,10 @@ Engine review **Phase 0 and Phase 1 are complete**:
 - Phase 1: F1 a real math module, E1 CI (MSVC job + headless validation run),
   C1 give the renderer a camera, T1 instanced tiles, S4 close the frame-arena
   hazard.
+- Phase 2: F2 an HDR scene target and a tonemap pass, landed as F2a then F2b,
+  with the "AO modulates ambient rather than the composite" half of V7 pulled
+  forward into it. F2c - a real curve and a user-facing exposure control - is
+  deliberately not done; see below.
 
 Each has its own section in this file explaining the invariants it
 established. Read the C1 and T1 notes under the renderer section before
@@ -31,63 +36,154 @@ implementation"**, recording four claims the review itself got wrong. Worth
 reading before trusting its estimates for the remaining phases - "falls out of
 C1 almost for free" was wrong about T1 by roughly a factor of ten.
 
-### Next: F2, an HDR target and a tonemap pass
+### What F2 established
 
-Phase 2 is F2, then A1 (replace the glTF loader), F3 (material model and GGX),
-V7 (rework the SSAO), F4 (split the uber-shader). F2 first, because PBR values
-without range headroom look worse than what is there now.
+Read this before touching `shaders/`, `VulkanSwapchainResources` or the tail
+of `VulkanSceneRecorder::record`. The whole shape of the end of the frame
+changed, and two of the invariants fail silently.
 
-**Surface area.** `colorFormat_` is currently one value - the swapchain
-surface format, `B8G8R8A8_SRGB` - reused for the MSAA colour image, the
-resolve image and the scene-colour copy
-(`VulkanSwapchainResources.cpp:693, 723, 749, 812`). F2 splits that into two
-independent formats and each of those four sites needs deciding separately.
-`sceneColor` has ~41 references across the recorder and the shaders.
+**There are two colour images now, and they are not interchangeable.**
 
-**Four hazards, named in advance:**
+- The **scene target** (`resolvedColorImage_`, plus `msaaColorImage_` and the
+  `sceneColorImage_` snapshot) is `R16G16B16A16_SFLOAT`, chosen by
+  `chooseSceneColorFormat()`. It holds linear light with no ceiling. Nothing
+  presents it, nothing screenshots it, ImGui never samples it.
+- The **display image** (`displayColorImage_`) is the surface format, at
+  render extent, and holds the scene after tonemapping and before any UI.
+  Its three readers are the upscale blit, the developer workspace's Game
+  Viewport, and `captureRenderedFrame`.
 
-1. **The sRGB double-conversion.** The attachment is `_SRGB` today, so the
-   hardware performs the linear-to-sRGB encode on write. Moving to a float
-   target silently removes it, and the tonemap pass has to reinstate it
-   exactly once. Getting this wrong looks like a bad tonemap curve and is
-   actually a colour-space bug.
-2. **UI must composite after tonemapping**, or the interface is tonemapped
-   with the scene. It currently draws into the same target. This is an
-   ordering change in the same path that caused a grey-screen launch during
-   C1 - see the clip-space quad note under the renderer section.
-3. **Blur-behind ice and the scene-image UI preview sample the scene colour**
-   and would begin sampling unbounded HDR values. The `mix(blurred, color,
-   alpha)` in `triangle.frag` still works, but its inputs stop being 0..1.
-4. **MSAA average-resolve on pre-tonemap HDR produces fireflies.** Expected,
-   but it is why exposure has to exist before the result can be judged.
+`sceneColorFormat()` and `colorFormat()` are separate for exactly this
+reason, and `VulkanPipelineFactory::Target` says which one a pipeline draws
+into. A pipeline created against the wrong one is a dynamic-rendering format
+mismatch - loud, and caught by the headless validation job.
 
-**Suggested slicing**, following the pattern that worked for T1 - land each
-step so it either renders identically or is plainly broken:
+**The frame's only sRGB encode is the hardware's, on the tonemap pass's
+write.** The display image is an `_SRGB` format, `tonemap.frag` writes linear
+values into it, and the driver encodes. Do not add a `pow()` anywhere in that
+shader: the symptom of a second encode is an image that reads as a badly
+chosen tonemap curve rather than as a colour-space bug, which is how the
+review predicted this would be got wrong.
 
-- **F2a** decouple the scene colour format from the swapchain format, still
-  8-bit. Pure plumbing; should be pixel-identical.
-- **F2b** switch the scene target to `R16G16B16A16_SFLOAT` and add the
-  tonemap pass writing to the swapchain, exposure 1.0 and a straight clamp.
-  Near no-op visually. This is where the sRGB accounting gets settled.
-- **F2c** the real curve (ACES or Khronos PBR Neutral) plus an exposure
-  control. `SceneFrameUniform` has room for it.
+**The scene target's alpha channel is not an opacity.** Since V7's first half
+it carries the *ambient mask*: the share of that pixel's light that came from
+the ambient term. `ssao_composite.frag` scales its darkening by it, so
+occlusion no longer dims direct sunlight. Three things hold that up together,
+and removing any one of them breaks it quietly:
 
-**One ordering question to settle first.** The plan puts V7 after F3, but AO
-wants to modulate the ambient term *pre*-tonemap, and F2b moves the composite
-anyway. Pulling the "AO applies to ambient" part of V7 forward into F2b is
-probably cheaper than moving that composite twice.
+1. `triangle.frag` and `ground_splat.frag` declare
+   `layout(constant_id = 0) const bool writeAmbientMask`, and write the mask
+   to alpha only when it is set. Every scene pipeline supplies a value; only
+   the opaque ones supply true, because a blended draw needs alpha to mean
+   alpha.
+2. The blended scene pipelines have `VK_COLOR_COMPONENT_A_BIT` masked out of
+   their colour writes. A translucent surface therefore inherits the mask of
+   the opaque geometry behind it, which is the answer you want anyway. Do not
+   "fix" that write mask.
+3. `materialColor.rgb *= texture(sceneColor, uv).rgb` in the scene-image UI
+   path takes colour only. Folding alpha in would feather the preview by how
+   much ambient light happened to reach it.
+
+The mask stays 0 for anything unlit, so occlusion cannot touch the grid
+overlay, the 2D board or UI.
+
+**The AO composite stopped being a blend.** It reads the scene and writes it
+back, which no shader may do to its own attachment, so the recorder takes a
+`copyResolvedSceneColor` snapshot for it - gated on the same
+`VulkanSsaoPass::samplesSceneDepth` predicate as the depth copy, so a frame
+with ambient occlusion off pays for neither. That copy is the price of having
+no depth prepass and no G-buffer to reconstruct an ambient term from; either
+would remove it, and V7 proper is the place to decide. `ssaoVisualize_` is
+gone: the composite and its debug view are now the same pipeline, told apart
+by `params.w`.
+
+**It still runs before the preview inset and the level transition**, where
+the blended version ran. The occlusion buffer is built from the main view's
+depth and means nothing over an inset the preview re-rendered afterwards.
+
+### What the plan for F2 got wrong
+
+- **F2a was not pure plumbing.** Splitting the format was the easy half.
+  Three readers were reading the scene target for its *pixels* rather than
+  its geometry - the upscale blit, ImGui's Game Viewport (through the
+  `sceneColorImage_` copy), and `captureRenderedFrame` - and none of them can
+  read a float target. Decoupling the format without also giving those
+  readers a display image of their own would have been F2b with the risk
+  still attached. F2a introduced the display image and the tonemap pass as a
+  passthrough, and moved all three readers onto it; F2b then changed only the
+  format and the shader.
+- **Hazard 2 was half true.** In the shipping path the UI already composited
+  onto the swapchain after the upscale blit, so it was already on the right
+  side of where the tonemap would go. Only the developer-workspace path
+  needed reordering, and it needed the display image to reorder onto.
+- **Hazard 1 was settled by not doing anything.** Keeping the display image
+  `_SRGB` and writing linear from the tonemap shader gives exactly one
+  encode, performed by the hardware, with no shader-side gamma at all.
+- **Pulling V7's ambient half forward cost more than "cheaper than moving the
+  composite twice".** With no depth prepass the ambient term cannot be
+  recovered downstream, so it has to be *stored* - which is where the
+  specialization constant, the alpha write masks and the scene snapshot all
+  come from. It was still worth doing here rather than after F3, because all
+  three of those changes are in code F2 was rewriting anyway. It is not the
+  small change the review implied.
+
+### F2c is still open
+
+`tonemap.frag` applies exposure from `params.x` and then a straight clamp.
+`params.y` is reserved for a curve selector so a real curve (ACES or Khronos
+PBR Neutral) can be A/B'd against the clamp in one place. Exposure is pushed
+as 1.0 by the recorder and has no home in user settings yet;
+`SceneFrameUniform` has room if it should be per-frame rather than per-pass.
+
+Until a curve exists, bright surfaces still clip - they just clip at the end
+of the frame instead of inside every draw, and the headroom to grade them
+back is there. Expect MSAA fireflies on very bright specular highlights: an
+average resolve of pre-tonemap HDR does that, and it is a reason to want the
+curve, not a bug in the resolve.
+
+### Next: A1, replace the glTF loader
+
+Phase 2 continues with A1 (replace the glTF loader), F3 (material model and
+GGX), the rest of V7 (view-space normals, world-unit radius, bilateral blur,
+half resolution), and F4 (split the uber-shader). A1 before F3: it is what
+supplies real materials, tangents and extensions, so writing a material model
+against the current regex-driven loader is throwaway work.
+
+Two notes for F3 when it arrives. The scene target now has range, so PBR
+values will behave; and `VulkanPipelineFactory::Target` is the seam where a
+material's blend behaviour should hang, rather than another parallel set of
+pipeline handles.
 
 ### How this work has been verified
 
-The agent doing this cannot run the game, and **no shader compiler is
-available** to it - neither `glslc` nor `glslangValidator` exists in its cloud
-container or on the device VM - so shaders are only checked structurally
-(push-constant and uniform block layouts compared across every shader that
-declares them, leftover references grepped). The build is the first real
-shader validation. C++ is verified by per-translation-unit `-fsyntax-only`
-compiles and by building and running the test suites that link cheaply
+The agent doing this cannot run the game. It can, however, **compile the
+shaders**, which an earlier note in this file wrongly said was impossible: the
+cloud container has network access to the Ubuntu archive, and
+`apt-get update && apt-get install -y glslang-tools` puts `glslangValidator`
+and `spirv-dis` on it. Stage `shaders/` into the container and compile every
+shader with the same contract CMake uses:
+
+```text
+glslangValidator --target-env vulkan1.3 -S frag \
+    -DMODEL_TEXTURE_COUNT=64 -DMAX_SKIN_JOINTS=128 shaders/<name>.frag.glsl
+```
+
+That is a real compile, not a structural check, and `spirv-dis` on the result
+confirms the descriptor bindings and specialization constant IDs the C++ side
+expects. Do this for **all** shaders, not only the edited ones - a changed
+descriptor set layout is visible in shaders that were not touched. It does not
+replace the build: `glslc` is what ships, the `-O` pass differs, and only the
+build proves the SPIR-V matches the pipeline state.
+
+C++ is verified by per-translation-unit `-fsyntax-only` compiles with
+`-Wall -Wextra -Wpedantic -Wno-missing-field-initializers` - the device VM has
+g++ 11 and the SDL-vendored Khronos headers stand in for the Vulkan SDK, so
+nothing links - and by building and running the test suites that link cheaply
 (`IsoScenePreparerTests`, `GroundPickTests`, `MathTests`, `GeometryTests`,
-`OpaqueDrawSorterTests`). The project owner builds, runs, and reports back.
+`OpaqueDrawSorterTests`). Suppress `-Wmissing-field-initializers` or the
+designated-initializer style used throughout the Vulkan layer buries
+everything else; MSVC's `/W4` does not warn on it. The project owner builds,
+runs, and reports back.
 
 Two habits earned their keep and are worth continuing: **land a large change
 in two steps where the first is behaviour-preserving by construction** (T1 did
@@ -1198,6 +1294,60 @@ Renderer:
     **farthest first**. Reversing that order is a correctness bug, not a
     performance regression. `IsoScenePreparerTests` pins each direction
     separately.
+- **The scene renders in HDR and a tonemap pass ends the frame** (review item
+  F2). The full account is under "What F2 established" near the top of this
+  file; the mechanics that live with the renderer:
+  - `VulkanSwapchainResources` owns two formats. `sceneColorFormat()` is
+    `R16G16B16A16_SFLOAT` (falling back to the surface format if a device
+    somehow cannot attach, blend, sample and copy it) and covers
+    `resolvedColorImage_`, `msaaColorImage_` and the `sceneColorImage_`
+    snapshot. `colorFormat()` is the surface format and covers the swapchain
+    images and `displayColorImage_`.
+  - `displayColorImage_` is the scene at render extent, tonemapped, before
+    any UI. It exists because three consumers want exactly that and none of
+    them can read a float target: the upscale blit, ImGui's Game Viewport,
+    and `captureRenderedFrame`.
+  - `VulkanPipelineFactory::Target` decides a scene pipeline's attachment
+    format, whether it blends, and what its alpha means, together - they are
+    not independent choices, and splitting them back apart is how the alpha
+    channel's meaning gets quietly lost.
+  - Descriptor **binding 11** is the scene target, for the tonemap pass.
+    `sceneSingleImageBindings` went from 7 to 8, so the release device
+    contract now asks for 72 rather than 71 per-stage sampled images.
+  - **The scene target's alpha is the ambient mask, not an opacity**, and the
+    scene pass clears it to **0.0** for that reason: a pixel no geometry
+    covered has no ambient term to occlude. The clear is also the only value
+    the 2D board's pixels ever get, because its opaque pass runs on the
+    blended pipeline (`flatScenePipeline`), which writes no alpha. Ambient
+    occlusion therefore does nothing in the 2D view now. It used to multiply
+    that view like everything else; this is the more defensible answer, not
+    an accident.
+  - Debug UI > Lighting has an **"SSAO Debug View"** with Off / Occlusion /
+    Ambient Mask. The mask view is there because a wrong mask is invisible in
+    the finished image - it reads as somebody having tuned the occlusion
+    differently.
+- **Adding a shader is a one-line edit to
+  `src/engine/render/ShaderCatalog.hpp`**, and that file is the only place a
+  shader filename is written down. Four things consume it: CMakeLists.txt
+  parses the quoted names at configure time to build `SHADER_SOURCES`,
+  `ContentPipeline::addShaders` stages the compiled modules into the
+  executable's `assets/shaders` tree, `VulkanPipelineFactory` loads them by
+  catalog constant rather than by path literal, and
+  `ContentPipelineTests` fakes them from the same array.
+  - This replaced four hand-maintained copies of the list. F2's tonemap
+    shader was added to the CMake copy alone, which built clean, validated
+    clean, and then killed the game on startup with "Failed to open file:
+    ...\assets\shaders/tonemap.frag.glsl.spv". Nothing catches that: the
+    runtime reads only the staged tree, and the staging list was the one
+    that had not been updated.
+  - Two rules the catalog's own comment states and CMake enforces: every
+    name is a plain string literal, and no other quoted shader filename
+    appears in that header, comments included. Configure fails outright if
+    the number of quoted names disagrees with the declared size of
+    `sources`, so a half-finished addition cannot reach a build.
+  - The pattern is the one already used for `sokoban::maxModelTextures`: the
+    C++ header is the source of truth and CMake reads it back out, with
+    `CMAKE_CONFIGURE_DEPENDS` re-running configure when it changes.
   - A face in the opaque list may still be blended, and **blended faces
     write depth**. Drawn front to back, such a face writes depth before the
     geometry behind it is drawn, so it blends against the background instead

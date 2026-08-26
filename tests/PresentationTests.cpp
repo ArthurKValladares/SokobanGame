@@ -442,14 +442,18 @@ void testSettingsNormalizeAndConvert()
 
     settings.lighting.sunAzimuthDegrees = 0.0f;
     settings.lighting.sunTiltDegrees = 90.0f;
-    settings.lighting.ambientOcclusionVisualize = true;
+    settings.lighting.ambientOcclusionDebug =
+        sokoban::RenderFrameData::Lighting::AmbientOcclusion::Debug::
+            AmbientMask;
     const Vec3 direction = settings.sunDirection();
     CHECK(near(direction.x, 1.0f));
     CHECK(near(direction.y, 0.0f));
     CHECK(near(direction.z, 0.0f));
 
     const RenderFrameData::Lighting lighting = settings.renderLighting();
-    CHECK(lighting.ambientOcclusion.visualize);
+    CHECK(lighting.ambientOcclusion.debug ==
+        sokoban::RenderFrameData::Lighting::AmbientOcclusion::Debug::
+            AmbientMask);
     CHECK(near(lighting.shadows.opacity, 0.85f));
     CHECK(near(settings.renderGridOverlay().width, 0.0f));
 }

@@ -13,7 +13,13 @@ public:
         VkPipelineCache pipelineCache = VK_NULL_HANDLE;
         std::filesystem::path assetRoot;
         VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+        // The surface's format. Only the two pipelines that draw a display
+        // image use it: the tonemap pass and the UI.
         VkFormat colorFormat = VK_FORMAT_UNDEFINED;
+        // What everything that draws into the scene targets. Separate from
+        // colorFormat since F2a; a pipeline created against the wrong one is
+        // a dynamic-rendering format mismatch, not a subtle shading bug.
+        VkFormat sceneColorFormat = VK_FORMAT_UNDEFINED;
         VkFormat depthFormat = VK_FORMAT_UNDEFINED;
         VkFormat shadowFormat = VK_FORMAT_UNDEFINED;
         VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT;
@@ -68,9 +74,15 @@ public:
         return skinnedModelShadow_;
     }
     [[nodiscard]] VkPipeline ssao() const { return ssao_; }
+    // One pipeline for both the composite and its debug visualization: they
+    // are the same shader, the same format and, since the composite stopped
+    // blending, the same state. params.w picks which one the draw is.
     [[nodiscard]] VkPipeline ssaoComposite() const { return ssaoComposite_; }
-    [[nodiscard]] VkPipeline ssaoVisualize() const { return ssaoVisualize_; }
     [[nodiscard]] VkPipeline worldTransition() const { return worldTransition_; }
+    // Scene target -> display image. The one place a scene colour becomes a
+    // presentable one, which is why the range and encode decisions live in
+    // its shader rather than scattered through the scene shaders.
+    [[nodiscard]] VkPipeline tonemap() const { return tonemap_; }
 
 private:
     enum class VertexLayout {
@@ -82,9 +94,23 @@ private:
     };
 
     [[nodiscard]] VkShaderModule createShaderModule(const std::filesystem::path& path) const;
-    enum class BlendMode {
-        AlphaBlend,
-        Opaque,
+
+    // What a pipeline draws into, which decides three things together because
+    // they are not independent: whether it blends, what its alpha channel
+    // means, and whether the fragment shader is specialized to produce that
+    // alpha.
+    //
+    // The scene target's alpha is not an opacity. It carries the share of
+    // each pixel's light that came from the ambient term, which is what the
+    // SSAO composite scales its effect by, so that occlusion stops darkening
+    // direct sunlight. Opaque scene draws write it; blended scene draws must
+    // leave it untouched, so a translucent surface inherits the mask of the
+    // geometry behind it rather than blending garbage over it. Only a draw
+    // targeting a display image still writes a real alpha.
+    enum class Target {
+        SceneBlended,
+        SceneOpaque,
+        Display,
     };
 
     [[nodiscard]] VkPipeline createScenePipeline(
@@ -93,20 +119,22 @@ private:
         VertexLayout vertexLayout,
         VkSampleCountFlagBits sampleCount,
         VkFormat depthFormat,
+        VkFormat colorFormat,
         bool wireframe,
-        BlendMode blendMode = BlendMode::AlphaBlend) const;
+        Target target = Target::SceneBlended) const;
     [[nodiscard]] VkPipeline createShadowPipeline(
         VkShaderModule vertexShader,
         VertexLayout vertexLayout) const;
+    // Fullscreen passes. All of them write their result outright: the SSAO
+    // composite was the last multiply blend and stopped being one when it
+    // started scaling the ambient term rather than the finished pixel.
     [[nodiscard]] VkPipeline createPostProcessPipeline(
         VkShaderModule vertexShader,
         VkShaderModule fragmentShader,
-        VkFormat colorFormat,
-        bool multiplyBlend) const;
+        VkFormat colorFormat) const;
 
     VkDevice device_ = VK_NULL_HANDLE;
     VkPipelineCache pipelineCache_ = VK_NULL_HANDLE;
-    VkFormat colorFormat_ = VK_FORMAT_UNDEFINED;
     VkFormat shadowFormat_ = VK_FORMAT_UNDEFINED;
     VkPipelineLayout layout_ = VK_NULL_HANDLE;
     VkPipeline scene_ = VK_NULL_HANDLE;
@@ -127,8 +155,8 @@ private:
     VkPipeline skinnedModelShadow_ = VK_NULL_HANDLE;
     VkPipeline ssao_ = VK_NULL_HANDLE;
     VkPipeline ssaoComposite_ = VK_NULL_HANDLE;
-    VkPipeline ssaoVisualize_ = VK_NULL_HANDLE;
     VkPipeline worldTransition_ = VK_NULL_HANDLE;
+    VkPipeline tonemap_ = VK_NULL_HANDLE;
 };
 
 } // namespace sokoban
