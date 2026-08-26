@@ -2,6 +2,113 @@
 
 This file is intended for another coding agent picking up work on the project. It summarizes the current shape of the game, the codebase, level format, asset pipeline, implemented mechanics, recent decisions, and rough areas that still need attention.
 
+## Engine Review Work: Where To Pick Up
+
+**Two different plans in this file use "Phase" numbering.** The shipping
+baseline below refers to the old P0-P4 hardening plan, which is finished. This
+section is about the *engine review* (the published artifact, "Sokoban 3D
+Engine Review"), whose own Phase 0-4 plan is the live one.
+
+### Done
+
+Engine review **Phase 0 and Phase 1 are complete**:
+
+- Phase 0: V5 shader compile flags, V1 per-image present semaphores, V3 stop
+  binding the 16 KB skinning struct, V6 anisotropic filtering, T7 gate the
+  depth copy on AO, T3 back-face culling on models, T2 opaque pipelines and
+  front-to-back sort, T6 MSAA default to 4x.
+- Phase 1: F1 a real math module, E1 CI (MSVC job + headless validation run),
+  C1 give the renderer a camera, T1 instanced tiles, S4 close the frame-arena
+  hazard.
+
+Each has its own section in this file explaining the invariants it
+established. Read the C1 and T1 notes under the renderer section before
+touching `shaders/` or `VulkanSceneRecorder`; several of them are the kind of
+thing that fails silently.
+
+The review artifact carries a **section 11, "Corrections from
+implementation"**, recording four claims the review itself got wrong. Worth
+reading before trusting its estimates for the remaining phases - "falls out of
+C1 almost for free" was wrong about T1 by roughly a factor of ten.
+
+### Next: F2, an HDR target and a tonemap pass
+
+Phase 2 is F2, then A1 (replace the glTF loader), F3 (material model and GGX),
+V7 (rework the SSAO), F4 (split the uber-shader). F2 first, because PBR values
+without range headroom look worse than what is there now.
+
+**Surface area.** `colorFormat_` is currently one value - the swapchain
+surface format, `B8G8R8A8_SRGB` - reused for the MSAA colour image, the
+resolve image and the scene-colour copy
+(`VulkanSwapchainResources.cpp:693, 723, 749, 812`). F2 splits that into two
+independent formats and each of those four sites needs deciding separately.
+`sceneColor` has ~41 references across the recorder and the shaders.
+
+**Four hazards, named in advance:**
+
+1. **The sRGB double-conversion.** The attachment is `_SRGB` today, so the
+   hardware performs the linear-to-sRGB encode on write. Moving to a float
+   target silently removes it, and the tonemap pass has to reinstate it
+   exactly once. Getting this wrong looks like a bad tonemap curve and is
+   actually a colour-space bug.
+2. **UI must composite after tonemapping**, or the interface is tonemapped
+   with the scene. It currently draws into the same target. This is an
+   ordering change in the same path that caused a grey-screen launch during
+   C1 - see the clip-space quad note under the renderer section.
+3. **Blur-behind ice and the scene-image UI preview sample the scene colour**
+   and would begin sampling unbounded HDR values. The `mix(blurred, color,
+   alpha)` in `triangle.frag` still works, but its inputs stop being 0..1.
+4. **MSAA average-resolve on pre-tonemap HDR produces fireflies.** Expected,
+   but it is why exposure has to exist before the result can be judged.
+
+**Suggested slicing**, following the pattern that worked for T1 - land each
+step so it either renders identically or is plainly broken:
+
+- **F2a** decouple the scene colour format from the swapchain format, still
+  8-bit. Pure plumbing; should be pixel-identical.
+- **F2b** switch the scene target to `R16G16B16A16_SFLOAT` and add the
+  tonemap pass writing to the swapchain, exposure 1.0 and a straight clamp.
+  Near no-op visually. This is where the sRGB accounting gets settled.
+- **F2c** the real curve (ACES or Khronos PBR Neutral) plus an exposure
+  control. `SceneFrameUniform` has room for it.
+
+**One ordering question to settle first.** The plan puts V7 after F3, but AO
+wants to modulate the ambient term *pre*-tonemap, and F2b moves the composite
+anyway. Pulling the "AO applies to ambient" part of V7 forward into F2b is
+probably cheaper than moving that composite twice.
+
+### How this work has been verified
+
+The agent doing this cannot run the game, and **no shader compiler is
+available** to it - neither `glslc` nor `glslangValidator` exists in its cloud
+container or on the device VM - so shaders are only checked structurally
+(push-constant and uniform block layouts compared across every shader that
+declares them, leftover references grepped). The build is the first real
+shader validation. C++ is verified by per-translation-unit `-fsyntax-only`
+compiles and by building and running the test suites that link cheaply
+(`IsoScenePreparerTests`, `GroundPickTests`, `MathTests`, `GeometryTests`,
+`OpaqueDrawSorterTests`). The project owner builds, runs, and reports back.
+
+Two habits earned their keep and are worth continuing: **land a large change
+in two steps where the first is behaviour-preserving by construction** (T1 did
+this and it isolated the risk), and **add a Debug UI toggle for anything whose
+failure mode is invisible** - Debug UI > Engine now has "Cull Model Back
+Faces" and "Sort Opaque Front To Back", which between them separate a winding
+problem from an ordering one in a single click.
+
+### Loose ends
+
+- `src/engine/render/GpuModelInstance.hpp` is retired by T1 and nothing
+  includes it. It still exists only because the cloud agent cannot delete
+  files from the working tree. Delete it.
+- 51 files show as fully rewritten in `git diff` because of carriage-return
+  churn with `core.autocrlf` unset. A small `.gitattributes` would settle it
+  permanently and make future review diffs readable.
+- The review artifact could not be republished from the cloud session: the
+  environment's network allowlist blocks `*.frame.claudeusercontent.com`. Add
+  it under environment settings -> Code -> Network access -> Custom -> Allowed
+  domains, or have the agent force-publish over the existing URL.
+
 ## Repository Note
 
 Treat the local checkout as the canonical project location:
