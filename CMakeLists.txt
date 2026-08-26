@@ -103,6 +103,26 @@ target_include_directories(sokoban_stb SYSTEM INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb"
 )
 
+# cgltf is vendored rather than fetched, like every other third-party header
+# here, so a fresh clone that skipped it should say what to do rather than
+# failing later with a missing include from the middle of GltfMesh.cpp.
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf/cgltf.h")
+    message(FATAL_ERROR
+        "third_party/cgltf/cgltf.h is missing. Download cgltf.h and "
+        "LICENSE.txt from https://github.com/jkuhlmann/cgltf (release v1.15, "
+        "which is what this tree is written against) into third_party/cgltf/. "
+        "Only the reader is needed; cgltf_write.h is not used.")
+endif()
+# SYSTEM, like sokoban_json and sokoban_stb: the implementation is compiled
+# into GltfMesh.cpp by CGLTF_IMPLEMENTATION, which is how stb_image and
+# stb_truetype are already handled, and this is what keeps 7,000 lines of
+# vendored C out of /W4 and clang-tidy while leaving it inside ASan and UBSan
+# - which is where a parser fed hostile files belongs.
+add_library(sokoban_cgltf INTERFACE)
+target_include_directories(sokoban_cgltf SYSTEM INTERFACE
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf"
+)
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL/CMakeLists.txt")
     set(SDL_SHARED OFF CACHE BOOL "Build SDL3 as a shared library" FORCE)
     set(SDL_STATIC ON CACHE BOOL "Build SDL3 as a static library" FORCE)
@@ -400,7 +420,7 @@ target_include_directories(sokoban_core PUBLIC src)
 target_include_directories(sokoban_core PRIVATE third_party/miniaudio)
 target_link_libraries(sokoban_core
     PUBLIC SDL3::SDL3
-    PRIVATE Threads::Threads sokoban_json sokoban_stb
+    PRIVATE Threads::Threads sokoban_json sokoban_stb sokoban_cgltf
 )
 if(WIN32)
     target_link_libraries(sokoban_core PRIVATE dbghelp)
@@ -1016,6 +1036,12 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb/LICENSE"
     DESTINATION licenses
     RENAME stb-LICENSE.txt
+    COMPONENT Runtime
+)
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf/LICENSE.txt"
+    DESTINATION licenses
+    RENAME cgltf-LICENSE.txt
     COMPONENT Runtime
 )
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/LICENSE.txt")

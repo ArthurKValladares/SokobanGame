@@ -2,54 +2,364 @@
 
 #include "engine/TaskSystem.hpp"
 
+// glTF parsing is cgltf's job (review item A1). This replaced a hand-rolled
+// scanner that built a std::regex per field lookup and could not read more
+// than one buffer, a sparse accessor, any KHR_* extension, a glTF material,
+// or an animation's interpolation mode.
+//
+// The implementation is compiled here rather than in a translation unit of
+// its own, which is how stb_image is compiled into ImageData.cpp and
+// stb_truetype into FontAtlas.cpp. third_party/cgltf is a SYSTEM include, so
+// /W4 and clang-tidy leave those seven thousand lines alone while ASan and
+// UBSan still instrument them - which is where a parser fed files off the
+// internet belongs.
+//
+// Nothing above this file knows cgltf exists, and it must stay that way:
+// GltfMesh.hpp is library-agnostic on purpose so that swapping the parser
+// again is a change to one translation unit. See the fastgltf note under
+// Important Design Decisions in HANDOFF.md.
+#define CGLTF_IMPLEMENTATION
+#include <cgltf.h>
+
 #include <algorithm>
-#include <cctype>
-#include <cmath>
-#include <cstring>
+#include <array>
+#include <cstdint>
+#include <cstdlib>
 #include <fstream>
-#include <iterator>
 #include <limits>
-#include <optional>
-#include <regex>
+#include <memory>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <unordered_map>
+#include <vector>
 
 namespace sokoban {
 namespace {
 
-constexpr uint32_t glbMagic = 0x46546C67;
-constexpr uint32_t glbJsonChunk = 0x4E4F534A;
-constexpr uint32_t glbBinaryChunk = 0x004E4942;
+// ---------------------------------------------------------------------------
+// Document handling
+// ---------------------------------------------------------------------------
 
-struct BufferView {
-    size_t byteOffset = 0;
-    size_t byteLength = 0;
-    size_t byteStride = 0;
-};
+// cgltf speaks `const char*` paths and would otherwise fopen them directly.
+// Every path here is a std::filesystem::path built from the asset root, and
+// on Windows that root can contain characters the narrow ANSI code page
+// cannot represent - a player whose user directory is not ASCII is not a
+// hypothetical. Handing cgltf UTF-8 and rebuilding a path from it in the read
+// callback keeps the round trip lossless, and keeps every read going through
+// the same std::filesystem that the rest of the engine uses.
+std::string utf8Path(const std::filesystem::path& path)
+{
+    const std::u8string text = path.u8string();
+    return std::string(text.begin(), text.end());
+}
 
-struct Accessor {
-    size_t bufferView = 0;
-    size_t byteOffset = 0;
-    size_t count = 0;
-    uint32_t componentType = 0;
-    std::string type;
-    bool normalized = false;
-};
+std::filesystem::path pathFromUtf8(const char* text)
+{
+    return std::filesystem::path(
+        std::u8string(reinterpret_cast<const char8_t*>(text)));
+}
 
-struct GltfDocument {
-    std::string json;
-    std::vector<std::byte> buffer;
-};
+cgltf_result readFileForCgltf(
+    const cgltf_memory_options* memoryOptions,
+    const cgltf_file_options* fileOptions,
+    const char* path,
+    cgltf_size* size,
+    void** data)
+{
+    (void)fileOptions;
+    // Mirrors cgltf_default_file_read's ownership contract exactly: the block
+    // handed back is released by releaseFileForCgltf below, through the same
+    // allocator pair.
+    auto* allocate = memoryOptions->alloc_func;
+    auto* release = memoryOptions->free_func;
 
-struct GltfNode {
-    std::string name;
-    std::vector<uint32_t> children;
-    Vec3 translation {};
-    Quat rotation {};
-    Vec3 scale { 1.0f, 1.0f, 1.0f };
+    std::ifstream stream(pathFromUtf8(path), std::ios::binary | std::ios::ate);
+    if (!stream) {
+        return cgltf_result_file_not_found;
+    }
+    const std::streamoff length = stream.tellg();
+    if (length < 0) {
+        return cgltf_result_io_error;
+    }
+    stream.seekg(0);
+
+    const auto fileSize = static_cast<cgltf_size>(length);
+    void* buffer = allocate
+        ? allocate(memoryOptions->user_data, fileSize)
+        : std::malloc(fileSize != 0 ? fileSize : 1);
+    if (!buffer) {
+        return cgltf_result_out_of_memory;
+    }
+    if (fileSize != 0 &&
+        !stream.read(static_cast<char*>(buffer),
+            static_cast<std::streamsize>(fileSize))) {
+        if (release) {
+            release(memoryOptions->user_data, buffer);
+        } else {
+            std::free(buffer);
+        }
+        return cgltf_result_io_error;
+    }
+
+    *size = fileSize;
+    *data = buffer;
+    return cgltf_result_success;
+}
+
+void releaseFileForCgltf(
+    const cgltf_memory_options* memoryOptions,
+    const cgltf_file_options* fileOptions,
+    void* data)
+{
+    (void)fileOptions;
+    if (memoryOptions->free_func) {
+        memoryOptions->free_func(memoryOptions->user_data, data);
+    } else {
+        std::free(data);
+    }
+}
+
+std::string_view resultName(cgltf_result result)
+{
+    switch (result) {
+    case cgltf_result_success: return "success";
+    case cgltf_result_data_too_short: return "data too short";
+    case cgltf_result_unknown_format: return "unknown format";
+    case cgltf_result_invalid_json: return "invalid JSON";
+    case cgltf_result_invalid_gltf: return "invalid glTF";
+    case cgltf_result_invalid_options: return "invalid options";
+    case cgltf_result_file_not_found: return "file not found";
+    case cgltf_result_io_error: return "I/O error";
+    case cgltf_result_out_of_memory: return "out of memory";
+    case cgltf_result_legacy_gltf: return "legacy glTF 1.0";
+    default: return "unknown error";
+    }
+}
+
+struct DocumentDeleter {
+    void operator()(cgltf_data* data) const { cgltf_free(data); }
 };
+using Document = std::unique_ptr<cgltf_data, DocumentDeleter>;
+
+cgltf_options cgltfOptions()
+{
+    cgltf_options options {};
+    options.file.read = &readFileForCgltf;
+    options.file.release = &releaseFileForCgltf;
+    return options;
+}
+
+// Structure only: the JSON or the GLB's JSON chunk, with no buffer resolved.
+// Enough to answer what a file contains, which is all listGltfAnimationNames
+// wants - and it deliberately still answers for a file whose .bin is missing.
+Document parseDocument(const std::filesystem::path& path)
+{
+    const cgltf_options options = cgltfOptions();
+    const std::string narrowPath = utf8Path(path);
+
+    cgltf_data* parsed = nullptr;
+    const cgltf_result result =
+        cgltf_parse_file(&options, narrowPath.c_str(), &parsed);
+    Document document(parsed);
+    if (result != cgltf_result_success) {
+        if (result == cgltf_result_file_not_found) {
+            throw std::runtime_error(
+                "Failed to open glTF file: " + path.string());
+        }
+        throw std::runtime_error(
+            "Failed to parse glTF file: " + path.string() + " (" +
+            std::string(resultName(result)) + ")");
+    }
+    return document;
+}
+
+// Structure plus data. cgltf_load_buffers is what makes a GLB chunk, an
+// external .bin and a base64 data URI all arrive the same way, and what
+// retired the previous loader's one-buffer-only limit.
+Document loadDocument(const std::filesystem::path& path)
+{
+    Document document = parseDocument(path);
+    const cgltf_options options = cgltfOptions();
+    const std::string narrowPath = utf8Path(path);
+    const cgltf_result result =
+        cgltf_load_buffers(&options, document.get(), narrowPath.c_str());
+    if (result != cgltf_result_success) {
+        throw std::runtime_error(
+            "Failed to open glTF buffer: " + path.string() + " (" +
+            std::string(resultName(result)) + ")");
+    }
+    return document;
+}
+
+// ---------------------------------------------------------------------------
+// Accessors
+// ---------------------------------------------------------------------------
+//
+// Thin wrappers that keep the shape and the messages the hand-rolled readers
+// had. What is gone from underneath them is the part that was worth deleting:
+// component-type conversion, byte strides, normalized integers and sparse
+// accessors are cgltf's problem now.
+
+Vec3 readVec3(const cgltf_accessor& accessor, size_t index)
+{
+    std::array<float, 3> values {};
+    if (accessor.type != cgltf_type_vec3 ||
+        !cgltf_accessor_read_float(&accessor, index, values.data(), 3)) {
+        throw std::runtime_error("Expected a float VEC3 glTF accessor");
+    }
+    return { values[0], values[1], values[2] };
+}
+
+Vec2 readVec2(const cgltf_accessor& accessor, size_t index)
+{
+    std::array<float, 2> values {};
+    if (accessor.type != cgltf_type_vec2 ||
+        !cgltf_accessor_read_float(&accessor, index, values.data(), 2)) {
+        throw std::runtime_error("Expected a float VEC2 glTF accessor");
+    }
+    return { values[0], values[1] };
+}
+
+Vec4 readVec4(const cgltf_accessor& accessor, size_t index)
+{
+    std::array<float, 4> values {};
+    if (accessor.type != cgltf_type_vec4 ||
+        !cgltf_accessor_read_float(&accessor, index, values.data(), 4)) {
+        throw std::runtime_error("Expected a float VEC4 glTF accessor");
+    }
+    return { values[0], values[1], values[2], values[3] };
+}
+
+float readScalarFloat(const cgltf_accessor& accessor, size_t index)
+{
+    float value = 0.0f;
+    if (accessor.type != cgltf_type_scalar ||
+        !cgltf_accessor_read_float(&accessor, index, &value, 1)) {
+        throw std::runtime_error("Expected a float scalar glTF accessor");
+    }
+    return value;
+}
+
+Mat4 readMat4(const cgltf_accessor& accessor, size_t index)
+{
+    Mat4 matrix;
+    if (accessor.type != cgltf_type_mat4 ||
+        !cgltf_accessor_read_float(
+            &accessor, index, matrix.values.data(), matrix.values.size())) {
+        throw std::runtime_error("Expected a float MAT4 glTF accessor");
+    }
+    return matrix;
+}
+
+std::array<uint16_t, 4> readJoints(const cgltf_accessor& accessor, size_t index)
+{
+    std::array<cgltf_uint, 4> values {};
+    if (accessor.type != cgltf_type_vec4 ||
+        !cgltf_accessor_read_uint(&accessor, index, values.data(), 4)) {
+        throw std::runtime_error(
+            "Expected an integer VEC4 JOINTS_0 glTF accessor");
+    }
+    return {
+        static_cast<uint16_t>(values[0]),
+        static_cast<uint16_t>(values[1]),
+        static_cast<uint16_t>(values[2]),
+        static_cast<uint16_t>(values[3]),
+    };
+}
+
+// cgltf scales integer weights only when the accessor says `normalized`,
+// where the previous reader always divided by the component maximum. The two
+// differ by one factor common to all four weights, and the caller divides by
+// their sum immediately afterwards, so the result is the same either way.
+std::array<float, 4> readWeights(const cgltf_accessor& accessor, size_t index)
+{
+    std::array<float, 4> values {};
+    if (accessor.type != cgltf_type_vec4 ||
+        !cgltf_accessor_read_float(&accessor, index, values.data(), 4)) {
+        throw std::runtime_error("Expected a VEC4 WEIGHTS_0 glTF accessor");
+    }
+    return values;
+}
+
+uint32_t readIndex(const cgltf_accessor& accessor, size_t index)
+{
+    return static_cast<uint32_t>(cgltf_accessor_read_index(&accessor, index));
+}
+
+const cgltf_accessor* findAttribute(
+    const cgltf_primitive& primitive,
+    cgltf_attribute_type type)
+{
+    for (cgltf_size i = 0; i < primitive.attributes_count; ++i) {
+        const cgltf_attribute& attribute = primitive.attributes[i];
+        // Set 0 only. A second UV set or a second joint influence set is F3's
+        // problem, not this file's.
+        if (attribute.type == type && attribute.index == 0) {
+            return attribute.data;
+        }
+    }
+    return nullptr;
+}
+
+const cgltf_accessor& requiredAttribute(
+    const cgltf_primitive& primitive,
+    cgltf_attribute_type type,
+    std::string_view name)
+{
+    const cgltf_accessor* accessor = findAttribute(primitive, type);
+    if (!accessor) {
+        throw std::runtime_error(
+            "glTF primitive is missing the " + std::string(name) +
+            " attribute");
+    }
+    return *accessor;
+}
+
+// The skeleton, flattened. cgltf hands back the parent pointer directly, so
+// the child-list walk the previous loader needed to invert is gone.
+std::vector<SkeletonNode> skeletonNodes(const cgltf_data& data)
+{
+    std::vector<SkeletonNode> nodes;
+    nodes.reserve(data.nodes_count);
+    for (cgltf_size i = 0; i < data.nodes_count; ++i) {
+        const cgltf_node& node = data.nodes[i];
+        // Defaults are stated rather than assumed: a node carrying a matrix
+        // instead of a TRS triple leaves these unset, and the previous loader
+        // treated that as identity. Reading the matrix instead is a change in
+        // behaviour and belongs with the work that needs it.
+        const Vec3 translation = node.has_translation
+            ? Vec3 { node.translation[0], node.translation[1], node.translation[2] }
+            : Vec3 {};
+        const Vec4 rotation = node.has_rotation
+            ? Vec4 { node.rotation[0], node.rotation[1], node.rotation[2], node.rotation[3] }
+            : Vec4 { 0.0f, 0.0f, 0.0f, 1.0f };
+        const Vec3 scale = node.has_scale
+            ? Vec3 { node.scale[0], node.scale[1], node.scale[2] }
+            : Vec3 { 1.0f, 1.0f, 1.0f };
+        nodes.push_back({
+            .name = node.name ? std::string(node.name) : std::string(),
+            .parent = node.parent
+                ? static_cast<int>(cgltf_node_index(&data, node.parent))
+                : -1,
+            .translation = translation,
+            .rotation = normalize(quatFromVec4(rotation)),
+            .scale = scale,
+        });
+    }
+    return nodes;
+}
+
+// Which manifest slot a primitive's material maps to. A primitive with no
+// material resolves to slot 0, which is what the previous loader did.
+uint32_t materialSlotIndex(
+    const cgltf_data& data,
+    const cgltf_primitive& primitive)
+{
+    return primitive.material
+        ? static_cast<uint32_t>(cgltf_material_index(&data, primitive.material))
+        : 0U;
+}
 
 struct SourceBounds {
     Vec3 minimum {
@@ -63,561 +373,6 @@ struct SourceBounds {
         std::numeric_limits<float>::lowest(),
     };
 };
-
-std::string readTextFile(const std::filesystem::path& path)
-{
-    std::ifstream stream(path, std::ios::binary);
-    if (!stream) {
-        throw std::runtime_error("Failed to open glTF file: " + path.string());
-    }
-    return {
-        std::istreambuf_iterator<char>(stream),
-        std::istreambuf_iterator<char>(),
-    };
-}
-
-std::vector<std::byte> readBinaryFile(const std::filesystem::path& path)
-{
-    std::ifstream stream(path, std::ios::binary | std::ios::ate);
-    if (!stream) {
-        throw std::runtime_error("Failed to open glTF buffer: " + path.string());
-    }
-
-    const std::streamsize size = stream.tellg();
-    if (size < 0) {
-        throw std::runtime_error("Failed to determine glTF buffer size: " + path.string());
-    }
-
-    std::vector<std::byte> bytes(static_cast<size_t>(size));
-    stream.seekg(0);
-    if (!bytes.empty() && !stream.read(reinterpret_cast<char*>(bytes.data()), size)) {
-        throw std::runtime_error("Failed to read glTF buffer: " + path.string());
-    }
-    return bytes;
-}
-
-template <typename Value>
-Value readValue(const std::vector<std::byte>& bytes, size_t offset)
-{
-    if (offset + sizeof(Value) > bytes.size()) {
-        throw std::runtime_error("glTF data exceeds its binary buffer");
-    }
-    Value value {};
-    std::memcpy(&value, bytes.data() + offset, sizeof(Value));
-    return value;
-}
-
-GltfDocument loadDocument(const std::filesystem::path& path)
-{
-    if (path.extension() != ".glb") {
-        GltfDocument document;
-        document.json = readTextFile(path);
-        return document;
-    }
-
-    const std::vector<std::byte> file = readBinaryFile(path);
-    if (file.size() < 20 || readValue<uint32_t>(file, 0) != glbMagic) {
-        throw std::runtime_error("Invalid GLB header: " + path.string());
-    }
-
-    GltfDocument document;
-    size_t offset = 12;
-    while (offset + 8 <= file.size()) {
-        const uint32_t chunkLength = readValue<uint32_t>(file, offset);
-        const uint32_t chunkType = readValue<uint32_t>(file, offset + 4);
-        offset += 8;
-        if (offset + chunkLength > file.size()) {
-            throw std::runtime_error("Invalid GLB chunk length: " + path.string());
-        }
-
-        if (chunkType == glbJsonChunk) {
-            document.json.assign(
-                reinterpret_cast<const char*>(file.data() + offset),
-                chunkLength);
-            while (!document.json.empty() &&
-                (document.json.back() == '\0' || document.json.back() == ' ')) {
-                document.json.pop_back();
-            }
-        } else if (chunkType == glbBinaryChunk) {
-            document.buffer.assign(
-                file.begin() + static_cast<std::ptrdiff_t>(offset),
-                file.begin() + static_cast<std::ptrdiff_t>(offset + chunkLength));
-        }
-        offset += chunkLength;
-    }
-
-    if (document.json.empty() || document.buffer.empty()) {
-        throw std::runtime_error("GLB is missing JSON or binary data: " + path.string());
-    }
-    return document;
-}
-
-std::string_view jsonArray(std::string_view json, std::string_view key)
-{
-    const std::string quotedKey = "\"" + std::string(key) + "\"";
-    const size_t keyPosition = json.find(quotedKey);
-    if (keyPosition == std::string_view::npos) {
-        throw std::runtime_error("Missing glTF array: " + std::string(key));
-    }
-    const size_t start = json.find('[', keyPosition + quotedKey.size());
-    if (start == std::string_view::npos) {
-        throw std::runtime_error("Invalid glTF array: " + std::string(key));
-    }
-
-    size_t depth = 0;
-    bool inString = false;
-    bool escaped = false;
-    for (size_t index = start; index < json.size(); ++index) {
-        const char character = json[index];
-        if (inString) {
-            if (escaped) {
-                escaped = false;
-            } else if (character == '\\') {
-                escaped = true;
-            } else if (character == '"') {
-                inString = false;
-            }
-            continue;
-        }
-        if (character == '"') {
-            inString = true;
-        } else if (character == '[') {
-            ++depth;
-        } else if (character == ']' && --depth == 0) {
-            return json.substr(start + 1, index - start - 1);
-        }
-    }
-    throw std::runtime_error("Unterminated glTF array: " + std::string(key));
-}
-
-std::string_view jsonArrayFromOpenBracket(std::string_view json, size_t start, std::string_view key)
-{
-    size_t depth = 0;
-    bool inString = false;
-    bool escaped = false;
-    for (size_t index = start; index < json.size(); ++index) {
-        const char character = json[index];
-        if (inString) {
-            if (escaped) {
-                escaped = false;
-            } else if (character == '\\') {
-                escaped = true;
-            } else if (character == '"') {
-                inString = false;
-            }
-            continue;
-        }
-        if (character == '"') {
-            inString = true;
-        } else if (character == '[') {
-            ++depth;
-        } else if (character == ']' && --depth == 0) {
-            return json.substr(start + 1, index - start - 1);
-        }
-    }
-    throw std::runtime_error("Unterminated glTF array: " + std::string(key));
-}
-
-std::string_view topLevelJsonArray(std::string_view json, std::string_view key)
-{
-    size_t objectDepth = 0;
-    size_t arrayDepth = 0;
-    bool inString = false;
-    bool escaped = false;
-    size_t stringStart = 0;
-
-    for (size_t index = 0; index < json.size(); ++index) {
-        const char character = json[index];
-        if (inString) {
-            if (escaped) {
-                escaped = false;
-            } else if (character == '\\') {
-                escaped = true;
-            } else if (character == '"') {
-                inString = false;
-                if (objectDepth == 1 && arrayDepth == 0 && json.substr(stringStart, index - stringStart) == key) {
-                    size_t colon = index + 1;
-                    while (colon < json.size() && std::isspace(static_cast<unsigned char>(json[colon]))) {
-                        ++colon;
-                    }
-                    if (colon >= json.size() || json[colon] != ':') {
-                        continue;
-                    }
-                    size_t start = colon + 1;
-                    while (start < json.size() && std::isspace(static_cast<unsigned char>(json[start]))) {
-                        ++start;
-                    }
-                    if (start < json.size() && json[start] == '[') {
-                        return jsonArrayFromOpenBracket(json, start, key);
-                    }
-                }
-            }
-            continue;
-        }
-
-        if (character == '"') {
-            inString = true;
-            escaped = false;
-            stringStart = index + 1;
-        } else if (character == '{') {
-            ++objectDepth;
-        } else if (character == '}' && objectDepth > 0) {
-            --objectDepth;
-        } else if (character == '[') {
-            ++arrayDepth;
-        } else if (character == ']' && arrayDepth > 0) {
-            --arrayDepth;
-        }
-    }
-
-    throw std::runtime_error("Missing top-level glTF array: " + std::string(key));
-}
-
-std::vector<std::string_view> jsonObjects(std::string_view array)
-{
-    std::vector<std::string_view> objects;
-    size_t depth = 0;
-    size_t start = 0;
-    bool inString = false;
-    bool escaped = false;
-    for (size_t index = 0; index < array.size(); ++index) {
-        const char character = array[index];
-        if (inString) {
-            if (escaped) {
-                escaped = false;
-            } else if (character == '\\') {
-                escaped = true;
-            } else if (character == '"') {
-                inString = false;
-            }
-            continue;
-        }
-        if (character == '"') {
-            inString = true;
-        } else if (character == '{') {
-            if (depth++ == 0) {
-                start = index;
-            }
-        } else if (character == '}' && depth > 0 && --depth == 0) {
-            objects.push_back(array.substr(start, index - start + 1));
-        }
-    }
-    return objects;
-}
-
-std::optional<size_t> unsignedField(std::string_view object, std::string_view key)
-{
-    const std::regex pattern(
-        "\"" + std::string(key) + "\"\\s*:\\s*([0-9]+)",
-        std::regex::ECMAScript);
-    std::cmatch match;
-    if (!std::regex_search(object.data(), object.data() + object.size(), match, pattern)) {
-        return std::nullopt;
-    }
-    return static_cast<size_t>(std::stoull(match[1].str()));
-}
-
-std::optional<bool> boolField(std::string_view object, std::string_view key)
-{
-    const std::regex pattern(
-        "\"" + std::string(key) + "\"\\s*:\\s*(true|false)",
-        std::regex::ECMAScript);
-    std::cmatch match;
-    if (!std::regex_search(object.data(), object.data() + object.size(), match, pattern)) {
-        return std::nullopt;
-    }
-    return match[1].str() == "true";
-}
-
-std::optional<std::string> stringField(std::string_view object, std::string_view key)
-{
-    const std::regex pattern(
-        "\"" + std::string(key) + "\"\\s*:\\s*\"([^\"]+)\"",
-        std::regex::ECMAScript);
-    std::cmatch match;
-    if (!std::regex_search(object.data(), object.data() + object.size(), match, pattern)) {
-        return std::nullopt;
-    }
-    return match[1].str();
-}
-
-size_t requiredUnsignedField(std::string_view object, std::string_view key)
-{
-    const std::optional<size_t> value = unsignedField(object, key);
-    if (!value) {
-        throw std::runtime_error("Missing glTF integer field: " + std::string(key));
-    }
-    return *value;
-}
-
-std::string requiredStringField(std::string_view object, std::string_view key)
-{
-    const std::optional<std::string> value = stringField(object, key);
-    if (!value) {
-        throw std::runtime_error("Missing glTF string field: " + std::string(key));
-    }
-    return *value;
-}
-
-std::vector<float> floatArrayField(std::string_view object, std::string_view key)
-{
-    const std::regex pattern(
-        "\"" + std::string(key) + "\"\\s*:\\s*\\[([^\\]]*)\\]",
-        std::regex::ECMAScript);
-    std::cmatch match;
-    if (!std::regex_search(object.data(), object.data() + object.size(), match, pattern)) {
-        return {};
-    }
-
-    std::vector<float> values;
-    const std::string text = match[1].str();
-    const std::regex numberPattern("-?(?:[0-9]+\\.?[0-9]*|\\.[0-9]+)(?:[eE][-+]?[0-9]+)?");
-    for (std::sregex_iterator it(text.begin(), text.end(), numberPattern), end; it != end; ++it) {
-        values.push_back(std::stof((*it)[0].str()));
-    }
-    return values;
-}
-
-std::vector<uint32_t> unsignedArrayField(std::string_view object, std::string_view key)
-{
-    const std::regex pattern(
-        "\"" + std::string(key) + "\"\\s*:\\s*\\[([^\\]]*)\\]",
-        std::regex::ECMAScript);
-    std::cmatch match;
-    if (!std::regex_search(object.data(), object.data() + object.size(), match, pattern)) {
-        return {};
-    }
-
-    std::vector<uint32_t> values;
-    const std::string text = match[1].str();
-    const std::regex numberPattern("[0-9]+");
-    for (std::sregex_iterator it(text.begin(), text.end(), numberPattern), end; it != end; ++it) {
-        values.push_back(static_cast<uint32_t>(std::stoul((*it)[0].str())));
-    }
-    return values;
-}
-
-Vec3 vec3FromArray(const std::vector<float>& values, Vec3 fallback)
-{
-    if (values.size() < 3) {
-        return fallback;
-    }
-    return { values[0], values[1], values[2] };
-}
-
-Vec4 vec4FromArray(const std::vector<float>& values, Vec4 fallback)
-{
-    if (values.size() < 4) {
-        return fallback;
-    }
-    return { values[0], values[1], values[2], values[3] };
-}
-
-size_t componentCount(std::string_view type)
-{
-    if (type == "SCALAR") {
-        return 1;
-    }
-    if (type == "VEC2") {
-        return 2;
-    }
-    if (type == "VEC3") {
-        return 3;
-    }
-    if (type == "VEC4") {
-        return 4;
-    }
-    if (type == "MAT4") {
-        return 16;
-    }
-    throw std::runtime_error("Unsupported glTF accessor type: " + std::string(type));
-}
-
-size_t componentSize(uint32_t componentType)
-{
-    switch (componentType) {
-    case 5121:
-        return sizeof(uint8_t);
-    case 5123:
-        return sizeof(uint16_t);
-    case 5125:
-        return sizeof(uint32_t);
-    case 5126:
-        return sizeof(float);
-    default:
-        throw std::runtime_error("Unsupported glTF component type");
-    }
-}
-
-size_t accessorStride(const Accessor& accessor, const BufferView& view)
-{
-    return view.byteStride == 0
-        ? componentSize(accessor.componentType) * componentCount(accessor.type)
-        : view.byteStride;
-}
-
-Vec3 readVec3(
-    const Accessor& accessor,
-    const BufferView& view,
-    const std::vector<std::byte>& bytes,
-    size_t index)
-{
-    if (accessor.componentType != 5126 || accessor.type != "VEC3") {
-        throw std::runtime_error("Expected a float VEC3 glTF accessor");
-    }
-    const size_t offset = view.byteOffset + accessor.byteOffset + index * accessorStride(accessor, view);
-    return {
-        readValue<float>(bytes, offset),
-        readValue<float>(bytes, offset + sizeof(float)),
-        readValue<float>(bytes, offset + sizeof(float) * 2),
-    };
-}
-
-Vec2 readVec2(
-    const Accessor& accessor,
-    const BufferView& view,
-    const std::vector<std::byte>& bytes,
-    size_t index)
-{
-    if (accessor.componentType != 5126 || accessor.type != "VEC2") {
-        throw std::runtime_error("Expected a float VEC2 glTF accessor");
-    }
-    const size_t offset = view.byteOffset + accessor.byteOffset + index * accessorStride(accessor, view);
-    return {
-        readValue<float>(bytes, offset),
-        readValue<float>(bytes, offset + sizeof(float)),
-    };
-}
-
-Vec4 readVec4(
-    const Accessor& accessor,
-    const BufferView& view,
-    const std::vector<std::byte>& bytes,
-    size_t index)
-{
-    if (accessor.componentType != 5126 || accessor.type != "VEC4") {
-        throw std::runtime_error("Expected a float VEC4 glTF accessor");
-    }
-    const size_t offset = view.byteOffset + accessor.byteOffset + index * accessorStride(accessor, view);
-    return {
-        readValue<float>(bytes, offset),
-        readValue<float>(bytes, offset + sizeof(float)),
-        readValue<float>(bytes, offset + sizeof(float) * 2),
-        readValue<float>(bytes, offset + sizeof(float) * 3),
-    };
-}
-
-float readScalarFloat(
-    const Accessor& accessor,
-    const BufferView& view,
-    const std::vector<std::byte>& bytes,
-    size_t index)
-{
-    if (accessor.componentType != 5126 || accessor.type != "SCALAR") {
-        throw std::runtime_error("Expected a float scalar glTF accessor");
-    }
-    const size_t offset = view.byteOffset + accessor.byteOffset + index * accessorStride(accessor, view);
-    return readValue<float>(bytes, offset);
-}
-
-Mat4 readMat4(
-    const Accessor& accessor,
-    const BufferView& view,
-    const std::vector<std::byte>& bytes,
-    size_t index)
-{
-    if (accessor.componentType != 5126 || accessor.type != "MAT4") {
-        throw std::runtime_error("Expected a float MAT4 glTF accessor");
-    }
-    const size_t offset = view.byteOffset + accessor.byteOffset + index * accessorStride(accessor, view);
-    Mat4 matrix;
-    for (size_t i = 0; i < matrix.values.size(); ++i) {
-        matrix.values[i] = readValue<float>(bytes, offset + sizeof(float) * i);
-    }
-    return matrix;
-}
-
-std::array<uint16_t, 4> readJoints(
-    const Accessor& accessor,
-    const BufferView& view,
-    const std::vector<std::byte>& bytes,
-    size_t index)
-{
-    if (accessor.type != "VEC4" || (accessor.componentType != 5121 && accessor.componentType != 5123)) {
-        throw std::runtime_error("Expected an integer VEC4 JOINTS_0 glTF accessor");
-    }
-    const size_t offset = view.byteOffset + accessor.byteOffset + index * accessorStride(accessor, view);
-    if (accessor.componentType == 5121) {
-        return {
-            readValue<uint8_t>(bytes, offset),
-            readValue<uint8_t>(bytes, offset + sizeof(uint8_t)),
-            readValue<uint8_t>(bytes, offset + sizeof(uint8_t) * 2),
-            readValue<uint8_t>(bytes, offset + sizeof(uint8_t) * 3),
-        };
-    }
-    return {
-        readValue<uint16_t>(bytes, offset),
-        readValue<uint16_t>(bytes, offset + sizeof(uint16_t)),
-        readValue<uint16_t>(bytes, offset + sizeof(uint16_t) * 2),
-        readValue<uint16_t>(bytes, offset + sizeof(uint16_t) * 3),
-    };
-}
-
-std::array<float, 4> readWeights(
-    const Accessor& accessor,
-    const BufferView& view,
-    const std::vector<std::byte>& bytes,
-    size_t index)
-{
-    if (accessor.type != "VEC4") {
-        throw std::runtime_error("Expected a VEC4 WEIGHTS_0 glTF accessor");
-    }
-    const size_t offset = view.byteOffset + accessor.byteOffset + index * accessorStride(accessor, view);
-    if (accessor.componentType == 5126) {
-        return {
-            readValue<float>(bytes, offset),
-            readValue<float>(bytes, offset + sizeof(float)),
-            readValue<float>(bytes, offset + sizeof(float) * 2),
-            readValue<float>(bytes, offset + sizeof(float) * 3),
-        };
-    }
-    if (accessor.componentType == 5121) {
-        return {
-            static_cast<float>(readValue<uint8_t>(bytes, offset)) / 255.0f,
-            static_cast<float>(readValue<uint8_t>(bytes, offset + sizeof(uint8_t))) / 255.0f,
-            static_cast<float>(readValue<uint8_t>(bytes, offset + sizeof(uint8_t) * 2)) / 255.0f,
-            static_cast<float>(readValue<uint8_t>(bytes, offset + sizeof(uint8_t) * 3)) / 255.0f,
-        };
-    }
-    if (accessor.componentType == 5123) {
-        return {
-            static_cast<float>(readValue<uint16_t>(bytes, offset)) / 65535.0f,
-            static_cast<float>(readValue<uint16_t>(bytes, offset + sizeof(uint16_t))) / 65535.0f,
-            static_cast<float>(readValue<uint16_t>(bytes, offset + sizeof(uint16_t) * 2)) / 65535.0f,
-            static_cast<float>(readValue<uint16_t>(bytes, offset + sizeof(uint16_t) * 3)) / 65535.0f,
-        };
-    }
-    throw std::runtime_error("Unsupported glTF weight component type");
-}
-
-uint32_t readIndex(
-    const Accessor& accessor,
-    const BufferView& view,
-    const std::vector<std::byte>& bytes,
-    size_t index)
-{
-    const size_t offset = view.byteOffset + accessor.byteOffset + index * accessorStride(accessor, view);
-    switch (accessor.componentType) {
-    case 5121:
-        return readValue<uint8_t>(bytes, offset);
-    case 5123:
-        return readValue<uint16_t>(bytes, offset);
-    case 5125:
-        return readValue<uint32_t>(bytes, offset);
-    default:
-        throw std::runtime_error("Unsupported glTF index component type");
-    }
-}
 
 Vec4 sampleKeyframes(const AnimationKeyframes& keyframes, float timeSeconds, bool rotation)
 {
@@ -717,232 +472,106 @@ MeshVertex normalizedVertex(
     return vertex;
 }
 
-std::vector<BufferView> parseBufferViews(const std::vector<std::string_view>& viewObjects)
-{
-    std::vector<BufferView> bufferViews;
-    bufferViews.reserve(viewObjects.size());
-    for (std::string_view object : viewObjects) {
-        if (requiredUnsignedField(object, "buffer") != 0) {
-            throw std::runtime_error("Only glTF buffer 0 is currently supported");
-        }
-        bufferViews.push_back({
-            .byteOffset = unsignedField(object, "byteOffset").value_or(0),
-            .byteLength = requiredUnsignedField(object, "byteLength"),
-            .byteStride = unsignedField(object, "byteStride").value_or(0),
-        });
-    }
-    return bufferViews;
-}
-
-std::vector<Accessor> parseAccessors(const std::vector<std::string_view>& accessorObjects)
-{
-    std::vector<Accessor> accessors;
-    accessors.reserve(accessorObjects.size());
-    for (std::string_view object : accessorObjects) {
-        accessors.push_back({
-            .bufferView = requiredUnsignedField(object, "bufferView"),
-            .byteOffset = unsignedField(object, "byteOffset").value_or(0),
-            .count = requiredUnsignedField(object, "count"),
-            .componentType = static_cast<uint32_t>(requiredUnsignedField(object, "componentType")),
-            .type = requiredStringField(object, "type"),
-            .normalized = boolField(object, "normalized").value_or(false),
-        });
-    }
-    return accessors;
-}
-
-std::vector<GltfNode> parseNodes(const std::string& json)
-{
-    std::vector<GltfNode> nodes;
-    const std::vector<std::string_view> nodeObjects = jsonObjects(topLevelJsonArray(json, "nodes"));
-    nodes.reserve(nodeObjects.size());
-    for (std::string_view object : nodeObjects) {
-        nodes.push_back({
-            .name = stringField(object, "name").value_or(""),
-            .children = unsignedArrayField(object, "children"),
-            .translation = vec3FromArray(floatArrayField(object, "translation"), {}),
-            .rotation = normalize(quatFromVec4(vec4FromArray(
-                floatArrayField(object, "rotation"), { 0.0f, 0.0f, 0.0f, 1.0f }))),
-            .scale = vec3FromArray(floatArrayField(object, "scale"), { 1.0f, 1.0f, 1.0f }),
-        });
-    }
-    return nodes;
-}
-
-std::vector<int> parentIndicesForNodes(const std::vector<GltfNode>& nodes)
-{
-    std::vector<int> parents(nodes.size(), -1);
-    for (size_t nodeIndex = 0; nodeIndex < nodes.size(); ++nodeIndex) {
-        for (uint32_t child : nodes[nodeIndex].children) {
-            if (child < parents.size()) {
-                parents[child] = static_cast<int>(nodeIndex);
-            }
-        }
-    }
-    return parents;
-}
-
-void ensureBufferLoaded(GltfDocument& document, const std::filesystem::path& path, const std::vector<std::string_view>& bufferObjects)
-{
-    if (!document.buffer.empty()) {
-        return;
-    }
-    if (bufferObjects.size() != 1) {
-        throw std::runtime_error("Only single-buffer glTF documents are supported");
-    }
-    const std::string uri = requiredStringField(bufferObjects.front(), "uri");
-    document.buffer = readBinaryFile(path.parent_path() / uri);
-}
-
 } // namespace
 
 MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions options)
 {
-    GltfDocument document = loadDocument(path);
-    const std::vector<std::string_view> bufferObjects = jsonObjects(topLevelJsonArray(document.json, "buffers"));
-    const std::vector<std::string_view> viewObjects = jsonObjects(topLevelJsonArray(document.json, "bufferViews"));
-    const std::vector<std::string_view> accessorObjects = jsonObjects(topLevelJsonArray(document.json, "accessors"));
-    const std::vector<std::string_view> meshObjects = jsonObjects(topLevelJsonArray(document.json, "meshes"));
-    if (bufferObjects.size() != 1 || viewObjects.empty() || accessorObjects.empty() || meshObjects.empty()) {
+    const Document document = loadDocument(path);
+    const cgltf_data& data = *document;
+    if (data.meshes_count == 0) {
         throw std::runtime_error("Unsupported or empty glTF document");
     }
 
-    if (document.buffer.empty()) {
-        const std::string uri = requiredStringField(bufferObjects.front(), "uri");
-        document.buffer = readBinaryFile(path.parent_path() / uri);
-    }
-
-    std::vector<BufferView> bufferViews;
-    bufferViews.reserve(viewObjects.size());
-    for (std::string_view object : viewObjects) {
-        if (requiredUnsignedField(object, "buffer") != 0) {
-            throw std::runtime_error("Only glTF buffer 0 is currently supported");
-        }
-        bufferViews.push_back({
-            .byteOffset = unsignedField(object, "byteOffset").value_or(0),
-            .byteLength = requiredUnsignedField(object, "byteLength"),
-            .byteStride = unsignedField(object, "byteStride").value_or(0),
-        });
-    }
-
-    std::vector<Accessor> accessors;
-    accessors.reserve(accessorObjects.size());
-    for (std::string_view object : accessorObjects) {
-        accessors.push_back({
-            .bufferView = requiredUnsignedField(object, "bufferView"),
-            .byteOffset = unsignedField(object, "byteOffset").value_or(0),
-            .count = requiredUnsignedField(object, "count"),
-            .componentType = static_cast<uint32_t>(requiredUnsignedField(object, "componentType")),
-            .type = requiredStringField(object, "type"),
-        });
-    }
-
     MeshData mesh;
-    Vec3 minimum {
-        std::numeric_limits<float>::max(),
-        std::numeric_limits<float>::max(),
-        std::numeric_limits<float>::max(),
-    };
-    Vec3 maximum {
-        std::numeric_limits<float>::lowest(),
-        std::numeric_limits<float>::lowest(),
-        std::numeric_limits<float>::lowest(),
-    };
+    SourceBounds bounds;
 
-    for (std::string_view meshObject : meshObjects) {
-        for (std::string_view primitive : jsonObjects(jsonArray(meshObject, "primitives"))) {
-            const size_t positionIndex = requiredUnsignedField(primitive, "POSITION");
-            const size_t normalIndex = requiredUnsignedField(primitive, "NORMAL");
-            const size_t uvIndex = requiredUnsignedField(primitive, "TEXCOORD_0");
-            const size_t indicesIndex = requiredUnsignedField(primitive, "indices");
-            const std::size_t primitiveMaterialIndex =
-                unsignedField(primitive, "material").value_or(0);
+    // Every mesh, every primitive, in document order, with node transforms
+    // ignored - which is what the previous loader did and what the manifest's
+    // scale options are written against. Applying the scene graph here would
+    // move every static model.
+    for (cgltf_size meshIndex = 0; meshIndex < data.meshes_count; ++meshIndex) {
+        const cgltf_mesh& sourceMesh = data.meshes[meshIndex];
+        for (cgltf_size primitiveIndex = 0;
+             primitiveIndex < sourceMesh.primitives_count;
+             ++primitiveIndex) {
+            const cgltf_primitive& primitive =
+                sourceMesh.primitives[primitiveIndex];
+            // The old scanner never looked at the primitive mode and would
+            // have read a strip or a fan as though it were a list, quietly
+            // producing wrong triangles. cgltf reports the mode, so say so.
+            if (primitive.type != cgltf_primitive_type_triangles ||
+                !primitive.indices) {
+                throw std::runtime_error(
+                    "Only non-empty triangle-list glTF meshes are supported");
+            }
+            const cgltf_accessor& positions = requiredAttribute(
+                primitive, cgltf_attribute_type_position, "POSITION");
+            const cgltf_accessor& normals = requiredAttribute(
+                primitive, cgltf_attribute_type_normal, "NORMAL");
+            const cgltf_accessor& uvs = requiredAttribute(
+                primitive, cgltf_attribute_type_texcoord, "TEXCOORD_0");
+            const cgltf_accessor& indices = *primitive.indices;
+
             uint32_t textureIndex = 0;
             uint32_t materialFlags = PrimitiveMaterialNone;
             if (!options.primitiveMaterials.empty()) {
-                if (primitiveMaterialIndex >=
-                    options.primitiveMaterials.size()) {
+                const uint32_t slot = materialSlotIndex(data, primitive);
+                if (slot >= options.primitiveMaterials.size()) {
                     throw std::runtime_error(
-                        "glTF primitive material " +
-                        std::to_string(primitiveMaterialIndex) +
+                        "glTF primitive material " + std::to_string(slot) +
                         " has no texture mapping in the asset manifest");
                 }
                 const PrimitiveMaterialBinding& material =
-                    options.primitiveMaterials[primitiveMaterialIndex];
+                    options.primitiveMaterials[slot];
                 textureIndex = material.textureIndex + 1;
                 materialFlags = material.flags;
             }
-            if (positionIndex >= accessors.size() ||
-                normalIndex >= accessors.size() ||
-                uvIndex >= accessors.size() ||
-                indicesIndex >= accessors.size()) {
-                throw std::runtime_error("glTF primitive references an invalid accessor");
+
+            if (positions.count != normals.count ||
+                positions.count != uvs.count) {
+                throw std::runtime_error(
+                    "Incompatible glTF primitive accessors");
             }
 
-            const Accessor& positions = accessors[positionIndex];
-            const Accessor& normals = accessors[normalIndex];
-            const Accessor& uvs = accessors[uvIndex];
-            const Accessor& indices = accessors[indicesIndex];
-            if (positions.count != normals.count || positions.count != uvs.count ||
-                positions.bufferView >= bufferViews.size() ||
-                normals.bufferView >= bufferViews.size() ||
-                uvs.bufferView >= bufferViews.size() ||
-                indices.bufferView >= bufferViews.size()) {
-                throw std::runtime_error("Incompatible glTF primitive accessors");
-            }
-
-            const uint32_t baseVertex = static_cast<uint32_t>(mesh.vertices.size());
+            const uint32_t baseVertex =
+                static_cast<uint32_t>(mesh.vertices.size());
             mesh.vertices.reserve(mesh.vertices.size() + positions.count);
             for (size_t index = 0; index < positions.count; ++index) {
-                const Vec3 position = readVec3(
-                    positions,
-                    bufferViews[positions.bufferView],
-                    document.buffer,
-                    index);
-                const Vec3 normal = readVec3(
-                    normals,
-                    bufferViews[normals.bufferView],
-                    document.buffer,
-                    index);
-                const Vec2 uv = readVec2(
-                    uvs,
-                    bufferViews[uvs.bufferView],
-                    document.buffer,
-                    index);
+                const Vec3 position = readVec3(positions, index);
                 mesh.vertices.push_back({
                     .position = position,
-                    .normal = normal,
-                    .uv = uv,
+                    .normal = readVec3(normals, index),
+                    .uv = readVec2(uvs, index),
                     .textureIndex = textureIndex,
                     .materialFlags = materialFlags,
                 });
-                minimum.x = std::min(minimum.x, position.x);
-                minimum.y = std::min(minimum.y, position.y);
-                minimum.z = std::min(minimum.z, position.z);
-                maximum.x = std::max(maximum.x, position.x);
-                maximum.y = std::max(maximum.y, position.y);
-                maximum.z = std::max(maximum.z, position.z);
+                includeBounds(bounds, position);
             }
 
             mesh.indices.reserve(mesh.indices.size() + indices.count);
             for (size_t index = 0; index < indices.count; ++index) {
-                const uint32_t sourceIndex = readIndex(
-                    indices,
-                    bufferViews[indices.bufferView],
-                    document.buffer,
-                    index);
+                const uint32_t sourceIndex = readIndex(indices, index);
                 if (sourceIndex >= positions.count) {
-                    throw std::runtime_error("glTF index references an invalid vertex");
+                    throw std::runtime_error(
+                        "glTF index references an invalid vertex");
                 }
                 mesh.indices.push_back(baseVertex + sourceIndex);
             }
         }
     }
 
-    if (mesh.vertices.empty() || mesh.indices.empty() || mesh.indices.size() % 3 != 0) {
-        throw std::runtime_error("Only non-empty triangle-list glTF meshes are supported");
+    if (mesh.vertices.empty() || mesh.indices.empty() ||
+        mesh.indices.size() % 3 != 0) {
+        throw std::runtime_error(
+            "Only non-empty triangle-list glTF meshes are supported");
     }
 
+    // Second pass: every mode below normalizes against the bounds of the
+    // whole file, not of one primitive. Spliced verbatim from the loader this
+    // replaced - the arithmetic is what decides where every static model
+    // sits, and rewriting it was not part of changing the parser.
+    const Vec3 minimum = bounds.minimum;
+    const Vec3 maximum = bounds.maximum;
     const float sourceHeight = std::max(maximum.y - minimum.y, 0.000001f);
     const Vec3 extent {
         std::max(maximum.x - minimum.x, 0.000001f),
@@ -993,107 +622,92 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
     return mesh;
 }
 
-SkinnedMeshData loadGltfSkinnedMesh(const std::filesystem::path& path, GltfMeshLoadOptions options)
+SkinnedMeshData loadGltfSkinnedMesh(
+    const std::filesystem::path& path,
+    GltfMeshLoadOptions options)
 {
-    GltfDocument document = loadDocument(path);
-    const std::vector<std::string_view> bufferObjects = jsonObjects(topLevelJsonArray(document.json, "buffers"));
-    const std::vector<std::string_view> viewObjects = jsonObjects(topLevelJsonArray(document.json, "bufferViews"));
-    const std::vector<std::string_view> accessorObjects = jsonObjects(topLevelJsonArray(document.json, "accessors"));
-    const std::vector<std::string_view> meshObjects = jsonObjects(topLevelJsonArray(document.json, "meshes"));
-    const std::vector<std::string_view> skinObjects = jsonObjects(topLevelJsonArray(document.json, "skins"));
-    if (bufferObjects.size() != 1 || viewObjects.empty() || accessorObjects.empty() || meshObjects.empty() || skinObjects.empty()) {
+    const Document document = loadDocument(path);
+    const cgltf_data& data = *document;
+    if (data.meshes_count == 0 || data.skins_count == 0) {
         throw std::runtime_error("Unsupported or empty skinned glTF document");
     }
-
-    ensureBufferLoaded(document, path, bufferObjects);
-    const std::vector<BufferView> bufferViews = parseBufferViews(viewObjects);
-    const std::vector<Accessor> accessors = parseAccessors(accessorObjects);
-    const std::vector<GltfNode> sourceNodes = parseNodes(document.json);
-    const std::vector<int> parents = parentIndicesForNodes(sourceNodes);
 
     SkinnedMeshData mesh;
     mesh.preserveAspectRatio = options.preserveAspectRatio;
     mesh.preserveSourceScale = options.preserveSourceScale;
     mesh.rotateHalfTurn = options.rotateHalfTurn;
-    mesh.nodes.reserve(sourceNodes.size());
-    for (size_t i = 0; i < sourceNodes.size(); ++i) {
-        mesh.nodes.push_back({
-            .name = sourceNodes[i].name,
-            .parent = parents[i],
-            .translation = sourceNodes[i].translation,
-            .rotation = sourceNodes[i].rotation,
-            .scale = sourceNodes[i].scale,
-        });
-    }
+    mesh.nodes = skeletonNodes(data);
 
-    mesh.jointNodeIndices = unsignedArrayField(skinObjects.front(), "joints");
-    if (mesh.jointNodeIndices.empty()) {
+    const cgltf_skin& skin = data.skins[0];
+    if (skin.joints_count == 0) {
         throw std::runtime_error("Skinned glTF document has no joints");
     }
-
-    const size_t inverseBindAccessorIndex = requiredUnsignedField(skinObjects.front(), "inverseBindMatrices");
-    if (inverseBindAccessorIndex >= accessors.size()) {
-        throw std::runtime_error("Skin references an invalid inverse bind accessor");
-    }
-    const Accessor& inverseBindAccessor = accessors[inverseBindAccessorIndex];
-    if (inverseBindAccessor.bufferView >= bufferViews.size() ||
-        inverseBindAccessor.count != mesh.jointNodeIndices.size()) {
-        throw std::runtime_error("Skin inverse bind matrix count does not match joints");
-    }
-    mesh.inverseBindMatrices.reserve(inverseBindAccessor.count);
-    for (size_t i = 0; i < inverseBindAccessor.count; ++i) {
-        mesh.inverseBindMatrices.push_back(readMat4(
-            inverseBindAccessor,
-            bufferViews[inverseBindAccessor.bufferView],
-            document.buffer,
-            i));
+    mesh.jointNodeIndices.reserve(skin.joints_count);
+    for (cgltf_size i = 0; i < skin.joints_count; ++i) {
+        mesh.jointNodeIndices.push_back(
+            static_cast<uint32_t>(cgltf_node_index(&data, skin.joints[i])));
     }
 
+    if (!skin.inverse_bind_matrices) {
+        throw std::runtime_error(
+            "Skin references an invalid inverse bind accessor");
+    }
+    const cgltf_accessor& inverseBind = *skin.inverse_bind_matrices;
+    if (inverseBind.count != mesh.jointNodeIndices.size()) {
+        throw std::runtime_error(
+            "Skin inverse bind matrix count does not match joints");
+    }
+    mesh.inverseBindMatrices.reserve(inverseBind.count);
+    for (size_t i = 0; i < inverseBind.count; ++i) {
+        mesh.inverseBindMatrices.push_back(readMat4(inverseBind, i));
+    }
+
+    // Skinned vertices stay in source space. Normalization happens per pose,
+    // in skinWithPoses, because the bounds a pose occupies are not the bounds
+    // of the bind pose.
     SourceBounds bounds;
-    for (std::string_view meshObject : meshObjects) {
-        for (std::string_view primitive : jsonObjects(jsonArray(meshObject, "primitives"))) {
-            const size_t positionIndex = requiredUnsignedField(primitive, "POSITION");
-            const size_t normalIndex = requiredUnsignedField(primitive, "NORMAL");
-            const size_t uvIndex = requiredUnsignedField(primitive, "TEXCOORD_0");
-            const size_t jointsIndex = requiredUnsignedField(primitive, "JOINTS_0");
-            const size_t weightsIndex = requiredUnsignedField(primitive, "WEIGHTS_0");
-            const size_t indicesIndex = requiredUnsignedField(primitive, "indices");
-            if (positionIndex >= accessors.size() ||
-                normalIndex >= accessors.size() ||
-                uvIndex >= accessors.size() ||
-                jointsIndex >= accessors.size() ||
-                weightsIndex >= accessors.size() ||
-                indicesIndex >= accessors.size()) {
-                throw std::runtime_error("glTF skinned primitive references an invalid accessor");
+    for (cgltf_size meshIndex = 0; meshIndex < data.meshes_count; ++meshIndex) {
+        const cgltf_mesh& sourceMesh = data.meshes[meshIndex];
+        for (cgltf_size primitiveIndex = 0;
+             primitiveIndex < sourceMesh.primitives_count;
+             ++primitiveIndex) {
+            const cgltf_primitive& primitive =
+                sourceMesh.primitives[primitiveIndex];
+            if (primitive.type != cgltf_primitive_type_triangles ||
+                !primitive.indices) {
+                throw std::runtime_error(
+                    "Only non-empty triangle-list skinned glTF meshes are "
+                    "supported");
             }
+            const cgltf_accessor& positions = requiredAttribute(
+                primitive, cgltf_attribute_type_position, "POSITION");
+            const cgltf_accessor& normals = requiredAttribute(
+                primitive, cgltf_attribute_type_normal, "NORMAL");
+            const cgltf_accessor& uvs = requiredAttribute(
+                primitive, cgltf_attribute_type_texcoord, "TEXCOORD_0");
+            const cgltf_accessor& joints = requiredAttribute(
+                primitive, cgltf_attribute_type_joints, "JOINTS_0");
+            const cgltf_accessor& weights = requiredAttribute(
+                primitive, cgltf_attribute_type_weights, "WEIGHTS_0");
+            const cgltf_accessor& indices = *primitive.indices;
 
-            const Accessor& positions = accessors[positionIndex];
-            const Accessor& normals = accessors[normalIndex];
-            const Accessor& uvs = accessors[uvIndex];
-            const Accessor& joints = accessors[jointsIndex];
-            const Accessor& weights = accessors[weightsIndex];
-            const Accessor& indices = accessors[indicesIndex];
             if (positions.count != normals.count ||
                 positions.count != uvs.count ||
                 positions.count != joints.count ||
-                positions.count != weights.count ||
-                positions.bufferView >= bufferViews.size() ||
-                normals.bufferView >= bufferViews.size() ||
-                uvs.bufferView >= bufferViews.size() ||
-                joints.bufferView >= bufferViews.size() ||
-                weights.bufferView >= bufferViews.size() ||
-                indices.bufferView >= bufferViews.size()) {
-                throw std::runtime_error("Incompatible skinned glTF primitive accessors");
+                positions.count != weights.count) {
+                throw std::runtime_error(
+                    "Incompatible skinned glTF primitive accessors");
             }
 
-            const uint32_t baseVertex = static_cast<uint32_t>(mesh.vertices.size());
+            const uint32_t baseVertex =
+                static_cast<uint32_t>(mesh.vertices.size());
             mesh.vertices.reserve(mesh.vertices.size() + positions.count);
             for (size_t index = 0; index < positions.count; ++index) {
-                const Vec3 position = readVec3(positions, bufferViews[positions.bufferView], document.buffer, index);
-                const Vec3 normal = readVec3(normals, bufferViews[normals.bufferView], document.buffer, index);
-                auto jointValues = readJoints(joints, bufferViews[joints.bufferView], document.buffer, index);
-                auto weightValues = readWeights(weights, bufferViews[weights.bufferView], document.buffer, index);
-                const float totalWeight = weightValues[0] + weightValues[1] + weightValues[2] + weightValues[3];
+                const Vec3 position = readVec3(positions, index);
+                auto jointValues = readJoints(joints, index);
+                auto weightValues = readWeights(weights, index);
+                const float totalWeight = weightValues[0] + weightValues[1] +
+                    weightValues[2] + weightValues[3];
                 if (totalWeight > 0.000001f) {
                     for (float& weight : weightValues) {
                         weight /= totalWeight;
@@ -1104,8 +718,8 @@ SkinnedMeshData loadGltfSkinnedMesh(const std::filesystem::path& path, GltfMeshL
                 }
                 mesh.vertices.push_back({
                     .position = position,
-                    .normal = normal,
-                    .uv = readVec2(uvs, bufferViews[uvs.bufferView], document.buffer, index),
+                    .normal = readVec3(normals, index),
+                    .uv = readVec2(uvs, index),
                     .joints = jointValues,
                     .weights = weightValues,
                 });
@@ -1114,17 +728,20 @@ SkinnedMeshData loadGltfSkinnedMesh(const std::filesystem::path& path, GltfMeshL
 
             mesh.indices.reserve(mesh.indices.size() + indices.count);
             for (size_t index = 0; index < indices.count; ++index) {
-                const uint32_t sourceIndex = readIndex(indices, bufferViews[indices.bufferView], document.buffer, index);
+                const uint32_t sourceIndex = readIndex(indices, index);
                 if (sourceIndex >= positions.count) {
-                    throw std::runtime_error("glTF index references an invalid skinned vertex");
+                    throw std::runtime_error(
+                        "glTF index references an invalid skinned vertex");
                 }
                 mesh.indices.push_back(baseVertex + sourceIndex);
             }
         }
     }
 
-    if (mesh.vertices.empty() || mesh.indices.empty() || mesh.indices.size() % 3 != 0) {
-        throw std::runtime_error("Only non-empty triangle-list skinned glTF meshes are supported");
+    if (mesh.vertices.empty() || mesh.indices.empty() ||
+        mesh.indices.size() % 3 != 0) {
+        throw std::runtime_error(
+            "Only non-empty triangle-list skinned glTF meshes are supported");
     }
     mesh.sourceMinimum = bounds.minimum;
     mesh.sourceMaximum = bounds.maximum;
@@ -1162,13 +779,14 @@ std::vector<std::string> listGltfAnimationNames(const std::filesystem::path& pat
 {
     std::vector<std::string> names;
     try {
-        const GltfDocument document = loadDocument(path);
-        const std::vector<std::string_view> animationObjects =
-            jsonObjects(topLevelJsonArray(document.json, "animations"));
-        names.reserve(animationObjects.size());
-        for (size_t i = 0; i < animationObjects.size(); ++i) {
-            names.push_back(stringField(animationObjects[i], "name")
-                    .value_or("animation " + std::to_string(i + 1)));
+        const Document document = parseDocument(path);
+        const cgltf_data& data = *document;
+        names.reserve(data.animations_count);
+        for (cgltf_size i = 0; i < data.animations_count; ++i) {
+            const char* name = data.animations[i].name;
+            names.push_back(name
+                ? std::string(name)
+                : "animation " + std::to_string(i + 1));
         }
     } catch (const std::exception&) {
         names.clear();
@@ -1177,83 +795,82 @@ std::vector<std::string> listGltfAnimationNames(const std::filesystem::path& pat
     return names;
 }
 
-GltfAnimationClip loadGltfAnimationClip(const std::filesystem::path& path, uint32_t animationIndex)
+GltfAnimationClip loadGltfAnimationClip(
+    const std::filesystem::path& path,
+    uint32_t animationIndex)
 {
-    GltfDocument document = loadDocument(path);
-    const std::vector<std::string_view> bufferObjects = jsonObjects(topLevelJsonArray(document.json, "buffers"));
-    const std::vector<std::string_view> viewObjects = jsonObjects(topLevelJsonArray(document.json, "bufferViews"));
-    const std::vector<std::string_view> accessorObjects = jsonObjects(topLevelJsonArray(document.json, "accessors"));
-    const std::vector<std::string_view> animationObjects = jsonObjects(topLevelJsonArray(document.json, "animations"));
-    if (bufferObjects.size() != 1 || viewObjects.empty() || accessorObjects.empty() || animationObjects.empty()) {
-        throw std::runtime_error("Unsupported or empty animation glTF document");
+    const Document document = loadDocument(path);
+    const cgltf_data& data = *document;
+    if (data.animations_count == 0) {
+        throw std::runtime_error(
+            "Unsupported or empty animation glTF document");
     }
-    if (animationIndex >= animationObjects.size()) {
-        throw std::runtime_error("Requested glTF animation index is out of range");
+    if (animationIndex >= data.animations_count) {
+        throw std::runtime_error(
+            "Requested glTF animation index is out of range");
     }
-
-    ensureBufferLoaded(document, path, bufferObjects);
-    const std::vector<BufferView> bufferViews = parseBufferViews(viewObjects);
-    const std::vector<Accessor> accessors = parseAccessors(accessorObjects);
-    const std::vector<GltfNode> nodes = parseNodes(document.json);
-    const std::string_view animationObject = animationObjects[animationIndex];
-    const std::vector<std::string_view> channelObjects = jsonObjects(jsonArray(animationObject, "channels"));
-    const std::vector<std::string_view> samplerObjects = jsonObjects(jsonArray(animationObject, "samplers"));
+    const cgltf_animation& animation = data.animations[animationIndex];
 
     GltfAnimationClip clip;
-    clip.name = stringField(animationObject, "name").value_or("");
-    clip.channels.reserve(channelObjects.size());
-    for (std::string_view channelObject : channelObjects) {
-        const size_t samplerIndex = requiredUnsignedField(channelObject, "sampler");
-        const size_t nodeIndex = requiredUnsignedField(channelObject, "node");
-        const std::string pathName = requiredStringField(channelObject, "path");
-        if (samplerIndex >= samplerObjects.size() || nodeIndex >= nodes.size()) {
+    clip.name = animation.name ? std::string(animation.name) : std::string();
+    clip.channels.reserve(animation.channels_count);
+    for (cgltf_size channelIndex = 0;
+         channelIndex < animation.channels_count;
+         ++channelIndex) {
+        const cgltf_animation_channel& source =
+            animation.channels[channelIndex];
+        if (!source.sampler || !source.target_node) {
             throw std::runtime_error(
-                "glTF animation channel references an invalid sampler or node: sampler " +
-                std::to_string(samplerIndex) +
-                " / " +
-                std::to_string(samplerObjects.size()) +
-                ", node " +
-                std::to_string(nodeIndex) +
-                " / " +
-                std::to_string(nodes.size()));
+                "glTF animation channel references an invalid sampler or "
+                "node");
         }
 
         AnimationChannelPath channelPath = AnimationChannelPath::Translation;
-        if (pathName == "rotation") {
+        switch (source.target_path) {
+        case cgltf_animation_path_type_translation:
+            channelPath = AnimationChannelPath::Translation;
+            break;
+        case cgltf_animation_path_type_rotation:
             channelPath = AnimationChannelPath::Rotation;
-        } else if (pathName == "scale") {
+            break;
+        case cgltf_animation_path_type_scale:
             channelPath = AnimationChannelPath::Scale;
-        } else if (pathName != "translation") {
+            break;
+        default:
+            // Morph target weights. Nothing samples them yet, and skipping
+            // them is what the previous loader did.
             continue;
         }
 
-        const std::string_view samplerObject = samplerObjects[samplerIndex];
-        const size_t inputIndex = requiredUnsignedField(samplerObject, "input");
-        const size_t outputIndex = requiredUnsignedField(samplerObject, "output");
-        if (inputIndex >= accessors.size() || outputIndex >= accessors.size()) {
-            throw std::runtime_error("glTF animation sampler references an invalid accessor");
-        }
-        const Accessor& input = accessors[inputIndex];
-        const Accessor& output = accessors[outputIndex];
-        if (input.bufferView >= bufferViews.size() || output.bufferView >= bufferViews.size() || input.count != output.count) {
-            throw std::runtime_error("Incompatible glTF animation sampler accessors");
+        const cgltf_animation_sampler& sampler = *source.sampler;
+        if (!sampler.input || !sampler.output ||
+            sampler.input->count != sampler.output->count) {
+            // A CUBICSPLINE sampler fails here, because its output holds an
+            // in-tangent and an out-tangent alongside every value. That is a
+            // known gap rather than a corrupt file; sampler.interpolation is
+            // still not read at all.
+            throw std::runtime_error(
+                "Incompatible glTF animation sampler accessors");
         }
 
         AnimationChannel channel;
-        channel.targetNodeName = nodes[nodeIndex].name;
+        channel.targetNodeName = source.target_node->name
+            ? std::string(source.target_node->name)
+            : std::string();
         channel.path = channelPath;
-        channel.keyframes.times.reserve(input.count);
-        channel.keyframes.values.reserve(output.count);
-        for (size_t i = 0; i < input.count; ++i) {
-            const float keyTime = readScalarFloat(input, bufferViews[input.bufferView], document.buffer, i);
+        channel.keyframes.times.reserve(sampler.input->count);
+        channel.keyframes.values.reserve(sampler.output->count);
+        for (size_t i = 0; i < sampler.input->count; ++i) {
+            const float keyTime = readScalarFloat(*sampler.input, i);
             channel.keyframes.times.push_back(keyTime);
             clip.durationSeconds = std::max(clip.durationSeconds, keyTime);
             if (channelPath == AnimationChannelPath::Rotation) {
-                channel.keyframes.values.push_back(toVec4(normalize(quatFromVec4(
-                    readVec4(output, bufferViews[output.bufferView], document.buffer, i)))));
+                channel.keyframes.values.push_back(toVec4(normalize(
+                    quatFromVec4(readVec4(*sampler.output, i)))));
             } else {
-                const Vec3 value = readVec3(output, bufferViews[output.bufferView], document.buffer, i);
-                channel.keyframes.values.push_back({ value.x, value.y, value.z, 0.0f });
+                const Vec3 value = readVec3(*sampler.output, i);
+                channel.keyframes.values.push_back(
+                    { value.x, value.y, value.z, 0.0f });
             }
         }
         clip.channels.push_back(std::move(channel));

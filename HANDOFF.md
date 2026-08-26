@@ -25,6 +25,10 @@ started**:
   with the "AO modulates ambient rather than the composite" half of V7 pulled
   forward into it. F2c - a real curve and a user-facing exposure control - is
   deliberately not done; see below.
+- Phase 2: A1 **step one** - cgltf replaces the hand-rolled glTF scanner
+  behind an unchanged `GltfMesh.hpp`. Byte-identical output on the whole asset
+  corpus; step two, which takes the limits the old loader could not, has not
+  been done. See below.
 
 Each has its own section in this file explaining the invariants it
 established. Read the C1 and T1 notes under the renderer section before
@@ -141,18 +145,69 @@ back is there. Expect MSAA fireflies on very bright specular highlights: an
 average resolve of pre-tonemap HDR does that, and it is a reason to want the
 curve, not a bug in the resolve.
 
-### Next: A1, replace the glTF loader
+### What A1 step one established
 
-Phase 2 continues with A1 (replace the glTF loader), F3 (material model and
-GGX), the rest of V7 (view-space normals, world-unit radius, bilateral blur,
-half resolution), and F4 (split the uber-shader). A1 before F3: it is what
-supplies real materials, tangents and extensions, so writing a material model
-against the current regex-driven loader is throwaway work.
+`src/engine/render/GltfMesh.cpp` went from 1,536 lines to 1,156, and the 541
+of them that were a JSON scanner and a set of hand-rolled accessor readers -
+seventeen `std::regex` constructions among them - are gone. cgltf does that
+now. The reasoning behind cgltf rather than tinygltf, and the conditions under
+which fastgltf becomes the better answer, are recorded under Important Design
+Decisions; do not re-litigate it from scratch.
 
-Two notes for F3 when it arrives. The scene target now has range, so PBR
-values will behave; and `VulkanPipelineFactory::Target` is the seam where a
-material's blend behaviour should hang, rather than another parallel set of
-pipeline handles.
+- **cgltf is vendored, not fetched.** `third_party/cgltf/cgltf.h` plus
+  `LICENSE.txt`, pinned at **v1.15**. `sokoban_cgltf` is a SYSTEM INTERFACE
+  target beside `sokoban_json` and `sokoban_stb`, and configure fails with an
+  actionable message if the header is missing from a fresh clone.
+  `CGLTF_IMPLEMENTATION` is defined in `GltfMesh.cpp` itself, the way
+  `STB_IMAGE_IMPLEMENTATION` lives in `ImageData.cpp`: SYSTEM keeps /W4 and
+  clang-tidy off the vendored code, while ASan and UBSan still instrument it,
+  which is the right way round for a parser fed files from the internet.
+- **No cgltf type may reach a header.** `GltfMesh.hpp` did not change by a
+  byte, which is what kept every caller, the whole skinning path and all of
+  `VulkanModelResources` out of this change - and it is what would keep a
+  future swap to fastgltf equally contained.
+- **Paths go in as UTF-8 and come back as `std::filesystem::path`.** cgltf
+  takes `const char*` and would `fopen` it; a Windows install directory can
+  hold characters the narrow ANSI code page cannot represent. `utf8Path` and
+  the `cgltf_options.file.read` callback keep the round trip lossless and keep
+  every read on `std::ifstream`.
+- **Behaviour deliberately preserved, including the parts that are odd.**
+  Static meshes still ignore node transforms; a primitive with no material
+  still resolves to manifest slot 0; the normalization pass is spliced
+  verbatim from the old loader because that arithmetic decides where every
+  static model sits. Two things did change on purpose: a non-triangle
+  primitive now throws instead of being read as though it were a triangle
+  list, and multiple buffers, sparse accessors and normalized-integer
+  attributes now work because cgltf handles them - none of which any current
+  asset exercises.
+- **Weights look like a divergence and are not.** cgltf scales integer
+  weights only when the accessor says `normalized`; the old reader always
+  divided by the component maximum. The two differ by one factor common to
+  all four weights, and the caller divides by their sum immediately, so the
+  result is identical either way.
+
+### Next: A1 step two
+
+Step one changed the parser and nothing else. Step two takes what the old
+loader could not do and what cgltf now makes cheap:
+
+- **Animation `interpolation` is still not read.** A STEP curve plays as LERP
+  and nobody is told; a CUBICSPLINE sampler throws "Incompatible glTF
+  animation sampler accessors", because its output holds three values per key.
+  `cgltf_animation_sampler::interpolation` is right there.
+- **`cgltf_validate` in the content pipeline.** `ContentPipeline` already
+  walks every animation at build time to catch a stale catalog duration. One
+  call upgrades that from "it parsed" to a real structural check.
+- **Materials for F3.** `cgltf_material` carries `pbrMetallicRoughness`,
+  normal, emissive and occlusion textures, alpha mode and double-sidedness.
+  None of it is read yet, and F3 is what needs it.
+
+Then F3 (material model and GGX), the rest of V7 (view-space normals,
+world-unit radius, bilateral blur, half resolution), and F4 (split the
+uber-shader). Two notes for F3: the scene target has range now, so PBR values
+will behave, and `VulkanPipelineFactory::Target` is the seam a material's
+blend behaviour should hang from rather than another parallel set of pipeline
+handles.
 
 ### How this work has been verified
 
@@ -174,6 +229,22 @@ expects. Do this for **all** shaders, not only the edited ones - a changed
 descriptor set layout is visible in shaders that were not touched. It does not
 replace the build: `glslc` is what ships, the `-O` pass differs, and only the
 build proves the SPIR-V matches the pipeline state.
+
+**Where a change is meant to preserve behaviour, prove it differentially.**
+A1 step one was verified by building a scratch harness against the *old*
+loader, dumping a digest of everything the public API produces for every model
+and animation the manifest reaches, then rebuilding the same harness against
+the new one and diffing. 680 lines - 36 models across six option combinations
+and three material configurations, both skinned meshes with their skeletons
+hashed, and all 27 animation clips in the four animation files, including the
+21 the manifest never names - came out byte-identical. The harness lives
+outside the repo because it is scratch, but the technique is not: it is the
+only thing that turns "should render the same" into a fact, it takes about
+twenty minutes to write, and the corpus is small enough (`assets/manifest.json`
+reaches 36 models and 6 clips) that it runs in seconds. It also measured the
+change: the same 653 jobs went from 31.7s to 7.1s wall, and from 26.9s to
+0.39s of CPU, because constructing a `std::regex` per field lookup was
+essentially the entire cost of loading a model.
 
 C++ is verified by per-translation-unit `-fsyntax-only` compiles with
 `-Wall -Wextra -Wpedantic -Wno-missing-field-initializers` - the device VM has
@@ -2524,6 +2595,37 @@ decision lands with the real-camera work rather than being guessed at now.
 - Keep runtime asset selection explicit through `assets/manifest.json`; code
   refers to assets via manifest roles/flags (player model, belt-scroll) or
   tile mappings, never hard-coded names.
+- **glTF parsing is cgltf's job, not ours** (review item A1). The loader used
+  to be a hand-rolled scanner that built a `std::regex` per field lookup, and
+  it could not read more than one buffer, sparse accessors, any `KHR_*`
+  extension, glTF materials, or animation `interpolation` - STEP curves played
+  as LERP and nobody noticed, because nothing said so.
+  - The pick was cgltf over tinygltf, and the deciding fact was maintenance,
+    not features: **tinygltf v2 is sunset after mid-2026** and its README says
+    so plainly - maintenance-only, no new features - while its successor
+    `tiny_gltf_v3.h` is an experimental C rewrite whose API may still change.
+    Replacing a bespoke loader with an end-of-life one is not progress.
+  - Three things also fit this engine specifically. Textures come from the
+    manifest, not from the glTF, and cgltf deliberately does not read images
+    or external files - tinygltf decodes with stb_image by default and would
+    have to be told not to. `cgltf_accessor_unpack_floats` /
+    `cgltf_accessor_unpack_indices` handle component types, normalized
+    integers, strides and sparse accessors, which is exactly the code the old
+    loader hand-rolled. And `cgltf_validate` gives `ContentPipeline`'s
+    build-time animation pass a real structural check rather than "it parsed".
+  - **Pinned for later: fastgltf.** It is the better library on the merits -
+    actively developed, C++17, SIMD base64, materially faster - and it is the
+    right thing to reach for if cgltf ever becomes the bottleneck or falls
+    behind on extensions. It was not chosen now because it is a real
+    dependency with a build system rather than a single vendored header,
+    which is a different kind of commitment from `sokoban_json` and
+    `sokoban_stb`. Revisit when any of these is true: glTF parse time shows up
+    in load profiling; an extension you need has landed there and not in
+    cgltf; or the project is already taking on CMake-based third-party
+    dependencies for another reason. The loader's public surface
+    (`GltfMesh.hpp`) is deliberately library-agnostic, so that swap stays a
+    contained change - keep it that way, and do not let cgltf types reach
+    beyond `GltfMesh.cpp`.
 - Keep runtime asset requirement planning in the Vulkan-free
   `RenderAssetRequirements` layer. CPU file work may use `TaskSystem`, but all
   Vulkan object creation, upload submission, and descriptor mutation must stay
