@@ -7,6 +7,7 @@ layout(location = 3) in uint inTextureIndex;
 layout(location = 4) in uint inMaterialFlags;
 layout(location = 8) in vec4 inTangent;
 layout(location = 9) in vec2 inUv1;
+layout(location = 10) in uint inMaterialIndex;
 
 layout(location = 0) out vec4 outShadowPosition;
 layout(location = 1) out float outFaceCoordU;
@@ -21,6 +22,9 @@ layout(location = 7) flat out uint outDrawInstance;
 // normal, which is what absorbs the scale this rotation deliberately skips.
 layout(location = 8) out vec4 outTangent;
 layout(location = 9) out vec2 outUv1;
+// Which material this vertex belongs to. Nothing reads it yet; F3b-2 is
+// where it stops being the vertex's job to carry a texture index at all.
+layout(location = 10) flat out uint outMaterialIndex;
 
 struct PointLightData
 {
@@ -113,6 +117,7 @@ void main()
     outTextureIndex = inTextureIndex;
     outMaterialFlags = inMaterialFlags;
     outUv1 = inUv1;
+    outMaterialIndex = inMaterialIndex;
     vec3 normal = inNormal;
     // Standard models use gridColor.xyz for inverse scale and a negative W
     // as the marker. Mirror-energy models need gridColor for their effect and

@@ -20,6 +20,7 @@ layout(location = 7) flat in uint inDrawInstance;
 // before the lighting that uses them changes everything at once.
 layout(location = 8) in vec4 inTangent;
 layout(location = 9) in vec2 inUv1;
+layout(location = 10) flat in uint inMaterialIndex;
 layout(location = 0) out vec4 outColor;
 
 // One draw's parameters, read back by instance index. T1 moved these out of

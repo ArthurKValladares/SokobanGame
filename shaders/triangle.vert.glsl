@@ -12,6 +12,7 @@ layout(location = 6) out vec3 outWorldPosition;
 layout(location = 7) flat out uint outDrawInstance;
 layout(location = 8) out vec4 outTangent;
 layout(location = 9) out vec2 outUv1;
+layout(location = 10) flat out uint outMaterialIndex;
 
 struct DrawInstance
 {
@@ -110,4 +111,7 @@ void main()
         ? vec4(normalize(draw.vertices[1].xyz - draw.vertices[0].xyz), 1.0)
         : vec4(0.0);
     outUv1 = faceCoord;
+    // Tile faces are not glTF primitives and have no material list; their
+    // colour and texture come from the draw block.
+    outMaterialIndex = 0u;
 }

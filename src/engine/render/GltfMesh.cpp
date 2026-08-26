@@ -389,6 +389,88 @@ AnimationInterpolation interpolationFrom(cgltf_interpolation_type type)
     }
 }
 
+MaterialAlphaMode alphaModeFrom(cgltf_alpha_mode mode)
+{
+    switch (mode) {
+    case cgltf_alpha_mode_mask:
+        return MaterialAlphaMode::Mask;
+    case cgltf_alpha_mode_blend:
+        return MaterialAlphaMode::Blend;
+    default:
+        return MaterialAlphaMode::Opaque;
+    }
+}
+
+// One glTF material plus whatever the manifest says its texture is. cgltf
+// fills its defaults from the spec, so an absent field arrives as the value
+// the spec says it has rather than as nothing.
+MeshMaterial materialFrom(
+    const cgltf_material* source,
+    const PrimitiveMaterialBinding& binding,
+    bool bound)
+{
+    MeshMaterial material;
+    if (bound) {
+        // One-based, matching the vertex path: zero means untextured.
+        material.baseColorTexture = binding.textureIndex + 1;
+        material.flags = binding.flags;
+    }
+    if (!source) {
+        return material;
+    }
+    if (source->has_pbr_metallic_roughness) {
+        const cgltf_pbr_metallic_roughness& pbr =
+            source->pbr_metallic_roughness;
+        material.baseColorFactor = {
+            pbr.base_color_factor[0],
+            pbr.base_color_factor[1],
+            pbr.base_color_factor[2],
+            pbr.base_color_factor[3],
+        };
+        material.metallicFactor = pbr.metallic_factor;
+        material.roughnessFactor = pbr.roughness_factor;
+        material.baseColorUvSet = static_cast<uint32_t>(
+            std::max(pbr.base_color_texture.texcoord, 0));
+    }
+    material.emissiveFactor = {
+        source->emissive_factor[0],
+        source->emissive_factor[1],
+        source->emissive_factor[2],
+    };
+    material.alphaCutoff = source->alpha_cutoff;
+    material.alphaMode = alphaModeFrom(source->alpha_mode);
+    material.doubleSided = source->double_sided != 0;
+    return material;
+}
+
+// Every material in the file, in file order, so that a vertex's
+// materialIndex is glTF's own index and nothing has to translate.
+//
+// A manifest slot missing for material N is not an error here, only when a
+// primitive actually uses N - which is what the loader has always done, and
+// what keeps a model whose manifest lists fewer slots than the file has
+// materials loading exactly as it did.
+std::vector<MeshMaterial> meshMaterials(
+    const cgltf_data& data,
+    const GltfMeshLoadOptions& options)
+{
+    const size_t count = std::max<size_t>(data.materials_count, 1);
+    std::vector<MeshMaterial> materials;
+    materials.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        const bool bound = !options.primitiveMaterials.empty() &&
+            i < options.primitiveMaterials.size();
+        const PrimitiveMaterialBinding binding = bound
+            ? options.primitiveMaterials[i]
+            : PrimitiveMaterialBinding {};
+        materials.push_back(materialFrom(
+            i < data.materials_count ? &data.materials[i] : nullptr,
+            binding,
+            bound));
+    }
+    return materials;
+}
+
 // Which manifest slot a primitive's material maps to. A primitive with no
 // material resolves to slot 0, which is what the previous loader did.
 uint32_t materialSlotIndex(
@@ -661,6 +743,7 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
     }
 
     MeshData mesh;
+    mesh.materials = meshMaterials(data, options);
     SourceBounds bounds;
 
     // Every mesh, every primitive, in document order, with node transforms
@@ -694,17 +777,18 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
                 findAttribute(primitive, cgltf_attribute_type_texcoord, 1);
             const cgltf_accessor& indices = *primitive.indices;
 
+            const uint32_t materialIndex = materialSlotIndex(data, primitive);
             uint32_t textureIndex = 0;
             uint32_t materialFlags = PrimitiveMaterialNone;
             if (!options.primitiveMaterials.empty()) {
-                const uint32_t slot = materialSlotIndex(data, primitive);
-                if (slot >= options.primitiveMaterials.size()) {
+                if (materialIndex >= options.primitiveMaterials.size()) {
                     throw std::runtime_error(
-                        "glTF primitive material " + std::to_string(slot) +
+                        "glTF primitive material " +
+                        std::to_string(materialIndex) +
                         " has no texture mapping in the asset manifest");
                 }
                 const PrimitiveMaterialBinding& material =
-                    options.primitiveMaterials[slot];
+                    options.primitiveMaterials[materialIndex];
                 textureIndex = material.textureIndex + 1;
                 materialFlags = material.flags;
             }
@@ -729,6 +813,7 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
                     .uv1 = optionalUv(secondUvs, index, uv),
                     .textureIndex = textureIndex,
                     .materialFlags = materialFlags,
+                    .materialIndex = materialIndex,
                 });
                 includeBounds(bounds, position);
             }
@@ -776,6 +861,7 @@ SkinnedMeshData loadGltfSkinnedMesh(
     }
 
     SkinnedMeshData mesh;
+    mesh.materials = meshMaterials(data, options);
     mesh.preserveAspectRatio = options.preserveAspectRatio;
     mesh.preserveSourceScale = options.preserveSourceScale;
     mesh.rotateHalfTurn = options.rotateHalfTurn;
@@ -837,6 +923,7 @@ SkinnedMeshData loadGltfSkinnedMesh(
             const cgltf_accessor* secondUvs =
                 findAttribute(primitive, cgltf_attribute_type_texcoord, 1);
             const cgltf_accessor& indices = *primitive.indices;
+            const uint32_t materialIndex = materialSlotIndex(data, primitive);
 
             if (positions.count != normals.count ||
                 positions.count != uvs.count ||
@@ -870,6 +957,7 @@ SkinnedMeshData loadGltfSkinnedMesh(
                     .tangent = optionalTangent(tangents, index),
                     .uv = uv,
                     .uv1 = optionalUv(secondUvs, index, uv),
+                    .materialIndex = materialIndex,
                     .joints = jointValues,
                     .weights = weightValues,
                 });
@@ -921,6 +1009,20 @@ void addSkinnedAttachment(
             "Skinned model has no attachment node named '" +
             std::string(nodeName) + "'");
     }
+    // The attachment is a separate glTF with its own material list, so its
+    // indices mean nothing in the actor's. Append the lists and shift the
+    // attachment's vertices onto the tail; leaving them alone would silently
+    // point an axe at whatever material the character happened to have first.
+    const uint32_t materialBase =
+        static_cast<uint32_t>(mesh.materials.size());
+    for (MeshVertex& vertex : attachment.vertices) {
+        vertex.materialIndex += materialBase;
+    }
+    mesh.materials.insert(
+        mesh.materials.end(),
+        attachment.materials.begin(),
+        attachment.materials.end());
+
     mesh.attachments.push_back({
         .mesh = std::move(attachment),
         .nodeIndex = static_cast<uint32_t>(
@@ -1143,6 +1245,9 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
 
     MeshData result;
     result.indices = mesh.indices;
+    // Already merged with every attachment's list by addSkinnedAttachment,
+    // so the indices the vertices carry are valid in it.
+    result.materials = mesh.materials;
     result.vertices.resize(mesh.vertices.size());
     // Each vertex writes only its own output slot, so chunks parallelize
     // freely; small meshes run inline via the minChunk threshold.
@@ -1180,6 +1285,7 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
                         source.tangent.w },
                     .uv = source.uv,
                     .uv1 = source.uv1,
+                    .materialIndex = source.materialIndex,
                 },
                 bounds,
                 options);
@@ -1234,6 +1340,7 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
                     // Carried explicitly, where it used to be patched back on
                     // after the fact because the old signature dropped it.
                     .materialFlags = vertex.materialFlags,
+                    .materialIndex = vertex.materialIndex,
                 },
                 bounds,
                 options));

@@ -14,6 +14,7 @@ layout(location = 6) in vec4 inWeights;
 layout(location = 7) in uint inAttachmentNode;
 layout(location = 8) in vec4 inTangent;
 layout(location = 9) in vec2 inUv1;
+layout(location = 10) in uint inMaterialIndex;
 
 layout(location = 0) out vec4 outShadowPosition;
 layout(location = 1) out float outFaceCoordU;
@@ -25,6 +26,9 @@ layout(location = 6) out vec3 outWorldPosition;
 layout(location = 7) flat out uint outDrawInstance;
 layout(location = 8) out vec4 outTangent;
 layout(location = 9) out vec2 outUv1;
+// Which material this vertex belongs to. Nothing reads it yet; F3b-2 is
+// where it stops being the vertex's job to carry a texture index at all.
+layout(location = 10) flat out uint outMaterialIndex;
 
 struct SkinningInstance {
     mat4 palette[MAX_SKIN_JOINTS + 128];
@@ -122,6 +126,7 @@ void main() {
     outFaceCoordU = inUv.x; outFaceCoordV = inUv.y;
     outTextureIndex = inTextureIndex; outMaterialFlags = inMaterialFlags;
     outUv1 = inUv1;
+    outMaterialIndex = inMaterialIndex;
     // modelFromSource, not normalFromSource: a tangent transforms by the
     // matrix, a normal by its inverse transpose.
     vec3 tangent = mat3(skinning.instances[gl_InstanceIndex].modelFromSource) *

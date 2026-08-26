@@ -30,6 +30,12 @@ struct MeshVertex {
     uint32_t textureIndex = 0;
     // Bitwise PrimitiveMaterialFlag values resolved from manifest metadata.
     uint32_t materialFlags = 0;
+    // Which entry of the owning mesh's `materials` this vertex belongs to.
+    // Per vertex rather than per draw because one draw covers a whole model
+    // and a model's primitives can carry different materials - which is also
+    // why textureIndex is per vertex today. Once the material reaches the
+    // shader, this subsumes both of the fields above.
+    uint32_t materialIndex = 0;
 };
 
 enum PrimitiveMaterialFlag : uint32_t {
@@ -42,9 +48,47 @@ struct PrimitiveMaterialBinding {
     uint32_t flags = PrimitiveMaterialNone;
 };
 
+// glTF's alpha handling, which decides whether a primitive belongs in the
+// opaque pass, is cut out against a threshold, or blends.
+enum class MaterialAlphaMode : uint32_t {
+    Opaque = 0,
+    Mask = 1,
+    Blend = 2,
+};
+
+// One glTF material, as authored.
+//
+// Everything here except the last three fields comes straight out of the
+// file. The texture does not: this engine's textures are declared by
+// assets/manifest.json and resolved to descriptor indices there, so a glTF
+// material's own image references are ignored and the manifest's slot for
+// that material index supplies `baseColorTexture` instead. Whether the other
+// map slots - normal, metallic-roughness, emissive, occlusion - should follow
+// the same rule or be read from the glTF is an open question; see the F3b
+// note in HANDOFF.md. They are deliberately absent rather than present and
+// unfillable.
+struct MeshMaterial {
+    Vec4 baseColorFactor { 1.0f, 1.0f, 1.0f, 1.0f };
+    Vec3 emissiveFactor {};
+    float metallicFactor = 1.0f;
+    float roughnessFactor = 1.0f;
+    float alphaCutoff = 0.5f;
+    MaterialAlphaMode alphaMode = MaterialAlphaMode::Opaque;
+    bool doubleSided = false;
+    // One-based descriptor index; zero means untextured.
+    uint32_t baseColorTexture = 0;
+    // Which UV set the base colour texture reads.
+    uint32_t baseColorUvSet = 0;
+    uint32_t flags = PrimitiveMaterialNone;
+};
+
 struct MeshData {
     std::vector<MeshVertex> vertices;
     std::vector<uint32_t> indices;
+    // Indexed by MeshVertex::materialIndex. Never empty: a file with no
+    // materials at all still gets one default entry, so nothing downstream
+    // has to special-case the absence.
+    std::vector<MeshMaterial> materials;
 };
 
 struct SkinnedVertex {
@@ -54,6 +98,7 @@ struct SkinnedVertex {
     Vec4 tangent {};
     Vec2 uv {};
     Vec2 uv1 {};
+    uint32_t materialIndex = 0;
     std::array<uint16_t, 4> joints {};
     std::array<float, 4> weights {};
 };
@@ -74,6 +119,7 @@ struct SkinnedAttachment {
 struct SkinnedMeshData {
     std::vector<SkinnedVertex> vertices;
     std::vector<uint32_t> indices;
+    std::vector<MeshMaterial> materials;
     std::vector<SkeletonNode> nodes;
     std::vector<uint32_t> jointNodeIndices;
     std::vector<Mat4> inverseBindMatrices;
@@ -95,6 +141,7 @@ struct GpuSkinnedVertex {
     Vec2 uv1 {};
     uint32_t textureIndex = 0;
     uint32_t materialFlags = 0;
+    uint32_t materialIndex = 0;
     std::array<uint16_t, 4> joints {};
     std::array<float, 4> weights {};
     uint32_t attachmentNodeIndex = UINT32_MAX;

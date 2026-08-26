@@ -99,6 +99,7 @@ std::vector<GpuSkinnedVertex> makeGpuSkinnedVertices(const SkinnedMeshData& mesh
             .tangent = vertex.tangent,
             .uv = vertex.uv,
             .uv1 = vertex.uv1,
+            .materialIndex = vertex.materialIndex,
             .joints = vertex.joints,
             .weights = vertex.weights,
         });
@@ -119,6 +120,7 @@ std::vector<GpuSkinnedVertex> makeGpuSkinnedVertices(const SkinnedMeshData& mesh
                 .uv1 = vertex.uv1,
                 .textureIndex = vertex.textureIndex,
                 .materialFlags = vertex.materialFlags,
+                .materialIndex = vertex.materialIndex,
                 .attachmentNodeIndex = attachment.nodeIndex,
             });
         }

@@ -290,23 +290,79 @@ tested - dropping Gram-Schmidt puts 421,682 tangents out of the surface, and
 dropping the normalize puts 509,216 off unit length - so they are load
 bearing rather than decorative.
 
-### Next: F3b and F3c
+### What F3b step one established
 
-- **F3b, the material model.** Parse `cgltf_material` into a real `Material`
-  (baseColor factor and texture, metallic-roughness, normal, emissive,
-  occlusion, alpha mode and cutoff, double-sided), upload it as a storage
-  buffer, and index it per draw. The vertex's `textureIndex` and
-  `materialFlags` are per-vertex today only because there was nowhere else to
-  put per-primitive state; a material index replaces both. Note what the
-  corpus actually contains: 40 materials, all with `baseColorFactor`,
-  `metallicFactor` and `roughnessFactor`, 35 with a `baseColorTexture`, one
-  `BLEND`, four `doubleSided`, and **no** normal, metallic-roughness,
-  emissive or occlusion textures anywhere. The map slots will be real and
-  unexercised until there is content for them.
+The CPU side of the material model. `MeshMaterial` holds glTF's authored
+values - baseColour factor, metallic and roughness factors, emissive factor,
+alpha mode and cutoff, double-sided - and `MeshData`/`SkinnedMeshData` carry a
+list of them. Every vertex carries a `materialIndex` into that list, at
+attribute location 10.
+
+- **Per vertex, not per draw**, for the same reason `textureIndex` already
+  was: one draw covers a whole model and a model's primitives can carry
+  different materials. Once the material reaches the shader it subsumes both
+  `textureIndex` and `materialFlags`, and they go.
+- **The list is never empty.** A file with no materials still gets one default
+  entry, so nothing downstream needs a special case.
+- **Attachment material lists are merged, not assumed compatible.** An
+  attachment is a separate glTF with its own material indices;
+  `addSkinnedAttachment` appends its list to the actor's and shifts the
+  attachment's vertices onto the tail. Left alone, an axe would have pointed
+  at whatever material the character happened to have first.
+- **A missing manifest slot is still only an error when a primitive uses it.**
+  Building the material list does not validate slots it was not asked about,
+  which is what keeps a model whose manifest lists fewer slots than the file
+  has materials loading exactly as it did.
+- **Nothing reads any of it yet.** No GPU buffer, no shader consumption.
+
+**Verified**: legacy fields byte-identical across all 734 digest lines again.
+The new data is populated and shaped as the files say it should be - 632
+single-material meshes, 18 lines for the one two-material model, and non-zero
+counts for textured, tinted, double-sided and blended materials that match a
+direct scan of the glTF JSON.
+
+### An open question F3b step two has to answer first
+
+`MeshMaterial` deliberately has **no** normal, metallic-roughness, emissive or
+occlusion texture slots yet, even though the review asks for them and the
+substrate is meant to be complete. They are absent rather than present and
+unfillable, because where those textures come from is not decided:
+
+- This engine's textures are declared in `assets/manifest.json`, resolved to
+  descriptor indices during validation, staged by the content pipeline and
+  budgeted for residency. A glTF material's own image references are ignored
+  entirely - the manifest's slot for that material index supplies the texture.
+- Reading the maps from the glTF instead would mean the loader pulling in
+  files the manifest never declared, which the content pipeline does not stage
+  and the residency budget does not know about.
+- Declaring them in the manifest keeps every existing guarantee, but multiplies
+  texture pressure by up to five against `maxModelTextures = 64` - which is
+  already the content ceiling review item V4 exists to remove.
+
+So the order matters: **V4's descriptor indexing may want to come before the
+map slots**, or the slots arrive and immediately run the manifest out of room.
+Worth deciding deliberately rather than discovering.
+
+### Next: F3b step two, then F3c
+
+- **F3b step two**: a material storage buffer uploaded when a model publishes,
+  a new descriptor binding, and `triangle.frag` reading baseColour factor,
+  metallic and roughness from it instead of from the draw block. This is where
+  `textureIndex` and `materialFlags` leave the vertex. Small visual change:
+  `baseColorFactor` starts being applied where it currently is not, which is
+  six of the forty materials.
 - **F3c, Cook-Torrance GGX**, as a straight swap for the wrapped-diffuse
-  Blinn-Phong, with normal mapping where a material supplies a map. This is
-  the step that changes how the game looks, and it is the reason F3a stops
-  where it does.
+  Blinn-Phong. This is the step that changes how the game looks.
+- **Do the `model.vert` Euler fix with F3b step two**, not with F3c. It is a
+  redundancy fix rather than a correctness one - `mat3(worldFromModel)` is
+  R\*S built from the same authored rotation and scale, so the shader's
+  inverse-scale-then-Euler is exactly the inverse transpose it should be, just
+  computed the long way from data it already has. Doing it in F3b step two
+  frees `normalAndAmbientRed.xyz` and `gridColor.xyz` on the model path -
+  six floats in a block that step is already reshaping - and drops 3 sin and
+  3 cos per vertex from two shaders. Folding it into F3c instead would make a
+  normal change and a lighting change indistinguishable in the first frame
+  anyone looks at.
 
 ### Still open on the loader
 

@@ -331,7 +331,7 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
     // skinned one name the same thing the same way: 5 to 7 are the skinning
     // attributes, and a tangent that moved depending on the pipeline would be
     // a trap in two vertex shaders instead of a number in one table.
-    const std::array<VkVertexInputAttributeDescription, 7> attributes {
+    const std::array<VkVertexInputAttributeDescription, 8> attributes {
         VkVertexInputAttributeDescription {
             .location = 0,
             .binding = 0,
@@ -374,8 +374,14 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
             .format = VK_FORMAT_R32G32_SFLOAT,
             .offset = offsetof(MeshVertex, uv1),
         },
+        VkVertexInputAttributeDescription {
+            .location = 10,
+            .binding = 0,
+            .format = VK_FORMAT_R32_UINT,
+            .offset = offsetof(MeshVertex, materialIndex),
+        },
     };
-    const std::array<VkVertexInputAttributeDescription, 10> skinnedAttributes {
+    const std::array<VkVertexInputAttributeDescription, 11> skinnedAttributes {
         VkVertexInputAttributeDescription { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuSkinnedVertex, position) },
         VkVertexInputAttributeDescription { 1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuSkinnedVertex, normal) },
         VkVertexInputAttributeDescription { 2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(GpuSkinnedVertex, uv) },
@@ -386,6 +392,7 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
         VkVertexInputAttributeDescription { 7, 0, VK_FORMAT_R32_UINT, offsetof(GpuSkinnedVertex, attachmentNodeIndex) },
         VkVertexInputAttributeDescription { 8, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(GpuSkinnedVertex, tangent) },
         VkVertexInputAttributeDescription { 9, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(GpuSkinnedVertex, uv1) },
+        VkVertexInputAttributeDescription { 10, 0, VK_FORMAT_R32_UINT, offsetof(GpuSkinnedVertex, materialIndex) },
     };
     const bool meshLayout = vertexLayout == VertexLayout::Mesh;
     const bool skinnedLayout = vertexLayout == VertexLayout::SkinnedMesh;
