@@ -459,7 +459,9 @@ a.ref:hover { background: var(--accent); color: var(--surface); }
   color: var(--ink-2);
   line-height: 1.45;
 }
-.steps li.done b { color: var(--ink-3); }
+.steps li.done b, .steps li.partial b, .steps li.next b { color: var(--ink-3); }
+.steps li.partial .step-body > b::after,
+.steps li.next .step-body > b::after,
 .steps li.done .step-body > b::after {
   content: "shipped";
   font-family: "IBM Plex Mono", monospace;
@@ -474,6 +476,24 @@ a.ref:hover { background: var(--accent); color: var(--surface); }
   margin-left: 0.5rem;
   vertical-align: 0.08em;
 }
+.steps li.partial .step-body > b::after {
+  content: "partly shipped";
+  color: var(--warn, #9a6b12);
+  border-color: color-mix(in srgb, var(--warn, #9a6b12) 32%, transparent);
+  background: color-mix(in srgb, var(--warn, #9a6b12) 10%, transparent);
+}
+.steps li.next .step-body > b::after {
+  content: "next up";
+  color: #2f5fa8;
+  border-color: color-mix(in srgb, #2f5fa8 34%, transparent);
+  background: color-mix(in srgb, #2f5fa8 10%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .steps li.next .step-body > b::after { color: #7aa9e8; }
+  :root:not([data-theme="light"]) .steps li.partial .step-body > b::after { color: #e0ab48; }
+}
+:root[data-theme="dark"] .steps li.next .step-body > b::after { color: #7aa9e8; }
+:root[data-theme="dark"] .steps li.partial .step-body > b::after { color: #e0ab48; }
 
 .phase-gate {
   font-family: "IBM Plex Mono", monospace;
@@ -643,14 +663,14 @@ footer {
     <p class="eyebrow">Engine review · Sokoban 3D · 64,900 LOC C++20 / Vulkan 1.3</p>
     <h1>What stands between this and a modern 3D engine</h1>
     <p class="deck">The gameplay, tooling, packaging and test discipline here are well above the usual bar. The renderer is not a small 3D engine — it is a very refined <em>fixed-camera tile-board rasterizer</em>, and almost every gap below descends from that one fact.</p>
-    <p class="deck" style="font-size: var(--step-0); margin-top: 0.9rem;">Findings carry stable IDs (<span class="f-id" style="--chip: var(--accent); --chip-bg: var(--accent-soft);">T3</span>, <span class="f-id" style="--chip: var(--accent); --chip-bg: var(--accent-soft);">V1</span>, …). <a href="#s9">§9</a> sequences them into phases, so each step there is a task you can hand to someone. Two findings were corrected after implementation revealed the original reasoning was wrong; both say so where they stand.</p>
-    <p class="deck" style="font-size: var(--step-0); margin-top: 0.9rem;"><b>Implementation status is marked on each finding</b> — look for the <span class="chip-status chip-done">Done</span>, <span class="chip-status chip-partial">Partly done</span> and <span class="chip-status chip-next">Next up</span> chips and the note under each heading. <a href="#s11">§11</a> records what building this document’s recommendations proved wrong about them. The working notes that go with it live in <code>HANDOFF.md</code> at the repo root; that file, not this one, is where the invariants each landed step established are written down.</p>
+    <p class="deck" style="font-size: var(--step-0); margin-top: 0.9rem;">Findings carry stable IDs (<span class="f-id" style="--chip: var(--accent); --chip-bg: var(--accent-soft);">T3</span>, <span class="f-id" style="--chip: var(--accent); --chip-bg: var(--accent-soft);">V1</span>, …). <a href="#s9">§9</a> sequences them into phases, so each step there is a task you can hand to someone. Nine findings were corrected after implementation revealed the original reasoning was wrong; each says so where it stands.</p>
+    <p class="deck" style="font-size: var(--step-0); margin-top: 0.9rem;"><b>Implementation status is marked on each finding</b> — look for the <span class="chip-status chip-done">Done</span>, <span class="chip-status chip-partial">Partly done</span> and <span class="chip-status chip-next">Next up</span> chips and the note under each heading, and for the same marks on every step of the plan in <a href="#s9">§9</a>. <b>Everything below a status note describes the code as it stood at review time</b>, in the present tense, and has deliberately not been rewritten — the finding is the record of what was found. The note above it is what is true now. <a href="#s11">§11</a> records what building this document’s recommendations proved wrong about them. The working notes that go with it live in <code>HANDOFF.md</code> at the repo root; that file, not this one, is where the invariants each landed step established are written down.</p>
     <div class="meta">
-      <div><b>Status</b>Phases 0–1 done · Phase 2 all but F2c · 17 open</div>
-      <div><b>Reviewed</b>src/, shaders/, tests/, CMakeLists.txt</div>
-      <div><b>Engine LOC</b>64,900 · 253 files</div>
-      <div><b>Shaders</b>14 GLSL · 2,054 lines</div>
-      <div><b>Tests</b>59 CTest suites</div>
+      <div><b>Status</b>14 findings done · 2 partly · 14 open</div>
+      <div><b>Scope at review</b>src/, shaders/, tests/, CMakeLists.txt</div>
+      <div><b>LOC at review</b>64,900 · 253 files</div>
+      <div><b>Shaders at review</b>14 GLSL · 2,054 lines</div>
+      <div><b>Tests at review</b>59 CTest suites</div>
     </div>
   </header>
 
@@ -738,8 +758,8 @@ diffuseLighting = ambient * (1.0 + skyFill * 0.35) + sunRadiance * diffuse * sha
       </div>
 
       <div class="finding f-foundation" id="f-ubershader">
-        <div class="f-head"><span class="f-id">F4</span><span class="chip">Foundation</span><span class="chip-status chip-next">Next up</span><p class="f-title">One über-shader does scene, models, UI text, title art, editor highlights and blur</p></div>
-        <p class="status-note"><b>Next up.</b> Not started. Now the largest remaining Foundation item, and F3 has made the branch count worse exactly as this document predicted.</p>
+        <div class="f-head"><span class="f-id">F4</span><span class="chip">Foundation</span><p class="f-title">One über-shader does scene, models, UI text, title art, editor highlights and blur</p></div>
+        <p class="status-note"><b>Not started.</b> Now the largest remaining Foundation item, and F3 has made the branch count worse exactly as this document predicted — <code>triangle.frag.glsl</code> is 576 lines and carries a full Cook-Torrance implementation beside the UI font and the title art. Sequenced after <a class="ref" href="#v-descriptors">V4</a> and the glTF map work, not before.</p>
         <p class="f-where">shaders/triangle.frag.glsl — 382 lines, 7 material modes selected by <code>textureOptions.x</code></p>
         <p>Modes 1–7 branch between tile color, model textures, the UI font atlas, the title background, a procedural particle texture, and a scene-image composite with a rounded-rect SDF. Editor highlight tinting, Bayer dither for previews, and a 5×5 gaussian read-back of the scene are all in the same fragment shader as the lighting. There are no specialization constants and no shader permutation system — 14 fixed SPIR-V modules feeding 16 fixed pipelines.</p>
         <div class="fix"><b>Do</b>Split UI out of the scene shader entirely; introduce specialization constants or a small permutation key (shadows on/off, AO on/off, skinned, material features) so the scene shader stops paying for branches it isn't using and so new features don't have to fit in the same file.</div>
@@ -943,19 +963,19 @@ SkinningInstance instance = skinning.instances[gl_InstanceIndex];   <span class=
         <table>
           <thead><tr><th style="width:30%">Capability</th><th style="width:34%">Current state</th><th>What it would take</th></tr></thead>
           <tbody>
-            <tr><td><span class="dot d-none"></span>PBR materials</td><td>Blinn-Phong, single baseColor texture, global specular strength/power</td><td>Material struct + GGX BRDF (§2)</td></tr>
-            <tr><td><span class="dot d-none"></span>Normal mapping</td><td>No tangents in the vertex format</td><td>Vertex format + glTF tangents or MikkTSpace</td></tr>
-            <tr><td><span class="dot d-none"></span>HDR &amp; tonemapping</td><td>8-bit sRGB targets end to end</td><td>Float target + tonemap pass (§2)</td></tr>
+            <tr><td><span class="dot d-part"></span>PBR materials</td><td><b>Since F3:</b> Cook-Torrance GGX driven by per-material metallic and roughness, uploaded in a GPU material buffer. The remaining gap is maps — normal, metallic-roughness, emissive and occlusion are parsed and uploaded but no texture can be bound to them yet</td><td>Let the manifest name a glTF’s own maps (blocked on <a class="ref" href="#v-descriptors">V4</a>)</td></tr>
+            <tr><td><span class="dot d-part"></span>Normal mapping</td><td><b>Since F3a:</b> the vertex carries a glTF tangent with handedness, read from the file or derived from the UVs; the fragment stage receives it. Nothing samples a normal map yet, because nothing can bind one</td><td>The same map work as the row above; the tangent substrate is done</td></tr>
+            <tr><td><span class="dot d-part"></span>HDR &amp; tonemapping</td><td><b>Since F2:</b> an <code>R16G16B16A16_SFLOAT</code> scene target and a tonemap pass, with the sRGB encode done once by hardware on write to the display image</td><td>F2c: a real curve instead of the placeholder, and an exposure control</td></tr>
             <tr><td><span class="dot d-none"></span>Post stack</td><td>None — no bloom, DOF, motion blur, grading, vignette, CA</td><td>Depends entirely on HDR existing first</td></tr>
-            <tr><td><span class="dot d-part"></span>Anti-aliasing</td><td>MSAA 2/4/8× only, 8× default</td><td>TAA + spatial upscaler; needs motion vectors</td></tr>
+            <tr><td><span class="dot d-part"></span>Anti-aliasing</td><td>MSAA 2/4/8× only, 4× default since T6</td><td>TAA + spatial upscaler; needs motion vectors</td></tr>
             <tr><td><span class="dot d-none"></span>Motion vectors</td><td>No previous-frame transforms are kept</td><td>Prerequisite for TAA, motion blur, temporal AO</td></tr>
             <tr><td><span class="dot d-part"></span>Shadows</td><td>One 2048² sun map, no cascades; 8 cube-map point lights, uncached</td><td>CSM for range; caching + atlas for the point lights (§3)</td></tr>
             <tr><td><span class="dot d-part"></span>Ambient occlusion</td><td>Depth-only SSAO, pixel-space radius, box blur, applied post-lighting</td><td>Normal-aware GTAO at half res (§4)</td></tr>
-            <tr><td><span class="dot d-none"></span>Global illumination</td><td>A flat ambient colour plus a <code>skyFill</code> normal-Z ramp</td><td>Irradiance probes / DDGI / lightmaps — pick one</td></tr>
+            <tr><td><span class="dot d-none"></span>Global illumination</td><td>A flat ambient colour plus a <code>skyFill</code> normal-Z ramp. F3c added an <code>ambient × F0</code> term so metals are not black, which is a stand-in for a probe, not a probe</td><td>Irradiance probes / DDGI / lightmaps — pick one</td></tr>
             <tr><td><span class="dot d-none"></span>Reflections</td><td>None; the "mirror" is a gameplay mechanic, not a reflection</td><td>SSR or reflection probes; both need view-space data</td></tr>
             <tr><td><span class="dot d-part"></span>Many lights</td><td>8 point lights in a UBO, looped per fragment, no culling</td><td>Clustered or tiled forward+ light culling</td></tr>
             <tr><td><span class="dot d-none"></span>Volumetrics / fog</td><td>None; no world-space depth available to the shader</td><td>Needs a real view matrix first (§1)</td></tr>
-            <tr><td><span class="dot d-part"></span>Transparency</td><td>Back-to-front sorted quads; opaque is also blended</td><td>Separate opaque/transparent pipelines; OIT if needed</td></tr>
+            <tr><td><span class="dot d-part"></span>Transparency</td><td>Back-to-front sorted quads. Opaque and blended are separate pipelines since T2, and F3b made a glTF <code>BLEND</code> material’s own alpha reach the surface</td><td>OIT if the sort ever stops being enough</td></tr>
             <tr><td><span class="dot d-none"></span>Decals</td><td>None. Ground variation is a painted splat map</td><td>Deferred or forward decal projection</td></tr>
             <tr><td><span class="dot d-part"></span>Particles</td><td>CPU sim, per-particle draw call, unlit alpha quads</td><td>GPU compute simulation + instanced or indirect draw</td></tr>
             <tr><td><span class="dot d-ok"></span>Skeletal animation</td><td>GPU skinning, crossfades, timeline events, attachments — genuinely solid</td><td>Add IK, blend trees/state machine, root motion</td></tr>
@@ -1032,7 +1052,7 @@ SkinningInstance instance = skinning.instances[gl_InstanceIndex];   <span class=
       <div class="sec-head"><span class="sec-num">09</span><h2>A sequenced plan</h2></div>
       <p class="lead">Every step below is one of the findings above, named by its ID, in the order it should be picked up. Ordering is the whole point: each phase makes the next one cheap, and doing them out of order means writing the same code twice. Phases are independently schedulable; steps within a phase are not.</p>
 
-      <div class="fix" style="margin-bottom:22px"><b>Where this stands</b>Phase 0 and Phase 1 are complete. Implementing them turned up four places where this review was wrong about its own subject matter; those corrections are recorded in the findings themselves and summarised in &sect;11.</div>
+      <div class="fix" style="margin-bottom:22px"><b>Where this stands</b>Phases 0 and 1 are complete. Phase 2 is complete except for <b>F2c</b> (a real tonemap curve and a user-facing exposure control), the sampling half of <b>V7</b>, and <b>F4</b>. The next step is <b>V4</b> out of Phase 3, pulled forward deliberately: descriptor indexing removes the 64-texture ceiling, and that ceiling is what makes it unaffordable to let the manifest read a glTF's own normal, metallic-roughness, emissive and occlusion maps. That map work follows immediately after V4 and finishes what F3 started. Implementing this plan turned up several places where the review was wrong about its own subject matter; those corrections are summarised in &sect;11 and worth reading before trusting any estimate here.</div>
 
       <div class="phase">
         <div class="phase-tag">Phase 0<br>days</div>
@@ -1075,10 +1095,10 @@ SkinningInstance instance = skinning.instances[gl_InstanceIndex];   <span class=
           <h4>Modernize the pixel path</h4>
           <p>Sequential for the first three; <a class="ref" href="#v-ssao">V7</a> and <a class="ref" href="#f-ubershader">F4</a> can run alongside once materials exist.</p>
           <ol class="steps">
-            <li><a class="ref" href="#f-hdr">F2</a><div class="step-body"><b>HDR target and a tonemap pass</b><span class="note">Before materials, not after: PBR values without range headroom look worse than what you have now.</span></div></li>
-            <li><a class="ref" href="#a-gltf">A1</a><div class="step-body"><b>Replace the glTF loader</b><span class="note">cgltf or tinygltf. Do it before <a class="ref" href="#f-materials">F3</a> — it is what supplies real materials, tangents, and extensions, so writing a material model against the current loader is throwaway work.</span></div></li>
-            <li><a class="ref" href="#f-materials">F3</a><div class="step-body"><b>Material model and a GGX BRDF</b><span class="note">Vertex tangents, metallic-roughness, normal, emissive, occlusion, alpha mode. Also retires the per-face alpha special-case that <a class="ref" href="#t-opaqueblend">T2</a> had to work around.</span></div></li>
-            <li><a class="ref" href="#v-ssao">V7</a><div class="step-body"><b>Rework the SSAO</b><span class="note">Needs the view matrix from <a class="ref" href="#s1">C1</a> to express its radius in world units, and the ambient term from <a class="ref" href="#f-materials">F3</a> to apply itself correctly.</span></div></li>
+            <li class="partial"><a class="ref" href="#f-hdr">F2</a><div class="step-body"><b>HDR target and a tonemap pass</b><span class="note">Before materials, not after: PBR values without range headroom look worse than what you have now.</span></div></li>
+            <li class="done"><a class="ref" href="#a-gltf">A1</a><div class="step-body"><b>Replace the glTF loader</b><span class="note">cgltf or tinygltf. Do it before <a class="ref" href="#f-materials">F3</a> — it is what supplies real materials, tangents, and extensions, so writing a material model against the current loader is throwaway work.</span></div></li>
+            <li class="done"><a class="ref" href="#f-materials">F3</a><div class="step-body"><b>Material model and a GGX BRDF</b><span class="note">Vertex tangents, metallic-roughness, normal, emissive, occlusion, alpha mode. Also retires the per-face alpha special-case that <a class="ref" href="#t-opaqueblend">T2</a> had to work around.</span></div></li>
+            <li class="partial"><a class="ref" href="#v-ssao">V7</a><div class="step-body"><b>Rework the SSAO</b><span class="note">Needs the view matrix from <a class="ref" href="#s1">C1</a> to express its radius in world units, and the ambient term from <a class="ref" href="#f-materials">F3</a> to apply itself correctly.</span></div></li>
             <li><a class="ref" href="#f-ubershader">F4</a><div class="step-body"><b>Split the über-shader</b><span class="note">Pull UI out of the scene shader; add specialization constants. Worth doing once <a class="ref" href="#f-materials">F3</a> has made the branch count worse, not before.</span></div></li>
           </ol>
           <p class="phase-gate">Gate: an off-the-shelf PBR glTF asset loads and lights correctly, with exposure control and no clipping at 1.0.</p>
@@ -1093,7 +1113,7 @@ SkinningInstance instance = skinning.instances[gl_InstanceIndex];   <span class=
           <ol class="steps">
             <li><a class="ref" href="#s-scene">S2</a><div class="step-body"><b>Persistent renderables with bounds</b><span class="note">First in this phase. Culling, LOD and streaming all need something stable to reference, and the current full rebuild gives them nothing.</span></div></li>
             <li><a class="ref" href="#t-visibility">T4</a><div class="step-body"><b>Frustum culling</b><span class="note">Uses <a class="ref" href="#f-math">F1</a>'s <code>Frustum</code> and <a class="ref" href="#s-scene">S2</a>'s bounds. Occlusion culling and LOD chains come later but reuse the same bounds.</span></div></li>
-            <li><a class="ref" href="#v-descriptors">V4</a><div class="step-body"><b>Descriptor indexing and frequency-based sets</b><span class="note">Independent of <a class="ref" href="#s-scene">S2</a>. Removes the 64-texture content ceiling and is a prerequisite for bindless materials and texture streaming.</span></div></li>
+            <li class="next"><a class="ref" href="#v-descriptors">V4</a><div class="step-body"><b>Descriptor indexing and frequency-based sets</b><span class="note">Independent of <a class="ref" href="#s-scene">S2</a>. Removes the 64-texture content ceiling and is a prerequisite for bindless materials and texture streaming.</span></div></li>
             <li><a class="ref" href="#v-vma">V2</a><div class="step-body"><b>VMA, or image suballocation</b><span class="note">Independent. Generalize <code>createImage</code>/<code>createImageView</code> for mips, layers and view types while you are there.</span></div></li>
             <li><a class="ref" href="#a-textures">A2</a><div class="step-body"><b>BC7 and KTX2 in the content tool</b><span class="note">Best after <a class="ref" href="#v-vma">V2</a>. Quarters texture VRAM and removes CPU decode from the load path entirely.</span></div></li>
             <li><a class="ref" href="#a-streaming">A3</a><div class="step-body"><b>Byte-budget publication and LRU eviction</b><span class="note">Follows <a class="ref" href="#a-textures">A2</a>: the budgets only start meaning something once texture sizes are realistic.</span></div></li>
