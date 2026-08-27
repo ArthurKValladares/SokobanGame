@@ -54,7 +54,7 @@ void testMenuProjectionAndChangePlan()
     (void)coordinator.initialize();
 
     sokoban::UserSettings settings = coordinator.userSettings();
-    settings.video.antiAliasingSamples = 4;
+    settings.video.antiAliasingSamples = 2;
     settings.video.customRenderScale = true;
     settings.video.customRenderScalePercent = 50;
     settings.video.ambientOcclusion =
@@ -70,7 +70,7 @@ void testMenuProjectionAndChangePlan()
     const sokoban::SettingsEffects effects =
         coordinator.applyUserSettings(settings);
 
-    CHECK(effects.antiAliasingSamples == 4);
+    CHECK(effects.antiAliasingSamples == 2);
     CHECK(effects.renderScalePercent == 50);
     CHECK(effects.window.has_value());
     CHECK(!effects.window->fullscreen);

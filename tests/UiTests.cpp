@@ -233,7 +233,7 @@ void testOptionsNavigationAndSettings()
         }));
     const auto graphicsChange = draw({ .left = true });
     CHECK(settingsChanged(graphicsChange));
-    CHECK(settings.video.antiAliasingSamples == 4);
+    CHECK(settings.video.antiAliasingSamples == 2);
     draw({ .down = true });
     draw({ .down = true });
     draw({ .down = true });
@@ -731,13 +731,13 @@ void testOptionsReducerAndDeclarativeRows()
         state,
         settings,
         sokoban::options::intent::AdjustSelected { -1 });
-    CHECK(settings.video.antiAliasingSamples == 8);
+    CHECK(settings.video.antiAliasingSamples == 4);
     CHECK(settingsChanged(reduction.action));
     const auto* changed =
         std::get_if<sokoban::options::SettingsChanged>(
             &*reduction.action);
     CHECK(changed != nullptr);
-    CHECK(changed->settings.video.antiAliasingSamples == 4);
+    CHECK(changed->settings.video.antiAliasingSamples == 2);
 
     reduction = sokoban::reduceOptionsMenu(
         state,

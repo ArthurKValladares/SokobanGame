@@ -2,10 +2,15 @@
 
 #include "engine/render/AnimationController.hpp"
 
+#include <chrono>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace {
 
@@ -26,6 +31,99 @@ void checkImpl(bool ok, const char* expression, int line)
 
 #define CHECK(expression) checkImpl((expression), #expression, __LINE__)
 #define TEST(name) currentTest = name
+
+class TempDirectory {
+public:
+    TempDirectory()
+    {
+        const auto id =
+            std::chrono::steady_clock::now().time_since_epoch().count();
+        path_ = std::filesystem::temp_directory_path() /
+            ("sokoban-animation-loader-" + std::to_string(id));
+        std::filesystem::create_directories(path_);
+    }
+
+    ~TempDirectory()
+    {
+        std::error_code error;
+        std::filesystem::remove_all(path_, error);
+    }
+
+    [[nodiscard]] const std::filesystem::path& path() const { return path_; }
+
+private:
+    std::filesystem::path path_;
+};
+
+void writeTextFile(const std::filesystem::path& path, std::string_view contents)
+{
+    std::ofstream stream(path, std::ios::binary);
+    stream << contents;
+}
+
+void writeFloatFile(
+    const std::filesystem::path& path,
+    const std::vector<float>& values)
+{
+    std::ofstream stream(path, std::ios::binary);
+    stream.write(
+        reinterpret_cast<const char*>(values.data()),
+        static_cast<std::streamsize>(values.size() * sizeof(float)));
+}
+
+std::string cubicSplineGltf(std::size_t translationOutputCount = 6)
+{
+    return R"json({
+  "asset":{"version":"2.0"},
+  "buffers":[{"uri":"cubic.bin","byteLength":176}],
+  "bufferViews":[
+    {"buffer":0,"byteOffset":0,"byteLength":8},
+    {"buffer":0,"byteOffset":8,"byteLength":72},
+    {"buffer":0,"byteOffset":80,"byteLength":96}
+  ],
+  "accessors":[
+    {"bufferView":0,"componentType":5126,"count":2,"type":"SCALAR","min":[0],"max":[2]},
+    {"bufferView":1,"componentType":5126,"count":)json" +
+        std::to_string(translationOutputCount) + R"json(,"type":"VEC3"},
+    {"bufferView":2,"componentType":5126,"count":6,"type":"VEC4"}
+  ],
+  "nodes":[{"name":"joint"}],
+  "animations":[{
+    "name":"Cubic",
+    "samplers":[
+      {"input":0,"output":1,"interpolation":"CUBICSPLINE"},
+      {"input":0,"output":2,"interpolation":"CUBICSPLINE"}
+    ],
+    "channels":[
+      {"sampler":0,"target":{"node":0,"path":"translation"}},
+      {"sampler":1,"target":{"node":0,"path":"rotation"}}
+    ]
+  }]
+})json";
+}
+
+std::vector<float> cubicSplineBuffer()
+{
+    return {
+        // Input times.
+        0.0f, 2.0f,
+        // Translation: in-tangent, value, out-tangent for each key.
+        9.0f, 0.0f, 0.0f,
+        1.0f, 2.0f, 3.0f,
+        4.0f, 0.0f, 0.0f,
+        6.0f, 0.0f, 0.0f,
+        7.0f, 8.0f, 9.0f,
+        10.0f, 0.0f, 0.0f,
+        // Rotation. Value slots are deliberately non-unit quaternions;
+        // tangent slots are distinctive free vectors that must stay unscaled.
+        9.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 2.0f,
+        2.0f, 0.0f, 0.0f, 0.0f,
+        4.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 2.0f, 0.0f,
+        8.0f, 0.0f, 0.0f, 0.0f,
+    };
+}
 
 // Runtime ids as an asset manifest would assign them.
 constexpr RenderModel heroModel { 1 };
@@ -573,6 +671,65 @@ void testAnimationInterpolationModes()
         markerPosition(rig, linear, 0.0625f)));
 }
 
+void testLoadsCubicSplineAnimationLayout()
+{
+    TEST("loadsCubicSplineAnimationLayout");
+    TempDirectory temp;
+    const std::filesystem::path gltfPath = temp.path() / "cubic.gltf";
+    writeTextFile(gltfPath, cubicSplineGltf());
+    writeFloatFile(temp.path() / "cubic.bin", cubicSplineBuffer());
+
+    const GltfAnimationClip clip = loadGltfAnimationClip(gltfPath, 0);
+    CHECK(clip.name == "Cubic");
+    CHECK(near(clip.durationSeconds, 2.0f));
+    CHECK(clip.channels.size() == 2);
+
+    const AnimationChannel& translation = clip.channels[0];
+    CHECK(translation.targetNodeName == "joint");
+    CHECK(translation.path == AnimationChannelPath::Translation);
+    CHECK(translation.keyframes.interpolation ==
+        AnimationInterpolation::CubicSpline);
+    CHECK(translation.keyframes.times.size() == 2);
+    CHECK(translation.keyframes.values.size() == 6);
+    CHECK(near(translation.keyframes.times[0], 0.0f));
+    CHECK(near(translation.keyframes.times[1], 2.0f));
+    CHECK(near(translation.keyframes.values[0].x, 9.0f));
+    CHECK(near(translation.keyframes.values[1].x, 1.0f));
+    CHECK(near(translation.keyframes.values[1].y, 2.0f));
+    CHECK(near(translation.keyframes.values[1].z, 3.0f));
+    CHECK(near(translation.keyframes.values[2].x, 4.0f));
+    CHECK(near(translation.keyframes.values[3].x, 6.0f));
+    CHECK(near(translation.keyframes.values[4].x, 7.0f));
+    CHECK(near(translation.keyframes.values[5].x, 10.0f));
+
+    const AnimationChannel& rotation = clip.channels[1];
+    CHECK(rotation.path == AnimationChannelPath::Rotation);
+    CHECK(rotation.keyframes.interpolation ==
+        AnimationInterpolation::CubicSpline);
+    CHECK(rotation.keyframes.values.size() == 6);
+    // Tangents are free vectors. Normalizing either one would turn these
+    // distinctive magnitudes into 1 and bend the sampled curve.
+    CHECK(near(rotation.keyframes.values[0].x, 9.0f));
+    CHECK(near(rotation.keyframes.values[2].x, 2.0f));
+    CHECK(near(rotation.keyframes.values[3].x, 4.0f));
+    CHECK(near(rotation.keyframes.values[5].x, 8.0f));
+    // Only the middle slot of each triple is a quaternion value.
+    CHECK(near(rotation.keyframes.values[1].w, 1.0f));
+    CHECK(near(rotation.keyframes.values[1].z, 0.0f));
+    CHECK(near(rotation.keyframes.values[4].z, 1.0f));
+    CHECK(near(rotation.keyframes.values[4].w, 0.0f));
+
+    const std::filesystem::path malformedPath = temp.path() / "malformed.gltf";
+    writeTextFile(malformedPath, cubicSplineGltf(5));
+    bool malformedRejected = false;
+    try {
+        (void)loadGltfAnimationClip(malformedPath, 0);
+    } catch (const std::runtime_error&) {
+        malformedRejected = true;
+    }
+    CHECK(malformedRejected);
+}
+
 } // namespace
 
 int main()
@@ -587,6 +744,7 @@ int main()
     testAnimatedInstancesKeepIndependentPlayback();
     testSkinnedAttachmentsInheritAnimatedNodeTransforms();
     testAnimationInterpolationModes();
+    testLoadsCubicSplineAnimationLayout();
 
     if (failures == 0) {
         std::cout << "AnimationControllerTests: " << checks << " checks passed\n";
