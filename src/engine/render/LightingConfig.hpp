@@ -18,11 +18,14 @@ inline constexpr float maximumSunIntensity = 4.0f;
 inline constexpr Vec3 ambientLightColor { 0.70f, 0.76f, 0.84f };
 inline constexpr float ambientLightIntensity = 0.44f;
 inline constexpr float maximumAmbientLightIntensity = 2.0f;
-inline constexpr float specularStrength = 0.16f;
+// A scene-wide dial on the specular half of the BRDF, full strength by
+// default. It was 0.16 under Blinn-Phong, where it was a fudge factor on an
+// unnormalized lobe; F3c's Cook-Torrance term is normalized and carries its
+// own Fresnel, so damping it by default would only mean throwing away energy
+// the material asked for. Its companion, specularPower, is gone with the
+// exponent it fed - a material's roughness is what decides gloss now.
+inline constexpr float specularStrength = 1.0f;
 inline constexpr float maximumSpecularStrength = 1.0f;
-inline constexpr float specularPower = 36.0f;
-inline constexpr float minimumSpecularPower = 1.0f;
-inline constexpr float maximumSpecularPower = 128.0f;
 inline constexpr float modelShadowReceive = 0.35f;
 inline constexpr float maximumModelShadowReceive = 1.0f;
 

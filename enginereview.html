@@ -1,0 +1,1241 @@
+<title>Sokoban 3D Engine Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+
+<style>
+:root {
+  --bg: #EDEFF3;
+  --surface: #FBFCFE;
+  --surface-sunk: #E4E8EE;
+  --ink: #151A22;
+  --ink-2: #4E5866;
+  --ink-3: #6E7987;
+  --line: #D5DAE2;
+  --line-strong: #B9C1CD;
+  --accent: #1D5FA6;
+  --accent-soft: #E3ECF7;
+  --sev-foundation: #A63A2E;
+  --sev-foundation-bg: #F7E7E4;
+  --sev-throughput: #8A5E10;
+  --sev-throughput-bg: #F7EEDC;
+  --sev-debt: #35636B;
+  --sev-debt-bg: #E2EDEF;
+  --good: #2F6B4F;
+  --good-bg: #E5EFE9;
+
+  --measure: 68ch;
+  --step-0: 1rem;
+  --step-1: 1.1875rem;
+  --step-2: 1.4375rem;
+  --step-3: 1.8125rem;
+  --step-4: 2.5rem;
+  --step-5: 3.4rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0E1218;
+    --surface: #151B24;
+    --surface-sunk: #10161E;
+    --ink: #E2E7EE;
+    --ink-2: #98A4B3;
+    --ink-3: #788493;
+    --line: #242E3A;
+    --line-strong: #35414F;
+    --accent: #78ADEA;
+    --accent-soft: #17222F;
+    --sev-foundation: #E58272;
+    --sev-foundation-bg: #2A1A18;
+    --sev-throughput: #DCA845;
+    --sev-throughput-bg: #29210F;
+    --sev-debt: #7CB4BE;
+    --sev-debt-bg: #132326;
+    --good: #6FB48E;
+    --good-bg: #13241C;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0E1218;
+  --surface: #151B24;
+  --surface-sunk: #10161E;
+  --ink: #E2E7EE;
+  --ink-2: #98A4B3;
+  --ink-3: #788493;
+  --line: #242E3A;
+  --line-strong: #35414F;
+  --accent: #78ADEA;
+  --accent-soft: #17222F;
+  --sev-foundation: #E58272;
+  --sev-foundation-bg: #2A1A18;
+  --sev-throughput: #DCA845;
+  --sev-throughput-bg: #29210F;
+  --sev-debt: #7CB4BE;
+  --sev-debt-bg: #132326;
+  --good: #6FB48E;
+  --good-bg: #13241C;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+  font-size: var(--step-0);
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, .ui {
+  font-family: "IBM Plex Sans Condensed", "Helvetica Neue", Arial, sans-serif;
+  text-wrap: balance;
+}
+
+code, kbd, .mono {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+code {
+  font-size: 0.855em;
+  background: var(--surface-sunk);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0.05em 0.32em;
+  word-break: break-word;
+}
+
+a { color: var(--accent); text-underline-offset: 0.18em; }
+a:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+/* ---------- shell ---------- */
+
+.shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 clamp(1.1rem, 4vw, 2.5rem) 6rem;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+
+@media (min-width: 1040px) {
+  .shell {
+    grid-template-columns: 15.5rem minmax(0, 1fr);
+    column-gap: 3.5rem;
+  }
+  .rail { grid-column: 1; }
+  .flow { grid-column: 2; }
+  .masthead { grid-column: 1 / -1; }
+}
+
+.flow { min-width: 0; }
+.flow > * { max-width: var(--measure); }
+.flow > .wide { max-width: none; }
+
+/* ---------- masthead ---------- */
+
+.masthead {
+  padding: clamp(3rem, 8vw, 5.5rem) 0 clamp(2rem, 4vw, 3rem);
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.eyebrow {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 1.4rem;
+}
+
+.masthead h1 {
+  margin: 0;
+  font-size: clamp(2.4rem, 6.5vw, var(--step-5));
+  font-weight: 700;
+  line-height: 1.02;
+  letter-spacing: -0.015em;
+  max-width: 16ch;
+}
+
+.masthead .deck {
+  margin: 1.5rem 0 0;
+  max-width: 60ch;
+  font-size: var(--step-1);
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
+.meta {
+  margin: 2.4rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 2.5rem;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.76rem;
+  color: var(--ink-3);
+}
+.meta div { padding: 0.35rem 0; }
+.meta b {
+  display: block;
+  font-weight: 500;
+  color: var(--ink);
+  letter-spacing: 0.01em;
+}
+
+/* ---------- rail ---------- */
+
+.rail {
+  padding-top: 3.2rem;
+}
+@media (min-width: 1040px) {
+  .rail-inner {
+    position: sticky;
+    top: 2rem;
+  }
+}
+.rail ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  counter-reset: rail;
+}
+.rail li { counter-increment: rail; }
+.rail a {
+  display: grid;
+  grid-template-columns: 2.1rem 1fr;
+  gap: 0.25rem;
+  padding: 0.42rem 0;
+  font-family: "IBM Plex Sans Condensed", sans-serif;
+  font-size: 0.94rem;
+  line-height: 1.28;
+  color: var(--ink-2);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+.rail a::before {
+  content: counter(rail, decimal-leading-zero);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.7rem;
+  color: var(--ink-3);
+  padding-top: 0.18em;
+}
+.rail a:hover { color: var(--accent); }
+
+.rail .rail-title {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 0.9rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--line);
+}
+
+/* ---------- sections ---------- */
+
+section { padding-top: 3.6rem; scroll-margin-top: 1.5rem; }
+
+.sec-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.9rem;
+  margin: 0 0 0.4rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 2px solid var(--ink);
+  max-width: var(--measure);
+}
+.sec-num {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.78rem;
+  color: var(--accent);
+  padding-bottom: 0.2rem;
+}
+h2 {
+  margin: 0;
+  font-size: var(--step-3);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.12;
+}
+
+h3 {
+  margin: 2.6rem 0 0.5rem;
+  font-size: var(--step-2);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+h4 {
+  margin: 1.8rem 0 0.4rem;
+  font-size: 1.02rem;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+}
+
+p { margin: 0.85rem 0; }
+ul, ol { margin: 0.85rem 0; padding-left: 1.35rem; }
+li { margin: 0.34rem 0; }
+li::marker { color: var(--ink-3); }
+
+.lead {
+  font-size: var(--step-1);
+  line-height: 1.55;
+  color: var(--ink-2);
+  margin-top: 1.1rem;
+}
+
+/* ---------- findings ---------- */
+
+.finding {
+  margin: 1.9rem 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--chip, var(--line-strong));
+  border-radius: 2px;
+  padding: 1.15rem 1.3rem 1.25rem;
+}
+
+.finding > :first-child { margin-top: 0; }
+.finding > :last-child { margin-bottom: 0; }
+
+.f-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.55rem 0.8rem;
+  margin-bottom: 0.55rem;
+}
+
+.chip {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.63rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  padding: 0.24em 0.6em;
+  border-radius: 2px;
+  white-space: nowrap;
+  color: var(--chip);
+  background: var(--chip-bg);
+  border: 1px solid color-mix(in srgb, var(--chip) 28%, transparent);
+}
+
+.chip-status {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.63rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  padding: 0.24em 0.6em;
+  border-radius: 2px;
+  white-space: nowrap;
+  border: 1px solid currentColor;
+}
+.chip-done    { color: #1a7f5a; background: color-mix(in srgb, #1a7f5a 10%, transparent); }
+.chip-partial { color: #9a6b12; background: color-mix(in srgb, #9a6b12 12%, transparent); }
+.chip-next    { color: #2f5fa8; background: color-mix(in srgb, #2f5fa8 10%, transparent); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .chip-done    { color: #56d3a0; }
+  :root:not([data-theme="light"]) .chip-partial { color: #e0ab48; }
+  :root:not([data-theme="light"]) .chip-next    { color: #7aa9e8; }
+}
+:root[data-theme="dark"] .chip-done    { color: #56d3a0; }
+:root[data-theme="dark"] .chip-partial { color: #e0ab48; }
+:root[data-theme="dark"] .chip-next    { color: #7aa9e8; }
+
+.status-note {
+  font-size: 0.82rem;
+  margin: 0.5rem 0 0.9rem;
+  padding-left: 0.85rem;
+  border-left: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  opacity: 0.85;
+}
+
+.f-foundation { --chip: var(--sev-foundation); --chip-bg: var(--sev-foundation-bg); }
+.f-throughput { --chip: var(--sev-throughput); --chip-bg: var(--sev-throughput-bg); }
+.f-debt       { --chip: var(--sev-debt);       --chip-bg: var(--sev-debt-bg); }
+
+.f-id {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--chip);
+  background: var(--chip-bg);
+  border: 1px solid color-mix(in srgb, var(--chip) 32%, transparent);
+  border-radius: 2px;
+  padding: 0.24em 0.5em;
+  white-space: nowrap;
+}
+
+.chip.shipped {
+  --chip: var(--good);
+  --chip-bg: var(--good-bg);
+}
+
+.f-title {
+  font-family: "IBM Plex Sans Condensed", sans-serif;
+  font-weight: 600;
+  font-size: 1.16rem;
+  line-height: 1.22;
+  margin: 0;
+  flex: 1 1 18ch;
+}
+
+.f-where {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  color: var(--ink-3);
+  margin: 0.15rem 0 0.7rem;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.fix {
+  margin-top: 0.9rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--line-strong);
+  font-size: 0.95rem;
+}
+.fix b {
+  font-family: "IBM Plex Sans Condensed", sans-serif;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  display: block;
+  margin-bottom: 0.2rem;
+  font-weight: 600;
+}
+
+a.ref {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: 2px;
+  padding: 0.1em 0.4em;
+  white-space: nowrap;
+}
+a.ref:hover { background: var(--accent); color: var(--surface); }
+
+.steps {
+  list-style: none;
+  margin: 0.9rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.steps > li {
+  display: grid;
+  grid-template-columns: 3.3rem minmax(0, 1fr);
+  gap: 0 0.75rem;
+  margin: 0;
+  align-items: baseline;
+}
+.steps .step-body { min-width: 0; }
+.steps b {
+  font-family: "IBM Plex Sans Condensed", sans-serif;
+  font-weight: 600;
+  font-size: 1.02rem;
+}
+.steps .note {
+  display: block;
+  font-size: 0.92rem;
+  color: var(--ink-2);
+  line-height: 1.45;
+}
+.steps li.done b { color: var(--ink-3); }
+.steps li.done .step-body > b::after {
+  content: "shipped";
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--good);
+  border: 1px solid color-mix(in srgb, var(--good) 32%, transparent);
+  background: var(--good-bg);
+  border-radius: 2px;
+  padding: 0.2em 0.45em;
+  margin-left: 0.5rem;
+  vertical-align: 0.08em;
+}
+
+.phase-gate {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.73rem;
+  color: var(--ink-3);
+  border-left: 2px solid var(--line-strong);
+  padding-left: 0.7rem;
+  margin: 1rem 0 0;
+  line-height: 1.55;
+}
+
+/* ---------- code ---------- */
+
+pre {
+  margin: 1.1rem 0;
+  background: var(--surface-sunk);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+  font-size: 0.795rem;
+  line-height: 1.62;
+}
+pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+}
+.cm { color: var(--ink-3); }
+
+/* ---------- tables ---------- */
+
+.table-wrap {
+  overflow-x: auto;
+  margin: 1.4rem 0;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--surface);
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 34rem;
+  font-family: "IBM Plex Sans Condensed", sans-serif;
+  font-size: 0.93rem;
+}
+th, td {
+  text-align: left;
+  padding: 0.62rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+thead th {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+  background: var(--surface-sunk);
+  border-bottom: 1px solid var(--line-strong);
+}
+tbody tr:last-child td { border-bottom: 0; }
+td.num { font-variant-numeric: tabular-nums; font-family: "IBM Plex Mono", monospace; font-size: 0.82rem; }
+
+.dot {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  margin-right: 0.45rem;
+  vertical-align: 0.02em;
+}
+.d-none { background: var(--sev-foundation); }
+.d-part { background: var(--sev-throughput); }
+.d-ok   { background: var(--good); }
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.4rem;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  color: var(--ink-3);
+  margin: -0.5rem 0 1.6rem;
+}
+
+/* ---------- callouts ---------- */
+
+.note {
+  margin: 1.6rem 0;
+  padding: 1rem 1.2rem;
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 2px;
+  font-size: 0.96rem;
+}
+.note > :first-child { margin-top: 0; }
+.note > :last-child { margin-bottom: 0; }
+
+.note.good {
+  background: var(--good-bg);
+  border-left-color: var(--good);
+}
+
+.kicker {
+  font-family: "IBM Plex Sans Condensed", sans-serif;
+  font-weight: 600;
+  font-size: 0.72rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+/* ---------- phases ---------- */
+
+.phase {
+  display: grid;
+  grid-template-columns: 4.6rem minmax(0, 1fr);
+  gap: 0 1.3rem;
+  padding: 1.4rem 0;
+  border-top: 1px solid var(--line);
+}
+.phase:last-of-type { border-bottom: 1px solid var(--line); }
+.phase-tag {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  padding-top: 0.35em;
+  line-height: 1.4;
+}
+.phase h4 { margin-top: 0; }
+.phase > div > :last-child { margin-bottom: 0; }
+
+@media (max-width: 620px) {
+  .phase { grid-template-columns: 1fr; gap: 0.3rem; }
+}
+
+hr.rule {
+  border: 0;
+  border-top: 1px solid var(--line-strong);
+  margin: 3rem 0 0;
+  max-width: var(--measure);
+}
+
+footer {
+  padding-top: 2rem;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.74rem;
+  color: var(--ink-3);
+  line-height: 1.7;
+  max-width: var(--measure);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+
+<div class="shell">
+
+  <header class="masthead">
+    <p class="eyebrow">Engine review · Sokoban 3D · 64,900 LOC C++20 / Vulkan 1.3</p>
+    <h1>What stands between this and a modern 3D engine</h1>
+    <p class="deck">The gameplay, tooling, packaging and test discipline here are well above the usual bar. The renderer is not a small 3D engine — it is a very refined <em>fixed-camera tile-board rasterizer</em>, and almost every gap below descends from that one fact.</p>
+    <p class="deck" style="font-size: var(--step-0); margin-top: 0.9rem;">Findings carry stable IDs (<span class="f-id" style="--chip: var(--accent); --chip-bg: var(--accent-soft);">T3</span>, <span class="f-id" style="--chip: var(--accent); --chip-bg: var(--accent-soft);">V1</span>, …). <a href="#s9">§9</a> sequences them into phases, so each step there is a task you can hand to someone. Two findings were corrected after implementation revealed the original reasoning was wrong; both say so where they stand.</p>
+    <p class="deck" style="font-size: var(--step-0); margin-top: 0.9rem;"><b>Implementation status is marked on each finding</b> — look for the <span class="chip-status chip-done">Done</span>, <span class="chip-status chip-partial">Partly done</span> and <span class="chip-status chip-next">Next up</span> chips and the note under each heading. <a href="#s11">§11</a> records what building this document’s recommendations proved wrong about them. The working notes that go with it live in <code>HANDOFF.md</code> at the repo root; that file, not this one, is where the invariants each landed step established are written down.</p>
+    <div class="meta">
+      <div><b>Status</b>Phases 0–1 done · Phase 2 all but F2c · 17 open</div>
+      <div><b>Reviewed</b>src/, shaders/, tests/, CMakeLists.txt</div>
+      <div><b>Engine LOC</b>64,900 · 253 files</div>
+      <div><b>Shaders</b>14 GLSL · 2,054 lines</div>
+      <div><b>Tests</b>59 CTest suites</div>
+    </div>
+  </header>
+
+  <nav class="rail" aria-label="Sections">
+    <div class="rail-inner">
+      <p class="rail-title">In priority order</p>
+      <ol>
+        <li><a href="#s1">The governing constraint</a></li>
+        <li><a href="#s2">Foundations that don't exist yet</a></li>
+        <li><a href="#s3">Throughput: bound by construction</a></li>
+        <li><a href="#s4">Vulkan correctness &amp; hygiene</a></li>
+        <li><a href="#s5">Assets and the content path</a></li>
+        <li><a href="#s6">Feature gap vs. a modern baseline</a></li>
+        <li><a href="#s7">Simulation, threading, world</a></li>
+        <li><a href="#s8">Engineering &amp; CI</a></li>
+        <li><a href="#s9">A sequenced plan</a></li>
+        <li><a href="#s10">What not to touch</a></li>
+        <li><a href="#s11">Corrections from implementation</a></li>
+      </ol>
+    </div>
+  </nav>
+
+  <main class="flow">
+
+    <!-- ============ 1 ============ -->
+    <section id="s1">
+      <div class="sec-head"><span class="sec-num">01</span><h2>The governing constraint: the renderer has no camera</h2></div>
+
+      <p class="lead">Before any individual finding, one architectural fact explains most of the list. There is no view or projection matrix anywhere on the GPU. The CPU projects every vertex to clip space and ships the four corners of each quad in push constants. The plan in <a href="#s9">§9</a> refers to fixing this as <span class="f-id" style="--chip: var(--accent); --chip-bg: var(--accent-soft);">C1</span> — it is the only work item that is a whole section rather than a single finding.</p>
+
+      <pre><code><span class="cm">// shaders/triangle.vert.glsl — the entire vertex transform</span>
+const int index = indices[gl_VertexIndex];
+gl_Position       = pc.vertices[index];
+outShadowPosition = pc.shadowVertices[index];
+outWorldPosition  = worldFromSunShadow(outShadowPosition);</code></pre>
+
+      <p>Three consequences follow directly, and they are the root of sections 2 and 3:</p>
+
+      <ul>
+        <li><b>World position is recovered by inverting the sun's shadow projection</b> (<code>worldFromSunShadow</code>, duplicated verbatim in four shaders). The shadow frustum is the only spatial frame the GPU has. Any effect needing a real world or view position — fog, parallax, screen-space reflections, correct specular, distance-based anything — has no supply.</li>
+        <li><b>The view direction is a hardcoded constant.</b> <code>triangle.frag.glsl:301</code> declares <code>const vec3 viewDirection = normalize(vec3(0.0, 0.25881904, 0.9659258));</code> — the fixed isometric camera baked into the shader. Specular highlights are correct only for that one camera. Move the camera and the lighting is wrong everywhere.</li>
+        <li><b>Geometry is push-constant sized.</b> <code>TilePushConstants</code> is <code>static_assert(sizeof(...) == 256)</code> — exactly the Vulkan guaranteed minimum, with zero bytes free. Your own handoff notes this twice ("the 256-byte push-constant block is completely full"). Every new per-draw parameter now requires evicting an existing one, and the ground-splat pass already reuses slots the ground path "leaves free."</li>
+      </ul>
+
+      <div class="note">
+        <span class="kicker">Read this way</span>
+        <p>This is not a bad renderer. For an isometric board of a few hundred tiles it is a legitimate, even clever design — the CPU has the geometry anyway for picking, so pushing clip-space corners skips vertex buffers entirely. It is simply a design whose ceiling is the board. Everything below is the cost of raising that ceiling.</p>
+      </div>
+    </section>
+
+    <!-- ============ 2 ============ -->
+    <section id="s2">
+      <div class="sec-head"><span class="sec-num">02</span><h2>Foundations that don't exist yet</h2></div>
+      <p class="lead">These are not features. They are the substrate every 3D feature is written against, and none of them can be retrofitted cheaply once more code depends on their absence.</p>
+
+      <div class="finding f-foundation" id="f-math">
+        <div class="f-head"><span class="f-id">F1</span><span class="chip">Foundation</span><span class="chip-status chip-done">Done</span><p class="f-title">There is no math library</p></div>
+        <p class="status-note"><b>Done.</b> Done in Phase 1.</p>
+        <p class="f-where">src/engine/Math.hpp · src/engine/render/GltfMesh.hpp:39 · IsoScenePreparer.cpp:25 · GltfMesh.cpp:728 · DecorationGizmo.cpp:19 · EditorInteraction.cpp:15</p>
+        <p><code>Math.hpp</code> contains <code>Vec2/Vec3/Vec4/GridPosition</code> as plain structs with no operators. There is no matrix type, no quaternion, no transform, no AABB, no ray, no frustum, no plane. <code>Mat4</code> is <code>std::array&lt;float,16&gt;</code> declared inside <em>the glTF mesh loader header</em> — so anything wanting a matrix must include the asset loader. <code>add()</code>, <code>dot()</code>, <code>normalize()</code> are independently re-implemented in at least four anonymous namespaces.</p>
+        <p>This is why the renderer works in pre-projected corners: composing a model→world→view→clip chain is currently a manual, error-prone thing nobody wants to write twice. It is also why <code>model.vert.glsl</code> rotates normals with three <code>sin</code>/<code>cos</code> pairs per vertex from Euler angles instead of a normal matrix.</p>
+        <div class="fix"><b>Do</b>A real <code>Math</code> module: <code>Mat3/Mat4</code> with multiply/inverse/transpose/TRS-decompose, <code>Quat</code> with slerp, <code>Transform</code>, <code>Aabb</code>, <code>Sphere</code>, <code>Plane</code>, <code>Frustum</code>, <code>Ray</code>, operator overloads, and unit tests. Everything in sections 3–6 is either easy or impossible depending on whether this exists. This is the single highest-leverage change in the review.</div>
+      </div>
+
+      <div class="finding f-foundation" id="f-hdr">
+        <div class="f-head"><span class="f-id">F2</span><span class="chip">Foundation</span><span class="chip-status chip-partial">Partly done</span><p class="f-title">The whole pipeline is 8-bit LDR sRGB — no HDR, no tonemapping, no exposure</p></div>
+        <p class="status-note"><b>Partly done.</b> F2a and F2b are done: an R16G16B16A16_SFLOAT scene target and a tonemap pass, with the "AO modulates ambient" half of V7 pulled forward into it. F2c — a real curve and a user-facing exposure control — is deliberately still open.</p>
+        <p class="f-where">VulkanSwapchainResources.cpp:906, 716–825 (all attachments use <code>colorFormat_</code>) · zero matches for tonemap/exposure/ACES/HDR across src/ and shaders/</p>
+        <p>Every render target — MSAA color, resolved color, sampled scene color — is created with the swapchain format, which <code>chooseSurfaceFormat</code> picks as <code>VK_FORMAT_B8G8R8A8_SRGB</code>. Lighting is computed in linear space and hardware-encoded on write, so gamma is <em>correct</em>; the problem is range. There is no headroom above 1.0, so bright surfaces clip hard, and there is no exposure control, no tonemap curve, and no place to put one.</p>
+        <p>This blocks, by construction: bloom, emissive materials, physically-meaningful light intensities, any HDR display output, and any post-process chain worth having. The sun intensity slider maxes at 4.0 and simply saturates.</p>
+        <div class="fix"><b>Do</b>Render the scene into <code>R16G16B16A16_SFLOAT</code> (or <code>B10G11R11</code> if bandwidth matters), add a tonemap+encode fullscreen pass as the last step before the swapchain blit, and move the sRGB encode there. The upscale path in <code>upscaleSceneToSwapchain</code> is the natural place to grow it.</div>
+      </div>
+
+      <div class="finding f-foundation" id="f-materials">
+        <div class="f-head"><span class="f-id">F3</span><span class="chip">Foundation</span><span class="chip-status chip-done">Done</span><p class="f-title">No material model — one baseColor texture and a scroll flag</p></div>
+        <p class="status-note"><b>Done.</b> Done in Phase 2, as F3a (tangents, a second UV set, a wider vertex), F3b (the material model on the CPU, then a GPU material buffer at descriptor binding 12), and F3c (Cook-Torrance GGX). The map slots this finding also asks for — normal, metallic-roughness, emissive, occlusion — are uploaded but unread: the manifest cannot name them yet, which is the work scheduled straight after V4.</p>
+        <p class="f-where">GltfMesh.hpp:14–31 (MeshVertex) · triangle.frag.glsl:197–351 · AssetManifest material modes</p>
+        <p>The vertex format is <code>position, normal, uv, textureIndex, materialFlags</code>. No tangents, no vertex colors, no second UV set. Materials come entirely from the manifest — <code>none</code>, <code>texture</code>, or <code>primitive-materials</code> — and the only per-material behavior is <code>scrollV</code>. The glTF loader never reads <code>pbrMetallicRoughness</code>, <code>normalTexture</code>, <code>emissiveTexture</code>, <code>occlusionTexture</code>, <code>alphaMode</code>, or <code>doubleSided</code> at all.</p>
+        <p>Lighting is ad-hoc Blinn-Phong with a wrapped-diffuse blend and a <code>skyFill</code> hack for ambient:</p>
+        <pre><code>float diffuse = mix(lambertDiffuse, wrappedDiffuse * wrappedDiffuse, 0.65);
+float skyFill = smoothstep(-0.35, 1.0, normal.z);
+diffuseLighting = ambient * (1.0 + skyFill * 0.35) + sunRadiance * diffuse * shadow + …;</code></pre>
+        <p>Without tangents there is no normal mapping. Without metallic/roughness there is no PBR. Without an alpha mode there is no cutout foliage. Every modern asset you buy or author assumes all three.</p>
+        <div class="fix"><b>Do</b>Extend <code>MeshVertex</code> with tangent + optional second UV; parse glTF materials into a real <code>Material</code> struct (baseColor factor+texture, metallic-roughness, normal, emissive, occlusion, alpha mode/cutoff, double-sided); move to a Cook-Torrance GGX BRDF. Do this <em>after</em> HDR exists, since PBR values without range headroom look worse than what you have.</div>
+      </div>
+
+      <div class="finding f-foundation" id="f-ubershader">
+        <div class="f-head"><span class="f-id">F4</span><span class="chip">Foundation</span><span class="chip-status chip-next">Next up</span><p class="f-title">One über-shader does scene, models, UI text, title art, editor highlights and blur</p></div>
+        <p class="status-note"><b>Next up.</b> Not started. Now the largest remaining Foundation item, and F3 has made the branch count worse exactly as this document predicted.</p>
+        <p class="f-where">shaders/triangle.frag.glsl — 382 lines, 7 material modes selected by <code>textureOptions.x</code></p>
+        <p>Modes 1–7 branch between tile color, model textures, the UI font atlas, the title background, a procedural particle texture, and a scene-image composite with a rounded-rect SDF. Editor highlight tinting, Bayer dither for previews, and a 5×5 gaussian read-back of the scene are all in the same fragment shader as the lighting. There are no specialization constants and no shader permutation system — 14 fixed SPIR-V modules feeding 16 fixed pipelines.</p>
+        <div class="fix"><b>Do</b>Split UI out of the scene shader entirely; introduce specialization constants or a small permutation key (shadows on/off, AO on/off, skinned, material features) so the scene shader stops paying for branches it isn't using and so new features don't have to fit in the same file.</div>
+      </div>
+
+      <div class="finding f-debt" id="f-rhi">
+        <div class="f-head"><span class="f-id">F5</span><span class="chip">Debt</span><p class="f-title">No RHI seam — zero virtual functions in the entire engine</p></div>
+        <p class="f-where">Application.hpp:26,140 (<code>VulkanRenderer renderer_;</code> by value) · <code>grep -rn "virtual " src/engine</code> → 0</p>
+        <p><code>Application</code> owns a concrete <code>VulkanRenderer</code>. Every render type — <code>VkDescriptorSet</code>, <code>VkRect2D</code>, <code>ImageData</code> — reaches the shell layer directly. Practically this means Windows/Vulkan is the only target that will ever build, and there is no seam for a headless/null backend to test rendering logic against.</p>
+        <div class="fix"><b>Do</b>You do not need a full RHI. But do introduce a narrow <code>IRenderer</code> (or a compile-time backend typedef) at the <code>Application</code> boundary and stop leaking <code>Vk*</code> types into <code>Ui</code>/<code>DebugUi</code> signatures. That alone buys you a null backend for CI, which section 8 needs.</div>
+      </div>
+    </section>
+
+    <!-- ============ 3 ============ -->
+    <section id="s3">
+      <div class="sec-head"><span class="sec-num">03</span><h2>Throughput: the frame is bound by construction</h2></div>
+      <p class="lead">Several independent decisions each cost throughput, and they compound. Individually defensible for a board; collectively they cap the scene at roughly its current size.</p>
+
+      <div class="finding f-throughput" id="t-quaddraws">
+        <div class="f-head"><span class="f-id">T1</span><span class="chip">Throughput</span><span class="chip-status chip-done">Done</span><p class="f-title">One draw call per quad, with 256 bytes of push constants each</p></div>
+        <p class="status-note"><b>Done.</b> Done in Phase 1. Cost roughly ten times what this document estimated; see §11.</p>
+        <p class="f-where">VulkanSceneRecorder.cpp — <code>vkCmdDraw(cb, 6, 1, 0, 0)</code> at ~10 sites: drawFace, drawGroundSplatFace, drawWaterFace, drawMirrorEnergyFace, drawParticle, grid overlay</p>
+        <p>Every tile face, every water surface, every particle, and every grid line is <code>vkCmdSetPrimitiveTopology</code> + <code>vkCmdPushConstants(256)</code> + <code>vkCmdDraw(6)</code>. A 20×20 board with height is on the order of a thousand quads before particles, and the grid overlay adds one draw per line in each axis. Models are batched properly (see <code>OpaqueDrawSorter</code>) — the tile geometry, which is the bulk of the scene, is not batched at all.</p>
+        <div class="fix"><b>Do</b>Once a real transform pipeline exists (§2), tiles become instanced geometry: one unit-cube mesh, a per-instance SSBO of transforms and material indices, one <code>vkCmdDrawIndexed</code> with <code>instanceCount = N</code>. This is the same mechanism <code>model.vert.glsl</code> already uses via <code>modelInstances</code> — it just needs to reach tiles.</div>
+      </div>
+
+      <div class="finding f-throughput" id="t-opaqueblend">
+        <div class="f-head"><span class="f-id">T2</span><span class="chip">Throughput</span><span class="chip-status chip-done">Done</span><p class="f-title">Opaque geometry is alpha-blended and sorted back-to-front</p></div>
+        <p class="status-note"><b>Done.</b> Done in Phase 0.</p>
+        <p class="f-where">VulkanPipelineFactory.cpp:332 <code>.blendEnable = VK_TRUE</code> on all nine scene pipelines · IsoScenePreparer.cpp:1138–1142 <code>std::ranges::sort(scene.opaqueFaceIndices, fartherFirst)</code></p>
+        <p>Every scene pipeline — <code>scene_</code>, <code>model_</code>, <code>skinnedModel_</code>, <code>groundSplat_</code>, <code>ui_</code> — is created with SRC_ALPHA / ONE_MINUS_SRC_ALPHA blending enabled, and opaque faces are then sorted <em>farthest first</em>. Back-to-front is the painter's-algorithm order: it guarantees every hidden surface is shaded and then overwritten.</p>
+        <p><span class="kicker">Correction</span>An earlier draft of this review said the blending was what stopped early-Z. That was wrong, and it is worth being precise because it changes the expected payoff. Blending happens after the fragment shader and does not disable early depth testing; what defers depth <em>writes</em> here is the <code>discard</code> in <code>applyEditorPreviewDither</code>, which every scene fragment pays for. So the two halves of this finding buy different things: dropping the blend unit on opaque draws saves colour-attachment read-modify-write bandwidth on every covered sample, which matters most at high MSAA, and the front-to-back sort lets the depth test reject occluded fragments. Both are real; neither is a step change on its own.</p>
+        <div class="fix"><b>Do</b>Give opaque draws a pipeline with <code>blendEnable = VK_FALSE</code>, sort them <em>front-to-back</em>, and keep the blended pipeline for the genuinely translucent list (water, mirror energy, ice blur, particles) already separated in <code>translucentFaceIndices</code>. Watch for faces that sit in the opaque list but carry a sub-1.0 alpha — the editor's ladder-rung preview does — and route those per face rather than per pass.</div>
+      </div>
+
+      <div class="finding f-throughput" id="t-cull">
+        <div class="f-head"><span class="f-id">T3</span><span class="chip">Throughput</span><span class="chip-status chip-done">Done</span><p class="f-title">GPU backface culling is disabled everywhere</p></div>
+        <p class="status-note"><b>Done.</b> Done in Phase 0.</p>
+        <p class="f-where">VulkanPipelineFactory.cpp:317 <code>.cullMode = VK_CULL_MODE_NONE</code> · VulkanSceneRecorder.cpp:720, 863 <code>vkCmdSetCullMode(cb, VK_CULL_MODE_NONE)</code> · recordScenePass viewport <code>.height = -extent.height</code></p>
+        <p>The pipeline default is NONE and the recorder explicitly sets NONE at record time. CPU-side <code>faceVisible()</code> does per-quad backface rejection for tiles, but every glTF mesh — the Rogue, the blocks, the conveyors, all decorations — rasterizes both sides of every closed surface.</p>
+        <p><span class="kicker">The winding trap</span>Turning culling on is not just a cull-mode change, and an earlier draft of this review got the reasoning wrong. It argued that mirror ghosts already culled <code>BACK</code> successfully and that this proved the assets wind consistently. It proved no such thing: a ghost is a translucent rim-lit effect, so drawing its interior looks acceptable, and that is exactly what had been happening. The scene pass uses a <strong>negative-height viewport</strong> to put +Y up in Vulkan's Y-down NDC, and a negative viewport height reverses the winding the rasterizer sees. glTF authors front faces counter-clockwise and nothing else in the chain flips them — the camera basis is right-handed, the projection applies no sign flip, decoration scale is clamped positive — so meshes arrive <em>clockwise</em>. Culling BACK against a COUNTER_CLOCKWISE front face therefore removes the outside of every model and leaves the inside: hollow.</p>
+        <div class="fix"><b>Do</b>Set <code>VK_CULL_MODE_BACK_BIT</code> for model draws <em>together with</em> <code>VK_FRONT_FACE_CLOCKWISE</code>, and keep NONE for tile quads, whose winding after CPU projection is not guaranteed. Restore both states after the model loop. Leave the shadow pass alone — it sets NONE explicitly and may rely on double-sided rendering to close depth. Expose a toggle: a model wound the other way disappears rather than degrading.</div>
+      </div>
+
+      <div class="finding f-throughput" id="t-visibility">
+        <div class="f-head"><span class="f-id">T4</span><span class="chip">Throughput</span><p class="f-title">No frustum culling, no occlusion culling, no LOD — anywhere</p></div>
+        <p class="f-where">Zero matches for frustum/cull/occlusion in src/engine outside <code>VK_CULL_MODE</code> · IsoScenePreparer.cpp:504 <code>faceVisible</code> is backface-only</p>
+        <p>The only visibility test in the engine is the per-quad backface dot product. Everything authored in the level is projected, sorted and submitted every frame. There is no spatial index of any kind — no BVH, no octree, no grid of renderables. <code>RenderFrameData</code> caps at 16,384 tiles and 65,536 iso faces; there is no mechanism to stay under that other than authoring small screens.</p>
+        <div class="fix"><b>Do</b>This needs §2's <code>Frustum</code> and <code>Aabb</code> first. Then: per-renderable bounds, a frustum test in <code>IsoScenePreparer::prepare</code>, and a coarse spatial structure once the world outgrows a screen. Occlusion culling and LOD chains are later, but the bounds you add now are what both will use.</div>
+      </div>
+
+      <div class="finding f-throughput" id="t-pointshadows">
+        <div class="f-head"><span class="f-id">T5</span><span class="chip">Throughput</span><p class="f-title">Point shadows re-render six cube faces per light, every frame, with no culling</p></div>
+        <p class="f-where">VulkanSceneRecorder.cpp:399–452 · LightingConfig.hpp:44 <code>pointShadowMapSize = 512</code> · RenderTypes.hpp:196 <code>pointLightCapacity = 8</code></p>
+        <p>For each shadow-casting point light, all six faces are re-recorded and every entry of <code>scene.shadowFaces</code> is drawn individually into each — up to 48 additional render passes per frame, each with a full pass over the scene's shadow geometry, each face draw being its own <code>vkCmdDraw(6)</code>. There is no range test against the light's sphere, no static/dynamic caching, no face skipping when nothing in that direction changed, no shadow distance fade.</p>
+        <p>The directional shadow is the opposite extreme: one 2048² map covering the whole board with no cascades, which is fine for a board and will not survive a larger world.</p>
+        <div class="fix"><b>Do</b>Cull casters against each light's range before recording; cache static-geometry cube faces and only re-render faces containing moved geometry; consider a shared shadow atlas with per-light tile sizing by screen-space importance. Add CSM to the sun only when the view distance actually grows.</div>
+      </div>
+
+      <div class="finding f-throughput" id="t-msaa">
+        <div class="f-head"><span class="f-id">T6</span><span class="chip">Throughput</span><span class="chip-status chip-done">Done</span><p class="f-title">MSAA 8× at full internal resolution is the shipping default</p></div>
+        <p class="status-note"><b>Done.</b> Done in Phase 0.</p>
+        <p class="f-where">UserSettingsConfig.hpp:18 <code>antiAliasingSamples = 8</code> · RendererReconfiguration.hpp:15 <code>Msaa8x</code></p>
+        <p>MSAA 8× is the default and the only anti-aliasing available — there is no FXAA, no SMAA, no TAA, and no upscaler (FSR/XeSS/DLSS). Stacked on top of blend-enabled opaque geometry with no early-Z and no backface culling, 8× samples multiply the fragment work you are already not rejecting. It is also the AA technique least compatible with the deferred/compute-based direction a modern renderer takes.</p>
+        <div class="fix"><b>Do</b>Drop the default to 4× now (measure it — with §3's other fixes 8× may become affordable again). Longer term, TAA plus a spatial upscaler replaces MSAA entirely and gives you temporal accumulation for AO, shadows and reflections as a bonus.</div>
+      </div>
+
+      <div class="finding f-throughput" id="t-depthcopy">
+        <div class="f-head"><span class="f-id">T7</span><span class="chip">Throughput</span><span class="chip-status chip-done">Done</span><p class="f-title">A full-resolution depth copy every frame, for an AO pass that may be off</p></div>
+        <p class="status-note"><b>Done.</b> Done in Phase 0.</p>
+        <p class="f-where">VulkanSwapchainResources.cpp:383–484 <code>copyResolvedSceneDepth</code> · VulkanSceneRecorder.cpp:485, 544 (both call sites unconditional) · VulkanSsaoPass.cpp:78 (the pass itself early-returns)</p>
+        <p><span class="kicker">Correction</span>An earlier draft of this review named the scene-<em>colour</em> copy here. That was wrong: <code>copyResolvedSceneColor</code> is already gated behind <code>hasTranslucentContent</code>, the level-transition amount, and the preview being active. The unconditional one is the <em>depth</em> copy.</p>
+        <p><code>copyResolvedSceneDepth</code> runs after every opaque pass — a full render-extent <code>vkCmdCopyImage</code> plus four barriers. Its only consumer is the SSAO occlusion pass, which reads descriptor binding 5 and early-returns when ambient occlusion is disabled or its strength is zero. With AO off, the frame pays for the copy and nothing reads it.</p>
+        <div class="fix"><b>Do</b>Gate the copy on the same predicate the pass uses, and put that predicate in one place both call. While you are here, the blur-behind path is still a 25-tap loop inside the main fragment shader; a half-res separable two-pass gaussian would be cheaper and better.</div>
+      </div>
+
+      <div class="finding f-throughput" id="t-threading">
+        <div class="f-head"><span class="f-id">T8</span><span class="chip">Throughput</span><p class="f-title">The whole frame is single-threaded: one queue, one command pool, one thread</p></div>
+        <p class="f-where">VulkanDeviceContext.cpp:340–403 (one graphics queue) · :406 (one command pool) · Application.cpp:349–566 (linear loop) · handoff: "deliberately no worker command pools, dedicated transfer queues, or concurrent Vulkan uploads"</p>
+        <p>Input → simulation → UI → scene preparation (full CPU projection and sort of every face) → command recording → submit → pace all run on the main thread in sequence. <code>TaskSystem</code> exists and is good, but is used only for asset decode and skinning-pose work. There is no render thread, no parallel command recording, no async transfer queue, no compute queue — there are in fact no compute shaders in the project at all.</p>
+        <div class="fix"><b>Do</b>The ordered, high-value steps: (1) parallelize <code>IsoScenePreparer::prepare</code>'s per-face projection with <code>parallelFor</code> — it is embarrassingly parallel and currently the largest CPU block; (2) secondary command buffers recorded per-pass on workers; (3) a dedicated transfer queue for asset uploads, which also removes the editor's <code>vkDeviceWaitIdle</code> on texture repaint.</div>
+      </div>
+    </section>
+
+    <!-- ============ 4 ============ -->
+    <section id="s4">
+      <div class="sec-head"><span class="sec-num">04</span><h2>Vulkan correctness &amp; hygiene</h2></div>
+
+      <div class="finding f-debt" id="v-semaphores">
+        <div class="f-head"><span class="f-id">V1</span><span class="chip">Debt</span><span class="chip-status chip-done">Done</span><p class="f-title">renderFinished semaphores are per frame-in-flight, not per swapchain image</p></div>
+        <p class="status-note"><b>Done.</b> Done in Phase 0.</p>
+        <p class="f-where">VulkanRenderer.hpp:190–196, <code>maxFramesInFlight_ = 2</code> · VulkanRenderer.cpp:415–455 · VulkanSwapchainResources.cpp:641 <code>imageCount = capabilities.minImageCount + 1</code></p>
+        <p>There are two <code>renderFinished</code> semaphores indexed by <code>currentFrame_</code>, but presentation waits on that semaphore for <code>imageIndex</code>, and the swapchain typically has three or four images. The <code>inFlight</code> fence proves the GPU <em>work</em> that signalled the semaphore finished; it does not prove the presentation engine's <em>wait</em> on it completed. With more images than frames in flight you can re-submit a signal on a semaphore a pending present is still waiting on.</p>
+        <p>This is the textbook Vulkan present-semaphore hazard. It usually works on desktop drivers with FIFO, which is exactly why it survives; it is undefined and shows up as intermittent validation errors or hangs, most often when the swapchain image count changes with window mode.</p>
+        <div class="fix"><b>Do</b>Allocate one <code>renderFinished</code> semaphore per swapchain image and signal <code>renderFinished[imageIndex]</code>. Keep <code>imageAvailable</code> per frame-in-flight, which is correct. If you later adopt <code>VK_KHR_present_wait</code> (already on your own "next improvements" list) this is a prerequisite.</div>
+      </div>
+
+      <div class="finding f-debt" id="v-vma">
+        <div class="f-head"><span class="f-id">V2</span><span class="chip">Debt</span><p class="f-title">Raw vkAllocateMemory in ten places, one allocation per image</p></div>
+        <p class="f-where">VulkanResourceUtils.cpp:122–168 · plus VulkanUploadRing, VulkanFrameCapture, VulkanModelResources (×3), VulkanGeometryArena, VulkanSceneDescriptors, VulkanThumbnailPass, VulkanShadowPass, VulkanUiResources</p>
+        <p>There is no allocator. <code>createImage</code> does <code>vkCreateImage</code> → <code>vkGetImageMemoryRequirements</code> → <code>vkAllocateMemory</code> → <code>vkBindImageMemory</code>, so every texture is its own device allocation. <code>maxMemoryAllocationCount</code> is commonly 4096; the manifest cap of 64 textures keeps you far from it today, but the pattern does not scale and it fragments device memory. Buffers are better served — <code>VulkanGeometryArena</code> + <code>GeometrySuballocator</code> + <code>VulkanUploadRing</code> are genuinely good — the images just never got the same treatment.</p>
+        <p>Two smaller things sit in the same file: <code>vulkanResources::subresourceRange</code> and <code>createImageView</code> hardcode <code>levelCount = 1</code>, <code>layerCount = 1</code>, <code>VIEW_TYPE_2D</code>, so any mipped, arrayed or cube resource has to bypass the shared helpers (which is why <code>VulkanShadowPass</code> and <code>VulkanModelResources</code> hand-roll theirs).</p>
+        <div class="fix"><b>Do</b>Adopt VulkanMemoryAllocator, or extend the existing suballocator to images with a pooled heap. Either way, generalize <code>createImage</code>/<code>createImageView</code> to take mip and layer counts and a view type.</div>
+      </div>
+
+      <div class="finding f-debt" id="v-skinstruct">
+        <div class="f-head"><span class="f-id">V3</span><span class="chip">Debt</span><span class="chip-status chip-done">Done</span><p class="f-title">The skinning vertex shader copies a 16 KB struct per invocation</p></div>
+        <p class="status-note"><b>Done.</b> Done in Phase 0.</p>
+        <p class="f-where">shaders/skinned_model.vert.glsl:57 · GpuSkinning.hpp:26–34</p>
+        <pre><code>struct SkinningInstance { mat4 palette[MAX_SKIN_JOINTS + 128]; mat4 modelFromSource; mat4 normalFromSource; };
+<span class="cm">// 258 mat4 = 16,512 bytes</span>
+SkinningInstance instance = skinning.instances[gl_InstanceIndex];   <span class="cm">// ← whole-struct load</span></code></pre>
+        <p>This emits an <code>OpLoad</code> of the entire 16 KB struct into function storage for every vertex. Good drivers scalarize it away because only a handful of members are read; that is not something to rely on, and it is a serious register-pressure hazard on the drivers that don't. The buffer sizing is also worth revisiting: 258 matrices × 256 instances × 2 frames ≈ 8.4 MB of palette storage, allocated at full size regardless of a model's actual joint count.</p>
+        <div class="fix"><b>Do</b>Index members directly — <code>skinning.instances[gl_InstanceIndex].palette[j]</code> — and never bind the struct to a local. Separately, consider a packed palette with per-instance offsets so a 30-joint rogue does not reserve 258 slots.</div>
+      </div>
+
+      <div class="finding f-debt" id="v-descriptors">
+        <div class="f-head"><span class="f-id">V4</span><span class="chip">Debt</span><span class="chip-status chip-next">Next up</span><p class="f-title">Descriptors: one set, one fixed 64-slot texture array, no descriptor indexing</p></div>
+        <p class="status-note"><b>Next up.</b> Not started, and next in the queue. Descriptor indexing is also what unblocks the manifest reading a glTF’s own texture set, because the 64-slot ceiling is what makes that unaffordable today.</p>
+        <p class="f-where">VulkanSceneDescriptors.cpp:41–140 · AssetManifest.hpp <code>maxModelTextures = 64</code> (35 in use)</p>
+        <p>Everything lives in set 0: shadow map, scene color, a <code>descriptorCount = 64</code> combined-image-sampler array, UI font, title background, scene depth, AO, lighting UBO, point-shadow cube array, and two storage buffers. There is no <code>VK_EXT_descriptor_indexing</code>, no <code>UPDATE_AFTER_BIND</code>, no <code>PARTIALLY_BOUND</code> — unused slots are padded with a 1×1 white fallback, and the whole set is rewritten when anything changes. Device selection rejects GPUs whose <code>maxPerStageDescriptorSampledImages</code> can't hold the array, so raising the cap narrows your hardware support.</p>
+        <p>Per-screen splat maps already consume one array slot each, so the ceiling is a content ceiling, not just a technical one.</p>
+        <div class="fix"><b>Do</b>Enable descriptor indexing with variable-count, partially-bound, update-after-bind bindings; split into frequency-based sets (per-frame / per-pass / per-material / per-draw). This is what makes bindless materials and streaming textures possible later.</div>
+      </div>
+
+      <div class="finding f-debt" id="v-shaderflags">
+        <div class="f-head"><span class="f-id">V5</span><span class="chip">Debt</span><span class="chip-status chip-done">Done</span><p class="f-title">Shaders compile unoptimized, targeting a Vulkan version you don't require</p></div>
+        <p class="status-note"><b>Done.</b> Done in Phase 0.</p>
+        <p class="f-where">CMakeLists.txt:199</p>
+        <pre><code>"${GLSLC_EXECUTABLE}" --target-env=vulkan1.4 -DMODEL_TEXTURE_COUNT=${MODEL_TEXTURE_COUNT} \
+  -DMAX_SKIN_JOINTS=128 -fshader-stage=${shader_stage} "${shader_source}" -o "${shader_output}"</code></pre>
+        <p>Two things. No <code>-O</code>, so glslc runs with optimization off and ships unoptimized SPIR-V — drivers re-optimize, but you are handing them more work and losing dead-code elimination on a shader with seven material branches. And <code>--target-env=vulkan1.4</code> contradicts the stated release contract of Vulkan 1.3; your own handoff notes the vendored SDL Vulkan headers predate <code>VK_API_VERSION_1_4</code>.</p>
+        <div class="fix"><b>Do</b>Add <code>-O</code> (and <code>-g</code> only for Debug), and set <code>--target-env=vulkan1.3</code> to match <code>VulkanDeviceContext</code>. Cheap, low-risk, do it this week.</div>
+      </div>
+
+      <div class="finding f-debt" id="v-aniso">
+        <div class="f-head"><span class="f-id">V6</span><span class="chip">Debt</span><span class="chip-status chip-done">Done</span><p class="f-title">Anisotropic filtering is never requested</p></div>
+        <p class="status-note"><b>Done.</b> Done in Phase 0.</p>
+        <p class="f-where">VulkanModelResources.cpp:1634 <code>.anisotropyEnable = VK_FALSE</code> · VulkanDeviceContext.cpp:377–380 (feature not enabled)</p>
+        <p>Mipmaps are generated correctly by blit chain, but <code>samplerAnisotropy</code> is never requested as a device feature and every sampler runs isotropic. On the ground plane — exactly where the splat textures live and where the view is most oblique — that is visible blurring.</p>
+        <div class="fix"><b>Do</b>Request the feature, gate on support the way wireframe already is, and pass the device's <code>maxSamplerAnisotropy</code> down to sampler creation. Apply it only to mipped, linearly-filtered textures so the point-sampled pixel-art atlases keep their crisp texels.</div>
+      </div>
+
+      <div class="finding f-debt" id="v-ssao">
+        <div class="f-head"><span class="f-id">V7</span><span class="chip">Debt</span><span class="chip-status chip-partial">Partly done</span><p class="f-title">The SSAO is depth-only, pixel-scaled, and blurred without depth awareness</p></div>
+        <p class="status-note"><b>Partly done.</b> The "AO modulates ambient rather than the whole composite" half landed inside F2b, using an ambient mask carried in the scene target’s alpha. The sampling rework — view-space normals, a world-unit radius, a bilateral blur — is untouched. See §11: F3c changed what that mask means.</p>
+        <p class="f-where">shaders/ssao.frag.glsl · shaders/ssao_composite.frag.glsl · LightingConfig.hpp <code>ssaoRadiusPixels</code>, <code>ssaoDepthRange</code></p>
+        <p>Four separate quality problems. It samples depth only, with no normals, so it cannot distinguish a crease from a depth step. Its radius is in <em>pixels</em> against non-linear depth with a fixed <code>depthRange</code>, so the AO scale drifts with camera distance and depth precision. The composite blur is a plain 5×5 box with no depth weighting, so occlusion bleeds across silhouettes. And it multiplies the fully lit image, darkening direct sunlight, where physically it should modulate ambient and indirect only.</p>
+        <div class="fix"><b>Do</b>Reconstruct view-space position and normal from depth, express the radius in world units, blur bilaterally, run at half resolution, and apply it to the ambient term rather than over the composite. GTAO is the modern target and reuses all of that — but it wants a real view matrix first (<a class="ref" href="#s1">C1</a>).</div>
+      </div>
+    </section>
+
+    <!-- ============ 5 ============ -->
+    <section id="s5">
+      <div class="sec-head"><span class="sec-num">05</span><h2>Assets and the content path</h2></div>
+      <p class="lead">The <em>pipeline</em> here is strong — manifest validation, atomic staging, priority scheduling, residency budgets. The <em>formats</em> are the weak part.</p>
+
+      <div class="finding f-foundation" id="a-gltf">
+        <div class="f-head"><span class="f-id">A1</span><span class="chip">Foundation</span><span class="chip-status chip-done">Done</span><p class="f-title">The glTF loader is a regex-driven scanner over raw JSON</p></div>
+        <p class="status-note"><b>Done.</b> Done in Phase 2, in two steps, with cgltf. See §11 for why cgltf rather than tinygltf, and what the swap was verified against.</p>
+        <p class="f-where">GltfMesh.cpp:221–400 (hand-rolled scanner) · :310, 322, 334, 364, 374, 383, 393 (<code>std::regex</code> constructed per field lookup) · :1339 (<code>bufferObjects.size() != 1</code>)</p>
+        <p>Field access works by constructing a <code>std::regex</code> and running <code>regex_search</code> over the object's substring — per field, per object. <code>std::regex</code> construction is famously expensive, and a substring search can match a key nested inside a child object. Meanwhile nlohmann/json is already vendored and pinned in the project, used for the asset manifest, and simply not used here.</p>
+        <p>What the loader does not support: more than one buffer; sparse accessors; <code>KHR_*</code> extensions of any kind (including Draco and meshopt compression); glTF materials; TANGENT, COLOR_0, TEXCOORD_1 or JOINTS_1 attributes; morph targets; and animation interpolation modes — <code>interpolation</code> is never read, so STEP curves silently play as LERP and CUBICSPLINE curves fail the <code>input.count != output.count</code> check and throw.</p>
+        <div class="fix"><b>Do</b>Your own handoff already flags this ("consider switching to a proven GLTF library"). Take that advice — cgltf or tinygltf, both single-header and permissively licensed. It is a contained change with a large payoff: you inherit materials, extensions, compression and correctness in one step.</div>
+      </div>
+
+      <div class="finding f-throughput" id="a-textures">
+        <div class="f-head"><span class="f-id">A2</span><span class="chip">Throughput</span><p class="f-title">Textures are RGBA8 only — no BCn, no KTX2, PNG decoded at runtime</p></div>
+        <p class="f-where">ImageData.hpp:10–14 · VulkanModelResources.cpp:1557 (only <code>R8G8B8A8_UNORM</code>/<code>_SRGB</code>) · zero matches for BC/ASTC/ktx/basis</p>
+        <p>Every texture is a PNG on disk, decoded by stb_image into a full uncompressed <code>std::vector&lt;std::byte&gt;</code>, uploaded as RGBA8, and mipped on the GPU. That is roughly 4× the VRAM a BC7 equivalent would use, 6× for BC1 color, plus CPU decode time on every load. The residency budget is set to 256 MB of textures — with block compression that same budget holds four times the content.</p>
+        <div class="fix"><b>Do</b>Compress offline in <code>sokoban_content_tool</code> (which already validates and stages everything) to BC7/BC5/BC4 in KTX2 containers, with mips baked. Runtime then memory-maps and uploads without decoding. This also removes the CPU decode jobs from the load scheduler entirely.</div>
+      </div>
+
+      <div class="finding f-debt" id="a-streaming">
+        <div class="f-head"><span class="f-id">A3</span><span class="chip">Debt</span><p class="f-title">One asset publishes per frame; nothing is ever evicted; there is no LOD or mip streaming</p></div>
+        <p class="f-where">AssetLoadScheduler.hpp:38 <code>maxPublicationsPerFrame = 1</code> · VulkanRenderer.cpp:316 <code>publishReadyAssets(1)</code> · handoff: "Loaded assets remain cached for the process lifetime; there is no eviction policy yet"</p>
+        <p>The scheduler is well designed — visible/prefetch priorities, bounded CPU jobs, residency caps, cancellable prefetch. Its granularity is whole assets, though: a 30-asset screen transition takes 30 frames (half a second) to fully populate, with geometry silently skipped by <code>tileReadyForDraw</code> until then. There is no mip-level streaming, no LOD chain, no eviction, and no partial residency.</p>
+        <div class="fix"><b>Do</b>Raise <code>maxPublicationsPerFrame</code> to a byte budget rather than a count. Add LRU eviction keyed off the residency caps that already exist. Mip streaming and mesh LOD come after BC7 + a real transform pipeline make them meaningful.</div>
+      </div>
+
+      <div class="finding f-debt" id="a-recordalloc">
+        <div class="f-head"><span class="f-id">A4</span><span class="chip">Debt</span><p class="f-title">Per-frame heap allocation inside command recording</p></div>
+        <p class="f-where">VulkanSceneRecorder.cpp:1115 <code>std::vector&lt;OpaqueDrawSortItem&gt; orderedDraws;</code> · OpaqueDrawSorter.hpp:14–20 (128-byte sort key) · requestAssets scans the whole manifest each frame</p>
+        <p>The recorder builds and sorts a fresh <code>std::vector</code> every frame, and <code>sortOpaqueDraws</code> returns another by value — despite <code>FrameArena</code> existing precisely for this. The sort key carries <code>std::array&lt;uint32_t, 29&gt; fragmentState</code> compared with <code>&lt;=&gt;</code>, so batching only merges draws agreeing on all 29 words of push-constant state, and the comparison itself is heavy. Separately, <code>requestAssets</code> loops over every model, animation and texture in the manifest on every <code>drawFrame</code>.</p>
+        <div class="fix"><b>Do</b>Move the sort scratch into the renderer as a reusable buffer (the <code>ReusableScratchPool</code> pattern is already in the codebase). Replace the 29-word key with a hashed material ID once materials are real objects rather than push-constant blobs.</div>
+      </div>
+    </section>
+
+    <!-- ============ 6 ============ -->
+    <section id="s6">
+      <div class="sec-head"><span class="sec-num">06</span><h2>Feature gap vs. a modern baseline</h2></div>
+      <p class="lead">Present state against what a 2020s 3D game is generally expected to have. This is a map, not a demand list — plenty of shipped games skip half of it.</p>
+
+      <div class="legend">
+        <span><span class="dot d-ok"></span>present and sound</span>
+        <span><span class="dot d-part"></span>partial or specialized</span>
+        <span><span class="dot d-none"></span>absent</span>
+      </div>
+
+      <div class="table-wrap wide">
+        <table>
+          <thead><tr><th style="width:30%">Capability</th><th style="width:34%">Current state</th><th>What it would take</th></tr></thead>
+          <tbody>
+            <tr><td><span class="dot d-none"></span>PBR materials</td><td>Blinn-Phong, single baseColor texture, global specular strength/power</td><td>Material struct + GGX BRDF (§2)</td></tr>
+            <tr><td><span class="dot d-none"></span>Normal mapping</td><td>No tangents in the vertex format</td><td>Vertex format + glTF tangents or MikkTSpace</td></tr>
+            <tr><td><span class="dot d-none"></span>HDR &amp; tonemapping</td><td>8-bit sRGB targets end to end</td><td>Float target + tonemap pass (§2)</td></tr>
+            <tr><td><span class="dot d-none"></span>Post stack</td><td>None — no bloom, DOF, motion blur, grading, vignette, CA</td><td>Depends entirely on HDR existing first</td></tr>
+            <tr><td><span class="dot d-part"></span>Anti-aliasing</td><td>MSAA 2/4/8× only, 8× default</td><td>TAA + spatial upscaler; needs motion vectors</td></tr>
+            <tr><td><span class="dot d-none"></span>Motion vectors</td><td>No previous-frame transforms are kept</td><td>Prerequisite for TAA, motion blur, temporal AO</td></tr>
+            <tr><td><span class="dot d-part"></span>Shadows</td><td>One 2048² sun map, no cascades; 8 cube-map point lights, uncached</td><td>CSM for range; caching + atlas for the point lights (§3)</td></tr>
+            <tr><td><span class="dot d-part"></span>Ambient occlusion</td><td>Depth-only SSAO, pixel-space radius, box blur, applied post-lighting</td><td>Normal-aware GTAO at half res (§4)</td></tr>
+            <tr><td><span class="dot d-none"></span>Global illumination</td><td>A flat ambient colour plus a <code>skyFill</code> normal-Z ramp</td><td>Irradiance probes / DDGI / lightmaps — pick one</td></tr>
+            <tr><td><span class="dot d-none"></span>Reflections</td><td>None; the "mirror" is a gameplay mechanic, not a reflection</td><td>SSR or reflection probes; both need view-space data</td></tr>
+            <tr><td><span class="dot d-part"></span>Many lights</td><td>8 point lights in a UBO, looped per fragment, no culling</td><td>Clustered or tiled forward+ light culling</td></tr>
+            <tr><td><span class="dot d-none"></span>Volumetrics / fog</td><td>None; no world-space depth available to the shader</td><td>Needs a real view matrix first (§1)</td></tr>
+            <tr><td><span class="dot d-part"></span>Transparency</td><td>Back-to-front sorted quads; opaque is also blended</td><td>Separate opaque/transparent pipelines; OIT if needed</td></tr>
+            <tr><td><span class="dot d-none"></span>Decals</td><td>None. Ground variation is a painted splat map</td><td>Deferred or forward decal projection</td></tr>
+            <tr><td><span class="dot d-part"></span>Particles</td><td>CPU sim, per-particle draw call, unlit alpha quads</td><td>GPU compute simulation + instanced or indirect draw</td></tr>
+            <tr><td><span class="dot d-ok"></span>Skeletal animation</td><td>GPU skinning, crossfades, timeline events, attachments — genuinely solid</td><td>Add IK, blend trees/state machine, root motion</td></tr>
+            <tr><td><span class="dot d-none"></span>Compute shaders</td><td>Zero in the project</td><td>Culling, particles, post, skinning all want them</td></tr>
+            <tr><td><span class="dot d-none"></span>GPU-driven rendering</td><td>All draws recorded on the CPU per object</td><td>Indirect draws + GPU culling; far horizon</td></tr>
+            <tr><td><span class="dot d-none"></span>Physics / collision</td><td>None. Movement is grid rules in <code>Rules.cpp</code></td><td>Jolt or PhysX if the game leaves the grid</td></tr>
+            <tr><td><span class="dot d-none"></span>Spatial audio</td><td>miniaudio 2D one-shots and music; no listener, no attenuation</td><td>miniaudio already supports 3D — wire up the listener</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============ 7 ============ -->
+    <section id="s7">
+      <div class="sec-head"><span class="sec-num">07</span><h2>Simulation, threading, and the shape of the world</h2></div>
+
+      <div class="finding f-foundation" id="s-timestep">
+        <div class="f-head"><span class="f-id">S1</span><span class="chip">Foundation</span><p class="f-title">Variable timestep with no fixed simulation tick</p></div>
+        <p class="f-where">Time.hpp:158–172 <code>SimulationTiming::frameDelta</code> · Application.cpp:424 <code>const float dt = frameTimer_.tick(simulationTiming_);</code></p>
+        <p>The simulation runs on raw wall-clock delta, clamped to 100 ms, with a generation counter that discards the frame after a suspend. That is a careful implementation of a variable timestep — and it is correct for Sokoban, where moves are discrete and only the presentation interpolates. It is the wrong foundation for anything with physics, and there is no interpolation alpha to hand the renderer.</p>
+        <div class="fix"><b>Do</b>Only if the game acquires continuous motion or physics: accumulator-driven fixed ticks (60 or 120 Hz) with a render-time alpha, and a decoupled presentation interpolation. Note this <em>before</em> adding physics, not after — retrofitting it means auditing every system that reads <code>dt</code>.</div>
+      </div>
+
+      <div class="finding f-throughput" id="s-scene">
+        <div class="f-head"><span class="f-id">S2</span><span class="chip">Throughput</span><p class="f-title">The entire visible world is rebuilt from scratch every frame</p></div>
+        <p class="f-where">RenderFrameBuilder.cpp — 2,555 lines · Application.cpp:1647, 1765 <code>renderFrameArena_.reset()</code> · RenderTypes.hpp:190–196 (capacities)</p>
+        <p>There is no scene graph, no ECS, no persistent renderable list. <code>RenderFrameBuilder</code> walks the level, the game state, the presentation state and the editor document and emits a complete flat description — up to 16,384 tiles and 65,536 iso faces — into a frame arena, every frame. <code>IsoScenePreparer</code> then projects and sorts all of it, every frame.</p>
+        <p>The arena is well built and the design is admirably stateless. But the cost is linear in authored world size with no way to skip unchanged regions, and there is no spatial structure for culling, streaming, queries, or physics to attach to.</p>
+        <div class="fix"><b>Do</b>Introduce persistent renderable instances with dirty flags for static geometry (which is most of a board), keeping the per-frame rebuild for dynamic actors. That is the step that makes culling, LOD and streaming implementable — all three need something stable to reference.</div>
+      </div>
+
+      <div class="finding f-debt" id="s-tasks">
+        <div class="f-head"><span class="f-id">S3</span><span class="chip">Debt</span><p class="f-title">TaskSystem: one mutex, one deque, no dependencies, no work stealing</p></div>
+        <p class="f-where">TaskSystem.hpp:29–70 — "Tasks must not block waiting on other tasks (there is no dependency tracking or work stealing yet)"</p>
+        <p>Every task is a <code>std::function&lt;void()&gt;</code> pushed through a single <code>std::mutex</code>-guarded <code>std::deque</code>, with <code>std::packaged_task</code> and <code>std::future</code> per <code>enqueue</code>. That is three heap allocations and a lock per task. Fine for a handful of coarse asset jobs; it will contend badly the moment frame work is parallelized, which is exactly what §3 asks for.</p>
+        <div class="fix"><b>Do</b>Per-worker deques with work stealing, a fixed-size inline task payload instead of <code>std::function</code>, and explicit dependency edges (a counter per task plus a continuation list) so a job graph is expressible without blocking a worker.</div>
+      </div>
+
+      <div class="finding f-debt" id="s-arena">
+        <div class="f-head"><span class="f-id">S4</span><span class="chip">Debt</span><span class="chip-status chip-done">Done</span><p class="f-title">A latent lifetime hazard around the frame arena</p></div>
+        <p class="status-note"><b>Done.</b> Done in Phase 1.</p>
+        <p class="f-where">Application.cpp:425 (update reads the previous prepared frame) → :551 <code>prepareFrame(buildRenderFrame(...))</code> which calls <code>renderFrameArena_.reset()</code> internally · VulkanRenderer.cpp:744, 763, 882 read <code>prepared.frameData.tiles</code></p>
+        <p>The previous frame's <code>PreparedFrame</code> holds a <code>RenderFrameData</code> whose arrays point into <code>renderFrameArena_</code>. <code>pickDecoration</code> and <code>primaryPlayerBoundsToPixels</code> read those tiles. This is currently <em>safe</em> only because every such read happens earlier in the loop than the <code>reset()</code> buried inside <code>buildRenderFrame</code>.</p>
+        <p>That invariant is invisible at both call sites and is exactly the kind of thing that breaks when someone moves the arena reset to the top of the loop — the natural place for it. Linux CI's ASan will never see it, because the render path doesn't build there.</p>
+        <div class="fix"><b>Do</b>Either double-buffer the arena (reset the one the previous prepared frame doesn't reference), or have <code>prepareFrame</code> take ownership of a deep copy of the small subset it needs to outlive the arena. Add a comment at <code>reset()</code> naming the invariant either way. Related: <code>FrameArray</code>'s copy constructor silently converts arena storage into a heap <code>std::vector</code> — a quiet performance cliff worth a <code>[[nodiscard]]</code>-style warning or an explicit <code>clone()</code>.</div>
+      </div>
+    </section>
+
+    <!-- ============ 8 ============ -->
+    <section id="s8">
+      <div class="sec-head"><span class="sec-num">08</span><h2>Engineering &amp; CI</h2></div>
+
+      <p>The test discipline is the strongest part of this project: 59 CTest suites, ASan + UBSan, clang-tidy, and a libFuzzer target for the profile codec, all gated in CI. That is better than most commercial codebases. Two gaps stand out for engine work specifically.</p>
+
+      <div class="finding f-debt" id="e-ci">
+        <div class="f-head"><span class="f-id">E1</span><span class="chip">Debt</span><span class="chip-status chip-done">Done</span><p class="f-title">CI never builds with the compiler you ship, and never touches a GPU</p></div>
+        <p class="status-note"><b>Done.</b> Done in Phase 1.</p>
+        <p class="f-where">.github/workflows/required-tests.yml — <code>runs-on: ubuntu-24.04</code> for all five matrix entries</p>
+        <p>All five jobs run on Ubuntu with GCC/Clang. Shipping is MSVC on Windows, so the compiler that produces the artifact is validated only on your machine. Your handoff already documents MSVC-only constructs that GCC and Clang reject (backslash includes, nested-type default initializers in default arguments) — that divergence runs both directions and nothing catches it.</p>
+        <p>There is also no rendering test of any kind beyond <code>VulkanSmokeTests</code> creating a device. No validation-layer run, no golden-image comparison, no GPU-timing regression gate. For a review whose findings are mostly in the renderer, that is the coverage that matters most.</p>
+        <div class="fix"><b>Do</b>Add a <code>windows-latest</code> MSVC job building Debug + Release. Add a headless Vulkan job using lavapipe/SwiftShader that runs the game for N frames with validation layers enabled as errors — that alone would have caught the semaphore issue in §4. Golden-image tests on the thumbnail-bake path are nearly free, since <code>VulkanFrameCapture</code> and <code>PngWriter</code> already exist.</div>
+      </div>
+
+      <div class="finding f-debt" id="e-docs">
+        <div class="f-head"><span class="f-id">E2</span><span class="chip">Debt</span><p class="f-title">The handoff has started to drift from the code</p></div>
+        <p class="f-where">HANDOFF.md:982–984 vs. VulkanRenderer.cpp:491–494 / VulkanModelResources.cpp:219–243</p>
+        <p>HANDOFF.md is 2,096 lines and genuinely excellent — but it now says <code>ensureAssets</code> "blocks only when an asset needed now has not finished preparing," while the code shows it is a pure non-blocking <code>requestAssets(..., Visible)</code>; the blocking path is the separate <code>waitForAssets</code>, documented as offline-only. The code is <em>better</em> than the doc here, which is the harmless direction, but at this length the document is the primary interface for anyone picking the project up.</p>
+        <div class="fix"><b>Do</b>Split it: a short architectural overview that stays true for months, and per-subsystem notes next to the code they describe. Prune the change-log material that has aged into history.</div>
+      </div>
+    </section>
+
+    <!-- ============ 9 ============ -->
+    <section id="s9">
+      <div class="sec-head"><span class="sec-num">09</span><h2>A sequenced plan</h2></div>
+      <p class="lead">Every step below is one of the findings above, named by its ID, in the order it should be picked up. Ordering is the whole point: each phase makes the next one cheap, and doing them out of order means writing the same code twice. Phases are independently schedulable; steps within a phase are not.</p>
+
+      <div class="fix" style="margin-bottom:22px"><b>Where this stands</b>Phase 0 and Phase 1 are complete. Implementing them turned up four places where this review was wrong about its own subject matter; those corrections are recorded in the findings themselves and summarised in &sect;11.</div>
+
+      <div class="phase">
+        <div class="phase-tag">Phase 0<br>days</div>
+        <div>
+          <h4>Free wins, no architecture change</h4>
+          <p>Local, individually revertible, and each improves the game as it stands. Nothing here depends on anything else here, so this phase parallelizes freely.</p>
+          <ol class="steps">
+            <li class="done"><a class="ref" href="#v-shaderflags">V5</a><div class="step-body"><b>Shader compile flags</b><span class="note">Add <code>-O</code>; set <code>--target-env</code> to the 1.3 you actually require. One line, zero risk.</span></div></li>
+            <li class="done"><a class="ref" href="#v-semaphores">V1</a><div class="step-body"><b>Per-image present semaphores</b><span class="note">The only correctness bug in Phase 0. Tie the set to the swapchain generation so the existing retirement wait covers its destruction.</span></div></li>
+            <li class="done"><a class="ref" href="#v-skinstruct">V3</a><div class="step-body"><b>Stop binding the 16 KB skinning struct</b><span class="note">Index the SSBO members directly. Same output, no reliance on the driver scalarizing a whole-struct load.</span></div></li>
+            <li class="done"><a class="ref" href="#v-aniso">V6</a><div class="step-body"><b>Anisotropic filtering</b><span class="note">Optional feature tier, like wireframe. Mipped linear textures only.</span></div></li>
+            <li class="done"><a class="ref" href="#t-depthcopy">T7</a><div class="step-body"><b>Gate the depth copy on AO</b><span class="note">Share one predicate with the SSAO pass so the copy and its only reader cannot drift.</span></div></li>
+            <li class="done"><a class="ref" href="#t-cull">T3</a><div class="step-body"><b>Back-face culling on models</b><span class="note">Must land with <code>VK_FRONT_FACE_CLOCKWISE</code>, or the negative-height viewport turns every model hollow. Ship a debug toggle with it.</span></div></li>
+            <li class="done"><a class="ref" href="#t-opaqueblend">T2</a><div class="step-body"><b>Opaque pipelines, front-to-back sort</b><span class="note">Do it after <a class="ref" href="#t-cull">T3</a>: both touch the same dynamic state in the model loop, and landing them together halves the visual bisection if something looks wrong.</span></div></li>
+            <li class="done"><a class="ref" href="#t-msaa">T6</a><div class="step-body"><b>MSAA default to 4x</b><span class="note">Last, so you measure it against the other seven rather than instead of them.</span></div></li>
+          </ol>
+          <p class="phase-gate">Gate: models solid and mirror ghosts showing their exterior; no coplanar flicker from the reordered opaque pass; frame time measured before deciding whether 8x is affordable again.</p>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="phase-tag">Phase 1<br>weeks</div>
+        <div>
+          <h4>Build the substrate</h4>
+          <p>Strictly sequential — this is the phase that will hurt, and the one everything downstream is waiting on.</p>
+          <ol class="steps">
+            <li class="done"><a class="ref" href="#e-ci">E1</a><div class="step-body"><b>CI: MSVC job and a headless validation run</b><span class="note">First, not last. Everything after this is a change you cannot verify by eye, and a validation-layer run would have caught <a class="ref" href="#v-semaphores">V1</a> on its own.</span></div></li>
+            <li class="done"><a class="ref" href="#f-math">F1</a><div class="step-body"><b>A real math module</b><span class="note"><code>Mat3/Mat4</code>, <code>Quat</code>, <code>Transform</code>, <code>Aabb</code>, <code>Frustum</code>, <code>Ray</code>, with tests. Move <code>Mat4</code> out of the glTF header; delete the four duplicate <code>add</code>/<code>dot</code>/<code>normalize</code> copies. Nothing below is affordable without it.</span></div></li>
+            <li class="done"><a class="ref" href="#s1">C1</a><div class="step-body"><b>Give the renderer a camera</b><span class="note">View and projection in a per-frame UBO; world-space vertices in vertex buffers; transforms in an instance buffer. Delete <code>worldFromSunShadow</code> and the hardcoded <code>viewDirection</code>. This is the change that unblocks §6 wholesale.</span></div></li>
+            <li class="done"><a class="ref" href="#t-quaddraws">T1</a><div class="step-body"><b>Instanced tiles</b><span class="note">Falls out of <a class="ref" href="#s1">C1</a> almost for free — the mechanism already exists for models. Do it immediately after, while the transform work is fresh.</span></div></li>
+            <li class="done"><a class="ref" href="#s-arena">S4</a><div class="step-body"><b>Close the frame-arena hazard</b><span class="note">Cheap, and <a class="ref" href="#s1">C1</a> rewrites the prepare/draw ordering the current safety silently depends on. Fix it while you are in there rather than discovering it afterwards.</span></div></li>
+          </ol>
+          <p class="phase-gate">Gate: the scene renders identically through a real transform pipeline, with tile draw calls down by orders of magnitude and no shader reconstructing world position from the shadow frustum.</p>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="phase-tag">Phase 2<br>weeks</div>
+        <div>
+          <h4>Modernize the pixel path</h4>
+          <p>Sequential for the first three; <a class="ref" href="#v-ssao">V7</a> and <a class="ref" href="#f-ubershader">F4</a> can run alongside once materials exist.</p>
+          <ol class="steps">
+            <li><a class="ref" href="#f-hdr">F2</a><div class="step-body"><b>HDR target and a tonemap pass</b><span class="note">Before materials, not after: PBR values without range headroom look worse than what you have now.</span></div></li>
+            <li><a class="ref" href="#a-gltf">A1</a><div class="step-body"><b>Replace the glTF loader</b><span class="note">cgltf or tinygltf. Do it before <a class="ref" href="#f-materials">F3</a> — it is what supplies real materials, tangents, and extensions, so writing a material model against the current loader is throwaway work.</span></div></li>
+            <li><a class="ref" href="#f-materials">F3</a><div class="step-body"><b>Material model and a GGX BRDF</b><span class="note">Vertex tangents, metallic-roughness, normal, emissive, occlusion, alpha mode. Also retires the per-face alpha special-case that <a class="ref" href="#t-opaqueblend">T2</a> had to work around.</span></div></li>
+            <li><a class="ref" href="#v-ssao">V7</a><div class="step-body"><b>Rework the SSAO</b><span class="note">Needs the view matrix from <a class="ref" href="#s1">C1</a> to express its radius in world units, and the ambient term from <a class="ref" href="#f-materials">F3</a> to apply itself correctly.</span></div></li>
+            <li><a class="ref" href="#f-ubershader">F4</a><div class="step-body"><b>Split the über-shader</b><span class="note">Pull UI out of the scene shader; add specialization constants. Worth doing once <a class="ref" href="#f-materials">F3</a> has made the branch count worse, not before.</span></div></li>
+          </ol>
+          <p class="phase-gate">Gate: an off-the-shelf PBR glTF asset loads and lights correctly, with exposure control and no clipping at 1.0.</p>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="phase-tag">Phase 3<br>weeks</div>
+        <div>
+          <h4>Scale the frame</h4>
+          <p><a class="ref" href="#s-scene">S2</a> gates <a class="ref" href="#t-visibility">T4</a>; the rest are largely independent and can be split across people.</p>
+          <ol class="steps">
+            <li><a class="ref" href="#s-scene">S2</a><div class="step-body"><b>Persistent renderables with bounds</b><span class="note">First in this phase. Culling, LOD and streaming all need something stable to reference, and the current full rebuild gives them nothing.</span></div></li>
+            <li><a class="ref" href="#t-visibility">T4</a><div class="step-body"><b>Frustum culling</b><span class="note">Uses <a class="ref" href="#f-math">F1</a>'s <code>Frustum</code> and <a class="ref" href="#s-scene">S2</a>'s bounds. Occlusion culling and LOD chains come later but reuse the same bounds.</span></div></li>
+            <li><a class="ref" href="#v-descriptors">V4</a><div class="step-body"><b>Descriptor indexing and frequency-based sets</b><span class="note">Independent of <a class="ref" href="#s-scene">S2</a>. Removes the 64-texture content ceiling and is a prerequisite for bindless materials and texture streaming.</span></div></li>
+            <li><a class="ref" href="#v-vma">V2</a><div class="step-body"><b>VMA, or image suballocation</b><span class="note">Independent. Generalize <code>createImage</code>/<code>createImageView</code> for mips, layers and view types while you are there.</span></div></li>
+            <li><a class="ref" href="#a-textures">A2</a><div class="step-body"><b>BC7 and KTX2 in the content tool</b><span class="note">Best after <a class="ref" href="#v-vma">V2</a>. Quarters texture VRAM and removes CPU decode from the load path entirely.</span></div></li>
+            <li><a class="ref" href="#a-streaming">A3</a><div class="step-body"><b>Byte-budget publication and LRU eviction</b><span class="note">Follows <a class="ref" href="#a-textures">A2</a>: the budgets only start meaning something once texture sizes are realistic.</span></div></li>
+            <li><a class="ref" href="#s-tasks">S3</a><div class="step-body"><b>Task system: stealing and dependencies</b><span class="note">Before <a class="ref" href="#t-threading">T8</a>, not with it. The current single-mutex deque will contend the moment frame work is parallelized.</span></div></li>
+            <li><a class="ref" href="#t-threading">T8</a><div class="step-body"><b>Parallel prepare, secondary command buffers, transfer queue</b><span class="note">Parallelize <code>IsoScenePreparer::prepare</code> first — largest CPU block, embarrassingly parallel. The transfer queue also removes the editor's <code>vkDeviceWaitIdle</code> on texture repaint.</span></div></li>
+            <li><a class="ref" href="#t-pointshadows">T5</a><div class="step-body"><b>Point-shadow caster culling and caching</b><span class="note">Needs <a class="ref" href="#s-scene">S2</a> to know which casters moved. Range-cull first, cache static faces second, atlas third.</span></div></li>
+            <li><a class="ref" href="#a-recordalloc">A4</a><div class="step-body"><b>Reusable recorder scratch</b><span class="note">Small. Do it last here — <a class="ref" href="#f-materials">F3</a> should already have replaced the 29-word sort key with a material ID.</span></div></li>
+          </ol>
+          <p class="phase-gate">Gate: frame cost scales with what is visible rather than what is authored, and the manifest can grow past 64 textures.</p>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="phase-tag">Phase 4<br>as needed</div>
+        <div>
+          <h4>Reach the modern baseline</h4>
+          <p>Everything here is a §6 table row rather than a finding, and none of it is ordered against the others — pick by what the game actually needs.</p>
+          <ol class="steps">
+            <li><a class="ref" href="#s6">§6</a><div class="step-body"><b>Motion vectors, then TAA, then an upscaler</b><span class="note">Strictly in that order; each is the input to the next. Retires <a class="ref" href="#t-msaa">T6</a> entirely and gives temporal accumulation to AO, shadows and reflections for free.</span></div></li>
+            <li><a class="ref" href="#s6">§6</a><div class="step-body"><b>Clustered light culling, post stack, GPU particles, probes, CSM</b><span class="note">Independent of each other. CSM only when view distance actually grows; probes only when a flat ambient term stops being acceptable.</span></div></li>
+            <li><a class="ref" href="#s-timestep">S1</a><div class="step-body"><b>Fixed simulation tick</b><span class="note">Only if the game acquires continuous motion or physics — but then <em>before</em> the physics, not after. Retrofitting means auditing every system that reads <code>dt</code>.</span></div></li>
+            <li><a class="ref" href="#f-rhi">F5</a><div class="step-body"><b>An RHI seam</b><span class="note">Only when a second platform is real. The narrow version — stop leaking <code>Vk*</code> types past <code>Application</code> — is worth doing early anyway, since it buys the null backend <a class="ref" href="#e-ci">E1</a> wants.</span></div></li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="phase">
+        <div class="phase-tag">Ongoing</div>
+        <div>
+          <h4>Continuous</h4>
+          <ol class="steps">
+            <li><a class="ref" href="#e-docs">E2</a><div class="step-body"><b>Keep the handoff true</b><span class="note">Not a phase. Split it into a short architectural overview plus per-subsystem notes next to the code, and update it in the same change that moves the code — every phase above invalidates part of it.</span></div></li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 10 ============ -->
+    <section id="s10">
+      <div class="sec-head"><span class="sec-num">10</span><h2>What not to touch</h2></div>
+
+      <p class="lead">A review that only lists problems misrepresents the codebase. Several parts of this engine are done properly and should survive every phase above intact.</p>
+
+      <div class="note good">
+        <span class="kicker">Keep as-is</span>
+        <ul>
+          <li><b>Frame resource lifetime management.</b> <code>FrameResourceTracker</code>, <code>RendererReconfigurationQueue</code>, generation-tagged retirement, replacement resources built before publication, retired bundles held until every referencing fence completes. This is how it should be done and it is rare to see it done at all.</li>
+          <li><b>Buffer memory.</b> <code>VulkanGeometryArena</code> + <code>GeometrySuballocator</code> + a persistently-mapped <code>VulkanUploadRing</code> with fence-guarded reservations. Real engine technique, tested in isolation.</li>
+          <li><b>The asset scheduler.</b> Visible/prefetch priorities, bounded concurrency, residency budgets, cancellable prefetch, per-frame publication throttling, failures retained and reported without interrupting play.</li>
+          <li><b>Headless separation.</b> <code>Rules</code>, <code>LevelEditor</code>, <code>SplatCanvas</code>, <code>IsoScenePreparer</code>, <code>OpaqueDrawSorter</code>, <code>AssetLoadScheduler</code> all testable without SDL or Vulkan. This is why 59 suites are possible.</li>
+          <li><b>The content pipeline.</b> Manifest validation, path containment, temp-directory staging with atomic replacement, stale-file removal, a runtime that only ever reads the staged tree.</li>
+          <li><b>Diagnostics.</b> GPU timestamp profiler, CPU/GPU frame-time telemetry with p95, debug object names, pipeline cache, device-suitability gating with actionable messages, crash diagnostics, atomic saves with a 26-format migration chain.</li>
+          <li><b>Skeletal animation.</b> GPU skinning, crossfades, timeline events with named dependencies, skeleton-node attachments. Genuinely the most modern subsystem in the engine.</li>
+        </ul>
+      </div>
+
+      <hr class="rule">
+
+      <p>The honest summary: you have built the <em>operations</em> half of a shippable engine — packaging, validation, telemetry, tests, tooling, content staging — to a standard most projects never reach, on top of a rendering core that was scoped precisely to an isometric tile board. The work ahead is not cleanup. It is replacing the geometry and shading path with one that has a camera, a material, and range, and then letting the good infrastructure you already have carry it.</p>
+    </section>
+
+
+    <!-- ============ 11 ============ -->
+    <section id="s11">
+      <div class="sec-head"><span class="sec-num">11</span><h2>Corrections from implementation</h2></div>
+
+      <p class="lead">Phases 0 through 2 were built against this document. Several things it asserted turned out to be wrong, and one turned out to be right for the wrong reason. They are recorded here rather than quietly edited away, because each was found the expensive way and the reasoning that produced them is worth distrusting again.</p>
+
+      <div class="finding f-debt">
+        <div class="f-head"><span class="f-id">C1</span><span class="chip">Corrected</span><h3 class="f-title">The clip-space clamp was the real defect, not the missing camera</h3></div>
+        <p class="f-where"><code>IsoScenePreparer::projectIsoPoint</code> &middot; <code>calculateIsoLayout</code></p>
+        <p>Because quads were projected on the CPU and pushed as clip-space vertices, there was no near or far clipping to rely on, so <code>projectIsoPoint</code> <em>clamped</em> z into <code>[0, 1]</code>. Anything past the far plane did not vanish; it arrived at exactly 1.0, sharing that depth with every other such surface. The depth range was derived from the camera-fit geometry alone, and every gameplay frame sets an explicit <code>cameraExtent</code>, so any tile a designer had marked as scenery landed on the far plane.</p>
+        <p>Two bugs came out of that one fact. <a class="ref" href="#t-opaqueblend">T2</a>'s sort flip turned the far row of a board inside out, because a tie under <code>LESS_OR_EQUAL</code> goes to whichever drew last. It was reported as a back-face culling bug and is not — the culling toggle made no difference. Then <code>VK_COMPARE_OP_LESS</code>, tried as the fix, made the row vanish outright, because the depth buffer clears to exactly 1.0.</p>
+        <div class="fix"><b>Correction</b>The on-screen fit and the depth range are different questions and must be computed separately: the fit stays authored, the depth range covers every drawn tile. This is a prerequisite for <a class="ref" href="#t-opaqueblend">T2</a>, not a consequence of <a class="ref" href="#s1">C1</a>, and reordering opaque geometry is unsafe until it holds.</div>
+      </div>
+
+      <div class="finding f-debt">
+        <div class="f-head"><span class="f-id">T1</span><span class="chip">Corrected</span><h3 class="f-title">"Falls out of C1 almost for free" was wrong</h3></div>
+        <p class="f-where"><code>shaders/triangle.frag.glsl</code> &mdash; 8 pipelines, 41 per-draw references</p>
+        <p>The plan assumed the transform pipeline was what blocked instancing. It was not. <code>triangle.frag</code> is shared by tiles, UI, static models and skinned models, and reads its per-draw parameters from push constants in 41 places; <code>ground_splat.frag</code> adds 29, <code>water.frag</code> 41, <code>mirror_energy.frag</code> 17. Instancing tiles means moving that data into a buffer, and every other consumer of the block has to follow it — models included, because they share the fragment shader.</p>
+        <div class="fix"><b>Correction</b><a class="ref" href="#t-quaddraws">T1</a> is a per-draw data move, which is <a class="ref" href="#f-ubershader">F4</a>'s problem wearing a throughput hat. It was landed in two steps — move the data with the draw count unchanged, then merge runs — precisely so the first step either rendered identically or was plainly broken. Anything else that depends on the über-shader should expect the same surprise.</div>
+      </div>
+
+      <div class="finding f-debt">
+        <div class="f-head"><span class="f-id">C1</span><span class="chip">Corrected</span><h3 class="f-title">Not every quad has a world position</h3></div>
+        <p class="f-where"><code>shaders/triangle.vert.glsl</code> &middot; UI, the top-down 2D board, the grid overlay</p>
+        <p>&sect;1 describes the CPU projecting "every vertex", which is true of the scene and false of the interface. The UI and the 2D board author their quads directly in clip space and share the same vertex shader. Giving that shader a camera projected them too, and the entire interface left the screen at once — which presents as a window that never finished loading, not as a transform bug.</p>
+        <div class="fix"><b>Correction</b>A quad's corner carries which space it is in. The tidy version is a separate screen-space pipeline, which belongs with <a class="ref" href="#f-ubershader">F4</a>.</div>
+      </div>
+
+      <div class="finding f-debt">
+        <div class="f-head"><span class="f-id">C1</span><span class="chip">Corrected</span><h3 class="f-title">The 256-byte block was not freed, and the shadow pass keeps it</h3></div>
+        <p class="f-where"><code>shaders/water.frag.glsl</code> &middot; <code>shaders/shadow.vert.glsl</code></p>
+        <p>Deleting the shadow-space copy of the corners was supposed to return 64 bytes. It did not: <code>water.frag</code> was already using those bytes for its border and ripple parameters — an instance of the slot-reuse &sect;1 complains about, one layer deeper than it looked. The block later moved into a storage buffer wholesale under <a class="ref" href="#t-quaddraws">T1</a>, which is the actual answer to it being full.</p>
+        <p>Separately, the shadow pass cannot take a camera from a uniform: it has one per sun and six per point light. Its pipelines still receive CPU-projected clip-space corners, and that is correct rather than unfinished — nothing in a shadow pass reads a world position.</p>
+      </div>
+
+      <div class="finding f-debt">
+        <div class="f-head"><span class="f-id">F2</span><span class="chip">Ordering to reconsider</span><h3 class="f-title">V7 may want to come forward into F2</h3></div>
+        <p class="f-where">Phase 2 &mdash; <a class="ref" href="#f-hdr">F2</a> before <a class="ref" href="#v-ssao">V7</a></p>
+        <p>The plan puts <a class="ref" href="#v-ssao">V7</a> after <a class="ref" href="#f-materials">F3</a>, on the grounds that ambient occlusion needs a correct ambient term to modulate. That is right, but it means moving the composite twice: <a class="ref" href="#f-hdr">F2</a> has to reorder it anyway so that the UI composites <em>after</em> tonemapping, and AO wants to apply pre-tonemap for the same reason it wants to apply to ambient.</p>
+        <div class="fix"><b>Consider</b>Pull the "AO modulates ambient rather than the composite" half of <a class="ref" href="#v-ssao">V7</a> forward into F2, and leave the sampling rework - view-space normals, world-unit radius, bilateral blur - where the plan has it. The two halves are independent.</div>
+      </div>
+
+      <div class="finding f-throughput">
+        <div class="f-head"><span class="f-id">T2</span><span class="chip">Right, wrong reason</span><h3 class="f-title">Tile faces were never perspective-correct</h3></div>
+        <p class="f-where"><code>VulkanSceneRecorder</code> &mdash; <code>drawFace</code>, <code>drawGroundSplatFace</code></p>
+        <p>Face quads were pushed already divided, with <code>w = 1</code>, so their attributes interpolated affinely. The review treated the CPU projection purely as a flexibility problem; it was also a correctness one. Ground-splat UVs and grid lines on large quads were subtly wrong, and the splat shader's "global origin" was a normalised device coordinate wearing a world-space name. Both are fixed by <a class="ref" href="#s1">C1</a> as a side effect.</p>
+      </div>
+    
+      <div class="finding f-foundation">
+        <div class="f-head"><span class="f-id">A1</span><span class="chip">Corrected</span>
+        <h3 class="f-title">cgltf, not tinygltf — and the choice was not close</h3></div>
+        <p class="f-where">Phase 2 &mdash; <a class="ref" href="#a-gltf">A1</a></p>
+        <p>The finding offers "cgltf or tinygltf" as if either would do. For this engine they are not equivalent. The loader is called from worker threads, has to round-trip non-ASCII Windows paths, and is held behind a header that deliberately names no library type. cgltf is a single C99 header with a caller-supplied file-read callback, which satisfies all three; tinygltf pulls in a C++ JSON dependency and owns its own I/O. A third option the document does not mention, <b>fastgltf</b>, is a better long-term fit — SIMD parsing, first-class GLB and extension support — and is pinned in <code>HANDOFF.md</code> with the three triggers that should make someone revisit it.</p>
+        <div class="fix"><b>Method worth reusing</b>The swap was verified by a differential digest harness that loads every model, skinned mesh, animation and pose the manifest reaches — 734 jobs — and hashes the result field by field, so one binary builds against both the old and the new vertex layout. Every step of A1 and F3 was held to byte-identical output on it, which is what made it safe to change the loader and the vertex format underneath a running game.</div>
+      </div>
+
+      <div class="finding f-foundation">
+        <div class="f-head"><span class="f-id">F3</span><span class="chip">Corrected</span>
+        <h3 class="f-title">The material model has to reach the shader before a BRDF can use it</h3></div>
+        <p class="f-where">Phase 2 &mdash; <a class="ref" href="#f-materials">F3</a></p>
+        <p>The finding reads as one step: parse materials, move to GGX. In practice the parsing was the easy half. A glTF material is per-primitive, a draw covers a whole model, and this engine's manifest — not the glTF — decides what texture a model uses. So the material had to become a GPU storage buffer indexed by a per-draw base plus a per-vertex material index before any BRDF could read a roughness. That is three landed steps (<b>F3a</b> vertex substrate, <b>F3b</b> material model then material buffer, <b>F3c</b> the BRDF), not one.</p>
+        <p>The trap in the middle: of the manifest's 36 models, 29 declare <code>material.mode: "texture"</code>, six declare nothing, and <em>one</em> uses <code>primitive-materials</code>. Reading the material only where glTF materials are declared would have given 35 of 36 models no metallic and no roughness — a physically based renderer lighting one conveyor belt. The material read had to be widened to every draw first, with a reserved fallback entry for draws that have no model behind them.</p>
+        <div class="fix"><b>Consequence for F4</b>This document says F4 is worth doing "once F3 has made the branch count worse". It has: <code>triangle.frag.glsl</code> went from 382 lines to 576, and now carries a full Cook-Torrance implementation alongside the UI font, the title art and the rounded-rect SDF. F4 is the largest remaining Foundation item and the case for it is stronger than when this was written.</div>
+      </div>
+
+      <div class="finding f-debt">
+        <div class="f-head"><span class="f-id">V7</span><span class="chip">Right, wrong reason</span>
+        <h3 class="f-title">The ambient mask is a per-pixel ratio, and a BRDF swap redefines it</h3></div>
+        <p class="f-where">Phase 2 &mdash; <a class="ref" href="#v-ssao">V7</a> inside <a class="ref" href="#f-hdr">F2b</a>, revisited by <a class="ref" href="#f-materials">F3c</a></p>
+        <p>Pulling V7's "AO modulates ambient" half forward into F2 was the right call, and it works: the scene target's alpha carries the share of a pixel's light that came from the ambient term, and the composite scales occlusion by it. What was not obvious is that this ratio is a <em>function of the BRDF</em>. F2b defined it as "diffuse only, on both sides", on the reasoning that occlusion has no business scaling a direct reflection.</p>
+        <p>F3c broke that definition without touching the composite. Cook-Torrance introduces an <em>ambient</em> specular term — the environment stand-in that keeps a metal from going black — which is ambient light by construction but sits on the specular side of the split. Left out of the ratio, a metallic surface reported a smaller ambient share than it had, and a fully metallic one computed zero over zero and took no occlusion at all. The mask is now "ambient contribution over total contribution", with direct light in the denominator only.</p>
+        <div class="fix"><b>For whoever does the rest of V7</b>Two shaders write this channel — <code>triangle.frag.glsl</code> and <code>ground_splat.frag.glsl</code> — and they must agree on what it means. They did not until F3c: one weighed the ratio against the albedo and the other against the light alone, which drift apart whenever an albedo is saturated, because the sun and the ambient term do not share a spectrum. Any further change to either lighting path has to re-check this ratio.</div>
+      </div>
+
+    </section>
+
+    <footer>
+      Review scope: full read of src/engine (253 files, 64,900 LOC), all 14 GLSL shaders, CMakeLists.txt, CI workflow, and HANDOFF.md.<br>
+      Every finding cites the file and line it was verified against. Baseline commit per HANDOFF.md: b287ebc4.
+    </footer>
+
+  </main>
+</div>

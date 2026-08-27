@@ -296,7 +296,6 @@ struct RenderFrameData {
         Shadows shadows {};
         AmbientOcclusion ambientOcclusion {};
         float specularStrength = 0.0f;
-        float specularPower = 1.0f;
         float modelShadowReceive = 0.0f;
     };
 

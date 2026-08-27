@@ -1789,7 +1789,9 @@ private:
                 0.0f,
                 0.0f,
                 std::max(lighting.specularStrength, 0.0f),
-                std::max(lighting.specularPower, 1.0f),
+                // w was the Blinn-Phong exponent. Roughness replaced it in
+                // F3c and nothing reads this lane on a tile draw now.
+                0.0f,
             },
         };
         return writeDrawInstance(constants);
@@ -2173,7 +2175,9 @@ private:
                 shaderValue(material.mode),
                 editorHighlightState,
                 std::max(lighting.specularStrength, 0.0f),
-                std::max(lighting.specularPower, 1.0f),
+                // w was the Blinn-Phong exponent, replaced by the material's
+                // roughness in F3c.
+                0.0f,
             },
         };
         return constants;

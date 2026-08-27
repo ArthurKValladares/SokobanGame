@@ -22,7 +22,6 @@ public:
         Vec3 ambientColor {};
         float ambientIntensity = 0.0f;
         float specularStrength = 0.0f;
-        float specularPower = 1.0f;
         float modelShadowReceive = 0.0f;
         bool ambientOcclusionEnabled = false;
         float ambientOcclusionStrength = 0.0f;

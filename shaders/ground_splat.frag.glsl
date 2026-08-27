@@ -281,10 +281,14 @@ void main()
         vec3 lightDirection = length(draw.sunDirectionAndAmbientGreen.xyz) > 0.0001
             ? normalize(draw.sunDirectionAndAmbientGreen.xyz)
             : vec3(0.0, 0.0, 1.0);
-        float rawDiffuse = dot(normal, lightDirection);
-        float lambertDiffuse = max(rawDiffuse, 0.0);
-        float wrappedDiffuse = clamp(rawDiffuse * 0.5 + 0.5, 0.0, 1.0);
-        float diffuse = mix(lambertDiffuse, wrappedDiffuse * wrappedDiffuse, 0.65);
+        // Lambert, matching the diffuse half of the Cook-Torrance model
+        // triangle.frag moved to in F3c. The ground and the models standing
+        // on it have to agree about where the terminator is; they used to
+        // share a wrapped-diffuse blend and this is what keeps them sharing
+        // one response now that the models are physically based. The ground
+        // stays specular-free, as it has always been.
+        float lambertDiffuse = max(dot(normal, lightDirection), 0.0);
+        float diffuse = lambertDiffuse;
         vec3 ambient = vec3(
             draw.normalAndAmbientRed.w,
             draw.sunDirectionAndAmbientGreen.w,
@@ -317,10 +321,17 @@ void main()
         vec3 diffuseLighting = ambientTerm +
             draw.sunRadianceAndAmbientBlue.rgb * diffuse * shadow +
             pointDiffuseLighting;
+        // Weighed against the albedo, not against the light alone, so this
+        // means the same thing as the mask triangle.frag writes into the same
+        // channel: the share of the radiance leaving this pixel that came
+        // from ambient. The two used different definitions until F3c, and a
+        // saturated albedo pulled them apart, because the sun and the ambient
+        // term do not share a spectrum.
+        vec3 ambientContribution = ambientTerm * color;
         color *= diffuseLighting;
         ambientMask = clamp(
-            dot(ambientTerm, luminanceWeights) /
-                max(dot(diffuseLighting, luminanceWeights), 0.0001),
+            dot(ambientContribution, luminanceWeights) /
+                max(dot(color, luminanceWeights), 0.0001),
             0.0,
             1.0);
     }

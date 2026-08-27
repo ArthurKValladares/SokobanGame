@@ -6,8 +6,57 @@ This file is intended for another coding agent picking up work on the project. I
 
 **Two different plans in this file use "Phase" numbering.** The shipping
 baseline below refers to the old P0-P4 hardening plan, which is finished. This
-section is about the *engine review* (the published artifact, "Sokoban 3D
-Engine Review"), whose own Phase 0-4 plan is the live one.
+section is about the *engine review* (`enginereview.html`, at the repo root),
+whose own Phase 0-4 plan is the live one. Every finding in that document now
+carries an implementation-status chip and a note saying where it stands, and
+its section 11 records what building the plan proved wrong about the plan.
+Read that section before trusting any estimate in the rest of it.
+
+### Start here
+
+**Next task, already decided with the project owner: `V4`, descriptor
+indexing.** Then teach the manifest to walk each model's glTF for its own
+textures. The reasoning for that order is under "Decided: V4 first" below.
+
+Working method that the last three items were built with, and that is worth
+keeping:
+
+- **The differential digest harness** in `$HOME/f2/a1/` (`digest.cpp`, plus
+  `jobs.tsv` / `alljobs.tsv`) loads every model, skinned mesh, animation and
+  pose the manifest reaches - 734 jobs - and prints a stable per-job digest.
+  It hashes **field by field**, so one binary compiles against two different
+  vertex layouts and the same run can be compared across a format change.
+  Build it with `g++ -std=c++20 -O1 -Isrc -isystem third_party/cgltf
+  digest.cpp src/engine/render/GltfMesh.cpp src/engine/TaskSystem.cpp`.
+  To prove a loader change is inert, build it twice - once against
+  `git show HEAD:` sources extracted to a temp tree, once against the working
+  tree - and diff the two runs. That is what every "byte-identical across 734
+  jobs" claim in this file means.
+- **Shaders can be compiled and reflected.** `glslangValidator` and
+  `spirv-dis` install from `glslang-tools` / `spirv-tools`. Compile all 15
+  with `-DMODEL_TEXTURE_COUNT=64 -DMAX_SKIN_JOINTS=128`, then reflect
+  `OpDecorate ... Location` / `Binding` to check that vertex attributes, the
+  varying interface and descriptor bindings still line up across every
+  vert/frag pair. Several classes of silent breakage only show up here.
+- **Per-translation-unit syntax checks** beat a full build on this machine:
+  `g++ -std=c++20 -fsyntax-only -Wall -Wextra -Wpedantic` with the vendored
+  Khronos headers standing in for the Vulkan SDK. Run each changed TU with
+  `SOKOBAN_ENABLE_DEBUG_UI` both 1 and 0. A full `sokoban_core` build has
+  timed out and restarted the VM; do not attempt one casually.
+- **Have the work reviewed before writing it up.** Every landed item in this
+  file was reviewed by a second pass looking specifically for lifetime,
+  synchronisation and ordering defects. That pass found real bugs in F3b and
+  F3c that the tests and the compiler did not - the ones recorded under each
+  section - and it found them in code that had already passed everything else.
+
+**Line endings**: 43 files in the working tree have mixed CRLF and LF within a
+single file, most of them untouched by this work. Naive string replacement
+breaks on them. There is still no `.gitattributes`; adding one, and
+normalising in a commit of its own, remains a worthwhile chore that nobody has
+done.
+
+**Commits are the project owner's**, not the agent's. Land work in separable
+steps and say what each one is.
 
 ### Done
 
@@ -29,10 +78,11 @@ started**:
   `GltfMesh.hpp`, byte-identical on the whole asset corpus. **Step two** read
   the animation `interpolation` field the loader had always ignored, and put
   `cgltf_validate` in front of every load. See below.
-- Phase 2: F3a (tangents, a second UV set, the wider vertex) and F3b in two
-  steps - **step one** the CPU material model, **step two** the GPU material
-  buffer at binding 12, which is where `textureIndex` and `materialFlags`
-  left the vertex. **F3c**, the Cook-Torrance GGX swap, is next.
+- Phase 2: **F3, complete.** F3a (tangents, a second UV set, the wider
+  vertex); F3b in two steps - the CPU material model, then the GPU material
+  buffer at binding 12, which is where `textureIndex` and `materialFlags` left
+  the vertex; F3c the Cook-Torrance GGX swap. The `model.vert` Euler rotation
+  was retired alongside it as its own step.
 
 Each has its own section in this file explaining the invariants it
 established. Read the C1 and T1 notes under the renderer section before
@@ -458,6 +508,84 @@ because a column length is unsigned. The old path dropped it too - its
 reciprocal went through `std::abs` - so this is unchanged, and no content can
 author one anyway: `DecorationGizmo` clamps scale to `>= 0.001` and no level
 or asset JSON contains a negative component.
+
+### What F3c established, and F3 is done
+
+The BRDF. `triangle.frag.glsl` lights models with Cook-Torrance GGX driven by
+the material's own metallic and roughness, where a wrapped-diffuse
+Blinn-Phong used to light everything with two scene-wide knobs.
+
+- **The material read was widened first, and that was the whole trick.** Of
+  the manifest's 36 models, 29 are `material.mode: "texture"`, six declare no
+  material, and one is `primitive-materials`. Reading the material only in the
+  branch where glTF materials live would have given 35 of 36 models no
+  metallic and no roughness. `Material material = modelMaterial()` is now read
+  once at the top of `main()` for **every** draw: a draw with no published
+  model behind it has a zero base and lands on the reserved fallback - white
+  factor, no texture, metallic 0, roughness 1 - so tiles, UI and particles are
+  unaffected and the lighting needs no branch to find their parameters.
+- **`baseColorFactor` applies in every model mode now**, rgb always and alpha
+  only on a `BLEND` material. **This is the visible change**: the four corpus
+  materials with a non-default factor are the glass ones, `BLEND`, at alpha
+  0.5 and 0.1. Glass is meaningfully more transparent than it was. That is the
+  authored value reaching the screen for the first time.
+- **Texture selection stays per-mode.** Mode 1's texture is the manifest's
+  single-texture override and the glTF's own base colour texture is
+  deliberately not consulted there. Only the factors and the lighting
+  parameters are shared across modes.
+- **The pi is folded into the light, not divided out of the surface.** That is
+  the same thing as scaling every authored light intensity by pi, and it is
+  what keeps the swap from darkening every existing level threefold. The
+  specular term carries the matching pi so the diffuse-to-specular ratio stays
+  where the physics puts it. If you ever move to a physically authored light
+  unit, this is the line to revisit.
+- **`ground_splat.frag.glsl` moved to plain Lambert too.** The ground and the
+  models standing on it have to agree about where the terminator is. It stays
+  specular-free, as it always was.
+- **`specularPower` is deleted** - config constants, the settings field, the
+  render type, the Debug UI slider, the recorder writes and the test. It was a
+  Blinn-Phong exponent and roughness replaces it. `specularStrength` survives
+  as a scene-wide dial on the *direct* specular half and its default moved
+  from 0.16 to 1.0, because 0.16 was a fudge factor on an unnormalized lobe
+  and the new one is normalized and carries its own Fresnel.
+
+**Expect the terminator to harden.** The old wrapped diffuse put 16% of full
+light on a surface facing 90 degrees away from the sun; Lambert puts zero.
+Head-on brightness is preserved to within 4%, which is the Fresnel coupling.
+That is the swap doing what a swap does, not a bug.
+
+**Two defects were found in review and fixed before this was written up:**
+
+1. The ambient mask counted only the diffuse half. Cook-Torrance introduces an
+   *ambient* specular term - the `ambientTerm * f0` that stands in for the
+   environment probe this engine does not have - which is ambient light by
+   construction. Left out of the ratio, a metallic surface reported a smaller
+   ambient share than it had and a fully metallic one computed zero over zero
+   and took no occlusion at all. The mask is now ambient contribution over
+   total contribution, with direct light in the denominator only. **The two
+   shaders that write this channel must agree on what it means**;
+   `ground_splat` was weighing the ratio against the light alone while
+   `triangle.frag` weighed it against the albedo, which drift apart on a
+   saturated albedo because the sun and the ambient term do not share a
+   spectrum. Both now weigh it the same way.
+2. `specularStrength` multiplied the ambient fill as well as the direct
+   specular, so dragging the Debug UI slider to zero would have rendered a
+   metallic surface black. The dial reaches the direct half only.
+
+**Verified**: all 15 shaders compile and the stage interfaces and descriptor
+bindings are unchanged by SPIR-V reflection; every changed TU is warning-clean
+with the debug UI on and off. The specular lobe's directional albedo
+integrates to 0.04-0.24 against a ceiling of pi, so it creates no energy. All
+2655 materials in the corpus declare `metallicFactor` (0, or 0.5 on eighteen
+of them) and `roughnessFactor` (0.3-0.6) explicitly - **worth knowing, because
+glTF's spec default for `metallicFactor` is 1.0**, and a file that omitted it
+would arrive as a fully metallic surface with no diffuse lobe at all.
+
+**Still uploaded and unread**: `emissiveFactor`, `alphaCutoff` and
+`doubleSided`. Emissive needs a decision about whether it is additive before
+or after tonemapping; alpha cutoff needs the pipeline to know it is a masked
+material; double-sided needs per-material cull state, which means a pipeline
+key. None of them is blocked on anything but a decision.
 
 ### Decided: V4 first, then the manifest discovers textures from the glTF
 

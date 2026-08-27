@@ -27,7 +27,6 @@ PresentationSettings::PresentationSettings()
           .ambientColor = config::ambientLightColor,
           .ambientIntensity = config::ambientLightIntensity,
           .specularStrength = config::specularStrength,
-          .specularPower = config::specularPower,
           .modelShadowReceive = config::modelShadowReceive,
           .ambientOcclusionEnabled = config::ambientOcclusionEnabled,
           .ambientOcclusionStrength = config::ambientOcclusionStrength,
@@ -76,10 +75,6 @@ void PresentationSettings::normalize()
         config::maximumAmbientLightIntensity);
     lighting.specularStrength = std::clamp(
         lighting.specularStrength, 0.0f, config::maximumSpecularStrength);
-    lighting.specularPower = std::clamp(
-        lighting.specularPower,
-        config::minimumSpecularPower,
-        config::maximumSpecularPower);
     lighting.modelShadowReceive = std::clamp(
         lighting.modelShadowReceive,
         0.0f,
@@ -207,7 +202,6 @@ RenderFrameData::Lighting PresentationSettings::renderLighting() const
             .debug = lighting.ambientOcclusionDebug,
         },
         .specularStrength = lighting.specularStrength,
-        .specularPower = lighting.specularPower,
         .modelShadowReceive = lighting.modelShadowReceive,
     };
 }

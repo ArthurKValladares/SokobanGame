@@ -565,13 +565,6 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             config::maximumSpecularStrength,
             "%.2f");
         ImGui::DragFloat(
-            "Specular Power",
-            &lighting.specularPower,
-            0.5f,
-            config::minimumSpecularPower,
-            config::maximumSpecularPower,
-            "%.1f");
-        ImGui::DragFloat(
             "Model Shadow Receive",
             &lighting.modelShadowReceive,
             0.01f,

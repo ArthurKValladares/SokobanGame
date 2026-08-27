@@ -251,11 +251,102 @@ float pointShadowFactor(
         clamp(light.shadowOptions.w, 0.0, 1.0);
 }
 
+// Cook-Torrance GGX. F3c replaced a wrapped-diffuse Blinn-Phong whose gloss
+// came from two scene-wide knobs, so every surface in a level was equally
+// shiny no matter what its glTF said.
+//
+// The pi that belongs under the Lambert term is folded into the light instead
+// of divided out of the surface, which is the same thing as scaling every
+// authored light intensity by pi. It keeps the swap from darkening every
+// existing level threefold, and the specular below carries the matching pi so
+// the two stay in the proportion the physics puts them in.
+const float pi = 3.14159265359;
+
+float distributionGgx(float normalDotHalf, float roughness)
+{
+    float alpha = roughness * roughness;
+    float alphaSquared = alpha * alpha;
+    float denominator =
+        normalDotHalf * normalDotHalf * (alphaSquared - 1.0) + 1.0;
+    return alphaSquared / max(pi * denominator * denominator, 0.0001);
+}
+
+// Smith with the direct-lighting remap of k. Height-correlated would be a
+// little more accurate and costs a divide this does not need to spend.
+float geometrySmith(float normalDotView, float normalDotLight, float roughness)
+{
+    float k = (roughness + 1.0) * (roughness + 1.0) * 0.125;
+    float view = normalDotView / (normalDotView * (1.0 - k) + k);
+    float light = normalDotLight / (normalDotLight * (1.0 - k) + k);
+    return view * light;
+}
+
+vec3 fresnelSchlick(float cosine, vec3 f0)
+{
+    float f = clamp(1.0 - cosine, 0.0, 1.0);
+    float fSquared = f * f;
+    return f0 + (1.0 - f0) * (fSquared * fSquared * f);
+}
+
+// Kept apart so the ambient mask can weigh the diffuse half on its own:
+// occlusion estimates ambient visibility and has no business scaling a direct
+// reflection, which is the same contract F2b established.
+struct Shaded
+{
+    vec3 diffuse;
+    vec3 specular;
+};
+
+Shaded shadeLight(
+    vec3 normal,
+    vec3 viewDirection,
+    vec3 lightDirection,
+    vec3 radiance,
+    vec3 diffuseAlbedo,
+    vec3 f0,
+    float roughness)
+{
+    Shaded result = Shaded(vec3(0.0), vec3(0.0));
+    float normalDotLight = dot(normal, lightDirection);
+    if (normalDotLight <= 0.0) {
+        return result;
+    }
+    float normalDotView = max(dot(normal, viewDirection), 0.0001);
+    vec3 halfVector = normalize(lightDirection + viewDirection);
+    vec3 fresnel = fresnelSchlick(
+        max(dot(halfVector, viewDirection), 0.0), f0);
+    float distribution = distributionGgx(
+        max(dot(normal, halfVector), 0.0), roughness);
+    float geometry = geometrySmith(normalDotView, normalDotLight, roughness);
+
+    vec3 incoming = radiance * normalDotLight;
+    // The pi here is the one folded into the light above.
+    result.specular = incoming * fresnel * distribution * geometry * pi /
+        max(4.0 * normalDotView * normalDotLight, 0.0001);
+    result.diffuse = incoming * (vec3(1.0) - fresnel) * diffuseAlbedo;
+    return result;
+}
+
 void main()
 {
     applyEditorPreviewDither();
 
+    // Read for every draw, not just the primitive-materials one. A draw with
+    // no model behind it has a zero base and lands on the reserved fallback:
+    // white factor, no texture, metallic 0, roughness 1. So this is a no-op
+    // for tiles, UI and particles, and the lighting below needs no branch to
+    // find a metallic and a roughness for them.
+    Material material = modelMaterial();
+    // glTF says the base colour factor multiplies the base colour texture.
+    // Alpha only counts on a BLEND material: an OPAQUE one ignores it, and
+    // this engine picks a model's pipeline from the tile rather than from the
+    // material, so an authored alpha on an opaque material would otherwise
+    // punch a hole through a surface the file says is solid.
     vec4 materialColor = draw.color;
+    materialColor.rgb *= material.baseColorFactor.rgb;
+    if (int(material.roughnessAlphaFlags.z + 0.5) == 2) {
+        materialColor.a *= material.baseColorFactor.a;
+    }
     int materialMode = int(draw.textureOptions.x + 0.5);
     if (materialMode == 3) {
         vec2 uv = draw.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
@@ -315,19 +406,10 @@ void main()
             MODEL_TEXTURE_COUNT - 1);
         materialColor *= texture(modelTextures[textureIndex], uv);
     } else if (materialMode == 2) {
-        Material material = modelMaterial();
-        // The base colour factor multiplies the texture, per glTF. It was
-        // being dropped entirely before F3b.
-        //
-        // Alpha only counts on a BLEND material: glTF says an OPAQUE one
-        // ignores it outright, and the engine picks a model's pipeline from
-        // the tile rather than from the material, so an authored alpha on an
-        // opaque material would otherwise punch a hole through a surface the
-        // file says is solid.
-        materialColor.rgb *= material.baseColorFactor.rgb;
-        if (int(material.roughnessAlphaFlags.z + 0.5) == 2) {
-            materialColor.a *= material.baseColorFactor.a;
-        }
+        // The factor is applied above for every mode. Only the texture is
+        // per-mode: mode 1's comes from the manifest's single-texture
+        // override, so the glTF's own base colour texture is deliberately
+        // not consulted there.
         int materialTexture = int(material.textureAndUvSet.x + 0.5);
         if (materialTexture != 0) {
             int textureIndex = clamp(
@@ -367,19 +449,30 @@ void main()
         vec3 lightDirection = length(draw.sunDirectionAndAmbientGreen.xyz) > 0.0001
             ? normalize(draw.sunDirectionAndAmbientGreen.xyz)
             : vec3(0.0, 0.0, 1.0);
-        float rawDiffuse = dot(normal, lightDirection);
-        float lambertDiffuse = max(rawDiffuse, 0.0);
-        float wrappedDiffuse = clamp(rawDiffuse * 0.5 + 0.5, 0.0, 1.0);
-        float diffuse = mix(lambertDiffuse, wrappedDiffuse * wrappedDiffuse, 0.65);
+        float lambertDiffuse = max(dot(normal, lightDirection), 0.0);
         vec3 ambient = vec3(
             draw.normalAndAmbientRed.w,
             draw.sunDirectionAndAmbientGreen.w,
             draw.sunRadianceAndAmbientBlue.w);
         float shadow = shadowFactor(inShadowPosition, lambertDiffuse);
         float skyFill = smoothstep(-0.35, 1.0, normal.z);
-        vec3 pointDiffuseLighting = vec3(0.0);
-        vec3 pointSpecularLighting = vec3(0.0);
+
+        // The material's own gloss, where the whole level used to share one
+        // exponent. Roughness has a floor because a perfect mirror is a
+        // delta function no point light can hit.
+        float metallic = clamp(material.emissiveAndMetallic.w, 0.0, 1.0);
+        float roughness = clamp(material.roughnessAlphaFlags.x, 0.045, 1.0);
+        // Dielectrics reflect about 4% head-on; a metal reflects its own
+        // colour and has no diffuse lobe at all.
+        vec3 f0 = mix(vec3(0.04), color, metallic);
+        vec3 diffuseAlbedo = color * (1.0 - metallic);
+        // A scene-wide dial on the specular half, kept from the old model so
+        // a level that wanted a flatter look still has the knob. Its
+        // companion, specularPower, is gone: roughness is the exponent now.
         float specularStrength = max(draw.textureOptions.z, 0.0);
+
+        vec3 diffuseLight = vec3(0.0);
+        vec3 specularLight = vec3(0.0);
         // The real direction from the surface to the camera. This used
         // to be a compiled-in constant matching one fixed isometric camera,
         // so every specular highlight was correct only from that angle and
@@ -410,40 +503,56 @@ void main()
             float pointShadow = pointShadowFactor(
                 lightIndex, -toLight, normal);
             vec3 radiance = pointLight.colorAndIntensity.rgb *
-                pointLight.colorAndIntensity.w * attenuation;
-            pointDiffuseLighting += radiance * pointLambert * pointShadow;
-            if (specularStrength > 0.0) {
-                vec3 pointHalf = normalize(pointDirection + viewDirection);
-                float pointSpecular = pow(
-                    max(dot(normal, pointHalf), 0.0),
-                    max(draw.textureOptions.w, 1.0));
-                pointSpecularLighting += radiance * pointSpecular *
-                    pointShadow * specularStrength;
-            }
+                pointLight.colorAndIntensity.w * attenuation * pointShadow;
+            Shaded point = shadeLight(
+                normal, viewDirection, pointDirection, radiance,
+                diffuseAlbedo, f0, roughness);
+            diffuseLight += point.diffuse;
+            specularLight += point.specular;
         }
+        Shaded sun = shadeLight(
+            normal,
+            viewDirection,
+            lightDirection,
+            draw.sunRadianceAndAmbientBlue.rgb * shadow,
+            diffuseAlbedo,
+            f0,
+            roughness);
+        diffuseLight += sun.diffuse;
+        specularLight += sun.specular;
+
+        // A hemispheric approximation, kept from the old model: an up-facing
+        // surface sees more of the sky. Both halves are here - the f0 half is
+        // what stops a metal from going black wherever no light reaches it
+        // directly, standing in for the environment probe this engine does
+        // not have yet.
+        //
+        // specularStrength deliberately does not reach it. That knob dials
+        // the gloss a level wants; this is not gloss, it is the only ambient
+        // a metal gets, and letting the slider reach zero would render a
+        // metallic surface black.
         vec3 ambientTerm = ambient * (1.0 + skyFill * 0.35);
-        vec3 diffuseLighting = ambientTerm +
-            draw.sunRadianceAndAmbientBlue.rgb * diffuse * shadow +
-            pointDiffuseLighting;
-        color *= diffuseLighting;
-        // Diffuse only: specular is a direct reflection and occlusion has no
-        // business scaling it. It is added below and deliberately left out of
-        // both sides of this ratio.
+        vec3 ambientContribution = ambientTerm * (diffuseAlbedo + f0);
+
+        color = diffuseLight + ambientContribution +
+            specularLight * specularStrength;
+
+        // The share of this pixel's light that came from ambient, which is
+        // what the SSAO composite scales by.
+        //
+        // Both halves of the ambient fill count: the f0 half is ambient by
+        // construction, and leaving it out - which is what "specular is
+        // excluded from both sides" would have meant here - made a metallic
+        // surface report a smaller ambient share than it had, and a fully
+        // metallic one report zero over zero and take no occlusion at all.
+        // Direct light, specular included, stays in the denominator only, so
+        // a pixel dominated by a highlight is occluded less. That is the same
+        // intent F2b had; only the arithmetic that serves it has changed.
         ambientMask = clamp(
-            dot(ambientTerm, luminanceWeights) /
-                max(dot(diffuseLighting, luminanceWeights), 0.0001),
+            dot(ambientContribution, luminanceWeights) /
+                max(dot(color, luminanceWeights), 0.0001),
             0.0,
             1.0);
-
-        if (specularStrength > 0.0 && lambertDiffuse > 0.0) {
-            vec3 halfDirection = normalize(lightDirection + viewDirection);
-            float specularPower = max(draw.textureOptions.w, 1.0);
-            float specular = pow(max(dot(normal, halfDirection), 0.0), specularPower);
-            specular *= smoothstep(0.0, 0.2, lambertDiffuse) * shadow * specularStrength;
-            color += draw.sunRadianceAndAmbientBlue.rgb * specular * materialColor.a;
-        }
-        color += pointSpecularLighting * materialColor.a;
-
     }
 
     int editorHighlight = int(draw.textureOptions.y + 0.5);

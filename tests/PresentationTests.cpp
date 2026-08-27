@@ -385,7 +385,6 @@ void testSettingsNormalizeAndConvert()
     settings.lighting.sunIntensity = -2.0f;
     settings.lighting.ambientIntensity = 9.0f;
     settings.lighting.specularStrength = 2.0f;
-    settings.lighting.specularPower = 0.0f;
     settings.lighting.modelShadowReceive = -1.0f;
     settings.lighting.ambientOcclusionStrength = 4.0f;
     settings.lighting.shadowOpacity = 2.0f;
@@ -411,7 +410,6 @@ void testSettingsNormalizeAndConvert()
     CHECK(near(settings.lighting.sunIntensity, 0.0f));
     CHECK(near(settings.lighting.ambientIntensity, 2.0f));
     CHECK(near(settings.lighting.specularStrength, 1.0f));
-    CHECK(near(settings.lighting.specularPower, 1.0f));
     CHECK(near(settings.lighting.modelShadowReceive, 0.0f));
     CHECK(near(settings.lighting.ambientOcclusionStrength, 1.0f));
     CHECK(near(settings.lighting.shadowOpacity, 0.85f));
