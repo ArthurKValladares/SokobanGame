@@ -26,15 +26,12 @@ struct MeshVertex {
     // so a material asking for set 1 on a single-set mesh reads something
     // sensible rather than nothing.
     Vec2 uv1 {};
-    // One-based global descriptor index; zero means untextured.
-    uint32_t textureIndex = 0;
-    // Bitwise PrimitiveMaterialFlag values resolved from manifest metadata.
-    uint32_t materialFlags = 0;
     // Which entry of the owning mesh's `materials` this vertex belongs to.
     // Per vertex rather than per draw because one draw covers a whole model
-    // and a model's primitives can carry different materials - which is also
-    // why textureIndex is per vertex today. Once the material reaches the
-    // shader, this subsumes both of the fields above.
+    // and a model's primitives can carry different materials. It replaced a
+    // per-vertex texture index and flag word in F3b: those were the same
+    // value for every vertex of a primitive, and the material entry they were
+    // copied from now travels to the shader instead.
     uint32_t materialIndex = 0;
 };
 
@@ -139,8 +136,6 @@ struct GpuSkinnedVertex {
     Vec4 tangent {};
     Vec2 uv {};
     Vec2 uv1 {};
-    uint32_t textureIndex = 0;
-    uint32_t materialFlags = 0;
     uint32_t materialIndex = 0;
     std::array<uint16_t, 4> joints {};
     std::array<float, 4> weights {};

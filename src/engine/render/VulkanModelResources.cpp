@@ -130,6 +130,7 @@ void VulkanModelResources::create(
             physicalDevice_, device_, commandPool_, graphicsQueue_, uploadRing_);
         createSkinningBuffer();
         createModelInstanceBuffer();
+        createMaterialBuffer();
         ImageData fallback {
             .width = 1,
             .height = 1,
@@ -187,6 +188,7 @@ void VulkanModelResources::destroy()
         }
         destroySkinningBuffer();
         destroyModelInstanceBuffer();
+        destroyMaterialBuffer();
         geometryArena_.destroy();
         uploadRing_.destroy();
     }
@@ -194,6 +196,7 @@ void VulkanModelResources::destroy()
     models_.clear();
     animations_.clear();
     textures_.clear();
+    materialStorage_.clear();
     fallbackTexture_ = {};
     animationController_.clear();
     manifest_ = nullptr;
@@ -667,6 +670,9 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                     return false;
                 }
                 slot.bounds = boundsOf(mesh.vertices);
+                slot.materialBase = writeMaterials(mesh.materials);
+                slot.materialCount =
+                    static_cast<uint32_t>(mesh.materials.size());
                 slot.gpu = uploadMesh(mesh, slot.upload);
                 slot.gpuBytes = bytes;
                 modelResidencyBytes_ += bytes;
@@ -691,6 +697,9 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                     slot.skinnedSource.reset();
                     return false;
                 }
+                slot.materialBase = writeMaterials(slot.skinnedSource->materials);
+                slot.materialCount = static_cast<uint32_t>(
+                    slot.skinnedSource->materials.size());
                 slot.skinnedGpu = uploadSkinnedMesh(*slot.skinnedSource, slot.upload);
                 slot.gpuBytes = bytes;
                 modelResidencyBytes_ += bytes;
@@ -700,6 +709,10 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
             }
             slot.prepared.reset();
         } catch (...) {
+            // A range claimed before the upload threw belongs to nobody now.
+            // Zeroing the count is what makes the next repack reclaim it.
+            slot.materialBase = 0;
+            slot.materialCount = 0;
             slot.failure = std::current_exception();
             slot.state = LoadState::Failed;
             if (wait) {
@@ -901,6 +914,7 @@ bool VulkanModelResources::makeModelResident(
     while (modelResidencyBytes_ + requiredBytes > budget) {
         const std::optional<std::size_t> victim = findVictim();
         if (!victim) {
+            repackMaterials();
             markResidencyBudgetBlocked();
             return false;
         }
@@ -911,6 +925,10 @@ bool VulkanModelResources::makeModelResident(
         slot = {};
         ++residencyEvictions_;
     }
+    // The evicted slots took their material ranges with them. Nothing has
+    // been submitted since the wait above, so closing the gaps now cannot
+    // move a range out from under a frame that is still reading it.
+    repackMaterials();
     residencyBudgetBlocked_ = false;
     return true;
 }
@@ -1215,9 +1233,13 @@ VulkanModelResources::MaterialBinding VulkanModelResources::materialForModel(
     RenderModel model) const
 {
     const AssetManifest::Model& definition = manifest_->model(model);
+    const uint32_t materialBase = model.index() < models_.size()
+        ? models_[model.index()].materialBase
+        : 0;
     return {
         .mode = definition.materialMode,
         .textureIndex = definition.textureIndex,
+        .materialBase = materialBase,
     };
 }
 
@@ -1269,6 +1291,16 @@ VulkanModelResources::drawInstanceBuffer() const
         .buffer = drawInstanceBuffer_.buffer,
         .range = static_cast<VkDeviceSize>(gpuSkinningFrameCount) *
             maxDrawInstancesPerFrame * sizeof(GpuDrawInstance),
+    };
+}
+
+VulkanModelResources::MaterialBufferView
+VulkanModelResources::materialBuffer() const
+{
+    return {
+        .buffer = materialBuffer_.buffer,
+        .range = static_cast<VkDeviceSize>(maxModelMaterials) *
+            sizeof(GpuMaterial),
     };
 }
 
@@ -1478,6 +1510,156 @@ void VulkanModelResources::destroyModelInstanceBuffer()
         vkFreeMemory(device_, drawInstanceBuffer_.memory, nullptr);
     }
     drawInstanceBuffer_ = {};
+}
+
+void VulkanModelResources::createMaterialBuffer()
+{
+    const VkDeviceSize size =
+        static_cast<VkDeviceSize>(maxModelMaterials) * sizeof(GpuMaterial);
+    const VkBufferCreateInfo bufferInfo {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = size,
+        .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+    vkCheck(vkCreateBuffer(device_, &bufferInfo, nullptr, &materialBuffer_.buffer),
+        "vkCreateBuffer model materials failed");
+    try {
+        VkMemoryRequirements requirements {};
+        vkGetBufferMemoryRequirements(device_, materialBuffer_.buffer, &requirements);
+        const VkMemoryAllocateInfo allocationInfo {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            .allocationSize = requirements.size,
+            .memoryTypeIndex = findMemoryType(
+                requirements.memoryTypeBits,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
+        };
+        vkCheck(vkAllocateMemory(
+                    device_, &allocationInfo, nullptr, &materialBuffer_.memory),
+            "vkAllocateMemory model materials failed");
+        vkCheck(vkBindBufferMemory(
+                    device_, materialBuffer_.buffer, materialBuffer_.memory, 0),
+            "vkBindBufferMemory model materials failed");
+        vkCheck(vkMapMemory(device_, materialBuffer_.memory, 0, size, 0,
+                    &materialBuffer_.mapped),
+            "vkMapMemory model materials failed");
+        // Entry zero is the material a draw lands on when nothing has been
+        // published for it yet, so it has to read as an untextured white
+        // surface rather than as whatever the allocation happened to hold.
+        // Reserving it in materialStorage_ as well is what keeps the first
+        // model to publish from being handed base zero and overwriting it.
+        const GpuMaterial fallback {};
+        for (uint32_t index = 0; index < maxModelMaterials; ++index) {
+            std::memcpy(
+                static_cast<std::byte*>(materialBuffer_.mapped) +
+                    static_cast<std::size_t>(index) * sizeof(GpuMaterial),
+                &fallback,
+                sizeof(GpuMaterial));
+        }
+        materialStorage_.assign(1, fallback);
+    } catch (...) {
+        destroyMaterialBuffer();
+        throw;
+    }
+}
+
+void VulkanModelResources::destroyMaterialBuffer()
+{
+    if (device_ && materialBuffer_.mapped) {
+        vkUnmapMemory(device_, materialBuffer_.memory);
+    }
+    if (device_ && materialBuffer_.buffer) {
+        vkDestroyBuffer(device_, materialBuffer_.buffer, nullptr);
+    }
+    if (device_ && materialBuffer_.memory) {
+        vkFreeMemory(device_, materialBuffer_.memory, nullptr);
+    }
+    materialBuffer_ = {};
+}
+
+GpuMaterial VulkanModelResources::gpuMaterialFrom(const MeshMaterial& material)
+{
+    return GpuMaterial {
+        .baseColorFactor = material.baseColorFactor,
+        .emissiveAndMetallic = {
+            material.emissiveFactor.x,
+            material.emissiveFactor.y,
+            material.emissiveFactor.z,
+            material.metallicFactor,
+        },
+        .roughnessAlphaFlags = {
+            material.roughnessFactor,
+            material.alphaCutoff,
+            static_cast<float>(static_cast<uint32_t>(material.alphaMode)),
+            static_cast<float>(material.flags),
+        },
+        .textureAndUvSet = {
+            static_cast<float>(material.baseColorTexture),
+            static_cast<float>(material.baseColorUvSet),
+            material.doubleSided ? 1.0f : 0.0f,
+            0.0f,
+        },
+    };
+}
+
+uint32_t VulkanModelResources::writeMaterials(
+    const std::vector<MeshMaterial>& materials)
+{
+    if (materials.empty()) {
+        return 0;
+    }
+    // Never zero: createMaterialBuffer seeds the reserved fallback entry, so
+    // the first real range starts at one.
+    const std::size_t base = materialStorage_.size();
+    if (!materialBuffer_.mapped || base == 0 ||
+        base + materials.size() > maxModelMaterials) {
+        throw std::runtime_error(
+            "Material buffer is exhausted; raise maxModelMaterials");
+    }
+    materialStorage_.reserve(base + materials.size());
+    for (const MeshMaterial& material : materials) {
+        materialStorage_.push_back(gpuMaterialFrom(material));
+    }
+    std::memcpy(
+        static_cast<std::byte*>(materialBuffer_.mapped) +
+            base * sizeof(GpuMaterial),
+        materialStorage_.data() + base,
+        materials.size() * sizeof(GpuMaterial));
+    return static_cast<uint32_t>(base);
+}
+
+void VulkanModelResources::repackMaterials()
+{
+    if (materialStorage_.empty()) {
+        return;
+    }
+    // Rebuilt unconditionally. An earlier version skipped the upload when the
+    // total had not shrunk, which was wrong: the loop below reorders the
+    // ranges into slot order as well as closing gaps, so it has already
+    // rewritten every materialBase by the time a size comparison could decide
+    // to keep the old buffer. Bailing out there left the bases describing a
+    // layout the buffer did not have.
+    std::vector<GpuMaterial> packed;
+    packed.reserve(materialStorage_.size());
+    // The reserved fallback keeps index zero through every repack.
+    packed.push_back(materialStorage_.front());
+    for (ModelSlot& slot : models_) {
+        if (slot.materialCount == 0) {
+            continue;
+        }
+        const auto first = materialStorage_.begin() + slot.materialBase;
+        const auto last = first + slot.materialCount;
+        slot.materialBase = static_cast<uint32_t>(packed.size());
+        packed.insert(packed.end(), first, last);
+    }
+    materialStorage_ = std::move(packed);
+    if (materialBuffer_.mapped) {
+        std::memcpy(
+            materialBuffer_.mapped,
+            materialStorage_.data(),
+            materialStorage_.size() * sizeof(GpuMaterial));
+    }
 }
 
 void VulkanModelResources::writeSkinningInstance(

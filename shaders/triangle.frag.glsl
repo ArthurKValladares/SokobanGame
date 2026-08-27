@@ -11,15 +11,15 @@ layout(location = 0) in vec4 inShadowPosition;
 layout(location = 1) in float inFaceCoordU;
 layout(location = 2) in float inFaceCoordV;
 layout(location = 3) in vec3 inNormal;
-layout(location = 4) flat in uint inTextureIndex;
-layout(location = 5) flat in uint inMaterialFlags;
 layout(location = 6) in vec3 inWorldPosition;
 layout(location = 7) flat in uint inDrawInstance;
-// Not read yet. They arrive here so that the vertex format, the pipelines and
+// Not read yet. It arrives here so that the vertex format, the pipelines and
 // the interface between the stages are all in place and provably unchanged
-// before the lighting that uses them changes everything at once.
+// before the lighting that uses it changes everything at once.
 layout(location = 8) in vec4 inTangent;
 layout(location = 9) in vec2 inUv1;
+// Which of the owning model's materials this fragment belongs to, relative to
+// the model. draw.passData[0].x makes it absolute.
 layout(location = 10) flat in uint inMaterialIndex;
 layout(location = 0) out vec4 outColor;
 
@@ -45,6 +45,31 @@ layout(std430, set = 0, binding = 10) readonly buffer DrawInstances
 } drawInstances;
 
 #define draw drawInstances.instances[inDrawInstance]
+
+// One glTF material. Mirrors GpuMaterial in VulkanRenderConstants.hpp; the
+// static_assert there is what keeps the two from drifting in size, and the
+// field comments there are the authority on what each lane means.
+struct Material
+{
+    vec4 baseColorFactor;
+    vec4 emissiveAndMetallic;
+    vec4 roughnessAlphaFlags;
+    vec4 textureAndUvSet;
+};
+layout(std430, set = 0, binding = 12) readonly buffer Materials
+{
+    Material entries[];
+} materials;
+
+// Entry zero is reserved as the published-nothing fallback: an untextured
+// white surface. A base of zero means the model has not published, and its
+// materialIndex means nothing yet, so it is ignored rather than added - which
+// is what makes the fallback read white instead of some other model's range.
+Material modelMaterial()
+{
+    int base = int(draw.passData[0].x + 0.5);
+    return materials.entries[base == 0 ? 0 : base + int(inMaterialIndex)];
+}
 
 
 struct PointLightData
@@ -290,10 +315,29 @@ void main()
             MODEL_TEXTURE_COUNT - 1);
         materialColor *= texture(modelTextures[textureIndex], uv);
     } else if (materialMode == 2) {
-        if (inTextureIndex != 0u) {
-            int textureIndex = clamp(int(inTextureIndex - 1u), 0, MODEL_TEXTURE_COUNT - 1);
-            vec2 uv = vec2(inFaceCoordU, inFaceCoordV);
-            if ((inMaterialFlags & 1u) != 0u) {
+        Material material = modelMaterial();
+        // The base colour factor multiplies the texture, per glTF. It was
+        // being dropped entirely before F3b.
+        //
+        // Alpha only counts on a BLEND material: glTF says an OPAQUE one
+        // ignores it outright, and the engine picks a model's pipeline from
+        // the tile rather than from the material, so an authored alpha on an
+        // opaque material would otherwise punch a hole through a surface the
+        // file says is solid.
+        materialColor.rgb *= material.baseColorFactor.rgb;
+        if (int(material.roughnessAlphaFlags.z + 0.5) == 2) {
+            materialColor.a *= material.baseColorFactor.a;
+        }
+        int materialTexture = int(material.textureAndUvSet.x + 0.5);
+        if (materialTexture != 0) {
+            int textureIndex = clamp(
+                materialTexture - 1, 0, MODEL_TEXTURE_COUNT - 1);
+            // Set 1 is the second unwrap; the loader falls it back to set 0
+            // on a mesh that has only one, so this never reads nothing.
+            vec2 uv = int(material.textureAndUvSet.y + 0.5) == 1
+                ? inUv1
+                : vec2(inFaceCoordU, inFaceCoordV);
+            if ((int(material.roughnessAlphaFlags.w + 0.5) & 1) != 0) {
                 uv.y = fract(uv.y + draw.materialOptions.y);
             }
             materialColor *= texture(modelTextures[textureIndex], uv);

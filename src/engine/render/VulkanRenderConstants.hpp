@@ -94,7 +94,14 @@ struct GpuDrawInstance {
     // more per point light, so its pipelines keep receiving clip-space
     // corners here. Nothing samples a world position in a shadow pass.
     std::array<Vec4, 4> vertices;
-    // Sixty-four bytes of per-draw space, free unless a pass claims them.
+    // Sixty-four bytes of per-draw space, claimed by one pass at a time.
+    //
+    // Water uses all four for its border and ripple parameters. Model draws
+    // use passData[0].x, and only that, for the base index of their material
+    // range in the material buffer: a draw covers a whole model, a model's
+    // primitives can carry different materials, and the vertex's
+    // materialIndex is relative to the model rather than global. The two
+    // never overlap - water is a tile pass and has no model behind it.
     //
     // These used to be a shadow-space copy of the corners above, pushed on
     // every scene draw - the frame's sun transform, restated once per face.
@@ -127,6 +134,38 @@ static_assert(sizeof(GpuDrawInstance) == 256);
 // "Draw instance buffer is exhausted" ever appears.
 inline constexpr uint32_t maxDrawInstancesPerFrame =
     RenderFrameData::tileCapacity * 4;
+
+// One glTF material, in the form the shader reads it.
+//
+// Everything is a float, including the things that are conceptually integers,
+// because that is how every other per-draw parameter in this file already
+// travels - see textureOptions - and because it keeps the std430 layout free
+// of the alignment traps that mixing scalars invites. The shader decodes an
+// index with int(x + 0.5), as it already does for textureOptions.y.
+struct GpuMaterial {
+    // rgb is the base colour factor, a multiplied over whatever the base
+    // colour texture supplies; a is the material's opacity.
+    Vec4 baseColorFactor { 1.0f, 1.0f, 1.0f, 1.0f };
+    // rgb emissive factor, w metallic.
+    Vec4 emissiveAndMetallic {};
+    // x roughness, y alpha cutoff, z alpha mode (0 opaque, 1 mask, 2 blend),
+    // w PrimitiveMaterialFlag bits.
+    Vec4 roughnessAlphaFlags { 1.0f, 0.5f, 0.0f, 0.0f };
+    // x one-based base colour texture, y its UV set, z double-sided, w spare.
+    Vec4 textureAndUvSet {};
+};
+
+static_assert(sizeof(GpuMaterial) == 64);
+
+// How many materials may be resident at once. A model claims a contiguous
+// range when it publishes and gives it back when residency evicts it, which
+// is why the ranges are repacked rather than merely marked free: a base index
+// is read off the model slot at record time and never baked into anything
+// that outlives a frame, so moving one costs nothing. Four per model of the
+// manifest cap is far more than any real model uses - the whole current
+// manifest needs forty-one - and if "Material buffer is exhausted" ever
+// appears, this is the knob.
+inline constexpr uint32_t maxModelMaterials = 1024;
 
 struct DrawInstanceIndexPushConstants {
     uint32_t drawInstance = 0;

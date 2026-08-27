@@ -778,19 +778,17 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
             const cgltf_accessor& indices = *primitive.indices;
 
             const uint32_t materialIndex = materialSlotIndex(data, primitive);
-            uint32_t textureIndex = 0;
-            uint32_t materialFlags = PrimitiveMaterialNone;
-            if (!options.primitiveMaterials.empty()) {
-                if (materialIndex >= options.primitiveMaterials.size()) {
-                    throw std::runtime_error(
-                        "glTF primitive material " +
-                        std::to_string(materialIndex) +
-                        " has no texture mapping in the asset manifest");
-                }
-                const PrimitiveMaterialBinding& material =
-                    options.primitiveMaterials[materialIndex];
-                textureIndex = material.textureIndex + 1;
-                materialFlags = material.flags;
+            // meshMaterials() leaves an unmapped slot at its glTF defaults
+            // rather than failing, because a manifest may legitimately list
+            // fewer slots than the file has materials. Reaching one from a
+            // primitive is the case that is not legitimate, and this is where
+            // it has always been caught.
+            if (!options.primitiveMaterials.empty() &&
+                materialIndex >= options.primitiveMaterials.size()) {
+                throw std::runtime_error(
+                    "glTF primitive material " +
+                    std::to_string(materialIndex) +
+                    " has no texture mapping in the asset manifest");
             }
 
             if (positions.count != normals.count ||
@@ -811,8 +809,6 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
                     .tangent = optionalTangent(tangents, index),
                     .uv = uv,
                     .uv1 = optionalUv(secondUvs, index, uv),
-                    .textureIndex = textureIndex,
-                    .materialFlags = materialFlags,
                     .materialIndex = materialIndex,
                 });
                 includeBounds(bounds, position);
@@ -1336,10 +1332,8 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
                         posedTangent.z, vertex.tangent.w },
                     .uv = vertex.uv,
                     .uv1 = vertex.uv1,
-                    .textureIndex = vertex.textureIndex,
                     // Carried explicitly, where it used to be patched back on
                     // after the fact because the old signature dropped it.
-                    .materialFlags = vertex.materialFlags,
                     .materialIndex = vertex.materialIndex,
                 },
                 bounds,

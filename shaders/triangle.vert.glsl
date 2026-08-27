@@ -4,8 +4,12 @@ layout(location = 0) out vec4 outShadowPosition;
 layout(location = 1) out float outFaceCoordU;
 layout(location = 2) out float outFaceCoordV;
 layout(location = 3) out vec3 outNormal;
-layout(location = 4) flat out uint outTextureIndex;
-layout(location = 5) flat out uint outMaterialFlags;
+// Locations 4 and 5 are retired. They carried a texture index and a material
+// flag word per vertex until F3b moved both into the material buffer, where
+// one entry serves every vertex sharing a material. Gaps here are normal -
+// a fragment shader declares only the locations it reads, and water declares
+// three of these - so they are left free rather than closed by renumbering
+// every scene shader.
 layout(location = 6) out vec3 outWorldPosition;
 // Which draw this vertex belongs to. The fragment stage reads the same
 // entry; flat because it is constant across the primitive.
@@ -101,8 +105,6 @@ void main()
     // Tile faces never use per-vertex texture indices (textureOptions.x is 0
     // on this path), but the shared fragment shader consumes location 4, so
     // the interface must still provide it.
-    outTextureIndex = 0u;
-    outMaterialFlags = 0u;
     // A quad's tangent is the direction its first UV axis runs, which for
     // these corners is the edge from 0 to 1. Clip-space quads are drawn unlit
     // and get nothing. Handedness is +1: faceCoords runs U left-to-right and

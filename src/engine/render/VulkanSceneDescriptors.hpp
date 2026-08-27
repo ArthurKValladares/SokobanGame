@@ -36,6 +36,7 @@ public:
         std::vector<VulkanModelResources::TextureView> modelTextures;
         VulkanModelResources::SkinningBufferView skinning;
         VulkanModelResources::DrawInstanceBufferView drawInstances;
+        VulkanModelResources::MaterialBufferView materials;
     };
 
     VulkanSceneDescriptors() = default;

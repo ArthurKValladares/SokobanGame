@@ -37,7 +37,7 @@ void VulkanSceneDescriptors::create(
     modelTextureCount_ = static_cast<uint32_t>(resources.modelTextures.size());
 
     try {
-        std::array<VkDescriptorSetLayoutBinding, sceneSingleImageBindings + 4>
+        std::array<VkDescriptorSetLayoutBinding, sceneSingleImageBindings + 5>
             bindings {
             VkDescriptorSetLayoutBinding {
                 .binding = 0,
@@ -115,6 +115,15 @@ void VulkanSceneDescriptors::create(
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
             },
+            VkDescriptorSetLayoutBinding {
+                .binding = 12,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .descriptorCount = 1,
+                // Fragment only for now. A vertex stage that wanted to fold
+                // a material into its transform would have to be added here
+                // as well as declared there.
+                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+            },
         };
         VkDescriptorSetLayoutCreateInfo layoutInfo {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -141,7 +150,7 @@ void VulkanSceneDescriptors::create(
             },
             VkDescriptorPoolSize {
                 .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .descriptorCount = 2 * setCount,
+                .descriptorCount = 3 * setCount,
             },
         };
         VkDescriptorPoolCreateInfo poolInfo {
@@ -211,7 +220,8 @@ void VulkanSceneDescriptors::updateInternal(
         !resources.uiFont.valid() ||
         !resources.titleBackground.valid() ||
         resources.modelTextures.size() != modelTextureCount_ ||
-        !resources.skinning.valid() || !resources.drawInstances.valid()) {
+        !resources.skinning.valid() || !resources.drawInstances.valid() ||
+        !resources.materials.valid()) {
         throw std::runtime_error("Scene descriptor resources are incomplete");
     }
 
@@ -253,6 +263,11 @@ void VulkanSceneDescriptors::updateInternal(
         .offset = 0,
         .range = resources.drawInstances.range,
     };
+    const VkDescriptorBufferInfo materials {
+        .buffer = resources.materials.buffer,
+        .offset = 0,
+        .range = resources.materials.range,
+    };
     const VkDescriptorImageInfo sceneColor {
         .sampler = resources.sceneColor.sampler,
         .imageView = resources.sceneColor.imageView,
@@ -283,7 +298,7 @@ void VulkanSceneDescriptors::updateInternal(
         .imageView = resources.titleBackground.imageView,
         .imageLayout = resources.titleBackground.imageLayout,
     };
-    std::array<VkWriteDescriptorSet, 12> writes {
+    std::array<VkWriteDescriptorSet, 13> writes {
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = descriptorSet,
@@ -379,6 +394,14 @@ void VulkanSceneDescriptors::updateInternal(
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .pImageInfo = &sceneHdrColor,
+        },
+        VkWriteDescriptorSet {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = descriptorSet,
+            .dstBinding = 12,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .pBufferInfo = &materials,
         },
     };
     vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);

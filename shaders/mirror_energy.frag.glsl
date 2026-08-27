@@ -6,10 +6,11 @@ layout(location = 0) in vec4 inShadowPosition;
 layout(location = 1) in float inFaceCoordU;
 layout(location = 2) in float inFaceCoordV;
 layout(location = 3) in vec3 inNormal;
-layout(location = 4) flat in uint inTextureIndex;
-layout(location = 5) flat in uint inMaterialFlags;
 layout(location = 6) in vec3 inWorldPosition;
 layout(location = 7) flat in uint inDrawInstance;
+layout(location = 9) in vec2 inUv1;
+// Relative to the owning model; draw.passData[0].x makes it absolute.
+layout(location = 10) flat in uint inMaterialIndex;
 layout(location = 0) out vec4 outColor;
 
 // One draw's parameters, read back by instance index. T1 moved these out of
@@ -35,6 +36,20 @@ layout(std430, set = 0, binding = 10) readonly buffer DrawInstances
 
 #define draw drawInstances.instances[inDrawInstance]
 
+// One glTF material. Mirrors GpuMaterial in VulkanRenderConstants.hpp, the
+// same way DrawInstance above mirrors GpuDrawInstance.
+struct Material
+{
+    vec4 baseColorFactor;
+    vec4 emissiveAndMetallic;
+    vec4 roughnessAlphaFlags;
+    vec4 textureAndUvSet;
+};
+layout(std430, set = 0, binding = 12) readonly buffer Materials
+{
+    Material entries[];
+} materials;
+
 
 struct PointLightData
 {
@@ -54,13 +69,29 @@ layout(std140, set = 0, binding = 7) uniform SceneFrame
 vec4 sampledMaterial()
 {
     int materialMode = int(draw.textureOptions.x + 0.5);
-    if (materialMode == 2 && inTextureIndex != 0u) {
-        int textureIndex = clamp(int(inTextureIndex - 1u), 0, MODEL_TEXTURE_COUNT - 1);
-        vec2 uv = vec2(inFaceCoordU, inFaceCoordV);
-        if ((inMaterialFlags & 1u) != 0u) {
+    if (materialMode == 2) {
+        // Entry zero is the reserved published-nothing fallback; see
+        // modelMaterial() in triangle.frag.glsl for why the index is dropped.
+        int materialBase = int(draw.passData[0].x + 0.5);
+        Material material = materials.entries[
+            materialBase == 0 ? 0 : materialBase + int(inMaterialIndex)];
+        int materialTexture = int(material.textureAndUvSet.x + 0.5);
+        // The ghost is a tint over the model's own colour, and its opacity
+        // comes from the effect rather than the material, so only the base
+        // colour's rgb is taken here.
+        vec4 result = vec4(material.baseColorFactor.rgb, 1.0);
+        if (materialTexture == 0) {
+            return result;
+        }
+        int textureIndex = clamp(
+            materialTexture - 1, 0, MODEL_TEXTURE_COUNT - 1);
+        vec2 uv = int(material.textureAndUvSet.y + 0.5) == 1
+            ? inUv1
+            : vec2(inFaceCoordU, inFaceCoordV);
+        if ((int(material.roughnessAlphaFlags.w + 0.5) & 1) != 0) {
             uv.y = fract(uv.y + draw.materialOptions.y);
         }
-        return texture(modelTextures[textureIndex], uv);
+        return result * texture(modelTextures[textureIndex], uv);
     }
     if (materialMode == 1) {
         int textureIndex = clamp(

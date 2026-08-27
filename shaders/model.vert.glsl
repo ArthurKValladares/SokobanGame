@@ -3,8 +3,6 @@
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inUv;
-layout(location = 3) in uint inTextureIndex;
-layout(location = 4) in uint inMaterialFlags;
 layout(location = 8) in vec4 inTangent;
 layout(location = 9) in vec2 inUv1;
 layout(location = 10) in uint inMaterialIndex;
@@ -13,8 +11,12 @@ layout(location = 0) out vec4 outShadowPosition;
 layout(location = 1) out float outFaceCoordU;
 layout(location = 2) out float outFaceCoordV;
 layout(location = 3) out vec3 outNormal;
-layout(location = 4) flat out uint outTextureIndex;
-layout(location = 5) flat out uint outMaterialFlags;
+// Locations 4 and 5 are retired. They carried a texture index and a material
+// flag word per vertex until F3b moved both into the material buffer, where
+// one entry serves every vertex sharing a material. Gaps here are normal -
+// a fragment shader declares only the locations it reads, and water declares
+// three of these - so they are left free rather than closed by renumbering
+// every scene shader.
 layout(location = 6) out vec3 outWorldPosition;
 layout(location = 7) flat out uint outDrawInstance;
 // xyz is the tangent in the same frame as outNormal; w is the bitangent's
@@ -114,8 +116,6 @@ void main()
     outShadowPosition = sunShadowFromWorld(worldPosition);
     outFaceCoordU = inUv.x;
     outFaceCoordV = inUv.y;
-    outTextureIndex = inTextureIndex;
-    outMaterialFlags = inMaterialFlags;
     outUv1 = inUv1;
     outMaterialIndex = inMaterialIndex;
     vec3 normal = inNormal;

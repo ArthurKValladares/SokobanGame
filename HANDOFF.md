@@ -29,6 +29,10 @@ started**:
   `GltfMesh.hpp`, byte-identical on the whole asset corpus. **Step two** read
   the animation `interpolation` field the loader had always ignored, and put
   `cgltf_validate` in front of every load. See below.
+- Phase 2: F3a (tangents, a second UV set, the wider vertex) and F3b in two
+  steps - **step one** the CPU material model, **step two** the GPU material
+  buffer at binding 12, which is where `textureIndex` and `materialFlags`
+  left the vertex. **F3c**, the Cook-Torrance GGX swap, is next.
 
 Each has its own section in this file explaining the invariants it
 established. Read the C1 and T1 notes under the renderer section before
@@ -313,7 +317,8 @@ attribute location 10.
   Building the material list does not validate slots it was not asked about,
   which is what keeps a model whose manifest lists fewer slots than the file
   has materials loading exactly as it did.
-- **Nothing reads any of it yet.** No GPU buffer, no shader consumption.
+- **Nothing reads any of it yet.** No GPU buffer, no shader consumption -
+  that is step two.
 
 **Verified**: legacy fields byte-identical across all 734 digest lines again.
 The new data is populated and shaped as the files say it should be - 632
@@ -321,7 +326,115 @@ single-material meshes, 18 lines for the one two-material model, and non-zero
 counts for textured, tinted, double-sided and blended materials that match a
 direct scan of the glTF JSON.
 
-### An open question F3b step two has to answer first
+### What F3b step two established
+
+The material reaches the shader, and the two per-vertex integers that stood in
+for it are gone.
+
+- **One shared material buffer**, `VulkanModelResources::materialBuffer_`,
+  host-visible and persistently mapped, at descriptor **binding 12**, fragment
+  stage only. A model claims a contiguous range when it publishes;
+  `GpuMaterial` is 64 bytes of pure float, matching the `textureOptions`
+  convention already in `VulkanRenderConstants.hpp`, and the shader decodes an
+  index with `int(x + 0.5)` exactly as it already did there.
+- **Model draws claim `passData[0].x`**, and only that, for the base of their
+  range. The vertex's `materialIndex` is relative to the model; the base makes
+  it absolute. Water is the other `passData` claimant and is a tile pass, so
+  the two can never meet - `materialMode == 2` is written only by
+  `modelPushConstants`.
+- **Entry zero is reserved** as an untextured white fallback and no real range
+  is ever handed it, so `materialBase == 0` unambiguously means "this model
+  has not published". Both fragment shaders drop `materialIndex` in that case
+  rather than adding it, which is what makes the fallback read white instead
+  of some other model's range. Nothing can currently record such a draw -
+  `tileReadyForDraw` gates on residency - but the guarantee is now real rather
+  than asserted in a comment.
+- **`textureIndex` and `materialFlags` left the vertex**, along with vertex
+  attribute locations 3 and 4 and stage-interface locations 4 and 5. Those
+  numbers are **retired, not reused**: gaps in both namespaces are normal here
+  (`water.frag` declares three of the nine varyings, and the shadow variants
+  read a subset of the vertex layout), so closing them would have meant
+  renumbering every scene shader for nothing.
+- **`baseColorFactor` is applied for the first time.** Its rgb always
+  multiplies; its alpha only on a `BLEND` material, because glTF says an
+  OPAQUE one ignores alpha and this engine picks a model's pipeline from the
+  tile rather than from the material.
+- **UV set 1 is selectable** per material, falling back to set 0 on a mesh
+  that has only one unwrap. Nothing in the corpus uses it yet.
+- **Expect no visible change.** The shader reads the material only in the
+  `materialMode == 2` branch, and the manifest puts exactly one model there -
+  the Conveyor, the only `primitive-materials` entry. Both its materials have
+  a default white factor and no `texcoord`, so every new line above is a
+  no-op on it. This step is substrate; F3c is where it starts to matter.
+- **`mirror_energy.frag` was ported too.** It read the same two retired
+  varyings. It takes the base colour's rgb but not its alpha: the ghost's
+  opacity is the effect's, not the material's.
+
+**Two defects were found in review and fixed before this was written up.**
+Both were unreachable today and both were traps for whoever changed this next:
+
+1. `repackMaterials` rewrote every `materialBase` and *then* decided, from a
+   size comparison, whether to upload. The loop reorders ranges as well as
+   closing gaps, so "the total did not shrink" does not mean "nothing moved" -
+   taking that early return would have left the bases describing a layout the
+   buffer did not have. It now rebuilds unconditionally.
+2. Entry zero was documented as the fallback in three places but not reserved,
+   so the first model to publish was handed base zero and overwrote it.
+
+**Verified**: all 15 shaders compile under `glslangValidator`, and SPIR-V
+reflection confirms the vertex attribute sets (6 mesh, 9 skinned), the varying
+interface across every vert/frag pair, and that binding 12 appears only in
+fragment stages. Every changed TU is warning-clean with the debug UI on and
+off. The loader digest is byte-identical across all 734 jobs once the two
+retired fields are excluded from the hash - built twice from one harness, once
+against `HEAD`'s loader and once against this one. And a per-vertex check on
+all 614 static-mesh jobs confirms the material entry a vertex now points at
+carries exactly the texture index and flag word the retired fields used to
+hold. Harness: `$HOME/f2/a1/digest.cpp`, `legacyBindingEquivalence`.
+
+**Still open in F3b**: `metallicFactor`, `roughnessFactor`, `emissiveFactor`,
+`alphaCutoff` and `doubleSided` are uploaded and unread. F3c is what reads the
+first two.
+
+**The thing F3c has to settle first.** Of the manifest's 36 models, 29 are
+`material.mode: "texture"` (`materialMode == 1`), 6 declare no material at all
+(`0`), and **one** is `primitive-materials` (`2`). Only mode 2 reads the
+material buffer today, so 35 of 36 models cannot supply a metallic or a
+roughness - and GGX needs both for every lit surface, not for one conveyor.
+
+The data is already in place for all of them: `writeMaterials` runs on every
+publish regardless of mode, `materialBase` goes into `passData[0].x` for every
+model draw, and every vertex carries a `materialIndex`. Only the shader branch
+is narrow. So F3c should read the material for **factors and lighting
+parameters in all three model modes**, while leaving **texture selection** as
+it is per mode - mode 1's texture is the manifest's single override
+(`materialOptions.z`) and deliberately not the glTF's.
+
+Note what that implies the first time it happens: four materials in the corpus
+carry a non-default `baseColorFactor`, and all four are the glass ones -
+`BLEND`, at alpha 0.5 and 0.1. Widening the branch is what makes glass
+noticeably more transparent, which is the authored value showing through for
+the first time. Worth landing on its own so it can be looked at, rather than
+inside the BRDF swap.
+
+### Decided: V4 first, then the manifest discovers textures from the glTF
+
+The question below was put to the project owner and answered. The order is:
+
+1. Finish F3 - the material buffer, then GGX.
+2. **V4**, descriptor indexing, which removes the 64-texture ceiling.
+3. **Then** teach the manifest to walk the glTF of every model it lists and
+   pull that file's own textures - normal, metallic-roughness, emissive,
+   occlusion - into the set of textures it needs, rather than requiring each
+   one to be hand-declared.
+
+That resolves both halves of the problem in the right order. The maps stay
+manifest-governed, so the content pipeline still stages them and the residency
+budget still knows about them; they just stop having to be typed out by hand.
+And V4 lands first, so the fivefold increase in texture count arrives after
+the ceiling that would have blocked it is gone rather than before.
+
+### The open question that decision answers
 
 `MeshMaterial` deliberately has **no** normal, metallic-roughness, emissive or
 occlusion texture slots yet, even though the review asks for them and the

@@ -2100,6 +2100,20 @@ private:
               };
         const GpuDrawInstance constants {
             .vertices = IsoScenePreparer::modelWorldTransform(tile),
+            // Model draws claim the first slot, and only the first slot, for
+            // the base of their material range. The vertex's materialIndex is
+            // relative to the model, so this is what makes it absolute.
+            .passData = {
+                Vec4 {
+                    static_cast<float>(material.materialBase),
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                },
+                Vec4 {},
+                Vec4 {},
+                Vec4 {},
+            },
             .color = tile.color,
             .normalAndAmbientRed = {
                 modelRotation.x,

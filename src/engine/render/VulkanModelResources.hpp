@@ -54,6 +54,13 @@ public:
         [[nodiscard]] bool valid() const { return buffer && range > 0; }
     };
 
+    struct MaterialBufferView {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VkDeviceSize range = 0;
+
+        [[nodiscard]] bool valid() const { return buffer && range > 0; }
+    };
+
     struct TextureView {
         VkImageView imageView = VK_NULL_HANDLE;
         VkSampler sampler = VK_NULL_HANDLE;
@@ -64,6 +71,11 @@ public:
     struct MaterialBinding {
         ModelMaterialMode mode = ModelMaterialMode::Untextured;
         uint32_t textureIndex = 0;
+        // Where this model's materials start in the material buffer. Zero
+        // until the model has published; entry zero is reserved as the
+        // untextured fallback and no real range is ever handed it, so a draw
+        // recorded a frame early reads white rather than another model.
+        uint32_t materialBase = 0;
     };
 
     // Axis-aligned extent of a model's mesh in its own space. Needed to frame
@@ -207,6 +219,7 @@ public:
     [[nodiscard]] LoadingStats loadingStats() const;
     [[nodiscard]] SkinningBufferView skinningBuffer() const;
     [[nodiscard]] DrawInstanceBufferView drawInstanceBuffer() const;
+    [[nodiscard]] MaterialBufferView materialBuffer() const;
 
 private:
     enum class LoadState {
@@ -248,6 +261,12 @@ private:
         void* mapped = nullptr;
     };
 
+    struct MaterialBuffer {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+        void* mapped = nullptr;
+    };
+
     struct TextureResource {
         OwnedImage image {};
         VkSampler sampler = VK_NULL_HANDLE;
@@ -277,6 +296,13 @@ private:
         // Captured at upload, because the CPU mesh is released immediately
         // afterwards and nothing else keeps it.
         ModelBounds bounds {};
+        // Where this model's materials sit in the shared material buffer.
+        // Zero means unpublished: the range never starts at the reserved
+        // fallback entry. The recorder reads the base off this slot for every
+        // draw, so a repack is free to move the range as long as no frame is
+        // in flight.
+        uint32_t materialBase = 0;
+        uint32_t materialCount = 0;
         uint64_t lastRequested = 0;
         uint64_t gpuBytes = 0;
         VulkanGeometryArena::Upload upload {};
@@ -346,6 +372,17 @@ private:
     void destroySkinningBuffer();
     void createModelInstanceBuffer();
     void destroyModelInstanceBuffer();
+    void createMaterialBuffer();
+    void destroyMaterialBuffer();
+    // Appends a model's materials and returns the base index of the range.
+    // Throws when the buffer is full, which fails that one model's
+    // publication rather than the frame.
+    [[nodiscard]] uint32_t writeMaterials(
+        const std::vector<MeshMaterial>& materials);
+    // Closes the gaps left by evicted models. Only safe while the device is
+    // idle, which is exactly where residency eviction already is.
+    void repackMaterials();
+    [[nodiscard]] static GpuMaterial gpuMaterialFrom(const MeshMaterial& material);
     void writeSkinningInstance(
         uint32_t frameIndex,
         uint32_t instanceSlot,
@@ -407,6 +444,10 @@ private:
     VulkanGeometryArena geometryArena_ {};
     SkinningBuffer skinningBuffer_ {};
     ModelInstanceBuffer drawInstanceBuffer_ {};
+    MaterialBuffer materialBuffer_ {};
+    // Mirrors the mapped buffer so a repack can move ranges without reading
+    // back through host-visible device memory.
+    std::vector<GpuMaterial> materialStorage_;
     AnimationController animationController_ {};
     struct AnimatedMeshKey {
         uint32_t frameIndex = 0;
