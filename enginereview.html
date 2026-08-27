@@ -257,12 +257,12 @@
   <header class="shell">
     <p class="eyebrow">Current-state review · 27 August 2026</p>
     <h1>Finish the material path without rebuilding it twice.</h1>
-    <p class="deck">Sokoban 3D now has the hard substrate and a device-bounded runtime texture heap. The next program discovers complete glTF materials, simplifies the scene shader, and lands each map behind a testable gate.</p>
+    <p class="deck">Sokoban 3D now has the hard substrate, a device-bounded runtime texture heap, and read-only glTF dependency inspection. The next program gives those sources stable content identities, simplifies the scene shader, and lands each map behind a testable gate.</p>
     <div class="metrics" aria-label="Current repository facts">
       <div class="metric"><b>36</b><span>manifest models</span></div>
       <div class="metric"><b>42 / 1024</b><span>textures on validated GPU</span></div>
       <div class="metric"><b>15</b><span>GLSL shaders</span></div>
-      <div class="metric"><b>62</b><span>registered test suites</span></div>
+      <div class="metric"><b>63</b><span>registered test suites</span></div>
     </div>
   </header>
 
@@ -281,7 +281,7 @@
     <section id="verdict">
       <div class="section-head"><span class="num">01</span><h2>Current verdict</h2></div>
       <div class="callout">
-        <strong>Next program:</strong> glTF dependency discovery → material-map transport → tonemap completion → minimal shader split → map sampling. The descriptor-indexed heap is implemented and remains a validation invariant.
+        <strong>Next program:</strong> texture-source identity and inventory enrichment → material-map transport → tonemap completion → minimal shader split → map sampling. The descriptor-indexed heap and structure-only glTF inspector are implemented validation invariants.
       </div>
       <div class="grid" style="margin-top:1rem">
         <article class="card">
@@ -292,7 +292,7 @@
         <article class="card">
           <p class="kicker">What blocks complete PBR</p>
           <h3>Texture identity and discovery</h3>
-          <p>The runtime heap can now grow beyond 64 entries, but glTF normal, metallic-roughness, emissive and occlusion images are neither represented in materials nor discovered, staged and bound.</p>
+          <p>The inspector now identifies glTF normal, metallic-roughness, emissive and occlusion sources, but they do not yet have canonical inventory identities and are not staged or bound.</p>
         </article>
         <article class="card">
           <p class="kicker">What not to overbuild</p>
@@ -362,7 +362,7 @@
         <article class="card">
           <p class="kicker">Content architecture</p>
           <h3>Manifest parsing stays pure</h3>
-          <p>Do not make <code>AssetManifest::parse</code> walk the filesystem. Add a loader-adjacent dependency inspector and enrich the content catalog in a step with an explicit asset root.</p>
+          <p><code>AssetManifest::parse</code> still does no filesystem work. The loader-adjacent inspector is complete; enrich the content catalog next in a separate step with an explicit asset root.</p>
         </article>
         <article class="card">
           <p class="kicker">Image sources</p>
@@ -390,7 +390,7 @@
           <div>
             <div class="phase-title"><h3>Make the starting point trustworthy</h3><span class="status partial">In progress</span></div>
             <div class="tasks">
-              <div class="task"><span class="task-id">0.1</span><div><b>Visual and performance evidence remains</b><p>The full Debug build and all 62 suites, including the Vulkan smoke test, pass. Capture representative screenshots and frame statistics before material-map behavior changes.</p></div></div>
+              <div class="task"><span class="task-id">0.1</span><div><b>Visual and performance evidence remains</b><p>The full Debug build and all 63 suites, including the Vulkan smoke test, pass. Capture representative screenshots and frame statistics before material-map behavior changes.</p></div></div>
               <div class="task"><span class="task-id">0.2</span><div><b>Loader CUBICSPLINE fixture — complete</b><p>The public file loader is covered for three outputs per key, quaternion value normalization, tangent preservation and malformed counts.</p></div></div>
               <div class="task"><span class="task-id">0.3</span><div><b>Mechanical cleanup — partial</b><p>The dead GPU instance header is gone. Add and normalize the line-ending policy in a separate, non-semantic commit.</p></div></div>
             </div>
@@ -426,10 +426,10 @@
         <article class="phase">
           <div class="phase-id">3<small>content</small></div>
           <div>
-            <div class="phase-title"><h3>Discover glTF dependencies deliberately</h3><span class="status next">Next</span></div>
+            <div class="phase-title"><h3>Discover glTF dependencies deliberately</h3><span class="status partial">In progress</span></div>
             <div class="tasks">
-              <div class="task"><span class="task-id">3.1</span><div><b>Dependency inspection API</b><p>Add a cgltf-backed, library-private API returning materials, images, samplers and buffers without GPU work or manifest-parser I/O.</p></div></div>
-              <div class="task"><span class="task-id">3.2</span><div><b>Texture source variant</b><p>Represent external URI, embedded GLB image and supported data URI; deduplicate by canonical source plus interpretation.</p></div></div>
+              <div class="task"><span class="task-id">3.1</span><div><b>Dependency inspection API — complete</b><p>The cgltf-backed API returns engine-owned buffers, image sources, samplers and five core material-map usages without loading referenced files, touching manifest parsing or creating GPU work. Synthetic <code>.gltf</code>/<code>.glb</code> fixtures cover external, data-URI and embedded metadata.</p></div></div>
+              <div class="task"><span class="task-id">3.2</span><div><b>Texture source variant — next</b><p>Represent external URI, embedded GLB image and supported data URI; deduplicate by canonical source plus interpretation.</p></div></div>
               <div class="task"><span class="task-id">3.3</span><div><b>Semantic validation</b><p>Carry color space, UV set, wrap and filtering. Support or clearly reject texture transforms.</p></div></div>
             </div>
             <p class="accept"><b>Gate:</b> external, embedded and data-URI fixtures stage without traversal, duplicate identity or hidden dependencies.</p>

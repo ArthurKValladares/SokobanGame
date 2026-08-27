@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -191,6 +192,117 @@ struct GltfMeshLoadOptions {
     // Entry N is the resolved render behavior for glTF material N.
     std::vector<PrimitiveMaterialBinding> primitiveMaterials;
 };
+
+// Read-only metadata used by content discovery before any image, buffer, or
+// GPU resource is loaded. These types deliberately describe glTF concepts in
+// engine-owned terms; cgltf remains private to GltfMesh.cpp.
+enum class GltfBufferSourceKind {
+    ExternalUri,
+    DataUri,
+    EmbeddedGlb,
+};
+
+struct GltfBufferDependency {
+    std::string name;
+    GltfBufferSourceKind sourceKind = GltfBufferSourceKind::EmbeddedGlb;
+    // Empty only for the GLB BIN chunk.
+    std::string uri;
+    uint64_t byteLength = 0;
+};
+
+enum class GltfImageSourceKind {
+    ExternalUri,
+    DataUri,
+    BufferView,
+};
+
+struct GltfImageDependency {
+    std::string name;
+    GltfImageSourceKind sourceKind = GltfImageSourceKind::ExternalUri;
+    // Set for URI-backed images, including data URIs.
+    std::string uri;
+    std::string mimeType;
+    // Set for buffer-view images. Offset and length are relative to the
+    // identified buffer, as authored by the glTF document.
+    std::optional<uint32_t> bufferViewIndex;
+    std::optional<uint32_t> bufferIndex;
+    uint64_t byteOffset = 0;
+    uint64_t byteLength = 0;
+};
+
+// Numeric values intentionally match glTF 2.0's sampler constants. The
+// names, defaults, and representation are ours rather than cgltf's.
+enum class GltfSamplerFilter : uint32_t {
+    Unspecified = 0,
+    Nearest = 9728,
+    Linear = 9729,
+    NearestMipmapNearest = 9984,
+    LinearMipmapNearest = 9985,
+    NearestMipmapLinear = 9986,
+    LinearMipmapLinear = 9987,
+};
+
+enum class GltfSamplerWrap : uint32_t {
+    ClampToEdge = 33071,
+    MirroredRepeat = 33648,
+    Repeat = 10497,
+};
+
+struct GltfSamplerDependency {
+    std::string name;
+    GltfSamplerFilter magFilter = GltfSamplerFilter::Unspecified;
+    GltfSamplerFilter minFilter = GltfSamplerFilter::Unspecified;
+    GltfSamplerWrap wrapS = GltfSamplerWrap::Repeat;
+    GltfSamplerWrap wrapT = GltfSamplerWrap::Repeat;
+};
+
+enum class GltfMaterialTextureSemantic {
+    BaseColor,
+    MetallicRoughness,
+    Normal,
+    Occlusion,
+    Emissive,
+};
+
+struct GltfTextureTransformDependency {
+    Vec2 offset {};
+    Vec2 scale { 1.0f, 1.0f };
+    float rotation = 0.0f;
+    std::optional<uint32_t> texcoord;
+};
+
+struct GltfMaterialTextureDependency {
+    GltfMaterialTextureSemantic semantic =
+        GltfMaterialTextureSemantic::BaseColor;
+    uint32_t textureIndex = 0;
+    std::string textureName;
+    // A texture can omit its core image when it is supplied only by an
+    // extension. Keeping this optional lets the later semantic-validation
+    // step report that case with model/material context.
+    std::optional<uint32_t> imageIndex;
+    std::optional<uint32_t> samplerIndex;
+    uint32_t texcoord = 0;
+    // Normal scale for Normal, occlusion strength for Occlusion, 1 otherwise.
+    float scale = 1.0f;
+    std::optional<GltfTextureTransformDependency> transform;
+};
+
+struct GltfMaterialDependency {
+    std::string name;
+    std::vector<GltfMaterialTextureDependency> textures;
+};
+
+struct GltfAssetDependencies {
+    std::vector<GltfBufferDependency> buffers;
+    std::vector<GltfImageDependency> images;
+    std::vector<GltfSamplerDependency> samplers;
+    std::vector<GltfMaterialDependency> materials;
+};
+
+// Parses and validates document structure only. External buffers and images
+// are intentionally not opened, and no render resources are created.
+[[nodiscard]] GltfAssetDependencies inspectGltfAssetDependencies(
+    const std::filesystem::path& path);
 
 [[nodiscard]] MeshData loadGltfMesh(
     const std::filesystem::path& path,

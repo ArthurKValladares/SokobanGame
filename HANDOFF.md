@@ -11,14 +11,16 @@ The renderer modernization has a sound substrate now: Vulkan 1.3, an explicit
 camera, instanced tile draws, an HDR scene target, a tonemap pass, cgltf-based
 loading, a GPU material buffer, tangents and two UV sets, and Cook-Torrance GGX
 lighting. The fixed texture ceiling has now been replaced by a device-bounded,
-frame-safe descriptor heap. The next objective is to discover complete glTF
-material dependencies without adding filesystem I/O to manifest parsing or
-more branches to the current uber-shader.
+frame-safe descriptor heap, and a read-only glTF inspector exposes the source
+metadata needed for content discovery. The next objective is to give external,
+embedded and data-URI images stable content identities without adding
+filesystem I/O to manifest parsing or more branches to the current uber-shader.
 
 The recommended order is:
 
 1. Capture the remaining visual/performance baseline evidence.
-2. Add a glTF dependency-inspection layer and a texture-source abstraction.
+2. Add texture-source identity and enrich the content inventory from inspected
+   glTF dependencies.
 3. Carry glTF material-map handles through the CPU and GPU material models.
 4. Finish tonemapping and exposure before judging mapped PBR output.
 5. Split non-scene modes out of `triangle.frag.glsl`.
@@ -35,7 +37,7 @@ sampling have different failure modes and should be independently reviewable.
 - Language and platform: C++20, SDL3, Vulkan 1.3, GLSL compiled to SPIR-V.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
-- Current tests: 62 CTest suites in the newest configured build tree.
+- Current tests: 63 CTest suites in the newest configured build tree.
 - Current shaders: 15 GLSL files. `triangle.frag.glsl` is 587 physical lines.
 - Texture capacity: selected at startup from a configured 1,024-slot ceiling,
   device limits, 16 editor-reserved slots and 32 import-reserved slots. The
@@ -156,7 +158,7 @@ combine adjacent packets merely because they touch the same files.
 ### 0. Refresh the baseline
 
 Current state on 27 August 2026: the full Visual Studio Debug build succeeds
-and all 62 registered CTest suites pass, including `vulkan_smoke`. Establishing
+and all 63 registered CTest suites pass, including `vulkan_smoke`. Establishing
 that baseline also exposed and repaired stale UI/settings assertions left by the
 earlier default-MSAA change. Representative screenshots and frame statistics
 still need to be captured before material-map behavior changes.
@@ -232,18 +234,19 @@ registration are covered beyond 64 entries.
 
 ### 3. Discover glTF texture dependencies outside manifest parsing
 
-#### 3.1 Add a side-effect-free glTF inspection API
+#### 3.1 Add a side-effect-free glTF inspection API — complete
 
-Create a loader-adjacent API such as `inspectGltfAssetDependencies(path)` that
-returns materials, image sources, samplers and buffer dependencies without
-creating GPU resources. Keep cgltf types private to the implementation.
+`inspectGltfAssetDependencies(path)` now validates document structure and
+returns engine-owned buffer, image, sampler and material-texture metadata. It
+records core map semantics, texture/image/sampler indices and names, UV sets,
+normal scale, occlusion strength and `KHR_texture_transform` metadata. cgltf
+types remain private to `GltfMesh.cpp`.
 
-Do not make `AssetManifest::parse(string)` perform filesystem I/O. Enrich a
-parsed manifest/catalog in a separate content-resolution step that has an
-explicit asset root.
-
-**Acceptance:** pure manifest parsing remains deterministic and unit-testable;
-dependency inspection has synthetic `.gltf` and `.glb` fixtures.
+Inspection deliberately uses the structure-only parse seam: external buffers
+and images are reported but never opened, no GPU resources are created, and
+`AssetManifest::parse(string)` remains unchanged and free of filesystem I/O.
+`GltfDependencyTests.cpp` writes synthetic external/data-URI `.gltf` and
+embedded-image `.glb` fixtures and verifies this boundary.
 
 #### 3.2 Introduce texture-source identity
 
@@ -446,6 +449,8 @@ layout changes affect modules that appear unrelated to the immediate feature.
 - `src/engine/AssetManifest.*`: parsed declarations and stable runtime handles.
 - `src/engine/ContentPipeline.*`: dependency validation, inventory and staging.
 - `src/engine/render/GltfMesh.*`: cgltf boundary, mesh/material/animation decode.
+- `tests/GltfDependencyTests.cpp`: structure-only dependency fixtures for
+  external/data-URI glTF and embedded-image GLB inputs.
 - `src/engine/render/ImageData.*`: decoded RGBA image abstraction; currently
   path-based and therefore a required seam for embedded GLB images.
 - `src/engine/render/VulkanDeviceContext.*`: feature/property queries and logical

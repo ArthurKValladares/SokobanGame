@@ -174,6 +174,20 @@ Document parseDocument(const std::filesystem::path& path)
     return document;
 }
 
+void validateDocumentStructure(
+    cgltf_data& document,
+    const std::filesystem::path& path)
+{
+    // This validates references and schema-level relationships without
+    // requiring external buffers to have been loaded.
+    const cgltf_result validation = cgltf_validate(&document);
+    if (validation != cgltf_result_success) {
+        throw std::runtime_error(
+            "Invalid glTF file: " + path.string() + " (" +
+            std::string(resultName(validation)) + ")");
+    }
+}
+
 // Structure plus data. cgltf_load_buffers is what makes a GLB chunk, an
 // external .bin and a base64 data URI all arrive the same way, and what
 // retired the previous loader's one-buffer-only limit.
@@ -195,12 +209,7 @@ Document loadDocument(const std::filesystem::path& path)
     // inside the buffer it points at". ContentPipeline loads every animation
     // at build time, so this is also what keeps a truncated or mis-sized
     // asset out of a package instead of out of a frame.
-    const cgltf_result validation = cgltf_validate(document.get());
-    if (validation != cgltf_result_success) {
-        throw std::runtime_error(
-            "Invalid glTF file: " + path.string() + " (" +
-            std::string(resultName(validation)) + ")");
-    }
+    validateDocumentStructure(*document, path);
     return document;
 }
 
@@ -732,7 +741,179 @@ void deriveMissingTangents(
     }
 }
 
+bool isDataUri(std::string_view uri)
+{
+    return uri.starts_with("data:");
+}
+
+uint32_t dependencyIndex(cgltf_size index, std::string_view description)
+{
+    if (index > std::numeric_limits<uint32_t>::max()) {
+        throw std::runtime_error(
+            "glTF " + std::string(description) + " index exceeds 32-bit range");
+    }
+    return static_cast<uint32_t>(index);
+}
+
+std::string stringOrEmpty(const char* text)
+{
+    return text ? std::string(text) : std::string();
+}
+
+void appendMaterialTextureDependency(
+    GltfMaterialDependency& material,
+    const cgltf_data& data,
+    const cgltf_texture_view& view,
+    GltfMaterialTextureSemantic semantic,
+    float scale)
+{
+    if (!view.texture) {
+        return;
+    }
+
+    GltfMaterialTextureDependency dependency {
+        .semantic = semantic,
+        .textureIndex = dependencyIndex(
+            cgltf_texture_index(&data, view.texture), "texture"),
+        .textureName = stringOrEmpty(view.texture->name),
+        .texcoord = static_cast<uint32_t>(std::max(view.texcoord, 0)),
+        .scale = scale,
+    };
+    if (view.texture->image) {
+        dependency.imageIndex = dependencyIndex(
+            cgltf_image_index(&data, view.texture->image), "image");
+    }
+    if (view.texture->sampler) {
+        dependency.samplerIndex = dependencyIndex(
+            cgltf_sampler_index(&data, view.texture->sampler), "sampler");
+    }
+    if (view.has_transform) {
+        GltfTextureTransformDependency transform {
+            .offset = { view.transform.offset[0], view.transform.offset[1] },
+            .scale = { view.transform.scale[0], view.transform.scale[1] },
+            .rotation = view.transform.rotation,
+        };
+        if (view.transform.has_texcoord) {
+            transform.texcoord = static_cast<uint32_t>(
+                std::max(view.transform.texcoord, 0));
+        }
+        dependency.transform = transform;
+    }
+    material.textures.push_back(std::move(dependency));
+}
+
 } // namespace
+
+GltfAssetDependencies inspectGltfAssetDependencies(
+    const std::filesystem::path& path)
+{
+    const Document document = parseDocument(path);
+    validateDocumentStructure(*document, path);
+    const cgltf_data& data = *document;
+
+    GltfAssetDependencies dependencies;
+    dependencies.buffers.reserve(data.buffers_count);
+    for (cgltf_size index = 0; index < data.buffers_count; ++index) {
+        const cgltf_buffer& source = data.buffers[index];
+        const std::string uri = stringOrEmpty(source.uri);
+        dependencies.buffers.push_back({
+            .name = stringOrEmpty(source.name),
+            .sourceKind = !source.uri
+                ? GltfBufferSourceKind::EmbeddedGlb
+                : (isDataUri(uri)
+                    ? GltfBufferSourceKind::DataUri
+                    : GltfBufferSourceKind::ExternalUri),
+            .uri = uri,
+            .byteLength = static_cast<uint64_t>(source.size),
+        });
+    }
+
+    dependencies.images.reserve(data.images_count);
+    for (cgltf_size index = 0; index < data.images_count; ++index) {
+        const cgltf_image& source = data.images[index];
+        const std::string uri = stringOrEmpty(source.uri);
+        GltfImageDependency dependency {
+            .name = stringOrEmpty(source.name),
+            .sourceKind = source.buffer_view
+                ? GltfImageSourceKind::BufferView
+                : (isDataUri(uri)
+                    ? GltfImageSourceKind::DataUri
+                    : GltfImageSourceKind::ExternalUri),
+            .uri = uri,
+            .mimeType = stringOrEmpty(source.mime_type),
+        };
+        if (source.buffer_view) {
+            dependency.bufferViewIndex = dependencyIndex(
+                cgltf_buffer_view_index(&data, source.buffer_view),
+                "buffer view");
+            if (source.buffer_view->buffer) {
+                dependency.bufferIndex = dependencyIndex(
+                    cgltf_buffer_index(&data, source.buffer_view->buffer),
+                    "buffer");
+            }
+            dependency.byteOffset =
+                static_cast<uint64_t>(source.buffer_view->offset);
+            dependency.byteLength =
+                static_cast<uint64_t>(source.buffer_view->size);
+        }
+        dependencies.images.push_back(std::move(dependency));
+    }
+
+    dependencies.samplers.reserve(data.samplers_count);
+    for (cgltf_size index = 0; index < data.samplers_count; ++index) {
+        const cgltf_sampler& source = data.samplers[index];
+        dependencies.samplers.push_back({
+            .name = stringOrEmpty(source.name),
+            .magFilter = static_cast<GltfSamplerFilter>(source.mag_filter),
+            .minFilter = static_cast<GltfSamplerFilter>(source.min_filter),
+            .wrapS = static_cast<GltfSamplerWrap>(source.wrap_s),
+            .wrapT = static_cast<GltfSamplerWrap>(source.wrap_t),
+        });
+    }
+
+    dependencies.materials.reserve(data.materials_count);
+    for (cgltf_size index = 0; index < data.materials_count; ++index) {
+        const cgltf_material& source = data.materials[index];
+        GltfMaterialDependency material {
+            .name = stringOrEmpty(source.name),
+        };
+        if (source.has_pbr_metallic_roughness) {
+            appendMaterialTextureDependency(
+                material,
+                data,
+                source.pbr_metallic_roughness.base_color_texture,
+                GltfMaterialTextureSemantic::BaseColor,
+                1.0f);
+            appendMaterialTextureDependency(
+                material,
+                data,
+                source.pbr_metallic_roughness.metallic_roughness_texture,
+                GltfMaterialTextureSemantic::MetallicRoughness,
+                1.0f);
+        }
+        appendMaterialTextureDependency(
+            material,
+            data,
+            source.normal_texture,
+            GltfMaterialTextureSemantic::Normal,
+            source.normal_texture.scale);
+        appendMaterialTextureDependency(
+            material,
+            data,
+            source.occlusion_texture,
+            GltfMaterialTextureSemantic::Occlusion,
+            source.occlusion_texture.scale);
+        appendMaterialTextureDependency(
+            material,
+            data,
+            source.emissive_texture,
+            GltfMaterialTextureSemantic::Emissive,
+            1.0f);
+        dependencies.materials.push_back(std::move(material));
+    }
+
+    return dependencies;
+}
 
 MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions options)
 {

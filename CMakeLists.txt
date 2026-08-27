@@ -825,6 +825,10 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/AnimationControllerTests.cpp
     )
+    sokoban_add_test(NAME gltf_dependencies TARGET sokoban_gltf_dependency_tests
+        LIBS sokoban_core
+        SOURCES tests/GltfDependencyTests.cpp
+    )
     sokoban_add_test(NAME animation_catalog TARGET sokoban_animation_catalog_tests
         LIBS sokoban_core
         ASSETS_ENV
