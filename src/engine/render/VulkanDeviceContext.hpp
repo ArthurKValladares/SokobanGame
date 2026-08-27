@@ -6,6 +6,7 @@
 #include <vulkan/vulkan.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
@@ -25,7 +26,9 @@ struct VulkanQueueFamilyIndices {
 // Resources created from these handles must be destroyed before this object.
 class VulkanDeviceContext {
 public:
-    explicit VulkanDeviceContext(SDL_Window* window);
+    VulkanDeviceContext(
+        SDL_Window* window,
+        std::size_t requiredTextureDescriptors = 1);
     ~VulkanDeviceContext();
 
     VulkanDeviceContext(const VulkanDeviceContext&) = delete;
@@ -46,6 +49,7 @@ public:
     // Highest anisotropy the device allows, or 1.0 when unsupported - which is
     // the value a sampler uses to mean "off", so callers need no branch.
     [[nodiscard]] float maxSamplerAnisotropy() const;
+    [[nodiscard]] uint32_t textureDescriptorCapacity() const;
     [[nodiscard]] bool graphicsTimestampsSupported() const;
     [[nodiscard]] float timestampPeriodNanoseconds() const;
     [[nodiscard]] uint32_t graphicsTimestampValidBits() const;
@@ -81,6 +85,8 @@ private:
     VkQueue presentQueue_ = VK_NULL_HANDLE;
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VulkanFeatureTier featureTier_ {};
+    uint32_t requiredTextureDescriptors_ = 1;
+    uint32_t textureDescriptorCapacity_ = 0;
     bool wideLinesSupported_ = false;
     uint32_t graphicsTimestampValidBits_ = 0;
     std::array<float, 2> wireframeLineWidthRange_ { 1.0f, 1.0f };

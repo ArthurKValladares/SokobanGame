@@ -202,7 +202,7 @@ VulkanRenderer::VulkanRenderer(
     PresentationPolicy presentationPolicy)
     : window_(window)
     , assetRoot_(std::move(assetRoot))
-    , deviceContext_(window)
+    , deviceContext_(window, manifest.textures().size())
     , reconfigurationQueue_({
           .antiAliasing = antiAliasingMode,
           .renderScalePercent = renderScalePercent,
@@ -237,6 +237,7 @@ VulkanRenderer::VulkanRenderer(
         deviceContext_.commandPool(),
         deviceContext_.graphicsQueue(),
         assetRoot_, manifest,
+        deviceContext_.textureDescriptorCapacity(),
         deviceContext_.maxSamplerAnisotropy());
     activeResources_ = createRenderResources(
         reconfigurationQueue_.active());
@@ -653,11 +654,16 @@ ImageData VulkanRenderer::captureRenderedFrame(std::optional<VkRect2D> region)
 void VulkanRenderer::syncManifestTextures()
 {
     if (modelResources_.syncManifestTextures()) {
-        // The descriptor array is padded to maxModelTextures with the fallback
-        // texture, so the new slot already has something valid bound; the
+        // Reserved descriptor slots are padded with the fallback texture, so
+        // the new slot already has something valid bound; the
         // rewrite is what points it at the real image once it publishes.
         descriptorSync_.resourcesChanged();
     }
+}
+
+uint32_t VulkanRenderer::textureDescriptorCapacity() const
+{
+    return deviceContext_.textureDescriptorCapacity();
 }
 
 void VulkanRenderer::syncManifestModels()
@@ -1297,6 +1303,8 @@ VulkanRenderer::createPipelines(
         .assetRoot = assetRoot_,
         .descriptorSetLayout =
             resources.sceneDescriptors->layout(),
+        .textureDescriptorSetLayout =
+            resources.sceneDescriptors->textureLayout(),
         .colorFormat = resources.swapchain->colorFormat(),
         .sceneColorFormat = resources.swapchain->sceneColorFormat(),
         .depthFormat = depthFormat_,

@@ -21,18 +21,6 @@ struct AssetManifestJsonParser;
     return clipNumber == 0 ? 0 : clipNumber - 1;
 }
 
-// Shader/pipeline cap for the model texture descriptor array, and the single
-// source of truth for its size: CMakeLists.txt parses this line and compiles
-// every shader with MODEL_TEXTURE_COUNT set to it, so the two cannot drift.
-// To grow the array, edit this number and re-run CMake configure.
-//
-// Every screen costs a slot, because each one declares its own ground splat
-// map. Exceeding the cap throws while loading the manifest, so a campaign that
-// outgrows the array fails loudly at startup rather than rendering wrong, and
-// `VulkanDeviceContext` rejects any device whose per-stage sampled-image limit
-// cannot hold this many.
-inline constexpr uint32_t maxModelTextures = 64;
-
 enum class ModelGeometry {
     Static,
     Skinned,

@@ -1,6 +1,7 @@
 #version 460
+#extension GL_EXT_nonuniform_qualifier : require
 
-layout(set = 0, binding = 2) uniform sampler2D modelTextures[MODEL_TEXTURE_COUNT];
+layout(set = 1, binding = 0) uniform sampler2D modelTextures[];
 
 layout(location = 0) in vec4 inShadowPosition;
 layout(location = 1) in float inFaceCoordU;
@@ -83,23 +84,20 @@ vec4 sampledMaterial()
         if (materialTexture == 0) {
             return result;
         }
-        int textureIndex = clamp(
-            materialTexture - 1, 0, MODEL_TEXTURE_COUNT - 1);
+        int textureIndex = max(materialTexture - 1, 0);
         vec2 uv = int(material.textureAndUvSet.y + 0.5) == 1
             ? inUv1
             : vec2(inFaceCoordU, inFaceCoordV);
         if ((int(material.roughnessAlphaFlags.w + 0.5) & 1) != 0) {
             uv.y = fract(uv.y + draw.materialOptions.y);
         }
-        return result * texture(modelTextures[textureIndex], uv);
+        return result * texture(
+            modelTextures[nonuniformEXT(textureIndex)], uv);
     }
     if (materialMode == 1) {
-        int textureIndex = clamp(
-            int(draw.materialOptions.z + 0.5),
-            0,
-            MODEL_TEXTURE_COUNT - 1);
+        int textureIndex = max(int(draw.materialOptions.z + 0.5), 0);
         return texture(
-            modelTextures[textureIndex],
+            modelTextures[nonuniformEXT(textureIndex)],
             vec2(inFaceCoordU, inFaceCoordV));
     }
     return vec4(1.0);

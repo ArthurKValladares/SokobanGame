@@ -1,4 +1,5 @@
 #version 460
+#extension GL_EXT_nonuniform_qualifier : require
 
 // Ground splatting: blends two ground textures (a base and a detail layer)
 // using the red channel of a splat map, then applies the same lighting,
@@ -11,7 +12,7 @@
 // composed-overworld screen can own an independent paint map.
 
 layout(set = 0, binding = 0) uniform sampler2D shadowMap;
-layout(set = 0, binding = 2) uniform sampler2D modelTextures[MODEL_TEXTURE_COUNT];
+layout(set = 1, binding = 0) uniform sampler2D modelTextures[];
 layout(set = 0, binding = 8) uniform samplerCubeArray pointShadowMaps;
 
 layout(location = 0) in vec4 inShadowPosition;
@@ -215,7 +216,7 @@ bool resolveTexture(float handle, out int index)
     if (handle < 0.5) {
         return false;
     }
-    index = clamp(int(handle - 1.0 + 0.5), 0, MODEL_TEXTURE_COUNT - 1);
+    index = max(int(handle - 1.0 + 0.5), 0);
     return true;
 }
 
@@ -246,16 +247,19 @@ void main()
     int detailIndex = 0;
     int splatIndex = 0;
     if (resolveTexture(draw.textureOptions.x, baseIndex)) {
-        vec3 baseColor = texture(modelTextures[baseIndex], uv).rgb;
+        vec3 baseColor = texture(
+            modelTextures[nonuniformEXT(baseIndex)], uv).rgb;
         vec3 blended = baseColor;
         if (resolveTexture(draw.textureOptions.y, detailIndex)) {
-            vec3 detailColor = texture(modelTextures[detailIndex], uv).rgb;
+            vec3 detailColor = texture(
+                modelTextures[nonuniformEXT(detailIndex)], uv).rgb;
             // The splat map spans the board once. Its size tells us how many
             // tiles that is, so world tile -> 0..1 needs nothing pushed.
             float weight = 0.0;
             if (resolveTexture(draw.textureOptions.z, splatIndex)) {
                 vec2 splatBoardTiles = max(
-                    vec2(textureSize(modelTextures[splatIndex], 0)) /
+                    vec2(textureSize(
+                        modelTextures[nonuniformEXT(splatIndex)], 0)) /
                         GROUND_SPLAT_TEXELS_PER_TILE,
                     vec2(1.0));
                 // Clamped, not wrapped: ground outside the board (the
@@ -263,7 +267,8 @@ void main()
                 // repeating the board's pattern back over itself.
                 vec2 splatUv = clamp(
                     splatLocalTile / splatBoardTiles, 0.0, 1.0);
-                weight = texture(modelTextures[splatIndex], splatUv).r;
+                weight = texture(
+                    modelTextures[nonuniformEXT(splatIndex)], splatUv).r;
             }
             blended = mix(baseColor, detailColor, clamp(weight, 0.0, 1.0));
         }

@@ -1,6 +1,5 @@
 #include "engine/render/VulkanDeviceContext.hpp"
 
-#include "engine/AssetManifest.hpp"
 #include "engine/render/RendererConfig.hpp"
 #include "engine/Log.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
@@ -63,9 +62,17 @@ bool supportsValidationLayer()
 
 } // namespace
 
-VulkanDeviceContext::VulkanDeviceContext(SDL_Window* window)
+VulkanDeviceContext::VulkanDeviceContext(
+    SDL_Window* window,
+    std::size_t requiredTextureDescriptors)
     : window_(window)
 {
+    if (requiredTextureDescriptors > std::numeric_limits<uint32_t>::max()) {
+        throw std::runtime_error(
+            "Texture descriptor requirement is outside the supported range");
+    }
+    requiredTextureDescriptors_ = std::max(
+        static_cast<uint32_t>(requiredTextureDescriptors), 1U);
     try {
         createInstance();
         createSurface();
@@ -147,6 +154,11 @@ float VulkanDeviceContext::maxSamplerAnisotropy() const
     return featureTier_.anisotropicFilteringSupported
         ? std::max(physicalDeviceProperties_.limits.maxSamplerAnisotropy, 1.0f)
         : 1.0f;
+}
+
+uint32_t VulkanDeviceContext::textureDescriptorCapacity() const
+{
+    return textureDescriptorCapacity_;
 }
 
 bool VulkanDeviceContext::graphicsTimestampsSupported() const
@@ -329,16 +341,29 @@ void VulkanDeviceContext::pickPhysicalDevice()
         physicalDevice_, &queueFamilyCount, queueFamilyProperties.data());
     graphicsTimestampValidBits_ =
         queueFamilyProperties[queueFamilies_.graphics].timestampValidBits;
+    const VulkanDeviceFeatureSupport support =
+        queryFeatureSupport(physicalDevice_);
+    const VulkanTextureHeapCapacity textureHeap =
+        chooseVulkanTextureHeapCapacity(
+            support,
+            requiredTextureDescriptors_,
+            config::editorTextureDescriptorReserve,
+            config::importedTextureDescriptorReserve,
+            config::textureDescriptorCapacityCeiling,
+            sceneSingleImageBindings);
+    textureDescriptorCapacity_ = textureHeap.capacity;
     featureTier_ = chooseVulkanFeatureTier(
-        queryFeatureSupport(physicalDevice_),
+        support,
         sizeof(GpuDrawInstance),
-        maxModelTextures + sceneSingleImageBindings);
+        textureDescriptorCapacity_ + sceneSingleImageBindings,
+        textureDescriptorCapacity_);
     log::info(log::Category::Rendering) << "Vulkan GPU: "
         << physicalDeviceProperties_.deviceName << " ("
         << vulkanDeviceTypeName(physicalDeviceProperties_.deviceType)
         << ")" << (featureTier_.wireframeSupported
             ? " with debug wireframe support"
-            : " without debug wireframe support");
+            : " without debug wireframe support")
+        << "; texture descriptor capacity " << textureDescriptorCapacity_;
 }
 
 void VulkanDeviceContext::createDevice()
@@ -369,6 +394,13 @@ void VulkanDeviceContext::createDevice()
         .synchronization2 = VK_TRUE,
         .dynamicRendering = VK_TRUE,
     };
+    VkPhysicalDeviceVulkan12Features vulkan12 {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+        .pNext = &vulkan13,
+    };
+    vulkan12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+    vulkan12.descriptorBindingVariableDescriptorCount = VK_TRUE;
+    vulkan12.runtimeDescriptorArray = VK_TRUE;
 
     wideLinesSupported_ = featureTier_.wideLinesSupported;
     const float minLineWidth = std::max(
@@ -392,7 +424,7 @@ void VulkanDeviceContext::createDevice()
     };
     const VkDeviceCreateInfo createInfo {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext = &vulkan13,
+        .pNext = &vulkan12,
         .queueCreateInfoCount =
             static_cast<uint32_t>(queueInfos.size()),
         .pQueueCreateInfos = queueInfos.data(),
@@ -485,10 +517,32 @@ VulkanQueueFamilyIndices VulkanDeviceContext::findQueueFamilies(
 
 bool VulkanDeviceContext::isDeviceSuitable(VkPhysicalDevice device) const
 {
-    if (!chooseVulkanFeatureTier(
-            queryFeatureSupport(device),
-            sizeof(GpuDrawInstance),
-            maxModelTextures + sceneSingleImageBindings).releaseCompatible) {
+    const VulkanDeviceFeatureSupport support = queryFeatureSupport(device);
+    const VulkanTextureHeapCapacity textureHeap =
+        chooseVulkanTextureHeapCapacity(
+            support,
+            requiredTextureDescriptors_,
+            config::editorTextureDescriptorReserve,
+            config::importedTextureDescriptorReserve,
+            config::textureDescriptorCapacityCeiling,
+            sceneSingleImageBindings);
+    VkPhysicalDeviceProperties properties {};
+    vkGetPhysicalDeviceProperties(device, &properties);
+    if (!textureHeap.supported) {
+        log::warning(log::Category::Rendering)
+            << "Rejecting Vulkan GPU " << properties.deviceName << ": "
+            << vulkanTextureHeapCapacityFailureMessage(textureHeap);
+        return false;
+    }
+    const VulkanFeatureTier tier = chooseVulkanFeatureTier(
+        support,
+        sizeof(GpuDrawInstance),
+        textureHeap.capacity + sceneSingleImageBindings,
+        textureHeap.capacity);
+    if (!tier.releaseCompatible) {
+        log::warning(log::Category::Rendering)
+            << "Rejecting Vulkan GPU " << properties.deviceName << ": "
+            << vulkanFeatureTierRejectionMessage(tier.rejection);
         return false;
     }
 
@@ -543,21 +597,35 @@ VulkanDeviceFeatureSupport VulkanDeviceContext::queryFeatureSupport(
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
         .pNext = &extendedDynamicState,
     };
-    VkPhysicalDeviceFeatures2 features {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+    VkPhysicalDeviceVulkan12Features vulkan12 {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
         .pNext = &vulkan13,
     };
+    VkPhysicalDeviceFeatures2 features {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .pNext = &vulkan12,
+    };
     vkGetPhysicalDeviceFeatures2(device, &features);
+
     return {
         .apiVersion = properties.apiVersion,
         .maxPushConstantsSize = properties.limits.maxPushConstantsSize,
         .maxPerStageDescriptorSampledImages =
             properties.limits.maxPerStageDescriptorSampledImages,
+        .maxDescriptorSetSampledImages =
+            properties.limits.maxDescriptorSetSampledImages,
         .dynamicRendering = vulkan13.dynamicRendering == VK_TRUE,
         .synchronization2 = vulkan13.synchronization2 == VK_TRUE,
         .imageCubeArray = features.features.imageCubeArray == VK_TRUE,
         .extendedDynamicState =
             extendedDynamicState.extendedDynamicState == VK_TRUE,
+        .runtimeDescriptorArray = vulkan12.runtimeDescriptorArray == VK_TRUE,
+        .descriptorBindingPartiallyBound =
+            vulkan12.descriptorBindingPartiallyBound == VK_TRUE,
+        .descriptorBindingVariableDescriptorCount =
+            vulkan12.descriptorBindingVariableDescriptorCount == VK_TRUE,
+        .shaderSampledImageArrayNonUniformIndexing =
+            vulkan12.shaderSampledImageArrayNonUniformIndexing == VK_TRUE,
         .fillModeNonSolid = features.features.fillModeNonSolid == VK_TRUE,
         .wideLines = features.features.wideLines == VK_TRUE,
         .samplerAnisotropy = features.features.samplerAnisotropy == VK_TRUE,

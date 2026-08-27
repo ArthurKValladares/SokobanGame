@@ -43,8 +43,9 @@ std::string_view vulkanFailureMessage(VulkanFailure failure)
     case VulkanFailure::UnsupportedHardware:
         return "Sokoban 3D requires a Vulkan 1.3 GPU with dynamic rendering, "
                "synchronization2, cube-map arrays, extended dynamic state, and "
-               "the required descriptor capacity. Update the graphics driver or "
-               "use supported graphics hardware.";
+               "descriptor indexing for runtime texture arrays, plus the "
+               "required descriptor capacity. Update the graphics driver or use "
+               "supported graphics hardware.";
     }
     return "An unrecoverable graphics error occurred.";
 }

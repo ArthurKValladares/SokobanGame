@@ -17,8 +17,7 @@ namespace sokoban::shaderCatalog {
 // tonemap shader was added to CMake alone and the game died on startup with
 // "Failed to open file: ...assets/shaders/tonemap.frag.glsl.spv".
 //
-// CMakeLists.txt parses the quoted names below at configure time, the same
-// way it reads sokoban::maxModelTextures out of AssetManifest.hpp, and
+// CMakeLists.txt parses the quoted names below at configure time, and
 // CMAKE_CONFIGURE_DEPENDS re-runs configure when this file changes. Two rules
 // follow from that, and neither is optional:
 //

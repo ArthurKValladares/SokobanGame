@@ -159,6 +159,7 @@ public:
     bool updateTexture(RenderTexture texture, const ImageData& image);
     // Picks up textures appended to the manifest after startup.
     void syncManifestTextures();
+    [[nodiscard]] uint32_t textureDescriptorCapacity() const;
     // Picks up static models appended by Debug decoration authoring.
     void syncManifestModels();
     // Reads the last drawn frame back as RGBA. The whole render extent when

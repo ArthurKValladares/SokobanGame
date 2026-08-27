@@ -160,24 +160,6 @@ find_program(GLSLC_EXECUTABLE glslc
     REQUIRED
 )
 
-# The model texture descriptor array size lives in exactly one place:
-# sokoban::maxModelTextures. Read it back out here instead of repeating the
-# number, so growing the array is a one-line header edit and the shaders can
-# never disagree with the C++ side. CMAKE_CONFIGURE_DEPENDS re-runs configure
-# when that header changes, so the shaders are rebuilt with the new size.
-set(ASSET_MANIFEST_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/AssetManifest.hpp")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ASSET_MANIFEST_HEADER}")
-file(READ "${ASSET_MANIFEST_HEADER}" ASSET_MANIFEST_HEADER_TEXT)
-string(REGEX MATCH "maxModelTextures[ \t]*=[ \t]*([0-9]+)"
-    MODEL_TEXTURE_COUNT_MATCH "${ASSET_MANIFEST_HEADER_TEXT}")
-if(NOT CMAKE_MATCH_1)
-    message(FATAL_ERROR
-        "Could not read sokoban::maxModelTextures from ${ASSET_MANIFEST_HEADER}. "
-        "Shaders would be compiled with the wrong descriptor array size.")
-endif()
-set(MODEL_TEXTURE_COUNT ${CMAKE_MATCH_1})
-message(STATUS "Model texture descriptor array: ${MODEL_TEXTURE_COUNT} slots")
-
 set(SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
 set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders")
 set(LEVEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/levels")
@@ -245,9 +227,6 @@ foreach(shader_source IN LISTS SHADER_SOURCES)
     add_custom_command(
         OUTPUT "${shader_output}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${SHADER_OUTPUT_DIR}"
-        # MODEL_TEXTURE_COUNT is read from sokoban::maxModelTextures above;
-        # descriptor writes pad to this size.
-        #
         # --target-env must match the device contract in VulkanDeviceContext
         # (Vulkan 1.3). Declaring a newer environment lets glslc emit SPIR-V a
         # conforming 1.3 driver is allowed to reject.
@@ -257,7 +236,7 @@ foreach(shader_source IN LISTS SHADER_SOURCES)
         # config-dependent flag would bake in whichever config compiled first
         # and never rebuild. Optimize always, and pass -g by hand when a
         # specific shader needs to be stepped through.
-        COMMAND "${GLSLC_EXECUTABLE}" --target-env=vulkan1.3 -O -DMODEL_TEXTURE_COUNT=${MODEL_TEXTURE_COUNT} -DMAX_SKIN_JOINTS=128 -fshader-stage=${shader_stage} "${shader_source}" -o "${shader_output}"
+        COMMAND "${GLSLC_EXECUTABLE}" --target-env=vulkan1.3 -O -DMAX_SKIN_JOINTS=128 -fshader-stage=${shader_stage} "${shader_source}" -o "${shader_output}"
         DEPENDS "${shader_source}"
         VERBATIM
     )

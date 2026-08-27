@@ -407,18 +407,31 @@ void testRuntimeTextureRegistration()
     check(manifest.addTexture({ .name = "NoPath", .path = "" }).isNone(),
         "empty texture path rejected");
 
-    while (manifest.textures().size() < sokoban::maxModelTextures) {
+    while (manifest.textures().size() < 80) {
         const sokoban::RenderTexture filler = manifest.addTexture({
             .name = "Filler" + std::to_string(manifest.textures().size()),
             .path = "filler.png",
         });
         check(!filler.isNone(), "filler texture registered");
     }
-    check(manifest.textures().size() == sokoban::maxModelTextures,
-        "texture list filled to the cap");
-    check(manifest.addTexture({ .name = "OneTooMany", .path = "x.png" })
-              .isNone(),
-        "registration stops at the descriptor array cap");
+    check(manifest.textures().size() == 80,
+        "manifest registration is not capped by the retired 64-slot layout");
+    check(manifest.findTextureIdByName(manifest.textures()[0].name) == existing,
+        "growing beyond the old descriptor cap preserves existing ids");
+
+    Json largeManifestJson = Json::parse(validManifest);
+    while (largeManifestJson["textures"].size() < 80) {
+        const std::string suffix =
+            std::to_string(largeManifestJson["textures"].size());
+        largeManifestJson["textures"].push_back({
+            { "name", "ParsedFiller" + suffix },
+            { "path", "textures/filler" + suffix + ".png" },
+        });
+    }
+    const AssetManifest largeManifest =
+        AssetManifest::parse(largeManifestJson.dump());
+    check(largeManifest.textures().size() == 80,
+        "a parsed manifest may exceed the retired 64-texture cap");
 }
 
 void testRuntimeDecorationModelRegistration()

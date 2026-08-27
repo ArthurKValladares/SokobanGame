@@ -108,11 +108,18 @@ void VulkanModelResources::create(
     VkQueue graphicsQueue,
     std::filesystem::path assetRoot,
     const AssetManifest& manifest,
+    uint32_t textureDescriptorCapacity,
     float maxSamplerAnisotropy)
 {
     destroy();
+    if (textureDescriptorCapacity == 0 ||
+        manifest.textures().size() > textureDescriptorCapacity) {
+        throw std::runtime_error(
+            "Asset manifest texture count exceeds the selected descriptor capacity");
+    }
     physicalDevice_ = physicalDevice;
     maxSamplerAnisotropy_ = std::max(maxSamplerAnisotropy, 1.0f);
+    textureDescriptorCapacity_ = textureDescriptorCapacity;
     device_ = device;
     commandPool_ = commandPool;
     graphicsQueue_ = graphicsQueue;
@@ -205,6 +212,7 @@ void VulkanModelResources::destroy()
     commandPool_ = VK_NULL_HANDLE;
     device_ = VK_NULL_HANDLE;
     physicalDevice_ = VK_NULL_HANDLE;
+    textureDescriptorCapacity_ = 0;
     textureUploadSubmissions_ = 0;
     textureUploadCompletions_ = 0;
     scheduler_.clear();
@@ -1245,11 +1253,11 @@ VulkanModelResources::MaterialBinding VulkanModelResources::materialForModel(
 
 std::vector<VulkanModelResources::TextureView> VulkanModelResources::textures() const
 {
-    // Shaders declare a fixed-size texture array (MODEL_TEXTURE_COUNT ==
-    // maxModelTextures), so the view is always padded to that size with the
-    // fallback texture regardless of how many textures the manifest defines.
+    // Every allocated descriptor is initialized. Nonresident manifest entries
+    // and reserved future slots both point at the fallback, so the renderer
+    // does not need partially-bound descriptor behavior.
     std::vector<TextureView> result;
-    result.reserve(maxModelTextures);
+    result.reserve(textureDescriptorCapacity_);
     for (const TextureSlot& texture : textures_) {
         const TextureResource& resource =
             (texture.state == LoadState::Uploading ||
@@ -1261,7 +1269,7 @@ std::vector<VulkanModelResources::TextureView> VulkanModelResources::textures() 
             .sampler = resource.sampler,
         });
     }
-    while (result.size() < maxModelTextures) {
+    while (result.size() < textureDescriptorCapacity_) {
         result.push_back({
             .imageView = fallbackTexture_.image.view,
             .sampler = fallbackTexture_.sampler,
@@ -1272,7 +1280,7 @@ std::vector<VulkanModelResources::TextureView> VulkanModelResources::textures() 
 
 uint32_t VulkanModelResources::textureCount() const
 {
-    return maxModelTextures;
+    return textureDescriptorCapacity_;
 }
 
 VulkanModelResources::SkinningBufferView VulkanModelResources::skinningBuffer() const
@@ -2020,6 +2028,13 @@ bool VulkanModelResources::syncManifestTextures()
     if (manifest_ == nullptr ||
         textures_.size() >= manifest_->textures().size()) {
         return false;
+    }
+    if (manifest_->textures().size() > textureDescriptorCapacity_) {
+        throw std::runtime_error(
+            "Runtime manifest requires " +
+            std::to_string(manifest_->textures().size()) +
+            " texture descriptors, but the stable heap capacity is " +
+            std::to_string(textureDescriptorCapacity_));
     }
     textures_.resize(manifest_->textures().size());
     return true;

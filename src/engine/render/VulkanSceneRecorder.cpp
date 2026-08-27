@@ -412,15 +412,18 @@ private:
 
     void bindDescriptorSet(VkCommandBuffer commandBuffer) const
     {
-        const VkDescriptorSet set = descriptorSet();
-        if (set) {
+        const std::array<VkDescriptorSet, 2> sets {
+            descriptorSet(),
+            descriptors_.textureSet(configuration_.descriptorFrameIndex),
+        };
+        if (sets[0] && sets[1]) {
             vkCmdBindDescriptorSets(
                 commandBuffer,
                 VK_PIPELINE_BIND_POINT_GRAPHICS,
                 pipelines_.layout(),
                 0,
-                1,
-                &set,
+                static_cast<uint32_t>(sets.size()),
+                sets.data(),
                 0,
                 nullptr);
         }

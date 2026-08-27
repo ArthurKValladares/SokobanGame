@@ -550,11 +550,6 @@ void AssetManifest::validateAndResolve()
             throw std::runtime_error("asset manifest: duplicate texture '" + texture.name + "'");
         }
     }
-    if (textures_.size() > maxModelTextures) {
-        throw std::runtime_error(
-            "asset manifest: too many textures (max " + std::to_string(maxModelTextures) + ")");
-    }
-
     for (Model& model : models_) {
         if (duplicate(models_, model.name)) {
             throw std::runtime_error("asset manifest: duplicate model '" + model.name + "'");
@@ -730,11 +725,6 @@ RenderTexture AssetManifest::addTexture(Texture texture)
         return noTexture;
     }
     if (!findTextureIdByName(texture.name).isNone()) {
-        return noTexture;
-    }
-    // The same cap parsing enforces: ids index the shader's descriptor array,
-    // so one past the end would sample out of bounds rather than fail loudly.
-    if (textures_.size() >= maxModelTextures) {
         return noTexture;
     }
     textures_.push_back(std::move(texture));

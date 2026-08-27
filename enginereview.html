@@ -257,10 +257,10 @@
   <header class="shell">
     <p class="eyebrow">Current-state review · 27 August 2026</p>
     <h1>Finish the material path without rebuilding it twice.</h1>
-    <p class="deck">Sokoban 3D now has the hard substrate—camera, HDR, cgltf, GPU materials and GGX. The next program removes the texture ceiling, discovers complete glTF materials, simplifies the scene shader, and lands each map behind a testable gate.</p>
+    <p class="deck">Sokoban 3D now has the hard substrate and a device-bounded runtime texture heap. The next program discovers complete glTF materials, simplifies the scene shader, and lands each map behind a testable gate.</p>
     <div class="metrics" aria-label="Current repository facts">
       <div class="metric"><b>36</b><span>manifest models</span></div>
-      <div class="metric"><b>42 / 64</b><span>texture slots used</span></div>
+      <div class="metric"><b>42 / 1024</b><span>textures on validated GPU</span></div>
       <div class="metric"><b>15</b><span>GLSL shaders</span></div>
       <div class="metric"><b>62</b><span>registered test suites</span></div>
     </div>
@@ -281,7 +281,7 @@
     <section id="verdict">
       <div class="section-head"><span class="num">01</span><h2>Current verdict</h2></div>
       <div class="callout">
-        <strong>Next program:</strong> descriptor-indexed texture heap → glTF dependency discovery → material-map transport → tonemap completion → minimal shader split → map sampling. Treat those as separate reviewable packets, not one V4/F3 mega-change.
+        <strong>Next program:</strong> glTF dependency discovery → material-map transport → tonemap completion → minimal shader split → map sampling. The descriptor-indexed heap is implemented and remains a validation invariant.
       </div>
       <div class="grid" style="margin-top:1rem">
         <article class="card">
@@ -291,13 +291,13 @@
         </article>
         <article class="card">
           <p class="kicker">What blocks complete PBR</p>
-          <h3>Texture identity and binding</h3>
-          <p>The manifest contains 42 textures against a fixed 64-entry descriptor array. glTF normal, metallic-roughness, emissive and occlusion images are neither represented in materials nor staged and bound.</p>
+          <h3>Texture identity and discovery</h3>
+          <p>The runtime heap can now grow beyond 64 entries, but glTF normal, metallic-roughness, emissive and occlusion images are neither represented in materials nor discovered, staged and bound.</p>
         </article>
         <article class="card">
           <p class="kicker">What not to overbuild</p>
           <h3>No per-material descriptor sets</h3>
-          <p>Draws and materials already select SSBO entries by index. Keep that bindless direction. Split out one texture heap; do not introduce per-material or per-draw sets.</p>
+          <p>Draws and materials select SSBO entries by index, while the texture heap lives in set 1. Preserve that bindless direction; do not introduce per-material or per-draw sets.</p>
         </article>
         <article class="card">
           <p class="kicker">Safety model</p>
@@ -325,7 +325,7 @@
             <tr><td>T8</td><td><span class="status open">Open</span></td><td>CPU asset work is threaded; frame preparation/recording remains largely serial.</td><td>Parallelize Vulkan-free preparation before command recording.</td></tr>
             <tr><td>V1/V3/V5/V6</td><td><span class="status done">Done</span></td><td>Semaphore ownership, skinning access, shader target/optimization and anisotropy are corrected.</td><td>Maintain through validation.</td></tr>
             <tr><td>V2</td><td><span class="status open">Open</span></td><td>Nine renderer files still call <code>vkAllocateMemory</code>.</td><td>VMA or deliberate suballocation before compressed streaming.</td></tr>
-            <tr><td>V4</td><td><span class="status next">Next</span></td><td>One descriptor set; fixed 64-slot texture array at binding 2.</td><td>Feature tier, separate texture set, runtime capacity.</td></tr>
+            <tr><td>V4</td><td><span class="status done">Done</span></td><td>Vulkan 1.2 feature gating, a separate per-frame texture set and device-bounded runtime capacity are live.</td><td>Preserve the fallback-filled, fence-safe update contract.</td></tr>
             <tr><td>V7</td><td><span class="status partial">Partial</span></td><td>AO now modulates ambient contribution only.</td><td>View-space data, world-unit radius, half-res and bilateral blur.</td></tr>
             <tr><td>A1</td><td><span class="status done">Done</span></td><td>cgltf parsing/validation, all interpolation modes and a loader-level CUBICSPLINE fixture are implemented.</td><td>Keep the fixture in the required regression gate.</td></tr>
             <tr><td>A2</td><td><span class="status open">Open</span></td><td>Runtime textures remain decoded RGBA images.</td><td>KTX2 and platform compression after allocation work.</td></tr>
@@ -352,12 +352,12 @@
         <article class="card">
           <p class="kicker">Layout rule</p>
           <h3>The texture binding must move</h3>
-          <p>A variable descriptor-count binding must be the highest binding in its set. The current array is binding 2 while the set continues through binding 12. A separate texture set is the clean seam.</p>
+          <p>A variable descriptor-count binding must be the highest binding in its set. The heap is now the only binding in set 1; set 0 retains scene resources through binding 12.</p>
         </article>
         <article class="card">
           <p class="kicker">Synchronization</p>
           <h3>Update-after-bind is optional</h3>
-          <p>Per-frame descriptor generations already avoid rewriting in-flight sets. Keep one texture set per frame and update the completed set. This removes a feature requirement and preserves current lifetime reasoning.</p>
+            <p>Per-frame descriptor generations avoid rewriting in-flight sets. One texture set per frame is updated only after completion; update-after-bind and partially-bound access are not required.</p>
         </article>
         <article class="card">
           <p class="kicker">Content architecture</p>
@@ -372,7 +372,7 @@
         <article class="card">
           <p class="kicker">Shader order</p>
           <h3>Split UI before map sampling</h3>
-          <p>The current scene fragment shader is 590 lines and has seven material-mode branches. Add descriptor and material plumbing first, then extract UI/title/composite modes before normal and MR logic arrive.</p>
+          <p>The current scene fragment shader is 587 lines and has seven material-mode branches. With descriptor plumbing in place, extract UI/title/composite modes before normal and MR logic arrive.</p>
         </article>
       </div>
       <div class="callout warn" style="margin-top:1rem">
@@ -390,21 +390,21 @@
           <div>
             <div class="phase-title"><h3>Make the starting point trustworthy</h3><span class="status partial">In progress</span></div>
             <div class="tasks">
-              <div class="task"><span class="task-id">0.1</span><div><b>Visual and performance evidence remains</b><p>The full Debug build and all 62 suites, including the Vulkan smoke test, pass. Capture representative screenshots and frame statistics before descriptor behavior changes.</p></div></div>
+              <div class="task"><span class="task-id">0.1</span><div><b>Visual and performance evidence remains</b><p>The full Debug build and all 62 suites, including the Vulkan smoke test, pass. Capture representative screenshots and frame statistics before material-map behavior changes.</p></div></div>
               <div class="task"><span class="task-id">0.2</span><div><b>Loader CUBICSPLINE fixture — complete</b><p>The public file loader is covered for three outputs per key, quaternion value normalization, tangent preservation and malformed counts.</p></div></div>
               <div class="task"><span class="task-id">0.3</span><div><b>Mechanical cleanup — partial</b><p>The dead GPU instance header is gone. Add and normalize the line-ending policy in a separate, non-semantic commit.</p></div></div>
             </div>
-            <p class="accept"><b>Gate:</b> automated validation is green; archive the visual and performance comparison baseline before starting descriptor changes.</p>
+            <p class="accept"><b>Gate:</b> automated validation is green; archive the visual and performance comparison baseline before material-map changes.</p>
           </div>
         </article>
 
         <article class="phase">
           <div class="phase-id">1<small>V4a</small></div>
           <div>
-            <div class="phase-title"><h3>Define the descriptor feature tier</h3></div>
+            <div class="phase-title"><h3>Define the descriptor feature tier</h3><span class="status done">Done</span></div>
             <div class="tasks">
-              <div class="task"><span class="task-id">1.1</span><div><b>Query Vulkan 1.2 features/properties</b><p>Represent runtime arrays, partially-bound and variable-count support; include non-uniform sampled-image indexing only if shader indexing requires it.</p></div></div>
-              <div class="task"><span class="task-id">1.2</span><div><b>Choose runtime capacity</b><p>Bound a configured heap ceiling by device limits and reserve explicit editor/import headroom. Report required, available and reserved counts on failure.</p></div></div>
+              <div class="task"><span class="task-id">1.1</span><div><b>Vulkan 1.2 feature contract — complete</b><p>Runtime arrays, variable counts and non-uniform sampled-image indexing are required and enabled. Partially-bound support is recorded but unused.</p></div></div>
+              <div class="task"><span class="task-id">1.2</span><div><b>Runtime capacity — complete</b><p>A 1,024-slot ceiling is bounded by device limits with 16 editor and 32 import slots reserved; failures report required, available and reserved counts.</p></div></div>
             </div>
             <p class="accept"><b>Gate:</b> unit fixtures accept and reject the right devices; logical-device creation enables exactly the features selection tested.</p>
           </div>
@@ -413,11 +413,11 @@
         <article class="phase">
           <div class="phase-id">2<small>V4b</small></div>
           <div>
-            <div class="phase-title"><h3>Isolate a frame-safe texture heap</h3></div>
+            <div class="phase-title"><h3>Isolate a frame-safe texture heap</h3><span class="status done">Done</span></div>
             <div class="tasks">
-              <div class="task"><span class="task-id">2.1</span><div><b>Two-set pipeline layout</b><p>Set 0 keeps scene/frame resources. Set 1 contains only the runtime-sized sampled texture array.</p></div></div>
-              <div class="task"><span class="task-id">2.2</span><div><b>One texture set per frame</b><p>Reuse FrameDescriptorSync; update only after the corresponding fence. Keep fallback descriptors for nonresident handles.</p></div></div>
-              <div class="task"><span class="task-id">2.3</span><div><b>Remove the 64-slot compile contract</b><p>Remove <code>MODEL_TEXTURE_COUNT</code>, CMake header scraping, manifest cap enforcement and fixed shader clamps.</p></div></div>
+              <div class="task"><span class="task-id">2.1</span><div><b>Two-set pipeline layout — complete</b><p>Set 0 keeps scene/frame resources. Set 1 contains only the runtime-sized sampled texture array.</p></div></div>
+              <div class="task"><span class="task-id">2.2</span><div><b>One texture set per frame — complete</b><p>FrameDescriptorSync updates only the completed frame; every nonresident and reserved handle has a fallback descriptor.</p></div></div>
+              <div class="task"><span class="task-id">2.3</span><div><b>Remove the 64-slot contract — complete</b><p><code>MODEL_TEXTURE_COUNT</code>, CMake header scraping, manifest cap enforcement and fixed shader clamps are gone.</p></div></div>
             </div>
             <p class="accept"><b>Gate:</b> more than 64 textures validate and bind on capable hardware; SPIR-V reflection and Vulkan validation agree for every pipeline.</p>
           </div>
@@ -426,7 +426,7 @@
         <article class="phase">
           <div class="phase-id">3<small>content</small></div>
           <div>
-            <div class="phase-title"><h3>Discover glTF dependencies deliberately</h3></div>
+            <div class="phase-title"><h3>Discover glTF dependencies deliberately</h3><span class="status next">Next</span></div>
             <div class="tasks">
               <div class="task"><span class="task-id">3.1</span><div><b>Dependency inspection API</b><p>Add a cgltf-backed, library-private API returning materials, images, samplers and buffers without GPU work or manifest-parser I/O.</p></div></div>
               <div class="task"><span class="task-id">3.2</span><div><b>Texture source variant</b><p>Represent external URI, embedded GLB image and supported data URI; deduplicate by canonical source plus interpretation.</p></div></div>

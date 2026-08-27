@@ -50,10 +50,14 @@ sokoban::VulkanDeviceFeatureSupport releaseFeatureSupport()
         .apiVersion = VK_API_VERSION_1_3,
         .maxPushConstantsSize = 128,
         .maxPerStageDescriptorSampledImages = 32,
+        .maxDescriptorSetSampledImages = 32,
         .dynamicRendering = true,
         .synchronization2 = true,
         .imageCubeArray = true,
         .extendedDynamicState = true,
+        .runtimeDescriptorArray = true,
+        .descriptorBindingVariableDescriptorCount = true,
+        .shaderSampledImageArrayNonUniformIndexing = true,
     };
 }
 
@@ -178,17 +182,21 @@ int main()
     constexpr uint32_t requiredPushConstants = 128;
     constexpr uint32_t requiredSampledImages = 32;
     const auto releaseOnlyTier = sokoban::chooseVulkanFeatureTier(
-        releaseFeatureSupport(), requiredPushConstants, requiredSampledImages);
+        releaseFeatureSupport(), requiredPushConstants,
+        requiredSampledImages, requiredSampledImages);
     check(releaseOnlyTier.releaseCompatible,
         "the Vulkan 1.3 release feature tier accepts its documented baseline");
     check(!releaseOnlyTier.wireframeSupported && !releaseOnlyTier.wideLinesSupported,
         "debug rasterization features do not gate the release tier");
+    check(!releaseOnlyTier.partiallyBoundDescriptorsSupported,
+        "fully populated descriptor heaps do not require partially-bound support");
 
     auto debugFeatureSupport = releaseFeatureSupport();
     debugFeatureSupport.fillModeNonSolid = true;
     debugFeatureSupport.wideLines = true;
     const auto debugTier = sokoban::chooseVulkanFeatureTier(
-        debugFeatureSupport, requiredPushConstants, requiredSampledImages);
+        debugFeatureSupport, requiredPushConstants,
+        requiredSampledImages, requiredSampledImages);
     check(debugTier.releaseCompatible && debugTier.wireframeSupported &&
             debugTier.wideLinesSupported,
         "supported debug features augment but do not replace the release tier");
@@ -196,7 +204,8 @@ int main()
     auto oldApiSupport = releaseFeatureSupport();
     oldApiSupport.apiVersion = VK_API_VERSION_1_2;
     check(!sokoban::chooseVulkanFeatureTier(
-               oldApiSupport, requiredPushConstants, requiredSampledImages)
+               oldApiSupport, requiredPushConstants,
+               requiredSampledImages, requiredSampledImages)
                .releaseCompatible,
         "Vulkan 1.2 is below the renderer's release contract");
 
@@ -205,6 +214,7 @@ int main()
     check(!sokoban::chooseVulkanFeatureTier(
                missingBaselineFeature,
                requiredPushConstants,
+               requiredSampledImages,
                requiredSampledImages).releaseCompatible,
         "ordinary draw-path features remain required for release");
 
@@ -214,8 +224,78 @@ int main()
     check(!sokoban::chooseVulkanFeatureTier(
                insufficientLimits,
                requiredPushConstants,
+               requiredSampledImages,
                requiredSampledImages).releaseCompatible,
         "descriptor capacity remains part of the release contract");
+
+    auto insufficientSetLimits = releaseFeatureSupport();
+    insufficientSetLimits.maxDescriptorSetSampledImages =
+        requiredSampledImages - 1;
+    const auto insufficientSetTier = sokoban::chooseVulkanFeatureTier(
+        insufficientSetLimits, requiredPushConstants,
+        requiredSampledImages, requiredSampledImages);
+    check(!insufficientSetTier.releaseCompatible &&
+            insufficientSetTier.rejection ==
+                sokoban::VulkanFeatureTierRejection::DescriptorSetSampledImageCapacity,
+        "descriptor-set sampled-image capacity is checked independently");
+
+    auto noRuntimeArrays = releaseFeatureSupport();
+    noRuntimeArrays.runtimeDescriptorArray = false;
+    const auto noRuntimeArrayTier = sokoban::chooseVulkanFeatureTier(
+        noRuntimeArrays, requiredPushConstants,
+        requiredSampledImages, requiredSampledImages);
+    check(!noRuntimeArrayTier.releaseCompatible &&
+            sokoban::vulkanFeatureTierRejectionMessage(
+                noRuntimeArrayTier.rejection).find("runtimeDescriptorArray") !=
+                std::string_view::npos,
+        "missing runtime descriptor arrays produce an actionable rejection");
+
+    auto noVariableCount = releaseFeatureSupport();
+    noVariableCount.descriptorBindingVariableDescriptorCount = false;
+    const auto noVariableCountTier = sokoban::chooseVulkanFeatureTier(
+        noVariableCount, requiredPushConstants,
+        requiredSampledImages, requiredSampledImages);
+    check(!noVariableCountTier.releaseCompatible &&
+            noVariableCountTier.rejection ==
+                sokoban::VulkanFeatureTierRejection::VariableDescriptorCount,
+        "variable descriptor counts are required by the runtime heap tier");
+
+    auto noNonUniformIndexing = releaseFeatureSupport();
+    noNonUniformIndexing.shaderSampledImageArrayNonUniformIndexing = false;
+    const auto noNonUniformTier = sokoban::chooseVulkanFeatureTier(
+        noNonUniformIndexing, requiredPushConstants,
+        requiredSampledImages, requiredSampledImages);
+    check(!noNonUniformTier.releaseCompatible &&
+            noNonUniformTier.rejection ==
+                sokoban::VulkanFeatureTierRejection::SampledImageArrayNonUniformIndexing,
+        "non-uniform sampled-image indexing is required by material handles");
+
+    auto partiallyBoundSupport = releaseFeatureSupport();
+    partiallyBoundSupport.descriptorBindingPartiallyBound = true;
+    const auto partiallyBoundTier = sokoban::chooseVulkanFeatureTier(
+        partiallyBoundSupport, requiredPushConstants,
+        requiredSampledImages, requiredSampledImages);
+    check(partiallyBoundTier.releaseCompatible &&
+            partiallyBoundTier.partiallyBoundDescriptorsSupported,
+        "partially-bound support is reported without becoming a requirement");
+
+    auto heapSupport = releaseFeatureSupport();
+    heapSupport.maxPerStageDescriptorSampledImages = 160;
+    heapSupport.maxDescriptorSetSampledImages = 128;
+    const auto boundedHeap = sokoban::chooseVulkanTextureHeapCapacity(
+        heapSupport, 70, 8, 16, 256, 8);
+    check(boundedHeap.supported && boundedHeap.capacity == 128,
+        "texture heap capacity is bounded by the tightest device limit");
+
+    const auto lowLimitHeap = sokoban::chooseVulkanTextureHeapCapacity(
+        heapSupport, 110, 8, 16, 256, 8);
+    const std::string lowLimitMessage =
+        sokoban::vulkanTextureHeapCapacityFailureMessage(lowLimitHeap);
+    check(!lowLimitHeap.supported &&
+            lowLimitMessage.find("110 content") != std::string::npos &&
+            lowLimitMessage.find("24 reserved") != std::string::npos &&
+            lowLimitMessage.find("128") != std::string::npos,
+        "low-limit heap rejection reports required, reserved and available counts");
 
     check(
         sokoban::vulkanDebug::validationMessageLogLevel(

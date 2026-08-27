@@ -1,8 +1,9 @@
 #version 460
+#extension GL_EXT_nonuniform_qualifier : require
 
 layout(set = 0, binding = 0) uniform sampler2D shadowMap;
 layout(set = 0, binding = 1) uniform sampler2D sceneColor;
-layout(set = 0, binding = 2) uniform sampler2D modelTextures[MODEL_TEXTURE_COUNT];
+layout(set = 1, binding = 0) uniform sampler2D modelTextures[];
 layout(set = 0, binding = 3) uniform sampler2D uiFont;
 layout(set = 0, binding = 4) uniform sampler2D titleBackground;
 layout(set = 0, binding = 8) uniform samplerCubeArray pointShadowMaps;
@@ -400,11 +401,9 @@ void main()
         materialColor *= texture(titleBackground, uv);
     } else if (materialMode == 7) {
         vec2 uv = draw.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
-        int textureIndex = clamp(
-            int(draw.textureOptions.y + 0.5) - 1,
-            0,
-            MODEL_TEXTURE_COUNT - 1);
-        materialColor *= texture(modelTextures[textureIndex], uv);
+        int textureIndex = max(int(draw.textureOptions.y + 0.5) - 1, 0);
+        materialColor *= texture(
+            modelTextures[nonuniformEXT(textureIndex)], uv);
     } else if (materialMode == 2) {
         // The factor is applied above for every mode. Only the texture is
         // per-mode: mode 1's comes from the manifest's single-texture
@@ -412,8 +411,7 @@ void main()
         // not consulted there.
         int materialTexture = int(material.textureAndUvSet.x + 0.5);
         if (materialTexture != 0) {
-            int textureIndex = clamp(
-                materialTexture - 1, 0, MODEL_TEXTURE_COUNT - 1);
+            int textureIndex = max(materialTexture - 1, 0);
             // Set 1 is the second unwrap; the loader falls it back to set 0
             // on a mesh that has only one, so this never reads nothing.
             vec2 uv = int(material.textureAndUvSet.y + 0.5) == 1
@@ -422,23 +420,22 @@ void main()
             if ((int(material.roughnessAlphaFlags.w + 0.5) & 1) != 0) {
                 uv.y = fract(uv.y + draw.materialOptions.y);
             }
-            materialColor *= texture(modelTextures[textureIndex], uv);
+            materialColor *= texture(
+                modelTextures[nonuniformEXT(textureIndex)], uv);
         }
     } else if (materialMode == MATERIAL_MODE_PROCEDURAL_TEXTURE) {
         // Procedural quads use a one-based texture handle because zero means
         // that no runtime texture was resolved.
         float selectedTexture = draw.textureOptions.y - 1.0;
-        int textureIndex = clamp(
-            int(selectedTexture + 0.5),
-            0,
-            MODEL_TEXTURE_COUNT - 1);
-        materialColor *= texture(modelTextures[textureIndex], vec2(inFaceCoordU, inFaceCoordV));
+        int textureIndex = max(int(selectedTexture + 0.5), 0);
+        materialColor *= texture(
+            modelTextures[nonuniformEXT(textureIndex)],
+            vec2(inFaceCoordU, inFaceCoordV));
     } else if (materialMode == 1) {
-        int textureIndex = clamp(
-            int(draw.materialOptions.z + 0.5),
-            0,
-            MODEL_TEXTURE_COUNT - 1);
-        materialColor *= texture(modelTextures[textureIndex], vec2(inFaceCoordU, inFaceCoordV));
+        int textureIndex = max(int(draw.materialOptions.z + 0.5), 0);
+        materialColor *= texture(
+            modelTextures[nonuniformEXT(textureIndex)],
+            vec2(inFaceCoordU, inFaceCoordV));
     }
     vec3 color = mix(materialColor.rgb, draw.gridColor.rgb, gridMask());
     // Stays zero for anything unlit - the grid overlay, the 2D board, UI -

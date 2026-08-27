@@ -136,6 +136,7 @@ public:
         VkQueue graphicsQueue,
         std::filesystem::path assetRoot,
         const AssetManifest& manifest,
+        uint32_t textureDescriptorCapacity,
         float maxSamplerAnisotropy = 1.0f);
     void destroy();
 
@@ -430,6 +431,7 @@ private:
 
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     float maxSamplerAnisotropy_ = 1.0f;
+    uint32_t textureDescriptorCapacity_ = 0;
     VkDevice device_ = VK_NULL_HANDLE;
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;

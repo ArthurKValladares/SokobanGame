@@ -13,6 +13,7 @@ public:
         VkPipelineCache pipelineCache = VK_NULL_HANDLE;
         std::filesystem::path assetRoot;
         VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+        VkDescriptorSetLayout textureDescriptorSetLayout = VK_NULL_HANDLE;
         // The surface's format. Only the two pipelines that draw a display
         // image use it: the tonemap pass and the UI.
         VkFormat colorFormat = VK_FORMAT_UNDEFINED;

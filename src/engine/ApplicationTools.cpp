@@ -140,6 +140,14 @@ bool ApplicationTools::createGroundSplatMap(
         ? groundSplatMapTextureNameForOverworldScreen(*overworldScreen)
         : groundSplatMapTextureNameForScreen(*location);
     if (manifest.findTextureIdByName(textureName).isNone()) {
+        if (manifest.textures().size() >=
+            renderer.textureDescriptorCapacity()) {
+            log::error(log::Category::Assets)
+                << "Could not register " << textureName
+                << "; the runtime texture descriptor heap is full (capacity "
+                << renderer.textureDescriptorCapacity() << ").";
+            return false;
+        }
         const RenderTexture added = manifest.addTexture({
             .name = textureName,
             .path = created.relativePath,
@@ -149,9 +157,7 @@ bool ApplicationTools::createGroundSplatMap(
         });
         if (added.isNone()) {
             log::error(log::Category::Assets)
-                << "Could not register " << textureName
-                << "; the texture descriptor array is full (max "
-                << maxModelTextures << ").";
+                << "Could not register " << textureName << ".";
             return false;
         }
         renderer.syncManifestTextures();

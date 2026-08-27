@@ -61,9 +61,15 @@ public:
         bool preview = false) const;
 
     [[nodiscard]] VkDescriptorSetLayout layout() const { return layout_; }
+    [[nodiscard]] VkDescriptorSetLayout textureLayout() const
+    {
+        return textureLayout_;
+    }
     [[nodiscard]] const VkDescriptorSet& set(
         uint32_t setIndex = 0,
         bool preview = false) const;
+    [[nodiscard]] const VkDescriptorSet& textureSet(
+        uint32_t setIndex = 0) const;
 
 private:
     struct OwnedBuffer {
@@ -77,11 +83,16 @@ private:
     void updateInternal(
         uint32_t internalSetIndex,
         const Resources& resources) const;
+    void updateTextureSet(
+        uint32_t setIndex,
+        const Resources& resources) const;
 
     VkDevice device_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout layout_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout textureLayout_ = VK_NULL_HANDLE;
     VkDescriptorPool pool_ = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> sets_;
+    std::vector<VkDescriptorSet> textureSets_;
     std::vector<OwnedBuffer> frameBuffers_;
     uint32_t frameSetCount_ = 0;
     uint32_t modelTextureCount_ = 0;

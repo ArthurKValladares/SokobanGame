@@ -10,24 +10,21 @@ history is the record of how the current baseline was produced.
 The renderer modernization has a sound substrate now: Vulkan 1.3, an explicit
 camera, instanced tile draws, an HDR scene target, a tonemap pass, cgltf-based
 loading, a GPU material buffer, tangents and two UV sets, and Cook-Torrance GGX
-lighting. The next objective is to finish glTF material support without
-preserving the fixed 64-texture ceiling or adding more branches to the current
-uber-shader.
+lighting. The fixed texture ceiling has now been replaced by a device-bounded,
+frame-safe descriptor heap. The next objective is to discover complete glTF
+material dependencies without adding filesystem I/O to manifest parsing or
+more branches to the current uber-shader.
 
 The recommended order is:
 
-1. Establish a fresh validation baseline and add the missing loader fixture.
-2. Query and enable the exact Vulkan descriptor-indexing feature tier.
-3. Move model textures into a separate, frame-safe descriptor set.
-4. Remove the compile-time 64-texture contract and introduce a runtime heap
-   capacity.
-5. Add a glTF dependency-inspection layer and a texture-source abstraction.
-6. Carry glTF material-map handles through the CPU and GPU material models.
-7. Finish tonemapping and exposure before judging mapped PBR output.
-8. Split non-scene modes out of `triangle.frag.glsl`.
-9. Implement and validate normal, metallic-roughness, emissive and occlusion
+1. Capture the remaining visual/performance baseline evidence.
+2. Add a glTF dependency-inspection layer and a texture-source abstraction.
+3. Carry glTF material-map handles through the CPU and GPU material models.
+4. Finish tonemapping and exposure before judging mapped PBR output.
+5. Split non-scene modes out of `triangle.frag.glsl`.
+6. Implement and validate normal, metallic-roughness, emissive and occlusion
    map sampling.
-10. Complete SSAO, then resume the larger scaling and memory work.
+7. Complete SSAO, then resume the larger scaling and memory work.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
@@ -39,10 +36,13 @@ sampling have different failure modes and should be independently reviewable.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
 - Current tests: 62 CTest suites in the newest configured build tree.
-- Current shaders: 15 GLSL files. `triangle.frag.glsl` is 590 physical lines.
-- Texture ceiling: `sokoban::maxModelTextures = 64`.
-- Descriptor layout: one set with bindings 0 through 12; the fixed texture
-  array is binding 2 and the GPU material buffer is binding 12.
+- Current shaders: 15 GLSL files. `triangle.frag.glsl` is 587 physical lines.
+- Texture capacity: selected at startup from a configured 1,024-slot ceiling,
+  device limits, 16 editor-reserved slots and 32 import-reserved slots. The
+  validated RTX 4060 configuration selects 1,024 slots for 42 manifest entries.
+- Descriptor layout: set 0 contains scene/frame resources; set 1 contains one
+  variable-count runtime texture array. One texture set exists per frame in
+  flight and every allocated slot has a valid fallback descriptor.
 - Working-tree policy: commits belong to the project owner. Keep changes
   separable and report each logical step.
 
@@ -64,6 +64,9 @@ future tasks:
   model back-face culling, 4x default MSAA, and AO-gated depth copying.
 - **V1/V3/V5/V6**: per-swapchain-image present semaphores, direct skinning
   SSBO indexing, Vulkan 1.3 optimized shader builds, and optional anisotropy.
+- **V4**: Vulkan 1.2 descriptor-indexing features are queried and selectively
+  enabled; model textures use a separate runtime-sized set with a device-bounded
+  capacity. The manifest and shader build no longer have a 64-texture cap.
 - **A1**: cgltf replaces the regex loader; validation, STEP and CUBICSPLINE
   sampling are implemented. A loader-level fixture covers the three-output
   layout, quaternion value normalization, tangent preservation and malformed
@@ -88,8 +91,8 @@ future tasks:
   per-frame descriptor sets and updates a set only after that frame's fence.
   Preserve that safety model until concurrent mutation is a measured need.
 - **A variable-count binding must be the highest binding in its set.** The
-  current texture array at binding 2 cannot simply be marked variable-count
-  while bindings 3 through 12 remain in the same set. Isolate the texture heap.
+  texture heap is therefore the only binding in set 1; do not merge it back
+  into the scene set, whose bindings continue through 12.
 
 ## Rendering invariants
 
@@ -156,7 +159,7 @@ Current state on 27 August 2026: the full Visual Studio Debug build succeeds
 and all 62 registered CTest suites pass, including `vulkan_smoke`. Establishing
 that baseline also exposed and repaired stale UI/settings assertions left by the
 earlier default-MSAA change. Representative screenshots and frame statistics
-still need to be captured before descriptor behavior changes.
+still need to be captured before material-map behavior changes.
 
 #### 0.1 Capture visual and performance evidence
 
@@ -165,7 +168,7 @@ still need to be captured before descriptor behavior changes.
   descriptor or material-map regressions.
 
 **Acceptance:** screenshots and frame statistics are archived against the green
-Debug baseline before descriptor behavior changes.
+Debug baseline before material-map behavior changes.
 
 #### 0.2 Loader-level CUBICSPLINE fixture — complete
 
@@ -182,82 +185,50 @@ only, and malformed output counts.
 - Add a small `.gitattributes` policy and normalize line endings in its own
   commit, never mixed with semantic changes.
 
-### 1. Define the descriptor-indexing device contract
+### 1. Descriptor-indexing device contract — complete
 
-#### 1.1 Represent support explicitly
+#### 1.1 Represent support explicitly — complete
 
-- Extend `VulkanDeviceFeatureSupport` with the Vulkan 1.2 descriptor features
-  the selected design actually uses.
-- Query `VkPhysicalDeviceVulkan12Features` in the physical-device feature chain.
-- Query the corresponding descriptor-indexing properties and limits.
-- Unit-test feature-tier acceptance and rejection.
+`VulkanDeviceFeatureSupport` now records the Vulkan 1.2 descriptor features and
+both relevant sampled-image limits. Device creation enables runtime arrays,
+variable descriptor counts and non-uniform sampled-image indexing. Unsupported
+devices are rejected with the first actionable feature or capacity reason.
 
-At minimum evaluate:
+`descriptorBindingPartiallyBound` is queried but deliberately not required or
+enabled: the heap fills every allocated slot with a fallback. Update-after-bind
+features are likewise not required.
 
-- `runtimeDescriptorArray`;
-- `descriptorBindingPartiallyBound`;
-- `descriptorBindingVariableDescriptorCount`;
-- `shaderSampledImageArrayNonUniformIndexing` if an index can vary within the
-  relevant invocation group.
+#### 1.2 Runtime capacity policy — complete
 
-Do not require update-after-bind features in this packet.
+The configured ceiling is 1,024 descriptors, bounded by per-stage and per-set
+device limits, with 16 editor and 32 import slots reserved at admission. Unit
+fixtures cover low-limit diagnostics, and logical-device layout support is
+checked before descriptor allocation. Manifest texture IDs remain append-only.
 
-**Acceptance:** unsupported GPUs are rejected with an actionable reason, and
-supported Vulkan 1.3 devices enable exactly the queried feature chain.
+### 2. Isolate the texture heap — complete
 
-#### 1.2 Define a runtime capacity policy
-
-- Choose a configured texture-heap ceiling bounded by the device's descriptor
-  limits, rather than using the raw maximum blindly.
-- Reserve explicit headroom for editor-added splat maps and imported assets.
-- Fail startup with required, available and reserved counts in the error.
-- Keep texture handles stable for the life of a manifest generation.
-
-**Acceptance:** a manifest can exceed 64 textures on capable hardware, and a
-low-limit fixture fails before descriptor allocation or shader execution.
-
-### 2. Isolate the texture heap
-
-#### 2.1 Split the pipeline layout by update frequency
-
-Use the smallest useful split:
+#### 2.1 Split the pipeline layout by update frequency — complete
 
 - **Set 0 — scene/frame resources:** shadows, scene images, SSAO, frame UBO,
   skinning, draw instances, materials, UI font and title image.
 - **Set 1 — sampled texture heap:** the runtime-sized model/content texture
   array as the final and only binding in that set.
 
-Do not create per-material or per-draw descriptor sets. Material and draw
-selection already use SSBO indices; adding sets there would reverse the
-bindless direction.
+All pipelines use this two-set layout. No per-material or per-draw descriptor
+sets were introduced.
 
-**Acceptance:** all pipelines use the two-set layout, shader reflection agrees
-with C++, and rendered output is unchanged.
+#### 2.2 Preserve frame-safe updates — complete
 
-#### 2.2 Preserve frame-safe updates
+There is one texture set per frame in flight. Existing `FrameDescriptorSync`
+generation tracking updates only the fence-completed frame, while nonresident
+and reserved entries remain valid fallback descriptors.
 
-- Allocate one texture set per frame in flight, matching the existing scene-set
-  safety model.
-- Update only the completed frame's texture set after its fence.
-- Keep fallback descriptors for nonresident entries unless partially-bound
-  behavior is proven safe for every shader access.
-- Retain generation tracking and add tests for growth, publication and eviction.
+#### 2.3 Remove the compile-time array contract — complete
 
-**Acceptance:** streaming a texture or evicting one never rewrites a set still
-referenced by an in-flight command buffer.
-
-#### 2.3 Remove the compile-time array contract
-
-- Replace fixed `MODEL_TEXTURE_COUNT` declarations with the runtime descriptor
-  array form used by the chosen feature tier.
-- Remove CMake's regex extraction of `maxModelTextures`.
-- Replace shader clamps against the compile-time count with validated handles
-  or a runtime count where defensive bounds checking remains useful.
-- Remove `maxModelTextures` from manifest validation and runtime registration.
-
-**Acceptance:** a test manifest with more than 64 textures validates, shader
-compilation no longer needs `MODEL_TEXTURE_COUNT`, and missing/nonresident
-textures still resolve to the fallback.
+The shaders now use a runtime descriptor array with explicit non-uniform
+indexing. `MODEL_TEXTURE_COUNT`, CMake header scraping, `maxModelTextures`, fixed
+shader clamps and manifest cap enforcement are gone. Parsing and runtime
+registration are covered beyond 64 entries.
 
 ### 3. Discover glTF texture dependencies outside manifest parsing
 

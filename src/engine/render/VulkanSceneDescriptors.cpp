@@ -33,11 +33,11 @@ void VulkanSceneDescriptors::create(
     }
     device_ = device;
     frameSetCount_ = setCount;
-    setCount *= 2;
+    const uint32_t sceneSetCount = setCount * 2;
     modelTextureCount_ = static_cast<uint32_t>(resources.modelTextures.size());
 
     try {
-        std::array<VkDescriptorSetLayoutBinding, sceneSingleImageBindings + 5>
+        std::array<VkDescriptorSetLayoutBinding, sceneSingleImageBindings + 4>
             bindings {
             VkDescriptorSetLayoutBinding {
                 .binding = 0,
@@ -49,12 +49,6 @@ void VulkanSceneDescriptors::create(
                 .binding = 1,
                 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-            },
-            VkDescriptorSetLayoutBinding {
-                .binding = 2,
-                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .descriptorCount = modelTextureCount_,
                 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
             },
             VkDescriptorSetLayoutBinding {
@@ -138,24 +132,75 @@ void VulkanSceneDescriptors::create(
             layout_,
             "Scene descriptor set layout");
 
+        const VkDescriptorSetLayoutBinding textureBinding {
+            .binding = 0,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = modelTextureCount_,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+        };
+        const VkDescriptorBindingFlags textureBindingFlags =
+            VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+        const VkDescriptorSetLayoutBindingFlagsCreateInfo bindingFlagsInfo {
+            .sType =
+                VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+            .bindingCount = 1,
+            .pBindingFlags = &textureBindingFlags,
+        };
+        const VkDescriptorSetLayoutCreateInfo textureLayoutInfo {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .pNext = &bindingFlagsInfo,
+            .bindingCount = 1,
+            .pBindings = &textureBinding,
+        };
+        VkDescriptorSetVariableDescriptorCountLayoutSupport variableCountSupport {
+            .sType =
+                VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_LAYOUT_SUPPORT,
+        };
+        VkDescriptorSetLayoutSupport textureLayoutSupport {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_SUPPORT,
+            .pNext = &variableCountSupport,
+        };
+        vkGetDescriptorSetLayoutSupport(
+            device_, &textureLayoutInfo, &textureLayoutSupport);
+        if (textureLayoutSupport.supported != VK_TRUE ||
+            variableCountSupport.maxVariableDescriptorCount <
+                modelTextureCount_) {
+            throw std::runtime_error(
+                "Texture descriptor layout requires " +
+                std::to_string(modelTextureCount_) +
+                " variable descriptors, but the logical device supports " +
+                std::to_string(
+                    variableCountSupport.maxVariableDescriptorCount));
+        }
+        vkCheck(
+            vkCreateDescriptorSetLayout(
+                device_, &textureLayoutInfo, nullptr, &textureLayout_),
+            "vkCreateDescriptorSetLayout texture heap failed");
+        vulkanDebug::setObjectName(
+            device_,
+            VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT,
+            textureLayout_,
+            "Texture heap descriptor set layout");
+
         std::array<VkDescriptorPoolSize, 3> poolSizes {
             VkDescriptorPoolSize {
                 .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .descriptorCount =
-                    (modelTextureCount_ + sceneSingleImageBindings) * setCount,
+                    sceneSingleImageBindings * sceneSetCount +
+                    modelTextureCount_ * frameSetCount_,
             },
             VkDescriptorPoolSize {
                 .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                .descriptorCount = setCount,
+                .descriptorCount = sceneSetCount,
             },
             VkDescriptorPoolSize {
                 .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .descriptorCount = 3 * setCount,
+                .descriptorCount = 3 * sceneSetCount,
             },
         };
         VkDescriptorPoolCreateInfo poolInfo {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-            .maxSets = setCount,
+            .maxSets = sceneSetCount + frameSetCount_,
             .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
             .pPoolSizes = poolSizes.data(),
         };
@@ -164,18 +209,42 @@ void VulkanSceneDescriptors::create(
         vulkanDebug::setObjectName(
             device_, VK_OBJECT_TYPE_DESCRIPTOR_POOL, pool_, "Scene descriptor pool");
 
-        std::vector<VkDescriptorSetLayout> layouts(setCount, layout_);
-        sets_.resize(setCount);
+        std::vector<VkDescriptorSetLayout> layouts(sceneSetCount, layout_);
+        sets_.resize(sceneSetCount);
         VkDescriptorSetAllocateInfo allocateInfo {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
             .descriptorPool = pool_,
-            .descriptorSetCount = setCount,
+            .descriptorSetCount = sceneSetCount,
             .pSetLayouts = layouts.data(),
         };
         vkCheck(vkAllocateDescriptorSets(device_, &allocateInfo, sets_.data()),
             "vkAllocateDescriptorSets failed");
-        frameBuffers_.reserve(setCount);
-        for (uint32_t i = 0; i < setCount; ++i) {
+
+        std::vector<VkDescriptorSetLayout> textureLayouts(
+            frameSetCount_, textureLayout_);
+        std::vector<uint32_t> textureDescriptorCounts(
+            frameSetCount_, modelTextureCount_);
+        const VkDescriptorSetVariableDescriptorCountAllocateInfo variableCounts {
+            .sType =
+                VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO,
+            .descriptorSetCount = frameSetCount_,
+            .pDescriptorCounts = textureDescriptorCounts.data(),
+        };
+        textureSets_.resize(frameSetCount_);
+        const VkDescriptorSetAllocateInfo textureAllocateInfo {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .pNext = &variableCounts,
+            .descriptorPool = pool_,
+            .descriptorSetCount = frameSetCount_,
+            .pSetLayouts = textureLayouts.data(),
+        };
+        vkCheck(
+            vkAllocateDescriptorSets(
+                device_, &textureAllocateInfo, textureSets_.data()),
+            "vkAllocateDescriptorSets texture heap failed");
+
+        frameBuffers_.reserve(sceneSetCount);
+        for (uint32_t i = 0; i < sceneSetCount; ++i) {
             frameBuffers_.push_back(createFrameBuffer(physicalDevice));
         }
         update(resources);
@@ -198,6 +267,7 @@ void VulkanSceneDescriptors::update(
 {
     updateInternal(setIndex * 2, resources);
     updateInternal(setIndex * 2 + 1, resources);
+    updateTextureSet(setIndex, resources);
 }
 
 void VulkanSceneDescriptors::updateInternal(
@@ -219,23 +289,9 @@ void VulkanSceneDescriptors::updateInternal(
         !resources.ssao.valid() ||
         !resources.uiFont.valid() ||
         !resources.titleBackground.valid() ||
-        resources.modelTextures.size() != modelTextureCount_ ||
         !resources.skinning.valid() || !resources.drawInstances.valid() ||
         !resources.materials.valid()) {
         throw std::runtime_error("Scene descriptor resources are incomplete");
-    }
-
-    std::vector<VkDescriptorImageInfo> modelImages;
-    modelImages.reserve(resources.modelTextures.size());
-    for (const VulkanModelResources::TextureView texture : resources.modelTextures) {
-        if (!texture.valid()) {
-            throw std::runtime_error("Model texture descriptor is incomplete");
-        }
-        modelImages.push_back({
-            .sampler = texture.sampler,
-            .imageView = texture.imageView,
-            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        });
     }
 
     const VkDescriptorImageInfo shadow {
@@ -298,7 +354,7 @@ void VulkanSceneDescriptors::updateInternal(
         .imageView = resources.titleBackground.imageView,
         .imageLayout = resources.titleBackground.imageLayout,
     };
-    std::array<VkWriteDescriptorSet, 13> writes {
+    std::array<VkWriteDescriptorSet, 12> writes {
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             .dstSet = descriptorSet,
@@ -330,14 +386,6 @@ void VulkanSceneDescriptors::updateInternal(
             .descriptorCount = 1,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .pImageInfo = &sceneColor,
-        },
-        VkWriteDescriptorSet {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = descriptorSet,
-            .dstBinding = 2,
-            .descriptorCount = static_cast<uint32_t>(modelImages.size()),
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo = modelImages.data(),
         },
         VkWriteDescriptorSet {
             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -407,6 +455,44 @@ void VulkanSceneDescriptors::updateInternal(
     vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 }
 
+void VulkanSceneDescriptors::updateTextureSet(
+    uint32_t setIndex,
+    const Resources& resources) const
+{
+    const VkDescriptorSet descriptorSet = setIndex < textureSets_.size()
+        ? textureSets_[setIndex]
+        : VK_NULL_HANDLE;
+    if (!descriptorSet) {
+        throw std::runtime_error("Texture heap descriptors have not been created");
+    }
+    if (resources.modelTextures.size() != modelTextureCount_) {
+        throw std::runtime_error(
+            "Texture heap resources do not match its stable capacity");
+    }
+
+    std::vector<VkDescriptorImageInfo> modelImages;
+    modelImages.reserve(resources.modelTextures.size());
+    for (const VulkanModelResources::TextureView texture : resources.modelTextures) {
+        if (!texture.valid()) {
+            throw std::runtime_error("Model texture descriptor is incomplete");
+        }
+        modelImages.push_back({
+            .sampler = texture.sampler,
+            .imageView = texture.imageView,
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        });
+    }
+    const VkWriteDescriptorSet write {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = descriptorSet,
+        .dstBinding = 0,
+        .descriptorCount = static_cast<uint32_t>(modelImages.size()),
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImageInfo = modelImages.data(),
+    };
+    vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+}
+
 void VulkanSceneDescriptors::destroy()
 {
     if (device_) {
@@ -427,12 +513,17 @@ void VulkanSceneDescriptors::destroy()
         if (layout_) {
             vkDestroyDescriptorSetLayout(device_, layout_, nullptr);
         }
+        if (textureLayout_) {
+            vkDestroyDescriptorSetLayout(device_, textureLayout_, nullptr);
+        }
     }
     sets_.clear();
+    textureSets_.clear();
     frameBuffers_.clear();
     frameSetCount_ = 0;
     pool_ = VK_NULL_HANDLE;
     layout_ = VK_NULL_HANDLE;
+    textureLayout_ = VK_NULL_HANDLE;
     modelTextureCount_ = 0;
     device_ = VK_NULL_HANDLE;
 }
@@ -557,6 +648,16 @@ const VkDescriptorSet& VulkanSceneDescriptors::set(
         return nullSet;
     }
     return sets_[internalSetIndex];
+}
+
+const VkDescriptorSet& VulkanSceneDescriptors::textureSet(
+    uint32_t setIndex) const
+{
+    if (setIndex >= textureSets_.size()) {
+        static const VkDescriptorSet nullSet = VK_NULL_HANDLE;
+        return nullSet;
+    }
+    return textureSets_[setIndex];
 }
 
 } // namespace sokoban

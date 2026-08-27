@@ -52,10 +52,18 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         // DrawInstanceIndexPushConstants into the front of the same range.
         .size = sizeof(GpuDrawInstance),
     };
+    const std::array<VkDescriptorSetLayout, 2> descriptorSetLayouts {
+        createInfo.descriptorSetLayout,
+        createInfo.textureDescriptorSetLayout,
+    };
+    if (!descriptorSetLayouts[0] || !descriptorSetLayouts[1]) {
+        throw std::runtime_error(
+            "Scene pipelines require scene and texture descriptor layouts");
+    }
     VkPipelineLayoutCreateInfo layoutInfo {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = createInfo.descriptorSetLayout ? 1U : 0U,
-        .pSetLayouts = createInfo.descriptorSetLayout ? &createInfo.descriptorSetLayout : nullptr,
+        .setLayoutCount = static_cast<uint32_t>(descriptorSetLayouts.size()),
+        .pSetLayouts = descriptorSetLayouts.data(),
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &pushConstantRange,
     };
