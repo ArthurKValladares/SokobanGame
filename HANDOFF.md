@@ -417,6 +417,48 @@ noticeably more transparent, which is the authored value showing through for
 the first time. Worth landing on its own so it can be looked at, rather than
 inside the BRDF swap.
 
+### The model.vert Euler rotation is gone
+
+`model.vert` and `skinned_model.vert` used to rebuild the model's rotation
+matrix from an Euler triple - three sines and three cosines per vertex - and
+take the inverse scale from a second slot, when `worldFromModel` was already
+in `draw.vertices` with the rotation and the scale in its columns.
+
+- **Rotation and scale now come from the matrix.** The first three columns are
+  the model's axes: their lengths are the scale, and the columns divided by it
+  are the rotation. `rotateByEuler` and its inlined duplicate are deleted, and
+  the SPIR-V for both shaders now contains **zero** sin or cos instructions.
+- **Two per-draw slots are free for a model draw**, and the recorder no longer
+  computes what went in them: `normalAndAmbientRed.xyz` (was the Euler triple)
+  and `gridColor.xyz` (was the reciprocal scale). The negative `gridColor.w`
+  stays - it is still the "this draw is a model" marker the fragment stage
+  reads for the editor highlight and to keep the grid overlay off.
+- **The mirror-energy special case is gone.** Mirror-energy models needed
+  `gridColor` for their effect, so they could not be handed an inverse scale
+  and silently shaded with unit normal scaling instead. Reading the scale from
+  the matrix removes the conflict, so they now get the same correct normals as
+  everything else.
+- **Not a correctness fix for normals.** Inverse-scale-then-Euler was already
+  exactly the inverse transpose of R·S, because `modelTransformPoints` builds
+  the matrix from the same authored rotation and scale. It was redundancy.
+- **It is a correctness fix for tangents.** The Euler path applied the
+  rotation without the scale; a tangent transforms by the matrix itself. The
+  two agree only under a uniform scale. Nothing reads the tangent yet, so this
+  became right before it became visible.
+
+**Verified**: all 15 shaders compile; the vertex attribute sets and the
+varying interface are unchanged by SPIR-V reflection. Numerically, over
+200,000 random rotation/scale/normal triples the new normal matches the old to
+**5.6e-16** - floating-point identity. The tangent deliberately does not match
+under non-uniform scale, and matches to 3.9e-16 under uniform scale, which is
+exactly the difference described above and nothing else.
+
+**One assumption worth knowing**: the sign of a negative scale is dropped,
+because a column length is unsigned. The old path dropped it too - its
+reciprocal went through `std::abs` - so this is unchanged, and no content can
+author one anyway: `DecorationGizmo` clamps scale to `>= 0.001` and no level
+or asset JSON contains a negative component.
+
 ### Decided: V4 first, then the manifest discovers textures from the glTF
 
 The question below was put to the project owner and answered. The order is:

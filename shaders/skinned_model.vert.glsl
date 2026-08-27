@@ -77,20 +77,6 @@ vec4 sunShadowFromWorld(vec3 worldPosition) {
 // OpLoad per vertex invocation, and drivers that fail to scalarize it spill
 // catastrophically. Index the members through the buffer instead; the
 // per-matrix loads below are the only reads that should reach memory.
-// See model.vert: the same Euler triple, applied to whatever needs it.
-vec3 rotateByEuler(vec3 value, vec3 rotation)
-{
-    float cosine = cos(rotation.x);
-    float sine = sin(rotation.x);
-    value = vec3(value.x, cosine * value.y - sine * value.z, sine * value.y + cosine * value.z);
-    cosine = cos(rotation.y);
-    sine = sin(rotation.y);
-    value = vec3(cosine * value.x + sine * value.z, value.y, -sine * value.x + cosine * value.z);
-    cosine = cos(rotation.z);
-    sine = sin(rotation.z);
-    return vec3(cosine * value.x - sine * value.y, sine * value.x + cosine * value.y, value.z);
-}
-
 void main() {
     vec4 sourcePosition = vec4(0.0);
     vec3 sourceNormal = vec3(0.0);
@@ -132,13 +118,35 @@ void main() {
     // matrix, a normal by its inverse transpose.
     vec3 tangent = mat3(skinning.instances[gl_InstanceIndex].modelFromSource) *
         sourceTangent;
-    if (draw.gridColor.w < 0.0) { normal *= draw.gridColor.xyz; }
-    vec3 rotation = draw.normalAndAmbientRed.xyz;
-    float cosine = cos(rotation.x); float sine = sin(rotation.x);
-    normal = vec3(normal.x, cosine * normal.y - sine * normal.z, sine * normal.y + cosine * normal.z);
-    cosine = cos(rotation.y); sine = sin(rotation.y);
-    normal = vec3(cosine * normal.x + sine * normal.z, normal.y, -sine * normal.x + cosine * normal.z);
-    cosine = cos(rotation.z); sine = sin(rotation.z);
-    outNormal = normalize(vec3(cosine * normal.x - sine * normal.y, sine * normal.x + cosine * normal.y, normal.z));
-    outTangent = vec4(rotateByEuler(tangent, rotation), inTangent.w);
+    // Rotation and scale are already in worldFromModel: its first three
+    // columns are the model's axes, so their lengths are the scale and the
+    // columns divided by that are the rotation. This used to rebuild the same
+    // rotation from an Euler triple the recorder sent alongside the matrix -
+    // three sines and three cosines per vertex to reconstruct something that
+    // was sitting in draw.vertices the whole time - and took the inverse
+    // scale from gridColor.xyz, which the mirror-energy path could not use
+    // because it needed gridColor for its effect. Deriving both from the
+    // matrix costs neither of those and drops the special case.
+    //
+    // The sign of a negative scale is lost here, exactly as it was before:
+    // the recorder's inverse scale went through std::abs.
+    mat3 modelToWorld = mat3(worldTransform);
+    vec3 inverseScale = 1.0 / max(
+        vec3(
+            length(modelToWorld[0]),
+            length(modelToWorld[1]),
+            length(modelToWorld[2])),
+        vec3(0.0001));
+    mat3 rotationOnly = mat3(
+        modelToWorld[0] * inverseScale.x,
+        modelToWorld[1] * inverseScale.y,
+        modelToWorld[2] * inverseScale.z);
+    // A normal transforms by the inverse transpose, which for a rotation
+    // times a diagonal scale is the rotation times the inverse scale.
+    outNormal = normalize(rotationOnly * (normal * inverseScale));
+    // A tangent transforms by the matrix itself. The Euler path applied the
+    // rotation without the scale, which is the same answer only when the
+    // scale is uniform; nothing reads the tangent yet, so this becomes right
+    // before it becomes visible.
+    outTangent = vec4(normalize(modelToWorld * tangent), inTangent.w);
 }

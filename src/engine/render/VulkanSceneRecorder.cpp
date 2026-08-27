@@ -2081,23 +2081,13 @@ private:
                           RenderFrameData::EditorDecorationHighlight::Hovered
                       ? 1.0f
                       : 0.0f);
-        const Vec3 modelRotation = tile.modelTransform
-            ? tile.modelTransform->rotationRadians
-            : Vec3 {
-                  0.0f,
-                  0.0f,
-                  static_cast<float>(
-                      tile.modelRotationQuarterTurns % 4) *
-                          1.57079632679f +
-                      tile.modelRotationOffsetRadians,
-              };
-        const Vec3 modelScale = tile.modelTransform
-            ? tile.modelTransform->scale
-            : Vec3 {
-                  tile.size.x,
-                  tile.size.y,
-                  std::max(tile.height, 0.0001f),
-              };
+        // The authored rotation and scale used to be restated here - the
+        // rotation as an Euler triple in normalAndAmbientRed.xyz and the
+        // reciprocal of the scale in gridColor.xyz - so that the vertex
+        // shaders could rebuild a rotation matrix per vertex. Both are
+        // columns of the worldFromModel this same draw already carries in
+        // `vertices`, so the shaders read them from there and these two
+        // slots are free for a model draw.
         const GpuDrawInstance constants {
             .vertices = IsoScenePreparer::modelWorldTransform(tile),
             // Model draws claim the first slot, and only the first slot, for
@@ -2115,10 +2105,11 @@ private:
                 Vec4 {},
             },
             .color = tile.color,
+            // xyz free; see above. w is the ambient term's red channel.
             .normalAndAmbientRed = {
-                modelRotation.x,
-                modelRotation.y,
-                modelRotation.z,
+                0.0f,
+                0.0f,
+                0.0f,
                 ambientRadiance.x,
             },
             .sunDirectionAndAmbientGreen = {
@@ -2173,12 +2164,11 @@ private:
                       config::mirrorEnergyPulseSpeed,
                       config::mirrorEnergyPulseStrength,
                   }
-                : Vec4 {
-                      1.0f / std::max(std::abs(modelScale.x), 0.0001f),
-                      1.0f / std::max(std::abs(modelScale.y), 0.0001f),
-                      1.0f / std::max(std::abs(modelScale.z), 0.0001f),
-                      -1.0f,
-                  },
+                // xyz free; see above. The negative w is still the marker
+                // that says "this draw is a model", which the fragment stage
+                // reads to decide the editor highlight and to keep the grid
+                // overlay off.
+                : Vec4 { 0.0f, 0.0f, 0.0f, -1.0f },
             .textureOptions = {
                 shaderValue(material.mode),
                 editorHighlightState,
