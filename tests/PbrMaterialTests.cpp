@@ -146,6 +146,52 @@ void testDoubleSidedBackFaceFlipsTheFinalMappedNormal()
     CHECK(near(back, -front));
 }
 
+void testMissingEmissiveMapPreservesTheFactor()
+{
+    TEST("missingEmissiveMapPreservesTheFactor");
+    CHECK(near(
+        resolveEmissive({ 0.25f, 0.5f, 0.75f }),
+        { 0.25f, 0.5f, 0.75f }));
+}
+
+void testEmissiveMapMultipliesLinearRgbAndIgnoresAlpha()
+{
+    TEST("emissiveMapMultipliesLinearRgbAndIgnoresAlpha");
+    const Vec3 result = resolveEmissive(
+        { 0.8f, 0.6f, 0.4f },
+        { 0.25f, 0.5f, 0.75f, 0.0f });
+    CHECK(near(result, { 0.2f, 0.3f, 0.3f }));
+
+    const Vec3 differentAlpha = resolveEmissive(
+        { 0.8f, 0.6f, 0.4f },
+        { 0.25f, 0.5f, 0.75f, 1.0f });
+    CHECK(near(differentAlpha, result));
+}
+
+void testEmissiveResolutionPreservesHdrValues()
+{
+    TEST("emissiveResolutionPreservesHdrValues");
+    const Vec3 result = resolveEmissive(
+        { 4.0f, 3.0f, 2.0f },
+        { 0.5f, 0.5f, 0.75f, 1.0f });
+    CHECK(near(result, { 2.0f, 1.5f, 1.5f }));
+    CHECK(result.x > 1.0f);
+}
+
+void testEmissiveIsExcludedFromTheAmbientNumerator()
+{
+    TEST("emissiveIsExcludedFromTheAmbientNumerator");
+    const Vec3 ambient { 1.0f, 1.0f, 1.0f };
+    const Vec3 direct { 1.0f, 1.0f, 1.0f };
+    const Vec3 emissive { 2.0f, 2.0f, 2.0f };
+
+    CHECK(near(ambientLightRatio(ambient, ambient + direct), 0.5f));
+    CHECK(near(
+        ambientLightRatio(ambient, ambient + direct + emissive),
+        0.25f));
+    CHECK(near(ambientLightRatio({}, emissive), 0.0f));
+}
+
 } // namespace
 
 int main()
@@ -158,6 +204,10 @@ int main()
     testTangentHandednessControlsTheBitangent();
     testDegenerateTangentGetsAnOrthonormalFallback();
     testDoubleSidedBackFaceFlipsTheFinalMappedNormal();
+    testMissingEmissiveMapPreservesTheFactor();
+    testEmissiveMapMultipliesLinearRgbAndIgnoresAlpha();
+    testEmissiveResolutionPreservesHdrValues();
+    testEmissiveIsExcludedFromTheAmbientNumerator();
 
     if (failures == 0) {
         std::cout << "PbrMaterialTests: " << checks << " checks passed\n";

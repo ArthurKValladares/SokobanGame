@@ -549,8 +549,24 @@ void main()
         vec3 ambientTerm = ambient * (1.0 + skyFill * 0.35);
         vec3 ambientContribution = ambientTerm * (diffuseAlbedo + f0);
 
+        // The emissive image is uploaded through an sRGB Vulkan format, so
+        // sampling returns linear RGB here. Its alpha is not part of glTF's
+        // emissive definition. A missing map is equivalent to white and lets
+        // the factor stand on its own; neither path is clamped, preserving
+        // authored HDR emission.
+        vec3 emissive = material.emissiveAndMetallic.rgb;
+        int emissiveTexture = int(material.primaryTextureHandles.w);
+        if (emissiveTexture != 0) {
+            int textureIndex = max(emissiveTexture - 1, 0);
+            emissive *= texture(
+                modelTextures[nonuniformEXT(textureIndex)],
+                materialTextureUv(
+                    material.textureUvSets.w,
+                    material.materialState.z)).rgb;
+        }
+
         color = diffuseLight + ambientContribution +
-            specularLight * specularStrength;
+            specularLight * specularStrength + emissive;
 
         // The share of this pixel's light that came from ambient, which is
         // what the SSAO composite scales by.
@@ -560,9 +576,10 @@ void main()
         // excluded from both sides" would have meant here - made a metallic
         // surface report a smaller ambient share than it had, and a fully
         // metallic one report zero over zero and take no occlusion at all.
-        // Direct light, specular included, stays in the denominator only, so
-        // a pixel dominated by a highlight is occluded less. That is the same
-        // intent F2b had; only the arithmetic that serves it has changed.
+        // Direct light, specular and emissive stay in the denominator only,
+        // so SSAO subtracts the ambient share without darkening illumination
+        // from the lights or the material itself. That is the same intent F2b
+        // had; only the arithmetic that serves it has changed.
         ambientMask = clamp(
             dot(ambientContribution, luminanceWeights) /
                 max(dot(color, luminanceWeights), 0.0001),

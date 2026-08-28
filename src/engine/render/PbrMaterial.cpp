@@ -62,4 +62,23 @@ Vec3 resolveNormalMap(
     return result;
 }
 
+Vec3 resolveEmissive(Vec3 emissiveFactor, Vec4 linearSample)
+{
+    return {
+        emissiveFactor.x * linearSample.x,
+        emissiveFactor.y * linearSample.y,
+        emissiveFactor.z * linearSample.z,
+    };
+}
+
+float ambientLightRatio(Vec3 ambientContribution, Vec3 totalColor)
+{
+    constexpr Vec3 luminanceWeights { 0.2126f, 0.7152f, 0.0722f };
+    return std::clamp(
+        dot(ambientContribution, luminanceWeights) /
+            std::max(dot(totalColor, luminanceWeights), 0.0001f),
+        0.0f,
+        1.0f);
+}
+
 } // namespace sokoban

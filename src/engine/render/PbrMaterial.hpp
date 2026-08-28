@@ -29,4 +29,19 @@ struct MetallicRoughness {
     float normalScale = 1.0f,
     bool doubleSidedBackFace = false);
 
+// CPU reference for glTF emissive resolution in triangle.frag.glsl. The
+// texture sample has already been decoded from sRGB by the image format.
+// Alpha is ignored and the result deliberately remains unclamped so authored
+// HDR emissive factors survive.
+[[nodiscard]] Vec3 resolveEmissive(
+    Vec3 emissiveFactor,
+    Vec4 linearSample = { 1.0f, 1.0f, 1.0f, 1.0f });
+
+// CPU reference for the ambient-share value written into the scene target's
+// alpha. totalColor includes direct, ambient, specular and emissive light;
+// ambientContribution is the only term SSAO is allowed to darken.
+[[nodiscard]] float ambientLightRatio(
+    Vec3 ambientContribution,
+    Vec3 totalColor);
+
 } // namespace sokoban

@@ -20,16 +20,16 @@ worker decode, render-thread publication and bounded residency. HDR presentation
 now uses Khronos PBR Neutral by default, with persisted exposure and a Debug
 straight-clamp comparison. Player-facing UI now has a dedicated fragment path,
 leaving the scene fragment shader free of font, title-art, UI-texture and
-rounded scene-image branches. Metallic-roughness sampling is now live as the
-first mapped PBR input, and normal maps now perturb the lighting frame through
-authored or derived tangents. The next objective is emissive sampling in linear
-light without contaminating the ambient-mask contract.
+rounded scene-image branches. Metallic-roughness, normal and emissive sampling
+are now live; normal maps perturb the lighting frame through authored or
+derived tangents, while emissive maps add unclamped linear HDR color without
+becoming ambient light. The next objective is material occlusion sampling.
 
 The recommended order is:
 
 1. Capture the remaining post-tonemap visual/performance baseline evidence.
-2. Implement and validate emissive and occlusion map sampling, then audit alpha
-   and mirror-energy behavior.
+2. Implement and validate occlusion map sampling, then audit alpha and
+   mirror-energy behavior.
 3. Complete SSAO, then resume the larger scaling and memory work.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
@@ -42,7 +42,7 @@ sampling have different failure modes and should be independently reviewable.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
 - Current tests: 67 CTest suites in the newest configured build tree.
-- Current shaders: 16 GLSL files. `triangle.frag.glsl` is 556 physical lines;
+- Current shaders: 16 GLSL files. `triangle.frag.glsl` is 622 physical lines;
   player-facing UI uses the 93-line `ui.frag.glsl` path.
 - Texture capacity: selected at startup from a configured 1,024-slot ceiling,
   device limits, 16 editor-reserved slots and 32 import-reserved slots. The
@@ -69,8 +69,8 @@ future tasks:
 - **F3**: cgltf material factors, tangents, a second UV set, alpha modes,
   double-sided metadata, a GPU material buffer and Cook-Torrance GGX. The CPU
   and GPU representations carry all core map types, runtime handle
-  assignment/residency is complete, and metallic-roughness plus normal-map
-  sampling are live. Emissive and occlusion sampling remain open.
+  assignment/residency is complete, and metallic-roughness, normal-map and
+  emissive sampling are live. Occlusion sampling remains open.
 - **F4a**: player-facing solid rectangles, font glyphs, title art, runtime UI
   textures and rounded scene-image composition use a dedicated UI fragment
   shader. The lit scene fragment shader no longer branches on those modes.
@@ -95,10 +95,11 @@ future tasks:
   byte budgets can evict old resources. What remains is mip/LOD streaming,
   compressed-size accounting, more flexible publication budgeting, and
   removing the `vkDeviceWaitIdle` eviction fallback.
-- **PBR map transport is complete; sampling is not.** A runtime catalog assigns
+- **PBR map transport is complete; sampling is nearly complete.** A runtime catalog assigns
   normal, metallic-roughness, emissive and occlusion handles from the resolved
   inventory and attaches only the relevant maps to each model's requirements.
-  The scene shaders still have to consume those handles in phase 7.
+  The main scene shader consumes the first three; material occlusion remains in
+  phase 7.
 - **Descriptor indexing is core in Vulkan 1.2.** This renderer already requires
   Vulkan 1.3. Query and enable the Vulkan 1.2 feature struct rather than adding
   an extension-name requirement unnecessarily.
@@ -134,8 +135,9 @@ These rules fail visually or under validation if they drift.
 ### Ambient-mask contract
 
 The scene target alpha channel carries the ratio of ambient contribution to
-total lit contribution for opaque scene pixels. SSAO uses it so occlusion does
-not darken direct sunlight.
+total lit contribution for opaque scene pixels. Total includes direct,
+specular and emissive light, but the numerator contains ambient light only.
+SSAO uses that ratio so occlusion does not darken direct or emissive light.
 
 - `triangle.frag.glsl` and `ground_splat.frag.glsl` must calculate the same
   semantic ratio.
@@ -492,13 +494,29 @@ including `vulkan_smoke`, pass.
 normal resolution, double-sided lighting and automated runtime validation.
 Visual reference capture remains in 0.1.
 
-#### 7.3 Emissive
+#### 7.3 Emissive — complete
 
-- Sample emissive as sRGB color, multiply by `emissiveFactor`, and add it in
-  linear light.
-- Do not count emissive as ambient light in the AO mask.
+`triangle.frag.glsl` now resolves the emissive factor and optional one-based
+emissive-map handle. The image is uploaded through an sRGB Vulkan format, so
+the texture unit decodes it before the shader multiplies its RGB by the factor
+and adds the result to the linear HDR scene color. Texture alpha is ignored,
+the no-map case behaves like a white sample, and the result is deliberately
+unclamped. UV0/UV1 selection and scrolling use the shared material UV helper.
 
-#### 7.4 Occlusion
+Emissive is excluded from the ambient-mask numerator but included in the total
+lit denominator. This preserves the composite's ambient-only subtraction:
+screen-space AO cannot darken self-emission. `resolveEmissive` and
+`ambientLightRatio` in `PbrMaterial.*` mirror those rules on the CPU. The
+focused suite covers factor-only materials, linear RGB multiplication, ignored
+alpha, values above 1.0 and the AO ratio, and all 25 checks pass. All shaders
+compile and the edited SPIR-V validates; the full Debug build and all 67 CTest
+suites, including `vulkan_smoke`, pass.
+
+**Acceptance:** complete for emissive color-space handling, factor/map
+resolution, HDR preservation, UV selection and ambient-mask isolation. Visual
+reference capture remains in 0.1.
+
+#### 7.4 Occlusion — next
 
 - Sample the R channel and apply strength only to ambient lighting.
 - Keep screen-space AO and material occlusion composable without multiplying
