@@ -84,6 +84,51 @@ vec2 materialTextureUv(uint uvSet, uint materialFlags)
     return uv;
 }
 
+vec3 mappedSurfaceNormal(Material material)
+{
+    vec3 geometricNormal = normalize(inNormal);
+    vec3 result = geometricNormal;
+    int normalTexture = int(material.primaryTextureHandles.y);
+    if (normalTexture != 0) {
+        // Interpolation and non-uniform model scale can leave the transformed
+        // tangent slightly outside the surface. Rebuild an orthonormal frame
+        // here, after interpolation, rather than trusting a vertex-only frame.
+        vec3 projectedTangent = inTangent.xyz -
+            geometricNormal * dot(geometricNormal, inTangent.xyz);
+        if (dot(projectedTangent, projectedTangent) < 0.000001) {
+            vec3 axis = abs(geometricNormal.z) < 0.9
+                ? vec3(0.0, 0.0, 1.0)
+                : vec3(1.0, 0.0, 0.0);
+            projectedTangent = cross(axis, geometricNormal);
+        }
+        vec3 tangent = normalize(projectedTangent);
+        float handedness = inTangent.w < 0.0 ? -1.0 : 1.0;
+        vec3 bitangent = cross(geometricNormal, tangent) * handedness;
+
+        int textureIndex = max(normalTexture - 1, 0);
+        vec3 tangentNormal = texture(
+            modelTextures[nonuniformEXT(textureIndex)],
+            materialTextureUv(
+                material.textureUvSets.y,
+                material.materialState.z)).xyz * 2.0 - 1.0;
+        // glTF normal scale affects the tangent-plane perturbation only. The
+        // sampled Z remains the map's authored distance from the surface.
+        tangentNormal.xy *= material.materialScalars.y;
+        result = normalize(
+            tangent * tangentNormal.x +
+            bitangent * tangentNormal.y +
+            geometricNormal * tangentNormal.z);
+    }
+
+    // glTF double-sided back faces reverse their final shading normal before
+    // lighting. Flipping after the normal-map transform keeps neutral and
+    // perturbed samples consistent with the same rule.
+    if (material.materialState.w != 0u && !gl_FrontFacing) {
+        result = -result;
+    }
+    return result;
+}
+
 
 struct PointLightData
 {
@@ -395,7 +440,7 @@ void main()
     // so occlusion cannot touch surfaces that have no ambient term to occlude.
     float ambientMask = 0.0;
     if (length(inNormal) > 0.0001) {
-        vec3 normal = normalize(inNormal);
+        vec3 normal = mappedSurfaceNormal(material);
         vec3 lightDirection = length(draw.sunDirectionAndAmbientGreen.xyz) > 0.0001
             ? normalize(draw.sunDirectionAndAmbientGreen.xyz)
             : vec3(0.0, 0.0, 1.0);

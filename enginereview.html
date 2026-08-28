@@ -281,7 +281,7 @@
     <section id="verdict">
       <div class="section-head"><span class="num">01</span><h2>Current verdict</h2></div>
       <div class="callout">
-        <strong>Next program:</strong> normal → emissive → occlusion sampling. Metallic-roughness is now live; CPU/GPU material transport, descriptor indexing, glTF source/semantic discovery, model-scoped residency, HDR presentation and the UI/scene shader split remain validation invariants.
+        <strong>Next program:</strong> emissive → occlusion → alpha/mirror audit. Metallic-roughness and normal mapping are now live; CPU/GPU material transport, descriptor indexing, glTF source/semantic discovery, model-scoped residency, HDR presentation and the UI/scene shader split remain validation invariants.
       </div>
       <div class="grid" style="margin-top:1rem">
         <article class="card">
@@ -292,7 +292,7 @@
         <article class="card">
           <p class="kicker">What blocks complete PBR</p>
           <h3>Material-map sampling</h3>
-          <p>glTF map sources, sampler state, color space, UV selections, map scalars and resolved handles survive through model-scoped residency. Metallic-roughness now feeds the BRDF; normal, emissive and occlusion sampling remain.</p>
+          <p>glTF map sources, sampler state, color space, UV selections, map scalars and resolved handles survive through model-scoped residency. Metallic-roughness and tangent-space normals now feed the BRDF; emissive and occlusion sampling remain.</p>
         </article>
         <article class="card">
           <p class="kicker">What not to overbuild</p>
@@ -315,7 +315,7 @@
           <tbody>
             <tr><td>F1</td><td><span class="status done">Done</span></td><td>Shared math, transforms, bounds, rays and frustums exist.</td><td>Use them in T4; no foundation rewrite.</td></tr>
             <tr><td>F2</td><td><span class="status done">Done</span></td><td>The HDR path uses Khronos PBR Neutral by default, persisted −4 to +4 EV exposure, and a Debug straight-clamp comparison.</td><td>Preserve UI-after-tonemap and single hardware sRGB encoding.</td></tr>
-            <tr><td>F3</td><td><span class="status partial">Core done</span></td><td>Material factors, tangents, UV1, GPU buffer, alpha metadata, GGX, model-scoped residency and metallic-roughness sampling exist.</td><td>Sample normal, emissive and occlusion maps.</td></tr>
+            <tr><td>F3</td><td><span class="status partial">Core done</span></td><td>Material factors, tangents, UV1, GPU buffer, alpha metadata, GGX, model-scoped residency, metallic-roughness and normal sampling exist.</td><td>Sample emissive and occlusion maps.</td></tr>
             <tr><td>F4</td><td><span class="status done">Done</span></td><td><code>ui.frag.glsl</code> owns solid/font/title/texture/scene-image UI; <code>triangle.frag.glsl</code> keeps scene work.</td><td>Preserve the split while material maps land.</td></tr>
             <tr><td>F5</td><td><span class="status conditional">Conditional</span></td><td>Vulkan types still cross broad renderer seams.</td><td>Build an RHI only for a real second backend/platform.</td></tr>
             <tr><td>T1–T3</td><td><span class="status done">Done</span></td><td>Instanced tiles, opaque sorting and model back-face culling are implemented.</td><td>Preserve their draw ordering and winding invariants.</td></tr>
@@ -372,7 +372,7 @@
         <article class="card">
           <p class="kicker">Shader boundary</p>
           <h3>UI split before map sampling — complete</h3>
-          <p>The scene fragment shader is now 514 lines after metallic-roughness sampling and still contains no font, title-art, UI-texture or rounded scene-image branches. The 93-line UI fragment module retains those modes after tonemapping.</p>
+          <p>The scene fragment shader is now 556 lines after mapped PBR work and still contains no font, title-art, UI-texture or rounded scene-image branches. The 93-line UI fragment module retains those modes after tonemapping.</p>
         </article>
       </div>
       <div class="callout warn" style="margin-top:1rem">
@@ -479,8 +479,8 @@
             <div class="phase-title"><h3>Sample maps one type at a time</h3><span class="status partial">In progress</span></div>
             <div class="tasks">
               <div class="task"><span class="task-id">7.1</span><div><b>Metallic-roughness — complete</b><p>The linear packed map reads G roughness and B metallic, multiplies authored factors, supports UV0/UV1 and scrolling, and feeds the direct plus ambient material partition. CPU-reference tests pin the channel and clamp math.</p></div></div>
-              <div class="task"><span class="task-id">7.2</span><div><b>Normal — next</b><p>Build world-space TBN from normal, tangent and handedness; handle authored/derived tangents and double-sided back faces.</p></div></div>
-              <div class="task"><span class="task-id">7.3</span><div><b>Emissive</b><p>Decode sRGB, multiply the factor, add in linear light, exclude from ambient-mask numerator.</p></div></div>
+              <div class="task"><span class="task-id">7.2</span><div><b>Normal — complete</b><p>The shader re-orthogonalizes world-space TBN, applies linear normal maps and scale, supports UV0/UV1 plus scrolling, and reverses the final mapped normal on double-sided back faces. CPU-reference and synthetic authored/derived tangent fixtures cover the contract.</p></div></div>
+              <div class="task"><span class="task-id">7.3</span><div><b>Emissive — next</b><p>Decode sRGB, multiply the factor, add in linear light, exclude from ambient-mask numerator.</p></div></div>
               <div class="task"><span class="task-id">7.4</span><div><b>Occlusion</b><p>Read R and scale ambient lighting only; keep it composable with screen-space AO.</p></div></div>
               <div class="task"><span class="task-id">7.5</span><div><b>Alpha and mirror audit</b><p>Recheck MASK, BLEND, double-sided culling and define the map subset used by mirror-energy ghosts.</p></div></div>
             </div>

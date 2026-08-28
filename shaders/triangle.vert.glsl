@@ -102,9 +102,6 @@ void main()
     outFaceCoordU = faceCoord.x;
     outFaceCoordV = faceCoord.y;
     outNormal = draw.normalAndAmbientRed.xyz;
-    // Tile faces never use per-vertex texture indices (textureOptions.x is 0
-    // on this path), but the shared fragment shader consumes location 4, so
-    // the interface must still provide it.
     // A quad's tangent is the direction its first UV axis runs, which for
     // these corners is the edge from 0 to 1. Clip-space quads are drawn unlit
     // and get nothing. Handedness is +1: faceCoords runs U left-to-right and

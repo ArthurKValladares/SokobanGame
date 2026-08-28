@@ -29,6 +29,11 @@ bool near(float a, float b)
     return std::abs(a - b) < 0.00001f;
 }
 
+bool near(Vec3 a, Vec3 b)
+{
+    return near(a.x, b.x) && near(a.y, b.y) && near(a.z, b.z);
+}
+
 void testMissingMapPreservesFactors()
 {
     TEST("missingMapPreservesFactors");
@@ -67,6 +72,80 @@ void testPhysicalRangeIsAppliedAfterSampling()
     CHECK(near(result.roughness, minimumPbrRoughness));
 }
 
+void testNeutralNormalPreservesTheGeometricNormal()
+{
+    TEST("neutralNormalPreservesTheGeometricNormal");
+    const Vec3 result = resolveNormalMap(
+        { 0.0f, 0.0f, 2.0f },
+        { 2.0f, 0.0f, 0.4f, 1.0f });
+    CHECK(near(result, { 0.0f, 0.0f, 1.0f }));
+}
+
+void testNormalScaleAffectsOnlyTheTangentPlane()
+{
+    TEST("normalScaleAffectsOnlyTheTangentPlane");
+    const Vec4 sample { 1.0f, 0.5f, 1.0f, 1.0f };
+    const Vec3 unscaled = resolveNormalMap(
+        { 0.0f, 0.0f, 1.0f },
+        { 1.0f, 0.0f, 0.0f, 1.0f },
+        sample,
+        0.0f);
+    CHECK(near(unscaled, { 0.0f, 0.0f, 1.0f }));
+
+    const Vec3 scaled = resolveNormalMap(
+        { 0.0f, 0.0f, 1.0f },
+        { 1.0f, 0.0f, 0.0f, 1.0f },
+        sample,
+        1.0f);
+    const float inverseSqrtTwo = std::sqrt(0.5f);
+    CHECK(near(scaled, { inverseSqrtTwo, 0.0f, inverseSqrtTwo }));
+}
+
+void testTangentHandednessControlsTheBitangent()
+{
+    TEST("tangentHandednessControlsTheBitangent");
+    const Vec4 bitangentSample { 0.5f, 1.0f, 1.0f, 1.0f };
+    const Vec3 positive = resolveNormalMap(
+        { 0.0f, 0.0f, 1.0f },
+        { 1.0f, 0.0f, 0.0f, 1.0f },
+        bitangentSample);
+    const Vec3 negative = resolveNormalMap(
+        { 0.0f, 0.0f, 1.0f },
+        { 1.0f, 0.0f, 0.0f, -1.0f },
+        bitangentSample);
+    CHECK(positive.y > 0.0f);
+    CHECK(negative.y < 0.0f);
+    CHECK(near(positive.x, negative.x));
+    CHECK(near(positive.z, negative.z));
+}
+
+void testDegenerateTangentGetsAnOrthonormalFallback()
+{
+    TEST("degenerateTangentGetsAnOrthonormalFallback");
+    const Vec3 result = resolveNormalMap(
+        { 0.0f, 0.0f, 1.0f },
+        { 0.0f, 0.0f, 2.0f, 1.0f },
+        { 1.0f, 0.5f, 1.0f, 1.0f });
+    const float inverseSqrtTwo = std::sqrt(0.5f);
+    CHECK(near(result, { 0.0f, -inverseSqrtTwo, inverseSqrtTwo }));
+}
+
+void testDoubleSidedBackFaceFlipsTheFinalMappedNormal()
+{
+    TEST("doubleSidedBackFaceFlipsTheFinalMappedNormal");
+    const Vec3 front = resolveNormalMap(
+        { 0.0f, 0.0f, 1.0f },
+        { 1.0f, 0.0f, 0.0f, 1.0f },
+        { 0.8f, 0.3f, 0.9f, 1.0f });
+    const Vec3 back = resolveNormalMap(
+        { 0.0f, 0.0f, 1.0f },
+        { 1.0f, 0.0f, 0.0f, 1.0f },
+        { 0.8f, 0.3f, 0.9f, 1.0f },
+        1.0f,
+        true);
+    CHECK(near(back, -front));
+}
+
 } // namespace
 
 int main()
@@ -74,6 +153,11 @@ int main()
     testMissingMapPreservesFactors();
     testPackedChannelsMultiplyFactors();
     testPhysicalRangeIsAppliedAfterSampling();
+    testNeutralNormalPreservesTheGeometricNormal();
+    testNormalScaleAffectsOnlyTheTangentPlane();
+    testTangentHandednessControlsTheBitangent();
+    testDegenerateTangentGetsAnOrthonormalFallback();
+    testDoubleSidedBackFaceFlipsTheFinalMappedNormal();
 
     if (failures == 0) {
         std::cout << "PbrMaterialTests: " << checks << " checks passed\n";

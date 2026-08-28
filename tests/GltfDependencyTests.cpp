@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <bit>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -390,6 +391,13 @@ void testLoadsMaterialMapBindingsAndAuthoredParameters()
     CHECK(material.alphaMode == MaterialAlphaMode::Mask);
     CHECK(material.alphaCutoff == 0.35f);
     CHECK(material.doubleSided);
+    for (const MeshVertex& vertex : bound.vertices) {
+        const Vec3 tangent {
+            vertex.tangent.x, vertex.tangent.y, vertex.tangent.z };
+        CHECK(std::abs(length(tangent) - 1.0f) < 0.0001f);
+        CHECK(std::abs(dot(vertex.normal, tangent)) < 0.0001f);
+        CHECK(std::abs(std::abs(vertex.tangent.w) - 1.0f) < 0.0001f);
+    }
 
     binding.bindBaseColorTexture = false;
     options.primitiveMaterials[0] = binding;
@@ -402,6 +410,76 @@ void testLoadsMaterialMapBindingsAndAuthoredParameters()
     CHECK(mapOnlyMaterial.occlusionTexture == 9U);
 }
 
+void testPreservesAuthoredTangentFrameForNormalMapping()
+{
+    TEST("preservesAuthoredTangentFrameForNormalMapping");
+    TempDirectory temp;
+    const std::filesystem::path model = temp.path() / "authored-tangent.glb";
+
+    std::vector<uint8_t> binary;
+    for (float value : {
+             0.0f, 0.0f, 0.0f,
+             1.0f, 0.0f, 0.0f,
+             0.0f, 1.0f, 0.0f,
+             0.0f, 0.0f, 1.0f,
+             0.0f, 0.0f, 1.0f,
+             0.0f, 0.0f, 1.0f,
+             1.0f, 0.0f, 0.0f, -1.0f,
+             1.0f, 0.0f, 0.0f, -1.0f,
+             1.0f, 0.0f, 0.0f, -1.0f,
+             0.0f, 0.0f,
+             1.0f, 0.0f,
+             0.0f, 1.0f,
+         }) {
+        appendFloat(binary, value);
+    }
+    appendUint16(binary, 0);
+    appendUint16(binary, 1);
+    appendUint16(binary, 2);
+
+    writeGlb(model, R"json({
+  "asset":{"version":"2.0"},
+  "buffers":[{"byteLength":150}],
+  "bufferViews":[
+    {"buffer":0,"byteOffset":0,"byteLength":36},
+    {"buffer":0,"byteOffset":36,"byteLength":36},
+    {"buffer":0,"byteOffset":72,"byteLength":48},
+    {"buffer":0,"byteOffset":120,"byteLength":24},
+    {"buffer":0,"byteOffset":144,"byteLength":6}
+  ],
+  "accessors":[
+    {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]},
+    {"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},
+    {"bufferView":2,"componentType":5126,"count":3,"type":"VEC4"},
+    {"bufferView":3,"componentType":5126,"count":3,"type":"VEC2"},
+    {"bufferView":4,"componentType":5123,"count":3,"type":"SCALAR"}
+  ],
+  "images":[{"uri":"data:image/png;base64,AAAA"}],
+  "textures":[{"source":0}],
+  "materials":[{"normalTexture":{"index":0}}],
+  "meshes":[{"primitives":[{
+    "attributes":{"POSITION":0,"NORMAL":1,"TANGENT":2,"TEXCOORD_0":3},
+    "indices":4,
+    "material":0
+  }]}]
+})json", binary);
+
+    PrimitiveMaterialBinding binding;
+    binding.normalTextureIndex = 0;
+    GltfMeshLoadOptions options;
+    options.primitiveMaterials.push_back(binding);
+    const MeshData mesh = loadGltfMesh(model, options);
+    CHECK(mesh.materials.size() == 1);
+    CHECK(mesh.materials[0].normalTexture == 1U);
+    CHECK(mesh.vertices.size() == 3);
+    for (const MeshVertex& vertex : mesh.vertices) {
+        CHECK(std::abs(vertex.tangent.x - 1.0f) < 0.0001f);
+        CHECK(std::abs(vertex.tangent.y) < 0.0001f);
+        CHECK(std::abs(vertex.tangent.z) < 0.0001f);
+        CHECK(vertex.tangent.w == -1.0f);
+    }
+}
+
 } // namespace
 
 int main()
@@ -409,6 +487,7 @@ int main()
     testInspectsExternalAndDataUriDependenciesWithoutLoadingThem();
     testInspectsEmbeddedGlbImage();
     testLoadsMaterialMapBindingsAndAuthoredParameters();
+    testPreservesAuthoredTangentFrameForNormalMapping();
 
     if (failures == 0) {
         std::cout << "GltfDependencyTests: " << checks << " checks passed\n";

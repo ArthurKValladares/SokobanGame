@@ -1,6 +1,7 @@
 #include "engine/render/PbrMaterial.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace sokoban {
 
@@ -19,6 +20,46 @@ MetallicRoughness resolveMetallicRoughness(
             minimumPbrRoughness,
             1.0f),
     };
+}
+
+Vec3 resolveNormalMap(
+    Vec3 geometricNormal,
+    Vec4 tangentAndHandedness,
+    Vec4 linearSample,
+    float normalScale,
+    bool doubleSidedBackFace)
+{
+    geometricNormal = normalizeOr(
+        geometricNormal, Vec3 { 0.0f, 0.0f, 1.0f });
+    Vec3 tangent {
+        tangentAndHandedness.x,
+        tangentAndHandedness.y,
+        tangentAndHandedness.z,
+    };
+    tangent -= geometricNormal * dot(geometricNormal, tangent);
+    if (lengthSquared(tangent) < 0.000001f) {
+        const Vec3 axis = std::abs(geometricNormal.z) < 0.9f
+            ? Vec3 { 0.0f, 0.0f, 1.0f }
+            : Vec3 { 1.0f, 0.0f, 0.0f };
+        tangent = cross(axis, geometricNormal);
+    }
+    tangent = normalize(tangent);
+    const float handedness = tangentAndHandedness.w < 0.0f ? -1.0f : 1.0f;
+    const Vec3 bitangent = cross(geometricNormal, tangent) * handedness;
+    const Vec3 tangentNormal {
+        (linearSample.x * 2.0f - 1.0f) * normalScale,
+        (linearSample.y * 2.0f - 1.0f) * normalScale,
+        linearSample.z * 2.0f - 1.0f,
+    };
+    Vec3 result = normalizeOr(
+        tangent * tangentNormal.x +
+            bitangent * tangentNormal.y +
+            geometricNormal * tangentNormal.z,
+        geometricNormal);
+    if (doubleSidedBackFace) {
+        result = -result;
+    }
+    return result;
 }
 
 } // namespace sokoban

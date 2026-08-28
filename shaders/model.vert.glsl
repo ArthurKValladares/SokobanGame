@@ -118,9 +118,8 @@ void main()
     // A normal transforms by the inverse transpose, which for a rotation
     // times a diagonal scale is the rotation times the inverse scale.
     outNormal = normalize(rotationOnly * (normal * inverseScale));
-    // A tangent transforms by the matrix itself. The Euler path applied the
-    // rotation without the scale, which is the same answer only when the
-    // scale is uniform; nothing reads the tangent yet, so this becomes right
-    // before it becomes visible.
+    // A tangent transforms by the matrix itself. The fragment stage projects
+    // it back onto the interpolated normal's plane before normal-map use,
+    // which completes the frame after non-uniform scale and interpolation.
     outTangent = vec4(normalize(modelToWorld * inTangent.xyz), inTangent.w);
 }

@@ -21,13 +21,15 @@ now uses Khronos PBR Neutral by default, with persisted exposure and a Debug
 straight-clamp comparison. Player-facing UI now has a dedicated fragment path,
 leaving the scene fragment shader free of font, title-art, UI-texture and
 rounded scene-image branches. Metallic-roughness sampling is now live as the
-first mapped PBR input. The next objective is normal mapping with the authored
-or derived tangent frame already carried by the vertex path.
+first mapped PBR input, and normal maps now perturb the lighting frame through
+authored or derived tangents. The next objective is emissive sampling in linear
+light without contaminating the ambient-mask contract.
 
 The recommended order is:
 
 1. Capture the remaining post-tonemap visual/performance baseline evidence.
-2. Implement and validate normal, emissive and occlusion map sampling.
+2. Implement and validate emissive and occlusion map sampling, then audit alpha
+   and mirror-energy behavior.
 3. Complete SSAO, then resume the larger scaling and memory work.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
@@ -40,7 +42,7 @@ sampling have different failure modes and should be independently reviewable.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
 - Current tests: 67 CTest suites in the newest configured build tree.
-- Current shaders: 16 GLSL files. `triangle.frag.glsl` is 514 physical lines;
+- Current shaders: 16 GLSL files. `triangle.frag.glsl` is 556 physical lines;
   player-facing UI uses the 93-line `ui.frag.glsl` path.
 - Texture capacity: selected at startup from a configured 1,024-slot ceiling,
   device limits, 16 editor-reserved slots and 32 import-reserved slots. The
@@ -67,8 +69,8 @@ future tasks:
 - **F3**: cgltf material factors, tangents, a second UV set, alpha modes,
   double-sided metadata, a GPU material buffer and Cook-Torrance GGX. The CPU
   and GPU representations carry all core map types, runtime handle
-  assignment/residency is complete, and metallic-roughness sampling is live.
-  Normal, emissive and occlusion sampling remain open.
+  assignment/residency is complete, and metallic-roughness plus normal-map
+  sampling are live. Emissive and occlusion sampling remain open.
 - **F4a**: player-facing solid rectangles, font glyphs, title art, runtime UI
   textures and rounded scene-image composition use a dedicated UI fragment
   shader. The lit scene fragment shader no longer branches on those modes.
@@ -459,12 +461,36 @@ and all 67 suites, including `vulkan_smoke`, pass.
 **Acceptance:** complete for the mapped parameter path and automated numeric,
 transport and runtime validation. Visual reference capture remains in 0.1.
 
-#### 7.2 Normal mapping
+#### 7.2 Normal mapping — complete
 
-- Build TBN from the world-space normal, tangent xyz and tangent handedness.
-- Sample the normal texture as linear data and apply normal scale.
-- Handle back faces of double-sided materials consistently.
-- Test both authored tangents and the derived-tangent fallback.
+`triangle.frag.glsl` now samples the one-based normal handle as linear data,
+maps RGB into tangent-space `[-1, 1]`, applies glTF normal scale to X/Y and
+normalizes the world-space result. It selects UV0/UV1 and scrolling through the
+same material UV helper used by base color and metallic-roughness.
+
+The fragment path re-orthogonalizes the interpolated world-space tangent against
+the geometric normal, reconstructs the bitangent from the tangent handedness,
+and supplies a deterministic orthogonal fallback for degenerate tangents. This
+handles static meshes, GPU-skinned meshes and loader-derived tangents without
+trusting interpolation or nonuniform transforms to preserve a perfect frame.
+For authored double-sided materials, the final mapped normal is reversed on
+back faces before every direct and ambient lighting calculation.
+
+`resolveNormalMap` in `PbrMaterial.*` is the matching CPU reference. Its focused
+suite now covers neutral samples, normal scale, tangent projection, handedness,
+degenerate fallback and double-sided back faces. The synthetic glTF loader
+fixture verifies both an authored negative-handedness tangent and the existing
+derived-tangent path. The fallback remains a standard accumulated tangent frame,
+not MikkTSpace; assets baked against MikkTSpace should continue to ship authored
+`TANGENT` data for exact seam behavior.
+
+All shaders compile and the affected vertex/fragment modules pass SPIR-V
+validation. The full Debug build, 200-file content stage and all 67 suites,
+including `vulkan_smoke`, pass.
+
+**Acceptance:** complete for authored and derived tangent transport, mapped
+normal resolution, double-sided lighting and automated runtime validation.
+Visual reference capture remains in 0.1.
 
 #### 7.3 Emissive
 
