@@ -9,7 +9,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <span>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -61,6 +64,64 @@ void writeFile(const std::filesystem::path& path, std::string_view contents = "d
     std::filesystem::create_directories(path.parent_path());
     std::ofstream stream(path, std::ios::binary);
     stream << contents;
+}
+
+void appendUint32(std::vector<uint8_t>& bytes, uint32_t value)
+{
+    bytes.push_back(static_cast<uint8_t>(value));
+    bytes.push_back(static_cast<uint8_t>(value >> 8U));
+    bytes.push_back(static_cast<uint8_t>(value >> 16U));
+    bytes.push_back(static_cast<uint8_t>(value >> 24U));
+}
+
+void writeGlb(
+    const std::filesystem::path& path,
+    std::string json,
+    std::span<const uint8_t> binary)
+{
+    while (json.size() % 4 != 0) {
+        json.push_back(' ');
+    }
+    std::vector<uint8_t> paddedBinary(binary.begin(), binary.end());
+    while (paddedBinary.size() % 4 != 0) {
+        paddedBinary.push_back(0);
+    }
+
+    constexpr uint32_t headerSize = 12;
+    constexpr uint32_t chunkHeaderSize = 8;
+    const uint32_t totalSize = headerSize + chunkHeaderSize +
+        static_cast<uint32_t>(json.size()) + chunkHeaderSize +
+        static_cast<uint32_t>(paddedBinary.size());
+    std::vector<uint8_t> bytes;
+    bytes.reserve(totalSize);
+    appendUint32(bytes, 0x46546C67);
+    appendUint32(bytes, 2);
+    appendUint32(bytes, totalSize);
+    appendUint32(bytes, static_cast<uint32_t>(json.size()));
+    appendUint32(bytes, 0x4E4F534A);
+    bytes.insert(bytes.end(), json.begin(), json.end());
+    appendUint32(bytes, static_cast<uint32_t>(paddedBinary.size()));
+    appendUint32(bytes, 0x004E4942);
+    bytes.insert(bytes.end(), paddedBinary.begin(), paddedBinary.end());
+
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream stream(path, std::ios::binary);
+    stream.write(
+        reinterpret_cast<const char*>(bytes.data()),
+        static_cast<std::streamsize>(bytes.size()));
+}
+
+std::string replaceFirst(
+    std::string text,
+    std::string_view from,
+    std::string_view to)
+{
+    const std::size_t position = text.find(from);
+    if (position == std::string::npos) {
+        throw std::logic_error("fixture text to replace was not found");
+    }
+    text.replace(position, from.size(), to);
+    return text;
 }
 
 std::string readFile(const std::filesystem::path& path)
@@ -192,9 +253,13 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
     writeFile(
         assets / "kenney_input-prompts_1.5/License.txt",
         "input prompt license");
-    writeFile(assets / "models/hero.gltf", R"({"buffers":[{"uri":"hero.bin"}]})");
+    writeFile(
+        assets / "models/hero.gltf",
+        R"({"asset":{"version":"2.0"},"buffers":[{"uri":"hero.bin","byteLength":4}]})");
     writeFile(assets / "models/hero.bin");
-    writeFile(assets / "models/sword.gltf", R"({"buffers":[{"uri":"sword.bin"}]})");
+    writeFile(
+        assets / "models/sword.gltf",
+        R"({"asset":{"version":"2.0"},"buffers":[{"uri":"sword.bin","byteLength":4}]})");
     writeFile(assets / "models/sword.bin");
     for (std::string_view flag : {
             "flag-a-blue",
@@ -206,8 +271,8 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
         }) {
         writeFile(
             assets / "models" / (std::string(flag) + ".gltf"),
-            "{\"buffers\":[{\"uri\":\"" + std::string(flag) +
-                ".bin\"}]}");
+            "{\"asset\":{\"version\":\"2.0\"},\"buffers\":[{\"uri\":\"" +
+                std::string(flag) + ".bin\",\"byteLength\":4}]}");
         writeFile(assets / "models" / (std::string(flag) + ".bin"));
     }
     writeFile(assets / "models/LICENSE.txt", "model license");
@@ -285,6 +350,63 @@ bool contains(const sokoban::ContentInventory& inventory, std::string_view desti
         }
     }
     return false;
+}
+
+std::size_t countExternalTextureSources(
+    const sokoban::ContentInventory& inventory,
+    const std::filesystem::path& path,
+    sokoban::TextureColorSpace colorSpace)
+{
+    std::size_t count = 0;
+    for (const sokoban::TextureSourceIdentity& identity :
+         inventory.textureSources) {
+        const auto* source =
+            std::get_if<sokoban::ExternalTextureSource>(&identity.source);
+        if (source && source->path == path &&
+            identity.interpretation.colorSpace == colorSpace) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+std::size_t countDataUriTextureSources(
+    const sokoban::ContentInventory& inventory,
+    std::string_view uri,
+    sokoban::TextureColorSpace colorSpace)
+{
+    std::size_t count = 0;
+    for (const sokoban::TextureSourceIdentity& identity :
+         inventory.textureSources) {
+        const auto* source =
+            std::get_if<sokoban::DataUriTextureSource>(&identity.source);
+        if (source && source->uri == uri &&
+            identity.interpretation.colorSpace == colorSpace) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+std::size_t countBufferViewTextureSources(
+    const sokoban::ContentInventory& inventory,
+    const std::filesystem::path& document,
+    uint32_t bufferViewIndex,
+    sokoban::TextureColorSpace colorSpace)
+{
+    std::size_t count = 0;
+    for (const sokoban::TextureSourceIdentity& identity :
+         inventory.textureSources) {
+        const auto* source =
+            std::get_if<sokoban::GltfBufferViewTextureSource>(
+                &identity.source);
+        if (source && source->document == document &&
+            source->bufferViewIndex == bufferViewIndex &&
+            identity.interpretation.colorSpace == colorSpace) {
+            ++count;
+        }
+    }
+    return count;
 }
 
 void testInventoryAndStaging()
@@ -505,6 +627,148 @@ void testMissingThumbnailsAreNotFatal()
         "the tiles never baked are still skipped");
 }
 
+void testGltfTextureSourcesAreCanonicalAndInterpretationAware()
+{
+    TempDirectory temp;
+    const auto roots = createValidContent(temp.path());
+    constexpr std::string_view inlinePng = "data:image/png;base64,AAAA";
+    writeFile(roots.assets / "textures/shared.png", "png");
+    writeFile(
+        roots.assets / "models/hero.gltf",
+        R"json({
+  "asset":{"version":"2.0"},
+  "buffers":[{"uri":"hero.bin","byteLength":4}],
+  "images":[
+    {"name":"Shared A","uri":"../textures/shared.png"},
+    {"name":"Shared B","uri":"../textures/./shared.png"},
+    {"name":"Inline","uri":"data:image/png;base64,AAAA"}
+  ],
+  "textures":[
+    {"name":"Color A","source":0},
+    {"name":"Color B","source":1},
+    {"name":"Inline data","source":2}
+  ],
+  "materials":[{
+    "name":"Mixed interpretation",
+    "pbrMetallicRoughness":{
+      "baseColorTexture":{"index":0},
+      "metallicRoughnessTexture":{"index":2}
+    },
+    "normalTexture":{"index":1},
+    "emissiveTexture":{"index":1}
+  }]
+})json");
+
+    const sokoban::ContentInventory inventory =
+        sokoban::collectContentInventory(roots);
+
+    check(
+        contains(inventory, "textures/shared.png"),
+        "external glTF image included once at its canonical path");
+    check(
+        countExternalTextureSources(
+            inventory,
+            "textures/shared.png",
+            sokoban::TextureColorSpace::Srgb) == 1,
+        "duplicate external URI spellings deduplicate in sRGB");
+    check(
+        countExternalTextureSources(
+            inventory,
+            "textures/shared.png",
+            sokoban::TextureColorSpace::Linear) == 1,
+        "same external bytes remain distinct for linear interpretation");
+    check(
+        countDataUriTextureSources(
+            inventory, inlinePng, sokoban::TextureColorSpace::Linear) == 1,
+        "supported data URI enters the linear texture inventory");
+    check(
+        inventory.textureSources.size() == 5,
+        "two manifest sources plus three unique glTF identities");
+}
+
+void testEmbeddedGlbTextureSourcesEnterInventory()
+{
+    TempDirectory temp;
+    const auto roots = createValidContent(temp.path());
+    writeFile(
+        roots.assets / "manifest.json",
+        replaceFirst(
+            manifest(),
+            "models/flag-a-blue.gltf",
+            "models/flag-a-blue.glb"));
+    constexpr uint8_t imageBytes[] { 1, 2, 3, 4 };
+    writeGlb(
+        roots.assets / "models/flag-a-blue.glb",
+        R"json({
+  "asset":{"version":"2.0"},
+  "buffers":[{"byteLength":4}],
+  "bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":4}],
+  "images":[{"name":"Embedded","bufferView":0,"mimeType":"image/png"}],
+  "textures":[{"name":"Embedded texture","source":0}],
+  "materials":[{
+    "name":"Dual use",
+    "pbrMetallicRoughness":{"baseColorTexture":{"index":0}},
+    "normalTexture":{"index":0}
+  }]
+})json",
+        imageBytes);
+
+    const sokoban::ContentInventory inventory =
+        sokoban::collectContentInventory(roots);
+
+    check(
+        contains(inventory, "models/flag-a-blue.glb"),
+        "GLB containing an embedded image is staged");
+    check(
+        countBufferViewTextureSources(
+            inventory,
+            "models/flag-a-blue.glb",
+            0,
+            sokoban::TextureColorSpace::Srgb) == 1,
+        "embedded buffer view has an unambiguous sRGB identity");
+    check(
+        countBufferViewTextureSources(
+            inventory,
+            "models/flag-a-blue.glb",
+            0,
+            sokoban::TextureColorSpace::Linear) == 1,
+        "embedded bytes used as data have a separate identity");
+}
+
+void testGltfTextureTraversalIsRejected()
+{
+    TempDirectory temp;
+    const auto roots = createValidContent(temp.path());
+    writeFile(temp.path() / "outside.png", "outside");
+    writeFile(
+        roots.assets / "models/hero.gltf",
+        R"json({
+  "asset":{"version":"2.0"},
+  "images":[{"uri":"../../outside.png"}],
+  "textures":[{"source":0}],
+  "materials":[{
+    "pbrMetallicRoughness":{"baseColorTexture":{"index":0}}
+  }]
+})json");
+    checkThrows(
+        [&] { (void)sokoban::collectContentInventory(roots); },
+        "external glTF image cannot traverse outside the asset root");
+
+    writeFile(
+        roots.assets / "models/hero.gltf",
+        R"json({
+  "asset":{"version":"2.0"},
+  "images":[{"uri":"%2e%2e/outside.png"}],
+  "textures":[{"source":0}],
+  "materials":[{
+    "pbrMetallicRoughness":{"baseColorTexture":{"index":0}}
+  }]
+})json");
+    checkThrows(
+        [&] { (void)sokoban::collectContentInventory(roots); },
+        "percent-encoded glTF traversal is rejected rather than reinterpreted");
+}
+
 void testValidationFailures()
 {
     TempDirectory temp;
@@ -604,6 +868,9 @@ int main()
         testComposedOverworldIsValidatedAndStaged();
         testBakedThumbnailsAreStaged();
         testMissingThumbnailsAreNotFatal();
+        testGltfTextureSourcesAreCanonicalAndInterpretationAware();
+        testEmbeddedGlbTextureSourcesEnterInventory();
+        testGltfTextureTraversalIsRejected();
         testValidationFailures();
     } catch (const std::exception& error) {
         std::cerr << "UNEXPECTED EXCEPTION: " << error.what() << '\n';

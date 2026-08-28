@@ -11,17 +11,17 @@ The renderer modernization has a sound substrate now: Vulkan 1.3, an explicit
 camera, instanced tile draws, an HDR scene target, a tonemap pass, cgltf-based
 loading, a GPU material buffer, tangents and two UV sets, and Cook-Torrance GGX
 lighting. The fixed texture ceiling has now been replaced by a device-bounded,
-frame-safe descriptor heap, and a read-only glTF inspector exposes the source
-metadata needed for content discovery. The next objective is to give external,
-embedded and data-URI images stable content identities without adding
-filesystem I/O to manifest parsing or more branches to the current uber-shader.
+frame-safe descriptor heap. Read-only glTF inspection now feeds a resolved
+content inventory with stable identities for external, buffer-view and data-URI
+images. The next objective is to validate sampler, UV and texture-transform
+semantics before those sources enter runtime material and GPU representations.
 
 The recommended order is:
 
 1. Capture the remaining visual/performance baseline evidence.
-2. Add texture-source identity and enrich the content inventory from inspected
-   glTF dependencies.
-3. Carry glTF material-map handles through the CPU and GPU material models.
+2. Validate and preserve glTF sampler, UV and texture-transform semantics.
+3. Carry resolved glTF material-map handles through the CPU and GPU material
+   models.
 4. Finish tonemapping and exposure before judging mapped PBR output.
 5. Split non-scene modes out of `triangle.frag.glsl`.
 6. Implement and validate normal, metallic-roughness, emissive and occlusion
@@ -248,21 +248,26 @@ and images are reported but never opened, no GPU resources are created, and
 `GltfDependencyTests.cpp` writes synthetic external/data-URI `.gltf` and
 embedded-image `.glb` fixtures and verifies this boundary.
 
-#### 3.2 Introduce texture-source identity
+#### 3.2 Introduce texture-source identity — complete
 
-The existing texture model assumes a filesystem path. Replace or extend it
-with a source that can identify:
+`TextureSource.hpp` owns a variant for asset-root-relative external files,
+document-plus-buffer-view images and supported data URIs. A separate
+`TextureInterpretation` is part of `TextureSourceIdentity`, so one byte source
+used for both sRGB color and linear data intentionally occupies two inventory
+entries.
 
-- an external URI resolved relative to its glTF;
-- an image embedded in a GLB buffer view;
-- a supported data URI.
+`ContentInventory::textureSources` now contains unique manifest and glTF image
+identities. `ContentPipeline` resolves URIs relative to each inspected document
+under its explicit asset root, rejects absolute/schemed/escaped, query,
+fragment, backslash and percent-encoded spellings, and stages every external
+buffer and image. The old JSON regex scraper is gone; `.gltf` and `.glb` use the
+validated inspector. Data and buffer-view sources remain contained in their
+staged document rather than acquiring invented filesystem paths.
 
-Deduplicate by canonical source plus interpretation. The same bytes interpreted
-as sRGB and linear data are distinct GPU resources unless the image/view design
-explicitly supports both views.
-
-**Acceptance:** external, embedded and data-URI fixtures enter the content
-inventory without path traversal, ambiguous identity or unstaged dependencies.
+`ContentPipelineTests.cpp` covers canonical external-URI deduplication,
+sRGB-versus-linear separation, supported data URIs, embedded GLB images and
+plain/percent-encoded traversal rejection. The real 199-file asset tree stages
+successfully through this path.
 
 #### 3.3 Preserve glTF texture semantics
 
@@ -448,6 +453,8 @@ layout changes affect modules that appear unrelated to the immediate feature.
 
 - `src/engine/AssetManifest.*`: parsed declarations and stable runtime handles.
 - `src/engine/ContentPipeline.*`: dependency validation, inventory and staging.
+- `src/engine/TextureSource.hpp`: canonical external, buffer-view and data-URI
+  identities plus color-space interpretation.
 - `src/engine/render/GltfMesh.*`: cgltf boundary, mesh/material/animation decode.
 - `tests/GltfDependencyTests.cpp`: structure-only dependency fixtures for
   external/data-URI glTF and embedded-image GLB inputs.

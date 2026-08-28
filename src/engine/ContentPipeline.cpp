@@ -23,10 +23,10 @@
 #include <optional>
 #include <regex>
 #include <set>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <type_traits>
 #include <unordered_set>
 #include <utility>
 
@@ -120,17 +120,6 @@ std::filesystem::path sourceFile(
     return candidate;
 }
 
-std::string readTextFile(const std::filesystem::path& path)
-{
-    std::ifstream stream(path, std::ios::binary);
-    if (!stream) {
-        throw std::runtime_error("cannot read content file: " + path.string());
-    }
-    std::ostringstream contents;
-    contents << stream.rdbuf();
-    return contents.str();
-}
-
 std::string lowercase(std::string value)
 {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
@@ -156,27 +145,84 @@ bool isNoticeFile(const std::filesystem::path& path)
         name == "readme.html" || name == "copyright" || name == "copyright.txt";
 }
 
-std::vector<std::filesystem::path> gltfDependencies(const std::filesystem::path& gltf)
+std::filesystem::path pathFromUtf8(std::string_view text)
 {
-    if (lowercase(gltf.extension().string()) != ".gltf") {
-        return {};
+    std::u8string utf8;
+    utf8.reserve(text.size());
+    for (const char character : text) {
+        utf8.push_back(static_cast<char8_t>(character));
     }
+    return std::filesystem::path(utf8);
+}
 
-    const std::string json = readTextFile(gltf);
-    const std::regex uriPattern(R"uri("uri"\s*:\s*"([^"]+)")uri");
-    std::vector<std::filesystem::path> dependencies;
-    for (std::sregex_iterator it(json.begin(), json.end(), uriPattern), end; it != end; ++it) {
-        const std::string uri = (*it)[1].str();
-        if (uri.starts_with("data:")) {
-            continue;
-        }
-        if (uri.find('\\') != std::string::npos || uri.find('%') != std::string::npos ||
-            uri.find("://") != std::string::npos) {
-            throw std::runtime_error("unsupported external glTF URI in " + gltf.string() + ": " + uri);
-        }
-        dependencies.emplace_back(uri);
+std::filesystem::path gltfExternalRelativePath(
+    const std::filesystem::path& document,
+    std::string_view uri)
+{
+    // URI decoding is deliberately not implicit. Reject percent escapes,
+    // schemes, fragments and platform separators so encoded traversal and
+    // two spellings of the same source cannot acquire different identities.
+    if (uri.empty() || uri.find('\\') != std::string_view::npos ||
+        uri.find('%') != std::string_view::npos ||
+        uri.find(':') != std::string_view::npos ||
+        uri.find('?') != std::string_view::npos ||
+        uri.find('#') != std::string_view::npos ||
+        uri.find('\0') != std::string_view::npos) {
+        throw std::runtime_error(
+            "unsupported external glTF URI in " + document.string() +
+            ": " + std::string(uri));
     }
-    return dependencies;
+    return normalizedRelativePath(
+        document.parent_path() / pathFromUtf8(uri),
+        "external glTF URI in " + document.string());
+}
+
+TextureColorSpace colorSpaceFor(GltfMaterialTextureSemantic semantic)
+{
+    switch (semantic) {
+    case GltfMaterialTextureSemantic::BaseColor:
+    case GltfMaterialTextureSemantic::Emissive:
+        return TextureColorSpace::Srgb;
+    case GltfMaterialTextureSemantic::MetallicRoughness:
+    case GltfMaterialTextureSemantic::Normal:
+    case GltfMaterialTextureSemantic::Occlusion:
+        return TextureColorSpace::Linear;
+    }
+    throw std::logic_error("unknown glTF material texture semantic");
+}
+
+void appendKeyPart(std::string& key, std::string_view part)
+{
+    key += std::to_string(part.size());
+    key.push_back(':');
+    key.append(part);
+}
+
+std::string textureSourceKey(const TextureSourceIdentity& identity)
+{
+    std::string key;
+    std::visit(
+        [&key](const auto& source) {
+            using Source = std::decay_t<decltype(source)>;
+            if constexpr (std::is_same_v<Source, ExternalTextureSource>) {
+                key = "file:";
+                appendKeyPart(key, contentPathKey(source.path));
+            } else if constexpr (
+                std::is_same_v<Source, GltfBufferViewTextureSource>) {
+                key = "view:";
+                appendKeyPart(key, contentPathKey(source.document));
+                appendKeyPart(key, std::to_string(source.bufferViewIndex));
+                appendKeyPart(key, source.mimeType);
+            } else {
+                key = "data:";
+                appendKeyPart(key, source.uri);
+            }
+        },
+        identity.source);
+    key += identity.interpretation.colorSpace == TextureColorSpace::Srgb
+        ? "|srgb"
+        : "|linear";
+    return key;
 }
 
 class InventoryBuilder {
@@ -205,6 +251,7 @@ public:
             inventory.totalBytes += size;
             inventory.files.push_back({ file.source, file.destination, size });
         }
+        inventory.textureSources = textureSources_;
         return inventory;
     }
 
@@ -247,14 +294,128 @@ private:
         }
     }
 
-    void addAssetPath(const std::filesystem::path& relative, std::string_view label)
+    void addTextureSource(TextureSourceIdentity identity)
     {
-        addFile(roots_.assets, relative, relative, label);
-        const std::filesystem::path absolute = sourceFile(roots_.assets, relative, label);
-        for (const auto& dependency : gltfDependencies(absolute)) {
-            const std::filesystem::path dependencyRelative = relative.parent_path() / dependency;
-            addFile(roots_.assets, dependencyRelative, dependencyRelative, "glTF dependency");
+        const std::string key = textureSourceKey(identity);
+        if (textureSourceKeys_.insert(key).second) {
+            textureSources_.push_back(std::move(identity));
         }
+    }
+
+    std::filesystem::path addExternalGltfFile(
+        const std::filesystem::path& document,
+        std::string_view uri,
+        std::string_view kind)
+    {
+        const std::filesystem::path relative =
+            gltfExternalRelativePath(document, uri);
+        addFile(
+            roots_.assets,
+            relative,
+            relative,
+            std::string(kind) + " referenced by " + document.string());
+        return relative;
+    }
+
+    TextureSource sourceForImage(
+        const std::filesystem::path& document,
+        const GltfImageDependency& image)
+    {
+        switch (image.sourceKind) {
+        case GltfImageSourceKind::ExternalUri:
+            return ExternalTextureSource {
+                gltfExternalRelativePath(document, image.uri),
+            };
+        case GltfImageSourceKind::DataUri:
+            if (!image.uri.starts_with("data:image/png;base64,") &&
+                !image.uri.starts_with("data:image/jpeg;base64,")) {
+                throw std::runtime_error(
+                    "unsupported glTF image data URI in " +
+                    document.string());
+            }
+            return DataUriTextureSource { image.uri };
+        case GltfImageSourceKind::BufferView:
+            if (!image.bufferViewIndex) {
+                throw std::runtime_error(
+                    "glTF buffer-view image has no buffer view index in " +
+                    document.string());
+            }
+            return GltfBufferViewTextureSource {
+                .document = document,
+                .bufferViewIndex = *image.bufferViewIndex,
+                .mimeType = image.mimeType,
+            };
+        }
+        throw std::logic_error("unknown glTF image source kind");
+    }
+
+    void addGltfDependencies(
+        const std::filesystem::path& document,
+        const std::filesystem::path& absolute)
+    {
+        const GltfAssetDependencies dependencies =
+            inspectGltfAssetDependencies(absolute);
+
+        // Stage every external dependency, including images that are present
+        // but currently unused. A package should never depend on whether a
+        // future material edit happens to make an already-authored image live.
+        for (const GltfBufferDependency& buffer : dependencies.buffers) {
+            if (buffer.sourceKind == GltfBufferSourceKind::ExternalUri) {
+                (void)addExternalGltfFile(
+                    document, buffer.uri, "glTF buffer");
+            }
+        }
+        for (const GltfImageDependency& image : dependencies.images) {
+            if (image.sourceKind == GltfImageSourceKind::ExternalUri) {
+                (void)addExternalGltfFile(
+                    document, image.uri, "glTF image");
+            }
+        }
+
+        for (std::size_t materialIndex = 0;
+             materialIndex < dependencies.materials.size();
+             ++materialIndex) {
+            const GltfMaterialDependency& material =
+                dependencies.materials[materialIndex];
+            for (const GltfMaterialTextureDependency& texture :
+                 material.textures) {
+                if (!texture.imageIndex ||
+                    *texture.imageIndex >= dependencies.images.size()) {
+                    throw std::runtime_error(
+                        "glTF material texture has no supported core image in " +
+                        document.string() + " (material " +
+                        std::to_string(materialIndex) + " '" + material.name +
+                        "', texture '" + texture.textureName + "')");
+                }
+                addTextureSource({
+                    .source = sourceForImage(
+                        document, dependencies.images[*texture.imageIndex]),
+                    .interpretation = {
+                        .colorSpace = colorSpaceFor(texture.semantic),
+                    },
+                });
+            }
+        }
+    }
+
+    void addAssetPath(
+        const std::filesystem::path& relative,
+        std::string_view label)
+    {
+        const std::filesystem::path safeRelative =
+            normalizedRelativePath(relative, label);
+        addFile(roots_.assets, safeRelative, safeRelative, label);
+        const std::string extension =
+            lowercase(safeRelative.extension().string());
+        if (extension != ".gltf" && extension != ".glb") {
+            return;
+        }
+        if (!inspectedGltf_.insert(contentPathKey(safeRelative)).second) {
+            return;
+        }
+        const std::filesystem::path absolute =
+            sourceFile(roots_.assets, safeRelative, label);
+        addGltfDependencies(safeRelative, absolute);
     }
 
     void addManifestAssets()
@@ -318,6 +479,13 @@ private:
 
         for (const auto& texture : manifest.textures()) {
             addAssetPath(texture.path, "texture '" + texture.name + "'");
+            addTextureSource({
+                .source = ExternalTextureSource {
+                    normalizedRelativePath(
+                        texture.path, "texture '" + texture.name + "'"),
+                },
+                .interpretation = { .colorSpace = texture.colorSpace },
+            });
         }
         for (const auto& model : manifest.models()) {
             addAssetPath(model.path, "model '" + model.name + "'");
@@ -607,6 +775,9 @@ private:
     ContentSourceRoots roots_;
     std::optional<AssetManifest> manifest_;
     std::map<std::string, PendingFile> files_;
+    std::unordered_set<std::string> inspectedGltf_;
+    std::unordered_set<std::string> textureSourceKeys_;
+    std::vector<TextureSourceIdentity> textureSources_;
 };
 
 void ensureSafeOutputRoot(

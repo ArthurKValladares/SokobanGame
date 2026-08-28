@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/TextureSource.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/render/RenderTypes.hpp"
 
@@ -28,11 +29,6 @@ enum class ModelGeometry {
 
 enum class TextureFilter {
     Nearest,
-    Linear,
-};
-
-enum class TextureColorSpace {
-    Srgb,
     Linear,
 };
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "engine/TextureSource.hpp"
+
 #include <cstdint>
 #include <filesystem>
 #include <string_view>
@@ -21,6 +23,9 @@ struct ContentFile {
 
 struct ContentInventory {
     std::vector<ContentFile> files;
+    // Unique decoded-image identities required by manifest textures and glTF
+    // material maps. A source used in both color spaces appears twice.
+    std::vector<TextureSourceIdentity> textureSources;
     std::uintmax_t totalBytes = 0;
 };
 
