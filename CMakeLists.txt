@@ -384,6 +384,7 @@ add_library(sokoban_core STATIC
     src/engine/render/FrameResourceTracker.cpp
     src/engine/render/FrameTimeTelemetry.cpp
     src/engine/render/GeometrySuballocator.cpp
+    src/engine/render/GpuMaterial.cpp
     src/engine/render/GpuSkinning.cpp
     src/engine/render/ImageData.cpp
     src/engine/render/OpaqueDrawSorter.cpp
@@ -877,6 +878,10 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         ASSET_DIR
         SOURCES tests/GpuSkinningTests.cpp
+    )
+    sokoban_add_test(NAME gpu_material TARGET sokoban_gpu_material_tests
+        LIBS sokoban_core
+        SOURCES tests/GpuMaterialTests.cpp
     )
     sokoban_add_test(NAME opaque_draw_sorter TARGET sokoban_opaque_draw_sorter_tests
         LIBS sokoban_core

@@ -14,19 +14,19 @@ lighting. The fixed texture ceiling has now been replaced by a device-bounded,
 frame-safe descriptor heap. Read-only glTF inspection now feeds a resolved
 content inventory with stable identities for external, buffer-view and data-URI
 images. Sampling, UV and unsupported-transform semantics are now validated as
-well. `MeshMaterial` now has the complete core map representation. The next
-objective is to redesign `GpuMaterial` once around that complete map set.
+well. `MeshMaterial` and the std430 `GpuMaterial` ABI now carry the complete
+core map representation. The next objective is to connect resolved maps to the
+existing request, decode, publication and residency path.
 
 The recommended order is:
 
 1. Capture the remaining visual/performance baseline evidence.
-2. Redesign `GpuMaterial` once around the complete map set.
-3. Upload resolved glTF map handles through the existing residency system.
-4. Finish tonemapping and exposure before judging mapped PBR output.
-5. Split non-scene modes out of `triangle.frag.glsl`.
-6. Implement and validate normal, metallic-roughness, emissive and occlusion
+2. Upload resolved glTF map handles through the existing residency system.
+3. Finish tonemapping and exposure before judging mapped PBR output.
+4. Split non-scene modes out of `triangle.frag.glsl`.
+5. Implement and validate normal, metallic-roughness, emissive and occlusion
    map sampling.
-7. Complete SSAO, then resume the larger scaling and memory work.
+6. Complete SSAO, then resume the larger scaling and memory work.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
@@ -37,7 +37,7 @@ sampling have different failure modes and should be independently reviewable.
 - Language and platform: C++20, SDL3, Vulkan 1.3, GLSL compiled to SPIR-V.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
-- Current tests: 63 CTest suites in the newest configured build tree.
+- Current tests: 64 CTest suites in the newest configured build tree.
 - Current shaders: 15 GLSL files. `triangle.frag.glsl` is 587 physical lines.
 - Texture capacity: selected at startup from a configured 1,024-slot ceiling,
   device limits, 16 editor-reserved slots and 32 import-reserved slots. The
@@ -61,8 +61,8 @@ future tasks:
   image, and a tonemap pass. F2c remains open.
 - **F3**: cgltf material factors, tangents, a second UV set, alpha modes,
   double-sided metadata, a GPU material buffer and Cook-Torrance GGX. The CPU
-  material now represents all core map types; GPU transport and sampling remain
-  open.
+  and GPU material representations now carry all core map types; runtime handle
+  assignment and sampling remain open.
 - **T1/T2/T3/T6/T7**: instanced tiles, separate opaque drawing and sorting,
   model back-face culling, 4x default MSAA, and AO-gated depth copying.
 - **V1/V3/V5/V6**: per-swapchain-image present semaphores, direct skinning
@@ -84,9 +84,10 @@ future tasks:
   byte budgets can evict old resources. What remains is mip/LOD streaming,
   compressed-size accounting, more flexible publication budgeting, and
   removing the `vkDeviceWaitIdle` eviction fallback.
-- **PBR maps are not “uploaded but unread.”** The scalar factors are uploaded.
-  `MeshMaterial` and `GpuMaterial` do not yet contain normal,
-  metallic-roughness, emissive-map or occlusion-map handles.
+- **PBR maps are represented but not resident.** `MeshMaterial` and
+  `GpuMaterial` contain normal, metallic-roughness, emissive and occlusion map
+  handles and parameters, but 4.3 still has to assign those handles from the
+  resolved inventory and publish the corresponding textures.
 - **Descriptor indexing is core in Vulkan 1.2.** This renderer already requires
   Vulkan 1.3. Query and enable the Vulkan 1.2 feature struct rather than adding
   an extension-name requirement unnecessarily.
@@ -159,7 +160,7 @@ combine adjacent packets merely because they touch the same files.
 ### 0. Refresh the baseline
 
 Current state on 27 August 2026: the full Visual Studio Debug build succeeds
-and all 63 registered CTest suites pass, including `vulkan_smoke`. Establishing
+and all 64 registered CTest suites pass, including `vulkan_smoke`. Establishing
 that baseline also exposed and repaired stale UI/settings assertions left by the
 earlier default-MSAA change. Representative screenshots and frame statistics
 still need to be captured before material-map behavior changes.
@@ -308,19 +309,24 @@ not substitute the glTF base-color image. A synthetic GLB acceptance fixture
 covers default and fully bound handles, UV0/UV1, factors, map scalars, alpha
 mode, cutoff, double-sided state and scrolling compatibility.
 
-#### 4.2 Redesign `GpuMaterial` once
+#### 4.2 Redesign `GpuMaterial` once — complete
 
-- Keep color and scalar factors in aligned float vectors.
-- Store texture handles, UV selections, alpha mode and flags in explicit
-  32-bit integer lanes rather than encoding new indices as floats.
-- Mirror the exact std430 layout in shared comments and static assertions.
-- Version or rebuild the material buffer as needed; never reinterpret an old
-  mapped layout.
+`GpuMaterial` is now a 112-byte, 16-byte-aligned std430 record: three float
+vectors carry color and scalar factors, while four explicit 32-bit integer
+vectors carry five one-based handles, five UV selections, alpha mode, material
+flags and double-sided state. Size, alignment and every field offset have
+compile-time assertions, and both material-consuming shaders mirror the same
+seven lanes with `vec4`/`uvec4` declarations. Disassembly of both compiled
+SPIR-V modules confirms offsets 0–96 and an array stride of 112 bytes.
 
-**Acceptance:** CPU-to-GPU conversion tests cover defaults, every map, alpha
-mode, double-sided state, scrolling compatibility and fallback entry zero.
+The material buffer is allocated and indexed from `sizeof(GpuMaterial)`, so a
+renderer start creates the new-sized buffer rather than reinterpreting the old
+64-byte layout. Existing shader behavior now reads base-color handle/UV, alpha
+mode and scrolling directly from integer lanes. `GpuMaterialTests.cpp` covers
+fallback entry zero, default conversion, every map and UV, all scalar factors,
+alpha mode, double-sided state, scrolling flags and reserved-zero lanes.
 
-#### 4.3 Upload map dependencies through existing residency
+#### 4.3 Upload map dependencies through existing residency — next
 
 - Add discovered material textures to per-model requirements.
 - Stage them through the content pipeline.
@@ -481,6 +487,8 @@ layout changes affect modules that appear unrelated to the immediate feature.
 - `src/engine/render/FrameDescriptorSync.hpp`: per-frame descriptor generations.
 - `src/engine/render/VulkanModelResources.*`: async preparation, GPU publication,
   texture views, material buffer and residency/eviction.
+- `src/engine/render/GpuMaterial.cpp` and `tests/GpuMaterialTests.cpp`: pure
+  CPU-to-GPU material conversion and complete ABI/default coverage.
 - `src/engine/render/VulkanPipelineFactory.*`: pipeline layouts, specialization
   constants, blend/cull/write-mask state.
 - `src/engine/render/VulkanSceneRecorder.*`: pass ordering and descriptor binds.

@@ -4,7 +4,9 @@
 #include "engine/render/RenderTypes.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 namespace sokoban {
 
@@ -135,27 +137,59 @@ static_assert(sizeof(GpuDrawInstance) == 256);
 inline constexpr uint32_t maxDrawInstancesPerFrame =
     RenderFrameData::tileCapacity * 4;
 
-// One glTF material, in the form the shader reads it.
-//
-// Everything is a float, including the things that are conceptually integers,
-// because that is how every other per-draw parameter in this file already
-// travels - see textureOptions - and because it keeps the std430 layout free
-// of the alignment traps that mixing scalars invites. The shader decodes an
-// index with int(x + 0.5), as it already does for textureOptions.y.
-struct GpuMaterial {
+// Four explicit 32-bit integer lanes with the size and alignment of a GLSL
+// uvec4 under std430. Keeping this separate from Math.hpp avoids making an
+// integer GPU transport type look like general-purpose engine math.
+struct alignas(16) GpuMaterialUint4 {
+    uint32_t x = 0;
+    uint32_t y = 0;
+    uint32_t z = 0;
+    uint32_t w = 0;
+};
+
+static_assert(sizeof(GpuMaterialUint4) == 16);
+static_assert(alignof(GpuMaterialUint4) == 16);
+
+// One glTF material, in the exact std430 form the shaders read. Every member
+// is one aligned 16-byte lane; the offset assertions below are the CPU side of
+// the ABI contract mirrored by Material in triangle.frag.glsl and
+// mirror_energy.frag.glsl.
+struct alignas(16) GpuMaterial {
     // rgb is the base colour factor, a multiplied over whatever the base
     // colour texture supplies; a is the material's opacity.
     Vec4 baseColorFactor { 1.0f, 1.0f, 1.0f, 1.0f };
     // rgb emissive factor, w metallic.
     Vec4 emissiveAndMetallic {};
-    // x roughness, y alpha cutoff, z alpha mode (0 opaque, 1 mask, 2 blend),
-    // w PrimitiveMaterialFlag bits.
-    Vec4 roughnessAlphaFlags { 1.0f, 0.5f, 0.0f, 0.0f };
-    // x one-based base colour texture, y its UV set, z double-sided, w spare.
-    Vec4 textureAndUvSet {};
+    // x roughness, y normal scale, z occlusion strength, w alpha cutoff.
+    Vec4 materialScalars { 1.0f, 1.0f, 1.0f, 0.5f };
+    // One-based handles: x base colour, y normal, z metallic-roughness,
+    // w emissive. Zero means that map is absent.
+    GpuMaterialUint4 primaryTextureHandles {};
+    // x is the one-based occlusion handle; yzw are reserved and remain zero.
+    GpuMaterialUint4 occlusionTextureAndPadding {};
+    // UV selections: x base colour, y normal, z metallic-roughness, w emissive.
+    GpuMaterialUint4 textureUvSets {};
+    // x occlusion UV, y alpha mode (0 opaque, 1 mask, 2 blend),
+    // z PrimitiveMaterialFlag bits, w double-sided (0 false, 1 true).
+    GpuMaterialUint4 materialState {};
 };
 
-static_assert(sizeof(GpuMaterial) == 64);
+static_assert(std::is_standard_layout_v<GpuMaterial>);
+static_assert(alignof(GpuMaterial) == 16);
+static_assert(offsetof(GpuMaterial, baseColorFactor) == 0);
+static_assert(offsetof(GpuMaterial, emissiveAndMetallic) == 16);
+static_assert(offsetof(GpuMaterial, materialScalars) == 32);
+static_assert(offsetof(GpuMaterial, primaryTextureHandles) == 48);
+static_assert(offsetof(GpuMaterial, occlusionTextureAndPadding) == 64);
+static_assert(offsetof(GpuMaterial, textureUvSets) == 80);
+static_assert(offsetof(GpuMaterial, materialState) == 96);
+static_assert(sizeof(GpuMaterial) == 112);
+
+struct MeshMaterial;
+
+// Pure CPU-to-GPU conversion, kept public so the material ABI can be tested
+// without constructing Vulkan resources.
+[[nodiscard]] GpuMaterial gpuMaterialFrom(const MeshMaterial& material);
 
 // How many materials may be resident at once. A model claims a contiguous
 // range when it publishes and gives it back when residency evicts it, which

@@ -1586,31 +1586,6 @@ void VulkanModelResources::destroyMaterialBuffer()
     materialBuffer_ = {};
 }
 
-GpuMaterial VulkanModelResources::gpuMaterialFrom(const MeshMaterial& material)
-{
-    return GpuMaterial {
-        .baseColorFactor = material.baseColorFactor,
-        .emissiveAndMetallic = {
-            material.emissiveFactor.x,
-            material.emissiveFactor.y,
-            material.emissiveFactor.z,
-            material.metallicFactor,
-        },
-        .roughnessAlphaFlags = {
-            material.roughnessFactor,
-            material.alphaCutoff,
-            static_cast<float>(static_cast<uint32_t>(material.alphaMode)),
-            static_cast<float>(material.flags),
-        },
-        .textureAndUvSet = {
-            static_cast<float>(material.baseColorTexture),
-            static_cast<float>(material.baseColorUvSet),
-            material.doubleSided ? 1.0f : 0.0f,
-            0.0f,
-        },
-    };
-}
-
 uint32_t VulkanModelResources::writeMaterials(
     const std::vector<MeshMaterial>& materials)
 {

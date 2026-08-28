@@ -257,12 +257,12 @@
   <header class="shell">
     <p class="eyebrow">Current-state review · 27 August 2026</p>
     <h1>Finish the material path without rebuilding it twice.</h1>
-    <p class="deck">Sokoban 3D now has the hard substrate, a device-bounded runtime texture heap, semantically validated glTF texture inventory, and a complete CPU material-map representation. The next program redesigns the GPU material once, connects residency, simplifies the scene shader, and lands each map behind a testable gate.</p>
+    <p class="deck">Sokoban 3D now has the hard substrate, a device-bounded runtime texture heap, semantically validated glTF texture inventory, and complete CPU/GPU material-map representations. The next program connects residency, simplifies the scene shader, and lands each map behind a testable gate.</p>
     <div class="metrics" aria-label="Current repository facts">
       <div class="metric"><b>36</b><span>manifest models</span></div>
       <div class="metric"><b>42 / 1024</b><span>textures on validated GPU</span></div>
       <div class="metric"><b>15</b><span>GLSL shaders</span></div>
-      <div class="metric"><b>63</b><span>registered test suites</span></div>
+      <div class="metric"><b>64</b><span>registered test suites</span></div>
     </div>
   </header>
 
@@ -281,7 +281,7 @@
     <section id="verdict">
       <div class="section-head"><span class="num">01</span><h2>Current verdict</h2></div>
       <div class="callout">
-        <strong>Next program:</strong> MeshMaterial map handles → one GpuMaterial redesign → residency integration → tonemap completion → minimal shader split → map sampling. Descriptor indexing and glTF source/semantic discovery are implemented validation invariants.
+        <strong>Next program:</strong> residency integration → tonemap completion → minimal shader split → map sampling. CPU/GPU material transport, descriptor indexing and glTF source/semantic discovery are implemented validation invariants.
       </div>
       <div class="grid" style="margin-top:1rem">
         <article class="card">
@@ -292,7 +292,7 @@
         <article class="card">
           <p class="kicker">What blocks complete PBR</p>
           <h3>Semantic transport and binding</h3>
-          <p>glTF map sources, sampler state, color space, UV selections and map scalars now survive through the CPU material representation, but they are not yet carried by the GPU ABI or bound at runtime.</p>
+          <p>glTF map sources, sampler state, color space, UV selections and map scalars now survive through both material representations, but resolved handles are not yet assigned and published through runtime residency.</p>
         </article>
         <article class="card">
           <p class="kicker">What not to overbuild</p>
@@ -390,7 +390,7 @@
           <div>
             <div class="phase-title"><h3>Make the starting point trustworthy</h3><span class="status partial">In progress</span></div>
             <div class="tasks">
-              <div class="task"><span class="task-id">0.1</span><div><b>Visual and performance evidence remains</b><p>The full Debug build and all 63 suites, including the Vulkan smoke test, pass. Capture representative screenshots and frame statistics before material-map behavior changes.</p></div></div>
+              <div class="task"><span class="task-id">0.1</span><div><b>Visual and performance evidence remains</b><p>The full Debug build and all 64 suites, including the Vulkan smoke test, pass. Capture representative screenshots and frame statistics before material-map behavior changes.</p></div></div>
               <div class="task"><span class="task-id">0.2</span><div><b>Loader CUBICSPLINE fixture — complete</b><p>The public file loader is covered for three outputs per key, quaternion value normalization, tangent preservation and malformed counts.</p></div></div>
               <div class="task"><span class="task-id">0.3</span><div><b>Mechanical cleanup — partial</b><p>The dead GPU instance header is gone. Add and normalize the line-ending policy in a separate, non-semantic commit.</p></div></div>
             </div>
@@ -442,8 +442,8 @@
             <div class="phase-title"><h3>Carry every material map to the GPU</h3><span class="status partial">In progress</span></div>
             <div class="tasks">
               <div class="task"><span class="task-id">4.1</span><div><b>Extend MeshMaterial — complete</b><p>CPU materials carry optional one-based handles, UV selections, normal scale and occlusion strength for all four core maps. A synthetic GLB loader fixture covers unbound defaults and fully bound metadata while preserving the manifest base-color override.</p></div></div>
-              <div class="task"><span class="task-id">4.2</span><div><b>Redesign GpuMaterial once — next</b><p>Keep factors in aligned float vectors and new handles/flags in explicit 32-bit integer lanes with std430 assertions.</p></div></div>
-              <div class="task"><span class="task-id">4.3</span><div><b>Use existing residency</b><p>Add maps to model requirements, worker decode, render-thread publication, budgets and diagnostics.</p></div></div>
+              <div class="task"><span class="task-id">4.2</span><div><b>Redesign GpuMaterial once — complete</b><p>The 112-byte std430 ABI uses three aligned float vectors and four explicit integer vectors. Exact offsets are asserted and confirmed in both compiled SPIR-V modules; focused tests cover fallback/default conversion, every map and UV, alpha, double-sided state and flags.</p></div></div>
+              <div class="task"><span class="task-id">4.3</span><div><b>Use existing residency — next</b><p>Add maps to model requirements, worker decode, render-thread publication, budgets and diagnostics.</p></div></div>
             </div>
             <p class="accept"><b>Gate:</b> requesting one model requests exactly its map dependencies; CPU-to-GPU conversion tests cover every default and flag.</p>
           </div>

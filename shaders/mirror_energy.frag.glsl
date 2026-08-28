@@ -43,8 +43,11 @@ struct Material
 {
     vec4 baseColorFactor;
     vec4 emissiveAndMetallic;
-    vec4 roughnessAlphaFlags;
-    vec4 textureAndUvSet;
+    vec4 materialScalars;
+    uvec4 primaryTextureHandles;
+    uvec4 occlusionTextureAndPadding;
+    uvec4 textureUvSets;
+    uvec4 materialState;
 };
 layout(std430, set = 0, binding = 12) readonly buffer Materials
 {
@@ -76,7 +79,7 @@ vec4 sampledMaterial()
         int materialBase = int(draw.passData[0].x + 0.5);
         Material material = materials.entries[
             materialBase == 0 ? 0 : materialBase + int(inMaterialIndex)];
-        int materialTexture = int(material.textureAndUvSet.x + 0.5);
+        int materialTexture = int(material.primaryTextureHandles.x);
         // The ghost is a tint over the model's own colour, and its opacity
         // comes from the effect rather than the material, so only the base
         // colour's rgb is taken here.
@@ -85,10 +88,10 @@ vec4 sampledMaterial()
             return result;
         }
         int textureIndex = max(materialTexture - 1, 0);
-        vec2 uv = int(material.textureAndUvSet.y + 0.5) == 1
+        vec2 uv = material.textureUvSets.x == 1u
             ? inUv1
             : vec2(inFaceCoordU, inFaceCoordV);
-        if ((int(material.roughnessAlphaFlags.w + 0.5) & 1) != 0) {
+        if ((material.materialState.z & 1u) != 0u) {
             uv.y = fract(uv.y + draw.materialOptions.y);
         }
         return result * texture(

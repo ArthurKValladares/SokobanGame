@@ -383,7 +383,6 @@ private:
     // Closes the gaps left by evicted models. Only safe while the device is
     // idle, which is exactly where residency eviction already is.
     void repackMaterials();
-    [[nodiscard]] static GpuMaterial gpuMaterialFrom(const MeshMaterial& material);
     void writeSkinningInstance(
         uint32_t frameIndex,
         uint32_t instanceSlot,

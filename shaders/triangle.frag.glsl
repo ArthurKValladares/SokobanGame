@@ -54,8 +54,11 @@ struct Material
 {
     vec4 baseColorFactor;
     vec4 emissiveAndMetallic;
-    vec4 roughnessAlphaFlags;
-    vec4 textureAndUvSet;
+    vec4 materialScalars;
+    uvec4 primaryTextureHandles;
+    uvec4 occlusionTextureAndPadding;
+    uvec4 textureUvSets;
+    uvec4 materialState;
 };
 layout(std430, set = 0, binding = 12) readonly buffer Materials
 {
@@ -345,7 +348,7 @@ void main()
     // punch a hole through a surface the file says is solid.
     vec4 materialColor = draw.color;
     materialColor.rgb *= material.baseColorFactor.rgb;
-    if (int(material.roughnessAlphaFlags.z + 0.5) == 2) {
+    if (material.materialState.y == 2u) {
         materialColor.a *= material.baseColorFactor.a;
     }
     int materialMode = int(draw.textureOptions.x + 0.5);
@@ -409,15 +412,15 @@ void main()
         // per-mode: mode 1's comes from the manifest's single-texture
         // override, so the glTF's own base colour texture is deliberately
         // not consulted there.
-        int materialTexture = int(material.textureAndUvSet.x + 0.5);
+        int materialTexture = int(material.primaryTextureHandles.x);
         if (materialTexture != 0) {
             int textureIndex = max(materialTexture - 1, 0);
             // Set 1 is the second unwrap; the loader falls it back to set 0
             // on a mesh that has only one, so this never reads nothing.
-            vec2 uv = int(material.textureAndUvSet.y + 0.5) == 1
+            vec2 uv = material.textureUvSets.x == 1u
                 ? inUv1
                 : vec2(inFaceCoordU, inFaceCoordV);
-            if ((int(material.roughnessAlphaFlags.w + 0.5) & 1) != 0) {
+            if ((material.materialState.z & 1u) != 0u) {
                 uv.y = fract(uv.y + draw.materialOptions.y);
             }
             materialColor *= texture(
@@ -458,7 +461,7 @@ void main()
         // exponent. Roughness has a floor because a perfect mirror is a
         // delta function no point light can hit.
         float metallic = clamp(material.emissiveAndMetallic.w, 0.0, 1.0);
-        float roughness = clamp(material.roughnessAlphaFlags.x, 0.045, 1.0);
+        float roughness = clamp(material.materialScalars.x, 0.045, 1.0);
         // Dielectrics reflect about 4% head-on; a metal reflects its own
         // colour and has no diffuse lobe at all.
         vec3 f0 = mix(vec3(0.04), color, metallic);
