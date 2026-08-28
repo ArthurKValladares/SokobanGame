@@ -4,8 +4,6 @@
 layout(set = 0, binding = 0) uniform sampler2D shadowMap;
 layout(set = 0, binding = 1) uniform sampler2D sceneColor;
 layout(set = 1, binding = 0) uniform sampler2D modelTextures[];
-layout(set = 0, binding = 3) uniform sampler2D uiFont;
-layout(set = 0, binding = 4) uniform sampler2D titleBackground;
 layout(set = 0, binding = 8) uniform samplerCubeArray pointShadowMaps;
 
 layout(location = 0) in vec4 inShadowPosition;
@@ -338,7 +336,7 @@ void main()
     // Read for every draw, not just the primitive-materials one. A draw with
     // no model behind it has a zero base and lands on the reserved fallback:
     // white factor, no texture, metallic 0, roughness 1. So this is a no-op
-    // for tiles, UI and particles, and the lighting below needs no branch to
+    // for tiles and particles, and the lighting below needs no branch to
     // find a metallic and a roughness for them.
     Material material = modelMaterial();
     // glTF says the base colour factor multiplies the base colour texture.
@@ -352,62 +350,7 @@ void main()
         materialColor.a *= material.baseColorFactor.a;
     }
     int materialMode = int(draw.textureOptions.x + 0.5);
-    if (materialMode == 3) {
-        vec2 uv = draw.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
-        materialColor.a *= texture(uiFont, uv).r;
-    } else if (materialMode == 6) {
-        vec2 uv = draw.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
-        // Colour only. The scene target's alpha is the ambient mask now, not
-        // an opacity, and folding it into this composite would feather the
-        // preview by how much ambient light happened to reach it.
-        materialColor.rgb *= texture(sceneColor, uv).rgb;
-
-        // Scene-image UI is the preserved main view composited over the
-        // preview. A signed-distance rounded rectangle makes the preview's
-        // outside edge genuinely transparent and gives corners one smooth,
-        // continuous curve instead of a stack of rectangular bands.
-        vec2 uvSpan = max(draw.materialOptions.yz, vec2(0.00001));
-        vec2 localPosition =
-            vec2(inFaceCoordU, inFaceCoordV) / uvSpan;
-        vec2 rectSize = max(draw.shadowOptions.xy, vec2(1.0));
-        float featherWidth = max(draw.shadowOptions.z, 0.001);
-        float cornerRadius = clamp(
-            draw.shadowOptions.w,
-            0.0,
-            min(rectSize.x, rectSize.y) * 0.5);
-        vec2 centeredPosition =
-            localPosition * rectSize - rectSize * 0.5;
-        vec2 distanceToCorner = abs(centeredPosition) -
-            (rectSize * 0.5 - vec2(cornerRadius));
-        float signedDistance =
-            length(max(distanceToCorner, vec2(0.0))) +
-            min(max(distanceToCorner.x, distanceToCorner.y), 0.0) -
-            cornerRadius;
-        float normalizedDistance = clamp(
-            -signedDistance / featherWidth,
-            0.0,
-            1.0);
-        float endpointSoftened = smoothstep(
-            0.0,
-            1.0,
-            normalizedDistance);
-        // A normalized logarithmic remap lifts the quiet first part of the
-        // Hermite curve and softens its abrupt-looking middle without losing
-        // the zero-slope endpoints that prevent visible seams.
-        const float logarithmicStrength = 2.0;
-        float previewOpacity = log(
-            1.0 + logarithmicStrength * endpointSoftened) /
-            log(1.0 + logarithmicStrength);
-        materialColor.a *= 1.0 - previewOpacity;
-    } else if (materialMode == 4) {
-        vec2 uv = draw.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
-        materialColor *= texture(titleBackground, uv);
-    } else if (materialMode == 7) {
-        vec2 uv = draw.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
-        int textureIndex = max(int(draw.textureOptions.y + 0.5) - 1, 0);
-        materialColor *= texture(
-            modelTextures[nonuniformEXT(textureIndex)], uv);
-    } else if (materialMode == 2) {
+    if (materialMode == 2) {
         // The factor is applied above for every mode. Only the texture is
         // per-mode: mode 1's comes from the manifest's single-texture
         // override, so the glTF's own base colour texture is deliberately
@@ -441,7 +384,7 @@ void main()
             vec2(inFaceCoordU, inFaceCoordV));
     }
     vec3 color = mix(materialColor.rgb, draw.gridColor.rgb, gridMask());
-    // Stays zero for anything unlit - the grid overlay, the 2D board, UI -
+    // Stays zero for anything unlit - the grid overlay or the 2D board -
     // so occlusion cannot touch surfaces that have no ambient term to occlude.
     float ambientMask = 0.0;
     if (length(inNormal) > 0.0001) {

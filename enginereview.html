@@ -257,11 +257,11 @@
   <header class="shell">
     <p class="eyebrow">Current-state review · 28 August 2026</p>
     <h1>Finish the material path without rebuilding it twice.</h1>
-    <p class="deck">Sokoban 3D now has the hard substrate, a device-bounded runtime texture heap, semantically validated glTF texture inventory, complete CPU/GPU material-map representations, model-scoped map residency, and a tested HDR output transform. The next program simplifies the scene shader and lands each map behind a testable gate.</p>
+    <p class="deck">Sokoban 3D now has the hard substrate, a device-bounded runtime texture heap, semantically validated glTF texture inventory, complete CPU/GPU material-map representations, model-scoped map residency, a tested HDR output transform, and a dedicated post-tonemap UI fragment path. The next program lands each material map behind a testable gate.</p>
     <div class="metrics" aria-label="Current repository facts">
       <div class="metric"><b>36</b><span>manifest models</span></div>
       <div class="metric"><b>42 / 1024</b><span>textures on validated GPU</span></div>
-      <div class="metric"><b>15</b><span>GLSL shaders</span></div>
+      <div class="metric"><b>16</b><span>GLSL shaders</span></div>
       <div class="metric"><b>66</b><span>registered test suites</span></div>
     </div>
   </header>
@@ -281,7 +281,7 @@
     <section id="verdict">
       <div class="section-head"><span class="num">01</span><h2>Current verdict</h2></div>
       <div class="callout">
-        <strong>Next program:</strong> minimal shader split → map sampling. CPU/GPU material transport, descriptor indexing, glTF source/semantic discovery, model-scoped residency and HDR presentation are implemented validation invariants.
+        <strong>Next program:</strong> metallic-roughness → normal → emissive → occlusion sampling. CPU/GPU material transport, descriptor indexing, glTF source/semantic discovery, model-scoped residency, HDR presentation and the UI/scene shader split are implemented validation invariants.
       </div>
       <div class="grid" style="margin-top:1rem">
         <article class="card">
@@ -291,8 +291,8 @@
         </article>
         <article class="card">
           <p class="kicker">What blocks complete PBR</p>
-          <h3>Shader structure and map sampling</h3>
-          <p>glTF map sources, sampler state, color space, UV selections, map scalars and resolved handles now survive through model-scoped residency, and the output transform is complete. The scene/UI shader split and four map sampling paths remain.</p>
+          <h3>Material-map sampling</h3>
+          <p>glTF map sources, sampler state, color space, UV selections, map scalars and resolved handles now survive through model-scoped residency. The output transform and UI split are complete; the four scene map sampling paths remain.</p>
         </article>
         <article class="card">
           <p class="kicker">What not to overbuild</p>
@@ -316,7 +316,7 @@
             <tr><td>F1</td><td><span class="status done">Done</span></td><td>Shared math, transforms, bounds, rays and frustums exist.</td><td>Use them in T4; no foundation rewrite.</td></tr>
             <tr><td>F2</td><td><span class="status done">Done</span></td><td>The HDR path uses Khronos PBR Neutral by default, persisted −4 to +4 EV exposure, and a Debug straight-clamp comparison.</td><td>Preserve UI-after-tonemap and single hardware sRGB encoding.</td></tr>
             <tr><td>F3</td><td><span class="status partial">Core done</span></td><td>Material factors, tangents, UV1, GPU buffer, alpha metadata, GGX and model-scoped map residency exist.</td><td>Sample normal/MR/emissive/occlusion maps in the shaders.</td></tr>
-            <tr><td>F4</td><td><span class="status open">Open</span></td><td><code>triangle.frag.glsl</code> still mixes lit scene work with UI/title/composite modes.</td><td>Extract non-scene modes before adding map branches.</td></tr>
+            <tr><td>F4</td><td><span class="status done">Done</span></td><td><code>ui.frag.glsl</code> owns solid/font/title/texture/scene-image UI; <code>triangle.frag.glsl</code> keeps scene work.</td><td>Preserve the split while material maps land.</td></tr>
             <tr><td>F5</td><td><span class="status conditional">Conditional</span></td><td>Vulkan types still cross broad renderer seams.</td><td>Build an RHI only for a real second backend/platform.</td></tr>
             <tr><td>T1–T3</td><td><span class="status done">Done</span></td><td>Instanced tiles, opaque sorting and model back-face culling are implemented.</td><td>Preserve their draw ordering and winding invariants.</td></tr>
             <tr><td>T4</td><td><span class="status open">Open</span></td><td>Frustum math exists but renderables are not persistently culled.</td><td>S2 persistent bounds, then frustum culling.</td></tr>
@@ -370,9 +370,9 @@
           <p>External URIs, GLB buffer-view images and supported data URIs share one source variant. Color and combined-sampler interpretation are part of identity so current descriptors remain unambiguous.</p>
         </article>
         <article class="card">
-          <p class="kicker">Shader order</p>
-          <h3>Split UI before map sampling</h3>
-          <p>The current scene fragment shader is 587 lines and has seven material-mode branches. With descriptor plumbing in place, extract UI/title/composite modes before normal and MR logic arrive.</p>
+          <p class="kicker">Shader boundary</p>
+          <h3>UI split before map sampling — complete</h3>
+          <p>The scene fragment shader is now 488 lines and contains no font, title-art, UI-texture or rounded scene-image branches. The 93-line UI fragment module retains those modes after tonemapping.</p>
         </article>
       </div>
       <div class="callout warn" style="margin-top:1rem">
@@ -464,19 +464,19 @@
         <article class="phase">
           <div class="phase-id">6<small>F4a</small></div>
           <div>
-            <div class="phase-title"><h3>Remove non-scene branches</h3><span class="status next">Next</span></div>
+            <div class="phase-title"><h3>Remove non-scene branches</h3><span class="status done">Done</span></div>
             <div class="tasks">
-              <div class="task"><span class="task-id">6.1</span><div><b>Dedicated UI fragment path</b><p>Extract font, title art, rounded scene-image composition and other unlit UI modes from the lit scene shader.</p></div></div>
-              <div class="task"><span class="task-id">6.2</span><div><b>Conservative specialization</b><p>Use constants for stable pipeline axes only; keep material differences data-driven.</p></div></div>
+              <div class="task"><span class="task-id">6.1</span><div><b>Dedicated UI fragment path — complete</b><p>Solid rectangles, font, title art, runtime textures and rounded scene-image composition now use <code>ui.frag.glsl</code>. The shared quad transport and post-tonemap blending remain unchanged.</p></div></div>
+              <div class="task"><span class="task-id">6.2</span><div><b>Conservative specialization — guardrail complete</b><p>The split needs no new permutation. Ambient-mask output remains the one stable specialization axis; material differences stay data-driven.</p></div></div>
             </div>
-            <p class="accept"><b>Gate:</b> UI pixels remain unchanged and the scene shader no longer selects UI/title modes.</p>
+            <p class="accept"><b>Gate:</b> both modules pass SPIR-V validation and interface inspection; the 200-file content stage, Vulkan smoke test and all 66 suites pass. Manual reference capture remains in 0.1.</p>
           </div>
         </article>
 
         <article class="phase">
           <div class="phase-id">7<small>PBR maps</small></div>
           <div>
-            <div class="phase-title"><h3>Sample maps one type at a time</h3></div>
+            <div class="phase-title"><h3>Sample maps one type at a time</h3><span class="status next">Next</span></div>
             <div class="tasks">
               <div class="task"><span class="task-id">7.1</span><div><b>Metallic-roughness</b><p>Read G roughness and B metallic; multiply existing factors.</p></div></div>
               <div class="task"><span class="task-id">7.2</span><div><b>Normal</b><p>Build world-space TBN from normal, tangent and handedness; handle authored/derived tangents and double-sided back faces.</p></div></div>

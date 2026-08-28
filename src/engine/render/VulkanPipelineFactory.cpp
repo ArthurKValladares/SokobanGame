@@ -90,7 +90,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
 
     // Indices are positional only so that the cleanup loop below has one
     // array to walk; nothing else depends on the order.
-    std::array<VkShaderModule, 15> shaders {};
+    std::array<VkShaderModule, 16> shaders {};
     try {
         shaders[0] = shaderModule(shaderCatalog::triangleVert);
         shaders[1] = shaderModule(shaderCatalog::triangleFrag);
@@ -107,6 +107,7 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         shaders[12] = shaderModule(shaderCatalog::skinnedModelVert);
         shaders[13] = shaderModule(shaderCatalog::skinnedModelShadowVert);
         shaders[14] = shaderModule(shaderCatalog::tonemapFrag);
+        shaders[15] = shaderModule(shaderCatalog::uiFrag);
 
         scene_ = createScenePipeline(
             shaders[0], shaders[1], VertexLayout::None,
@@ -132,11 +133,12 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             shaders[0], shaders[10], VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             createInfo.wireframe, Target::SceneOpaque);
-        // The only scene-shader pipeline that draws a display image: the
-        // game's UI composites after the tonemap, onto the swapchain or onto
-        // the display image the developer workspace publishes.
+        // The game's UI has its own fragment path and composites after the
+        // tonemap, onto the swapchain or onto the display image the developer
+        // workspace publishes. It retains the shared instanced-quad vertex
+        // transport without pulling scene lighting into the fragment stage.
         ui_ = createScenePipeline(
-            shaders[0], shaders[1], VertexLayout::None,
+            shaders[0], shaders[15], VertexLayout::None,
             VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_UNDEFINED, displayFormat,
             createInfo.wireframe, Target::Display);
         model_ = createScenePipeline(

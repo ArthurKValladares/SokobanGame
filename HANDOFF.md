@@ -18,16 +18,17 @@ well. `MeshMaterial` and the std430 `GpuMaterial` ABI carry the complete core
 map representation, and resolved maps now flow through model requirements,
 worker decode, render-thread publication and bounded residency. HDR presentation
 now uses Khronos PBR Neutral by default, with persisted exposure and a Debug
-straight-clamp comparison. The next objective is to split non-scene modes out
-of the scene fragment shader before adding material-map sampling branches.
+straight-clamp comparison. Player-facing UI now has a dedicated fragment path,
+leaving the scene fragment shader free of font, title-art, UI-texture and
+rounded scene-image branches. The next objective is to add material-map
+sampling one map type at a time, beginning with metallic-roughness.
 
 The recommended order is:
 
 1. Capture the remaining post-tonemap visual/performance baseline evidence.
-2. Split non-scene modes out of `triangle.frag.glsl`.
-3. Implement and validate normal, metallic-roughness, emissive and occlusion
+2. Implement and validate metallic-roughness, normal, emissive and occlusion
    map sampling.
-4. Complete SSAO, then resume the larger scaling and memory work.
+3. Complete SSAO, then resume the larger scaling and memory work.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
@@ -39,7 +40,8 @@ sampling have different failure modes and should be independently reviewable.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
 - Current tests: 66 CTest suites in the newest configured build tree.
-- Current shaders: 15 GLSL files. `triangle.frag.glsl` is 587 physical lines.
+- Current shaders: 16 GLSL files. `triangle.frag.glsl` is 488 physical lines;
+  player-facing UI uses the 93-line `ui.frag.glsl` path.
 - Texture capacity: selected at startup from a configured 1,024-slot ceiling,
   device limits, 16 editor-reserved slots and 32 import-reserved slots. The
   validated RTX 4060 configuration selects 1,024 slots for 42 manifest entries.
@@ -66,6 +68,9 @@ future tasks:
   double-sided metadata, a GPU material buffer and Cook-Torrance GGX. The CPU
   and GPU representations carry all core map types, and runtime handle
   assignment/residency is complete; shader sampling remains open.
+- **F4a**: player-facing solid rectangles, font glyphs, title art, runtime UI
+  textures and rounded scene-image composition use a dedicated UI fragment
+  shader. The lit scene fragment shader no longer branches on those modes.
 - **T1/T2/T3/T6/T7**: instanced tiles, separate opaque drawing and sorting,
   model back-face culling, 4x default MSAA, and AO-gated depth copying.
 - **V1/V3/V5/V6**: per-swapchain-image present semaphores, direct skinning
@@ -278,7 +283,7 @@ staged document rather than acquiring invented filesystem paths.
 
 `ContentPipelineTests.cpp` covers canonical external-URI deduplication,
 sRGB-versus-linear separation, supported data URIs, embedded GLB images and
-plain/percent-encoded traversal rejection. The real 199-file asset tree stages
+plain/percent-encoded traversal rejection. The real 200-file asset tree stages
 successfully through this path.
 
 #### 3.3 Preserve glTF texture semantics — complete
@@ -360,7 +365,7 @@ separation, shared-document models, unrelated-model isolation, stable low/high
 descriptor mapping, the manifest base-color override and all three source
 forms. `GltfDependencyTests.cpp` additionally verifies that map-only bindings
 do not synthesize a base-color handle. The production catalog inspection, full
-199-file content stage, Debug build and all 66 suites pass.
+200-file content stage, Debug build and all 66 suites pass.
 
 **Acceptance:** complete. Requesting a model requests all of its maps while an
 unrelated model's maps remain absent from that request.
@@ -393,25 +398,39 @@ Vulkan smoke test, pass.
 remaining representative screenshot capture is tracked in 0.1 rather than
 blocking the next independent shader-structure packet.
 
-### 6. Reduce the uber-shader before adding map branches
+### 6. Reduce the uber-shader before adding map branches — complete
 
-#### 6.1 Extract non-scene modes
+#### 6.1 Extract non-scene modes — complete
 
-- Move UI font, title art, rounded scene-image composition and other unlit UI
-  modes out of `triangle.frag.glsl` into a dedicated fragment shader/pipeline.
-- Keep scene lighting, tile/model materials and the ambient-mask contract in
-  the scene shader.
-- Prefer a small shared include for genuinely shared declarations over copying
-  large functions.
+`ui.frag.glsl` now owns every `UiDrawKind`: solid rectangles, font glyphs,
+title art, runtime texture images and rounded scene-image composition. The UI
+pipeline pairs that module with the existing instanced-quad vertex path, so the
+draw-instance ABI, command batching, post-tonemap pass order and blend behavior
+are unchanged.
 
-**Acceptance:** UI output is unchanged, the scene shader no longer branches on
-UI/title modes, and shader-interface reflection passes.
+`triangle.frag.glsl` no longer declares the UI font or title-art descriptors and
+no longer contains material-mode branches 3, 4, 6 or 7. Scene lighting,
+tile/model materials, scene blur, editor highlighting and the ambient-mask
+contract remain in the scene shader. The rounded-image edge formula was moved
+without changing its arithmetic.
 
-#### 6.2 Add permutations only for stable axes
+Both SPIR-V modules pass `spirv-val`. Disassembly confirms the scene module no
+longer declares bindings 3 or 4, while the UI module declares only scene color,
+font, title art, the runtime texture heap and the shared draw buffer. The shader
+catalog, compiler and content stage now carry all 16 modules, and the content
+pipeline fixture explicitly requires the UI module. The complete Debug build,
+200-file content stage and all 66 suites, including `vulkan_smoke`, pass.
 
-Use specialization constants for stable pipeline choices such as lit/unlit or
-ambient-mask output. Do not create a combinatorial permutation system for every
-material flag; data-driven material differences belong in `GpuMaterial`.
+**Acceptance:** complete for source separation, compiled interfaces, pipeline
+creation and automated regression coverage. The post-tonemap reference capture
+tracked by 0.1 remains the manual pixel-comparison evidence.
+
+#### 6.2 Specialization policy — complete guardrail
+
+No new specialization axis was needed for the split: UI is a separate fragment
+module, and `writeAmbientMask` remains the one stable opaque-pipeline choice.
+Do not create a combinatorial permutation system for material flags;
+data-driven material differences belong in `GpuMaterial`.
 
 ### 7. Implement material-map sampling
 
@@ -547,7 +566,10 @@ layout changes affect modules that appear unrelated to the immediate feature.
   `ui/OptionsMenu.*`: persisted exposure and its user-facing control.
 - `src/engine/PresentationSettings.*` and `render/RenderFrameBuilder.cpp`:
   authoritative runtime output-transform projection and frame transport.
-- `shaders/triangle.frag.glsl`: current scene/UI uber-shader.
+- `shaders/triangle.frag.glsl`: scene lighting, tile/model materials, scene blur,
+  editor highlight and the ambient-mask writer.
+- `shaders/ui.frag.glsl`: post-tonemap solid, font, title-art, runtime-texture
+  and rounded scene-image UI modes.
 - `shaders/ground_splat.frag.glsl`: second ambient-mask writer.
 - `shaders/mirror_energy.frag.glsl`: separate material-texture consumer.
 - `shaders/tonemap.frag.glsl`: completed exposure and output transform.

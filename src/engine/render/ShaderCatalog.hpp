@@ -33,6 +33,7 @@ namespace sokoban::shaderCatalog {
 
 inline constexpr std::string_view triangleVert = "triangle.vert.glsl";
 inline constexpr std::string_view triangleFrag = "triangle.frag.glsl";
+inline constexpr std::string_view uiFrag = "ui.frag.glsl";
 inline constexpr std::string_view waterFrag = "water.frag.glsl";
 inline constexpr std::string_view mirrorEnergyFrag = "mirror_energy.frag.glsl";
 inline constexpr std::string_view groundSplatFrag = "ground_splat.frag.glsl";
@@ -49,9 +50,10 @@ inline constexpr std::string_view tonemapFrag = "tonemap.frag.glsl";
 inline constexpr std::string_view worldTransitionFrag =
     "world_transition.frag.glsl";
 
-inline constexpr std::array<std::string_view, 15> sources {
+inline constexpr std::array<std::string_view, 16> sources {
     triangleVert,
     triangleFrag,
+    uiFrag,
     waterFrag,
     mirrorEnergyFrag,
     groundSplatFrag,

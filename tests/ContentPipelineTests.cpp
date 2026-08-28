@@ -480,6 +480,8 @@ void testInventoryAndStaging()
         "level names included");
     check(!contains(inventory, "levels/Deleted/level9/screen0.scr"), "deleted level excluded");
     check(contains(inventory, "shaders/model.vert.glsl.spv"), "compiled shader included");
+    check(contains(inventory, "shaders/ui.frag.glsl.spv"),
+        "dedicated UI fragment shader included");
 
     const std::filesystem::path output = temp.path() / "package/assets";
     writeFile(output / "stale.file");
