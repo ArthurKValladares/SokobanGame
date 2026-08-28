@@ -20,14 +20,14 @@ worker decode, render-thread publication and bounded residency. HDR presentation
 now uses Khronos PBR Neutral by default, with persisted exposure and a Debug
 straight-clamp comparison. Player-facing UI now has a dedicated fragment path,
 leaving the scene fragment shader free of font, title-art, UI-texture and
-rounded scene-image branches. The next objective is to add material-map
-sampling one map type at a time, beginning with metallic-roughness.
+rounded scene-image branches. Metallic-roughness sampling is now live as the
+first mapped PBR input. The next objective is normal mapping with the authored
+or derived tangent frame already carried by the vertex path.
 
 The recommended order is:
 
 1. Capture the remaining post-tonemap visual/performance baseline evidence.
-2. Implement and validate metallic-roughness, normal, emissive and occlusion
-   map sampling.
+2. Implement and validate normal, emissive and occlusion map sampling.
 3. Complete SSAO, then resume the larger scaling and memory work.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
@@ -39,8 +39,8 @@ sampling have different failure modes and should be independently reviewable.
 - Language and platform: C++20, SDL3, Vulkan 1.3, GLSL compiled to SPIR-V.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
-- Current tests: 66 CTest suites in the newest configured build tree.
-- Current shaders: 16 GLSL files. `triangle.frag.glsl` is 488 physical lines;
+- Current tests: 67 CTest suites in the newest configured build tree.
+- Current shaders: 16 GLSL files. `triangle.frag.glsl` is 514 physical lines;
   player-facing UI uses the 93-line `ui.frag.glsl` path.
 - Texture capacity: selected at startup from a configured 1,024-slot ceiling,
   device limits, 16 editor-reserved slots and 32 import-reserved slots. The
@@ -66,8 +66,9 @@ future tasks:
   outside the output transform.
 - **F3**: cgltf material factors, tangents, a second UV set, alpha modes,
   double-sided metadata, a GPU material buffer and Cook-Torrance GGX. The CPU
-  and GPU representations carry all core map types, and runtime handle
-  assignment/residency is complete; shader sampling remains open.
+  and GPU representations carry all core map types, runtime handle
+  assignment/residency is complete, and metallic-roughness sampling is live.
+  Normal, emissive and occlusion sampling remain open.
 - **F4a**: player-facing solid rectangles, font glyphs, title art, runtime UI
   textures and rounded scene-image composition use a dedicated UI fragment
   shader. The lit scene fragment shader no longer branches on those modes.
@@ -173,7 +174,7 @@ combine adjacent packets merely because they touch the same files.
 ### 0. Refresh the baseline
 
 Current state on 28 August 2026: the full Visual Studio Debug build succeeds
-and all 66 registered CTest suites pass, including `vulkan_smoke`. Establishing
+and all 67 registered CTest suites pass, including `vulkan_smoke`. Establishing
 that baseline also exposed and repaired stale UI/settings assertions left by the
 earlier default-MSAA change. Representative screenshots and frame statistics
 still need to be captured after the output-transform change and before
@@ -365,7 +366,7 @@ separation, shared-document models, unrelated-model isolation, stable low/high
 descriptor mapping, the manifest base-color override and all three source
 forms. `GltfDependencyTests.cpp` additionally verifies that map-only bindings
 do not synthesize a base-color handle. The production catalog inspection, full
-200-file content stage, Debug build and all 66 suites pass.
+200-file content stage, Debug build and all 67 suites pass.
 
 **Acceptance:** complete. Requesting a model requests all of its maps while an
 unrelated model's maps remain absent from that request.
@@ -391,7 +392,7 @@ UI composition remains after tonemapping. The shader writes linear output and
 the sRGB attachment remains the only output encode. `TonemapTests` covers the EV
 range and multiplier, legacy clamp behavior, neutral low-range colors and HDR
 highlight compression; profile, settings, presentation and UI suites cover the
-full settings path. The complete Debug build and all 66 suites, including the
+full settings path. The complete Debug build and all 67 suites, including the
 Vulkan smoke test, pass.
 
 **Acceptance:** implementation and automated validation are complete. The
@@ -419,7 +420,7 @@ longer declares bindings 3 or 4, while the UI module declares only scene color,
 font, title art, the runtime texture heap and the shared draw buffer. The shader
 catalog, compiler and content stage now carry all 16 modules, and the content
 pipeline fixture explicitly requires the UI module. The complete Debug build,
-200-file content stage and all 66 suites, including `vulkan_smoke`, pass.
+200-file content stage and all 67 suites, including `vulkan_smoke`, pass.
 
 **Acceptance:** complete for source separation, compiled interfaces, pipeline
 creation and automated regression coverage. The post-tonemap reference capture
@@ -436,11 +437,27 @@ data-driven material differences belong in `GpuMaterial`.
 
 Land map types separately so visual regressions remain bisectable.
 
-#### 7.1 Metallic-roughness
+#### 7.1 Metallic-roughness — complete
 
-- Sample glTF roughness from G and metallic from B.
-- Multiply by the scalar factors already in `MeshMaterial`.
-- Confirm the direct and ambient BRDF paths use the same resulting values.
+`triangle.frag.glsl` now samples the one-based metallic-roughness handle as
+linear data, reads perceptual roughness from G and metallic from B, and
+multiplies both by the authored scalar factors before clamping. A missing map is
+equivalent to a white sample, preserving factor-only materials and the fallback
+material. UV0/UV1 selection and the existing scrolling-material flag use the
+same helper as base color, so packed maps do not drift away from animated color.
+
+The resolved metallic value feeds both direct-light `f0`/diffuse partitioning
+and the ambient approximation. Resolved roughness feeds every direct GGX light;
+the current ambient approximation has no roughness-dependent environment term.
+`PbrMaterial.*` provides a matching CPU reference, and `PbrMaterialTests.cpp`
+covers fallback, G/B selection, ignored R/A channels, factor multiplication and
+post-sample physical clamping. Existing glTF, GPU-material and runtime-catalog
+tests cover linear interpretation, UV1, handles and residency. All shaders pass
+compilation and SPIR-V validation; the full Debug build, 200-file content stage
+and all 67 suites, including `vulkan_smoke`, pass.
+
+**Acceptance:** complete for the mapped parameter path and automated numeric,
+transport and runtime validation. Visual reference capture remains in 0.1.
 
 #### 7.2 Normal mapping
 
@@ -556,6 +573,8 @@ layout changes affect modules that appear unrelated to the immediate feature.
   texture views, material buffer and residency/eviction.
 - `src/engine/render/GpuMaterial.cpp` and `tests/GpuMaterialTests.cpp`: pure
   CPU-to-GPU material conversion and complete ABI/default coverage.
+- `src/engine/render/PbrMaterial.*` and `tests/PbrMaterialTests.cpp`: CPU
+  reference and focused numeric coverage for mapped PBR parameter resolution.
 - `src/engine/render/VulkanPipelineFactory.*`: pipeline layouts, specialization
   constants, blend/cull/write-mask state.
 - `src/engine/render/VulkanSceneRecorder.*`: pass ordering and descriptor binds.

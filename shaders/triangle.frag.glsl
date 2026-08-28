@@ -73,6 +73,17 @@ Material modelMaterial()
     return materials.entries[base == 0 ? 0 : base + int(inMaterialIndex)];
 }
 
+vec2 materialTextureUv(uint uvSet, uint materialFlags)
+{
+    vec2 uv = uvSet == 1u
+        ? inUv1
+        : vec2(inFaceCoordU, inFaceCoordV);
+    if ((materialFlags & 1u) != 0u) {
+        uv.y = fract(uv.y + draw.materialOptions.y);
+    }
+    return uv;
+}
+
 
 struct PointLightData
 {
@@ -360,12 +371,8 @@ void main()
             int textureIndex = max(materialTexture - 1, 0);
             // Set 1 is the second unwrap; the loader falls it back to set 0
             // on a mesh that has only one, so this never reads nothing.
-            vec2 uv = material.textureUvSets.x == 1u
-                ? inUv1
-                : vec2(inFaceCoordU, inFaceCoordV);
-            if ((material.materialState.z & 1u) != 0u) {
-                uv.y = fract(uv.y + draw.materialOptions.y);
-            }
+            vec2 uv = materialTextureUv(
+                material.textureUvSets.x, material.materialState.z);
             materialColor *= texture(
                 modelTextures[nonuniformEXT(textureIndex)], uv);
         }
@@ -403,8 +410,28 @@ void main()
         // The material's own gloss, where the whole level used to share one
         // exponent. Roughness has a floor because a perfect mirror is a
         // delta function no point light can hit.
-        float metallic = clamp(material.emissiveAndMetallic.w, 0.0, 1.0);
-        float roughness = clamp(material.materialScalars.x, 0.045, 1.0);
+        float metallic = material.emissiveAndMetallic.w;
+        float roughness = material.materialScalars.x;
+        int metallicRoughnessTexture =
+            int(material.primaryTextureHandles.z);
+        if (metallicRoughnessTexture != 0) {
+            int textureIndex = max(metallicRoughnessTexture - 1, 0);
+            // glTF metallic-roughness images are linear data: G carries
+            // perceptual roughness and B carries metallic. The authored
+            // scalar factors multiply those channels rather than being
+            // replaced by them.
+            vec2 metallicRoughnessSample = texture(
+                modelTextures[nonuniformEXT(textureIndex)],
+                materialTextureUv(
+                    material.textureUvSets.z,
+                    material.materialState.z)).gb;
+            roughness *= metallicRoughnessSample.x;
+            metallic *= metallicRoughnessSample.y;
+        }
+        metallic = clamp(metallic, 0.0, 1.0);
+        // GGX cannot represent a perfect delta with this finite sampling
+        // path, so preserve the established floor after applying the map.
+        roughness = clamp(roughness, 0.045, 1.0);
         // Dielectrics reflect about 4% head-on; a metal reflects its own
         // colour and has no diffuse lobe at all.
         vec3 f0 = mix(vec3(0.04), color, metallic);

@@ -389,6 +389,7 @@ add_library(sokoban_core STATIC
     src/engine/render/GpuSkinning.cpp
     src/engine/render/ImageData.cpp
     src/engine/render/OpaqueDrawSorter.cpp
+    src/engine/render/PbrMaterial.cpp
     src/engine/render/PngWriter.cpp
     src/engine/render/RenderAssetRequirements.cpp
     src/engine/render/RenderResolution.cpp
@@ -842,6 +843,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME tonemap TARGET sokoban_tonemap_tests
         LIBS sokoban_core
         SOURCES tests/TonemapTests.cpp
+    )
+    sokoban_add_test(NAME pbr_material TARGET sokoban_pbr_material_tests
+        LIBS sokoban_core
+        SOURCES tests/PbrMaterialTests.cpp
     )
     sokoban_add_test(NAME animation_catalog TARGET sokoban_animation_catalog_tests
         LIBS sokoban_core
