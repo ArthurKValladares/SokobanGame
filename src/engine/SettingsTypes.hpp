@@ -3,6 +3,7 @@
 #include "engine/AudioConfig.hpp"
 #include "engine/InputBindings.hpp"
 #include "engine/UserSettingsConfig.hpp"
+#include "engine/render/Tonemap.hpp"
 
 namespace sokoban {
 
@@ -27,6 +28,7 @@ struct UserSettings {
         bool ambientOcclusion = config::ambientOcclusion;
         float ambientOcclusionStrength =
             config::userAmbientOcclusionStrength;
+        float exposureEv = defaultExposureEv;
         int windowWidth = config::windowWidth;
         int windowHeight = config::windowHeight;
 

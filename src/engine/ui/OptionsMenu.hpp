@@ -37,6 +37,7 @@ enum class OptionsMenuRowId {
     FrameRateLimit,
     RenderScalePreset,
     CustomRenderScale,
+    Exposure,
     AmbientOcclusion,
     AmbientOcclusionStrength,
     Display,
@@ -80,6 +81,11 @@ enum class OptionsMenuRowTone {
     Danger,
 };
 
+enum class OptionsMenuSliderDisplay {
+    Percent,
+    ExposureEv,
+};
+
 struct OptionsMenuChoice {
     int value = 0;
     std::string_view label;
@@ -94,6 +100,10 @@ struct OptionsMenuRow {
     std::span<const OptionsMenuChoice> choices;
     int choiceValue = 0;
     float sliderValue = 0.0f;
+    float sliderMinimum = 0.0f;
+    float sliderMaximum = 1.0f;
+    OptionsMenuSliderDisplay sliderDisplay =
+        OptionsMenuSliderDisplay::Percent;
     bool toggleValue = false;
     bool enabled = true;
     OptionsMenuRowTone tone = OptionsMenuRowTone::Normal;

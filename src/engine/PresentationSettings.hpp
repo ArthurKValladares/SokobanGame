@@ -48,6 +48,7 @@ public:
     Lighting lighting;
     Grid grid;
     Geometry geometry;
+    RenderFrameData::OutputTransform outputTransform;
     RenderFrameData::WaterRendering water;
 
     void normalize();
@@ -58,6 +59,7 @@ public:
     [[nodiscard]] Vec3 sunDirection() const;
     [[nodiscard]] RenderFrameData::Lighting renderLighting() const;
     [[nodiscard]] RenderFrameData::GridOverlay renderGridOverlay() const;
+    [[nodiscard]] RenderFrameData::OutputTransform renderOutputTransform() const;
 
 private:
     // Defaults come from the asset manifest via applyTileScales at startup.

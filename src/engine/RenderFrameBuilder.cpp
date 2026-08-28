@@ -950,6 +950,7 @@ RenderFrameData initializeGameplayFrame(
     frame.cameraPitchDegrees = input.cameraPitchDegrees;
     frame.lighting = input.settings.renderLighting();
     frame.gridOverlay = input.settings.renderGridOverlay();
+    frame.outputTransform = input.settings.renderOutputTransform();
     frame.waterRendering = input.settings.water;
     frame.levelWidth = input.level.width();
     frame.levelHeight = input.level.height();
@@ -1831,6 +1832,7 @@ private:
         frame.viewMode = RenderViewMode::Isometric3D;
         frame.lighting = input_.settings.renderLighting();
         frame.gridOverlay = input_.settings.renderGridOverlay();
+        frame.outputTransform = input_.settings.renderOutputTransform();
         frame.waterRendering = input_.settings.water;
         frame.levelWidth = input_.editor.documentWidth();
         frame.levelHeight = input_.editor.documentHeight();

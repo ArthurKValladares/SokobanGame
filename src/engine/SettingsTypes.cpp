@@ -49,6 +49,7 @@ void UserSettings::normalize()
         video.ambientOcclusionStrength,
         config::minimumUserAmbientOcclusionStrength,
         config::maximumUserAmbientOcclusionStrength);
+    video.exposureEv = normalizedExposureEv(video.exposureEv);
     video.windowWidth = std::clamp(
         video.windowWidth,
         config::minimumWindowWidth,

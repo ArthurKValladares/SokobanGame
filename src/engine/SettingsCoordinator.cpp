@@ -112,6 +112,8 @@ void SettingsCoordinator::updatePresentationSettings()
         profile_.settings.video.ambientOcclusion;
     presentationSettings_.lighting.ambientOcclusionStrength =
         profile_.settings.video.ambientOcclusionStrength;
+    presentationSettings_.outputTransform.exposureEv =
+        profile_.settings.video.exposureEv;
     presentationSettings_.normalize();
 }
 

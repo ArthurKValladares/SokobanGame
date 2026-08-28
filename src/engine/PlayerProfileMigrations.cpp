@@ -816,6 +816,19 @@ void migrate25to26(Json& root)
     }
 }
 
+// Format 27 adds a persisted photographic exposure control. Existing profiles
+// retain their current brightness with the neutral 0 EV default.
+void migrate26to27(Json& root)
+{
+    if (!root.contains("settings") || !root["settings"].is_object()) {
+        return;
+    }
+    Json& video = root["settings"]["video"];
+    if (video.is_object() && !video.contains("exposureEv")) {
+        video["exposureEv"] = UserSettings {}.video.exposureEv;
+    }
+}
+
 } // namespace
 
 void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
@@ -847,6 +860,7 @@ void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
         migrate23to24,
         migrate24to25,
         migrate25to26,
+        migrate26to27,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

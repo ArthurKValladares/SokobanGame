@@ -255,14 +255,14 @@
 </head>
 <body>
   <header class="shell">
-    <p class="eyebrow">Current-state review · 27 August 2026</p>
+    <p class="eyebrow">Current-state review · 28 August 2026</p>
     <h1>Finish the material path without rebuilding it twice.</h1>
-    <p class="deck">Sokoban 3D now has the hard substrate, a device-bounded runtime texture heap, semantically validated glTF texture inventory, complete CPU/GPU material-map representations, and model-scoped map residency. The next program finishes HDR presentation, simplifies the scene shader, and lands each map behind a testable gate.</p>
+    <p class="deck">Sokoban 3D now has the hard substrate, a device-bounded runtime texture heap, semantically validated glTF texture inventory, complete CPU/GPU material-map representations, model-scoped map residency, and a tested HDR output transform. The next program simplifies the scene shader and lands each map behind a testable gate.</p>
     <div class="metrics" aria-label="Current repository facts">
       <div class="metric"><b>36</b><span>manifest models</span></div>
       <div class="metric"><b>42 / 1024</b><span>textures on validated GPU</span></div>
       <div class="metric"><b>15</b><span>GLSL shaders</span></div>
-      <div class="metric"><b>65</b><span>registered test suites</span></div>
+      <div class="metric"><b>66</b><span>registered test suites</span></div>
     </div>
   </header>
 
@@ -281,7 +281,7 @@
     <section id="verdict">
       <div class="section-head"><span class="num">01</span><h2>Current verdict</h2></div>
       <div class="callout">
-        <strong>Next program:</strong> tonemap completion → minimal shader split → map sampling. CPU/GPU material transport, descriptor indexing, glTF source/semantic discovery and model-scoped residency are implemented validation invariants.
+        <strong>Next program:</strong> minimal shader split → map sampling. CPU/GPU material transport, descriptor indexing, glTF source/semantic discovery, model-scoped residency and HDR presentation are implemented validation invariants.
       </div>
       <div class="grid" style="margin-top:1rem">
         <article class="card">
@@ -291,8 +291,8 @@
         </article>
         <article class="card">
           <p class="kicker">What blocks complete PBR</p>
-          <h3>Output transform and shader sampling</h3>
-          <p>glTF map sources, sampler state, color space, UV selections, map scalars and resolved handles now survive through model-scoped residency. Tonemapping and the four shader sampling paths remain.</p>
+          <h3>Shader structure and map sampling</h3>
+          <p>glTF map sources, sampler state, color space, UV selections, map scalars and resolved handles now survive through model-scoped residency, and the output transform is complete. The scene/UI shader split and four map sampling paths remain.</p>
         </article>
         <article class="card">
           <p class="kicker">What not to overbuild</p>
@@ -314,7 +314,7 @@
           <thead><tr><th>ID</th><th>Status</th><th>Current truth</th><th>Remaining work</th></tr></thead>
           <tbody>
             <tr><td>F1</td><td><span class="status done">Done</span></td><td>Shared math, transforms, bounds, rays and frustums exist.</td><td>Use them in T4; no foundation rewrite.</td></tr>
-            <tr><td>F2</td><td><span class="status partial">Partial</span></td><td>HDR scene target, display target and tonemap pass are live.</td><td>F2c: real curve and exposure setting.</td></tr>
+            <tr><td>F2</td><td><span class="status done">Done</span></td><td>The HDR path uses Khronos PBR Neutral by default, persisted −4 to +4 EV exposure, and a Debug straight-clamp comparison.</td><td>Preserve UI-after-tonemap and single hardware sRGB encoding.</td></tr>
             <tr><td>F3</td><td><span class="status partial">Core done</span></td><td>Material factors, tangents, UV1, GPU buffer, alpha metadata, GGX and model-scoped map residency exist.</td><td>Sample normal/MR/emissive/occlusion maps in the shaders.</td></tr>
             <tr><td>F4</td><td><span class="status open">Open</span></td><td><code>triangle.frag.glsl</code> still mixes lit scene work with UI/title/composite modes.</td><td>Extract non-scene modes before adding map branches.</td></tr>
             <tr><td>F5</td><td><span class="status conditional">Conditional</span></td><td>Vulkan types still cross broad renderer seams.</td><td>Build an RHI only for a real second backend/platform.</td></tr>
@@ -390,7 +390,7 @@
           <div>
             <div class="phase-title"><h3>Make the starting point trustworthy</h3><span class="status partial">In progress</span></div>
             <div class="tasks">
-              <div class="task"><span class="task-id">0.1</span><div><b>Visual and performance evidence remains</b><p>The full Debug build and all 65 suites, including the Vulkan smoke test, pass. Capture representative screenshots and frame statistics before tonemap and material-map shader behavior changes.</p></div></div>
+              <div class="task"><span class="task-id">0.1</span><div><b>Visual and performance evidence remains</b><p>The full Debug build and all 66 suites, including the Vulkan smoke test, pass. Capture representative post-tonemap screenshots and frame statistics before material-map shader behavior changes.</p></div></div>
               <div class="task"><span class="task-id">0.2</span><div><b>Loader CUBICSPLINE fixture — complete</b><p>The public file loader is covered for three outputs per key, quaternion value normalization, tangent preservation and malformed counts.</p></div></div>
               <div class="task"><span class="task-id">0.3</span><div><b>Mechanical cleanup — partial</b><p>The dead GPU instance header is gone. Add and normalize the line-ending policy in a separate, non-semantic commit.</p></div></div>
             </div>
@@ -445,26 +445,26 @@
               <div class="task"><span class="task-id">4.2</span><div><b>Redesign GpuMaterial once — complete</b><p>The 112-byte std430 ABI uses three aligned float vectors and four explicit integer vectors. Exact offsets are asserted and confirmed in both compiled SPIR-V modules; focused tests cover fallback/default conversion, every map and UV, alpha, double-sided state and flags.</p></div></div>
               <div class="task"><span class="task-id">4.3</span><div><b>Use existing residency — complete</b><p>A deduplicated runtime catalog assigns non-base glTF maps to isolated per-model requirements. Manifest slots stay low and append-stable; discovered maps occupy stable high heap slots. External, data-URI and buffer-view images share worker decode, render-thread upload, authored sampling, residency budgets and diagnostics.</p></div></div>
             </div>
-            <p class="accept"><b>Gate:</b> requesting one model requests exactly its map dependencies; unrelated maps stay out of the request, the manifest base-color override is preserved, all three source forms decode, and the 65-suite Debug gate passes.</p>
+            <p class="accept"><b>Gate:</b> requesting one model requests exactly its map dependencies; unrelated maps stay out of the request, the manifest base-color override is preserved, all three source forms decode, and the 66-suite Debug gate passes.</p>
           </div>
         </article>
 
         <article class="phase">
           <div class="phase-id">5<small>F2c</small></div>
           <div>
-            <div class="phase-title"><h3>Finish the output transform</h3></div>
+            <div class="phase-title"><h3>Finish the output transform</h3><span class="status done">Done</span></div>
             <div class="tasks">
-              <div class="task"><span class="task-id">5.1</span><div><b>Khronos PBR Neutral</b><p>Use it as the default curve; retain straight clamp as a Debug comparison.</p></div></div>
-              <div class="task"><span class="task-id">5.2</span><div><b>Exposure setting</b><p>Add a safe user-facing EV range and one authoritative settings path. Keep UI after tonemapping and hardware as the sole sRGB encode.</p></div></div>
+              <div class="task"><span class="task-id">5.1</span><div><b>Khronos PBR Neutral — complete</b><p>The canonical curve is the default; straight clamp remains available in the Debug Output panel. Focused CPU-reference tests cover neutral low-range colors and HDR highlight compression.</p></div></div>
+              <div class="task"><span class="task-id">5.2</span><div><b>Exposure setting — complete</b><p>Profile format 27 persists a −4 to +4 EV setting with a 0 EV default. Settings flow through PresentationSettings and RenderFrameData to the tonemap push constants; UI remains after tonemapping and hardware is the sole sRGB encode.</p></div></div>
             </div>
-            <p class="accept"><b>Gate:</b> highlights roll off without hue surprises; capture, viewport and presentation match.</p>
+            <p class="accept"><b>Gate:</b> implementation, shader compilation and all 66 Debug suites pass. Representative post-tonemap screenshot capture remains in baseline task 0.1.</p>
           </div>
         </article>
 
         <article class="phase">
           <div class="phase-id">6<small>F4a</small></div>
           <div>
-            <div class="phase-title"><h3>Remove non-scene branches</h3></div>
+            <div class="phase-title"><h3>Remove non-scene branches</h3><span class="status next">Next</span></div>
             <div class="tasks">
               <div class="task"><span class="task-id">6.1</span><div><b>Dedicated UI fragment path</b><p>Extract font, title art, rounded scene-image composition and other unlit UI modes from the lit scene shader.</p></div></div>
               <div class="task"><span class="task-id">6.2</span><div><b>Conservative specialization</b><p>Use constants for stable pipeline axes only; keep material differences data-driven.</p></div></div>

@@ -91,6 +91,7 @@ void testRoundTripAndBests()
         .customRenderScalePercent = 63,
         .ambientOcclusion = false,
         .ambientOcclusionStrength = 0.35f,
+        .exposureEv = 1.25f,
         .windowWidth = 1600,
         .windowHeight = 900,
     };
@@ -380,6 +381,7 @@ void testNormalizationAndMigration()
     profile.settings.video.renderScalePercent = 42;
     profile.settings.video.customRenderScale = true;
     profile.settings.video.customRenderScalePercent = 10;
+    profile.settings.video.exposureEv = -99.0f;
     profile.settings.video.windowWidth = 20;
     profile.settings.video.windowHeight = 30;
     profile.normalize();
@@ -395,6 +397,9 @@ void testNormalizationAndMigration()
         "custom render scale clamps to its minimum");
     check(profile.settings.video.effectiveRenderScalePercent() == 25,
         "enabled custom render scale is effective");
+    check(profile.settings.video.exposureEv ==
+            sokoban::minimumExposureEv,
+        "exposure clamps to its safe minimum");
     check(profile.settings.video.windowWidth == 640, "window width clamps low");
     check(profile.settings.video.windowHeight == 480, "window height clamps low");
 
@@ -525,6 +530,17 @@ void testNormalizationAndMigration()
     check(migratedFormat25.profile.serialize().find("\"accessibility\"") ==
             std::string::npos,
         "format 25 accessibility settings are removed during migration");
+
+    nlohmann::json format26 = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    format26["format"] = 26;
+    format26["settings"]["video"].erase("exposureEv");
+    const sokoban::DecodedPlayerProfile migratedFormat26 =
+        sokoban::decodePlayerProfile(format26.dump());
+    check(migratedFormat26.sourceFormat == 26,
+        "format 26 source reported");
+    check(migratedFormat26.profile.settings.video.exposureEv == 0.0f,
+        "format 26 receives neutral exposure");
 
     nlohmann::json format5Root = nlohmann::json::parse(
         sokoban::PlayerProfile {}.serialize());

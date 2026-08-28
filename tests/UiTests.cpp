@@ -717,15 +717,20 @@ void testOptionsReducerAndDeclarativeRows()
     CHECK(state.page == sokoban::OptionsMenuPage::Graphics);
     const std::vector<sokoban::OptionsMenuRow> graphicsRows =
         sokoban::optionsMenuRows(state, settings);
-    CHECK(graphicsRows.size() == 10);
+    CHECK(graphicsRows.size() == 11);
     CHECK(graphicsRows[1].id == sokoban::OptionsMenuRowId::Vsync);
     CHECK(!graphicsRows[2].enabled);
     CHECK(graphicsRows[3].id == sokoban::OptionsMenuRowId::FrameRateLimit);
-    CHECK(graphicsRows[6].id ==
-        sokoban::OptionsMenuRowId::AmbientOcclusion);
+    CHECK(graphicsRows[6].id == sokoban::OptionsMenuRowId::Exposure);
+    CHECK(graphicsRows[6].sliderMinimum == sokoban::minimumExposureEv);
+    CHECK(graphicsRows[6].sliderMaximum == sokoban::maximumExposureEv);
+    CHECK(graphicsRows[6].sliderDisplay ==
+        sokoban::OptionsMenuSliderDisplay::ExposureEv);
     CHECK(graphicsRows[7].id ==
+        sokoban::OptionsMenuRowId::AmbientOcclusion);
+    CHECK(graphicsRows[8].id ==
         sokoban::OptionsMenuRowId::AmbientOcclusionStrength);
-    CHECK(graphicsRows[7].enabled);
+    CHECK(graphicsRows[8].enabled);
 
     reduction = sokoban::reduceOptionsMenu(
         state,
@@ -832,7 +837,20 @@ void testOptionsReducerDraftAndBindingSemantics()
     CHECK(changed != nullptr);
     CHECK(changed->settings.video.ambientOcclusionStrength == 0.8f);
 
-    graphics.selectedRow = 7;
+    reduction = sokoban::reduceOptionsMenu(
+        graphics,
+        settings,
+        sokoban::options::intent::SetSlider {
+            sokoban::OptionsMenuRowId::Exposure,
+            -1.5f,
+            true,
+        });
+    changed = std::get_if<sokoban::options::SettingsChanged>(
+        &*reduction.action);
+    CHECK(changed != nullptr);
+    CHECK(changed->settings.video.exposureEv == -1.5f);
+
+    graphics.selectedRow = 8;
     reduction = sokoban::reduceOptionsMenu(
         graphics,
         settings,
@@ -846,7 +864,7 @@ void testOptionsReducerDraftAndBindingSemantics()
     settings.video.ambientOcclusion = false;
     const std::vector<sokoban::OptionsMenuRow> disabledRows =
         sokoban::optionsMenuRows(graphics, settings);
-    CHECK(!disabledRows[7].enabled);
+    CHECK(!disabledRows[8].enabled);
     const auto disabledStrength = sokoban::reduceOptionsMenu(
         graphics,
         settings,

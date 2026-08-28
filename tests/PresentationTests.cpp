@@ -402,6 +402,7 @@ void testSettingsNormalizeAndConvert()
     settings.water.rippleCrestHalfWidth = 0.4f;
     settings.water.rippleHaloWidth = 0.1f;
     settings.water.underwaterCausticStrength = 2.0f;
+    settings.outputTransform.exposureEv = 99.0f;
     settings.setTileScale(TileType::Wall, 99.0f);
     settings.normalize();
 
@@ -436,6 +437,7 @@ void testSettingsNormalizeAndConvert()
         settings.water.rippleHaloWidth,
         settings.water.rippleCrestHalfWidth));
     CHECK(near(settings.water.underwaterCausticStrength, 1.0f));
+    CHECK(near(settings.outputTransform.exposureEv, maximumExposureEv));
     CHECK(near(settings.tileScale(TileType::Wall), config::maxTileScale));
 
     settings.lighting.sunAzimuthDegrees = 0.0f;
@@ -454,6 +456,11 @@ void testSettingsNormalizeAndConvert()
             AmbientMask);
     CHECK(near(lighting.shadows.opacity, 0.85f));
     CHECK(near(settings.renderGridOverlay().width, 0.0f));
+    CHECK(settings.renderOutputTransform().curve ==
+        TonemapCurve::PbrNeutral);
+    CHECK(near(exposureMultiplier(0.0f), 1.0f));
+    CHECK(near(exposureMultiplier(1.0f), 2.0f));
+    CHECK(near(exposureMultiplier(-1.0f), 0.5f));
 }
 
 void testPresentationResetClocksAndFallenTargets()
@@ -566,6 +573,7 @@ void testGameplayFrameUsesSettingsAndPresentation()
     PresentationSettings settings;
     settings.lighting.sunColor = { 0.1f, 0.2f, 0.3f };
     settings.grid.lineWidth = 4.0f;
+    settings.outputTransform.exposureEv = -1.25f;
     settings.setTileScale(TileType::Player, 2.0f);
     GameplaySession::Action action;
     const RenderFrameData frame = RenderFrameBuilder::buildGameplay({
@@ -578,6 +586,8 @@ void testGameplayFrameUsesSettingsAndPresentation()
         .settings = settings,
         .conveyorBeltScrollOffset = 0.75f,
     });
+    CHECK(near(frame.outputTransform.exposureEv, -1.25f));
+    CHECK(frame.outputTransform.curve == TonemapCurve::PbrNeutral);
 
     CHECK(frame.viewMode == RenderViewMode::Isometric3D);
     const RenderFrameData overheadFrame = RenderFrameBuilder::buildGameplay({

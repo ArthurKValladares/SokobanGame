@@ -263,6 +263,8 @@ std::optional<OptionsAction> activateRow(
             !settings.video.customRenderScale;
         state.customRenderScalePreview.reset();
         return changedSettings(std::move(settings), current);
+    case OptionsMenuRowId::Exposure:
+        break;
     case OptionsMenuRowId::AmbientOcclusion:
         settings.video.ambientOcclusion =
             !settings.video.ambientOcclusion;
@@ -358,6 +360,9 @@ std::optional<OptionsAction> adjustRow(
             return std::nullopt;
         }
         settings.video.customRenderScalePercent += direction < 0 ? -1 : 1;
+        break;
+    case OptionsMenuRowId::Exposure:
+        settings.video.exposureEv += direction < 0 ? -0.25f : 0.25f;
         break;
     case OptionsMenuRowId::Display:
         applyDisplayMode(
@@ -635,6 +640,15 @@ std::vector<OptionsMenuRow> optionsMenuRows(
                         settings.video.customRenderScalePercent)) / 100.0f,
                 .toggleValue = settings.video.customRenderScale,
                 .enabled = settings.video.customRenderScale,
+            },
+            {
+                .id = OptionsMenuRowId::Exposure,
+                .kind = OptionsMenuRowKind::Slider,
+                .label = "Exposure",
+                .sliderValue = settings.video.exposureEv,
+                .sliderMinimum = minimumExposureEv,
+                .sliderMaximum = maximumExposureEv,
+                .sliderDisplay = OptionsMenuSliderDisplay::ExposureEv,
             },
             {
                 .id = OptionsMenuRowId::AmbientOcclusion,
@@ -919,6 +933,9 @@ OptionsMenuReduction reduceOptionsMenu(
                     return;
                 }
                 settings.video.ambientOcclusionStrength = slider.value;
+                break;
+            case OptionsMenuRowId::Exposure:
+                settings.video.exposureEv = slider.value;
                 break;
             default:
                 return;
@@ -1275,19 +1292,30 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
                     controlId,
                     layout.tree.rect(rowLayout.control),
                     value,
-                    0.0f,
-                    1.0f,
+                    row.sliderMinimum,
+                    row.sliderMaximum,
                     focused && row.enabled,
                     row.enabled)) {
                 intent = options::intent::SetSlider {
                     row.id, value, true };
             }
-            const std::string percent = std::to_string(
-                static_cast<int>(std::round(row.sliderValue * 100.0f))) + "%";
+            std::string displayValue;
+            if (row.sliderDisplay ==
+                OptionsMenuSliderDisplay::ExposureEv) {
+                const int tenths = static_cast<int>(
+                    std::round(row.sliderValue * 10.0f));
+                const int magnitude = std::abs(tenths);
+                displayValue = (tenths > 0 ? "+" : (tenths < 0 ? "-" : "")) +
+                    std::to_string(magnitude / 10) + "." +
+                    std::to_string(magnitude % 10) + " EV";
+            } else {
+                displayValue = std::to_string(static_cast<int>(
+                    std::round(row.sliderValue * 100.0f))) + "%";
+            }
             menuKit::trailingText(
                 ui,
                 layout.tree.rect(rowLayout.primary),
-                percent,
+                displayValue,
                 row.enabled
                     ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
                     : Vec4 { 0.50f, 0.52f, 0.51f, 0.45f },

@@ -3,6 +3,7 @@
 #include "engine/LevelCatalog.hpp"
 #include "engine/FrameArray.hpp"
 #include "engine/Math.hpp"
+#include "engine/render/Tonemap.hpp"
 #include "engine/render/WaterConfig.hpp"
 
 #include <array>
@@ -384,6 +385,11 @@ struct RenderFrameData {
         float width = 0.0f;
     };
 
+    struct OutputTransform {
+        float exposureEv = defaultExposureEv;
+        TonemapCurve curve = TonemapCurve::PbrNeutral;
+    };
+
     // Snapshot of the live water tuning used by the render thread. Defaults
     // preserve the authored look for frames built outside PresentationSettings.
     struct WaterRendering {
@@ -431,6 +437,7 @@ struct RenderFrameData {
     std::optional<float> cameraDistanceMultiplier;
     Lighting lighting {};
     GridOverlay gridOverlay {};
+    OutputTransform outputTransform {};
     WaterRendering waterRendering {};
     uint32_t levelWidth = 0;
     uint32_t levelHeight = 0;

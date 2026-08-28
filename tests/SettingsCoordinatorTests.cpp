@@ -25,6 +25,7 @@ void testInitializationProducesAllStartupEffects()
     profile.settings.audio.masterVolume = 0.7f;
     profile.settings.video.ambientOcclusion = false;
     profile.settings.video.ambientOcclusionStrength = 0.35f;
+    profile.settings.video.exposureEv = 1.25f;
     sokoban::PresentationSettings presentation;
     sokoban::SettingsCoordinator coordinator(profile, presentation);
 
@@ -44,6 +45,9 @@ void testInitializationProducesAllStartupEffects()
     CHECK(!effects.saveSettings);
     CHECK(!presentation.lighting.ambientOcclusionEnabled);
     CHECK(presentation.lighting.ambientOcclusionStrength == 0.35f);
+    CHECK(presentation.outputTransform.exposureEv == 1.25f);
+    CHECK(presentation.outputTransform.curve ==
+        sokoban::TonemapCurve::PbrNeutral);
 }
 
 void testMenuProjectionAndChangePlan()
@@ -60,6 +64,7 @@ void testMenuProjectionAndChangePlan()
     settings.video.ambientOcclusion =
         !settings.video.ambientOcclusion;
     settings.video.ambientOcclusionStrength = 0.8f;
+    settings.video.exposureEv = -1.5f;
     settings.video.windowWidth = 1600;
     settings.video.windowHeight = 900;
     settings.audio.masterVolume = 0.4f;
@@ -86,6 +91,7 @@ void testMenuProjectionAndChangePlan()
     CHECK(presentation.lighting.ambientOcclusionEnabled ==
         settings.video.ambientOcclusion);
     CHECK(presentation.lighting.ambientOcclusionStrength == 0.8f);
+    CHECK(presentation.outputTransform.exposureEv == -1.5f);
     CHECK(coordinator.userSettings() == settings);
 }
 
@@ -100,6 +106,7 @@ void testUnchangedDomainsDoNotProduceRuntimeEffects()
     settings.video.ambientOcclusion =
         !settings.video.ambientOcclusion;
     settings.video.ambientOcclusionStrength = 0.25f;
+    settings.video.exposureEv = 0.75f;
     const sokoban::SettingsEffects effects =
         coordinator.applyUserSettings(settings);
 
@@ -115,6 +122,7 @@ void testUnchangedDomainsDoNotProduceRuntimeEffects()
     CHECK(presentation.lighting.ambientOcclusionEnabled ==
         settings.video.ambientOcclusion);
     CHECK(presentation.lighting.ambientOcclusionStrength == 0.25f);
+    CHECK(presentation.outputTransform.exposureEv == 0.75f);
 }
 
 void testPresentationAndPacingProduceTargetedEffects()

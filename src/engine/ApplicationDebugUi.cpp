@@ -493,6 +493,22 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
         }
     }
 
+    if (ImGui::CollapsingHeader("Output")) {
+        ImGui::Text(
+            "Exposure: %+.2f EV (player setting)",
+            settings.outputTransform.exposureEv);
+        int curve = static_cast<int>(settings.outputTransform.curve);
+        if (ImGui::Combo(
+                "Tonemap Curve",
+                &curve,
+                "Straight Clamp\0Khronos PBR Neutral\0")) {
+            settings.outputTransform.curve =
+                static_cast<TonemapCurve>(curve);
+        }
+        ImGui::TextDisabled(
+            "Clamp is a Debug A/B reference; PBR Neutral is the default.");
+    }
+
     if (ImGui::CollapsingHeader("Lighting")) {
         auto& lighting = settings.lighting;
         ImGui::DragFloat(

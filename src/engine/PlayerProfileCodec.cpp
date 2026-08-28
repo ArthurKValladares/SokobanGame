@@ -1089,7 +1089,7 @@ void parseSettingsSection(PlayerProfile& profile, const Json& settings)
         "fullscreen", "vsync", "allowTearing", "frameRateLimit",
         "antiAliasingSamples", "renderScalePercent",
         "customRenderScale", "customRenderScalePercent", "ambientOcclusion",
-        "ambientOcclusionStrength", "windowWidth", "windowHeight",
+        "ambientOcclusionStrength", "exposureEv", "windowWidth", "windowHeight",
     }, "settings.video");
     profile.settings.video.fullscreen =
         boolProperty(video, "fullscreen", "settings.video");
@@ -1111,6 +1111,8 @@ void parseSettingsSection(PlayerProfile& profile, const Json& settings)
         video, "ambientOcclusion", "settings.video");
     profile.settings.video.ambientOcclusionStrength = floatProperty(
         video, "ambientOcclusionStrength", "settings.video");
+    profile.settings.video.exposureEv = floatProperty(
+        video, "exposureEv", "settings.video");
     profile.settings.video.windowWidth = nonNegativeIntegerProperty(
         video, "windowWidth", "settings.video");
     profile.settings.video.windowHeight = nonNegativeIntegerProperty(
@@ -1262,6 +1264,7 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
                 { "customRenderScalePercent", normalized.settings.video.customRenderScalePercent },
                 { "ambientOcclusion", normalized.settings.video.ambientOcclusion },
                 { "ambientOcclusionStrength", normalized.settings.video.ambientOcclusionStrength },
+                { "exposureEv", normalized.settings.video.exposureEv },
                 { "windowWidth", normalized.settings.video.windowWidth },
                 { "windowHeight", normalized.settings.video.windowHeight },
             } },

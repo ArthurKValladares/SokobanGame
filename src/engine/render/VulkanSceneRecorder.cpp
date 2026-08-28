@@ -293,7 +293,7 @@ public:
         vulkanDebug::endLabel(device_, commandBuffer);
         vulkanDebug::beginLabel(
             device_, commandBuffer, "Tonemap", { 0.6f, 0.5f, 1.0f, 1.0f });
-        recordTonemap(commandBuffer);
+        recordTonemap(commandBuffer, frameData.outputTransform);
         vulkanDebug::endLabel(device_, commandBuffer);
         vulkanDebug::beginLabel(
             device_, commandBuffer, "UI composition", { 0.9f, 0.9f, 0.2f, 1.0f });
@@ -649,7 +649,9 @@ private:
     // This is also the frame's only sRGB encode. It happens because the
     // display image is an _SRGB format and the hardware does it on write; see
     // tonemap.frag.glsl before adding any gamma of your own.
-    void recordTonemap(VkCommandBuffer commandBuffer)
+    void recordTonemap(
+        VkCommandBuffer commandBuffer,
+        const RenderFrameData::OutputTransform& outputTransform)
     {
         // Unconditionally, and before the guard below: the blit, the game
         // viewport and the capture all assume the display image is a colour
@@ -689,9 +691,15 @@ private:
         };
         const VkRect2D scissor { .offset = { 0, 0 }, .extent = extent };
         GpuDrawInstance pushConstants {};
-        // x is exposure, y selects the curve. F2c gives both a home in the
-        // user's settings; until then the pass is a straight passthrough.
-        pushConstants.color = { 1.0f, 0.0f, 0.0f, 0.0f };
+        // The fragment shader converts EV to a multiplier with exp2. Keeping
+        // the persisted value in photographic stops makes the setting
+        // symmetric and gives zero an exact no-exposure-change meaning.
+        pushConstants.color = {
+            normalizedExposureEv(outputTransform.exposureEv),
+            static_cast<float>(outputTransform.curve),
+            0.0f,
+            0.0f,
+        };
 
         vkCmdBeginRendering(commandBuffer, &renderingInfo);
         ++stats_.renderPasses;

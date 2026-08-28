@@ -394,6 +394,7 @@ add_library(sokoban_core STATIC
     src/engine/render/RenderResolution.cpp
     src/engine/render/RuntimeTextureCatalog.cpp
     src/engine/render/TextureSourceLoader.cpp
+    src/engine/render/Tonemap.cpp
     src/engine/render/UploadRingAllocator.cpp
     src/engine/render/RendererReconfiguration.cpp
     src/engine/render/IsoScenePreparer.cpp
@@ -837,6 +838,10 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         ASSET_DIR
         SOURCES tests/RuntimeTextureCatalogTests.cpp
+    )
+    sokoban_add_test(NAME tonemap TARGET sokoban_tonemap_tests
+        LIBS sokoban_core
+        SOURCES tests/TonemapTests.cpp
     )
     sokoban_add_test(NAME animation_catalog TARGET sokoban_animation_catalog_tests
         LIBS sokoban_core

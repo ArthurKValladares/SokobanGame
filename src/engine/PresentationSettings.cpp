@@ -59,6 +59,8 @@ void PresentationSettings::applyTileScales(const AssetManifest& manifest)
 
 void PresentationSettings::normalize()
 {
+    outputTransform.exposureEv = normalizedExposureEv(
+        outputTransform.exposureEv);
     lighting.sunAzimuthDegrees = std::clamp(
         lighting.sunAzimuthDegrees,
         config::minimumSunAzimuthDegrees,
@@ -211,6 +213,15 @@ RenderFrameData::GridOverlay PresentationSettings::renderGridOverlay() const
     return {
         .color = grid.color,
         .width = grid.lineWidth,
+    };
+}
+
+RenderFrameData::OutputTransform
+PresentationSettings::renderOutputTransform() const
+{
+    return {
+        .exposureEv = normalizedExposureEv(outputTransform.exposureEv),
+        .curve = outputTransform.curve,
     };
 }
 

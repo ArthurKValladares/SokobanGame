@@ -16,18 +16,18 @@ content inventory with stable identities for external, buffer-view and data-URI
 images. Sampling, UV and unsupported-transform semantics are now validated as
 well. `MeshMaterial` and the std430 `GpuMaterial` ABI carry the complete core
 map representation, and resolved maps now flow through model requirements,
-worker decode, render-thread publication and bounded residency. The next
-objective is to finish HDR tonemapping and exposure before judging mapped PBR
-output.
+worker decode, render-thread publication and bounded residency. HDR presentation
+now uses Khronos PBR Neutral by default, with persisted exposure and a Debug
+straight-clamp comparison. The next objective is to split non-scene modes out
+of the scene fragment shader before adding material-map sampling branches.
 
 The recommended order is:
 
-1. Capture the remaining visual/performance baseline evidence.
-2. Finish tonemapping and exposure before judging mapped PBR output.
-3. Split non-scene modes out of `triangle.frag.glsl`.
-4. Implement and validate normal, metallic-roughness, emissive and occlusion
+1. Capture the remaining post-tonemap visual/performance baseline evidence.
+2. Split non-scene modes out of `triangle.frag.glsl`.
+3. Implement and validate normal, metallic-roughness, emissive and occlusion
    map sampling.
-5. Complete SSAO, then resume the larger scaling and memory work.
+4. Complete SSAO, then resume the larger scaling and memory work.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
@@ -38,7 +38,7 @@ sampling have different failure modes and should be independently reviewable.
 - Language and platform: C++20, SDL3, Vulkan 1.3, GLSL compiled to SPIR-V.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
-- Current tests: 65 CTest suites in the newest configured build tree.
+- Current tests: 66 CTest suites in the newest configured build tree.
 - Current shaders: 15 GLSL files. `triangle.frag.glsl` is 587 physical lines.
 - Texture capacity: selected at startup from a configured 1,024-slot ceiling,
   device limits, 16 editor-reserved slots and 32 import-reserved slots. The
@@ -58,8 +58,10 @@ The following items are implemented and should be treated as baseline, not as
 future tasks:
 
 - **F1**: shared math and geometry types, including frustums and bounds.
-- **F2a/F2b**: an `R16G16B16A16_SFLOAT` scene target, a distinct display
-  image, and a tonemap pass. F2c remains open.
+- **F2**: an `R16G16B16A16_SFLOAT` scene target, a distinct display image, and
+  a tonemap pass using Khronos PBR Neutral by default. Exposure is persisted in
+  EV, straight clamp remains available as a Debug comparison, and UI remains
+  outside the output transform.
 - **F3**: cgltf material factors, tangents, a second UV set, alpha modes,
   double-sided metadata, a GPU material buffer and Cook-Torrance GGX. The CPU
   and GPU representations carry all core map types, and runtime handle
@@ -112,6 +114,11 @@ These rules fail visually or under validation if they drift.
 - `tonemap.frag.glsl` writes linear values to the sRGB display attachment. The
   attachment performs the frame's only linear-to-sRGB encode. Do not add a
   shader-side gamma `pow()`.
+- The default curve is Khronos PBR Neutral. Straight clamp is a Debug-only A/B
+  selection, while user exposure is persisted in the safe `[-4, +4] EV` range
+  with a 0 EV default.
+- `PresentationSettings::outputTransform` is the runtime authority copied into
+  each `RenderFrameData`; the tonemap pass receives only normalized frame data.
 - The upscale blit, frame capture and developer Game Viewport read the display
   image, not the HDR scene target.
 - Player-facing UI is composed after tonemapping.
@@ -160,15 +167,17 @@ combine adjacent packets merely because they touch the same files.
 
 ### 0. Refresh the baseline
 
-Current state on 27 August 2026: the full Visual Studio Debug build succeeds
-and all 65 registered CTest suites pass, including `vulkan_smoke`. Establishing
+Current state on 28 August 2026: the full Visual Studio Debug build succeeds
+and all 66 registered CTest suites pass, including `vulkan_smoke`. Establishing
 that baseline also exposed and repaired stale UI/settings assertions left by the
 earlier default-MSAA change. Representative screenshots and frame statistics
-still need to be captured before material-map behavior changes.
+still need to be captured after the output-transform change and before
+material-map behavior changes.
 
 #### 0.1 Capture visual and performance evidence
 
-- Record representative screenshots and frame statistics for comparison.
+- Record representative post-tonemap screenshots and frame statistics for
+  comparison.
 - Record the scene, UI and editor states that are most likely to expose texture
   descriptor or material-map regressions.
 
@@ -351,24 +360,38 @@ separation, shared-document models, unrelated-model isolation, stable low/high
 descriptor mapping, the manifest base-color override and all three source
 forms. `GltfDependencyTests.cpp` additionally verifies that map-only bindings
 do not synthesize a base-color handle. The production catalog inspection, full
-199-file content stage, Debug build and all 65 suites pass.
+199-file content stage, Debug build and all 66 suites pass.
 
 **Acceptance:** complete. Requesting a model requests all of its maps while an
 unrelated model's maps remain absent from that request.
 
-### 5. Finish HDR presentation before visual PBR acceptance
+### 5. Finish HDR presentation before visual PBR acceptance — complete
 
-#### 5.1 Implement F2c
+#### 5.1 Implement F2c — complete
 
-- Add Khronos PBR Neutral as the default tonemap curve.
-- Retain straight clamp as a Debug comparison mode.
-- Add a user-facing exposure setting with a safe range and default of 0 EV.
-- Pass exposure and curve selection through one authoritative settings path.
-- Keep UI after tonemapping and keep hardware as the only sRGB encode.
+The output transform now applies exposure in linear light and uses the canonical
+Khronos PBR Neutral curve by default. Straight clamp remains selectable in the
+Debug Output panel for comparison. `Tonemap.cpp` supplies the matching CPU
+reference used by focused tests.
 
-**Acceptance:** bright highlights roll off instead of clipping, neutral colors
-remain stable, screenshots and the developer viewport match the presented game,
-and the clamp comparison remains available in Debug builds.
+User exposure is persisted in profile format 27, defaults to 0 EV and is
+normalized to `[-4, +4] EV`. The Graphics options slider updates it in 0.25 EV
+keyboard increments. `SettingsCoordinator` projects the persisted value into
+`PresentationSettings::outputTransform`; both gameplay and editor frame builders
+copy that single runtime value into `RenderFrameData`, and the tonemap pass sends
+the frame value to the shader. The Debug curve choice lives alongside exposure
+in the same presentation structure but is intentionally not persisted.
+
+UI composition remains after tonemapping. The shader writes linear output and
+the sRGB attachment remains the only output encode. `TonemapTests` covers the EV
+range and multiplier, legacy clamp behavior, neutral low-range colors and HDR
+highlight compression; profile, settings, presentation and UI suites cover the
+full settings path. The complete Debug build and all 66 suites, including the
+Vulkan smoke test, pass.
+
+**Acceptance:** implementation and automated validation are complete. The
+remaining representative screenshot capture is tracked in 0.1 rather than
+blocking the next independent shader-structure packet.
 
 ### 6. Reduce the uber-shader before adding map branches
 
@@ -518,10 +541,16 @@ layout changes affect modules that appear unrelated to the immediate feature.
   constants, blend/cull/write-mask state.
 - `src/engine/render/VulkanSceneRecorder.*`: pass ordering and descriptor binds.
 - `src/engine/render/VulkanRenderConstants.hpp`: CPU/GPU shared layouts.
+- `src/engine/render/Tonemap.*` and `tests/TonemapTests.cpp`: output-transform
+  contract, canonical CPU reference and focused numeric coverage.
+- `src/engine/SettingsTypes.*`, `PlayerProfile*`, `SettingsCoordinator.*` and
+  `ui/OptionsMenu.*`: persisted exposure and its user-facing control.
+- `src/engine/PresentationSettings.*` and `render/RenderFrameBuilder.cpp`:
+  authoritative runtime output-transform projection and frame transport.
 - `shaders/triangle.frag.glsl`: current scene/UI uber-shader.
 - `shaders/ground_splat.frag.glsl`: second ambient-mask writer.
 - `shaders/mirror_energy.frag.glsl`: separate material-texture consumer.
-- `shaders/tonemap.frag.glsl`: exposure and output transform.
+- `shaders/tonemap.frag.glsl`: completed exposure and output transform.
 - `shaders/ssao*.glsl`: remaining V7 work.
 
 ## Build and test commands
