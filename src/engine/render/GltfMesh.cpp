@@ -422,6 +422,19 @@ MeshMaterial materialFrom(
     if (bound) {
         // One-based, matching the vertex path: zero means untextured.
         material.baseColorTexture = binding.textureIndex + 1;
+        if (binding.normalTextureIndex) {
+            material.normalTexture = *binding.normalTextureIndex + 1;
+        }
+        if (binding.metallicRoughnessTextureIndex) {
+            material.metallicRoughnessTexture =
+                *binding.metallicRoughnessTextureIndex + 1;
+        }
+        if (binding.emissiveTextureIndex) {
+            material.emissiveTexture = *binding.emissiveTextureIndex + 1;
+        }
+        if (binding.occlusionTextureIndex) {
+            material.occlusionTexture = *binding.occlusionTextureIndex + 1;
+        }
         material.flags = binding.flags;
     }
     if (!source) {
@@ -440,6 +453,24 @@ MeshMaterial materialFrom(
         material.roughnessFactor = pbr.roughness_factor;
         material.baseColorUvSet = static_cast<uint32_t>(
             std::max(pbr.base_color_texture.texcoord, 0));
+        if (pbr.metallic_roughness_texture.texture) {
+            material.metallicRoughnessUvSet = static_cast<uint32_t>(
+                std::max(pbr.metallic_roughness_texture.texcoord, 0));
+        }
+    }
+    if (source->normal_texture.texture) {
+        material.normalUvSet = static_cast<uint32_t>(
+            std::max(source->normal_texture.texcoord, 0));
+        material.normalScale = source->normal_texture.scale;
+    }
+    if (source->occlusion_texture.texture) {
+        material.occlusionUvSet = static_cast<uint32_t>(
+            std::max(source->occlusion_texture.texcoord, 0));
+        material.occlusionStrength = source->occlusion_texture.scale;
+    }
+    if (source->emissive_texture.texture) {
+        material.emissiveUvSet = static_cast<uint32_t>(
+            std::max(source->emissive_texture.texcoord, 0));
     }
     material.emissiveFactor = {
         source->emissive_factor[0],

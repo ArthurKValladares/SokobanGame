@@ -1,6 +1,7 @@
 #include "engine/render/GltfMesh.hpp"
 
 #include <chrono>
+#include <bit>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -66,6 +67,17 @@ void appendUint32(std::vector<uint8_t>& bytes, uint32_t value)
     bytes.push_back(static_cast<uint8_t>(value >> 8U));
     bytes.push_back(static_cast<uint8_t>(value >> 16U));
     bytes.push_back(static_cast<uint8_t>(value >> 24U));
+}
+
+void appendFloat(std::vector<uint8_t>& bytes, float value)
+{
+    appendUint32(bytes, std::bit_cast<uint32_t>(value));
+}
+
+void appendUint16(std::vector<uint8_t>& bytes, uint16_t value)
+{
+    bytes.push_back(static_cast<uint8_t>(value));
+    bytes.push_back(static_cast<uint8_t>(value >> 8U));
 }
 
 void writeGlb(
@@ -256,12 +268,137 @@ void testInspectsEmbeddedGlbImage()
     CHECK(!dependencies.materials[0].textures[0].samplerIndex.has_value());
 }
 
+void testLoadsMaterialMapBindingsAndAuthoredParameters()
+{
+    TEST("loadsMaterialMapBindingsAndAuthoredParameters");
+    TempDirectory temp;
+    const std::filesystem::path model = temp.path() / "material-maps.glb";
+
+    std::vector<uint8_t> binary;
+    for (float value : {
+             0.0f, 0.0f, 0.0f,
+             1.0f, 0.0f, 0.0f,
+             0.0f, 1.0f, 0.0f,
+             0.0f, 0.0f, 1.0f,
+             0.0f, 0.0f, 1.0f,
+             0.0f, 0.0f, 1.0f,
+             0.0f, 0.0f,
+             1.0f, 0.0f,
+             0.0f, 1.0f,
+             0.25f, 0.25f,
+             0.75f, 0.25f,
+             0.25f, 0.75f,
+         }) {
+        appendFloat(binary, value);
+    }
+    appendUint16(binary, 0);
+    appendUint16(binary, 1);
+    appendUint16(binary, 2);
+
+    writeGlb(model, R"json({
+  "asset":{"version":"2.0"},
+  "buffers":[{"byteLength":126}],
+  "bufferViews":[
+    {"buffer":0,"byteOffset":0,"byteLength":36},
+    {"buffer":0,"byteOffset":36,"byteLength":36},
+    {"buffer":0,"byteOffset":72,"byteLength":24},
+    {"buffer":0,"byteOffset":96,"byteLength":24},
+    {"buffer":0,"byteOffset":120,"byteLength":6}
+  ],
+  "accessors":[
+    {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]},
+    {"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},
+    {"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"},
+    {"bufferView":3,"componentType":5126,"count":3,"type":"VEC2"},
+    {"bufferView":4,"componentType":5123,"count":3,"type":"SCALAR"}
+  ],
+  "images":[
+    {"uri":"data:image/png;base64,AAAA"},
+    {"uri":"data:image/png;base64,AAAA"},
+    {"uri":"data:image/png;base64,AAAA"},
+    {"uri":"data:image/png;base64,AAAA"},
+    {"uri":"data:image/png;base64,AAAA"}
+  ],
+  "textures":[
+    {"source":0},{"source":1},{"source":2},{"source":3},{"source":4}
+  ],
+  "materials":[{
+    "pbrMetallicRoughness":{
+      "baseColorFactor":[0.1,0.2,0.3,0.4],
+      "metallicFactor":0.6,
+      "roughnessFactor":0.7,
+      "baseColorTexture":{"index":0,"texCoord":1},
+      "metallicRoughnessTexture":{"index":1,"texCoord":1}
+    },
+    "normalTexture":{"index":2,"texCoord":1,"scale":0.25},
+    "occlusionTexture":{"index":3,"texCoord":0,"strength":0.5},
+    "emissiveTexture":{"index":4,"texCoord":1},
+    "emissiveFactor":[0.8,0.7,0.6],
+    "alphaMode":"MASK",
+    "alphaCutoff":0.35,
+    "doubleSided":true
+  }],
+  "meshes":[{"primitives":[{
+    "attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2,"TEXCOORD_1":3},
+    "indices":4,
+    "material":0
+  }]}]
+})json", binary);
+
+    const MeshData unbound = loadGltfMesh(model);
+    CHECK(unbound.materials.size() == 1);
+    const MeshMaterial& authored = unbound.materials[0];
+    CHECK(authored.baseColorTexture == 0U);
+    CHECK(authored.normalTexture == 0U);
+    CHECK(authored.metallicRoughnessTexture == 0U);
+    CHECK(authored.emissiveTexture == 0U);
+    CHECK(authored.occlusionTexture == 0U);
+    CHECK(authored.baseColorUvSet == 1U);
+    CHECK(authored.normalUvSet == 1U);
+    CHECK(authored.metallicRoughnessUvSet == 1U);
+    CHECK(authored.emissiveUvSet == 1U);
+    CHECK(authored.occlusionUvSet == 0U);
+    CHECK(authored.normalScale == 0.25f);
+    CHECK(authored.occlusionStrength == 0.5f);
+
+    PrimitiveMaterialBinding binding;
+    binding.textureIndex = 4;
+    binding.normalTextureIndex = 5;
+    binding.metallicRoughnessTextureIndex = 6;
+    binding.emissiveTextureIndex = 7;
+    binding.occlusionTextureIndex = 8;
+    binding.flags = PrimitiveMaterialScrollV;
+    GltfMeshLoadOptions options;
+    options.primitiveMaterials.push_back(binding);
+    const MeshData bound = loadGltfMesh(model, options);
+    const MeshMaterial& material = bound.materials[0];
+    CHECK(material.baseColorTexture == 5U);
+    CHECK(material.normalTexture == 6U);
+    CHECK(material.metallicRoughnessTexture == 7U);
+    CHECK(material.emissiveTexture == 8U);
+    CHECK(material.occlusionTexture == 9U);
+    CHECK(material.flags == PrimitiveMaterialScrollV);
+    CHECK(material.baseColorFactor.x == 0.1f);
+    CHECK(material.baseColorFactor.y == 0.2f);
+    CHECK(material.baseColorFactor.z == 0.3f);
+    CHECK(material.baseColorFactor.w == 0.4f);
+    CHECK(material.metallicFactor == 0.6f);
+    CHECK(material.roughnessFactor == 0.7f);
+    CHECK(material.emissiveFactor.x == 0.8f);
+    CHECK(material.emissiveFactor.y == 0.7f);
+    CHECK(material.emissiveFactor.z == 0.6f);
+    CHECK(material.alphaMode == MaterialAlphaMode::Mask);
+    CHECK(material.alphaCutoff == 0.35f);
+    CHECK(material.doubleSided);
+}
+
 } // namespace
 
 int main()
 {
     testInspectsExternalAndDataUriDependenciesWithoutLoadingThem();
     testInspectsEmbeddedGlbImage();
+    testLoadsMaterialMapBindingsAndAuthoredParameters();
 
     if (failures == 0) {
         std::cout << "GltfDependencyTests: " << checks << " checks passed\n";

@@ -14,14 +14,14 @@ lighting. The fixed texture ceiling has now been replaced by a device-bounded,
 frame-safe descriptor heap. Read-only glTF inspection now feeds a resolved
 content inventory with stable identities for external, buffer-view and data-URI
 images. Sampling, UV and unsupported-transform semantics are now validated as
-well. The next objective is to carry these resolved map uses into
-`MeshMaterial`, then redesign `GpuMaterial` once around the complete map set.
+well. `MeshMaterial` now has the complete core map representation. The next
+objective is to redesign `GpuMaterial` once around that complete map set.
 
 The recommended order is:
 
 1. Capture the remaining visual/performance baseline evidence.
-2. Carry resolved glTF material-map handles through `MeshMaterial`.
-3. Redesign `GpuMaterial` once around the complete map set.
+2. Redesign `GpuMaterial` once around the complete map set.
+3. Upload resolved glTF map handles through the existing residency system.
 4. Finish tonemapping and exposure before judging mapped PBR output.
 5. Split non-scene modes out of `triangle.frag.glsl`.
 6. Implement and validate normal, metallic-roughness, emissive and occlusion
@@ -60,8 +60,9 @@ future tasks:
 - **F2a/F2b**: an `R16G16B16A16_SFLOAT` scene target, a distinct display
   image, and a tonemap pass. F2c remains open.
 - **F3**: cgltf material factors, tangents, a second UV set, alpha modes,
-  double-sided metadata, a GPU material buffer and Cook-Torrance GGX. Texture
-  maps other than the manifest-supplied base color are not implemented.
+  double-sided metadata, a GPU material buffer and Cook-Torrance GGX. The CPU
+  material now represents all core map types; GPU transport and sampling remain
+  open.
 - **T1/T2/T3/T6/T7**: instanced tiles, separate opaque drawing and sorting,
   model back-face culling, 4x default MSAA, and AO-gated depth copying.
 - **V1/V3/V5/V6**: per-swapchain-image present semaphores, direct skinning
@@ -293,18 +294,19 @@ and contextual rejection.
 
 ### 4. Extend the material representations
 
-#### 4.1 Extend `MeshMaterial`
+#### 4.1 Extend `MeshMaterial` — complete
 
-Add optional handles and glTF parameters for:
+`MeshMaterial` now carries one-based optional handles and authored UV selections
+for normal, metallic-roughness, emissive and occlusion maps, plus normal scale
+and occlusion strength. `PrimitiveMaterialBinding` accepts independent optional
+zero-based descriptor indices for those maps and converts them at the loader
+boundary. Missing bindings retain the zero-handle sentinel while preserving
+authored glTF parameters.
 
-- normal map, UV set and normal scale;
-- metallic-roughness map and UV set;
-- emissive map and UV set;
-- occlusion map, UV set and strength.
-
-Keep the existing base-color override behavior for authored manifest entries
-until migration is explicit. Do not silently change the look of all existing
-assets in the same packet.
+The existing manifest-owned base-color override is unchanged: the loader does
+not substitute the glTF base-color image. A synthetic GLB acceptance fixture
+covers default and fully bound handles, UV0/UV1, factors, map scalars, alpha
+mode, cutoff, double-sided state and scrolling compatibility.
 
 #### 4.2 Redesign `GpuMaterial` once
 
@@ -467,7 +469,8 @@ layout changes affect modules that appear unrelated to the immediate feature.
   identities plus color-space and sampling interpretation.
 - `src/engine/render/GltfMesh.*`: cgltf boundary, mesh/material/animation decode.
 - `tests/GltfDependencyTests.cpp`: structure-only dependency fixtures for
-  external/data-URI glTF and embedded-image GLB inputs.
+  external/data-URI glTF and embedded-image GLB inputs, plus loader-level CPU
+  material binding/default coverage.
 - `src/engine/render/ImageData.*`: decoded RGBA image abstraction; currently
   path-based and therefore a required seam for embedded GLB images.
 - `src/engine/render/VulkanDeviceContext.*`: feature/property queries and logical

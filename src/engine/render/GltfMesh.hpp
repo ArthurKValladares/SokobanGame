@@ -44,7 +44,16 @@ enum PrimitiveMaterialFlag : uint32_t {
 
 struct PrimitiveMaterialBinding {
     uint32_t textureIndex = 0;
+    // Kept adjacent to textureIndex for source compatibility with the
+    // original two-field aggregate.
     uint32_t flags = PrimitiveMaterialNone;
+    // Optional zero-based descriptor indices for glTF-authored material maps.
+    // Content discovery resolves these independently because one source image
+    // can require different colour-space or sampler interpretations per use.
+    std::optional<uint32_t> normalTextureIndex;
+    std::optional<uint32_t> metallicRoughnessTextureIndex;
+    std::optional<uint32_t> emissiveTextureIndex;
+    std::optional<uint32_t> occlusionTextureIndex;
 };
 
 // glTF's alpha handling, which decides whether a primitive belongs in the
@@ -57,15 +66,10 @@ enum class MaterialAlphaMode : uint32_t {
 
 // One glTF material, as authored.
 //
-// Everything here except the last three fields comes straight out of the
-// file. The texture does not: this engine's textures are declared by
-// assets/manifest.json and resolved to descriptor indices there, so a glTF
-// material's own image references are ignored and the manifest's slot for
-// that material index supplies `baseColorTexture` instead. Whether the other
-// map slots - normal, metallic-roughness, emissive, occlusion - should follow
-// the same rule or be read from the glTF is an open question; see the F3b
-// note in HANDOFF.md. They are deliberately absent rather than present and
-// unfillable.
+// Factors, UV selections, and map-specific scalars come from the glTF. Map
+// handles come from content resolution: the manifest continues to own the
+// base-colour override while glTF dependency discovery supplies the other
+// maps. Handles are one-based descriptor indices, with zero meaning absent.
 struct MeshMaterial {
     Vec4 baseColorFactor { 1.0f, 1.0f, 1.0f, 1.0f };
     Vec3 emissiveFactor {};
@@ -78,6 +82,16 @@ struct MeshMaterial {
     uint32_t baseColorTexture = 0;
     // Which UV set the base colour texture reads.
     uint32_t baseColorUvSet = 0;
+    uint32_t normalTexture = 0;
+    uint32_t normalUvSet = 0;
+    float normalScale = 1.0f;
+    uint32_t metallicRoughnessTexture = 0;
+    uint32_t metallicRoughnessUvSet = 0;
+    uint32_t emissiveTexture = 0;
+    uint32_t emissiveUvSet = 0;
+    uint32_t occlusionTexture = 0;
+    uint32_t occlusionUvSet = 0;
+    float occlusionStrength = 1.0f;
     uint32_t flags = PrimitiveMaterialNone;
 };
 

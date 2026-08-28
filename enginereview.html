@@ -257,7 +257,7 @@
   <header class="shell">
     <p class="eyebrow">Current-state review · 27 August 2026</p>
     <h1>Finish the material path without rebuilding it twice.</h1>
-    <p class="deck">Sokoban 3D now has the hard substrate, a device-bounded runtime texture heap, and semantically validated glTF texture inventory. The next program carries those map uses through CPU and GPU materials, simplifies the scene shader, and lands each map behind a testable gate.</p>
+    <p class="deck">Sokoban 3D now has the hard substrate, a device-bounded runtime texture heap, semantically validated glTF texture inventory, and a complete CPU material-map representation. The next program redesigns the GPU material once, connects residency, simplifies the scene shader, and lands each map behind a testable gate.</p>
     <div class="metrics" aria-label="Current repository facts">
       <div class="metric"><b>36</b><span>manifest models</span></div>
       <div class="metric"><b>42 / 1024</b><span>textures on validated GPU</span></div>
@@ -292,7 +292,7 @@
         <article class="card">
           <p class="kicker">What blocks complete PBR</p>
           <h3>Semantic transport and binding</h3>
-          <p>glTF map sources, sampler state, color space and UV selections now survive content resolution, but the maps are not yet represented in runtime materials or bound.</p>
+          <p>glTF map sources, sampler state, color space, UV selections and map scalars now survive through the CPU material representation, but they are not yet carried by the GPU ABI or bound at runtime.</p>
         </article>
         <article class="card">
           <p class="kicker">What not to overbuild</p>
@@ -439,10 +439,10 @@
         <article class="phase">
           <div class="phase-id">4<small>materials</small></div>
           <div>
-            <div class="phase-title"><h3>Carry every material map to the GPU</h3><span class="status next">Next</span></div>
+            <div class="phase-title"><h3>Carry every material map to the GPU</h3><span class="status partial">In progress</span></div>
             <div class="tasks">
-              <div class="task"><span class="task-id">4.1</span><div><b>Extend MeshMaterial — next</b><p>Add handles, UV selection, normal scale and occlusion strength for normal, MR, emissive and occlusion maps.</p></div></div>
-              <div class="task"><span class="task-id">4.2</span><div><b>Redesign GpuMaterial once</b><p>Keep factors in aligned float vectors and new handles/flags in explicit 32-bit integer lanes with std430 assertions.</p></div></div>
+              <div class="task"><span class="task-id">4.1</span><div><b>Extend MeshMaterial — complete</b><p>CPU materials carry optional one-based handles, UV selections, normal scale and occlusion strength for all four core maps. A synthetic GLB loader fixture covers unbound defaults and fully bound metadata while preserving the manifest base-color override.</p></div></div>
+              <div class="task"><span class="task-id">4.2</span><div><b>Redesign GpuMaterial once — next</b><p>Keep factors in aligned float vectors and new handles/flags in explicit 32-bit integer lanes with std430 assertions.</p></div></div>
               <div class="task"><span class="task-id">4.3</span><div><b>Use existing residency</b><p>Add maps to model requirements, worker decode, render-thread publication, budgets and diagnostics.</p></div></div>
             </div>
             <p class="accept"><b>Gate:</b> requesting one model requests exactly its map dependencies; CPU-to-GPU conversion tests cover every default and flag.</p>
