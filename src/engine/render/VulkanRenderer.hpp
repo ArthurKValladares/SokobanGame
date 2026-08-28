@@ -10,6 +10,7 @@
 #include "engine/render/RendererReconfiguration.hpp"
 #include "engine/render/RenderTypes.hpp"
 #include "engine/render/ReusableScratchPool.hpp"
+#include "engine/render/RuntimeTextureCatalog.hpp"
 #include "engine/render/VulkanDeviceContext.hpp"
 #include "engine/render/VulkanDiagnostics.hpp"
 #include "engine/render/VulkanGpuProfiler.hpp"
@@ -295,6 +296,7 @@ private:
 
     SDL_Window* window_ = nullptr;
     std::filesystem::path assetRoot_;
+    RuntimeTextureCatalog runtimeTextureCatalog_;
     VulkanDeviceContext deviceContext_;
     VulkanPipelineCache pipelineCache_;
     VulkanGpuProfiler gpuProfiler_;

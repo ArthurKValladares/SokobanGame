@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <cstdlib>
 #include <fstream>
 #include <limits>
@@ -421,7 +422,9 @@ MeshMaterial materialFrom(
     MeshMaterial material;
     if (bound) {
         // One-based, matching the vertex path: zero means untextured.
-        material.baseColorTexture = binding.textureIndex + 1;
+        if (binding.bindBaseColorTexture) {
+            material.baseColorTexture = binding.textureIndex + 1;
+        }
         if (binding.normalTextureIndex) {
             material.normalTexture = *binding.normalTextureIndex + 1;
         }
@@ -944,6 +947,27 @@ GltfAssetDependencies inspectGltfAssetDependencies(
     }
 
     return dependencies;
+}
+
+std::vector<std::byte> loadGltfBufferViewBytes(
+    const std::filesystem::path& path,
+    uint32_t bufferViewIndex)
+{
+    const Document document = loadDocument(path);
+    const cgltf_data& data = *document;
+    if (bufferViewIndex >= data.buffer_views_count) {
+        throw std::runtime_error(
+            "glTF buffer view index is out of range: " + path.string());
+    }
+    const cgltf_buffer_view& view = data.buffer_views[bufferViewIndex];
+    const uint8_t* bytes = cgltf_buffer_view_data(&view);
+    if (bytes == nullptr || view.size == 0) {
+        throw std::runtime_error(
+            "glTF buffer view contains no data: " + path.string());
+    }
+    std::vector<std::byte> result(view.size);
+    std::memcpy(result.data(), bytes, view.size);
+    return result;
 }
 
 MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions options)

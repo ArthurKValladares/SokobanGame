@@ -4,6 +4,7 @@
 #include "engine/TextureSource.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -47,6 +48,9 @@ struct PrimitiveMaterialBinding {
     // Kept adjacent to textureIndex for source compatibility with the
     // original two-field aggregate.
     uint32_t flags = PrimitiveMaterialNone;
+    // False for a map-only runtime binding. The manifest remains authoritative
+    // for base colour even when discovered glTF maps populate the other slots.
+    bool bindBaseColorTexture = true;
     // Optional zero-based descriptor indices for glTF-authored material maps.
     // Content discovery resolves these independently because one source image
     // can require different colour-space or sampler interpretations per use.
@@ -309,6 +313,12 @@ struct GltfAssetDependencies {
 // are intentionally not opened, and no render resources are created.
 [[nodiscard]] GltfAssetDependencies inspectGltfAssetDependencies(
     const std::filesystem::path& path);
+
+// Loads the document's buffers and copies one buffer view. Used by texture
+// decode for embedded GLB images and buffer-view images in external glTFs.
+[[nodiscard]] std::vector<std::byte> loadGltfBufferViewBytes(
+    const std::filesystem::path& path,
+    uint32_t bufferViewIndex);
 
 [[nodiscard]] MeshData loadGltfMesh(
     const std::filesystem::path& path,

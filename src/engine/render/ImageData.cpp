@@ -47,6 +47,22 @@ std::vector<stbi_uc> readImageFile(const std::filesystem::path& path)
 ImageData loadRgbaImage(const std::filesystem::path& path)
 {
     const std::vector<stbi_uc> encoded = readImageFile(path);
+    return loadRgbaImage(
+        std::as_bytes(std::span(encoded)), path.string());
+}
+
+ImageData loadRgbaImage(
+    std::span<const std::byte> encoded,
+    std::string_view label)
+{
+    if (encoded.empty()) {
+        throw std::runtime_error(
+            "Image data is empty: " + std::string(label));
+    }
+    if (encoded.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        throw std::runtime_error(
+            "Image data is too large to decode: " + std::string(label));
+    }
 
     int width = 0;
     int height = 0;
@@ -54,7 +70,7 @@ ImageData loadRgbaImage(const std::filesystem::path& path)
     using StbiPixels = std::unique_ptr<stbi_uc, decltype(&stbi_image_free)>;
     const StbiPixels pixels(
         stbi_load_from_memory(
-            encoded.data(),
+            reinterpret_cast<const stbi_uc*>(encoded.data()),
             static_cast<int>(encoded.size()),
             &width,
             &height,
@@ -64,18 +80,20 @@ ImageData loadRgbaImage(const std::filesystem::path& path)
     if (!pixels) {
         const char* reason = stbi_failure_reason();
         throw std::runtime_error(
-            "Failed to decode image '" + path.string() + "': "
+            "Failed to decode image '" + std::string(label) + "': "
             + (reason != nullptr ? reason : "unknown decoder error"));
     }
     if (width <= 0 || height <= 0) {
-        throw std::runtime_error("Invalid image dimensions: " + path.string());
+        throw std::runtime_error(
+            "Invalid image dimensions: " + std::string(label));
     }
 
     const size_t imageWidth = static_cast<size_t>(width);
     const size_t imageHeight = static_cast<size_t>(height);
     constexpr size_t rgbaChannels = 4;
     if (imageWidth > std::numeric_limits<size_t>::max() / rgbaChannels / imageHeight) {
-        throw std::runtime_error("Decoded image is too large: " + path.string());
+        throw std::runtime_error(
+            "Decoded image is too large: " + std::string(label));
     }
 
     ImageData image;

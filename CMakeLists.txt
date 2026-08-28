@@ -376,6 +376,7 @@ add_library(sokoban_core STATIC
     src/engine/StateDelta.cpp
     src/engine/TileThumbnailBake.cpp
     src/engine/TaskSystem.cpp
+    src/engine/TextureSource.cpp
     src/engine/TileTypes.cpp
     src/engine/Window.cpp
     src/engine/render/AnimationController.cpp
@@ -391,6 +392,8 @@ add_library(sokoban_core STATIC
     src/engine/render/PngWriter.cpp
     src/engine/render/RenderAssetRequirements.cpp
     src/engine/render/RenderResolution.cpp
+    src/engine/render/RuntimeTextureCatalog.cpp
+    src/engine/render/TextureSourceLoader.cpp
     src/engine/render/UploadRingAllocator.cpp
     src/engine/render/RendererReconfiguration.cpp
     src/engine/render/IsoScenePreparer.cpp
@@ -829,6 +832,11 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME gltf_dependencies TARGET sokoban_gltf_dependency_tests
         LIBS sokoban_core
         SOURCES tests/GltfDependencyTests.cpp
+    )
+    sokoban_add_test(NAME runtime_texture_catalog TARGET sokoban_runtime_texture_catalog_tests
+        LIBS sokoban_core
+        ASSET_DIR
+        SOURCES tests/RuntimeTextureCatalogTests.cpp
     )
     sokoban_add_test(NAME animation_catalog TARGET sokoban_animation_catalog_tests
         LIBS sokoban_core

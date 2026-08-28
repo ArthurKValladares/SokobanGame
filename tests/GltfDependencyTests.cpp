@@ -390,6 +390,16 @@ void testLoadsMaterialMapBindingsAndAuthoredParameters()
     CHECK(material.alphaMode == MaterialAlphaMode::Mask);
     CHECK(material.alphaCutoff == 0.35f);
     CHECK(material.doubleSided);
+
+    binding.bindBaseColorTexture = false;
+    options.primitiveMaterials[0] = binding;
+    const MeshData mapOnly = loadGltfMesh(model, options);
+    const MeshMaterial& mapOnlyMaterial = mapOnly.materials[0];
+    CHECK(mapOnlyMaterial.baseColorTexture == 0U);
+    CHECK(mapOnlyMaterial.normalTexture == 6U);
+    CHECK(mapOnlyMaterial.metallicRoughnessTexture == 7U);
+    CHECK(mapOnlyMaterial.emissiveTexture == 8U);
+    CHECK(mapOnlyMaterial.occlusionTexture == 9U);
 }
 
 } // namespace

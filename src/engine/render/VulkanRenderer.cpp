@@ -202,7 +202,9 @@ VulkanRenderer::VulkanRenderer(
     PresentationPolicy presentationPolicy)
     : window_(window)
     , assetRoot_(std::move(assetRoot))
-    , deviceContext_(window, manifest.textures().size())
+    , runtimeTextureCatalog_(
+          collectRuntimeTextureCatalog(assetRoot_, manifest))
+    , deviceContext_(window, runtimeTextureCatalog_.textures().size())
     , reconfigurationQueue_({
           .antiAliasing = antiAliasingMode,
           .renderScalePercent = renderScalePercent,
@@ -236,7 +238,7 @@ VulkanRenderer::VulkanRenderer(
         deviceContext_.device(),
         deviceContext_.commandPool(),
         deviceContext_.graphicsQueue(),
-        assetRoot_, manifest,
+        assetRoot_, manifest, runtimeTextureCatalog_,
         deviceContext_.textureDescriptorCapacity(),
         deviceContext_.maxSamplerAnisotropy());
     activeResources_ = createRenderResources(

@@ -47,6 +47,15 @@ struct ContentInventory {
     std::uintmax_t totalBytes = 0;
 };
 
+// Resolves only the core material-map uses in one glTF document. This is the
+// shared semantic boundary used by staging and by the runtime texture catalog;
+// `document` is relative to `assetRoot` and remains relative in every result.
+[[nodiscard]] std::vector<ResolvedMaterialTexture>
+resolveGltfMaterialTextures(
+    const std::filesystem::path& assetRoot,
+    const std::filesystem::path& document,
+    std::string_view assetLabel);
+
 // Resolves and validates every file needed by a distributable build. Manifest
 // references remain relative to the assets root, while levels and compiled
 // shaders are added under levels/ and shaders/ respectively.

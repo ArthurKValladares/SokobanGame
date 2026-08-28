@@ -2,6 +2,7 @@
 
 #include "engine/Log.hpp"
 #include "engine/TaskSystem.hpp"
+#include "engine/render/TextureSourceLoader.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 
@@ -30,6 +31,90 @@ uint32_t mipLevelCount(uint32_t width, uint32_t height)
         ? 1U
         : 1U + static_cast<uint32_t>(
               std::floor(std::log2(static_cast<double>(largestDimension))));
+}
+
+bool usesMipmaps(TextureMinificationFilter filter)
+{
+    return filter == TextureMinificationFilter::NearestMipmapNearest ||
+        filter == TextureMinificationFilter::LinearMipmapNearest ||
+        filter == TextureMinificationFilter::NearestMipmapLinear ||
+        filter == TextureMinificationFilter::LinearMipmapLinear;
+}
+
+VkSamplerAddressMode vulkanAddressMode(TextureAddressMode mode)
+{
+    switch (mode) {
+    case TextureAddressMode::ClampToEdge:
+        return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    case TextureAddressMode::MirroredRepeat:
+        return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+    case TextureAddressMode::Repeat:
+        return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    }
+    return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+}
+
+VkFilter vulkanMagnificationFilter(TextureMagnificationFilter filter)
+{
+    return filter == TextureMagnificationFilter::Nearest
+        ? VK_FILTER_NEAREST
+        : VK_FILTER_LINEAR;
+}
+
+VkFilter vulkanMinificationFilter(TextureMinificationFilter filter)
+{
+    switch (filter) {
+    case TextureMinificationFilter::Nearest:
+    case TextureMinificationFilter::NearestMipmapNearest:
+    case TextureMinificationFilter::NearestMipmapLinear:
+        return VK_FILTER_NEAREST;
+    case TextureMinificationFilter::Linear:
+    case TextureMinificationFilter::LinearMipmapNearest:
+    case TextureMinificationFilter::LinearMipmapLinear:
+        return VK_FILTER_LINEAR;
+    }
+    return VK_FILTER_LINEAR;
+}
+
+VkSamplerMipmapMode vulkanMipmapMode(TextureMinificationFilter filter)
+{
+    return filter == TextureMinificationFilter::NearestMipmapLinear ||
+            filter == TextureMinificationFilter::LinearMipmapLinear
+        ? VK_SAMPLER_MIPMAP_MODE_LINEAR
+        : VK_SAMPLER_MIPMAP_MODE_NEAREST;
+}
+
+uint32_t descriptorIndexForLogicalTexture(
+    uint32_t logicalIndex,
+    uint32_t manifestTextureCount,
+    uint32_t discoveredTextureBase)
+{
+    return logicalIndex < manifestTextureCount
+        ? logicalIndex
+        : discoveredTextureBase + logicalIndex - manifestTextureCount;
+}
+
+void remapBindingTextures(
+    PrimitiveMaterialBinding& binding,
+    uint32_t manifestTextureCount,
+    uint32_t discoveredTextureBase)
+{
+    const auto remap = [=](std::optional<uint32_t>& index) {
+        if (index) {
+            *index = descriptorIndexForLogicalTexture(
+                *index, manifestTextureCount, discoveredTextureBase);
+        }
+    };
+    if (binding.bindBaseColorTexture) {
+        binding.textureIndex = descriptorIndexForLogicalTexture(
+            binding.textureIndex,
+            manifestTextureCount,
+            discoveredTextureBase);
+    }
+    remap(binding.normalTextureIndex);
+    remap(binding.metallicRoughnessTextureIndex);
+    remap(binding.emissiveTextureIndex);
+    remap(binding.occlusionTextureIndex);
 }
 
 } // namespace
@@ -108,14 +193,16 @@ void VulkanModelResources::create(
     VkQueue graphicsQueue,
     std::filesystem::path assetRoot,
     const AssetManifest& manifest,
+    const RuntimeTextureCatalog& textureCatalog,
     uint32_t textureDescriptorCapacity,
     float maxSamplerAnisotropy)
 {
     destroy();
     if (textureDescriptorCapacity == 0 ||
-        manifest.textures().size() > textureDescriptorCapacity) {
+        textureCatalog.textures().size() > textureDescriptorCapacity ||
+        textureCatalog.manifestTextureCount() != manifest.textures().size()) {
         throw std::runtime_error(
-            "Asset manifest texture count exceeds the selected descriptor capacity");
+            "Runtime texture catalog exceeds the selected descriptor capacity");
     }
     physicalDevice_ = physicalDevice;
     maxSamplerAnisotropy_ = std::max(maxSamplerAnisotropy, 1.0f);
@@ -127,7 +214,44 @@ void VulkanModelResources::create(
     manifest_ = &manifest;
     models_.resize(manifest.models().size());
     animations_.resize(manifest.animations().size());
-    textures_.resize(manifest.textures().size());
+    textures_.resize(textureDescriptorCapacity_);
+    textureDefinitions_.resize(textureDescriptorCapacity_);
+    manifestTextureCount_ = textureCatalog.manifestTextureCount();
+    discoveredTextureBase_ = textureDescriptorCapacity_ -
+        textureCatalog.discoveredTextureCount();
+    if (manifestTextureCount_ > discoveredTextureBase_) {
+        throw std::runtime_error(
+            "Runtime texture catalog leaves no stable manifest descriptor range");
+    }
+    activeTextureIndices_.reserve(textureCatalog.textures().size());
+    for (uint32_t logicalIndex = 0;
+         logicalIndex < textureCatalog.textures().size();
+         ++logicalIndex) {
+        const uint32_t descriptorIndex = textureCatalog.descriptorIndex(
+            logicalIndex, textureDescriptorCapacity_);
+        textureDefinitions_[descriptorIndex] =
+            textureCatalog.textures()[logicalIndex];
+        activeTextureIndices_.push_back(descriptorIndex);
+    }
+    modelTextureDependencies_.resize(models_.size());
+    modelMaterialBindings_.resize(models_.size());
+    for (uint32_t modelIndex = 0; modelIndex < models_.size(); ++modelIndex) {
+        const RuntimeModelTextures& catalogModel =
+            textureCatalog.model(modelIndex);
+        std::vector<uint32_t>& dependencies =
+            modelTextureDependencies_[modelIndex];
+        dependencies.reserve(catalogModel.requiredTextures.size());
+        for (uint32_t logicalIndex : catalogModel.requiredTextures) {
+            dependencies.push_back(textureCatalog.descriptorIndex(
+                logicalIndex, textureDescriptorCapacity_));
+        }
+        modelMaterialBindings_[modelIndex] = catalogModel.primitiveMaterials;
+        for (PrimitiveMaterialBinding& binding :
+             modelMaterialBindings_[modelIndex]) {
+            remapBindingTextures(
+                binding, manifestTextureCount_, discoveredTextureBase_);
+        }
+    }
     animationController_.configure(
         manifest.playerModel(), manifest.playerIdleAnimation());
 
@@ -152,7 +276,13 @@ void VulkanModelResources::create(
             fallback,
             fallbackTexture_.image,
             fallbackTexture_.sampler,
-            TextureSampling {});
+            {
+                .colorSpace = TextureColorSpace::Srgb,
+                .wrapU = TextureAddressMode::ClampToEdge,
+                .wrapV = TextureAddressMode::ClampToEdge,
+                .magFilter = TextureMagnificationFilter::Nearest,
+                .minFilter = TextureMinificationFilter::Nearest,
+            });
     } catch (...) {
         destroy();
         throw;
@@ -203,6 +333,10 @@ void VulkanModelResources::destroy()
     models_.clear();
     animations_.clear();
     textures_.clear();
+    textureDefinitions_.clear();
+    activeTextureIndices_.clear();
+    modelTextureDependencies_.clear();
+    modelMaterialBindings_.clear();
     materialStorage_.clear();
     fallbackTexture_ = {};
     animationController_.clear();
@@ -213,6 +347,8 @@ void VulkanModelResources::destroy()
     device_ = VK_NULL_HANDLE;
     physicalDevice_ = VK_NULL_HANDLE;
     textureDescriptorCapacity_ = 0;
+    manifestTextureCount_ = 0;
+    discoveredTextureBase_ = 0;
     textureUploadSubmissions_ = 0;
     textureUploadCompletions_ = 0;
     scheduler_.clear();
@@ -248,7 +384,7 @@ void VulkanModelResources::requestAssets(
             queueAnimation(animation, priority);
         }
     }
-    for (uint32_t i = 0; i < textures_.size(); ++i) {
+    for (uint32_t i = 0; i < manifestTextureCount_; ++i) {
         if (requirements.contains(RenderTexture { i + 1 })) {
             queueTexture(i, priority);
         }
@@ -285,9 +421,9 @@ bool VulkanModelResources::waitForAssets(const RenderAssetRequirements& requirem
                 break;
             }
         }
-        for (std::size_t i = 0; i < textures_.size(); ++i) {
-            if (textures_[i].state == LoadState::Loading) {
-                (void)publishTexture(i, true);
+        for (uint32_t textureIndex : activeTextureIndices_) {
+            if (textures_[textureIndex].state == LoadState::Loading) {
+                (void)publishTexture(textureIndex, true);
                 break;
             }
         }
@@ -361,7 +497,7 @@ bool VulkanModelResources::publishReadyAssets(std::size_t maxPublications)
         }
     }
 
-    for (std::size_t i = 0; i < textures_.size(); ++i) {
+    for (uint32_t i : activeTextureIndices_) {
         if (publications >= maxPublications) {
             return descriptorsChanged;
         }
@@ -460,14 +596,7 @@ void VulkanModelResources::startModel(RenderModel model)
         .preserveSourceScale = definition.preserveSourceScale,
         .rotateHalfTurn = definition.rotateHalfTurn,
     };
-    options.primitiveMaterials.reserve(definition.primitiveMaterials.size());
-    for (const AssetManifest::Model::PrimitiveMaterial& material :
-         definition.primitiveMaterials) {
-        options.primitiveMaterials.push_back({
-            .textureIndex = material.textureIndex,
-            .flags = material.scrollV ? PrimitiveMaterialScrollV : PrimitiveMaterialNone,
-        });
-    }
+    options.primitiveMaterials = modelMaterialBindings_.at(model.index());
     const ModelGeometry geometry = definition.geometry;
     const std::filesystem::path assetRoot = assetRoot_;
     const std::vector<AssetManifest::Model::Attachment> attachments =
@@ -498,7 +627,9 @@ void VulkanModelResources::queueTexture(
     std::size_t textureIndex,
     AssetLoadPriority priority)
 {
-    if (textureIndex >= textures_.size()) {
+    if (textureIndex >= textures_.size() ||
+        textureIndex >= textureDefinitions_.size() ||
+        !textureDefinitions_[textureIndex]) {
         throw std::runtime_error("Model material references an invalid texture index");
     }
     TextureSlot& slot = textures_[textureIndex];
@@ -526,12 +657,33 @@ void VulkanModelResources::startTexture(std::size_t textureIndex)
         throw std::logic_error("Started a texture asset that was not queued");
     }
 
-    const std::filesystem::path path =
-        assetRoot_ / manifest_->textures()[textureIndex].path;
-    slot.future = taskSystem().enqueue([path] {
-        return loadRgbaImage(path);
+    if (textureIndex >= textureDefinitions_.size() ||
+        !textureDefinitions_[textureIndex]) {
+        throw std::logic_error("Started an undefined runtime texture slot");
+    }
+    const TextureSource source =
+        textureDefinitions_[textureIndex]->identity.source;
+    const std::filesystem::path assetRoot = assetRoot_;
+    slot.future = taskSystem().enqueue([assetRoot, source] {
+        return loadRgbaTextureSource(assetRoot, source);
     });
     slot.state = LoadState::Loading;
+}
+
+std::filesystem::path VulkanModelResources::textureDiagnosticPath(
+    std::size_t textureIndex) const
+{
+    if (textureIndex >= textureDefinitions_.size() ||
+        !textureDefinitions_[textureIndex]) {
+        return "texture descriptor " + std::to_string(textureIndex);
+    }
+    const RuntimeTextureDefinition& definition =
+        *textureDefinitions_[textureIndex];
+    if (const auto* external =
+            std::get_if<ExternalTextureSource>(&definition.identity.source)) {
+        return assetRoot_ / external->path;
+    }
+    return std::filesystem::path(definition.label);
 }
 
 void VulkanModelResources::queueAnimation(
@@ -577,15 +729,11 @@ void VulkanModelResources::queueModelDependencies(
     RenderModel model,
     AssetLoadPriority priority)
 {
-    const AssetManifest::Model& definition = manifest_->model(model);
-    if (definition.materialMode == ModelMaterialMode::SingleTexture) {
-        queueTexture(definition.textureIndex, priority);
-    } else if (definition.materialMode == ModelMaterialMode::PrimitiveMaterials) {
-        for (const AssetManifest::Model::PrimitiveMaterial& material :
-             definition.primitiveMaterials) {
-            queueTexture(material.textureIndex, priority);
-        }
+    for (uint32_t textureIndex :
+         modelTextureDependencies_.at(model.index())) {
+        queueTexture(textureIndex, priority);
     }
+    const AssetManifest::Model& definition = manifest_->model(model);
     if (definition.geometry == ModelGeometry::Skinned) {
         queueAnimation(manifest_->playerIdleAnimation(), priority);
     }
@@ -772,8 +920,7 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
 bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
 {
     TextureSlot& slot = textures_.at(textureIndex);
-    const std::filesystem::path path =
-        assetRoot_ / manifest_->textures()[textureIndex].path;
+    const std::filesystem::path path = textureDiagnosticPath(textureIndex);
     if (slot.state == LoadState::Uploading || slot.state == LoadState::Ready) {
         return false;
     }
@@ -823,7 +970,9 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
 
     try {
         const ImageData& image = *slot.prepared;
-        const uint64_t bytes = textureBytes(image);
+        const TextureInterpretation& interpretation =
+            textureDefinitions_.at(textureIndex)->identity.interpretation;
+        const uint64_t bytes = textureBytes(image, interpretation);
         if (!makeTextureResident(textureIndex, bytes)) {
             return false;
         }
@@ -832,7 +981,7 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
             slot.gpu.image,
             slot.gpu.sampler,
             slot.upload,
-            samplingFor(manifest_->textures()[textureIndex]));
+            interpretation);
         slot.gpu.width = image.width;
         slot.gpu.height = image.height;
         slot.gpuBytes = bytes;
@@ -865,13 +1014,23 @@ uint64_t VulkanModelResources::meshBytes(const MeshData& mesh)
         static_cast<uint64_t>(sizeof(uint32_t)) * mesh.indices.size();
 }
 
-uint64_t VulkanModelResources::textureBytes(const ImageData& image)
+uint64_t VulkanModelResources::textureBytes(
+    const ImageData& image,
+    const TextureInterpretation& interpretation)
 {
-    // Linear-filtered textures may generate a full mip chain. Four thirds of
-    // the base level is a conservative estimate and keeps the residency cap
-    // meaningful even before the Vulkan allocation is created.
     const uint64_t base = image.rgba.size();
-    return base + base / 3U;
+    switch (interpretation.minFilter) {
+    case TextureMinificationFilter::NearestMipmapNearest:
+    case TextureMinificationFilter::LinearMipmapNearest:
+    case TextureMinificationFilter::NearestMipmapLinear:
+    case TextureMinificationFilter::LinearMipmapLinear:
+        // A complete mip pyramid converges to four thirds of the base level.
+        return base + base / 3U;
+    case TextureMinificationFilter::Nearest:
+    case TextureMinificationFilter::Linear:
+        return base;
+    }
+    return base;
 }
 
 void VulkanModelResources::markResidencyBudgetBlocked()
@@ -1064,7 +1223,7 @@ std::vector<bool> VulkanModelResources::requiredTextures(
     const RenderAssetRequirements& requirements) const
 {
     std::vector<bool> result(textures_.size(), false);
-    for (uint32_t i = 0; i < textures_.size(); ++i) {
+    for (uint32_t i = 0; i < manifestTextureCount_; ++i) {
         result[i] = requirements.contains(RenderTexture { i + 1 });
     }
     for (uint32_t i = 0; i < models_.size(); ++i) {
@@ -1072,14 +1231,8 @@ std::vector<bool> VulkanModelResources::requiredTextures(
         if (!requirements.contains(model)) {
             continue;
         }
-        const AssetManifest::Model& definition = manifest_->model(model);
-        if (definition.materialMode == ModelMaterialMode::SingleTexture) {
-            result.at(definition.textureIndex) = true;
-        } else if (definition.materialMode == ModelMaterialMode::PrimitiveMaterials) {
-            for (const AssetManifest::Model::PrimitiveMaterial& material :
-                 definition.primitiveMaterials) {
-                result.at(material.textureIndex) = true;
-            }
+        for (uint32_t textureIndex : modelTextureDependencies_[i]) {
+            result.at(textureIndex) = true;
         }
     }
     return result;
@@ -1316,7 +1469,7 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
 {
     LoadingStats result {
         .totalModels = static_cast<uint32_t>(models_.size()),
-        .totalTextures = static_cast<uint32_t>(textures_.size()),
+        .totalTextures = static_cast<uint32_t>(activeTextureIndices_.size()),
         .totalAnimations = static_cast<uint32_t>(animations_.size()),
     };
     auto countState = [&result](LoadState state, uint32_t& loaded, uint32_t& pending) {
@@ -1336,7 +1489,8 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
         countState(model.state, result.loadedModels, result.pendingModels);
         result.requestedAssets += model.state != LoadState::Unrequested;
     }
-    for (const TextureSlot& texture : textures_) {
+    for (uint32_t textureIndex : activeTextureIndices_) {
+        const TextureSlot& texture = textures_[textureIndex];
         countState(texture.state, result.loadedTextures, result.pendingTextures);
         result.requestedAssets += texture.state != LoadState::Unrequested;
         if (texture.state == LoadState::Uploading) {
@@ -1674,21 +1828,11 @@ void VulkanModelResources::writeSkinningInstance(
         sizeof(instance));
 }
 
-VulkanModelResources::TextureSampling VulkanModelResources::samplingFor(
-    const AssetManifest::Texture& texture)
-{
-    return {
-        .tiling = texture.tiling,
-        .filter = texture.filter,
-        .colorSpace = texture.colorSpace,
-    };
-}
-
 void VulkanModelResources::createTextureBlocking(
     const ImageData& image,
     OwnedImage& textureImage,
     VkSampler& sampler,
-    TextureSampling sampling)
+    TextureInterpretation sampling)
 {
     PendingTextureUpload upload;
     try {
@@ -1712,7 +1856,7 @@ void VulkanModelResources::beginTextureUpload(
     OwnedImage& textureImage,
     VkSampler& sampler,
     PendingTextureUpload& upload,
-    TextureSampling sampling)
+    TextureInterpretation sampling)
 {
     if (image.width == 0 || image.height == 0 || image.rgba.empty()) {
         throw std::runtime_error("Texture image contains no pixels");
@@ -1730,7 +1874,7 @@ void VulkanModelResources::beginTextureUpload(
         VK_FORMAT_FEATURE_BLIT_SRC_BIT |
         VK_FORMAT_FEATURE_BLIT_DST_BIT |
         VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
-    const bool supportsMipmaps = sampling.filter == TextureFilter::Linear &&
+    const bool supportsMipmaps = usesMipmaps(sampling.minFilter) &&
         (formatProperties.optimalTilingFeatures & requiredBlitFeatures) ==
             requiredBlitFeatures;
     textureImage.mipLevels = supportsMipmaps
@@ -1781,27 +1925,18 @@ void VulkanModelResources::beginTextureUpload(
         textureImage.mipLevels);
     vulkanDebug::setObjectName(
         device_, VK_OBJECT_TYPE_IMAGE_VIEW, textureImage.view, "Model texture view");
-    // Address mode and filtering are independent: the ground material layers
-    // repeat and filter smoothly, the splat map clamps but still filters
-    // smoothly (it spans the board once), and atlases do neither.
-    const VkSamplerAddressMode addressMode = sampling.tiling
-        ? VK_SAMPLER_ADDRESS_MODE_REPEAT
-        : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    const VkFilter filter = sampling.filter == TextureFilter::Linear
-        ? VK_FILTER_LINEAR
-        : VK_FILTER_NEAREST;
-    const float anisotropy = supportsMipmaps &&
-            sampling.filter == TextureFilter::Linear
+    const VkFilter minFilter = vulkanMinificationFilter(sampling.minFilter);
+    const float anisotropy = supportsMipmaps && minFilter == VK_FILTER_LINEAR
         ? maxSamplerAnisotropy_
         : 1.0f;
     VkSamplerCreateInfo samplerInfo {
         .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-        .magFilter = filter,
-        .minFilter = filter,
-        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
-        .addressModeU = addressMode,
-        .addressModeV = addressMode,
-        .addressModeW = addressMode,
+        .magFilter = vulkanMagnificationFilter(sampling.magFilter),
+        .minFilter = minFilter,
+        .mipmapMode = vulkanMipmapMode(sampling.minFilter),
+        .addressModeU = vulkanAddressMode(sampling.wrapU),
+        .addressModeV = vulkanAddressMode(sampling.wrapV),
+        .addressModeW = vulkanAddressMode(sampling.wrapV),
         // Anisotropy only earns its cost where a mip chain exists and the
         // surface is viewed obliquely - the splatted ground being the case
         // that motivated it. Point-sampled atlases keep their crisp texels.
@@ -2001,17 +2136,26 @@ void VulkanModelResources::recordTextureCopy(
 bool VulkanModelResources::syncManifestTextures()
 {
     if (manifest_ == nullptr ||
-        textures_.size() >= manifest_->textures().size()) {
+        manifestTextureCount_ >= manifest_->textures().size()) {
         return false;
     }
-    if (manifest_->textures().size() > textureDescriptorCapacity_) {
+    if (manifest_->textures().size() > discoveredTextureBase_) {
         throw std::runtime_error(
             "Runtime manifest requires " +
             std::to_string(manifest_->textures().size()) +
-            " texture descriptors, but the stable heap capacity is " +
-            std::to_string(textureDescriptorCapacity_));
+            " stable low texture descriptors, but discovered glTF textures "
+            "begin at descriptor " +
+            std::to_string(discoveredTextureBase_));
     }
-    textures_.resize(manifest_->textures().size());
+    for (uint32_t index = manifestTextureCount_;
+         index < manifest_->textures().size();
+         ++index) {
+        textureDefinitions_[index] = runtimeTextureDefinitionFor(
+            manifest_->textures()[index]);
+        activeTextureIndices_.push_back(index);
+    }
+    manifestTextureCount_ =
+        static_cast<uint32_t>(manifest_->textures().size());
     return true;
 }
 
@@ -2021,14 +2165,40 @@ bool VulkanModelResources::syncManifestModels()
         models_.size() >= manifest_->models().size()) {
         return false;
     }
+    const std::size_t previousSize = models_.size();
     models_.resize(manifest_->models().size());
+    modelTextureDependencies_.resize(models_.size());
+    modelMaterialBindings_.resize(models_.size());
+    for (std::size_t modelIndex = previousSize;
+         modelIndex < models_.size();
+         ++modelIndex) {
+        const AssetManifest::Model& definition =
+            manifest_->models()[modelIndex];
+        if (definition.materialMode == ModelMaterialMode::SingleTexture) {
+            modelTextureDependencies_[modelIndex].push_back(
+                definition.textureIndex);
+        } else if (
+            definition.materialMode == ModelMaterialMode::PrimitiveMaterials) {
+            for (const AssetManifest::Model::PrimitiveMaterial& material :
+                 definition.primitiveMaterials) {
+                modelTextureDependencies_[modelIndex].push_back(
+                    material.textureIndex);
+                modelMaterialBindings_[modelIndex].push_back({
+                    .textureIndex = material.textureIndex,
+                    .flags = material.scrollV
+                        ? PrimitiveMaterialScrollV
+                        : PrimitiveMaterialNone,
+                });
+            }
+        }
+    }
     return true;
 }
 
 VulkanModelResources::TextureUpdate VulkanModelResources::updateTexture(
     RenderTexture texture, const ImageData& image)
 {
-    if (texture.isNone() || texture.index() >= textures_.size()) {
+    if (texture.isNone() || texture.index() >= manifestTextureCount_) {
         return {};
     }
     TextureSlot& slot = textures_[texture.index()];
@@ -2060,7 +2230,7 @@ VulkanModelResources::TextureUpdate VulkanModelResources::updateTexture(
             image,
             slot.gpu.image,
             slot.gpu.sampler,
-            samplingFor(manifest_->textures()[texture.index()]));
+            textureDefinitions_[texture.index()]->identity.interpretation);
         slot.gpu.width = image.width;
         slot.gpu.height = image.height;
         return { .updated = true, .descriptorsChanged = true };

@@ -6,6 +6,7 @@
 #include "engine/render/GpuSkinning.hpp"
 #include "engine/render/ImageData.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
+#include "engine/render/RuntimeTextureCatalog.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanGeometryArena.hpp"
 #include "engine/render/VulkanUploadRing.hpp"
@@ -136,6 +137,7 @@ public:
         VkQueue graphicsQueue,
         std::filesystem::path assetRoot,
         const AssetManifest& manifest,
+        const RuntimeTextureCatalog& textureCatalog,
         uint32_t textureDescriptorCapacity,
         float maxSamplerAnisotropy = 1.0f);
     void destroy();
@@ -335,6 +337,8 @@ private:
     void startAsset(AssetLoadKey key);
     void startModel(RenderModel model);
     void startTexture(std::size_t textureIndex);
+    [[nodiscard]] std::filesystem::path textureDiagnosticPath(
+        std::size_t textureIndex) const;
     void startAnimation(RenderAnimation animation);
     void resetCancelledAsset(AssetLoadKey key);
     void completeCpuJob(AssetLoadKey key);
@@ -347,7 +351,9 @@ private:
         uint64_t requiredBytes);
     void markResidencyBudgetBlocked();
     [[nodiscard]] static uint64_t meshBytes(const MeshData& mesh);
-    [[nodiscard]] static uint64_t textureBytes(const ImageData& image);
+    [[nodiscard]] static uint64_t textureBytes(
+        const ImageData& image,
+        const TextureInterpretation& interpretation);
 
     [[nodiscard]] bool publishModel(RenderModel model, bool wait);
     [[nodiscard]] bool publishTexture(std::size_t textureIndex, bool wait);
@@ -388,28 +394,17 @@ private:
         uint32_t instanceSlot,
         const SkinnedMeshData& mesh,
         const AnimationController::SkinningRequest& request);
-    // Address mode, filtering, and colour space all come from the manifest
-    // (see AssetManifest::Texture). Passed explicitly rather than defaulted:
-    // a nested type's default member initializers are not usable in a default
-    // argument of the enclosing class (MSVC allows it, GCC and Clang do not).
-    struct TextureSampling {
-        bool tiling = false;
-        TextureFilter filter = TextureFilter::Nearest;
-        TextureColorSpace colorSpace = TextureColorSpace::Srgb;
-    };
-    [[nodiscard]] static TextureSampling samplingFor(
-        const AssetManifest::Texture& texture);
     void createTextureBlocking(
         const ImageData& image,
         OwnedImage& gpuImage,
         VkSampler& sampler,
-        TextureSampling sampling);
+        TextureInterpretation sampling);
     void beginTextureUpload(
         const ImageData& image,
         OwnedImage& gpuImage,
         VkSampler& sampler,
         PendingTextureUpload& upload,
-        TextureSampling sampling);
+        TextureInterpretation sampling);
     // Stages `image` and records the copy into an image that already exists,
     // leaving it shader-readable. Shared by first upload and repaint.
     void recordTextureCopy(
@@ -439,7 +434,15 @@ private:
 
     std::vector<ModelSlot> models_; // indexed by RenderModel::index()
     std::vector<AnimationSlot> animations_; // indexed by RenderAnimation::index()
+    // Descriptor-indexed. Manifest/editor definitions occupy low indices;
+    // discovered glTF definitions occupy stable high indices.
+    std::vector<std::optional<RuntimeTextureDefinition>> textureDefinitions_;
+    std::vector<uint32_t> activeTextureIndices_;
+    std::vector<std::vector<uint32_t>> modelTextureDependencies_;
+    std::vector<std::vector<PrimitiveMaterialBinding>> modelMaterialBindings_;
     std::vector<TextureSlot> textures_;
+    uint32_t manifestTextureCount_ = 0;
+    uint32_t discoveredTextureBase_ = 0;
     TextureResource fallbackTexture_ {};
     VulkanUploadRing uploadRing_ {};
     VulkanGeometryArena geometryArena_ {};

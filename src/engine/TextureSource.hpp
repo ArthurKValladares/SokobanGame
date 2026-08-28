@@ -99,4 +99,9 @@ struct TextureSourceIdentity {
     bool operator==(const TextureSourceIdentity&) const = default;
 };
 
+// Stable deduplication key for source bytes plus interpretation. Filesystem
+// paths follow the content pipeline's platform case rules.
+[[nodiscard]] std::string textureSourceIdentityKey(
+    const TextureSourceIdentity& identity);
+
 } // namespace sokoban

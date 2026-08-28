@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <span>
+#include <string_view>
 #include <vector>
 
 namespace sokoban {
@@ -14,5 +16,8 @@ struct ImageData {
 };
 
 [[nodiscard]] ImageData loadRgbaImage(const std::filesystem::path& path);
+[[nodiscard]] ImageData loadRgbaImage(
+    std::span<const std::byte> encoded,
+    std::string_view label);
 
 } // namespace sokoban

@@ -26,7 +26,6 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
-#include <type_traits>
 #include <unordered_set>
 #include <utility>
 
@@ -264,46 +263,125 @@ std::string materialTextureContext(
         material.name + "', texture '" + texture.textureName + "'";
 }
 
-void appendKeyPart(std::string& key, std::string_view part)
+TextureSource sourceForGltfImage(
+    const std::filesystem::path& document,
+    const GltfImageDependency& image,
+    std::string_view context)
 {
-    key += std::to_string(part.size());
-    key.push_back(':');
-    key.append(part);
+    switch (image.sourceKind) {
+    case GltfImageSourceKind::ExternalUri:
+        return ExternalTextureSource {
+            gltfExternalRelativePath(document, image.uri),
+        };
+    case GltfImageSourceKind::DataUri:
+        if (!image.uri.starts_with("data:image/png;base64,") &&
+            !image.uri.starts_with("data:image/jpeg;base64,")) {
+            throw std::runtime_error(
+                std::string(context) +
+                ": unsupported glTF image data URI");
+        }
+        return DataUriTextureSource { image.uri };
+    case GltfImageSourceKind::BufferView:
+        if (!image.bufferViewIndex) {
+            throw std::runtime_error(
+                std::string(context) +
+                ": glTF buffer-view image has no buffer view index");
+        }
+        return GltfBufferViewTextureSource {
+            .document = document,
+            .bufferViewIndex = *image.bufferViewIndex,
+            .mimeType = image.mimeType,
+        };
+    }
+    throw std::logic_error("unknown glTF image source kind");
 }
 
-std::string textureSourceKey(const TextureSourceIdentity& identity)
+TextureInterpretation interpretationForGltfTexture(
+    const GltfAssetDependencies& dependencies,
+    const GltfMaterialTextureDependency& texture,
+    std::string_view context)
 {
-    std::string key;
-    std::visit(
-        [&key](const auto& source) {
-            using Source = std::decay_t<decltype(source)>;
-            if constexpr (std::is_same_v<Source, ExternalTextureSource>) {
-                key = "file:";
-                appendKeyPart(key, contentPathKey(source.path));
-            } else if constexpr (
-                std::is_same_v<Source, GltfBufferViewTextureSource>) {
-                key = "view:";
-                appendKeyPart(key, contentPathKey(source.document));
-                appendKeyPart(key, std::to_string(source.bufferViewIndex));
-                appendKeyPart(key, source.mimeType);
-            } else {
-                key = "data:";
-                appendKeyPart(key, source.uri);
+    TextureInterpretation interpretation {
+        .colorSpace = colorSpaceFor(texture.semantic),
+    };
+    if (!texture.samplerIndex) {
+        return interpretation;
+    }
+    if (*texture.samplerIndex >= dependencies.samplers.size()) {
+        throw std::runtime_error(
+            std::string(context) + ": sampler index is out of range");
+    }
+    const GltfSamplerDependency& sampler =
+        dependencies.samplers[*texture.samplerIndex];
+    interpretation.wrapU = addressModeFor(sampler.wrapS, context);
+    interpretation.wrapV = addressModeFor(sampler.wrapT, context);
+    interpretation.magFilter =
+        magnificationFilterFor(sampler.magFilter, context);
+    interpretation.minFilter =
+        minificationFilterFor(sampler.minFilter, context);
+    return interpretation;
+}
+
+std::vector<ResolvedMaterialTexture> resolvedMaterialTexturesFrom(
+    const GltfAssetDependencies& dependencies,
+    const std::filesystem::path& document,
+    std::string_view assetLabel)
+{
+    std::vector<ResolvedMaterialTexture> result;
+    for (std::size_t materialIndex = 0;
+         materialIndex < dependencies.materials.size();
+         ++materialIndex) {
+        const GltfMaterialDependency& material =
+            dependencies.materials[materialIndex];
+        for (const GltfMaterialTextureDependency& texture :
+             material.textures) {
+            const std::string context = materialTextureContext(
+                assetLabel,
+                document,
+                materialIndex,
+                material,
+                texture);
+            if (!texture.imageIndex ||
+                *texture.imageIndex >= dependencies.images.size()) {
+                throw std::runtime_error(
+                    context +
+                    ": glTF material texture has no supported core image");
             }
-        },
-        identity.source);
-    key += identity.interpretation.colorSpace == TextureColorSpace::Srgb
-        ? "|srgb"
-        : "|linear";
-    key += "|" + std::to_string(
-        static_cast<uint32_t>(identity.interpretation.wrapU));
-    key += "|" + std::to_string(
-        static_cast<uint32_t>(identity.interpretation.wrapV));
-    key += "|" + std::to_string(
-        static_cast<uint32_t>(identity.interpretation.magFilter));
-    key += "|" + std::to_string(
-        static_cast<uint32_t>(identity.interpretation.minFilter));
-    return key;
+            if (texture.texcoord > 1U) {
+                throw std::runtime_error(
+                    context + ": texture coordinate set " +
+                    std::to_string(texture.texcoord) +
+                    " is unsupported; only TEXCOORD_0 and TEXCOORD_1 "
+                    "are available");
+            }
+            if (texture.transform) {
+                throw std::runtime_error(
+                    context +
+                    ": KHR_texture_transform is unsupported until its "
+                    "UV transform is represented in MeshMaterial");
+            }
+            TextureSourceIdentity identity {
+                .source = sourceForGltfImage(
+                    document,
+                    dependencies.images[*texture.imageIndex],
+                    context),
+                .interpretation = interpretationForGltfTexture(
+                    dependencies, texture, context),
+            };
+            result.push_back({
+                .document = document,
+                .assetLabel = std::string(assetLabel),
+                .materialIndex = static_cast<uint32_t>(materialIndex),
+                .materialName = material.name,
+                .textureName = texture.textureName,
+                .semantic = texture.semantic,
+                .identity = std::move(identity),
+                .texcoord = texture.texcoord,
+                .scale = texture.scale,
+            });
+        }
+    }
+    return result;
 }
 
 class InventoryBuilder {
@@ -378,7 +456,7 @@ private:
 
     void addTextureSource(TextureSourceIdentity identity)
     {
-        const std::string key = textureSourceKey(identity);
+        const std::string key = textureSourceIdentityKey(identity);
         if (textureSourceKeys_.insert(key).second) {
             textureSources_.push_back(std::move(identity));
         }
@@ -397,65 +475,6 @@ private:
             relative,
             std::string(kind) + " referenced by " + document.string());
         return relative;
-    }
-
-    TextureSource sourceForImage(
-        const std::filesystem::path& document,
-        const GltfImageDependency& image,
-        std::string_view context)
-    {
-        switch (image.sourceKind) {
-        case GltfImageSourceKind::ExternalUri:
-            return ExternalTextureSource {
-                gltfExternalRelativePath(document, image.uri),
-            };
-        case GltfImageSourceKind::DataUri:
-            if (!image.uri.starts_with("data:image/png;base64,") &&
-                !image.uri.starts_with("data:image/jpeg;base64,")) {
-                throw std::runtime_error(
-                    std::string(context) +
-                    ": unsupported glTF image data URI");
-            }
-            return DataUriTextureSource { image.uri };
-        case GltfImageSourceKind::BufferView:
-            if (!image.bufferViewIndex) {
-                throw std::runtime_error(
-                    std::string(context) +
-                    ": glTF buffer-view image has no buffer view index");
-            }
-            return GltfBufferViewTextureSource {
-                .document = document,
-                .bufferViewIndex = *image.bufferViewIndex,
-                .mimeType = image.mimeType,
-            };
-        }
-        throw std::logic_error("unknown glTF image source kind");
-    }
-
-    TextureInterpretation interpretationFor(
-        const GltfAssetDependencies& dependencies,
-        const GltfMaterialTextureDependency& texture,
-        std::string_view context)
-    {
-        TextureInterpretation interpretation {
-            .colorSpace = colorSpaceFor(texture.semantic),
-        };
-        if (!texture.samplerIndex) {
-            return interpretation;
-        }
-        if (*texture.samplerIndex >= dependencies.samplers.size()) {
-            throw std::runtime_error(
-                std::string(context) + ": sampler index is out of range");
-        }
-        const GltfSamplerDependency& sampler =
-            dependencies.samplers[*texture.samplerIndex];
-        interpretation.wrapU = addressModeFor(sampler.wrapS, context);
-        interpretation.wrapV = addressModeFor(sampler.wrapT, context);
-        interpretation.magFilter =
-            magnificationFilterFor(sampler.magFilter, context);
-        interpretation.minFilter =
-            minificationFilterFor(sampler.minFilter, context);
-        return interpretation;
     }
 
     void addGltfDependencies(
@@ -482,59 +501,10 @@ private:
             }
         }
 
-        for (std::size_t materialIndex = 0;
-             materialIndex < dependencies.materials.size();
-             ++materialIndex) {
-            const GltfMaterialDependency& material =
-                dependencies.materials[materialIndex];
-            for (const GltfMaterialTextureDependency& texture :
-                 material.textures) {
-                const std::string context = materialTextureContext(
-                    assetLabel,
-                    document,
-                    materialIndex,
-                    material,
-                    texture);
-                if (!texture.imageIndex ||
-                    *texture.imageIndex >= dependencies.images.size()) {
-                    throw std::runtime_error(
-                        context +
-                        ": glTF material texture has no supported core image");
-                }
-                if (texture.texcoord > 1U) {
-                    throw std::runtime_error(
-                        context + ": texture coordinate set " +
-                        std::to_string(texture.texcoord) +
-                        " is unsupported; only TEXCOORD_0 and TEXCOORD_1 "
-                        "are available");
-                }
-                if (texture.transform) {
-                    throw std::runtime_error(
-                        context +
-                        ": KHR_texture_transform is unsupported until its "
-                        "UV transform is represented in MeshMaterial");
-                }
-                TextureSourceIdentity identity {
-                    .source = sourceForImage(
-                        document,
-                        dependencies.images[*texture.imageIndex],
-                        context),
-                    .interpretation = interpretationFor(
-                        dependencies, texture, context),
-                };
-                addTextureSource(identity);
-                materialTextures_.push_back({
-                    .document = document,
-                    .assetLabel = std::string(assetLabel),
-                    .materialIndex = static_cast<uint32_t>(materialIndex),
-                    .materialName = material.name,
-                    .textureName = texture.textureName,
-                    .semantic = texture.semantic,
-                    .identity = std::move(identity),
-                    .texcoord = texture.texcoord,
-                    .scale = texture.scale,
-                });
-            }
+        for (ResolvedMaterialTexture& texture : resolvedMaterialTexturesFrom(
+                 dependencies, document, assetLabel)) {
+            addTextureSource(texture.identity);
+            materialTextures_.push_back(std::move(texture));
         }
     }
 
@@ -1127,6 +1097,20 @@ void validateContentPackage(
 ContentInventory collectContentInventory(const ContentSourceRoots& roots)
 {
     return InventoryBuilder(roots).build();
+}
+
+std::vector<ResolvedMaterialTexture> resolveGltfMaterialTextures(
+    const std::filesystem::path& assetRoot,
+    const std::filesystem::path& document,
+    std::string_view assetLabel)
+{
+    const std::filesystem::path root = canonicalRoot(assetRoot, "asset source");
+    const std::filesystem::path relative =
+        normalizedRelativePath(document, assetLabel);
+    const std::filesystem::path absolute =
+        sourceFile(root, relative, assetLabel);
+    return resolvedMaterialTexturesFrom(
+        inspectGltfAssetDependencies(absolute), relative, assetLabel);
 }
 
 ContentInventory stageContent(

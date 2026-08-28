@@ -14,19 +14,20 @@ lighting. The fixed texture ceiling has now been replaced by a device-bounded,
 frame-safe descriptor heap. Read-only glTF inspection now feeds a resolved
 content inventory with stable identities for external, buffer-view and data-URI
 images. Sampling, UV and unsupported-transform semantics are now validated as
-well. `MeshMaterial` and the std430 `GpuMaterial` ABI now carry the complete
-core map representation. The next objective is to connect resolved maps to the
-existing request, decode, publication and residency path.
+well. `MeshMaterial` and the std430 `GpuMaterial` ABI carry the complete core
+map representation, and resolved maps now flow through model requirements,
+worker decode, render-thread publication and bounded residency. The next
+objective is to finish HDR tonemapping and exposure before judging mapped PBR
+output.
 
 The recommended order is:
 
 1. Capture the remaining visual/performance baseline evidence.
-2. Upload resolved glTF map handles through the existing residency system.
-3. Finish tonemapping and exposure before judging mapped PBR output.
-4. Split non-scene modes out of `triangle.frag.glsl`.
-5. Implement and validate normal, metallic-roughness, emissive and occlusion
+2. Finish tonemapping and exposure before judging mapped PBR output.
+3. Split non-scene modes out of `triangle.frag.glsl`.
+4. Implement and validate normal, metallic-roughness, emissive and occlusion
    map sampling.
-6. Complete SSAO, then resume the larger scaling and memory work.
+5. Complete SSAO, then resume the larger scaling and memory work.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
@@ -37,7 +38,7 @@ sampling have different failure modes and should be independently reviewable.
 - Language and platform: C++20, SDL3, Vulkan 1.3, GLSL compiled to SPIR-V.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
-- Current tests: 64 CTest suites in the newest configured build tree.
+- Current tests: 65 CTest suites in the newest configured build tree.
 - Current shaders: 15 GLSL files. `triangle.frag.glsl` is 587 physical lines.
 - Texture capacity: selected at startup from a configured 1,024-slot ceiling,
   device limits, 16 editor-reserved slots and 32 import-reserved slots. The
@@ -61,8 +62,8 @@ future tasks:
   image, and a tonemap pass. F2c remains open.
 - **F3**: cgltf material factors, tangents, a second UV set, alpha modes,
   double-sided metadata, a GPU material buffer and Cook-Torrance GGX. The CPU
-  and GPU material representations now carry all core map types; runtime handle
-  assignment and sampling remain open.
+  and GPU representations carry all core map types, and runtime handle
+  assignment/residency is complete; shader sampling remains open.
 - **T1/T2/T3/T6/T7**: instanced tiles, separate opaque drawing and sorting,
   model back-face culling, 4x default MSAA, and AO-gated depth copying.
 - **V1/V3/V5/V6**: per-swapchain-image present semaphores, direct skinning
@@ -84,10 +85,10 @@ future tasks:
   byte budgets can evict old resources. What remains is mip/LOD streaming,
   compressed-size accounting, more flexible publication budgeting, and
   removing the `vkDeviceWaitIdle` eviction fallback.
-- **PBR maps are represented but not resident.** `MeshMaterial` and
-  `GpuMaterial` contain normal, metallic-roughness, emissive and occlusion map
-  handles and parameters, but 4.3 still has to assign those handles from the
-  resolved inventory and publish the corresponding textures.
+- **PBR map transport is complete; sampling is not.** A runtime catalog assigns
+  normal, metallic-roughness, emissive and occlusion handles from the resolved
+  inventory and attaches only the relevant maps to each model's requirements.
+  The scene shaders still have to consume those handles in phase 7.
 - **Descriptor indexing is core in Vulkan 1.2.** This renderer already requires
   Vulkan 1.3. Query and enable the Vulkan 1.2 feature struct rather than adding
   an extension-name requirement unnecessarily.
@@ -160,7 +161,7 @@ combine adjacent packets merely because they touch the same files.
 ### 0. Refresh the baseline
 
 Current state on 27 August 2026: the full Visual Studio Debug build succeeds
-and all 64 registered CTest suites pass, including `vulkan_smoke`. Establishing
+and all 65 registered CTest suites pass, including `vulkan_smoke`. Establishing
 that baseline also exposed and repaired stale UI/settings assertions left by the
 earlier default-MSAA change. Representative screenshots and frame statistics
 still need to be captured before material-map behavior changes.
@@ -326,16 +327,34 @@ mode and scrolling directly from integer lanes. `GpuMaterialTests.cpp` covers
 fallback entry zero, default conversion, every map and UV, all scalar factors,
 alpha mode, double-sided state, scrolling flags and reserved-zero lanes.
 
-#### 4.3 Upload map dependencies through existing residency — next
+#### 4.3 Upload map dependencies through existing residency — complete
 
-- Add discovered material textures to per-model requirements.
-- Stage them through the content pipeline.
-- Decode on worker threads and publish on the render thread like current
-  textures.
-- Account for them in the existing texture residency budget and diagnostics.
+`RuntimeTextureCatalog` assembles manifest textures and resolved glTF map uses
+with source-plus-interpretation deduplication. Manifest slots remain at the low
+end of the selected descriptor heap, while discovered maps occupy stable slots
+at the high end. This leaves the middle available for append-only editor
+textures without shifting either existing `RenderTexture` ids or imported-map
+handles. A discovered glTF base-color image is intentionally ignored so the
+existing manifest-owned base-color override stays authoritative.
 
-**Acceptance:** requesting a model requests all of its maps, while an unrelated
-model's maps remain nonresident.
+Each model now owns an isolated list of texture dependencies and remapped
+primitive-material bindings. Requests queue only those dependencies. External
+files, supported data URIs and glTF buffer-view images decode to RGBA on worker
+tasks through one loader, then reuse the existing render-thread upload,
+publication, descriptor refresh, residency budget, eviction and failure-report
+paths. Authored sRGB/linear interpretation, independent wrap axes, mag/min
+filters and mip policy drive Vulkan image and sampler creation; mipmapped images
+include their pyramid in residency estimates.
+
+`RuntimeTextureCatalogTests.cpp` covers identity deduplication, interpretation
+separation, shared-document models, unrelated-model isolation, stable low/high
+descriptor mapping, the manifest base-color override and all three source
+forms. `GltfDependencyTests.cpp` additionally verifies that map-only bindings
+do not synthesize a base-color handle. The production catalog inspection, full
+199-file content stage, Debug build and all 65 suites pass.
+
+**Acceptance:** complete. Requesting a model requests all of its maps while an
+unrelated model's maps remain absent from that request.
 
 ### 5. Finish HDR presentation before visual PBR acceptance
 
@@ -471,14 +490,20 @@ layout changes affect modules that appear unrelated to the immediate feature.
 
 - `src/engine/AssetManifest.*`: parsed declarations and stable runtime handles.
 - `src/engine/ContentPipeline.*`: dependency validation, inventory and staging.
-- `src/engine/TextureSource.hpp`: canonical external, buffer-view and data-URI
-  identities plus color-space and sampling interpretation.
+- `src/engine/TextureSource.*`: canonical external, buffer-view and data-URI
+  identities, color-space/sampling interpretation and stable identity keys.
 - `src/engine/render/GltfMesh.*`: cgltf boundary, mesh/material/animation decode.
 - `tests/GltfDependencyTests.cpp`: structure-only dependency fixtures for
   external/data-URI glTF and embedded-image GLB inputs, plus loader-level CPU
   material binding/default coverage.
-- `src/engine/render/ImageData.*`: decoded RGBA image abstraction; currently
-  path-based and therefore a required seam for embedded GLB images.
+- `src/engine/render/ImageData.*`: decoded RGBA image abstraction for both
+  filesystem paths and encoded memory.
+- `src/engine/render/TextureSourceLoader.*`: worker-safe external, data-URI and
+  glTF buffer-view byte loading through the shared RGBA decoder.
+- `src/engine/render/RuntimeTextureCatalog.*`: deduplicated logical texture
+  slots, per-model requirements/material bindings and stable descriptor remap.
+- `tests/RuntimeTextureCatalogTests.cpp`: catalog isolation, stable-slot,
+  source-form and production-document inspection coverage.
 - `src/engine/render/VulkanDeviceContext.*`: feature/property queries and logical
   device feature chain.
 - `src/engine/render/VulkanDeviceSelection.*`: testable release feature tier.
