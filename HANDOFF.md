@@ -13,15 +13,15 @@ loading, a GPU material buffer, tangents and two UV sets, and Cook-Torrance GGX
 lighting. The fixed texture ceiling has now been replaced by a device-bounded,
 frame-safe descriptor heap. Read-only glTF inspection now feeds a resolved
 content inventory with stable identities for external, buffer-view and data-URI
-images. The next objective is to validate sampler, UV and texture-transform
-semantics before those sources enter runtime material and GPU representations.
+images. Sampling, UV and unsupported-transform semantics are now validated as
+well. The next objective is to carry these resolved map uses into
+`MeshMaterial`, then redesign `GpuMaterial` once around the complete map set.
 
 The recommended order is:
 
 1. Capture the remaining visual/performance baseline evidence.
-2. Validate and preserve glTF sampler, UV and texture-transform semantics.
-3. Carry resolved glTF material-map handles through the CPU and GPU material
-   models.
+2. Carry resolved glTF material-map handles through `MeshMaterial`.
+3. Redesign `GpuMaterial` once around the complete map set.
 4. Finish tonemapping and exposure before judging mapped PBR output.
 5. Split non-scene modes out of `triangle.frag.glsl`.
 6. Implement and validate normal, metallic-roughness, emissive and occlusion
@@ -269,17 +269,27 @@ sRGB-versus-linear separation, supported data URIs, embedded GLB images and
 plain/percent-encoded traversal rejection. The real 199-file asset tree stages
 successfully through this path.
 
-#### 3.3 Preserve glTF texture semantics
+#### 3.3 Preserve glTF texture semantics — complete
 
-- Base color and emissive maps are sRGB.
-- Normal, metallic-roughness and occlusion maps are linear.
-- Preserve or deliberately map wrap S/T and min/mag/mipmap filtering.
-- Include texture coordinate set selection.
-- Decide explicitly how `KHR_texture_transform` is handled; support it or emit
-  a clear unsupported-feature diagnostic rather than silently rendering wrong.
+`TextureInterpretation` now includes color space, independent U/V address
+modes, magnification filtering and the complete glTF minification/mipmap mode.
+Authored sampler values are preserved. An absent glTF sampler or filter maps
+deliberately to repeat addressing, linear magnification and trilinear
+minification; manifest textures retain their existing clamp/repeat and
+nearest/linear behavior.
 
-**Acceptance:** content validation reports unsupported combinations with model,
-material and texture names.
+`ContentInventory::materialTextures` preserves one resolved record per authored
+material map: document and asset label, material/texture names, semantic,
+source identity, UV set and normal-scale/occlusion-strength value. UV0 and UV1
+are accepted because those are the vertex sets the renderer carries. Higher UV
+sets fail content validation.
+
+`KHR_texture_transform` is deliberately rejected until `MeshMaterial` and the
+shader path can represent it; it is never silently ignored. Transform, UV-set,
+unsupported-source and sampler diagnostics include the asset/model, document,
+material and texture context. Synthetic tests cover every color-space class,
+authored and default sampling, UV1, sampling-sensitive identity, scale/strength
+and contextual rejection.
 
 ### 4. Extend the material representations
 
@@ -454,7 +464,7 @@ layout changes affect modules that appear unrelated to the immediate feature.
 - `src/engine/AssetManifest.*`: parsed declarations and stable runtime handles.
 - `src/engine/ContentPipeline.*`: dependency validation, inventory and staging.
 - `src/engine/TextureSource.hpp`: canonical external, buffer-view and data-URI
-  identities plus color-space interpretation.
+  identities plus color-space and sampling interpretation.
 - `src/engine/render/GltfMesh.*`: cgltf boundary, mesh/material/animation decode.
 - `tests/GltfDependencyTests.cpp`: structure-only dependency fixtures for
   external/data-URI glTF and embedded-image GLB inputs.

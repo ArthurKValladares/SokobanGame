@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/Math.hpp"
+#include "engine/TextureSource.hpp"
 
 #include <array>
 #include <cstdint>
@@ -256,14 +257,6 @@ struct GltfSamplerDependency {
     GltfSamplerWrap wrapT = GltfSamplerWrap::Repeat;
 };
 
-enum class GltfMaterialTextureSemantic {
-    BaseColor,
-    MetallicRoughness,
-    Normal,
-    Occlusion,
-    Emissive,
-};
-
 struct GltfTextureTransformDependency {
     Vec2 offset {};
     Vec2 scale { 1.0f, 1.0f };
@@ -272,8 +265,7 @@ struct GltfTextureTransformDependency {
 };
 
 struct GltfMaterialTextureDependency {
-    GltfMaterialTextureSemantic semantic =
-        GltfMaterialTextureSemantic::BaseColor;
+    MaterialTextureSemantic semantic = MaterialTextureSemantic::BaseColor;
     uint32_t textureIndex = 0;
     std::string textureName;
     // A texture can omit its core image when it is supplied only by an

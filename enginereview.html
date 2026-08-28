@@ -257,7 +257,7 @@
   <header class="shell">
     <p class="eyebrow">Current-state review · 27 August 2026</p>
     <h1>Finish the material path without rebuilding it twice.</h1>
-    <p class="deck">Sokoban 3D now has the hard substrate, a device-bounded runtime texture heap, and canonical glTF texture-source inventory. The next program validates sampling semantics, simplifies the scene shader, and lands each map behind a testable gate.</p>
+    <p class="deck">Sokoban 3D now has the hard substrate, a device-bounded runtime texture heap, and semantically validated glTF texture inventory. The next program carries those map uses through CPU and GPU materials, simplifies the scene shader, and lands each map behind a testable gate.</p>
     <div class="metrics" aria-label="Current repository facts">
       <div class="metric"><b>36</b><span>manifest models</span></div>
       <div class="metric"><b>42 / 1024</b><span>textures on validated GPU</span></div>
@@ -281,7 +281,7 @@
     <section id="verdict">
       <div class="section-head"><span class="num">01</span><h2>Current verdict</h2></div>
       <div class="callout">
-        <strong>Next program:</strong> sampler/UV/transform validation → material-map transport → tonemap completion → minimal shader split → map sampling. The descriptor-indexed heap, glTF inspector and canonical source inventory are implemented validation invariants.
+        <strong>Next program:</strong> MeshMaterial map handles → one GpuMaterial redesign → residency integration → tonemap completion → minimal shader split → map sampling. Descriptor indexing and glTF source/semantic discovery are implemented validation invariants.
       </div>
       <div class="grid" style="margin-top:1rem">
         <article class="card">
@@ -292,7 +292,7 @@
         <article class="card">
           <p class="kicker">What blocks complete PBR</p>
           <h3>Semantic transport and binding</h3>
-          <p>glTF map sources now have canonical inventory identities and every external dependency is staged, but sampler/UV semantics are not yet validated and the maps are not represented in runtime materials or bound.</p>
+          <p>glTF map sources, sampler state, color space and UV selections now survive content resolution, but the maps are not yet represented in runtime materials or bound.</p>
         </article>
         <article class="card">
           <p class="kicker">What not to overbuild</p>
@@ -367,7 +367,7 @@
         <article class="card">
           <p class="kicker">Image sources</p>
           <h3>A path is not enough</h3>
-          <p>External URIs, GLB buffer-view images and supported data URIs now share one source variant. Color interpretation is part of identity; sampling interpretation is the next validation packet.</p>
+          <p>External URIs, GLB buffer-view images and supported data URIs share one source variant. Color and combined-sampler interpretation are part of identity so current descriptors remain unambiguous.</p>
         </article>
         <article class="card">
           <p class="kicker">Shader order</p>
@@ -426,11 +426,11 @@
         <article class="phase">
           <div class="phase-id">3<small>content</small></div>
           <div>
-            <div class="phase-title"><h3>Discover glTF dependencies deliberately</h3><span class="status partial">In progress</span></div>
+            <div class="phase-title"><h3>Discover glTF dependencies deliberately</h3><span class="status done">Done</span></div>
             <div class="tasks">
               <div class="task"><span class="task-id">3.1</span><div><b>Dependency inspection API — complete</b><p>The cgltf-backed API returns engine-owned buffers, image sources, samplers and five core material-map usages without loading referenced files, touching manifest parsing or creating GPU work. Synthetic <code>.gltf</code>/<code>.glb</code> fixtures cover external, data-URI and embedded metadata.</p></div></div>
               <div class="task"><span class="task-id">3.2</span><div><b>Texture source variant — complete</b><p>External files, glTF buffer views and supported data URIs now enter a deduplicated inventory. Resolution is asset-root bounded, all external buffers/images stage, and sRGB/linear interpretations remain distinct.</p></div></div>
-              <div class="task"><span class="task-id">3.3</span><div><b>Semantic validation — next</b><p>Carry UV set, wrap and min/mag/mipmap filtering. Support or clearly reject texture transforms with model/material/texture diagnostics.</p></div></div>
+              <div class="task"><span class="task-id">3.3</span><div><b>Semantic validation — complete</b><p>Resolved material uses preserve color space, UV0/UV1, independent wrap axes, full min/mag/mipmap policy and scale/strength. Unsupported UV sets and texture transforms fail with asset, material and texture context.</p></div></div>
             </div>
             <p class="accept"><b>Gate:</b> external, embedded and data-URI fixtures stage without traversal, duplicate identity or hidden dependencies.</p>
           </div>
@@ -439,9 +439,9 @@
         <article class="phase">
           <div class="phase-id">4<small>materials</small></div>
           <div>
-            <div class="phase-title"><h3>Carry every material map to the GPU</h3></div>
+            <div class="phase-title"><h3>Carry every material map to the GPU</h3><span class="status next">Next</span></div>
             <div class="tasks">
-              <div class="task"><span class="task-id">4.1</span><div><b>Extend MeshMaterial</b><p>Add handles, UV selection, normal scale and occlusion strength for normal, MR, emissive and occlusion maps.</p></div></div>
+              <div class="task"><span class="task-id">4.1</span><div><b>Extend MeshMaterial — next</b><p>Add handles, UV selection, normal scale and occlusion strength for normal, MR, emissive and occlusion maps.</p></div></div>
               <div class="task"><span class="task-id">4.2</span><div><b>Redesign GpuMaterial once</b><p>Keep factors in aligned float vectors and new handles/flags in explicit 32-bit integer lanes with std430 assertions.</p></div></div>
               <div class="task"><span class="task-id">4.3</span><div><b>Use existing residency</b><p>Add maps to model requirements, worker decode, render-thread publication, budgets and diagnostics.</p></div></div>
             </div>

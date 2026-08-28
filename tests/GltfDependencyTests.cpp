@@ -183,7 +183,7 @@ void testInspectsExternalAndDataUriDependenciesWithoutLoadingThem()
     CHECK(material.name == "Painted metal");
     CHECK(material.textures.size() == 5);
     CHECK(material.textures[0].semantic ==
-        GltfMaterialTextureSemantic::BaseColor);
+        MaterialTextureSemantic::BaseColor);
     CHECK(material.textures[0].textureIndex == 0U);
     CHECK(material.textures[0].textureName == "Albedo texture");
     CHECK(material.textures[0].imageIndex == 0U);
@@ -197,16 +197,16 @@ void testInspectsExternalAndDataUriDependenciesWithoutLoadingThem()
     CHECK(material.textures[0].transform->rotation == 0.75f);
     CHECK(material.textures[0].transform->texcoord == 0U);
     CHECK(material.textures[1].semantic ==
-        GltfMaterialTextureSemantic::MetallicRoughness);
+        MaterialTextureSemantic::MetallicRoughness);
     CHECK(material.textures[1].imageIndex == 1U);
     CHECK(!material.textures[1].samplerIndex.has_value());
-    CHECK(material.textures[2].semantic == GltfMaterialTextureSemantic::Normal);
+    CHECK(material.textures[2].semantic == MaterialTextureSemantic::Normal);
     CHECK(material.textures[2].scale == 0.25f);
     CHECK(material.textures[3].semantic ==
-        GltfMaterialTextureSemantic::Occlusion);
+        MaterialTextureSemantic::Occlusion);
     CHECK(material.textures[3].scale == 0.5f);
     CHECK(material.textures[4].semantic ==
-        GltfMaterialTextureSemantic::Emissive);
+        MaterialTextureSemantic::Emissive);
     CHECK(material.textures[4].texcoord == 1U);
 }
 

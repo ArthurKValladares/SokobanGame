@@ -764,7 +764,7 @@ void appendMaterialTextureDependency(
     GltfMaterialDependency& material,
     const cgltf_data& data,
     const cgltf_texture_view& view,
-    GltfMaterialTextureSemantic semantic,
+    MaterialTextureSemantic semantic,
     float scale)
 {
     if (!view.texture) {
@@ -882,32 +882,32 @@ GltfAssetDependencies inspectGltfAssetDependencies(
                 material,
                 data,
                 source.pbr_metallic_roughness.base_color_texture,
-                GltfMaterialTextureSemantic::BaseColor,
+                MaterialTextureSemantic::BaseColor,
                 1.0f);
             appendMaterialTextureDependency(
                 material,
                 data,
                 source.pbr_metallic_roughness.metallic_roughness_texture,
-                GltfMaterialTextureSemantic::MetallicRoughness,
+                MaterialTextureSemantic::MetallicRoughness,
                 1.0f);
         }
         appendMaterialTextureDependency(
             material,
             data,
             source.normal_texture,
-            GltfMaterialTextureSemantic::Normal,
+            MaterialTextureSemantic::Normal,
             source.normal_texture.scale);
         appendMaterialTextureDependency(
             material,
             data,
             source.occlusion_texture,
-            GltfMaterialTextureSemantic::Occlusion,
+            MaterialTextureSemantic::Occlusion,
             source.occlusion_texture.scale);
         appendMaterialTextureDependency(
             material,
             data,
             source.emissive_texture,
-            GltfMaterialTextureSemantic::Emissive,
+            MaterialTextureSemantic::Emissive,
             1.0f);
         dependencies.materials.push_back(std::move(material));
     }

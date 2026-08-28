@@ -12,6 +12,34 @@ enum class TextureColorSpace {
     Linear,
 };
 
+enum class TextureAddressMode {
+    ClampToEdge,
+    MirroredRepeat,
+    Repeat,
+};
+
+enum class TextureMagnificationFilter {
+    Nearest,
+    Linear,
+};
+
+enum class TextureMinificationFilter {
+    Nearest,
+    Linear,
+    NearestMipmapNearest,
+    LinearMipmapNearest,
+    NearestMipmapLinear,
+    LinearMipmapLinear,
+};
+
+enum class MaterialTextureSemantic {
+    BaseColor,
+    MetallicRoughness,
+    Normal,
+    Occlusion,
+    Emissive,
+};
+
 // A filesystem-backed image after its URI has been resolved relative to the
 // declaring glTF and normalized against the explicit asset root. `path` is
 // always relative to that root.
@@ -46,6 +74,15 @@ using TextureSource = std::variant<
 
 struct TextureInterpretation {
     TextureColorSpace colorSpace = TextureColorSpace::Srgb;
+    TextureAddressMode wrapU = TextureAddressMode::Repeat;
+    TextureAddressMode wrapV = TextureAddressMode::Repeat;
+    // glTF leaves absent filters implementation-defined. Content resolution
+    // deliberately chooses linear filtering with a linear mip transition so
+    // the result is deterministic across drivers.
+    TextureMagnificationFilter magFilter =
+        TextureMagnificationFilter::Linear;
+    TextureMinificationFilter minFilter =
+        TextureMinificationFilter::LinearMipmapLinear;
 
     bool operator==(const TextureInterpretation&) const = default;
 };
@@ -53,6 +90,8 @@ struct TextureInterpretation {
 // Source bytes and interpretation form the resource identity. In particular,
 // the same bytes used as color and data remain distinct because Vulkan image
 // formats cannot silently change their transfer function per material use.
+// Sampling state is included too because the current descriptor heap binds a
+// combined image sampler; a future separate-image/view design may split these.
 struct TextureSourceIdentity {
     TextureSource source;
     TextureInterpretation interpretation;

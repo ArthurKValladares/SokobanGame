@@ -8,6 +8,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iostream>
 #include <span>
 #include <stdexcept>
@@ -34,6 +35,28 @@ void checkThrows(Fn&& fn, const char* label)
         ++failures;
         std::cerr << "FAIL (no throw): " << label << '\n';
     } catch (const std::exception&) {
+    }
+}
+
+template <typename Fn>
+void checkThrowsContaining(
+    Fn&& fn,
+    std::initializer_list<std::string_view> expected,
+    const char* label)
+{
+    try {
+        fn();
+        ++failures;
+        std::cerr << "FAIL (no throw): " << label << '\n';
+    } catch (const std::exception& error) {
+        const std::string message = error.what();
+        for (const std::string_view text : expected) {
+            if (message.find(text) == std::string::npos) {
+                ++failures;
+                std::cerr << "FAIL (missing '" << text << "'): " << label
+                          << "\n  " << message << '\n';
+            }
+        }
     }
 }
 
@@ -409,6 +432,20 @@ std::size_t countBufferViewTextureSources(
     return count;
 }
 
+const sokoban::ResolvedMaterialTexture* findMaterialTexture(
+    const sokoban::ContentInventory& inventory,
+    const std::filesystem::path& document,
+    sokoban::MaterialTextureSemantic semantic)
+{
+    for (const sokoban::ResolvedMaterialTexture& texture :
+         inventory.materialTextures) {
+        if (texture.document == document && texture.semantic == semantic) {
+            return &texture;
+        }
+    }
+    return nullptr;
+}
+
 void testInventoryAndStaging()
 {
     TempDirectory temp;
@@ -643,18 +680,27 @@ void testGltfTextureSourcesAreCanonicalAndInterpretationAware()
     {"name":"Shared B","uri":"../textures/./shared.png"},
     {"name":"Inline","uri":"data:image/png;base64,AAAA"}
   ],
+  "samplers":[{
+    "name":"Authored sampler",
+    "magFilter":9728,
+    "minFilter":9985,
+    "wrapS":33071,
+    "wrapT":33648
+  }],
   "textures":[
-    {"name":"Color A","source":0},
-    {"name":"Color B","source":1},
-    {"name":"Inline data","source":2}
+    {"name":"Color A","source":0,"sampler":0},
+    {"name":"Color B","source":1,"sampler":0},
+    {"name":"Inline data","source":2},
+    {"name":"Default data reuse","source":0}
   ],
   "materials":[{
     "name":"Mixed interpretation",
     "pbrMetallicRoughness":{
-      "baseColorTexture":{"index":0},
+      "baseColorTexture":{"index":0,"texCoord":1},
       "metallicRoughnessTexture":{"index":2}
     },
     "normalTexture":{"index":1},
+    "occlusionTexture":{"index":3,"strength":0.6},
     "emissiveTexture":{"index":1}
   }]
 })json");
@@ -675,15 +721,91 @@ void testGltfTextureSourcesAreCanonicalAndInterpretationAware()
         countExternalTextureSources(
             inventory,
             "textures/shared.png",
-            sokoban::TextureColorSpace::Linear) == 1,
-        "same external bytes remain distinct for linear interpretation");
+            sokoban::TextureColorSpace::Linear) == 2,
+        "same external bytes retain distinct linear sampling interpretations");
     check(
         countDataUriTextureSources(
             inventory, inlinePng, sokoban::TextureColorSpace::Linear) == 1,
         "supported data URI enters the linear texture inventory");
     check(
-        inventory.textureSources.size() == 5,
-        "two manifest sources plus three unique glTF identities");
+        inventory.textureSources.size() == 6,
+        "source, color and sampling interpretation form unique identities");
+    const sokoban::ResolvedMaterialTexture* baseColor = findMaterialTexture(
+        inventory,
+        "models/hero.gltf",
+        sokoban::MaterialTextureSemantic::BaseColor);
+    check(baseColor != nullptr, "base-color material use is preserved");
+    if (baseColor) {
+        check(baseColor->assetLabel == "model 'Hero'", "model label preserved");
+        check(baseColor->materialName == "Mixed interpretation",
+            "material name preserved");
+        check(baseColor->textureName == "Color A", "texture name preserved");
+        check(baseColor->texcoord == 1U, "TEXCOORD_1 selection preserved");
+        check(baseColor->identity.interpretation.colorSpace ==
+                sokoban::TextureColorSpace::Srgb,
+            "base color is interpreted as sRGB");
+        check(baseColor->identity.interpretation.wrapU ==
+                sokoban::TextureAddressMode::ClampToEdge,
+            "wrap S preserved");
+        check(baseColor->identity.interpretation.wrapV ==
+                sokoban::TextureAddressMode::MirroredRepeat,
+            "wrap T preserved");
+        check(baseColor->identity.interpretation.magFilter ==
+                sokoban::TextureMagnificationFilter::Nearest,
+            "magnification filter preserved");
+        check(baseColor->identity.interpretation.minFilter ==
+                sokoban::TextureMinificationFilter::LinearMipmapNearest,
+            "minification and mip filtering preserved");
+    }
+    const sokoban::ResolvedMaterialTexture* metallicRoughness =
+        findMaterialTexture(
+            inventory,
+            "models/hero.gltf",
+            sokoban::MaterialTextureSemantic::MetallicRoughness);
+    check(metallicRoughness != nullptr,
+        "metallic-roughness material use is preserved");
+    if (metallicRoughness) {
+        check(metallicRoughness->identity.interpretation.colorSpace ==
+                sokoban::TextureColorSpace::Linear,
+            "metallic-roughness is interpreted as linear data");
+        check(metallicRoughness->identity.interpretation.magFilter ==
+                sokoban::TextureMagnificationFilter::Linear,
+            "absent sampler uses deterministic linear magnification");
+        check(metallicRoughness->identity.interpretation.minFilter ==
+                sokoban::TextureMinificationFilter::LinearMipmapLinear,
+            "absent sampler uses deterministic trilinear minification");
+    }
+    const sokoban::ResolvedMaterialTexture* normal = findMaterialTexture(
+        inventory,
+        "models/hero.gltf",
+        sokoban::MaterialTextureSemantic::Normal);
+    const sokoban::ResolvedMaterialTexture* occlusion = findMaterialTexture(
+        inventory,
+        "models/hero.gltf",
+        sokoban::MaterialTextureSemantic::Occlusion);
+    check(normal != nullptr && occlusion != nullptr,
+        "normal and occlusion material uses are preserved");
+    if (normal && occlusion) {
+        check(normal->identity != occlusion->identity,
+            "different sampler interpretations do not deduplicate");
+        check(normal->identity.interpretation.colorSpace ==
+                sokoban::TextureColorSpace::Linear,
+            "normal map is interpreted as linear data");
+        check(occlusion->identity.interpretation.colorSpace ==
+                sokoban::TextureColorSpace::Linear,
+            "occlusion map is interpreted as linear data");
+        check(occlusion->scale == 0.6f, "occlusion strength preserved");
+    }
+    const sokoban::ResolvedMaterialTexture* emissive = findMaterialTexture(
+        inventory,
+        "models/hero.gltf",
+        sokoban::MaterialTextureSemantic::Emissive);
+    check(emissive != nullptr, "emissive material use is preserved");
+    if (emissive) {
+        check(emissive->identity.interpretation.colorSpace ==
+                sokoban::TextureColorSpace::Srgb,
+            "emissive map is interpreted as sRGB");
+    }
 }
 
 void testEmbeddedGlbTextureSourcesEnterInventory()
@@ -767,6 +889,57 @@ void testGltfTextureTraversalIsRejected()
     checkThrows(
         [&] { (void)sokoban::collectContentInventory(roots); },
         "percent-encoded glTF traversal is rejected rather than reinterpreted");
+}
+
+void testUnsupportedGltfTextureSemanticsHaveContext()
+{
+    TempDirectory temp;
+    const auto roots = createValidContent(temp.path());
+    writeFile(
+        roots.assets / "models/hero.gltf",
+        R"json({
+  "asset":{"version":"2.0"},
+  "extensionsUsed":["KHR_texture_transform"],
+  "images":[{"name":"Paint image","uri":"data:image/png;base64,AAAA"}],
+  "textures":[{"name":"Paint texture","source":0}],
+  "materials":[{
+    "name":"Paint material",
+    "pbrMetallicRoughness":{"baseColorTexture":{
+      "index":0,
+      "extensions":{"KHR_texture_transform":{"offset":[0.25,0.5]}}
+    }}
+  }]
+})json");
+    checkThrowsContaining(
+        [&] { (void)sokoban::collectContentInventory(roots); },
+        {
+            "model 'Hero'",
+            "Paint material",
+            "Paint texture",
+            "KHR_texture_transform",
+        },
+        "unsupported texture transform reports model, material and texture");
+
+    writeFile(
+        roots.assets / "models/hero.gltf",
+        R"json({
+  "asset":{"version":"2.0"},
+  "images":[{"uri":"data:image/png;base64,AAAA"}],
+  "textures":[{"name":"UV2 texture","source":0}],
+  "materials":[{
+    "name":"UV2 material",
+    "normalTexture":{"index":0,"texCoord":2}
+  }]
+})json");
+    checkThrowsContaining(
+        [&] { (void)sokoban::collectContentInventory(roots); },
+        {
+            "model 'Hero'",
+            "UV2 material",
+            "UV2 texture",
+            "TEXCOORD_0 and TEXCOORD_1",
+        },
+        "unsupported UV set reports model, material and texture");
 }
 
 void testValidationFailures()
@@ -871,6 +1044,7 @@ int main()
         testGltfTextureSourcesAreCanonicalAndInterpretationAware();
         testEmbeddedGlbTextureSourcesEnterInventory();
         testGltfTextureTraversalIsRejected();
+        testUnsupportedGltfTextureSemanticsHaveContext();
         testValidationFailures();
     } catch (const std::exception& error) {
         std::cerr << "UNEXPECTED EXCEPTION: " << error.what() << '\n';

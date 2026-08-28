@@ -177,18 +177,91 @@ std::filesystem::path gltfExternalRelativePath(
         "external glTF URI in " + document.string());
 }
 
-TextureColorSpace colorSpaceFor(GltfMaterialTextureSemantic semantic)
+TextureColorSpace colorSpaceFor(MaterialTextureSemantic semantic)
 {
     switch (semantic) {
-    case GltfMaterialTextureSemantic::BaseColor:
-    case GltfMaterialTextureSemantic::Emissive:
+    case MaterialTextureSemantic::BaseColor:
+    case MaterialTextureSemantic::Emissive:
         return TextureColorSpace::Srgb;
-    case GltfMaterialTextureSemantic::MetallicRoughness:
-    case GltfMaterialTextureSemantic::Normal:
-    case GltfMaterialTextureSemantic::Occlusion:
+    case MaterialTextureSemantic::MetallicRoughness:
+    case MaterialTextureSemantic::Normal:
+    case MaterialTextureSemantic::Occlusion:
         return TextureColorSpace::Linear;
     }
     throw std::logic_error("unknown glTF material texture semantic");
+}
+
+TextureAddressMode addressModeFor(
+    GltfSamplerWrap wrap,
+    std::string_view context)
+{
+    switch (wrap) {
+    case GltfSamplerWrap::ClampToEdge:
+        return TextureAddressMode::ClampToEdge;
+    case GltfSamplerWrap::MirroredRepeat:
+        return TextureAddressMode::MirroredRepeat;
+    case GltfSamplerWrap::Repeat:
+        return TextureAddressMode::Repeat;
+    }
+    throw std::runtime_error(
+        std::string(context) + ": unsupported glTF sampler wrap mode");
+}
+
+TextureMagnificationFilter magnificationFilterFor(
+    GltfSamplerFilter filter,
+    std::string_view context)
+{
+    switch (filter) {
+    case GltfSamplerFilter::Unspecified:
+    case GltfSamplerFilter::Linear:
+        return TextureMagnificationFilter::Linear;
+    case GltfSamplerFilter::Nearest:
+        return TextureMagnificationFilter::Nearest;
+    case GltfSamplerFilter::NearestMipmapNearest:
+    case GltfSamplerFilter::LinearMipmapNearest:
+    case GltfSamplerFilter::NearestMipmapLinear:
+    case GltfSamplerFilter::LinearMipmapLinear:
+        break;
+    }
+    throw std::runtime_error(
+        std::string(context) +
+        ": unsupported glTF magnification filter");
+}
+
+TextureMinificationFilter minificationFilterFor(
+    GltfSamplerFilter filter,
+    std::string_view context)
+{
+    switch (filter) {
+    case GltfSamplerFilter::Unspecified:
+        return TextureMinificationFilter::LinearMipmapLinear;
+    case GltfSamplerFilter::Nearest:
+        return TextureMinificationFilter::Nearest;
+    case GltfSamplerFilter::Linear:
+        return TextureMinificationFilter::Linear;
+    case GltfSamplerFilter::NearestMipmapNearest:
+        return TextureMinificationFilter::NearestMipmapNearest;
+    case GltfSamplerFilter::LinearMipmapNearest:
+        return TextureMinificationFilter::LinearMipmapNearest;
+    case GltfSamplerFilter::NearestMipmapLinear:
+        return TextureMinificationFilter::NearestMipmapLinear;
+    case GltfSamplerFilter::LinearMipmapLinear:
+        return TextureMinificationFilter::LinearMipmapLinear;
+    }
+    throw std::runtime_error(
+        std::string(context) + ": unsupported glTF minification filter");
+}
+
+std::string materialTextureContext(
+    std::string_view assetLabel,
+    const std::filesystem::path& document,
+    std::size_t materialIndex,
+    const GltfMaterialDependency& material,
+    const GltfMaterialTextureDependency& texture)
+{
+    return std::string(assetLabel) + " in " + document.string() +
+        ", material " + std::to_string(materialIndex) + " '" +
+        material.name + "', texture '" + texture.textureName + "'";
 }
 
 void appendKeyPart(std::string& key, std::string_view part)
@@ -222,6 +295,14 @@ std::string textureSourceKey(const TextureSourceIdentity& identity)
     key += identity.interpretation.colorSpace == TextureColorSpace::Srgb
         ? "|srgb"
         : "|linear";
+    key += "|" + std::to_string(
+        static_cast<uint32_t>(identity.interpretation.wrapU));
+    key += "|" + std::to_string(
+        static_cast<uint32_t>(identity.interpretation.wrapV));
+    key += "|" + std::to_string(
+        static_cast<uint32_t>(identity.interpretation.magFilter));
+    key += "|" + std::to_string(
+        static_cast<uint32_t>(identity.interpretation.minFilter));
     return key;
 }
 
@@ -252,6 +333,7 @@ public:
             inventory.files.push_back({ file.source, file.destination, size });
         }
         inventory.textureSources = textureSources_;
+        inventory.materialTextures = materialTextures_;
         return inventory;
     }
 
@@ -319,7 +401,8 @@ private:
 
     TextureSource sourceForImage(
         const std::filesystem::path& document,
-        const GltfImageDependency& image)
+        const GltfImageDependency& image,
+        std::string_view context)
     {
         switch (image.sourceKind) {
         case GltfImageSourceKind::ExternalUri:
@@ -330,15 +413,15 @@ private:
             if (!image.uri.starts_with("data:image/png;base64,") &&
                 !image.uri.starts_with("data:image/jpeg;base64,")) {
                 throw std::runtime_error(
-                    "unsupported glTF image data URI in " +
-                    document.string());
+                    std::string(context) +
+                    ": unsupported glTF image data URI");
             }
             return DataUriTextureSource { image.uri };
         case GltfImageSourceKind::BufferView:
             if (!image.bufferViewIndex) {
                 throw std::runtime_error(
-                    "glTF buffer-view image has no buffer view index in " +
-                    document.string());
+                    std::string(context) +
+                    ": glTF buffer-view image has no buffer view index");
             }
             return GltfBufferViewTextureSource {
                 .document = document,
@@ -349,9 +432,36 @@ private:
         throw std::logic_error("unknown glTF image source kind");
     }
 
+    TextureInterpretation interpretationFor(
+        const GltfAssetDependencies& dependencies,
+        const GltfMaterialTextureDependency& texture,
+        std::string_view context)
+    {
+        TextureInterpretation interpretation {
+            .colorSpace = colorSpaceFor(texture.semantic),
+        };
+        if (!texture.samplerIndex) {
+            return interpretation;
+        }
+        if (*texture.samplerIndex >= dependencies.samplers.size()) {
+            throw std::runtime_error(
+                std::string(context) + ": sampler index is out of range");
+        }
+        const GltfSamplerDependency& sampler =
+            dependencies.samplers[*texture.samplerIndex];
+        interpretation.wrapU = addressModeFor(sampler.wrapS, context);
+        interpretation.wrapV = addressModeFor(sampler.wrapT, context);
+        interpretation.magFilter =
+            magnificationFilterFor(sampler.magFilter, context);
+        interpretation.minFilter =
+            minificationFilterFor(sampler.minFilter, context);
+        return interpretation;
+    }
+
     void addGltfDependencies(
         const std::filesystem::path& document,
-        const std::filesystem::path& absolute)
+        const std::filesystem::path& absolute,
+        std::string_view assetLabel)
     {
         const GltfAssetDependencies dependencies =
             inspectGltfAssetDependencies(absolute);
@@ -379,20 +489,50 @@ private:
                 dependencies.materials[materialIndex];
             for (const GltfMaterialTextureDependency& texture :
                  material.textures) {
+                const std::string context = materialTextureContext(
+                    assetLabel,
+                    document,
+                    materialIndex,
+                    material,
+                    texture);
                 if (!texture.imageIndex ||
                     *texture.imageIndex >= dependencies.images.size()) {
                     throw std::runtime_error(
-                        "glTF material texture has no supported core image in " +
-                        document.string() + " (material " +
-                        std::to_string(materialIndex) + " '" + material.name +
-                        "', texture '" + texture.textureName + "')");
+                        context +
+                        ": glTF material texture has no supported core image");
                 }
-                addTextureSource({
+                if (texture.texcoord > 1U) {
+                    throw std::runtime_error(
+                        context + ": texture coordinate set " +
+                        std::to_string(texture.texcoord) +
+                        " is unsupported; only TEXCOORD_0 and TEXCOORD_1 "
+                        "are available");
+                }
+                if (texture.transform) {
+                    throw std::runtime_error(
+                        context +
+                        ": KHR_texture_transform is unsupported until its "
+                        "UV transform is represented in MeshMaterial");
+                }
+                TextureSourceIdentity identity {
                     .source = sourceForImage(
-                        document, dependencies.images[*texture.imageIndex]),
-                    .interpretation = {
-                        .colorSpace = colorSpaceFor(texture.semantic),
-                    },
+                        document,
+                        dependencies.images[*texture.imageIndex],
+                        context),
+                    .interpretation = interpretationFor(
+                        dependencies, texture, context),
+                };
+                addTextureSource(identity);
+                materialTextures_.push_back({
+                    .document = document,
+                    .assetLabel = std::string(assetLabel),
+                    .materialIndex = static_cast<uint32_t>(materialIndex),
+                    .materialName = material.name,
+                    .textureName = texture.textureName,
+                    .semantic = texture.semantic,
+                    .identity = std::move(identity),
+                    .texcoord = texture.texcoord,
+                    .scale = texture.scale,
                 });
             }
         }
@@ -415,7 +555,7 @@ private:
         }
         const std::filesystem::path absolute =
             sourceFile(roots_.assets, safeRelative, label);
-        addGltfDependencies(safeRelative, absolute);
+        addGltfDependencies(safeRelative, absolute, label);
     }
 
     void addManifestAssets()
@@ -484,7 +624,21 @@ private:
                     normalizedRelativePath(
                         texture.path, "texture '" + texture.name + "'"),
                 },
-                .interpretation = { .colorSpace = texture.colorSpace },
+                .interpretation = {
+                    .colorSpace = texture.colorSpace,
+                    .wrapU = texture.tiling
+                        ? TextureAddressMode::Repeat
+                        : TextureAddressMode::ClampToEdge,
+                    .wrapV = texture.tiling
+                        ? TextureAddressMode::Repeat
+                        : TextureAddressMode::ClampToEdge,
+                    .magFilter = texture.filter == TextureFilter::Linear
+                        ? TextureMagnificationFilter::Linear
+                        : TextureMagnificationFilter::Nearest,
+                    .minFilter = texture.filter == TextureFilter::Linear
+                        ? TextureMinificationFilter::LinearMipmapLinear
+                        : TextureMinificationFilter::Nearest,
+                },
             });
         }
         for (const auto& model : manifest.models()) {
@@ -778,6 +932,7 @@ private:
     std::unordered_set<std::string> inspectedGltf_;
     std::unordered_set<std::string> textureSourceKeys_;
     std::vector<TextureSourceIdentity> textureSources_;
+    std::vector<ResolvedMaterialTexture> materialTextures_;
 };
 
 void ensureSafeOutputRoot(
