@@ -320,7 +320,7 @@ VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
     scratch->previewScene.reset();
     if (scratch->previewFrameData) {
         scratch->previewScene.emplace();
-        scenePreparer_.prepare(
+        previewScenePreparer_.prepare(
             *scratch->previewFrameData,
             {
                 static_cast<float>(extent.width) * 0.75f,

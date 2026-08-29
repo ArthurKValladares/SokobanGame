@@ -825,6 +825,71 @@ Vec4 IsoScenePreparer::projectShadowPoint(
     return { x, y, z, 1.0f };
 }
 
+std::vector<IsoScenePreparer::CachedRenderable>&
+IsoScenePreparer::cacheFor(PreparedRenderable::Kind kind) const
+{
+    switch (kind) {
+    case PreparedRenderable::Kind::Tile:
+        return tileRenderableCache_;
+    case PreparedRenderable::Kind::WaterSurface:
+        return waterRenderableCache_;
+    case PreparedRenderable::Kind::IsoFace:
+        return isoFaceRenderableCache_;
+    }
+    return tileRenderableCache_;
+}
+
+PreparedRenderable IsoScenePreparer::reconcileRenderable(
+    PreparedRenderable::Kind kind,
+    std::size_t sourceIndex,
+    std::span<const Vec3> points,
+    GridPosition3 semanticCell,
+    RenderModel model,
+    uint64_t semanticId,
+    uint32_t semanticTag) const
+{
+    std::vector<CachedRenderable>& cache = cacheFor(kind);
+    if (cache.size() <= sourceIndex) {
+        cache.resize(sourceIndex + 1);
+    }
+    CachedRenderable& cached = cache[sourceIndex];
+
+    const bool sameSemanticSource = cached.identity != 0 &&
+        cached.semanticCell == semanticCell && cached.model == model &&
+        cached.semanticId == semanticId &&
+        cached.semanticTag == semanticTag;
+    bool samePoints = sameSemanticSource &&
+        cached.pointCount == points.size();
+    for (std::size_t index = 0; samePoints && index < points.size(); ++index) {
+        samePoints = cached.points[index] == points[index];
+    }
+
+    if (!sameSemanticSource) {
+        cached.identity = nextRenderableIdentity_++;
+        cached.boundsRevision = 1;
+    } else if (!samePoints) {
+        ++cached.boundsRevision;
+    }
+    if (!samePoints) {
+        cached.pointCount = points.size();
+        std::ranges::copy(points, cached.points.begin());
+        cached.semanticCell = semanticCell;
+        cached.model = model;
+        cached.semanticId = semanticId;
+        cached.semanticTag = semanticTag;
+        cached.worldBounds = aabbFromPoints(points);
+    }
+
+    return {
+        .kind = kind,
+        .sourceIndex = sourceIndex,
+        .identity = cached.identity,
+        .boundsRevision = cached.boundsRevision,
+        .worldBounds = cached.worldBounds,
+        .boundsReused = samePoints,
+    };
+}
+
 void IsoScenePreparer::prepare(
     const RenderFrameData& frameData,
     Vec2 renderExtent,
@@ -840,6 +905,9 @@ void IsoScenePreparer::prepare(
     scene.particles.clear();
     scene.shadowFaces.clear();
     scene.shadowModelIndices.clear();
+    scene.renderables.clear();
+    scene.reusedRenderableBounds = 0;
+    scene.rebuiltRenderableBounds = 0;
     scene.renderExtent = {
         std::max(renderExtent.x, 1.0f),
         std::max(renderExtent.y, 1.0f),
@@ -874,6 +942,49 @@ void IsoScenePreparer::prepare(
         frameData.tiles.size() * 3 + frameData.waterSurfaces.size());
     scene.shadowFaces.reserve(frameData.tiles.size() * 5);
     scene.particles.reserve(frameData.particles.size());
+    scene.renderables.reserve(
+        frameData.tiles.size() + frameData.waterSurfaces.size() +
+        frameData.isoFaces.size());
+
+    tileRenderableCache_.resize(frameData.tiles.size());
+    waterRenderableCache_.resize(frameData.waterSurfaces.size());
+    isoFaceRenderableCache_.resize(frameData.isoFaces.size());
+
+    const auto appendRenderable = [&scene](PreparedRenderable renderable) {
+        if (renderable.boundsReused) {
+            ++scene.reusedRenderableBounds;
+        } else {
+            ++scene.rebuiltRenderableBounds;
+        }
+        scene.renderables.push_back(renderable);
+    };
+    for (std::size_t tileIndex = 0;
+         tileIndex < frameData.tiles.size();
+         ++tileIndex) {
+        const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
+        const std::array<Vec3, 8> corners = tileCorners(tile);
+        appendRenderable(reconcileRenderable(
+            PreparedRenderable::Kind::Tile,
+            tileIndex,
+            corners,
+            tile.renderableId == 0 ? tile.cell : GridPosition3 {},
+            tile.model,
+            tile.renderableId,
+            static_cast<uint32_t>(tile.effect)));
+    }
+    for (std::size_t faceIndex = 0;
+         faceIndex < frameData.isoFaces.size();
+         ++faceIndex) {
+        const RenderFrameData::IsoFace& face = frameData.isoFaces[faceIndex];
+        appendRenderable(reconcileRenderable(
+            PreparedRenderable::Kind::IsoFace,
+            faceIndex,
+            face.vertices,
+            {},
+            cubeModel,
+            0,
+            static_cast<uint32_t>(face.effect)));
+    }
 
     auto appendIsoFace = [&](
                              const std::array<Vec3, 4>& vertices,
@@ -1078,6 +1189,8 @@ void IsoScenePreparer::prepare(
 
         for (const RenderFrameData::WaterSurface& water :
              frameData.waterSurfaces) {
+            const std::size_t waterIndex = static_cast<std::size_t>(
+                &water - frameData.waterSurfaces.data());
             float left = water.position.x;
             float top = water.position.y;
             float right = left + water.size.x;
@@ -1118,13 +1231,22 @@ void IsoScenePreparer::prepare(
                     }
                 }
             }
-            appendIsoFace(
-                {
+            const std::array<Vec3, 4> waterVertices {
                     Vec3 { left, top, water.elevation },
                     Vec3 { right, top, water.elevation },
                     Vec3 { right, bottom, water.elevation },
                     Vec3 { left, bottom, water.elevation },
-                },
+            };
+            appendRenderable(reconcileRenderable(
+                PreparedRenderable::Kind::WaterSurface,
+                waterIndex,
+                waterVertices,
+                water.cell,
+                cubeModel,
+                0,
+                water.shorelineMask));
+            appendIsoFace(
+                waterVertices,
                 { 0.0f, 0.0f, 1.0f },
                 water.color,
                 water.cell,

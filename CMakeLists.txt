@@ -504,6 +504,7 @@ target_link_libraries(sokoban_content_tool PRIVATE sokoban_core)
 set(SOKOBAN_APPLICATION_SOURCES
     src/main.cpp
     src/engine/Application.cpp
+    src/engine/ApplicationEvidence.cpp
 )
 if(SOKOBAN_ENABLE_DEVELOPER_TOOLS)
     list(APPEND SOKOBAN_APPLICATION_SOURCES

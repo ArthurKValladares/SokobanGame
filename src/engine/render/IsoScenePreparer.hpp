@@ -1,11 +1,14 @@
 #pragma once
 
+#include "engine/Geometry.hpp"
 #include "engine/Math.hpp"
 #include "engine/render/RenderTypes.hpp"
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace sokoban {
@@ -126,6 +129,25 @@ struct PreparedParticle {
     bool drawOnTop = false;
 };
 
+// Persistent, Vulkan-free identity and world bounds for one source
+// renderable. PreparedRenderScene owns a frame-local snapshot of these values;
+// the preparer's cache may therefore advance while an older prepared frame is
+// still leased by the renderer.
+struct PreparedRenderable {
+    enum class Kind {
+        Tile,
+        WaterSurface,
+        IsoFace,
+    };
+
+    Kind kind = Kind::Tile;
+    std::size_t sourceIndex = 0;
+    uint64_t identity = 0;
+    uint64_t boundsRevision = 0;
+    Aabb worldBounds;
+    bool boundsReused = false;
+};
+
 // CPU scene work shared by every pass in one submitted frame.
 // Index lists point into the source RenderFrameData or the face pool and keep
 // pass recording free of geometry regeneration, culling, and sorting.
@@ -149,6 +171,9 @@ struct PreparedRenderScene {
     std::vector<PreparedParticle> particles;
     std::vector<std::array<Vec3, 4>> shadowFaces;
     std::vector<std::size_t> shadowModelIndices;
+    std::vector<PreparedRenderable> renderables;
+    uint32_t reusedRenderableBounds = 0;
+    uint32_t rebuiltRenderableBounds = 0;
 };
 
 // Owns all Vulkan-free projection, culling, sorting, and picking behavior.
@@ -234,6 +259,33 @@ public:
         Vec3 point);
 
 private:
+    struct CachedRenderable {
+        std::array<Vec3, 8> points {};
+        std::size_t pointCount = 0;
+        GridPosition3 semanticCell {};
+        RenderModel model {};
+        uint64_t semanticId = 0;
+        uint32_t semanticTag = 0;
+        uint64_t identity = 0;
+        uint64_t boundsRevision = 0;
+        Aabb worldBounds;
+    };
+
+    PreparedRenderable reconcileRenderable(
+        PreparedRenderable::Kind kind,
+        std::size_t sourceIndex,
+        std::span<const Vec3> points,
+        GridPosition3 semanticCell,
+        RenderModel model,
+        uint64_t semanticId,
+        uint32_t semanticTag) const;
+    [[nodiscard]] std::vector<CachedRenderable>& cacheFor(
+        PreparedRenderable::Kind kind) const;
+
+    mutable std::vector<CachedRenderable> tileRenderableCache_;
+    mutable std::vector<CachedRenderable> waterRenderableCache_;
+    mutable std::vector<CachedRenderable> isoFaceRenderableCache_;
+    mutable uint64_t nextRenderableIdentity_ = 1;
     bool opaqueFrontToBackSort_ = true;
 };
 

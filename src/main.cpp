@@ -70,6 +70,12 @@ int main(int argc, char** argv)
             sokoban::ApplicationOptions {
                 .smokeFrames = options.smokeFrames,
                 .saveDirectoryOverride = options.saveDirectory,
+                .evidenceOutputDirectory =
+                    options.evidenceOutputDirectory,
+                .evidenceRenderScalePercent =
+                    options.evidenceRenderScalePercent,
+                .evidenceAmbientOcclusionEnabled =
+                    options.evidenceAmbientOcclusionEnabled,
             }
         };
 #if SOKOBAN_ENABLE_DEBUG_UI

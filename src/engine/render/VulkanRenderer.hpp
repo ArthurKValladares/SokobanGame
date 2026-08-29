@@ -322,6 +322,7 @@ private:
         preparedFrameScratch_;
     RenderAssetRequirements frameAssetRequirements_;
     IsoScenePreparer scenePreparer_;
+    IsoScenePreparer previewScenePreparer_;
     FrameDescriptorSync descriptorSync_ { maxFramesInFlight_ };
     uint32_t currentFrame_ = 0;
     uint64_t nextPreparedFrameGeneration_ = 1;

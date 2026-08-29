@@ -26,6 +26,12 @@ struct CommandLineOptions {
     bool requireValidation = false;
     // Re-bake the editor's tile palette pictures and exit.
     bool bakeTileThumbnails = false;
+    // Archive the last normal frame, a filtered SSAO debug frame, and timing
+    // statistics after a smoke run. The scale override keeps separate runs
+    // comparable without reading or rewriting a user profile.
+    std::string evidenceOutputDirectory;
+    int evidenceRenderScalePercent = 100;
+    bool evidenceAmbientOcclusionEnabled = true;
     // Set when parsing rejected the arguments; `error` says why.
     bool malformed = false;
     std::string error;
@@ -37,6 +43,8 @@ struct CommandLineOptions {
     std::span<const std::string_view> arguments)
 {
     CommandLineOptions options;
+    bool evidenceScaleSpecified = false;
+    bool evidenceAmbientOcclusionSpecified = false;
     const auto reject = [&options](std::string message) {
         options.malformed = true;
         options.error = std::move(message);
@@ -75,9 +83,51 @@ struct CommandLineOptions {
                 return reject("--save-directory needs a path");
             }
             options.saveDirectory = std::string(arguments[++index]);
+        } else if (argument == "--evidence-output") {
+            if (index + 1 >= arguments.size()) {
+                return reject("--evidence-output needs a directory");
+            }
+            options.evidenceOutputDirectory =
+                std::string(arguments[++index]);
+            if (options.evidenceOutputDirectory.empty()) {
+                return reject("--evidence-output cannot be empty");
+            }
+        } else if (argument == "--evidence-render-scale") {
+            if (index + 1 >= arguments.size()) {
+                return reject("--evidence-render-scale needs a percentage");
+            }
+            const std::string_view value = arguments[++index];
+            int percent = 0;
+            const char* const begin = value.data();
+            const char* const end = begin + value.size();
+            const std::from_chars_result parsed =
+                std::from_chars(begin, end, percent);
+            if (parsed.ec != std::errc {} || parsed.ptr != end ||
+                percent < 25 || percent > 100) {
+                return reject(
+                    "--evidence-render-scale wants an integer from 25 to 100, got '" +
+                    std::string(value) + "'");
+            }
+            options.evidenceRenderScalePercent = percent;
+            evidenceScaleSpecified = true;
+        } else if (argument == "--evidence-disable-ao") {
+            options.evidenceAmbientOcclusionEnabled = false;
+            evidenceAmbientOcclusionSpecified = true;
         } else {
             return reject("Unknown argument '" + std::string(argument) + "'");
         }
+    }
+    if (!options.evidenceOutputDirectory.empty() && options.smokeFrames < 3) {
+        return reject(
+            "--evidence-output requires --smoke-frames of at least 3");
+    }
+    if (options.evidenceOutputDirectory.empty() && evidenceScaleSpecified) {
+        return reject(
+            "--evidence-render-scale requires --evidence-output");
+    }
+    if (options.evidenceOutputDirectory.empty() &&
+        evidenceAmbientOcclusionSpecified) {
+        return reject("--evidence-disable-ao requires --evidence-output");
     }
     return options;
 }
@@ -85,6 +135,8 @@ struct CommandLineOptions {
 inline constexpr std::string_view commandLineUsage =
     "Usage: sokoban [--smoke-frames <positive integer>] "
     "[--save-directory <path>] [--require-validation] "
-    "[--bake-tile-thumbnails]";
+    "[--bake-tile-thumbnails] "
+    "[--evidence-output <directory> "
+    "--evidence-render-scale <25..100> [--evidence-disable-ao]]";
 
 } // namespace sokoban

@@ -47,7 +47,9 @@ void endLabel(VkDevice device, VkCommandBuffer commandBuffer) noexcept;
 // the same uninteresting reason: nothing was watching.
 [[nodiscard]] bool validationActive() noexcept;
 
-// Validation errors reported since process start, or since the last reset.
+// Validation-type errors reported since process start, or since the last
+// reset. General loader/driver discovery messages remain logged but do not
+// make the application-validation gate fail.
 //
 // The messenger already logs every message; this exists so a run can *fail*
 // on one. Validation output is easy to lose in a wall of stderr, and a

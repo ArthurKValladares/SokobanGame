@@ -28,17 +28,15 @@ mirror-energy effect has an explicit base-color-only material contract. SSAO
 now reconstructs view-space position and geometric normals from copied depth
 and samples with scene-unit radius and bias into a half-resolution target. Its
 full-resolution composite now uses view-space depth and normal weights instead
-of a box blur, while continuing to affect ambient light only. The next objective
-is to capture the remaining visual/performance evidence, then resume measured
-scene scaling.
+of a box blur, while continuing to affect ambient light only. A deterministic
+evidence runner now archives post-tonemap scenes, filtered AO, matched AO-off
+controls and CPU/GPU frame statistics. Persistent renderable identities and
+stable world bounds are now implemented; measured frustum culling is next.
 
 The recommended order is:
 
-1. Capture the remaining post-tonemap/material reference images and revalidate
-   AO appearance and GPU cost across camera/render-scale changes.
-2. Establish persistent renderables and stable bounds (S2).
-3. Consume those bounds for measured frustum culling (T4).
-4. Continue allocation/compression work (V2/A2) only after new telemetry.
+1. Consume persistent bounds for measured frustum culling (T4).
+2. Continue allocation/compression work (V2/A2) only after new telemetry.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
@@ -96,6 +94,15 @@ future tasks:
   output counts.
 - **C1/S4/E1**: explicit camera data, closed frame-arena lifetime, MSVC CI and
   a headless Vulkan validation run.
+- **0.1 evidence**: deterministic frozen-scene captures at 100% and 50% render
+  scale, filtered-AO views, matched AO-off controls, GPU frame timings and
+  validation-clean reproduction commands are archived under
+  `docs/render-evidence/2026-08-28-ssao/`.
+- **S2**: `IsoScenePreparer` retains Vulkan-free renderable identities and
+  world AABBs for tiles, water surfaces and authored faces. Frame-local scenes
+  snapshot identity, bounds and revision so cache updates cannot mutate an
+  older leased frame. Main and preview scenes use separate caches, and runtime
+  telemetry reports retained/reused/rebuilt counts.
 
 ## Corrections to the remaining review inventory
 
@@ -187,22 +194,27 @@ combine adjacent packets merely because they touch the same files.
 
 ### 0. Refresh the baseline
 
-Current state on 28 August 2026: the full Visual Studio Debug build succeeds
+Current state on 29 August 2026: the full Visual Studio Debug build succeeds
 and all 68 registered CTest suites pass, including `vulkan_smoke`. Establishing
 that baseline also exposed and repaired stale UI/settings assertions left by the
-earlier default-MSAA change. Representative screenshots and frame statistics
-still need to be captured after the output-transform change and before
-material-map behavior changes.
+earlier default-MSAA change. Representative scene/AO images and matched timing
+controls are now archived and reproducible from the executable.
 
-#### 0.1 Capture visual and performance evidence
+#### 0.1 Capture visual and performance evidence — complete
 
-- Record representative post-tonemap screenshots and frame statistics for
-  comparison.
-- Record the scene, UI and editor states that are most likely to expose texture
-  descriptor or material-map regressions.
+`--evidence-output` turns an ordinary bounded smoke run into a deterministic
+capture: simulation is frozen, the developer workspace is hidden, render scale
+is explicit, and the last frames archive the normal post-tonemap scene plus the
+filtered-AO debug view. `--evidence-disable-ao` supplies a matched control rather
+than attributing an entire render-scale delta to SSAO.
 
-**Acceptance:** screenshots and frame statistics are archived against the green
-Debug baseline before material-map behavior changes.
+At 1280x720 output on the validated RTX 4060 Laptop GPU, the whole-frame GPU
+timestamp was 0.753 ms with AO and 0.355 ms without it at 100% render scale; at
+50%, it was 0.409 ms with AO and 0.238 ms without it. The matched difference
+estimates the complete AO path at 0.398 ms and 0.171 ms respectively—a 57%
+reduction. Images retain contacts and silhouettes without broad halos or
+cross-wall bleeding. All four runs passed the validation gate and all 68 Debug
+suites pass. See `docs/render-evidence/2026-08-28-ssao/README.md`.
 
 #### 0.2 Loader-level CUBICSPLINE fixture — complete
 
@@ -471,7 +483,7 @@ compilation and SPIR-V validation; the full Debug build, 200-file content stage
 and all 68 suites, including `vulkan_smoke`, pass.
 
 **Acceptance:** complete for the mapped parameter path and automated numeric,
-transport and runtime validation. Visual reference capture remains in 0.1.
+transport and runtime validation. Representative evidence is archived.
 
 #### 7.2 Normal mapping — complete
 
@@ -502,7 +514,7 @@ including `vulkan_smoke`, pass.
 
 **Acceptance:** complete for authored and derived tangent transport, mapped
 normal resolution, double-sided lighting and automated runtime validation.
-Visual reference capture remains in 0.1.
+Representative evidence is archived.
 
 #### 7.3 Emissive — complete
 
@@ -523,8 +535,8 @@ compile and the edited SPIR-V validates; the full Debug build and all 68 CTest
 suites, including `vulkan_smoke`, pass.
 
 **Acceptance:** complete for emissive color-space handling, factor/map
-resolution, HDR preservation, UV selection and ambient-mask isolation. Visual
-reference capture remains in 0.1.
+resolution, HDR preservation, UV selection and ambient-mask isolation.
+Representative evidence is archived.
 
 #### 7.4 Occlusion — complete
 
@@ -551,8 +563,8 @@ build stages all 200 content files, and all 68 CTest suites—including
 `vulkan_smoke`—pass.
 
 **Acceptance:** complete for occlusion color space, channel and strength
-semantics, UV selection, ambient-only application and SSAO composition. Visual
-reference capture remains in 0.1.
+semantics, UV selection, ambient-only application and SSAO composition.
+Representative evidence is archived.
 
 #### 7.5 Alpha and mirror paths — complete
 
@@ -585,14 +597,15 @@ its opacity and lighting response.
 
 The focused material suite now passes 55 checks covering pass selection,
 OPAQUE/MASK/BLEND alpha math and the mirror subset. The scene-preparation suite
-passes 1,545 checks including alpha-tinted model classification. The embedded
+passes 1,564 checks including alpha-tinted model classification and persistent
+identity/bounds behavior. The embedded
 GLB loader fixture still covers all core maps, both UV sets, MASK and
 double-sided metadata; production external glTF content exercises BLEND and
 double-sided summaries. All 16 shaders compile, the Debug build stages 200
 files, and all 68 CTest suites—including `vulkan_smoke`—pass.
 
 **Acceptance:** automated material transport, policy and runtime validation are
-complete. Representative appearance capture remains in 0.1. MASK currently
+complete. Representative appearance evidence is archived. MASK currently
 cuts out the visible scene pass; the depth-only model-shadow pipelines still
 cast the mesh silhouette and would need a texture-sampling fragment stage if
 cutout shadow silhouettes become an authored-content requirement.
@@ -626,7 +639,7 @@ the Debug build stages all
 
 **Acceptance:** complete for view-space position/normal reconstruction,
 scene-unit radius and bias, render-scale-independent sampling math and the
-existing ambient-only composite. Appearance capture remains in 0.1.
+existing ambient-only composite. Appearance evidence is archived.
 
 #### 8.2 Half-resolution bilateral path — complete
 
@@ -658,8 +671,8 @@ suites pass.
 
 **Acceptance:** implementation complete for half-resolution storage/recording,
 full-resolution silhouette-aware upsampling, ambient-only composition and
-resize edge cases. Representative image capture and comparative GPU timings
-remain part of the explicit evidence task in 0.1.
+resize edge cases. Representative images and matched GPU timings are archived
+under `docs/render-evidence/2026-08-28-ssao/`.
 
 **Acceptance:** AO is stable across render scales and camera changes, does not
 bleed across silhouettes, and does not darken direct highlights or emissive
@@ -669,16 +682,41 @@ surfaces.
 
 After the material path is complete, prioritize by measured frame cost:
 
-1. **S2:** persistent renderables and stable bounds.
-2. **T4:** frustum culling using the existing `Frustum` and `Aabb` math.
-3. **V2:** VMA or deliberate image/buffer suballocation.
-4. **A2:** KTX2 plus BC7/appropriate platform formats in the content tool.
-5. **A3 remainder:** mip/LOD streaming, compressed byte accounting and
+1. **T4:** frustum-cull prepared renderables using the retained world AABBs
+   and existing `Frustum` math. Build visible index lists without mutating the
+   persistent cache; preserve picking behavior and keep uncertain model bounds
+   conservatively visible.
+2. **V2:** VMA or deliberate image/buffer suballocation.
+3. **A2:** KTX2 plus BC7/appropriate platform formats in the content tool.
+4. **A3 remainder:** mip/LOD streaming, compressed byte accounting and
    fence-based eviction retirement instead of `vkDeviceWaitIdle`.
-6. **T8:** parallelize Vulkan-free scene preparation first; add secondary
+5. **T8:** parallelize Vulkan-free scene preparation first; add secondary
    command buffers or a transfer queue only after profiling.
-7. **T5:** range-cull point-shadow casters, then cache unchanged faces.
-8. **A4:** reuse recorder scratch storage after scene data structures settle.
+6. **T5:** range-cull point-shadow casters, then cache unchanged faces.
+7. **A4:** reuse recorder scratch storage after scene data structures settle.
+
+#### 9.1 S2 persistent renderables and stable bounds — complete
+
+The preparer reconciles tiles, water surfaces and authored faces into retained
+cache slots. Stable semantic sources keep their identity while geometry changes
+increment a bounds revision; unchanged geometry reuses its AABB. Each prepared
+frame receives a value snapshot, preserving the two-frame lease model, and the
+preview path uses a separate cache so it cannot churn main-scene identity.
+Dynamic gameplay entities carry presentation identity even when not animated.
+Debug and evidence telemetry expose retained/reused/rebuilt counts; a frozen
+live frame reported 204 retained renderables, 204 reused bounds and zero rebuilt
+bounds.
+
+The focused scene-preparation suite passes 1,564 checks, the validation smoke
+run is clean, and all 68 Debug suites pass.
+
+#### 9.2 T4 frustum culling — next
+
+Extract the camera frustum from `isoClipFromWorld`, classify retained AABBs,
+and produce visible face/model lists before recorder submission. Start with
+main color/depth work; preserve picking data and shadow semantics until each is
+given its own conservative volume. Add before/after prepared/visible counts and
+CPU/GPU timing evidence.
 
 `S3` task-graph/work-stealing work should follow an observed scheduling
 bottleneck. `S1` fixed-tick simulation is conditional on continuous physics or
@@ -708,8 +746,8 @@ layout changes affect modules that appear unrelated to the immediate feature.
 
 ## Source map for the next packets
 
-- `src/engine/render/IsoScenePreparer.*`: current per-frame render-scene
-  construction; isolate stable renderables and bounds before adding culling.
+- `src/engine/render/IsoScenePreparer.*`: retained identity/bounds cache and
+  current per-frame projection/sorting; consume its snapshots for T4.
 - `src/engine/render/RenderTypes.hpp`: source render data and frame-level
   ownership boundaries that the persistent representation must not blur.
 - `src/engine/Geometry.*`: existing bounds/frustum primitives to reuse for T4.
@@ -717,8 +755,8 @@ layout changes affect modules that appear unrelated to the immediate feature.
   place to expose before/after CPU/GPU telemetry.
 - `src/engine/render/VulkanSceneRecorder.*`: consumer of the prepared visible
   lists; keep Vulkan recording downstream of Vulkan-free culling.
-- `tests/IsoScenePreparerTests.cpp`: extend with stable-identity/bounds and
-  visibility cases before changing recorder behavior.
+- `tests/IsoScenePreparerTests.cpp`: stable identity/bounds behavior is covered;
+  add conservative visibility cases before changing recorder behavior.
 - `src/engine/render/VulkanSsaoPass.*`, `shaders/ssao*.glsl` and
   `tests/SsaoMathTests.cpp`: completed V7 baseline; revisit only if visual or
   timing evidence exposes a concrete regression.

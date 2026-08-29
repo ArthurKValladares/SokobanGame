@@ -1345,6 +1345,7 @@ void appendGameplayEntities(
             .animation = animation,
             .animationFallback = fallback,
             .animationInstanceId = actorAnimationInstance(visual.motion.target),
+            .renderableId = visual.motion.target.id,
             .animationLoops = visual.animationLoops,
             .animationCrossfades = visual.animationCrossfades,
             .animationTimeSeconds = animationTimeFor(
@@ -1396,6 +1397,7 @@ void appendGameplayEntities(
                           *visual.animationFallbackUse))
                 : noAnimation,
             .animationInstanceId = actorAnimationInstance(visual.motion.target),
+            .renderableId = visual.motion.target.id,
             .animationLoops = visual.animationLoops,
             .animationCrossfades = visual.animationCrossfades,
             .animationTimeSeconds = animationTimeFor(
@@ -1452,6 +1454,7 @@ void appendGameplayEntities(
             .blurBehind = movable.type == TileType::Ice,
             .affectsCameraFit = false,
             .model = input.manifest.modelForTile(movable.type),
+            .renderableId = visual.target.id,
         };
         applyTileScale(
             movableTile,

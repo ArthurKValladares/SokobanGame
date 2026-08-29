@@ -33,6 +33,12 @@ void testEmptyIsANormalRun()
     check(!options.requireValidation, "validation not required by default");
     check(!options.bakeTileThumbnails, "no bake by default");
     check(options.saveDirectory.empty(), "no save override by default");
+    check(options.evidenceOutputDirectory.empty(),
+        "no evidence output by default");
+    check(options.evidenceRenderScalePercent == 100,
+        "evidence scale defaults to 100 percent");
+    check(options.evidenceAmbientOcclusionEnabled,
+        "ambient occlusion is enabled in evidence runs by default");
 }
 
 void testFlags()
@@ -48,6 +54,22 @@ void testFlags()
     check(smoke.smokeRun(), "a non-zero count is a smoke run");
     check(smoke.requireValidation, "validation requirement is read");
     check(smoke.saveDirectory == "/tmp/profile", "save directory is read");
+
+    const sokoban::CommandLineOptions evidence = parse(
+        { "--smoke-frames", "180", "--evidence-output", "/tmp/evidence",
+            "--evidence-render-scale", "50" });
+    check(!evidence.malformed, "evidence invocation parses");
+    check(evidence.evidenceOutputDirectory == "/tmp/evidence",
+        "evidence directory is read");
+    check(evidence.evidenceRenderScalePercent == 50,
+        "evidence scale is read");
+
+    const sokoban::CommandLineOptions noAoEvidence = parse(
+        { "--smoke-frames", "180", "--evidence-output", "/tmp/evidence",
+            "--evidence-disable-ao" });
+    check(!noAoEvidence.malformed, "AO-off evidence invocation parses");
+    check(!noAoEvidence.evidenceAmbientOcclusionEnabled,
+        "AO-off evidence invocation disables ambient occlusion");
 
     // Order must not matter: CI writes these in whatever order reads best.
     const sokoban::CommandLineOptions reordered = parse(
@@ -74,6 +96,12 @@ void testMalformedInput()
         "missing frame count is rejected");
     check(parse({ "--save-directory" }).malformed,
         "missing save directory is rejected");
+    check(parse({ "--evidence-output" }).malformed,
+        "missing evidence directory is rejected");
+    check(parse({ "--evidence-output", "" }).malformed,
+        "empty evidence directory is rejected");
+    check(parse({ "--evidence-render-scale" }).malformed,
+        "missing evidence scale is rejected");
     check(parse({ "--smoke-frames", "0" }).malformed,
         "zero frames is rejected");
     check(parse({ "--smoke-frames", "-1" }).malformed,
@@ -86,6 +114,23 @@ void testMalformedInput()
         "an empty frame count is rejected");
     check(parse({ "--unknown-flag" }).malformed,
         "an unknown flag is rejected rather than ignored");
+    check(parse({ "--smoke-frames", "2", "--evidence-output", "/tmp/e" })
+            .malformed,
+        "evidence capture requires two distinct capture frames");
+    check(parse({ "--smoke-frames", "3", "--evidence-output", "/tmp/e",
+                    "--evidence-render-scale", "24" })
+            .malformed,
+        "evidence scale below the renderer range is rejected");
+    check(parse({ "--smoke-frames", "3", "--evidence-output", "/tmp/e",
+                    "--evidence-render-scale", "101" })
+            .malformed,
+        "evidence scale above the renderer range is rejected");
+    check(parse({ "--evidence-render-scale", "50" }).malformed,
+        "evidence scale without an output directory is rejected");
+    check(parse({ "--evidence-render-scale", "100" }).malformed,
+        "explicit default evidence scale still requires an output directory");
+    check(parse({ "--evidence-disable-ao" }).malformed,
+        "AO-off evidence mode requires an output directory");
 
     const sokoban::CommandLineOptions rejected = parse({ "--smoke-frames", "abc" });
     check(!rejected.error.empty(), "a rejection explains itself");

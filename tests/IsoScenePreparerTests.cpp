@@ -857,6 +857,58 @@ void testPreparationReusesOutputWithoutStaleLists()
     CHECK(scene.opaqueFaceIndices.capacity() >= opaqueCapacity);
 }
 
+void testPersistentRenderablesReuseAndReviseStableBounds()
+{
+    using namespace sokoban;
+
+    IsoScenePreparer preparer;
+    RenderFrameData frame = sceneFrame();
+    PreparedRenderScene scene;
+    preparer.prepare(frame, { 1280.0f, 720.0f }, scene);
+
+    CHECK(scene.renderables.size() ==
+        frame.tiles.size() + frame.waterSurfaces.size() +
+            frame.isoFaces.size());
+    CHECK(scene.rebuiltRenderableBounds == scene.renderables.size());
+    CHECK(scene.reusedRenderableBounds == 0);
+    const PreparedRenderable firstTile = scene.renderables.front();
+    CHECK(firstTile.kind == PreparedRenderable::Kind::Tile);
+    CHECK(firstTile.sourceIndex == 0);
+    CHECK(firstTile.identity != 0);
+    CHECK(firstTile.boundsRevision == 1);
+    CHECK(firstTile.worldBounds == aabbFromMinMax(
+        Vec3 { 0.0f, 0.0f, 0.0f },
+        Vec3 { 1.0f, 1.0f, 1.0f }));
+
+    // Camera and material values are frame-local. They must not invalidate
+    // retained world geometry or its identity.
+    frame.cameraPitchDegrees = 35.0f;
+    frame.tiles.front().color = { 0.2f, 0.4f, 0.6f, 1.0f };
+    preparer.prepare(frame, { 1920.0f, 1080.0f }, scene);
+    CHECK(scene.reusedRenderableBounds == scene.renderables.size());
+    CHECK(scene.rebuiltRenderableBounds == 0);
+    CHECK(scene.renderables.front().identity == firstTile.identity);
+    CHECK(scene.renderables.front().boundsRevision ==
+        firstTile.boundsRevision);
+
+    // Moving the same semantic source keeps its identity but advances the
+    // bounds revision. The earlier snapshot remains unchanged.
+    frame.tiles.front().position.x = 0.5f;
+    preparer.prepare(frame, { 1920.0f, 1080.0f }, scene);
+    CHECK(scene.rebuiltRenderableBounds == 1);
+    CHECK(scene.renderables.front().identity == firstTile.identity);
+    CHECK(scene.renderables.front().boundsRevision == 2);
+    CHECK(scene.renderables.front().worldBounds.minimum.x == 0.5f);
+    CHECK(firstTile.worldBounds.minimum.x == 0.0f);
+
+    // Replacing the source occupying a slot starts a new persistent identity.
+    frame.tiles.front().cell = { 8, 8, 0 };
+    frame.tiles.front().position = { 8.0f, 8.0f };
+    preparer.prepare(frame, { 1920.0f, 1080.0f }, scene);
+    CHECK(scene.renderables.front().identity != firstTile.identity);
+    CHECK(scene.renderables.front().boundsRevision == 1);
+}
+
 void testExteriorWaterDoesNotAffectCameraFitOrPicking()
 {
     const sokoban::RenderFrameData baseFrame = sceneFrame();
@@ -1331,6 +1383,7 @@ int main()
     testVirtualPickPlaneMatchesPreviewTopUnderPerspective();
     testTopDownPreparationSkipsIsoWork();
     testPreparationReusesOutputWithoutStaleLists();
+    testPersistentRenderablesReuseAndReviseStableBounds();
     testExteriorWaterDoesNotAffectCameraFitOrPicking();
     testExteriorWaterReachesVisiblePlaneFootprint();
     testDecorativeTileDoesNotAffectCameraFit();

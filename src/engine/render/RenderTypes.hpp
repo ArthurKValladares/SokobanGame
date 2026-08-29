@@ -333,6 +333,10 @@ struct RenderFrameData {
         // Stable presentation identity for independently posed skinned
         // actors. Zero means the model has no persistent animated instance.
         uint64_t animationInstanceId = 0;
+        // Stable presentation identity for retained renderable metadata.
+        // Dynamic entities set this even when they are not animated. Zero
+        // lets scene preparation fall back to the authored cell/model slot.
+        uint64_t renderableId = 0;
         bool animationLoops = true;
         // False requests a hard clip transition for semantic discontinuities
         // such as reviving during undo. The actor identity and GPU resources
@@ -503,6 +507,9 @@ struct RenderStats {
     uint32_t preparedModels = 0;
     uint32_t unavailableModels = 0;
     uint32_t preparedParticles = 0;
+    uint32_t persistentRenderables = 0;
+    uint32_t reusedRenderableBounds = 0;
+    uint32_t rebuiltRenderableBounds = 0;
     uint32_t visibleFaces = 0;
     uint32_t drawCalls = 0;
     uint32_t vertices = 0;
@@ -515,6 +522,8 @@ struct RenderStats {
     uint32_t swapchainImages = 0;
     uint32_t renderWidth = 0;
     uint32_t renderHeight = 0;
+    uint32_t ssaoWidth = 0;
+    uint32_t ssaoHeight = 0;
     uint32_t renderScalePercent = 100;
     uint32_t activeSamples = 1;
     bool cpuFrameTimingAvailable = false;

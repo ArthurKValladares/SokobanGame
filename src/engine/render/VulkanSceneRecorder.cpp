@@ -129,6 +129,7 @@ public:
     {
         const VkExtent2D extent = swapchain_.extent();
         const VkExtent2D renderExtent = swapchain_.renderExtent();
+        const VkExtent2D ssaoExtent = ssaoPass_.aoExtent();
         const auto unavailableModelCount = [this](
                                                const RenderFrameData& data,
                                                const PreparedRenderScene& prepared) {
@@ -177,11 +178,20 @@ public:
             .preparedParticles =
                 static_cast<uint32_t>(scene.particles.size() +
                     (previewScene ? previewScene->particles.size() : 0)),
+            .persistentRenderables = static_cast<uint32_t>(
+                scene.renderables.size() +
+                (previewScene ? previewScene->renderables.size() : 0)),
+            .reusedRenderableBounds = scene.reusedRenderableBounds +
+                (previewScene ? previewScene->reusedRenderableBounds : 0),
+            .rebuiltRenderableBounds = scene.rebuiltRenderableBounds +
+                (previewScene ? previewScene->rebuiltRenderableBounds : 0),
             .swapchainWidth = extent.width,
             .swapchainHeight = extent.height,
             .swapchainImages = swapchain_.imageCount(),
             .renderWidth = renderExtent.width,
             .renderHeight = renderExtent.height,
+            .ssaoWidth = ssaoExtent.width,
+            .ssaoHeight = ssaoExtent.height,
             .renderScalePercent = static_cast<uint32_t>(
                 swapchain_.renderScalePercent()),
             .activeSamples = configuration_.activeSamples,

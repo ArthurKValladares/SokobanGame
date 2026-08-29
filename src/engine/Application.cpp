@@ -104,7 +104,9 @@ Application::Application(ApplicationOptions options)
           uiFont_,
           antiAliasingModeForSamples(
               playerProfile_.settings.video.antiAliasingSamples),
-          playerProfile_.settings.video.effectiveRenderScalePercent(),
+          options.evidenceOutputDirectory.empty()
+              ? playerProfile_.settings.video.effectiveRenderScalePercent()
+              : options.evidenceRenderScalePercent,
           {
               .vsync = playerProfile_.settings.video.vsync,
               .allowTearing = playerProfile_.settings.video.allowTearing,
@@ -122,12 +124,20 @@ Application::Application(ApplicationOptions options)
           FrameArena("render frame B", renderFrameArenaBytes()),
       }
     , smokeFrames_(options.smokeFrames)
+    , evidenceOutputDirectory_(
+          std::move(options.evidenceOutputDirectory))
+    , evidenceAmbientOcclusionEnabled_(
+          options.evidenceAmbientOcclusionEnabled)
 {
     log::info(log::Category::Persistence)
         << saveSlots_.progressStatus();
     buildLevelCatalog();
     restoreProfileLocation();
     applySettingsEffects(settingsCoordinator_.initialize());
+    if (!evidenceOutputDirectory_.empty()) {
+        presentationSettings_.lighting.ambientOcclusionEnabled =
+            evidenceAmbientOcclusionEnabled_;
+    }
     presentationSettings_.applyTileScales(assetManifest_);
     presentationSettings_.normalize();
     presentation_.setAnimationCatalog(&animationCatalog_);
@@ -438,7 +448,12 @@ void Application::run()
 
         const InputRouter::Frame routedInput =
             inputRouter_.routeFrame(input_, inputRoutingContext());
-        const float dt = frameTimer_.tick(simulationTiming_);
+        const float measuredDt = frameTimer_.tick(simulationTiming_);
+        // Evidence runs compare separate renderer configurations. Freezing
+        // simulation makes their scene/camera/animation inputs identical.
+        const float dt = evidenceOutputDirectory_.empty()
+            ? measuredDt
+            : 0.0f;
         update(
             dt,
             routedInput,
@@ -447,6 +462,7 @@ void Application::run()
         const Vec2 pixelSize = window_.sizeInPixels();
 #if SOKOBAN_ENABLE_DEBUG_UI
         const bool developerWorkspaceVisible =
+            evidenceOutputDirectory_.empty() &&
             !optionsMenu_.isOpen() && !titleScreen_.isOpen();
         if (!developerWorkspaceVisible) {
             renderer_.setGameViewportDisplay(std::nullopt);
@@ -578,7 +594,14 @@ void Application::run()
             running_ = false;
         }
         ++renderedFrames;
+        if (!evidenceOutputDirectory_.empty() &&
+            renderedFrames + 1 == smokeFrames_) {
+            captureEvidenceScene();
+        }
         if (smokeFrames_ > 0 && renderedFrames >= smokeFrames_) {
+            if (!evidenceOutputDirectory_.empty()) {
+                finishEvidenceCapture();
+            }
             log::info(log::Category::Application)
                 << "Smoke run finished after " << renderedFrames
                 << " frames.";

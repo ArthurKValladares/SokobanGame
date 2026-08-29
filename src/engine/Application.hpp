@@ -58,6 +58,11 @@ struct ApplicationOptions {
     // Roots saves, settings and the pipeline cache here instead of the user's
     // preference path. Empty keeps the normal location.
     std::filesystem::path saveDirectoryOverride;
+    // Optional smoke-run artifact destination. See CommandLineOptions: this
+    // is deliberately explicit so ordinary play never performs readback.
+    std::filesystem::path evidenceOutputDirectory;
+    int evidenceRenderScalePercent = 100;
+    bool evidenceAmbientOcclusionEnabled = true;
 };
 
 struct ApplicationTimingEventWatchState {
@@ -86,6 +91,8 @@ public:
 #endif
 
 private:
+    void captureEvidenceScene();
+    void finishEvidenceCapture();
     void loadCurrentScreen();
     void openTitleScreen();
     [[nodiscard]] std::vector<SaveSlotInfo> saveSlotInfos() const;
@@ -211,6 +218,10 @@ private:
     std::array<FrameArena, 2> renderFrameArenas_;
     std::size_t renderFrameArenaIndex_ = 0;
     std::uint64_t smokeFrames_ = 0;
+    std::filesystem::path evidenceOutputDirectory_;
+    RenderStats evidenceStats_ {};
+    bool evidenceAmbientOcclusionEnabled_ = true;
+    bool evidenceSceneCaptured_ = false;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;
     float overworldOverviewProgress_ = 0.0f;
     bool screenPreviewActive_ = false;

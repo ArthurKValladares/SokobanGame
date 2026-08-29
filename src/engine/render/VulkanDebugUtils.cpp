@@ -25,11 +25,12 @@ std::atomic<PFN_vkCmdEndDebugUtilsLabelEXT> endLabelFunction { nullptr };
 
 VKAPI_ATTR VkBool32 VKAPI_CALL validationCallback(
     VkDebugUtilsMessageSeverityFlagBitsEXT severity,
-    VkDebugUtilsMessageTypeFlagsEXT,
+    VkDebugUtilsMessageTypeFlagsEXT messageTypes,
     const VkDebugUtilsMessengerCallbackDataEXT* callbackData,
     void*)
 {
-    if (severity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+    if (severity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT &&
+        (messageTypes & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT) != 0) {
         // Before the logging below, which is allowed to fail: the count is the
         // part a CI gate depends on, so it must not be lost to a formatting or
         // allocation failure inside a C callback.

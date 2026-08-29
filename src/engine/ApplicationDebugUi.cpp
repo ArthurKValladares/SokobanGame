@@ -686,6 +686,10 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             renderStats.renderWidth,
             renderStats.renderHeight,
             renderStats.renderScalePercent);
+        ImGui::Text(
+            "SSAO %u x %u (half scene resolution)",
+            renderStats.ssaoWidth,
+            renderStats.ssaoHeight);
         const double megapixels =
             static_cast<double>(renderStats.swapchainWidth) *
             static_cast<double>(renderStats.swapchainHeight) / 1'000'000.0;
@@ -715,6 +719,11 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             renderStats.preparedModels,
             renderStats.preparedParticles);
         ImGui::Text("Visible faces %u", renderStats.visibleFaces);
+        ImGui::Text(
+            "Persistent renderables %u (bounds %u reused, %u rebuilt)",
+            renderStats.persistentRenderables,
+            renderStats.reusedRenderableBounds,
+            renderStats.rebuiltRenderableBounds);
         ImGui::Text("Draw calls %u", renderStats.drawCalls);
         ImGui::Text("Triangles %u", renderStats.triangles);
         ImGui::Text("Vertices %u", renderStats.vertices);
