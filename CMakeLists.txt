@@ -388,6 +388,7 @@ add_library(sokoban_core STATIC
     src/engine/render/GpuMaterial.cpp
     src/engine/render/GpuSkinning.cpp
     src/engine/render/ImageData.cpp
+    src/engine/render/MaterialRenderPolicy.cpp
     src/engine/render/OpaqueDrawSorter.cpp
     src/engine/render/PbrMaterial.cpp
     src/engine/render/PngWriter.cpp

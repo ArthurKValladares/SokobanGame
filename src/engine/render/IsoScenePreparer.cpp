@@ -850,6 +850,7 @@ void IsoScenePreparer::prepare(
                 frameData.tiles,
                 [](const RenderFrameData::Tile& tile) {
                     return tile.blurBehind ||
+                        tile.color.w < 1.0f ||
                         tile.effect == RenderSurfaceEffect::MirrorEnergy;
                 }) ||
             std::ranges::any_of(
@@ -1062,7 +1063,7 @@ void IsoScenePreparer::prepare(
             }
 
             if (!tile.model.isCube() && !tile.pickOnly) {
-                (tile.blurBehind ||
+                (tile.blurBehind || tile.color.w < 1.0f ||
                         tile.effect == RenderSurfaceEffect::MirrorEnergy
                         ? scene.translucentModelIndices
                         : scene.opaqueModelIndices)

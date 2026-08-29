@@ -395,22 +395,29 @@ void main()
     // for tiles and particles, and the lighting below needs no branch to
     // find a metallic and a roughness for them.
     Material material = modelMaterial();
-    // glTF says the base colour factor multiplies the base colour texture.
-    // Alpha only counts on a BLEND material: an OPAQUE one ignores it, and
-    // this engine picks a model's pipeline from the tile rather than from the
-    // material, so an authored alpha on an opaque material would otherwise
-    // punch a hole through a surface the file says is solid.
     vec4 materialColor = draw.color;
-    materialColor.rgb *= material.baseColorFactor.rgb;
-    if (material.materialState.y == 2u) {
-        materialColor.a *= material.baseColorFactor.a;
-    }
     int materialMode = int(draw.textureOptions.x + 0.5);
+    bool modelDraw = draw.gridColor.w < 0.0;
+    if (modelDraw) {
+        // A mixed glTF mesh may be submitted to both passes. The recorder
+        // selects the pass's material subset without multiplying pipelines.
+        int alphaSelection = int(draw.textureOptions.w + 0.5);
+        bool blendMaterial = material.materialState.y == 2u;
+        if ((alphaSelection == 1 && blendMaterial) ||
+            (alphaSelection == 2 && !blendMaterial)) {
+            discard;
+        }
+        // A model containing any double-sided material disables fixed-function
+        // culling for the whole draw. Restore authored single-sided behavior
+        // per primitive; double-sided back faces continue to the normal flip.
+        if (draw.passData[0].y > 0.5 && !gl_FrontFacing &&
+            material.materialState.w == 0u) {
+            discard;
+        }
+    }
+
+    vec4 baseColorSample = vec4(1.0);
     if (materialMode == 2) {
-        // The factor is applied above for every mode. Only the texture is
-        // per-mode: mode 1's comes from the manifest's single-texture
-        // override, so the glTF's own base colour texture is deliberately
-        // not consulted there.
         int materialTexture = int(material.primaryTextureHandles.x);
         if (materialTexture != 0) {
             int textureIndex = max(materialTexture - 1, 0);
@@ -418,7 +425,7 @@ void main()
             // on a mesh that has only one, so this never reads nothing.
             vec2 uv = materialTextureUv(
                 material.textureUvSets.x, material.materialState.z);
-            materialColor *= texture(
+            baseColorSample = texture(
                 modelTextures[nonuniformEXT(textureIndex)], uv);
         }
     } else if (materialMode == MATERIAL_MODE_PROCEDURAL_TEXTURE) {
@@ -431,9 +438,28 @@ void main()
             vec2(inFaceCoordU, inFaceCoordV));
     } else if (materialMode == 1) {
         int textureIndex = max(int(draw.materialOptions.z + 0.5), 0);
-        materialColor *= texture(
+        baseColorSample = texture(
             modelTextures[nonuniformEXT(textureIndex)],
             vec2(inFaceCoordU, inFaceCoordV));
+    }
+    if (modelDraw) {
+        // glTF base-colour RGB always multiplies factor and the selected base
+        // texture, including a manifest override. Authored alpha instead
+        // controls coverage: OPAQUE ignores it, MASK compares it to the
+        // cutoff, and BLEND contributes it to output opacity.
+        materialColor.rgb *=
+            material.baseColorFactor.rgb * baseColorSample.rgb;
+        float authoredAlpha =
+            material.baseColorFactor.a * baseColorSample.a;
+        if (material.materialState.y == 1u &&
+            authoredAlpha < material.materialScalars.w) {
+            discard;
+        }
+        if (material.materialState.y == 2u) {
+            materialColor.a *= authoredAlpha;
+        }
+    } else if (materialMode == 1 || materialMode == 2) {
+        materialColor *= baseColorSample;
     }
     vec3 color = mix(materialColor.rgb, draw.gridColor.rgb, gridMask());
     // Stays zero for anything unlit - the grid overlay or the 2D board -

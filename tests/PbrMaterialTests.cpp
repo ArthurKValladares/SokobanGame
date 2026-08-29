@@ -1,5 +1,7 @@
 #include "engine/render/PbrMaterial.hpp"
+#include "engine/render/MaterialRenderPolicy.hpp"
 
+#include <array>
 #include <cmath>
 #include <iostream>
 
@@ -242,6 +244,104 @@ void testMaterialAndScreenSpaceOcclusionComposeOnAmbientOnly()
         direct + ambientAfterMaterial * screenOcclusion));
 }
 
+void testModelMaterialPolicyFindsEveryRequiredDrawProperty()
+{
+    TEST("modelMaterialPolicyFindsEveryRequiredDrawProperty");
+    const ModelMaterialPolicy fallback =
+        modelMaterialPolicy(std::span<const MeshMaterial> {});
+    CHECK(fallback.hasOpaqueOrMask);
+    CHECK(!fallback.hasBlend);
+    CHECK(!fallback.hasDoubleSided);
+
+    std::array<MeshMaterial, 3> materials {};
+    materials[0].alphaMode = MaterialAlphaMode::Opaque;
+    materials[1].alphaMode = MaterialAlphaMode::Mask;
+    materials[1].doubleSided = true;
+    materials[2].alphaMode = MaterialAlphaMode::Blend;
+    const ModelMaterialPolicy mixed = modelMaterialPolicy(materials);
+    CHECK(mixed.hasOpaqueOrMask);
+    CHECK(mixed.hasBlend);
+    CHECK(mixed.hasDoubleSided);
+}
+
+void testMaterialSelectionSplitsMixedMeshesAcrossExistingPasses()
+{
+    TEST("materialSelectionSplitsMixedMeshesAcrossExistingPasses");
+    CHECK(materialSelected(
+        MaterialAlphaMode::Opaque, MaterialAlphaSelection::All));
+    CHECK(materialSelected(
+        MaterialAlphaMode::Mask,
+        MaterialAlphaSelection::OpaqueAndMask));
+    CHECK(!materialSelected(
+        MaterialAlphaMode::Blend,
+        MaterialAlphaSelection::OpaqueAndMask));
+    CHECK(materialSelected(
+        MaterialAlphaMode::Blend, MaterialAlphaSelection::BlendOnly));
+    CHECK(!materialSelected(
+        MaterialAlphaMode::Opaque, MaterialAlphaSelection::BlendOnly));
+}
+
+void testOpaqueBaseColorIgnoresAuthoredAlpha()
+{
+    TEST("opaqueBaseColorIgnoresAuthoredAlpha");
+    const ResolvedBaseColor result = resolveMaterialBaseColor(
+        { 0.8f, 0.6f, 0.4f, 0.7f },
+        { 0.5f, 0.25f, 0.75f, 0.2f },
+        { 0.25f, 0.5f, 0.8f, 0.1f },
+        MaterialAlphaMode::Opaque,
+        0.5f);
+    CHECK(near(result.rgb, { 0.1f, 0.075f, 0.24f }));
+    CHECK(near(result.alpha, 0.7f));
+    CHECK(!result.discarded);
+}
+
+void testMaskUsesCombinedAuthoredAlphaAndKeepsInstanceOpacity()
+{
+    TEST("maskUsesCombinedAuthoredAlphaAndKeepsInstanceOpacity");
+    const ResolvedBaseColor below = resolveMaterialBaseColor(
+        { 1.0f, 1.0f, 1.0f, 0.8f },
+        { 1.0f, 1.0f, 1.0f, 0.5f },
+        { 1.0f, 1.0f, 1.0f, 0.99f },
+        MaterialAlphaMode::Mask,
+        0.5f);
+    CHECK(below.discarded);
+
+    const ResolvedBaseColor exact = resolveMaterialBaseColor(
+        { 1.0f, 1.0f, 1.0f, 0.8f },
+        { 1.0f, 1.0f, 1.0f, 0.5f },
+        { 1.0f, 1.0f, 1.0f, 1.0f },
+        MaterialAlphaMode::Mask,
+        0.5f);
+    CHECK(!exact.discarded);
+    CHECK(near(exact.alpha, 0.8f));
+}
+
+void testBlendMultipliesFactorTextureAndInstanceAlpha()
+{
+    TEST("blendMultipliesFactorTextureAndInstanceAlpha");
+    const ResolvedBaseColor result = resolveMaterialBaseColor(
+        { 1.0f, 1.0f, 1.0f, 0.8f },
+        { 1.0f, 1.0f, 1.0f, 0.5f },
+        { 1.0f, 1.0f, 1.0f, 0.25f },
+        MaterialAlphaMode::Blend,
+        0.5f);
+    CHECK(near(result.alpha, 0.1f));
+    CHECK(!result.discarded);
+}
+
+void testMirrorEnergySubsetIgnoresAllAuthoredAlpha()
+{
+    TEST("mirrorEnergySubsetIgnoresAllAuthoredAlpha");
+    const Vec3 transparent = resolveMirrorEnergyBaseColor(
+        { 0.8f, 0.6f, 0.4f, 0.0f },
+        { 0.5f, 0.25f, 0.75f, 0.0f });
+    const Vec3 opaque = resolveMirrorEnergyBaseColor(
+        { 0.8f, 0.6f, 0.4f, 1.0f },
+        { 0.5f, 0.25f, 0.75f, 1.0f });
+    CHECK(near(transparent, { 0.4f, 0.15f, 0.3f }));
+    CHECK(near(opaque, transparent));
+}
+
 } // namespace
 
 int main()
@@ -262,6 +362,12 @@ int main()
     testOcclusionReadsRedAndInterpolatesByStrength();
     testOcclusionStrengthIsClampedToTheAuthoredRange();
     testMaterialAndScreenSpaceOcclusionComposeOnAmbientOnly();
+    testModelMaterialPolicyFindsEveryRequiredDrawProperty();
+    testMaterialSelectionSplitsMixedMeshesAcrossExistingPasses();
+    testOpaqueBaseColorIgnoresAuthoredAlpha();
+    testMaskUsesCombinedAuthoredAlphaAndKeepsInstanceOpacity();
+    testBlendMultipliesFactorTextureAndInstanceAlpha();
+    testMirrorEnergySubsetIgnoresAllAuthoredAlpha();
 
     if (failures == 0) {
         std::cout << "PbrMaterialTests: " << checks << " checks passed\n";

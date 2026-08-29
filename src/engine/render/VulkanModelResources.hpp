@@ -5,6 +5,7 @@
 #include "engine/render/AssetLoadScheduler.hpp"
 #include "engine/render/GpuSkinning.hpp"
 #include "engine/render/ImageData.hpp"
+#include "engine/render/MaterialRenderPolicy.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/RuntimeTextureCatalog.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
@@ -77,6 +78,7 @@ public:
         // untextured fallback and no real range is ever handed it, so a draw
         // recorded a frame early reads white rather than another model.
         uint32_t materialBase = 0;
+        ModelMaterialPolicy policy {};
     };
 
     // Axis-aligned extent of a model's mesh in its own space. Needed to frame
@@ -306,6 +308,7 @@ private:
         // in flight.
         uint32_t materialBase = 0;
         uint32_t materialCount = 0;
+        ModelMaterialPolicy materialPolicy {};
         uint64_t lastRequested = 0;
         uint64_t gpuBytes = 0;
         VulkanGeometryArena::Upload upload {};

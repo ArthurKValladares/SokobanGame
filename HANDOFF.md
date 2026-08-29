@@ -22,14 +22,17 @@ straight-clamp comparison. Player-facing UI now has a dedicated fragment path,
 leaving the scene fragment shader free of font, title-art, UI-texture and
 rounded scene-image branches. All four core glTF material maps now affect scene
 lighting: metallic-roughness, tangent-space normals, linear HDR emissive and
-ambient-only material occlusion. The next objective is the alpha and
-mirror-energy audit that closes phase 7.
+ambient-only material occlusion. Authored OPAQUE, MASK, BLEND and double-sided
+state now control pass selection, coverage, sorting and culling, while the
+mirror-energy effect has an explicit base-color-only material contract. Phase 7
+is complete; the next objective is view-space, world-unit SSAO.
 
 The recommended order is:
 
-1. Capture the remaining post-tonemap visual/performance baseline evidence.
-2. Audit alpha and mirror-energy behavior now that all core maps are live.
-3. Complete SSAO, then resume the larger scaling and memory work.
+1. Capture the remaining post-tonemap/material visual baseline evidence.
+2. Add view-space SSAO inputs and world/view-unit radius and bias.
+3. Move AO to half resolution with a depth/normal-aware bilateral filter.
+4. Resume the larger scaling and memory work after SSAO is stable.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
@@ -41,7 +44,7 @@ sampling have different failure modes and should be independently reviewable.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
 - Current tests: 67 CTest suites in the newest configured build tree.
-- Current shaders: 16 GLSL files. `triangle.frag.glsl` is 643 physical lines;
+- Current shaders: 16 GLSL files. `triangle.frag.glsl` is 669 physical lines;
   player-facing UI uses the 93-line `ui.frag.glsl` path.
 - Texture capacity: selected at startup from a configured 1,024-slot ceiling,
   device limits, 16 editor-reserved slots and 32 import-reserved slots. The
@@ -69,8 +72,8 @@ future tasks:
   double-sided metadata, a GPU material buffer and Cook-Torrance GGX. The CPU
   and GPU representations carry all core map types, runtime handle
   assignment/residency and sampling are complete for metallic-roughness,
-  normal, emissive and occlusion maps. The alpha and mirror paths remain to be
-  audited against the completed material behavior.
+  normal, emissive and occlusion maps. Alpha pass selection, cutoff, ordering,
+  double-sided culling and the mirror-energy material subset are complete.
 - **F4a**: player-facing solid rectangles, font glyphs, title art, runtime UI
   textures and rounded scene-image composition use a dedicated UI fragment
   shader. The lit scene fragment shader no longer branches on those modes.
@@ -95,11 +98,11 @@ future tasks:
   byte budgets can evict old resources. What remains is mip/LOD streaming,
   compressed-size accounting, more flexible publication budgeting, and
   removing the `vkDeviceWaitIdle` eviction fallback.
-- **PBR map transport and sampling are complete.** A runtime catalog assigns
+- **The material program is complete.** A runtime catalog assigns
   normal, metallic-roughness, emissive and occlusion handles from the resolved
   inventory and attaches only the relevant maps to each model's requirements.
-  The main scene shader consumes every core map; phase 7 now needs only the
-  alpha and mirror-path audit.
+  The main scene shader consumes every core map and honors authored alpha and
+  sidedness; mirror energy deliberately consumes only base-color RGB detail.
 - **Descriptor indexing is core in Vulkan 1.2.** This renderer already requires
   Vulkan 1.3. Query and enable the Vulkan 1.2 feature struct rather than adding
   an extension-name requirement unnecessarily.
@@ -545,24 +548,62 @@ build stages all 200 content files, and all 67 CTest suites—including
 semantics, UV selection, ambient-only application and SSAO composition. Visual
 reference capture remains in 0.1.
 
-#### 7.5 Alpha and mirror paths — next
+#### 7.5 Alpha and mirror paths — complete
 
-- Revalidate MASK cutoff, BLEND ordering, double-sided culling and base-color
-  alpha after map migration.
-- Make an explicit decision about which map effects mirror-energy ghosts use;
-  do not let them accidentally inherit the full lit path.
+`MaterialRenderPolicy.*` is the CPU reference and runtime summary for authored
+alpha/sidedness. Model publication records whether a mesh contains opaque/mask,
+blend or double-sided materials. A mixed mesh uses the existing opaque and
+blended pipelines: the recorder submits its OPAQUE/MASK primitives to the first
+pass and BLEND primitives to the second, and `triangle.frag.glsl` rejects the
+other subset per primitive. No new pipeline permutation or descriptor set was
+added. Translucent model draws are stable-sorted farthest first; source order
+inside one model remains the glTF author's responsibility.
 
-**Acceptance:** an off-the-shelf external-texture glTF and an embedded-texture
-GLB render correctly; all four map types, both UV sets, alpha modes and
-double-sided materials have focused fixtures.
+Base-color factor and the selected base-color texture multiply RGB in every
+model material mode, including manifest texture overrides. OPAQUE ignores
+authored factor/texture alpha, MASK discards when their product is below the
+authored cutoff, and BLEND multiplies the instance alpha by that product. A
+sub-1.0 instance tint now puts the whole model in the translucent pass.
+
+Fixed-function back-face culling remains enabled for wholly single-sided
+models in either pass. Any double-sided material disables whole-draw culling;
+the standard and mirror fragment paths then reject back faces only for the
+single-sided primitives in a mixed model, while mapped normals continue to flip
+for surviving double-sided back faces.
+
+Mirror energy has an explicit narrow contract: base-color factor RGB, the
+selected base-color texture RGB, UV0/UV1 selection and scrolling may shape its
+detail. Factor/texture alpha, alpha mode/cutoff, metallic-roughness, normal,
+emissive and occlusion do not affect the ghost; effect color and animation own
+its opacity and lighting response.
+
+The focused material suite now passes 55 checks covering pass selection,
+OPAQUE/MASK/BLEND alpha math and the mirror subset. The scene-preparation suite
+passes 1,545 checks including alpha-tinted model classification. The embedded
+GLB loader fixture still covers all core maps, both UV sets, MASK and
+double-sided metadata; production external glTF content exercises BLEND and
+double-sided summaries. All 16 shaders compile, the Debug build stages 200
+files, and all 67 CTest suites—including `vulkan_smoke`—pass.
+
+**Acceptance:** automated material transport, policy and runtime validation are
+complete. Representative appearance capture remains in 0.1. MASK currently
+cuts out the visible scene pass; the depth-only model-shadow pipelines still
+cast the mesh silhouette and would need a texture-sampling fragment stage if
+cutout shadow silhouettes become an authored-content requirement.
 
 ### 8. Complete V7 SSAO
 
+#### 8.1 View-space inputs and physical sampling — next
+
 - Reconstruct or provide view-space position and normals.
 - Express radius and bias in view/world units rather than pixels and raw depth.
+- Preserve the existing ambient-only application contract and test stability
+  across camera and render-scale changes before changing resolution.
+
+#### 8.2 Half-resolution bilateral path
+
 - Render AO at half resolution.
 - Replace the 5x5 box blur with a depth/normal-aware bilateral filter.
-- Preserve the ambient-only application contract.
 - Profile the existing scene-color snapshot; remove it only if the new data
   flow makes it unnecessary.
 
@@ -613,52 +654,24 @@ layout changes affect modules that appear unrelated to the immediate feature.
 
 ## Source map for the next packets
 
-- `src/engine/AssetManifest.*`: parsed declarations and stable runtime handles.
-- `src/engine/ContentPipeline.*`: dependency validation, inventory and staging.
-- `src/engine/TextureSource.*`: canonical external, buffer-view and data-URI
-  identities, color-space/sampling interpretation and stable identity keys.
-- `src/engine/render/GltfMesh.*`: cgltf boundary, mesh/material/animation decode.
-- `tests/GltfDependencyTests.cpp`: structure-only dependency fixtures for
-  external/data-URI glTF and embedded-image GLB inputs, plus loader-level CPU
-  material binding/default coverage.
-- `src/engine/render/ImageData.*`: decoded RGBA image abstraction for both
-  filesystem paths and encoded memory.
-- `src/engine/render/TextureSourceLoader.*`: worker-safe external, data-URI and
-  glTF buffer-view byte loading through the shared RGBA decoder.
-- `src/engine/render/RuntimeTextureCatalog.*`: deduplicated logical texture
-  slots, per-model requirements/material bindings and stable descriptor remap.
-- `tests/RuntimeTextureCatalogTests.cpp`: catalog isolation, stable-slot,
-  source-form and production-document inspection coverage.
-- `src/engine/render/VulkanDeviceContext.*`: feature/property queries and logical
-  device feature chain.
-- `src/engine/render/VulkanDeviceSelection.*`: testable release feature tier.
-- `src/engine/render/VulkanSceneDescriptors.*`: descriptor layouts, pools, sets
-  and writes.
-- `src/engine/render/FrameDescriptorSync.hpp`: per-frame descriptor generations.
-- `src/engine/render/VulkanModelResources.*`: async preparation, GPU publication,
-  texture views, material buffer and residency/eviction.
-- `src/engine/render/GpuMaterial.cpp` and `tests/GpuMaterialTests.cpp`: pure
-  CPU-to-GPU material conversion and complete ABI/default coverage.
-- `src/engine/render/PbrMaterial.*` and `tests/PbrMaterialTests.cpp`: CPU
-  reference and focused numeric coverage for mapped PBR parameter resolution.
-- `src/engine/render/VulkanPipelineFactory.*`: pipeline layouts, specialization
-  constants, blend/cull/write-mask state.
-- `src/engine/render/VulkanSceneRecorder.*`: pass ordering and descriptor binds.
-- `src/engine/render/VulkanRenderConstants.hpp`: CPU/GPU shared layouts.
-- `src/engine/render/Tonemap.*` and `tests/TonemapTests.cpp`: output-transform
-  contract, canonical CPU reference and focused numeric coverage.
-- `src/engine/SettingsTypes.*`, `PlayerProfile*`, `SettingsCoordinator.*` and
-  `ui/OptionsMenu.*`: persisted exposure and its user-facing control.
-- `src/engine/PresentationSettings.*` and `render/RenderFrameBuilder.cpp`:
-  authoritative runtime output-transform projection and frame transport.
-- `shaders/triangle.frag.glsl`: scene lighting, tile/model materials, scene blur,
-  editor highlight and the ambient-mask writer.
-- `shaders/ui.frag.glsl`: post-tonemap solid, font, title-art, runtime-texture
-  and rounded scene-image UI modes.
-- `shaders/ground_splat.frag.glsl`: second ambient-mask writer.
-- `shaders/mirror_energy.frag.glsl`: separate material-texture consumer.
-- `shaders/tonemap.frag.glsl`: completed exposure and output transform.
-- `shaders/ssao*.glsl`: remaining V7 work.
+- `shaders/ssao.frag.glsl`: current depth-only AO estimator with pixel/raw-depth
+  radius and bias.
+- `shaders/ssao_composite.frag.glsl`: bilateral/composite destination; must
+  preserve the ambient-mask contract.
+- `src/engine/render/VulkanSsaoPass.*`: AO target sizing, recording and resource
+  lifetime.
+- `src/engine/render/VulkanSwapchainResources.*`: scene depth/color copies and
+  AO image ownership.
+- `src/engine/render/VulkanSceneDescriptors.*`: depth, AO and any new
+  normal/input bindings.
+- `src/engine/render/VulkanPipelineFactory.*`: SSAO pipeline and render-target
+  formats.
+- `src/engine/render/VulkanSceneRecorder.*`: pass ordering and conditional depth
+  copy.
+- `src/engine/render/VulkanRenderConstants.hpp` and `RenderTypes.hpp`: camera,
+  projection and world/view-unit sampling parameters.
+- `tests/PbrMaterialTests.cpp`: ambient-only composition reference; add focused
+  projection/reconstruction math coverage in a Vulkan-free module.
 
 ## Build and test commands
 

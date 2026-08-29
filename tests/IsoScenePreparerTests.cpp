@@ -1223,6 +1223,29 @@ void testMirrorEnergyIsTranslucentNonPickableAndShadowless()
     }
 }
 
+void testAlphaTintedModelUsesTheTranslucentPass()
+{
+    sokoban::RenderFrameData frame;
+    frame.viewMode = sokoban::RenderViewMode::Isometric3D;
+    frame.levelWidth = 2;
+    frame.levelHeight = 2;
+    frame.levelDepth = 1;
+    frame.tiles.push_back({
+        .cell = { 1, 1, 0 },
+        .position = { 1.0f, 1.0f },
+        .color = { 0.8f, 0.7f, 0.6f, 0.4f },
+        .height = 1.0f,
+        .model = { 1 },
+    });
+
+    const sokoban::PreparedRenderScene scene =
+        prepareScene(frame, { 1280.0f, 720.0f });
+    CHECK(scene.hasTranslucentContent);
+    CHECK(scene.opaqueModelIndices.empty());
+    CHECK(scene.translucentModelIndices.size() == 1);
+    CHECK(scene.translucentModelIndices[0] == 0);
+}
+
 void testParticlesBecomeSortedTranslucentBillboardsOnly()
 {
     using namespace sokoban;
@@ -1316,6 +1339,7 @@ int main()
     testAdjacentWaterFacesSharePerspectiveCoordinates();
     testAdjacentModelsShareProjectiveCoordinates();
     testMirrorEnergyIsTranslucentNonPickableAndShadowless();
+    testAlphaTintedModelUsesTheTranslucentPass();
     testParticlesBecomeSortedTranslucentBillboardsOnly();
     testAuthoredModelTransformSupportsPivotRotationAndNonUniformScale();
 

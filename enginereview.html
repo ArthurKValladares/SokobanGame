@@ -257,7 +257,7 @@
   <header class="shell">
     <p class="eyebrow">Current-state review · 28 August 2026</p>
     <h1>Finish the material path without rebuilding it twice.</h1>
-    <p class="deck">Sokoban 3D now has the hard substrate, a device-bounded runtime texture heap, semantically validated glTF texture inventory, complete CPU/GPU material-map representations, model-scoped map residency, a tested HDR output transform, and a dedicated post-tonemap UI fragment path. The next program lands each material map behind a testable gate.</p>
+    <p class="deck">Sokoban 3D now has the hard substrate, a device-bounded runtime texture heap, semantically validated glTF texture inventory, complete CPU/GPU material behavior, model-scoped map residency, a tested HDR output transform, and a dedicated post-tonemap UI fragment path. The next program replaces the depth-only, pixel-scaled SSAO approximation with a view-space, scale-stable path.</p>
     <div class="metrics" aria-label="Current repository facts">
       <div class="metric"><b>36</b><span>manifest models</span></div>
       <div class="metric"><b>42 / 1024</b><span>textures on validated GPU</span></div>
@@ -281,7 +281,7 @@
     <section id="verdict">
       <div class="section-head"><span class="num">01</span><h2>Current verdict</h2></div>
       <div class="callout">
-        <strong>Next program:</strong> alpha/mirror audit. Metallic-roughness, normal, emissive and ambient-only material occlusion are now live; CPU/GPU material transport, descriptor indexing, glTF source/semantic discovery, model-scoped residency, HDR presentation and the UI/scene shader split remain validation invariants.
+        <strong>Next program:</strong> SSAO view-space inputs. Metallic-roughness, normal, emissive, material occlusion, alpha modes, double-sided culling and the deliberately separate mirror-energy material subset are now live; CPU/GPU material transport, descriptor indexing, model-scoped residency, HDR presentation and the ambient-only mask remain validation invariants.
       </div>
       <div class="grid" style="margin-top:1rem">
         <article class="card">
@@ -290,9 +290,9 @@
           <p>The renderer has a real camera and world transforms, instanced tiles, distinct opaque paths, an HDR scene target, cgltf validation, tangents and UV1, a GPU material buffer, and Cook-Torrance GGX. These are baseline invariants.</p>
         </article>
         <article class="card">
-          <p class="kicker">What remains in phase 7</p>
-          <h3>Edge-path audit</h3>
-          <p>All four core glTF maps now affect scene lighting with their authored color space, channels, UV selections and scalars. Revalidate alpha modes, double-sided state and the deliberately separate mirror-energy path before calling the material program complete.</p>
+          <p class="kicker">What comes next</p>
+          <h3>Physical SSAO inputs</h3>
+          <p>Phase 7 is complete. Reconstruct or provide view-space position and normals, then express AO radius and bias in world/view units before changing resolution or blur behavior.</p>
         </article>
         <article class="card">
           <p class="kicker">What not to overbuild</p>
@@ -315,7 +315,7 @@
           <tbody>
             <tr><td>F1</td><td><span class="status done">Done</span></td><td>Shared math, transforms, bounds, rays and frustums exist.</td><td>Use them in T4; no foundation rewrite.</td></tr>
             <tr><td>F2</td><td><span class="status done">Done</span></td><td>The HDR path uses Khronos PBR Neutral by default, persisted −4 to +4 EV exposure, and a Debug straight-clamp comparison.</td><td>Preserve UI-after-tonemap and single hardware sRGB encoding.</td></tr>
-            <tr><td>F3</td><td><span class="status partial">Core done</span></td><td>Material factors, tangents, UV1, GPU buffer, alpha metadata, GGX, model-scoped residency and all four core map samplers exist.</td><td>Audit alpha modes, double-sided state and mirror-energy behavior.</td></tr>
+            <tr><td>F3</td><td><span class="status done">Done</span></td><td>Material factors, tangents, UV1, GPU buffer, GGX, all four core maps, alpha pass selection/cutoff and authored sidedness are live.</td><td>Preserve the data-driven policy and mirror-energy's narrow subset.</td></tr>
             <tr><td>F4</td><td><span class="status done">Done</span></td><td><code>ui.frag.glsl</code> owns solid/font/title/texture/scene-image UI; <code>triangle.frag.glsl</code> keeps scene work.</td><td>Preserve the split while material maps land.</td></tr>
             <tr><td>F5</td><td><span class="status conditional">Conditional</span></td><td>Vulkan types still cross broad renderer seams.</td><td>Build an RHI only for a real second backend/platform.</td></tr>
             <tr><td>T1–T3</td><td><span class="status done">Done</span></td><td>Instanced tiles, opaque sorting and model back-face culling are implemented.</td><td>Preserve their draw ordering and winding invariants.</td></tr>
@@ -372,7 +372,7 @@
         <article class="card">
           <p class="kicker">Shader boundary</p>
           <h3>UI split before map sampling — complete</h3>
-          <p>The scene fragment shader is now 643 lines after mapped PBR work and still contains no font, title-art, UI-texture or rounded scene-image branches. The 93-line UI fragment module retains those modes after tonemapping.</p>
+          <p>The scene fragment shader is now 669 lines after mapped PBR and alpha-policy work and still contains no font, title-art, UI-texture or rounded scene-image branches. The 93-line UI fragment module retains those modes after tonemapping.</p>
         </article>
       </div>
       <div class="callout warn" style="margin-top:1rem">
@@ -476,24 +476,24 @@
         <article class="phase">
           <div class="phase-id">7<small>PBR maps</small></div>
           <div>
-            <div class="phase-title"><h3>Sample maps one type at a time</h3><span class="status partial">In progress</span></div>
+            <div class="phase-title"><h3>Sample maps one type at a time</h3><span class="status done">Complete</span></div>
             <div class="tasks">
               <div class="task"><span class="task-id">7.1</span><div><b>Metallic-roughness — complete</b><p>The linear packed map reads G roughness and B metallic, multiplies authored factors, supports UV0/UV1 and scrolling, and feeds the direct plus ambient material partition. CPU-reference tests pin the channel and clamp math.</p></div></div>
               <div class="task"><span class="task-id">7.2</span><div><b>Normal — complete</b><p>The shader re-orthogonalizes world-space TBN, applies linear normal maps and scale, supports UV0/UV1 plus scrolling, and reverses the final mapped normal on double-sided back faces. CPU-reference and synthetic authored/derived tangent fixtures cover the contract.</p></div></div>
               <div class="task"><span class="task-id">7.3</span><div><b>Emissive — complete</b><p>The sRGB-backed map samples as linear RGB, multiplies the factor, supports UV0/UV1 plus scrolling and adds unclamped HDR color. Its alpha is ignored; it stays outside the ambient numerator while remaining in total light so SSAO preserves self-emission. CPU-reference tests pin the contract.</p></div></div>
               <div class="task"><span class="task-id">7.4</span><div><b>Occlusion — complete</b><p>The linear map reads R, interpolates by clamped strength, supports UV0/UV1 plus scrolling and scales diffuse plus metallic ambient fill only. The already-reduced ambient enters both sides of the scene mask, so material and screen-space AO compose without touching direct, specular or emissive light. CPU-reference tests pin the contract.</p></div></div>
-              <div class="task"><span class="task-id">7.5</span><div><b>Alpha and mirror audit — next</b><p>Recheck MASK, BLEND, double-sided culling and define the map subset used by mirror-energy ghosts.</p></div></div>
+              <div class="task"><span class="task-id">7.5</span><div><b>Alpha and mirror audit — complete</b><p>A tested material policy splits mixed meshes across the existing opaque/blended pipelines, sorts translucent models farthest first, applies MASK to factor × texture alpha, and honors per-material sidedness without new pipeline permutations. OPAQUE ignores authored opacity; BLEND multiplies it by instance alpha. Mirror energy consumes only base-color factor/texture RGB, UV selection and scrolling—never material alpha or the PBR lighting maps.</p></div></div>
             </div>
-            <p class="accept"><b>Gate:</b> one external-texture glTF and one embedded GLB cover all map types, UV sets, alpha modes and double-sided behavior.</p>
+            <p class="accept"><b>Gate:</b> all 16 shaders compile; the focused CPU policy has 55 passing checks, scene preparation has 1,545, the embedded GLB fixture covers maps/UVs/MASK/double-sided transport, production glTF content exercises BLEND, and all 67 Debug suites pass. Manual appearance capture remains in 0.1; MASK shadow cutouts remain a separate depth-only-shadow limitation.</p>
           </div>
         </article>
 
         <article class="phase">
           <div class="phase-id">8<small>V7</small></div>
           <div>
-            <div class="phase-title"><h3>Complete ambient occlusion</h3></div>
+            <div class="phase-title"><h3>Complete ambient occlusion</h3><span class="status next">Next</span></div>
             <div class="tasks">
-              <div class="task"><span class="task-id">8.1</span><div><b>View-space inputs</b><p>Provide/reconstruct position and normals; express radius/bias in world or view units.</p></div></div>
+              <div class="task"><span class="task-id">8.1</span><div><b>View-space inputs — next</b><p>Provide/reconstruct position and normals; express radius/bias in world or view units and prove camera/render-scale stability before changing resolution.</p></div></div>
               <div class="task"><span class="task-id">8.2</span><div><b>Half-resolution bilateral path</b><p>Replace the full-resolution depth-only sample and 5×5 box blur while preserving ambient-only application.</p></div></div>
             </div>
             <p class="accept"><b>Gate:</b> AO is scale-stable, silhouette-aware and never darkens direct or emissive light.</p>

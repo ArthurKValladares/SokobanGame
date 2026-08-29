@@ -70,20 +70,25 @@ layout(std140, set = 0, binding = 7) uniform SceneFrame
     vec4 pointLightMeta;
 } frame;
 
-vec4 sampledMaterial()
+Material modelMaterial()
+{
+    // Entry zero is the reserved published-nothing fallback; see the standard
+    // model shader for why the relative index is dropped for a zero base.
+    int materialBase = int(draw.passData[0].x + 0.5);
+    return materials.entries[
+        materialBase == 0 ? 0 : materialBase + int(inMaterialIndex)];
+}
+
+vec3 sampledMaterialRgb(Material material)
 {
     int materialMode = int(draw.textureOptions.x + 0.5);
+    vec3 result = material.baseColorFactor.rgb;
     if (materialMode == 2) {
-        // Entry zero is the reserved published-nothing fallback; see
-        // modelMaterial() in triangle.frag.glsl for why the index is dropped.
-        int materialBase = int(draw.passData[0].x + 0.5);
-        Material material = materials.entries[
-            materialBase == 0 ? 0 : materialBase + int(inMaterialIndex)];
         int materialTexture = int(material.primaryTextureHandles.x);
-        // The ghost is a tint over the model's own colour, and its opacity
-        // comes from the effect rather than the material, so only the base
-        // colour's rgb is taken here.
-        vec4 result = vec4(material.baseColorFactor.rgb, 1.0);
+        // Mirror energy's explicit material subset is base-colour RGB, its UV
+        // selection, and scrolling. Factor/texture alpha, alpha mode/cutoff,
+        // and every PBR lighting map are deliberately ignored: this effect
+        // owns its opacity and lighting response.
         if (materialTexture == 0) {
             return result;
         }
@@ -95,22 +100,27 @@ vec4 sampledMaterial()
             uv.y = fract(uv.y + draw.materialOptions.y);
         }
         return result * texture(
-            modelTextures[nonuniformEXT(textureIndex)], uv);
+            modelTextures[nonuniformEXT(textureIndex)], uv).rgb;
     }
     if (materialMode == 1) {
         int textureIndex = max(int(draw.materialOptions.z + 0.5), 0);
-        return texture(
+        return result * texture(
             modelTextures[nonuniformEXT(textureIndex)],
-            vec2(inFaceCoordU, inFaceCoordV));
+            vec2(inFaceCoordU, inFaceCoordV)).rgb;
     }
-    return vec4(1.0);
+    return result;
 }
 
 void main()
 {
-    vec4 material = sampledMaterial();
+    Material materialState = modelMaterial();
+    if (draw.passData[0].y > 0.5 && !gl_FrontFacing &&
+        materialState.materialState.w == 0u) {
+        discard;
+    }
+    vec3 material = sampledMaterialRgb(materialState);
     float textureInfluence = clamp(draw.shadowOptions.w, 0.0, 1.0);
-    float luminance = dot(material.rgb, vec3(0.2126, 0.7152, 0.0722));
+    float luminance = dot(material, vec3(0.2126, 0.7152, 0.0722));
     float detail = mix(1.0, 0.48 + luminance * 0.72, textureInfluence);
 
     float pulse = 0.5 + 0.5 * sin(
@@ -142,7 +152,7 @@ void main()
             max(draw.gridColor.x, 0.01)) * draw.gridColor.y;
     }
 
-    vec3 normalizedTexture = material.rgb /
+    vec3 normalizedTexture = material /
         max(max(material.r, material.g), max(material.b, 0.15));
     vec3 textureTint = mix(
         vec3(1.0),
@@ -151,7 +161,7 @@ void main()
     vec3 energyColor =
         draw.color.rgb * textureTint *
         (detail * pulseScale * scanScale + rim);
-    float alpha = draw.color.a * material.a *
+    float alpha = draw.color.a *
         clamp(0.78 + rim * 0.18 + pulse * 0.12, 0.0, 1.25);
     outColor = vec4(energyColor, alpha);
 }

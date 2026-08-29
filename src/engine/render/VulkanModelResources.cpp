@@ -826,6 +826,7 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                     return false;
                 }
                 slot.bounds = boundsOf(mesh.vertices);
+                slot.materialPolicy = modelMaterialPolicy(mesh.materials);
                 slot.materialBase = writeMaterials(mesh.materials);
                 slot.materialCount =
                     static_cast<uint32_t>(mesh.materials.size());
@@ -853,6 +854,8 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                     slot.skinnedSource.reset();
                     return false;
                 }
+                slot.materialPolicy = modelMaterialPolicy(
+                    slot.skinnedSource->materials);
                 slot.materialBase = writeMaterials(slot.skinnedSource->materials);
                 slot.materialCount = static_cast<uint32_t>(
                     slot.skinnedSource->materials.size());
@@ -869,6 +872,7 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
             // Zeroing the count is what makes the next repack reclaim it.
             slot.materialBase = 0;
             slot.materialCount = 0;
+            slot.materialPolicy = {};
             slot.failure = std::current_exception();
             slot.state = LoadState::Failed;
             if (wait) {
@@ -1397,10 +1401,14 @@ VulkanModelResources::MaterialBinding VulkanModelResources::materialForModel(
     const uint32_t materialBase = model.index() < models_.size()
         ? models_[model.index()].materialBase
         : 0;
+    const ModelMaterialPolicy policy = model.index() < models_.size()
+        ? models_[model.index()].materialPolicy
+        : ModelMaterialPolicy {};
     return {
         .mode = definition.materialMode,
         .textureIndex = definition.textureIndex,
         .materialBase = materialBase,
+        .policy = policy,
     };
 }
 

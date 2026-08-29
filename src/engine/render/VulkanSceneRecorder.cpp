@@ -526,6 +526,18 @@ private:
         shadowPass_.finishPointShadows(commandBuffer, stats_);
     }
 
+    [[nodiscard]] bool hasAuthoredBlendMaterials(
+        const RenderFrameData& frameData,
+        const PreparedRenderScene& scene) const
+    {
+        return std::ranges::any_of(
+            scene.opaqueModelIndices,
+            [&](std::size_t tileIndex) {
+                return models_.materialForModel(
+                    frameData.tiles[tileIndex].model).policy.hasBlend;
+            });
+    }
+
     void recordGameRendering(
         VkCommandBuffer commandBuffer,
         VkImageView colorView,
@@ -533,6 +545,8 @@ private:
         const RenderFrameData& frameData,
         const PreparedRenderScene& scene)
     {
+        const bool hasTranslucency = scene.hasTranslucentContent ||
+            hasAuthoredBlendMaterials(frameData, scene);
         if (shadowPass_.valid() && pipelines_.shadow()) {
             recordShadowMapRendering(
                 commandBuffer, frameData, scene);
@@ -547,7 +561,7 @@ private:
             scene,
             false,
             false,
-            scene.hasTranslucentContent || !resolveView,
+            hasTranslucency || !resolveView,
             false,
             true,
             { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });
@@ -559,7 +573,7 @@ private:
             swapchain_.copyResolvedSceneDepth(
                 commandBuffer, stats_);
         }
-        if (!scene.hasTranslucentContent) {
+        if (!hasTranslucency) {
             return;
         }
         swapchain_.copyResolvedSceneColor(
@@ -586,6 +600,8 @@ private:
         const PreparedRenderScene& scene)
     {
         previewDescriptor_ = true;
+        const bool hasTranslucency = scene.hasTranslucentContent ||
+            hasAuthoredBlendMaterials(frameData, scene);
         const VkExtent2D full = swapchain_.renderExtent();
         const VkExtent2D extent {
             std::max(1U, static_cast<uint32_t>(
@@ -612,7 +628,7 @@ private:
             scene,
             false,
             false,
-            scene.hasTranslucentContent || !resolveView,
+            hasTranslucency || !resolveView,
             false,
             true,
             inset);
@@ -620,7 +636,7 @@ private:
                 frameData.lighting.ambientOcclusion)) {
             swapchain_.copyResolvedSceneDepth(commandBuffer, stats_);
         }
-        if (!scene.hasTranslucentContent) {
+        if (!hasTranslucency) {
             return;
         }
         // Keep sceneColor as the untouched main view for the opacity feather.
@@ -1277,6 +1293,7 @@ private:
             const RenderFrameData::Tile* tile = nullptr;
             VulkanModelResources::MeshView mesh {};
             GpuDrawInstance constants {};
+            ModelMaterialPolicy materialPolicy {};
             VkPipeline pipeline = VK_NULL_HANDLE;
             uint32_t pipelineRank = 0;
             std::array<uint32_t, 29> batchState {};
@@ -1303,14 +1320,81 @@ private:
             append(constants.textureOptions);
             return result;
         };
-        const std::vector<std::size_t>& modelIndices =
-            translucentPass
-            ? scene.translucentModelIndices
-            : scene.opaqueModelIndices;
+
+        struct ModelCandidate {
+            std::size_t tileIndex = 0;
+            MaterialAlphaSelection alphaSelection =
+                MaterialAlphaSelection::All;
+            float depth = 0.0f;
+        };
+        const auto modelDepth = [&](const RenderFrameData::Tile& tile) {
+            const ModelTransformPoints transform =
+                IsoScenePreparer::modelTransformPoints(tile);
+            const Vec3 center {
+                (transform.xPoint.x + transform.yPoint.x +
+                    transform.zPoint.x - transform.origin.x) * 0.5f,
+                (transform.xPoint.y + transform.yPoint.y +
+                    transform.zPoint.y - transform.origin.y) * 0.5f,
+                (transform.xPoint.z + transform.yPoint.z +
+                    transform.zPoint.z - transform.origin.z) * 0.5f,
+            };
+            const Vec3 relative {
+                center.x - scene.isoLayout.cameraPosition.x,
+                center.y - scene.isoLayout.cameraPosition.y,
+                center.z - scene.isoLayout.cameraPosition.z,
+            };
+            return relative.x * scene.isoLayout.cameraForward.x +
+                relative.y * scene.isoLayout.cameraForward.y +
+                relative.z * scene.isoLayout.cameraForward.z;
+        };
+        std::vector<ModelCandidate> candidates;
+        candidates.reserve(
+            scene.opaqueModelIndices.size() +
+            scene.translucentModelIndices.size());
+        if (translucentPass) {
+            for (std::size_t tileIndex : scene.translucentModelIndices) {
+                candidates.push_back({
+                    .tileIndex = tileIndex,
+                    .depth = modelDepth(frameData.tiles[tileIndex]),
+                });
+            }
+            for (std::size_t tileIndex : scene.opaqueModelIndices) {
+                const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
+                if (models_.materialForModel(tile.model).policy.hasBlend) {
+                    candidates.push_back({
+                        .tileIndex = tileIndex,
+                        .alphaSelection =
+                            MaterialAlphaSelection::BlendOnly,
+                        .depth = modelDepth(tile),
+                    });
+                }
+            }
+            std::stable_sort(
+                candidates.begin(),
+                candidates.end(),
+                [](const ModelCandidate& left, const ModelCandidate& right) {
+                    return left.depth > right.depth;
+                });
+        } else {
+            for (std::size_t tileIndex : scene.opaqueModelIndices) {
+                const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
+                const ModelMaterialPolicy policy =
+                    models_.materialForModel(tile.model).policy;
+                if (policy.hasOpaqueOrMask) {
+                    candidates.push_back({
+                        .tileIndex = tileIndex,
+                        .alphaSelection = policy.hasBlend
+                            ? MaterialAlphaSelection::OpaqueAndMask
+                            : MaterialAlphaSelection::All,
+                    });
+                }
+            }
+        }
         std::vector<ModelDraw> draws;
-        draws.reserve(modelIndices.size());
-        for (std::size_t tileIndex : modelIndices) {
-            const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
+        draws.reserve(candidates.size());
+        for (const ModelCandidate& candidate : candidates) {
+            const RenderFrameData::Tile& tile =
+                frameData.tiles[candidate.tileIndex];
             if (!models_.tileReadyForDraw(
                     tile, configuration_.descriptorFrameIndex)) {
                 continue;
@@ -1318,10 +1402,13 @@ private:
             const bool mirrorGhost =
                 tile.effect == RenderSurfaceEffect::MirrorEnergy;
             const bool skinned = models_.modelUsesGpuSkinning(tile.model);
+            const VulkanModelResources::MaterialBinding material =
+                models_.materialForModel(tile.model);
             const GpuDrawInstance constants = modelPushConstants(
                 tile,
                 frameData.lighting,
-                frameData.effectAnimationTimeSeconds);
+                frameData.effectAnimationTimeSeconds,
+                candidate.alphaSelection);
             // Mirror ghosts are translucent by construction. Everything else
             // in the opaque pass with a full-alpha tint skips the blend unit.
             const bool opaqueModel =
@@ -1340,6 +1427,7 @@ private:
                 .mesh = models_.meshForTile(
                     tile, configuration_.descriptorFrameIndex),
                 .constants = constants,
+                .materialPolicy = material.policy,
                 .pipeline = pipeline,
                 .pipelineRank = pipelineRank,
                 .batchState = batchStateFor(constants),
@@ -1392,27 +1480,12 @@ private:
         // which is exactly the "hollow model" symptom.
         constexpr VkFrontFace modelFrontFace = VK_FRONT_FACE_CLOCKWISE;
 
-        // Closed glTF meshes never need their interior rasterized.
-        //
         // Wireframe opts out entirely: seeing through geometry is the whole
-        // point of that mode. The Debug UI toggle is the escape hatch for a
-        // model that turns out to be wound the other way, so it has to reach
-        // every culled draw, ghosts included.
+        // point of that mode. A model containing a double-sided material also
+        // disables whole-draw culling; the fragment shaders then discard back
+        // faces only for single-sided primitives in that mixed mesh.
         const bool cullingAllowed = configuration_.modelBackfaceCulling &&
             !configuration_.wireframeEnabled;
-        // Opaque models only. The translucent list also holds blur-behind
-        // ice, whose look depends on what its own back faces contribute;
-        // that is a visual decision, not a free win.
-        const VkCullModeFlags modelCullMode =
-            opaquePass && cullingAllowed
-            ? VK_CULL_MODE_BACK_BIT
-            : VK_CULL_MODE_NONE;
-        // Mirror ghosts are the exception that does cull in the translucent
-        // pass: they are closed meshes standing in for an actor, so their
-        // interior is no more meaningful than any other model's.
-        const VkCullModeFlags ghostCullMode = cullingAllowed
-            ? VK_CULL_MODE_BACK_BIT
-            : VK_CULL_MODE_NONE;
         // recordScenePass left the command buffer on CULL_MODE_NONE and
         // COUNTER_CLOCKWISE for the tile quads drawn above. Tile quads are
         // unaffected by either: they are CPU-culled and never cull on the GPU.
@@ -1431,9 +1504,10 @@ private:
                         : VK_FALSE);
                 mirrorGhostState = draw.mirrorGhost;
             }
-            const VkCullModeFlags desiredCullMode = draw.mirrorGhost
-                ? ghostCullMode
-                : modelCullMode;
+            const VkCullModeFlags desiredCullMode =
+                cullingAllowed && !draw.materialPolicy.hasDoubleSided
+                ? VK_CULL_MODE_BACK_BIT
+                : VK_CULL_MODE_NONE;
             if (desiredCullMode != boundCullMode) {
                 vkCmdSetCullMode(commandBuffer, desiredCullMode);
                 boundCullMode = desiredCullMode;
@@ -2067,7 +2141,8 @@ private:
     [[nodiscard]] GpuDrawInstance modelPushConstants(
         const RenderFrameData::Tile& tile,
         const RenderFrameData::Lighting& lighting,
-        float effectAnimationTimeSeconds)
+        float effectAnimationTimeSeconds,
+        MaterialAlphaSelection alphaSelection)
     {
         const VulkanModelResources::MaterialBinding material =
             models_.materialForModel(tile.model);
@@ -2103,13 +2178,17 @@ private:
         // slots are free for a model draw.
         const GpuDrawInstance constants {
             .vertices = IsoScenePreparer::modelWorldTransform(tile),
-            // Model draws claim the first slot, and only the first slot, for
-            // the base of their material range. The vertex's materialIndex is
-            // relative to the model, so this is what makes it absolute.
+            // x is the base of the model's material range. y asks the fragment
+            // shader to restore single-sided rejection per primitive when a
+            // mixed double-sided model has disabled fixed-function culling.
             .passData = {
                 Vec4 {
                     static_cast<float>(material.materialBase),
-                    0.0f,
+                    material.policy.hasDoubleSided &&
+                            configuration_.modelBackfaceCulling &&
+                            !configuration_.wireframeEnabled
+                        ? 1.0f
+                        : 0.0f,
                     0.0f,
                     0.0f,
                 },
@@ -2186,9 +2265,9 @@ private:
                 shaderValue(material.mode),
                 editorHighlightState,
                 std::max(lighting.specularStrength, 0.0f),
-                // w was the Blinn-Phong exponent, replaced by the material's
-                // roughness in F3c.
-                0.0f,
+                // Mixed meshes can share the existing opaque and blended
+                // pipelines while each pass keeps its authored modes.
+                static_cast<float>(alphaSelection),
             },
         };
         return constants;
