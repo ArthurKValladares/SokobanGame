@@ -192,6 +192,56 @@ void testEmissiveIsExcludedFromTheAmbientNumerator()
     CHECK(near(ambientLightRatio({}, emissive), 0.0f));
 }
 
+void testMissingOcclusionMapPreservesAmbientLight()
+{
+    TEST("missingOcclusionMapPreservesAmbientLight");
+    CHECK(near(resolveMaterialOcclusion(1.0f), 1.0f));
+}
+
+void testOcclusionReadsRedAndInterpolatesByStrength()
+{
+    TEST("occlusionReadsRedAndInterpolatesByStrength");
+    const Vec4 sample { 0.25f, 0.1f, 0.9f, 0.0f };
+    CHECK(near(resolveMaterialOcclusion(0.0f, sample), 1.0f));
+    CHECK(near(resolveMaterialOcclusion(0.4f, sample), 0.7f));
+    CHECK(near(resolveMaterialOcclusion(1.0f, sample), 0.25f));
+
+    const Vec4 differentUnusedChannels { 0.25f, 1.0f, 0.0f, 1.0f };
+    CHECK(near(
+        resolveMaterialOcclusion(0.4f, differentUnusedChannels),
+        0.7f));
+}
+
+void testOcclusionStrengthIsClampedToTheAuthoredRange()
+{
+    TEST("occlusionStrengthIsClampedToTheAuthoredRange");
+    const Vec4 sample { 0.2f, 1.0f, 1.0f, 1.0f };
+    CHECK(near(resolveMaterialOcclusion(-1.0f, sample), 1.0f));
+    CHECK(near(resolveMaterialOcclusion(2.0f, sample), 0.2f));
+}
+
+void testMaterialAndScreenSpaceOcclusionComposeOnAmbientOnly()
+{
+    TEST("materialAndScreenSpaceOcclusionComposeOnAmbientOnly");
+    const float materialOcclusion = resolveMaterialOcclusion(
+        1.0f, { 0.5f, 0.0f, 0.0f, 0.0f });
+    const Vec3 ambientAfterMaterial =
+        Vec3 { 1.0f, 1.0f, 1.0f } * materialOcclusion;
+    const Vec3 direct { 1.0f, 1.0f, 1.0f };
+    const Vec3 total = ambientAfterMaterial + direct;
+    const float ambientRatio = ambientLightRatio(
+        ambientAfterMaterial, total);
+
+    CHECK(near(ambientRatio, 1.0f / 3.0f));
+    const float screenOcclusion = 0.25f;
+    const float compositeFactor = 1.0f +
+        (screenOcclusion - 1.0f) * ambientRatio;
+    const Vec3 composited = total * compositeFactor;
+    CHECK(near(
+        composited,
+        direct + ambientAfterMaterial * screenOcclusion));
+}
+
 } // namespace
 
 int main()
@@ -208,6 +258,10 @@ int main()
     testEmissiveMapMultipliesLinearRgbAndIgnoresAlpha();
     testEmissiveResolutionPreservesHdrValues();
     testEmissiveIsExcludedFromTheAmbientNumerator();
+    testMissingOcclusionMapPreservesAmbientLight();
+    testOcclusionReadsRedAndInterpolatesByStrength();
+    testOcclusionStrengthIsClampedToTheAuthoredRange();
+    testMaterialAndScreenSpaceOcclusionComposeOnAmbientOnly();
 
     if (failures == 0) {
         std::cout << "PbrMaterialTests: " << checks << " checks passed\n";

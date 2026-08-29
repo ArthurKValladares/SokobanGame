@@ -20,16 +20,15 @@ worker decode, render-thread publication and bounded residency. HDR presentation
 now uses Khronos PBR Neutral by default, with persisted exposure and a Debug
 straight-clamp comparison. Player-facing UI now has a dedicated fragment path,
 leaving the scene fragment shader free of font, title-art, UI-texture and
-rounded scene-image branches. Metallic-roughness, normal and emissive sampling
-are now live; normal maps perturb the lighting frame through authored or
-derived tangents, while emissive maps add unclamped linear HDR color without
-becoming ambient light. The next objective is material occlusion sampling.
+rounded scene-image branches. All four core glTF material maps now affect scene
+lighting: metallic-roughness, tangent-space normals, linear HDR emissive and
+ambient-only material occlusion. The next objective is the alpha and
+mirror-energy audit that closes phase 7.
 
 The recommended order is:
 
 1. Capture the remaining post-tonemap visual/performance baseline evidence.
-2. Implement and validate occlusion map sampling, then audit alpha and
-   mirror-energy behavior.
+2. Audit alpha and mirror-energy behavior now that all core maps are live.
 3. Complete SSAO, then resume the larger scaling and memory work.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
@@ -42,7 +41,7 @@ sampling have different failure modes and should be independently reviewable.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
 - Current tests: 67 CTest suites in the newest configured build tree.
-- Current shaders: 16 GLSL files. `triangle.frag.glsl` is 622 physical lines;
+- Current shaders: 16 GLSL files. `triangle.frag.glsl` is 643 physical lines;
   player-facing UI uses the 93-line `ui.frag.glsl` path.
 - Texture capacity: selected at startup from a configured 1,024-slot ceiling,
   device limits, 16 editor-reserved slots and 32 import-reserved slots. The
@@ -69,8 +68,9 @@ future tasks:
 - **F3**: cgltf material factors, tangents, a second UV set, alpha modes,
   double-sided metadata, a GPU material buffer and Cook-Torrance GGX. The CPU
   and GPU representations carry all core map types, runtime handle
-  assignment/residency is complete, and metallic-roughness, normal-map and
-  emissive sampling are live. Occlusion sampling remains open.
+  assignment/residency and sampling are complete for metallic-roughness,
+  normal, emissive and occlusion maps. The alpha and mirror paths remain to be
+  audited against the completed material behavior.
 - **F4a**: player-facing solid rectangles, font glyphs, title art, runtime UI
   textures and rounded scene-image composition use a dedicated UI fragment
   shader. The lit scene fragment shader no longer branches on those modes.
@@ -95,11 +95,11 @@ future tasks:
   byte budgets can evict old resources. What remains is mip/LOD streaming,
   compressed-size accounting, more flexible publication budgeting, and
   removing the `vkDeviceWaitIdle` eviction fallback.
-- **PBR map transport is complete; sampling is nearly complete.** A runtime catalog assigns
+- **PBR map transport and sampling are complete.** A runtime catalog assigns
   normal, metallic-roughness, emissive and occlusion handles from the resolved
   inventory and attaches only the relevant maps to each model's requirements.
-  The main scene shader consumes the first three; material occlusion remains in
-  phase 7.
+  The main scene shader consumes every core map; phase 7 now needs only the
+  alpha and mirror-path audit.
 - **Descriptor indexing is core in Vulkan 1.2.** This renderer already requires
   Vulkan 1.3. Query and enable the Vulkan 1.2 feature struct rather than adding
   an extension-name requirement unnecessarily.
@@ -145,8 +145,9 @@ SSAO uses that ratio so occlusion does not darken direct or emissive light.
 - Blended scene pipelines mask alpha writes so they inherit the opaque mask
   behind them.
 - Scene-image UI samples scene RGB only.
-- Normal and occlusion map work must preserve this definition. The occlusion
-  texture scales ambient lighting, not direct light or the final composite.
+- Material occlusion is resolved before the ratio: it scales the ambient term
+  in both the numerator and total color, never direct, specular, emissive or
+  the final composite. Screen-space AO then scales that reduced ambient share.
 
 ### Camera, transforms and vertices
 
@@ -516,14 +517,35 @@ suites, including `vulkan_smoke`, pass.
 resolution, HDR preservation, UV selection and ambient-mask isolation. Visual
 reference capture remains in 0.1.
 
-#### 7.4 Occlusion — next
+#### 7.4 Occlusion — complete
 
-- Sample the R channel and apply strength only to ambient lighting.
-- Keep screen-space AO and material occlusion composable without multiplying
-  direct light.
-- Re-check the ambient mask in both scene lighting shaders.
+`triangle.frag.glsl` now samples the optional one-based occlusion handle as
+linear data, reads only R, and interpolates from an unoccluded value of one to
+the sample using the clamped glTF strength. A missing map remains neutral.
+UV0/UV1 selection and scrolling use the same shared helper as the other core
+maps.
 
-#### 7.5 Alpha and mirror paths
+The resolved factor scales `ambientContribution` after both its diffuse and
+metallic fill have been assembled, but before that contribution is added to
+the lit color or measured for the ambient mask. Direct lights, GGX specular and
+emissive are therefore unchanged. The screen-space composite receives the
+ratio of the already material-occluded ambient term to total outgoing light,
+so the two occlusion sources compose without double-applying either one to
+non-ambient light. `ground_splat.frag.glsl` has no glTF material input and
+continues to write the same semantic ratio without a map sample.
+
+`resolveMaterialOcclusion` in `PbrMaterial.*` is the matching CPU reference.
+The focused suite now passes 34 checks covering no-map fallback, R-only
+sampling, strength endpoints/interpolation and clamping, plus material/SSAO
+composition. All shaders compile, the edited SPIR-V validates, the full Debug
+build stages all 200 content files, and all 67 CTest suites—including
+`vulkan_smoke`—pass.
+
+**Acceptance:** complete for occlusion color space, channel and strength
+semantics, UV selection, ambient-only application and SSAO composition. Visual
+reference capture remains in 0.1.
+
+#### 7.5 Alpha and mirror paths — next
 
 - Revalidate MASK cutoff, BLEND ordering, double-sided culling and base-color
   alpha after map migration.

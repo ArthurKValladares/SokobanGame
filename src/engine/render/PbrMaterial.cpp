@@ -71,6 +71,12 @@ Vec3 resolveEmissive(Vec3 emissiveFactor, Vec4 linearSample)
     };
 }
 
+float resolveMaterialOcclusion(float strength, Vec4 linearSample)
+{
+    const float clampedStrength = std::clamp(strength, 0.0f, 1.0f);
+    return 1.0f + (linearSample.x - 1.0f) * clampedStrength;
+}
+
 float ambientLightRatio(Vec3 ambientContribution, Vec3 totalColor)
 {
     constexpr Vec3 luminanceWeights { 0.2126f, 0.7152f, 0.0722f };

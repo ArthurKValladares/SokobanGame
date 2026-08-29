@@ -37,6 +37,14 @@ struct MetallicRoughness {
     Vec3 emissiveFactor,
     Vec4 linearSample = { 1.0f, 1.0f, 1.0f, 1.0f });
 
+// CPU reference for glTF material occlusion in triangle.frag.glsl. The map is
+// linear data, only R is defined, and strength interpolates between an
+// unoccluded value of one and the sample. A missing map is represented by the
+// default white sample.
+[[nodiscard]] float resolveMaterialOcclusion(
+    float strength,
+    Vec4 linearSample = { 1.0f, 1.0f, 1.0f, 1.0f });
+
 // CPU reference for the ambient-share value written into the scene target's
 // alpha. totalColor includes direct, ambient, specular and emissive light;
 // ambientContribution is the only term SSAO is allowed to darken.

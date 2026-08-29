@@ -549,6 +549,26 @@ void main()
         vec3 ambientTerm = ambient * (1.0 + skyFill * 0.35);
         vec3 ambientContribution = ambientTerm * (diffuseAlbedo + f0);
 
+        // glTF material occlusion is linear data in R. Strength interpolates
+        // from no occlusion at zero to the sampled value at one. Applying the
+        // result here affects both diffuse and metallic ambient fill, but no
+        // direct, specular or emissive light. A missing map is a white sample.
+        int occlusionTexture =
+            int(material.occlusionTextureAndPadding.x);
+        if (occlusionTexture != 0) {
+            int textureIndex = max(occlusionTexture - 1, 0);
+            float sampledOcclusion = texture(
+                modelTextures[nonuniformEXT(textureIndex)],
+                materialTextureUv(
+                    material.materialState.x,
+                    material.materialState.z)).r;
+            float materialOcclusion = mix(
+                1.0,
+                sampledOcclusion,
+                clamp(material.materialScalars.z, 0.0, 1.0));
+            ambientContribution *= materialOcclusion;
+        }
+
         // The emissive image is uploaded through an sRGB Vulkan format, so
         // sampling returns linear RGB here. Its alpha is not part of glTF's
         // emissive definition. A missing map is equivalent to white and lets
@@ -576,10 +596,11 @@ void main()
         // excluded from both sides" would have meant here - made a metallic
         // surface report a smaller ambient share than it had, and a fully
         // metallic one report zero over zero and take no occlusion at all.
+        // Material occlusion has already reduced the ambient contribution, so
+        // both sides describe the radiance that actually leaves the surface.
         // Direct light, specular and emissive stay in the denominator only,
-        // so SSAO subtracts the ambient share without darkening illumination
-        // from the lights or the material itself. That is the same intent F2b
-        // had; only the arithmetic that serves it has changed.
+        // letting screen-space AO compose with the material map instead of
+        // applying either form of occlusion to non-ambient light.
         ambientMask = clamp(
             dot(ambientContribution, luminanceWeights) /
                 max(dot(color, luminanceWeights), 0.0001),
