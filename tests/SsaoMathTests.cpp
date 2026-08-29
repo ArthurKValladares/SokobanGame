@@ -84,6 +84,19 @@ void testProjectionRoundTripUsesVulkanDepthAndFramebufferY()
     CHECK(upper.y < lower.y);
 }
 
+void testAoExtentIsHalfResolutionAndCoversOddEdges()
+{
+    TEST("aoExtentIsHalfResolutionAndCoversOddEdges");
+    const PixelExtent even = ssaoBufferExtent({ 1920, 1080 });
+    CHECK(even == (PixelExtent { 960, 540 }));
+    const PixelExtent odd = ssaoBufferExtent({ 1919, 1079 });
+    CHECK(odd == (PixelExtent { 960, 540 }));
+    const PixelExtent single = ssaoBufferExtent({ 1, 1 });
+    CHECK(single == (PixelExtent { 1, 1 }));
+    const PixelExtent empty = ssaoBufferExtent({ 0, 0 });
+    CHECK(empty == (PixelExtent { 0, 0 }));
+}
+
 void testPhysicalRadiusIsIndependentOfRenderResolution()
 {
     TEST("physicalRadiusIsIndependentOfRenderResolution");
@@ -152,14 +165,68 @@ void testSampleComparisonUsesViewUnitsAndRejectsHalos()
     CHECK(faded < 1.0f);
 }
 
+void testBilateralWeightRejectsDepthAndNormalDiscontinuities()
+{
+    TEST("bilateralWeightRejectsDepthAndNormalDiscontinuities");
+    const Vec3 center { 0.0f, 0.0f, 5.0f };
+    const Vec3 normal { 0.0f, 0.0f, -1.0f };
+    CHECK(near(ssaoBilateralWeight(
+        center,
+        normal,
+        { 1.0f, 0.0f, 5.0f },
+        normal,
+        0.1f,
+        0.8f,
+        0.5f), 0.5f));
+
+    const float acrossDepthEdge = ssaoBilateralWeight(
+        center,
+        normal,
+        { 0.0f, 0.0f, 5.5f },
+        normal,
+        0.1f,
+        0.8f,
+        0.5f);
+    CHECK(acrossDepthEdge < 0.00001f);
+
+    CHECK(near(ssaoBilateralWeight(
+        center,
+        normal,
+        { 0.0f, 0.0f, 5.0f },
+        { 1.0f, 0.0f, 0.0f },
+        0.1f,
+        0.8f,
+        0.5f), 0.0f));
+    const float similarNormal = ssaoBilateralWeight(
+        center,
+        normal,
+        { 0.0f, 0.0f, 5.0f },
+        normalize(Vec3 { 0.4f, 0.0f, -1.0f }),
+        0.1f,
+        0.8f,
+        0.5f);
+    CHECK(similarNormal > 0.0f);
+    CHECK(similarNormal < 0.5f);
+    CHECK(near(ssaoBilateralWeight(
+        center,
+        normal,
+        center,
+        normal,
+        0.1f,
+        0.8f,
+        -1.0f), 0.0f));
+}
+
 } // namespace
 
 int main()
 {
     testProjectionRoundTripUsesVulkanDepthAndFramebufferY();
+    testAoExtentIsHalfResolutionAndCoversOddEdges();
     testPhysicalRadiusIsIndependentOfRenderResolution();
     testReconstructedNormalFacesTheCamera();
     testSampleComparisonUsesViewUnitsAndRejectsHalos();
+    testBilateralWeightRejectsDepthAndNormalDiscontinuities();
 
     if (failures == 0) {
         std::cout << "SsaoMathTests: " << checks << " checks passed\n";

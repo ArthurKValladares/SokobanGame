@@ -1,8 +1,13 @@
 #pragma once
 
 #include "engine/Math.hpp"
+#include "engine/render/RenderResolution.hpp"
 
 namespace sokoban {
+
+// Half resolution rounds up so every full-resolution edge pixel maps to a
+// valid AO texel, including odd-sized and one-pixel render targets.
+[[nodiscard]] PixelExtent ssaoBufferExtent(PixelExtent renderExtent);
 
 // Vulkan depth is already NDC z in [0, 1]. UV y runs down the framebuffer,
 // while NDC y runs up because the scene uses a negative-height viewport.
@@ -30,5 +35,17 @@ namespace sokoban {
     Vec3 actualSample,
     float radius,
     float bias);
+
+// Reference for the composite shader's bilateral upsample. Plane distance
+// rejects depth discontinuities while the normal term rejects adjoining faces;
+// spatialWeight is the ordinary bilinear contribution of the AO texel.
+[[nodiscard]] float ssaoBilateralWeight(
+    Vec3 centerPosition,
+    Vec3 centerNormal,
+    Vec3 samplePosition,
+    Vec3 sampleNormal,
+    float depthSigma,
+    float normalThreshold,
+    float spatialWeight);
 
 } // namespace sokoban

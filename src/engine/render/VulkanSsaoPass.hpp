@@ -56,6 +56,7 @@ public:
     [[nodiscard]] bool valid() const;
     [[nodiscard]] VkImageView imageView() const { return image_.view; }
     [[nodiscard]] VkSampler sampler() const { return sampler_; }
+    [[nodiscard]] VkExtent2D aoExtent() const { return aoExtent_; }
 
 private:
     void createImage();
@@ -63,7 +64,8 @@ private:
 
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkDevice device_ = VK_NULL_HANDLE;
-    VkExtent2D extent_ {};
+    VkExtent2D renderExtent_ {};
+    VkExtent2D aoExtent_ {};
     vulkanResources::OwnedImage image_ {};
     VkSampler sampler_ = VK_NULL_HANDLE;
 };

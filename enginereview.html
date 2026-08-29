@@ -256,8 +256,8 @@
 <body>
   <header class="shell">
     <p class="eyebrow">Current-state review · 28 August 2026</p>
-    <h1>Finish ambient occlusion in physical space.</h1>
-    <p class="deck">Sokoban 3D now has complete CPU/GPU material behavior, a device-bounded texture heap, HDR output, and a dedicated post-tonemap UI path. SSAO now reconstructs view-space positions and normals and samples with scene-unit radius and bias. The next packet moves that estimator to half resolution and replaces the box blur with silhouette-aware bilateral upsampling.</p>
+    <h1>Scale the scene from measured evidence.</h1>
+    <p class="deck">Sokoban 3D now has complete CPU/GPU material behavior, a device-bounded texture heap, HDR output, a dedicated post-tonemap UI path, and physical view-space SSAO. AO estimation runs at half resolution and returns through a depth/normal-aware bilateral upsample. Capture the remaining appearance and timing evidence, then establish persistent renderables and frustum culling.</p>
     <div class="metrics" aria-label="Current repository facts">
       <div class="metric"><b>36</b><span>manifest models</span></div>
       <div class="metric"><b>42 / 1024</b><span>textures on validated GPU</span></div>
@@ -281,7 +281,7 @@
     <section id="verdict">
       <div class="section-head"><span class="num">01</span><h2>Current verdict</h2></div>
       <div class="callout">
-        <strong>Next program:</strong> half-resolution bilateral SSAO. View-space reconstruction, scene-unit sampling and ambient-only composition are now invariants; change target sizing and filtering without returning to pixel/raw-depth tuning or darkening direct and emissive light.
+        <strong>Next program:</strong> close the visual/performance evidence gap, then implement persistent renderables and frustum culling. The completed SSAO path—view-space reconstruction, scene-unit sampling, half-resolution storage, bilateral upsampling and ambient-only composition—is now a renderer invariant.
       </div>
       <div class="grid" style="margin-top:1rem">
         <article class="card">
@@ -291,8 +291,8 @@
         </article>
         <article class="card">
           <p class="kicker">What comes next</p>
-          <h3>Silhouette-aware filtering</h3>
-          <p>The estimator now works in view space with a 0.45-unit radius and 0.025-unit bias. Render it at half resolution, then upsample with reconstructed depth/normal weights instead of the current full-resolution 5×5 box blur.</p>
+          <h3>Measure, persist, then cull</h3>
+          <p>Capture representative post-tonemap/material images and AO timings across render scales. Then separate stable renderables and bounds from per-frame state so the existing frustum math can remove invisible work before Vulkan recording.</p>
         </article>
         <article class="card">
           <p class="kicker">What not to overbuild</p>
@@ -326,7 +326,7 @@
             <tr><td>V1/V3/V5/V6</td><td><span class="status done">Done</span></td><td>Semaphore ownership, skinning access, shader target/optimization and anisotropy are corrected.</td><td>Maintain through validation.</td></tr>
             <tr><td>V2</td><td><span class="status open">Open</span></td><td>Nine renderer files still call <code>vkAllocateMemory</code>.</td><td>VMA or deliberate suballocation before compressed streaming.</td></tr>
             <tr><td>V4</td><td><span class="status done">Done</span></td><td>Vulkan 1.2 feature gating, a separate per-frame texture set and device-bounded runtime capacity are live.</td><td>Preserve the fallback-filled, fence-safe update contract.</td></tr>
-            <tr><td>V7</td><td><span class="status partial">Partial</span></td><td>AO reconstructs view-space position/normals, samples a physical hemisphere and modulates ambient contribution only.</td><td>Half-resolution target plus depth/normal-aware bilateral upsampling.</td></tr>
+            <tr><td>V7</td><td><span class="status done">Done</span></td><td>AO reconstructs view-space position/normals, samples a physical hemisphere at half resolution, and bilaterally upsamples against full-resolution depth/normals.</td><td>Preserve ambient-only application and recheck appearance/timing in the evidence capture.</td></tr>
             <tr><td>A1</td><td><span class="status done">Done</span></td><td>cgltf parsing/validation, all interpolation modes and a loader-level CUBICSPLINE fixture are implemented.</td><td>Keep the fixture in the required regression gate.</td></tr>
             <tr><td>A2</td><td><span class="status open">Open</span></td><td>Runtime textures remain decoded RGBA images.</td><td>KTX2 and platform compression after allocation work.</td></tr>
             <tr><td>A3</td><td><span class="status partial">Partial</span></td><td>Async preparation, publication budgets, residency budgets and eviction exist.</td><td>Mip/LOD streaming, compressed accounting, fence-based retirement.</td></tr>
@@ -491,12 +491,12 @@
         <article class="phase">
           <div class="phase-id">8<small>V7</small></div>
           <div>
-            <div class="phase-title"><h3>Complete ambient occlusion</h3><span class="status partial">In progress</span></div>
+            <div class="phase-title"><h3>Complete ambient occlusion</h3><span class="status done">Complete</span></div>
             <div class="tasks">
-              <div class="task"><span class="task-id">8.1</span><div><b>View-space inputs — complete</b><p>The exact scene projection and inverse round-trip copied Vulkan depth into view space. Position derivatives provide camera-facing geometric normals; twelve rotated hemisphere samples use a 0.45 scene-unit radius, 0.025-unit bias and Euclidean range rejection. A 15-check CPU reference covers projection, negative-viewport Y, normals, scale stability and occlusion comparison.</p></div></div>
-              <div class="task"><span class="task-id">8.2</span><div><b>Half-resolution bilateral path — next</b><p>Resize the AO target, adapt estimator coordinates, and replace the full-resolution 5×5 box blur with depth/normal-aware bilateral upsampling while preserving ambient-only application.</p></div></div>
+              <div class="task"><span class="task-id">8.1</span><div><b>View-space inputs — complete</b><p>The exact scene projection and inverse round-trip copied Vulkan depth into view space. Position derivatives provide camera-facing geometric normals; twelve rotated hemisphere samples use a 0.45 scene-unit radius, 0.025-unit bias and Euclidean range rejection.</p></div></div>
+              <div class="task"><span class="task-id">8.2</span><div><b>Half-resolution bilateral path — complete</b><p>The R8 AO target rounds up to half the scene extent, including odd and one-pixel cases. The full-resolution composite replaces the 5×5 box blur with four AO candidates weighted by reconstructed view-space plane distance and normal agreement. Background samples are excluded and the scene-color snapshot remains because unblended ambient-only composition still reads the original scene.</p></div></div>
             </div>
-            <p class="accept"><b>8.1 gate:</b> both SSAO shaders compile, SPIR-V validates, 200 files stage, and all 68 Debug suites—including Vulkan smoke—pass. <b>Final gate:</b> AO is scale-stable, silhouette-aware and never darkens direct or emissive light.</p>
+            <p class="accept"><b>Gate:</b> the 25-check CPU reference covers projection, physical sampling, half-up sizing and bilateral edge rejection; both shaders pass Vulkan 1.3 SPIR-V validation, 200 files stage, and all 68 Debug suites—including Vulkan smoke—pass. Comparative image capture and GPU timings remain in 0.1.</p>
           </div>
         </article>
 

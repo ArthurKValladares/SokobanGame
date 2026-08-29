@@ -101,7 +101,9 @@ struct GpuDrawInstance {
     // Water uses all four for its border and ripple parameters. Model draws
     // use passData[0].x for the base index of their material range and y for
     // mixed-material back-face rejection. The full-screen SSAO pass uses this
-    // block for clipFromView while `vertices` carries its inverse.
+    // block for clipFromView while `vertices` carries its inverse; `color`
+    // carries its physical sampling controls and `normalAndAmbientRed` carries
+    // the half-resolution extent plus bilateral thresholds.
     //
     // These used to be a shadow-space copy of the corners above, pushed on
     // every scene draw - the frame's sun transform, restated once per face.

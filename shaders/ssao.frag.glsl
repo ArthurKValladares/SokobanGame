@@ -5,16 +5,18 @@ layout(location = 0) out vec4 outAo;
 
 // viewFromClip and clipFromView are exact inverses of the main scene's
 // projection. params: x = strength (composite only), y = radius in scene
-// units, z = bias in scene units, w = composite debug mode.
+// units, z = bias in scene units, w = composite debug mode. filterParams.xy
+// is the half-resolution AO target extent.
 layout(push_constant) uniform PushConstants
 {
     mat4 viewFromClip;
     mat4 clipFromView;
     layout(offset = 128) vec4 params;
+    layout(offset = 144) vec4 filterParams;
 } pc;
 
 // Interleaved gradient noise: cheap per-pixel randomization without a noise
-// texture; the composite blur averages it away.
+// texture; the bilateral upsample averages it away without crossing edges.
 float gradientNoise(vec2 pixel)
 {
     return fract(52.9829189 * fract(
@@ -56,8 +58,8 @@ vec3 viewNormal(vec3 centerPosition)
 
 void main()
 {
-    vec2 texel = 1.0 / vec2(textureSize(depthTexture, 0));
-    vec2 uv = gl_FragCoord.xy * texel;
+    vec2 aoExtent = max(pc.filterParams.xy, vec2(1.0));
+    vec2 uv = gl_FragCoord.xy / aoExtent;
     float centerDepth = texture(depthTexture, uv).r;
     vec3 centerPosition = reconstructViewPosition(uv, centerDepth);
     // Derivatives must execute for every invocation in the quad. Returning a

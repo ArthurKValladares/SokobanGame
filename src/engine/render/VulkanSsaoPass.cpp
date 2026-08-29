@@ -1,6 +1,7 @@
 #include "engine/render/VulkanSsaoPass.hpp"
 
 #include "engine/render/LightingConfig.hpp"
+#include "engine/render/SsaoMath.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
@@ -36,7 +37,9 @@ void VulkanSsaoPass::create(VkPhysicalDevice physicalDevice, VkDevice device, Vk
     destroy();
     physicalDevice_ = physicalDevice;
     device_ = device;
-    extent_ = extent;
+    renderExtent_ = extent;
+    const PixelExtent half = ssaoBufferExtent({ extent.width, extent.height });
+    aoExtent_ = { half.width, half.height };
 
     try {
         createImage();
@@ -65,7 +68,9 @@ void VulkanSsaoPass::create(VkPhysicalDevice physicalDevice, VkDevice device, Vk
 
 void VulkanSsaoPass::recreate(VkExtent2D extent)
 {
-    extent_ = extent;
+    renderExtent_ = extent;
+    const PixelExtent half = ssaoBufferExtent({ extent.width, extent.height });
+    aoExtent_ = { half.width, half.height };
     destroyImage();
     createImage();
 }
@@ -79,7 +84,8 @@ void VulkanSsaoPass::destroy()
         }
     }
     sampler_ = VK_NULL_HANDLE;
-    extent_ = {};
+    renderExtent_ = {};
+    aoExtent_ = {};
     device_ = VK_NULL_HANDLE;
     physicalDevice_ = VK_NULL_HANDLE;
 }
@@ -122,19 +128,19 @@ void VulkanSsaoPass::record(
     vulkanResources::transitionImages(commandBuffer, beforeBarriers);
     ++stats.imageBarriers;
 
-    VkViewport viewport {
+    VkViewport aoViewport {
         .x = 0.0f,
-        .y = static_cast<float>(extent_.height),
-        .width = static_cast<float>(extent_.width),
-        .height = -static_cast<float>(extent_.height),
+        .y = static_cast<float>(aoExtent_.height),
+        .width = static_cast<float>(aoExtent_.width),
+        .height = -static_cast<float>(aoExtent_.height),
         .minDepth = 0.0f,
         .maxDepth = 1.0f,
     };
-    VkRect2D scissor { .offset = { 0, 0 }, .extent = extent_ };
+    VkRect2D aoScissor { .offset = { 0, 0 }, .extent = aoExtent_ };
     using Debug = RenderFrameData::Lighting::AmbientOcclusion::Debug;
-    // Both draws read the same block. The occlusion pass round-trips depth
-    // through view space with the projection pair; the composite reads only
-    // strength and debug mode.
+    // Both draws read the same block. The estimator uses the half-resolution
+    // extent to map its fragment coordinates over the full depth image. The
+    // composite reuses the inverse projection and bilateral thresholds.
     const float debugMode = settings.debug == Debug::AmbientMask
         ? 2.0f
         : (settings.debug == Debug::Occlusion ? 1.0f : 0.0f);
@@ -147,6 +153,12 @@ void VulkanSsaoPass::record(
         config::ssaoBiasWorld,
         debugMode,
     };
+    pushConstants.normalAndAmbientRed = {
+        static_cast<float>(aoExtent_.width),
+        static_cast<float>(aoExtent_.height),
+        config::ssaoBilateralDepthSigmaWorld,
+        config::ssaoBilateralNormalThreshold,
+    };
 
     VkRenderingAttachmentInfo ssaoAttachment {
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
@@ -158,7 +170,7 @@ void VulkanSsaoPass::record(
     };
     VkRenderingInfo ssaoRenderingInfo {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-        .renderArea = { .offset = { 0, 0 }, .extent = extent_ },
+        .renderArea = { .offset = { 0, 0 }, .extent = aoExtent_ },
         .layerCount = 1,
         .colorAttachmentCount = 1,
         .pColorAttachments = &ssaoAttachment,
@@ -176,8 +188,8 @@ void VulkanSsaoPass::record(
         &descriptorSet,
         0,
         nullptr);
-    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+    vkCmdSetViewport(commandBuffer, 0, 1, &aoViewport);
+    vkCmdSetScissor(commandBuffer, 0, 1, &aoScissor);
     vkCmdPushConstants(
         commandBuffer,
         pipelineLayout,
@@ -207,6 +219,19 @@ void VulkanSsaoPass::record(
     vulkanResources::transitionImages(commandBuffer, afterBarriers);
     ++stats.imageBarriers;
 
+    VkViewport compositeViewport {
+        .x = 0.0f,
+        .y = static_cast<float>(renderExtent_.height),
+        .width = static_cast<float>(renderExtent_.width),
+        .height = -static_cast<float>(renderExtent_.height),
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f,
+    };
+    VkRect2D compositeScissor {
+        .offset = { 0, 0 },
+        .extent = renderExtent_,
+    };
+
     // The composite covers every pixel and no longer blends with what is
     // already there - it samples the copy the recorder took instead - so the
     // attachment's previous contents are worth nothing to it.
@@ -219,7 +244,7 @@ void VulkanSsaoPass::record(
     };
     VkRenderingInfo compositeRenderingInfo {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-        .renderArea = { .offset = { 0, 0 }, .extent = extent_ },
+        .renderArea = { .offset = { 0, 0 }, .extent = renderExtent_ },
         .layerCount = 1,
         .colorAttachmentCount = 1,
         .pColorAttachments = &compositeAttachment,
@@ -238,8 +263,8 @@ void VulkanSsaoPass::record(
         &descriptorSet,
         0,
         nullptr);
-    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+    vkCmdSetViewport(commandBuffer, 0, 1, &compositeViewport);
+    vkCmdSetScissor(commandBuffer, 0, 1, &compositeScissor);
     vkCmdPushConstants(
         commandBuffer,
         pipelineLayout,
@@ -254,19 +279,25 @@ void VulkanSsaoPass::record(
 
 bool VulkanSsaoPass::valid() const
 {
-    return image_.image && image_.view && sampler_ && extent_.width > 0 && extent_.height > 0;
+    return image_.image && image_.view && sampler_ &&
+        renderExtent_.width > 0 && renderExtent_.height > 0 &&
+        aoExtent_.width > 0 && aoExtent_.height > 0;
 }
 
 void VulkanSsaoPass::createImage()
 {
-    if (!device_ || extent_.width == 0 || extent_.height == 0) {
+    if (!device_ || aoExtent_.width == 0 || aoExtent_.height == 0) {
         return;
     }
     VkImageCreateInfo imageInfo {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = VK_IMAGE_TYPE_2D,
         .format = VK_FORMAT_R8_UNORM,
-        .extent = { .width = extent_.width, .height = extent_.height, .depth = 1 },
+        .extent = {
+            .width = aoExtent_.width,
+            .height = aoExtent_.height,
+            .depth = 1,
+        },
         .mipLevels = 1,
         .arrayLayers = 1,
         .samples = VK_SAMPLE_COUNT_1_BIT,
@@ -280,7 +311,7 @@ void VulkanSsaoPass::createImage()
         device_,
         imageInfo,
         VK_IMAGE_ASPECT_COLOR_BIT,
-        "SSAO buffer");
+        "Half-resolution SSAO buffer");
 }
 
 void VulkanSsaoPass::destroyImage()

@@ -26,15 +26,19 @@ ambient-only material occlusion. Authored OPAQUE, MASK, BLEND and double-sided
 state now control pass selection, coverage, sorting and culling, while the
 mirror-energy effect has an explicit base-color-only material contract. SSAO
 now reconstructs view-space position and geometric normals from copied depth
-and samples with scene-unit radius and bias. The next objective is the
-half-resolution, silhouette-aware bilateral path.
+and samples with scene-unit radius and bias into a half-resolution target. Its
+full-resolution composite now uses view-space depth and normal weights instead
+of a box blur, while continuing to affect ambient light only. The next objective
+is to capture the remaining visual/performance evidence, then resume measured
+scene scaling.
 
 The recommended order is:
 
-1. Capture the remaining post-tonemap/material visual baseline evidence.
-2. Move AO to half resolution with a depth/normal-aware bilateral filter.
-3. Revalidate AO appearance and GPU cost across camera/render-scale changes.
-4. Resume the larger scaling and memory work after SSAO is stable.
+1. Capture the remaining post-tonemap/material reference images and revalidate
+   AO appearance and GPU cost across camera/render-scale changes.
+2. Establish persistent renderables and stable bounds (S2).
+3. Consume those bounds for measured frustum culling (T4).
+4. Continue allocation/compression work (V2/A2) only after new telemetry.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
@@ -613,22 +617,49 @@ radii, rejecting unrelated silhouettes without tying the threshold to the
 camera's non-linear depth encoding.
 
 `SsaoMath.*` mirrors projection round-tripping, negative-viewport Y handling,
-normal orientation and sample comparison on the CPU. Its new focused suite
-passes 15 checks, including identical physical reconstruction across two render
-resolutions with the same aspect ratio. Both SSAO modules compile, the edited
-SPIR-V validates and uses derivative instructions, the Debug build stages all
+normal orientation and sample comparison on the CPU. The first 15 checks cover
+8.1, including identical physical reconstruction across two render resolutions
+with the same aspect ratio; 8.2 extends the same suite to 25 checks. Both SSAO
+modules compile, the edited SPIR-V validates and uses derivative instructions,
+the Debug build stages all
 200 files, and all 68 CTest suites—including `vulkan_smoke`—pass.
 
 **Acceptance:** complete for view-space position/normal reconstruction,
 scene-unit radius and bias, render-scale-independent sampling math and the
 existing ambient-only composite. Appearance capture remains in 0.1.
 
-#### 8.2 Half-resolution bilateral path — next
+#### 8.2 Half-resolution bilateral path — complete
 
-- Render AO at half resolution.
-- Replace the 5x5 box blur with a depth/normal-aware bilateral filter.
-- Profile the existing scene-color snapshot; remove it only if the new data
-  flow makes it unnecessary.
+`VulkanSsaoPass` now owns an `R8_UNORM` AO image whose dimensions are the
+ceiling of half the scene-render dimensions. Odd and one-pixel extents remain
+covered, recreation recomputes both extents, and only the estimator uses the
+smaller viewport/scissor/render area. The composite still covers the complete
+scene target. The estimator maps its half-resolution fragment coordinates over
+the full copied depth image, preserving the physical view-space sampling from
+8.1.
+
+`ssao_composite.frag.glsl` replaces the full-resolution 5x5 box blur with the
+native four-candidate bilinear footprint of the half-resolution AO image. For
+each candidate it reconstructs full-resolution view-space position and a
+camera-facing geometric normal. Gaussian plane-distance weights in scene units
+and normal-agreement weights reject samples across depth discontinuities and
+adjoining faces before normalization. Background candidates are excluded, and
+the filtered AO still scales only the scene alpha's ambient share. The scene
+color snapshot remains necessary because the unblended composite cannot sample
+the color attachment it is simultaneously writing; half-resolution AO does not
+change that data dependency.
+
+`SsaoMath.*` now provides overflow-safe half-up target sizing and a CPU reference
+for the bilateral weight. The focused suite passes 25 checks, including even,
+odd, one-pixel and empty extents plus same-plane retention and depth/normal-edge
+rejection. Both edited shaders compile and pass Vulkan 1.3 SPIR-V validation;
+the Debug build stages all 200 files, Vulkan smoke passes, and all 68 CTest
+suites pass.
+
+**Acceptance:** implementation complete for half-resolution storage/recording,
+full-resolution silhouette-aware upsampling, ambient-only composition and
+resize edge cases. Representative image capture and comparative GPU timings
+remain part of the explicit evidence task in 0.1.
 
 **Acceptance:** AO is stable across render scales and camera changes, does not
 bleed across silhouettes, and does not darken direct highlights or emissive
@@ -677,24 +708,20 @@ layout changes affect modules that appear unrelated to the immediate feature.
 
 ## Source map for the next packets
 
-- `shaders/ssao.frag.glsl`: completed view-space reconstruction and physical
-  hemisphere estimator; adapt its target coordinates for half resolution.
-- `shaders/ssao_composite.frag.glsl`: current full-resolution 5x5 box blur and
-  ambient-only composite; replace only the filter/upsampling half.
-- `src/engine/render/VulkanSsaoPass.*`: AO target sizing, recording and resource
-  lifetime.
-- `src/engine/render/VulkanSwapchainResources.*`: scene depth/color copies and
-  AO image ownership.
-- `src/engine/render/VulkanSceneDescriptors.*`: depth, AO and any new
-  normal/input bindings.
-- `src/engine/render/VulkanPipelineFactory.*`: SSAO pipeline and render-target
-  formats.
-- `src/engine/render/VulkanSceneRecorder.*`: pass ordering and conditional depth
-  copy.
-- `src/engine/render/SsaoMath.*` and `tests/SsaoMathTests.cpp`: projection,
-  normal and view-unit comparison reference for the shader.
-- `tests/PbrMaterialTests.cpp`: ambient-only composition reference that the
-  upsampler must preserve.
+- `src/engine/render/IsoScenePreparer.*`: current per-frame render-scene
+  construction; isolate stable renderables and bounds before adding culling.
+- `src/engine/render/RenderTypes.hpp`: source render data and frame-level
+  ownership boundaries that the persistent representation must not blur.
+- `src/engine/Geometry.*`: existing bounds/frustum primitives to reuse for T4.
+- `src/engine/render/VulkanRenderer.*`: preparation orchestration and the right
+  place to expose before/after CPU/GPU telemetry.
+- `src/engine/render/VulkanSceneRecorder.*`: consumer of the prepared visible
+  lists; keep Vulkan recording downstream of Vulkan-free culling.
+- `tests/IsoScenePreparerTests.cpp`: extend with stable-identity/bounds and
+  visibility cases before changing recorder behavior.
+- `src/engine/render/VulkanSsaoPass.*`, `shaders/ssao*.glsl` and
+  `tests/SsaoMathTests.cpp`: completed V7 baseline; revisit only if visual or
+  timing evidence exposes a concrete regression.
 
 ## Build and test commands
 

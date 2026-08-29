@@ -18,6 +18,17 @@ float smoothstep(float edge0, float edge1, float value)
 
 } // namespace
 
+PixelExtent ssaoBufferExtent(PixelExtent renderExtent)
+{
+    const auto halfUp = [](uint32_t value) {
+        return value / 2U + value % 2U;
+    };
+    return {
+        .width = halfUp(renderExtent.width),
+        .height = halfUp(renderExtent.height),
+    };
+}
+
 Vec3 reconstructSsaoViewPosition(
     const Mat4& viewFromClip,
     Vec2 uv,
@@ -86,6 +97,29 @@ float ssaoSampleOcclusion(
         ? 1.0f
         : 0.0f;
     return occluded * rangeWeight;
+}
+
+float ssaoBilateralWeight(
+    Vec3 centerPosition,
+    Vec3 centerNormal,
+    Vec3 samplePosition,
+    Vec3 sampleNormal,
+    float depthSigma,
+    float normalThreshold,
+    float spatialWeight)
+{
+    const float safeSigma = std::max(depthSigma, 0.000001f);
+    const float planeDistance = std::abs(dot(
+        subtract(samplePosition, centerPosition), centerNormal));
+    const float normalizedDistance = planeDistance / safeSigma;
+    const float depthWeight = std::exp(
+        -0.5f * normalizedDistance * normalizedDistance);
+    const float threshold = std::clamp(normalThreshold, -1.0f, 0.999999f);
+    const float normalWeight = smoothstep(
+        threshold,
+        1.0f,
+        std::clamp(dot(centerNormal, sampleNormal), -1.0f, 1.0f));
+    return std::max(spatialWeight, 0.0f) * depthWeight * normalWeight;
 }
 
 } // namespace sokoban
