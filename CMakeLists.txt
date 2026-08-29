@@ -395,6 +395,7 @@ add_library(sokoban_core STATIC
     src/engine/render/RenderAssetRequirements.cpp
     src/engine/render/RenderResolution.cpp
     src/engine/render/RuntimeTextureCatalog.cpp
+    src/engine/render/SsaoMath.cpp
     src/engine/render/TextureSourceLoader.cpp
     src/engine/render/Tonemap.cpp
     src/engine/render/UploadRingAllocator.cpp
@@ -848,6 +849,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME pbr_material TARGET sokoban_pbr_material_tests
         LIBS sokoban_core
         SOURCES tests/PbrMaterialTests.cpp
+    )
+    sokoban_add_test(NAME ssao_math TARGET sokoban_ssao_math_tests
+        LIBS sokoban_core
+        SOURCES tests/SsaoMathTests.cpp
     )
     sokoban_add_test(NAME animation_catalog TARGET sokoban_animation_catalog_tests
         LIBS sokoban_core

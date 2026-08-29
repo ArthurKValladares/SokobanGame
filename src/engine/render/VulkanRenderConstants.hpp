@@ -99,11 +99,9 @@ struct GpuDrawInstance {
     // Sixty-four bytes of per-draw space, claimed by one pass at a time.
     //
     // Water uses all four for its border and ripple parameters. Model draws
-    // use passData[0].x, and only that, for the base index of their material
-    // range in the material buffer: a draw covers a whole model, a model's
-    // primitives can carry different materials, and the vertex's
-    // materialIndex is relative to the model rather than global. The two
-    // never overlap - water is a tile pass and has no model behind it.
+    // use passData[0].x for the base index of their material range and y for
+    // mixed-material back-face rejection. The full-screen SSAO pass uses this
+    // block for clipFromView while `vertices` carries its inverse.
     //
     // These used to be a shadow-space copy of the corners above, pushed on
     // every scene draw - the frame's sun transform, restated once per face.

@@ -11,8 +11,7 @@
 // A shader cannot read and write the same attachment, so the pass samples the
 // snapshot copyResolvedSceneColor leaves in sceneColor and writes the scene
 // target unblended. That copy is the price of having no depth prepass and no
-// G-buffer to reconstruct an ambient term from; either would remove it, and
-// V7 proper is where that belongs.
+// G-buffer to reconstruct an ambient term from; either would remove it.
 //
 // It runs before the preview inset and the level transition, as the blended
 // version did, because the occlusion buffer was built from the main view's
@@ -35,8 +34,8 @@ void main()
     vec2 uv = gl_FragCoord.xy * texel;
 
     // 5x5 box blur smooths the per-pixel noise from the AO pass. Still not
-    // depth-aware, so occlusion bleeds across silhouettes; the bilateral
-    // blur is V7's other half and deliberately not here.
+    // depth-aware, so occlusion bleeds across silhouettes; packet 8.2 replaces
+    // it with the half-resolution bilateral path.
     float ao = 0.0;
     for (int y = -2; y <= 2; ++y) {
         for (int x = -2; x <= 2; ++x) {

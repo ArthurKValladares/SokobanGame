@@ -47,6 +47,7 @@ public:
         VkCommandBuffer commandBuffer,
         VkImageView targetView,
         const RenderFrameData::Lighting::AmbientOcclusion& settings,
+        const Mat4& clipFromView,
         VkDescriptorSet descriptorSet,
         VkPipelineLayout pipelineLayout,
         Pipelines pipelines,

@@ -44,6 +44,11 @@ struct IsoRenderLayout {
 [[nodiscard]] Mat4 isoClipFromWorld(
     const IsoRenderLayout& layout,
     Vec2 renderExtent);
+// Projection without the rigid view transform. SSAO uses it and its inverse
+// to round-trip copied depth through view space in physical scene units.
+[[nodiscard]] Mat4 isoClipFromView(
+    const IsoRenderLayout& layout,
+    Vec2 renderExtent);
 
 
 struct ShadowRenderLayout {

@@ -8,6 +8,24 @@
 #include <array>
 
 namespace sokoban {
+namespace {
+
+std::array<Vec4, 4> matrixColumns(const Mat4& matrix)
+{
+    return {
+        Vec4 { at(matrix, 0, 0), at(matrix, 1, 0),
+            at(matrix, 2, 0), at(matrix, 3, 0) },
+        Vec4 { at(matrix, 0, 1), at(matrix, 1, 1),
+            at(matrix, 2, 1), at(matrix, 3, 1) },
+        Vec4 { at(matrix, 0, 2), at(matrix, 1, 2),
+            at(matrix, 2, 2), at(matrix, 3, 2) },
+        Vec4 { at(matrix, 0, 3), at(matrix, 1, 3),
+            at(matrix, 2, 3), at(matrix, 3, 3) },
+    };
+}
+
+} // namespace
+
 VulkanSsaoPass::~VulkanSsaoPass()
 {
     destroy();
@@ -70,6 +88,7 @@ void VulkanSsaoPass::record(
     VkCommandBuffer commandBuffer,
     VkImageView targetView,
     const RenderFrameData::Lighting::AmbientOcclusion& settings,
+    const Mat4& clipFromView,
     VkDescriptorSet descriptorSet,
     VkPipelineLayout pipelineLayout,
     Pipelines pipelines,
@@ -113,16 +132,19 @@ void VulkanSsaoPass::record(
     };
     VkRect2D scissor { .offset = { 0, 0 }, .extent = extent_ };
     using Debug = RenderFrameData::Lighting::AmbientOcclusion::Debug;
-    // Both draws read the same block. x-z belong to the occlusion pass; w is
-    // the composite's debug mode, which the occlusion pass ignores.
+    // Both draws read the same block. The occlusion pass round-trips depth
+    // through view space with the projection pair; the composite reads only
+    // strength and debug mode.
     const float debugMode = settings.debug == Debug::AmbientMask
         ? 2.0f
         : (settings.debug == Debug::Occlusion ? 1.0f : 0.0f);
     GpuDrawInstance pushConstants {};
+    pushConstants.vertices = matrixColumns(inverse(clipFromView));
+    pushConstants.passData = matrixColumns(clipFromView);
     pushConstants.color = {
         settings.strength,
-        config::ssaoRadiusPixels,
-        config::ssaoDepthRange,
+        config::ssaoRadiusWorld,
+        config::ssaoBiasWorld,
         debugMode,
     };
 

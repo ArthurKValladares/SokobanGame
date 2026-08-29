@@ -32,8 +32,10 @@ inline constexpr float maximumModelShadowReceive = 1.0f;
 inline constexpr bool ambientOcclusionEnabled = true;
 inline constexpr float ambientOcclusionStrength = 0.55f;
 inline constexpr float maximumAmbientOcclusionStrength = 1.0f;
-inline constexpr float ssaoRadiusPixels = 10.0f;
-inline constexpr float ssaoDepthRange = 0.02f;
+// Physical scene units: one board cell is one unit. Projection and render
+// scale therefore change the pixel footprint, not the AO neighborhood.
+inline constexpr float ssaoRadiusWorld = 0.45f;
+inline constexpr float ssaoBiasWorld = 0.025f;
 
 inline constexpr bool shadowsEnabled = true;
 inline constexpr float shadowOpacity = 0.5f;

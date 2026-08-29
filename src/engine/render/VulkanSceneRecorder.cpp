@@ -263,6 +263,7 @@ public:
             commandBuffer,
             swapchain_.resolvedColorView(),
             frameData.lighting.ambientOcclusion,
+            isoClipFromView(scene.isoLayout, scene.renderExtent),
             descriptorSet(),
             pipelines_.layout(),
             {

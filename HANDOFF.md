@@ -24,14 +24,16 @@ rounded scene-image branches. All four core glTF material maps now affect scene
 lighting: metallic-roughness, tangent-space normals, linear HDR emissive and
 ambient-only material occlusion. Authored OPAQUE, MASK, BLEND and double-sided
 state now control pass selection, coverage, sorting and culling, while the
-mirror-energy effect has an explicit base-color-only material contract. Phase 7
-is complete; the next objective is view-space, world-unit SSAO.
+mirror-energy effect has an explicit base-color-only material contract. SSAO
+now reconstructs view-space position and geometric normals from copied depth
+and samples with scene-unit radius and bias. The next objective is the
+half-resolution, silhouette-aware bilateral path.
 
 The recommended order is:
 
 1. Capture the remaining post-tonemap/material visual baseline evidence.
-2. Add view-space SSAO inputs and world/view-unit radius and bias.
-3. Move AO to half resolution with a depth/normal-aware bilateral filter.
+2. Move AO to half resolution with a depth/normal-aware bilateral filter.
+3. Revalidate AO appearance and GPU cost across camera/render-scale changes.
 4. Resume the larger scaling and memory work after SSAO is stable.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
@@ -43,7 +45,7 @@ sampling have different failure modes and should be independently reviewable.
 - Language and platform: C++20, SDL3, Vulkan 1.3, GLSL compiled to SPIR-V.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
-- Current tests: 67 CTest suites in the newest configured build tree.
+- Current tests: 68 CTest suites in the newest configured build tree.
 - Current shaders: 16 GLSL files. `triangle.frag.glsl` is 669 physical lines;
   player-facing UI uses the 93-line `ui.frag.glsl` path.
 - Texture capacity: selected at startup from a configured 1,024-slot ceiling,
@@ -182,7 +184,7 @@ combine adjacent packets merely because they touch the same files.
 ### 0. Refresh the baseline
 
 Current state on 28 August 2026: the full Visual Studio Debug build succeeds
-and all 67 registered CTest suites pass, including `vulkan_smoke`. Establishing
+and all 68 registered CTest suites pass, including `vulkan_smoke`. Establishing
 that baseline also exposed and repaired stale UI/settings assertions left by the
 earlier default-MSAA change. Representative screenshots and frame statistics
 still need to be captured after the output-transform change and before
@@ -374,7 +376,7 @@ separation, shared-document models, unrelated-model isolation, stable low/high
 descriptor mapping, the manifest base-color override and all three source
 forms. `GltfDependencyTests.cpp` additionally verifies that map-only bindings
 do not synthesize a base-color handle. The production catalog inspection, full
-200-file content stage, Debug build and all 67 suites pass.
+200-file content stage, Debug build and all 68 suites pass.
 
 **Acceptance:** complete. Requesting a model requests all of its maps while an
 unrelated model's maps remain absent from that request.
@@ -400,7 +402,7 @@ UI composition remains after tonemapping. The shader writes linear output and
 the sRGB attachment remains the only output encode. `TonemapTests` covers the EV
 range and multiplier, legacy clamp behavior, neutral low-range colors and HDR
 highlight compression; profile, settings, presentation and UI suites cover the
-full settings path. The complete Debug build and all 67 suites, including the
+full settings path. The complete Debug build and all 68 suites, including the
 Vulkan smoke test, pass.
 
 **Acceptance:** implementation and automated validation are complete. The
@@ -428,7 +430,7 @@ longer declares bindings 3 or 4, while the UI module declares only scene color,
 font, title art, the runtime texture heap and the shared draw buffer. The shader
 catalog, compiler and content stage now carry all 16 modules, and the content
 pipeline fixture explicitly requires the UI module. The complete Debug build,
-200-file content stage and all 67 suites, including `vulkan_smoke`, pass.
+200-file content stage and all 68 suites, including `vulkan_smoke`, pass.
 
 **Acceptance:** complete for source separation, compiled interfaces, pipeline
 creation and automated regression coverage. The post-tonemap reference capture
@@ -462,7 +464,7 @@ covers fallback, G/B selection, ignored R/A channels, factor multiplication and
 post-sample physical clamping. Existing glTF, GPU-material and runtime-catalog
 tests cover linear interpretation, UV1, handles and residency. All shaders pass
 compilation and SPIR-V validation; the full Debug build, 200-file content stage
-and all 67 suites, including `vulkan_smoke`, pass.
+and all 68 suites, including `vulkan_smoke`, pass.
 
 **Acceptance:** complete for the mapped parameter path and automated numeric,
 transport and runtime validation. Visual reference capture remains in 0.1.
@@ -491,7 +493,7 @@ not MikkTSpace; assets baked against MikkTSpace should continue to ship authored
 `TANGENT` data for exact seam behavior.
 
 All shaders compile and the affected vertex/fragment modules pass SPIR-V
-validation. The full Debug build, 200-file content stage and all 67 suites,
+validation. The full Debug build, 200-file content stage and all 68 suites,
 including `vulkan_smoke`, pass.
 
 **Acceptance:** complete for authored and derived tangent transport, mapped
@@ -513,7 +515,7 @@ screen-space AO cannot darken self-emission. `resolveEmissive` and
 `ambientLightRatio` in `PbrMaterial.*` mirror those rules on the CPU. The
 focused suite covers factor-only materials, linear RGB multiplication, ignored
 alpha, values above 1.0 and the AO ratio, and all 25 checks pass. All shaders
-compile and the edited SPIR-V validates; the full Debug build and all 67 CTest
+compile and the edited SPIR-V validates; the full Debug build and all 68 CTest
 suites, including `vulkan_smoke`, pass.
 
 **Acceptance:** complete for emissive color-space handling, factor/map
@@ -541,7 +543,7 @@ continues to write the same semantic ratio without a map sample.
 The focused suite now passes 34 checks covering no-map fallback, R-only
 sampling, strength endpoints/interpolation and clamping, plus material/SSAO
 composition. All shaders compile, the edited SPIR-V validates, the full Debug
-build stages all 200 content files, and all 67 CTest suites—including
+build stages all 200 content files, and all 68 CTest suites—including
 `vulkan_smoke`—pass.
 
 **Acceptance:** complete for occlusion color space, channel and strength
@@ -583,7 +585,7 @@ passes 1,545 checks including alpha-tinted model classification. The embedded
 GLB loader fixture still covers all core maps, both UV sets, MASK and
 double-sided metadata; production external glTF content exercises BLEND and
 double-sided summaries. All 16 shaders compile, the Debug build stages 200
-files, and all 67 CTest suites—including `vulkan_smoke`—pass.
+files, and all 68 CTest suites—including `vulkan_smoke`—pass.
 
 **Acceptance:** automated material transport, policy and runtime validation are
 complete. Representative appearance capture remains in 0.1. MASK currently
@@ -593,14 +595,35 @@ cutout shadow silhouettes become an authored-content requirement.
 
 ### 8. Complete V7 SSAO
 
-#### 8.1 View-space inputs and physical sampling — next
+#### 8.1 View-space inputs and physical sampling — complete
 
-- Reconstruct or provide view-space position and normals.
-- Express radius and bias in view/world units rather than pixels and raw depth.
-- Preserve the existing ambient-only application contract and test stability
-  across camera and render-scale changes before changing resolution.
+`isoClipFromView` exposes the exact scene projection without its rigid camera
+transform. `VulkanSsaoPass` pushes that projection and its inverse to the AO
+shader without extending the frame descriptor ABI. For each copied depth pixel,
+`ssao.frag.glsl` reconstructs view-space position, derives a camera-facing
+geometric normal from position derivatives, places twelve rotated samples in a
+normal-oriented hemisphere, projects them back to the depth texture and
+compares reconstructed positions in view units.
 
-#### 8.2 Half-resolution bilateral path
+The fixed 10-pixel disk, raw-depth range and `0.0005` depth bias are gone.
+`ssaoRadiusWorld` is 0.45 scene units and `ssaoBiasWorld` is 0.025 scene units,
+so render resolution changes only the pixel footprint of the same physical
+neighborhood. Euclidean view-space distance fades samples between one and two
+radii, rejecting unrelated silhouettes without tying the threshold to the
+camera's non-linear depth encoding.
+
+`SsaoMath.*` mirrors projection round-tripping, negative-viewport Y handling,
+normal orientation and sample comparison on the CPU. Its new focused suite
+passes 15 checks, including identical physical reconstruction across two render
+resolutions with the same aspect ratio. Both SSAO modules compile, the edited
+SPIR-V validates and uses derivative instructions, the Debug build stages all
+200 files, and all 68 CTest suites—including `vulkan_smoke`—pass.
+
+**Acceptance:** complete for view-space position/normal reconstruction,
+scene-unit radius and bias, render-scale-independent sampling math and the
+existing ambient-only composite. Appearance capture remains in 0.1.
+
+#### 8.2 Half-resolution bilateral path — next
 
 - Render AO at half resolution.
 - Replace the 5x5 box blur with a depth/normal-aware bilateral filter.
@@ -654,10 +677,10 @@ layout changes affect modules that appear unrelated to the immediate feature.
 
 ## Source map for the next packets
 
-- `shaders/ssao.frag.glsl`: current depth-only AO estimator with pixel/raw-depth
-  radius and bias.
-- `shaders/ssao_composite.frag.glsl`: bilateral/composite destination; must
-  preserve the ambient-mask contract.
+- `shaders/ssao.frag.glsl`: completed view-space reconstruction and physical
+  hemisphere estimator; adapt its target coordinates for half resolution.
+- `shaders/ssao_composite.frag.glsl`: current full-resolution 5x5 box blur and
+  ambient-only composite; replace only the filter/upsampling half.
 - `src/engine/render/VulkanSsaoPass.*`: AO target sizing, recording and resource
   lifetime.
 - `src/engine/render/VulkanSwapchainResources.*`: scene depth/color copies and
@@ -668,10 +691,10 @@ layout changes affect modules that appear unrelated to the immediate feature.
   formats.
 - `src/engine/render/VulkanSceneRecorder.*`: pass ordering and conditional depth
   copy.
-- `src/engine/render/VulkanRenderConstants.hpp` and `RenderTypes.hpp`: camera,
-  projection and world/view-unit sampling parameters.
-- `tests/PbrMaterialTests.cpp`: ambient-only composition reference; add focused
-  projection/reconstruction math coverage in a Vulkan-free module.
+- `src/engine/render/SsaoMath.*` and `tests/SsaoMathTests.cpp`: projection,
+  normal and view-unit comparison reference for the shader.
+- `tests/PbrMaterialTests.cpp`: ambient-only composition reference that the
+  upsampler must preserve.
 
 ## Build and test commands
 

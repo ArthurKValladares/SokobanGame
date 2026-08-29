@@ -256,13 +256,13 @@
 <body>
   <header class="shell">
     <p class="eyebrow">Current-state review · 28 August 2026</p>
-    <h1>Finish the material path without rebuilding it twice.</h1>
-    <p class="deck">Sokoban 3D now has the hard substrate, a device-bounded runtime texture heap, semantically validated glTF texture inventory, complete CPU/GPU material behavior, model-scoped map residency, a tested HDR output transform, and a dedicated post-tonemap UI fragment path. The next program replaces the depth-only, pixel-scaled SSAO approximation with a view-space, scale-stable path.</p>
+    <h1>Finish ambient occlusion in physical space.</h1>
+    <p class="deck">Sokoban 3D now has complete CPU/GPU material behavior, a device-bounded texture heap, HDR output, and a dedicated post-tonemap UI path. SSAO now reconstructs view-space positions and normals and samples with scene-unit radius and bias. The next packet moves that estimator to half resolution and replaces the box blur with silhouette-aware bilateral upsampling.</p>
     <div class="metrics" aria-label="Current repository facts">
       <div class="metric"><b>36</b><span>manifest models</span></div>
       <div class="metric"><b>42 / 1024</b><span>textures on validated GPU</span></div>
       <div class="metric"><b>16</b><span>GLSL shaders</span></div>
-      <div class="metric"><b>67</b><span>registered test suites</span></div>
+      <div class="metric"><b>68</b><span>registered test suites</span></div>
     </div>
   </header>
 
@@ -281,7 +281,7 @@
     <section id="verdict">
       <div class="section-head"><span class="num">01</span><h2>Current verdict</h2></div>
       <div class="callout">
-        <strong>Next program:</strong> SSAO view-space inputs. Metallic-roughness, normal, emissive, material occlusion, alpha modes, double-sided culling and the deliberately separate mirror-energy material subset are now live; CPU/GPU material transport, descriptor indexing, model-scoped residency, HDR presentation and the ambient-only mask remain validation invariants.
+        <strong>Next program:</strong> half-resolution bilateral SSAO. View-space reconstruction, scene-unit sampling and ambient-only composition are now invariants; change target sizing and filtering without returning to pixel/raw-depth tuning or darkening direct and emissive light.
       </div>
       <div class="grid" style="margin-top:1rem">
         <article class="card">
@@ -291,8 +291,8 @@
         </article>
         <article class="card">
           <p class="kicker">What comes next</p>
-          <h3>Physical SSAO inputs</h3>
-          <p>Phase 7 is complete. Reconstruct or provide view-space position and normals, then express AO radius and bias in world/view units before changing resolution or blur behavior.</p>
+          <h3>Silhouette-aware filtering</h3>
+          <p>The estimator now works in view space with a 0.45-unit radius and 0.025-unit bias. Render it at half resolution, then upsample with reconstructed depth/normal weights instead of the current full-resolution 5×5 box blur.</p>
         </article>
         <article class="card">
           <p class="kicker">What not to overbuild</p>
@@ -326,7 +326,7 @@
             <tr><td>V1/V3/V5/V6</td><td><span class="status done">Done</span></td><td>Semaphore ownership, skinning access, shader target/optimization and anisotropy are corrected.</td><td>Maintain through validation.</td></tr>
             <tr><td>V2</td><td><span class="status open">Open</span></td><td>Nine renderer files still call <code>vkAllocateMemory</code>.</td><td>VMA or deliberate suballocation before compressed streaming.</td></tr>
             <tr><td>V4</td><td><span class="status done">Done</span></td><td>Vulkan 1.2 feature gating, a separate per-frame texture set and device-bounded runtime capacity are live.</td><td>Preserve the fallback-filled, fence-safe update contract.</td></tr>
-            <tr><td>V7</td><td><span class="status partial">Partial</span></td><td>AO now modulates ambient contribution only.</td><td>View-space data, world-unit radius, half-res and bilateral blur.</td></tr>
+            <tr><td>V7</td><td><span class="status partial">Partial</span></td><td>AO reconstructs view-space position/normals, samples a physical hemisphere and modulates ambient contribution only.</td><td>Half-resolution target plus depth/normal-aware bilateral upsampling.</td></tr>
             <tr><td>A1</td><td><span class="status done">Done</span></td><td>cgltf parsing/validation, all interpolation modes and a loader-level CUBICSPLINE fixture are implemented.</td><td>Keep the fixture in the required regression gate.</td></tr>
             <tr><td>A2</td><td><span class="status open">Open</span></td><td>Runtime textures remain decoded RGBA images.</td><td>KTX2 and platform compression after allocation work.</td></tr>
             <tr><td>A3</td><td><span class="status partial">Partial</span></td><td>Async preparation, publication budgets, residency budgets and eviction exist.</td><td>Mip/LOD streaming, compressed accounting, fence-based retirement.</td></tr>
@@ -390,7 +390,7 @@
           <div>
             <div class="phase-title"><h3>Make the starting point trustworthy</h3><span class="status partial">In progress</span></div>
             <div class="tasks">
-              <div class="task"><span class="task-id">0.1</span><div><b>Visual and performance evidence remains</b><p>The full Debug build and all 67 suites, including the Vulkan smoke test, pass. Capture representative post-tonemap screenshots and frame statistics for mapped-material comparison.</p></div></div>
+              <div class="task"><span class="task-id">0.1</span><div><b>Visual and performance evidence remains</b><p>The full Debug build and all 68 suites, including the Vulkan smoke test, pass. Capture representative post-tonemap screenshots and frame statistics for mapped-material comparison.</p></div></div>
               <div class="task"><span class="task-id">0.2</span><div><b>Loader CUBICSPLINE fixture — complete</b><p>The public file loader is covered for three outputs per key, quaternion value normalization, tangent preservation and malformed counts.</p></div></div>
               <div class="task"><span class="task-id">0.3</span><div><b>Mechanical cleanup — partial</b><p>The dead GPU instance header is gone. Add and normalize the line-ending policy in a separate, non-semantic commit.</p></div></div>
             </div>
@@ -445,7 +445,7 @@
               <div class="task"><span class="task-id">4.2</span><div><b>Redesign GpuMaterial once — complete</b><p>The 112-byte std430 ABI uses three aligned float vectors and four explicit integer vectors. Exact offsets are asserted and confirmed in both compiled SPIR-V modules; focused tests cover fallback/default conversion, every map and UV, alpha, double-sided state and flags.</p></div></div>
               <div class="task"><span class="task-id">4.3</span><div><b>Use existing residency — complete</b><p>A deduplicated runtime catalog assigns non-base glTF maps to isolated per-model requirements. Manifest slots stay low and append-stable; discovered maps occupy stable high heap slots. External, data-URI and buffer-view images share worker decode, render-thread upload, authored sampling, residency budgets and diagnostics.</p></div></div>
             </div>
-            <p class="accept"><b>Gate:</b> requesting one model requests exactly its map dependencies; unrelated maps stay out of the request, the manifest base-color override is preserved, all three source forms decode, and the 67-suite Debug gate passes.</p>
+            <p class="accept"><b>Gate:</b> requesting one model requests exactly its map dependencies; unrelated maps stay out of the request, the manifest base-color override is preserved, all three source forms decode, and the 68-suite Debug gate passes.</p>
           </div>
         </article>
 
@@ -457,7 +457,7 @@
               <div class="task"><span class="task-id">5.1</span><div><b>Khronos PBR Neutral — complete</b><p>The canonical curve is the default; straight clamp remains available in the Debug Output panel. Focused CPU-reference tests cover neutral low-range colors and HDR highlight compression.</p></div></div>
               <div class="task"><span class="task-id">5.2</span><div><b>Exposure setting — complete</b><p>Profile format 27 persists a −4 to +4 EV setting with a 0 EV default. Settings flow through PresentationSettings and RenderFrameData to the tonemap push constants; UI remains after tonemapping and hardware is the sole sRGB encode.</p></div></div>
             </div>
-            <p class="accept"><b>Gate:</b> implementation, shader compilation and all 67 Debug suites pass. Representative post-tonemap screenshot capture remains in baseline task 0.1.</p>
+            <p class="accept"><b>Gate:</b> implementation, shader compilation and all 68 Debug suites pass. Representative post-tonemap screenshot capture remains in baseline task 0.1.</p>
           </div>
         </article>
 
@@ -469,7 +469,7 @@
               <div class="task"><span class="task-id">6.1</span><div><b>Dedicated UI fragment path — complete</b><p>Solid rectangles, font, title art, runtime textures and rounded scene-image composition now use <code>ui.frag.glsl</code>. The shared quad transport and post-tonemap blending remain unchanged.</p></div></div>
               <div class="task"><span class="task-id">6.2</span><div><b>Conservative specialization — guardrail complete</b><p>The split needs no new permutation. Ambient-mask output remains the one stable specialization axis; material differences stay data-driven.</p></div></div>
             </div>
-            <p class="accept"><b>Gate:</b> both modules pass SPIR-V validation and interface inspection; the 200-file content stage, Vulkan smoke test and all 67 suites pass. Manual reference capture remains in 0.1.</p>
+            <p class="accept"><b>Gate:</b> both modules pass SPIR-V validation and interface inspection; the 200-file content stage, Vulkan smoke test and all 68 suites pass. Manual reference capture remains in 0.1.</p>
           </div>
         </article>
 
@@ -484,19 +484,19 @@
               <div class="task"><span class="task-id">7.4</span><div><b>Occlusion — complete</b><p>The linear map reads R, interpolates by clamped strength, supports UV0/UV1 plus scrolling and scales diffuse plus metallic ambient fill only. The already-reduced ambient enters both sides of the scene mask, so material and screen-space AO compose without touching direct, specular or emissive light. CPU-reference tests pin the contract.</p></div></div>
               <div class="task"><span class="task-id">7.5</span><div><b>Alpha and mirror audit — complete</b><p>A tested material policy splits mixed meshes across the existing opaque/blended pipelines, sorts translucent models farthest first, applies MASK to factor × texture alpha, and honors per-material sidedness without new pipeline permutations. OPAQUE ignores authored opacity; BLEND multiplies it by instance alpha. Mirror energy consumes only base-color factor/texture RGB, UV selection and scrolling—never material alpha or the PBR lighting maps.</p></div></div>
             </div>
-            <p class="accept"><b>Gate:</b> all 16 shaders compile; the focused CPU policy has 55 passing checks, scene preparation has 1,545, the embedded GLB fixture covers maps/UVs/MASK/double-sided transport, production glTF content exercises BLEND, and all 67 Debug suites pass. Manual appearance capture remains in 0.1; MASK shadow cutouts remain a separate depth-only-shadow limitation.</p>
+            <p class="accept"><b>Gate:</b> all 16 shaders compile; the focused CPU policy has 55 passing checks, scene preparation has 1,545, the embedded GLB fixture covers maps/UVs/MASK/double-sided transport, production glTF content exercises BLEND, and all 68 Debug suites pass. Manual appearance capture remains in 0.1; MASK shadow cutouts remain a separate depth-only-shadow limitation.</p>
           </div>
         </article>
 
         <article class="phase">
           <div class="phase-id">8<small>V7</small></div>
           <div>
-            <div class="phase-title"><h3>Complete ambient occlusion</h3><span class="status next">Next</span></div>
+            <div class="phase-title"><h3>Complete ambient occlusion</h3><span class="status partial">In progress</span></div>
             <div class="tasks">
-              <div class="task"><span class="task-id">8.1</span><div><b>View-space inputs — next</b><p>Provide/reconstruct position and normals; express radius/bias in world or view units and prove camera/render-scale stability before changing resolution.</p></div></div>
-              <div class="task"><span class="task-id">8.2</span><div><b>Half-resolution bilateral path</b><p>Replace the full-resolution depth-only sample and 5×5 box blur while preserving ambient-only application.</p></div></div>
+              <div class="task"><span class="task-id">8.1</span><div><b>View-space inputs — complete</b><p>The exact scene projection and inverse round-trip copied Vulkan depth into view space. Position derivatives provide camera-facing geometric normals; twelve rotated hemisphere samples use a 0.45 scene-unit radius, 0.025-unit bias and Euclidean range rejection. A 15-check CPU reference covers projection, negative-viewport Y, normals, scale stability and occlusion comparison.</p></div></div>
+              <div class="task"><span class="task-id">8.2</span><div><b>Half-resolution bilateral path — next</b><p>Resize the AO target, adapt estimator coordinates, and replace the full-resolution 5×5 box blur with depth/normal-aware bilateral upsampling while preserving ambient-only application.</p></div></div>
             </div>
-            <p class="accept"><b>Gate:</b> AO is scale-stable, silhouette-aware and never darkens direct or emissive light.</p>
+            <p class="accept"><b>8.1 gate:</b> both SSAO shaders compile, SPIR-V validates, 200 files stage, and all 68 Debug suites—including Vulkan smoke—pass. <b>Final gate:</b> AO is scale-stable, silhouette-aware and never darkens direct or emissive light.</p>
           </div>
         </article>
 

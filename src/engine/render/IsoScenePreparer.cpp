@@ -46,24 +46,29 @@ Vec4 projectIsoPointToClip(
 
 } // namespace
 
-Mat4 isoClipFromWorld(const IsoRenderLayout& layout, Vec2 renderExtent)
+Mat4 isoClipFromView(const IsoRenderLayout& layout, Vec2 renderExtent)
 {
     const float aspect =
         std::max(renderExtent.x, 1.0f) / std::max(renderExtent.y, 1.0f);
     const float nearDepth = std::max(layout.nearestDepth, 0.001f);
     const float farDepth = std::max(layout.farthestDepth, nearDepth + 0.001f);
     return mat4PerspectiveOffCenter(
-               layout.focalLength,
-               aspect,
-               nearDepth,
-               farDepth,
-               layout.projectedCenter,
-               layout.fitScale) *
+        layout.focalLength,
+        aspect,
+        nearDepth,
+        farDepth,
+        layout.projectedCenter,
+        layout.fitScale);
+}
+
+Mat4 isoClipFromWorld(const IsoRenderLayout& layout, Vec2 renderExtent)
+{
+    return isoClipFromView(layout, renderExtent) *
         mat4View(
-               layout.cameraPosition,
-               layout.cameraRight,
-               layout.cameraUp,
-               layout.cameraForward);
+            layout.cameraPosition,
+            layout.cameraRight,
+            layout.cameraUp,
+            layout.cameraForward);
 }
 
 Mat4 shadowClipFromWorld(const ShadowRenderLayout& layout)
