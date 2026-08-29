@@ -1,6 +1,7 @@
 #include "engine/render/SsaoMath.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
 
+#include <array>
 #include <cmath>
 #include <iostream>
 
@@ -95,6 +96,31 @@ void testAoExtentIsHalfResolutionAndCoversOddEdges()
     CHECK(single == (PixelExtent { 1, 1 }));
     const PixelExtent empty = ssaoBufferExtent({ 0, 0 });
     CHECK(empty == (PixelExtent { 0, 0 }));
+}
+
+void testRotationNoiseUsesBothAxesWithoutRowBias()
+{
+    TEST("rotationNoiseUsesBothAxesWithoutRowBias");
+    CHECK(ssaoRotationNoise(13, 7) == ssaoRotationNoise(13, 7));
+    CHECK(ssaoRotationNoise(13, 7) != ssaoRotationNoise(14, 7));
+    CHECK(ssaoRotationNoise(13, 7) != ssaoRotationNoise(13, 8));
+
+    std::array<float, 16> rowMeans {};
+    float total = 0.0f;
+    for (uint32_t y = 0; y < rowMeans.size(); ++y) {
+        for (uint32_t x = 0; x < 64; ++x) {
+            const float value = ssaoRotationNoise(x, y);
+            CHECK(value >= 0.0f);
+            CHECK(value < 1.0f);
+            rowMeans[y] += value;
+            total += value;
+        }
+        rowMeans[y] /= 64.0f;
+        CHECK(rowMeans[y] > 0.35f);
+        CHECK(rowMeans[y] < 0.65f);
+    }
+    CHECK(total / (64.0f * static_cast<float>(rowMeans.size())) > 0.47f);
+    CHECK(total / (64.0f * static_cast<float>(rowMeans.size())) < 0.53f);
 }
 
 void testPhysicalRadiusIsIndependentOfRenderResolution()
@@ -223,6 +249,7 @@ int main()
 {
     testProjectionRoundTripUsesVulkanDepthAndFramebufferY();
     testAoExtentIsHalfResolutionAndCoversOddEdges();
+    testRotationNoiseUsesBothAxesWithoutRowBias();
     testPhysicalRadiusIsIndependentOfRenderResolution();
     testReconstructedNormalFacesTheCamera();
     testSampleComparisonUsesViewUnitsAndRejectsHalos();

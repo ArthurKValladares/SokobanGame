@@ -28,7 +28,9 @@ mirror-energy effect has an explicit base-color-only material contract. SSAO
 now reconstructs view-space position and geometric normals from copied depth
 and samples with scene-unit radius and bias into a half-resolution target. Its
 full-resolution composite now uses view-space depth and normal weights instead
-of a box blur, while continuing to affect ambient light only. A deterministic
+of a box blur, while continuing to affect ambient light only. Its estimator
+uses a full two-axis integer hash for kernel rotation so half-resolution noise
+does not settle into horizontal bands. A deterministic
 evidence runner now archives post-tonemap scenes, filtered AO, matched AO-off
 controls and CPU/GPU frame statistics. Persistent renderable identities and
 stable world bounds are now implemented; measured frustum culling is next.
@@ -632,7 +634,8 @@ camera's non-linear depth encoding.
 `SsaoMath.*` mirrors projection round-tripping, negative-viewport Y handling,
 normal orientation and sample comparison on the CPU. The first 15 checks cover
 8.1, including identical physical reconstruction across two render resolutions
-with the same aspect ratio; 8.2 extends the same suite to 25 checks. Both SSAO
+with the same aspect ratio; 8.2 extends the same suite with half-up sizing,
+bilateral rejection and a two-axis rotation-noise regression. Both SSAO
 modules compile, the edited SPIR-V validates and uses derivative instructions,
 the Debug build stages all
 200 files, and all 68 CTest suites—including `vulkan_smoke`—pass.
@@ -649,7 +652,10 @@ covered, recreation recomputes both extents, and only the estimator uses the
 smaller viewport/scissor/render area. The composite still covers the complete
 scene target. The estimator maps its half-resolution fragment coordinates over
 the full copied depth image, preserving the physical view-space sampling from
-8.1.
+8.1. Its per-pixel kernel rotation now comes from a full two-axis integer hash.
+The prior interleaved-gradient pattern changed much more slowly between rows
+than columns, so its row-correlated error survived upsampling as horizontal
+bands on large flat surfaces.
 
 `ssao_composite.frag.glsl` replaces the full-resolution 5x5 box blur with the
 native four-candidate bilinear footprint of the half-resolution AO image. For
@@ -662,10 +668,12 @@ color snapshot remains necessary because the unblended composite cannot sample
 the color attachment it is simultaneously writing; half-resolution AO does not
 change that data dependency.
 
-`SsaoMath.*` now provides overflow-safe half-up target sizing and a CPU reference
-for the bilateral weight. The focused suite passes 25 checks, including even,
-odd, one-pixel and empty extents plus same-plane retention and depth/normal-edge
-rejection. Both edited shaders compile and pass Vulkan 1.3 SPIR-V validation;
+`SsaoMath.*` now provides overflow-safe half-up target sizing, a CPU reference
+for the bilateral weight, and the exact shader rotation hash. The focused suite
+passes 2,110 checks, including even, odd, one-pixel and empty extents,
+same-plane retention, depth/normal-edge rejection, deterministic hash output,
+both-axis variation and bounded per-row distribution. Both edited shaders
+compile and pass Vulkan 1.3 SPIR-V validation;
 the Debug build stages all 200 files, Vulkan smoke passes, and all 68 CTest
 suites pass.
 
@@ -673,6 +681,11 @@ suites pass.
 full-resolution silhouette-aware upsampling, ambient-only composition and
 resize edge cases. Representative images and matched GPU timings are archived
 under `docs/render-evidence/2026-08-28-ssao/`.
+
+The banding regression capture is archived separately under
+`docs/render-evidence/2026-08-29-ssao-banding/`; its filtered-AO frame retains
+contact occlusion without the long periodic horizontal stripes from the
+reported debug view.
 
 **Acceptance:** AO is stable across render scales and camera changes, does not
 bleed across silhouettes, and does not darken direct highlights or emissive

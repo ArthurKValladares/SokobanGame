@@ -3,11 +3,17 @@
 #include "engine/Math.hpp"
 #include "engine/render/RenderResolution.hpp"
 
+#include <cstdint>
+
 namespace sokoban {
 
 // Half resolution rounds up so every full-resolution edge pixel maps to a
 // valid AO texel, including odd-sized and one-pixel render targets.
 [[nodiscard]] PixelExtent ssaoBufferExtent(PixelExtent renderExtent);
+
+// CPU reference for the estimator's per-pixel kernel rotation. Both axes are
+// deliberately mixed to prevent row-correlated noise from becoming bands.
+[[nodiscard]] float ssaoRotationNoise(uint32_t pixelX, uint32_t pixelY);
 
 // Vulkan depth is already NDC z in [0, 1]. UV y runs down the framebuffer,
 // while NDC y runs up because the scene uses a negative-height viewport.

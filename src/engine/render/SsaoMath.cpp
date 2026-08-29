@@ -29,6 +29,17 @@ PixelExtent ssaoBufferExtent(PixelExtent renderExtent)
     };
 }
 
+float ssaoRotationNoise(uint32_t pixelX, uint32_t pixelY)
+{
+    uint32_t state = pixelX * 0x9e3779b9U ^ pixelY * 0x85ebca6bU;
+    state ^= state >> 16U;
+    state *= 0x7feb352dU;
+    state ^= state >> 15U;
+    state *= 0x846ca68bU;
+    state ^= state >> 16U;
+    return static_cast<float>(state >> 8U) * (1.0f / 16777216.0f);
+}
+
 Vec3 reconstructSsaoViewPosition(
     const Mat4& viewFromClip,
     Vec2 uv,

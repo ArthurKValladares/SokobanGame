@@ -15,12 +15,20 @@ layout(push_constant) uniform PushConstants
     layout(offset = 144) vec4 filterParams;
 } pc;
 
-// Interleaved gradient noise: cheap per-pixel randomization without a noise
-// texture; the bilateral upsample averages it away without crossing edges.
-float gradientNoise(vec2 pixel)
+// A full 2D integer hash avoids the row-correlated bias of interleaved
+// gradient noise. That bias survives half-resolution estimation as visible
+// horizontal bands on large, gently occluded surfaces.
+float rotationNoise(uvec2 pixel)
 {
-    return fract(52.9829189 * fract(
-        0.06711056 * pixel.x + 0.00583715 * pixel.y));
+    uint state = pixel.x * 0x9e3779b9u ^ pixel.y * 0x85ebca6bu;
+    state ^= state >> 16;
+    state *= 0x7feb352du;
+    state ^= state >> 15;
+    state *= 0x846ca68bu;
+    state ^= state >> 16;
+    // Use the upper 24 bits so the conversion stays in [0, 1) even after
+    // rounding to a 32-bit float.
+    return float(state >> 8) * (1.0 / 16777216.0);
 }
 
 vec3 reconstructViewPosition(vec2 uv, float depth)
@@ -76,7 +84,7 @@ void main()
 
     const int sampleCount = 12;
     const float goldenAngle = 2.39996323;
-    float rotation = gradientNoise(gl_FragCoord.xy) * 6.2831853;
+    float rotation = rotationNoise(uvec2(gl_FragCoord.xy)) * 6.2831853;
     vec3 randomDirection = vec3(cos(rotation), sin(rotation), 0.0);
     vec3 tangent = randomDirection -
         normal * dot(randomDirection, normal);
