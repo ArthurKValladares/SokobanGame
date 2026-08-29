@@ -1,5 +1,6 @@
 #include "engine/render/VulkanFrameCapture.hpp"
 
+#include "engine/render/VulkanMemoryAllocator.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 
 #include <cstring>
@@ -20,7 +21,7 @@ namespace {
 } // namespace
 
 ImageData captureImageRegion(
-    VkPhysicalDevice physicalDevice,
+    VulkanMemoryAllocator& allocator,
     VkDevice device,
     VkCommandPool commandPool,
     VkQueue graphicsQueue,
@@ -39,7 +40,8 @@ ImageData captureImageRegion(
         static_cast<VkDeviceSize>(extent.width) * extent.height * channels;
 
     VkBuffer staging = VK_NULL_HANDLE;
-    VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+    VulkanAllocation stagingAllocation = nullptr;
+    void* mapped = nullptr;
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
 
@@ -50,12 +52,7 @@ ImageData captureImageRegion(
         if (commandBuffer) {
             vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
         }
-        if (staging) {
-            vkDestroyBuffer(device, staging, nullptr);
-        }
-        if (stagingMemory) {
-            vkFreeMemory(device, stagingMemory, nullptr);
-        }
+        allocator.destroyBuffer(staging, stagingAllocation);
     };
 
     try {
@@ -65,24 +62,13 @@ ImageData captureImageRegion(
             .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         };
-        vkCheck(vkCreateBuffer(device, &bufferInfo, nullptr, &staging),
-            "vkCreateBuffer capture staging failed");
-
-        VkMemoryRequirements requirements {};
-        vkGetBufferMemoryRequirements(device, staging, &requirements);
-        const VkMemoryAllocateInfo allocation {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            .allocationSize = requirements.size,
-            .memoryTypeIndex = vulkanResources::findMemoryType(
-                physicalDevice,
-                requirements.memoryTypeBits,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
-        };
-        vkCheck(vkAllocateMemory(device, &allocation, nullptr, &stagingMemory),
-            "vkAllocateMemory capture staging failed");
-        vkCheck(vkBindBufferMemory(device, staging, stagingMemory, 0),
-            "vkBindBufferMemory capture staging failed");
+        allocator.createBuffer(
+            bufferInfo,
+            VulkanMemoryUsage::HostReadback,
+            staging,
+            stagingAllocation,
+            &mapped,
+            "Frame capture readback");
 
         const VkCommandBufferAllocateInfo commandBufferInfo {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -171,10 +157,6 @@ ImageData captureImageRegion(
         vkCheck(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX),
             "vkWaitForFences capture failed");
 
-        void* mapped = nullptr;
-        vkCheck(vkMapMemory(device, stagingMemory, 0, byteCount, 0, &mapped),
-            "vkMapMemory capture failed");
-
         ImageData image;
         image.width = extent.width;
         image.height = extent.height;
@@ -192,8 +174,6 @@ ImageData captureImageRegion(
             // full alpha rather than trusting whatever the attachment held.
             image.rgba[i + 3] = static_cast<std::byte>(255);
         }
-        vkUnmapMemory(device, stagingMemory);
-
         cleanup();
         return image;
     } catch (...) {

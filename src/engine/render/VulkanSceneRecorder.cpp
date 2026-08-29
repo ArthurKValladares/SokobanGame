@@ -185,6 +185,12 @@ public:
                 (previewScene ? previewScene->reusedRenderableBounds : 0),
             .rebuiltRenderableBounds = scene.rebuiltRenderableBounds +
                 (previewScene ? previewScene->rebuiltRenderableBounds : 0),
+            .visibleRenderables = scene.visibleRenderables +
+                (previewScene ? previewScene->visibleRenderables : 0),
+            .culledRenderables = scene.culledRenderables +
+                (previewScene ? previewScene->culledRenderables : 0),
+            .frustumCullingEnabled = scene.frustumCullingEnabled &&
+                (!previewScene || previewScene->frustumCullingEnabled),
             .swapchainWidth = extent.width,
             .swapchainHeight = extent.height,
             .swapchainImages = swapchain_.imageCount(),

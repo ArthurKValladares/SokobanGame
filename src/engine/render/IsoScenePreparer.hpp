@@ -146,6 +146,9 @@ struct PreparedRenderable {
     uint64_t boundsRevision = 0;
     Aabb worldBounds;
     bool boundsReused = false;
+    // Main color/depth visibility only. Picking and shadow lists deliberately
+    // do not consume this classification yet.
+    bool mainSceneVisible = true;
 };
 
 // CPU scene work shared by every pass in one submitted frame.
@@ -172,8 +175,11 @@ struct PreparedRenderScene {
     std::vector<std::array<Vec3, 4>> shadowFaces;
     std::vector<std::size_t> shadowModelIndices;
     std::vector<PreparedRenderable> renderables;
+    bool frustumCullingEnabled = true;
     uint32_t reusedRenderableBounds = 0;
     uint32_t rebuiltRenderableBounds = 0;
+    uint32_t visibleRenderables = 0;
+    uint32_t culledRenderables = 0;
 };
 
 // Owns all Vulkan-free projection, culling, sorting, and picking behavior.
@@ -207,6 +213,15 @@ public:
     void setOpaqueFrontToBackSort(bool enabled)
     {
         opaqueFrontToBackSort_ = enabled;
+    }
+
+    [[nodiscard]] bool frustumCulling() const
+    {
+        return frustumCulling_;
+    }
+    void setFrustumCulling(bool enabled)
+    {
+        frustumCulling_ = enabled;
     }
 
     [[nodiscard]] std::optional<GridPosition3> pickGridCell(
@@ -287,6 +302,7 @@ private:
     mutable std::vector<CachedRenderable> isoFaceRenderableCache_;
     mutable uint64_t nextRenderableIdentity_ = 1;
     bool opaqueFrontToBackSort_ = true;
+    bool frustumCulling_ = true;
 };
 
 } // namespace sokoban

@@ -222,6 +222,10 @@ public:
     // effect on the next prepared frame with no pipeline rebuild.
     [[nodiscard]] bool opaqueFrontToBackSortEnabled() const;
     void setOpaqueFrontToBackSortEnabled(bool enabled);
+    // Main color/depth frustum culling. The toggle exists for matched evidence
+    // and developer A/B inspection; normal play leaves it enabled.
+    [[nodiscard]] bool frustumCullingEnabled() const;
+    void setFrustumCullingEnabled(bool enabled);
     [[nodiscard]] bool wideLinesSupported() const;
     [[nodiscard]] float wireframeLineWidth() const;
     [[nodiscard]] std::array<float, 2> wireframeLineWidthRange() const;
@@ -334,6 +338,7 @@ private:
     std::optional<VulkanFailure> fatalFailure_;
     PresentationPolicy presentationPolicy_ {};
     RenderStats lastStats_ {};
+    FrameTimeTelemetry scenePreparationTimeTelemetry_ {};
     FrameTimeTelemetry cpuFrameTimeTelemetry_ {};
     uint64_t nextStatsFrameIndex_ = 1;
     std::optional<GameViewportDisplay> gameViewportDisplay_;

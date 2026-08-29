@@ -23,14 +23,14 @@ VulkanGeometryArena::~VulkanGeometryArena()
 }
 
 void VulkanGeometryArena::create(
-    VkPhysicalDevice physicalDevice,
+    VulkanMemoryAllocator& memoryAllocator,
     VkDevice device,
     VkCommandPool commandPool,
     VkQueue graphicsQueue,
     VulkanUploadRing& uploadRing)
 {
     destroy();
-    physicalDevice_ = physicalDevice;
+    memoryAllocator_ = &memoryAllocator;
     device_ = device;
     commandPool_ = commandPool;
     graphicsQueue_ = graphicsQueue;
@@ -53,7 +53,7 @@ void VulkanGeometryArena::destroy()
     commandPool_ = VK_NULL_HANDLE;
     uploadRing_ = nullptr;
     device_ = VK_NULL_HANDLE;
-    physicalDevice_ = VK_NULL_HANDLE;
+    memoryAllocator_ = nullptr;
 }
 
 VulkanGeometryArena::Allocation VulkanGeometryArena::allocate(
@@ -303,22 +303,6 @@ VkDeviceSize VulkanGeometryArena::indexOffset(const Allocation& allocation) cons
     return allocation.index.offset;
 }
 
-uint32_t VulkanGeometryArena::findMemoryType(
-    uint32_t typeFilter,
-    VkMemoryPropertyFlags properties) const
-{
-    VkPhysicalDeviceMemoryProperties memoryProperties {};
-    vkGetPhysicalDeviceMemoryProperties(physicalDevice_, &memoryProperties);
-    for (uint32_t index = 0; index < memoryProperties.memoryTypeCount; ++index) {
-        if ((typeFilter & (1U << index)) &&
-            (memoryProperties.memoryTypes[index].propertyFlags & properties) ==
-                properties) {
-            return index;
-        }
-    }
-    throw std::runtime_error("No suitable memory type for geometry arena");
-}
-
 VulkanGeometryArena::Block VulkanGeometryArena::createBlock(
     VkDeviceSize capacity,
     VkBufferUsageFlags usage,
@@ -331,29 +315,14 @@ VulkanGeometryArena::Block VulkanGeometryArena::createBlock(
         .usage = usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
-    vkCheck(vkCreateBuffer(device_, &bufferInfo, nullptr, &result.buffer),
-        "vkCreateBuffer geometry arena failed");
+    memoryAllocator_->createBuffer(
+        bufferInfo,
+        VulkanMemoryUsage::DeviceLocal,
+        result.buffer,
+        result.allocation,
+        nullptr,
+        name);
     vulkanDebug::setObjectName(device_, VK_OBJECT_TYPE_BUFFER, result.buffer, name);
-    VkMemoryRequirements requirements {};
-    vkGetBufferMemoryRequirements(device_, result.buffer, &requirements);
-    const VkMemoryAllocateInfo allocationInfo {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = requirements.size,
-        .memoryTypeIndex = findMemoryType(
-            requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
-    };
-    const VkResult allocationResult =
-        vkAllocateMemory(device_, &allocationInfo, nullptr, &result.memory);
-    if (allocationResult != VK_SUCCESS) {
-        vkDestroyBuffer(device_, result.buffer, nullptr);
-        vkCheck(allocationResult, "vkAllocateMemory geometry arena failed");
-    }
-    const VkResult bindResult = vkBindBufferMemory(device_, result.buffer, result.memory, 0);
-    if (bindResult != VK_SUCCESS) {
-        vkFreeMemory(device_, result.memory, nullptr);
-        vkDestroyBuffer(device_, result.buffer, nullptr);
-        vkCheck(bindResult, "vkBindBufferMemory geometry arena failed");
-    }
     result.allocator = GeometrySuballocator(capacity);
     return result;
 }
@@ -385,14 +354,9 @@ GeometrySuballocator::Allocation VulkanGeometryArena::allocateSlice(
 
 void VulkanGeometryArena::destroyBlock(Block& block) const
 {
-    if (block.buffer) {
-        vkDestroyBuffer(device_, block.buffer, nullptr);
-    }
-    if (block.memory) {
-        vkFreeMemory(device_, block.memory, nullptr);
-    }
+    memoryAllocator_->destroyBuffer(block.buffer, block.allocation);
     block.buffer = VK_NULL_HANDLE;
-    block.memory = VK_NULL_HANDLE;
+    block.allocation = nullptr;
     block.allocator = GeometrySuballocator(0);
 }
 

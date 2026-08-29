@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/render/VulkanModelResources.hpp"
+#include "engine/render/VulkanMemoryAllocator.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/RenderTypes.hpp"
 
@@ -46,7 +47,7 @@ public:
     VulkanSceneDescriptors& operator=(const VulkanSceneDescriptors&) = delete;
 
     void create(
-        VkPhysicalDevice physicalDevice,
+        VulkanMemoryAllocator& allocator,
         VkDevice device,
         const Resources& resources,
         uint32_t setCount = 1);
@@ -74,12 +75,11 @@ public:
 private:
     struct OwnedBuffer {
         VkBuffer buffer = VK_NULL_HANDLE;
-        VkDeviceMemory memory = VK_NULL_HANDLE;
+        VulkanAllocation allocation = nullptr;
         void* mapped = nullptr;
     };
 
-    [[nodiscard]] OwnedBuffer createFrameBuffer(
-        VkPhysicalDevice physicalDevice) const;
+    [[nodiscard]] OwnedBuffer createFrameBuffer() const;
     void updateInternal(
         uint32_t internalSetIndex,
         const Resources& resources) const;
@@ -88,6 +88,7 @@ private:
         const Resources& resources) const;
 
     VkDevice device_ = VK_NULL_HANDLE;
+    VulkanMemoryAllocator* allocator_ = nullptr;
     VkDescriptorSetLayout layout_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout textureLayout_ = VK_NULL_HANDLE;
     VkDescriptorPool pool_ = VK_NULL_HANDLE;

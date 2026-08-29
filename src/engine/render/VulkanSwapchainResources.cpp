@@ -23,6 +23,7 @@ VulkanSwapchainResources::~VulkanSwapchainResources()
 
 void VulkanSwapchainResources::create(
     VkPhysicalDevice physicalDevice,
+    VulkanMemoryAllocator& allocator,
     VkDevice device,
     VkSurfaceKHR surface,
     SDL_Window* window,
@@ -36,6 +37,7 @@ void VulkanSwapchainResources::create(
     destroy();
     physicalDevice_ = physicalDevice;
     device_ = device;
+    allocator_ = &allocator;
     surface_ = surface;
     window_ = window;
     queueFamilies_ = queueFamilies;
@@ -107,6 +109,7 @@ void VulkanSwapchainResources::destroy()
     window_ = nullptr;
     surface_ = VK_NULL_HANDLE;
     device_ = VK_NULL_HANDLE;
+    allocator_ = nullptr;
     physicalDevice_ = VK_NULL_HANDLE;
 }
 
@@ -874,7 +877,7 @@ void VulkanSwapchainResources::createResolvedColor()
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
     resolvedColorImage_ = vulkanResources::createImage(
-        physicalDevice_,
+        *allocator_,
         device_,
         imageInfo,
         VK_IMAGE_ASPECT_COLOR_BIT,
@@ -900,7 +903,7 @@ void VulkanSwapchainResources::createMsaaColor()
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
     msaaColorImage_ = vulkanResources::createImage(
-        physicalDevice_,
+        *allocator_,
         device_,
         imageInfo,
         VK_IMAGE_ASPECT_COLOR_BIT,
@@ -928,7 +931,7 @@ void VulkanSwapchainResources::createDepth()
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
     depthImage_ = vulkanResources::createImage(
-        physicalDevice_,
+        *allocator_,
         device_,
         imageInfo,
         VK_IMAGE_ASPECT_DEPTH_BIT,
@@ -936,7 +939,7 @@ void VulkanSwapchainResources::createDepth()
     if (msaaEnabled()) {
         imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
         resolveDepthImage_ = vulkanResources::createImage(
-            physicalDevice_,
+            *allocator_,
             device_,
             imageInfo,
             VK_IMAGE_ASPECT_DEPTH_BIT,
@@ -963,7 +966,7 @@ void VulkanSwapchainResources::createSceneColor()
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
     sceneColorImage_ = vulkanResources::createImage(
-        physicalDevice_,
+        *allocator_,
         device_,
         imageInfo,
         VK_IMAGE_ASPECT_COLOR_BIT,
@@ -1014,7 +1017,7 @@ void VulkanSwapchainResources::createSceneDepth()
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
     sceneDepthImage_ = vulkanResources::createImage(
-        physicalDevice_,
+        *allocator_,
         device_,
         imageInfo,
         VK_IMAGE_ASPECT_DEPTH_BIT,
@@ -1050,7 +1053,7 @@ void VulkanSwapchainResources::createDisplayColor()
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
     displayColorImage_ = vulkanResources::createImage(
-        physicalDevice_,
+        *allocator_,
         device_,
         imageInfo,
         VK_IMAGE_ASPECT_COLOR_BIT,
@@ -1066,13 +1069,13 @@ void VulkanSwapchainResources::destroyAttachments()
         vkDestroySampler(device_, sceneColorSampler_, nullptr);
     }
     sceneColorSampler_ = VK_NULL_HANDLE;
-    vulkanResources::destroyImage(device_, displayColorImage_);
-    vulkanResources::destroyImage(device_, sceneDepthImage_);
-    vulkanResources::destroyImage(device_, sceneColorImage_);
-    vulkanResources::destroyImage(device_, resolveDepthImage_);
-    vulkanResources::destroyImage(device_, depthImage_);
-    vulkanResources::destroyImage(device_, msaaColorImage_);
-    vulkanResources::destroyImage(device_, resolvedColorImage_);
+    vulkanResources::destroyImage(*allocator_, device_, displayColorImage_);
+    vulkanResources::destroyImage(*allocator_, device_, sceneDepthImage_);
+    vulkanResources::destroyImage(*allocator_, device_, sceneColorImage_);
+    vulkanResources::destroyImage(*allocator_, device_, resolveDepthImage_);
+    vulkanResources::destroyImage(*allocator_, device_, depthImage_);
+    vulkanResources::destroyImage(*allocator_, device_, msaaColorImage_);
+    vulkanResources::destroyImage(*allocator_, device_, resolvedColorImage_);
     renderExtent_ = {};
     sceneColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     sceneDepthLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;

@@ -18,7 +18,7 @@ public:
     VulkanUiResources& operator=(const VulkanUiResources&) = delete;
 
     void create(
-        VkPhysicalDevice physicalDevice,
+        VulkanMemoryAllocator& allocator,
         VkDevice device,
         VkCommandPool commandPool,
         VkQueue graphicsQueue,
@@ -35,6 +35,7 @@ public:
 
 private:
     VkDevice device_ = VK_NULL_HANDLE;
+    VulkanMemoryAllocator* allocator_ = nullptr;
     vulkanResources::OwnedImage fontImage_ {};
     vulkanResources::OwnedImage titleBackgroundImage_ {};
     VkSampler sampler_ = VK_NULL_HANDLE;

@@ -871,6 +871,8 @@ void testPersistentRenderablesReuseAndReviseStableBounds()
             frame.isoFaces.size());
     CHECK(scene.rebuiltRenderableBounds == scene.renderables.size());
     CHECK(scene.reusedRenderableBounds == 0);
+    CHECK(scene.visibleRenderables + scene.culledRenderables ==
+        scene.renderables.size());
     const PreparedRenderable firstTile = scene.renderables.front();
     CHECK(firstTile.kind == PreparedRenderable::Kind::Tile);
     CHECK(firstTile.sourceIndex == 0);
@@ -907,6 +909,117 @@ void testPersistentRenderablesReuseAndReviseStableBounds()
     preparer.prepare(frame, { 1920.0f, 1080.0f }, scene);
     CHECK(scene.renderables.front().identity != firstTile.identity);
     CHECK(scene.renderables.front().boundsRevision == 1);
+}
+
+void testFrustumCullingFiltersOnlyMainSceneDrawLists()
+{
+    using namespace sokoban;
+
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 4;
+    frame.levelHeight = 3;
+    frame.levelDepth = 1;
+    frame.cameraExtent = RenderFrameData::CameraExtent {
+        .width = 4,
+        .height = 3,
+        .depth = 1,
+    };
+
+    RenderFrameData::Tile visibleCube = cube(1, 1);
+    RenderFrameData::Tile outsideCube = cube(100, 100);
+    outsideCube.affectsCameraFit = false;
+    RenderFrameData::Tile provisionalModel = cube(200, 200);
+    provisionalModel.model = RenderModel { 1 };
+    provisionalModel.affectsCameraFit = false;
+    frame.tiles = { visibleCube, outsideCube, provisionalModel };
+
+    frame.waterSurfaces = {
+        RenderFrameData::WaterSurface {
+            .cell = { 1, 2, 0 },
+            .position = { 1.0f, 2.0f },
+            .color = { 0.1f, 0.3f, 0.8f, 0.6f },
+            .elevation = 0.5f,
+        },
+        RenderFrameData::WaterSurface {
+            .cell = { 100, 100, 0 },
+            .position = { 100.0f, 100.0f },
+            .color = { 0.1f, 0.3f, 0.8f, 0.6f },
+            .elevation = 0.5f,
+        },
+    };
+    frame.isoFaces = {
+        RenderFrameData::IsoFace {
+            .vertices = {
+                Vec3 { 0.0f, 2.0f, 0.0f },
+                Vec3 { 1.0f, 2.0f, 0.0f },
+                Vec3 { 1.0f, 3.0f, 0.0f },
+                Vec3 { 0.0f, 3.0f, 0.0f },
+            },
+            .normal = { 0.0f, 0.0f, 1.0f },
+            .color = { 0.5f, 0.5f, 0.5f, 1.0f },
+        },
+        RenderFrameData::IsoFace {
+            .vertices = {
+                Vec3 { 100.0f, 100.0f, 0.0f },
+                Vec3 { 101.0f, 100.0f, 0.0f },
+                Vec3 { 101.0f, 101.0f, 0.0f },
+                Vec3 { 100.0f, 101.0f, 0.0f },
+            },
+            .normal = { 0.0f, 0.0f, 1.0f },
+            .color = { 0.5f, 0.5f, 0.5f, 1.0f },
+        },
+    };
+
+    const auto isOutsideFace = [](const PreparedIsoFace& face) {
+        return std::ranges::any_of(
+            face.worldVertices,
+            [](Vec3 vertex) { return vertex.x > 50.0f; });
+    };
+    const auto drawsOutsideFace = [&](const PreparedRenderScene& scene) {
+        return std::ranges::any_of(
+                   scene.opaqueFaceIndices,
+                   [&](std::size_t index) {
+                       return isOutsideFace(scene.isoFaces[index]);
+                   }) ||
+            std::ranges::any_of(
+                scene.translucentFaceIndices,
+                [&](std::size_t index) {
+                    return isOutsideFace(scene.isoFaces[index]);
+                });
+    };
+
+    IsoScenePreparer preparer;
+    PreparedRenderScene culled;
+    preparer.prepare(frame, { 1280.0f, 720.0f }, culled);
+    CHECK(culled.renderables.size() == 7);
+    CHECK(culled.visibleRenderables == 4);
+    CHECK(culled.culledRenderables == 3);
+    CHECK(culled.renderables[0].mainSceneVisible);
+    CHECK(!culled.renderables[1].mainSceneVisible);
+    // Loaded mesh bounds are not retained yet, so model-backed tiles fail
+    // open even when their provisional unit volume is outside the frustum.
+    CHECK(culled.renderables[2].mainSceneVisible);
+    CHECK(!drawsOutsideFace(culled));
+    CHECK(culled.opaqueModelIndices.size() == 1);
+    CHECK(culled.opaqueModelIndices.front() == 2);
+    CHECK(containsCell(culled, { 100, 100, 0 }));
+
+    const std::size_t pickFaceCount = culled.pickFaceIndices.size();
+    const std::size_t shadowFaceCount = culled.shadowFaces.size();
+    const std::size_t shadowModelCount = culled.shadowModelIndices.size();
+    CHECK(shadowFaceCount == 12);
+    CHECK(shadowModelCount == 1);
+
+    preparer.setFrustumCulling(false);
+    PreparedRenderScene unculled;
+    preparer.prepare(frame, { 1280.0f, 720.0f }, unculled);
+    CHECK(unculled.visibleRenderables == 7);
+    CHECK(unculled.culledRenderables == 0);
+    CHECK(drawsOutsideFace(unculled));
+    CHECK(unculled.pickFaceIndices.size() == pickFaceCount);
+    CHECK(unculled.shadowFaces.size() == shadowFaceCount);
+    CHECK(unculled.shadowModelIndices.size() == shadowModelCount);
 }
 
 void testExteriorWaterDoesNotAffectCameraFitOrPicking()
@@ -1384,6 +1497,7 @@ int main()
     testTopDownPreparationSkipsIsoWork();
     testPreparationReusesOutputWithoutStaleLists();
     testPersistentRenderablesReuseAndReviseStableBounds();
+    testFrustumCullingFiltersOnlyMainSceneDrawLists();
     testExteriorWaterDoesNotAffectCameraFitOrPicking();
     testExteriorWaterReachesVisiblePlaneFootprint();
     testDecorativeTileDoesNotAffectCameraFit();

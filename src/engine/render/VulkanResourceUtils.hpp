@@ -8,7 +8,11 @@
 #include <string_view>
 #include <utility>
 
+struct VmaAllocation_T;
+
 namespace sokoban {
+
+class VulkanMemoryAllocator;
 
 class VulkanError final : public std::runtime_error {
 public:
@@ -65,14 +69,9 @@ void transitionImage(
 
 struct OwnedImage {
     VkImage image = VK_NULL_HANDLE;
-    VkDeviceMemory memory = VK_NULL_HANDLE;
+    ::VmaAllocation_T* allocation = nullptr;
     VkImageView view = VK_NULL_HANDLE;
 };
-
-[[nodiscard]] uint32_t findMemoryType(
-    VkPhysicalDevice physicalDevice,
-    uint32_t typeFilter,
-    VkMemoryPropertyFlags properties);
 [[nodiscard]] VkImageView createImageView(
     VkDevice device,
     VkImage image,
@@ -80,12 +79,15 @@ struct OwnedImage {
     VkImageAspectFlags aspectMask,
     std::string_view debugName = {});
 [[nodiscard]] OwnedImage createImage(
-    VkPhysicalDevice physicalDevice,
+    VulkanMemoryAllocator& allocator,
     VkDevice device,
     const VkImageCreateInfo& imageInfo,
     VkImageAspectFlags aspectMask,
     std::string_view debugName = {});
-void destroyImage(VkDevice device, OwnedImage& image);
+void destroyImage(
+    VulkanMemoryAllocator& allocator,
+    VkDevice device,
+    OwnedImage& image);
 
 } // namespace vulkanResources
 } // namespace sokoban

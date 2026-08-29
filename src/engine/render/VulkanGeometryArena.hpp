@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/render/GeometrySuballocator.hpp"
+#include "engine/render/VulkanMemoryAllocator.hpp"
 #include "engine/render/VulkanUploadRing.hpp"
 
 #include <vulkan/vulkan.h>
@@ -44,7 +45,7 @@ public:
     VulkanGeometryArena& operator=(const VulkanGeometryArena&) = delete;
 
     void create(
-        VkPhysicalDevice physicalDevice,
+        VulkanMemoryAllocator& memoryAllocator,
         VkDevice device,
         VkCommandPool commandPool,
         VkQueue graphicsQueue,
@@ -75,13 +76,9 @@ public:
 private:
     struct Block {
         VkBuffer buffer = VK_NULL_HANDLE;
-        VkDeviceMemory memory = VK_NULL_HANDLE;
+        VulkanAllocation allocation = nullptr;
         GeometrySuballocator allocator;
     };
-
-    [[nodiscard]] uint32_t findMemoryType(
-        uint32_t typeFilter,
-        VkMemoryPropertyFlags properties) const;
     [[nodiscard]] Block createBlock(
         VkDeviceSize capacity,
         VkBufferUsageFlags usage,
@@ -95,7 +92,7 @@ private:
         const char* name);
     void destroyBlock(Block& block) const;
 
-    VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
+    VulkanMemoryAllocator* memoryAllocator_ = nullptr;
     VkDevice device_ = VK_NULL_HANDLE;
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;

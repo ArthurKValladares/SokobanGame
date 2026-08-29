@@ -36,7 +36,7 @@ public:
     VulkanThumbnailPass& operator=(const VulkanThumbnailPass&) = delete;
 
     void create(
-        VkPhysicalDevice physicalDevice,
+        VulkanMemoryAllocator& allocator,
         VkDevice device,
         VkCommandPool commandPool,
         VkQueue graphicsQueue,
@@ -70,8 +70,8 @@ private:
         Thumbnail& thumbnail,
         bool releaseImGuiDescriptor = true);
 
-    VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkDevice device_ = VK_NULL_HANDLE;
+    VulkanMemoryAllocator* allocator_ = nullptr;
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     std::filesystem::path assetRoot_;

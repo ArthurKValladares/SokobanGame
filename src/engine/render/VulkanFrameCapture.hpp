@@ -8,6 +8,8 @@
 
 namespace sokoban {
 
+class VulkanMemoryAllocator;
+
 // Reads a rectangle of a rendered frame back to the CPU as RGBA.
 //
 // The source is the resolved scene colour image - the fully rendered frame
@@ -19,7 +21,7 @@ namespace sokoban {
 // Blocking and allocation-heavy: intended for offline capture (the thumbnail
 // bake), not per-frame use.
 [[nodiscard]] ImageData captureImageRegion(
-    VkPhysicalDevice physicalDevice,
+    VulkanMemoryAllocator& allocator,
     VkDevice device,
     VkCommandPool commandPool,
     VkQueue graphicsQueue,

@@ -32,11 +32,14 @@ VulkanSsaoPass::~VulkanSsaoPass()
     destroy();
 }
 
-void VulkanSsaoPass::create(VkPhysicalDevice physicalDevice, VkDevice device, VkExtent2D extent)
+void VulkanSsaoPass::create(
+    VulkanMemoryAllocator& allocator,
+    VkDevice device,
+    VkExtent2D extent)
 {
     destroy();
-    physicalDevice_ = physicalDevice;
     device_ = device;
+    allocator_ = &allocator;
     renderExtent_ = extent;
     const PixelExtent half = ssaoBufferExtent({ extent.width, extent.height });
     aoExtent_ = { half.width, half.height };
@@ -87,7 +90,7 @@ void VulkanSsaoPass::destroy()
     renderExtent_ = {};
     aoExtent_ = {};
     device_ = VK_NULL_HANDLE;
-    physicalDevice_ = VK_NULL_HANDLE;
+    allocator_ = nullptr;
 }
 
 void VulkanSsaoPass::record(
@@ -307,7 +310,7 @@ void VulkanSsaoPass::createImage()
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
     image_ = vulkanResources::createImage(
-        physicalDevice_,
+        *allocator_,
         device_,
         imageInfo,
         VK_IMAGE_ASPECT_COLOR_BIT,
@@ -317,7 +320,7 @@ void VulkanSsaoPass::createImage()
 void VulkanSsaoPass::destroyImage()
 {
     if (device_) {
-        vulkanResources::destroyImage(device_, image_);
+        vulkanResources::destroyImage(*allocator_, device_, image_);
     }
 }
 

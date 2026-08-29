@@ -14,16 +14,16 @@ VulkanUploadRing::~VulkanUploadRing()
 }
 
 void VulkanUploadRing::create(
-    VkPhysicalDevice physicalDevice,
+    VulkanMemoryAllocator& memoryAllocator,
     VkDevice device,
     VkDeviceSize capacity)
 {
     destroy();
-    if (!physicalDevice || !device || capacity == 0) {
+    if (!memoryAllocator.valid() || !device || capacity == 0) {
         throw std::invalid_argument("Invalid Vulkan upload ring configuration");
     }
 
-    physicalDevice_ = physicalDevice;
+    memoryAllocator_ = &memoryAllocator;
     device_ = device;
     try {
         const VkBufferCreateInfo bufferInfo {
@@ -32,29 +32,16 @@ void VulkanUploadRing::create(
             .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         };
-        vkCheck(vkCreateBuffer(device_, &bufferInfo, nullptr, &buffer_),
-            "vkCreateBuffer upload ring failed");
+        void* mapped = nullptr;
+        memoryAllocator_->createBuffer(
+            bufferInfo,
+            VulkanMemoryUsage::HostSequentialWrite,
+            buffer_,
+            allocation_,
+            &mapped,
+            "Shared upload ring");
         vulkanDebug::setObjectName(
             device_, VK_OBJECT_TYPE_BUFFER, buffer_, "Shared upload ring");
-
-        VkMemoryRequirements requirements {};
-        vkGetBufferMemoryRequirements(device_, buffer_, &requirements);
-        const VkMemoryAllocateInfo allocationInfo {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            .allocationSize = requirements.size,
-            .memoryTypeIndex = findMemoryType(
-                requirements.memoryTypeBits,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
-        };
-        vkCheck(vkAllocateMemory(device_, &allocationInfo, nullptr, &memory_),
-            "vkAllocateMemory upload ring failed");
-        vkCheck(vkBindBufferMemory(device_, buffer_, memory_, 0),
-            "vkBindBufferMemory upload ring failed");
-
-        void* mapped = nullptr;
-        vkCheck(vkMapMemory(device_, memory_, 0, capacity, 0, &mapped),
-            "vkMapMemory upload ring failed");
         mapped_ = static_cast<std::byte*>(mapped);
         allocator_ = UploadRingAllocator(capacity);
     } catch (...) {
@@ -65,21 +52,15 @@ void VulkanUploadRing::create(
 
 void VulkanUploadRing::destroy()
 {
-    if (device_ && mapped_) {
-        vkUnmapMemory(device_, memory_);
-    }
-    if (device_ && buffer_) {
-        vkDestroyBuffer(device_, buffer_, nullptr);
-    }
-    if (device_ && memory_) {
-        vkFreeMemory(device_, memory_, nullptr);
+    if (memoryAllocator_) {
+        memoryAllocator_->destroyBuffer(buffer_, allocation_);
     }
     allocator_ = UploadRingAllocator();
     mapped_ = nullptr;
-    memory_ = VK_NULL_HANDLE;
+    allocation_ = nullptr;
     buffer_ = VK_NULL_HANDLE;
     device_ = VK_NULL_HANDLE;
-    physicalDevice_ = VK_NULL_HANDLE;
+    memoryAllocator_ = nullptr;
 }
 
 std::optional<VulkanUploadRing::Reservation> VulkanUploadRing::reserve(
@@ -119,22 +100,6 @@ void VulkanUploadRing::complete(Reservation reservation)
 void VulkanUploadRing::abandon(Reservation reservation)
 {
     allocator_.abandon(reservation);
-}
-
-uint32_t VulkanUploadRing::findMemoryType(
-    uint32_t typeFilter,
-    VkMemoryPropertyFlags properties) const
-{
-    VkPhysicalDeviceMemoryProperties memoryProperties {};
-    vkGetPhysicalDeviceMemoryProperties(physicalDevice_, &memoryProperties);
-    for (uint32_t index = 0; index < memoryProperties.memoryTypeCount; ++index) {
-        if ((typeFilter & (1U << index)) &&
-            (memoryProperties.memoryTypes[index].propertyFlags & properties) ==
-                properties) {
-            return index;
-        }
-    }
-    throw std::runtime_error("No suitable memory type for upload ring");
 }
 
 } // namespace sokoban

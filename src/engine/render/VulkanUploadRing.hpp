@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/render/UploadRingAllocator.hpp"
+#include "engine/render/VulkanMemoryAllocator.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -24,7 +25,7 @@ public:
     VulkanUploadRing& operator=(const VulkanUploadRing&) = delete;
 
     void create(
-        VkPhysicalDevice physicalDevice,
+        VulkanMemoryAllocator& memoryAllocator,
         VkDevice device,
         VkDeviceSize capacity = 64ULL * 1024ULL * 1024ULL);
     void destroy();
@@ -46,14 +47,10 @@ public:
     [[nodiscard]] VkDeviceSize usedBytes() const { return allocator_.usedBytes(); }
 
 private:
-    [[nodiscard]] uint32_t findMemoryType(
-        uint32_t typeFilter,
-        VkMemoryPropertyFlags properties) const;
-
-    VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
+    VulkanMemoryAllocator* memoryAllocator_ = nullptr;
     VkDevice device_ = VK_NULL_HANDLE;
     VkBuffer buffer_ = VK_NULL_HANDLE;
-    VkDeviceMemory memory_ = VK_NULL_HANDLE;
+    VulkanAllocation allocation_ = nullptr;
     std::byte* mapped_ = nullptr;
     UploadRingAllocator allocator_;
 };

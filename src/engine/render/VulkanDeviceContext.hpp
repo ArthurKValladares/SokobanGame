@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/render/VulkanDeviceSelection.hpp"
+#include "engine/render/VulkanMemoryAllocator.hpp"
 
 #include <SDL3/SDL_video.h>
 #include <vulkan/vulkan.h>
@@ -43,6 +44,8 @@ public:
     [[nodiscard]] VkQueue graphicsQueue() const;
     [[nodiscard]] VkQueue presentQueue() const;
     [[nodiscard]] VkCommandPool commandPool() const;
+    [[nodiscard]] VulkanMemoryAllocator& memoryAllocator();
+    [[nodiscard]] const VulkanMemoryAllocator& memoryAllocator() const;
 
     [[nodiscard]] bool wireframeSupported() const;
     [[nodiscard]] bool wideLinesSupported() const;
@@ -80,6 +83,7 @@ private:
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkPhysicalDeviceProperties physicalDeviceProperties_ {};
     VkDevice device_ = VK_NULL_HANDLE;
+    VulkanMemoryAllocator memoryAllocator_;
     VulkanQueueFamilyIndices queueFamilies_ {};
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     VkQueue presentQueue_ = VK_NULL_HANDLE;

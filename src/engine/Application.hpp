@@ -63,6 +63,7 @@ struct ApplicationOptions {
     std::filesystem::path evidenceOutputDirectory;
     int evidenceRenderScalePercent = 100;
     bool evidenceAmbientOcclusionEnabled = true;
+    bool evidenceFrustumCullingEnabled = true;
 };
 
 struct ApplicationTimingEventWatchState {

@@ -906,8 +906,11 @@ void IsoScenePreparer::prepare(
     scene.shadowFaces.clear();
     scene.shadowModelIndices.clear();
     scene.renderables.clear();
+    scene.frustumCullingEnabled = frustumCulling_;
     scene.reusedRenderableBounds = 0;
     scene.rebuiltRenderableBounds = 0;
+    scene.visibleRenderables = 0;
+    scene.culledRenderables = 0;
     scene.renderExtent = {
         std::max(renderExtent.x, 1.0f),
         std::max(renderExtent.y, 1.0f),
@@ -915,23 +918,9 @@ void IsoScenePreparer::prepare(
     scene.tileLayout = calculateTileLayout(frameData, scene.renderExtent);
     scene.isoLayout = calculateIsoLayout(frameData, scene.renderExtent);
     scene.shadowLayout = calculateShadowLayout(frameData);
-    scene.hasTranslucentContent =
-        frameData.viewMode == RenderViewMode::Isometric3D &&
-        (!frameData.waterSurfaces.empty() ||
-            !frameData.particles.empty() ||
-            std::ranges::any_of(
-                frameData.tiles,
-                [](const RenderFrameData::Tile& tile) {
-                    return tile.blurBehind ||
-                        tile.color.w < 1.0f ||
-                        tile.effect == RenderSurfaceEffect::MirrorEnergy;
-                }) ||
-            std::ranges::any_of(
-                frameData.isoFaces,
-                [](const RenderFrameData::IsoFace& face) {
-                    return face.effect ==
-                        RenderSurfaceEffect::MirrorEnergy;
-                }));
+    const Frustum mainSceneFrustum = frustumFromViewProjection(
+        isoClipFromWorld(scene.isoLayout, scene.renderExtent));
+    scene.hasTranslucentContent = false;
 
     scene.isoFaces.reserve(
         frameData.tiles.size() * 5 + frameData.waterSurfaces.size());
@@ -950,40 +939,66 @@ void IsoScenePreparer::prepare(
     waterRenderableCache_.resize(frameData.waterSurfaces.size());
     isoFaceRenderableCache_.resize(frameData.isoFaces.size());
 
-    const auto appendRenderable = [&scene](PreparedRenderable renderable) {
+    const auto appendRenderable = [
+                                      &scene,
+                                      &frameData,
+                                      &mainSceneFrustum,
+                                      this](
+                                      PreparedRenderable renderable,
+                                      bool boundsTrusted) {
         if (renderable.boundsReused) {
             ++scene.reusedRenderableBounds;
         } else {
             ++scene.rebuiltRenderableBounds;
         }
+        // An invalid or provisional bound must fail open. Non-cube model
+        // records currently retain their authored unit transform rather than
+        // the loaded mesh's local AABB, so they also remain visible until the
+        // mesh bound becomes part of the persistent contract.
+        renderable.mainSceneVisible =
+            !frustumCulling_ ||
+            frameData.viewMode != RenderViewMode::Isometric3D ||
+            !boundsTrusted ||
+            !renderable.worldBounds.valid() ||
+            intersects(mainSceneFrustum, renderable.worldBounds);
+        if (renderable.mainSceneVisible) {
+            ++scene.visibleRenderables;
+        } else {
+            ++scene.culledRenderables;
+        }
         scene.renderables.push_back(renderable);
+        return renderable.mainSceneVisible;
     };
     for (std::size_t tileIndex = 0;
          tileIndex < frameData.tiles.size();
          ++tileIndex) {
         const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
         const std::array<Vec3, 8> corners = tileCorners(tile);
-        appendRenderable(reconcileRenderable(
-            PreparedRenderable::Kind::Tile,
-            tileIndex,
-            corners,
-            tile.renderableId == 0 ? tile.cell : GridPosition3 {},
-            tile.model,
-            tile.renderableId,
-            static_cast<uint32_t>(tile.effect)));
+        appendRenderable(
+            reconcileRenderable(
+                PreparedRenderable::Kind::Tile,
+                tileIndex,
+                corners,
+                tile.renderableId == 0 ? tile.cell : GridPosition3 {},
+                tile.model,
+                tile.renderableId,
+                static_cast<uint32_t>(tile.effect)),
+            tile.model.isCube());
     }
     for (std::size_t faceIndex = 0;
          faceIndex < frameData.isoFaces.size();
          ++faceIndex) {
         const RenderFrameData::IsoFace& face = frameData.isoFaces[faceIndex];
-        appendRenderable(reconcileRenderable(
-            PreparedRenderable::Kind::IsoFace,
-            faceIndex,
-            face.vertices,
-            {},
-            cubeModel,
-            0,
-            static_cast<uint32_t>(face.effect)));
+        appendRenderable(
+            reconcileRenderable(
+                PreparedRenderable::Kind::IsoFace,
+                faceIndex,
+                face.vertices,
+                {},
+                cubeModel,
+                0,
+                static_cast<uint32_t>(face.effect)),
+            true);
     }
 
     auto appendIsoFace = [&](
@@ -1056,6 +1071,8 @@ void IsoScenePreparer::prepare(
              tileIndex < frameData.tiles.size();
              ++tileIndex) {
             const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
+            const bool mainSceneVisible =
+                scene.renderables[tileIndex].mainSceneVisible;
             const float width = tile.size.x;
             const float depth = tile.size.y;
             const float height = std::max(tile.height, 0.0f);
@@ -1101,7 +1118,7 @@ void IsoScenePreparer::prepare(
                     tile.showGrid,
                     tile.isEditorPreview,
                     pickable,
-                    drawCube,
+                    drawCube && mainSceneVisible,
                     { width, depth },
                     topMaterial,
                     0);
@@ -1116,7 +1133,7 @@ void IsoScenePreparer::prepare(
                     tile.showGrid,
                     tile.isEditorPreview,
                     pickable,
-                    drawCube,
+                    drawCube && mainSceneVisible,
                     { width, height },
                     tileMaterial,
                     0);
@@ -1130,7 +1147,7 @@ void IsoScenePreparer::prepare(
                     tile.showGrid,
                     tile.isEditorPreview,
                     pickable,
-                    drawCube,
+                    drawCube && mainSceneVisible,
                     { depth, height },
                     tileMaterial,
                     0);
@@ -1144,7 +1161,7 @@ void IsoScenePreparer::prepare(
                     tile.showGrid,
                     tile.isEditorPreview,
                     pickable,
-                    drawCube,
+                    drawCube && mainSceneVisible,
                     { width, height },
                     tileMaterial,
                     0);
@@ -1158,7 +1175,7 @@ void IsoScenePreparer::prepare(
                     tile.showGrid,
                     tile.isEditorPreview,
                     pickable,
-                    drawCube,
+                    drawCube && mainSceneVisible,
                     { depth, height },
                     tileMaterial,
                     0);
@@ -1172,13 +1189,13 @@ void IsoScenePreparer::prepare(
                     tile.showGrid,
                     tile.isEditorPreview,
                     pickable,
-                    drawCube,
+                    drawCube && mainSceneVisible,
                     { width, depth },
                     topMaterial,
                     0);
             }
 
-            if (!tile.model.isCube() && !tile.pickOnly) {
+            if (!tile.model.isCube() && !tile.pickOnly && mainSceneVisible) {
                 (tile.blurBehind || tile.color.w < 1.0f ||
                         tile.effect == RenderSurfaceEffect::MirrorEnergy
                         ? scene.translucentModelIndices
@@ -1237,14 +1254,16 @@ void IsoScenePreparer::prepare(
                     Vec3 { right, bottom, water.elevation },
                     Vec3 { left, bottom, water.elevation },
             };
-            appendRenderable(reconcileRenderable(
-                PreparedRenderable::Kind::WaterSurface,
-                waterIndex,
-                waterVertices,
-                water.cell,
-                cubeModel,
-                0,
-                water.shorelineMask));
+            const bool mainSceneVisible = appendRenderable(
+                reconcileRenderable(
+                    PreparedRenderable::Kind::WaterSurface,
+                    waterIndex,
+                    waterVertices,
+                    water.cell,
+                    cubeModel,
+                    0,
+                    water.shorelineMask),
+                true);
             appendIsoFace(
                 waterVertices,
                 { 0.0f, 0.0f, 1.0f },
@@ -1258,13 +1277,17 @@ void IsoScenePreparer::prepare(
                 false,
                 water.isEditorPreview,
                 water.pickable && !water.isEditorPreview,
-                true,
+                mainSceneVisible,
                 { right - left, bottom - top },
                 PreparedSurfaceMaterial::Water,
                 water.shorelineMask);
         }
 
-        for (const RenderFrameData::IsoFace& source : frameData.isoFaces) {
+        for (std::size_t sourceIndex = 0;
+             sourceIndex < frameData.isoFaces.size();
+             ++sourceIndex) {
+            const RenderFrameData::IsoFace& source =
+                frameData.isoFaces[sourceIndex];
             const Vec3 normal = normalize(cross(
                 subtract(source.vertices[1], source.vertices[0]),
                 subtract(source.vertices[2], source.vertices[0])));
@@ -1282,10 +1305,14 @@ void IsoScenePreparer::prepare(
                 face.vertices[i] = projectIsoPoint(
                     scene.isoLayout, scene.renderExtent, source.vertices[i]);
             }
-            (face.material == PreparedSurfaceMaterial::MirrorEnergy
-                    ? scene.translucentFaceIndices
-                    : scene.opaqueFaceIndices)
-                .push_back(scene.isoFaces.size());
+            const std::size_t renderableIndex =
+                frameData.tiles.size() + sourceIndex;
+            if (scene.renderables[renderableIndex].mainSceneVisible) {
+                (face.material == PreparedSurfaceMaterial::MirrorEnergy
+                        ? scene.translucentFaceIndices
+                        : scene.opaqueFaceIndices)
+                    .push_back(scene.isoFaces.size());
+            }
             scene.isoFaces.push_back(face);
         }
 
@@ -1390,6 +1417,10 @@ void IsoScenePreparer::prepare(
                 }
                 return left.depth > right.depth;
             });
+        scene.hasTranslucentContent =
+            !scene.translucentFaceIndices.empty() ||
+            !scene.translucentModelIndices.empty() ||
+            !scene.particles.empty();
     }
 
     for (std::size_t tileIndex = 0;

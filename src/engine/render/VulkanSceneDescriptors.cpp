@@ -19,7 +19,7 @@ VulkanSceneDescriptors::~VulkanSceneDescriptors()
 }
 
 void VulkanSceneDescriptors::create(
-    VkPhysicalDevice physicalDevice,
+    VulkanMemoryAllocator& allocator,
     VkDevice device,
     const Resources& resources,
     uint32_t setCount)
@@ -32,6 +32,7 @@ void VulkanSceneDescriptors::create(
         throw std::runtime_error("Scene descriptors require at least one set");
     }
     device_ = device;
+    allocator_ = &allocator;
     frameSetCount_ = setCount;
     const uint32_t sceneSetCount = setCount * 2;
     modelTextureCount_ = static_cast<uint32_t>(resources.modelTextures.size());
@@ -245,7 +246,7 @@ void VulkanSceneDescriptors::create(
 
         frameBuffers_.reserve(sceneSetCount);
         for (uint32_t i = 0; i < sceneSetCount; ++i) {
-            frameBuffers_.push_back(createFrameBuffer(physicalDevice));
+            frameBuffers_.push_back(createFrameBuffer());
         }
         update(resources);
     } catch (...) {
@@ -497,15 +498,7 @@ void VulkanSceneDescriptors::destroy()
 {
     if (device_) {
         for (OwnedBuffer& buffer : frameBuffers_) {
-            if (buffer.mapped) {
-                vkUnmapMemory(device_, buffer.memory);
-            }
-            if (buffer.buffer) {
-                vkDestroyBuffer(device_, buffer.buffer, nullptr);
-            }
-            if (buffer.memory) {
-                vkFreeMemory(device_, buffer.memory, nullptr);
-            }
+            allocator_->destroyBuffer(buffer.buffer, buffer.allocation);
         }
         if (pool_) {
             vkDestroyDescriptorPool(device_, pool_, nullptr);
@@ -526,11 +519,11 @@ void VulkanSceneDescriptors::destroy()
     textureLayout_ = VK_NULL_HANDLE;
     modelTextureCount_ = 0;
     device_ = VK_NULL_HANDLE;
+    allocator_ = nullptr;
 }
 
 VulkanSceneDescriptors::OwnedBuffer
-VulkanSceneDescriptors::createFrameBuffer(
-    VkPhysicalDevice physicalDevice) const
+VulkanSceneDescriptors::createFrameBuffer() const
 {
     OwnedBuffer result;
     const VkBufferCreateInfo info {
@@ -539,45 +532,20 @@ VulkanSceneDescriptors::createFrameBuffer(
         .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
-    vkCheck(vkCreateBuffer(device_, &info, nullptr, &result.buffer),
-        "vkCreateBuffer scene frame uniform failed");
-    vulkanDebug::setObjectName(
-        device_, VK_OBJECT_TYPE_BUFFER, result.buffer, "Scene frame uniform buffer");
     try {
-        VkMemoryRequirements requirements {};
-        vkGetBufferMemoryRequirements(device_, result.buffer, &requirements);
-        const VkMemoryAllocateInfo allocation {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            .allocationSize = requirements.size,
-            .memoryTypeIndex = vulkanResources::findMemoryType(
-                physicalDevice,
-                requirements.memoryTypeBits,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
-        };
-        vkCheck(vkAllocateMemory(
-                    device_, &allocation, nullptr, &result.memory),
-            "vkAllocateMemory scene frame uniform failed");
+        allocator_->createBuffer(
+            info,
+            VulkanMemoryUsage::HostSequentialWrite,
+            result.buffer,
+            result.allocation,
+            &result.mapped,
+            "Scene frame uniform buffer");
         vulkanDebug::setObjectName(
-            device_,
-            VK_OBJECT_TYPE_DEVICE_MEMORY,
-            result.memory,
-            "Scene frame uniform buffer memory");
-        vkCheck(vkBindBufferMemory(
-                    device_, result.buffer, result.memory, 0),
-            "vkBindBufferMemory scene frame uniform failed");
-        vkCheck(vkMapMemory(
-                    device_, result.memory, 0,
-                    sizeof(SceneFrameUniform), 0, &result.mapped),
-            "vkMapMemory scene frame uniform failed");
+            device_, VK_OBJECT_TYPE_BUFFER, result.buffer,
+            "Scene frame uniform buffer");
         std::memset(result.mapped, 0, sizeof(SceneFrameUniform));
     } catch (...) {
-        if (result.memory) {
-            vkFreeMemory(device_, result.memory, nullptr);
-        }
-        if (result.buffer) {
-            vkDestroyBuffer(device_, result.buffer, nullptr);
-        }
+        allocator_->destroyBuffer(result.buffer, result.allocation);
         throw;
     }
     return result;

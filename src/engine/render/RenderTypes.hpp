@@ -510,6 +510,9 @@ struct RenderStats {
     uint32_t persistentRenderables = 0;
     uint32_t reusedRenderableBounds = 0;
     uint32_t rebuiltRenderableBounds = 0;
+    uint32_t visibleRenderables = 0;
+    uint32_t culledRenderables = 0;
+    bool frustumCullingEnabled = true;
     uint32_t visibleFaces = 0;
     uint32_t drawCalls = 0;
     uint32_t vertices = 0;
@@ -526,6 +529,12 @@ struct RenderStats {
     uint32_t ssaoHeight = 0;
     uint32_t renderScalePercent = 100;
     uint32_t activeSamples = 1;
+    bool scenePreparationTimingAvailable = false;
+    uint32_t scenePreparationTimingSamples = 0;
+    double scenePreparationMilliseconds = 0.0;
+    double scenePreparationAverageMilliseconds = 0.0;
+    double scenePreparationP95Milliseconds = 0.0;
+    double scenePreparationMaximumMilliseconds = 0.0;
     bool cpuFrameTimingAvailable = false;
     uint32_t cpuFrameTimingSamples = 0;
     double cpuFrameMilliseconds = 0.0;

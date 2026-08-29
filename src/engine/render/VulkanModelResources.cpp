@@ -188,6 +188,7 @@ VulkanModelResources::~VulkanModelResources()
 
 void VulkanModelResources::create(
     VkPhysicalDevice physicalDevice,
+    VulkanMemoryAllocator& allocator,
     VkDevice device,
     VkCommandPool commandPool,
     VkQueue graphicsQueue,
@@ -205,6 +206,7 @@ void VulkanModelResources::create(
             "Runtime texture catalog exceeds the selected descriptor capacity");
     }
     physicalDevice_ = physicalDevice;
+    allocator_ = &allocator;
     maxSamplerAnisotropy_ = std::max(maxSamplerAnisotropy, 1.0f);
     textureDescriptorCapacity_ = textureDescriptorCapacity;
     device_ = device;
@@ -256,9 +258,9 @@ void VulkanModelResources::create(
         manifest.playerModel(), manifest.playerIdleAnimation());
 
     try {
-        uploadRing_.create(physicalDevice_, device_);
+        uploadRing_.create(*allocator_, device_);
         geometryArena_.create(
-            physicalDevice_, device_, commandPool_, graphicsQueue_, uploadRing_);
+            *allocator_, device_, commandPool_, graphicsQueue_, uploadRing_);
         createSkinningBuffer();
         createModelInstanceBuffer();
         createMaterialBuffer();
@@ -345,6 +347,7 @@ void VulkanModelResources::destroy()
     graphicsQueue_ = VK_NULL_HANDLE;
     commandPool_ = VK_NULL_HANDLE;
     device_ = VK_NULL_HANDLE;
+    allocator_ = nullptr;
     physicalDevice_ = VK_NULL_HANDLE;
     textureDescriptorCapacity_ = 0;
     manifestTextureCount_ = 0;
@@ -1586,28 +1589,14 @@ void VulkanModelResources::createSkinningBuffer()
         .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
-    vkCheck(vkCreateBuffer(device_, &bufferInfo, nullptr, &skinningBuffer_.buffer),
-        "vkCreateBuffer GPU skinning palette failed");
     try {
-        VkMemoryRequirements requirements {};
-        vkGetBufferMemoryRequirements(device_, skinningBuffer_.buffer, &requirements);
-        const VkMemoryAllocateInfo allocationInfo {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            .allocationSize = requirements.size,
-            .memoryTypeIndex = findMemoryType(
-                requirements.memoryTypeBits,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
-        };
-        vkCheck(vkAllocateMemory(
-                    device_, &allocationInfo, nullptr, &skinningBuffer_.memory),
-            "vkAllocateMemory GPU skinning palette failed");
-        vkCheck(vkBindBufferMemory(
-                    device_, skinningBuffer_.buffer, skinningBuffer_.memory, 0),
-            "vkBindBufferMemory GPU skinning palette failed");
-        vkCheck(vkMapMemory(device_, skinningBuffer_.memory, 0, size, 0,
-                    &skinningBuffer_.mapped),
-            "vkMapMemory GPU skinning palette failed");
+        allocator_->createBuffer(
+            bufferInfo,
+            VulkanMemoryUsage::HostSequentialWrite,
+            skinningBuffer_.buffer,
+            skinningBuffer_.allocation,
+            &skinningBuffer_.mapped,
+            "GPU skinning palette");
         std::memset(skinningBuffer_.mapped, 0, static_cast<std::size_t>(size));
     } catch (...) {
         destroySkinningBuffer();
@@ -1617,14 +1606,9 @@ void VulkanModelResources::createSkinningBuffer()
 
 void VulkanModelResources::destroySkinningBuffer()
 {
-    if (device_ && skinningBuffer_.mapped) {
-        vkUnmapMemory(device_, skinningBuffer_.memory);
-    }
-    if (device_ && skinningBuffer_.buffer) {
-        vkDestroyBuffer(device_, skinningBuffer_.buffer, nullptr);
-    }
-    if (device_ && skinningBuffer_.memory) {
-        vkFreeMemory(device_, skinningBuffer_.memory, nullptr);
+    if (allocator_) {
+        allocator_->destroyBuffer(
+            skinningBuffer_.buffer, skinningBuffer_.allocation);
     }
     skinningBuffer_ = {};
 }
@@ -1639,28 +1623,14 @@ void VulkanModelResources::createModelInstanceBuffer()
         .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
-    vkCheck(vkCreateBuffer(device_, &bufferInfo, nullptr, &drawInstanceBuffer_.buffer),
-        "vkCreateBuffer static model instances failed");
     try {
-        VkMemoryRequirements requirements {};
-        vkGetBufferMemoryRequirements(device_, drawInstanceBuffer_.buffer, &requirements);
-        const VkMemoryAllocateInfo allocationInfo {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            .allocationSize = requirements.size,
-            .memoryTypeIndex = findMemoryType(
-                requirements.memoryTypeBits,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
-        };
-        vkCheck(vkAllocateMemory(
-                    device_, &allocationInfo, nullptr, &drawInstanceBuffer_.memory),
-            "vkAllocateMemory static model instances failed");
-        vkCheck(vkBindBufferMemory(
-                    device_, drawInstanceBuffer_.buffer, drawInstanceBuffer_.memory, 0),
-            "vkBindBufferMemory static model instances failed");
-        vkCheck(vkMapMemory(device_, drawInstanceBuffer_.memory, 0, size, 0,
-                    &drawInstanceBuffer_.mapped),
-            "vkMapMemory static model instances failed");
+        allocator_->createBuffer(
+            bufferInfo,
+            VulkanMemoryUsage::HostSequentialWrite,
+            drawInstanceBuffer_.buffer,
+            drawInstanceBuffer_.allocation,
+            &drawInstanceBuffer_.mapped,
+            "Static model instances");
         std::memset(drawInstanceBuffer_.mapped, 0, static_cast<std::size_t>(size));
     } catch (...) {
         destroyModelInstanceBuffer();
@@ -1670,14 +1640,9 @@ void VulkanModelResources::createModelInstanceBuffer()
 
 void VulkanModelResources::destroyModelInstanceBuffer()
 {
-    if (device_ && drawInstanceBuffer_.mapped) {
-        vkUnmapMemory(device_, drawInstanceBuffer_.memory);
-    }
-    if (device_ && drawInstanceBuffer_.buffer) {
-        vkDestroyBuffer(device_, drawInstanceBuffer_.buffer, nullptr);
-    }
-    if (device_ && drawInstanceBuffer_.memory) {
-        vkFreeMemory(device_, drawInstanceBuffer_.memory, nullptr);
+    if (allocator_) {
+        allocator_->destroyBuffer(
+            drawInstanceBuffer_.buffer, drawInstanceBuffer_.allocation);
     }
     drawInstanceBuffer_ = {};
 }
@@ -1692,28 +1657,14 @@ void VulkanModelResources::createMaterialBuffer()
         .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
-    vkCheck(vkCreateBuffer(device_, &bufferInfo, nullptr, &materialBuffer_.buffer),
-        "vkCreateBuffer model materials failed");
     try {
-        VkMemoryRequirements requirements {};
-        vkGetBufferMemoryRequirements(device_, materialBuffer_.buffer, &requirements);
-        const VkMemoryAllocateInfo allocationInfo {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            .allocationSize = requirements.size,
-            .memoryTypeIndex = findMemoryType(
-                requirements.memoryTypeBits,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
-        };
-        vkCheck(vkAllocateMemory(
-                    device_, &allocationInfo, nullptr, &materialBuffer_.memory),
-            "vkAllocateMemory model materials failed");
-        vkCheck(vkBindBufferMemory(
-                    device_, materialBuffer_.buffer, materialBuffer_.memory, 0),
-            "vkBindBufferMemory model materials failed");
-        vkCheck(vkMapMemory(device_, materialBuffer_.memory, 0, size, 0,
-                    &materialBuffer_.mapped),
-            "vkMapMemory model materials failed");
+        allocator_->createBuffer(
+            bufferInfo,
+            VulkanMemoryUsage::HostSequentialWrite,
+            materialBuffer_.buffer,
+            materialBuffer_.allocation,
+            &materialBuffer_.mapped,
+            "Model materials");
         // Entry zero is the material a draw lands on when nothing has been
         // published for it yet, so it has to read as an untextured white
         // surface rather than as whatever the allocation happened to hold.
@@ -1736,14 +1687,9 @@ void VulkanModelResources::createMaterialBuffer()
 
 void VulkanModelResources::destroyMaterialBuffer()
 {
-    if (device_ && materialBuffer_.mapped) {
-        vkUnmapMemory(device_, materialBuffer_.memory);
-    }
-    if (device_ && materialBuffer_.buffer) {
-        vkDestroyBuffer(device_, materialBuffer_.buffer, nullptr);
-    }
-    if (device_ && materialBuffer_.memory) {
-        vkFreeMemory(device_, materialBuffer_.memory, nullptr);
+    if (allocator_) {
+        allocator_->destroyBuffer(
+            materialBuffer_.buffer, materialBuffer_.allocation);
     }
     materialBuffer_ = {};
 }
@@ -1902,29 +1848,13 @@ void VulkanModelResources::beginTextureUpload(
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
-    vkCheck(vkCreateImage(device_, &imageInfo, nullptr, &textureImage.image),
-        "vkCreateImage model texture failed");
+    allocator_->createDeviceImage(
+        imageInfo,
+        textureImage.image,
+        textureImage.allocation,
+        "Model texture");
     vulkanDebug::setObjectName(
         device_, VK_OBJECT_TYPE_IMAGE, textureImage.image, "Model texture");
-
-    VkMemoryRequirements requirements {};
-    vkGetImageMemoryRequirements(device_, textureImage.image, &requirements);
-    VkMemoryAllocateInfo allocationInfo {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .allocationSize = requirements.size,
-        .memoryTypeIndex = findMemoryType(
-            requirements.memoryTypeBits,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
-    };
-    vkCheck(vkAllocateMemory(device_, &allocationInfo, nullptr, &textureImage.memory),
-        "vkAllocateMemory model texture failed");
-    vulkanDebug::setObjectName(
-        device_,
-        VK_OBJECT_TYPE_DEVICE_MEMORY,
-        textureImage.memory,
-        "Model texture memory");
-    vkCheck(vkBindImageMemory(device_, textureImage.image, textureImage.memory, 0),
-        "vkBindImageMemory model texture failed");
 
     textureImage.view = createImageView(
         textureImage.image,
@@ -2296,15 +2226,8 @@ void VulkanModelResources::destroyTexture(
         vkDestroyImageView(device_, textureImage.view, nullptr);
         textureImage.view = VK_NULL_HANDLE;
     }
-    if (textureImage.image) {
-        vkDestroyImage(device_, textureImage.image, nullptr);
-        textureImage.image = VK_NULL_HANDLE;
-    }
-    if (textureImage.memory) {
-        vkFreeMemory(device_, textureImage.memory, nullptr);
-        textureImage.memory = VK_NULL_HANDLE;
-    }
-    textureImage.mipLevels = 1;
+    allocator_->destroyImage(textureImage.image, textureImage.allocation);
+    textureImage = {};
 }
 
 void VulkanModelResources::destroyMesh(GpuMesh& mesh)
@@ -2339,21 +2262,6 @@ const VulkanModelResources::GpuMesh& VulkanModelResources::gpuMeshForModel(
         throw std::runtime_error("Render model mesh was used before it was ready");
     }
     return slot.gpu;
-}
-
-uint32_t VulkanModelResources::findMemoryType(
-    uint32_t typeFilter,
-    VkMemoryPropertyFlags properties) const
-{
-    VkPhysicalDeviceMemoryProperties memoryProperties {};
-    vkGetPhysicalDeviceMemoryProperties(physicalDevice_, &memoryProperties);
-    for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i) {
-        if ((typeFilter & (1U << i)) &&
-            (memoryProperties.memoryTypes[i].propertyFlags & properties) == properties) {
-            return i;
-        }
-    }
-    throw std::runtime_error("No suitable Vulkan memory type found for model resource");
 }
 
 VkImageView VulkanModelResources::createImageView(

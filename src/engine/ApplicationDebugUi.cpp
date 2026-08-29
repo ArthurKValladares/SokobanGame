@@ -251,6 +251,17 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             "coincident-geometry problem, not a culling one.");
     }
 
+    bool frustumCulling = context.renderer.frustumCullingEnabled();
+    if (ImGui::Checkbox("Frustum Cull Main Scene", &frustumCulling)) {
+        context.renderer.setFrustumCullingEnabled(frustumCulling);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Filters only main color/depth draw lists. Picking and shadow "
+            "casters remain unchanged; model instances without retained "
+            "mesh bounds fail open.");
+    }
+
     if (ImGui::CollapsingHeader("Tile Grid")) {
         float gridColor[3] {
             settings.grid.color.x,
@@ -720,10 +731,23 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             renderStats.preparedParticles);
         ImGui::Text("Visible faces %u", renderStats.visibleFaces);
         ImGui::Text(
-            "Persistent renderables %u (bounds %u reused, %u rebuilt)",
+            "Persistent renderables %u (%u visible, %u culled; bounds %u reused, %u rebuilt)",
             renderStats.persistentRenderables,
+            renderStats.visibleRenderables,
+            renderStats.culledRenderables,
             renderStats.reusedRenderableBounds,
             renderStats.rebuiltRenderableBounds);
+        ImGui::Text(
+            "Main-scene frustum culling %s",
+            renderStats.frustumCullingEnabled ? "on" : "off");
+        if (renderStats.scenePreparationTimingAvailable) {
+            ImGui::Text(
+                "Scene preparation %.3f ms avg (p95 %.3f, max %.3f; %u samples)",
+                renderStats.scenePreparationAverageMilliseconds,
+                renderStats.scenePreparationP95Milliseconds,
+                renderStats.scenePreparationMaximumMilliseconds,
+                renderStats.scenePreparationTimingSamples);
+        }
         ImGui::Text("Draw calls %u", renderStats.drawCalls);
         ImGui::Text("Triangles %u", renderStats.triangles);
         ImGui::Text("Vertices %u", renderStats.vertices);

@@ -39,7 +39,10 @@ public:
     VulkanSsaoPass(const VulkanSsaoPass&) = delete;
     VulkanSsaoPass& operator=(const VulkanSsaoPass&) = delete;
 
-    void create(VkPhysicalDevice physicalDevice, VkDevice device, VkExtent2D extent);
+    void create(
+        VulkanMemoryAllocator& allocator,
+        VkDevice device,
+        VkExtent2D extent);
     void recreate(VkExtent2D extent);
     void destroy();
 
@@ -62,8 +65,8 @@ private:
     void createImage();
     void destroyImage();
 
-    VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkDevice device_ = VK_NULL_HANDLE;
+    VulkanMemoryAllocator* allocator_ = nullptr;
     VkExtent2D renderExtent_ {};
     VkExtent2D aoExtent_ {};
     vulkanResources::OwnedImage image_ {};

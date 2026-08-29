@@ -256,8 +256,8 @@
 <body>
   <header class="shell">
     <p class="eyebrow">Current-state review · 29 August 2026</p>
-    <h1>Persist the scene, then cull it.</h1>
-    <p class="deck">Sokoban 3D now has complete CPU/GPU material behavior, a device-bounded texture heap, HDR output, a dedicated post-tonemap UI path, and physical view-space SSAO. Deterministic evidence confirms the half-resolution bilateral path, and retained renderables now expose stable world bounds. The active packet is measured frustum culling.</p>
+    <h1>The renderer is ready for compressed textures.</h1>
+    <p class="deck">Sokoban 3D now has complete CPU/GPU material behavior, a device-bounded texture heap, HDR output, a dedicated post-tonemap UI path, physical view-space SSAO, retained world bounds, conservative main-scene frustum culling and one tested VMA-backed memory seam. The active packet is KTX2 and platform texture compression.</p>
     <div class="metrics" aria-label="Current repository facts">
       <div class="metric"><b>36</b><span>manifest models</span></div>
       <div class="metric"><b>42 / 1024</b><span>textures on validated GPU</span></div>
@@ -281,7 +281,7 @@
     <section id="verdict">
       <div class="section-head"><span class="num">01</span><h2>Current verdict</h2></div>
       <div class="callout">
-        <strong>Next program:</strong> consume retained world bounds in measured frustum culling. Persistent renderable identity, revisioned AABBs and frame-safe snapshots are now baseline alongside the completed SSAO path.
+        <strong>Next program:</strong> add KTX2 and platform-compressed texture artifacts through the completed allocator seam. Retained bounds, measured main-scene frustum culling and VMA-backed image/buffer ownership are now baseline.
       </div>
       <div class="grid" style="margin-top:1rem">
         <article class="card">
@@ -291,8 +291,8 @@
         </article>
         <article class="card">
           <p class="kicker">What comes next</p>
-          <h3>Cull before recording</h3>
-          <p>Extract the camera frustum, classify retained AABBs, and build visible face/model lists before Vulkan recording. Preserve picking and shadow behavior until each has its own conservative volume.</p>
+          <h3>Compress through one seam</h3>
+          <p>Add KTX2 artifacts and BC7 or appropriate platform formats without rewriting scheduling. Preserve sRGB/linear interpretation, provide a compatibility fallback and account actual compressed mip bytes.</p>
         </article>
         <article class="card">
           <p class="kicker">What not to overbuild</p>
@@ -313,26 +313,26 @@
         <table>
           <thead><tr><th>ID</th><th>Status</th><th>Current truth</th><th>Remaining work</th></tr></thead>
           <tbody>
-            <tr><td>F1</td><td><span class="status done">Done</span></td><td>Shared math, transforms, bounds, rays and frustums exist.</td><td>Use them in T4; no foundation rewrite.</td></tr>
+            <tr><td>F1</td><td><span class="status done">Done</span></td><td>Shared math, transforms, bounds, rays and frustums exist.</td><td>Preserve the completed T4 consumers; no foundation rewrite.</td></tr>
             <tr><td>F2</td><td><span class="status done">Done</span></td><td>The HDR path uses Khronos PBR Neutral by default, persisted −4 to +4 EV exposure, and a Debug straight-clamp comparison.</td><td>Preserve UI-after-tonemap and single hardware sRGB encoding.</td></tr>
             <tr><td>F3</td><td><span class="status done">Done</span></td><td>Material factors, tangents, UV1, GPU buffer, GGX, all four core maps, alpha pass selection/cutoff and authored sidedness are live.</td><td>Preserve the data-driven policy and mirror-energy's narrow subset.</td></tr>
             <tr><td>F4</td><td><span class="status done">Done</span></td><td><code>ui.frag.glsl</code> owns solid/font/title/texture/scene-image UI; <code>triangle.frag.glsl</code> keeps scene work.</td><td>Preserve the split while material maps land.</td></tr>
             <tr><td>F5</td><td><span class="status conditional">Conditional</span></td><td>Vulkan types still cross broad renderer seams.</td><td>Build an RHI only for a real second backend/platform.</td></tr>
             <tr><td>T1–T3</td><td><span class="status done">Done</span></td><td>Instanced tiles, opaque sorting and model back-face culling are implemented.</td><td>Preserve their draw ordering and winding invariants.</td></tr>
-            <tr><td>T4</td><td><span class="status open">Next</span></td><td>Frustum math and persistent world bounds exist, but visible lists do not consume them yet.</td><td>Conservative main-scene frustum culling with before/after telemetry.</td></tr>
+            <tr><td>T4</td><td><span class="status done">Done</span></td><td>Retained AABBs build conservative main color/depth lists; uncertain models fail open, picking/shadows are preserved, and matched evidence is pixel-identical.</td><td>Extend to model mesh bounds or shadow volumes only with their own conservative contracts.</td></tr>
             <tr><td>T5</td><td><span class="status open">Open</span></td><td>Shadow-casting point lights still render six faces each frame.</td><td>Range-cull casters, then cache unchanged faces.</td></tr>
             <tr><td>T6–T7</td><td><span class="status done">Done</span></td><td>4x default MSAA and AO-gated depth copy are implemented.</td><td>Revisit only with measured temporal-AA or V7 work.</td></tr>
             <tr><td>T8</td><td><span class="status open">Open</span></td><td>CPU asset work is threaded; frame preparation/recording remains largely serial.</td><td>Parallelize Vulkan-free preparation before command recording.</td></tr>
             <tr><td>V1/V3/V5/V6</td><td><span class="status done">Done</span></td><td>Semaphore ownership, skinning access, shader target/optimization and anisotropy are corrected.</td><td>Maintain through validation.</td></tr>
-            <tr><td>V2</td><td><span class="status open">Open</span></td><td>Nine renderer files still call <code>vkAllocateMemory</code>.</td><td>VMA or deliberate suballocation before compressed streaming.</td></tr>
+            <tr><td>V2</td><td><span class="status done">Done</span></td><td>Vendored VMA owns device-local, mapped upload and readback memory; renderer code has no direct allocation or mapping calls.</td><td>Extend the policy seam for new A2 resources; preserve arena/ring suballocation and fence ownership.</td></tr>
             <tr><td>V4</td><td><span class="status done">Done</span></td><td>Vulkan 1.2 feature gating, a separate per-frame texture set and device-bounded runtime capacity are live.</td><td>Preserve the fallback-filled, fence-safe update contract.</td></tr>
             <tr><td>V7</td><td><span class="status done">Done</span></td><td>AO reconstructs view-space position/normals, samples a physically sized hemisphere at half resolution with banding-resistant two-axis kernel rotation, and bilaterally upsamples against full-resolution depth/normals.</td><td>Preserve the captured ambient-only, silhouette-aware behavior.</td></tr>
             <tr><td>A1</td><td><span class="status done">Done</span></td><td>cgltf parsing/validation, all interpolation modes and a loader-level CUBICSPLINE fixture are implemented.</td><td>Keep the fixture in the required regression gate.</td></tr>
-            <tr><td>A2</td><td><span class="status open">Open</span></td><td>Runtime textures remain decoded RGBA images.</td><td>KTX2 and platform compression after allocation work.</td></tr>
+            <tr><td>A2</td><td><span class="status open">Open</span></td><td>Runtime textures remain decoded RGBA images.</td><td>Add KTX2 and platform compression through the completed VMA seam.</td></tr>
             <tr><td>A3</td><td><span class="status partial">Partial</span></td><td>Async preparation, publication budgets, residency budgets and eviction exist.</td><td>Mip/LOD streaming, compressed accounting, fence-based retirement.</td></tr>
             <tr><td>A4</td><td><span class="status open">Open</span></td><td>Recorder paths still create transient CPU containers.</td><td>Reuse scratch after scene structures settle.</td></tr>
             <tr><td>S1</td><td><span class="status conditional">Conditional</span></td><td>Gameplay uses variable timestep.</td><td>Fixed tick only before continuous physics/motion requires it.</td></tr>
-            <tr><td>S2</td><td><span class="status done">Done</span></td><td>Tiles, water and authored faces retain identity plus revisioned world AABBs; prepared frames own safe snapshots and main/preview caches are isolated.</td><td>Consume the bounds in T4; keep camera, color and sorting state frame-local.</td></tr>
+            <tr><td>S2</td><td><span class="status done">Done</span></td><td>Tiles, water and authored faces retain identity plus revisioned world AABBs; prepared frames own safe snapshots and main/preview caches are isolated.</td><td>Preserve frame-local camera, color and sorting state and T4's fail-open consumers.</td></tr>
             <tr><td>S3</td><td><span class="status conditional">Measured</span></td><td>TaskSystem is a useful pool but has one queue and no dependency graph.</td><td>Change only after scheduling profiles identify a bottleneck.</td></tr>
             <tr><td>S4/E1</td><td><span class="status done">Done</span></td><td>Frame-arena lifetime and shipping-compiler/headless-validation coverage are established.</td><td>Keep the tests in the gate.</td></tr>
             <tr><td>E2</td><td><span class="status partial">Ongoing</span></td><td>This review and <code>HANDOFF.md</code> are now forward-looking.</td><td>Update both when each packet lands.</td></tr>
@@ -506,11 +506,12 @@
             <div class="phase-title"><h3>Resume measured frame scaling</h3></div>
             <div class="tasks">
               <div class="task"><span class="task-id">9.1</span><div><b>S2 — complete</b><p>Retained Vulkan-free records give tiles, water and authored faces stable identity plus revisioned world AABBs. Camera/material-only changes reuse bounds; geometry changes revise them; prepared frames keep value snapshots. Live telemetry reported 204/204 bounds reused on a steady frame.</p></div></div>
-              <div class="task"><span class="task-id">9.2</span><div><b>T4 — next</b><p>Use the existing frustum extraction and retained AABBs to build conservative visible lists before command recording, with before/after timing and count telemetry.</p></div></div>
-              <div class="task"><span class="task-id">9.3</span><div><b>V2 → A2</b><p>Suballocation/VMA, then KTX2 and compressed texture formats.</p></div></div>
-              <div class="task"><span class="task-id">9.4</span><div><b>A3, T8, T5, A4</b><p>Streaming/retirement, parallel preparation, shadow culling/caching and recorder scratch—ordered by profiling evidence.</p></div></div>
+              <div class="task"><span class="task-id">9.2</span><div><b>T4 — complete</b><p>Main color/depth lists now consume retained AABBs before recording. Exact bounds cull conservatively; provisional model bounds fail open; picking and shadows are unchanged. The captured scene rejects 74 of 204 records, removes eight draw calls and 436 triangles, and produces byte-identical scene/AO images against the disabled control.</p></div></div>
+              <div class="task"><span class="task-id">9.3</span><div><b>V2 — complete</b><p>One device-owned VMA instance now backs persistent buffers/images, swapchain-generation targets, model textures, geometry blocks, the upload ring, staging and readback. Existing fences and higher-level suballocators retain lifetime control; no direct allocation or mapping calls remain in renderer code.</p></div></div>
+              <div class="task"><span class="task-id">9.4</span><div><b>A2 — next</b><p>Add KTX2 and BC7 or appropriate platform formats, preserve sRGB/linear semantics and an uncompressed fallback, then account residency in actual compressed mip bytes.</p></div></div>
+              <div class="task"><span class="task-id">9.5</span><div><b>A3, T8, T5, A4</b><p>Streaming/retirement, parallel preparation, shadow culling/caching and recorder scratch—ordered by profiling evidence.</p></div></div>
             </div>
-            <p class="accept"><b>Gate:</b> measured CPU/GPU time scales with visible content; claims include before/after telemetry.</p>
+            <p class="accept"><b>Gate:</b> all 68 Debug suites pass. The Vulkan smoke test creates mapped and device-local VMA resources, verifies allocation statistics and complete release; a validation-enabled 120-frame game run exercises render targets, runtime uploads and clean teardown. T4's matched visual evidence remains unchanged.</p>
           </div>
         </article>
       </div>
@@ -519,8 +520,8 @@
     <section id="remaining">
       <div class="section-head"><span class="num">05</span><h2>Remaining work after the material program</h2></div>
       <div class="grid">
-        <article class="card"><p class="kicker">Visibility</p><h3>T4 is next</h3><p>Persistent renderables and stable bounds are complete. Consume them with ordinary conservative frustum culling and measure the result before considering an occlusion system.</p></article>
-        <article class="card"><p class="kicker">Memory and texture format</p><h3>V2 then A2</h3><p>Generalize allocation and image creation before KTX2/BC7, mip chains and streaming make allocation patterns more complex.</p></article>
+        <article class="card"><p class="kicker">Visibility</p><h3>T4 is complete</h3><p>Persistent bounds now feed conservative main-scene lists with matched validation evidence. Do not add occlusion culling until profiles justify its complexity.</p></article>
+        <article class="card"><p class="kicker">Texture format</p><h3>A2 is next</h3><p>The allocator seam is complete. Add KTX2/BC7, mip artifacts and compressed accounting without reintroducing raw allocation paths.</p></article>
         <article class="card"><p class="kicker">Residency</p><h3>A3 remainder</h3><p>The system already has requirements, budgets and eviction. Replace idle waits with explicit retirement and add mips/LOD; do not rewrite the scheduler from zero.</p></article>
         <article class="card"><p class="kicker">Conditional architecture</p><h3>S1, S3 and F5</h3><p>Fixed tick needs continuous gameplay physics. A task graph needs a measured scheduling problem. An RHI needs a second backend or platform. Until then, these are not priority work.</p></article>
       </div>

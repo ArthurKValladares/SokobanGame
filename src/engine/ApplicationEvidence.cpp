@@ -110,9 +110,26 @@ void Application::finishEvidenceCapture()
     report << "- Triangles: " << evidenceStats_.triangles << "\n";
     report << "- Render passes: " << evidenceStats_.renderPasses << "\n";
     report << "- Persistent renderables: "
-           << evidenceStats_.persistentRenderables << " (bounds reused "
+           << evidenceStats_.persistentRenderables << " (visible "
+           << evidenceStats_.visibleRenderables << ", culled "
+           << evidenceStats_.culledRenderables << "; bounds reused "
            << evidenceStats_.reusedRenderableBounds << ", rebuilt "
            << evidenceStats_.rebuiltRenderableBounds << ")\n";
+    report << "- Main-scene frustum culling: "
+           << (evidenceStats_.frustumCullingEnabled ? "enabled" : "disabled")
+           << "\n";
+    if (evidenceStats_.scenePreparationTimingAvailable) {
+        report << "- Scene preparation: average "
+               << evidenceStats_.scenePreparationAverageMilliseconds
+               << " ms, p95 "
+               << evidenceStats_.scenePreparationP95Milliseconds
+               << " ms, maximum "
+               << evidenceStats_.scenePreparationMaximumMilliseconds
+               << " ms (" << evidenceStats_.scenePreparationTimingSamples
+               << " samples)\n";
+    } else {
+        report << "- Scene preparation: unavailable\n";
+    }
     report << "- CPU frame: average "
            << evidenceStats_.cpuFrameAverageMilliseconds << " ms, p95 "
            << evidenceStats_.cpuFrameP95Milliseconds << " ms, maximum "

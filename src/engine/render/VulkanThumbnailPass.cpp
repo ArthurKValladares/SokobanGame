@@ -3,6 +3,7 @@
 #include "engine/Log.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/render/ImageData.hpp"
+#include "engine/render/VulkanMemoryAllocator.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -21,15 +22,15 @@ VulkanThumbnailPass::~VulkanThumbnailPass()
 }
 
 void VulkanThumbnailPass::create(
-    VkPhysicalDevice physicalDevice,
+    VulkanMemoryAllocator& allocator,
     VkDevice device,
     VkCommandPool commandPool,
     VkQueue graphicsQueue,
     std::filesystem::path assetRoot)
 {
     destroy();
-    physicalDevice_ = physicalDevice;
     device_ = device;
+    allocator_ = &allocator;
     commandPool_ = commandPool;
     graphicsQueue_ = graphicsQueue;
     assetRoot_ = std::move(assetRoot);
@@ -40,8 +41,8 @@ void VulkanThumbnailPass::destroy()
     if (device_) {
         invalidate();
     }
-    physicalDevice_ = VK_NULL_HANDLE;
     device_ = VK_NULL_HANDLE;
+    allocator_ = nullptr;
     commandPool_ = VK_NULL_HANDLE;
     graphicsQueue_ = VK_NULL_HANDLE;
     assetRoot_.clear();
@@ -61,7 +62,7 @@ void VulkanThumbnailPass::destroyThumbnail(
 #endif
         thumbnail.imguiTexture = VK_NULL_HANDLE;
     }
-    vulkanResources::destroyImage(device_, thumbnail.image);
+    vulkanResources::destroyImage(*allocator_, device_, thumbnail.image);
 }
 
 void VulkanThumbnailPass::invalidate()
@@ -161,7 +162,7 @@ bool VulkanThumbnailPass::loadThumbnail(TileType tile, Thumbnail& target)
     const VkDeviceSize byteCount = image.rgba.size();
 
     VkBuffer staging = VK_NULL_HANDLE;
-    VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+    VulkanAllocation stagingAllocation = nullptr;
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
     const auto cleanup = [&] {
@@ -171,12 +172,7 @@ bool VulkanThumbnailPass::loadThumbnail(TileType tile, Thumbnail& target)
         if (commandBuffer) {
             vkFreeCommandBuffers(device_, commandPool_, 1, &commandBuffer);
         }
-        if (staging) {
-            vkDestroyBuffer(device_, staging, nullptr);
-        }
-        if (stagingMemory) {
-            vkFreeMemory(device_, stagingMemory, nullptr);
-        }
+        allocator_->destroyBuffer(staging, stagingAllocation);
     };
 
     try {
@@ -195,7 +191,7 @@ bool VulkanThumbnailPass::loadThumbnail(TileType tile, Thumbnail& target)
             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         };
         target.image = vulkanResources::createImage(
-            physicalDevice_,
+            *allocator_,
             device_,
             imageInfo,
             VK_IMAGE_ASPECT_COLOR_BIT,
@@ -207,30 +203,15 @@ bool VulkanThumbnailPass::loadThumbnail(TileType tile, Thumbnail& target)
             .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         };
-        vkCheck(vkCreateBuffer(device_, &bufferInfo, nullptr, &staging),
-            "vkCreateBuffer thumbnail staging failed");
-
-        VkMemoryRequirements requirements {};
-        vkGetBufferMemoryRequirements(device_, staging, &requirements);
-        const VkMemoryAllocateInfo allocation {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            .allocationSize = requirements.size,
-            .memoryTypeIndex = vulkanResources::findMemoryType(
-                physicalDevice_,
-                requirements.memoryTypeBits,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
-        };
-        vkCheck(vkAllocateMemory(device_, &allocation, nullptr, &stagingMemory),
-            "vkAllocateMemory thumbnail staging failed");
-        vkCheck(vkBindBufferMemory(device_, staging, stagingMemory, 0),
-            "vkBindBufferMemory thumbnail staging failed");
-
         void* mapped = nullptr;
-        vkCheck(vkMapMemory(device_, stagingMemory, 0, byteCount, 0, &mapped),
-            "vkMapMemory thumbnail staging failed");
+        allocator_->createBuffer(
+            bufferInfo,
+            VulkanMemoryUsage::HostSequentialWrite,
+            staging,
+            stagingAllocation,
+            &mapped,
+            "Tile thumbnail staging");
         std::memcpy(mapped, image.rgba.data(), image.rgba.size());
-        vkUnmapMemory(device_, stagingMemory);
 
         const VkCommandBufferAllocateInfo commandBufferInfo {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,

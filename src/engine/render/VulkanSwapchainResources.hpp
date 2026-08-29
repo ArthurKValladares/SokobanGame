@@ -28,6 +28,7 @@ public:
 
     void create(
         VkPhysicalDevice physicalDevice,
+        VulkanMemoryAllocator& allocator,
         VkDevice device,
         VkSurfaceKHR surface,
         SDL_Window* window,
@@ -136,6 +137,7 @@ private:
 
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkDevice device_ = VK_NULL_HANDLE;
+    VulkanMemoryAllocator* allocator_ = nullptr;
     VkSurfaceKHR surface_ = VK_NULL_HANDLE;
     SDL_Window* window_ = nullptr;
     QueueFamilies queueFamilies_ {};

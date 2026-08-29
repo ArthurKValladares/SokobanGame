@@ -78,6 +78,7 @@ VulkanDeviceContext::VulkanDeviceContext(
         createSurface();
         pickPhysicalDevice();
         createDevice();
+        memoryAllocator_.create(instance_, physicalDevice_, device_);
         createCommandPool();
     } catch (...) {
         destroy();
@@ -135,6 +136,16 @@ VkQueue VulkanDeviceContext::presentQueue() const
 VkCommandPool VulkanDeviceContext::commandPool() const
 {
     return commandPool_;
+}
+
+VulkanMemoryAllocator& VulkanDeviceContext::memoryAllocator()
+{
+    return memoryAllocator_;
+}
+
+const VulkanMemoryAllocator& VulkanDeviceContext::memoryAllocator() const
+{
+    return memoryAllocator_;
 }
 
 bool VulkanDeviceContext::wireframeSupported() const
@@ -467,6 +478,7 @@ void VulkanDeviceContext::destroy() noexcept
         vkDestroyCommandPool(device_, commandPool_, nullptr);
         commandPool_ = VK_NULL_HANDLE;
     }
+    memoryAllocator_.destroy();
     if (device_) {
         vkDestroyDevice(device_, nullptr);
         device_ = VK_NULL_HANDLE;

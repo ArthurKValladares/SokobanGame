@@ -32,6 +32,7 @@ struct CommandLineOptions {
     std::string evidenceOutputDirectory;
     int evidenceRenderScalePercent = 100;
     bool evidenceAmbientOcclusionEnabled = true;
+    bool evidenceFrustumCullingEnabled = true;
     // Set when parsing rejected the arguments; `error` says why.
     bool malformed = false;
     std::string error;
@@ -45,6 +46,7 @@ struct CommandLineOptions {
     CommandLineOptions options;
     bool evidenceScaleSpecified = false;
     bool evidenceAmbientOcclusionSpecified = false;
+    bool evidenceFrustumCullingSpecified = false;
     const auto reject = [&options](std::string message) {
         options.malformed = true;
         options.error = std::move(message);
@@ -113,6 +115,9 @@ struct CommandLineOptions {
         } else if (argument == "--evidence-disable-ao") {
             options.evidenceAmbientOcclusionEnabled = false;
             evidenceAmbientOcclusionSpecified = true;
+        } else if (argument == "--evidence-disable-frustum-culling") {
+            options.evidenceFrustumCullingEnabled = false;
+            evidenceFrustumCullingSpecified = true;
         } else {
             return reject("Unknown argument '" + std::string(argument) + "'");
         }
@@ -129,6 +134,11 @@ struct CommandLineOptions {
         evidenceAmbientOcclusionSpecified) {
         return reject("--evidence-disable-ao requires --evidence-output");
     }
+    if (options.evidenceOutputDirectory.empty() &&
+        evidenceFrustumCullingSpecified) {
+        return reject(
+            "--evidence-disable-frustum-culling requires --evidence-output");
+    }
     return options;
 }
 
@@ -137,6 +147,7 @@ inline constexpr std::string_view commandLineUsage =
     "[--save-directory <path>] [--require-validation] "
     "[--bake-tile-thumbnails] "
     "[--evidence-output <directory> "
-    "--evidence-render-scale <25..100> [--evidence-disable-ao]]";
+    "--evidence-render-scale <25..100> [--evidence-disable-ao] "
+    "[--evidence-disable-frustum-culling]]";
 
 } // namespace sokoban

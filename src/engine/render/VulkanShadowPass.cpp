@@ -2,6 +2,7 @@
 
 #include "engine/render/LightingConfig.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
+#include "engine/render/VulkanMemoryAllocator.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 
 #include <stdexcept>
@@ -13,12 +14,13 @@ VulkanShadowPass::~VulkanShadowPass()
 }
 
 void VulkanShadowPass::create(
-    VkPhysicalDevice physicalDevice,
+    VulkanMemoryAllocator& allocator,
     VkDevice device,
     VkFormat format)
 {
     destroy();
     device_ = device;
+    allocator_ = &allocator;
     format_ = format;
 
     try {
@@ -40,7 +42,7 @@ void VulkanShadowPass::create(
             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         };
         image_ = vulkanResources::createImage(
-            physicalDevice,
+            allocator,
             device_,
             imageInfo,
             VK_IMAGE_ASPECT_DEPTH_BIT,
@@ -87,32 +89,14 @@ void VulkanShadowPass::create(
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         };
-        vkCheck(vkCreateImage(
-                    device_, &pointImageInfo, nullptr, &pointImage_.image),
-            "vkCreateImage point shadow array failed");
+        allocator.createDeviceImage(
+            pointImageInfo,
+            pointImage_.image,
+            pointImage_.allocation,
+            "Point shadow cube array");
         vulkanDebug::setObjectName(
             device_, VK_OBJECT_TYPE_IMAGE, pointImage_.image,
             "Point shadow cube array");
-        VkMemoryRequirements pointRequirements {};
-        vkGetImageMemoryRequirements(
-            device_, pointImage_.image, &pointRequirements);
-        const VkMemoryAllocateInfo pointAllocation {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            .allocationSize = pointRequirements.size,
-            .memoryTypeIndex = vulkanResources::findMemoryType(
-                physicalDevice,
-                pointRequirements.memoryTypeBits,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
-        };
-        vkCheck(vkAllocateMemory(
-                    device_, &pointAllocation, nullptr, &pointImage_.memory),
-            "vkAllocateMemory point shadow array failed");
-        vulkanDebug::setObjectName(
-            device_, VK_OBJECT_TYPE_DEVICE_MEMORY, pointImage_.memory,
-            "Point shadow cube array memory");
-        vkCheck(vkBindImageMemory(
-                    device_, pointImage_.image, pointImage_.memory, 0),
-            "vkBindImageMemory point shadow array failed");
 
         VkImageViewCreateInfo pointViewInfo {
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -165,11 +149,11 @@ void VulkanShadowPass::destroy()
                 view = VK_NULL_HANDLE;
             }
         }
-        vulkanResources::destroyImage(device_, pointImage_);
+        vulkanResources::destroyImage(*allocator_, device_, pointImage_);
         if (sampler_) {
             vkDestroySampler(device_, sampler_, nullptr);
         }
-        vulkanResources::destroyImage(device_, image_);
+        vulkanResources::destroyImage(*allocator_, device_, image_);
     }
     sampler_ = VK_NULL_HANDLE;
     pointSampler_ = VK_NULL_HANDLE;
@@ -177,6 +161,7 @@ void VulkanShadowPass::destroy()
     pointImageLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     format_ = VK_FORMAT_UNDEFINED;
     device_ = VK_NULL_HANDLE;
+    allocator_ = nullptr;
 }
 
 void VulkanShadowPass::begin(

@@ -1,6 +1,7 @@
 #include "engine/render/VulkanResourceUtils.hpp"
 
 #include "engine/render/VulkanDebugUtils.hpp"
+#include "engine/render/VulkanMemoryAllocator.hpp"
 
 #include <stdexcept>
 #include <string>
@@ -69,22 +70,6 @@ void transitionImage(
         dependencyFlags);
 }
 
-uint32_t findMemoryType(
-    VkPhysicalDevice physicalDevice,
-    uint32_t typeFilter,
-    VkMemoryPropertyFlags properties)
-{
-    VkPhysicalDeviceMemoryProperties memoryProperties {};
-    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
-    for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i) {
-        if ((typeFilter & (1U << i)) &&
-            (memoryProperties.memoryTypes[i].propertyFlags & properties) == properties) {
-            return i;
-        }
-    }
-    throw std::runtime_error("No suitable Vulkan image memory type found");
-}
-
 VkImageView createImageView(
     VkDevice device,
     VkImage image,
@@ -120,39 +105,18 @@ VkImageView createImageView(
 }
 
 OwnedImage createImage(
-    VkPhysicalDevice physicalDevice,
+    VulkanMemoryAllocator& allocator,
     VkDevice device,
     const VkImageCreateInfo& imageInfo,
     VkImageAspectFlags aspectMask,
     std::string_view debugName)
 {
     OwnedImage result;
-    vkCheck(vkCreateImage(device, &imageInfo, nullptr, &result.image), "vkCreateImage failed");
+    allocator.createDeviceImage(
+        imageInfo, result.image, result.allocation, debugName);
     vulkanDebug::setObjectName(
         device, VK_OBJECT_TYPE_IMAGE, result.image, debugName);
     try {
-        VkMemoryRequirements requirements {};
-        vkGetImageMemoryRequirements(device, result.image, &requirements);
-        VkMemoryAllocateInfo allocateInfo {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            .allocationSize = requirements.size,
-            .memoryTypeIndex = findMemoryType(
-                physicalDevice,
-                requirements.memoryTypeBits,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
-        };
-        vkCheck(vkAllocateMemory(device, &allocateInfo, nullptr, &result.memory),
-            "vkAllocateMemory image failed");
-        const std::string memoryName = debugName.empty()
-            ? std::string {}
-            : std::string(debugName) + " memory";
-        vulkanDebug::setObjectName(
-            device,
-            VK_OBJECT_TYPE_DEVICE_MEMORY,
-            result.memory,
-            memoryName);
-        vkCheck(vkBindImageMemory(device, result.image, result.memory, 0),
-            "vkBindImageMemory failed");
         const std::string viewName = debugName.empty()
             ? std::string {}
             : std::string(debugName) + " view";
@@ -163,23 +127,21 @@ OwnedImage createImage(
             aspectMask,
             viewName);
     } catch (...) {
-        destroyImage(device, result);
+        destroyImage(allocator, device, result);
         throw;
     }
     return result;
 }
 
-void destroyImage(VkDevice device, OwnedImage& image)
+void destroyImage(
+    VulkanMemoryAllocator& allocator,
+    VkDevice device,
+    OwnedImage& image)
 {
     if (image.view) {
         vkDestroyImageView(device, image.view, nullptr);
     }
-    if (image.image) {
-        vkDestroyImage(device, image.image, nullptr);
-    }
-    if (image.memory) {
-        vkFreeMemory(device, image.memory, nullptr);
-    }
+    allocator.destroyImage(image.image, image.allocation);
     image = {};
 }
 

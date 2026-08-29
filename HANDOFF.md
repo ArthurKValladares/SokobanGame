@@ -31,14 +31,17 @@ full-resolution composite now uses view-space depth and normal weights instead
 of a box blur, while continuing to affect ambient light only. Its estimator
 uses a full two-axis integer hash for kernel rotation so half-resolution noise
 does not settle into horizontal bands. A deterministic
-evidence runner now archives post-tonemap scenes, filtered AO, matched AO-off
-controls and CPU/GPU frame statistics. Persistent renderable identities and
-stable world bounds are now implemented; measured frustum culling is next.
+evidence runner now archives post-tonemap scenes, filtered AO, matched controls
+and CPU/GPU frame statistics. Persistent renderable identities, stable world
+bounds and conservative main-scene frustum culling are now implemented;
+renderer memory now flows through one VMA-backed allocator seam.
 
 The recommended order is:
 
-1. Consume persistent bounds for measured frustum culling (T4).
-2. Continue allocation/compression work (V2/A2) only after new telemetry.
+1. Add KTX2 and platform texture compression through the completed allocation
+   seam (A2).
+2. Continue mip/LOD streaming and fence-based retirement after compressed byte
+   accounting exists (A3 remainder).
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
@@ -87,6 +90,10 @@ future tasks:
   model back-face culling, 4x default MSAA, and AO-gated depth copying.
 - **V1/V3/V5/V6**: per-swapchain-image present semaphores, direct skinning
   SSBO indexing, Vulkan 1.3 optimized shader builds, and optional anisotropy.
+- **V2**: vendored VMA 3.2.1 is owned by `VulkanDeviceContext`; persistent,
+  swapchain-generation, upload, staging and readback images/buffers all use its
+  explicit device-local, sequential-write or readback policies. The geometry
+  arena and upload ring keep their higher-level fence-safe suballocation.
 - **V4**: Vulkan 1.2 descriptor-indexing features are queried and selectively
   enabled; model textures use a separate runtime-sized set with a device-bounded
   capacity. The manifest and shader build no longer have a 64-texture cap.
@@ -693,20 +700,15 @@ surfaces.
 
 ### 9. Resume frame-scaling work
 
-After the material path is complete, prioritize by measured frame cost:
+With S2, T4 and V2 complete, continue by measured frame and memory cost:
 
-1. **T4:** frustum-cull prepared renderables using the retained world AABBs
-   and existing `Frustum` math. Build visible index lists without mutating the
-   persistent cache; preserve picking behavior and keep uncertain model bounds
-   conservatively visible.
-2. **V2:** VMA or deliberate image/buffer suballocation.
-3. **A2:** KTX2 plus BC7/appropriate platform formats in the content tool.
-4. **A3 remainder:** mip/LOD streaming, compressed byte accounting and
+1. **A2:** KTX2 plus BC7/appropriate platform formats in the content tool.
+2. **A3 remainder:** mip/LOD streaming, compressed byte accounting and
    fence-based eviction retirement instead of `vkDeviceWaitIdle`.
-5. **T8:** parallelize Vulkan-free scene preparation first; add secondary
+3. **T8:** parallelize Vulkan-free scene preparation first; add secondary
    command buffers or a transfer queue only after profiling.
-6. **T5:** range-cull point-shadow casters, then cache unchanged faces.
-7. **A4:** reuse recorder scratch storage after scene data structures settle.
+4. **T5:** range-cull point-shadow casters, then cache unchanged faces.
+5. **A4:** reuse recorder scratch storage after scene data structures settle.
 
 #### 9.1 S2 persistent renderables and stable bounds — complete
 
@@ -720,16 +722,62 @@ Debug and evidence telemetry expose retained/reused/rebuilt counts; a frozen
 live frame reported 204 retained renderables, 204 reused bounds and zero rebuilt
 bounds.
 
-The focused scene-preparation suite passes 1,564 checks, the validation smoke
+The current focused scene-preparation suite passes 1,503 checks, the validation smoke
 run is clean, and all 68 Debug suites pass.
 
-#### 9.2 T4 frustum culling — next
+#### 9.2 T4 frustum culling — complete
 
-Extract the camera frustum from `isoClipFromWorld`, classify retained AABBs,
-and produce visible face/model lists before recorder submission. Start with
-main color/depth work; preserve picking data and shadow semantics until each is
-given its own conservative volume. Add before/after prepared/visible counts and
-CPU/GPU timing evidence.
+`IsoScenePreparer` extracts the camera frustum from `isoClipFromWorld` and
+classifies retained AABBs before building the main color/depth face and model
+lists. Exact cube, water and authored-face bounds may be rejected. Model-backed
+tiles fail open because their retained unit transform is not yet the loaded
+mesh's true local AABB. Invalid bounds also fail open. Picking faces, sun-shadow
+casters and point-shadow casters deliberately ignore this classification.
+
+Visible/culled counters, a developer checkbox, rolling scene-preparation time
+and an evidence-only `--evidence-disable-frustum-culling` control make the
+policy inspectable. In the frozen 1280x720 capture, 74 of 204 retained records
+were outside the main frustum. Draw calls fell from 51 to 43 and submitted
+triangles from 14,504 to 14,068. Preparation moved from 1.743 to 1.768 ms,
+CPU draw-frame time from 5.504 to 5.489 ms and GPU frame time from 1.649 to
+1.280 ms on the captured RTX 4060 Laptop GPU. The timing deltas are run- and
+hardware-specific; the deterministic claims are the list/count reductions and
+byte-identical composed-scene and AO images.
+
+The focused suite passes 1,503 checks, including culling on/off coverage that
+keeps picking and shadow counts identical. The complete Debug build and all 68
+CTest suites, including Vulkan smoke, pass. Evidence is archived under
+`docs/render-evidence/2026-08-29-frustum-culling/`.
+
+#### 9.3 V2 allocation consolidation — complete
+
+VMA 3.2.1 is vendored under `third_party/vma` and wrapped by
+`VulkanMemoryAllocator`, one instance per `VulkanDeviceContext`. Its public
+policy distinguishes device-local resources, persistently mapped sequential
+writes and persistently mapped readback. All renderer image and buffer owners
+now use that seam: swapchain-generation targets, SSAO and shadow images, model
+textures, UI/thumbnail images, model/material/frame buffers, geometry backing
+blocks, the shared upload ring, transient staging and frame capture readback.
+There are no direct `vkAllocateMemory`, `vkFreeMemory`, `vkMapMemory` or
+`vkUnmapMemory` calls left under `src/engine/render`.
+
+The existing owners still determine lifetime. VMA replaces memory selection,
+allocation, binding and mapping; it does not replace the geometry arena's slice
+allocator, upload-ring reservations, fences, retired render-resource sets or
+descriptor publication rules. The Vulkan smoke test now allocates a mapped
+host buffer and device image, checks VMA statistics, frees both and verifies
+the live allocation count returns to zero. A validation-enabled 120-frame game
+run exercised render targets, runtime asset uploads and teardown. The complete
+Debug build and all 68 suites pass.
+
+#### 9.4 A2 compressed texture pipeline — next
+
+Add KTX2 as a content artifact and select BC7 or the appropriate platform
+format at build time. Keep source-image interpretation in the content tool,
+preserve sRGB versus linear semantics, retain an uncompressed compatibility
+fallback, and account residency in actual compressed mip bytes. Do not couple
+this packet to a scheduler rewrite; A3 retirement and mip/LOD policy follow
+after the format path is independently validated.
 
 `S3` task-graph/work-stealing work should follow an observed scheduling
 bottleneck. `S1` fixed-tick simulation is conditional on continuous physics or
@@ -759,13 +807,19 @@ layout changes affect modules that appear unrelated to the immediate feature.
 
 ## Source map for the next packets
 
-- `src/engine/render/IsoScenePreparer.*`: retained identity/bounds cache and
-  current per-frame projection/sorting; consume its snapshots for T4.
+- `src/engine/render/IsoScenePreparer.*`: completed retained bounds and
+  main-scene culling; preserve fail-open model, picking and shadow behavior.
 - `src/engine/render/RenderTypes.hpp`: source render data and frame-level
   ownership boundaries that the persistent representation must not blur.
-- `src/engine/Geometry.*`: existing bounds/frustum primitives to reuse for T4.
-- `src/engine/render/VulkanRenderer.*`: preparation orchestration and the right
-  place to expose before/after CPU/GPU telemetry.
+- `src/engine/Geometry.*`: completed bounds/frustum primitives.
+- `src/engine/render/VulkanRenderer.*`: preparation orchestration and completed
+  before/after culling telemetry; preserve its retirement boundaries while A2
+  changes texture creation.
+- `src/engine/render/VulkanMemoryAllocator.*`: completed VMA ownership and the
+  only renderer memory-policy seam; extend this instead of reintroducing raw
+  Vulkan allocation calls.
+- `src/engine/render/VulkanModelResources.*` and the content tool: next A2
+  boundary for compressed artifacts, format selection and byte accounting.
 - `src/engine/render/VulkanSceneRecorder.*`: consumer of the prepared visible
   lists; keep Vulkan recording downstream of Vulkan-free culling.
 - `tests/IsoScenePreparerTests.cpp`: stable identity/bounds behavior is covered;

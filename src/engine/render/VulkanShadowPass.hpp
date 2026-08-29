@@ -17,7 +17,10 @@ public:
     VulkanShadowPass(const VulkanShadowPass&) = delete;
     VulkanShadowPass& operator=(const VulkanShadowPass&) = delete;
 
-    void create(VkPhysicalDevice physicalDevice, VkDevice device, VkFormat format);
+    void create(
+        VulkanMemoryAllocator& allocator,
+        VkDevice device,
+        VkFormat format);
     void destroy();
 
     void begin(VkCommandBuffer commandBuffer, VkPipeline tilePipeline, RenderStats& stats);
@@ -48,6 +51,7 @@ public:
 
 private:
     VkDevice device_ = VK_NULL_HANDLE;
+    VulkanMemoryAllocator* allocator_ = nullptr;
     VkFormat format_ = VK_FORMAT_UNDEFINED;
     vulkanResources::OwnedImage image_ {};
     vulkanResources::OwnedImage pointImage_ {};

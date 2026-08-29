@@ -137,6 +137,8 @@ Application::Application(ApplicationOptions options)
     if (!evidenceOutputDirectory_.empty()) {
         presentationSettings_.lighting.ambientOcclusionEnabled =
             evidenceAmbientOcclusionEnabled_;
+        renderer_.setFrustumCullingEnabled(
+            options.evidenceFrustumCullingEnabled);
     }
     presentationSettings_.applyTileScales(assetManifest_);
     presentationSettings_.normalize();

@@ -223,11 +223,11 @@ VulkanRenderer::VulkanRenderer(
     // The default MSAA mode is a request; drop to what the device supports.
     activeSampleCount_ = sampleCountForMode(antiAliasingMode);
     shadowPass_.create(
-        deviceContext_.physicalDevice(),
+        deviceContext_.memoryAllocator(),
         deviceContext_.device(),
         shadowFormat_);
     uiResources_.create(
-        deviceContext_.physicalDevice(),
+        deviceContext_.memoryAllocator(),
         deviceContext_.device(),
         deviceContext_.commandPool(),
         deviceContext_.graphicsQueue(),
@@ -235,6 +235,7 @@ VulkanRenderer::VulkanRenderer(
         loadRgbaImage(assetRoot_ / config::titleBackgroundPath));
     modelResources_.create(
         deviceContext_.physicalDevice(),
+        deviceContext_.memoryAllocator(),
         deviceContext_.device(),
         deviceContext_.commandPool(),
         deviceContext_.graphicsQueue(),
@@ -259,7 +260,7 @@ VulkanRenderer::VulkanRenderer(
     // Vulkan backend to exist. Failure here only costs the editor its
     // thumbnails, so it is not fatal.
     thumbnailPass_.create(
-        deviceContext_.physicalDevice(),
+        deviceContext_.memoryAllocator(),
         deviceContext_.device(),
         deviceContext_.commandPool(),
         deviceContext_.graphicsQueue(),
@@ -303,6 +304,7 @@ VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
     RenderFrameData frameData,
     std::optional<RenderFrameData> previewFrameData)
 {
+    const auto preparationStart = std::chrono::steady_clock::now();
     const VkExtent2D extent =
         activeResources_.swapchain->renderExtent();
     std::shared_ptr<PreparedFrameScratch> scratch =
@@ -328,6 +330,10 @@ VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
             },
             *scratch->previewScene);
     }
+    scenePreparationTimeTelemetry_.record(
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - preparationStart)
+            .count());
 
     PreparedFrame frame;
     frame.levelWidth = scratch->frameData.levelWidth;
@@ -476,6 +482,20 @@ void VulkanRenderer::drawFrame(
         prepared.previewScene ? &*prepared.previewScene : nullptr,
         uiDrawData);
     lastStats_.gpuTimestampsSupported = gpuProfiler_.supported();
+    const FrameTimeSummary preparationTiming =
+        scenePreparationTimeTelemetry_.summary();
+    lastStats_.scenePreparationTimingAvailable =
+        preparationTiming.available();
+    lastStats_.scenePreparationTimingSamples =
+        preparationTiming.sampleCount;
+    lastStats_.scenePreparationMilliseconds =
+        preparationTiming.latestMilliseconds;
+    lastStats_.scenePreparationAverageMilliseconds =
+        preparationTiming.averageMilliseconds;
+    lastStats_.scenePreparationP95Milliseconds =
+        preparationTiming.p95Milliseconds;
+    lastStats_.scenePreparationMaximumMilliseconds =
+        preparationTiming.maximumMilliseconds;
     const FrameTimeSummary gpuTiming = gpuProfiler_.frameTimeSummary();
     if (gpuTiming.available()) {
         lastStats_.gpuFrameTimingAvailable = true;
@@ -634,7 +654,7 @@ ImageData VulkanRenderer::captureRenderedFrame(std::optional<VkRect2D> region)
     // Everything submitted must have landed before the copy reads the image.
     deviceContext_.waitIdle();
     return captureImageRegion(
-        deviceContext_.physicalDevice(),
+        deviceContext_.memoryAllocator(),
         deviceContext_.device(),
         deviceContext_.commandPool(),
         deviceContext_.graphicsQueue(),
@@ -1143,6 +1163,17 @@ void VulkanRenderer::setOpaqueFrontToBackSortEnabled(bool enabled)
     scenePreparer_.setOpaqueFrontToBackSort(enabled);
 }
 
+bool VulkanRenderer::frustumCullingEnabled() const
+{
+    return scenePreparer_.frustumCulling();
+}
+
+void VulkanRenderer::setFrustumCullingEnabled(bool enabled)
+{
+    scenePreparer_.setFrustumCulling(enabled);
+    previewScenePreparer_.setFrustumCulling(enabled);
+}
+
 bool VulkanRenderer::wideLinesSupported() const
 {
     return deviceContext_.wideLinesSupported();
@@ -1259,6 +1290,7 @@ VulkanRenderer::createRenderResources(
         std::make_unique<VulkanSwapchainResources>();
     resources.swapchain->create(
         deviceContext_.physicalDevice(),
+        deviceContext_.memoryAllocator(),
         deviceContext_.device(),
         deviceContext_.surface(),
         window_,
@@ -1279,13 +1311,13 @@ VulkanRenderer::createRenderResources(
         deviceContext_.device(), resources.swapchain->imageCount());
     resources.ssaoPass = std::make_unique<VulkanSsaoPass>();
     resources.ssaoPass->create(
-        deviceContext_.physicalDevice(),
+        deviceContext_.memoryAllocator(),
         deviceContext_.device(),
         resources.swapchain->renderExtent());
     resources.sceneDescriptors =
         std::make_unique<VulkanSceneDescriptors>();
     resources.sceneDescriptors->create(
-        deviceContext_.physicalDevice(),
+        deviceContext_.memoryAllocator(),
         deviceContext_.device(),
         descriptorResources(resources),
         maxFramesInFlight_);

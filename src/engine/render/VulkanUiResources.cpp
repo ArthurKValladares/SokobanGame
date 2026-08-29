@@ -1,6 +1,7 @@
 #include "engine/render/VulkanUiResources.hpp"
 
 #include "engine/render/ImageData.hpp"
+#include "engine/render/VulkanMemoryAllocator.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 #include "engine/ui/FontAtlas.hpp"
 
@@ -13,23 +14,20 @@ namespace {
 
 struct StagingBuffer {
     VkBuffer buffer = VK_NULL_HANDLE;
-    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VulkanAllocation allocation = nullptr;
+    void* mapped = nullptr;
 };
 
-void destroyStaging(VkDevice device, StagingBuffer& staging)
+void destroyStaging(
+    VulkanMemoryAllocator& allocator,
+    StagingBuffer& staging)
 {
-    if (staging.buffer) {
-        vkDestroyBuffer(device, staging.buffer, nullptr);
-    }
-    if (staging.memory) {
-        vkFreeMemory(device, staging.memory, nullptr);
-    }
+    allocator.destroyBuffer(staging.buffer, staging.allocation);
     staging = {};
 }
 
 StagingBuffer createStaging(
-    VkPhysicalDevice physicalDevice,
-    VkDevice device,
+    VulkanMemoryAllocator& allocator,
     std::span<const std::byte> pixels)
 {
     StagingBuffer staging;
@@ -40,37 +38,24 @@ StagingBuffer createStaging(
         .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
-    vkCheck(vkCreateBuffer(device, &bufferInfo, nullptr, &staging.buffer),
-        "vkCreateBuffer UI font staging failed");
     try {
-        VkMemoryRequirements requirements {};
-        vkGetBufferMemoryRequirements(device, staging.buffer, &requirements);
-        VkMemoryAllocateInfo allocation {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            .allocationSize = requirements.size,
-            .memoryTypeIndex = vulkanResources::findMemoryType(
-                physicalDevice,
-                requirements.memoryTypeBits,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
-        };
-        vkCheck(vkAllocateMemory(device, &allocation, nullptr, &staging.memory),
-            "vkAllocateMemory UI font staging failed");
-        vkCheck(vkBindBufferMemory(device, staging.buffer, staging.memory, 0),
-            "vkBindBufferMemory UI font staging failed");
-        void* mapped = nullptr;
-        vkCheck(vkMapMemory(device, staging.memory, 0, size, 0, &mapped),
-            "vkMapMemory UI image staging failed");
-        std::memcpy(mapped, pixels.data(), pixels.size());
-        vkUnmapMemory(device, staging.memory);
+        allocator.createBuffer(
+            bufferInfo,
+            VulkanMemoryUsage::HostSequentialWrite,
+            staging.buffer,
+            staging.allocation,
+            &staging.mapped,
+            "UI image staging");
+        std::memcpy(staging.mapped, pixels.data(), pixels.size());
     } catch (...) {
-        destroyStaging(device, staging);
+        destroyStaging(allocator, staging);
         throw;
     }
     return staging;
 }
 
 vulkanResources::OwnedImage uploadImage(
-    VkPhysicalDevice physicalDevice,
+    VulkanMemoryAllocator& allocator,
     VkDevice device,
     VkCommandPool commandPool,
     VkQueue graphicsQueue,
@@ -83,7 +68,7 @@ vulkanResources::OwnedImage uploadImage(
     vulkanResources::OwnedImage image;
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
     try {
-        staging = createStaging(physicalDevice, device, pixels);
+        staging = createStaging(allocator, pixels);
         const VkImageCreateInfo imageInfo {
             .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
             .imageType = VK_IMAGE_TYPE_2D,
@@ -98,7 +83,7 @@ vulkanResources::OwnedImage uploadImage(
             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         };
         image = vulkanResources::createImage(
-            physicalDevice,
+            allocator,
             device,
             imageInfo,
             VK_IMAGE_ASPECT_COLOR_BIT,
@@ -174,14 +159,14 @@ vulkanResources::OwnedImage uploadImage(
 
         vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
         commandBuffer = VK_NULL_HANDLE;
-        destroyStaging(device, staging);
+        destroyStaging(allocator, staging);
         return image;
     } catch (...) {
         if (commandBuffer) {
             vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
         }
-        destroyStaging(device, staging);
-        vulkanResources::destroyImage(device, image);
+        destroyStaging(allocator, staging);
+        vulkanResources::destroyImage(allocator, device, image);
         throw;
     }
 }
@@ -194,7 +179,7 @@ VulkanUiResources::~VulkanUiResources()
 }
 
 void VulkanUiResources::create(
-    VkPhysicalDevice physicalDevice,
+    VulkanMemoryAllocator& allocator,
     VkDevice device,
     VkCommandPool commandPool,
     VkQueue graphicsQueue,
@@ -211,9 +196,10 @@ void VulkanUiResources::create(
         throw std::runtime_error("Title background contains no pixels");
     }
     device_ = device;
+    allocator_ = &allocator;
     try {
         fontImage_ = uploadImage(
-            physicalDevice,
+            allocator,
             device_,
             commandPool,
             graphicsQueue,
@@ -222,7 +208,7 @@ void VulkanUiResources::create(
             VK_FORMAT_R8_UNORM,
             font.pixels());
         titleBackgroundImage_ = uploadImage(
-            physicalDevice,
+            allocator,
             device_,
             commandPool,
             graphicsQueue,
@@ -255,13 +241,15 @@ void VulkanUiResources::destroy()
         if (sampler_) {
             vkDestroySampler(device_, sampler_, nullptr);
         }
-        vulkanResources::destroyImage(device_, titleBackgroundImage_);
-        vulkanResources::destroyImage(device_, fontImage_);
+        vulkanResources::destroyImage(
+            *allocator_, device_, titleBackgroundImage_);
+        vulkanResources::destroyImage(*allocator_, device_, fontImage_);
     }
     sampler_ = VK_NULL_HANDLE;
     titleBackgroundImage_ = {};
     fontImage_ = {};
     device_ = VK_NULL_HANDLE;
+    allocator_ = nullptr;
 }
 
 } // namespace sokoban

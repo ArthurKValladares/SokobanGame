@@ -1,8 +1,10 @@
 #include "engine/render/VulkanDeviceContext.hpp"
+#include "engine/render/VulkanMemoryAllocator.hpp"
 
 #include <SDL3/SDL.h>
 
 #include <chrono>
+#include <cstddef>
 #include <exception>
 #include <iostream>
 #include <stdexcept>
@@ -131,6 +133,73 @@ void submitNoOp(sokoban::VulkanDeviceContext& deviceContext)
     }
 }
 
+void exerciseMemoryAllocator(sokoban::VulkanDeviceContext& deviceContext)
+{
+    sokoban::VulkanMemoryAllocator& allocator =
+        deviceContext.memoryAllocator();
+    VkBuffer buffer = VK_NULL_HANDLE;
+    sokoban::VulkanAllocation bufferAllocation = nullptr;
+    VkImage image = VK_NULL_HANDLE;
+    sokoban::VulkanAllocation imageAllocation = nullptr;
+    try {
+        const VkBufferCreateInfo bufferInfo {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size = 4096,
+            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        };
+        void* mapped = nullptr;
+        allocator.createBuffer(
+            bufferInfo,
+            sokoban::VulkanMemoryUsage::HostSequentialWrite,
+            buffer,
+            bufferAllocation,
+            &mapped,
+            "Vulkan smoke mapped buffer");
+        if (!buffer || !bufferAllocation || !mapped) {
+            throw std::runtime_error(
+                "VMA did not return a mapped host buffer");
+        }
+        static_cast<std::byte*>(mapped)[0] = std::byte { 0x5a };
+
+        const VkImageCreateInfo imageInfo {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .imageType = VK_IMAGE_TYPE_2D,
+            .format = VK_FORMAT_R8G8B8A8_UNORM,
+            .extent = { 16, 16, 1 },
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .samples = VK_SAMPLE_COUNT_1_BIT,
+            .tiling = VK_IMAGE_TILING_OPTIMAL,
+            .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                VK_IMAGE_USAGE_SAMPLED_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        };
+        allocator.createDeviceImage(
+            imageInfo,
+            image,
+            imageAllocation,
+            "Vulkan smoke device image");
+        const sokoban::VulkanMemoryStatistics active = allocator.statistics();
+        if (!image || !imageAllocation || active.allocationCount < 2 ||
+            active.allocationBytes == 0 || active.blockCount == 0) {
+            throw std::runtime_error(
+                "VMA allocation statistics did not include smoke resources");
+        }
+    } catch (...) {
+        allocator.destroyImage(image, imageAllocation);
+        allocator.destroyBuffer(buffer, bufferAllocation);
+        throw;
+    }
+    allocator.destroyImage(image, imageAllocation);
+    allocator.destroyBuffer(buffer, bufferAllocation);
+    if (allocator.statistics().allocationCount != 0) {
+        throw std::runtime_error(
+            "VMA smoke allocations were not fully released");
+    }
+}
+
 } // namespace
 
 int main()
@@ -139,6 +208,7 @@ int main()
         const SdlVideo video;
         const SdlWindow window;
         sokoban::VulkanDeviceContext deviceContext(window.get());
+        exerciseMemoryAllocator(deviceContext);
         submitNoOp(deviceContext);
         std::cout << "Vulkan hidden-surface smoke test passed\n";
         return 0;

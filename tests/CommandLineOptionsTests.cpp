@@ -39,6 +39,8 @@ void testEmptyIsANormalRun()
         "evidence scale defaults to 100 percent");
     check(options.evidenceAmbientOcclusionEnabled,
         "ambient occlusion is enabled in evidence runs by default");
+    check(options.evidenceFrustumCullingEnabled,
+        "frustum culling is enabled in evidence runs by default");
 }
 
 void testFlags()
@@ -70,6 +72,14 @@ void testFlags()
     check(!noAoEvidence.malformed, "AO-off evidence invocation parses");
     check(!noAoEvidence.evidenceAmbientOcclusionEnabled,
         "AO-off evidence invocation disables ambient occlusion");
+
+    const sokoban::CommandLineOptions noCullingEvidence = parse(
+        { "--smoke-frames", "180", "--evidence-output", "/tmp/evidence",
+            "--evidence-disable-frustum-culling" });
+    check(!noCullingEvidence.malformed,
+        "culling-off evidence invocation parses");
+    check(!noCullingEvidence.evidenceFrustumCullingEnabled,
+        "culling-off evidence invocation disables frustum culling");
 
     // Order must not matter: CI writes these in whatever order reads best.
     const sokoban::CommandLineOptions reordered = parse(
@@ -131,6 +141,8 @@ void testMalformedInput()
         "explicit default evidence scale still requires an output directory");
     check(parse({ "--evidence-disable-ao" }).malformed,
         "AO-off evidence mode requires an output directory");
+    check(parse({ "--evidence-disable-frustum-culling" }).malformed,
+        "culling-off evidence mode requires an output directory");
 
     const sokoban::CommandLineOptions rejected = parse({ "--smoke-frames", "abc" });
     check(!rejected.error.empty(), "a rejection explains itself");

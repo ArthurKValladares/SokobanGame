@@ -456,6 +456,8 @@ add_library(sokoban_render_vulkan STATIC
     src/engine/render/VulkanDeviceSelection.cpp
     src/engine/render/VulkanGpuProfiler.cpp
     src/engine/render/VulkanGeometryArena.cpp
+    src/engine/render/VulkanMemoryAllocator.cpp
+    src/engine/render/VulkanMemoryAllocatorImplementation.cpp
     src/engine/render/VulkanModelResources.cpp
     src/engine/render/VulkanUploadRing.cpp
     src/engine/render/VulkanPipelineCache.cpp
@@ -482,6 +484,7 @@ target_include_directories(sokoban_render_vulkan
         third_party/imgui
         third_party/imgui/backends
         third_party/imgui/misc/cpp
+        third_party/vma
 )
 target_link_libraries(sokoban_render_vulkan
     PUBLIC
@@ -498,6 +501,18 @@ target_compile_definitions(sokoban_render_vulkan PRIVATE
 )
 sokoban_enable_warnings(sokoban_render_vulkan)
 sokoban_enable_lto(sokoban_render_vulkan)
+
+# VMA is a vendored single-header implementation. Keep third-party diagnostics
+# out of the project's warning budget while retaining warnings for the wrapper.
+if(MSVC)
+    set_source_files_properties(
+        src/engine/render/VulkanMemoryAllocatorImplementation.cpp
+        PROPERTIES COMPILE_OPTIONS "/w")
+else()
+    set_source_files_properties(
+        src/engine/render/VulkanMemoryAllocatorImplementation.cpp
+        PROPERTIES COMPILE_OPTIONS "-w")
+endif()
 
 target_link_libraries(sokoban_content_tool PRIVATE sokoban_core)
 

@@ -76,6 +76,8 @@ int main(int argc, char** argv)
                     options.evidenceRenderScalePercent,
                 .evidenceAmbientOcclusionEnabled =
                     options.evidenceAmbientOcclusionEnabled,
+                .evidenceFrustumCullingEnabled =
+                    options.evidenceFrustumCullingEnabled,
             }
         };
 #if SOKOBAN_ENABLE_DEBUG_UI

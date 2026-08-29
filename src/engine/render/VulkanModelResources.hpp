@@ -10,6 +10,7 @@
 #include "engine/render/RuntimeTextureCatalog.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanGeometryArena.hpp"
+#include "engine/render/VulkanMemoryAllocator.hpp"
 #include "engine/render/VulkanUploadRing.hpp"
 
 #include <vulkan/vulkan.h>
@@ -134,6 +135,7 @@ public:
     // from VulkanDeviceContext rather than be re-derived from device limits.
     void create(
         VkPhysicalDevice physicalDevice,
+        VulkanMemoryAllocator& allocator,
         VkDevice device,
         VkCommandPool commandPool,
         VkQueue graphicsQueue,
@@ -239,7 +241,7 @@ private:
 
     struct OwnedImage {
         VkImage image = VK_NULL_HANDLE;
-        VkDeviceMemory memory = VK_NULL_HANDLE;
+        VulkanAllocation allocation = nullptr;
         VkImageView view = VK_NULL_HANDLE;
         uint32_t mipLevels = 1;
     };
@@ -256,19 +258,19 @@ private:
 
     struct SkinningBuffer {
         VkBuffer buffer = VK_NULL_HANDLE;
-        VkDeviceMemory memory = VK_NULL_HANDLE;
+        VulkanAllocation allocation = nullptr;
         void* mapped = nullptr;
     };
 
     struct ModelInstanceBuffer {
         VkBuffer buffer = VK_NULL_HANDLE;
-        VkDeviceMemory memory = VK_NULL_HANDLE;
+        VulkanAllocation allocation = nullptr;
         void* mapped = nullptr;
     };
 
     struct MaterialBuffer {
         VkBuffer buffer = VK_NULL_HANDLE;
-        VkDeviceMemory memory = VK_NULL_HANDLE;
+        VulkanAllocation allocation = nullptr;
         void* mapped = nullptr;
     };
 
@@ -419,7 +421,6 @@ private:
     void destroyMesh(GpuMesh& mesh);
     void destroySkinnedMesh(GpuSkinnedMesh& mesh);
     [[nodiscard]] const GpuMesh& gpuMeshForModel(RenderModel model) const;
-    [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
     [[nodiscard]] VkImageView createImageView(
         VkImage image,
         VkFormat format,
@@ -427,6 +428,7 @@ private:
         uint32_t mipLevels) const;
 
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
+    VulkanMemoryAllocator* allocator_ = nullptr;
     float maxSamplerAnisotropy_ = 1.0f;
     uint32_t textureDescriptorCapacity_ = 0;
     VkDevice device_ = VK_NULL_HANDLE;
