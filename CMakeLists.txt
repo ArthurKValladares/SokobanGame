@@ -103,6 +103,21 @@ target_include_directories(sokoban_stb SYSTEM INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb"
 )
 
+add_library(sokoban_bc7enc16 STATIC
+    third_party/bc7enc16/bc7enc16.c
+)
+set_source_files_properties(
+    third_party/bc7enc16/bc7enc16.c
+    PROPERTIES LANGUAGE CXX SKIP_LINTING ON)
+target_include_directories(sokoban_bc7enc16 SYSTEM PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/bc7enc16"
+)
+if(MSVC)
+    target_compile_options(sokoban_bc7enc16 PRIVATE /w)
+else()
+    target_compile_options(sokoban_bc7enc16 PRIVATE -w)
+endif()
+
 # cgltf is vendored rather than fetched, like every other third-party header
 # here, so a fresh clone that skipped it should say what to do rather than
 # failing later with a missing include from the middle of GltfMesh.cpp.
@@ -381,6 +396,7 @@ add_library(sokoban_core STATIC
     src/engine/Window.cpp
     src/engine/render/AnimationController.cpp
     src/engine/render/AssetLoadScheduler.cpp
+    src/engine/render/CompressedTextureArtifact.cpp
     src/engine/render/GltfMesh.cpp
     src/engine/render/FrameResourceTracker.cpp
     src/engine/render/FrameTimeTelemetry.cpp
@@ -408,6 +424,7 @@ target_include_directories(sokoban_core PRIVATE third_party/miniaudio)
 target_link_libraries(sokoban_core
     PUBLIC SDL3::SDL3
     PRIVATE Threads::Threads sokoban_json sokoban_stb sokoban_cgltf
+        sokoban_bc7enc16
 )
 if(WIN32)
     target_link_libraries(sokoban_core PRIVATE dbghelp)
@@ -857,6 +874,10 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         ASSET_DIR
         SOURCES tests/RuntimeTextureCatalogTests.cpp
+    )
+    sokoban_add_test(NAME compressed_texture_artifact TARGET sokoban_compressed_texture_artifact_tests
+        LIBS sokoban_core
+        SOURCES tests/CompressedTextureArtifactTests.cpp
     )
     sokoban_add_test(NAME tonemap TARGET sokoban_tonemap_tests
         LIBS sokoban_core

@@ -1,6 +1,7 @@
 #include "engine/AssetManifest.hpp"
 #include "engine/render/RuntimeTextureCatalog.hpp"
 #include "engine/render/TextureSourceLoader.hpp"
+#include "engine/render/PngWriter.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -304,6 +305,61 @@ void testLoadsEverySupportedSourceForm()
     });
 }
 
+void writeBytes(
+    const std::filesystem::path& path,
+    std::span<const std::byte> bytes)
+{
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream stream(path, std::ios::binary);
+    stream.write(
+        reinterpret_cast<const char*>(bytes.data()),
+        static_cast<std::streamsize>(bytes.size()));
+}
+
+void testPreparedTextureSelectsArtifactOrSourceFallback()
+{
+    TEST("preparedTextureSelectsArtifactOrSourceFallback");
+    TempDirectory temp;
+    const std::filesystem::path relative = "textures/test.png";
+    const std::vector<std::byte> png = encodeRgbaPng(
+        2, 2,
+        {
+            255, 0, 0, 255,
+            0, 255, 0, 255,
+            0, 0, 255, 255,
+            255, 255, 255, 255,
+        });
+    writeBytes(temp.path() / relative, png);
+    const TextureSourceIdentity source =
+        identity(relative.generic_string(), TextureColorSpace::Srgb);
+    const ImageData rgba = loadRgbaTextureSource(temp.path(), source.source);
+    const std::filesystem::path artifactPath =
+        temp.path() / compressedTextureArtifactPath(source);
+    const std::vector<std::byte> ktx =
+        buildBc7Ktx2(rgba, source.interpretation);
+    writeBytes(artifactPath, ktx);
+
+    const PreparedTextureSource compressed =
+        loadPreparedTextureSource(temp.path(), source, true);
+    CHECK(std::holds_alternative<CompressedTextureArtifact>(compressed));
+    CHECK(std::get<CompressedTextureArtifact>(compressed).residentBytes() == 32U);
+
+    const PreparedTextureSource unsupported =
+        loadPreparedTextureSource(temp.path(), source, false);
+    CHECK(std::holds_alternative<ImageData>(unsupported));
+    CHECK(std::get<ImageData>(unsupported).rgba == rgba.rgba);
+
+    std::filesystem::remove(artifactPath);
+    const PreparedTextureSource missing =
+        loadPreparedTextureSource(temp.path(), source, true);
+    CHECK(std::holds_alternative<ImageData>(missing));
+
+    writeBytes(artifactPath, std::span<const std::byte>(ktx).first(20));
+    checkThrows([&] {
+        (void)loadPreparedTextureSource(temp.path(), source, true);
+    });
+}
+
 void testCollectsProductionCatalog()
 {
     TEST("collectsProductionCatalog");
@@ -329,6 +385,7 @@ int main()
 {
     testBuildsDeduplicatedPerModelCatalog();
     testLoadsEverySupportedSourceForm();
+    testPreparedTextureSelectsArtifactOrSourceFallback();
     testCollectsProductionCatalog();
 
     if (failures == 0) {

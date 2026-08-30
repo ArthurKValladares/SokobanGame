@@ -1,8 +1,10 @@
 #include "engine/render/FrameResourceTracker.hpp"
+#include "engine/render/FrameRetirementQueue.hpp"
 #include "engine/render/ReusableScratchPool.hpp"
 
 #include <iostream>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 
@@ -98,6 +100,46 @@ void testScratchStorageIsNeverReusedWhileLeased()
     CHECK(second->value == 22);
 }
 
+void testRetirementWaitsForEveryReferencingFrame()
+{
+    sokoban::FrameRetirementQueue<int> queue;
+    std::vector<int> destroyed;
+    const auto drain = [&] {
+        queue.drainCompleted([&](int resource) {
+            destroyed.push_back(resource);
+        });
+    };
+
+    queue.retire(10, 0b11);
+    drain();
+    CHECK(destroyed.empty());
+
+    queue.completeFrame(0);
+    drain();
+    CHECK(destroyed.empty());
+
+    // This resource was retired after frame zero completed, so only the
+    // still-pending frame owns it. A later frame-zero submission must not be
+    // retroactively attached to either retirement.
+    queue.retire(20, 0b10);
+    queue.completeFrame(1);
+    drain();
+    CHECK(destroyed.size() == 2);
+    CHECK(destroyed[0] == 10);
+    CHECK(destroyed[1] == 20);
+    CHECK(queue.empty());
+}
+
+void testRetirementWithoutPendingFramesIsImmediate()
+{
+    sokoban::FrameRetirementQueue<int> queue;
+    int destroyed = 0;
+    queue.retire(7, 0);
+    queue.drainCompleted([&](int resource) { destroyed = resource; });
+    CHECK(destroyed == 7);
+    CHECK(queue.empty());
+}
+
 } // namespace
 
 int main()
@@ -105,6 +147,8 @@ int main()
     testTracksOverlappingGenerationsExactly();
     testRejectsInvalidSubmissionTransitions();
     testScratchStorageIsNeverReusedWhileLeased();
+    testRetirementWaitsForEveryReferencingFrame();
+    testRetirementWithoutPendingFramesIsImmediate();
 
     if (failures == 0) {
         std::cout << "FrameResourceTrackerTests: "

@@ -399,7 +399,7 @@ void VulkanRenderer::drawFrame(
     completeFrame(currentFrame_);
     gpuProfiler_.collectCompletedFrame(currentFrame_);
     modelResources_.retireCompletedUploads();
-    if (modelResources_.publishReadyAssets(1)) {
+    if (modelResources_.publishReadyAssets(1, pendingFrameMask())) {
         descriptorSync_.resourcesChanged();
     }
     if (descriptorSync_.needsUpdate(currentFrame_)) {
@@ -1407,6 +1407,7 @@ void VulkanRenderer::completeFrame(uint32_t frameIndex)
     if (!frameResourceTracker_.complete(frameIndex)) {
         return;
     }
+    modelResources_.completeFrame(frameIndex);
     const uint32_t completedBit = ~(1U << frameIndex);
     for (RetiredRenderResources& retired : retiredResources_) {
         retired.pendingFrameMask &= completedBit;

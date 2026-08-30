@@ -799,6 +799,14 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             static_cast<unsigned long long>(assetStats.residencyEvictions),
             static_cast<unsigned long long>(assetStats.residencyBudgetBlocks),
             assetStats.residencyBudgetBlocked ? ", capacity blocked" : "");
+        ImGui::Text(
+            "Fence retirement %u meshes (%.1f MiB), %u textures (%.1f MiB)",
+            assetStats.retiringModels,
+            static_cast<double>(assetStats.retiringModelBytes) /
+                (1024.0 * 1024.0),
+            assetStats.retiringTextures,
+            static_cast<double>(assetStats.retiringTextureBytes) /
+                (1024.0 * 1024.0));
         if (assetStats.failedAssets > 0) {
             ImGui::Text("Asset load failures %u", assetStats.failedAssets);
         }

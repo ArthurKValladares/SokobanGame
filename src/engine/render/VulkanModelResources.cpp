@@ -12,6 +12,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 namespace sokoban {
@@ -82,6 +83,26 @@ VkSamplerMipmapMode vulkanMipmapMode(TextureMinificationFilter filter)
             filter == TextureMinificationFilter::LinearMipmapLinear
         ? VK_SAMPLER_MIPMAP_MODE_LINEAR
         : VK_SAMPLER_MIPMAP_MODE_NEAREST;
+}
+
+bool supportsBc7Textures(VkPhysicalDevice physicalDevice)
+{
+    constexpr VkFormatFeatureFlags required =
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
+        VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+    for (VkFormat format : {
+             VK_FORMAT_BC7_UNORM_BLOCK,
+             VK_FORMAT_BC7_SRGB_BLOCK,
+         }) {
+        VkFormatProperties properties {};
+        vkGetPhysicalDeviceFormatProperties(
+            physicalDevice, format, &properties);
+        if ((properties.optimalTilingFeatures & required) != required) {
+            return false;
+        }
+    }
+    return true;
 }
 
 uint32_t descriptorIndexForLogicalTexture(
@@ -206,6 +227,7 @@ void VulkanModelResources::create(
             "Runtime texture catalog exceeds the selected descriptor capacity");
     }
     physicalDevice_ = physicalDevice;
+    supportsBc7_ = supportsBc7Textures(physicalDevice_);
     allocator_ = &allocator;
     maxSamplerAnisotropy_ = std::max(maxSamplerAnisotropy, 1.0f);
     textureDescriptorCapacity_ = textureDescriptorCapacity;
@@ -325,6 +347,15 @@ void VulkanModelResources::destroy()
             destroyMesh(model->gpu);
             destroySkinnedMesh(model->skinnedGpu);
         }
+        retiredTextures_.drainAll(
+            [this](RetiredTextureResources& retired) {
+                destroyTexture(retired.gpu.image, retired.gpu.sampler);
+            });
+        retiredModels_.drainAll(
+            [this](RetiredModelResources& retired) {
+                destroyMesh(retired.gpu);
+                destroySkinnedMesh(retired.skinnedGpu);
+            });
         destroySkinningBuffer();
         destroyModelInstanceBuffer();
         destroyMaterialBuffer();
@@ -340,6 +371,7 @@ void VulkanModelResources::destroy()
     modelTextureDependencies_.clear();
     modelMaterialBindings_.clear();
     materialStorage_.clear();
+    freeMaterialRanges_.clear();
     fallbackTexture_ = {};
     animationController_.clear();
     manifest_ = nullptr;
@@ -349,6 +381,7 @@ void VulkanModelResources::destroy()
     device_ = VK_NULL_HANDLE;
     allocator_ = nullptr;
     physicalDevice_ = VK_NULL_HANDLE;
+    supportsBc7_ = false;
     textureDescriptorCapacity_ = 0;
     manifestTextureCount_ = 0;
     discoveredTextureBase_ = 0;
@@ -360,10 +393,13 @@ void VulkanModelResources::destroy()
     textureResidencyBytes_ = 0;
     modelResidencyPeakBytes_ = 0;
     textureResidencyPeakBytes_ = 0;
+    retiringModelBytes_ = 0;
+    retiringTextureBytes_ = 0;
     residencyEvictions_ = 0;
     residencyBudgetBlocks_ = 0;
     residencyBudgetBlocked_ = false;
     textureDescriptorsDirty_ = false;
+    retirementFrameMask_ = 0;
     activeSkinningFrame_ = UINT32_MAX;
     skinningInstanceCount_ = 0;
 }
@@ -403,6 +439,9 @@ void VulkanModelResources::cancelQueuedPrefetches()
 
 bool VulkanModelResources::waitForAssets(const RenderAssetRequirements& requirements)
 {
+    // Offline callers have no submitted render frames referencing residency
+    // resources, so evictions from this blocking path can retire immediately.
+    retirementFrameMask_ = 0;
     requestAssets(requirements);
 
     // This is an offline-only path. Let the normal bounded scheduler drain as
@@ -468,15 +507,23 @@ bool VulkanModelResources::waitForAssets(const RenderAssetRequirements& requirem
     return descriptorsChanged;
 }
 
-bool VulkanModelResources::publishReadyAssets(std::size_t maxPublications)
+bool VulkanModelResources::publishReadyAssets(
+    std::size_t maxPublications,
+    uint32_t pendingFrameMask)
 {
+    retirementFrameMask_ = pendingFrameMask;
     startQueuedAssets();
     std::size_t publications = 0;
     bool descriptorsChanged = false;
+    const auto finish = [&] {
+        const bool evictionChangedDescriptors =
+            std::exchange(textureDescriptorsDirty_, false);
+        return descriptorsChanged || evictionChangedDescriptors;
+    };
 
     for (uint32_t i = 0; i < animations_.size(); ++i) {
         if (publications >= maxPublications) {
-            return descriptorsChanged;
+            return finish();
         }
         const RenderAnimation animation { i + 1 };
         AnimationSlot& slot = animations_[i];
@@ -488,7 +535,7 @@ bool VulkanModelResources::publishReadyAssets(std::size_t maxPublications)
 
     for (uint32_t i = 0; i < models_.size(); ++i) {
         if (publications >= maxPublications) {
-            return descriptorsChanged;
+            return finish();
         }
         const RenderModel model { i + 1 };
         ModelSlot& slot = models_[i];
@@ -502,7 +549,7 @@ bool VulkanModelResources::publishReadyAssets(std::size_t maxPublications)
 
     for (uint32_t i : activeTextureIndices_) {
         if (publications >= maxPublications) {
-            return descriptorsChanged;
+            return finish();
         }
         TextureSlot& slot = textures_[i];
         const bool canPublish =
@@ -520,7 +567,7 @@ bool VulkanModelResources::publishReadyAssets(std::size_t maxPublications)
         }
     }
     startQueuedAssets();
-    return descriptorsChanged;
+    return finish();
 }
 
 void VulkanModelResources::retireCompletedUploads()
@@ -540,6 +587,13 @@ void VulkanModelResources::retireCompletedUploads()
         slot.state = LoadState::Ready;
         ++textureUploadCompletions_;
     }
+}
+
+void VulkanModelResources::completeFrame(uint32_t frameIndex)
+{
+    retiredModels_.completeFrame(frameIndex);
+    retiredTextures_.completeFrame(frameIndex);
+    destroyCompletedResidencyRetirements();
 }
 
 void VulkanModelResources::retireCompletedGeometryUploads(bool wait)
@@ -664,11 +718,12 @@ void VulkanModelResources::startTexture(std::size_t textureIndex)
         !textureDefinitions_[textureIndex]) {
         throw std::logic_error("Started an undefined runtime texture slot");
     }
-    const TextureSource source =
-        textureDefinitions_[textureIndex]->identity.source;
+    const TextureSourceIdentity identity =
+        textureDefinitions_[textureIndex]->identity;
     const std::filesystem::path assetRoot = assetRoot_;
-    slot.future = taskSystem().enqueue([assetRoot, source] {
-        return loadRgbaTextureSource(assetRoot, source);
+    const bool supportsBc7 = supportsBc7_;
+    slot.future = taskSystem().enqueue([assetRoot, identity, supportsBc7] {
+        return loadPreparedTextureSource(assetRoot, identity, supportsBc7);
     });
     slot.state = LoadState::Loading;
 }
@@ -871,8 +926,9 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
             }
             slot.prepared.reset();
         } catch (...) {
-            // A range claimed before the upload threw belongs to nobody now.
-            // Zeroing the count is what makes the next repack reclaim it.
+            // This range was never published to a frame and is safe to reuse
+            // immediately when Vulkan publication fails.
+            releaseMaterialRange(slot.materialBase, slot.materialCount);
             slot.materialBase = 0;
             slot.materialCount = 0;
             slot.materialPolicy = {};
@@ -976,21 +1032,27 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
     }
 
     try {
-        const ImageData& image = *slot.prepared;
+        const PreparedTextureSource& texture = *slot.prepared;
         const TextureInterpretation& interpretation =
             textureDefinitions_.at(textureIndex)->identity.interpretation;
-        const uint64_t bytes = textureBytes(image, interpretation);
+        const uint64_t bytes = textureBytes(texture, interpretation);
         if (!makeTextureResident(textureIndex, bytes)) {
             return false;
         }
-        beginTextureUpload(
-            image,
-            slot.gpu.image,
-            slot.gpu.sampler,
-            slot.upload,
-            interpretation);
-        slot.gpu.width = image.width;
-        slot.gpu.height = image.height;
+        std::visit(
+            [&](const auto& prepared) {
+                beginTextureUpload(
+                    prepared,
+                    slot.gpu.image,
+                    slot.gpu.sampler,
+                    slot.upload,
+                    interpretation);
+                slot.gpu.width = prepared.width;
+                slot.gpu.height = prepared.height;
+                slot.gpu.compressed = !std::is_same_v<
+                    std::decay_t<decltype(prepared)>, ImageData>;
+            },
+            texture);
         slot.gpuBytes = bytes;
         textureResidencyBytes_ += bytes;
         textureResidencyPeakBytes_ = std::max(
@@ -1022,9 +1084,14 @@ uint64_t VulkanModelResources::meshBytes(const MeshData& mesh)
 }
 
 uint64_t VulkanModelResources::textureBytes(
-    const ImageData& image,
+    const PreparedTextureSource& texture,
     const TextureInterpretation& interpretation)
 {
+    if (const auto* compressed =
+            std::get_if<CompressedTextureArtifact>(&texture)) {
+        return compressed->residentBytes();
+    }
+    const ImageData& image = std::get<ImageData>(texture);
     const uint64_t base = image.rgba.size();
     switch (interpretation.minFilter) {
     case TextureMinificationFilter::NearestMipmapNearest:
@@ -1050,6 +1117,7 @@ bool VulkanModelResources::makeModelResident(
     RenderModel protectedModel,
     uint64_t requiredBytes)
 {
+    destroyCompletedResidencyRetirements();
     const uint64_t budget = scheduler_.budget().modelResidencyBytes;
     if (requiredBytes > budget) {
         markResidencyBudgetBlocked();
@@ -1057,6 +1125,13 @@ bool VulkanModelResources::makeModelResident(
     }
     if (modelResidencyBytes_ + requiredBytes <= budget) {
         return true;
+    }
+    if (retiringModelBytes_ != 0) {
+        // A previous publication already selected enough victims for its own
+        // retry. Do not let other CPU-ready slots cascade into additional
+        // evictions while the first fence-owned retirement is still pending.
+        residencyBudgetBlocked_ = false;
+        return false;
     }
 
     auto findVictim = [&]() -> std::optional<std::size_t> {
@@ -1076,41 +1151,31 @@ bool VulkanModelResources::makeModelResident(
         }
         return victim;
     };
-    if (!findVictim()) {
-        markResidencyBudgetBlocked();
-        return false;
-    }
-
-    // A descriptor set in another in-flight frame may still reference a
-    // candidate. Eviction is rare and only happens at the hard cap, so the
-    // explicit idle is a safer trade-off than use-after-free GPU resources.
-    vkCheck(vkDeviceWaitIdle(device_), "vkDeviceWaitIdle model residency eviction failed");
-    while (modelResidencyBytes_ + requiredBytes > budget) {
+    uint64_t scheduledBytes = 0;
+    while (modelResidencyBytes_ - retiringModelBytes_ - scheduledBytes +
+        requiredBytes > budget) {
         const std::optional<std::size_t> victim = findVictim();
         if (!victim) {
-            repackMaterials();
             markResidencyBudgetBlocked();
             return false;
         }
         ModelSlot& slot = models_[*victim];
-        modelResidencyBytes_ -= slot.gpuBytes;
-        destroyMesh(slot.gpu);
-        destroySkinnedMesh(slot.skinnedGpu);
-        slot = {};
-        ++residencyEvictions_;
+        scheduledBytes += slot.gpuBytes;
+        retireModel(slot);
     }
-    // The evicted slots took their material ranges with them. Nothing has
-    // been submitted since the wait above, so closing the gaps now cannot
-    // move a range out from under a frame that is still reading it.
-    repackMaterials();
+    destroyCompletedResidencyRetirements();
     residencyBudgetBlocked_ = false;
-    return true;
+    // Retired allocations remain part of the physical residency total until
+    // every referencing frame fence completes. Keep this CPU-ready asset for
+    // a later publication instead of oversubscribing the hard budget.
+    return modelResidencyBytes_ + requiredBytes <= budget;
 }
 
 bool VulkanModelResources::makeTextureResident(
     std::size_t protectedTexture,
     uint64_t requiredBytes)
 {
+    destroyCompletedResidencyRetirements();
     const uint64_t budget = scheduler_.budget().textureResidencyBytes;
     if (requiredBytes > budget) {
         markResidencyBudgetBlocked();
@@ -1118,6 +1183,10 @@ bool VulkanModelResources::makeTextureResident(
     }
     if (textureResidencyBytes_ + requiredBytes <= budget) {
         return true;
+    }
+    if (retiringTextureBytes_ != 0) {
+        residencyBudgetBlocked_ = false;
+        return false;
     }
 
     auto findVictim = [&]() -> std::optional<std::size_t> {
@@ -1137,28 +1206,66 @@ bool VulkanModelResources::makeTextureResident(
         }
         return victim;
     };
-    if (!findVictim()) {
-        markResidencyBudgetBlocked();
-        return false;
-    }
-
-    vkCheck(vkDeviceWaitIdle(device_), "vkDeviceWaitIdle texture residency eviction failed");
-    retireCompletedUploads();
-    while (textureResidencyBytes_ + requiredBytes > budget) {
+    uint64_t scheduledBytes = 0;
+    while (textureResidencyBytes_ - retiringTextureBytes_ - scheduledBytes +
+        requiredBytes > budget) {
         const std::optional<std::size_t> victim = findVictim();
         if (!victim) {
             markResidencyBudgetBlocked();
             return false;
         }
         TextureSlot& slot = textures_[*victim];
-        textureResidencyBytes_ -= slot.gpuBytes;
-        destroyTexture(slot.gpu.image, slot.gpu.sampler);
-        slot = {};
-        textureDescriptorsDirty_ = true;
-        ++residencyEvictions_;
+        scheduledBytes += slot.gpuBytes;
+        retireTexture(slot);
     }
+    destroyCompletedResidencyRetirements();
     residencyBudgetBlocked_ = false;
-    return true;
+    return textureResidencyBytes_ + requiredBytes <= budget;
+}
+
+void VulkanModelResources::retireModel(ModelSlot& slot)
+{
+    retiringModelBytes_ += slot.gpuBytes;
+    retiredModels_.retire({
+        .gpu = std::exchange(slot.gpu, {}),
+        .skinnedGpu = std::exchange(slot.skinnedGpu, {}),
+        .materialBase = slot.materialBase,
+        .materialCount = slot.materialCount,
+        .gpuBytes = slot.gpuBytes,
+    }, retirementFrameMask_);
+    slot = {};
+    ++residencyEvictions_;
+}
+
+void VulkanModelResources::retireTexture(TextureSlot& slot)
+{
+    retiringTextureBytes_ += slot.gpuBytes;
+    retiredTextures_.retire({
+        .gpu = std::exchange(slot.gpu, {}),
+        .gpuBytes = slot.gpuBytes,
+    }, retirementFrameMask_);
+    slot = {};
+    textureDescriptorsDirty_ = true;
+    ++residencyEvictions_;
+}
+
+void VulkanModelResources::destroyCompletedResidencyRetirements()
+{
+    retiredModels_.drainCompleted(
+        [this](RetiredModelResources& retired) {
+            destroyMesh(retired.gpu);
+            destroySkinnedMesh(retired.skinnedGpu);
+            releaseMaterialRange(
+                retired.materialBase, retired.materialCount);
+            modelResidencyBytes_ -= retired.gpuBytes;
+            retiringModelBytes_ -= retired.gpuBytes;
+        });
+    retiredTextures_.drainCompleted(
+        [this](RetiredTextureResources& retired) {
+            destroyTexture(retired.gpu.image, retired.gpu.sampler);
+            textureResidencyBytes_ -= retired.gpuBytes;
+            retiringTextureBytes_ -= retired.gpuBytes;
+        });
 }
 
 bool VulkanModelResources::publishAnimation(RenderAnimation animation, bool wait)
@@ -1523,6 +1630,10 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
     result.textureResidencyBudgetBytes = scheduler_.budget().textureResidencyBytes;
     result.residencyEvictions = residencyEvictions_;
     result.residencyBudgetBlocks = residencyBudgetBlocks_;
+    result.retiringModels = static_cast<uint32_t>(retiredModels_.size());
+    result.retiringTextures = static_cast<uint32_t>(retiredTextures_.size());
+    result.retiringModelBytes = retiringModelBytes_;
+    result.retiringTextureBytes = retiringTextureBytes_;
     result.residencyBudgetBlocked = residencyBudgetBlocked_;
     result.textureUploadSubmissions = textureUploadSubmissions_;
     result.textureUploadCompletions = textureUploadCompletions_;
@@ -1700,17 +1811,38 @@ uint32_t VulkanModelResources::writeMaterials(
     if (materials.empty()) {
         return 0;
     }
+    if (!materialBuffer_.mapped) {
+        throw std::runtime_error("Material buffer is not mapped");
+    }
+
+    std::size_t base = materialStorage_.size();
+    const uint32_t required = static_cast<uint32_t>(materials.size());
+    for (auto range = freeMaterialRanges_.begin();
+         range != freeMaterialRanges_.end();
+         ++range) {
+        if (range->count < required) {
+            continue;
+        }
+        base = range->base;
+        range->base += required;
+        range->count -= required;
+        if (range->count == 0) {
+            freeMaterialRanges_.erase(range);
+        }
+        break;
+    }
+
     // Never zero: createMaterialBuffer seeds the reserved fallback entry, so
     // the first real range starts at one.
-    const std::size_t base = materialStorage_.size();
-    if (!materialBuffer_.mapped || base == 0 ||
-        base + materials.size() > maxModelMaterials) {
+    if (base == 0 || base + materials.size() > maxModelMaterials) {
         throw std::runtime_error(
             "Material buffer is exhausted; raise maxModelMaterials");
     }
-    materialStorage_.reserve(base + materials.size());
-    for (const MeshMaterial& material : materials) {
-        materialStorage_.push_back(gpuMaterialFrom(material));
+    if (base + materials.size() > materialStorage_.size()) {
+        materialStorage_.resize(base + materials.size());
+    }
+    for (std::size_t index = 0; index < materials.size(); ++index) {
+        materialStorage_[base + index] = gpuMaterialFrom(materials[index]);
     }
     std::memcpy(
         static_cast<std::byte*>(materialBuffer_.mapped) +
@@ -1720,37 +1852,35 @@ uint32_t VulkanModelResources::writeMaterials(
     return static_cast<uint32_t>(base);
 }
 
-void VulkanModelResources::repackMaterials()
+void VulkanModelResources::releaseMaterialRange(uint32_t base, uint32_t count)
 {
-    if (materialStorage_.empty()) {
+    if (base == 0 || count == 0) {
         return;
     }
-    // Rebuilt unconditionally. An earlier version skipped the upload when the
-    // total had not shrunk, which was wrong: the loop below reorders the
-    // ranges into slot order as well as closing gaps, so it has already
-    // rewritten every materialBase by the time a size comparison could decide
-    // to keep the old buffer. Bailing out there left the bases describing a
-    // layout the buffer did not have.
-    std::vector<GpuMaterial> packed;
-    packed.reserve(materialStorage_.size());
-    // The reserved fallback keeps index zero through every repack.
-    packed.push_back(materialStorage_.front());
-    for (ModelSlot& slot : models_) {
-        if (slot.materialCount == 0) {
-            continue;
+
+    const auto position = std::lower_bound(
+        freeMaterialRanges_.begin(),
+        freeMaterialRanges_.end(),
+        base,
+        [](const MaterialFreeRange& range, uint32_t value) {
+            return range.base < value;
+        });
+    freeMaterialRanges_.insert(position, { .base = base, .count = count });
+
+    std::vector<MaterialFreeRange> merged;
+    merged.reserve(freeMaterialRanges_.size());
+    for (const MaterialFreeRange& range : freeMaterialRanges_) {
+        if (!merged.empty() &&
+            merged.back().base + merged.back().count >= range.base) {
+            const uint32_t end = std::max(
+                merged.back().base + merged.back().count,
+                range.base + range.count);
+            merged.back().count = end - merged.back().base;
+        } else {
+            merged.push_back(range);
         }
-        const auto first = materialStorage_.begin() + slot.materialBase;
-        const auto last = first + slot.materialCount;
-        slot.materialBase = static_cast<uint32_t>(packed.size());
-        packed.insert(packed.end(), first, last);
     }
-    materialStorage_ = std::move(packed);
-    if (materialBuffer_.mapped) {
-        std::memcpy(
-            materialBuffer_.mapped,
-            materialStorage_.data(),
-            materialStorage_.size() * sizeof(GpuMaterial));
-    }
+    freeMaterialRanges_ = std::move(merged);
 }
 
 void VulkanModelResources::writeSkinningInstance(
@@ -1890,6 +2020,85 @@ void VulkanModelResources::beginTextureUpload(
         device_, VK_OBJECT_TYPE_SAMPLER, sampler, "Model texture sampler");
 
     recordTextureCopy(image, textureImage, upload);
+}
+
+void VulkanModelResources::beginTextureUpload(
+    const CompressedTextureArtifact& texture,
+    OwnedImage& textureImage,
+    VkSampler& sampler,
+    PendingTextureUpload& upload,
+    TextureInterpretation sampling)
+{
+    if (texture.width == 0 || texture.height == 0 || texture.mips.empty()) {
+        throw std::runtime_error("Compressed texture contains no mip data");
+    }
+    const VkFormat textureFormat = texture.format ==
+            CompressedTextureFormat::Bc7Srgb
+        ? VK_FORMAT_BC7_SRGB_BLOCK
+        : VK_FORMAT_BC7_UNORM_BLOCK;
+    const bool expectsSrgb =
+        sampling.colorSpace == TextureColorSpace::Srgb;
+    if ((textureFormat == VK_FORMAT_BC7_SRGB_BLOCK) != expectsSrgb) {
+        throw std::runtime_error(
+            "Compressed texture format disagrees with source colour space");
+    }
+    textureImage.mipLevels = static_cast<uint32_t>(texture.mips.size());
+    const VkImageCreateInfo imageInfo {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = textureFormat,
+        .extent = { texture.width, texture.height, 1 },
+        .mipLevels = textureImage.mipLevels,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+            VK_IMAGE_USAGE_SAMPLED_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    allocator_->createDeviceImage(
+        imageInfo,
+        textureImage.image,
+        textureImage.allocation,
+        "BC7 model texture");
+    vulkanDebug::setObjectName(
+        device_, VK_OBJECT_TYPE_IMAGE, textureImage.image,
+        "BC7 model texture");
+    textureImage.view = createImageView(
+        textureImage.image,
+        textureFormat,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        textureImage.mipLevels);
+    vulkanDebug::setObjectName(
+        device_, VK_OBJECT_TYPE_IMAGE_VIEW, textureImage.view,
+        "BC7 model texture view");
+
+    const VkFilter minFilter = vulkanMinificationFilter(sampling.minFilter);
+    const float anisotropy = textureImage.mipLevels > 1U &&
+            minFilter == VK_FILTER_LINEAR
+        ? maxSamplerAnisotropy_
+        : 1.0f;
+    const VkSamplerCreateInfo samplerInfo {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = vulkanMagnificationFilter(sampling.magFilter),
+        .minFilter = minFilter,
+        .mipmapMode = vulkanMipmapMode(sampling.minFilter),
+        .addressModeU = vulkanAddressMode(sampling.wrapU),
+        .addressModeV = vulkanAddressMode(sampling.wrapV),
+        .addressModeW = vulkanAddressMode(sampling.wrapV),
+        .anisotropyEnable = anisotropy > 1.0f ? VK_TRUE : VK_FALSE,
+        .maxAnisotropy = anisotropy,
+        .compareEnable = VK_FALSE,
+        .minLod = 0.0f,
+        .maxLod = static_cast<float>(textureImage.mipLevels - 1U),
+    };
+    vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &sampler),
+        "vkCreateSampler BC7 model texture failed");
+    vulkanDebug::setObjectName(
+        device_, VK_OBJECT_TYPE_SAMPLER, sampler,
+        "BC7 model texture sampler");
+    recordTextureCopy(texture, textureImage, upload);
 }
 
 void VulkanModelResources::recordTextureCopy(
@@ -2071,6 +2280,127 @@ void VulkanModelResources::recordTextureCopy(
     upload.submitted = true;
 }
 
+void VulkanModelResources::recordTextureCopy(
+    const CompressedTextureArtifact& texture,
+    OwnedImage& textureImage,
+    PendingTextureUpload& upload)
+{
+    std::vector<VkDeviceSize> levelOffsets;
+    levelOffsets.reserve(texture.mips.size());
+    VkDeviceSize uploadBytes = 0;
+    for (const CompressedTextureMip& mip : texture.mips) {
+        uploadBytes = (uploadBytes + 15U) & ~VkDeviceSize { 15U };
+        levelOffsets.push_back(uploadBytes);
+        uploadBytes += mip.bytes.size();
+    }
+    const auto staging = uploadRing_.reserve(uploadBytes, 16);
+    if (!staging) {
+        throw std::runtime_error(
+            "Shared upload ring is full for compressed texture upload");
+    }
+    upload.staging = *staging;
+    std::vector<VkBufferImageCopy> copyRegions;
+    copyRegions.reserve(texture.mips.size());
+    for (uint32_t level = 0; level < texture.mips.size(); ++level) {
+        const CompressedTextureMip& mip = texture.mips[level];
+        uploadRing_.write(
+            upload.staging,
+            levelOffsets[level],
+            mip.bytes.data(),
+            mip.bytes.size());
+        copyRegions.push_back({
+            .bufferOffset = upload.staging.offset + levelOffsets[level],
+            .imageSubresource = {
+                VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1 },
+            .imageExtent = { mip.width, mip.height, 1 },
+        });
+    }
+
+    const VkCommandBufferAllocateInfo commandBufferInfo {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = commandPool_,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    vkCheck(vkAllocateCommandBuffers(
+            device_, &commandBufferInfo, &upload.commandBuffer),
+        "vkAllocateCommandBuffers compressed texture upload failed");
+    vulkanDebug::setObjectName(
+        device_,
+        VK_OBJECT_TYPE_COMMAND_BUFFER,
+        upload.commandBuffer,
+        "BC7 texture upload command buffer");
+    const VkCommandBufferBeginInfo beginInfo {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    vkCheck(vkBeginCommandBuffer(upload.commandBuffer, &beginInfo),
+        "vkBeginCommandBuffer compressed texture upload failed");
+
+    const VkImageSubresourceRange allMipLevels {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel = 0,
+        .levelCount = textureImage.mipLevels,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+    };
+    vulkanResources::transitionImage(
+        upload.commandBuffer,
+        textureImage.image,
+        allMipLevels,
+        {},
+        {
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        });
+    vkCmdCopyBufferToImage(
+        upload.commandBuffer,
+        uploadRing_.buffer(),
+        textureImage.image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        static_cast<uint32_t>(copyRegions.size()),
+        copyRegions.data());
+    vulkanResources::transitionImage(
+        upload.commandBuffer,
+        textureImage.image,
+        allMipLevels,
+        {
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        },
+        {
+            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        });
+    vkCheck(vkEndCommandBuffer(upload.commandBuffer),
+        "vkEndCommandBuffer compressed texture upload failed");
+
+    const VkFenceCreateInfo fenceInfo {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+    };
+    vkCheck(vkCreateFence(device_, &fenceInfo, nullptr, &upload.fence),
+        "vkCreateFence compressed texture upload failed");
+    vulkanDebug::setObjectName(
+        device_, VK_OBJECT_TYPE_FENCE, upload.fence,
+        "BC7 texture upload fence");
+    const VkCommandBufferSubmitInfo commandBufferSubmit {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+        .commandBuffer = upload.commandBuffer,
+    };
+    const VkSubmitInfo2 submit {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+        .commandBufferInfoCount = 1,
+        .pCommandBufferInfos = &commandBufferSubmit,
+    };
+    vkCheck(vkQueueSubmit2(graphicsQueue_, 1, &submit, upload.fence),
+        "vkQueueSubmit2 compressed texture upload failed");
+    uploadRing_.commit(upload.staging);
+    upload.submitted = true;
+}
+
 bool VulkanModelResources::syncManifestTextures()
 {
     if (manifest_ == nullptr ||
@@ -2158,7 +2488,7 @@ VulkanModelResources::TextureUpdate VulkanModelResources::updateTexture(
 
     const bool sizeChanged =
         image.width != slot.gpu.width || image.height != slot.gpu.height;
-    if (sizeChanged) {
+    if (sizeChanged || slot.gpu.compressed) {
         // A resized board needs a differently sized image. The old view and
         // sampler go with it, so descriptor sets pointing at them must be
         // rewritten - reported back rather than done here, because this class
@@ -2171,6 +2501,15 @@ VulkanModelResources::TextureUpdate VulkanModelResources::updateTexture(
             textureDefinitions_[texture.index()]->identity.interpretation);
         slot.gpu.width = image.width;
         slot.gpu.height = image.height;
+        slot.gpu.compressed = false;
+        const uint64_t previousBytes = slot.gpuBytes;
+        slot.gpuBytes = textureBytes(
+            PreparedTextureSource { image },
+            textureDefinitions_[texture.index()]->identity.interpretation);
+        textureResidencyBytes_ = textureResidencyBytes_ - previousBytes +
+            slot.gpuBytes;
+        textureResidencyPeakBytes_ = std::max(
+            textureResidencyPeakBytes_, textureResidencyBytes_);
         return { .updated = true, .descriptorsChanged = true };
     }
 

@@ -119,4 +119,30 @@ ImageData loadRgbaTextureSource(
         source);
 }
 
+PreparedTextureSource loadPreparedTextureSource(
+    const std::filesystem::path& assetRoot,
+    const TextureSourceIdentity& identity,
+    bool supportsBc7)
+{
+    if (supportsBc7) {
+        const std::filesystem::path artifactPath =
+            assetRoot / compressedTextureArtifactPath(identity);
+        std::error_code error;
+        if (std::filesystem::is_regular_file(artifactPath, error)) {
+            CompressedTextureArtifact artifact = loadBc7Ktx2(artifactPath);
+            const CompressedTextureFormat expected =
+                identity.interpretation.colorSpace == TextureColorSpace::Srgb
+                ? CompressedTextureFormat::Bc7Srgb
+                : CompressedTextureFormat::Bc7Unorm;
+            if (artifact.format != expected) {
+                throw std::runtime_error(
+                    "Compressed texture artifact has the wrong colour space: " +
+                    artifactPath.string());
+            }
+            return artifact;
+        }
+    }
+    return loadRgbaTextureSource(assetRoot, identity.source);
+}
+
 } // namespace sokoban

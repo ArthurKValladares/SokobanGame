@@ -35,13 +35,14 @@ evidence runner now archives post-tonemap scenes, filtered AO, matched controls
 and CPU/GPU frame statistics. Persistent renderable identities, stable world
 bounds and conservative main-scene frustum culling are now implemented;
 renderer memory now flows through one VMA-backed allocator seam.
+The content build now emits deterministic KTX2 artifacts with native BC7 mip
+chains for every unique source interpretation. BC7-capable devices upload the
+precomputed blocks directly, while unsupported devices and runtime-authored
+textures retain the original RGBA decode path.
 
-The recommended order is:
-
-1. Add KTX2 and platform texture compression through the completed allocation
-   seam (A2).
-2. Continue mip/LOD streaming and fence-based retirement after compressed byte
-   accounting exists (A3 remainder).
+The recommended next step is measured mip/LOD residency policy on top of the
+completed compressed mip artifacts (A3 remainder). Fence-owned eviction
+retirement is complete.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
@@ -52,7 +53,7 @@ sampling have different failure modes and should be independently reviewable.
 - Language and platform: C++20, SDL3, Vulkan 1.3, GLSL compiled to SPIR-V.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
-- Current tests: 68 CTest suites in the newest configured build tree.
+- Current tests: 69 CTest suites in the newest configured build tree.
 - Current shaders: 16 GLSL files. `triangle.frag.glsl` is 669 physical lines;
   player-facing UI uses the 93-line `ui.frag.glsl` path.
 - Texture capacity: selected at startup from a configured 1,024-slot ceiling,
@@ -101,6 +102,11 @@ future tasks:
   sampling are implemented. A loader-level fixture covers the three-output
   layout, quaternion value normalization, tangent preservation and malformed
   output counts.
+- **A2**: the content tool emits KTX2 2D artifacts with complete BC7 mip
+  chains, linear-light sRGB downsampling and stable source-interpretation
+  identities. Runtime format queries select BC7 UNORM/SRGB when supported and
+  retain source-image decoding as the compatibility and editor fallback.
+  Residency uses the exact sum of uploaded compressed mip bytes.
 - **C1/S4/E1**: explicit camera data, closed frame-arena lifetime, MSVC CI and
   a headless Vulkan validation run.
 - **0.1 evidence**: deterministic frozen-scene captures at 100% and 50% render
@@ -117,9 +123,10 @@ future tasks:
 
 - **A3 is partly implemented, not untouched.** CPU preparation is asynchronous,
   publication is budgeted, requirements drive residency, and model/texture
-  byte budgets can evict old resources. What remains is mip/LOD streaming,
-  compressed-size accounting, more flexible publication budgeting, and
-  removing the `vkDeviceWaitIdle` eviction fallback.
+  byte budgets evict through fence-owned retirement without a device-wide
+  stall. Compressed-size accounting is exact. What remains is measured mip/LOD
+  residency and, only if profiling warrants it, more flexible publication
+  budgeting.
 - **The material program is complete.** A runtime catalog assigns
   normal, metallic-roughness, emissive and occlusion handles from the resolved
   inventory and attaches only the relevant maps to each model's requirements.
@@ -190,11 +197,12 @@ SSAO uses that ratio so occlusion does not darken direct or emissive light.
 - Descriptor updates are frame-local. `FrameDescriptorSync` updates a set only
   after the corresponding fence has completed.
 - A fallback texture keeps nonresident manifest slots safe to sample.
-- Eviction currently waits for device idle before destroying resources that an
-  older descriptor set may reference. Descriptor work must not silently remove
-  this safety without replacing it with explicit lifetime tracking.
+- Eviction snapshots the submitted-frame mask and destroys resources only after
+  every referencing frame fence clears its bit. Descriptor work must preserve
+  this lifetime boundary.
 - The material buffer reserves entry zero as the fallback. Published model
-  ranges start after it and may move only while no frame can read them.
+  ranges start after it, never move while live, and return to the free list only
+  after fence-owned retirement.
 
 ## Itemized implementation sequence
 
@@ -700,15 +708,15 @@ surfaces.
 
 ### 9. Resume frame-scaling work
 
-With S2, T4 and V2 complete, continue by measured frame and memory cost:
+With S2, T4, V2 and A3 retirement complete, continue by measured frame and
+memory cost:
 
-1. **A2:** KTX2 plus BC7/appropriate platform formats in the content tool.
-2. **A3 remainder:** mip/LOD streaming, compressed byte accounting and
-   fence-based eviction retirement instead of `vkDeviceWaitIdle`.
-3. **T8:** parallelize Vulkan-free scene preparation first; add secondary
+1. **A3 mip/LOD:** add a measured residency policy over the complete BC7 mip
+   artifacts; compressed byte accounting is already exact.
+2. **T8:** parallelize Vulkan-free scene preparation first; add secondary
    command buffers or a transfer queue only after profiling.
-4. **T5:** range-cull point-shadow casters, then cache unchanged faces.
-5. **A4:** reuse recorder scratch storage after scene data structures settle.
+3. **T5:** range-cull point-shadow casters, then cache unchanged faces.
+4. **A4:** reuse recorder scratch storage after scene data structures settle.
 
 #### 9.1 S2 persistent renderables and stable bounds — complete
 
@@ -770,14 +778,49 @@ the live allocation count returns to zero. A validation-enabled 120-frame game
 run exercised render targets, runtime asset uploads and teardown. The complete
 Debug build and all 68 suites pass.
 
-#### 9.4 A2 compressed texture pipeline — next
+#### 9.4 A2 compressed texture pipeline — complete
 
-Add KTX2 as a content artifact and select BC7 or the appropriate platform
-format at build time. Keep source-image interpretation in the content tool,
-preserve sRGB versus linear semantics, retain an uncompressed compatibility
-fallback, and account residency in actual compressed mip bytes. Do not couple
-this packet to a scheduler rewrite; A3 retirement and mip/LOD policy follow
-after the format path is independently validated.
+`CompressedTextureArtifact` builds and validates little-endian KTX2 files with
+native BC7 blocks. Artifact names are a stable digest of the complete
+`TextureSourceIdentity`, so sRGB/linear and sampler-distinct uses never alias.
+Mipmapped sources receive a complete CPU-generated chain; sRGB color is
+filtered in linear light, while linear data remains linear. Physical KTX2 mip
+data is smallest-first and the level index remains base-first as required.
+
+The content tool stages one artifact for each of the 52 production texture
+identities and includes it in `content.index`; source PNG/JPEG/glTF bytes stay
+in the package. Runtime device format queries require sampled-image, linear
+filter and transfer-destination support for both BC7 variants. Supported
+devices load and upload every precomputed mip directly; unsupported devices,
+missing legacy artifacts and newly painted editor textures use the existing
+RGBA path. A present but malformed artifact fails instead of silently changing
+quality. Texture budgets account the exact sum of BC7 mip bytes.
+
+The Debug package contains 252 files. Artifact round-trip/corruption tests,
+runtime selection/fallback tests and content-staging fixtures pass. All 69
+CTest suites pass, and a validation-required 120-frame run on the RTX 4060
+Laptop GPU completed with clean upload and teardown. The deterministic capture
+under `build/a2-evidence` shows intact scene, character, ground and prop
+textures without block-layout corruption.
+
+#### 9.5 A3 fence-owned retirement — complete; mip residency next
+
+Residency eviction no longer calls `vkDeviceWaitIdle`. Models and textures move
+to retirement queues carrying the exact mask of submitted frame slots that can
+still reference them. Each completed frame fence clears its bit; only a zero
+mask releases geometry allocations, image views and samplers. Retiring bytes
+remain charged to the hard residency budget, so publication retries after the
+fence instead of temporarily oversubscribing GPU memory. Texture eviction marks
+the fence-owned descriptor sets dirty, while model material ranges remain
+stable and return to a coalescing free list only after retirement.
+
+`FrameResourceTrackerTests.cpp` covers overlapping two-frame retirement,
+immediate zero-mask release and the rule that later submissions are not added
+retroactively. The Debug panel exposes retiring model/texture counts and bytes.
+All 69 CTest suites pass, including Vulkan smoke, and a validation-required
+120-frame run on the RTX 4060 Laptop GPU completed without application Vulkan
+errors. The remaining A3 work is a measured mip/LOD residency policy over the
+already-complete KTX2 mip chains; do not rewrite the scheduler.
 
 `S3` task-graph/work-stealing work should follow an observed scheduling
 bottleneck. `S1` fixed-tick simulation is conditional on continuous physics or
@@ -818,8 +861,9 @@ layout changes affect modules that appear unrelated to the immediate feature.
 - `src/engine/render/VulkanMemoryAllocator.*`: completed VMA ownership and the
   only renderer memory-policy seam; extend this instead of reintroducing raw
   Vulkan allocation calls.
-- `src/engine/render/VulkanModelResources.*` and the content tool: next A2
-  boundary for compressed artifacts, format selection and byte accounting.
+- `src/engine/render/VulkanModelResources.*`: completed fence-owned eviction
+  retirement and the next A3 boundary for measured mip residency; preserve BC7
+  selection/upload, exact-byte accounting and stable material ranges.
 - `src/engine/render/VulkanSceneRecorder.*`: consumer of the prepared visible
   lists; keep Vulkan recording downstream of Vulkan-free culling.
 - `tests/IsoScenePreparerTests.cpp`: stable identity/bounds behavior is covered;

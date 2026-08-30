@@ -3,11 +3,13 @@
 #include "engine/AssetManifest.hpp"
 #include "engine/render/AnimationController.hpp"
 #include "engine/render/AssetLoadScheduler.hpp"
+#include "engine/render/FrameRetirementQueue.hpp"
 #include "engine/render/GpuSkinning.hpp"
 #include "engine/render/ImageData.hpp"
 #include "engine/render/MaterialRenderPolicy.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/RuntimeTextureCatalog.hpp"
+#include "engine/render/TextureSourceLoader.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanGeometryArena.hpp"
 #include "engine/render/VulkanMemoryAllocator.hpp"
@@ -115,6 +117,10 @@ public:
         uint64_t textureResidencyBudgetBytes = 0;
         uint64_t residencyEvictions = 0;
         uint64_t residencyBudgetBlocks = 0;
+        uint32_t retiringModels = 0;
+        uint32_t retiringTextures = 0;
+        uint64_t retiringModelBytes = 0;
+        uint64_t retiringTextureBytes = 0;
         bool residencyBudgetBlocked = false;
         uint32_t uploadingTextures = 0;
         uint64_t textureUploadSubmissions = 0;
@@ -185,10 +191,15 @@ public:
     // Publishes up to maxPublications completed background tasks without
     // waiting. Failed resources stay observable in LoadingStats while frames
     // continue using available content and fallback textures.
-    [[nodiscard]] bool publishReadyAssets(std::size_t maxPublications);
+    [[nodiscard]] bool publishReadyAssets(
+        std::size_t maxPublications,
+        uint32_t pendingFrameMask = 0);
     // Reclaims upload command buffers and staging resources whose GPU fences
     // have signaled. This never waits for GPU work.
     void retireCompletedUploads();
+    // Releases residency resources once the fence-owned frame slot no longer
+    // references them. Must be called only after that frame's fence signals.
+    void completeFrame(uint32_t frameIndex);
 
     void setAnimationPreview(
         RenderModel model,
@@ -281,6 +292,7 @@ private:
         // which would need a new image and a descriptor rewrite.
         uint32_t width = 0;
         uint32_t height = 0;
+        bool compressed = false;
     };
 
     struct PendingTextureUpload {
@@ -306,8 +318,8 @@ private:
         // Where this model's materials sit in the shared material buffer.
         // Zero means unpublished: the range never starts at the reserved
         // fallback entry. The recorder reads the base off this slot for every
-        // draw, so a repack is free to move the range as long as no frame is
-        // in flight.
+        // draw. Published ranges remain stable for their entire lifetime;
+        // evicted ranges are reused only after their referencing frames retire.
         uint32_t materialBase = 0;
         uint32_t materialCount = 0;
         ModelMaterialPolicy materialPolicy {};
@@ -320,8 +332,8 @@ private:
         LoadState state = LoadState::Unrequested;
         TextureResource gpu {};
         PendingTextureUpload upload {};
-        std::future<ImageData> future;
-        std::optional<ImageData> prepared;
+        std::future<PreparedTextureSource> future;
+        std::optional<PreparedTextureSource> prepared;
         std::exception_ptr failure;
         uint64_t lastRequested = 0;
         uint64_t gpuBytes = 0;
@@ -332,6 +344,24 @@ private:
         std::future<GltfAnimationClip> future;
         std::exception_ptr failure;
         uint64_t lastRequested = 0;
+    };
+
+    struct RetiredModelResources {
+        GpuMesh gpu {};
+        GpuSkinnedMesh skinnedGpu {};
+        uint32_t materialBase = 0;
+        uint32_t materialCount = 0;
+        uint64_t gpuBytes = 0;
+    };
+
+    struct RetiredTextureResources {
+        TextureResource gpu {};
+        uint64_t gpuBytes = 0;
+    };
+
+    struct MaterialFreeRange {
+        uint32_t base = 0;
+        uint32_t count = 0;
     };
 
     void queueModel(RenderModel model, AssetLoadPriority priority);
@@ -354,10 +384,14 @@ private:
     [[nodiscard]] bool makeTextureResident(
         std::size_t protectedTexture,
         uint64_t requiredBytes);
+    void retireModel(ModelSlot& slot);
+    void retireTexture(TextureSlot& slot);
+    void destroyCompletedResidencyRetirements();
+    void releaseMaterialRange(uint32_t base, uint32_t count);
     void markResidencyBudgetBlocked();
     [[nodiscard]] static uint64_t meshBytes(const MeshData& mesh);
     [[nodiscard]] static uint64_t textureBytes(
-        const ImageData& image,
+        const PreparedTextureSource& texture,
         const TextureInterpretation& interpretation);
 
     [[nodiscard]] bool publishModel(RenderModel model, bool wait);
@@ -386,14 +420,11 @@ private:
     void destroyModelInstanceBuffer();
     void createMaterialBuffer();
     void destroyMaterialBuffer();
-    // Appends a model's materials and returns the base index of the range.
+    // Allocates a stable range for a model's materials and returns its base.
     // Throws when the buffer is full, which fails that one model's
     // publication rather than the frame.
     [[nodiscard]] uint32_t writeMaterials(
         const std::vector<MeshMaterial>& materials);
-    // Closes the gaps left by evicted models. Only safe while the device is
-    // idle, which is exactly where residency eviction already is.
-    void repackMaterials();
     void writeSkinningInstance(
         uint32_t frameIndex,
         uint32_t instanceSlot,
@@ -410,10 +441,20 @@ private:
         VkSampler& sampler,
         PendingTextureUpload& upload,
         TextureInterpretation sampling);
+    void beginTextureUpload(
+        const CompressedTextureArtifact& texture,
+        OwnedImage& gpuImage,
+        VkSampler& sampler,
+        PendingTextureUpload& upload,
+        TextureInterpretation sampling);
     // Stages `image` and records the copy into an image that already exists,
     // leaving it shader-readable. Shared by first upload and repaint.
     void recordTextureCopy(
         const ImageData& image,
+        OwnedImage& gpuImage,
+        PendingTextureUpload& upload);
+    void recordTextureCopy(
+        const CompressedTextureArtifact& texture,
         OwnedImage& gpuImage,
         PendingTextureUpload& upload);
     void destroyTextureUpload(PendingTextureUpload& upload);
@@ -428,6 +469,7 @@ private:
         uint32_t mipLevels) const;
 
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
+    bool supportsBc7_ = false;
     VulkanMemoryAllocator* allocator_ = nullptr;
     float maxSamplerAnisotropy_ = 1.0f;
     uint32_t textureDescriptorCapacity_ = 0;
@@ -454,9 +496,12 @@ private:
     SkinningBuffer skinningBuffer_ {};
     ModelInstanceBuffer drawInstanceBuffer_ {};
     MaterialBuffer materialBuffer_ {};
-    // Mirrors the mapped buffer so a repack can move ranges without reading
-    // back through host-visible device memory.
+    // Mirrors the mapped buffer. Live ranges never move, and retired ranges
+    // return to freeMaterialRanges_ only after their frame fences complete.
     std::vector<GpuMaterial> materialStorage_;
+    std::vector<MaterialFreeRange> freeMaterialRanges_;
+    FrameRetirementQueue<RetiredModelResources> retiredModels_;
+    FrameRetirementQueue<RetiredTextureResources> retiredTextures_;
     AnimationController animationController_ {};
     struct AnimatedMeshKey {
         uint32_t frameIndex = 0;
@@ -487,10 +532,13 @@ private:
     uint64_t textureResidencyBytes_ = 0;
     uint64_t modelResidencyPeakBytes_ = 0;
     uint64_t textureResidencyPeakBytes_ = 0;
+    uint64_t retiringModelBytes_ = 0;
+    uint64_t retiringTextureBytes_ = 0;
     uint64_t residencyEvictions_ = 0;
     uint64_t residencyBudgetBlocks_ = 0;
     bool residencyBudgetBlocked_ = false;
     bool textureDescriptorsDirty_ = false;
+    uint32_t retirementFrameMask_ = 0;
 };
 
 } // namespace sokoban

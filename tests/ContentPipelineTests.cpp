@@ -2,6 +2,8 @@
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/render/ShaderCatalog.hpp"
+#include "engine/render/CompressedTextureArtifact.hpp"
+#include "engine/render/PngWriter.hpp"
 
 #include <array>
 #include <chrono>
@@ -87,6 +89,24 @@ void writeFile(const std::filesystem::path& path, std::string_view contents = "d
     std::filesystem::create_directories(path.parent_path());
     std::ofstream stream(path, std::ios::binary);
     stream << contents;
+}
+
+void writeTinyPng(const std::filesystem::path& path)
+{
+    std::filesystem::create_directories(path.parent_path());
+    const std::vector<std::byte> png = sokoban::encodeRgbaPng(
+        2,
+        2,
+        {
+            255, 32, 16, 255,
+            16, 255, 32, 255,
+            32, 16, 255, 255,
+            255, 255, 255, 128,
+        });
+    std::ofstream stream(path, std::ios::binary);
+    stream.write(
+        reinterpret_cast<const char*>(png.data()),
+        static_cast<std::streamsize>(png.size()));
 }
 
 void appendUint32(std::vector<uint8_t>& bytes, uint32_t value)
@@ -256,8 +276,8 @@ sokoban::ContentSourceRoots createValidContent(const std::filesystem::path& root
 
     writeFile(assets / "manifest.json", manifest());
     writeFile(assets / "animation_catalog.json", animationCatalog());
-    writeFile(assets / "textures/hero.png");
-    writeFile(assets / "textures/boardgame.png");
+    writeTinyPng(assets / "textures/hero.png");
+    writeTinyPng(assets / "textures/boardgame.png");
     writeFile(assets / "ui/Karla-Regular.ttf");
     writeFile(assets / "ui/OFL.txt", "font license");
     writeFile(assets / "custom/ui/main-menu-rogue-pushing-rock-4k.png");
@@ -486,12 +506,27 @@ void testInventoryAndStaging()
     const std::filesystem::path output = temp.path() / "package/assets";
     writeFile(output / "stale.file");
     const sokoban::ContentInventory staged = sokoban::stageContent(roots, output, "1.2.3");
-    check(staged.files.size() == inventory.files.size(), "stage returns inventory");
+    check(
+        staged.files.size() ==
+            inventory.files.size() + inventory.textureSources.size(),
+        "stage returns source and generated texture artifacts");
     check(std::filesystem::is_regular_file(output / "content.index"), "content index written");
     check(
         std::ifstream(output / "content.index").good(),
         "content index readable");
     check(std::filesystem::is_regular_file(output / "models/hero.bin"), "dependency staged");
+    for (const sokoban::TextureSourceIdentity& identity :
+         inventory.textureSources) {
+        const std::filesystem::path artifact =
+            sokoban::compressedTextureArtifactPath(identity);
+        check(
+            std::filesystem::is_regular_file(output / artifact),
+            "BC7 KTX2 artifact staged for every texture identity");
+        const sokoban::CompressedTextureArtifact parsed =
+            sokoban::loadBc7Ktx2(output / artifact);
+        check(parsed.width == 2 && parsed.height == 2,
+            "staged KTX2 dimensions preserved");
+    }
     check(!std::filesystem::exists(output / "stale.file"), "stale output removed");
 }
 

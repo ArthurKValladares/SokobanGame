@@ -20,6 +20,9 @@ struct ContentFile {
     std::filesystem::path source;
     std::filesystem::path destination;
     std::uintmax_t size = 0;
+    // Generated files have no source path; stageContent writes their bytes
+    // after source files have been copied.
+    bool generated = false;
 };
 
 struct ResolvedMaterialTexture {

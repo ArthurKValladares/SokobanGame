@@ -3,6 +3,8 @@
 
 #include "engine/AnimationCatalog.hpp"
 #include "engine/render/GltfMesh.hpp"
+#include "engine/render/CompressedTextureArtifact.hpp"
+#include "engine/render/TextureSourceLoader.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/Level.hpp"
 #include "engine/LevelCatalog.hpp"
@@ -408,7 +410,8 @@ public:
             (void)key;
             const std::uintmax_t size = std::filesystem::file_size(file.source);
             inventory.totalBytes += size;
-            inventory.files.push_back({ file.source, file.destination, size });
+            inventory.files.push_back({
+                file.source, file.destination, size, false });
         }
         inventory.textureSources = textureSources_;
         inventory.materialTextures = materialTextures_;
@@ -1119,7 +1122,7 @@ ContentInventory stageContent(
     std::string_view gameVersion)
 {
     ensureSafeOutputRoot(roots, outputRoot);
-    const ContentInventory inventory = collectContentInventory(roots);
+    ContentInventory inventory = collectContentInventory(roots);
     const std::filesystem::path stagingRoot = outputRoot.parent_path() /
         (outputRoot.filename().string() + ".staging");
     const std::filesystem::path backupRoot = outputRoot.parent_path() /
@@ -1137,6 +1140,45 @@ ContentInventory stageContent(
             const std::filesystem::path destination = stagingRoot / file.destination;
             std::filesystem::create_directories(destination.parent_path());
             std::filesystem::copy_file(file.source, destination, std::filesystem::copy_options::overwrite_existing);
+        }
+
+        std::unordered_set<std::string> packagePaths;
+        packagePaths.reserve(inventory.files.size() + inventory.textureSources.size());
+        for (const ContentFile& file : inventory.files) {
+            packagePaths.insert(contentPathKey(file.destination));
+        }
+        for (const TextureSourceIdentity& identity : inventory.textureSources) {
+            const std::filesystem::path relative =
+                compressedTextureArtifactPath(identity);
+            if (!packagePaths.insert(contentPathKey(relative)).second) {
+                throw std::runtime_error(
+                    "compressed texture artifact path collides with another "
+                    "package file: " + relative.string());
+            }
+            const ImageData source = loadRgbaTextureSource(
+                roots.assets, identity.source);
+            const std::vector<std::byte> artifact = buildBc7Ktx2(
+                source, identity.interpretation);
+            const std::filesystem::path destination = stagingRoot / relative;
+            std::filesystem::create_directories(destination.parent_path());
+            std::ofstream output(destination, std::ios::binary);
+            if (!output) {
+                throw std::runtime_error(
+                    "cannot create compressed texture artifact: " +
+                    destination.string());
+            }
+            output.write(
+                reinterpret_cast<const char*>(artifact.data()),
+                static_cast<std::streamsize>(artifact.size()));
+            output.close();
+            if (!output) {
+                throw std::runtime_error(
+                    "cannot finish compressed texture artifact: " +
+                    destination.string());
+            }
+            inventory.files.push_back({
+                {}, relative, artifact.size(), true });
+            inventory.totalBytes += artifact.size();
         }
 
         std::ofstream index(stagingRoot / "content.index", std::ios::binary);
