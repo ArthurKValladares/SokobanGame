@@ -191,6 +191,10 @@ void Application::finishEvidenceCapture()
     writePhase(
         "Asset publication events",
         evidenceStats_.assetPublicationEventTiming);
+    writePhase("GPU shadows", evidenceStats_.gpuShadowTiming);
+    writePhase("GPU scene color/depth", evidenceStats_.gpuSceneTiming);
+    writePhase("GPU SSAO", evidenceStats_.gpuSsaoTiming);
+    writePhase("GPU output/UI", evidenceStats_.gpuOutputTiming);
     report << "- Asset publications: " << evidenceStats_.assetPublications
            << " across " << evidenceStats_.assetPublicationFrames
            << " frames\n";

@@ -595,6 +595,10 @@ struct RenderStats {
     double gpuFrameAverageMilliseconds = 0.0;
     double gpuFrameP95Milliseconds = 0.0;
     double gpuFrameMaximumMilliseconds = 0.0;
+    RenderPhaseTiming gpuShadowTiming {};
+    RenderPhaseTiming gpuSceneTiming {};
+    RenderPhaseTiming gpuSsaoTiming {};
+    RenderPhaseTiming gpuOutputTiming {};
     bool wireframeEnabled = false;
     float wireframeLineWidth = 1.0f;
     uint64_t pipelineRebuilds = 0;

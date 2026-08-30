@@ -91,6 +91,14 @@ void testFlags()
     check(!pointShadowEvidence.pointShadowOptimizationsEnabled,
         "point-shadow legacy control is read");
 
+    const sokoban::CommandLineOptions pointShadowStress = parse(
+        { "--smoke-frames", "120", "--evidence-output", "/tmp/evidence",
+            "--evidence-point-light-stress" });
+    check(!pointShadowStress.malformed,
+        "point-shadow stress invocation parses");
+    check(pointShadowStress.evidencePointLightStressEnabled,
+        "point-shadow stress lights are enabled");
+
     const sokoban::CommandLineOptions transientRecorderScratch = parse(
         { "--smoke-frames", "120", "--disable-recorder-scratch-reuse" });
     check(!transientRecorderScratch.malformed,
@@ -192,6 +200,12 @@ void testMalformedInput()
         "culling-off evidence mode requires an output directory");
     check(parse({ "--evidence-point-light" }).malformed,
         "point-light evidence mode requires an output directory");
+    check(parse({ "--evidence-point-light-stress" }).malformed,
+        "point-light stress mode requires an output directory");
+    check(parse({ "--smoke-frames", "3", "--evidence-output", "/tmp/e",
+                    "--evidence-point-light", "--evidence-point-light-stress" })
+            .malformed,
+        "point-light evidence modes are mutually exclusive");
 
     const sokoban::CommandLineOptions rejected = parse({ "--smoke-frames", "abc" });
     check(!rejected.error.empty(), "a rejection explains itself");

@@ -34,6 +34,7 @@ struct CommandLineOptions {
     bool evidenceAmbientOcclusionEnabled = true;
     bool evidenceFrustumCullingEnabled = true;
     bool evidencePointLightEnabled = false;
+    bool evidencePointLightStressEnabled = false;
     // Diagnostic A/B switch for frame-preparation profiling.
     bool parallelScenePreparationEnabled = true;
     bool pointShadowOptimizationsEnabled = true;
@@ -56,6 +57,7 @@ struct CommandLineOptions {
     bool evidenceAmbientOcclusionSpecified = false;
     bool evidenceFrustumCullingSpecified = false;
     bool evidencePointLightSpecified = false;
+    bool evidencePointLightStressSpecified = false;
     const auto reject = [&options](std::string message) {
         options.malformed = true;
         options.error = std::move(message);
@@ -132,6 +134,9 @@ struct CommandLineOptions {
         } else if (argument == "--evidence-point-light") {
             options.evidencePointLightEnabled = true;
             evidencePointLightSpecified = true;
+        } else if (argument == "--evidence-point-light-stress") {
+            options.evidencePointLightStressEnabled = true;
+            evidencePointLightStressSpecified = true;
         } else if (argument == "--disable-point-shadow-optimizations") {
             options.pointShadowOptimizationsEnabled = false;
         } else if (argument == "--disable-recorder-scratch-reuse") {
@@ -179,6 +184,16 @@ struct CommandLineOptions {
     if (options.evidenceOutputDirectory.empty() && evidencePointLightSpecified) {
         return reject("--evidence-point-light requires --evidence-output");
     }
+    if (options.evidenceOutputDirectory.empty() &&
+        evidencePointLightStressSpecified) {
+        return reject(
+            "--evidence-point-light-stress requires --evidence-output");
+    }
+    if (options.evidencePointLightEnabled &&
+        options.evidencePointLightStressEnabled) {
+        return reject(
+            "--evidence-point-light and --evidence-point-light-stress are mutually exclusive");
+    }
     return options;
 }
 
@@ -192,6 +207,7 @@ inline constexpr std::string_view commandLineUsage =
     "[--bake-tile-thumbnails] "
     "[--evidence-output <directory> "
     "--evidence-render-scale <25..100> [--evidence-disable-ao] "
-    "[--evidence-disable-frustum-culling] [--evidence-point-light]]";
+    "[--evidence-disable-frustum-culling] [--evidence-point-light] "
+    "[--evidence-point-light-stress]]";
 
 } // namespace sokoban

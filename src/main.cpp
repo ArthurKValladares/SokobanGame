@@ -79,6 +79,8 @@ int main(int argc, char** argv)
                 .evidenceFrustumCullingEnabled =
                     options.evidenceFrustumCullingEnabled,
                 .evidencePointLightEnabled = options.evidencePointLightEnabled,
+                .evidencePointLightStressEnabled =
+                    options.evidencePointLightStressEnabled,
                 .parallelScenePreparationEnabled =
                     options.parallelScenePreparationEnabled,
                 .pointShadowOptimizationsEnabled =

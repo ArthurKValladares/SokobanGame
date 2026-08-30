@@ -405,6 +405,10 @@ public:
         gameTimeTelemetry_.record(elapsedMilliseconds(gameStart));
 
         const auto ssaoStart = std::chrono::steady_clock::now();
+        gpuProfiler_.beginPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::Ssao);
         vulkanDebug::beginLabel(
             device_, commandBuffer, "SSAO", { 0.8f, 0.4f, 1.0f, 1.0f });
         // The composite reads the scene and writes it back, which it cannot
@@ -427,6 +431,10 @@ public:
             },
             stats_);
         vulkanDebug::endLabel(device_, commandBuffer);
+        gpuProfiler_.endPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::Ssao);
         ssaoTimeTelemetry_.record(elapsedMilliseconds(ssaoStart));
         if (previewFrameData && previewScene) {
             // Preserve the completed main view before the preview replaces
@@ -447,6 +455,10 @@ public:
                 elapsedMilliseconds(previewStart));
         }
         const auto outputStart = std::chrono::steady_clock::now();
+        gpuProfiler_.beginPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::Output);
         vulkanDebug::beginLabel(
             device_, commandBuffer, "Level transition", { 1.0f, 0.4f, 0.2f, 1.0f });
         recordLevelTransition(
@@ -505,6 +517,10 @@ public:
             device_, commandBuffer, "Present transition", { 0.3f, 0.7f, 1.0f, 1.0f });
         swapchain_.endFrame(commandBuffer, imageIndex, stats_);
         vulkanDebug::endLabel(device_, commandBuffer);
+        gpuProfiler_.endPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::Output);
         gpuProfiler_.endFrame(commandBuffer, configuration_.descriptorFrameIndex);
         vulkanDebug::endLabel(device_, commandBuffer);
         vkCheck(
@@ -769,12 +785,24 @@ private:
         const bool hasTranslucency = scene.hasTranslucentContent ||
             hasAuthoredBlendMaterials(frameData, scene);
         const auto shadowStart = std::chrono::steady_clock::now();
+        gpuProfiler_.beginPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::Shadows);
         if (shadowPass_.valid() && pipelines_.shadow()) {
             recordShadowMapRendering(
                 commandBuffer, frameData, scene);
         }
+        gpuProfiler_.endPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::Shadows);
         shadowTimeTelemetry_.record(elapsedMilliseconds(shadowStart));
         const auto sceneStart = std::chrono::steady_clock::now();
+        gpuProfiler_.beginPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::Scene);
         swapchain_.ensureSceneColorReadable(
             commandBuffer, stats_);
         recordScenePass(
@@ -798,6 +826,10 @@ private:
                 commandBuffer, stats_);
         }
         if (!hasTranslucency) {
+            gpuProfiler_.endPhase(
+                commandBuffer,
+                configuration_.descriptorFrameIndex,
+                VulkanGpuPhase::Scene);
             sceneTimeTelemetry_.record(elapsedMilliseconds(sceneStart));
             return;
         }
@@ -815,6 +847,10 @@ private:
             true,
             false,
             { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });
+        gpuProfiler_.endPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::Scene);
         sceneTimeTelemetry_.record(elapsedMilliseconds(sceneStart));
     }
 

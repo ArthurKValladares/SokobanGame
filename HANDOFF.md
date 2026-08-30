@@ -53,6 +53,17 @@ scene/AO captures. Secondary command buffers are no longer the next action:
 the captured frame is GPU-bound at 3.223 ms and the two remaining CPU game
 buckets are only 0.559 ms of shadow work and 0.474 ms of scene work.
 
+The point-shadow stress and Release GPU profile are now complete as well. A
+deterministic eight-light mode keeps skinned casters in range so all 48 cube
+faces and 7,560 tile-face candidates record every frame; Debug validation and
+visual inspection are clean, with no frame-instance exhaustion. Fence-read GPU
+timestamps now cover shadows, main scene color/depth, SSAO and output/UI. At
+2880x1800 Release, the normal frame measured 3.715 ms GPU: 0.057 ms shadows,
+1.870 ms scene, 1.601 ms SSAO and 0.182 ms output. AO-off measured 1.986 ms;
+50% render scale measured 0.943 ms. The next measurement packet should split
+scene raster/resolve/depth-copy and SSAO occlusion/composite before changing
+either algorithm.
+
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
 sampling have different failure modes and should be independently reviewable.
@@ -118,6 +129,10 @@ future tasks:
   Directional tile casters use one instanced draw; point-light faces retain the
   capacity-safe push-constant path because six faces across all lights can
   exceed the shared frame-instance budget.
+- **9.10 point-shadow stress and Release GPU phases**: an explicit eight-light
+  evidence mode continuously exercises all 48 point-shadow cube faces without
+  allowing cache reuse to hide the push path. Fence-owned timestamp queries
+  report shadows, scene color/depth, SSAO and output/UI without a CPU/GPU wait.
 - **V1/V3/V5/V6**: per-swapchain-image present semaphores, direct skinning
   SSBO indexing, Vulkan 1.3 optimized shader builds, and optional anisotropy.
 - **V2**: vendored VMA 3.2.1 is owned by `VulkanDeviceContext`; persistent,
@@ -745,15 +760,17 @@ surfaces.
 
 ### 9. Resume frame-scaling work
 
-S2, T4, T5, V2, A2, A3, A4, T8 and the post-A4 recording/upload profile are
-complete. Continue in this order:
+S2, T4, T5, V2, A2, A3, A4, T8, the post-A4 recording/upload profile, the
+point-shadow stress gate and top-level GPU pass timestamps are complete.
+Continue in this order:
 
-1. Exercise the retained point-shadow push path in an authored multi-light
-   stress scene and preserve its exact cache/range behavior.
-2. Add GPU timestamps around directional shadows, main color/depth, SSAO and
-   output only if a representative Release capture still shows the GPU frame
-   materially above the CPU frame. Optimize the measured GPU pass, not the
-   whole renderer by assumption.
+1. Split the Release GPU scene bucket into opaque raster/resolve, sampled-depth
+   copy and any translucent color-copy work. Split SSAO into occlusion,
+   scene-color snapshot and full-resolution composite. Reuse the existing
+   fence-read query pool; do not add waits.
+2. Compare native, 50% and AO-off captures after that split. Optimize the
+   largest stable subpass while preserving the current image evidence and AO
+   banding regression.
 3. Reconsider secondary command buffers only if a larger content scene makes
    CPU command recording a durable frame bottleneck again. Reconsider a
    transfer queue only for sustained streaming that leaves uploads in flight.
@@ -1008,6 +1025,44 @@ capture and all 69 CTest suites pass. Vulkan loader diagnostics about an absent
 Epic overlay manifest and the existing unused shader output warnings are host
 environment/pre-existing warnings, not validation failures from this packet.
 
+#### 9.10 Point-shadow stress and Release GPU phase profile — complete
+
+`--evidence-point-light-stress` installs eight deterministic point lights
+around the evidence board. Their ranges cover the scene and no emitter is
+excluded, so the animated character keeps the caster state uncacheable. This
+forces all 48 cube faces through the retained push-constant path every frame
+instead of allowing T5's unchanged-face cache to turn the stress run into a
+reuse test. The ordinary `--evidence-point-light` mode remains unchanged for
+the original matched T5 control.
+
+The Debug stress capture reported 7,560/7,560 tile-face candidates in range,
+120/120 models in range, 48 cube faces rendered and zero reused on the final
+frame. It completed 120 frames with validation enabled, did not exhaust the
+shared draw-instance buffer, and produced a visually coherent multi-light
+scene. Its large 76.364 ms Debug command-recording average is intentional: it
+is a worst-case safety workload with thousands of per-face push/draw pairs,
+not a representative shipping frame.
+
+`VulkanGpuProfiler` now owns ten queries per frame slot: the original frame
+pair plus begin/end pairs for shadows, main scene color/depth, SSAO and
+output/UI. All queries reset while recording, are read only after the existing
+frame fence, and feed fixed histories. The stress Release phase sum (1.757 +
+2.433 + 1.594 + 0.164 ms) matches its 5.951 ms whole-frame average within
+rounding, validating the query boundaries.
+
+The representative 2880x1800 Release capture measured 3.715 ms GPU: shadows
+0.057 ms, main scene 1.870 ms, SSAO 1.601 ms and output/UI 0.182 ms. AO-off
+measured 1.986 ms total with 1.777 ms scene and zero SSAO. At 50% render scale,
+the GPU frame fell to 0.943 ms, with 0.472 ms scene and 0.283 ms SSAO. Both
+large buckets therefore scale predominantly with pixel workload; shadows,
+secondary command recording and transfer ownership are not the next target.
+
+Evidence is under `build/point-shadow-stress-debug`,
+`build/gpu-phases-release-normal`, `build/gpu-phases-release-point-stress`,
+`build/gpu-phases-release-ao-off` and `build/gpu-phases-release-scale-50`.
+The complete Debug build, Release executable, validation stress run, focused
+CLI/profiler coverage and all 69 CTest suites pass.
+
 `S3` task-graph/work-stealing work should follow an observed scheduling
 bottleneck. `S1` fixed-tick simulation is conditional on continuous physics or
 gameplay motion. `F5` RHI work is conditional on a real second renderer or
@@ -1061,6 +1116,9 @@ layout changes affect modules that appear unrelated to the immediate feature.
 - `src/engine/render/FrameTimeTelemetry.hpp` and `RenderTypes.hpp`: fixed-size
   evidence histories and public phase summaries. Record samples in-frame but
   calculate sorted summaries only for an explicit stats consumer.
+- `src/engine/render/VulkanGpuProfiler.*`: fence-read whole-frame and top-level
+  GPU phase queries. Preserve the per-frame-slot reset/read ownership; extend
+  these boundaries for the next scene/SSAO subpass split without adding waits.
 - `src/engine/render/PointShadowFaceCache.*`: exact unchanged-depth key. Keep
   skinned casters uncacheable unless a real GPU-pose revision joins the key.
 - `tests/IsoScenePreparerTests.cpp`: stable identity/bounds behavior is covered;
@@ -1110,6 +1168,17 @@ Reproduce the current recording/upload profile and directional-shadow result:
 ```powershell
 .\build\Debug\sokoban.exe --smoke-frames 240 --require-validation --evidence-output build\batched-shadow-final
 .\build\Debug\sokoban.exe --smoke-frames 240 --require-validation --texture-residency-kib 64 --evidence-output build\post-a4-upload-pressure
+```
+
+Reproduce the point-shadow stress and Release GPU phase matrix:
+
+```powershell
+.\build\Debug\sokoban.exe --smoke-frames 120 --require-validation --evidence-output build\point-shadow-stress-debug --evidence-point-light-stress
+cmake --build build --config Release --target sokoban
+.\build\Release\sokoban.exe --smoke-frames 240 --evidence-output build\gpu-phases-release-normal
+.\build\Release\sokoban.exe --smoke-frames 120 --evidence-output build\gpu-phases-release-point-stress --evidence-point-light-stress
+.\build\Release\sokoban.exe --smoke-frames 240 --evidence-output build\gpu-phases-release-ao-off --evidence-disable-ao
+.\build\Release\sokoban.exe --smoke-frames 240 --evidence-output build\gpu-phases-release-scale-50 --evidence-render-scale 50
 ```
 
 Build content explicitly when changing manifest, glTF or texture discovery:

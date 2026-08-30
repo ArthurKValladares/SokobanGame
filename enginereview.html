@@ -256,8 +256,8 @@
 <body>
   <header class="shell">
     <p class="eyebrow">Current-state review · 30 August 2026</p>
-    <h1>Measured shadow batching removes the recording bottleneck.</h1>
-    <p class="deck">Sokoban 3D now has complete CPU/GPU material behavior, a device-bounded texture heap, HDR output, a dedicated post-tonemap UI path, physical view-space SSAO, retained world bounds, conservative main-scene frustum culling, one tested VMA-backed memory seam, staged KTX2/BC7 artifacts, fence-owned eviction, pressure-driven mip-tail residency, deterministic parallel Vulkan-free frame preparation, range-bounded point shadows with exact unchanged-layer reuse, retained model-recording scratch, low-overhead frame-phase telemetry, and one instanced directional-shadow tile draw. Upload captures drain to zero in-flight work, while matched shadow evidence cuts command recording from 2.817 to 1.332 ms with identical scene/AO hashes.</p>
+    <h1>Release profiling isolates scene and SSAO pixel cost.</h1>
+    <p class="deck">Sokoban 3D now has complete CPU/GPU material behavior, a device-bounded texture heap, HDR output, a dedicated post-tonemap UI path, physical view-space SSAO, retained world bounds, conservative main-scene frustum culling, one tested VMA-backed memory seam, staged KTX2/BC7 artifacts, fence-owned eviction, pressure-driven mip-tail residency, deterministic parallel Vulkan-free frame preparation, range-bounded point shadows with exact unchanged-layer reuse, retained model-recording scratch, batched directional tile shadows, an eight-light point-shadow stress gate, and fence-read GPU phase timestamps. At 2880×1800 Release, shadows cost 0.057 ms, scene color/depth 1.870 ms, SSAO 1.601 ms and output/UI 0.182 ms of a 3.715 ms GPU frame.</p>
     <div class="metrics" aria-label="Current repository facts">
       <div class="metric"><b>36</b><span>manifest models</span></div>
       <div class="metric"><b>42 / 1024</b><span>textures on validated GPU</span></div>
@@ -281,7 +281,7 @@
     <section id="verdict">
       <div class="section-head"><span class="num">01</span><h2>Current verdict</h2></div>
       <div class="callout">
-        <strong>Next program:</strong> validate the retained point-shadow path in an authored multi-light stress scene, then add per-pass GPU timestamps only if representative Release evidence remains GPU-bound. The current measurements reject both a transfer queue and secondary command buffers as the next change.
+        <strong>Next program:</strong> split scene raster/resolve/depth-copy and SSAO occlusion/snapshot/composite GPU timestamps, then optimize the largest stable subpass. Native, AO-off and 50% evidence shows both current leaders scale with pixel workload; shadows, secondary command buffers and transfer ownership are not the target.
       </div>
       <div class="grid" style="margin-top:1rem">
         <article class="card">
@@ -291,8 +291,8 @@
         </article>
         <article class="card">
           <p class="kicker">What comes next</p>
-          <h3>Follow the GPU evidence</h3>
-          <p>The final capture records a 1.842 ms CPU frame and a 3.223 ms GPU frame. Validate point-light stress behavior, then timestamp directional shadows, scene, SSAO and output in a representative Release capture before changing another architecture boundary.</p>
+          <h3>Split the two pixel-heavy buckets</h3>
+          <p>The Release frame spends 1.870 ms in scene color/depth and 1.601 ms in SSAO. Add subpass timestamps for raster/resolve/depth copy and occlusion/snapshot/composite before changing samples, formats or attachment flow.</p>
         </article>
         <article class="card">
           <p class="kicker">What not to overbuild</p>
@@ -331,7 +331,8 @@
             <tr><td>A2</td><td><span class="status done">Done</span></td><td>The content tool stages KTX2 BC7 mip chains per source interpretation; capable devices upload native blocks and source decoding remains the fallback.</td><td>Preserve sRGB/linear identity, source fallback and exact compressed-byte accounting.</td></tr>
             <tr><td>A3</td><td><span class="status done">Done</span></td><td>Async preparation, publication budgets, exact compressed accounting, fence-owned eviction and finest-fitting complete mip tails are implemented.</td><td>Preserve full quality by default and use the explicit budget override for pressure validation.</td></tr>
             <tr><td>A4</td><td><span class="status done">Done</span></td><td>Model candidates, resolved draws, ordered items and batches reuse one synchronous recorder scratch object. Stable translucent ties use an explicit ordinal and the sorter writes into caller-owned output.</td><td>Preserve zero steady-state growth and keep scratch references inside <code>record()</code>.</td></tr>
-            <tr><td>9.9</td><td><span class="status done">Done</span></td><td>Fixed histories attribute frame/recorder phases without sorting in the hot path. Directional tile shadows use one SSBO-backed instanced draw; point faces keep their bounded push path.</td><td>Stress authored point lights, then profile GPU passes in Release before selecting another optimization.</td></tr>
+            <tr><td>9.9</td><td><span class="status done">Done</span></td><td>Fixed histories attribute frame/recorder phases without sorting in the hot path. Directional tile shadows use one SSBO-backed instanced draw; point faces keep their bounded push path.</td><td>Preserve the measured batching result and capacity-safe point-face contract.</td></tr>
+            <tr><td>9.10</td><td><span class="status done">Done</span></td><td>An eight-light mode continuously renders 48 cube faces; fence-read timestamps attribute shadows, scene, SSAO and output in Debug and Release without adding waits.</td><td>Split scene and SSAO into their internal GPU subpasses; optimize only after the native/AO-off/50% matrix identifies the stable leader.</td></tr>
             <tr><td>S1</td><td><span class="status conditional">Conditional</span></td><td>Gameplay uses variable timestep.</td><td>Fixed tick only before continuous physics/motion requires it.</td></tr>
             <tr><td>S2</td><td><span class="status done">Done</span></td><td>Tiles, water and authored faces retain identity plus revisioned world AABBs; prepared frames own safe snapshots and main/preview caches are isolated.</td><td>Preserve frame-local camera, color and sorting state and T4's fail-open consumers.</td></tr>
             <tr><td>S3</td><td><span class="status conditional">Measured</span></td><td>TaskSystem is a useful pool but has one queue and no dependency graph.</td><td>Change only after scheduling profiles identify a bottleneck.</td></tr>
@@ -515,8 +516,9 @@
               <div class="task"><span class="task-id">9.7</span><div><b>T5 — complete</b><p>Point-light face and static-model casters are conservatively range-bounded. Exact unchanged light/caster states reuse all six cube layers; skinned casters fail open and invalidate reuse.</p></div></div>
               <div class="task"><span class="task-id">9.8</span><div><b>A4 — complete</b><p>Four model-recording vectors retain a 9,600-byte high-water mark across opaque, translucent, main and preview passes. The steady matched frame fell from four capacity growths to zero; scene/AO output is byte-identical, while CPU average moved from 3.126 ms to 2.955 ms in the captured run.</p></div></div>
               <div class="task"><span class="task-id">9.9</span><div><b>Profile and batch directional shadows — complete</b><p>Fixed-size histories attribute scheduling, fence, maintenance, acquisition, recording, submit/present, publication and recorder subphases; summaries are calculated only for stats consumers. Normal and pressure upload runs end with zero work in flight, rejecting a transfer queue. The measured 204 directional tile casters now share one draw-instance-buffer-backed instanced draw; point-light cube faces retain their capacity-safe push path. Command recording fell from 2.817 to 1.332 ms, shadow recording from 1.949 to 0.559 ms and CPU frame time from 3.349 to 1.842 ms. Scene and AO hashes are identical.</p></div></div>
+              <div class="task"><span class="task-id">9.10</span><div><b>Stress point shadows and profile Release GPU phases — complete</b><p>A deterministic eight-light mode keeps a skinned caster in range, forcing 7,560 tile-face candidates and all 48 cube faces through the push path every frame; Debug validation and visual inspection are clean. Ten fence-read queries per frame attribute the full frame plus shadows, scene color/depth, SSAO and output/UI. Native Release measures 3.715 ms GPU (0.057 / 1.870 / 1.601 / 0.182 ms); AO-off measures 1.986 ms and 50% scale measures 0.943 ms. Scene and SSAO are the pixel-scaling leaders.</p></div></div>
             </div>
-            <p class="accept"><b>Gate:</b> all 69 Debug suites pass. The validation-required 240-frame batched-shadow capture is clean and byte-identical to the pre-batch scene/AO captures. The final frame is GPU-bound at 3.223 ms versus 1.842 ms CPU; secondary command buffers and transfer-queue ownership are explicitly deferred until new content produces a measured need.</p>
+            <p class="accept"><b>Gate:</b> all 69 Debug suites pass. The validation-required stress capture renders 48 point-shadow faces every frame without exhaustion or validation errors. The Release stress phase sum matches its whole-frame timestamp within rounding; native, AO-off and 50% captures provide the next subpass baseline. Secondary command buffers and transfer-queue ownership remain explicitly deferred.</p>
           </div>
         </article>
       </div>
@@ -529,6 +531,7 @@
         <article class="card"><p class="kicker">Texture format</p><h3>A2 is complete</h3><p>KTX2/BC7 artifacts, complete mip chains, capability selection, source fallback and exact compressed accounting are live through the VMA seam.</p></article>
         <article class="card"><p class="kicker">Residency</p><h3>A3 is complete</h3><p>The system has requirements, hard budgets, exact compressed accounting, fence-owned eviction and pressure-driven complete mip tails. Preserve the scheduler and full-quality default.</p></article>
         <article class="card"><p class="kicker">CPU recording</p><h3>9.9 is complete</h3><p>Steady model scratch is retained and 204 directional tile casters collapse to one instanced draw. The current profile is GPU-bound; secondary buffers and a transfer queue do not solve the measured frame.</p></article>
+        <article class="card"><p class="kicker">GPU attribution</p><h3>9.10 is complete</h3><p>Fence-read phase timestamps and the point-shadow stress gate are live. Scene color/depth and SSAO dominate at native resolution; split those internal subpasses next.</p></article>
         <article class="card"><p class="kicker">Conditional architecture</p><h3>S1, S3 and F5</h3><p>Fixed tick needs continuous gameplay physics. A task graph needs a measured scheduling problem. An RHI needs a second backend or platform. Until then, these are not priority work.</p></article>
       </div>
     </section>

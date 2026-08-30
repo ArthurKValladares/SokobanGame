@@ -65,6 +65,7 @@ struct ApplicationOptions {
     bool evidenceAmbientOcclusionEnabled = true;
     bool evidenceFrustumCullingEnabled = true;
     bool evidencePointLightEnabled = false;
+    bool evidencePointLightStressEnabled = false;
     bool parallelScenePreparationEnabled = true;
     bool pointShadowOptimizationsEnabled = true;
     bool recorderScratchReuseEnabled = true;
@@ -230,6 +231,7 @@ private:
     RenderStats evidenceStats_ {};
     bool evidenceAmbientOcclusionEnabled_ = true;
     bool evidencePointLightEnabled_ = false;
+    bool evidencePointLightStressEnabled_ = false;
     bool evidenceSceneCaptured_ = false;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;
     float overworldOverviewProgress_ = 0.0f;

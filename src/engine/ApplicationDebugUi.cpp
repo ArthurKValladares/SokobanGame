@@ -809,6 +809,10 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
         showPhase(
             "Asset publication events",
             renderStats.assetPublicationEventTiming);
+        showPhase("GPU shadows", renderStats.gpuShadowTiming);
+        showPhase("GPU scene color/depth", renderStats.gpuSceneTiming);
+        showPhase("GPU SSAO", renderStats.gpuSsaoTiming);
+        showPhase("GPU output/UI", renderStats.gpuOutputTiming);
         ImGui::Text(
             "Asset publications %llu across %llu frames; texture uploads %llu/%llu complete (%u in flight)",
             static_cast<unsigned long long>(renderStats.assetPublications),

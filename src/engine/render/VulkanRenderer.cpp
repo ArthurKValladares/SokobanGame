@@ -1237,6 +1237,14 @@ RenderStats VulkanRenderer::renderStats() const
         submitPresentTimeTelemetry_.summary());
     stats.assetPublicationEventTiming = renderPhaseTiming(
         assetPublicationEventTimeTelemetry_.summary());
+    stats.gpuShadowTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::Shadows));
+    stats.gpuSceneTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::Scene));
+    stats.gpuSsaoTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::Ssao));
+    stats.gpuOutputTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::Output));
     sceneRecorder_.populateTimingStats(stats);
     return stats;
 }

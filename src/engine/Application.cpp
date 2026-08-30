@@ -149,6 +149,8 @@ Application::Application(ApplicationOptions options)
     , evidenceAmbientOcclusionEnabled_(
           options.evidenceAmbientOcclusionEnabled)
     , evidencePointLightEnabled_(options.evidencePointLightEnabled)
+    , evidencePointLightStressEnabled_(
+          options.evidencePointLightStressEnabled)
 {
     log::info(log::Category::Persistence)
         << saveSlots_.progressStatus();
@@ -1927,6 +1929,47 @@ RenderFrameData Application::buildRenderFrame(
             .shadowOpacity = 0.85f,
             .emitterTileIndex = animatedCaster,
         };
+    } else if (evidencePointLightStressEnabled_) {
+        constexpr std::array<Vec3, RenderFrameData::pointLightCapacity>
+            stressColors {
+                Vec3 { 1.0f, 0.42f, 0.30f },
+                Vec3 { 0.35f, 0.62f, 1.0f },
+                Vec3 { 0.45f, 1.0f, 0.52f },
+                Vec3 { 1.0f, 0.82f, 0.34f },
+                Vec3 { 0.90f, 0.38f, 1.0f },
+                Vec3 { 0.30f, 1.0f, 0.92f },
+                Vec3 { 1.0f, 0.56f, 0.74f },
+                Vec3 { 0.72f, 0.76f, 1.0f },
+            };
+        constexpr std::array<Vec2, RenderFrameData::pointLightCapacity>
+            stressPositions {
+                Vec2 { 0.18f, 0.18f }, Vec2 { 0.50f, 0.15f },
+                Vec2 { 0.82f, 0.18f }, Vec2 { 0.85f, 0.50f },
+                Vec2 { 0.82f, 0.82f }, Vec2 { 0.50f, 0.85f },
+                Vec2 { 0.18f, 0.82f }, Vec2 { 0.15f, 0.50f },
+            };
+        const float width = static_cast<float>(frame.levelWidth);
+        const float height = static_cast<float>(frame.levelHeight);
+        const float range = std::max(width, height) * 1.35f;
+        frame.lighting.pointLightCount =
+            RenderFrameData::pointLightCapacity;
+        for (std::size_t lightIndex = 0;
+             lightIndex < RenderFrameData::pointLightCapacity;
+             ++lightIndex) {
+            frame.lighting.pointLights[lightIndex] = {
+                .position = {
+                    width * stressPositions[lightIndex].x,
+                    height * stressPositions[lightIndex].y,
+                    2.1f + 0.15f * static_cast<float>(lightIndex % 3),
+                },
+                .color = stressColors[lightIndex],
+                .intensity = 3.5f,
+                .range = range,
+                .castsShadows = true,
+                .shadowBias = 0.012f,
+                .shadowOpacity = 0.72f,
+            };
+        }
     }
     return frame;
 }
