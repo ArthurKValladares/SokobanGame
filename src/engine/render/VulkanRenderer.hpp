@@ -348,6 +348,17 @@ private:
     RenderStats lastStats_ {};
     FrameTimeTelemetry scenePreparationTimeTelemetry_ {};
     FrameTimeTelemetry cpuFrameTimeTelemetry_ {};
+    FrameTimeTelemetry assetSchedulingTimeTelemetry_ {};
+    FrameTimeTelemetry frameFenceWaitTimeTelemetry_ {};
+    FrameTimeTelemetry assetMaintenanceTimeTelemetry_ {};
+    FrameTimeTelemetry imageAcquisitionTimeTelemetry_ {};
+    FrameTimeTelemetry commandRecordingTimeTelemetry_ {};
+    FrameTimeTelemetry submitPresentTimeTelemetry_ {};
+    // Recorded only for frames that actually publish an asset, so the
+    // startup/upload cost remains visible after the steady-state window.
+    FrameTimeTelemetry assetPublicationEventTimeTelemetry_ {};
+    uint64_t assetPublications_ = 0;
+    uint64_t assetPublicationFrames_ = 0;
     bool parallelScenePreparationEnabled_ = true;
     bool pointShadowOptimizationsEnabled_ = true;
     bool recorderScratchReuseEnabled_ = true;

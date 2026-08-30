@@ -767,6 +767,58 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             renderStats.recorderScratchGrowths,
             static_cast<unsigned long long>(
                 renderStats.recorderScratchCapacityBytes));
+        const auto showPhase = [](const char* label,
+                                   const RenderPhaseTiming& timing) {
+            if (!timing.available) {
+                ImGui::Text("%s timing pending", label);
+                return;
+            }
+            ImGui::Text(
+                "%s %.3f ms avg (p95 %.3f, max %.3f; %u samples)",
+                label,
+                timing.averageMilliseconds,
+                timing.p95Milliseconds,
+                timing.maximumMilliseconds,
+                timing.samples);
+        };
+        showPhase("Asset scheduling", renderStats.assetSchedulingTiming);
+        showPhase("Frame-fence wait", renderStats.frameFenceWaitTiming);
+        showPhase("Asset maintenance", renderStats.assetMaintenanceTiming);
+        showPhase("Image acquisition", renderStats.imageAcquisitionTiming);
+        showPhase("Command recording", renderStats.commandRecordingTiming);
+        showPhase("Submit/present", renderStats.submitPresentTiming);
+        showPhase("  Recorder setup", renderStats.recorderSetupTiming);
+        showPhase(
+            "  Game command recording",
+            renderStats.gameCommandRecordingTiming);
+        showPhase(
+            "    Shadow command recording",
+            renderStats.shadowCommandRecordingTiming);
+        showPhase(
+            "    Scene command recording",
+            renderStats.sceneCommandRecordingTiming);
+        showPhase(
+            "  SSAO command recording",
+            renderStats.ssaoCommandRecordingTiming);
+        showPhase(
+            "  Preview command recording",
+            renderStats.previewCommandRecordingTiming);
+        showPhase(
+            "  Output/UI command recording",
+            renderStats.outputCommandRecordingTiming);
+        showPhase(
+            "Asset publication events",
+            renderStats.assetPublicationEventTiming);
+        ImGui::Text(
+            "Asset publications %llu across %llu frames; texture uploads %llu/%llu complete (%u in flight)",
+            static_cast<unsigned long long>(renderStats.assetPublications),
+            static_cast<unsigned long long>(
+                renderStats.assetPublicationFrames),
+            static_cast<unsigned long long>(
+                renderStats.textureUploadCompletions),
+            static_cast<unsigned long long>(
+                renderStats.textureUploadSubmissions),
+            renderStats.textureUploadsInFlight);
         if (renderStats.scenePreparationTimingAvailable) {
             ImGui::Text(
                 "Scene preparation %.3f ms avg (p95 %.3f, max %.3f; %u samples)",

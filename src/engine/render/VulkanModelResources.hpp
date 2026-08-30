@@ -194,10 +194,15 @@ public:
     // image and requires the caller to refresh descriptors. Returns
     // `updated = false` when the texture is not resident.
     TextureUpdate updateTexture(RenderTexture texture, const ImageData& image);
+    struct PublicationResult {
+        std::size_t publications = 0;
+        bool descriptorsChanged = false;
+    };
+
     // Publishes up to maxPublications completed background tasks without
     // waiting. Failed resources stay observable in LoadingStats while frames
     // continue using available content and fallback textures.
-    [[nodiscard]] bool publishReadyAssets(
+    [[nodiscard]] PublicationResult publishReadyAssets(
         std::size_t maxPublications,
         uint32_t pendingFrameMask = 0);
     // Reclaims upload command buffers and staging resources whose GPU fences

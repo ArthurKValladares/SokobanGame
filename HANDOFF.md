@@ -40,11 +40,18 @@ chains for every unique source interpretation. BC7-capable devices upload the
 precomputed blocks directly, while unsupported devices and runtime-authored
 textures retain the original RGBA decode path.
 
-The recommended next step is a fresh command-recording and upload profile.
-A4 recorder scratch reuse, T5 point-shadow range-culling/cache work, T8
-Vulkan-free frame preparation and A3 residency are complete. Secondary command
-buffers and a transfer queue remain conditional on that profile identifying a
-durable CPU-recording or upload-ownership bottleneck.
+The post-A4 profile is complete. Uploads are bounded startup work: the normal
+capture submitted and completed 32 texture uploads and ended with zero in
+flight; the 64 KiB pressure capture completed 16 and also ended at zero. A
+transfer queue is therefore not justified. Command recording was the durable
+CPU cost, but the dominant cause was 204 directional-shadow quads encoded as
+individual push/draw pairs rather than a lack of recording threads. The
+directional pass now reads the existing frame-owned draw-instance buffer and
+emits one instanced tile draw. Matched evidence reduced command recording from
+2.817 to 1.332 ms and CPU frame time from 3.349 to 1.842 ms with byte-identical
+scene/AO captures. Secondary command buffers are no longer the next action:
+the captured frame is GPU-bound at 3.223 ms and the two remaining CPU game
+buckets are only 0.559 ms of shadow work and 0.474 ms of scene work.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
@@ -104,6 +111,13 @@ future tasks:
   batch vectors across frames. The sorter writes into caller-owned output and
   translucent depth ties use an explicit source ordinal, avoiding both the
   returned batch allocation and `stable_sort` temporary storage.
+- **9.9 recording profile and directional-shadow batching**: fixed-size phase
+  histories attribute scheduling, fence, maintenance, acquisition, recording,
+  submit/present, recorder subphases, publication events and upload completion.
+  Summaries are produced only for stats consumers, not in the frame hot path.
+  Directional tile casters use one instanced draw; point-light faces retain the
+  capacity-safe push-constant path because six faces across all lights can
+  exceed the shared frame-instance budget.
 - **V1/V3/V5/V6**: per-swapchain-image present semaphores, direct skinning
   SSBO indexing, Vulkan 1.3 optimized shader builds, and optional anisotropy.
 - **V2**: vendored VMA 3.2.1 is owned by `VulkanDeviceContext`; persistent,
@@ -141,6 +155,15 @@ future tasks:
   budgets evict through fence-owned retirement, and compressed textures select
   the finest complete mip tail that fits measured capacity. More flexible
   publication budgeting is conditional on profiling, not unfinished A3 work.
+- **A transfer queue is not current work.** Both normal and hard-budget upload
+  captures drained to zero in-flight submissions, while publication events
+  were bounded startup costs. Reconsider queue ownership only for a sustained
+  streaming workload with measured overlap or graphics-queue stalls.
+- **Secondary command buffers are not current work.** After directional-shadow
+  batching, the captured CPU frame is 1.842 ms against a 3.223 ms GPU frame,
+  and the remaining shadow/scene recording buckets are 0.559/0.474 ms. The
+  command-pool and worker synchronization cost does not have a measured CPU
+  bottleneck to solve.
 - **The material program is complete.** A runtime catalog assigns
   normal, metallic-roughness, emissive and occlusion handles from the resolved
   inventory and attaches only the relevant maps to each model's requirements.
@@ -722,10 +745,20 @@ surfaces.
 
 ### 9. Resume frame-scaling work
 
-With S2, T4, T5, V2, A3, A4 and T8 complete, continue by measured frame cost:
+S2, T4, T5, V2, A2, A3, A4, T8 and the post-A4 recording/upload profile are
+complete. Continue in this order:
 
-1. Re-profile command recording and uploads. Add secondary command buffers or
-   a transfer queue only if that profile identifies a durable bottleneck.
+1. Exercise the retained point-shadow push path in an authored multi-light
+   stress scene and preserve its exact cache/range behavior.
+2. Add GPU timestamps around directional shadows, main color/depth, SSAO and
+   output only if a representative Release capture still shows the GPU frame
+   materially above the CPU frame. Optimize the measured GPU pass, not the
+   whole renderer by assumption.
+3. Reconsider secondary command buffers only if a larger content scene makes
+   CPU command recording a durable frame bottleneck again. Reconsider a
+   transfer queue only for sustained streaming that leaves uploads in flight.
+4. Keep S1 fixed-tick simulation, S3 task-graph work and F5 RHI work conditional
+   on their original product requirements.
 
 #### 9.1 S2 persistent renderables and stable bounds — complete
 
@@ -868,7 +901,8 @@ retained-bound and culling counts. Evidence is under `build/t8-serial` and
 The focused test compares serial and parallel ordered outputs across both
 initial bounds construction and retained-bound reuse; it passes 1,696 checks.
 The complete Debug build, both Vulkan validation runs and all 69 CTest suites
-pass. Do not split command recording solely because T8 exists; re-profile it.
+pass. The later 9.9 profile confirmed that secondary recording is not the
+current bottleneck; keep T8 focused on Vulkan-free preparation.
 
 #### 9.7 T5 point-shadow range culling and unchanged-face cache — complete
 
@@ -936,6 +970,44 @@ runs, the complete Debug build and all 69 CTest suites pass. Treat the timing
 delta as run-specific; the deterministic acceptance result is zero steady-
 state capacity growth with unchanged commands and pixels.
 
+#### 9.9 Post-A4 profiling and directional-shadow batching — complete
+
+`VulkanRenderer` and `VulkanSceneRecorder` now retain fixed-size timing histories
+for asset scheduling, frame-fence waits, asset maintenance, acquisition,
+command recording, submit/present, asset-publication events, recorder setup,
+game, shadows, scene color/depth, SSAO, preview and output/UI. Evidence also
+reports publication counts and texture upload submissions, completions and
+current in-flight work. Timing histories only accept samples on the frame path;
+their average/p95/maximum summaries are sorted when `renderStats()` is consumed,
+avoiding the diagnostic regression found in the first instrumented run.
+
+The normal startup capture completed 32 texture uploads and the 64 KiB pressure
+capture completed 16; both ended at zero in flight. Asset publication events
+were startup-bound rather than a steady queue-ownership cost. Do not add a
+transfer queue without a new sustained-streaming profile.
+
+The corrected recorder split identified directional shadows as 1.949 ms of a
+2.487 ms game-recording bucket: 204 tile casters each projected four vertices,
+pushed a full `GpuDrawInstance`, and issued one draw. `shadow.vert.glsl` now
+reads the existing frame-owned draw-instance SSBO for directional tile casters.
+The recorder writes their projected vertices consecutively and emits one
+instanced draw. Point-light cube faces deliberately retain push constants: up
+to six faces across the full point-light capacity can multiply caster entries
+beyond the shared frame buffer, and T5 already bounds/caches that path.
+
+At 2880x1800 Debug with validation, command recording moved from 2.817 to 1.332
+ms, shadow recording from 1.949 to 0.559 ms, and CPU frame time from 3.349 to
+1.842 ms. Scene recording was 0.474 ms after the change. GPU average was 3.223
+ms in the final run, so secondary CPU recording is not the next bottleneck.
+The scene and filtered-AO PNG hashes match the pre-batch capture exactly.
+Evidence is under `build/post-a4-recording-split`,
+`build/post-a4-upload-pressure` and `build/batched-shadow-final`.
+
+The complete Debug build, shader compilation, validation-required 240-frame
+capture and all 69 CTest suites pass. Vulkan loader diagnostics about an absent
+Epic overlay manifest and the existing unused shader output warnings are host
+environment/pre-existing warnings, not validation failures from this packet.
+
 `S3` task-graph/work-stealing work should follow an observed scheduling
 bottleneck. `S1` fixed-tick simulation is conditional on continuous physics or
 gameplay motion. `F5` RHI work is conditional on a real second renderer or
@@ -981,8 +1053,14 @@ layout changes affect modules that appear unrelated to the immediate feature.
   tails, exact-byte accounting and stable material ranges.
 - `src/engine/render/VulkanSceneRecorder.*`: consumer of the prepared visible
   lists and owner of retained model-recording and point-shadow model-state
-  scratch; keep Vulkan recording downstream of Vulkan-free culling and keep
-  scratch synchronous to `record()`.
+  scratch; it also owns the low-overhead recorder-phase histories and batches
+  directional tile shadows through the draw-instance buffer. Keep Vulkan
+  recording downstream of Vulkan-free culling, keep scratch synchronous to
+  `record()`, and do not convert capacity-multiplying point faces without a
+  separate bounded storage contract.
+- `src/engine/render/FrameTimeTelemetry.hpp` and `RenderTypes.hpp`: fixed-size
+  evidence histories and public phase summaries. Record samples in-frame but
+  calculate sorted summaries only for an explicit stats consumer.
 - `src/engine/render/PointShadowFaceCache.*`: exact unchanged-depth key. Keep
   skinned casters uncacheable unless a real GPU-pose revision joins the key.
 - `tests/IsoScenePreparerTests.cpp`: stable identity/bounds behavior is covered;
@@ -1025,6 +1103,13 @@ Reproduce the A4 transient and retained recorder-scratch runs:
 ```powershell
 .\build\Debug\sokoban.exe --smoke-frames 240 --require-validation --disable-recorder-scratch-reuse --evidence-output build\a4-transient
 .\build\Debug\sokoban.exe --smoke-frames 240 --require-validation --evidence-output build\a4-retained
+```
+
+Reproduce the current recording/upload profile and directional-shadow result:
+
+```powershell
+.\build\Debug\sokoban.exe --smoke-frames 240 --require-validation --evidence-output build\batched-shadow-final
+.\build\Debug\sokoban.exe --smoke-frames 240 --require-validation --texture-residency-kib 64 --evidence-output build\post-a4-upload-pressure
 ```
 
 Build content explicitly when changing manifest, glTF or texture discovery:

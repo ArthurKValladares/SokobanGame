@@ -504,6 +504,15 @@ struct RenderFrameData {
             RenderFrameData::particleCapacity);
 }
 
+struct RenderPhaseTiming {
+    bool available = false;
+    uint32_t samples = 0;
+    double latestMilliseconds = 0.0;
+    double averageMilliseconds = 0.0;
+    double p95Milliseconds = 0.0;
+    double maximumMilliseconds = 0.0;
+};
+
 struct RenderStats {
     uint64_t frameIndex = 0;
     uint32_t totalTiles = 0;
@@ -548,6 +557,25 @@ struct RenderStats {
     bool parallelScenePreparationEnabled = true;
     bool pointShadowOptimizationsEnabled = true;
     bool recorderScratchReuseEnabled = true;
+    RenderPhaseTiming assetSchedulingTiming {};
+    RenderPhaseTiming frameFenceWaitTiming {};
+    RenderPhaseTiming assetMaintenanceTiming {};
+    RenderPhaseTiming imageAcquisitionTiming {};
+    RenderPhaseTiming commandRecordingTiming {};
+    RenderPhaseTiming submitPresentTiming {};
+    RenderPhaseTiming recorderSetupTiming {};
+    RenderPhaseTiming gameCommandRecordingTiming {};
+    RenderPhaseTiming shadowCommandRecordingTiming {};
+    RenderPhaseTiming sceneCommandRecordingTiming {};
+    RenderPhaseTiming ssaoCommandRecordingTiming {};
+    RenderPhaseTiming previewCommandRecordingTiming {};
+    RenderPhaseTiming outputCommandRecordingTiming {};
+    RenderPhaseTiming assetPublicationEventTiming {};
+    uint64_t assetPublications = 0;
+    uint64_t assetPublicationFrames = 0;
+    uint64_t textureUploadSubmissions = 0;
+    uint64_t textureUploadCompletions = 0;
+    uint32_t textureUploadsInFlight = 0;
     bool scenePreparationTimingAvailable = false;
     uint32_t scenePreparationTimingSamples = 0;
     double scenePreparationMilliseconds = 0.0;

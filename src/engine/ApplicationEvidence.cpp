@@ -10,6 +10,7 @@
 #include <iomanip>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace sokoban {
@@ -149,6 +150,54 @@ void Application::finishEvidenceCapture()
            << " capacity growths this frame; "
            << evidenceStats_.recorderScratchCapacityBytes
            << " bytes of model-recording capacity\n";
+    const auto writePhase = [&report](
+                                std::string_view label,
+                                const RenderPhaseTiming& timing) {
+        report << "- " << label << ": ";
+        if (!timing.available) {
+            report << "unavailable\n";
+            return;
+        }
+        report << "average " << timing.averageMilliseconds
+               << " ms, p95 " << timing.p95Milliseconds
+               << " ms, maximum " << timing.maximumMilliseconds
+               << " ms (" << timing.samples << " samples)\n";
+    };
+    writePhase("Asset scheduling", evidenceStats_.assetSchedulingTiming);
+    writePhase("Frame-fence wait", evidenceStats_.frameFenceWaitTiming);
+    writePhase("Asset maintenance", evidenceStats_.assetMaintenanceTiming);
+    writePhase("Image acquisition", evidenceStats_.imageAcquisitionTiming);
+    writePhase("Command recording", evidenceStats_.commandRecordingTiming);
+    writePhase("Submit/present", evidenceStats_.submitPresentTiming);
+    writePhase("  Recorder setup", evidenceStats_.recorderSetupTiming);
+    writePhase(
+        "  Game command recording",
+        evidenceStats_.gameCommandRecordingTiming);
+    writePhase(
+        "    Shadow command recording",
+        evidenceStats_.shadowCommandRecordingTiming);
+    writePhase(
+        "    Scene command recording",
+        evidenceStats_.sceneCommandRecordingTiming);
+    writePhase(
+        "  SSAO command recording",
+        evidenceStats_.ssaoCommandRecordingTiming);
+    writePhase(
+        "  Preview command recording",
+        evidenceStats_.previewCommandRecordingTiming);
+    writePhase(
+        "  Output/UI command recording",
+        evidenceStats_.outputCommandRecordingTiming);
+    writePhase(
+        "Asset publication events",
+        evidenceStats_.assetPublicationEventTiming);
+    report << "- Asset publications: " << evidenceStats_.assetPublications
+           << " across " << evidenceStats_.assetPublicationFrames
+           << " frames\n";
+    report << "- Texture uploads: "
+           << evidenceStats_.textureUploadSubmissions << " submitted, "
+           << evidenceStats_.textureUploadCompletions << " completed, "
+           << evidenceStats_.textureUploadsInFlight << " in flight\n";
     if (evidenceStats_.scenePreparationTimingAvailable) {
         report << "- Scene preparation: average "
                << evidenceStats_.scenePreparationAverageMilliseconds

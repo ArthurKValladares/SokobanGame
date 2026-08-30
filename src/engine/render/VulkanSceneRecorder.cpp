@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <vector>
 
@@ -35,6 +36,24 @@ namespace sokoban {
 namespace {
 
 constexpr float particleTextureMaterialMode = 5.0f;
+
+double elapsedMilliseconds(std::chrono::steady_clock::time_point start)
+{
+    return std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count();
+}
+
+RenderPhaseTiming renderPhaseTiming(const FrameTimeSummary& summary)
+{
+    return {
+        .available = summary.available(),
+        .samples = summary.sampleCount,
+        .latestMilliseconds = summary.latestMilliseconds,
+        .averageMilliseconds = summary.averageMilliseconds,
+        .p95Milliseconds = summary.p95Milliseconds,
+        .maximumMilliseconds = summary.maximumMilliseconds,
+    };
+}
 
 std::array<Vec4, 4> affineTransformColumns(
     Vec4 origin,
@@ -196,7 +215,14 @@ public:
             RenderFrameData::pointLightCapacity>& pointShadowModelStateScratch,
         bool pointShadowCacheEnabled,
         VulkanSceneRecorder::Scratch& scratch,
-        bool scratchReuseEnabled)
+        bool scratchReuseEnabled,
+        FrameTimeTelemetry& setupTimeTelemetry,
+        FrameTimeTelemetry& gameTimeTelemetry,
+        FrameTimeTelemetry& shadowTimeTelemetry,
+        FrameTimeTelemetry& sceneTimeTelemetry,
+        FrameTimeTelemetry& ssaoTimeTelemetry,
+        FrameTimeTelemetry& previewTimeTelemetry,
+        FrameTimeTelemetry& outputTimeTelemetry)
         : device_(resources.device)
         , gpuProfiler_(resources.gpuProfiler)
         , swapchain_(resources.swapchain)
@@ -211,6 +237,13 @@ public:
         , pointShadowCacheEnabled_(pointShadowCacheEnabled)
         , scratch_(scratch)
         , scratchReuseEnabled_(scratchReuseEnabled)
+        , setupTimeTelemetry_(setupTimeTelemetry)
+        , gameTimeTelemetry_(gameTimeTelemetry)
+        , shadowTimeTelemetry_(shadowTimeTelemetry)
+        , sceneTimeTelemetry_(sceneTimeTelemetry)
+        , ssaoTimeTelemetry_(ssaoTimeTelemetry)
+        , previewTimeTelemetry_(previewTimeTelemetry)
+        , outputTimeTelemetry_(outputTimeTelemetry)
     {
     }
 
@@ -320,6 +353,7 @@ public:
                 configuration_.rendererReconfigurationPending,
         };
 
+        const auto setupStart = std::chrono::steady_clock::now();
         // The camera the whole frame renders through. Built here rather than
         // in the descriptor class so that nothing below the recorder has to
         // know what an isometric layout is.
@@ -356,6 +390,9 @@ public:
             device_, commandBuffer, "Swapchain setup", { 0.3f, 0.7f, 1.0f, 1.0f });
         swapchain_.beginFrame(commandBuffer, imageIndex, stats_);
         vulkanDebug::endLabel(device_, commandBuffer);
+        setupTimeTelemetry_.record(elapsedMilliseconds(setupStart));
+
+        const auto gameStart = std::chrono::steady_clock::now();
         vulkanDebug::beginLabel(
             device_, commandBuffer, "Game rendering", { 0.2f, 0.9f, 0.4f, 1.0f });
         recordGameRendering(
@@ -365,6 +402,9 @@ public:
             frameData,
             scene);
         vulkanDebug::endLabel(device_, commandBuffer);
+        gameTimeTelemetry_.record(elapsedMilliseconds(gameStart));
+
+        const auto ssaoStart = std::chrono::steady_clock::now();
         vulkanDebug::beginLabel(
             device_, commandBuffer, "SSAO", { 0.8f, 0.4f, 1.0f, 1.0f });
         // The composite reads the scene and writes it back, which it cannot
@@ -387,10 +427,12 @@ public:
             },
             stats_);
         vulkanDebug::endLabel(device_, commandBuffer);
+        ssaoTimeTelemetry_.record(elapsedMilliseconds(ssaoStart));
         if (previewFrameData && previewScene) {
             // Preserve the completed main view before the preview replaces
             // the inset. ScreenPreviewOverlay samples this copy to feather
             // the main view back over the preview at its perimeter.
+            const auto previewStart = std::chrono::steady_clock::now();
             vulkanDebug::beginLabel(
                 device_, commandBuffer, "Preview rendering", { 1.0f, 0.7f, 0.2f, 1.0f });
             swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
@@ -401,7 +443,10 @@ public:
                 *previewFrameData,
                 *previewScene);
             vulkanDebug::endLabel(device_, commandBuffer);
+            previewTimeTelemetry_.record(
+                elapsedMilliseconds(previewStart));
         }
+        const auto outputStart = std::chrono::steady_clock::now();
         vulkanDebug::beginLabel(
             device_, commandBuffer, "Level transition", { 1.0f, 0.4f, 0.2f, 1.0f });
         recordLevelTransition(
@@ -465,6 +510,7 @@ public:
         vkCheck(
             vkEndCommandBuffer(commandBuffer),
             "vkEndCommandBuffer failed");
+        outputTimeTelemetry_.record(elapsedMilliseconds(outputStart));
         return stats_;
     }
 
@@ -552,9 +598,7 @@ private:
     {
         shadowPass_.begin(
             commandBuffer, pipelines_.shadow(), stats_);
-        for (const std::array<Vec3, 4>& face : scene.shadowFaces) {
-            drawShadowFace(commandBuffer, scene.shadowLayout, face);
-        }
+        drawShadowFaces(commandBuffer, scene.shadowLayout, scene.shadowFaces);
         VkPipeline boundModelPipeline = VK_NULL_HANDLE;
         for (std::size_t tileIndex : scene.shadowModelIndices) {
             const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
@@ -651,6 +695,7 @@ private:
                     cubeFace,
                     pipelines_.shadow(),
                     stats_);
+                bindDescriptorSet(commandBuffer);
                 for (std::size_t faceIndex : casters.faceIndices) {
                     drawPointShadowFace(
                         commandBuffer,
@@ -723,10 +768,13 @@ private:
     {
         const bool hasTranslucency = scene.hasTranslucentContent ||
             hasAuthoredBlendMaterials(frameData, scene);
+        const auto shadowStart = std::chrono::steady_clock::now();
         if (shadowPass_.valid() && pipelines_.shadow()) {
             recordShadowMapRendering(
                 commandBuffer, frameData, scene);
         }
+        shadowTimeTelemetry_.record(elapsedMilliseconds(shadowStart));
+        const auto sceneStart = std::chrono::steady_clock::now();
         swapchain_.ensureSceneColorReadable(
             commandBuffer, stats_);
         recordScenePass(
@@ -750,6 +798,7 @@ private:
                 commandBuffer, stats_);
         }
         if (!hasTranslucency) {
+            sceneTimeTelemetry_.record(elapsedMilliseconds(sceneStart));
             return;
         }
         swapchain_.copyResolvedSceneColor(
@@ -766,6 +815,7 @@ private:
             true,
             false,
             { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });
+        sceneTimeTelemetry_.record(elapsedMilliseconds(sceneStart));
     }
 
     void recordPreviewRendering(
@@ -2276,23 +2326,31 @@ private:
         return writeDrawInstance(constants);
     }
 
-    void drawShadowFace(
+    void drawShadowFaces(
         VkCommandBuffer commandBuffer,
         const ShadowRenderLayout& layout,
-        const std::array<Vec3, 4>& worldVertices)
+        const std::vector<std::array<Vec3, 4>>& faces)
     {
-        std::array<Vec4, 4> shadowVertices {};
-        for (std::size_t i = 0; i < worldVertices.size(); ++i) {
-            shadowVertices[i] = IsoScenePreparer::projectShadowPoint(
-                layout, worldVertices[i]);
+        uint32_t firstInstance = 0;
+        uint32_t instanceCount = 0;
+        for (const std::array<Vec3, 4>& worldVertices : faces) {
+            std::array<Vec4, 4> shadowVertices {};
+            for (std::size_t i = 0; i < worldVertices.size(); ++i) {
+                shadowVertices[i] = IsoScenePreparer::projectShadowPoint(
+                    layout, worldVertices[i]);
+            }
+            const uint32_t instance = writeDrawInstance({
+                .vertices = shadowVertices,
+            });
+            if (instanceCount == 0) {
+                firstInstance = instance;
+            }
+            ++instanceCount;
         }
-        // Clip space, not world. A shadow pass has one camera per sun and six
-        // per point light, so there is no single transform a uniform could
-        // hold; these stay projected on the CPU and nothing in a shadow pass
-        // asks where it is in the world.
-        const GpuDrawInstance constants {
-            .vertices = shadowVertices,
-        };
+        if (instanceCount == 0) {
+            return;
+        }
+        const GpuDrawInstance batchConstants {};
         vkCmdPushConstants(
             commandBuffer,
             pipelines_.layout(),
@@ -2300,8 +2358,9 @@ private:
                 VK_SHADER_STAGE_FRAGMENT_BIT,
             0,
             sizeof(GpuDrawInstance),
-            &constants);
-        vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+            &batchConstants);
+        bindDescriptorSet(commandBuffer);
+        vkCmdDraw(commandBuffer, 6, instanceCount, 0, firstInstance);
     }
 
     void drawPointShadowFace(
@@ -2315,9 +2374,14 @@ private:
             shadowVertices[i] = projectPointShadow(
                 light, cubeFace, worldVertices[i]);
         }
-        const GpuDrawInstance constants {
+        // Point lights can multiply the same caster set by six faces and up
+        // to the full light capacity. Keep their proven push-constant path so
+        // batching the directional map cannot exhaust the frame instance
+        // buffer in a point-light stress scene.
+        GpuDrawInstance constants {
             .vertices = shadowVertices,
         };
+        constants.passData[0].x = 1.0f;
         vkCmdPushConstants(
             commandBuffer,
             pipelines_.layout(),
@@ -2667,6 +2731,13 @@ private:
     bool pointShadowCacheEnabled_ = true;
     VulkanSceneRecorder::Scratch& scratch_;
     bool scratchReuseEnabled_ = true;
+    FrameTimeTelemetry& setupTimeTelemetry_;
+    FrameTimeTelemetry& gameTimeTelemetry_;
+    FrameTimeTelemetry& shadowTimeTelemetry_;
+    FrameTimeTelemetry& sceneTimeTelemetry_;
+    FrameTimeTelemetry& ssaoTimeTelemetry_;
+    FrameTimeTelemetry& previewTimeTelemetry_;
+    FrameTimeTelemetry& outputTimeTelemetry_;
     RenderStats stats_ {};
 };
 
@@ -2688,7 +2759,14 @@ RenderStats VulkanSceneRecorder::record(
         pointShadowModelStateScratch_,
         pointShadowCacheEnabled_,
         *scratch_,
-        scratchReuseEnabled_).record(
+        scratchReuseEnabled_,
+        setupTimeTelemetry_,
+        gameTimeTelemetry_,
+        shadowTimeTelemetry_,
+        sceneTimeTelemetry_,
+        ssaoTimeTelemetry_,
+        previewTimeTelemetry_,
+        outputTimeTelemetry_).record(
         commandBuffer,
         imageIndex,
         frameData,
@@ -2696,6 +2774,24 @@ RenderStats VulkanSceneRecorder::record(
         previewFrameData,
         previewScene,
         uiDrawData);
+}
+
+void VulkanSceneRecorder::populateTimingStats(RenderStats& stats) const
+{
+    stats.recorderSetupTiming = renderPhaseTiming(
+        setupTimeTelemetry_.summary());
+    stats.gameCommandRecordingTiming = renderPhaseTiming(
+        gameTimeTelemetry_.summary());
+    stats.shadowCommandRecordingTiming = renderPhaseTiming(
+        shadowTimeTelemetry_.summary());
+    stats.sceneCommandRecordingTiming = renderPhaseTiming(
+        sceneTimeTelemetry_.summary());
+    stats.ssaoCommandRecordingTiming = renderPhaseTiming(
+        ssaoTimeTelemetry_.summary());
+    stats.previewCommandRecordingTiming = renderPhaseTiming(
+        previewTimeTelemetry_.summary());
+    stats.outputCommandRecordingTiming = renderPhaseTiming(
+        outputTimeTelemetry_.summary());
 }
 
 } // namespace sokoban

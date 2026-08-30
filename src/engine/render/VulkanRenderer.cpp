@@ -34,6 +34,24 @@
 namespace sokoban {
 namespace {
 
+double elapsedMilliseconds(std::chrono::steady_clock::time_point start)
+{
+    return std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count();
+}
+
+RenderPhaseTiming renderPhaseTiming(const FrameTimeSummary& summary)
+{
+    return {
+        .available = summary.available(),
+        .samples = summary.sampleCount,
+        .latestMilliseconds = summary.latestMilliseconds,
+        .averageMilliseconds = summary.averageMilliseconds,
+        .p95Milliseconds = summary.p95Milliseconds,
+        .maximumMilliseconds = summary.maximumMilliseconds,
+    };
+}
+
 Vec3 transformedModelPoint(
     const ModelTransformPoints& transform,
     Vec3 localPoint)
@@ -435,6 +453,7 @@ void VulkanRenderer::drawFrame(
     }
     const auto cpuFrameStart = std::chrono::steady_clock::now();
     try {
+    const auto assetSchedulingStart = std::chrono::steady_clock::now();
     const PreparedFrameScratch& prepared =
         resolvePreparedFrame(preparedFrame);
     const RenderFrameData& frameData = prepared.frameData;
@@ -449,6 +468,8 @@ void VulkanRenderer::drawFrame(
         frameAssetRequirements_.requireTexture(command.texture);
     }
     ensureAssets(frameAssetRequirements_);
+    assetSchedulingTimeTelemetry_.record(
+        elapsedMilliseconds(assetSchedulingStart));
 
 #if SOKOBAN_ENABLE_DEBUG_UI
     // Finish the ImGui frame even when swapchain acquisition is out of date
@@ -457,6 +478,7 @@ void VulkanRenderer::drawFrame(
 #endif
 
     auto& frame = frames_[currentFrame_];
+    const auto frameFenceWaitStart = std::chrono::steady_clock::now();
     vkCheck(
         vkWaitForFences(
             deviceContext_.device(),
@@ -465,10 +487,25 @@ void VulkanRenderer::drawFrame(
             VK_TRUE,
             UINT64_MAX),
         "vkWaitForFences failed");
+    frameFenceWaitTimeTelemetry_.record(
+        elapsedMilliseconds(frameFenceWaitStart));
+
+    const auto assetMaintenanceStart = std::chrono::steady_clock::now();
     completeFrame(currentFrame_);
     gpuProfiler_.collectCompletedFrame(currentFrame_);
     modelResources_.retireCompletedUploads();
-    if (modelResources_.publishReadyAssets(1, pendingFrameMask())) {
+    const auto assetPublicationStart = std::chrono::steady_clock::now();
+    const VulkanModelResources::PublicationResult publication =
+        modelResources_.publishReadyAssets(1, pendingFrameMask());
+    const double assetPublicationMilliseconds =
+        elapsedMilliseconds(assetPublicationStart);
+    if (publication.publications != 0) {
+        assetPublicationEventTimeTelemetry_.record(
+            assetPublicationMilliseconds);
+        assetPublications_ += publication.publications;
+        ++assetPublicationFrames_;
+    }
+    if (publication.descriptorsChanged) {
         descriptorSync_.resourcesChanged();
     }
     if (descriptorSync_.needsUpdate(currentFrame_)) {
@@ -483,10 +520,15 @@ void VulkanRenderer::drawFrame(
         modelResources_.updateAnimations(
             *prepared.previewFrameData, currentFrame_);
     }
+    assetMaintenanceTimeTelemetry_.record(
+        elapsedMilliseconds(assetMaintenanceStart));
 
     uint32_t imageIndex = 0;
+    const auto imageAcquisitionStart = std::chrono::steady_clock::now();
     VkResult acquired = activeResources_.swapchain->acquire(
         frame.imageAvailable, imageIndex);
+    imageAcquisitionTimeTelemetry_.record(
+        elapsedMilliseconds(imageAcquisitionStart));
     if (acquired == VK_ERROR_OUT_OF_DATE_KHR) {
         swapchainRecreationRequested_ = true;
         applyPendingReconfiguration();
@@ -499,6 +541,7 @@ void VulkanRenderer::drawFrame(
         swapchainRecreationRequested_ = true;
     }
 
+    const auto commandRecordingStart = std::chrono::steady_clock::now();
     vkCheck(
         vkResetFences(
             deviceContext_.device(), 1, &frame.inFlight),
@@ -550,6 +593,8 @@ void VulkanRenderer::drawFrame(
             : nullptr,
         prepared.previewScene ? &*prepared.previewScene : nullptr,
         uiDrawData);
+    commandRecordingTimeTelemetry_.record(
+        elapsedMilliseconds(commandRecordingStart));
     lastStats_.gpuTimestampsSupported = gpuProfiler_.supported();
     lastStats_.parallelScenePreparationEnabled =
         parallelScenePreparationEnabled_;
@@ -617,6 +662,7 @@ void VulkanRenderer::drawFrame(
         .pSignalSemaphoreInfos = &signalSemaphore,
     };
 
+    const auto submitPresentStart = std::chrono::steady_clock::now();
     vkCheck(
         vkQueueSubmit2(
             deviceContext_.graphicsQueue(),
@@ -637,6 +683,8 @@ void VulkanRenderer::drawFrame(
     } else {
         vkCheck(presented, "vkQueuePresentKHR failed");
     }
+    submitPresentTimeTelemetry_.record(
+        elapsedMilliseconds(submitPresentStart));
 
     cpuFrameTimeTelemetry_.record(std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - cpuFrameStart).count());
@@ -647,6 +695,15 @@ void VulkanRenderer::drawFrame(
     lastStats_.cpuFrameAverageMilliseconds = cpuTiming.averageMilliseconds;
     lastStats_.cpuFrameP95Milliseconds = cpuTiming.p95Milliseconds;
     lastStats_.cpuFrameMaximumMilliseconds = cpuTiming.maximumMilliseconds;
+    lastStats_.assetPublications = assetPublications_;
+    lastStats_.assetPublicationFrames = assetPublicationFrames_;
+    const VulkanModelResources::LoadingStats loadingStats =
+        modelResources_.loadingStats();
+    lastStats_.textureUploadSubmissions =
+        loadingStats.textureUploadSubmissions;
+    lastStats_.textureUploadCompletions =
+        loadingStats.textureUploadCompletions;
+    lastStats_.textureUploadsInFlight = loadingStats.uploadingTextures;
 
     currentFrame_ = (currentFrame_ + 1) % maxFramesInFlight_;
     applyPendingReconfiguration();
@@ -1165,7 +1222,23 @@ VkSampleCountFlagBits VulkanRenderer::activeSampleCount() const
 
 RenderStats VulkanRenderer::renderStats() const
 {
-    return lastStats_;
+    RenderStats stats = lastStats_;
+    stats.assetSchedulingTiming = renderPhaseTiming(
+        assetSchedulingTimeTelemetry_.summary());
+    stats.frameFenceWaitTiming = renderPhaseTiming(
+        frameFenceWaitTimeTelemetry_.summary());
+    stats.assetMaintenanceTiming = renderPhaseTiming(
+        assetMaintenanceTimeTelemetry_.summary());
+    stats.imageAcquisitionTiming = renderPhaseTiming(
+        imageAcquisitionTimeTelemetry_.summary());
+    stats.commandRecordingTiming = renderPhaseTiming(
+        commandRecordingTimeTelemetry_.summary());
+    stats.submitPresentTiming = renderPhaseTiming(
+        submitPresentTimeTelemetry_.summary());
+    stats.assetPublicationEventTiming = renderPhaseTiming(
+        assetPublicationEventTimeTelemetry_.summary());
+    sceneRecorder_.populateTimingStats(stats);
+    return stats;
 }
 
 VulkanModelResources::LoadingStats VulkanRenderer::assetLoadingStats() const

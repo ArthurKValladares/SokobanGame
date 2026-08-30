@@ -256,8 +256,8 @@
 <body>
   <header class="shell">
     <p class="eyebrow">Current-state review · 30 August 2026</p>
-    <h1>A4 removes steady-state recorder scratch churn.</h1>
-    <p class="deck">Sokoban 3D now has complete CPU/GPU material behavior, a device-bounded texture heap, HDR output, a dedicated post-tonemap UI path, physical view-space SSAO, retained world bounds, conservative main-scene frustum culling, one tested VMA-backed memory seam, staged KTX2/BC7 artifacts, fence-owned eviction, pressure-driven mip-tail residency, deterministic parallel Vulkan-free frame preparation, range-bounded point shadows with exact unchanged-layer reuse, and retained model-recording scratch. The next action is to re-profile recording and uploads before choosing any larger threading or queue change.</p>
+    <h1>Measured shadow batching removes the recording bottleneck.</h1>
+    <p class="deck">Sokoban 3D now has complete CPU/GPU material behavior, a device-bounded texture heap, HDR output, a dedicated post-tonemap UI path, physical view-space SSAO, retained world bounds, conservative main-scene frustum culling, one tested VMA-backed memory seam, staged KTX2/BC7 artifacts, fence-owned eviction, pressure-driven mip-tail residency, deterministic parallel Vulkan-free frame preparation, range-bounded point shadows with exact unchanged-layer reuse, retained model-recording scratch, low-overhead frame-phase telemetry, and one instanced directional-shadow tile draw. Upload captures drain to zero in-flight work, while matched shadow evidence cuts command recording from 2.817 to 1.332 ms with identical scene/AO hashes.</p>
     <div class="metrics" aria-label="Current repository facts">
       <div class="metric"><b>36</b><span>manifest models</span></div>
       <div class="metric"><b>42 / 1024</b><span>textures on validated GPU</span></div>
@@ -281,7 +281,7 @@
     <section id="verdict">
       <div class="section-head"><span class="num">01</span><h2>Current verdict</h2></div>
       <div class="callout">
-        <strong>Next program:</strong> profile command recording and uploads again. A4, T5, T8 and A3 are baseline; secondary command buffers and transfer-queue ownership remain evidence-dependent.
+        <strong>Next program:</strong> validate the retained point-shadow path in an authored multi-light stress scene, then add per-pass GPU timestamps only if representative Release evidence remains GPU-bound. The current measurements reject both a transfer queue and secondary command buffers as the next change.
       </div>
       <div class="grid" style="margin-top:1rem">
         <article class="card">
@@ -291,8 +291,8 @@
         </article>
         <article class="card">
           <p class="kicker">What comes next</p>
-          <h3>Measure the remaining CPU path</h3>
-          <p>Attribute command-recording and upload cost after the completed scratch change. Add secondary command buffers or transfer-queue ownership only for a durable measured bottleneck.</p>
+          <h3>Follow the GPU evidence</h3>
+          <p>The final capture records a 1.842 ms CPU frame and a 3.223 ms GPU frame. Validate point-light stress behavior, then timestamp directional shadows, scene, SSAO and output in a representative Release capture before changing another architecture boundary.</p>
         </article>
         <article class="card">
           <p class="kicker">What not to overbuild</p>
@@ -322,7 +322,7 @@
             <tr><td>T4</td><td><span class="status done">Done</span></td><td>Retained AABBs build conservative main color/depth lists; uncertain models fail open, picking/shadows are preserved, and matched evidence is pixel-identical.</td><td>Extend to model mesh bounds or shadow volumes only with their own conservative contracts.</td></tr>
             <tr><td>T5</td><td><span class="status done">Done</span></td><td>Exact face bounds and loaded static-model bounds range-cull point-light casters; unchanged exact light/caster states reuse all six cube layers. Skinned casters fail open and invalidate reuse.</td><td>Preserve byte-identical optimized/control evidence and exact cache invalidation.</td></tr>
             <tr><td>T6–T7</td><td><span class="status done">Done</span></td><td>4x default MSAA and AO-gated depth copy are implemented.</td><td>Revisit only with measured temporal-AA or V7 work.</td></tr>
-            <tr><td>T8</td><td><span class="status done">Done</span></td><td>A dedicated worker overlaps shadow/particle lists with ordered main preparation, or whole main/preview scenes when a preview exists. Serial/parallel evidence is byte-identical.</td><td>Keep Vulkan recording after the join; re-profile before adding secondary command buffers.</td></tr>
+            <tr><td>T8</td><td><span class="status done">Done</span></td><td>A dedicated worker overlaps shadow/particle lists with ordered main preparation, or whole main/preview scenes when a preview exists. Serial/parallel evidence is byte-identical.</td><td>Keep Vulkan recording after the join; current CPU/GPU evidence does not justify secondary command buffers.</td></tr>
             <tr><td>V1/V3/V5/V6</td><td><span class="status done">Done</span></td><td>Semaphore ownership, skinning access, shader target/optimization and anisotropy are corrected.</td><td>Maintain through validation.</td></tr>
             <tr><td>V2</td><td><span class="status done">Done</span></td><td>Vendored VMA owns device-local, mapped upload and readback memory; renderer code has no direct allocation or mapping calls.</td><td>Preserve arena/ring suballocation and fence ownership through later profiling work.</td></tr>
             <tr><td>V4</td><td><span class="status done">Done</span></td><td>Vulkan 1.2 feature gating, a separate per-frame texture set and device-bounded runtime capacity are live.</td><td>Preserve the fallback-filled, fence-safe update contract.</td></tr>
@@ -331,6 +331,7 @@
             <tr><td>A2</td><td><span class="status done">Done</span></td><td>The content tool stages KTX2 BC7 mip chains per source interpretation; capable devices upload native blocks and source decoding remains the fallback.</td><td>Preserve sRGB/linear identity, source fallback and exact compressed-byte accounting.</td></tr>
             <tr><td>A3</td><td><span class="status done">Done</span></td><td>Async preparation, publication budgets, exact compressed accounting, fence-owned eviction and finest-fitting complete mip tails are implemented.</td><td>Preserve full quality by default and use the explicit budget override for pressure validation.</td></tr>
             <tr><td>A4</td><td><span class="status done">Done</span></td><td>Model candidates, resolved draws, ordered items and batches reuse one synchronous recorder scratch object. Stable translucent ties use an explicit ordinal and the sorter writes into caller-owned output.</td><td>Preserve zero steady-state growth and keep scratch references inside <code>record()</code>.</td></tr>
+            <tr><td>9.9</td><td><span class="status done">Done</span></td><td>Fixed histories attribute frame/recorder phases without sorting in the hot path. Directional tile shadows use one SSBO-backed instanced draw; point faces keep their bounded push path.</td><td>Stress authored point lights, then profile GPU passes in Release before selecting another optimization.</td></tr>
             <tr><td>S1</td><td><span class="status conditional">Conditional</span></td><td>Gameplay uses variable timestep.</td><td>Fixed tick only before continuous physics/motion requires it.</td></tr>
             <tr><td>S2</td><td><span class="status done">Done</span></td><td>Tiles, water and authored faces retain identity plus revisioned world AABBs; prepared frames own safe snapshots and main/preview caches are isolated.</td><td>Preserve frame-local camera, color and sorting state and T4's fail-open consumers.</td></tr>
             <tr><td>S3</td><td><span class="status conditional">Measured</span></td><td>TaskSystem is a useful pool but has one queue and no dependency graph.</td><td>Change only after scheduling profiles identify a bottleneck.</td></tr>
@@ -513,8 +514,9 @@
               <div class="task"><span class="task-id">9.6</span><div><b>T8 — complete</b><p>A dedicated preparation worker overlaps auxiliary shadow/particle lists with ordered main preparation; main and preview scenes use their separate caches concurrently. Matched serial/parallel captures are byte-identical.</p></div></div>
               <div class="task"><span class="task-id">9.7</span><div><b>T5 — complete</b><p>Point-light face and static-model casters are conservatively range-bounded. Exact unchanged light/caster states reuse all six cube layers; skinned casters fail open and invalidate reuse.</p></div></div>
               <div class="task"><span class="task-id">9.8</span><div><b>A4 — complete</b><p>Four model-recording vectors retain a 9,600-byte high-water mark across opaque, translucent, main and preview passes. The steady matched frame fell from four capacity growths to zero; scene/AO output is byte-identical, while CPU average moved from 3.126 ms to 2.955 ms in the captured run.</p></div></div>
+              <div class="task"><span class="task-id">9.9</span><div><b>Profile and batch directional shadows — complete</b><p>Fixed-size histories attribute scheduling, fence, maintenance, acquisition, recording, submit/present, publication and recorder subphases; summaries are calculated only for stats consumers. Normal and pressure upload runs end with zero work in flight, rejecting a transfer queue. The measured 204 directional tile casters now share one draw-instance-buffer-backed instanced draw; point-light cube faces retain their capacity-safe push path. Command recording fell from 2.817 to 1.332 ms, shadow recording from 1.949 to 0.559 ms and CPU frame time from 3.349 to 1.842 ms. Scene and AO hashes are identical.</p></div></div>
             </div>
-            <p class="accept"><b>Gate:</b> all 69 Debug suites pass. Matched A4 control/retained runs are validation-clean, report four versus zero steady-frame capacity growths, and produce byte-identical scene and AO captures. Secondary command buffers and a transfer queue still require a new profile.</p>
+            <p class="accept"><b>Gate:</b> all 69 Debug suites pass. The validation-required 240-frame batched-shadow capture is clean and byte-identical to the pre-batch scene/AO captures. The final frame is GPU-bound at 3.223 ms versus 1.842 ms CPU; secondary command buffers and transfer-queue ownership are explicitly deferred until new content produces a measured need.</p>
           </div>
         </article>
       </div>
@@ -526,7 +528,7 @@
         <article class="card"><p class="kicker">Visibility</p><h3>T4 is complete</h3><p>Persistent bounds now feed conservative main-scene lists with matched validation evidence. Do not add occlusion culling until profiles justify its complexity.</p></article>
         <article class="card"><p class="kicker">Texture format</p><h3>A2 is complete</h3><p>KTX2/BC7 artifacts, complete mip chains, capability selection, source fallback and exact compressed accounting are live through the VMA seam.</p></article>
         <article class="card"><p class="kicker">Residency</p><h3>A3 is complete</h3><p>The system has requirements, hard budgets, exact compressed accounting, fence-owned eviction and pressure-driven complete mip tails. Preserve the scheduler and full-quality default.</p></article>
-        <article class="card"><p class="kicker">CPU recording</p><h3>A4 is complete</h3><p>Steady model recording now reuses its scratch allocations. Profile the remaining recorder and upload path before introducing secondary buffers or transfer-queue ownership.</p></article>
+        <article class="card"><p class="kicker">CPU recording</p><h3>9.9 is complete</h3><p>Steady model scratch is retained and 204 directional tile casters collapse to one instanced draw. The current profile is GPU-bound; secondary buffers and a transfer queue do not solve the measured frame.</p></article>
         <article class="card"><p class="kicker">Conditional architecture</p><h3>S1, S3 and F5</h3><p>Fixed tick needs continuous gameplay physics. A task graph needs a measured scheduling problem. An RHI needs a second backend or platform. Until then, these are not priority work.</p></article>
       </div>
     </section>

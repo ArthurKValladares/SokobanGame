@@ -508,7 +508,7 @@ bool VulkanModelResources::waitForAssets(const RenderAssetRequirements& requirem
     return descriptorsChanged;
 }
 
-bool VulkanModelResources::publishReadyAssets(
+VulkanModelResources::PublicationResult VulkanModelResources::publishReadyAssets(
     std::size_t maxPublications,
     uint32_t pendingFrameMask)
 {
@@ -519,7 +519,11 @@ bool VulkanModelResources::publishReadyAssets(
     const auto finish = [&] {
         const bool evictionChangedDescriptors =
             std::exchange(textureDescriptorsDirty_, false);
-        return descriptorsChanged || evictionChangedDescriptors;
+        return PublicationResult {
+            .publications = publications,
+            .descriptorsChanged =
+                descriptorsChanged || evictionChangedDescriptors,
+        };
     };
 
     for (uint32_t i = 0; i < animations_.size(); ++i) {

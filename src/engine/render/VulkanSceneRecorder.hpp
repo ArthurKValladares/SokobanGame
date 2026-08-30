@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/render/IsoScenePreparer.hpp"
+#include "engine/render/FrameTimeTelemetry.hpp"
 #include "engine/render/PointShadowFaceCache.hpp"
 #include "engine/render/RenderTypes.hpp"
 #include "engine/ui/Ui.hpp"
@@ -77,6 +78,10 @@ public:
         const PreparedRenderScene* previewScene,
         const UiDrawData& uiDrawData) const;
 
+    // Summaries sort the fixed timing histories. Keep that diagnostic work
+    // out of the recording hot path and perform it only for a stats consumer.
+    void populateTimingStats(RenderStats& stats) const;
+
     void setPointShadowCacheEnabled(bool enabled)
     {
         pointShadowCacheEnabled_ = enabled;
@@ -104,6 +109,13 @@ private:
     mutable std::array<std::vector<PointShadowModelState>,
         RenderFrameData::pointLightCapacity> pointShadowModelStateScratch_;
     mutable std::unique_ptr<Scratch> scratch_;
+    mutable FrameTimeTelemetry setupTimeTelemetry_ {};
+    mutable FrameTimeTelemetry gameTimeTelemetry_ {};
+    mutable FrameTimeTelemetry shadowTimeTelemetry_ {};
+    mutable FrameTimeTelemetry sceneTimeTelemetry_ {};
+    mutable FrameTimeTelemetry ssaoTimeTelemetry_ {};
+    mutable FrameTimeTelemetry previewTimeTelemetry_ {};
+    mutable FrameTimeTelemetry outputTimeTelemetry_ {};
 };
 
 } // namespace sokoban
