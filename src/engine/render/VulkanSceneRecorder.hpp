@@ -72,6 +72,13 @@ public:
     void setPointShadowCacheEnabled(bool enabled)
     {
         pointShadowCacheEnabled_ = enabled;
+        if (!enabled) {
+            for (std::size_t lightIndex = 0;
+                 lightIndex < RenderFrameData::pointLightCapacity;
+                 ++lightIndex) {
+                pointShadowFaceCache_.invalidate(lightIndex);
+            }
+        }
     }
 
 private:

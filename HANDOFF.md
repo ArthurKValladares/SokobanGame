@@ -40,10 +40,11 @@ chains for every unique source interpretation. BC7-capable devices upload the
 precomputed blocks directly, while unsupported devices and runtime-authored
 textures retain the original RGBA decode path.
 
-The recommended next step is T5: range-cull point-shadow casters, measure the
-six-face workload reduction, and only then cache unchanged faces. T8 Vulkan-free
-frame preparation and A3 residency are complete. Secondary command buffers and
-a transfer queue remain conditional on a new recording or upload profile.
+The recommended next step is A4: reuse recorder scratch storage now that the
+scene and point-shadow list structures have settled. T5 point-shadow
+range-culling/cache work, T8 Vulkan-free frame preparation and A3 residency are
+complete. Secondary command buffers and a transfer queue remain conditional on
+a new recording or upload profile.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
@@ -94,6 +95,11 @@ future tasks:
   shadow/particle list generation with main-scene projection, culling and
   sorting. When a screen preview exists, whole main/preview preparations run
   concurrently through their already-separate retained caches.
+- **T5**: point-shadow face casters are conservatively range-culled in Vulkan-
+  free preparation, static loaded models use transformed mesh bounds, and exact
+  unchanged light/caster states reuse all six stored cube layers. Skinned
+  casters fail open and force re-recording because bind-pose bounds and frame
+  inputs are not a proof that the GPU pose is unchanged.
 - **V1/V3/V5/V6**: per-swapchain-image present semaphores, direct skinning
   SSBO indexing, Vulkan 1.3 optimized shader builds, and optional anisotropy.
 - **V2**: vendored VMA 3.2.1 is owned by `VulkanDeviceContext`; persistent,
@@ -712,11 +718,10 @@ surfaces.
 
 ### 9. Resume frame-scaling work
 
-With S2, T4, V2, A3 and T8 complete, continue by measured frame cost:
+With S2, T4, T5, V2, A3 and T8 complete, continue by measured frame cost:
 
-1. **T5:** range-cull point-shadow casters, then cache unchanged faces.
-2. **A4:** reuse recorder scratch storage after scene data structures settle.
-3. Re-profile command recording and uploads; add secondary command buffers or
+1. **A4:** reuse recorder scratch storage after scene data structures settle.
+2. Re-profile command recording and uploads; add secondary command buffers or
    a transfer queue only if that profile identifies a durable bottleneck.
 
 #### 9.1 S2 persistent renderables and stable bounds — complete
@@ -862,6 +867,42 @@ initial bounds construction and retained-bound reuse; it passes 1,696 checks.
 The complete Debug build, both Vulkan validation runs and all 69 CTest suites
 pass. Do not split command recording solely because T8 exists; re-profile it.
 
+#### 9.7 T5 point-shadow range culling and unchanged-face cache — complete
+
+The Vulkan-free auxiliary-preparation job now builds exact AABBs alongside sun
+shadow faces and filters each point light's face-caster indices against its
+influence sphere without changing source order. The closest-point sphere/AABB
+test includes a floating-point boundary guard, so exact range contact fails
+open. At recording time, loaded static models use their real mesh AABB
+transformed into world space. Unready bounds and skinned models fail open;
+bind-pose bounds are not conservative for an animated pose.
+
+`PointShadowFaceCache` retains exact light position/range, selected world-space
+faces, complete static model-tile state and asset readiness. It deliberately
+does not hash the key. An exact match reuses all six cube layers without a
+depth transition, clear or rendering pass. Light, geometry, ordering,
+transform, animation input or readiness changes re-record all six faces.
+Any in-range skinned caster invalidates reuse because animation-controller
+history is not fully represented by the frame tile. The cache remains safe
+across the two frames in flight because submissions share the ordered graphics
+queue and the cube array outlives swapchain generations.
+
+`--evidence-point-light` adds a deterministic evidence-only light, while
+`--disable-point-shadow-optimizations` restores the all-casters/all-frames
+control. At 2880x1800, the optimized frozen frame retained 186 of 945 face
+candidates, culled 11 of 14 static-model candidates and avoided 4,554 projected
+face draws. It reused all six cube faces instead of adding six render passes.
+The 120-sample CPU-frame average fell from 12.297 ms to 3.043 ms; GPU average
+fell from 3.634 ms to 3.055 ms. Scene and AO captures are byte-identical.
+Evidence is under `build/t5-legacy` and `build/t5-optimized`.
+
+Geometry coverage pins inside, touching, separated, invalid and negative-radius
+sphere/AABB cases. Scene-preparation coverage pins stable filtered ordering,
+disabled-control counts, emitter exclusion and serial/parallel equivalence.
+The exact cache tests cover light, face order/geometry, model state, readiness
+and explicit invalidation. Both validation-required 240-frame evidence runs,
+the complete Debug build and all 69 CTest suites pass.
+
 `S3` task-graph/work-stealing work should follow an observed scheduling
 bottleneck. `S1` fixed-tick simulation is conditional on continuous physics or
 gameplay motion. `F5` RHI work is conditional on a real second renderer or
@@ -906,7 +947,10 @@ layout changes affect modules that appear unrelated to the immediate feature.
   completed A3 residency; preserve fence-owned retirement, finest-fitting mip
   tails, exact-byte accounting and stable material ranges.
 - `src/engine/render/VulkanSceneRecorder.*`: consumer of the prepared visible
-  lists; keep Vulkan recording downstream of Vulkan-free culling.
+  lists and owner of retained point-shadow model-state scratch; keep Vulkan
+  recording downstream of Vulkan-free culling.
+- `src/engine/render/PointShadowFaceCache.*`: exact unchanged-depth key. Keep
+  skinned casters uncacheable unless a real GPU-pose revision joins the key.
 - `tests/IsoScenePreparerTests.cpp`: stable identity/bounds behavior is covered;
   add conservative visibility cases before changing recorder behavior.
 - `src/engine/render/VulkanSsaoPass.*`, `shaders/ssao*.glsl` and
@@ -933,6 +977,13 @@ Reproduce the T8 matched preparation profile:
 ```powershell
 .\build\Debug\sokoban.exe --smoke-frames 240 --require-validation --serial-scene-preparation --evidence-output build\t8-serial
 .\build\Debug\sokoban.exe --smoke-frames 240 --require-validation --evidence-output build\t8-parallel
+```
+
+Reproduce the T5 point-shadow control and optimized runs:
+
+```powershell
+.\build\Debug\sokoban.exe --smoke-frames 240 --require-validation --evidence-point-light --disable-point-shadow-optimizations --evidence-output build\t5-legacy
+.\build\Debug\sokoban.exe --smoke-frames 240 --require-validation --evidence-point-light --evidence-output build\t5-optimized
 ```
 
 Build content explicitly when changing manifest, glTF or texture discovery:

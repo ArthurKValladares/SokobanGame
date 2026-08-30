@@ -551,17 +551,21 @@ private:
             stats_.pointShadowModelCandidates += static_cast<uint32_t>(
                 casters.modelTileIndices.size());
             const Sphere influence { light.position, light.range };
+            bool hasSkinnedCaster = false;
             for (std::size_t tileIndex : casters.modelTileIndices) {
                 const RenderFrameData::Tile& tile =
                     frameData.tiles[tileIndex];
                 const bool ready = models_.tileReadyForDraw(
                     tile, configuration_.descriptorFrameIndex);
+                const bool skinned =
+                    models_.modelUsesGpuSkinning(tile.model);
+                hasSkinnedCaster = hasSkinnedCaster || skinned;
                 bool inRange = true;
                 // Bind-pose bounds are not conservative for skinned motion.
                 // Static loaded meshes have exact local bounds and may be
                 // transformed into a safe world-space range test.
                 if (pointShadowCacheEnabled_ && ready &&
-                    !models_.modelUsesGpuSkinning(tile.model)) {
+                    !skinned) {
                     const Aabb bounds = modelWorldBounds(
                         tile, models_.boundsForModel(tile.model));
                     if (bounds.valid()) {
@@ -579,7 +583,7 @@ private:
                     .ready = ready,
                 });
             }
-            if (pointShadowCacheEnabled_ &&
+            if (pointShadowCacheEnabled_ && !hasSkinnedCaster &&
                 pointShadowFaceCache_.reusable(
                     lightIndex,
                     light,
@@ -630,7 +634,7 @@ private:
                 shadowPass_.endPointFace(commandBuffer);
             }
             stats_.pointShadowCubeFacesRendered += 6;
-            if (pointShadowCacheEnabled_) {
+            if (pointShadowCacheEnabled_ && !hasSkinnedCaster) {
                 pointShadowFaceCache_.markRendered(
                     lightIndex,
                     light,

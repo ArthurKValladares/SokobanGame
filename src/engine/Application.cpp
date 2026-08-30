@@ -1902,6 +1902,15 @@ RenderFrameData Application::buildRenderFrame(
     particleSystem_.appendRenderData(frame);
     frame.levelTransitionAmount = levelTransition_.amount();
     if (evidencePointLightEnabled_) {
+        std::optional<std::size_t> animatedCaster;
+        for (std::size_t tileIndex = 0;
+             tileIndex < frame.tiles.size();
+             ++tileIndex) {
+            if (frame.tiles[tileIndex].animationInstanceId != 0) {
+                animatedCaster = tileIndex;
+                break;
+            }
+        }
         frame.lighting.pointLightCount = 1;
         frame.lighting.pointLights[0] = {
             .position = {
@@ -1915,6 +1924,7 @@ RenderFrameData Application::buildRenderFrame(
             .castsShadows = true,
             .shadowBias = 0.012f,
             .shadowOpacity = 0.85f,
+            .emitterTileIndex = animatedCaster,
         };
     }
     return frame;

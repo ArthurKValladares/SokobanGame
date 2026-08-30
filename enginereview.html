@@ -256,8 +256,8 @@
 <body>
   <header class="shell">
     <p class="eyebrow">Current-state review · 30 August 2026</p>
-    <h1>T8 frame preparation is complete.</h1>
-    <p class="deck">Sokoban 3D now has complete CPU/GPU material behavior, a device-bounded texture heap, HDR output, a dedicated post-tonemap UI path, physical view-space SSAO, retained world bounds, conservative main-scene frustum culling, one tested VMA-backed memory seam, staged KTX2/BC7 artifacts, fence-owned eviction, pressure-driven mip-tail residency, and deterministic parallel Vulkan-free frame preparation. The next packet is T5 point-shadow caster range culling.</p>
+    <h1>T5 point shadows are bounded and cached.</h1>
+    <p class="deck">Sokoban 3D now has complete CPU/GPU material behavior, a device-bounded texture heap, HDR output, a dedicated post-tonemap UI path, physical view-space SSAO, retained world bounds, conservative main-scene frustum culling, one tested VMA-backed memory seam, staged KTX2/BC7 artifacts, fence-owned eviction, pressure-driven mip-tail residency, deterministic parallel Vulkan-free frame preparation, and range-bounded point shadows with exact unchanged-layer reuse. The next packet is A4 recorder scratch reuse.</p>
     <div class="metrics" aria-label="Current repository facts">
       <div class="metric"><b>36</b><span>manifest models</span></div>
       <div class="metric"><b>42 / 1024</b><span>textures on validated GPU</span></div>
@@ -281,7 +281,7 @@
     <section id="verdict">
       <div class="section-head"><span class="num">01</span><h2>Current verdict</h2></div>
       <div class="callout">
-        <strong>Next program:</strong> range-cull T5 point-shadow casters, measure the six-face workload reduction, and cache unchanged faces only after the range policy is stable. T8 and A3 are baseline.
+        <strong>Next program:</strong> reuse A4 recorder scratch containers now that prepared scene and point-shadow lists have settled. T5, T8 and A3 are baseline.
       </div>
       <div class="grid" style="margin-top:1rem">
         <article class="card">
@@ -291,8 +291,8 @@
         </article>
         <article class="card">
           <p class="kicker">What comes next</p>
-          <h3>Reduce point-shadow work first</h3>
-          <p>Conservatively range-cull point-light casters before designing a face cache. Secondary command buffers or transfer-queue ownership still need their own evidence.</p>
+          <h3>Remove measured recorder churn</h3>
+          <p>Inventory per-frame recorder containers and retain only the scratch proven safe to reuse. Secondary command buffers or transfer-queue ownership still need their own evidence.</p>
         </article>
         <article class="card">
           <p class="kicker">What not to overbuild</p>
@@ -320,7 +320,7 @@
             <tr><td>F5</td><td><span class="status conditional">Conditional</span></td><td>Vulkan types still cross broad renderer seams.</td><td>Build an RHI only for a real second backend/platform.</td></tr>
             <tr><td>T1–T3</td><td><span class="status done">Done</span></td><td>Instanced tiles, opaque sorting and model back-face culling are implemented.</td><td>Preserve their draw ordering and winding invariants.</td></tr>
             <tr><td>T4</td><td><span class="status done">Done</span></td><td>Retained AABBs build conservative main color/depth lists; uncertain models fail open, picking/shadows are preserved, and matched evidence is pixel-identical.</td><td>Extend to model mesh bounds or shadow volumes only with their own conservative contracts.</td></tr>
-            <tr><td>T5</td><td><span class="status open">Open</span></td><td>Shadow-casting point lights still render six faces each frame.</td><td>Range-cull casters, then cache unchanged faces.</td></tr>
+            <tr><td>T5</td><td><span class="status done">Done</span></td><td>Exact face bounds and loaded static-model bounds range-cull point-light casters; unchanged exact light/caster states reuse all six cube layers. Skinned casters fail open and invalidate reuse.</td><td>Preserve byte-identical optimized/control evidence and exact cache invalidation.</td></tr>
             <tr><td>T6–T7</td><td><span class="status done">Done</span></td><td>4x default MSAA and AO-gated depth copy are implemented.</td><td>Revisit only with measured temporal-AA or V7 work.</td></tr>
             <tr><td>T8</td><td><span class="status done">Done</span></td><td>A dedicated worker overlaps shadow/particle lists with ordered main preparation, or whole main/preview scenes when a preview exists. Serial/parallel evidence is byte-identical.</td><td>Keep Vulkan recording after the join; re-profile before adding secondary command buffers.</td></tr>
             <tr><td>V1/V3/V5/V6</td><td><span class="status done">Done</span></td><td>Semaphore ownership, skinning access, shader target/optimization and anisotropy are corrected.</td><td>Maintain through validation.</td></tr>

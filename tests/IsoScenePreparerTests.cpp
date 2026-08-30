@@ -271,6 +271,14 @@ void testPointShadowCastersAreRangeCulledConservatively()
     // remove indices but must never reorder the survivors.
     CHECK(std::ranges::is_sorted(
         scene.pointShadowCasters[0].faceIndices));
+
+    IsoScenePreparer legacyPreparer;
+    legacyPreparer.setPointShadowRangeCulling(false);
+    PreparedRenderScene legacy;
+    legacyPreparer.prepare(frame, { 1920.0f, 1080.0f }, legacy);
+    CHECK(legacy.pointShadowFaceCandidates == 22);
+    CHECK(legacy.pointShadowFacesInRange == 22);
+    CHECK(legacy.pointShadowFacesCulled == 0);
 }
 
 void testPointShadowFaceCacheRequiresExactStableGeometry()
