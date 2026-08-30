@@ -78,6 +78,8 @@ int main(int argc, char** argv)
                     options.evidenceAmbientOcclusionEnabled,
                 .evidenceFrustumCullingEnabled =
                     options.evidenceFrustumCullingEnabled,
+                .textureResidencyBudgetKiB =
+                    options.textureResidencyBudgetKiB,
             }
         };
 #if SOKOBAN_ENABLE_DEBUG_UI

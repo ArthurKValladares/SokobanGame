@@ -10,6 +10,7 @@
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/RuntimeTextureCatalog.hpp"
 #include "engine/render/TextureSourceLoader.hpp"
+#include "engine/render/TextureMipResidency.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanGeometryArena.hpp"
 #include "engine/render/VulkanMemoryAllocator.hpp"
@@ -121,6 +122,10 @@ public:
         uint32_t retiringTextures = 0;
         uint64_t retiringModelBytes = 0;
         uint64_t retiringTextureBytes = 0;
+        uint32_t mipDegradedTextures = 0;
+        uint32_t residentTextureMipLevels = 0;
+        uint32_t availableTextureMipLevels = 0;
+        uint64_t mipOmittedBytes = 0;
         bool residencyBudgetBlocked = false;
         uint32_t uploadingTextures = 0;
         uint64_t textureUploadSubmissions = 0;
@@ -149,7 +154,8 @@ public:
         const AssetManifest& manifest,
         const RuntimeTextureCatalog& textureCatalog,
         uint32_t textureDescriptorCapacity,
-        float maxSamplerAnisotropy = 1.0f);
+        float maxSamplerAnisotropy = 1.0f,
+        AssetLoadingBudget loadingBudget = {});
     void destroy();
 
     // Queues independent CPU work and returns immediately. Visible requests
@@ -337,6 +343,9 @@ private:
         std::exception_ptr failure;
         uint64_t lastRequested = 0;
         uint64_t gpuBytes = 0;
+        uint64_t fullQualityBytes = 0;
+        uint32_t sourceMipLevels = 0;
+        uint32_t residentBaseMip = 0;
     };
 
     struct AnimationSlot {
@@ -384,6 +393,8 @@ private:
     [[nodiscard]] bool makeTextureResident(
         std::size_t protectedTexture,
         uint64_t requiredBytes);
+    [[nodiscard]] uint64_t texturePublicationCapacity(
+        std::size_t protectedTexture) const;
     void retireModel(ModelSlot& slot);
     void retireTexture(TextureSlot& slot);
     void destroyCompletedResidencyRetirements();
@@ -443,6 +454,7 @@ private:
         TextureInterpretation sampling);
     void beginTextureUpload(
         const CompressedTextureArtifact& texture,
+        uint32_t sourceBaseMip,
         OwnedImage& gpuImage,
         VkSampler& sampler,
         PendingTextureUpload& upload,
@@ -455,6 +467,7 @@ private:
         PendingTextureUpload& upload);
     void recordTextureCopy(
         const CompressedTextureArtifact& texture,
+        uint32_t sourceBaseMip,
         OwnedImage& gpuImage,
         PendingTextureUpload& upload);
     void destroyTextureUpload(PendingTextureUpload& upload);

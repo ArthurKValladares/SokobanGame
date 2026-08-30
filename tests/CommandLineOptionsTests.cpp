@@ -41,6 +41,8 @@ void testEmptyIsANormalRun()
         "ambient occlusion is enabled in evidence runs by default");
     check(options.evidenceFrustumCullingEnabled,
         "frustum culling is enabled in evidence runs by default");
+    check(options.textureResidencyBudgetKiB == 0,
+        "texture residency uses its production default");
 }
 
 void testFlags()
@@ -56,6 +58,12 @@ void testFlags()
     check(smoke.smokeRun(), "a non-zero count is a smoke run");
     check(smoke.requireValidation, "validation requirement is read");
     check(smoke.saveDirectory == "/tmp/profile", "save directory is read");
+
+    const sokoban::CommandLineOptions residency = parse(
+        { "--smoke-frames", "120", "--texture-residency-kib", "64" });
+    check(!residency.malformed, "residency stress invocation parses");
+    check(residency.textureResidencyBudgetKiB == 64,
+        "texture residency override is read");
 
     const sokoban::CommandLineOptions evidence = parse(
         { "--smoke-frames", "180", "--evidence-output", "/tmp/evidence",
@@ -112,6 +120,12 @@ void testMalformedInput()
         "empty evidence directory is rejected");
     check(parse({ "--evidence-render-scale" }).malformed,
         "missing evidence scale is rejected");
+    check(parse({ "--texture-residency-kib" }).malformed,
+        "missing residency budget is rejected");
+    check(parse({ "--texture-residency-kib", "0" }).malformed,
+        "zero residency budget is rejected");
+    check(parse({ "--texture-residency-kib", "12x" }).malformed,
+        "malformed residency budget is rejected");
     check(parse({ "--smoke-frames", "0" }).malformed,
         "zero frames is rejected");
     check(parse({ "--smoke-frames", "-1" }).malformed,

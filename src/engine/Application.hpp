@@ -64,6 +64,9 @@ struct ApplicationOptions {
     int evidenceRenderScalePercent = 100;
     bool evidenceAmbientOcclusionEnabled = true;
     bool evidenceFrustumCullingEnabled = true;
+    // Zero keeps the production default. A non-zero override exists for
+    // deterministic residency stress/validation runs.
+    std::uint64_t textureResidencyBudgetKiB = 0;
 };
 
 struct ApplicationTimingEventWatchState {

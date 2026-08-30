@@ -413,6 +413,7 @@ add_library(sokoban_core STATIC
     src/engine/render/RuntimeTextureCatalog.cpp
     src/engine/render/SsaoMath.cpp
     src/engine/render/TextureSourceLoader.cpp
+    src/engine/render/TextureMipResidency.cpp
     src/engine/render/Tonemap.cpp
     src/engine/render/UploadRingAllocator.cpp
     src/engine/render/RendererReconfiguration.cpp

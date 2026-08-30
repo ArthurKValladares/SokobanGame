@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <exception>
 #include <functional>
+#include <limits>
 #include <ranges>
 #include <stdexcept>
 #include <string>
@@ -37,6 +38,21 @@ AntiAliasingMode antiAliasingModeForSamples(int samples)
     case 4: return AntiAliasingMode::Msaa4x;
     default: return AntiAliasingMode::Msaa8x;
     }
+}
+
+AssetLoadingBudget assetLoadingBudgetFor(const ApplicationOptions& options)
+{
+    AssetLoadingBudget budget;
+    if (options.textureResidencyBudgetKiB != 0) {
+        if (options.textureResidencyBudgetKiB >
+            std::numeric_limits<uint64_t>::max() / 1024ULL) {
+            throw std::invalid_argument(
+                "Texture residency budget is too large");
+        }
+        budget.textureResidencyBytes =
+            options.textureResidencyBudgetKiB * 1024ULL;
+    }
+    return budget;
 }
 
 bool SDLCALL simulationTimingEventWatch(void* userdata, SDL_Event* event)
@@ -110,7 +126,8 @@ Application::Application(ApplicationOptions options)
           {
               .vsync = playerProfile_.settings.video.vsync,
               .allowTearing = playerProfile_.settings.video.allowTearing,
-          })
+          },
+          assetLoadingBudgetFor(options))
     , ui_(uiFont_)
     , audioSystem_(assetRoot_, assetManifest_)
     , mirrorSwapParticleEffect_(
@@ -604,6 +621,18 @@ void Application::run()
             if (!evidenceOutputDirectory_.empty()) {
                 finishEvidenceCapture();
             }
+            const VulkanModelResources::LoadingStats assetStats =
+                renderer_.assetLoadingStats();
+            log::info(log::Category::Rendering)
+                << "Texture residency "
+                << assetStats.textureResidencyBytes << " / "
+                << assetStats.textureResidencyBudgetBytes
+                << " bytes; mip levels "
+                << assetStats.residentTextureMipLevels << " / "
+                << assetStats.availableTextureMipLevels << "; "
+                << assetStats.mipDegradedTextures
+                << " reduced textures omitted "
+                << assetStats.mipOmittedBytes << " bytes.";
             log::info(log::Category::Application)
                 << "Smoke run finished after " << renderedFrames
                 << " frames.";

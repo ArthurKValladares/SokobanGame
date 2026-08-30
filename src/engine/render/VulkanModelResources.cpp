@@ -12,7 +12,6 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
-#include <type_traits>
 #include <utility>
 
 namespace sokoban {
@@ -217,9 +216,11 @@ void VulkanModelResources::create(
     const AssetManifest& manifest,
     const RuntimeTextureCatalog& textureCatalog,
     uint32_t textureDescriptorCapacity,
-    float maxSamplerAnisotropy)
+    float maxSamplerAnisotropy,
+    AssetLoadingBudget loadingBudget)
 {
     destroy();
+    scheduler_ = AssetLoadScheduler(loadingBudget);
     if (textureDescriptorCapacity == 0 ||
         textureCatalog.textures().size() > textureDescriptorCapacity ||
         textureCatalog.manifestTextureCount() != manifest.textures().size()) {
@@ -1035,24 +1036,53 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
         const PreparedTextureSource& texture = *slot.prepared;
         const TextureInterpretation& interpretation =
             textureDefinitions_.at(textureIndex)->identity.interpretation;
-        const uint64_t bytes = textureBytes(texture, interpretation);
+        uint64_t bytes = textureBytes(texture, interpretation);
+        std::optional<TextureMipResidencyPlan> mipPlan;
+        if (const auto* compressed =
+                std::get_if<CompressedTextureArtifact>(&texture)) {
+            mipPlan = chooseTextureMipResidency(
+                *compressed,
+                texturePublicationCapacity(textureIndex));
+            if (!mipPlan) {
+                markResidencyBudgetBlocked();
+                return false;
+            }
+            bytes = mipPlan->residentBytes;
+        }
         if (!makeTextureResident(textureIndex, bytes)) {
             return false;
         }
-        std::visit(
-            [&](const auto& prepared) {
-                beginTextureUpload(
-                    prepared,
-                    slot.gpu.image,
-                    slot.gpu.sampler,
-                    slot.upload,
-                    interpretation);
-                slot.gpu.width = prepared.width;
-                slot.gpu.height = prepared.height;
-                slot.gpu.compressed = !std::is_same_v<
-                    std::decay_t<decltype(prepared)>, ImageData>;
-            },
-            texture);
+        if (const auto* compressed =
+                std::get_if<CompressedTextureArtifact>(&texture)) {
+            beginTextureUpload(
+                *compressed,
+                mipPlan->sourceBaseMip,
+                slot.gpu.image,
+                slot.gpu.sampler,
+                slot.upload,
+                interpretation);
+            slot.gpu.width = mipPlan->width;
+            slot.gpu.height = mipPlan->height;
+            slot.gpu.compressed = true;
+            slot.fullQualityBytes = mipPlan->fullQualityBytes;
+            slot.sourceMipLevels =
+                static_cast<uint32_t>(compressed->mips.size());
+            slot.residentBaseMip = mipPlan->sourceBaseMip;
+        } else {
+            const ImageData& image = std::get<ImageData>(texture);
+            beginTextureUpload(
+                image,
+                slot.gpu.image,
+                slot.gpu.sampler,
+                slot.upload,
+                interpretation);
+            slot.gpu.width = image.width;
+            slot.gpu.height = image.height;
+            slot.gpu.compressed = false;
+            slot.fullQualityBytes = bytes;
+            slot.sourceMipLevels = slot.gpu.image.mipLevels;
+            slot.residentBaseMip = 0;
+        }
         slot.gpuBytes = bytes;
         textureResidencyBytes_ += bytes;
         textureResidencyPeakBytes_ = std::max(
@@ -1221,6 +1251,31 @@ bool VulkanModelResources::makeTextureResident(
     destroyCompletedResidencyRetirements();
     residencyBudgetBlocked_ = false;
     return textureResidencyBytes_ + requiredBytes <= budget;
+}
+
+uint64_t VulkanModelResources::texturePublicationCapacity(
+    std::size_t protectedTexture) const
+{
+    const uint64_t budget = scheduler_.budget().textureResidencyBytes;
+    const uint64_t nonRetiringBytes =
+        textureResidencyBytes_ - retiringTextureBytes_;
+    uint64_t capacity = budget > nonRetiringBytes
+        ? budget - nonRetiringBytes
+        : 0;
+    for (std::size_t index = 0; index < textures_.size(); ++index) {
+        const TextureSlot& slot = textures_[index];
+        if (index == protectedTexture || slot.state != LoadState::Ready ||
+            slot.gpuBytes == 0 ||
+            (visibleRequestStamp_ != 0 &&
+                slot.lastRequested == visibleRequestStamp_)) {
+            continue;
+        }
+        capacity += std::min(slot.gpuBytes, budget - capacity);
+        if (capacity == budget) {
+            break;
+        }
+    }
+    return capacity;
 }
 
 void VulkanModelResources::retireModel(ModelSlot& slot)
@@ -1613,6 +1668,18 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
         result.requestedAssets += texture.state != LoadState::Unrequested;
         if (texture.state == LoadState::Uploading) {
             ++result.uploadingTextures;
+        }
+        if ((texture.state == LoadState::Ready ||
+                texture.state == LoadState::Uploading) &&
+            texture.sourceMipLevels != 0) {
+            result.availableTextureMipLevels += texture.sourceMipLevels;
+            result.residentTextureMipLevels +=
+                texture.sourceMipLevels - texture.residentBaseMip;
+            if (texture.residentBaseMip != 0) {
+                ++result.mipDegradedTextures;
+                result.mipOmittedBytes +=
+                    texture.fullQualityBytes - texture.gpuBytes;
+            }
         }
     }
     for (const AnimationSlot& animation : animations_) {
@@ -2024,12 +2091,14 @@ void VulkanModelResources::beginTextureUpload(
 
 void VulkanModelResources::beginTextureUpload(
     const CompressedTextureArtifact& texture,
+    uint32_t sourceBaseMip,
     OwnedImage& textureImage,
     VkSampler& sampler,
     PendingTextureUpload& upload,
     TextureInterpretation sampling)
 {
-    if (texture.width == 0 || texture.height == 0 || texture.mips.empty()) {
+    if (texture.width == 0 || texture.height == 0 || texture.mips.empty() ||
+        sourceBaseMip >= texture.mips.size()) {
         throw std::runtime_error("Compressed texture contains no mip data");
     }
     const VkFormat textureFormat = texture.format ==
@@ -2042,12 +2111,14 @@ void VulkanModelResources::beginTextureUpload(
         throw std::runtime_error(
             "Compressed texture format disagrees with source colour space");
     }
-    textureImage.mipLevels = static_cast<uint32_t>(texture.mips.size());
+    const CompressedTextureMip& residentBase = texture.mips[sourceBaseMip];
+    textureImage.mipLevels =
+        static_cast<uint32_t>(texture.mips.size()) - sourceBaseMip;
     const VkImageCreateInfo imageInfo {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = VK_IMAGE_TYPE_2D,
         .format = textureFormat,
-        .extent = { texture.width, texture.height, 1 },
+        .extent = { residentBase.width, residentBase.height, 1 },
         .mipLevels = textureImage.mipLevels,
         .arrayLayers = 1,
         .samples = VK_SAMPLE_COUNT_1_BIT,
@@ -2098,7 +2169,7 @@ void VulkanModelResources::beginTextureUpload(
     vulkanDebug::setObjectName(
         device_, VK_OBJECT_TYPE_SAMPLER, sampler,
         "BC7 model texture sampler");
-    recordTextureCopy(texture, textureImage, upload);
+    recordTextureCopy(texture, sourceBaseMip, textureImage, upload);
 }
 
 void VulkanModelResources::recordTextureCopy(
@@ -2282,13 +2353,17 @@ void VulkanModelResources::recordTextureCopy(
 
 void VulkanModelResources::recordTextureCopy(
     const CompressedTextureArtifact& texture,
+    uint32_t sourceBaseMip,
     OwnedImage& textureImage,
     PendingTextureUpload& upload)
 {
     std::vector<VkDeviceSize> levelOffsets;
-    levelOffsets.reserve(texture.mips.size());
+    levelOffsets.reserve(textureImage.mipLevels);
     VkDeviceSize uploadBytes = 0;
-    for (const CompressedTextureMip& mip : texture.mips) {
+    for (uint32_t sourceLevel = sourceBaseMip;
+         sourceLevel < texture.mips.size();
+         ++sourceLevel) {
+        const CompressedTextureMip& mip = texture.mips[sourceLevel];
         uploadBytes = (uploadBytes + 15U) & ~VkDeviceSize { 15U };
         levelOffsets.push_back(uploadBytes);
         uploadBytes += mip.bytes.size();
@@ -2300,9 +2375,10 @@ void VulkanModelResources::recordTextureCopy(
     }
     upload.staging = *staging;
     std::vector<VkBufferImageCopy> copyRegions;
-    copyRegions.reserve(texture.mips.size());
-    for (uint32_t level = 0; level < texture.mips.size(); ++level) {
-        const CompressedTextureMip& mip = texture.mips[level];
+    copyRegions.reserve(textureImage.mipLevels);
+    for (uint32_t level = 0; level < textureImage.mipLevels; ++level) {
+        const CompressedTextureMip& mip =
+            texture.mips[sourceBaseMip + level];
         uploadRing_.write(
             upload.staging,
             levelOffsets[level],
@@ -2506,6 +2582,9 @@ VulkanModelResources::TextureUpdate VulkanModelResources::updateTexture(
         slot.gpuBytes = textureBytes(
             PreparedTextureSource { image },
             textureDefinitions_[texture.index()]->identity.interpretation);
+        slot.fullQualityBytes = slot.gpuBytes;
+        slot.sourceMipLevels = slot.gpu.image.mipLevels;
+        slot.residentBaseMip = 0;
         textureResidencyBytes_ = textureResidencyBytes_ - previousBytes +
             slot.gpuBytes;
         textureResidencyPeakBytes_ = std::max(

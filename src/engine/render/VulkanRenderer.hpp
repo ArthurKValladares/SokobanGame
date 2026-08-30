@@ -116,7 +116,8 @@ public:
         const FontAtlas& uiFont,
         AntiAliasingMode antiAliasingMode = AntiAliasingMode::Msaa4x,
         int renderScalePercent = 100,
-        PresentationPolicy presentationPolicy = {});
+        PresentationPolicy presentationPolicy = {},
+        AssetLoadingBudget assetLoadingBudget = {});
     ~VulkanRenderer();
 
     VulkanRenderer(const VulkanRenderer&) = delete;

@@ -40,9 +40,10 @@ chains for every unique source interpretation. BC7-capable devices upload the
 precomputed blocks directly, while unsupported devices and runtime-authored
 textures retain the original RGBA decode path.
 
-The recommended next step is measured mip/LOD residency policy on top of the
-completed compressed mip artifacts (A3 remainder). Fence-owned eviction
-retirement is complete.
+The recommended next step is T8: profile and parallelize Vulkan-free frame
+preparation before considering secondary command buffers or a transfer queue.
+A3 residency, including fence-owned retirement and pressure-driven compressed
+mip selection, is complete.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
@@ -121,12 +122,11 @@ future tasks:
 
 ## Corrections to the remaining review inventory
 
-- **A3 is partly implemented, not untouched.** CPU preparation is asynchronous,
-  publication is budgeted, requirements drive residency, and model/texture
-  byte budgets evict through fence-owned retirement without a device-wide
-  stall. Compressed-size accounting is exact. What remains is measured mip/LOD
-  residency and, only if profiling warrants it, more flexible publication
-  budgeting.
+- **A3 is complete for the current renderer.** CPU preparation is asynchronous,
+  publication is budgeted, requirements drive residency, model/texture byte
+  budgets evict through fence-owned retirement, and compressed textures select
+  the finest complete mip tail that fits measured capacity. More flexible
+  publication budgeting is conditional on profiling, not unfinished A3 work.
 - **The material program is complete.** A runtime catalog assigns
   normal, metallic-roughness, emissive and occlusion handles from the resolved
   inventory and attaches only the relevant maps to each model's requirements.
@@ -708,15 +708,12 @@ surfaces.
 
 ### 9. Resume frame-scaling work
 
-With S2, T4, V2 and A3 retirement complete, continue by measured frame and
-memory cost:
+With S2, T4, V2 and A3 complete, continue by measured frame cost:
 
-1. **A3 mip/LOD:** add a measured residency policy over the complete BC7 mip
-   artifacts; compressed byte accounting is already exact.
-2. **T8:** parallelize Vulkan-free scene preparation first; add secondary
+1. **T8:** parallelize Vulkan-free scene preparation first; add secondary
    command buffers or a transfer queue only after profiling.
-3. **T5:** range-cull point-shadow casters, then cache unchanged faces.
-4. **A4:** reuse recorder scratch storage after scene data structures settle.
+2. **T5:** range-cull point-shadow casters, then cache unchanged faces.
+3. **A4:** reuse recorder scratch storage after scene data structures settle.
 
 #### 9.1 S2 persistent renderables and stable bounds — complete
 
@@ -803,7 +800,7 @@ Laptop GPU completed with clean upload and teardown. The deterministic capture
 under `build/a2-evidence` shows intact scene, character, ground and prop
 textures without block-layout corruption.
 
-#### 9.5 A3 fence-owned retirement — complete; mip residency next
+#### 9.5 A3 fence-owned retirement and mip residency — complete
 
 Residency eviction no longer calls `vkDeviceWaitIdle`. Models and textures move
 to retirement queues carrying the exact mask of submitted frame slots that can
@@ -817,10 +814,23 @@ stable and return to a coalescing free list only after retirement.
 `FrameResourceTrackerTests.cpp` covers overlapping two-frame retirement,
 immediate zero-mask release and the rule that later submissions are not added
 retroactively. The Debug panel exposes retiring model/texture counts and bytes.
-All 69 CTest suites pass, including Vulkan smoke, and a validation-required
-120-frame run on the RTX 4060 Laptop GPU completed without application Vulkan
-errors. The remaining A3 work is a measured mip/LOD residency policy over the
-already-complete KTX2 mip chains; do not rewrite the scheduler.
+`TextureMipResidency` selects full quality whenever the available hard-budget
+capacity can hold it. Under pressure it chooses the finest source mip whose
+complete KTX2 tail fits, creates a smaller Vulkan image with that source mip as
+level zero, and uploads only the selected tail. Implicit shader LOD therefore
+tracks the reduced base dimensions without shader or descriptor ABI changes.
+Noncompressed compatibility/editor textures retain their existing path.
+
+Residency telemetry reports resident/available mip levels, reduced-texture
+count and omitted bytes. `--texture-residency-kib` provides an explicit smoke
+override while zero retains the 256 MiB production default. Unit tests cover
+full, intermediate, smallest-tail and cannot-fit decisions. All 69 CTest suites
+pass. A normal validation-required run used all 162/162 available levels at
+10,301,968 / 268,435,456 bytes. A 64 KiB validation stress run stayed bounded
+at 63,376 / 65,536 bytes, retained 37/46 levels across its then-resident
+textures, reduced five textures and omitted 831,232 bytes. Its deterministic
+capture under `build/a3-mip-evidence` is intact, with expected pressure-induced
+softness and no block/layout corruption.
 
 `S3` task-graph/work-stealing work should follow an observed scheduling
 bottleneck. `S1` fixed-tick simulation is conditional on continuous physics or
@@ -856,14 +866,14 @@ layout changes affect modules that appear unrelated to the immediate feature.
   ownership boundaries that the persistent representation must not blur.
 - `src/engine/Geometry.*`: completed bounds/frustum primitives.
 - `src/engine/render/VulkanRenderer.*`: preparation orchestration and completed
-  before/after culling telemetry; preserve its retirement boundaries while A2
-  changes texture creation.
+  before/after culling telemetry; profile its Vulkan-free preparation boundary
+  before splitting T8 work.
 - `src/engine/render/VulkanMemoryAllocator.*`: completed VMA ownership and the
   only renderer memory-policy seam; extend this instead of reintroducing raw
   Vulkan allocation calls.
-- `src/engine/render/VulkanModelResources.*`: completed fence-owned eviction
-  retirement and the next A3 boundary for measured mip residency; preserve BC7
-  selection/upload, exact-byte accounting and stable material ranges.
+- `src/engine/render/VulkanModelResources.*` and `TextureMipResidency.*`:
+  completed A3 residency; preserve fence-owned retirement, finest-fitting mip
+  tails, exact-byte accounting and stable material ranges.
 - `src/engine/render/VulkanSceneRecorder.*`: consumer of the prepared visible
   lists; keep Vulkan recording downstream of Vulkan-free culling.
 - `tests/IsoScenePreparerTests.cpp`: stable identity/bounds behavior is covered;
@@ -878,6 +888,13 @@ layout changes affect modules that appear unrelated to the immediate feature.
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure --no-tests=error
+```
+
+Exercise normal and forced mip residency with validation enabled:
+
+```powershell
+.\build\Debug\sokoban.exe --smoke-frames 120 --require-validation
+.\build\Debug\sokoban.exe --smoke-frames 240 --require-validation --texture-residency-kib 64 --evidence-output build\a3-mip-evidence
 ```
 
 Build content explicitly when changing manifest, glTF or texture discovery:

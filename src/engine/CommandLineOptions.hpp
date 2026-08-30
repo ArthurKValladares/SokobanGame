@@ -33,6 +33,9 @@ struct CommandLineOptions {
     int evidenceRenderScalePercent = 100;
     bool evidenceAmbientOcclusionEnabled = true;
     bool evidenceFrustumCullingEnabled = true;
+    // Diagnostic override for exercising residency pressure. Zero keeps the
+    // normal renderer budget.
+    std::uint64_t textureResidencyBudgetKiB = 0;
     // Set when parsing rejected the arguments; `error` says why.
     bool malformed = false;
     std::string error;
@@ -118,6 +121,25 @@ struct CommandLineOptions {
         } else if (argument == "--evidence-disable-frustum-culling") {
             options.evidenceFrustumCullingEnabled = false;
             evidenceFrustumCullingSpecified = true;
+        } else if (argument == "--texture-residency-kib") {
+            if (index + 1 >= arguments.size()) {
+                return reject("--texture-residency-kib needs a size");
+            }
+            const std::string_view value = arguments[++index];
+            std::uint64_t kibibytes = 0;
+            const char* const begin = value.data();
+            const char* const end = begin + value.size();
+            const std::from_chars_result parsed =
+                std::from_chars(begin, end, kibibytes);
+            constexpr std::uint64_t maximumKiB = 16ULL * 1024ULL * 1024ULL;
+            if (parsed.ec != std::errc {} || parsed.ptr != end ||
+                kibibytes == 0 || kibibytes > maximumKiB) {
+                return reject(
+                    "--texture-residency-kib wants an integer from 1 to " +
+                    std::to_string(maximumKiB) + ", got '" +
+                    std::string(value) + "'");
+            }
+            options.textureResidencyBudgetKiB = kibibytes;
         } else {
             return reject("Unknown argument '" + std::string(argument) + "'");
         }
@@ -145,6 +167,7 @@ struct CommandLineOptions {
 inline constexpr std::string_view commandLineUsage =
     "Usage: sokoban [--smoke-frames <positive integer>] "
     "[--save-directory <path>] [--require-validation] "
+    "[--texture-residency-kib <1..16777216>] "
     "[--bake-tile-thumbnails] "
     "[--evidence-output <directory> "
     "--evidence-render-scale <25..100> [--evidence-disable-ao] "

@@ -1,4 +1,5 @@
 #include "engine/render/CompressedTextureArtifact.hpp"
+#include "engine/render/TextureMipResidency.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -132,6 +133,42 @@ void testMalformedArtifactsAreRejected()
         "sRGB Vulkan format with linear DFD rejected");
 }
 
+void testMipResidencyChoosesTheFinestCompleteTailThatFits()
+{
+    const sokoban::CompressedTextureArtifact artifact =
+        sokoban::parseBc7Ktx2(sokoban::buildBc7Ktx2(
+            oddImage(), sokoban::TextureInterpretation {}));
+
+    const auto full = sokoban::chooseTextureMipResidency(artifact, 64);
+    check(full && full->sourceBaseMip == 0 && !full->degraded(),
+        "full mip chain wins when it fits");
+    check(full && full->residentBytes == 64 &&
+            full->fullQualityBytes == 64 && full->omittedBytes() == 0,
+        "full-quality residency accounting is exact");
+
+    const auto middle = sokoban::chooseTextureMipResidency(artifact, 32);
+    check(middle && middle->sourceBaseMip == 1,
+        "first source mip is omitted under moderate pressure");
+    check(middle && middle->width == 2 && middle->height == 1 &&
+            middle->mipLevels == 2,
+        "selected source mip becomes the resident base level");
+    check(middle && middle->residentBytes == 32 &&
+            middle->omittedBytes() == 32,
+        "reduced residency reports saved bytes");
+
+    const auto smallest = sokoban::chooseTextureMipResidency(artifact, 16);
+    check(smallest && smallest->sourceBaseMip == 2 &&
+            smallest->mipLevels == 1,
+        "smallest complete tail remains a valid last resort");
+    check(!sokoban::chooseTextureMipResidency(artifact, 15),
+        "selection fails when even the smallest compressed block cannot fit");
+
+    sokoban::CompressedTextureArtifact empty;
+    checkThrows(
+        [&] { (void)sokoban::chooseTextureMipResidency(empty, 64); },
+        "empty texture cannot produce a residency plan");
+}
+
 } // namespace
 
 int main()
@@ -139,6 +176,7 @@ int main()
     testRoundTripPreservesFormatDimensionsAndMipBytes();
     testLinearNonMipmappedArtifactAndStableIdentityPath();
     testMalformedArtifactsAreRejected();
+    testMipResidencyChoosesTheFinestCompleteTailThatFits();
 
     if (failures == 0) {
         std::cout << "CompressedTextureArtifactTests: " << checks

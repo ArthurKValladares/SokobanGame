@@ -807,6 +807,13 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             assetStats.retiringTextures,
             static_cast<double>(assetStats.retiringTextureBytes) /
                 (1024.0 * 1024.0));
+        ImGui::Text(
+            "Texture mip residency %u/%u levels, %u reduced (%.1f MiB omitted)",
+            assetStats.residentTextureMipLevels,
+            assetStats.availableTextureMipLevels,
+            assetStats.mipDegradedTextures,
+            static_cast<double>(assetStats.mipOmittedBytes) /
+                (1024.0 * 1024.0));
         if (assetStats.failedAssets > 0) {
             ImGui::Text("Asset load failures %u", assetStats.failedAssets);
         }

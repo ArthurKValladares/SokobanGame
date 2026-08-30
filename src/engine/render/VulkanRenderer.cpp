@@ -199,7 +199,8 @@ VulkanRenderer::VulkanRenderer(
     const FontAtlas& uiFont,
     AntiAliasingMode antiAliasingMode,
     int renderScalePercent,
-    PresentationPolicy presentationPolicy)
+    PresentationPolicy presentationPolicy,
+    AssetLoadingBudget assetLoadingBudget)
     : window_(window)
     , assetRoot_(std::move(assetRoot))
     , runtimeTextureCatalog_(
@@ -241,7 +242,8 @@ VulkanRenderer::VulkanRenderer(
         deviceContext_.graphicsQueue(),
         assetRoot_, manifest, runtimeTextureCatalog_,
         deviceContext_.textureDescriptorCapacity(),
-        deviceContext_.maxSamplerAnisotropy());
+        deviceContext_.maxSamplerAnisotropy(),
+        assetLoadingBudget);
     activeResources_ = createRenderResources(
         reconfigurationQueue_.active());
     descriptorSync_.markAllUpdated();
