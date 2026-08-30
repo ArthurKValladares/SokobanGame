@@ -34,7 +34,11 @@ struct OpaqueDrawBatch {
 // Sorts opaque work by pipeline, material, and mesh. Items that cannot be
 // instanced (currently skinned models) remain a one-item batch even if their
 // key happens to match a neighbour.
-[[nodiscard]] std::vector<OpaqueDrawBatch> sortOpaqueDraws(
-    std::vector<OpaqueDrawSortItem>& items);
+// Writes into caller-owned storage so command recording can retain the batch
+// allocation across frames. `batches` is cleared before use; its capacity is
+// deliberately preserved.
+void sortOpaqueDraws(
+    std::vector<OpaqueDrawSortItem>& items,
+    std::vector<OpaqueDrawBatch>& batches);
 
 } // namespace sokoban

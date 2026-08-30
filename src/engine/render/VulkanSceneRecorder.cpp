@@ -129,6 +129,51 @@ Aabb modelWorldBounds(
     return result;
 }
 
+struct RecorderModelCandidate {
+    std::size_t tileIndex = 0;
+    MaterialAlphaSelection alphaSelection = MaterialAlphaSelection::All;
+    float depth = 0.0f;
+    std::size_t sourceOrder = 0;
+};
+
+struct RecorderModelDraw {
+    const RenderFrameData::Tile* tile = nullptr;
+    VulkanModelResources::MeshView mesh {};
+    GpuDrawInstance constants {};
+    ModelMaterialPolicy materialPolicy {};
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    uint32_t pipelineRank = 0;
+    std::array<uint32_t, 29> batchState {};
+    bool mirrorGhost = false;
+    bool skinned = false;
+};
+
+} // namespace
+
+struct VulkanSceneRecorder::Scratch {
+    std::vector<RecorderModelCandidate> modelCandidates;
+    std::vector<RecorderModelDraw> modelDraws;
+    std::vector<OpaqueDrawSortItem> orderedModelDraws;
+    std::vector<OpaqueDrawBatch> modelBatches;
+
+    [[nodiscard]] uint64_t capacityBytes() const
+    {
+        return modelCandidates.capacity() * sizeof(RecorderModelCandidate) +
+            modelDraws.capacity() * sizeof(RecorderModelDraw) +
+            orderedModelDraws.capacity() * sizeof(OpaqueDrawSortItem) +
+            modelBatches.capacity() * sizeof(OpaqueDrawBatch);
+    }
+};
+
+VulkanSceneRecorder::VulkanSceneRecorder()
+    : scratch_(std::make_unique<Scratch>())
+{
+}
+
+VulkanSceneRecorder::~VulkanSceneRecorder() = default;
+
+namespace {
+
 void renderDebugUi(VkCommandBuffer commandBuffer)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -139,6 +184,8 @@ void renderDebugUi(VkCommandBuffer commandBuffer)
 #endif
 }
 
+} // namespace
+
 class SceneRecordingSession {
 public:
     SceneRecordingSession(
@@ -147,7 +194,9 @@ public:
         PointShadowFaceCache& pointShadowFaceCache,
         std::array<std::vector<PointShadowModelState>,
             RenderFrameData::pointLightCapacity>& pointShadowModelStateScratch,
-        bool pointShadowCacheEnabled)
+        bool pointShadowCacheEnabled,
+        VulkanSceneRecorder::Scratch& scratch,
+        bool scratchReuseEnabled)
         : device_(resources.device)
         , gpuProfiler_(resources.gpuProfiler)
         , swapchain_(resources.swapchain)
@@ -160,6 +209,8 @@ public:
         , pointShadowFaceCache_(pointShadowFaceCache)
         , pointShadowModelStateScratch_(pointShadowModelStateScratch)
         , pointShadowCacheEnabled_(pointShadowCacheEnabled)
+        , scratch_(scratch)
+        , scratchReuseEnabled_(scratchReuseEnabled)
     {
     }
 
@@ -1414,17 +1465,6 @@ private:
         }
         flushFaceRun();
 
-        struct ModelDraw {
-            const RenderFrameData::Tile* tile = nullptr;
-            VulkanModelResources::MeshView mesh {};
-            GpuDrawInstance constants {};
-            ModelMaterialPolicy materialPolicy {};
-            VkPipeline pipeline = VK_NULL_HANDLE;
-            uint32_t pipelineRank = 0;
-            std::array<uint32_t, 29> batchState {};
-            bool mirrorGhost = false;
-            bool skinned = false;
-        };
         const auto batchStateFor = [](const GpuDrawInstance& constants) {
             std::array<uint32_t, 29> result {};
             std::size_t index = 0;
@@ -1446,12 +1486,6 @@ private:
             return result;
         };
 
-        struct ModelCandidate {
-            std::size_t tileIndex = 0;
-            MaterialAlphaSelection alphaSelection =
-                MaterialAlphaSelection::All;
-            float depth = 0.0f;
-        };
         const auto modelDepth = [&](const RenderFrameData::Tile& tile) {
             const ModelTransformPoints transform =
                 IsoScenePreparer::modelTransformPoints(tile);
@@ -1472,15 +1506,31 @@ private:
                 relative.y * scene.isoLayout.cameraForward.y +
                 relative.z * scene.isoLayout.cameraForward.z;
         };
-        std::vector<ModelCandidate> candidates;
-        candidates.reserve(
+        VulkanSceneRecorder::Scratch transientScratch;
+        VulkanSceneRecorder::Scratch& scratch = scratchReuseEnabled_
+            ? scratch_
+            : transientScratch;
+        const auto clearAndReserve = [this](auto& values, std::size_t size) {
+            const std::size_t oldCapacity = values.capacity();
+            values.clear();
+            values.reserve(size);
+            if (values.capacity() != oldCapacity) {
+                ++stats_.recorderScratchGrowths;
+            }
+        };
+        std::vector<RecorderModelCandidate>& candidates =
+            scratch.modelCandidates;
+        clearAndReserve(
+            candidates,
             scene.opaqueModelIndices.size() +
-            scene.translucentModelIndices.size());
+                scene.translucentModelIndices.size());
+        std::size_t sourceOrder = 0;
         if (translucentPass) {
             for (std::size_t tileIndex : scene.translucentModelIndices) {
                 candidates.push_back({
                     .tileIndex = tileIndex,
                     .depth = modelDepth(frameData.tiles[tileIndex]),
+                    .sourceOrder = sourceOrder++,
                 });
             }
             for (std::size_t tileIndex : scene.opaqueModelIndices) {
@@ -1491,14 +1541,24 @@ private:
                         .alphaSelection =
                             MaterialAlphaSelection::BlendOnly,
                         .depth = modelDepth(tile),
+                        .sourceOrder = sourceOrder++,
                     });
                 }
             }
-            std::stable_sort(
+            // The ordinal preserves stable depth ties without stable_sort's
+            // temporary allocation.
+            std::sort(
                 candidates.begin(),
                 candidates.end(),
-                [](const ModelCandidate& left, const ModelCandidate& right) {
-                    return left.depth > right.depth;
+                [](const RecorderModelCandidate& left,
+                    const RecorderModelCandidate& right) {
+                    if (left.depth > right.depth) {
+                        return true;
+                    }
+                    if (right.depth > left.depth) {
+                        return false;
+                    }
+                    return left.sourceOrder < right.sourceOrder;
                 });
         } else {
             for (std::size_t tileIndex : scene.opaqueModelIndices) {
@@ -1511,13 +1571,14 @@ private:
                         .alphaSelection = policy.hasBlend
                             ? MaterialAlphaSelection::OpaqueAndMask
                             : MaterialAlphaSelection::All,
+                        .sourceOrder = sourceOrder++,
                     });
                 }
             }
         }
-        std::vector<ModelDraw> draws;
-        draws.reserve(candidates.size());
-        for (const ModelCandidate& candidate : candidates) {
+        std::vector<RecorderModelDraw>& draws = scratch.modelDraws;
+        clearAndReserve(draws, candidates.size());
+        for (const RecorderModelCandidate& candidate : candidates) {
             const RenderFrameData::Tile& tile =
                 frameData.tiles[candidate.tileIndex];
             if (!models_.tileReadyForDraw(
@@ -1560,10 +1621,11 @@ private:
                 .skinned = skinned,
             });
         }
-        std::vector<OpaqueDrawSortItem> orderedDraws;
-        orderedDraws.reserve(draws.size());
+        std::vector<OpaqueDrawSortItem>& orderedDraws =
+            scratch.orderedModelDraws;
+        clearAndReserve(orderedDraws, draws.size());
         for (std::size_t drawIndex = 0; drawIndex < draws.size(); ++drawIndex) {
-            const ModelDraw& draw = draws[drawIndex];
+            const RecorderModelDraw& draw = draws[drawIndex];
             orderedDraws.push_back({
                 .key = {
                     .pipeline = draw.pipelineRank,
@@ -1576,7 +1638,9 @@ private:
                 .instancable = !draw.skinned,
             });
         }
-        std::vector<OpaqueDrawBatch> batches;
+        std::vector<OpaqueDrawBatch>& batches = scratch.modelBatches;
+        const std::size_t oldBatchCapacity = batches.capacity();
+        batches.clear();
         if (translucentPass) {
             batches.reserve(orderedDraws.size());
             for (std::size_t itemIndex = 0;
@@ -1585,8 +1649,14 @@ private:
                 batches.push_back({ .firstItem = itemIndex, .itemCount = 1 });
             }
         } else {
-            batches = sortOpaqueDraws(orderedDraws);
+            sortOpaqueDraws(orderedDraws, batches);
         }
+        if (batches.capacity() != oldBatchCapacity) {
+            ++stats_.recorderScratchGrowths;
+        }
+        stats_.recorderScratchCapacityBytes = std::max(
+            stats_.recorderScratchCapacityBytes,
+            scratch.capacityBytes());
 
         // Front faces are CLOCKWISE here, not counter-clockwise.
         //
@@ -1619,7 +1689,7 @@ private:
         VkPipeline boundModelPipeline = VK_NULL_HANDLE;
         bool mirrorGhostState = false;
         for (const OpaqueDrawBatch& batch : batches) {
-            const ModelDraw& draw =
+            const RecorderModelDraw& draw =
                 draws[orderedDraws[batch.firstItem].drawIndex];
             if (draw.mirrorGhost != mirrorGhostState) {
                 vkCmdSetDepthWriteEnable(
@@ -2595,10 +2665,10 @@ private:
     std::array<std::vector<PointShadowModelState>,
         RenderFrameData::pointLightCapacity>& pointShadowModelStateScratch_;
     bool pointShadowCacheEnabled_ = true;
+    VulkanSceneRecorder::Scratch& scratch_;
+    bool scratchReuseEnabled_ = true;
     RenderStats stats_ {};
 };
-
-} // namespace
 
 RenderStats VulkanSceneRecorder::record(
     Resources resources,
@@ -2616,7 +2686,9 @@ RenderStats VulkanSceneRecorder::record(
         configuration,
         pointShadowFaceCache_,
         pointShadowModelStateScratch_,
-        pointShadowCacheEnabled_).record(
+        pointShadowCacheEnabled_,
+        *scratch_,
+        scratchReuseEnabled_).record(
         commandBuffer,
         imageIndex,
         frameData,

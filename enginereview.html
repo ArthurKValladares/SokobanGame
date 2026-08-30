@@ -256,8 +256,8 @@
 <body>
   <header class="shell">
     <p class="eyebrow">Current-state review · 30 August 2026</p>
-    <h1>T5 point shadows are bounded and cached.</h1>
-    <p class="deck">Sokoban 3D now has complete CPU/GPU material behavior, a device-bounded texture heap, HDR output, a dedicated post-tonemap UI path, physical view-space SSAO, retained world bounds, conservative main-scene frustum culling, one tested VMA-backed memory seam, staged KTX2/BC7 artifacts, fence-owned eviction, pressure-driven mip-tail residency, deterministic parallel Vulkan-free frame preparation, and range-bounded point shadows with exact unchanged-layer reuse. The next packet is A4 recorder scratch reuse.</p>
+    <h1>A4 removes steady-state recorder scratch churn.</h1>
+    <p class="deck">Sokoban 3D now has complete CPU/GPU material behavior, a device-bounded texture heap, HDR output, a dedicated post-tonemap UI path, physical view-space SSAO, retained world bounds, conservative main-scene frustum culling, one tested VMA-backed memory seam, staged KTX2/BC7 artifacts, fence-owned eviction, pressure-driven mip-tail residency, deterministic parallel Vulkan-free frame preparation, range-bounded point shadows with exact unchanged-layer reuse, and retained model-recording scratch. The next action is to re-profile recording and uploads before choosing any larger threading or queue change.</p>
     <div class="metrics" aria-label="Current repository facts">
       <div class="metric"><b>36</b><span>manifest models</span></div>
       <div class="metric"><b>42 / 1024</b><span>textures on validated GPU</span></div>
@@ -281,7 +281,7 @@
     <section id="verdict">
       <div class="section-head"><span class="num">01</span><h2>Current verdict</h2></div>
       <div class="callout">
-        <strong>Next program:</strong> reuse A4 recorder scratch containers now that prepared scene and point-shadow lists have settled. T5, T8 and A3 are baseline.
+        <strong>Next program:</strong> profile command recording and uploads again. A4, T5, T8 and A3 are baseline; secondary command buffers and transfer-queue ownership remain evidence-dependent.
       </div>
       <div class="grid" style="margin-top:1rem">
         <article class="card">
@@ -291,8 +291,8 @@
         </article>
         <article class="card">
           <p class="kicker">What comes next</p>
-          <h3>Remove measured recorder churn</h3>
-          <p>Inventory per-frame recorder containers and retain only the scratch proven safe to reuse. Secondary command buffers or transfer-queue ownership still need their own evidence.</p>
+          <h3>Measure the remaining CPU path</h3>
+          <p>Attribute command-recording and upload cost after the completed scratch change. Add secondary command buffers or transfer-queue ownership only for a durable measured bottleneck.</p>
         </article>
         <article class="card">
           <p class="kicker">What not to overbuild</p>
@@ -330,7 +330,7 @@
             <tr><td>A1</td><td><span class="status done">Done</span></td><td>cgltf parsing/validation, all interpolation modes and a loader-level CUBICSPLINE fixture are implemented.</td><td>Keep the fixture in the required regression gate.</td></tr>
             <tr><td>A2</td><td><span class="status done">Done</span></td><td>The content tool stages KTX2 BC7 mip chains per source interpretation; capable devices upload native blocks and source decoding remains the fallback.</td><td>Preserve sRGB/linear identity, source fallback and exact compressed-byte accounting.</td></tr>
             <tr><td>A3</td><td><span class="status done">Done</span></td><td>Async preparation, publication budgets, exact compressed accounting, fence-owned eviction and finest-fitting complete mip tails are implemented.</td><td>Preserve full quality by default and use the explicit budget override for pressure validation.</td></tr>
-            <tr><td>A4</td><td><span class="status open">Open</span></td><td>Recorder paths still create transient CPU containers.</td><td>Reuse scratch after scene structures settle.</td></tr>
+            <tr><td>A4</td><td><span class="status done">Done</span></td><td>Model candidates, resolved draws, ordered items and batches reuse one synchronous recorder scratch object. Stable translucent ties use an explicit ordinal and the sorter writes into caller-owned output.</td><td>Preserve zero steady-state growth and keep scratch references inside <code>record()</code>.</td></tr>
             <tr><td>S1</td><td><span class="status conditional">Conditional</span></td><td>Gameplay uses variable timestep.</td><td>Fixed tick only before continuous physics/motion requires it.</td></tr>
             <tr><td>S2</td><td><span class="status done">Done</span></td><td>Tiles, water and authored faces retain identity plus revisioned world AABBs; prepared frames own safe snapshots and main/preview caches are isolated.</td><td>Preserve frame-local camera, color and sorting state and T4's fail-open consumers.</td></tr>
             <tr><td>S3</td><td><span class="status conditional">Measured</span></td><td>TaskSystem is a useful pool but has one queue and no dependency graph.</td><td>Change only after scheduling profiles identify a bottleneck.</td></tr>
@@ -510,8 +510,11 @@
               <div class="task"><span class="task-id">9.3</span><div><b>V2 — complete</b><p>One device-owned VMA instance now backs persistent buffers/images, swapchain-generation targets, model textures, geometry blocks, the upload ring, staging and readback. Existing fences and higher-level suballocators retain lifetime control; no direct allocation or mapping calls remain in renderer code.</p></div></div>
               <div class="task"><span class="task-id">9.4</span><div><b>A2 — complete</b><p>The build stages 52 deterministic KTX2/BC7 artifacts with complete mip chains. Runtime capability selection preserves BC7 UNORM/SRGB semantics, source and editor fallback, and exact compressed mip accounting.</p></div></div>
               <div class="task"><span class="task-id">9.5</span><div><b>A3 — complete</b><p>Evicted resources retire against exact pending-frame masks without a device idle. Full KTX2 chains remain the default; under hard-budget pressure the finest complete mip tail that fits becomes a smaller Vulkan image. Normal validation retained 162/162 levels; a 64 KiB stress retained 37/46 levels, stayed at 63,376 bytes and omitted 831,232 bytes.</p></div></div>
+              <div class="task"><span class="task-id">9.6</span><div><b>T8 — complete</b><p>A dedicated preparation worker overlaps auxiliary shadow/particle lists with ordered main preparation; main and preview scenes use their separate caches concurrently. Matched serial/parallel captures are byte-identical.</p></div></div>
+              <div class="task"><span class="task-id">9.7</span><div><b>T5 — complete</b><p>Point-light face and static-model casters are conservatively range-bounded. Exact unchanged light/caster states reuse all six cube layers; skinned casters fail open and invalidate reuse.</p></div></div>
+              <div class="task"><span class="task-id">9.8</span><div><b>A4 — complete</b><p>Four model-recording vectors retain a 9,600-byte high-water mark across opaque, translucent, main and preview passes. The steady matched frame fell from four capacity growths to zero; scene/AO output is byte-identical, while CPU average moved from 3.126 ms to 2.955 ms in the captured run.</p></div></div>
             </div>
-            <p class="accept"><b>Gate:</b> all 69 Debug suites pass. The Debug package stages 252 indexed files, including 52 KTX2 artifacts. Normal and 64 KiB pressure validation runs exercise full and rebased BC7 uploads with clean teardown; both deterministic captures are intact.</p>
+            <p class="accept"><b>Gate:</b> all 69 Debug suites pass. Matched A4 control/retained runs are validation-clean, report four versus zero steady-frame capacity growths, and produce byte-identical scene and AO captures. Secondary command buffers and a transfer queue still require a new profile.</p>
           </div>
         </article>
       </div>
@@ -523,6 +526,7 @@
         <article class="card"><p class="kicker">Visibility</p><h3>T4 is complete</h3><p>Persistent bounds now feed conservative main-scene lists with matched validation evidence. Do not add occlusion culling until profiles justify its complexity.</p></article>
         <article class="card"><p class="kicker">Texture format</p><h3>A2 is complete</h3><p>KTX2/BC7 artifacts, complete mip chains, capability selection, source fallback and exact compressed accounting are live through the VMA seam.</p></article>
         <article class="card"><p class="kicker">Residency</p><h3>A3 is complete</h3><p>The system has requirements, hard budgets, exact compressed accounting, fence-owned eviction and pressure-driven complete mip tails. Preserve the scheduler and full-quality default.</p></article>
+        <article class="card"><p class="kicker">CPU recording</p><h3>A4 is complete</h3><p>Steady model recording now reuses its scratch allocations. Profile the remaining recorder and upload path before introducing secondary buffers or transfer-queue ownership.</p></article>
         <article class="card"><p class="kicker">Conditional architecture</p><h3>S1, S3 and F5</h3><p>Fixed tick needs continuous gameplay physics. A task graph needs a measured scheduling problem. An RHI needs a second backend or platform. Until then, these are not priority work.</p></article>
       </div>
     </section>

@@ -221,7 +221,8 @@ VulkanRenderer::VulkanRenderer(
     PresentationPolicy presentationPolicy,
     AssetLoadingBudget assetLoadingBudget,
     bool parallelScenePreparationEnabled,
-    bool pointShadowOptimizationsEnabled)
+    bool pointShadowOptimizationsEnabled,
+    bool recorderScratchReuseEnabled)
     : window_(window)
     , assetRoot_(std::move(assetRoot))
     , runtimeTextureCatalog_(
@@ -235,6 +236,7 @@ VulkanRenderer::VulkanRenderer(
     , presentationPolicy_(presentationPolicy)
     , parallelScenePreparationEnabled_(parallelScenePreparationEnabled)
     , pointShadowOptimizationsEnabled_(pointShadowOptimizationsEnabled)
+    , recorderScratchReuseEnabled_(recorderScratchReuseEnabled)
 {
     scenePreparer_.setPointShadowRangeCulling(
         pointShadowOptimizationsEnabled_);
@@ -242,6 +244,7 @@ VulkanRenderer::VulkanRenderer(
         pointShadowOptimizationsEnabled_);
     sceneRecorder_.setPointShadowCacheEnabled(
         pointShadowOptimizationsEnabled_);
+    sceneRecorder_.setScratchReuseEnabled(recorderScratchReuseEnabled_);
     pipelineCache_.create(
         deviceContext_.device(),
         deviceContext_.physicalDeviceProperties(),
@@ -552,6 +555,7 @@ void VulkanRenderer::drawFrame(
         parallelScenePreparationEnabled_;
     lastStats_.pointShadowOptimizationsEnabled =
         pointShadowOptimizationsEnabled_;
+    lastStats_.recorderScratchReuseEnabled = recorderScratchReuseEnabled_;
     const FrameTimeSummary preparationTiming =
         scenePreparationTimeTelemetry_.summary();
     lastStats_.scenePreparationTimingAvailable =

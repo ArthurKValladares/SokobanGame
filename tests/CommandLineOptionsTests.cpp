@@ -47,6 +47,8 @@ void testEmptyIsANormalRun()
         "evidence point light is disabled by default");
     check(options.pointShadowOptimizationsEnabled,
         "point-shadow optimizations are enabled by default");
+    check(options.recorderScratchReuseEnabled,
+        "recorder scratch reuse is enabled by default");
     check(options.textureResidencyBudgetKiB == 0,
         "texture residency uses its production default");
 }
@@ -88,6 +90,13 @@ void testFlags()
         "point-shadow evidence light is enabled");
     check(!pointShadowEvidence.pointShadowOptimizationsEnabled,
         "point-shadow legacy control is read");
+
+    const sokoban::CommandLineOptions transientRecorderScratch = parse(
+        { "--smoke-frames", "120", "--disable-recorder-scratch-reuse" });
+    check(!transientRecorderScratch.malformed,
+        "transient recorder scratch invocation parses");
+    check(!transientRecorderScratch.recorderScratchReuseEnabled,
+        "recorder scratch control is read");
 
     const sokoban::CommandLineOptions evidence = parse(
         { "--smoke-frames", "180", "--evidence-output", "/tmp/evidence",

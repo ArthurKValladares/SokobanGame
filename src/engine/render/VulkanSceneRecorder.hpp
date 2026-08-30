@@ -8,6 +8,7 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <memory>
 
 namespace sokoban {
 
@@ -18,12 +19,19 @@ class VulkanSceneDescriptors;
 class VulkanShadowPass;
 class VulkanSsaoPass;
 class VulkanSwapchainResources;
+class SceneRecordingSession;
 
 // Owns Vulkan command encoding for one prepared scene. It does not own any
 // Vulkan handles; the renderer supplies the resources whose lifetimes bracket
 // each record() call.
 class VulkanSceneRecorder {
 public:
+    VulkanSceneRecorder();
+    ~VulkanSceneRecorder();
+
+    VulkanSceneRecorder(const VulkanSceneRecorder&) = delete;
+    VulkanSceneRecorder& operator=(const VulkanSceneRecorder&) = delete;
+
     struct Resources {
         VkDevice device = VK_NULL_HANDLE;
         VulkanGpuProfiler& gpuProfiler;
@@ -81,11 +89,21 @@ public:
         }
     }
 
+    void setScratchReuseEnabled(bool enabled)
+    {
+        scratchReuseEnabled_ = enabled;
+    }
+
 private:
+    friend class SceneRecordingSession;
+    struct Scratch;
+
     bool pointShadowCacheEnabled_ = true;
+    bool scratchReuseEnabled_ = true;
     mutable PointShadowFaceCache pointShadowFaceCache_;
     mutable std::array<std::vector<PointShadowModelState>,
         RenderFrameData::pointLightCapacity> pointShadowModelStateScratch_;
+    mutable std::unique_ptr<Scratch> scratch_;
 };
 
 } // namespace sokoban

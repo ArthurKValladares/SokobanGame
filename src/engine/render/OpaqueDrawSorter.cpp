@@ -4,8 +4,9 @@
 
 namespace sokoban {
 
-std::vector<OpaqueDrawBatch> sortOpaqueDraws(
-    std::vector<OpaqueDrawSortItem>& items)
+void sortOpaqueDraws(
+    std::vector<OpaqueDrawSortItem>& items,
+    std::vector<OpaqueDrawBatch>& batches)
 {
     std::sort(
         items.begin(), items.end(),
@@ -13,7 +14,8 @@ std::vector<OpaqueDrawBatch> sortOpaqueDraws(
             return left.key < right.key;
         });
 
-    std::vector<OpaqueDrawBatch> result;
+    batches.clear();
+    batches.reserve(items.size());
     for (std::size_t first = 0; first < items.size();) {
         std::size_t end = first + 1;
         if (items[first].instancable) {
@@ -22,10 +24,9 @@ std::vector<OpaqueDrawBatch> sortOpaqueDraws(
                 ++end;
             }
         }
-        result.push_back({ .firstItem = first, .itemCount = end - first });
+        batches.push_back({ .firstItem = first, .itemCount = end - first });
         first = end;
     }
-    return result;
 }
 
 } // namespace sokoban

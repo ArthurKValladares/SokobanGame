@@ -120,7 +120,8 @@ public:
         PresentationPolicy presentationPolicy = {},
         AssetLoadingBudget assetLoadingBudget = {},
         bool parallelScenePreparationEnabled = true,
-        bool pointShadowOptimizationsEnabled = true);
+        bool pointShadowOptimizationsEnabled = true,
+        bool recorderScratchReuseEnabled = true);
     ~VulkanRenderer();
 
     VulkanRenderer(const VulkanRenderer&) = delete;
@@ -349,6 +350,7 @@ private:
     FrameTimeTelemetry cpuFrameTimeTelemetry_ {};
     bool parallelScenePreparationEnabled_ = true;
     bool pointShadowOptimizationsEnabled_ = true;
+    bool recorderScratchReuseEnabled_ = true;
     uint64_t nextStatsFrameIndex_ = 1;
     std::optional<GameViewportDisplay> gameViewportDisplay_;
     uint64_t pipelineRebuilds_ = 0;

@@ -129,7 +129,8 @@ Application::Application(ApplicationOptions options)
           },
           assetLoadingBudgetFor(options),
           options.parallelScenePreparationEnabled,
-          options.pointShadowOptimizationsEnabled)
+          options.pointShadowOptimizationsEnabled,
+          options.recorderScratchReuseEnabled)
     , ui_(uiFont_)
     , audioSystem_(assetRoot_, assetManifest_)
     , mirrorSwapParticleEffect_(

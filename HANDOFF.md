@@ -40,11 +40,11 @@ chains for every unique source interpretation. BC7-capable devices upload the
 precomputed blocks directly, while unsupported devices and runtime-authored
 textures retain the original RGBA decode path.
 
-The recommended next step is A4: reuse recorder scratch storage now that the
-scene and point-shadow list structures have settled. T5 point-shadow
-range-culling/cache work, T8 Vulkan-free frame preparation and A3 residency are
-complete. Secondary command buffers and a transfer queue remain conditional on
-a new recording or upload profile.
+The recommended next step is a fresh command-recording and upload profile.
+A4 recorder scratch reuse, T5 point-shadow range-culling/cache work, T8
+Vulkan-free frame preparation and A3 residency are complete. Secondary command
+buffers and a transfer queue remain conditional on that profile identifying a
+durable CPU-recording or upload-ownership bottleneck.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
@@ -100,6 +100,10 @@ future tasks:
   unchanged light/caster states reuse all six stored cube layers. Skinned
   casters fail open and force re-recording because bind-pose bounds and frame
   inputs are not a proof that the GPU pose is unchanged.
+- **A4**: model recording retains candidate, resolved-draw, ordered-item and
+  batch vectors across frames. The sorter writes into caller-owned output and
+  translucent depth ties use an explicit source ordinal, avoiding both the
+  returned batch allocation and `stable_sort` temporary storage.
 - **V1/V3/V5/V6**: per-swapchain-image present semaphores, direct skinning
   SSBO indexing, Vulkan 1.3 optimized shader builds, and optional anisotropy.
 - **V2**: vendored VMA 3.2.1 is owned by `VulkanDeviceContext`; persistent,
@@ -718,10 +722,9 @@ surfaces.
 
 ### 9. Resume frame-scaling work
 
-With S2, T4, T5, V2, A3 and T8 complete, continue by measured frame cost:
+With S2, T4, T5, V2, A3, A4 and T8 complete, continue by measured frame cost:
 
-1. **A4:** reuse recorder scratch storage after scene data structures settle.
-2. Re-profile command recording and uploads; add secondary command buffers or
+1. Re-profile command recording and uploads. Add secondary command buffers or
    a transfer queue only if that profile identifies a durable bottleneck.
 
 #### 9.1 S2 persistent renderables and stable bounds — complete
@@ -903,6 +906,36 @@ The exact cache tests cover light, face order/geometry, model state, readiness
 and explicit invalidation. Both validation-required 240-frame evidence runs,
 the complete Debug build and all 69 CTest suites pass.
 
+#### 9.8 A4 retained recorder scratch — complete
+
+`VulkanSceneRecorder` now owns one synchronous model-recording scratch object.
+Opaque, translucent, main and preview passes clear and reuse its candidate,
+resolved-draw, ordered-sort-item and batch vectors; no command or prepared
+frame retains references to them after `record()` returns. Capacity grows only
+when a later scene exceeds the prior high-water mark. The existing point-shadow
+model-state vectors remain independently retained per light because their
+contents feed each light's exact cache decision.
+
+`OpaqueDrawSorter` now writes batches into caller-owned storage. Translucent
+models use `std::sort` with an explicit source ordinal as the depth tie-breaker,
+preserving the former stable order without `stable_sort` temporary storage.
+`--disable-recorder-scratch-reuse` constructs fresh per-pass scratch for a
+matched diagnostic control. Debug UI and evidence report capacity growths and
+retained model-recording bytes.
+
+At 2880x1800, the steady control frame grew four vector capacities totaling
+9,600 bytes; retained mode reported zero capacity growths with the same 9,600-
+byte high-water mark. The 120-sample CPU-frame average moved from 3.126 ms to
+2.955 ms and p95 from 3.738 ms to 3.328 ms. GPU average remained effectively
+flat at 3.028 versus 3.037 ms. Scene and AO captures are byte-identical.
+Evidence is under `build/a4-transient` and `build/a4-retained`.
+
+The sorter regression test proves repeated calls preserve caller-owned batch
+storage and replace prior output correctly. Both validation-required 240-frame
+runs, the complete Debug build and all 69 CTest suites pass. Treat the timing
+delta as run-specific; the deterministic acceptance result is zero steady-
+state capacity growth with unchanged commands and pixels.
+
 `S3` task-graph/work-stealing work should follow an observed scheduling
 bottleneck. `S1` fixed-tick simulation is conditional on continuous physics or
 gameplay motion. `F5` RHI work is conditional on a real second renderer or
@@ -947,8 +980,9 @@ layout changes affect modules that appear unrelated to the immediate feature.
   completed A3 residency; preserve fence-owned retirement, finest-fitting mip
   tails, exact-byte accounting and stable material ranges.
 - `src/engine/render/VulkanSceneRecorder.*`: consumer of the prepared visible
-  lists and owner of retained point-shadow model-state scratch; keep Vulkan
-  recording downstream of Vulkan-free culling.
+  lists and owner of retained model-recording and point-shadow model-state
+  scratch; keep Vulkan recording downstream of Vulkan-free culling and keep
+  scratch synchronous to `record()`.
 - `src/engine/render/PointShadowFaceCache.*`: exact unchanged-depth key. Keep
   skinned casters uncacheable unless a real GPU-pose revision joins the key.
 - `tests/IsoScenePreparerTests.cpp`: stable identity/bounds behavior is covered;
@@ -984,6 +1018,13 @@ Reproduce the T5 point-shadow control and optimized runs:
 ```powershell
 .\build\Debug\sokoban.exe --smoke-frames 240 --require-validation --evidence-point-light --disable-point-shadow-optimizations --evidence-output build\t5-legacy
 .\build\Debug\sokoban.exe --smoke-frames 240 --require-validation --evidence-point-light --evidence-output build\t5-optimized
+```
+
+Reproduce the A4 transient and retained recorder-scratch runs:
+
+```powershell
+.\build\Debug\sokoban.exe --smoke-frames 240 --require-validation --disable-recorder-scratch-reuse --evidence-output build\a4-transient
+.\build\Debug\sokoban.exe --smoke-frames 240 --require-validation --evidence-output build\a4-retained
 ```
 
 Build content explicitly when changing manifest, glTF or texture discovery:

@@ -141,6 +141,14 @@ void Application::finishEvidenceCapture()
                    ? "enabled"
                    : "disabled")
            << "\n";
+    report << "- Recorder scratch reuse: "
+           << (evidenceStats_.recorderScratchReuseEnabled
+                   ? "enabled"
+                   : "disabled")
+           << "; " << evidenceStats_.recorderScratchGrowths
+           << " capacity growths this frame; "
+           << evidenceStats_.recorderScratchCapacityBytes
+           << " bytes of model-recording capacity\n";
     if (evidenceStats_.scenePreparationTimingAvailable) {
         report << "- Scene preparation: average "
                << evidenceStats_.scenePreparationAverageMilliseconds

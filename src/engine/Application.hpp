@@ -67,6 +67,7 @@ struct ApplicationOptions {
     bool evidencePointLightEnabled = false;
     bool parallelScenePreparationEnabled = true;
     bool pointShadowOptimizationsEnabled = true;
+    bool recorderScratchReuseEnabled = true;
     // Zero keeps the production default. A non-zero override exists for
     // deterministic residency stress/validation runs.
     std::uint64_t textureResidencyBudgetKiB = 0;

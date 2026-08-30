@@ -761,6 +761,12 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
         ImGui::Text(
             "Point-shadow range/cache optimizations %s",
             renderStats.pointShadowOptimizationsEnabled ? "on" : "off");
+        ImGui::Text(
+            "Recorder scratch reuse %s (%u growths, %llu capacity bytes)",
+            renderStats.recorderScratchReuseEnabled ? "on" : "off",
+            renderStats.recorderScratchGrowths,
+            static_cast<unsigned long long>(
+                renderStats.recorderScratchCapacityBytes));
         if (renderStats.scenePreparationTimingAvailable) {
             ImGui::Text(
                 "Scene preparation %.3f ms avg (p95 %.3f, max %.3f; %u samples)",

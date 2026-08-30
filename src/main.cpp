@@ -83,6 +83,8 @@ int main(int argc, char** argv)
                     options.parallelScenePreparationEnabled,
                 .pointShadowOptimizationsEnabled =
                     options.pointShadowOptimizationsEnabled,
+                .recorderScratchReuseEnabled =
+                    options.recorderScratchReuseEnabled,
                 .textureResidencyBudgetKiB =
                     options.textureResidencyBudgetKiB,
             }

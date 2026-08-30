@@ -534,6 +534,8 @@ struct RenderStats {
     uint32_t pipelineBinds = 0;
     uint32_t renderPasses = 0;
     uint32_t imageBarriers = 0;
+    uint32_t recorderScratchGrowths = 0;
+    uint64_t recorderScratchCapacityBytes = 0;
     uint32_t swapchainWidth = 0;
     uint32_t swapchainHeight = 0;
     uint32_t swapchainImages = 0;
@@ -545,6 +547,7 @@ struct RenderStats {
     uint32_t activeSamples = 1;
     bool parallelScenePreparationEnabled = true;
     bool pointShadowOptimizationsEnabled = true;
+    bool recorderScratchReuseEnabled = true;
     bool scenePreparationTimingAvailable = false;
     uint32_t scenePreparationTimingSamples = 0;
     double scenePreparationMilliseconds = 0.0;

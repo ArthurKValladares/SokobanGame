@@ -37,6 +37,7 @@ struct CommandLineOptions {
     // Diagnostic A/B switch for frame-preparation profiling.
     bool parallelScenePreparationEnabled = true;
     bool pointShadowOptimizationsEnabled = true;
+    bool recorderScratchReuseEnabled = true;
     // Diagnostic override for exercising residency pressure. Zero keeps the
     // normal renderer budget.
     std::uint64_t textureResidencyBudgetKiB = 0;
@@ -133,6 +134,8 @@ struct CommandLineOptions {
             evidencePointLightSpecified = true;
         } else if (argument == "--disable-point-shadow-optimizations") {
             options.pointShadowOptimizationsEnabled = false;
+        } else if (argument == "--disable-recorder-scratch-reuse") {
+            options.recorderScratchReuseEnabled = false;
         } else if (argument == "--texture-residency-kib") {
             if (index + 1 >= arguments.size()) {
                 return reject("--texture-residency-kib needs a size");
@@ -185,6 +188,7 @@ inline constexpr std::string_view commandLineUsage =
     "[--texture-residency-kib <1..16777216>] "
     "[--serial-scene-preparation] "
     "[--disable-point-shadow-optimizations] "
+    "[--disable-recorder-scratch-reuse] "
     "[--bake-tile-thumbnails] "
     "[--evidence-output <directory> "
     "--evidence-render-scale <25..100> [--evidence-disable-ao] "
