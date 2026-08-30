@@ -1,5 +1,7 @@
 #include "engine/render/IsoScenePreparer.hpp"
 #include "engine/render/CameraConfig.hpp"
+#include "engine/render/PointShadowFaceCache.hpp"
+#include "engine/TaskSystem.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -119,6 +121,222 @@ sokoban::RenderFrameData sceneFrame()
         .color = { 0.5f, 0.5f, 0.5f, 1.0f },
     });
     return frame;
+}
+
+void checkPreparationOutputsMatch(
+    const sokoban::PreparedRenderScene& expected,
+    const sokoban::PreparedRenderScene& actual)
+{
+    CHECK(expected.opaqueFaceIndices == actual.opaqueFaceIndices);
+    CHECK(expected.translucentFaceIndices == actual.translucentFaceIndices);
+    CHECK(expected.pickFaceIndices == actual.pickFaceIndices);
+    CHECK(expected.opaqueModelIndices == actual.opaqueModelIndices);
+    CHECK(expected.translucentModelIndices == actual.translucentModelIndices);
+    CHECK(expected.shadowFaces == actual.shadowFaces);
+    CHECK(expected.shadowFaceBounds == actual.shadowFaceBounds);
+    CHECK(expected.shadowModelIndices == actual.shadowModelIndices);
+    CHECK(expected.pointShadowFaceCandidates ==
+          actual.pointShadowFaceCandidates);
+    CHECK(expected.pointShadowFacesInRange == actual.pointShadowFacesInRange);
+    CHECK(expected.pointShadowFacesCulled == actual.pointShadowFacesCulled);
+    for (std::size_t lightIndex = 0;
+         lightIndex < sokoban::RenderFrameData::pointLightCapacity;
+         ++lightIndex) {
+        CHECK(expected.pointShadowCasters[lightIndex].faceIndices ==
+              actual.pointShadowCasters[lightIndex].faceIndices);
+        CHECK(expected.pointShadowCasters[lightIndex].modelTileIndices ==
+              actual.pointShadowCasters[lightIndex].modelTileIndices);
+    }
+    CHECK(expected.opaqueBlendedFirst == actual.opaqueBlendedFirst);
+    CHECK(expected.hasTranslucentContent == actual.hasTranslucentContent);
+    CHECK(expected.isoFaces.size() == actual.isoFaces.size());
+    CHECK(expected.renderables.size() == actual.renderables.size());
+    CHECK(expected.particles.size() == actual.particles.size());
+    for (std::size_t index = 0; index < expected.isoFaces.size(); ++index) {
+        CHECK(expected.isoFaces[index].worldVertices ==
+              actual.isoFaces[index].worldVertices);
+        CHECK(expected.isoFaces[index].vertices ==
+              actual.isoFaces[index].vertices);
+        CHECK(expected.isoFaces[index].depth == actual.isoFaces[index].depth);
+    }
+    for (std::size_t index = 0; index < expected.renderables.size(); ++index) {
+        CHECK(expected.renderables[index].identity ==
+              actual.renderables[index].identity);
+        CHECK(expected.renderables[index].boundsRevision ==
+              actual.renderables[index].boundsRevision);
+        CHECK(expected.renderables[index].boundsReused ==
+              actual.renderables[index].boundsReused);
+        CHECK(expected.renderables[index].mainSceneVisible ==
+              actual.renderables[index].mainSceneVisible);
+    }
+    for (std::size_t index = 0; index < expected.particles.size(); ++index) {
+        CHECK(expected.particles[index].vertices ==
+              actual.particles[index].vertices);
+        CHECK(expected.particles[index].color == actual.particles[index].color);
+        CHECK(expected.particles[index].texture ==
+              actual.particles[index].texture);
+        CHECK(expected.particles[index].depth == actual.particles[index].depth);
+        CHECK(expected.particles[index].drawOnTop ==
+              actual.particles[index].drawOnTop);
+    }
+}
+
+void testParallelAuxiliaryPreparationMatchesSerialOutput()
+{
+    using namespace sokoban;
+
+    RenderFrameData frame = sceneFrame();
+    frame.particles = {
+        {
+            .position = { 0.5f, 0.5f, 0.7f },
+            .size = { 0.4f, 0.6f },
+            .rotationRadians = 0.35f,
+            .color = { 1.0f, 0.5f, 0.2f, 0.8f },
+            .texture = { 1 },
+        },
+        {
+            .position = { 2.0f, 1.0f, 1.2f },
+            .size = { 0.8f, 0.3f },
+            .rotationRadians = -0.2f,
+            .color = { 0.2f, 0.7f, 1.0f, 1.0f },
+            .texture = { 2 },
+            .drawOnTop = true,
+        },
+    };
+
+    IsoScenePreparer serialPreparer;
+    IsoScenePreparer parallelPreparer;
+    TaskSystem preparationTasks(1);
+    PreparedRenderScene serialScene;
+    PreparedRenderScene parallelScene;
+    const Vec2 extent { 1920.0f, 1080.0f };
+
+    serialPreparer.prepare(frame, extent, serialScene);
+    parallelPreparer.prepare(
+        frame, extent, parallelScene, &preparationTasks);
+    CHECK(preparationTasks.executedTaskCount() == 1);
+    checkPreparationOutputsMatch(serialScene, parallelScene);
+
+    // A second frame also exercises retained-bound reuse on the foreground
+    // path while the auxiliary vectors are rebuilt by the worker.
+    serialPreparer.prepare(frame, extent, serialScene);
+    parallelPreparer.prepare(
+        frame, extent, parallelScene, &preparationTasks);
+    CHECK(preparationTasks.executedTaskCount() == 2);
+    CHECK(serialScene.reusedRenderableBounds ==
+          parallelScene.reusedRenderableBounds);
+    checkPreparationOutputsMatch(serialScene, parallelScene);
+}
+
+void testPointShadowCastersAreRangeCulledConservatively()
+{
+    using namespace sokoban;
+
+    RenderFrameData frame = sceneFrame();
+    frame.lighting.pointLightCount = 3;
+    frame.lighting.pointLights[0] = {
+        .position = { 0.5f, 0.5f, 0.5f },
+        .intensity = 2.0f,
+        .range = 0.75f,
+        .emitterTileIndex = 2,
+    };
+    frame.lighting.pointLights[1] = {
+        .position = { 100.0f, 100.0f, 100.0f },
+        .intensity = 1.0f,
+        .range = 1.0f,
+    };
+    frame.lighting.pointLights[2] = {
+        .position = { 0.5f, 0.5f, 0.5f },
+        .intensity = 1.0f,
+        .range = 10.0f,
+        .castsShadows = false,
+    };
+
+    const PreparedRenderScene scene =
+        prepareScene(frame, { 1920.0f, 1080.0f });
+    CHECK(scene.shadowFaces.size() == 11);
+    CHECK(scene.shadowFaceBounds.size() == scene.shadowFaces.size());
+    CHECK(scene.pointShadowFaceCandidates == 22);
+    CHECK(scene.pointShadowFacesInRange == 9);
+    CHECK(scene.pointShadowFacesCulled == 13);
+    CHECK(scene.pointShadowCasters[0].faceIndices.size() == 9);
+    CHECK(scene.pointShadowCasters[0].modelTileIndices.empty());
+    CHECK(scene.pointShadowCasters[1].faceIndices.empty());
+    CHECK(scene.pointShadowCasters[1].modelTileIndices.size() == 1);
+    CHECK(scene.pointShadowCasters[1].modelTileIndices[0] == 2);
+    CHECK(scene.pointShadowCasters[2].faceIndices.empty());
+    CHECK(scene.pointShadowCasters[2].modelTileIndices.empty());
+
+    // Stable source order is part of the rendering contract: filtering may
+    // remove indices but must never reorder the survivors.
+    CHECK(std::ranges::is_sorted(
+        scene.pointShadowCasters[0].faceIndices));
+}
+
+void testPointShadowFaceCacheRequiresExactStableGeometry()
+{
+    using namespace sokoban;
+
+    PointShadowFaceCache cache;
+    RenderFrameData::PointLight light {
+        .position = { 1.0f, 2.0f, 3.0f },
+        .intensity = 1.0f,
+        .range = 5.0f,
+    };
+    std::vector<std::array<Vec3, 4>> faces {
+        {
+            Vec3 { 0.0f, 0.0f, 0.0f },
+            Vec3 { 1.0f, 0.0f, 0.0f },
+            Vec3 { 1.0f, 1.0f, 0.0f },
+            Vec3 { 0.0f, 1.0f, 0.0f },
+        },
+        {
+            Vec3 { 2.0f, 0.0f, 0.0f },
+            Vec3 { 3.0f, 0.0f, 0.0f },
+            Vec3 { 3.0f, 1.0f, 0.0f },
+            Vec3 { 2.0f, 1.0f, 0.0f },
+        },
+    };
+    const std::vector<std::size_t> indices { 0, 1 };
+    const std::span<const PointShadowModelState> noModels;
+
+    CHECK(!cache.reusable(0, light, faces, indices, noModels));
+    cache.markRendered(0, light, faces, indices, noModels);
+    CHECK(cache.reusable(0, light, faces, indices, noModels));
+    CHECK(!cache.reusable(1, light, faces, indices, noModels));
+
+    RenderFrameData::PointLight moved = light;
+    moved.position.x += 0.001f;
+    CHECK(!cache.reusable(0, moved, faces, indices, noModels));
+    RenderFrameData::PointLight reranged = light;
+    reranged.range += 0.001f;
+    CHECK(!cache.reusable(0, reranged, faces, indices, noModels));
+
+    faces[1][0].z += 0.001f;
+    CHECK(!cache.reusable(0, light, faces, indices, noModels));
+    faces[1][0].z -= 0.001f;
+    const std::vector<std::size_t> reordered { 1, 0 };
+    CHECK(!cache.reusable(0, light, faces, reordered, noModels));
+
+    std::vector<PointShadowModelState> models {
+        {
+            .tileIndex = 3,
+            .tile = cube(3, 2),
+            .ready = true,
+        },
+    };
+    CHECK(!cache.reusable(0, light, faces, indices, models));
+    cache.markRendered(0, light, faces, indices, models);
+    CHECK(cache.reusable(0, light, faces, indices, models));
+    models[0].tile.animationTimeSeconds = 0.25f;
+    CHECK(!cache.reusable(0, light, faces, indices, models));
+    models[0].tile.animationTimeSeconds = 0.0f;
+    models[0].ready = false;
+    CHECK(!cache.reusable(0, light, faces, indices, models));
+
+    cache.markRendered(0, light, faces, indices, noModels);
+    cache.invalidate(0);
+    CHECK(!cache.reusable(0, light, faces, indices, noModels));
 }
 
 void testCameraLayoutUsesConfiguredAngles()
@@ -1482,6 +1700,9 @@ void testAuthoredModelTransformSupportsPivotRotationAndNonUniformScale()
 
 int main()
 {
+    testParallelAuxiliaryPreparationMatchesSerialOutput();
+    testPointShadowCastersAreRangeCulledConservatively();
+    testPointShadowFaceCacheRequiresExactStableGeometry();
     testCameraLayoutUsesConfiguredAngles();
     testPreparationCategorizesOneSharedFacePool();
     testPassListsAreDepthSorted();

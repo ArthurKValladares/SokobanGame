@@ -729,6 +729,21 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             renderStats.preparedModels - renderStats.unavailableModels,
             renderStats.preparedModels,
             renderStats.preparedParticles);
+        ImGui::Text(
+            "Point-shadow faces %u/%u in range (%u culled; %u draw submissions avoided)",
+            renderStats.pointShadowFacesInRange,
+            renderStats.pointShadowFaceCandidates,
+            renderStats.pointShadowFacesCulled,
+            renderStats.pointShadowFacesCulled * 6U);
+        ImGui::Text(
+            "Point-shadow cube faces %u rendered, %u reused",
+            renderStats.pointShadowCubeFacesRendered,
+            renderStats.pointShadowCubeFacesReused);
+        ImGui::Text(
+            "Point-shadow models %u/%u in range (%u culled)",
+            renderStats.pointShadowModelsInRange,
+            renderStats.pointShadowModelCandidates,
+            renderStats.pointShadowModelsCulled);
         ImGui::Text("Visible faces %u", renderStats.visibleFaces);
         ImGui::Text(
             "Persistent renderables %u (%u visible, %u culled; bounds %u reused, %u rebuilt)",
@@ -740,6 +755,12 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
         ImGui::Text(
             "Main-scene frustum culling %s",
             renderStats.frustumCullingEnabled ? "on" : "off");
+        ImGui::Text(
+            "Parallel scene preparation %s",
+            renderStats.parallelScenePreparationEnabled ? "on" : "off");
+        ImGui::Text(
+            "Point-shadow range/cache optimizations %s",
+            renderStats.pointShadowOptimizationsEnabled ? "on" : "off");
         if (renderStats.scenePreparationTimingAvailable) {
             ImGui::Text(
                 "Scene preparation %.3f ms avg (p95 %.3f, max %.3f; %u samples)",

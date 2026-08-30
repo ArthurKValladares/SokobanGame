@@ -13,6 +13,8 @@
 
 namespace sokoban {
 
+class TaskSystem;
+
 struct TileRenderLayout {
     Vec2 boardBottomLeft {};
     Vec2 tileSize {};
@@ -151,6 +153,12 @@ struct PreparedRenderable {
     bool mainSceneVisible = true;
 };
 
+struct PreparedPointShadowCasters {
+    // Indices retain source order so culling cannot perturb depth-tie behavior.
+    std::vector<std::size_t> faceIndices;
+    std::vector<std::size_t> modelTileIndices;
+};
+
 // CPU scene work shared by every pass in one submitted frame.
 // Index lists point into the source RenderFrameData or the face pool and keep
 // pass recording free of geometry regeneration, culling, and sorting.
@@ -173,7 +181,13 @@ struct PreparedRenderScene {
     std::vector<std::size_t> translucentModelIndices;
     std::vector<PreparedParticle> particles;
     std::vector<std::array<Vec3, 4>> shadowFaces;
+    std::vector<Aabb> shadowFaceBounds;
     std::vector<std::size_t> shadowModelIndices;
+    std::array<PreparedPointShadowCasters,
+        RenderFrameData::pointLightCapacity> pointShadowCasters;
+    uint32_t pointShadowFaceCandidates = 0;
+    uint32_t pointShadowFacesInRange = 0;
+    uint32_t pointShadowFacesCulled = 0;
     std::vector<PreparedRenderable> renderables;
     bool frustumCullingEnabled = true;
     uint32_t reusedRenderableBounds = 0;
@@ -190,7 +204,8 @@ public:
     void prepare(
         const RenderFrameData& frameData,
         Vec2 renderExtent,
-        PreparedRenderScene& output) const;
+        PreparedRenderScene& output,
+        TaskSystem* auxiliaryTasks = nullptr) const;
 
     // Developer toggle for the opaque face order.
     //
@@ -222,6 +237,11 @@ public:
     void setFrustumCulling(bool enabled)
     {
         frustumCulling_ = enabled;
+    }
+
+    void setPointShadowRangeCulling(bool enabled)
+    {
+        pointShadowRangeCulling_ = enabled;
     }
 
     [[nodiscard]] std::optional<GridPosition3> pickGridCell(
@@ -303,6 +323,7 @@ private:
     mutable uint64_t nextRenderableIdentity_ = 1;
     bool opaqueFrontToBackSort_ = true;
     bool frustumCulling_ = true;
+    bool pointShadowRangeCulling_ = true;
 };
 
 } // namespace sokoban

@@ -33,6 +33,10 @@ struct CommandLineOptions {
     int evidenceRenderScalePercent = 100;
     bool evidenceAmbientOcclusionEnabled = true;
     bool evidenceFrustumCullingEnabled = true;
+    bool evidencePointLightEnabled = false;
+    // Diagnostic A/B switch for frame-preparation profiling.
+    bool parallelScenePreparationEnabled = true;
+    bool pointShadowOptimizationsEnabled = true;
     // Diagnostic override for exercising residency pressure. Zero keeps the
     // normal renderer budget.
     std::uint64_t textureResidencyBudgetKiB = 0;
@@ -50,6 +54,7 @@ struct CommandLineOptions {
     bool evidenceScaleSpecified = false;
     bool evidenceAmbientOcclusionSpecified = false;
     bool evidenceFrustumCullingSpecified = false;
+    bool evidencePointLightSpecified = false;
     const auto reject = [&options](std::string message) {
         options.malformed = true;
         options.error = std::move(message);
@@ -121,6 +126,13 @@ struct CommandLineOptions {
         } else if (argument == "--evidence-disable-frustum-culling") {
             options.evidenceFrustumCullingEnabled = false;
             evidenceFrustumCullingSpecified = true;
+        } else if (argument == "--serial-scene-preparation") {
+            options.parallelScenePreparationEnabled = false;
+        } else if (argument == "--evidence-point-light") {
+            options.evidencePointLightEnabled = true;
+            evidencePointLightSpecified = true;
+        } else if (argument == "--disable-point-shadow-optimizations") {
+            options.pointShadowOptimizationsEnabled = false;
         } else if (argument == "--texture-residency-kib") {
             if (index + 1 >= arguments.size()) {
                 return reject("--texture-residency-kib needs a size");
@@ -161,6 +173,9 @@ struct CommandLineOptions {
         return reject(
             "--evidence-disable-frustum-culling requires --evidence-output");
     }
+    if (options.evidenceOutputDirectory.empty() && evidencePointLightSpecified) {
+        return reject("--evidence-point-light requires --evidence-output");
+    }
     return options;
 }
 
@@ -168,9 +183,11 @@ inline constexpr std::string_view commandLineUsage =
     "Usage: sokoban [--smoke-frames <positive integer>] "
     "[--save-directory <path>] [--require-validation] "
     "[--texture-residency-kib <1..16777216>] "
+    "[--serial-scene-preparation] "
+    "[--disable-point-shadow-optimizations] "
     "[--bake-tile-thumbnails] "
     "[--evidence-output <directory> "
     "--evidence-render-scale <25..100> [--evidence-disable-ao] "
-    "[--evidence-disable-frustum-culling]]";
+    "[--evidence-disable-frustum-culling] [--evidence-point-light]]";
 
 } // namespace sokoban

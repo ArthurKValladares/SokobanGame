@@ -109,6 +109,19 @@ void Application::finishEvidenceCapture()
     report << "- Draw calls: " << evidenceStats_.drawCalls << "\n";
     report << "- Triangles: " << evidenceStats_.triangles << "\n";
     report << "- Render passes: " << evidenceStats_.renderPasses << "\n";
+    report << "- Point-shadow faces: "
+           << evidenceStats_.pointShadowFacesInRange << " / "
+           << evidenceStats_.pointShadowFaceCandidates << " in range; "
+           << evidenceStats_.pointShadowFacesCulled << " culled ("
+           << evidenceStats_.pointShadowFacesCulled * 6U
+           << " face draws avoided)\n";
+    report << "- Point-shadow cube faces: "
+           << evidenceStats_.pointShadowCubeFacesRendered << " rendered, "
+           << evidenceStats_.pointShadowCubeFacesReused << " reused\n";
+    report << "- Point-shadow models: "
+           << evidenceStats_.pointShadowModelsInRange << " / "
+           << evidenceStats_.pointShadowModelCandidates << " in range; "
+           << evidenceStats_.pointShadowModelsCulled << " culled\n";
     report << "- Persistent renderables: "
            << evidenceStats_.persistentRenderables << " (visible "
            << evidenceStats_.visibleRenderables << ", culled "
@@ -117,6 +130,16 @@ void Application::finishEvidenceCapture()
            << evidenceStats_.rebuiltRenderableBounds << ")\n";
     report << "- Main-scene frustum culling: "
            << (evidenceStats_.frustumCullingEnabled ? "enabled" : "disabled")
+           << "\n";
+    report << "- Parallel scene preparation: "
+           << (evidenceStats_.parallelScenePreparationEnabled
+                   ? "enabled"
+                   : "disabled")
+           << "\n";
+    report << "- Point-shadow range/cache optimizations: "
+           << (evidenceStats_.pointShadowOptimizationsEnabled
+                   ? "enabled"
+                   : "disabled")
            << "\n";
     if (evidenceStats_.scenePreparationTimingAvailable) {
         report << "- Scene preparation: average "

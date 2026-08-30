@@ -41,6 +41,12 @@ void testEmptyIsANormalRun()
         "ambient occlusion is enabled in evidence runs by default");
     check(options.evidenceFrustumCullingEnabled,
         "frustum culling is enabled in evidence runs by default");
+    check(options.parallelScenePreparationEnabled,
+        "scene preparation is parallel by default");
+    check(!options.evidencePointLightEnabled,
+        "evidence point light is disabled by default");
+    check(options.pointShadowOptimizationsEnabled,
+        "point-shadow optimizations are enabled by default");
     check(options.textureResidencyBudgetKiB == 0,
         "texture residency uses its production default");
 }
@@ -64,6 +70,24 @@ void testFlags()
     check(!residency.malformed, "residency stress invocation parses");
     check(residency.textureResidencyBudgetKiB == 64,
         "texture residency override is read");
+
+    const sokoban::CommandLineOptions serialPreparation = parse(
+        { "--smoke-frames", "120", "--serial-scene-preparation" });
+    check(!serialPreparation.malformed,
+        "serial scene preparation invocation parses");
+    check(!serialPreparation.parallelScenePreparationEnabled,
+        "serial scene preparation override is read");
+
+    const sokoban::CommandLineOptions pointShadowEvidence = parse(
+        { "--smoke-frames", "120", "--evidence-output", "/tmp/evidence",
+            "--evidence-point-light",
+            "--disable-point-shadow-optimizations" });
+    check(!pointShadowEvidence.malformed,
+        "point-shadow evidence invocation parses");
+    check(pointShadowEvidence.evidencePointLightEnabled,
+        "point-shadow evidence light is enabled");
+    check(!pointShadowEvidence.pointShadowOptimizationsEnabled,
+        "point-shadow legacy control is read");
 
     const sokoban::CommandLineOptions evidence = parse(
         { "--smoke-frames", "180", "--evidence-output", "/tmp/evidence",
@@ -157,6 +181,8 @@ void testMalformedInput()
         "AO-off evidence mode requires an output directory");
     check(parse({ "--evidence-disable-frustum-culling" }).malformed,
         "culling-off evidence mode requires an output directory");
+    check(parse({ "--evidence-point-light" }).malformed,
+        "point-light evidence mode requires an output directory");
 
     const sokoban::CommandLineOptions rejected = parse({ "--smoke-frames", "abc" });
     check(!rejected.error.empty(), "a rejection explains itself");

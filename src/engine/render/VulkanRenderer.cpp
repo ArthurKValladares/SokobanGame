@@ -107,6 +107,25 @@ bool pointInConvexHull(std::array<Vec2, 8> points, Vec2 point)
     return true;
 }
 
+template <typename BackgroundFn, typename ForegroundFn>
+void runConcurrently(
+    TaskSystem& tasks,
+    BackgroundFn background,
+    ForegroundFn foreground)
+{
+    std::future<void> backgroundResult = tasks.enqueue(
+        std::move(background));
+    try {
+        foreground();
+    } catch (...) {
+        // The background callable may still reference frame scratch. Keep it
+        // alive and quiescent before propagating the foreground failure.
+        backgroundResult.wait();
+        throw;
+    }
+    backgroundResult.get();
+}
+
 } // namespace
 
 SwapchainPresentSemaphores::SwapchainPresentSemaphores(
@@ -200,7 +219,9 @@ VulkanRenderer::VulkanRenderer(
     AntiAliasingMode antiAliasingMode,
     int renderScalePercent,
     PresentationPolicy presentationPolicy,
-    AssetLoadingBudget assetLoadingBudget)
+    AssetLoadingBudget assetLoadingBudget,
+    bool parallelScenePreparationEnabled,
+    bool pointShadowOptimizationsEnabled)
     : window_(window)
     , assetRoot_(std::move(assetRoot))
     , runtimeTextureCatalog_(
@@ -212,7 +233,15 @@ VulkanRenderer::VulkanRenderer(
           .wireframe = false,
       })
     , presentationPolicy_(presentationPolicy)
+    , parallelScenePreparationEnabled_(parallelScenePreparationEnabled)
+    , pointShadowOptimizationsEnabled_(pointShadowOptimizationsEnabled)
 {
+    scenePreparer_.setPointShadowRangeCulling(
+        pointShadowOptimizationsEnabled_);
+    previewScenePreparer_.setPointShadowRangeCulling(
+        pointShadowOptimizationsEnabled_);
+    sceneRecorder_.setPointShadowCacheEnabled(
+        pointShadowOptimizationsEnabled_);
     pipelineCache_.create(
         deviceContext_.device(),
         deviceContext_.physicalDeviceProperties(),
@@ -313,24 +342,59 @@ VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
         preparedFrameScratch_.acquire();
     scratch->frameData = std::move(frameData);
     scratch->generation = nextPreparedFrameGeneration_++;
-    scenePreparer_.prepare(
-        scratch->frameData,
-        {
-            static_cast<float>(extent.width),
-            static_cast<float>(extent.height),
-        },
-        scratch->scene);
     scratch->previewFrameData = std::move(previewFrameData);
     scratch->previewScene.reset();
-    if (scratch->previewFrameData) {
+    const Vec2 mainExtent {
+        static_cast<float>(extent.width),
+        static_cast<float>(extent.height),
+    };
+    if (scratch->previewFrameData && parallelScenePreparationEnabled_) {
+        scratch->previewScene.emplace();
+        const Vec2 previewExtent {
+            mainExtent.x * 0.75f,
+            mainExtent.y * 0.75f,
+        };
+        // Whole-scene preparation is the coarsest useful split. The main and
+        // preview preparers own separate retained caches and write separate
+        // frame-scratch subobjects, so no ordering or cache synchronization is
+        // required between them.
+        runConcurrently(
+            framePreparationTasks_,
+            [this, scratch, previewExtent] {
+                previewScenePreparer_.prepare(
+                    *scratch->previewFrameData,
+                    previewExtent,
+                    *scratch->previewScene);
+            },
+            [this, &scratch, mainExtent] {
+                scenePreparer_.prepare(
+                    scratch->frameData,
+                    mainExtent,
+                    scratch->scene);
+            });
+    } else if (scratch->previewFrameData) {
+        scenePreparer_.prepare(
+            scratch->frameData,
+            mainExtent,
+            scratch->scene);
         scratch->previewScene.emplace();
         previewScenePreparer_.prepare(
             *scratch->previewFrameData,
             {
-                static_cast<float>(extent.width) * 0.75f,
-                static_cast<float>(extent.height) * 0.75f,
+                mainExtent.x * 0.75f,
+                mainExtent.y * 0.75f,
             },
             *scratch->previewScene);
+    } else {
+        // With one scene, overlap its independent shadow/particle lists with
+        // ordered main-scene projection, culling, and sorting.
+        scenePreparer_.prepare(
+            scratch->frameData,
+            mainExtent,
+            scratch->scene,
+            parallelScenePreparationEnabled_
+                ? &framePreparationTasks_
+                : nullptr);
     }
     scenePreparationTimeTelemetry_.record(
         std::chrono::duration<double, std::milli>(
@@ -484,6 +548,10 @@ void VulkanRenderer::drawFrame(
         prepared.previewScene ? &*prepared.previewScene : nullptr,
         uiDrawData);
     lastStats_.gpuTimestampsSupported = gpuProfiler_.supported();
+    lastStats_.parallelScenePreparationEnabled =
+        parallelScenePreparationEnabled_;
+    lastStats_.pointShadowOptimizationsEnabled =
+        pointShadowOptimizationsEnabled_;
     const FrameTimeSummary preparationTiming =
         scenePreparationTimeTelemetry_.summary();
     lastStats_.scenePreparationTimingAvailable =

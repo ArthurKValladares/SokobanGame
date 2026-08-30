@@ -64,6 +64,9 @@ struct ApplicationOptions {
     int evidenceRenderScalePercent = 100;
     bool evidenceAmbientOcclusionEnabled = true;
     bool evidenceFrustumCullingEnabled = true;
+    bool evidencePointLightEnabled = false;
+    bool parallelScenePreparationEnabled = true;
+    bool pointShadowOptimizationsEnabled = true;
     // Zero keeps the production default. A non-zero override exists for
     // deterministic residency stress/validation runs.
     std::uint64_t textureResidencyBudgetKiB = 0;
@@ -225,6 +228,7 @@ private:
     std::filesystem::path evidenceOutputDirectory_;
     RenderStats evidenceStats_ {};
     bool evidenceAmbientOcclusionEnabled_ = true;
+    bool evidencePointLightEnabled_ = false;
     bool evidenceSceneCaptured_ = false;
     std::optional<VulkanRenderer::PreparedFrame> preparedRenderFrame_;
     float overworldOverviewProgress_ = 0.0f;

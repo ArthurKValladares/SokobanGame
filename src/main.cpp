@@ -78,6 +78,11 @@ int main(int argc, char** argv)
                     options.evidenceAmbientOcclusionEnabled,
                 .evidenceFrustumCullingEnabled =
                     options.evidenceFrustumCullingEnabled,
+                .evidencePointLightEnabled = options.evidencePointLightEnabled,
+                .parallelScenePreparationEnabled =
+                    options.parallelScenePreparationEnabled,
+                .pointShadowOptimizationsEnabled =
+                    options.pointShadowOptimizationsEnabled,
                 .textureResidencyBudgetKiB =
                     options.textureResidencyBudgetKiB,
             }

@@ -2,6 +2,7 @@
 
 #include "engine/Math.hpp"
 #include "engine/PresentationPolicy.hpp"
+#include "engine/TaskSystem.hpp"
 #include "engine/render/GltfMesh.hpp"
 #include "engine/render/FrameDescriptorSync.hpp"
 #include "engine/render/FrameResourceTracker.hpp"
@@ -117,7 +118,9 @@ public:
         AntiAliasingMode antiAliasingMode = AntiAliasingMode::Msaa4x,
         int renderScalePercent = 100,
         PresentationPolicy presentationPolicy = {},
-        AssetLoadingBudget assetLoadingBudget = {});
+        AssetLoadingBudget assetLoadingBudget = {},
+        bool parallelScenePreparationEnabled = true,
+        bool pointShadowOptimizationsEnabled = true);
     ~VulkanRenderer();
 
     VulkanRenderer(const VulkanRenderer&) = delete;
@@ -326,6 +329,9 @@ private:
     ReusableScratchPool<PreparedFrameScratch, preparedFrameSlotCount_>
         preparedFrameScratch_;
     RenderAssetRequirements frameAssetRequirements_;
+    // Kept separate from asset loading: frame preparation waits for this
+    // worker every frame and must not sit behind texture/model jobs.
+    TaskSystem framePreparationTasks_ { 1 };
     IsoScenePreparer scenePreparer_;
     IsoScenePreparer previewScenePreparer_;
     FrameDescriptorSync descriptorSync_ { maxFramesInFlight_ };
@@ -341,6 +347,8 @@ private:
     RenderStats lastStats_ {};
     FrameTimeTelemetry scenePreparationTimeTelemetry_ {};
     FrameTimeTelemetry cpuFrameTimeTelemetry_ {};
+    bool parallelScenePreparationEnabled_ = true;
+    bool pointShadowOptimizationsEnabled_ = true;
     uint64_t nextStatsFrameIndex_ = 1;
     std::optional<GameViewportDisplay> gameViewportDisplay_;
     uint64_t pipelineRebuilds_ = 0;

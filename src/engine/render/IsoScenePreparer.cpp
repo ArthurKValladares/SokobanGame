@@ -1,16 +1,52 @@
 #include "engine/render/IsoScenePreparer.hpp"
 
+#include "engine/TaskSystem.hpp"
+
 #include "engine/BoardLayout.hpp"
 #include "engine/render/CameraConfig.hpp"
 #include "engine/render/LightingConfig.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <future>
 #include <limits>
 #include <ranges>
 
 namespace sokoban {
 namespace {
+
+class ScopedVoidTask {
+public:
+    ScopedVoidTask() = default;
+    explicit ScopedVoidTask(std::future<void> task)
+        : task_(std::move(task))
+    {
+    }
+
+    ~ScopedVoidTask()
+    {
+        // If foreground preparation throws, the scene must remain alive until
+        // the worker has stopped writing its disjoint output vectors.
+        if (task_.valid()) {
+            task_.wait();
+        }
+    }
+
+    ScopedVoidTask(ScopedVoidTask&&) = delete;
+    ScopedVoidTask& operator=(ScopedVoidTask&&) = delete;
+    ScopedVoidTask(const ScopedVoidTask&) = delete;
+    ScopedVoidTask& operator=(const ScopedVoidTask&) = delete;
+
+    void finish()
+    {
+        if (task_.valid()) {
+            task_.get();
+        }
+    }
+
+private:
+    std::future<void> task_;
+};
 
 Vec4 projectIsoPointToClip(
     const IsoRenderLayout& layout,
@@ -890,10 +926,172 @@ PreparedRenderable IsoScenePreparer::reconcileRenderable(
     };
 }
 
+static void prepareAuxiliaryGeometry(
+    const RenderFrameData& frameData,
+    const IsoRenderLayout& isoLayout,
+    std::vector<PreparedParticle>& particles,
+    std::vector<std::array<Vec3, 4>>& shadowFaces,
+    std::vector<Aabb>& shadowFaceBounds,
+    std::vector<std::size_t>& shadowModelIndices,
+    std::array<PreparedPointShadowCasters,
+        RenderFrameData::pointLightCapacity>& pointShadowCasters,
+    uint32_t& pointShadowFaceCandidates,
+    uint32_t& pointShadowFacesInRange,
+    uint32_t& pointShadowFacesCulled,
+    bool pointShadowRangeCulling)
+{
+    particles.clear();
+    particles.reserve(frameData.particles.size());
+    shadowFaces.clear();
+    shadowFaces.reserve(
+        frameData.tiles.size() * 5 + frameData.isoFaces.size());
+    shadowFaceBounds.clear();
+    shadowFaceBounds.reserve(
+        frameData.tiles.size() * 5 + frameData.isoFaces.size());
+    shadowModelIndices.clear();
+    shadowModelIndices.reserve(frameData.tiles.size());
+
+    if (frameData.viewMode == RenderViewMode::Isometric3D) {
+        for (const RenderFrameData::Particle& source : frameData.particles) {
+            if (source.texture.isNone() || source.color.w <= 0.0f ||
+                source.size.x <= 0.0f || source.size.y <= 0.0f) {
+                continue;
+            }
+            const float cosine = std::cos(source.rotationRadians);
+            const float sine = std::sin(source.rotationRadians);
+            const Vec3 right = add(
+                multiply(
+                    isoLayout.cameraRight,
+                    cosine * source.size.x * 0.5f),
+                multiply(
+                    isoLayout.cameraUp,
+                    sine * source.size.x * 0.5f));
+            const Vec3 up = add(
+                multiply(
+                    isoLayout.cameraUp,
+                    cosine * source.size.y * 0.5f),
+                multiply(
+                    isoLayout.cameraRight,
+                    -sine * source.size.y * 0.5f));
+            PreparedParticle particle {
+                .vertices = {
+                    subtract(source.position, add(right, up)),
+                    add(subtract(source.position, up), right),
+                    add(source.position, add(right, up)),
+                    add(subtract(source.position, right), up),
+                },
+                .color = source.color,
+                .texture = source.texture,
+                .depth = dot(
+                    subtract(source.position, isoLayout.cameraPosition),
+                    isoLayout.cameraForward),
+                .drawOnTop = source.drawOnTop,
+            };
+            particles.push_back(particle);
+        }
+        std::ranges::sort(
+            particles,
+            [](const PreparedParticle& left, const PreparedParticle& right) {
+                if (left.drawOnTop != right.drawOnTop) {
+                    return !left.drawOnTop;
+                }
+                return left.depth > right.depth;
+            });
+    }
+
+    const auto appendShadowFace = [&](const std::array<Vec3, 4>& vertices) {
+        shadowFaces.push_back(vertices);
+        shadowFaceBounds.push_back(aabbFromPoints(vertices));
+    };
+    for (std::size_t tileIndex = 0;
+         tileIndex < frameData.tiles.size();
+         ++tileIndex) {
+        const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
+        if (tile.isEditorPreview || tile.pickOnly ||
+            tile.effect == RenderSurfaceEffect::MirrorEnergy) {
+            continue;
+        }
+        if (!tile.model.isCube()) {
+            shadowModelIndices.push_back(tileIndex);
+            continue;
+        }
+
+        const std::array<Vec3, 8> corners = tileCorners(tile);
+        if (std::max(tile.height, 0.0f) <= 0.0f) {
+            appendShadowFace(
+                { corners[0], corners[1], corners[2], corners[3] });
+            continue;
+        }
+        appendShadowFace(
+            { corners[0], corners[1], corners[5], corners[4] });
+        appendShadowFace(
+            { corners[1], corners[2], corners[6], corners[5] });
+        appendShadowFace(
+            { corners[2], corners[3], corners[7], corners[6] });
+        appendShadowFace(
+            { corners[3], corners[0], corners[4], corners[7] });
+        appendShadowFace(
+            { corners[4], corners[5], corners[6], corners[7] });
+    }
+    for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
+        if (face.effect != RenderSurfaceEffect::MirrorEnergy) {
+            appendShadowFace(face.vertices);
+        }
+    }
+
+    pointShadowFaceCandidates = 0;
+    pointShadowFacesInRange = 0;
+    pointShadowFacesCulled = 0;
+    for (PreparedPointShadowCasters& casters : pointShadowCasters) {
+        casters.faceIndices.clear();
+        casters.modelTileIndices.clear();
+    }
+    const std::size_t pointLightCount = std::min(
+        frameData.lighting.pointLightCount,
+        RenderFrameData::pointLightCapacity);
+    for (std::size_t lightIndex = 0;
+         lightIndex < pointLightCount;
+         ++lightIndex) {
+        const RenderFrameData::PointLight& light =
+            frameData.lighting.pointLights[lightIndex];
+        if (!light.castsShadows || light.intensity <= 0.0f ||
+            light.range <= config::pointShadowNearPlane) {
+            continue;
+        }
+        PreparedPointShadowCasters& casters =
+            pointShadowCasters[lightIndex];
+        casters.faceIndices.reserve(shadowFaces.size());
+        casters.modelTileIndices.reserve(shadowModelIndices.size());
+        pointShadowFaceCandidates +=
+            static_cast<uint32_t>(shadowFaces.size());
+        const Sphere influence { light.position, light.range };
+        for (std::size_t faceIndex = 0;
+             faceIndex < shadowFaceBounds.size();
+             ++faceIndex) {
+            if (!pointShadowRangeCulling ||
+                intersects(shadowFaceBounds[faceIndex], influence)) {
+                casters.faceIndices.push_back(faceIndex);
+                ++pointShadowFacesInRange;
+            } else {
+                ++pointShadowFacesCulled;
+            }
+        }
+        // Non-cube model bounds remain provisional until the loaded mesh AABB
+        // joins the retained-renderable contract. Fail open rather than clip a
+        // caster whose authored mesh extends outside its logical unit box.
+        for (std::size_t tileIndex : shadowModelIndices) {
+            if (!light.excludesShadowCaster(tileIndex)) {
+                casters.modelTileIndices.push_back(tileIndex);
+            }
+        }
+    }
+}
+
 void IsoScenePreparer::prepare(
     const RenderFrameData& frameData,
     Vec2 renderExtent,
-    PreparedRenderScene& scene) const
+    PreparedRenderScene& scene,
+    TaskSystem* auxiliaryTasks) const
 {
     scene.isoFaces.clear();
     scene.opaqueFaceIndices.clear();
@@ -902,9 +1100,6 @@ void IsoScenePreparer::prepare(
     scene.pickFaceIndices.clear();
     scene.opaqueModelIndices.clear();
     scene.translucentModelIndices.clear();
-    scene.particles.clear();
-    scene.shadowFaces.clear();
-    scene.shadowModelIndices.clear();
     scene.renderables.clear();
     scene.frustumCullingEnabled = frustumCulling_;
     scene.reusedRenderableBounds = 0;
@@ -922,6 +1117,41 @@ void IsoScenePreparer::prepare(
         isoClipFromWorld(scene.isoLayout, scene.renderExtent));
     scene.hasTranslucentContent = false;
 
+    std::future<void> auxiliaryFuture;
+    if (auxiliaryTasks) {
+        auxiliaryFuture = auxiliaryTasks->enqueue([
+            &frameData,
+            &scene,
+            this] {
+            prepareAuxiliaryGeometry(
+                frameData,
+                scene.isoLayout,
+                scene.particles,
+                scene.shadowFaces,
+                scene.shadowFaceBounds,
+                scene.shadowModelIndices,
+                scene.pointShadowCasters,
+                scene.pointShadowFaceCandidates,
+                scene.pointShadowFacesInRange,
+                scene.pointShadowFacesCulled,
+                pointShadowRangeCulling_);
+        });
+    } else {
+        prepareAuxiliaryGeometry(
+            frameData,
+            scene.isoLayout,
+            scene.particles,
+            scene.shadowFaces,
+            scene.shadowFaceBounds,
+            scene.shadowModelIndices,
+            scene.pointShadowCasters,
+            scene.pointShadowFaceCandidates,
+            scene.pointShadowFacesInRange,
+            scene.pointShadowFacesCulled,
+            pointShadowRangeCulling_);
+    }
+    ScopedVoidTask auxiliaryTask(std::move(auxiliaryFuture));
+
     scene.isoFaces.reserve(
         frameData.tiles.size() * 5 + frameData.waterSurfaces.size());
     scene.opaqueFaceIndices.reserve(frameData.tiles.size() * 3);
@@ -929,8 +1159,6 @@ void IsoScenePreparer::prepare(
         frameData.tiles.size() + frameData.waterSurfaces.size());
     scene.pickFaceIndices.reserve(
         frameData.tiles.size() * 3 + frameData.waterSurfaces.size());
-    scene.shadowFaces.reserve(frameData.tiles.size() * 5);
-    scene.particles.reserve(frameData.particles.size());
     scene.renderables.reserve(
         frameData.tiles.size() + frameData.waterSurfaces.size() +
         frameData.isoFaces.size());
@@ -1060,10 +1288,6 @@ void IsoScenePreparer::prepare(
         if (pickable) {
             scene.pickFaceIndices.push_back(index);
         }
-    };
-
-    auto appendShadowFace = [&](const std::array<Vec3, 4>& vertices) {
-        scene.shadowFaces.push_back(vertices);
     };
 
     if (frameData.viewMode == RenderViewMode::Isometric3D) {
@@ -1369,96 +1593,12 @@ void IsoScenePreparer::prepare(
         // dependent, so it must stay farthest first.
         std::ranges::sort(scene.translucentFaceIndices, fartherFirst);
 
-        for (const RenderFrameData::Particle& source : frameData.particles) {
-            if (source.texture.isNone() || source.color.w <= 0.0f ||
-                source.size.x <= 0.0f || source.size.y <= 0.0f) {
-                continue;
-            }
-            const float cosine = std::cos(source.rotationRadians);
-            const float sine = std::sin(source.rotationRadians);
-            const Vec3 right = add(
-                multiply(
-                    scene.isoLayout.cameraRight,
-                    cosine * source.size.x * 0.5f),
-                multiply(
-                    scene.isoLayout.cameraUp,
-                    sine * source.size.x * 0.5f));
-            const Vec3 up = add(
-                multiply(
-                    scene.isoLayout.cameraUp,
-                    cosine * source.size.y * 0.5f),
-                multiply(
-                    scene.isoLayout.cameraRight,
-                    -sine * source.size.y * 0.5f));
-            const std::array worldVertices {
-                subtract(source.position, add(right, up)),
-                add(subtract(source.position, up), right),
-                add(source.position, add(right, up)),
-                add(subtract(source.position, right), up),
-            };
-            PreparedParticle particle {
-                .color = source.color,
-                .texture = source.texture,
-                .depth = dot(
-                    subtract(
-                        source.position,
-                        scene.isoLayout.cameraPosition),
-                    scene.isoLayout.cameraForward),
-                .drawOnTop = source.drawOnTop,
-            };
-            particle.vertices = worldVertices;
-            scene.particles.push_back(particle);
-        }
-        std::ranges::sort(
-            scene.particles,
-            [](const PreparedParticle& left, const PreparedParticle& right) {
-                if (left.drawOnTop != right.drawOnTop) {
-                    return !left.drawOnTop;
-                }
-                return left.depth > right.depth;
-            });
-        scene.hasTranslucentContent =
-            !scene.translucentFaceIndices.empty() ||
-            !scene.translucentModelIndices.empty() ||
-            !scene.particles.empty();
     }
-
-    for (std::size_t tileIndex = 0;
-         tileIndex < frameData.tiles.size();
-         ++tileIndex) {
-        const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
-        if (tile.isEditorPreview || tile.pickOnly ||
-            tile.effect == RenderSurfaceEffect::MirrorEnergy) {
-            continue;
-        }
-        if (!tile.model.isCube()) {
-            scene.shadowModelIndices.push_back(tileIndex);
-            continue;
-        }
-
-        const std::array<Vec3, 8> corners = tileCorners(tile);
-        if (std::max(tile.height, 0.0f) <= 0.0f) {
-            appendShadowFace(
-                { corners[0], corners[1], corners[2], corners[3] });
-            continue;
-        }
-        appendShadowFace(
-            { corners[0], corners[1], corners[5], corners[4] });
-        appendShadowFace(
-            { corners[1], corners[2], corners[6], corners[5] });
-        appendShadowFace(
-            { corners[2], corners[3], corners[7], corners[6] });
-        appendShadowFace(
-            { corners[3], corners[0], corners[4], corners[7] });
-        appendShadowFace(
-            { corners[4], corners[5], corners[6], corners[7] });
-    }
-    for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
-        if (face.effect != RenderSurfaceEffect::MirrorEnergy) {
-            appendShadowFace(face.vertices);
-        }
-    }
-
+    auxiliaryTask.finish();
+    scene.hasTranslucentContent =
+        !scene.translucentFaceIndices.empty() ||
+        !scene.translucentModelIndices.empty() ||
+        !scene.particles.empty();
 }
 
 std::optional<GridPosition3> IsoScenePreparer::pickGridCell(

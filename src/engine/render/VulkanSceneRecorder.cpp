@@ -91,6 +91,44 @@ Vec4 projectPointShadow(
     };
 }
 
+Vec3 transformModelPoint(
+    const ModelTransformPoints& transform,
+    Vec3 point)
+{
+    const Vec3 xAxis = subtract(transform.xPoint, transform.origin);
+    const Vec3 yAxis = subtract(transform.yPoint, transform.origin);
+    const Vec3 zAxis = subtract(transform.zPoint, transform.origin);
+    return add(
+        transform.origin,
+        add(
+            multiply(xAxis, point.x),
+            add(
+                multiply(yAxis, point.y),
+                multiply(zAxis, point.z))));
+}
+
+Aabb modelWorldBounds(
+    const RenderFrameData::Tile& tile,
+    const VulkanModelResources::ModelBounds& bounds)
+{
+    if (!bounds.valid) {
+        return {};
+    }
+    const ModelTransformPoints transform =
+        IsoScenePreparer::modelTransformPoints(tile);
+    Aabb result;
+    for (float x : { bounds.minimum.x, bounds.maximum.x }) {
+        for (float y : { bounds.minimum.y, bounds.maximum.y }) {
+            for (float z : { bounds.minimum.z, bounds.maximum.z }) {
+                result = expand(
+                    result,
+                    transformModelPoint(transform, { x, y, z }));
+            }
+        }
+    }
+    return result;
+}
+
 void renderDebugUi(VkCommandBuffer commandBuffer)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -105,7 +143,11 @@ class SceneRecordingSession {
 public:
     SceneRecordingSession(
         VulkanSceneRecorder::Resources resources,
-        const VulkanSceneRecorder::FrameConfiguration& configuration)
+        const VulkanSceneRecorder::FrameConfiguration& configuration,
+        PointShadowFaceCache& pointShadowFaceCache,
+        std::array<std::vector<PointShadowModelState>,
+            RenderFrameData::pointLightCapacity>& pointShadowModelStateScratch,
+        bool pointShadowCacheEnabled)
         : device_(resources.device)
         , gpuProfiler_(resources.gpuProfiler)
         , swapchain_(resources.swapchain)
@@ -115,6 +157,9 @@ public:
         , pipelines_(resources.pipelines)
         , models_(resources.modelResources)
         , configuration_(configuration)
+        , pointShadowFaceCache_(pointShadowFaceCache)
+        , pointShadowModelStateScratch_(pointShadowModelStateScratch)
+        , pointShadowCacheEnabled_(pointShadowCacheEnabled)
     {
     }
 
@@ -164,6 +209,9 @@ public:
             .preparedShadowFaces =
                 static_cast<uint32_t>(scene.shadowFaces.size() +
                     (previewScene ? previewScene->shadowFaces.size() : 0)),
+            .pointShadowFaceCandidates = scene.pointShadowFaceCandidates,
+            .pointShadowFacesInRange = scene.pointShadowFacesInRange,
+            .pointShadowFacesCulled = scene.pointShadowFacesCulled,
             .preparedModels = static_cast<uint32_t>(
                 scene.opaqueModelIndices.size() +
                 scene.translucentModelIndices.size() +
@@ -494,6 +542,53 @@ private:
                 light.range <= config::pointShadowNearPlane) {
                 continue;
             }
+            const PreparedPointShadowCasters& casters =
+                scene.pointShadowCasters[lightIndex];
+            std::vector<PointShadowModelState>& modelStates =
+                pointShadowModelStateScratch_[lightIndex];
+            modelStates.clear();
+            modelStates.reserve(casters.modelTileIndices.size());
+            stats_.pointShadowModelCandidates += static_cast<uint32_t>(
+                casters.modelTileIndices.size());
+            const Sphere influence { light.position, light.range };
+            for (std::size_t tileIndex : casters.modelTileIndices) {
+                const RenderFrameData::Tile& tile =
+                    frameData.tiles[tileIndex];
+                const bool ready = models_.tileReadyForDraw(
+                    tile, configuration_.descriptorFrameIndex);
+                bool inRange = true;
+                // Bind-pose bounds are not conservative for skinned motion.
+                // Static loaded meshes have exact local bounds and may be
+                // transformed into a safe world-space range test.
+                if (pointShadowCacheEnabled_ && ready &&
+                    !models_.modelUsesGpuSkinning(tile.model)) {
+                    const Aabb bounds = modelWorldBounds(
+                        tile, models_.boundsForModel(tile.model));
+                    if (bounds.valid()) {
+                        inRange = intersects(bounds, influence);
+                    }
+                }
+                if (!inRange) {
+                    ++stats_.pointShadowModelsCulled;
+                    continue;
+                }
+                ++stats_.pointShadowModelsInRange;
+                modelStates.push_back({
+                    .tileIndex = tileIndex,
+                    .tile = tile,
+                    .ready = ready,
+                });
+            }
+            if (pointShadowCacheEnabled_ &&
+                pointShadowFaceCache_.reusable(
+                    lightIndex,
+                    light,
+                    scene.shadowFaces,
+                    casters.faceIndices,
+                    modelStates)) {
+                stats_.pointShadowCubeFacesReused += 6;
+                continue;
+            }
             for (uint32_t cubeFace = 0; cubeFace < 6; ++cubeFace) {
                 shadowPass_.beginPointFace(
                     commandBuffer,
@@ -501,21 +596,19 @@ private:
                     cubeFace,
                     pipelines_.shadow(),
                     stats_);
-                for (const std::array<Vec3, 4>& face : scene.shadowFaces) {
+                for (std::size_t faceIndex : casters.faceIndices) {
                     drawPointShadowFace(
-                        commandBuffer, light, cubeFace, face);
+                        commandBuffer,
+                        light,
+                        cubeFace,
+                        scene.shadowFaces[faceIndex]);
                 }
                 VkPipeline pointModelPipeline = VK_NULL_HANDLE;
-                for (std::size_t tileIndex : scene.shadowModelIndices) {
-                    if (light.excludesShadowCaster(tileIndex)) {
+                for (const PointShadowModelState& state : modelStates) {
+                    if (!state.ready) {
                         continue;
                     }
-                    const RenderFrameData::Tile& tile =
-                        frameData.tiles[tileIndex];
-                    if (!models_.tileReadyForDraw(
-                            tile, configuration_.descriptorFrameIndex)) {
-                        continue;
-                    }
+                    const RenderFrameData::Tile& tile = state.tile;
                     const VkPipeline modelPipeline =
                         models_.modelUsesGpuSkinning(tile.model)
                         ? pipelines_.skinnedModelShadow()
@@ -535,6 +628,17 @@ private:
                         tile);
                 }
                 shadowPass_.endPointFace(commandBuffer);
+            }
+            stats_.pointShadowCubeFacesRendered += 6;
+            if (pointShadowCacheEnabled_) {
+                pointShadowFaceCache_.markRendered(
+                    lightIndex,
+                    light,
+                    scene.shadowFaces,
+                    casters.faceIndices,
+                    modelStates);
+            } else {
+                pointShadowFaceCache_.invalidate(lightIndex);
             }
         }
         // The descriptor exposes the complete cube array. Even when no point
@@ -2483,6 +2587,10 @@ private:
     VulkanPipelineFactory& pipelines_;
     VulkanModelResources& models_;
     const VulkanSceneRecorder::FrameConfiguration& configuration_;
+    PointShadowFaceCache& pointShadowFaceCache_;
+    std::array<std::vector<PointShadowModelState>,
+        RenderFrameData::pointLightCapacity>& pointShadowModelStateScratch_;
+    bool pointShadowCacheEnabled_ = true;
     RenderStats stats_ {};
 };
 
@@ -2499,7 +2607,12 @@ RenderStats VulkanSceneRecorder::record(
     const PreparedRenderScene* previewScene,
     const UiDrawData& uiDrawData) const
 {
-    return SceneRecordingSession(resources, configuration).record(
+    return SceneRecordingSession(
+        resources,
+        configuration,
+        pointShadowFaceCache_,
+        pointShadowModelStateScratch_,
+        pointShadowCacheEnabled_).record(
         commandBuffer,
         imageIndex,
         frameData,

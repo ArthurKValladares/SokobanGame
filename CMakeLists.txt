@@ -408,6 +408,7 @@ add_library(sokoban_core STATIC
     src/engine/render/OpaqueDrawSorter.cpp
     src/engine/render/PbrMaterial.cpp
     src/engine/render/PngWriter.cpp
+    src/engine/render/PointShadowFaceCache.cpp
     src/engine/render/RenderAssetRequirements.cpp
     src/engine/render/RenderResolution.cpp
     src/engine/render/RuntimeTextureCatalog.cpp

@@ -86,6 +86,19 @@ void testAabbQueries()
     check(!intersects(box, aabbFromMinMax({ 2.1f, 0.0f, 0.0f }, { 4.0f, 2.0f, 2.0f })),
         "separated boxes do not intersect");
     check(!intersects(box, Aabb {}), "nothing intersects an invalid box");
+
+    check(intersects(box, Sphere { { 1.0f, 1.0f, 1.0f }, 0.0f }),
+        "a zero-radius sphere inside the box intersects");
+    check(intersects(box, Sphere { { 3.0f, 1.0f, 1.0f }, 1.0f }),
+        "a sphere touching a box face intersects");
+    check(intersects(Sphere { { 3.0f, 3.0f, 1.0f }, std::sqrt(2.0f) }, box),
+        "a sphere touching a box corner intersects symmetrically");
+    check(!intersects(box, Sphere { { 3.1f, 1.0f, 1.0f }, 1.0f }),
+        "a sphere beyond the box does not intersect");
+    check(!intersects(Aabb {}, Sphere { {}, 10.0f }),
+        "a sphere does not intersect invalid bounds");
+    check(!intersects(box, Sphere { {}, -1.0f }),
+        "a negative-radius sphere is invalid");
 }
 
 void testAabbTransform()

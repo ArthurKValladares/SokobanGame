@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/render/IsoScenePreparer.hpp"
+#include "engine/render/PointShadowFaceCache.hpp"
 #include "engine/render/RenderTypes.hpp"
 #include "engine/ui/Ui.hpp"
 
@@ -67,6 +68,17 @@ public:
         const RenderFrameData* previewFrameData,
         const PreparedRenderScene* previewScene,
         const UiDrawData& uiDrawData) const;
+
+    void setPointShadowCacheEnabled(bool enabled)
+    {
+        pointShadowCacheEnabled_ = enabled;
+    }
+
+private:
+    bool pointShadowCacheEnabled_ = true;
+    mutable PointShadowFaceCache pointShadowFaceCache_;
+    mutable std::array<std::vector<PointShadowModelState>,
+        RenderFrameData::pointLightCapacity> pointShadowModelStateScratch_;
 };
 
 } // namespace sokoban

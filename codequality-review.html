@@ -1,0 +1,1967 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root { color-scheme: light dark; }
+body { margin: 0; font: 14px system-ui, sans-serif; background: #faf9f7; }
+img { max-width: 100%; }
+[hidden] { display: none !important; }
+</style>
+<title>Sokoban Engine Audit</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+</head>
+<body>
+<style>
+:root {
+  color-scheme: light dark;
+
+  --paper: #f2efe6;
+  --panel: #fffefa;
+  --panel-sunk: #ebe7db;
+  --ink: #171d1b;
+  --ink-soft: #3d4744;
+  --muted: #5f6b66;
+  --line: #dad3c5;
+  --line-strong: #c3baa8;
+
+  --major: #9a3f38;
+  --major-soft: #f3ded9;
+  --moderate: #8d5a11;
+  --moderate-soft: #f6e7c6;
+  --minor: #2a5f9c;
+  --minor-soft: #dee9f6;
+  --good: #16674f;
+  --good-soft: #d8ebe2;
+
+  --accent: #16674f;
+
+  --display: Archivo, "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+
+  --measure: 68ch;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #12171a;
+    --panel: #1a2126;
+    --panel-sunk: #151b1f;
+    --ink: #e9eeec;
+    --ink-soft: #c2cdc9;
+    --muted: #94a29e;
+    --line: #2c383c;
+    --line-strong: #3d4c51;
+
+    --major: #e79a93;
+    --major-soft: #3b2422;
+    --moderate: #e3ba6d;
+    --moderate-soft: #382d18;
+    --minor: #8fbaea;
+    --minor-soft: #1b2c40;
+    --good: #7ad2ac;
+    --good-soft: #16332a;
+
+    --accent: #7ad2ac;
+  }
+}
+
+:root[data-theme="dark"] {
+  --paper: #12171a;
+  --panel: #1a2126;
+  --panel-sunk: #151b1f;
+  --ink: #e9eeec;
+  --ink-soft: #c2cdc9;
+  --muted: #94a29e;
+  --line: #2c383c;
+  --line-strong: #3d4c51;
+
+  --major: #e79a93;
+  --major-soft: #3b2422;
+  --moderate: #e3ba6d;
+  --moderate-soft: #382d18;
+  --minor: #8fbaea;
+  --minor-soft: #1b2c40;
+  --good: #7ad2ac;
+  --good-soft: #16332a;
+
+  --accent: #7ad2ac;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 17px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+
+.shell {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 28px 96px;
+}
+
+/* ---------------------------------------------------------- masthead */
+
+.masthead {
+  border-bottom: 2px solid var(--ink);
+  padding: 44px 0 22px;
+  margin-bottom: 34px;
+}
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-bottom: 18px;
+}
+
+h1 {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: clamp(2.1rem, 5.4vw, 3.4rem);
+  line-height: 1.02;
+  letter-spacing: -0.026em;
+  margin: 0 0 16px;
+  text-wrap: balance;
+}
+
+.standfirst {
+  max-width: var(--measure);
+  font-size: 1.075rem;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+.standfirst strong { color: var(--ink); font-weight: 600; }
+
+/* ---------------------------------------------------------- tally */
+
+.tally {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  margin: 34px 0 44px;
+}
+
+.tally-cell {
+  background: var(--panel);
+  padding: 16px 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tally-n {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 2.1rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.tally-label {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.tally-cell.is-major .tally-n { color: var(--major); }
+.tally-cell.is-moderate .tally-n { color: var(--moderate); }
+.tally-cell.is-minor .tally-n { color: var(--minor); }
+.tally-cell.is-good .tally-n { color: var(--good); }
+
+/* ---------------------------------------------------------- sections */
+
+section { margin: 0 0 58px; }
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  border-bottom: 1px solid var(--line-strong);
+  padding-bottom: 9px;
+  margin-bottom: 26px;
+}
+
+.section-key {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+h2 {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.42rem;
+  letter-spacing: -0.016em;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.section-note {
+  max-width: var(--measure);
+  color: var(--muted);
+  font-size: 0.965rem;
+  margin: -12px 0 26px;
+}
+
+/* ---------------------------------------------------------- findings */
+
+.finding {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--line-strong);
+  padding: 20px 24px 18px;
+  margin-bottom: 14px;
+}
+
+.finding.is-major { border-left-color: var(--major); }
+.finding.is-moderate { border-left-color: var(--moderate); }
+.finding.is-minor { border-left-color: var(--minor); }
+
+.finding-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+
+.sev {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+.sev.is-major { background: var(--major-soft); color: var(--major); }
+.sev.is-moderate { background: var(--moderate-soft); color: var(--moderate); }
+.sev.is-minor { background: var(--minor-soft); color: var(--minor); }
+.sev.is-good { background: var(--good-soft); color: var(--good); }
+
+.tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  padding: 3px 8px;
+  border-radius: 2px;
+}
+
+.finding h3 {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.115rem;
+  letter-spacing: -0.011em;
+  line-height: 1.28;
+  margin: 0 0 10px;
+  text-wrap: balance;
+}
+
+.finding p {
+  margin: 0 0 11px;
+  max-width: var(--measure);
+  color: var(--ink-soft);
+  font-size: 0.98rem;
+}
+
+.finding p:last-child { margin-bottom: 0; }
+
+.finding strong { color: var(--ink); font-weight: 600; }
+
+.loc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 7px;
+  margin: 0 0 12px;
+}
+
+.loc code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  background: var(--panel-sunk);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 2px 7px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.fix {
+  border-top: 1px dashed var(--line-strong);
+  margin-top: 14px;
+  padding-top: 11px;
+  font-size: 0.94rem;
+  color: var(--ink-soft);
+  max-width: var(--measure);
+}
+
+.fix::before {
+  content: "Fix";
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: block;
+  margin-bottom: 4px;
+}
+
+code, .code {
+  font-family: var(--mono);
+  font-size: 0.875em;
+}
+
+p code, li code, .fix code, td code {
+  background: var(--panel-sunk);
+  border-radius: 2px;
+  padding: 1px 4px;
+}
+
+pre {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  background: var(--panel-sunk);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  padding: 13px 16px;
+  overflow-x: auto;
+  margin: 0 0 12px;
+}
+
+pre .cmt { color: var(--muted); font-style: italic; }
+pre .hl { color: var(--major); font-weight: 600; }
+
+/* ---------------------------------------------------------- tables */
+
+.table-wrap { overflow-x: auto; margin: 0 0 14px; }
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 460px;
+  font-size: 0.92rem;
+}
+
+th {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: left;
+  font-weight: 500;
+  padding: 0 14px 7px 0;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+td {
+  padding: 8px 14px 8px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-soft);
+  vertical-align: top;
+}
+
+td.num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+tr:last-child td { border-bottom: none; }
+
+/* ---------------------------------------------------------- lists */
+
+ul.plain {
+  max-width: var(--measure);
+  padding-left: 1.15em;
+  margin: 0 0 14px;
+  color: var(--ink-soft);
+  font-size: 0.98rem;
+}
+
+ul.plain li { margin-bottom: 6px; }
+
+ol.steps {
+  max-width: var(--measure);
+  counter-reset: step;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+ol.steps li {
+  counter-increment: step;
+  position: relative;
+  padding: 0 0 18px 46px;
+  border-left: 1px solid var(--line-strong);
+  margin-left: 13px;
+  color: var(--ink-soft);
+  font-size: 0.98rem;
+}
+
+ol.steps li:last-child { border-left-color: transparent; padding-bottom: 0; }
+
+ol.steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: -13px;
+  top: -2px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--paper);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+ol.steps li b {
+  font-family: var(--display);
+  font-weight: 700;
+  color: var(--ink);
+  display: block;
+  font-size: 1.02rem;
+  margin-bottom: 3px;
+}
+
+/* ---------------------------------------------------------- strengths */
+
+.strengths {
+  background: var(--good-soft);
+  border: 1px solid color-mix(in srgb, var(--good) 30%, transparent);
+  padding: 24px 26px;
+}
+
+.strengths h2 { margin-bottom: 14px; }
+.strengths ul { max-width: var(--measure); padding-left: 1.15em; margin: 0; }
+.strengths li { margin-bottom: 8px; color: var(--ink-soft); font-size: 0.98rem; }
+.strengths li:last-child { margin-bottom: 0; }
+.strengths strong { color: var(--ink); font-weight: 600; }
+
+/* ---------------------------------------------------------- footer */
+
+footer {
+  border-top: 2px solid var(--ink);
+  padding-top: 18px;
+  margin-top: 20px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+}
+
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+
+@media (max-width: 640px) {
+  body { font-size: 16px; }
+  .shell { padding: 0 18px 64px; }
+  .finding { padding: 17px 18px 15px; }
+}
+</style>
+
+<div class="shell">
+
+<header class="masthead">
+  <div class="eyebrow">
+    <span>Code-quality audit</span>
+    <span>72,086 LOC source · 28,045 LOC tests · 279 files</span>
+    <span>30 August 2026</span>
+  </div>
+  <h1>Sokoban Engine Audit</h1>
+  <p class="standfirst">
+    The engine is in genuinely good shape. Resource lifetimes are correct, Vulkan
+    return codes are checked almost everywhere, the comments explain <em>why</em>
+    rather than restating the code, and CI runs Debug, Release, ASan, UBSan,
+    clang-tidy, fuzzing and a headless validation pass. What follows is therefore
+    not a list of things that are broken. It is a list of places where the code
+    is <strong>harder to change than it needs to be</strong> — most of them
+    concentrated in one theme: the CPU&#8202;↔&#8202;GPU contract is maintained by
+    hand in up to eight places at once, and nothing checks that the copies agree.
+  </p>
+</header>
+
+<div class="tally">
+  <div class="tally-cell is-major">
+    <span class="tally-n">11</span>
+    <span class="tally-label">Major</span>
+  </div>
+  <div class="tally-cell is-moderate">
+    <span class="tally-n">14</span>
+    <span class="tally-label">Moderate</span>
+  </div>
+  <div class="tally-cell is-minor">
+    <span class="tally-n">13</span>
+    <span class="tally-label">Minor</span>
+  </div>
+  <div class="tally-cell">
+    <span class="tally-n">8</span>
+    <span class="tally-label">Duplicated ABI copies</span>
+  </div>
+  <div class="tally-cell is-good">
+    <span class="tally-n">0</span>
+    <span class="tally-label">Live defects found</span>
+  </div>
+</div>
+
+<!-- ==================================================== A -->
+
+<section>
+  <div class="section-head">
+    <span class="section-key">A</span>
+    <h2>Correctness and latent defects</h2>
+  </div>
+  <p class="section-note">
+    Nothing here misbehaves in the shipping configuration today. Each item is a
+    guard that has fallen out of step with the code it protects, or a failure
+    mode that is handled more harshly than it needs to be.
+  </p>
+
+  <article class="finding is-major">
+    <div class="finding-top">
+      <span class="sev is-major">Major</span>
+      <span class="tag">Outdated guard</span>
+    </div>
+    <h3>The static-mesh guard still asks “is this the player?”, not “is this skinned?”</h3>
+    <div class="loc">
+      <code>src/engine/render/VulkanModelResources.cpp:2667</code>
+      <code>assets/manifest.json</code>
+    </div>
+    <pre><span class="cmt">// gpuMeshForModel — the safety net for "this model has no static mesh"</span>
+if (model.isCube() ||
+    <span class="hl">model == manifest_-&gt;playerModel()</span> ||
+    model.index() &gt;= models_.size()) {
+    throw std::runtime_error("Render model does not have a static GPU mesh");
+}</pre>
+    <p>
+      Everywhere else in the class, “this model is skinned” is decided by
+      <code>manifest_-&gt;model(model).geometry == ModelGeometry::Skinned</code>
+      (<code>modelUsesGpuSkinning</code>, line 176). This one guard instead
+      compares against the player model by identity — an assumption from when the
+      player was the only skinned mesh. <strong>The manifest already declares two
+      skinned models, <code>Rogue</code> and <code>Barbarian</code>.</strong>
+    </p>
+    <p>
+      It produces no wrong result today only because <code>meshForTile</code>
+      branches on <code>geometry</code> first and never reaches this line for a
+      skinned model. But the guard is the last line of defence, and half of it is
+      already blind. If the routing above it ever changes, a skinned model walks
+      straight past the net and reads an empty <code>GpuMesh</code>.
+    </p>
+    <div class="fix">
+      Replace the identity test with the same geometry test the rest of the class
+      uses. Better still, give <code>ModelSlot</code> a resolved
+      <code>geometry</code> field at publication so no call site re-derives it
+      from the manifest at all.
+    </div>
+  </article>
+
+  <article class="finding is-major">
+    <div class="finding-top">
+      <span class="sev is-major">Major</span>
+      <span class="tag">Failure handling</span>
+    </div>
+    <h3>Content-driven budget overflow terminates the process</h3>
+    <div class="loc">
+      <code>VulkanModelResources.cpp:1467</code>
+      <code>VulkanModelResources.cpp:1499</code>
+      <code>VulkanRenderer.cpp:404</code>
+      <code>src/main.cpp:134</code>
+    </div>
+    <p>
+      <code>updateAnimations</code> throws
+      <code>std::runtime_error("GPU skinning instance budget exceeded")</code>
+      when more than 256 skinned instances appear in one frame, and
+      <code>writeDrawInstance</code> throws
+      <code>"Draw instance buffer is exhausted or invalid"</code> the same way.
+      Both are called from inside <code>drawFrame</code>, whose only
+      <code>catch</code> is for <code>VulkanError</code> — so a plain
+      <code>runtime_error</code> passes straight through, unwinds
+      <code>Application::run</code>, and lands in <code>main</code>’s fatal
+      handler: dialog, minidump, exit&nbsp;1.
+    </p>
+    <p>
+      That is the correct response to a device loss. It is a harsh response to
+      “a level author put 257 enemies on screen”, which is a bounded, recoverable,
+      purely visual condition. The renderer already has a well-designed vocabulary
+      for degrading gracefully — nonresident textures fall back, unavailable
+      models are counted in <code>RenderStats::unavailableModels</code> and
+      skipped. These two limits are the only places that reach for termination
+      instead.
+    </p>
+    <div class="fix">
+      Return a sentinel (or <code>std::optional</code>) instead of throwing, skip
+      the instance, and surface the overflow through <code>RenderStats</code> the
+      same way <code>unavailableModels</code> already is. Log once per frame
+      rather than per instance so a full board does not flood the log.
+    </div>
+  </article>
+
+  <article class="finding is-major">
+    <div class="finding-top">
+      <span class="sev is-major">Major</span>
+      <span class="tag">ODR hazard</span>
+    </div>
+    <h3>A build flag that gates class members silently defaults itself to zero</h3>
+    <div class="loc">
+      <code>src/engine/Application.hpp:41</code>
+      <code>src/engine/Application.hpp:205</code>
+      <code>src/engine/DebugUi.hpp:7</code>
+      <code>src/main.cpp:17</code>
+      <code>+ 5 more files</code>
+    </div>
+    <pre>#ifndef SOKOBAN_ENABLE_DEBUG_UI
+#define SOKOBAN_ENABLE_DEBUG_UI 0
+#endif
+<span class="cmt">...200 lines later, inside class Application:</span>
+#if SOKOBAN_ENABLE_DEBUG_UI
+    <span class="hl">std::unique_ptr&lt;ApplicationTools&gt; tools_;</span>
+#endif</pre>
+    <p>
+      Eight files carry this fallback, and two of them are headers that use the
+      macro to <strong>add or remove a data member</strong>. Any translation unit
+      that includes <code>Application.hpp</code> without the compile definition
+      gets a different <code>sizeof(Application)</code> and different member
+      offsets from the rest of the program — a silent ODR violation that links
+      cleanly and corrupts memory at runtime.
+    </p>
+    <p>
+      It is latent, not live: all three targets that reach these headers do set
+      the definition today. The problem is that the fallback is precisely what
+      turns “someone forgot the definition on a new target” from a compile error
+      into a memory-corruption bug. That is the wrong default for a flag with ABI
+      consequences.
+    </p>
+    <div class="fix">
+      Delete all eight fallbacks. Replace them with
+      <code>#ifndef SOKOBAN_ENABLE_DEBUG_UI<br>#error "SOKOBAN_ENABLE_DEBUG_UI must be defined by the build"<br>#endif</code>,
+      or generate a <code>SokobanConfig.hpp</code> with
+      <code>configure_file</code> and include that instead of relying on a
+      command-line macro at all.
+    </div>
+  </article>
+
+  <article class="finding is-moderate">
+    <div class="finding-top">
+      <span class="sev is-moderate">Moderate</span>
+      <span class="tag">Coupled constants</span>
+    </div>
+    <h3>Frames in flight and the skinning frame count must agree, and nothing says so</h3>
+    <div class="loc">
+      <code>VulkanRenderer.hpp:290</code>
+      <code>render/GpuSkinning.hpp:16</code>
+      <code>VulkanModelResources.cpp:1477</code>
+    </div>
+    <p>
+      <code>VulkanRenderer::maxFramesInFlight_</code> is 2 and
+      <code>gpuSkinningFrameCount</code> is 2, declared in different headers by
+      different owners. <code>beginAnimationFrame</code> throws
+      <code>std::out_of_range</code> if the frame index exceeds the second one, so
+      raising frames-in-flight to 3 is a runtime crash on the first frame rather
+      than a compile error.
+    </p>
+    <p>
+      This is out of character for the file: <code>VulkanRenderConstants.hpp</code>
+      carries eleven <code>static_assert</code>s pinning GPU struct sizes,
+      alignments and every field offset. The one invariant that couples two
+      independent headers is the one left unasserted.
+    </p>
+    <div class="fix">
+      <code>static_assert(gpuSkinningFrameCount == VulkanRenderer::maxFramesInFlight_)</code>,
+      or make one derive from the other.
+    </div>
+  </article>
+
+  <article class="finding is-moderate">
+    <div class="finding-top">
+      <span class="sev is-moderate">Moderate</span>
+      <span class="tag">Constant drift</span>
+    </div>
+    <h3>The point-shadow near plane exists three times, as three unrelated literals</h3>
+    <div class="loc">
+      <code>render/LightingConfig.hpp:52</code>
+      <code>shaders/triangle.frag.glsl:274</code>
+      <code>shaders/ground_splat.frag.glsl:189</code>
+    </div>
+    <p>
+      <code>config::pointShadowNearPlane = 0.05f</code> drives the CPU-side
+      projection in <code>VulkanSceneRecorder::projectPointShadow</code>. Both
+      fragment shaders that unproject that depth hard-code
+      <code>const float nearPlane = 0.05;</code> locally. They agree today. If the
+      C++ constant is ever tuned, point shadows silently shift on every lit
+      surface and the symptom — a global bias error that looks like a shadow-acne
+      regression — points nowhere near the change.
+    </p>
+    <div class="fix">
+      Push it through <code>SceneFrameUniform</code> alongside the other
+      frame-wide lighting data, or (see&nbsp;<span class="code">B1</span>) emit it
+      into a generated GLSL constants header that both shaders include.
+    </div>
+  </article>
+
+  <article class="finding is-moderate">
+    <div class="finding-top">
+      <span class="sev is-moderate">Moderate</span>
+      <span class="tag">Divergent paths</span>
+    </div>
+    <h3>Runtime-appended models skip the descriptor remap the startup path applies</h3>
+    <div class="loc">
+      <code>VulkanModelResources.cpp:2506</code>
+      <code>VulkanModelResources.cpp:236</code>
+    </div>
+    <p>
+      <code>create()</code> routes every model’s texture dependencies and material
+      bindings through <code>textureCatalog.descriptorIndex()</code> and
+      <code>remapBindingTextures()</code>, because manifest textures live at the
+      low end of the descriptor heap and glTF-discovered maps live at the high end.
+      <code>syncManifestModels()</code> — the Debug decoration-authoring path —
+      pushes <code>definition.textureIndex</code> raw, with no remap at all.
+    </p>
+    <p>
+      It happens to be correct, because
+      <code>descriptorIndexForLogicalTexture</code> is the identity function below
+      <code>manifestTextureCount_</code> and editor models only reference manifest
+      textures. But the correctness depends on an invariant stated nowhere, in a
+      function that looks like it simply forgot a step. The same function also
+      builds bindings with base colour only — no normal, metallic-roughness,
+      emissive or occlusion handle — so editor-appended models silently get a
+      lesser material path than manifest-loaded ones.
+    </p>
+    <div class="fix">
+      Call <code>remapBindingTextures</code> unconditionally so both paths read the
+      same, and either extend the binding construction to the full map set or add
+      a comment stating that editor decorations are deliberately base-colour only.
+    </div>
+  </article>
+
+  <article class="finding is-minor">
+    <div class="finding-top">
+      <span class="sev is-minor">Minor</span>
+      <span class="tag">Copy-paste</span>
+    </div>
+    <h3>Sampler W address mode is copied from V</h3>
+    <div class="loc">
+      <code>VulkanModelResources.cpp:2074</code>
+      <code>VulkanModelResources.cpp:2160</code>
+    </div>
+    <pre>.addressModeU = vulkanAddressMode(sampling.wrapU),
+.addressModeV = vulkanAddressMode(sampling.wrapV),
+.addressModeW = vulkanAddressMode(<span class="hl">sampling.wrapV</span>),</pre>
+    <p>
+      Harmless for 2D images, where W is never sampled. It reads as an
+      unfinished line rather than a decision, in a function whose whole purpose is
+      preserving authored glTF sampler semantics exactly.
+    </p>
+    <div class="fix">
+      Set it to <code>VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE</code> with a comment
+      saying 2D images never sample W, matching the other five sampler sites in
+      the renderer.
+    </div>
+  </article>
+
+  <article class="finding is-minor">
+    <div class="finding-top">
+      <span class="sev is-minor">Minor</span>
+      <span class="tag">Error handling</span>
+    </div>
+    <h3>Three <code>vkDeviceWaitIdle</code> calls drop their result</h3>
+    <div class="loc">
+      <code>VulkanDeviceContext.cpp:224</code>
+      <code>VulkanModelResources.cpp:2563</code>
+      <code>VulkanThumbnailPass.cpp:76</code>
+    </div>
+    <p>
+      Every other Vulkan entry point in <code>src/engine/render</code> is wrapped
+      in <code>vkCheck</code>, or explicitly discarded with <code>(void)</code>
+      where failure is genuinely uninteresting. These three do neither, so
+      <code>VK_ERROR_DEVICE_LOST</code> at a wait point is swallowed and the next
+      operation fails somewhere less informative.
+    </p>
+    <div class="fix">
+      <code>vkCheck</code> where a failure should be fatal (the texture repaint in
+      <code>updateTexture</code>), <code>(void)</code> where it should not
+      (teardown). Both are one-line changes; the point is that a reader can tell
+      which was intended.
+    </div>
+  </article>
+</section>
+
+<!-- ==================================================== B -->
+
+<section>
+  <div class="section-head">
+    <span class="section-key">B</span>
+    <h2>The CPU↔GPU contract is maintained by hand</h2>
+  </div>
+  <p class="section-note">
+    This is the highest-leverage theme in the audit. The handoff is rightly proud
+    that <code>GpuMaterial</code>’s size, alignment and every field offset carry
+    compile-time assertions and were verified against SPIR-V disassembly. That
+    rigour stops at the shader source, where the same structures are retyped
+    by hand and nothing checks them.
+  </p>
+
+  <article class="finding is-major">
+    <div class="finding-top">
+      <span class="sev is-major">Major</span>
+      <span class="tag">Duplication</span>
+    </div>
+    <h3>The shared GPU structs are retyped in every shader that uses them</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Declaration</th><th>C++ owner</th><th>Hand-copied into</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>struct DrawInstance</code></td><td><code>GpuDrawInstance</code> (256 B)</td><td class="num">8 shaders</td></tr>
+          <tr><td><code>uniform SceneFrame</code></td><td><code>SceneFrameUniform</code> (544 B)</td><td class="num">6 shaders</td></tr>
+          <tr><td><code>struct PointLightData</code></td><td><code>PointLightUniform</code> (48 B)</td><td class="num">6 shaders</td></tr>
+          <tr><td><code>struct Material</code></td><td><code>GpuMaterial</code> (112 B)</td><td class="num">2 shaders</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      Adding one <code>vec4</code> to <code>GpuDrawInstance</code> means editing
+      eight <code>.glsl</code> files correctly and in the same order. Getting it
+      wrong in one of them produces a shader that compiles, validates, and reads
+      the wrong bytes. The <code>static_assert</code>s catch the C++ half of the
+      contract and nothing catches the GLSL half.
+    </p>
+    <p>
+      The build already uses <code>glslc</code>, which supports
+      <code>#include</code> via <code>GL_GOOGLE_include_directive</code> and
+      <code>-I</code>. There is no technical obstacle here — only that the
+      mechanism was never turned on.
+    </p>
+    <div class="fix">
+      Add <code>shaders/include/</code> with <code>SceneFrame.glsl</code>,
+      <code>DrawInstance.glsl</code> and <code>Material.glsl</code>; pass
+      <code>-I shaders/include</code> in the CMake shader rule and add
+      <code>#extension GL_GOOGLE_include_directive : require</code> to the modules.
+      This removes roughly 250 lines of copied declarations and turns four ABIs
+      into four single sources of truth.
+    </div>
+  </article>
+
+  <article class="finding is-major">
+    <div class="finding-top">
+      <span class="sev is-major">Major</span>
+      <span class="tag">Duplication</span>
+    </div>
+    <h3>The shadow sampling functions are duplicated verbatim across two shaders</h3>
+    <div class="loc">
+      <code>shaders/triangle.frag.glsl:230–307</code>
+      <code>shaders/ground_splat.frag.glsl:145–210</code>
+    </div>
+    <p>
+      <code>shadowFactor</code>, <code>pointShadowWorldDistance</code> and
+      <code>pointShadowFactor</code> — including the 3×3 PCF loop, the five-tap
+      cube kernel, the grazing-angle bias ramp and the near-plane literal — are
+      byte-identical in both files. A window-based comparison finds
+      <strong>47 shared 12-line spans</strong> between them, roughly 60 duplicated
+      lines of shadowing logic plus the declaration blocks above.
+    </p>
+    <p>
+      Two shaders currently write the ambient mask and the handoff makes it an
+      explicit invariant that they “must calculate the same semantic ratio”. Right
+      now that invariant is upheld by remembering to edit both files.
+    </p>
+    <div class="fix">
+      Same mechanism as <span class="code">B1</span>: move them to
+      <code>shaders/include/Shadowing.glsl</code>. The invariant then holds by
+      construction instead of by discipline.
+    </div>
+  </article>
+
+  <article class="finding is-major">
+    <div class="finding-top">
+      <span class="sev is-major">Major</span>
+      <span class="tag">Fragile encoding</span>
+    </div>
+    <h3>One <code>vec4</code> lane carries three unrelated meanings depending on the draw</h3>
+    <div class="loc">
+      <code>VulkanSceneRecorder.cpp:1733, 1780, 1881, 1974, 2077, 2257, 2458</code>
+      <code>shaders/triangle.frag.glsl:202, 217, 79, 645</code>
+    </div>
+    <p>
+      Seven call sites write <code>GpuDrawInstance::materialOptions</code>, each
+      with a different meaning per lane, and the fragment shader reads several of
+      those meanings without knowing which draw produced it:
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Lane</th><th>Written as</th><th>Read as</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">.x</td>
+            <td>blur flag · face world-origin X · camera X</td>
+            <td>“blur behind” predicate</td>
+          </tr>
+          <tr>
+            <td class="num">.y</td>
+            <td>grid size X · UV rect width · <strong>belt scroll offset</strong></td>
+            <td>grid-mask gate <em>and</em> material UV scroll</td>
+          </tr>
+          <tr>
+            <td class="num">.z</td>
+            <td>grid size Y · UV rect height · manifest texture index</td>
+            <td>grid-mask gate <em>and</em> texture selector</td>
+          </tr>
+          <tr>
+            <td class="num">.w</td>
+            <td>±blur radius (sign = editor preview) · ±water mode · animation time</td>
+            <td>blur radius, dither predicate <em>and</em> highlight pulse clock</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      <code>.y</code> is the sharpest case: <code>gridMask()</code> treats it as a
+      grid dimension and bails when it is <code>&lt;= 0.0</code>, while
+      <code>materialTextureUv()</code> treats the same lane as a scroll offset
+      added to <code>uv.y</code>. A model draw that ever wanted both would have to
+      choose. <code>textureOptions.y</code> is likewise both a one-based procedural
+      texture handle and an editor-highlight enum, separated only by the
+      <code>draw.gridColor.w &lt; 0.0</code> flag — a boolean smuggled into an
+      alpha channel as a negative number.
+    </p>
+    <div class="fix">
+      Two options, in increasing order of effort. Cheap: document the union
+      explicitly in <code>VulkanRenderConstants.hpp</code> the way
+      <code>passData</code> already is, naming which draw kind claims which lane.
+      Better: follow the precedent <code>GpuMaterial</code> already set — add a
+      <code>uvec4</code> of explicit integer lanes carrying a draw-kind tag and
+      the flags, so the shader branches on a named kind instead of inferring it
+      from the sign of an alpha channel.
+    </div>
+  </article>
+
+  <article class="finding is-major">
+    <div class="finding-top">
+      <span class="sev is-major">Major</span>
+      <span class="tag">Magic numbers</span>
+    </div>
+    <h3>Material and UI mode numbering is a shared enum written as bare literals on both sides</h3>
+    <div class="loc">
+      <code>VulkanSceneRecorder.cpp:37</code>
+      <code>VulkanSceneRecorder.cpp:2444</code>
+      <code>shaders/triangle.frag.glsl:420–461</code>
+      <code>shaders/ui.frag.glsl:40–96</code>
+    </div>
+    <pre><span class="cmt">// C++ — VulkanSceneRecorder.cpp:2444</span>
+const float materialMode = command.kind == UiDrawKind::FontGlyph
+    ? <span class="hl">3.0f</span>
+    : (command.kind == UiDrawKind::SceneImage
+            ? <span class="hl">6.0f</span>
+            : (command.kind == UiDrawKind::TextureImage ? <span class="hl">7.0f</span> : <span class="hl">4.0f</span>));
+
+<span class="cmt">// GLSL — ui.frag.glsl:40</span>
+const int UI_MODE_FONT_GLYPH = 3;
+const int UI_MODE_TITLE_BACKGROUND = 4;
+const int UI_MODE_SCENE_IMAGE = 6;
+const int UI_MODE_TEXTURE_IMAGE = 7;</pre>
+    <p>
+      The shaders name their half of the enum; the C++ side writes raw floats,
+      with the sole exception of <code>particleTextureMaterialMode = 5.0f</code>.
+      Scene modes 1 and 2 are unnamed on both sides. And an integer enum is
+      transported as a <code>float</code> and recovered with
+      <code>int(x + 0.5)</code> — a pattern the material redesign already
+      abandoned in favour of explicit <code>uvec4</code> integer lanes.
+    </p>
+    <div class="fix">
+      One <code>enum class DrawMaterialMode : uint32_t</code> in
+      <code>VulkanRenderConstants.hpp</code>, emitted into the generated GLSL
+      include from <span class="code">B1</span>, and a nested map from
+      <code>UiDrawKind</code> instead of the nested ternary. The float transport
+      can move to the integer lanes in the same change.
+    </div>
+  </article>
+</section>
+
+<!-- ==================================================== C -->
+
+<section>
+  <div class="section-head">
+    <span class="section-key">C</span>
+    <h2>Size, structure and readability</h2>
+  </div>
+  <p class="section-note">
+    The codebase is well modularised at the file level — 279 files with clear
+    ownership boundaries. The pressure is inside a handful of specific functions
+    and one class.
+  </p>
+
+  <article class="finding is-major">
+    <div class="finding-top">
+      <span class="sev is-major">Major</span>
+      <span class="tag">God object</span>
+    </div>
+    <h3><code>VulkanModelResources</code> owns eight things at once</h3>
+    <div class="loc">
+      <code>VulkanModelResources.cpp — 2,710 lines</code>
+      <code>VulkanModelResources.hpp — 557 lines</code>
+    </div>
+    <p>
+      3,267 lines, 40 private members and 60-odd methods covering: mesh loading
+      and upload; texture loading, format selection, mip generation and upload;
+      animation clip loading; the skinning palette buffer; the draw-instance
+      buffer; the material buffer and its free-list allocator; two residency
+      budgets with eviction and fence-owned retirement; and the descriptor-heap
+      index mapping. Any one of those is a reasonable class.
+    </p>
+    <p>
+      The consequences are visible in the file: the load-state machine
+      (<code>Unrequested → Queued → Loading → CpuReady → Uploading → Ready</code>)
+      is implemented three times, once per asset kind, with each copy slightly
+      different — <code>publishModel</code> recurses into itself,
+      <code>publishTexture</code> falls through, <code>publishAnimation</code> has
+      no CPU-ready phase at all. A reader has to hold all three in their head to
+      be confident about any one.
+    </p>
+    <div class="fix">
+      The natural seams are already visible in the member list. Split out
+      <code>ModelGeometryStore</code> (models, meshes, bounds, materials),
+      <code>TextureHeap</code> (slots, definitions, uploads, descriptor mapping)
+      and <code>ResidencyBudget</code> (budgets, victim selection, retirement) —
+      the last is the easiest first cut because <code>makeModelResident</code> and
+      <code>makeTextureResident</code> are already the same algorithm twice.
+      Then template the shared load-state machine over the slot type so the three
+      copies collapse into one.
+    </div>
+  </article>
+
+  <article class="finding is-major">
+    <div class="finding-top">
+      <span class="sev is-major">Major</span>
+      <span class="tag">Function length</span>
+    </div>
+    <h3>Eight functions run past 200 lines</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Lines</th><th>Function</th><th>What it mixes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="num">755</td><td><code>ApplicationDebugUi.cpp:93</code> · <code>draw</code></td><td>Every developer panel in one function</td></tr>
+          <tr><td class="num">494</td><td><code>IsoScenePreparer.cpp:1037</code> · <code>prepare</code></td><td>Culling, face emission, sorting, picking, water, decorations</td></tr>
+          <tr><td class="num">377</td><td><code>ui/OptionsMenu.cpp:1063</code> · <code>draw</code></td><td>All option categories and their layout</td></tr>
+          <tr><td class="num">318</td><td><code>AnimationCatalogDebugUi.cpp:41</code> · <code>draw</code></td><td>Catalog browser, editor and preview controls</td></tr>
+          <tr><td class="num">275</td><td><code>RenderFrameBuilder.cpp:1469</code> · <code>appendMirrorPreview</code></td><td>Beam prism, ghost, destination preview</td></tr>
+          <tr><td class="num">259</td><td><code>Application.cpp:386</code> · <code>run</code></td><td>Frame loop, events, UI, render, smoke run, evidence</td></tr>
+          <tr><td class="num">230</td><td><code>VulkanSceneDescriptors.cpp:26</code> · <code>create</code></td><td>12 layout bindings written out longhand</td></tr>
+          <tr><td class="num">224</td><td><code>VulkanRenderer.cpp:404</code> · <code>drawFrame</code></td><td>Requirements, sync, acquire, record, stats, submit, present</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      <code>Application::run</code> is the clearest case: it interleaves eight
+      separate <code>#if SOKOBAN_ENABLE_DEBUG_UI</code> blocks with the frame
+      loop, and repeats
+      <code>preparedRenderFrame_ ? &amp;*preparedRenderFrame_ : nullptr</code>
+      five times in one body. <code>drawFrame</code> is second: 30 of its lines are
+      nothing but copying three <code>FrameTimeSummary</code> values into
+      differently-named <code>RenderStats</code> fields, three times over.
+      It also opens a <code>try</code> block whose 130-line body is left at the
+      outer indentation level, so the scope is invisible when reading.
+    </p>
+    <div class="fix">
+      <code>run()</code> → <code>pumpEvents</code>, <code>drawShellUi</code>,
+      <code>drawDeveloperUi</code>, <code>renderFrame</code>,
+      <code>serviceSmokeRun</code>. <code>drawFrame</code> → extract
+      <code>publishFrameStatistics()</code>, and either re-indent the
+      <code>try</code> body or move it into a private
+      <code>drawFrameUnguarded()</code> so the guard is one line.
+      <code>VulkanSceneDescriptors::create</code> → a
+      <code>constexpr std::array</code> of <code>{binding, type, stages}</code>
+      and one loop.
+    </div>
+  </article>
+
+  <article class="finding is-moderate">
+    <div class="finding-top">
+      <span class="sev is-moderate">Moderate</span>
+      <span class="tag">Readability</span>
+    </div>
+    <h3>Positional boolean parameters at the busiest call sites</h3>
+    <div class="loc">
+      <code>VulkanSceneRecorder.cpp:817</code>
+      <code>VulkanSceneRecorder.cpp:1794</code>
+      <code>IsoScenePreparer.cpp:1156</code>
+    </div>
+    <pre>recordScenePass(
+    commandBuffer, colorView, resolveView, frameData, scene,
+    <span class="hl">false, false, hasTranslucency || !resolveView, false, true,</span>
+    { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });</pre>
+    <p>
+      Five consecutive booleans —
+      <code>translucentPass, loadColor, storeColor, loadDepth, writeDepth</code> —
+      at a call site where getting one wrong produces a subtly wrong frame rather
+      than a crash. <code>drawFace</code> takes eleven parameters with
+      <code>{}</code> placeholders threaded between them, and
+      <code>appendIsoFace</code> in <code>IsoScenePreparer</code> is a lambda with
+      <strong>thirteen</strong> positional parameters including five booleans.
+    </p>
+    <div class="fix">
+      The codebase already uses designated initialisers heavily and to good
+      effect — <code>FrameConfiguration</code>, <code>GltfMeshLoadOptions</code>,
+      <code>ApplicationOptions</code>. Apply the same pattern: a
+      <code>ScenePassOptions</code> struct passed as
+      <code>{ .translucent = false, .loadColor = false, ... }</code> makes these
+      call sites self-describing at no runtime cost.
+    </div>
+  </article>
+
+  <article class="finding is-moderate">
+    <div class="finding-top">
+      <span class="sev is-moderate">Moderate</span>
+      <span class="tag">Structure</span>
+    </div>
+    <h3><code>RenderFrameBuilder.cpp</code> is two independent builders in one file</h3>
+    <div class="loc"><code>src/engine/RenderFrameBuilder.cpp — 2,562 lines</code></div>
+    <p>
+      The file contains two separate anonymous namespaces — one at line 17 for the
+      gameplay frame, one at line 1782 for the editor frame — with about 45 free
+      helper functions between them and no shared state. It is already two
+      translation units that happen to be typed into one.
+    </p>
+    <div class="fix">
+      Split into <code>RenderFrameBuilder.Gameplay.cpp</code> and
+      <code>RenderFrameBuilder.Editor.cpp</code> with the genuinely shared helpers
+      (<code>shade</code>, <code>toRenderPoint</code>, <code>interpolate</code>,
+      <code>applyTileScale</code>) in a small internal header. Build times and
+      diff noise both improve immediately.
+    </div>
+  </article>
+</section>
+
+<!-- ==================================================== D -->
+
+<section>
+  <div class="section-head">
+    <span class="section-key">D</span>
+    <h2>Duplication</h2>
+  </div>
+  <p class="section-note">
+    Textual duplication is low — an exact-match scan across all 279 source files
+    finds only two 20-line clusters. The duplication here is structural:
+    near-identical code that differs by a type or a field name, which a text
+    search will never surface but which still has to be edited in lockstep.
+  </p>
+
+  <article class="finding is-moderate">
+    <div class="finding-top">
+      <span class="sev is-moderate">Moderate</span>
+      <span class="tag">Structural</span>
+    </div>
+    <h3>Five face-draw functions rebuild the same lighting payload</h3>
+    <div class="loc">
+      <code>VulkanSceneRecorder.cpp:1703</code>
+      <code>:1794</code>
+      <code>:1907</code>
+      <code>:1993</code>
+      <code>:2101</code>
+      <code>:2129</code>
+    </div>
+    <p>
+      <code>drawFace</code>, <code>drawGroundSplatFace</code>,
+      <code>drawWaterFace</code>, <code>drawMirrorEnergyFace</code> and
+      <code>drawParticle</code> each construct a <code>GpuDrawInstance</code>
+      from scratch. The sun-radiance and ambient-radiance packing block is
+      byte-identical in three of them (lines 1815, 1928, 2167), and the
+      <code>shadowOptions</code> block with its four-way grid-validity ternary is
+      identical in the same three. The code says so itself:
+    </p>
+    <pre><span class="cmt">// Ground tops blended from two textures via a splat map. Lighting,
+// shadowing, grid, and dithering match drawFace exactly; only the free
+// push-constant slots differ...</span></pre>
+    <p>
+      <code>drawShadowFace</code> and <code>drawPointShadowFace</code> are a
+      smaller instance of the same pattern — identical except for which projection
+      function they call.
+    </p>
+    <div class="fix">
+      One <code>GpuDrawInstance baseSceneInstance(vertices, color, normal, lighting, gridColor, gridLineWidth, gridSize)</code>
+      that every variant starts from and then overwrites its own lanes on.
+      Roughly 150 lines disappear and the “these must stay in sync” comment
+      becomes unnecessary.
+    </div>
+  </article>
+
+  <article class="finding is-moderate">
+    <div class="finding-top">
+      <span class="sev is-moderate">Moderate</span>
+      <span class="tag">Structural</span>
+    </div>
+    <h3>Nine structurally identical small structs</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Shape</th><th>Declared as</th><th>Where</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="num">×4</td>
+            <td><code>{ VkBuffer, VulkanAllocation, void* mapped }</code></td>
+            <td><code>SkinningBuffer</code>, <code>ModelInstanceBuffer</code>, <code>MaterialBuffer</code>, <code>OwnedBuffer</code></td>
+          </tr>
+          <tr>
+            <td class="num">×3</td>
+            <td><code>{ VkBuffer, VkDeviceSize range, valid() }</code></td>
+            <td><code>SkinningBufferView</code>, <code>DrawInstanceBufferView</code>, <code>MaterialBufferView</code></td>
+          </tr>
+          <tr>
+            <td class="num">×2</td>
+            <td><code>{ Arena::Allocation, uint32_t indexCount }</code></td>
+            <td><code>GpuMesh</code>, <code>GpuSkinnedMesh</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      Each of the four mapped-buffer structs also has its own
+      <code>createXBuffer()</code>/<code>destroyXBuffer()</code> pair with
+      identical bodies apart from the size expression and a debug label, and each
+      of the three views has a hand-written accessor returning the same shape.
+    </p>
+    <div class="fix">
+      One <code>MappedBuffer</code> type with
+      <code>create(allocator, bytes, label)</code> and a
+      <code>view()</code> accessor. Three constructor/destructor pairs and three
+      view structs collapse into one each. Distinct types are worth keeping only
+      where they prevent a real mix-up; here they are all consumed through the
+      same descriptor-write path.
+    </div>
+  </article>
+
+  <article class="finding is-moderate">
+    <div class="finding-top">
+      <span class="sev is-moderate">Moderate</span>
+      <span class="tag">Structural</span>
+    </div>
+    <h3>The residency and retirement algorithms are written twice</h3>
+    <div class="loc">
+      <code>VulkanModelResources.cpp:1147</code>
+      <code>VulkanModelResources.cpp:1204</code>
+      <code>:1279</code>
+      <code>:1291</code>
+    </div>
+    <p>
+      <code>makeModelResident</code> and <code>makeTextureResident</code> are
+      50-line functions that differ only in which vector they scan and which pair
+      of byte counters they touch: same early-out ladder, same
+      “a retirement is already pending” guard, same LRU victim search protecting
+      the current visible stamp, same eviction loop, same closing predicate.
+      <code>retireModel</code> and <code>retireTexture</code> are the same shape
+      again.
+    </p>
+    <div class="fix">
+      Extract a <code>ResidencyBudget</code> holding
+      <code>{ budget, resident, retiring, peak }</code> and a template
+      <code>makeResident(slots, protectedIndex, bytes, budget)</code> constrained
+      on the slot having <code>state</code>, <code>gpuBytes</code> and
+      <code>lastRequested</code>. This is the highest-value single extraction in
+      the file and the natural first step toward splitting the class (see
+      <span class="code">C1</span>).
+    </div>
+  </article>
+
+  <article class="finding is-moderate">
+    <div class="finding-top">
+      <span class="sev is-moderate">Moderate</span>
+      <span class="tag">Reinvention</span>
+    </div>
+    <h3><code>ModelBounds</code> reimplements <code>Aabb</code></h3>
+    <div class="loc">
+      <code>VulkanModelResources.hpp:91</code>
+      <code>VulkanModelResources.cpp:137</code>
+      <code>src/engine/Geometry.hpp:29</code>
+    </div>
+    <p>
+      <code>Geometry.hpp</code> provides <code>Aabb</code> with an inverted default
+      sentinel, <code>valid()</code>, <code>expand()</code>,
+      <code>merge()</code>, <code>aabbFromPoints()</code>, <code>center()</code>,
+      <code>extents()</code>, <code>transformed()</code> and frustum
+      intersection — and the handoff records it as completed shared infrastructure
+      (F1). <code>VulkanModelResources</code> instead declares its own
+      <code>{ Vec3 minimum, Vec3 maximum, bool valid }</code> and
+      <code>boundsOf()</code> hand-writes the six min/max comparisons that
+      <code>aabbFromPoints</code> already performs.
+    </p>
+    <p>
+      The cost is visible downstream: <code>VulkanRenderer::pickDecoration</code>
+      has to expand <code>ModelBounds</code> into eight corners by hand, and the
+      handoff notes that model-backed tiles “fail open because their retained unit
+      transform is not yet the loaded mesh’s true local AABB” — a gap that closes
+      more naturally when both sides speak the same type.
+    </p>
+    <div class="fix">
+      Delete <code>ModelBounds</code>; return <code>Aabb</code>. Replace
+      <code>boundsOf</code> with <code>aabbFromPoints</code> over a positions view.
+      The eight-corner expansion in <code>pickDecoration</code> and
+      <code>primaryPlayerBoundsToPixels</code> then becomes one shared
+      <code>corners(Aabb)</code> helper.
+    </div>
+  </article>
+
+  <article class="finding is-moderate">
+    <div class="finding-top">
+      <span class="sev is-moderate">Moderate</span>
+      <span class="tag">Coupled maths</span>
+    </div>
+    <h3>The isometric projection has two independent implementations</h3>
+    <div class="loc">
+      <code>IsoScenePreparer.cpp:50</code>
+      <code>IsoScenePreparer.cpp:84</code>
+      <code>Math.hpp:713</code>
+    </div>
+    <p>
+      <code>projectIsoPointToClip</code> computes the projection by hand;
+      <code>isoClipFromView</code> builds the same projection as a
+      <code>Mat4</code> through <code>mat4PerspectiveOffCenter</code>. They agree
+      term for term today — I checked all four components — but they are
+      maintained separately and consumed by different subsystems: the hand-written
+      one drives CPU face projection and picking, the matrix drives frustum
+      culling and SSAO unprojection.
+    </p>
+    <p>
+      If they ever drift, culling rejects geometry the rasteriser would have drawn,
+      or SSAO samples land in the wrong place — both of which present as visual
+      artefacts far from the edit that caused them. There is a test that compares
+      <code>isoClipFromWorld</code> against <code>projectIsoPoint</code> at
+      <code>IsoScenePreparerTests.cpp:564</code>, which is good; it is worth being
+      explicit that this test is the only thing holding the two together.
+    </p>
+    <div class="fix">
+      Either derive one from the other (<code>projectIsoPointToClip</code> becomes
+      <code>transform(isoClipFromView(...), toVec4(viewPoint, 1))</code> with the
+      near-plane clamp applied first), or add a comment at both sites naming the
+      test that pins them together.
+    </div>
+  </article>
+
+  <article class="finding is-minor">
+    <div class="finding-top">
+      <span class="sev is-minor">Minor</span>
+      <span class="tag">Dead branch</span>
+    </div>
+    <h3>Three queue functions each contain the same do-nothing <code>else if</code></h3>
+    <div class="loc">
+      <code>VulkanModelResources.cpp:633</code>
+      <code>:703</code>
+      <code>:762</code>
+    </div>
+    <pre>if (slot.state == LoadState::Unrequested) {
+    slot.state = LoadState::Queued;
+    scheduler_.request({ Kind, index }, priority);
+<span class="hl">} else if (slot.state == LoadState::Queued) {
+    scheduler_.request({ Kind, index }, priority);   // identical call</span>
+}</pre>
+    <p>
+      Both branches make the same call; only the state assignment differs, and
+      assigning <code>Queued</code> to a slot already in <code>Queued</code> is a
+      no-op. The whole thing is one condition. Beyond that,
+      <code>queueModel</code>, <code>queueTexture</code> and
+      <code>queueAnimation</code> are the same eleven lines three times over —
+      the same triplication as the load-state machine in <span class="code">C1</span>.
+    </p>
+    <div class="fix">
+      <code>if (slot.state == LoadState::Unrequested || slot.state == LoadState::Queued) { slot.state = LoadState::Queued; scheduler_.request(key, priority); }</code>,
+      then hoist into one template over the slot type.
+    </div>
+  </article>
+
+  <article class="finding is-minor">
+    <div class="finding-top">
+      <span class="sev is-minor">Minor</span>
+      <span class="tag">Boilerplate</span>
+    </div>
+    <h3>Repeated preambles in the renderer’s public surface</h3>
+    <div class="loc">
+      <code>VulkanRenderer.cpp:865, 899, 929</code>
+      <code>VulkanRenderer.cpp:547–572</code>
+      <code>VulkanSceneDescriptors.cpp:277</code>
+    </div>
+    <ul class="plain">
+      <li>
+        <code>pickIsoGridCell</code>, <code>pickIsoGroundPoint</code> and
+        <code>pickDecoration</code> each repeat the same eight-line preamble:
+        check the view mode, fetch the output extent, reject a zero extent, map the
+        pointer, reject a negative result. A single
+        <code>std::optional&lt;Vec2&gt; mapPickPoint(frame, pixel)</code> covers all three.
+      </li>
+      <li>
+        <code>drawFrame</code> copies <code>FrameTimeSummary</code> into
+        <code>RenderStats</code> three times, six near-identical assignments each.
+        Embedding <code>FrameTimeSummary</code> in <code>RenderStats</code> as
+        three named members removes 30 lines and the risk of pasting the wrong
+        prefix.
+      </li>
+      <li>
+        <code>VulkanSceneDescriptors::updateInternal</code> is 180 lines of
+        <code>VkDescriptorImageInfo</code> / <code>VkWriteDescriptorSet</code>
+        boilerplate, with the writes in a scrambled binding order (3, 4, 0, 1, 5…)
+        and an eleven-clause <code>||</code> validity check. A table of
+        <code>{binding, type, source}</code> plus one loop replaces all of it.
+      </li>
+    </ul>
+  </article>
+</section>
+
+<!-- ==================================================== E -->
+
+<section>
+  <div class="section-head">
+    <span class="section-key">E</span>
+    <h2>The test suite</h2>
+  </div>
+  <p class="section-note">
+    69 registered suites over 28,045 lines, with real coverage of the hard parts —
+    residency retirement, descriptor sync, SSAO maths, glTF fixtures, profile
+    migrations, a fuzz target. The content is strong; the scaffolding is not.
+  </p>
+
+  <article class="finding is-major">
+    <div class="finding-top">
+      <span class="sev is-major">Major</span>
+      <span class="tag">Duplication</span>
+    </div>
+    <h3>Sixty-seven hand-rolled test harnesses, in two incompatible idioms</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Count</th><th>Duplicated across test files</th></tr></thead>
+        <tbody>
+          <tr><td class="num">67</td><td>Local <code>int failures = 0;</code> counter and <code>main()</code> returning it</td></tr>
+          <tr><td class="num">53</td><td><code>checkImpl</code> + <code>#define CHECK(expr)</code> + <code>#define TEST(name)</code></td></tr>
+          <tr><td class="num">15</td><td><code>void check(bool, const char* label)</code> — the older idiom</td></tr>
+          <tr><td class="num">13</td><td>A <code>TemporaryDirectory</code> / <code>TempDirectory</code> RAII helper</td></tr>
+          <tr><td class="num">3</td><td><code>checkNear</code> for floats and <code>Vec3</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      There is no <code>tests/*.hpp</code> at all — every suite re-declares its own
+      scaffolding. The two idioms behave differently in a way that matters: the
+      <code>CHECK</code> macro reports the expression and
+      <code>__LINE__</code>, while <code>check(cond, "label")</code> reports only
+      a hand-written string, so a failure in the older 15 files is measurably
+      harder to locate. Roughly 1,400 lines across the suite are harness rather
+      than test.
+    </p>
+    <div class="fix">
+      One <code>tests/TestHarness.hpp</code> with <code>CHECK</code>,
+      <code>CHECK_NEAR</code>, <code>TEST</code>, <code>TemporaryDirectory</code>
+      and a <code>SOKOBAN_TEST_MAIN()</code> macro. Convert the 15 stragglers to
+      <code>CHECK</code> as you touch them rather than in one sweep — a mechanical
+      change to a test file is exactly the kind of diff that hides a real one.
+    </div>
+  </article>
+
+  <article class="finding is-minor">
+    <div class="finding-top">
+      <span class="sev is-minor">Minor</span>
+      <span class="tag">Unused API</span>
+    </div>
+    <h3>Part of <code>Geometry.hpp</code> exists only to be tested</h3>
+    <div class="loc"><code>Geometry.hpp:141, 148, 193, 326</code> · <code>Math.hpp:36, 211</code></div>
+    <p>
+      <code>Sphere</code>, <code>boundingSphere</code>,
+      <code>intersects(Frustum, Sphere)</code>, <code>Ray::pointAt</code> and
+      <code>radiansToDegrees</code> have exactly one caller each, all in
+      <code>tests/</code>. <code>absComponents</code> in <code>Math.hpp:211</code>
+      has none at all. Frustum culling ships and uses the <code>Aabb</code>
+      overload only.
+    </p>
+    <p>
+      A small shared maths library is allowed some breadth, and the handoff’s F1
+      framing (“the shapes culling, picking and streaming <em>will</em> address
+      geometry with”) makes the sphere path deliberate. Worth a note in
+      <code>Geometry.hpp</code> saying so, so a future reader does not mistake it
+      for something that lost its caller. <code>absComponents</code> has no such
+      story and should go.
+    </p>
+    <div class="fix">
+      Delete <code>absComponents</code>. Add one line above the
+      <code>Sphere</code> section recording that it is provided for future
+      bounding work and currently exercised only by tests.
+    </div>
+  </article>
+</section>
+
+<!-- ==================================================== F -->
+
+<section>
+  <div class="section-head">
+    <span class="section-key">F</span>
+    <h2>Stale and leftover</h2>
+  </div>
+
+  <article class="finding is-moderate">
+    <div class="finding-top">
+      <span class="sev is-moderate">Moderate</span>
+      <span class="tag">Stale comment</span>
+    </div>
+    <h3>The scene shader says tangents are unread; they have been read since packet 7.2</h3>
+    <div class="loc"><code>shaders/triangle.frag.glsl:15</code></div>
+    <pre><span class="cmt">// Not read yet. It arrives here so that the vertex format, the pipelines and
+// the interface between the stages are all in place and provably unchanged
+// before the lighting that uses it changes everything at once.</span>
+layout(location = 8) in vec4 inTangent;</pre>
+    <p>
+      <code>mappedSurfaceNormal</code>, seventy lines below, reads
+      <code>inTangent.xyz</code> to build the tangent frame and
+      <code>inTangent.w</code> for handedness. The comment is a survivor from
+      before normal mapping landed, and it now actively misinforms: a reader
+      deciding whether it is safe to change the vertex layout will read this and
+      conclude nothing depends on it.
+    </p>
+    <div class="fix">
+      Replace with the current contract: glTF <code>vec4</code>, xyz direction and
+      handedness in w, re-orthogonalised per fragment against the geometric
+      normal. The handoff already contains that sentence.
+    </div>
+  </article>
+
+  <article class="finding is-minor">
+    <div class="finding-top">
+      <span class="sev is-minor">Minor</span>
+      <span class="tag">Stale comment</span>
+    </div>
+    <h3>An orphaned comment now documents the wrong constant</h3>
+    <div class="loc"><code>render/VulkanRenderConstants.hpp:128</code></div>
+    <pre><span class="cmt">// Which entry of the draw-instance buffer a draw should read. Only the
+// skinned-model pipeline needs it: gl_InstanceIndex is already spoken for...</span>
+<span class="cmt">// How many draws one frame may record. Quads dominate: a tile emits up to...</span>
+inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
+    <p>
+      The first paragraph documents
+      <code>DrawInstanceIndexPushConstants</code>, which was moved to line 204 and
+      left its comment behind. Two unrelated paragraphs now run together above a
+      constant that only the second describes.
+    </p>
+    <div class="fix">Move the paragraph back to line 204.</div>
+  </article>
+
+  <article class="finding is-minor">
+    <div class="finding-top">
+      <span class="sev is-minor">Minor</span>
+      <span class="tag">Undocumented hole</span>
+    </div>
+    <h3>Descriptor binding 2 is a gap nobody explains, and the array size is arithmetic</h3>
+    <div class="loc">
+      <code>VulkanSceneDescriptors.cpp:41</code>
+      <code>VulkanRenderConstants.hpp:18</code>
+    </div>
+    <p>
+      Set 0 declares bindings 0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12. Binding 2 is
+      referenced by no shader and no C++ — a retired slot with nothing recording
+      that it is deliberately vacant. The array is sized
+      <code>sceneSingleImageBindings + 4</code>, which is <em>8 image bindings +
+      4 buffer bindings</em>: adding a sampler means editing a constant whose name
+      does not suggest it governs an array that also holds buffers.
+    </p>
+    <div class="fix">
+      One comment saying what binding 2 was and that new bindings continue at 13.
+      Then build the array with a <code>constexpr</code> table so its size is
+      <code>std::size(bindings)</code> rather than an expression the author has to
+      keep balanced.
+    </div>
+  </article>
+
+  <article class="finding is-minor">
+    <div class="finding-top">
+      <span class="sev is-minor">Minor</span>
+      <span class="tag">Redundant API</span>
+    </div>
+    <h3>Vector arithmetic has two spellings, used inconsistently</h3>
+    <div class="loc"><code>Math.hpp:118–126</code></div>
+    <p>
+      <code>add</code>, <code>subtract</code> and <code>multiply</code> are
+      one-line forwarders to <code>operator+</code>, <code>operator-</code> and
+      <code>operator*</code>, provided for all three vector types. Six call sites
+      use the named forms — <code>IsoScenePreparer.cpp:323, 452</code>,
+      <code>SsaoMath.cpp:124</code>, <code>VulkanSceneRecorder.cpp:46–48</code> —
+      and everything else uses the operators, sometimes in adjacent lines.
+    </p>
+    <div class="fix">
+      Pick one. The operators are the idiomatic choice and already dominate;
+      converting six call sites and deleting nine forwarders removes a decision
+      every future author has to make.
+    </div>
+  </article>
+
+  <article class="finding is-minor">
+    <div class="finding-top">
+      <span class="sev is-minor">Minor</span>
+      <span class="tag">Repo hygiene</span>
+    </div>
+    <h3>Compiled Python bytecode is tracked in the repository</h3>
+    <div class="loc"><code>tools/__pycache__/make_ground_textures.cpython-310.pyc</code></div>
+    <p>
+      <code>git ls-files</code> lists it. <code>.gitignore</code> covers
+      <code>build/</code>, <code>out/</code>, <code>.vs/</code>,
+      <code>*.user</code>, <code>*.suo</code>, <code>*.log</code> and
+      <code>imgui.ini</code>, but not <code>__pycache__/</code>.
+    </p>
+    <div class="fix">
+      <code>git rm -r --cached tools/__pycache__</code> and add
+      <code>__pycache__/</code> to <code>.gitignore</code>.
+    </div>
+  </article>
+</section>
+
+<!-- ==================================================== G -->
+
+<section>
+  <div class="section-head">
+    <span class="section-key">G</span>
+    <h2>Build, CI and consistency</h2>
+  </div>
+
+  <article class="finding is-major">
+    <div class="finding-top">
+      <span class="sev is-major">Major</span>
+      <span class="tag">Open handoff item</span>
+    </div>
+    <h3>52 files have inconsistent line endings, and <code>.gitattributes</code> is still missing</h3>
+    <p>
+      Handoff item 0.3 calls for “a small <code>.gitattributes</code> policy” and
+      normalised line endings “in its own commit, never mixed with semantic
+      changes”. The sibling clean-up in that item — deleting
+      <code>GpuModelInstance.hpp</code> — is done; this half is not, and the
+      working tree has drifted further:
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Count</th><th>State</th><th>Examples</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="num">46</td>
+            <td>Mixed CRLF and LF <em>within one file</em></td>
+            <td><code>RenderFrameBuilder.cpp</code> (923 of 2,562), <code>VulkanSwapchainResources.cpp</code> (346 of 1,141), <code>ApplicationDebugUi.cpp</code> (553 of 853)</td>
+          </tr>
+          <tr>
+            <td class="num">6</td>
+            <td>CRLF throughout</td>
+            <td><code>TileTypes.hpp</code>, <code>Window.hpp</code>, <code>ui/FontAtlas.*</code>, <code>GameplaySessionTests.cpp</code>, <code>ImageDataTests.cpp</code></td>
+          </tr>
+          <tr>
+            <td class="num">322</td>
+            <td>LF throughout</td>
+            <td>The rest</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      Mixed endings inside a single file are the costly case: an editor that
+      normalises on save rewrites hundreds of untouched lines, so the next real
+      change arrives as a 900-line diff that <code>git blame</code> can no longer
+      see through. Two of the worst-affected files —
+      <code>RenderFrameBuilder.cpp</code> and
+      <code>VulkanSwapchainResources.cpp</code> — are also two of the largest.
+      <code>.github/workflows/required-tests.yml</code> is affected too.
+    </p>
+    <div class="fix">
+      <code>.gitattributes</code> with <code>* text=auto eol=lf</code> and
+      binary exclusions, then <code>git add --renormalize .</code> as a single
+      commit touching nothing else, and a CI step that fails on a non-empty
+      <code>git diff --exit-code</code> after renormalising. Do this before the
+      refactors above, not after — otherwise every one of them lands as an
+      unreviewable diff.
+    </div>
+  </article>
+
+  <article class="finding is-moderate">
+    <div class="finding-top">
+      <span class="sev is-moderate">Moderate</span>
+      <span class="tag">CI gate</span>
+    </div>
+    <h3>Warnings are enabled everywhere and gated nowhere</h3>
+    <div class="loc"><code>CMakeLists.txt:262</code></div>
+    <p>
+      <code>sokoban_enable_warnings</code> sets <code>/W4 /permissive-</code> on
+      MSVC and <code>-Wall -Wextra -Wpedantic</code> otherwise, applied
+      consistently to every target — but never <code>/WX</code> or
+      <code>-Werror</code>. Six CI jobs build this project on two toolchains, so
+      the enforcement infrastructure is already there and unused. A warning
+      introduced today goes unnoticed until it is one of hundreds.
+    </p>
+    <div class="fix">
+      Add a <code>SOKOBAN_WARNINGS_AS_ERRORS</code> option, default OFF for local
+      builds and ON in the CI matrix. Turning it on will surface a batch of
+      existing warnings; fix or suppress them once, then it stays clean for free.
+    </div>
+  </article>
+
+  <article class="finding is-moderate">
+    <div class="finding-top">
+      <span class="sev is-moderate">Moderate</span>
+      <span class="tag">Static analysis</span>
+    </div>
+    <h3>clang-tidy runs with one check group enabled</h3>
+    <div class="loc"><code>CMakeLists.txt:296</code></div>
+    <p>
+      The configuration is <code>-checks=-*,clang-analyzer-*</code> with
+      <code>-warnings-as-errors=*</code>. The comment explains the intent — keep
+      it a high-signal gate, leave broad style checks to a separate policy — and
+      that reasoning is sound for <code>readability-*</code> and
+      <code>modernize-*</code>.
+    </p>
+    <p>
+      It leaves out two groups that are not style, though.
+      <code>bugprone-*</code> would have flagged several items in this report
+      directly, and <code>performance-*</code> catches unnecessary copies in a
+      codebase that passes a lot of vectors and <code>std::filesystem::path</code>
+      by value. Both are low-noise and produce real defects, not opinions.
+    </p>
+    <div class="fix">
+      <code>-checks=-*,clang-analyzer-*,bugprone-*,performance-*</code>, with
+      specific <code>-bugprone-easily-swappable-parameters</code> style opt-outs
+      if the noise is not worth it. Add a <code>.clang-tidy</code> file so the
+      configuration is visible to editors, not just to CMake.
+    </div>
+  </article>
+
+  <article class="finding is-minor">
+    <div class="finding-top">
+      <span class="sev is-minor">Minor</span>
+      <span class="tag">Build config</span>
+    </div>
+    <h3>The debug-UI flag is defined three times with two visibilities</h3>
+    <div class="loc"><code>CMakeLists.txt:464, 515, 628</code></div>
+    <p>
+      The same generator expression appears on <code>sokoban_ui</code>
+      (<code>PUBLIC</code>), <code>sokoban_render_vulkan</code>
+      (<code>PRIVATE</code>) and <code>sokoban</code> (<code>PRIVATE</code>).
+      Because <code>sokoban_ui</code> propagates publicly and both other targets
+      link it, the two private repeats are already redundant.
+      <code>sokoban_render_vulkan</code> also gets two consecutive
+      <code>target_compile_definitions(... PRIVATE ...)</code> calls where one
+      would do.
+    </p>
+    <p>
+      Related: the developer-UI sources are gated by
+      <code>$&lt;$&lt;CONFIG:Debug&gt;:...&gt;</code> while the macro is gated by
+      <code>Debug AND SOKOBAN_ENABLE_DEVELOPER_TOOLS</code>. Building Debug with
+      developer tools off therefore compiles seven <code>*DebugUi.cpp</code> files
+      into empty translation units.
+    </p>
+    <div class="fix">
+      One <code>PUBLIC</code> definition on <code>sokoban_core</code>; delete the
+      other two. Hoist the condition into a variable
+      (<code>SOKOBAN_DEVELOPER_BUILD</code>) and use it for both the macro and the
+      source list so they cannot disagree.
+    </div>
+  </article>
+
+  <article class="finding is-minor">
+    <div class="finding-top">
+      <span class="sev is-minor">Minor</span>
+      <span class="tag">Build config</span>
+    </div>
+    <h3>CMake regex-parses a C++ header to build the shader list</h3>
+    <div class="loc"><code>CMakeLists.txt:189–228</code></div>
+    <p>
+      The build reads <code>ShaderCatalog.hpp</code>, extracts the quoted filenames
+      and the declared array size with regexes, and errors if they disagree. The
+      validation is careful and the error messages are good — but the coupling is
+      a string-matching dependency on C++ source formatting. Reformatting the
+      header breaks the build in a way that has nothing to do with shaders.
+    </p>
+    <p>
+      Note this is the same shape as the <code>MODEL_TEXTURE_COUNT</code> header
+      scraping that handoff packet 2.3 removed. One instance survived.
+    </p>
+    <div class="fix">
+      Invert it: list the shaders in CMake and generate
+      <code>ShaderCatalog.hpp</code> with <code>configure_file</code>. CMake then
+      owns the list, C++ consumes it, and the two cannot disagree.
+    </div>
+  </article>
+
+  <article class="finding is-minor">
+    <div class="finding-top">
+      <span class="sev is-minor">Minor</span>
+      <span class="tag">Consistency</span>
+    </div>
+    <h3>No formatting configuration exists</h3>
+    <p>
+      There is no <code>.clang-format</code> and no <code>.editorconfig</code>.
+      The house style is actually very consistent — four-space indent, Allman
+      braces on functions, K&amp;R inside them, trailing-comma designated
+      initialisers, ~80 column wrap — which means it is being maintained by hand
+      and by review. That works until it doesn't, and it is what makes the
+      unindented <code>try</code> block in <code>drawFrame</code> possible.
+    </p>
+    <div class="fix">
+      Generate a <code>.clang-format</code> that reproduces the current style
+      (<code>clang-format --style=... --dump-config</code> against a
+      representative file, then hand-tune), and land the reformat in the same
+      commit as the line-ending normalisation so there is exactly one noisy diff
+      in the history rather than two.
+    </div>
+  </article>
+</section>
+
+<!-- ==================================================== strengths -->
+
+<section class="strengths">
+  <div class="section-head" style="border-bottom-color: color-mix(in srgb, var(--good) 40%, transparent);">
+    <span class="section-key" style="color: var(--good);">✓</span>
+    <h2>What is already working, and should not be touched</h2>
+  </div>
+  <ul>
+    <li>
+      <strong>Resource lifetime is genuinely correct.</strong> Fence-owned
+      retirement with a submitted-frame bitmask, per-swapchain-image present
+      semaphores with the reasoning written out in the header, a present-queue
+      wait only when a retired swapchain has no in-flight users, and stable
+      material ranges that return to a coalescing free list only after their
+      frames clear. This is the hardest part of a Vulkan renderer to get right
+      and it is right.
+    </li>
+    <li>
+      <strong>The comments explain reasoning, not mechanics.</strong>
+      “The near plane uses row 2 alone rather than row2 + row3 because Vulkan’s
+      clip volume is 0 ≤ z ≤ w” and the note about not “tidying up” the shadow
+      depth row are the kind of comments that save a future reader a day. This is
+      rare and worth protecting through every refactor above.
+    </li>
+    <li>
+      <strong>Vulkan return codes are checked systematically.</strong> A sweep of
+      <code>src/engine/render</code> found three unchecked calls out of hundreds,
+      all <code>vkDeviceWaitIdle</code>, all in teardown or editor paths.
+    </li>
+    <li>
+      <strong>CI is stronger than most projects this size.</strong> Debug,
+      Release, ASan+UBSan, clang-tidy, a fuzz target for profile decoding, MSVC
+      and Linux, plus a headless run that turns Vulkan validation errors into a
+      non-zero exit code. That last one is the difference between “validation is
+      enabled” and “validation is enforced”.
+    </li>
+    <li>
+      <strong>GPU ABI discipline where it is checked.</strong> Eleven
+      <code>static_assert</code>s pinning <code>GpuMaterial</code>’s size,
+      alignment and every field offset, verified against SPIR-V disassembly.
+      Section&nbsp;B is not a criticism of this — it is an argument for extending
+      the same standard to the shader side.
+    </li>
+    <li>
+      <strong>Ownership boundaries are clear at the file level.</strong> 279 files
+      with descriptive names and one job each. The problems in section&nbsp;C are
+      about a handful of functions, not about the architecture.
+    </li>
+  </ul>
+</section>
+
+<!-- ==================================================== order -->
+
+<section>
+  <div class="section-head">
+    <span class="section-key">→</span>
+    <h2>Where I would start</h2>
+  </div>
+  <p class="section-note">
+    This order is deliberate: the first step makes every later diff readable, and
+    the second removes the mechanism that would otherwise let the later ones
+    introduce a silent ABI mismatch.
+  </p>
+  <ol class="steps">
+    <li>
+      <b>Normalise line endings and add <code>.gitattributes</code>.</b>
+      <span class="code">G1</span> — one commit, no semantic change, with a CI
+      guard. Every refactor below produces a reviewable diff afterwards and an
+      unreviewable one before. This is the open handoff item 0.3.
+    </li>
+    <li>
+      <b>Turn on <code>#include</code> for shaders and move the shared declarations.</b>
+      <span class="code">B1</span>, <span class="code">B2</span> — deletes about
+      250 lines of copied struct declarations and 60 lines of duplicated shadow
+      code, and converts four hand-maintained ABIs into four single sources of
+      truth. Purely mechanical, verifiable with <code>spirv-dis</code> on the
+      before and after.
+    </li>
+    <li>
+      <b>Fix the three correctness items.</b>
+      <span class="code">A1</span> (the skinned-model guard),
+      <span class="code">A3</span> (the ODR fallback) and
+      <span class="code">A4</span> (the frames-in-flight assert). All three are
+      small, none needs a design decision, and each removes a way for a future
+      change to fail silently.
+    </li>
+    <li>
+      <b>Extract <code>ResidencyBudget</code> from <code>VulkanModelResources</code>.</b>
+      <span class="code">D3</span> — this is the highest-value single extraction
+      in the renderer, it collapses two 50-line algorithms into one, and it is the
+      natural first cut toward <span class="code">C1</span>. The existing
+      <code>FrameResourceTrackerTests</code> coverage makes it safe to do.
+    </li>
+    <li>
+      <b>Introduce the shared test harness.</b>
+      <span class="code">E1</span> — do it before the larger refactors, so that
+      when a test fails during them you get an expression and a line number
+      instead of a hand-written label.
+    </li>
+    <li>
+      <b>Then the structural work.</b>
+      <span class="code">C1</span> (splitting the class),
+      <span class="code">C2</span> (the long functions),
+      <span class="code">D1</span> (the face-draw payload) and
+      <span class="code">B3</span> (the overloaded lanes). These are larger and
+      benefit from everything above being done first.
+    </li>
+  </ol>
+</section>
+
+<footer>
+  <span>Sokoban 3D engine · code-quality audit</span>
+  <span>Reviewed against the working tree at 30 Aug 2026</span>
+  <span>38 findings · 0 live defects</span>
+</footer>
+
+</div>
+
+</body>
+</html>

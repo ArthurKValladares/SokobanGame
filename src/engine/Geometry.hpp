@@ -145,6 +145,30 @@ struct Sphere {
     friend constexpr bool operator==(const Sphere&, const Sphere&) = default;
 };
 
+// Closest-point test. Touching is an intersection so culling remains
+// conservative at an authored light's exact range boundary.
+[[nodiscard]] constexpr bool intersects(Aabb box, Sphere sphere)
+{
+    if (!box.valid() || sphere.radius < 0.0f) {
+        return false;
+    }
+    const Vec3 closest {
+        std::clamp(sphere.center.x, box.minimum.x, box.maximum.x),
+        std::clamp(sphere.center.y, box.minimum.y, box.maximum.y),
+        std::clamp(sphere.center.z, box.minimum.z, box.maximum.z),
+    };
+    const Vec3 offset = closest - sphere.center;
+    const float radiusSquared = sphere.radius * sphere.radius;
+    const float tolerance = std::max(1.0f, radiusSquared) *
+        std::numeric_limits<float>::epsilon() * 8.0f;
+    return dot(offset, offset) <= radiusSquared + tolerance;
+}
+
+[[nodiscard]] constexpr bool intersects(Sphere sphere, Aabb box)
+{
+    return intersects(box, sphere);
+}
+
 [[nodiscard]] inline Sphere boundingSphere(Aabb box)
 {
     return box.valid() ? Sphere { center(box), length(extents(box)) } : Sphere {};

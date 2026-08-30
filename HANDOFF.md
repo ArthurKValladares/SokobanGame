@@ -40,10 +40,10 @@ chains for every unique source interpretation. BC7-capable devices upload the
 precomputed blocks directly, while unsupported devices and runtime-authored
 textures retain the original RGBA decode path.
 
-The recommended next step is T8: profile and parallelize Vulkan-free frame
-preparation before considering secondary command buffers or a transfer queue.
-A3 residency, including fence-owned retirement and pressure-driven compressed
-mip selection, is complete.
+The recommended next step is T5: range-cull point-shadow casters, measure the
+six-face workload reduction, and only then cache unchanged faces. T8 Vulkan-free
+frame preparation and A3 residency are complete. Secondary command buffers and
+a transfer queue remain conditional on a new recording or upload profile.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
@@ -90,6 +90,10 @@ future tasks:
   shader. The lit scene fragment shader no longer branches on those modes.
 - **T1/T2/T3/T6/T7**: instanced tiles, separate opaque drawing and sorting,
   model back-face culling, 4x default MSAA, and AO-gated depth copying.
+- **T8**: a dedicated one-worker frame-preparation lane overlaps independent
+  shadow/particle list generation with main-scene projection, culling and
+  sorting. When a screen preview exists, whole main/preview preparations run
+  concurrently through their already-separate retained caches.
 - **V1/V3/V5/V6**: per-swapchain-image present semaphores, direct skinning
   SSBO indexing, Vulkan 1.3 optimized shader builds, and optional anisotropy.
 - **V2**: vendored VMA 3.2.1 is owned by `VulkanDeviceContext`; persistent,
@@ -708,12 +712,12 @@ surfaces.
 
 ### 9. Resume frame-scaling work
 
-With S2, T4, V2 and A3 complete, continue by measured frame cost:
+With S2, T4, V2, A3 and T8 complete, continue by measured frame cost:
 
-1. **T8:** parallelize Vulkan-free scene preparation first; add secondary
-   command buffers or a transfer queue only after profiling.
-2. **T5:** range-cull point-shadow casters, then cache unchanged faces.
-3. **A4:** reuse recorder scratch storage after scene data structures settle.
+1. **T5:** range-cull point-shadow casters, then cache unchanged faces.
+2. **A4:** reuse recorder scratch storage after scene data structures settle.
+3. Re-profile command recording and uploads; add secondary command buffers or
+   a transfer queue only if that profile identifies a durable bottleneck.
 
 #### 9.1 S2 persistent renderables and stable bounds — complete
 
@@ -832,6 +836,32 @@ textures, reduced five textures and omitted 831,232 bytes. Its deterministic
 capture under `build/a3-mip-evidence` is intact, with expected pressure-induced
 softness and no block/layout corruption.
 
+#### 9.6 T8 Vulkan-free frame preparation — complete
+
+`VulkanRenderer` owns a dedicated one-worker preparation lane, isolated from
+the asset-loading queue so synchronous frame work cannot wait behind texture or
+model jobs. A normal one-scene frame prepares shadows and particles on that
+worker while the calling thread performs retained-bound reconciliation,
+projection, frustum classification and stable draw-list sorting. A frame with a
+screen preview uses the coarser split instead: the main and preview scenes run
+concurrently through their separate `IsoScenePreparer` caches and separate
+prepared-frame scratch subobjects. Vulkan calls and command recording remain
+downstream of the join.
+
+`--serial-scene-preparation` keeps a reproducible diagnostic control, and the
+evidence report states which mode produced it. In matched validation-required
+240-frame runs at 2880x1800, parallel preparation reduced the 120-sample scene
+average from 1.670 ms to 1.571 ms and p95 from 1.812 ms to 1.744 ms. Average CPU
+frame time fell from 3.396 ms to 3.238 ms and p95 from 3.923 ms to 3.768 ms.
+Scene/AO captures are byte-identical between modes, as are draw, triangle,
+retained-bound and culling counts. Evidence is under `build/t8-serial` and
+`build/t8-parallel`.
+
+The focused test compares serial and parallel ordered outputs across both
+initial bounds construction and retained-bound reuse; it passes 1,696 checks.
+The complete Debug build, both Vulkan validation runs and all 69 CTest suites
+pass. Do not split command recording solely because T8 exists; re-profile it.
+
 `S3` task-graph/work-stealing work should follow an observed scheduling
 bottleneck. `S1` fixed-tick simulation is conditional on continuous physics or
 gameplay motion. `F5` RHI work is conditional on a real second renderer or
@@ -860,14 +890,15 @@ layout changes affect modules that appear unrelated to the immediate feature.
 
 ## Source map for the next packets
 
-- `src/engine/render/IsoScenePreparer.*`: completed retained bounds and
-  main-scene culling; preserve fail-open model, picking and shadow behavior.
+- `src/engine/render/IsoScenePreparer.*`: completed retained bounds,
+  main-scene culling and T8 auxiliary-list split; preserve deterministic list
+  order, fail-open model behavior and disjoint worker output ownership.
 - `src/engine/render/RenderTypes.hpp`: source render data and frame-level
   ownership boundaries that the persistent representation must not blur.
 - `src/engine/Geometry.*`: completed bounds/frustum primitives.
-- `src/engine/render/VulkanRenderer.*`: preparation orchestration and completed
-  before/after culling telemetry; profile its Vulkan-free preparation boundary
-  before splitting T8 work.
+- `src/engine/render/VulkanRenderer.*`: completed T8 main/preview and
+  main/auxiliary preparation orchestration; Vulkan recording begins only after
+  the worker join.
 - `src/engine/render/VulkanMemoryAllocator.*`: completed VMA ownership and the
   only renderer memory-policy seam; extend this instead of reintroducing raw
   Vulkan allocation calls.
@@ -895,6 +926,13 @@ Exercise normal and forced mip residency with validation enabled:
 ```powershell
 .\build\Debug\sokoban.exe --smoke-frames 120 --require-validation
 .\build\Debug\sokoban.exe --smoke-frames 240 --require-validation --texture-residency-kib 64 --evidence-output build\a3-mip-evidence
+```
+
+Reproduce the T8 matched preparation profile:
+
+```powershell
+.\build\Debug\sokoban.exe --smoke-frames 240 --require-validation --serial-scene-preparation --evidence-output build\t8-serial
+.\build\Debug\sokoban.exe --smoke-frames 240 --require-validation --evidence-output build\t8-parallel
 ```
 
 Build content explicitly when changing manifest, glTF or texture discovery:

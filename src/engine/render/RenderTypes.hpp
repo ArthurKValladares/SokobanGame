@@ -308,6 +308,10 @@ struct RenderFrameData {
         // transform makes this affine path reusable for other authored model
         // instances without changing mesh data.
         Vec3 pivot { 0.5f, 0.5f, 0.0f };
+
+        friend constexpr bool operator==(
+            const ModelTransform&,
+            const ModelTransform&) = default;
     };
 
     struct Tile {
@@ -355,6 +359,8 @@ struct RenderFrameData {
         std::optional<uint32_t> editorDecorationIndex;
         EditorDecorationHighlight editorDecorationHighlight =
             EditorDecorationHighlight::None;
+
+        friend constexpr bool operator==(const Tile&, const Tile&) = default;
     };
 
     struct IsoFace {
@@ -504,6 +510,14 @@ struct RenderStats {
     uint32_t scenePreparations = 0;
     uint32_t preparedIsoFaces = 0;
     uint32_t preparedShadowFaces = 0;
+    uint32_t pointShadowFaceCandidates = 0;
+    uint32_t pointShadowFacesInRange = 0;
+    uint32_t pointShadowFacesCulled = 0;
+    uint32_t pointShadowModelCandidates = 0;
+    uint32_t pointShadowModelsInRange = 0;
+    uint32_t pointShadowModelsCulled = 0;
+    uint32_t pointShadowCubeFacesRendered = 0;
+    uint32_t pointShadowCubeFacesReused = 0;
     uint32_t preparedModels = 0;
     uint32_t unavailableModels = 0;
     uint32_t preparedParticles = 0;
@@ -529,6 +543,8 @@ struct RenderStats {
     uint32_t ssaoHeight = 0;
     uint32_t renderScalePercent = 100;
     uint32_t activeSamples = 1;
+    bool parallelScenePreparationEnabled = true;
+    bool pointShadowOptimizationsEnabled = true;
     bool scenePreparationTimingAvailable = false;
     uint32_t scenePreparationTimingSamples = 0;
     double scenePreparationMilliseconds = 0.0;

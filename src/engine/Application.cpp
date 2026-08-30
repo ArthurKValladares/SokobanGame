@@ -127,7 +127,9 @@ Application::Application(ApplicationOptions options)
               .vsync = playerProfile_.settings.video.vsync,
               .allowTearing = playerProfile_.settings.video.allowTearing,
           },
-          assetLoadingBudgetFor(options))
+          assetLoadingBudgetFor(options),
+          options.parallelScenePreparationEnabled,
+          options.pointShadowOptimizationsEnabled)
     , ui_(uiFont_)
     , audioSystem_(assetRoot_, assetManifest_)
     , mirrorSwapParticleEffect_(
@@ -145,6 +147,7 @@ Application::Application(ApplicationOptions options)
           std::move(options.evidenceOutputDirectory))
     , evidenceAmbientOcclusionEnabled_(
           options.evidenceAmbientOcclusionEnabled)
+    , evidencePointLightEnabled_(options.evidencePointLightEnabled)
 {
     log::info(log::Category::Persistence)
         << saveSlots_.progressStatus();
@@ -1898,6 +1901,22 @@ RenderFrameData Application::buildRenderFrame(
     }, arena);
     particleSystem_.appendRenderData(frame);
     frame.levelTransitionAmount = levelTransition_.amount();
+    if (evidencePointLightEnabled_) {
+        frame.lighting.pointLightCount = 1;
+        frame.lighting.pointLights[0] = {
+            .position = {
+                static_cast<float>(frame.levelWidth) * 0.42f,
+                static_cast<float>(frame.levelHeight) * 0.45f,
+                2.25f,
+            },
+            .color = { 1.0f, 0.72f, 0.48f },
+            .intensity = 7.0f,
+            .range = 3.5f,
+            .castsShadows = true,
+            .shadowBias = 0.012f,
+            .shadowOpacity = 0.85f,
+        };
+    }
     return frame;
 }
 
