@@ -1,5 +1,7 @@
 #pragma once
 
+#include "engine/UserSettingsConfig.hpp"
+
 #include <charconv>
 #include <cstdint>
 #include <span>
@@ -31,6 +33,10 @@ struct CommandLineOptions {
     // comparable without reading or rewriting a user profile.
     std::string evidenceOutputDirectory;
     int evidenceRenderScalePercent = 100;
+    // Evidence must not inherit a workstation's saved profile. Keep the
+    // product default unless the run explicitly selects another supported
+    // sample count.
+    int evidenceAntiAliasingSamples = config::antiAliasingSamples;
     bool evidenceAmbientOcclusionEnabled = true;
     bool evidenceFrustumCullingEnabled = true;
     bool evidencePointLightEnabled = false;
@@ -54,6 +60,7 @@ struct CommandLineOptions {
 {
     CommandLineOptions options;
     bool evidenceScaleSpecified = false;
+    bool evidenceAntiAliasingSpecified = false;
     bool evidenceAmbientOcclusionSpecified = false;
     bool evidenceFrustumCullingSpecified = false;
     bool evidencePointLightSpecified = false;
@@ -123,6 +130,25 @@ struct CommandLineOptions {
             }
             options.evidenceRenderScalePercent = percent;
             evidenceScaleSpecified = true;
+        } else if (argument == "--evidence-msaa") {
+            if (index + 1 >= arguments.size()) {
+                return reject("--evidence-msaa needs a sample count");
+            }
+            const std::string_view value = arguments[++index];
+            int samples = 0;
+            const char* const begin = value.data();
+            const char* const end = begin + value.size();
+            const std::from_chars_result parsed =
+                std::from_chars(begin, end, samples);
+            if (parsed.ec != std::errc {} || parsed.ptr != end ||
+                (samples != 1 && samples != 2 && samples != 4 &&
+                    samples != 8)) {
+                return reject(
+                    "--evidence-msaa wants one of 1, 2, 4, or 8, got '" +
+                    std::string(value) + "'");
+            }
+            options.evidenceAntiAliasingSamples = samples;
+            evidenceAntiAliasingSpecified = true;
         } else if (argument == "--evidence-disable-ao") {
             options.evidenceAmbientOcclusionEnabled = false;
             evidenceAmbientOcclusionSpecified = true;
@@ -173,6 +199,10 @@ struct CommandLineOptions {
             "--evidence-render-scale requires --evidence-output");
     }
     if (options.evidenceOutputDirectory.empty() &&
+        evidenceAntiAliasingSpecified) {
+        return reject("--evidence-msaa requires --evidence-output");
+    }
+    if (options.evidenceOutputDirectory.empty() &&
         evidenceAmbientOcclusionSpecified) {
         return reject("--evidence-disable-ao requires --evidence-output");
     }
@@ -206,7 +236,8 @@ inline constexpr std::string_view commandLineUsage =
     "[--disable-recorder-scratch-reuse] "
     "[--bake-tile-thumbnails] "
     "[--evidence-output <directory> "
-    "--evidence-render-scale <25..100> [--evidence-disable-ao] "
+    "--evidence-render-scale <25..100> [--evidence-msaa <1|2|4|8>] "
+    "[--evidence-disable-ao] "
     "[--evidence-disable-frustum-culling] [--evidence-point-light] "
     "[--evidence-point-light-stress]]";
 

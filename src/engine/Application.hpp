@@ -22,6 +22,7 @@
 #include "engine/PlayerProfile.hpp"
 #include "engine/SettingsCoordinator.hpp"
 #include "engine/Time.hpp"
+#include "engine/UserSettingsConfig.hpp"
 #include "engine/Window.hpp"
 #include "engine/render/VulkanRenderer.hpp"
 #include "engine/ui/FontAtlas.hpp"
@@ -62,6 +63,7 @@ struct ApplicationOptions {
     // is deliberately explicit so ordinary play never performs readback.
     std::filesystem::path evidenceOutputDirectory;
     int evidenceRenderScalePercent = 100;
+    int evidenceAntiAliasingSamples = config::antiAliasingSamples;
     bool evidenceAmbientOcclusionEnabled = true;
     bool evidenceFrustumCullingEnabled = true;
     bool evidencePointLightEnabled = false;

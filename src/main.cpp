@@ -74,6 +74,8 @@ int main(int argc, char** argv)
                     options.evidenceOutputDirectory,
                 .evidenceRenderScalePercent =
                     options.evidenceRenderScalePercent,
+                .evidenceAntiAliasingSamples =
+                    options.evidenceAntiAliasingSamples,
                 .evidenceAmbientOcclusionEnabled =
                     options.evidenceAmbientOcclusionEnabled,
                 .evidenceFrustumCullingEnabled =

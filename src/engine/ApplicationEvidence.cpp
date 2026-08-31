@@ -29,9 +29,11 @@ void writeCapture(
 
 std::string evidenceSuffix(
     uint32_t renderScalePercent,
+    uint32_t activeSamples,
     bool ambientOcclusionEnabled)
 {
-    std::string suffix = "scale-" + std::to_string(renderScalePercent);
+    std::string suffix = "scale-" + std::to_string(renderScalePercent) +
+        "-msaa-" + std::to_string(activeSamples);
     if (!ambientOcclusionEnabled) {
         suffix += "-ao-off";
     }
@@ -53,6 +55,7 @@ void Application::captureEvidenceScene()
     evidenceStats_ = renderer_.renderStats();
     const std::string suffix = evidenceSuffix(
         evidenceStats_.renderScalePercent,
+        evidenceStats_.activeSamples,
         evidenceAmbientOcclusionEnabled_);
     writeCapture(
         evidenceOutputDirectory_ / ("scene-" + suffix + ".png"),
@@ -75,6 +78,7 @@ void Application::finishEvidenceCapture()
     }
     const std::string suffix = evidenceSuffix(
         evidenceStats_.renderScalePercent,
+        evidenceStats_.activeSamples,
         evidenceAmbientOcclusionEnabled_);
     const std::string sceneName = "scene-" + suffix + ".png";
     std::string occlusionName;
@@ -94,7 +98,8 @@ void Application::finishEvidenceCapture()
     }
     report << std::fixed << std::setprecision(3);
     report << "# Render evidence — "
-           << evidenceStats_.renderScalePercent << "% scale\n\n";
+           << evidenceStats_.renderScalePercent << "% scale, "
+           << evidenceStats_.activeSamples << "x MSAA\n\n";
     report << "- Device: " << renderer_.physicalDeviceName()
            << " (" << renderer_.physicalDeviceTypeName() << ")\n";
     report << "- Swapchain: " << evidenceStats_.swapchainWidth << 'x'

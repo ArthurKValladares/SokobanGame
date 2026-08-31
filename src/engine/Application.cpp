@@ -119,7 +119,9 @@ Application::Application(ApplicationOptions options)
           assetManifest_,
           uiFont_,
           antiAliasingModeForSamples(
-              playerProfile_.settings.video.antiAliasingSamples),
+              options.evidenceOutputDirectory.empty()
+                  ? playerProfile_.settings.video.antiAliasingSamples
+                  : options.evidenceAntiAliasingSamples),
           options.evidenceOutputDirectory.empty()
               ? playerProfile_.settings.video.effectiveRenderScalePercent()
               : options.evidenceRenderScalePercent,

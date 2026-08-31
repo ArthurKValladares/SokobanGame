@@ -37,6 +37,8 @@ void testEmptyIsANormalRun()
         "no evidence output by default");
     check(options.evidenceRenderScalePercent == 100,
         "evidence scale defaults to 100 percent");
+    check(options.evidenceAntiAliasingSamples == 4,
+        "evidence MSAA defaults to the product default");
     check(options.evidenceAmbientOcclusionEnabled,
         "ambient occlusion is enabled in evidence runs by default");
     check(options.evidenceFrustumCullingEnabled,
@@ -108,12 +110,22 @@ void testFlags()
 
     const sokoban::CommandLineOptions evidence = parse(
         { "--smoke-frames", "180", "--evidence-output", "/tmp/evidence",
-            "--evidence-render-scale", "50" });
+            "--evidence-render-scale", "50", "--evidence-msaa", "2" });
     check(!evidence.malformed, "evidence invocation parses");
     check(evidence.evidenceOutputDirectory == "/tmp/evidence",
         "evidence directory is read");
     check(evidence.evidenceRenderScalePercent == 50,
         "evidence scale is read");
+    check(evidence.evidenceAntiAliasingSamples == 2,
+        "evidence MSAA is read");
+
+    for (const std::string_view samples : { "1", "2", "4", "8" }) {
+        const sokoban::CommandLineOptions supported = parse(
+            { "--smoke-frames", "3", "--evidence-output", "/tmp/evidence",
+                "--evidence-msaa", samples });
+        check(!supported.malformed,
+            "each supported evidence MSAA sample count parses");
+    }
 
     const sokoban::CommandLineOptions noAoEvidence = parse(
         { "--smoke-frames", "180", "--evidence-output", "/tmp/evidence",
@@ -161,6 +173,8 @@ void testMalformedInput()
         "empty evidence directory is rejected");
     check(parse({ "--evidence-render-scale" }).malformed,
         "missing evidence scale is rejected");
+    check(parse({ "--evidence-msaa" }).malformed,
+        "missing evidence MSAA sample count is rejected");
     check(parse({ "--texture-residency-kib" }).malformed,
         "missing residency budget is rejected");
     check(parse({ "--texture-residency-kib", "0" }).malformed,
@@ -194,6 +208,20 @@ void testMalformedInput()
         "evidence scale without an output directory is rejected");
     check(parse({ "--evidence-render-scale", "100" }).malformed,
         "explicit default evidence scale still requires an output directory");
+    check(parse({ "--evidence-msaa", "4" }).malformed,
+        "explicit default evidence MSAA still requires an output directory");
+    check(parse({ "--smoke-frames", "3", "--evidence-output", "/tmp/e",
+                    "--evidence-msaa", "0" })
+            .malformed,
+        "zero evidence MSAA is rejected");
+    check(parse({ "--smoke-frames", "3", "--evidence-output", "/tmp/e",
+                    "--evidence-msaa", "3" })
+            .malformed,
+        "unsupported evidence MSAA is rejected");
+    check(parse({ "--smoke-frames", "3", "--evidence-output", "/tmp/e",
+                    "--evidence-msaa", "8x" })
+            .malformed,
+        "malformed evidence MSAA is rejected");
     check(parse({ "--evidence-disable-ao" }).malformed,
         "AO-off evidence mode requires an output directory");
     check(parse({ "--evidence-disable-frustum-culling" }).malformed,

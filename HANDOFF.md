@@ -78,10 +78,16 @@ Opaque MSAA resolves directly into the sampled scene image and the unchanged AO
 composite writes the existing HDR output target; translucent content keeps the
 copy fallback. The snapshot boundary fell from 0.198 to 0.000 ms and the
 matched native Release frame from 3.441 to 3.255 ms, with byte-identical scene
-and AO captures. One evidence flaw is now exposed: evidence runs inherit the
-saved anti-aliasing setting, and this machine's captures used 8x MSAA despite
-the engine's 4x default. The next packet should make evidence MSAA explicit and
-compare 1x/4x/8x before choosing between scene raster and SSAO composite work.
+and AO captures.
+
+Evidence MSAA is deterministic now. `--evidence-msaa` accepts only 1x, 2x, 4x
+or 8x, defaults evidence to the 4x product setting without reading or rewriting
+the saved preference, and records the sample count in report titles and artifact
+names. In warmed native Release captures, 1x/4x/8x GPU-frame averages were
+0.828/0.975/1.148–1.216 ms. At 4x, scene raster/resolve measured 0.239 ms and
+SSAO composite 0.202 ms: neither is a sufficiently dominant target to justify
+a speculative rewrite. The next packet should add deterministic translucent/
+water evidence before changing the retained color-copy fallback.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
@@ -161,6 +167,11 @@ future tasks:
   resolves into the sampled scene image and composites into the HDR output,
   eliminating its full-resolution color snapshot. Translucent, preview and
   level-transition paths retain their safe copy contracts.
+- **9.13 deterministic evidence MSAA**: evidence runs use an explicit tested
+  1x/2x/4x/8x input, default to the 4x product setting independently of saved
+  preferences, and encode the active sample count in reports and filenames.
+  The matched Release matrix establishes the product-default baseline before
+  any further GPU optimization.
 - **V1/V3/V5/V6**: per-swapchain-image present semaphores, direct skinning
   SSBO indexing, Vulkan 1.3 optimized shader builds, and optional anisotropy.
 - **V2**: vendored VMA 3.2.1 is owned by `VulkanDeviceContext`; persistent,
@@ -291,8 +302,8 @@ combine adjacent packets merely because they touch the same files.
 
 ### 0. Refresh the baseline
 
-Current state on 29 August 2026: the full Visual Studio Debug build succeeds
-and all 68 registered CTest suites pass, including `vulkan_smoke`. Establishing
+Current state on 31 August 2026: the full Visual Studio Debug build succeeds
+and all 69 registered CTest suites pass, including `vulkan_smoke`. Establishing
 that baseline also exposed and repaired stale UI/settings assertions left by the
 earlier default-MSAA change. Representative scene/AO images and matched timing
 controls are now archived and reproducible from the executable.
@@ -792,25 +803,18 @@ S2, T4, T5, V2, A2, A3, A4, T8, the post-A4 recording/upload profile, the
 point-shadow stress gate and top-level GPU pass timestamps are complete.
 Continue in this order:
 
-1. Add an explicit evidence-only MSAA override accepting the supported
-   1x/2x/4x/8x choices. Apply it without reading or rewriting the user profile,
-   report the chosen sample count in evidence, and cover malformed/unsupported
-   command-line values.
-2. Capture matched native Release evidence at 1x, the 4x product default and
-   8x. Keep AO, scale, content and output fixed. This corrects the current
-   profile's accidental dependence on the saved 8x setting.
-3. Choose the next optimization from that matrix. If 4x scene raster remains
-   the leader, inspect fragment/sample cost before architectural work. If the
-   0.919 ms full-resolution SSAO composite leads, preserve bilateral
-   normal/depth rejection and require the banding/silhouette evidence for any
-   shader change.
-4. Add a deterministic translucent/water evidence scene before changing the
+1. Add a deterministic translucent/water evidence scene before changing the
    retained color-copy fallback; the current opaque evidence cannot validate
    that path visually.
-5. Reconsider secondary command buffers only if a larger content scene makes
+2. Use the explicit 4x baseline for any next shader experiment. Scene raster/
+   resolve (0.239 ms) and SSAO composite (0.202 ms) are co-dominant at the
+   product default, so require a narrow measured hypothesis rather than an
+   architectural rewrite. Preserve bilateral normal/depth rejection and the
+   banding/silhouette evidence for any composite change.
+3. Reconsider secondary command buffers only if a larger content scene makes
    CPU command recording a durable frame bottleneck again. Reconsider a
    transfer queue only for sustained streaming that leaves uploads in flight.
-6. Keep S1 fixed-tick simulation, S3 task-graph work and F5 RHI work conditional
+4. Keep S1 fixed-tick simulation, S3 task-graph work and F5 RHI work conditional
    on their original product requirements.
 
 #### 9.1 S2 persistent renderables and stable bounds — complete
@@ -1170,10 +1174,47 @@ validation runs are clean. Evidence is under `build/gpu-color-direct-debug`,
 `build/gpu-color-direct-release-scale-50` and
 `build/gpu-color-direct-release-ao-off`.
 
-The evidence logs report 8x MSAA on this machine because the runner still
-inherits the persisted user setting. The product default remains 4x. Treat the
-current timings as a valid matched 8x optimization comparison, not a default-
-settings benchmark; 9.13 should make MSAA an explicit evidence input.
+The 9.12 evidence logs report 8x MSAA because that older runner inherited the
+persisted user setting. Treat those timings as a valid matched 8x optimization
+comparison, not a default-settings benchmark; 9.13 below replaces that
+accidental input.
+
+#### 9.13 Deterministic evidence MSAA and corrected baseline — complete
+
+`--evidence-msaa <1|2|4|8>` now selects anti-aliasing before renderer creation.
+It is evidence-only, rejects missing, malformed and unsupported values, and is
+rejected without `--evidence-output`. When omitted from an evidence run it uses
+the 4x product default rather than the saved profile, while ordinary play still
+uses the player's setting. Settings initialization does not reapply or persist
+the override.
+
+Evidence report titles, scene/AO filenames and report references include the
+renderer-reported active sample count (for example,
+`scene-scale-100-msaa-4.png`). This makes archives self-identifying even when
+several sample-count runs share a parent directory. Parser coverage pins all
+four supported choices, the 4x default and the invalid-input cases.
+
+The first 240-frame pass exposed GPU clock/startup outliers in different phase
+buckets, so the decision matrix uses 600-frame runs and the final 120-sample
+steady windows. At native 1280x720 on the RTX 4060 Laptop GPU:
+
+| MSAA | GPU frame avg | Scene raster/resolve avg | SSAO composite avg |
+| --- | ---: | ---: | ---: |
+| 1x | 0.828 ms | 0.182 ms | 0.177 ms |
+| 4x product default | 0.975 ms | 0.239 ms | 0.202 ms |
+| 8x, repeated | 1.148–1.216 ms | 0.347–0.362 ms | 0.635–0.671 ms |
+
+The 4x result corrects the old inherited-8x baseline. Scene raster and SSAO
+composite are close at the product default, so the data does not support a
+large rewrite of either path. The repeated 8x cost is useful as a high-quality
+stress result, not as the product target. The next safe packet is deterministic
+translucent/water evidence for the retained copy fallback.
+
+The complete Debug build and all 69 CTest suites pass. A 120-frame explicit-4x
+Debug evidence run completed with the Khronos validation layer active and no
+Vulkan usage errors. Release evidence is under
+`build/gpu-msaa-release-steady-1x`, `build/gpu-msaa-release-steady-4x`,
+`build/gpu-msaa-release-steady-8x` and `build/gpu-msaa-release-steady2-8x`.
 
 `S3` task-graph/work-stealing work should follow an observed scheduling
 bottleneck. `S1` fixed-tick simulation is conditional on continuous physics or
@@ -1238,6 +1279,9 @@ layout changes affect modules that appear unrelated to the immediate feature.
 - `src/engine/render/VulkanSsaoPass.*`, `shaders/ssao*.glsl` and
   `tests/SsaoMathTests.cpp`: completed V7 baseline; revisit only if visual or
   timing evidence exposes a concrete regression.
+- `src/engine/CommandLineOptions.hpp`, `Application.cpp` and
+  `ApplicationEvidence.cpp`: evidence-only inputs and artifact identity.
+  Preserve the 4x deterministic default and keep overrides out of persistence.
 
 ## Build and test commands
 
@@ -1311,6 +1355,15 @@ Reproduce the direct-color result:
 .\build\Release\sokoban.exe --smoke-frames 240 --evidence-output build\gpu-color-direct-release
 .\build\Release\sokoban.exe --smoke-frames 240 --evidence-render-scale 50 --evidence-output build\gpu-color-direct-release-scale-50
 .\build\Release\sokoban.exe --smoke-frames 240 --evidence-disable-ao --evidence-output build\gpu-color-direct-release-ao-off
+```
+
+Reproduce the explicit-MSAA product baseline and stress matrix:
+
+```powershell
+.\build\Debug\sokoban.exe --smoke-frames 120 --require-validation --evidence-msaa 4 --evidence-output build\gpu-msaa-debug-4x
+.\build\Release\sokoban.exe --smoke-frames 600 --evidence-msaa 1 --evidence-output build\gpu-msaa-release-steady-1x
+.\build\Release\sokoban.exe --smoke-frames 600 --evidence-msaa 4 --evidence-output build\gpu-msaa-release-steady-4x
+.\build\Release\sokoban.exe --smoke-frames 600 --evidence-msaa 8 --evidence-output build\gpu-msaa-release-steady-8x
 ```
 
 Build content explicitly when changing manifest, glTF or texture discovery:
