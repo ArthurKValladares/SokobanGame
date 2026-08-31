@@ -597,7 +597,13 @@ struct RenderStats {
     double gpuFrameMaximumMilliseconds = 0.0;
     RenderPhaseTiming gpuShadowTiming {};
     RenderPhaseTiming gpuSceneTiming {};
+    RenderPhaseTiming gpuSceneRasterTiming {};
+    RenderPhaseTiming gpuSceneDepthPublishTiming {};
+    RenderPhaseTiming gpuSceneTranslucencyTiming {};
     RenderPhaseTiming gpuSsaoTiming {};
+    RenderPhaseTiming gpuSsaoSnapshotTiming {};
+    RenderPhaseTiming gpuSsaoOcclusionTiming {};
+    RenderPhaseTiming gpuSsaoCompositeTiming {};
     RenderPhaseTiming gpuOutputTiming {};
     bool wireframeEnabled = false;
     float wireframeLineWidth = 1.0f;

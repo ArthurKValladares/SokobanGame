@@ -193,7 +193,14 @@ void Application::finishEvidenceCapture()
         evidenceStats_.assetPublicationEventTiming);
     writePhase("GPU shadows", evidenceStats_.gpuShadowTiming);
     writePhase("GPU scene color/depth", evidenceStats_.gpuSceneTiming);
+    writePhase("  GPU scene raster/resolve", evidenceStats_.gpuSceneRasterTiming);
+    writePhase(
+        "  GPU scene depth publish", evidenceStats_.gpuSceneDepthPublishTiming);
+    writePhase("  GPU scene translucency", evidenceStats_.gpuSceneTranslucencyTiming);
     writePhase("GPU SSAO", evidenceStats_.gpuSsaoTiming);
+    writePhase("  GPU SSAO scene snapshot", evidenceStats_.gpuSsaoSnapshotTiming);
+    writePhase("  GPU SSAO occlusion", evidenceStats_.gpuSsaoOcclusionTiming);
+    writePhase("  GPU SSAO composite", evidenceStats_.gpuSsaoCompositeTiming);
     writePhase("GPU output/UI", evidenceStats_.gpuOutputTiming);
     report << "- Asset publications: " << evidenceStats_.assetPublications
            << " across " << evidenceStats_.assetPublicationFrames

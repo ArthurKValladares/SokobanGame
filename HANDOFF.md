@@ -25,7 +25,8 @@ lighting: metallic-roughness, tangent-space normals, linear HDR emissive and
 ambient-only material occlusion. Authored OPAQUE, MASK, BLEND and double-sided
 state now control pass selection, coverage, sorting and culling, while the
 mirror-energy effect has an explicit base-color-only material contract. SSAO
-now reconstructs view-space position and geometric normals from copied depth
+now reconstructs view-space position and geometric normals from the published
+single-sample depth resolve
 and samples with scene-unit radius and bias into a half-resolution target. Its
 full-resolution composite now uses view-space depth and normal weights instead
 of a box blur, while continuing to affect ambient light only. Its estimator
@@ -60,9 +61,27 @@ visual inspection are clean, with no frame-instance exhaustion. Fence-read GPU
 timestamps now cover shadows, main scene color/depth, SSAO and output/UI. At
 2880x1800 Release, the normal frame measured 3.715 ms GPU: 0.057 ms shadows,
 1.870 ms scene, 1.601 ms SSAO and 0.182 ms output. AO-off measured 1.986 ms;
-50% render scale measured 0.943 ms. The next measurement packet should split
-scene raster/resolve/depth-copy and SSAO occlusion/composite before changing
-either algorithm.
+50% render scale measured 0.943 ms.
+
+That subpass split is now complete. At native resolution, the baseline broke
+down into 1.667 ms scene raster/resolve, 0.135 ms depth copy, 0.260 ms scene-
+color snapshot, 0.368 ms AO estimation and 0.923 ms AO composite. The sampled
+depth copy and its separate full-resolution D32 image have been removed: SSAO
+and translucent water now read the single-sample depth resolve in
+`DEPTH_READ_ONLY_OPTIMAL`, with explicit attachment restoration before another
+scene render. The matched Release depth-publish boundary is 0.001 ms, native
+GPU time moved from 3.616 to 3.441 ms, and native plus 50% scene captures are
+byte-identical.
+
+The color snapshot is now gone on the normal opaque-only AO path as well.
+Opaque MSAA resolves directly into the sampled scene image and the unchanged AO
+composite writes the existing HDR output target; translucent content keeps the
+copy fallback. The snapshot boundary fell from 0.198 to 0.000 ms and the
+matched native Release frame from 3.441 to 3.255 ms, with byte-identical scene
+and AO captures. One evidence flaw is now exposed: evidence runs inherit the
+saved anti-aliasing setting, and this machine's captures used 8x MSAA despite
+the engine's 4x default. The next packet should make evidence MSAA explicit and
+compare 1x/4x/8x before choosing between scene raster and SSAO composite work.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
@@ -108,7 +127,8 @@ future tasks:
   textures and rounded scene-image composition use a dedicated UI fragment
   shader. The lit scene fragment shader no longer branches on those modes.
 - **T1/T2/T3/T6/T7**: instanced tiles, separate opaque drawing and sorting,
-  model back-face culling, 4x default MSAA, and AO-gated depth copying.
+  model back-face culling, 4x default MSAA, and AO-gated direct depth-resolve
+  publication.
 - **T8**: a dedicated one-worker frame-preparation lane overlaps independent
   shadow/particle list generation with main-scene projection, culling and
   sorting. When a screen preview exists, whole main/preview preparations run
@@ -133,6 +153,14 @@ future tasks:
   evidence mode continuously exercises all 48 point-shadow cube faces without
   allowing cache reuse to hide the push path. Fence-owned timestamp queries
   report shadows, scene color/depth, SSAO and output/UI without a CPU/GPU wait.
+- **9.11 GPU subpasses and direct depth-resolve sampling**: fence-read queries
+  split scene raster/resolve, depth publication, translucency, scene-color
+  snapshot, AO estimation and AO composite. SSAO and water sample the resolved
+  depth attachment directly; the redundant D32 image and depth copy are gone.
+- **9.12 direct opaque-color resolve for SSAO**: the normal opaque-only AO path
+  resolves into the sampled scene image and composites into the HDR output,
+  eliminating its full-resolution color snapshot. Translucent, preview and
+  level-transition paths retain their safe copy contracts.
 - **V1/V3/V5/V6**: per-swapchain-image present semaphores, direct skinning
   SSBO indexing, Vulkan 1.3 optimized shader builds, and optional anisotropy.
 - **V2**: vendored VMA 3.2.1 is owned by `VulkanDeviceContext`; persistent,
@@ -685,7 +713,7 @@ cutout shadow silhouettes become an authored-content requirement.
 
 `isoClipFromView` exposes the exact scene projection without its rigid camera
 transform. `VulkanSsaoPass` pushes that projection and its inverse to the AO
-shader without extending the frame descriptor ABI. For each copied depth pixel,
+shader without extending the frame descriptor ABI. For each resolved depth pixel,
 `ssao.frag.glsl` reconstructs view-space position, derives a camera-facing
 geometric normal from position derivatives, places twelve rotated samples in a
 normal-oriented hemisphere, projects them back to the depth texture and
@@ -718,7 +746,7 @@ ceiling of half the scene-render dimensions. Odd and one-pixel extents remain
 covered, recreation recomputes both extents, and only the estimator uses the
 smaller viewport/scissor/render area. The composite still covers the complete
 scene target. The estimator maps its half-resolution fragment coordinates over
-the full copied depth image, preserving the physical view-space sampling from
+the full published depth image, preserving the physical view-space sampling from
 8.1. Its per-pixel kernel rotation now comes from a full two-axis integer hash.
 The prior interleaved-gradient pattern changed much more slowly between rows
 than columns, so its row-correlated error survived upsampling as horizontal
@@ -764,17 +792,25 @@ S2, T4, T5, V2, A2, A3, A4, T8, the post-A4 recording/upload profile, the
 point-shadow stress gate and top-level GPU pass timestamps are complete.
 Continue in this order:
 
-1. Split the Release GPU scene bucket into opaque raster/resolve, sampled-depth
-   copy and any translucent color-copy work. Split SSAO into occlusion,
-   scene-color snapshot and full-resolution composite. Reuse the existing
-   fence-read query pool; do not add waits.
-2. Compare native, 50% and AO-off captures after that split. Optimize the
-   largest stable subpass while preserving the current image evidence and AO
-   banding regression.
-3. Reconsider secondary command buffers only if a larger content scene makes
+1. Add an explicit evidence-only MSAA override accepting the supported
+   1x/2x/4x/8x choices. Apply it without reading or rewriting the user profile,
+   report the chosen sample count in evidence, and cover malformed/unsupported
+   command-line values.
+2. Capture matched native Release evidence at 1x, the 4x product default and
+   8x. Keep AO, scale, content and output fixed. This corrects the current
+   profile's accidental dependence on the saved 8x setting.
+3. Choose the next optimization from that matrix. If 4x scene raster remains
+   the leader, inspect fragment/sample cost before architectural work. If the
+   0.919 ms full-resolution SSAO composite leads, preserve bilateral
+   normal/depth rejection and require the banding/silhouette evidence for any
+   shader change.
+4. Add a deterministic translucent/water evidence scene before changing the
+   retained color-copy fallback; the current opaque evidence cannot validate
+   that path visually.
+5. Reconsider secondary command buffers only if a larger content scene makes
    CPU command recording a durable frame bottleneck again. Reconsider a
    transfer queue only for sustained streaming that leaves uploads in flight.
-4. Keep S1 fixed-tick simulation, S3 task-graph work and F5 RHI work conditional
+6. Keep S1 fixed-tick simulation, S3 task-graph work and F5 RHI work conditional
    on their original product requirements.
 
 #### 9.1 S2 persistent renderables and stable bounds — complete
@@ -1043,10 +1079,11 @@ scene. Its large 76.364 ms Debug command-recording average is intentional: it
 is a worst-case safety workload with thousands of per-face push/draw pairs,
 not a representative shipping frame.
 
-`VulkanGpuProfiler` now owns ten queries per frame slot: the original frame
-pair plus begin/end pairs for shadows, main scene color/depth, SSAO and
-output/UI. All queries reset while recording, are read only after the existing
-frame fence, and feed fixed histories. The stress Release phase sum (1.757 +
+At the 9.10 checkpoint, `VulkanGpuProfiler` owned ten queries per frame slot:
+the original frame pair plus begin/end pairs for shadows, main scene
+color/depth, SSAO and output/UI. Section 9.11 expands that same fence-read pool
+with subpass pairs. All queries reset while recording, are read only after the
+existing frame fence, and feed fixed histories. The stress Release phase sum (1.757 +
 2.433 + 1.594 + 0.164 ms) matches its 5.951 ms whole-frame average within
 rounding, validating the query boundaries.
 
@@ -1062,6 +1099,81 @@ Evidence is under `build/point-shadow-stress-debug`,
 `build/gpu-phases-release-ao-off` and `build/gpu-phases-release-scale-50`.
 The complete Debug build, Release executable, validation stress run, focused
 CLI/profiler coverage and all 69 CTest suites pass.
+
+#### 9.11 GPU subpasses and direct depth-resolve sampling — complete
+
+The fence-read query pool now owns paired timestamps for scene raster/resolve,
+depth publication, translucency, the SSAO scene-color snapshot, AO estimation
+and the full-resolution composite. Conditional passes still write both query
+ends, including AO-off frames, so a skipped pass cannot leave the entire
+frame's non-blocking query result unavailable.
+
+The native 2880x1800 Release baseline measured 3.616 ms GPU. Scene split into
+1.667 ms raster/resolve, 0.135 ms depth copy and no translucency; SSAO split
+into a 0.260 ms scene-color snapshot, 0.368 ms half-resolution estimator and
+0.923 ms full-resolution composite. At 50% scale those same pieces measured
+0.459, 0.014, 0.027, 0.071 and 0.184 ms. AO-off wrote all query pairs and
+reported zero for every inactive depth/SSAO subpass.
+
+The redundant depth path is gone. The main opaque pass already produces the
+single-sample depth image that SSAO and water need, either as the MSAA depth
+resolve or as the one-sample attachment itself. That image now transitions to
+`DEPTH_READ_ONLY_OPTIMAL` for shader consumers and back to attachment state
+before another main/preview render. Translucent rendering no longer declares a
+second depth resolve when depth writes are disabled. The separate sampled D32
+image, its copy command and transfer usage were removed, saving one native
+full-resolution depth payload (about 19.8 MiB at 2880x1800).
+
+The optimized native run measured 3.441 ms GPU with a 0.001 ms depth-publish
+boundary; 50% measured 0.921 ms with the same 0.001 ms boundary. The native
+and 50% Release scene PNGs are byte-identical to their pre-change captures,
+as is the matched validation Debug scene. AO-on and AO-off validation runs are
+clean. Evidence is under `build/gpu-subpasses-release-baseline`,
+`build/gpu-subpasses-release-ao-off`, `build/gpu-subpasses-release-scale-50`,
+`build/gpu-subpasses-depth-direct-debug`,
+`build/gpu-subpasses-depth-direct-ao-off-debug`,
+`build/gpu-subpasses-depth-direct-release`,
+`build/gpu-subpasses-depth-direct-release-ao-off` and
+`build/gpu-subpasses-depth-direct-release-scale-50`.
+
+The full Debug build and all 69 CTest suites pass. This made the normal path's
+HDR color snapshot the next exact-output target addressed in 9.12 below.
+
+#### 9.12 Direct opaque-color resolve for SSAO — complete
+
+When SSAO is active, both SSAO pipelines are valid and the prepared main scene
+has no water or authored BLEND material, the opaque pass now resolves directly
+into `sceneColorImage_`. That image transitions from color attachment to shader
+read, and the existing unblended SSAO composite writes `resolvedColorImage_`.
+This is a ping-pong between the two existing HDR images: no new image,
+descriptor mutation, shader branch or filter change was introduced.
+
+The optimization is deliberately conditional. AO-off continues to render
+straight into the resolved HDR output. Water/authored BLEND retains the old
+resolved-output plus scene-color-copy path because its fragment shader samples
+the opaque scene while the translucent pass resolves. Preview feathering and
+level transitions also retain their copies. `sceneColorImage_` now has color-
+attachment usage, and its tracked layout explicitly covers attachment,
+shader-read and transfer-destination ownership.
+
+Against the 9.11 direct-depth Release result, native 2880x1800 GPU time moved
+from 3.441 to 3.255 ms. The SSAO bucket moved from 1.430 to 1.246 ms and its
+scene snapshot from 0.198 to 0.000 ms; estimator/composite work remains 0.327/
+0.919 ms. At 50% scale, the snapshot moved from 0.028 to 0.000 ms and whole-
+frame GPU time from 0.921 to 0.789 ms. These whole-frame deltas include normal
+run-to-run variance, while the isolated snapshot result is the direct measure.
+
+Native and 50% Release scene captures, native AO-debug captures and AO-off
+captures are byte-identical to their 9.11 counterparts. AO-on and AO-off Debug
+validation runs are clean. Evidence is under `build/gpu-color-direct-debug`,
+`build/gpu-color-direct-ao-off-debug`, `build/gpu-color-direct-release`,
+`build/gpu-color-direct-release-scale-50` and
+`build/gpu-color-direct-release-ao-off`.
+
+The evidence logs report 8x MSAA on this machine because the runner still
+inherits the persisted user setting. The product default remains 4x. Treat the
+current timings as a valid matched 8x optimization comparison, not a default-
+settings benchmark; 9.13 should make MSAA an explicit evidence input.
 
 `S3` task-graph/work-stealing work should follow an observed scheduling
 bottleneck. `S1` fixed-tick simulation is conditional on continuous physics or
@@ -1116,9 +1228,9 @@ layout changes affect modules that appear unrelated to the immediate feature.
 - `src/engine/render/FrameTimeTelemetry.hpp` and `RenderTypes.hpp`: fixed-size
   evidence histories and public phase summaries. Record samples in-frame but
   calculate sorted summaries only for an explicit stats consumer.
-- `src/engine/render/VulkanGpuProfiler.*`: fence-read whole-frame and top-level
-  GPU phase queries. Preserve the per-frame-slot reset/read ownership; extend
-  these boundaries for the next scene/SSAO subpass split without adding waits.
+- `src/engine/render/VulkanGpuProfiler.*`: fence-read whole-frame, top-level
+  and scene/SSAO subpass GPU queries. Preserve the per-frame-slot reset/read
+  ownership and write every query pair on conditional paths; never add waits.
 - `src/engine/render/PointShadowFaceCache.*`: exact unchanged-depth key. Keep
   skinned casters uncacheable unless a real GPU-pose revision joins the key.
 - `tests/IsoScenePreparerTests.cpp`: stable identity/bounds behavior is covered;
@@ -1179,6 +1291,26 @@ cmake --build build --config Release --target sokoban
 .\build\Release\sokoban.exe --smoke-frames 120 --evidence-output build\gpu-phases-release-point-stress --evidence-point-light-stress
 .\build\Release\sokoban.exe --smoke-frames 240 --evidence-output build\gpu-phases-release-ao-off --evidence-disable-ao
 .\build\Release\sokoban.exe --smoke-frames 240 --evidence-output build\gpu-phases-release-scale-50 --evidence-render-scale 50
+```
+
+Reproduce the subpass baseline and direct-depth result:
+
+```powershell
+.\build\Debug\sokoban.exe --smoke-frames 120 --require-validation --evidence-output build\gpu-subpasses-depth-direct-debug
+.\build\Debug\sokoban.exe --smoke-frames 60 --require-validation --evidence-disable-ao --evidence-output build\gpu-subpasses-depth-direct-ao-off-debug
+.\build\Release\sokoban.exe --smoke-frames 240 --evidence-output build\gpu-subpasses-depth-direct-release
+.\build\Release\sokoban.exe --smoke-frames 240 --evidence-disable-ao --evidence-output build\gpu-subpasses-depth-direct-release-ao-off
+.\build\Release\sokoban.exe --smoke-frames 240 --evidence-render-scale 50 --evidence-output build\gpu-subpasses-depth-direct-release-scale-50
+```
+
+Reproduce the direct-color result:
+
+```powershell
+.\build\Debug\sokoban.exe --smoke-frames 120 --require-validation --evidence-output build\gpu-color-direct-debug
+.\build\Debug\sokoban.exe --smoke-frames 60 --require-validation --evidence-disable-ao --evidence-output build\gpu-color-direct-ao-off-debug
+.\build\Release\sokoban.exe --smoke-frames 240 --evidence-output build\gpu-color-direct-release
+.\build\Release\sokoban.exe --smoke-frames 240 --evidence-render-scale 50 --evidence-output build\gpu-color-direct-release-scale-50
+.\build\Release\sokoban.exe --smoke-frames 240 --evidence-disable-ao --evidence-output build\gpu-color-direct-release-ao-off
 ```
 
 Build content explicitly when changing manifest, glTF or texture discovery:

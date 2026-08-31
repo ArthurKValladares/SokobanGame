@@ -58,6 +58,12 @@ public:
         uint32_t imageIndex,
         RenderStats& stats) const;
     void ensureSceneColorReadable(VkCommandBuffer commandBuffer, RenderStats& stats);
+    void prepareSceneColorAttachment(
+        VkCommandBuffer commandBuffer,
+        RenderStats& stats);
+    void publishSceneColor(
+        VkCommandBuffer commandBuffer,
+        RenderStats& stats);
     // Hands the scene target to the tonemap pass and its display image to the
     // rasterizer. Everything that used to read the scene target directly -
     // the upscale blit, the developer workspace's game viewport, the frame
@@ -72,7 +78,12 @@ public:
     void copyResolvedSceneColor(
         VkCommandBuffer commandBuffer,
         RenderStats& stats);
-    void copyResolvedSceneDepth(
+    // Publishes the single-sample depth resolve directly for shader reads;
+    // prepareSceneDepthAttachment restores it before another scene render.
+    void publishSceneDepth(
+        VkCommandBuffer commandBuffer,
+        RenderStats& stats);
+    void prepareSceneDepthAttachment(
         VkCommandBuffer commandBuffer,
         RenderStats& stats);
     void upscaleSceneToSwapchain(
@@ -99,7 +110,6 @@ public:
     [[nodiscard]] VkImageView imageView(uint32_t index) const;
     [[nodiscard]] VkImageView sceneColorView() const { return sceneColorImage_.view; }
     [[nodiscard]] VkSampler sceneColorSampler() const { return sceneColorSampler_; }
-    [[nodiscard]] VkImageView sceneDepthView() const { return sceneDepthImage_.view; }
     [[nodiscard]] VkImageView depthView() const { return depthImage_.view; }
     [[nodiscard]] VkImageView sampledDepthView() const;
     [[nodiscard]] VkImage depthSourceImage() const;
@@ -108,8 +118,10 @@ public:
     [[nodiscard]] VkImageView resolvedColorView() const { return resolvedColorImage_.view; }
     [[nodiscard]] VkImage displayColorImage() const { return displayColorImage_.image; }
     [[nodiscard]] VkImageView displayColorView() const { return displayColorImage_.view; }
-    [[nodiscard]] VkImageView renderColorView() const;
-    [[nodiscard]] VkImageView resolveColorView() const;
+    [[nodiscard]] VkImageView renderColorView(
+        bool resolveIntoSampledScene = false) const;
+    [[nodiscard]] VkImageView resolveColorView(
+        bool resolveIntoSampledScene = false) const;
 
 private:
     struct SwapchainImage {
@@ -123,7 +135,6 @@ private:
     void createMsaaColor();
     void createDepth();
     void createSceneColor();
-    void createSceneDepth();
     void createDisplayColor();
     void destroyAttachments();
     [[nodiscard]] VkFormat chooseSceneColorFormat() const;
@@ -157,7 +168,6 @@ private:
     vulkanResources::OwnedImage depthImage_ {};
     vulkanResources::OwnedImage resolveDepthImage_ {};
     vulkanResources::OwnedImage sceneColorImage_ {};
-    vulkanResources::OwnedImage sceneDepthImage_ {};
     vulkanResources::OwnedImage displayColorImage_ {};
     VkSampler sceneColorSampler_ = VK_NULL_HANDLE;
     VkImageLayout sceneColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -166,7 +176,6 @@ private:
     // The next frame's tonemap has to name that read as the thing it is
     // waiting on, or its write races a sample still in progress.
     VkImageLayout displayColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
-    VkImageLayout sceneDepthLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     bool depthLayoutInitialized_ = false;
 };
 

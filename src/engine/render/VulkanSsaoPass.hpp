@@ -7,6 +7,8 @@
 
 namespace sokoban {
 
+class VulkanGpuProfiler;
+
 class VulkanSsaoPass {
 public:
     struct Pipelines {
@@ -18,12 +20,10 @@ public:
 
     // Whether these settings make this pass run at all.
     //
-    // The recorder copies resolved depth into the sampled depth image purely
-    // so the occlusion pass can read it, and copies resolved colour so the
-    // composite has something to read that is not the attachment it writes.
-    // Each is a full render-extent vkCmdCopyImage plus barriers. Every one of
-    // those decisions must key off this same predicate, or a frame either
-    // pays for a copy nothing reads or samples a stale one.
+    // The recorder publishes resolved depth for this pass and copies resolved
+    // colour so the composite has something to read that is not the attachment
+    // it writes. Both decisions must key off this predicate, or a frame either
+    // pays for work nothing reads or samples stale data.
     [[nodiscard]] static constexpr bool samplesSceneDepth(
         const RenderFrameData::Lighting::AmbientOcclusion& settings)
     {
@@ -54,6 +54,8 @@ public:
         VkDescriptorSet descriptorSet,
         VkPipelineLayout pipelineLayout,
         Pipelines pipelines,
+        VulkanGpuProfiler& gpuProfiler,
+        uint32_t frameIndex,
         RenderStats& stats) const;
 
     [[nodiscard]] bool valid() const;

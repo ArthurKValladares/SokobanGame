@@ -3,6 +3,7 @@
 #include "engine/render/LightingConfig.hpp"
 #include "engine/render/SsaoMath.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
+#include "engine/render/VulkanGpuProfiler.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 
@@ -101,6 +102,8 @@ void VulkanSsaoPass::record(
     VkDescriptorSet descriptorSet,
     VkPipelineLayout pipelineLayout,
     Pipelines pipelines,
+    VulkanGpuProfiler& gpuProfiler,
+    uint32_t frameIndex,
     RenderStats& stats) const
 {
     if (!samplesSceneDepth(settings) ||
@@ -110,9 +113,21 @@ void VulkanSsaoPass::record(
         !pipelineLayout ||
         !pipelines.occlusion ||
         !pipelines.composite) {
+        // Every profiler query must be written each submitted frame or the
+        // whole frame's non-blocking query read remains unavailable.
+        gpuProfiler.beginPhase(
+            commandBuffer, frameIndex, VulkanGpuPhase::SsaoOcclusion);
+        gpuProfiler.endPhase(
+            commandBuffer, frameIndex, VulkanGpuPhase::SsaoOcclusion);
+        gpuProfiler.beginPhase(
+            commandBuffer, frameIndex, VulkanGpuPhase::SsaoComposite);
+        gpuProfiler.endPhase(
+            commandBuffer, frameIndex, VulkanGpuPhase::SsaoComposite);
         return;
     }
 
+    gpuProfiler.beginPhase(
+        commandBuffer, frameIndex, VulkanGpuPhase::SsaoOcclusion);
     const std::array<VkImageMemoryBarrier2, 1> beforeBarriers {
         vulkanResources::imageBarrier(
             image_.image,
@@ -221,7 +236,11 @@ void VulkanSsaoPass::record(
     };
     vulkanResources::transitionImages(commandBuffer, afterBarriers);
     ++stats.imageBarriers;
+    gpuProfiler.endPhase(
+        commandBuffer, frameIndex, VulkanGpuPhase::SsaoOcclusion);
 
+    gpuProfiler.beginPhase(
+        commandBuffer, frameIndex, VulkanGpuPhase::SsaoComposite);
     VkViewport compositeViewport {
         .x = 0.0f,
         .y = static_cast<float>(renderExtent_.height),
@@ -278,6 +297,8 @@ void VulkanSsaoPass::record(
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
     ++stats.drawCalls;
     vkCmdEndRendering(commandBuffer);
+    gpuProfiler.endPhase(
+        commandBuffer, frameIndex, VulkanGpuPhase::SsaoComposite);
 }
 
 bool VulkanSsaoPass::valid() const

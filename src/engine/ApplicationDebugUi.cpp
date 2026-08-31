@@ -811,7 +811,14 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             renderStats.assetPublicationEventTiming);
         showPhase("GPU shadows", renderStats.gpuShadowTiming);
         showPhase("GPU scene color/depth", renderStats.gpuSceneTiming);
+        showPhase("  GPU scene raster/resolve", renderStats.gpuSceneRasterTiming);
+        showPhase(
+            "  GPU scene depth publish", renderStats.gpuSceneDepthPublishTiming);
+        showPhase("  GPU scene translucency", renderStats.gpuSceneTranslucencyTiming);
         showPhase("GPU SSAO", renderStats.gpuSsaoTiming);
+        showPhase("  GPU SSAO scene snapshot", renderStats.gpuSsaoSnapshotTiming);
+        showPhase("  GPU SSAO occlusion", renderStats.gpuSsaoOcclusionTiming);
+        showPhase("  GPU SSAO composite", renderStats.gpuSsaoCompositeTiming);
         showPhase("GPU output/UI", renderStats.gpuOutputTiming);
         ImGui::Text(
             "Asset publications %llu across %llu frames; texture uploads %llu/%llu complete (%u in flight)",

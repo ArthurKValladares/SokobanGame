@@ -393,14 +393,28 @@ public:
         setupTimeTelemetry_.record(elapsedMilliseconds(setupStart));
 
         const auto gameStart = std::chrono::steady_clock::now();
+        const bool mainHasTranslucency =
+            scene.hasTranslucentContent ||
+            hasAuthoredBlendMaterials(frameData, scene);
+        const bool mainDepthPublished =
+            VulkanSsaoPass::samplesSceneDepth(
+                frameData.lighting.ambientOcclusion) ||
+            mainHasTranslucency;
+        const bool directSsaoColor =
+            VulkanSsaoPass::samplesSceneDepth(
+                frameData.lighting.ambientOcclusion) &&
+            !mainHasTranslucency &&
+            ssaoPass_.valid() && pipelines_.ssao() &&
+            pipelines_.ssaoComposite();
         vulkanDebug::beginLabel(
             device_, commandBuffer, "Game rendering", { 0.2f, 0.9f, 0.4f, 1.0f });
         recordGameRendering(
             commandBuffer,
-            swapchain_.renderColorView(),
-            swapchain_.resolveColorView(),
+            swapchain_.renderColorView(directSsaoColor),
+            swapchain_.resolveColorView(directSsaoColor),
             frameData,
-            scene);
+            scene,
+            directSsaoColor);
         vulkanDebug::endLabel(device_, commandBuffer);
         gameTimeTelemetry_.record(elapsedMilliseconds(gameStart));
 
@@ -412,12 +426,20 @@ public:
         vulkanDebug::beginLabel(
             device_, commandBuffer, "SSAO", { 0.8f, 0.4f, 1.0f, 1.0f });
         // The composite reads the scene and writes it back, which it cannot
-        // do to the attachment it is bound to. Same predicate as the depth
-        // copy above: with ambient occlusion off, neither copy happens.
-        if (VulkanSsaoPass::samplesSceneDepth(
+        // do to the attachment it is bound to. With ambient occlusion off,
+        // this color snapshot and both SSAO draws stay empty.
+        gpuProfiler_.beginPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::SsaoSnapshot);
+        if (!directSsaoColor && VulkanSsaoPass::samplesSceneDepth(
                 frameData.lighting.ambientOcclusion)) {
             swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
         }
+        gpuProfiler_.endPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::SsaoSnapshot);
         ssaoPass_.record(
             commandBuffer,
             swapchain_.resolvedColorView(),
@@ -429,12 +451,17 @@ public:
                 .occlusion = pipelines_.ssao(),
                 .composite = pipelines_.ssaoComposite(),
             },
+            gpuProfiler_,
+            configuration_.descriptorFrameIndex,
             stats_);
         vulkanDebug::endLabel(device_, commandBuffer);
         gpuProfiler_.endPhase(
             commandBuffer,
             configuration_.descriptorFrameIndex,
             VulkanGpuPhase::Ssao);
+        if (mainDepthPublished) {
+            swapchain_.prepareSceneDepthAttachment(commandBuffer, stats_);
+        }
         ssaoTimeTelemetry_.record(elapsedMilliseconds(ssaoStart));
         if (previewFrameData && previewScene) {
             // Preserve the completed main view before the preview replaces
@@ -780,7 +807,8 @@ private:
         VkImageView colorView,
         VkImageView resolveView,
         const RenderFrameData& frameData,
-        const PreparedRenderScene& scene)
+        const PreparedRenderScene& scene,
+        bool directSsaoColor)
     {
         const bool hasTranslucency = scene.hasTranslucentContent ||
             hasAuthoredBlendMaterials(frameData, scene);
@@ -803,8 +831,15 @@ private:
             commandBuffer,
             configuration_.descriptorFrameIndex,
             VulkanGpuPhase::Scene);
-        swapchain_.ensureSceneColorReadable(
-            commandBuffer, stats_);
+        gpuProfiler_.beginPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::SceneRaster);
+        if (directSsaoColor) {
+            swapchain_.prepareSceneColorAttachment(commandBuffer, stats_);
+        } else {
+            swapchain_.ensureSceneColorReadable(commandBuffer, stats_);
+        }
         recordScenePass(
             commandBuffer,
             colorView,
@@ -817,15 +852,37 @@ private:
             false,
             true,
             { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });
-        // The sampled depth image has exactly one reader, the SSAO occlusion
-        // pass. With ambient occlusion off, this copy is a full render-extent
-        // vkCmdCopyImage and four barriers that nothing consumes.
-        if (VulkanSsaoPass::samplesSceneDepth(
-                frameData.lighting.ambientOcclusion)) {
-            swapchain_.copyResolvedSceneDepth(
-                commandBuffer, stats_);
+        if (directSsaoColor) {
+            swapchain_.publishSceneColor(commandBuffer, stats_);
         }
+        gpuProfiler_.endPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::SceneRaster);
+        // Publish the single-sample resolve itself. SSAO and translucent
+        // water can read it directly; the recorder restores attachment state
+        // after those consumers finish.
+        gpuProfiler_.beginPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::SceneDepthPublish);
+        if (VulkanSsaoPass::samplesSceneDepth(
+                frameData.lighting.ambientOcclusion) || hasTranslucency) {
+            swapchain_.publishSceneDepth(commandBuffer, stats_);
+        }
+        gpuProfiler_.endPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::SceneDepthPublish);
+        gpuProfiler_.beginPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::SceneTranslucency);
         if (!hasTranslucency) {
+            gpuProfiler_.endPhase(
+                commandBuffer,
+                configuration_.descriptorFrameIndex,
+                VulkanGpuPhase::SceneTranslucency);
             gpuProfiler_.endPhase(
                 commandBuffer,
                 configuration_.descriptorFrameIndex,
@@ -847,6 +904,10 @@ private:
             true,
             false,
             { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });
+        gpuProfiler_.endPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::SceneTranslucency);
         gpuProfiler_.endPhase(
             commandBuffer,
             configuration_.descriptorFrameIndex,
@@ -894,13 +955,10 @@ private:
             false,
             true,
             inset);
-        if (VulkanSsaoPass::samplesSceneDepth(
-                frameData.lighting.ambientOcclusion)) {
-            swapchain_.copyResolvedSceneDepth(commandBuffer, stats_);
-        }
         if (!hasTranslucency) {
             return;
         }
+        swapchain_.publishSceneDepth(commandBuffer, stats_);
         // Keep sceneColor as the untouched main view for the opacity feather.
         // Preview translucency can also sample it naturally as the world
         // visible behind the portal-like inset.
@@ -916,6 +974,7 @@ private:
             true,
             false,
             inset);
+        swapchain_.prepareSceneDepthAttachment(commandBuffer, stats_);
     }
 
     // Scene target -> display image: linear scene light in, a presentable
@@ -1105,18 +1164,24 @@ private:
         const VkClearValue depthClear {
             .depthStencil = { .depth = 1.0f, .stencil = 0 },
         };
+        const bool samplesDepthAttachment =
+            !writeDepth && !swapchain_.resolveDepthView();
+        const bool resolvesDepth =
+            writeDepth && swapchain_.resolveDepthView();
         const VkRenderingAttachmentInfo depthAttachment {
             .sType =
                 VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .imageView = swapchain_.depthView(),
-            .imageLayout =
-                VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-            .resolveMode = swapchain_.resolveDepthView()
+            .imageLayout = samplesDepthAttachment
+                ? VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL
+                : VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+            .resolveMode = resolvesDepth
                 ? VK_RESOLVE_MODE_SAMPLE_ZERO_BIT
                 : VK_RESOLVE_MODE_NONE,
-            .resolveImageView = swapchain_.resolveDepthView(),
-            .resolveImageLayout =
-                swapchain_.resolveDepthView()
+            .resolveImageView = resolvesDepth
+                ? swapchain_.resolveDepthView()
+                : VK_NULL_HANDLE,
+            .resolveImageLayout = resolvesDepth
                 ? VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL
                 : VK_IMAGE_LAYOUT_UNDEFINED,
             .loadOp = loadDepth

@@ -353,6 +353,52 @@ void VulkanSwapchainResources::publishDisplayColor(
     ++stats.imageBarriers;
 }
 
+void VulkanSwapchainResources::prepareSceneColorAttachment(
+    VkCommandBuffer commandBuffer,
+    RenderStats& stats)
+{
+    vulkanResources::transitionImage(
+        commandBuffer,
+        sceneColorImage_.image,
+        vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+        sceneColorLayout_ == VK_IMAGE_LAYOUT_UNDEFINED
+            ? vulkanResources::ImageState {}
+            : vulkanResources::ImageState {
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            },
+        {
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        });
+    sceneColorLayout_ = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    ++stats.imageBarriers;
+}
+
+void VulkanSwapchainResources::publishSceneColor(
+    VkCommandBuffer commandBuffer,
+    RenderStats& stats)
+{
+    vulkanResources::transitionImage(
+        commandBuffer,
+        sceneColorImage_.image,
+        vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
+        {
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        },
+        {
+            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        });
+    sceneColorLayout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    ++stats.imageBarriers;
+}
+
 void VulkanSwapchainResources::copyResolvedSceneColor(
     VkCommandBuffer commandBuffer,
     RenderStats& stats)
@@ -471,107 +517,49 @@ void VulkanSwapchainResources::prepareSwapchainForUi(
     ++stats.imageBarriers;
 }
 
-void VulkanSwapchainResources::copyResolvedSceneDepth(
+void VulkanSwapchainResources::publishSceneDepth(
     VkCommandBuffer commandBuffer,
     RenderStats& stats)
 {
-    const VkImage source = depthSourceImage();
-    const std::array<VkImageMemoryBarrier2, 2> toTransfer {
-        vulkanResources::imageBarrier(
-            source,
-            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_DEPTH_BIT),
-            {
-                VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                    VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-            },
-            {
-                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                VK_ACCESS_2_TRANSFER_READ_BIT,
-                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            }),
-        vulkanResources::imageBarrier(
-            sceneDepthImage_.image,
-            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_DEPTH_BIT),
-            {
-                sceneDepthLayout_ == VK_IMAGE_LAYOUT_UNDEFINED
-                    ? VK_PIPELINE_STAGE_2_NONE
-                    : VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                sceneDepthLayout_ == VK_IMAGE_LAYOUT_UNDEFINED
-                    ? VK_ACCESS_2_NONE
-                    : VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-                sceneDepthLayout_,
-            },
-            {
-                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            }),
-    };
-    vulkanResources::transitionImages(commandBuffer, toTransfer);
-    ++stats.imageBarriers;
-
-    const VkImageCopy copyRegion {
-        .srcSubresource = {
-            .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
-            .mipLevel = 0,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
-        .dstSubresource = {
-            .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
-            .mipLevel = 0,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
-        .extent = {
-            .width = renderExtent_.width,
-            .height = renderExtent_.height,
-            .depth = 1,
-        },
-    };
-    vkCmdCopyImage(
+    vulkanResources::transitionImage(
         commandBuffer,
-        source,
-        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        sceneDepthImage_.image,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        1,
-        &copyRegion);
+        depthSourceImage(),
+        vulkanResources::subresourceRange(VK_IMAGE_ASPECT_DEPTH_BIT),
+        {
+            VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+            VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+        },
+        {
+            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+            VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+        });
+    ++stats.imageBarriers;
+}
 
-    const std::array<VkImageMemoryBarrier2, 2> fromTransfer {
-        vulkanResources::imageBarrier(
-            source,
-            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_DEPTH_BIT),
-            {
-                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                VK_ACCESS_2_TRANSFER_READ_BIT,
-                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            },
-            {
-                VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                    VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                    VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-            }),
-        vulkanResources::imageBarrier(
-            sceneDepthImage_.image,
-            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_DEPTH_BIT),
-            {
-                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            },
-            {
-                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            }),
-    };
-    vulkanResources::transitionImages(commandBuffer, fromTransfer);
-    sceneDepthLayout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+void VulkanSwapchainResources::prepareSceneDepthAttachment(
+    VkCommandBuffer commandBuffer,
+    RenderStats& stats)
+{
+    vulkanResources::transitionImage(
+        commandBuffer,
+        depthSourceImage(),
+        vulkanResources::subresourceRange(VK_IMAGE_ASPECT_DEPTH_BIT),
+        {
+            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+            VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+        },
+        {
+            VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+            VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+        });
     ++stats.imageBarriers;
 }
 
@@ -695,14 +683,26 @@ VkImage VulkanSwapchainResources::depthSourceImage() const
     return resolveDepthImage_.image ? resolveDepthImage_.image : depthImage_.image;
 }
 
-VkImageView VulkanSwapchainResources::renderColorView() const
+VkImageView VulkanSwapchainResources::renderColorView(
+    bool resolveIntoSampledScene) const
 {
-    return msaaEnabled() ? msaaColorImage_.view : resolvedColorImage_.view;
+    if (msaaEnabled()) {
+        return msaaColorImage_.view;
+    }
+    return resolveIntoSampledScene
+        ? sceneColorImage_.view
+        : resolvedColorImage_.view;
 }
 
-VkImageView VulkanSwapchainResources::resolveColorView() const
+VkImageView VulkanSwapchainResources::resolveColorView(
+    bool resolveIntoSampledScene) const
 {
-    return msaaEnabled() ? resolvedColorImage_.view : VK_NULL_HANDLE;
+    if (!msaaEnabled()) {
+        return VK_NULL_HANDLE;
+    }
+    return resolveIntoSampledScene
+        ? sceneColorImage_.view
+        : resolvedColorImage_.view;
 }
 
 void VulkanSwapchainResources::createSwapchain(
@@ -802,7 +802,6 @@ void VulkanSwapchainResources::createAttachments()
     renderExtent_ = { scaled.width, scaled.height };
     depthLayoutInitialized_ = false;
     sceneColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
-    sceneDepthLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     displayColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     // Decided once here, before anything that renders into the scene is
     // created, because every scene attachment and every pipeline that targets
@@ -812,7 +811,6 @@ void VulkanSwapchainResources::createAttachments()
     createMsaaColor();
     createDepth();
     createSceneColor();
-    createSceneDepth();
     createDisplayColor();
 }
 
@@ -925,8 +923,7 @@ void VulkanSwapchainResources::createDepth()
         .samples = sampleCount_,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
         .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
-            VK_IMAGE_USAGE_SAMPLED_BIT |
-            VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+            VK_IMAGE_USAGE_SAMPLED_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
@@ -961,7 +958,9 @@ void VulkanSwapchainResources::createSceneColor()
         .arrayLayers = 1,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+            VK_IMAGE_USAGE_SAMPLED_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
@@ -991,37 +990,6 @@ void VulkanSwapchainResources::createSceneColor()
     vulkanDebug::setObjectName(
         device_, VK_OBJECT_TYPE_SAMPLER, sceneColorSampler_,
         "Sampled scene color sampler");
-}
-
-void VulkanSwapchainResources::createSceneDepth()
-{
-    if (renderExtent_.width == 0 || renderExtent_.height == 0) {
-        return;
-    }
-    const VkImageCreateInfo imageInfo {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
-        .format = depthFormat_,
-        .extent = {
-            .width = renderExtent_.width,
-            .height = renderExtent_.height,
-            .depth = 1,
-        },
-        .mipLevels = 1,
-        .arrayLayers = 1,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-            VK_IMAGE_USAGE_SAMPLED_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-    };
-    sceneDepthImage_ = vulkanResources::createImage(
-        *allocator_,
-        device_,
-        imageInfo,
-        VK_IMAGE_ASPECT_DEPTH_BIT,
-        "Sampled scene depth");
 }
 
 // What the tonemap pass writes: the scene at render extent, in the surface's
@@ -1070,7 +1038,6 @@ void VulkanSwapchainResources::destroyAttachments()
     }
     sceneColorSampler_ = VK_NULL_HANDLE;
     vulkanResources::destroyImage(*allocator_, device_, displayColorImage_);
-    vulkanResources::destroyImage(*allocator_, device_, sceneDepthImage_);
     vulkanResources::destroyImage(*allocator_, device_, sceneColorImage_);
     vulkanResources::destroyImage(*allocator_, device_, resolveDepthImage_);
     vulkanResources::destroyImage(*allocator_, device_, depthImage_);
@@ -1078,7 +1045,6 @@ void VulkanSwapchainResources::destroyAttachments()
     vulkanResources::destroyImage(*allocator_, device_, resolvedColorImage_);
     renderExtent_ = {};
     sceneColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
-    sceneDepthLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     displayColorLayout_ = VK_IMAGE_LAYOUT_UNDEFINED;
     depthLayoutInitialized_ = false;
 }

@@ -8,10 +8,10 @@
 // pixel and nothing else. That share arrives in the scene target's alpha,
 // written by the opaque pipelines - see writeAmbientMask in triangle.frag.
 //
-// A shader cannot read and write the same attachment, so the pass samples the
-// snapshot copyResolvedSceneColor leaves in sceneColor and writes the scene
-// target unblended. That copy is the price of having no depth prepass and no
-// G-buffer to reconstruct an ambient term from; either would remove it.
+// A shader cannot read and write the same attachment. The normal opaque-only
+// path therefore resolves the scene into sceneColor and composites into the
+// HDR output target. Translucent content retains the copy fallback because it
+// already samples sceneColor while resolving into the HDR target.
 //
 // It runs before the preview inset and the level transition, as the blended
 // version did, because the occlusion buffer was built from the main view's

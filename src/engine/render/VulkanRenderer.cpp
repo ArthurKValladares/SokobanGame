@@ -1241,8 +1241,20 @@ RenderStats VulkanRenderer::renderStats() const
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::Shadows));
     stats.gpuSceneTiming = renderPhaseTiming(
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::Scene));
+    stats.gpuSceneRasterTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::SceneRaster));
+    stats.gpuSceneDepthPublishTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::SceneDepthPublish));
+    stats.gpuSceneTranslucencyTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::SceneTranslucency));
     stats.gpuSsaoTiming = renderPhaseTiming(
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::Ssao));
+    stats.gpuSsaoSnapshotTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::SsaoSnapshot));
+    stats.gpuSsaoOcclusionTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::SsaoOcclusion));
+    stats.gpuSsaoCompositeTiming = renderPhaseTiming(
+        gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::SsaoComposite));
     stats.gpuOutputTiming = renderPhaseTiming(
         gpuProfiler_.phaseTimeSummary(VulkanGpuPhase::Output));
     sceneRecorder_.populateTimingStats(stats);
@@ -1405,7 +1417,8 @@ VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources(
         },
         .sceneDepth = {
             .sampler = shadowPass_.sampler(),
-            .imageView = resources.swapchain->sceneDepthView(),
+            .imageView = resources.swapchain->sampledDepthView(),
+            .imageLayout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
         },
         .ssao = {
             .sampler = resources.ssaoPass->sampler(),

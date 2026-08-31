@@ -14,7 +14,13 @@ namespace sokoban {
 enum class VulkanGpuPhase : uint32_t {
     Shadows,
     Scene,
+    SceneRaster,
+    SceneDepthPublish,
+    SceneTranslucency,
     Ssao,
+    SsaoSnapshot,
+    SsaoOcclusion,
+    SsaoComposite,
     Output,
     Count,
 };
@@ -25,7 +31,8 @@ enum class VulkanGpuPhase : uint32_t {
     float timestampPeriodNanoseconds,
     uint32_t validBits) noexcept;
 
-// Owns a two-timestamp query pair per in-flight frame. Results are read only
+// Owns a timestamp query pair for the frame and each profiled phase per
+// in-flight frame. Results are read only
 // after the renderer's existing frame fence has completed, so profiling does
 // not add a CPU/GPU synchronization point.
 class VulkanGpuProfiler {
