@@ -6,6 +6,7 @@
 
 #include "engine/ParticleConfig.hpp"
 #include "engine/render/CameraConfig.hpp"
+#include "engine/render/WaterConfig.hpp"
 
 #include "engine/Log.hpp"
 #include "engine/RenderFrameBuilder.hpp"
@@ -53,6 +54,47 @@ AssetLoadingBudget assetLoadingBudgetFor(const ApplicationOptions& options)
             options.textureResidencyBudgetKiB * 1024ULL;
     }
     return budget;
+}
+
+void appendEvidenceWaterFixture(RenderFrameData& frame)
+{
+    if (frame.levelWidth == 0 || frame.levelHeight == 0) {
+        return;
+    }
+
+    // One stable exterior strip is enough to exercise the complete water
+    // shader, depth sampling, opaque-color snapshot and translucent resolve
+    // path. Keeping it outside the board is important: authored water sits
+    // below the surrounding ground lip, so overlaying an ordinary solid
+    // floor would make a nominal water draw completely depth-occluded.
+    const RenderFrameData::CameraExtent fixtureExtent =
+        frame.cameraExtent.value_or(RenderFrameData::CameraExtent {
+            .width = frame.levelWidth,
+            .height = frame.levelHeight,
+            .depth = frame.levelDepth,
+        });
+    constexpr float stripLeft = -3.0f;
+    constexpr float stripWidth = 2.0f;
+    const float stripTop = static_cast<float>(fixtureExtent.originY);
+    const float stripHeight = std::max(
+        static_cast<float>(fixtureExtent.height), 1.0f);
+    constexpr uint32_t shorelineMask =
+        waterShorelineBit(WaterShorelineEdge::PositiveX) |
+        waterShorelineBit(WaterShorelineCorner::PositiveXNegativeY) |
+        waterShorelineBit(WaterShorelineCorner::PositiveXPositiveY);
+    frame.waterSurfaces.push_back({
+        .cell = {
+            static_cast<int>(stripLeft),
+            fixtureExtent.originY,
+            0,
+        },
+        .position = { stripLeft, stripTop },
+        .size = { stripWidth, stripHeight },
+        .color = frame.waterRendering.surfaceColor,
+        .elevation = 1.0f - config::waterDepthBelowGround,
+        .shorelineMask = shorelineMask,
+        .pickable = false,
+    });
 }
 
 bool SDLCALL simulationTimingEventWatch(void* userdata, SDL_Event* event)
@@ -150,6 +192,7 @@ Application::Application(ApplicationOptions options)
           std::move(options.evidenceOutputDirectory))
     , evidenceAmbientOcclusionEnabled_(
           options.evidenceAmbientOcclusionEnabled)
+    , evidenceWaterEnabled_(options.evidenceWaterEnabled)
     , evidencePointLightEnabled_(options.evidencePointLightEnabled)
     , evidencePointLightStressEnabled_(
           options.evidencePointLightStressEnabled)
@@ -162,6 +205,9 @@ Application::Application(ApplicationOptions options)
     if (!evidenceOutputDirectory_.empty()) {
         presentationSettings_.lighting.ambientOcclusionEnabled =
             evidenceAmbientOcclusionEnabled_;
+        if (evidenceWaterEnabled_) {
+            presentationSettings_.water = {};
+        }
         renderer_.setFrustumCullingEnabled(
             options.evidenceFrustumCullingEnabled);
     }
@@ -1906,6 +1952,9 @@ RenderFrameData Application::buildRenderFrame(
     }, arena);
     particleSystem_.appendRenderData(frame);
     frame.levelTransitionAmount = levelTransition_.amount();
+    if (evidenceWaterEnabled_) {
+        appendEvidenceWaterFixture(frame);
+    }
     if (evidencePointLightEnabled_) {
         std::optional<std::size_t> animatedCaster;
         for (std::size_t tileIndex = 0;

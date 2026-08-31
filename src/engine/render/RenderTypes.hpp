@@ -557,6 +557,8 @@ struct RenderStats {
     bool parallelScenePreparationEnabled = true;
     bool pointShadowOptimizationsEnabled = true;
     bool recorderScratchReuseEnabled = true;
+    bool mainSceneHasTranslucency = false;
+    bool ssaoColorSnapshotCopied = false;
     RenderPhaseTiming assetSchedulingTiming {};
     RenderPhaseTiming frameFenceWaitTiming {};
     RenderPhaseTiming assetMaintenanceTiming {};

@@ -619,17 +619,23 @@ void main()
         (worldPosition - cameraPosition) *
         (distanceBehindWater / max(waterCameraDepth, 0.001)) *
         geometryPresent;
-    vec2 projectedCaustics;
-    vec2 projectedSecondaryCaustics;
-    waterRipplePatterns(
-        worldPosition + causticProjectionOffset,
-        frequency,
-        time,
-        rippleCrestHalfWidth,
-        rippleHaloWidth,
-        secondaryThicknessScale,
-        projectedCaustics,
-        projectedSecondaryCaustics);
+    vec2 projectedCaustics = vec2(0.0);
+    vec2 projectedSecondaryCaustics = vec2(0.0);
+    // Exterior water commonly has only the clear background behind it. The
+    // projected pattern was still evaluated there even though the coverage
+    // below is multiplied by zero. Keep the expensive second pattern only
+    // for fragments where it can affect copied opaque geometry.
+    if (geometryPresent > 0.0) {
+        waterRipplePatterns(
+            worldPosition + causticProjectionOffset,
+            frequency,
+            time,
+            rippleCrestHalfWidth,
+            rippleHaloWidth,
+            secondaryThicknessScale,
+            projectedCaustics,
+            projectedSecondaryCaustics);
+    }
 
     // Apply the projected bands before tinting so they belong to the geometry
     // below the plane instead of reading as another surface decal.

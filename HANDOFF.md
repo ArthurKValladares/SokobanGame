@@ -86,8 +86,20 @@ the saved preference, and records the sample count in report titles and artifact
 names. In warmed native Release captures, 1x/4x/8x GPU-frame averages were
 0.828/0.975/1.148–1.216 ms. At 4x, scene raster/resolve measured 0.239 ms and
 SSAO composite 0.202 ms: neither is a sufficiently dominant target to justify
-a speculative rewrite. The next packet should add deterministic translucent/
-water evidence before changing the retained color-copy fallback.
+a speculative rewrite.
+
+Translucent evidence and its first measured follow-up are complete. The tested
+`--evidence-water` mode adds a visible exterior shoreline without changing
+gameplay state, gives every report and image a `-water` suffix, and fails the
+capture unless both the translucent scene pass and AO color-copy fallback were
+actually recorded. Two warmed 4x Release runs produced identical scene and AO
+hashes. The retained snapshot costs only 0.024–0.025 ms, so restructuring that
+fallback is not justified. The water shader itself was the useful narrow
+target: skipping its second projected-caustic evaluation when resolved depth
+says there is no opaque geometry behind the surface reduced stable translucent
+time from 0.466 to 0.388–0.390 ms and the GPU frame from 1.050 to 0.970–0.977
+ms, with byte-identical output. The frame-scaling program is now at a measured
+stopping point; resume it only for a concrete content or performance target.
 
 Do not implement “V4” as one monolithic change. The device contract, descriptor
 layout, runtime capacity, content discovery, material representation and shader
@@ -170,8 +182,13 @@ future tasks:
 - **9.13 deterministic evidence MSAA**: evidence runs use an explicit tested
   1x/2x/4x/8x input, default to the 4x product setting independently of saved
   preferences, and encode the active sample count in reports and filenames.
-  The matched Release matrix establishes the product-default baseline before
-  any further GPU optimization.
+  The matched Release matrix establishes the product-default baseline.
+- **9.14/9.15 translucent evidence and safe water optimization**: a visible
+  exterior water fixture proves the retained AO color snapshot, report fields
+  identify the exercised path, and repeated captures are deterministic. The
+  snapshot is too small to justify restructuring; skipping projected caustics
+  over clear background instead improves the measured water pass without
+  changing any scene or AO bytes.
 - **V1/V3/V5/V6**: per-swapchain-image present semaphores, direct skinning
   SSBO indexing, Vulkan 1.3 optimized shader builds, and optional anisotropy.
 - **V2**: vendored VMA 3.2.1 is owned by `VulkanDeviceContext`; persistent,
@@ -803,14 +820,14 @@ S2, T4, T5, V2, A2, A3, A4, T8, the post-A4 recording/upload profile, the
 point-shadow stress gate and top-level GPU pass timestamps are complete.
 Continue in this order:
 
-1. Add a deterministic translucent/water evidence scene before changing the
-   retained color-copy fallback; the current opaque evidence cannot validate
-   that path visually.
-2. Use the explicit 4x baseline for any next shader experiment. Scene raster/
-   resolve (0.239 ms) and SSAO composite (0.202 ms) are co-dominant at the
-   product default, so require a narrow measured hypothesis rather than an
-   architectural rewrite. Preserve bilateral normal/depth rejection and the
-   banding/silhouette evidence for any composite change.
+1. Preserve the deterministic `--evidence-water` gate for every change to
+   water, translucent ordering, resolved scene color or the retained AO copy.
+   A counter-only run is insufficient: the water surface must remain visible
+   and the scene/AO hashes must remain stable where output should not change.
+2. Leave the retained translucent color snapshot in place. Its measured
+   0.024–0.025 ms cost is below the threshold for another image-ownership
+   rewrite; the background-caustic skip already addressed the larger safe
+   water cost with exact output preservation.
 3. Reconsider secondary command buffers only if a larger content scene makes
    CPU command recording a durable frame bottleneck again. Reconsider a
    transfer queue only for sustained streaming that leaves uploads in flight.
@@ -1207,14 +1224,61 @@ steady windows. At native 1280x720 on the RTX 4060 Laptop GPU:
 The 4x result corrects the old inherited-8x baseline. Scene raster and SSAO
 composite are close at the product default, so the data does not support a
 large rewrite of either path. The repeated 8x cost is useful as a high-quality
-stress result, not as the product target. The next safe packet is deterministic
-translucent/water evidence for the retained copy fallback.
+stress result, not as the product target. Section 9.14 uses this explicit 4x
+baseline to evaluate the retained translucent copy fallback.
 
 The complete Debug build and all 69 CTest suites pass. A 120-frame explicit-4x
 Debug evidence run completed with the Khronos validation layer active and no
 Vulkan usage errors. Release evidence is under
 `build/gpu-msaa-release-steady-1x`, `build/gpu-msaa-release-steady-4x`,
 `build/gpu-msaa-release-steady-8x` and `build/gpu-msaa-release-steady2-8x`.
+
+#### 9.14 Deterministic translucent-water fallback evidence — complete
+
+`--evidence-water` now adds a non-pickable exterior water strip beside the
+frozen evidence board. It uses the normal water elevation, shoreline shader,
+depth sampling, opaque-color snapshot and translucent resolve without changing
+the level or save. Evidence water tuning is reset to the authored defaults so a
+saved Debug preference cannot change the pixels. Keeping the fixture outside
+the board is deliberate: a first counter-valid version overlaid solid ground
+and was completely depth-occluded, which proved that recording a translucent
+draw alone is not visual evidence.
+
+The flag is rejected without `--evidence-output`, remains off by default and
+adds `-water` to report and image names. Captures fail if the prepared scene has
+no translucency or, with AO enabled, if the SSAO color-copy fallback did not
+execute. Reports state fixture, translucency and fallback status explicitly.
+
+At native 1280x720, explicit 4x MSAA and a warmed final 120-sample Release
+window, the opaque control used 0.706 ms GPU. Repeated water runs used 1.048–
+1.050 ms, including 0.466 ms of translucency and only 0.024–0.025 ms for the
+retained scene snapshot. Both water runs produced scene hash
+`9354DB0F4D7FF8D86C23E9BAB42235AF965364228579EA4162D8F4B9D72BCF0F`
+and AO hash
+`61F4519D30268B7335887E1F6DF023DBC972E2F09539210CA791D7ABC81AE871`;
+the control retained the 9.13 scene hash. The copy is therefore necessary but
+not a worthwhile optimization target.
+
+#### 9.15 Skip inoperative projected water caustics — complete
+
+The water shader used to evaluate its costly ripple field a second time for
+projected underwater caustics even when resolved depth contained only the clear
+background. That result was subsequently multiplied by zero. The second
+evaluation is now conditional on opaque geometry being present; surface
+ripples, refraction, shoreline foam and every geometry-backed caustic remain
+unchanged.
+
+Two stable warmed Release repetitions measure 0.388–0.390 ms translucency and
+0.970–0.977 ms for the full GPU frame, down from 0.466 and 1.050 ms
+respectively. The pre-change, Debug validation and all three post-change
+Release scene/AO pairs have the exact hashes above. The optimized 120-frame
+Debug run is validation-clean, the water shader compiles to Vulkan 1.3 SPIR-V,
+and all 69 Debug suites pass.
+
+Evidence is under `build/gpu-water-debug-4x`,
+`build/gpu-water-release-control-4x`, `build/gpu-water-release-4x-a`,
+`build/gpu-water-release-4x-b`, `build/gpu-water-caustic-skip-debug-4x` and
+`build/gpu-water-caustic-skip-release-4x-{a,b,c}`.
 
 `S3` task-graph/work-stealing work should follow an observed scheduling
 bottleneck. `S1` fixed-tick simulation is conditional on continuous physics or
@@ -1364,6 +1428,14 @@ Reproduce the explicit-MSAA product baseline and stress matrix:
 .\build\Release\sokoban.exe --smoke-frames 600 --evidence-msaa 1 --evidence-output build\gpu-msaa-release-steady-1x
 .\build\Release\sokoban.exe --smoke-frames 600 --evidence-msaa 4 --evidence-output build\gpu-msaa-release-steady-4x
 .\build\Release\sokoban.exe --smoke-frames 600 --evidence-msaa 8 --evidence-output build\gpu-msaa-release-steady-8x
+```
+
+Reproduce the translucent fallback and optimized water result:
+
+```powershell
+.\build\Debug\sokoban.exe --smoke-frames 120 --require-validation --evidence-msaa 4 --evidence-water --evidence-output build\gpu-water-caustic-skip-debug-4x
+.\build\Release\sokoban.exe --smoke-frames 600 --evidence-msaa 4 --evidence-output build\gpu-water-release-control-4x
+.\build\Release\sokoban.exe --smoke-frames 600 --evidence-msaa 4 --evidence-water --evidence-output build\gpu-water-caustic-skip-release-4x
 ```
 
 Build content explicitly when changing manifest, glTF or texture discovery:

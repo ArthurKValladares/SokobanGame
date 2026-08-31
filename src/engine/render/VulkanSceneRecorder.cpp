@@ -406,6 +406,11 @@ public:
             !mainHasTranslucency &&
             ssaoPass_.valid() && pipelines_.ssao() &&
             pipelines_.ssaoComposite();
+        const bool ssaoColorSnapshotCopied =
+            !directSsaoColor && VulkanSsaoPass::samplesSceneDepth(
+                frameData.lighting.ambientOcclusion);
+        stats_.mainSceneHasTranslucency = mainHasTranslucency;
+        stats_.ssaoColorSnapshotCopied = ssaoColorSnapshotCopied;
         vulkanDebug::beginLabel(
             device_, commandBuffer, "Game rendering", { 0.2f, 0.9f, 0.4f, 1.0f });
         recordGameRendering(
@@ -432,8 +437,7 @@ public:
             commandBuffer,
             configuration_.descriptorFrameIndex,
             VulkanGpuPhase::SsaoSnapshot);
-        if (!directSsaoColor && VulkanSsaoPass::samplesSceneDepth(
-                frameData.lighting.ambientOcclusion)) {
+        if (ssaoColorSnapshotCopied) {
             swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
         }
         gpuProfiler_.endPhase(

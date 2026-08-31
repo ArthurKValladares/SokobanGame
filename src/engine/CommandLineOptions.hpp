@@ -39,6 +39,7 @@ struct CommandLineOptions {
     int evidenceAntiAliasingSamples = config::antiAliasingSamples;
     bool evidenceAmbientOcclusionEnabled = true;
     bool evidenceFrustumCullingEnabled = true;
+    bool evidenceWaterEnabled = false;
     bool evidencePointLightEnabled = false;
     bool evidencePointLightStressEnabled = false;
     // Diagnostic A/B switch for frame-preparation profiling.
@@ -63,6 +64,7 @@ struct CommandLineOptions {
     bool evidenceAntiAliasingSpecified = false;
     bool evidenceAmbientOcclusionSpecified = false;
     bool evidenceFrustumCullingSpecified = false;
+    bool evidenceWaterSpecified = false;
     bool evidencePointLightSpecified = false;
     bool evidencePointLightStressSpecified = false;
     const auto reject = [&options](std::string message) {
@@ -155,6 +157,9 @@ struct CommandLineOptions {
         } else if (argument == "--evidence-disable-frustum-culling") {
             options.evidenceFrustumCullingEnabled = false;
             evidenceFrustumCullingSpecified = true;
+        } else if (argument == "--evidence-water") {
+            options.evidenceWaterEnabled = true;
+            evidenceWaterSpecified = true;
         } else if (argument == "--serial-scene-preparation") {
             options.parallelScenePreparationEnabled = false;
         } else if (argument == "--evidence-point-light") {
@@ -211,6 +216,9 @@ struct CommandLineOptions {
         return reject(
             "--evidence-disable-frustum-culling requires --evidence-output");
     }
+    if (options.evidenceOutputDirectory.empty() && evidenceWaterSpecified) {
+        return reject("--evidence-water requires --evidence-output");
+    }
     if (options.evidenceOutputDirectory.empty() && evidencePointLightSpecified) {
         return reject("--evidence-point-light requires --evidence-output");
     }
@@ -238,7 +246,8 @@ inline constexpr std::string_view commandLineUsage =
     "[--evidence-output <directory> "
     "--evidence-render-scale <25..100> [--evidence-msaa <1|2|4|8>] "
     "[--evidence-disable-ao] "
-    "[--evidence-disable-frustum-culling] [--evidence-point-light] "
+    "[--evidence-disable-frustum-culling] [--evidence-water] "
+    "[--evidence-point-light] "
     "[--evidence-point-light-stress]]";
 
 } // namespace sokoban

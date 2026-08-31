@@ -43,6 +43,8 @@ void testEmptyIsANormalRun()
         "ambient occlusion is enabled in evidence runs by default");
     check(options.evidenceFrustumCullingEnabled,
         "frustum culling is enabled in evidence runs by default");
+    check(!options.evidenceWaterEnabled,
+        "evidence water fixture is disabled by default");
     check(options.parallelScenePreparationEnabled,
         "scene preparation is parallel by default");
     check(!options.evidencePointLightEnabled,
@@ -142,6 +144,13 @@ void testFlags()
     check(!noCullingEvidence.evidenceFrustumCullingEnabled,
         "culling-off evidence invocation disables frustum culling");
 
+    const sokoban::CommandLineOptions waterEvidence = parse(
+        { "--smoke-frames", "180", "--evidence-output", "/tmp/evidence",
+            "--evidence-water" });
+    check(!waterEvidence.malformed, "water evidence invocation parses");
+    check(waterEvidence.evidenceWaterEnabled,
+        "water evidence invocation enables the fixture");
+
     // Order must not matter: CI writes these in whatever order reads best.
     const sokoban::CommandLineOptions reordered = parse(
         { "--save-directory", "/tmp/profile", "--require-validation",
@@ -226,6 +235,8 @@ void testMalformedInput()
         "AO-off evidence mode requires an output directory");
     check(parse({ "--evidence-disable-frustum-culling" }).malformed,
         "culling-off evidence mode requires an output directory");
+    check(parse({ "--evidence-water" }).malformed,
+        "water evidence mode requires an output directory");
     check(parse({ "--evidence-point-light" }).malformed,
         "point-light evidence mode requires an output directory");
     check(parse({ "--evidence-point-light-stress" }).malformed,

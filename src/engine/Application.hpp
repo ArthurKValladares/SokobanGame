@@ -66,6 +66,7 @@ struct ApplicationOptions {
     int evidenceAntiAliasingSamples = config::antiAliasingSamples;
     bool evidenceAmbientOcclusionEnabled = true;
     bool evidenceFrustumCullingEnabled = true;
+    bool evidenceWaterEnabled = false;
     bool evidencePointLightEnabled = false;
     bool evidencePointLightStressEnabled = false;
     bool parallelScenePreparationEnabled = true;
@@ -232,6 +233,7 @@ private:
     std::filesystem::path evidenceOutputDirectory_;
     RenderStats evidenceStats_ {};
     bool evidenceAmbientOcclusionEnabled_ = true;
+    bool evidenceWaterEnabled_ = false;
     bool evidencePointLightEnabled_ = false;
     bool evidencePointLightStressEnabled_ = false;
     bool evidenceSceneCaptured_ = false;
