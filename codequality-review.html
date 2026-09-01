@@ -951,9 +951,10 @@ if (model.isCube() ||
     </p>
   </article>
 
-  <article class="finding is-major">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-major">Major</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: major · behavioural drift</span>
       <span class="tag">Behavioural drift</span>
       <span class="tag">Corrected</span>
     </div>
@@ -1000,13 +1001,48 @@ return 1.0 - shadowed * clamp(light.shadowOptions.w, 0.0, 1.0);</pre>
       evidence, not inside a refactor that is otherwise provably a no-op.
     </p>
     <div class="fix">
-      Decide which behaviour is correct, then unify into
+      <b>Unified; the split kept, deliberately.</b> Both bodies moved into
       <code>shaders/include/PointShadow.glsl</code> — the header
-      <span class="code">B1</span> created for the one helper the two files do
-      agree on, which already carries a comment recording the divergence. If the
-      single tap is deliberate, make it a parameter with the reason written down
-      rather than two functions that merely look alike.
+      <span class="code">B1</span> created for the one helper they already
+      shared — and each shader now says which shape it wants with a single
+      <code>#define POINT_SHADOW_TAPS</code>. The scene asks for 5, the ground
+      for 1. Nothing about the picture changes; what changes is that the
+      difference is one token in each file instead of something you have to diff
+      two shaders to notice.
     </div>
+    <p>
+      Keeping the split is the decision, not an omission. Both shaders loop over
+      up to eight point lights, so five taps on the ground would be up to forty
+      cube-map samples on the largest surface in the frame against eight today.
+      That trade deserves a capture rather than a cleanup, and it is now a
+      one-token experiment when someone wants to run it.
+    </p>
+    <p>
+      A claim in the earlier version of this finding was also wrong and is
+      withdrawn: I wrote that <code>shadowFactor</code> differed cosmetically
+      between the two. The directional filter is a 3×3 kernel over nine taps in
+      <em>both</em>, identical arithmetic; only the scene's extra depth-range
+      early-out differs. The point-shadow tap count was the only real divergence.
+    </p>
+    <p>
+      Verified against SPIR-V, which caught a mistake on the way.
+      <code>ground_splat.frag</code>'s instruction stream is <strong>identical</strong>
+      — 797 instructions, zero diff hunks after id canonicalisation — and
+      <code>triangle.frag</code> differs only by a <code>textureSize</code> query
+      being scheduled a few instructions later, same opcode multiset, which is a
+      pure reordering of a side-effect-free query. Both pass
+      <code>spirv-val</code>, and the other fourteen modules are byte-identical.
+    </p>
+    <p>
+      The mistake: the first attempt shared one loop for both shapes, running it
+      once for the ground on the assumption the compiler would fold a
+      one-iteration loop away. It does not. glslc emitted a real
+      <code>OpLoopMerge</code> with its compare, branch and phi — 204 bytes and
+      14 instructions of overhead added to the shader whose entire reason for
+      taking one tap is cost. The sampling shape is a compile-time branch now,
+      with that measurement written beside it so the next person does not try the
+      same tidy-looking thing.
+    </p>
   </article>
 
   <article class="finding is-resolved">
@@ -1222,9 +1258,10 @@ const int UI_MODE_TEXTURE_IMAGE = 7;</pre>
 </article>
 </section>
 
-  <article class="finding is-moderate">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-moderate">Moderate</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: moderate · correctness</span>
       <span class="tag">Found while extracting D3</span>
     </div>
     <h3>Eviction stops after freeing about half of what it needed</h3>
@@ -1249,20 +1286,103 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       under memory pressure than the code reads as intending. It also explains
       why the ladder ends on a <code>fits</code> check that so often fails.
     </p>
+    <div class="fix">
+      <b>Fixed.</b> <code>scheduledBytes</code> is gone — from the condition, from
+      the loop, and from the signature. <code>retiring</code> was always the
+      running total the condition wanted: the loop's own victims are in it
+      because retiring one puts them there, and nothing else can be, because the
+      caller refuses to start evicting at all while an earlier retirement is
+      still pending. One tally, not two.
+    </div>
     <p>
-      Left exactly as it was during the extraction, because correcting it makes
-      eviction meaningfully more aggressive under pressure — a real behaviour
-      change that wants its own before/after measurement rather than riding
-      along inside a refactor. <code>ResidencyBudgetTests</code> pins the
-      current behaviour by name, so changing it is now a deliberate act.
+      <strong>What it was costing, measured.</strong> Before changing anything I
+      ran the whole ladder to completion both ways over 200,000 randomised pools,
+      treating one publication attempt plus its fence as a round:
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th>Double-counted</th><th>Fixed</th></tr></thead>
+        <tbody>
+          <tr><td>Rounds to publish, mean</td><td class="num">2.641</td><td class="num">1.502</td></tr>
+          <tr><td>Rounds to publish, worst</td><td class="num">9</td><td class="num">2</td></tr>
+          <tr><td>Bytes evicted per case</td><td class="num">4722.4</td><td class="num">4722.4</td></tr>
+          <tr><td>Evictions per case</td><td class="num">5.656</td><td class="num">5.656</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      The same victims, the same bytes, the same admit-or-block outcome in every
+      one of the 200,000 cases — and in none of them did resident bytes exceed
+      the limit, either way. The fix is not more aggressive eviction, which is
+      what the earlier note assumed and why it was left alone: the total freed
+      was always going to be the shortfall. It just used to arrive in halves, a
+      frame apiece, taking up to nine rounds to do what now takes two. Two is the
+      floor, not a target: one round to choose victims, one to admit after the
+      fence clears, because retiring bytes stay charged until then and that part
+      is deliberate.
+    </p>
+    <p>
+      <code>ResidencyBudgetTests</code> pinned the old behaviour by name; that
+      test is now <code>evictionFreesTheWholeShortfallInOneRound</code>, and it
+      checks the retry too. Five mutants of the corrected condition are all
+      caught, including one that restores the original double count exactly.
     </p>
     <div class="fix">
-      Drop <code>scheduledBytes</code> and let <code>retiring</code> alone carry
-      the running total — <code>retireModel</code> already maintains it. Then
-      re-run the 64&nbsp;KiB residency stress capture the handoff records under
-      <code>build/a3-mip-evidence</code> and compare resident bytes, retained
-      mip levels and eviction counts against the archived run.
+      <b>One thing to confirm on a real build.</b> Run the 64&nbsp;KiB stress
+      capture the handoff records:
+      <code>--smoke-frames 240 --require-validation --texture-residency-kib 64
+      --evidence-output build\a3-mip-evidence</code>. Resident bytes must stay
+      bounded at 65,536 and validation must stay clean — those falsify the fix if
+      they move. Retained mip levels (37/46 archived) and the set of reduced
+      textures <em>may</em> legitimately differ: publications now land in
+      different frames, and <code>TextureMipResidency</code> chooses a mip tail
+      from the capacity available at publication time. A different split is worth
+      a look, not an alarm.
     </div>
+    <p>
+      The counters that answer this were not in the capture at all. Residency
+      evictions and capacity blocks were reachable only from the debug panel,
+      which a headless smoke run never draws — so the two numbers that say
+      whether residency was under pressure and whether it coped were missing from
+      exactly the runs taken to find out. The smoke summary now logs them beside
+      the mip line it already wrote.
+    </p>
+    <p>
+      <strong>Result of the capture, and a correction.</strong> On a current
+      binary the run reports <code>63376 / 65536</code> bytes, <code>37 / 46</code>
+      mip levels, five reduced textures and <code>831232</code> bytes omitted —
+      character for character the archived baseline. Bounded, validation-error
+      free, and the mip split did not move. That is the half of the prediction
+      that mattered for safety, and it holds.
+    </p>
+    <p>
+      The other half is still unmeasured, because <strong>I named the wrong
+      number to watch</strong>. I said capacity blocks should fall. The run shows
+      3,324 of them against only <em>11</em> evictions in 240 frames — so the
+      eviction loop barely ran, and almost every refusal never reached it. One
+      counter was being incremented for three unrelated reasons: an asset larger
+      than the whole budget, a compressed texture with no mip tail that fits, and
+      eviction finding nothing it was allowed to take. Under a deliberately tiny
+      64&nbsp;KiB budget the first two are permanent and expected — roughly 13.9
+      refusals per frame is the same handful of oversized textures being retried
+      every frame — and they swamp the third, which is the only one this fix
+      touches. A single number adding those together cannot answer the question
+      it was added to answer.
+    </p>
+    <div class="fix">
+      The counter is now three: <code>residencyOversizedBlocks</code>,
+      <code>residencyMipPlanBlocks</code> and
+      <code>residencyNoVictimBlocks</code>, with the total kept. The smoke
+      summary and the debug panel both report the split. Only the third is
+      pressure; the first two are the budget being smaller than the content, which
+      is what a stress run is for.
+    </div>
+    <p>
+      Note also that model residency sat at 1,775,756 of 134,217,728 bytes — the
+      model pool was never under pressure at all, so this capture exercises the
+      eviction path only for textures. A run that actually stresses both would
+      need a model budget override, which does not currently exist.
+    </p>
   </article>
 
 <!-- ==================================================== C -->
@@ -1939,6 +2059,54 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
     <h2>Stale and leftover</h2>
   </div>
 
+  <article class="finding is-minor">
+    <div class="finding-top">
+      <span class="sev is-minor">Minor</span>
+      <span class="tag">Found in a build log</span>
+    </div>
+    <h3>The “validation-clean” captures emit eight validation warnings</h3>
+    <div class="loc">
+      <code>shaders/triangle.vert.glsl:20, :86</code>
+      <code>VulkanPipelineFactory.cpp:121, 129, 133, 141</code>
+    </div>
+    <p>
+      The handoff describes the 64&nbsp;KiB stress capture as validation-clean.
+      A run of it emits eight
+      <code>WARNING-Shader-OutputNotConsumed</code>, all the same one:
+    </p>
+    <pre>VK_SHADER_STAGE_VERTEX_BIT declared to output location 10 Component 0
+but is not an Input declared by VK_SHADER_STAGE_FRAGMENT_BIT</pre>
+    <p>
+      Location 10 is <code>outMaterialIndex</code>, and
+      <code>triangle.vert</code> writes a constant to it —
+      <code>outMaterialIndex = 0u;</code> — because
+      <code>triangle.frag</code> declares it. <code>triangle.frag</code> needs it
+      because it is <em>also</em> the fragment stage for
+      <code>model.vert</code> and <code>skinned_model.vert</code>, where the
+      index is real per-vertex data. Its other four partners —
+      <code>water.frag</code>, <code>ground_splat.frag</code> in two pipelines,
+      and <code>ui.frag</code> — do not declare it, so each of those four
+      pipeline creations warns. The swapchain is built twice in a smoke run
+      (1280×720, then 2880×1800), which is where eight comes from.
+    </p>
+    <p>
+      An unconsumed vertex output is legal and the cost is one constant store
+      per vertex, so this is not a defect. It matters because eight recurring
+      warnings are how a run stops being read: the same log carries a genuine
+      <code>[ERROR]</code> line about a Vulkan layer manifest, which turns out to
+      be an unrelated Epic Online Services install and not this program at all.
+      Two kinds of noise in a capture taken to prove cleanliness.
+    </p>
+    <div class="fix">
+      Either declare the input in the three fragment shaders that lack it and
+      accept three dead declarations, or split <code>triangle.frag</code> so the
+      quad pipelines stop carrying a model-only interface — which is the same
+      seam <span class="code">B3</span> is about. Whichever, correct the handoff:
+      these captures are <em>free of validation errors</em>, which is a different
+      claim from clean.
+    </div>
+  </article>
+
   <article class="finding is-moderate">
     <div class="finding-top">
       <span class="sev is-moderate">Moderate</span>
@@ -2409,8 +2577,13 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
       purpose: the count was wrong — 17 functions past 200 lines, not eight —
       and the two whose correctness could be demonstrated were taken, while the
       five ImGui panels are left because the only check on them is to look at
-      the screen. Both behavioural questions remain parked: the divergent
-      point-shadow filtering and the double-counted eviction victim.
+      the screen. The double-counted eviction victim is fixed — measured first,
+      which showed it was costing frames rather than memory. The point-shadow
+      divergence is unified with the split deliberately kept, so the tap count is
+      now one token per shader rather than two functions that look alike. Nothing
+      is parked any more; what remains open is the class split, the long
+      functions, and the draw-kind tag, each of which needs a build or a pair of
+      eyes rather than a decision.
     </li>
   </ol>
 </section>
@@ -2418,7 +2591,7 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
 <footer>
   <span>Sokoban 3D engine · code-quality audit</span>
   <span>Reviewed against HEAD 21dff13a · 31 Aug 2026</span>
-  <span>37 findings · 11 resolved · 0 live defects</span>
+  <span>38 findings · 13 resolved · 0 live defects</span>
 </footer>
 
 </div>

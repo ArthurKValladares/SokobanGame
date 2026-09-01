@@ -72,25 +72,23 @@ public:
     // cannot cascade into freeing far more than the frame actually needed.
     [[nodiscard]] bool retirementPending() const { return retiring_ != 0; }
 
-    // Whether more victims are needed, given what this publication has already
-    // scheduled.
+    // Whether more victims are needed: counting everything already retiring as
+    // gone, does this publication still not fit?
     //
-    // Note that a victim chosen by the loop above counts twice here: retiring
-    // this asset raised `retiring_`, and the caller also adds the same bytes to
-    // `scheduledBytes`. Eviction therefore stops after freeing roughly half of
-    // what was asked for, the publication is refused, and it retries once the
-    // fence clears. That under-evicts; it never oversubscribes, so the hard
-    // limit stays honest either way.
+    // `retiring_` is the running total. The eviction loop's own victims are in
+    // it, because retiring one raises it, and nothing else can be in it - the
+    // caller refuses to start evicting at all while an earlier publication's
+    // retirement is still pending. So there is one tally, not two.
     //
-    // Kept exactly as it was when this moved out of VulkanModelResources,
-    // because correcting it makes eviction more aggressive under memory
-    // pressure - a real behaviour change that wants its own measurement rather
-    // than riding along with a refactor.
-    // ResidencyBudgetTests pins the current behaviour so a change is a choice.
-    [[nodiscard]] bool needsEviction(
-        uint64_t bytes, uint64_t scheduledBytes, uint64_t limit) const
+    // There used to be a second. The loop passed its own `scheduledBytes`
+    // alongside, and both were subtracted, so every victim counted twice and
+    // the loop stopped after freeing about half of what was asked for. The
+    // publication was refused, the fence cleared, and the next attempt freed
+    // half of the remainder - up to nine rounds, at a frame apiece, to admit
+    // one asset. It never oversubscribed, which is why nothing looked wrong.
+    [[nodiscard]] bool needsEviction(uint64_t bytes, uint64_t limit) const
     {
-        return resident_ - retiring_ - scheduledBytes + bytes > limit;
+        return resident_ - retiring_ + bytes > limit;
     }
 
     // Room left before the limit, not counting anything already retiring.

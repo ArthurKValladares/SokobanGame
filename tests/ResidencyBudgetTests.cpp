@@ -113,22 +113,32 @@ void testFitAndHeadroom()
     CHECK(!over.fits(0, 1000));
 }
 
-void testNeedsEvictionCountsScheduledAndRetiring()
+void testNeedsEvictionCountsRetiringBytesAsGone()
 {
-    TEST("needsEvictionCountsScheduledAndRetiring");
+    TEST("needsEvictionCountsRetiringBytesAsGone");
     ResidencyBudget budget;
     budget.addResident(900);
 
-    CHECK(budget.needsEviction(200, 0, 1000));
-    // Scheduling 200 bytes of victims makes room for the request.
-    CHECK(!budget.needsEviction(200, 200, 1000));
-    // Bytes already retiring count the same way, and are not double-counted
-    // with newly scheduled ones.
-    budget.beginRetiring(100);
-    CHECK(!budget.needsEviction(200, 100, 1000));
-    // Landing exactly on the limit is a fit, not a reason to evict.
-    CHECK(!budget.needsEviction(300, 100, 1000));
-    CHECK(budget.needsEviction(301, 100, 1000));
+    // 900 resident against a 1000 limit, asking for 200: the shortfall is
+    // exactly 100 bytes.
+    CHECK(budget.needsEviction(200, 1000));
+
+    // Retiring bytes make room one for one. Half the shortfall is still short
+    // - and this is precisely the check the old two-tally version got wrong.
+    // It subtracted each victim twice, once through `retiring_` and once
+    // through the caller's own running total, so these 50 bytes looked like
+    // 100 and the loop stopped here with the publication still 50 short.
+    budget.beginRetiring(50);
+    CHECK(budget.needsEviction(200, 1000));
+
+    // The whole shortfall is enough, and only the whole shortfall.
+    budget.beginRetiring(50);
+    CHECK(!budget.needsEviction(200, 1000));
+
+    // Landing exactly on the limit is a fit, not a reason to evict. With 900
+    // resident and 100 of it retiring, 800 bytes are genuinely held.
+    CHECK(!budget.needsEviction(200, 1000));
+    CHECK(budget.needsEviction(201, 1000));
 }
 
 // ------------------------------------------------------ victim selection
@@ -262,15 +272,13 @@ Outcome admit(
     if (budget.retirementPending()) {
         return outcome;
     }
-    uint64_t scheduled = 0;
-    while (budget.needsEviction(bytes, scheduled, limit)) {
+    while (budget.needsEviction(bytes, limit)) {
         const std::optional<std::size_t> victim =
             chooseResidencyVictim(slots, protectedIndex, stamp, isReady);
         if (!victim) {
             outcome.blocked = true;
             return outcome;
         }
-        scheduled += slots[*victim].gpuBytes;
         budget.beginRetiring(slots[*victim].gpuBytes);
         slots[*victim] = {};
         ++outcome.evicted;
@@ -367,25 +375,27 @@ void testLadderEvictsSeveralVictimsWhenOneIsNotEnough()
         { true, 100, 2 },
     };
     const Outcome outcome = admit(budget, slots, 99, 0, 250, 1000);
-    // Least recently requested first: stamp 1, then stamp 2.
-    CHECK(outcome.evicted >= 2);
+    // 250 bytes are needed and each victim is worth 100, so it takes three.
+    // Least recently requested first: stamps 1, 2, then 3.
+    CHECK(outcome.evicted == 3);
+    CHECK(!slots[0].ready);
     CHECK(!slots[1].ready);
     CHECK(!slots[2].ready);
 }
 
-// Pins a quirk of the loop this policy was extracted from, so that changing it
-// is a deliberate act rather than an accident.
+// The case that used to stop half-served.
 //
-// Choosing a victim raises `retiring` (retireModel does that) *and* adds the
-// same bytes to the loop's own `scheduled` tally, so the stop condition
-// subtracts each victim twice. Eviction therefore stops after freeing about
-// half of what the publication asked for, the publication is refused, and it
-// retries after the fence clears. The hard limit is never exceeded - this
-// under-evicts, it does not oversubscribe - but an asset takes more rounds to
-// become resident under pressure than the code reads as intending.
-void testEvictionStopsEarlyBecauseVictimsAreCountedTwice()
+// Each victim was counted twice - once by `retiring_`, which retiring it
+// raises, and once by a `scheduled` tally the loop kept alongside - so the stop
+// condition thought a 100-byte victim had freed 200. Eviction quit after
+// covering about half the shortfall, the publication was refused, the fence
+// cleared, and the next attempt covered half of what was left. Measured over
+// randomised pools it took up to nine rounds, a frame apiece, to admit one
+// asset; it now takes at most two, evicting the same victims and the same
+// total bytes.
+void testEvictionFreesTheWholeShortfallInOneRound()
 {
-    TEST("evictionStopsEarlyBecauseVictimsAreCountedTwice");
+    TEST("evictionFreesTheWholeShortfallInOneRound");
     ResidencyBudget budget;
     budget.addResident(1000);
     std::vector<Slot> slots {
@@ -393,14 +403,24 @@ void testEvictionStopsEarlyBecauseVictimsAreCountedTwice()
         { true, 100, 2 },
         { true, 100, 3 },
     };
-    // 250 bytes are needed; two victims (200 bytes) is where it stops.
+    // 250 bytes are needed, so all three 100-byte victims go. Under the old
+    // condition this stopped at two and left the publication short.
     const Outcome outcome = admit(budget, slots, 99, 0, 250, 1000);
-    CHECK(outcome.evicted == 2);
-    CHECK(budget.retiring() == 200);
+    CHECK(outcome.evicted == 3);
+    CHECK(budget.retiring() == 300);
+
+    // Still refused this round, and that part is unchanged and deliberate:
+    // choosing victims does not free their bytes, so the hard limit stays
+    // honest until the fences clear.
     CHECK(!outcome.admitted);
     CHECK(!outcome.blocked);
-    // Counting each victim once would have taken a third and admitted it.
-    CHECK(budget.resident() + 250 > 1000);
+    CHECK(budget.resident() == 1000);
+
+    // The difference is that one retry is now enough.
+    budget.finishRetiring(300);
+    const Outcome retry = admit(budget, slots, 99, 0, 250, 1000);
+    CHECK(retry.admitted);
+    CHECK(retry.evicted == 0);
 }
 
 } // namespace
@@ -410,7 +430,7 @@ int main()
     testAccounting();
     testInPlaceReplacementTracksBothDirections();
     testFitAndHeadroom();
-    testNeedsEvictionCountsScheduledAndRetiring();
+    testNeedsEvictionCountsRetiringBytesAsGone();
 
     testVictimIsLeastRecentlyRequested();
     testVictimSkipsIneligibleSlots();
@@ -427,7 +447,7 @@ int main()
     testLadderWillNotCascadeWhileARetirementIsPending();
     testLadderBlocksWhenNothingCanBeGivenUp();
     testLadderEvictsSeveralVictimsWhenOneIsNotEnough();
-    testEvictionStopsEarlyBecauseVictimsAreCountedTwice();
+    testEvictionFreesTheWholeShortfallInOneRound();
 
     if (failures != 0) {
         std::cerr << failures << " of " << checks << " checks failed\n";

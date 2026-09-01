@@ -687,6 +687,23 @@ void Application::run()
                 << assetStats.mipDegradedTextures
                 << " reduced textures omitted "
                 << assetStats.mipOmittedBytes << " bytes.";
+            // Eviction counters were reachable only from the debug panel,
+            // which a headless smoke run never draws - so the two numbers that
+            // say whether residency was under pressure, and whether it coped,
+            // were missing from exactly the captures taken to find out.
+            log::info(log::Category::Rendering)
+                << "Residency evictions " << assetStats.residencyEvictions
+                << "; capacity blocks " << assetStats.residencyBudgetBlocks
+                << " (" << assetStats.residencyOversizedBlocks
+                << " larger than the budget, "
+                << assetStats.residencyMipPlanBlocks
+                << " no mip tail fits, "
+                << assetStats.residencyNoVictimBlocks
+                << " nothing evictable)"
+                << "; model residency " << assetStats.modelResidencyBytes
+                << " / " << assetStats.modelResidencyBudgetBytes
+                << " bytes (peak " << assetStats.modelResidencyPeakBytes
+                << ").";
             log::info(log::Category::Application)
                 << "Smoke run finished after " << renderedFrames
                 << " frames.";

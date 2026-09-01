@@ -193,52 +193,8 @@ float shadowFactor(vec4 shadowPosition, float diffuse)
     return 1.0 - shadowAmount * draw.shadowOptions.y;
 }
 
+#define POINT_SHADOW_TAPS 5
 #include "PointShadow.glsl"
-
-float pointShadowFactor(
-    int lightIndex, vec3 fromLight, vec3 surfaceNormal)
-{
-    PointLightData light = frame.pointLights[lightIndex];
-    if (light.shadowOptions.x <= 0.5) {
-        return 1.0;
-    }
-    const float nearPlane = 0.05;
-    float farPlane = max(light.positionAndRange.w, nearPlane + 0.001);
-    float majorDistance = max(
-        abs(fromLight.x), max(abs(fromLight.y), abs(fromLight.z)));
-    if (majorDistance <= nearPlane || majorDistance >= farPlane) {
-        return 1.0;
-    }
-    float texelAngle = 2.0 / float(textureSize(pointShadowMaps, 0).x);
-    vec3 direction = normalize(fromLight);
-    // The authored bias is a world-space minimum. Increase it at grazing
-    // angles, where rasterized depth changes fastest across the surface.
-    float facing = clamp(dot(normalize(surfaceNormal), -direction), 0.0, 1.0);
-    float worldBias = max(light.shadowOptions.z, 0.0) *
-        (1.0 + 2.0 * (1.0 - facing));
-    vec3 tangent = normalize(cross(
-        abs(direction.z) < 0.9 ? vec3(0.0, 0.0, 1.0)
-                               : vec3(0.0, 1.0, 0.0),
-        direction));
-    vec3 bitangent = cross(direction, tangent);
-    vec3 offsets[5] = vec3[5](
-        vec3(0.0), tangent, -tangent, bitangent, -bitangent);
-    float shadowed = 0.0;
-    for (int sampleIndex = 0; sampleIndex < 5; ++sampleIndex) {
-        vec3 sampleDirection = direction +
-            offsets[sampleIndex] * texelAngle;
-        float closestDepth = texture(
-            pointShadowMaps,
-            vec4(sampleDirection, light.shadowOptions.y)).r;
-        float closestDistance = pointShadowWorldDistance(
-            closestDepth, nearPlane, farPlane);
-        shadowed += majorDistance - worldBias > closestDistance
-            ? 1.0
-            : 0.0;
-    }
-    return 1.0 - shadowed / 5.0 *
-        clamp(light.shadowOptions.w, 0.0, 1.0);
-}
 
 // Cook-Torrance GGX. F3c replaced a wrapped-diffuse Blinn-Phong whose gloss
 // came from two scene-wide knobs, so every surface in a level was equally

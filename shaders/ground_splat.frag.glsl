@@ -124,38 +124,8 @@ float shadowFactor(vec4 shadowPosition, float diffuse)
     return 1.0 - shadowAmount * draw.shadowOptions.y;
 }
 
+#define POINT_SHADOW_TAPS 1
 #include "PointShadow.glsl"
-
-float pointShadowFactor(
-    int lightIndex, vec3 fromLight, vec3 surfaceNormal)
-{
-    PointLightData light = frame.pointLights[lightIndex];
-    if (light.shadowOptions.x <= 0.5) {
-        return 1.0;
-    }
-    const float nearPlane = 0.05;
-    float farPlane = max(light.positionAndRange.w, nearPlane + 0.001);
-    float majorDistance = max(
-        abs(fromLight.x), max(abs(fromLight.y), abs(fromLight.z)));
-    if (majorDistance <= nearPlane || majorDistance >= farPlane) {
-        return 1.0;
-    }
-    vec3 direction = normalize(fromLight);
-    // The authored bias is a world-space minimum. Increase it at grazing
-    // angles, where rasterized depth changes fastest across the surface.
-    float facing = clamp(dot(normalize(surfaceNormal), -direction), 0.0, 1.0);
-    float worldBias = max(light.shadowOptions.z, 0.0) *
-        (1.0 + 2.0 * (1.0 - facing));
-    float closestDepth = texture(
-        pointShadowMaps,
-        vec4(direction, light.shadowOptions.y)).r;
-    float closestDistance = pointShadowWorldDistance(
-        closestDepth, nearPlane, farPlane);
-    float shadowed = majorDistance - worldBias > closestDistance
-        ? 1.0
-        : 0.0;
-    return 1.0 - shadowed * clamp(light.shadowOptions.w, 0.0, 1.0);
-}
 
 // One-based handle -> texture array index; returns false when unresolved.
 bool resolveTexture(float handle, out int index)

@@ -111,6 +111,27 @@ sampling have different failure modes and should be independently reviewable.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
 - Current tests: 74 CTest suites in the newest configured build tree.
+- Residency eviction: `ResidencyBudget::needsEviction` takes `(bytes, limit)`
+  and reads `retiring_` as its only running total. It used to take a third
+  argument that duplicated `retiring_`, so each victim counted twice and the
+  loop freed about half the shortfall per round. Measured over 200,000
+  randomised pools the correction evicts the same victims and the same bytes;
+  it only changes how many rounds a publication under pressure takes, from up
+  to nine down to two. Two is the floor: retiring bytes stay charged until the
+  fence clears, so one round chooses victims and the next admits.
+  Captured on 1 September: texture residency 63,376 / 65,536 bytes, 37/46 mip
+  levels, five reduced textures, 831,232 bytes omitted - the archived baseline
+  reproduced exactly, with no validation errors. Eleven evictions across 240
+  frames, and model residency never left 1,775,756 / 134,217,728 bytes, so that
+  capture exercises the eviction path for textures only.
+  STILL UNMEASURED: the round count the fix actually changes. The capture cannot
+  show it, because 3,324 of its refusals are assets that can never fit a 64 KiB
+  budget rather than eviction pressure. `residencyBudgetBlocks` has been split
+  into `residencyOversizedBlocks`, `residencyMipPlanBlocks` and
+  `residencyNoVictimBlocks` so the next run separates them; only the last is
+  pressure. To measure the fix directly, run the same capture with
+  `ResidencyBudget::needsEviction` reverted to subtracting a second tally and
+  compare, or add a model-budget override so the model pool is stressed too.
 - `RenderStats` carries every phase timing as a `RenderPhaseTiming`. The GPU
   frame timing is written only when the device reports timestamps, so an
   unsupported device keeps the last value instead of being overwritten with an
@@ -118,6 +139,16 @@ sampling have different failure modes and should be independently reviewable.
 - Shader contract: `shaders/include/DrawMode.glsl` carries the draw-mode
   numbering and the `isModelDraw` sign test; `draw_mode` pins both against
   `VulkanRenderConstants.hpp` and fails if either spelling moves.
+- Point shadowing lives once, in `shaders/include/PointShadow.glsl`. Each shader
+  picks its filter with `#define POINT_SHADOW_TAPS` before including it: the
+  scene asks for 5, the ground for 1. The split is deliberate - both loop over
+  up to eight point lights, so five taps on the ground would be up to forty
+  cube-map samples on the largest surface in the frame against eight now.
+  Changing it is a one-token experiment and wants a `--evidence-point-light`
+  capture, not a cleanup. Do not replace the two sampling bodies with a shared
+  loop run once: glslc does not unroll a one-iteration loop and the ground pays
+  204 bytes and 14 instructions of loop overhead for it. The directional filter
+  is a 3x3 kernel in both shaders and already agrees.
 - Current shaders: 16 GLSL files plus shared declarations under
   `shaders/include/`, which the shader build passes to `glslc` with `-I`.
   `triangle.frag.glsl` is 669 physical lines; player-facing UI uses the
@@ -270,7 +301,8 @@ declarations under `shaders/include/`, with `gpu_abi` checking SPIR-V member
 offsets against `offsetof` and `draw_mode` pinning `DrawMode.glsl` to
 `DrawMaterialMode`; one `TestHarness.hpp` behind 55 suites; `ResidencyBudget`
 and `MaterialRangeAllocator` extracted from `VulkanModelResources`;
-`SceneDrawLanes` extracted from `VulkanSceneRecorder`; the
+`SceneDrawLanes` extracted from `VulkanSceneRecorder`; the eviction ladder's
+double-counted victim corrected; the
 `GpuDrawInstance` lane union traced and written down; the scene descriptor
 layout made table-driven; and the last three phase timings converted to
 `RenderPhaseTiming`.
@@ -284,14 +316,9 @@ are among those it never named. Five of the sixteen still open are ImGui panels
 and are deliberately last: splitting one is mechanical, but the only check that
 it still behaves is to look at the screen.
 
-Three items are parked deliberately rather than fixed, because each needs a
+One item is parked deliberately rather than fixed, because it needs a
 judgement this review cannot make from the source alone:
 
-- The ground and the scene filter point shadows differently — five taps against
-  one. The difference is real, not a refactoring artifact.
-- Eviction double-counts a victim and so stops after freeing roughly half of
-  what it asked for. `ResidencyBudgetTests` pins the current behaviour and says
-  why; it is not silently corrected.
 - `GpuDrawInstance` is a 256-byte union, and inside the scene pipeline
   `materialOptions.y` is a grid cell width for a quad draw and a
   scrolling-material UV offset for a model. Nothing separates the two but
@@ -1009,6 +1036,16 @@ at 63,376 / 65,536 bytes, retained 37/46 levels across its then-resident
 textures, reduced five textures and omitted 831,232 bytes. Its deterministic
 capture under `build/a3-mip-evidence` is intact, with expected pressure-induced
 softness and no block/layout corruption.
+
+That run is free of validation *errors*, which is not the same as clean: it
+emits eight `WARNING-Shader-OutputNotConsumed`, all of them the same one.
+`triangle.vert` writes a constant to `outMaterialIndex` at location 10 because
+`triangle.frag` declares that input - which it needs, being the fragment stage
+for `model.vert` and `skinned_model.vert` as well - while four of the pipelines
+built from `triangle.vert` pair it with `water.frag`, `ground_splat.frag`
+(twice) and `ui.frag`, none of which declare it. Four pipelines, and a smoke
+run builds the swapchain twice. Harmless in itself, and worth removing so that
+the next real warning is visible.
 
 #### 9.6 T8 Vulkan-free frame preparation — complete
 

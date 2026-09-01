@@ -885,9 +885,15 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             static_cast<double>(assetStats.textureResidencyBudgetBytes) / (1024.0 * 1024.0),
             static_cast<double>(assetStats.textureResidencyPeakBytes) / (1024.0 * 1024.0));
         ImGui::Text(
-            "Residency evictions %llu, capacity blocks %llu%s",
+            "Residency evictions %llu, capacity blocks %llu"
+            " (%llu oversized, %llu no mip tail, %llu nothing evictable)%s",
             static_cast<unsigned long long>(assetStats.residencyEvictions),
             static_cast<unsigned long long>(assetStats.residencyBudgetBlocks),
+            static_cast<unsigned long long>(
+                assetStats.residencyOversizedBlocks),
+            static_cast<unsigned long long>(assetStats.residencyMipPlanBlocks),
+            static_cast<unsigned long long>(
+                assetStats.residencyNoVictimBlocks),
             assetStats.residencyBudgetBlocked ? ", capacity blocked" : "");
         ImGui::Text(
             "Fence retirement %u meshes (%.1f MiB), %u textures (%.1f MiB)",

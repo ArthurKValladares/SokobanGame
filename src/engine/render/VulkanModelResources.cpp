@@ -395,6 +395,9 @@ void VulkanModelResources::destroy()
     textureResidency_.reset();
     residencyEvictions_ = 0;
     residencyBudgetBlocks_ = 0;
+    residencyOversizedBlocks_ = 0;
+    residencyMipPlanBlocks_ = 0;
+    residencyNoVictimBlocks_ = 0;
     residencyBudgetBlocked_ = false;
     textureDescriptorsDirty_ = false;
     retirementFrameMask_ = 0;
@@ -1041,7 +1044,7 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
                 *compressed,
                 texturePublicationCapacity(textureIndex));
             if (!mipPlan) {
-                markResidencyBudgetBlocked();
+                markResidencyBudgetBlocked(ResidencyBlock::NoMipTailFits);
                 return false;
             }
             bytes = mipPlan->residentBytes;
@@ -1132,10 +1135,21 @@ uint64_t VulkanModelResources::textureBytes(
     return base;
 }
 
-void VulkanModelResources::markResidencyBudgetBlocked()
+void VulkanModelResources::markResidencyBudgetBlocked(ResidencyBlock reason)
 {
     residencyBudgetBlocked_ = true;
     ++residencyBudgetBlocks_;
+    switch (reason) {
+    case ResidencyBlock::AssetLargerThanBudget:
+        ++residencyOversizedBlocks_;
+        break;
+    case ResidencyBlock::NoMipTailFits:
+        ++residencyMipPlanBlocks_;
+        break;
+    case ResidencyBlock::NothingEvictable:
+        ++residencyNoVictimBlocks_;
+        break;
+    }
 }
 
 template <typename Slot, typename Retire>
@@ -1149,7 +1163,7 @@ bool VulkanModelResources::makeResident(
 {
     destroyCompletedResidencyRetirements();
     if (requiredBytes > limitBytes) {
-        markResidencyBudgetBlocked();
+        markResidencyBudgetBlocked(ResidencyBlock::AssetLargerThanBudget);
         return false;
     }
     if (budget.fits(requiredBytes, limitBytes)) {
@@ -1163,18 +1177,18 @@ bool VulkanModelResources::makeResident(
         return false;
     }
 
-    uint64_t scheduledBytes = 0;
-    while (budget.needsEviction(requiredBytes, scheduledBytes, limitBytes)) {
+    while (budget.needsEviction(requiredBytes, limitBytes)) {
         const std::optional<std::size_t> victim = chooseResidencyVictim(
             slots,
             protectedIndex,
             visibleRequestStamp_,
             [](const Slot& slot) { return slot.state == LoadState::Ready; });
         if (!victim) {
-            markResidencyBudgetBlocked();
+            markResidencyBudgetBlocked(ResidencyBlock::NothingEvictable);
             return false;
         }
-        scheduledBytes += slots[*victim].gpuBytes;
+        // retire() raises the budget's retiring total, which is what the
+        // condition above reads; there is no second tally to keep in step.
         retire(slots[*victim]);
     }
     destroyCompletedResidencyRetirements();
@@ -1640,6 +1654,9 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
     result.textureResidencyBudgetBytes = scheduler_.budget().textureResidencyBytes;
     result.residencyEvictions = residencyEvictions_;
     result.residencyBudgetBlocks = residencyBudgetBlocks_;
+    result.residencyOversizedBlocks = residencyOversizedBlocks_;
+    result.residencyMipPlanBlocks = residencyMipPlanBlocks_;
+    result.residencyNoVictimBlocks = residencyNoVictimBlocks_;
     result.retiringModels = static_cast<uint32_t>(retiredModels_.size());
     result.retiringTextures = static_cast<uint32_t>(retiredTextures_.size());
     result.retiringModelBytes = modelResidency_.retiring();

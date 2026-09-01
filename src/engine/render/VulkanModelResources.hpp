@@ -119,7 +119,19 @@ public:
         uint64_t modelResidencyBudgetBytes = 0;
         uint64_t textureResidencyBudgetBytes = 0;
         uint64_t residencyEvictions = 0;
+        // Total refusals, and the three unrelated reasons behind them. They
+        // were one number, which made it useless: under a small budget the
+        // first two are permanent and expected, so a large total said nothing
+        // about whether residency was actually struggling.
         uint64_t residencyBudgetBlocks = 0;
+        // The asset is larger than the whole budget. Retried every frame and
+        // refused every time; no amount of eviction can help.
+        uint64_t residencyOversizedBlocks = 0;
+        // No mip tail of a compressed texture fits the capacity available.
+        uint64_t residencyMipPlanBlocks = 0;
+        // Eviction was needed and there was nothing it was allowed to take.
+        // This is the one that reports real pressure.
+        uint64_t residencyNoVictimBlocks = 0;
         uint32_t retiringModels = 0;
         uint32_t retiringTextures = 0;
         uint64_t retiringModelBytes = 0;
@@ -410,7 +422,15 @@ private:
     void retireModel(ModelSlot& slot);
     void retireTexture(TextureSlot& slot);
     void destroyCompletedResidencyRetirements();
-    void markResidencyBudgetBlocked();
+    // Why a publication was refused. Kept apart because they mean different
+    // things: the first two are properties of the asset against the budget,
+    // the third is a property of the moment.
+    enum class ResidencyBlock {
+        AssetLargerThanBudget,
+        NoMipTailFits,
+        NothingEvictable,
+    };
+    void markResidencyBudgetBlocked(ResidencyBlock reason);
     [[nodiscard]] static uint64_t meshBytes(const MeshData& mesh);
     [[nodiscard]] static uint64_t textureBytes(
         const PreparedTextureSource& texture,
@@ -559,6 +579,9 @@ private:
     ResidencyBudget textureResidency_;
     uint64_t residencyEvictions_ = 0;
     uint64_t residencyBudgetBlocks_ = 0;
+    uint64_t residencyOversizedBlocks_ = 0;
+    uint64_t residencyMipPlanBlocks_ = 0;
+    uint64_t residencyNoVictimBlocks_ = 0;
     bool residencyBudgetBlocked_ = false;
     bool textureDescriptorsDirty_ = false;
     uint32_t retirementFrameMask_ = 0;
