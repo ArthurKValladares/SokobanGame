@@ -997,6 +997,10 @@ if(SOKOBAN_BUILD_TESTS)
     )
     target_compile_definitions(sokoban_draw_mode_tests PRIVATE
         SOKOBAN_TEST_SHADER_INCLUDE_DIR="${SHADER_INCLUDE_DIR}")
+    sokoban_add_test(NAME scene_draw_lanes TARGET sokoban_scene_draw_lanes_tests
+        LIBS sokoban_core
+        SOURCES tests/SceneDrawLanesTests.cpp
+    )
     sokoban_add_test(NAME opaque_draw_sorter TARGET sokoban_opaque_draw_sorter_tests
         LIBS sokoban_core
         SOURCES tests/OpaqueDrawSorterTests.cpp

@@ -110,7 +110,7 @@ sampling have different failure modes and should be independently reviewable.
 - Language and platform: C++20, SDL3, Vulkan 1.3, GLSL compiled to SPIR-V.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
-- Current tests: 73 CTest suites in the newest configured build tree.
+- Current tests: 74 CTest suites in the newest configured build tree.
 - Current shaders: 16 GLSL files plus shared declarations under
   `shaders/include/`, which the shader build passes to `glslc` with `-I`.
   `triangle.frag.glsl` is 669 physical lines; player-facing UI uses the
@@ -262,13 +262,16 @@ Landed so far: the line-ending policy and its CI gate; shared GPU struct
 declarations under `shaders/include/`, with `gpu_abi` checking SPIR-V member
 offsets against `offsetof` and `draw_mode` pinning `DrawMode.glsl` to
 `DrawMaterialMode`; one `TestHarness.hpp` behind 55 suites; `ResidencyBudget`
-and `MaterialRangeAllocator` extracted from `VulkanModelResources`.
+and `MaterialRangeAllocator` extracted from `VulkanModelResources`; and
+`SceneDrawLanes` extracted from `VulkanSceneRecorder`.
 
 Still open, in the order the report recommends: splitting
 `VulkanModelResources` proper and collapsing its three copies of the load-state
-machine; the eight functions past 200 lines; the five face-draw functions that
-rebuild the same lighting payload; and the overloaded `materialOptions` /
-`textureOptions` lanes.
+machine; the eight functions past 200 lines; and the overloaded
+`materialOptions` / `textureOptions` lanes. That last one has grown in
+importance: the reason water and mirror-energy draws share no lighting payload
+with the scene draws is that they reuse the same vec4 slots for unrelated data,
+so the lane overloading is the root of what looked like unrelated duplication.
 
 Two behavioural questions are parked deliberately rather than fixed, because
 either answer is a visual or performance decision, not a cleanup:
@@ -1361,7 +1364,13 @@ layout changes affect modules that appear unrelated to the immediate feature.
   `MaterialRangeAllocator.hpp` (the material buffer's bump pointer, first-fit
   reuse and coalescing free list). Change either policy there, with its test,
   rather than reintroducing the logic here.
-- `src/engine/render/VulkanSceneRecorder.*`: consumer of the prepared visible
+- `src/engine/render/VulkanSceneRecorder.*`: the packing shared by its quad
+  draws now lives in `SceneDrawLanes.hpp` - sun/ambient radiance, the face
+  shadow lane, the grid-validity predicate and the four-corner vertex packing -
+  and is covered by `scene_draw_lanes`. Build a draw's lanes from those rather
+  than restating the arithmetic; there is deliberately no shared base instance,
+  because water and mirror-energy claim the same slots for other data. It is
+  also the consumer of the prepared visible
   lists and owner of retained model-recording and point-shadow model-state
   scratch; it also owns the low-overhead recorder-phase histories and batches
   directional tile shadows through the draw-instance buffer. Keep Vulkan

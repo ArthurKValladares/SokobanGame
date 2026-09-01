@@ -6,6 +6,7 @@
 #include "engine/render/LightingConfig.hpp"
 #include "engine/render/OpaqueDrawSorter.hpp"
 #include "engine/render/SceneConfig.hpp"
+#include "engine/render/SceneDrawLanes.hpp"
 #include "engine/render/WaterConfig.hpp"
 #include "engine/render/VulkanModelResources.hpp"
 #include "engine/render/VulkanPipelineFactory.hpp"
@@ -2069,12 +2070,11 @@ private:
         }
     }
 
-    [[nodiscard]] uint32_t drawMirrorEnergyFace(
-        VkCommandBuffer commandBuffer,
-        const std::array<Vec3, 4>& vertices,
-        Vec4 color,
-        Vec3 normal,
-        float animationTimeSeconds)
+    // Every quad draw opens the same way: two triangles from the fixed
+    // six-index buffer, counted once. Named because five call sites had it
+    // written out, and a draw that forgets the topology inherits whichever one
+    // the previous draw happened to set.
+    void beginQuadDraw(VkCommandBuffer commandBuffer)
     {
         vkCmdSetPrimitiveTopology(
             commandBuffer,
@@ -2082,14 +2082,19 @@ private:
         ++stats_.visibleFaces;
         stats_.vertices += 6;
         stats_.triangles += 2;
+    }
+
+    [[nodiscard]] uint32_t drawMirrorEnergyFace(
+        VkCommandBuffer commandBuffer,
+        const std::array<Vec3, 4>& vertices,
+        Vec4 color,
+        Vec3 normal,
+        float animationTimeSeconds)
+    {
+        beginQuadDraw(commandBuffer);
 
         const GpuDrawInstance constants {
-            .vertices = {
-                Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, worldSpaceQuad },
-                Vec4 { vertices[1].x, vertices[1].y, vertices[1].z, worldSpaceQuad },
-                Vec4 { vertices[2].x, vertices[2].y, vertices[2].z, worldSpaceQuad },
-                Vec4 { vertices[3].x, vertices[3].y, vertices[3].z, worldSpaceQuad },
-            },
+            .vertices = quadVertices(vertices, worldSpaceQuad),
             .color = color,
             .normalAndAmbientRed = {
                 normal.x, normal.y, normal.z, 0.0f },
@@ -2115,36 +2120,10 @@ private:
         VkCommandBuffer commandBuffer,
         const PreparedParticle& particle)
     {
-        vkCmdSetPrimitiveTopology(
-            commandBuffer,
-            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-        ++stats_.visibleFaces;
-        stats_.vertices += 6;
-        stats_.triangles += 2;
+        beginQuadDraw(commandBuffer);
 
         const GpuDrawInstance constants {
-            .vertices = {
-                Vec4 {
-                    particle.vertices[0].x,
-                    particle.vertices[0].y,
-                    particle.vertices[0].z,
-                    worldSpaceQuad },
-                Vec4 {
-                    particle.vertices[1].x,
-                    particle.vertices[1].y,
-                    particle.vertices[1].z,
-                    worldSpaceQuad },
-                Vec4 {
-                    particle.vertices[2].x,
-                    particle.vertices[2].y,
-                    particle.vertices[2].z,
-                    worldSpaceQuad },
-                Vec4 {
-                    particle.vertices[3].x,
-                    particle.vertices[3].y,
-                    particle.vertices[3].z,
-                    worldSpaceQuad },
-            },
+            .vertices = quadVertices(particle.vertices, worldSpaceQuad),
             .color = particle.color,
             .materialOptions = { 0.0f, 1.0f, 1.0f, 0.0f },
             .textureOptions = {
@@ -2173,80 +2152,23 @@ private:
         bool isEditorPreview = false,
         bool clipSpace = false)
     {
-        vkCmdSetPrimitiveTopology(
-            commandBuffer,
-            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-        ++stats_.visibleFaces;
-        stats_.vertices += 6;
-        stats_.triangles += 2;
+        beginQuadDraw(commandBuffer);
 
-        const Vec3 sunRadiance {
-            lighting.sun.color.x * lighting.sun.intensity,
-            lighting.sun.color.y * lighting.sun.intensity,
-            lighting.sun.color.z * lighting.sun.intensity,
-        };
-        const Vec3 ambientRadiance {
-            lighting.ambient.color.x *
-                lighting.ambient.intensity,
-            lighting.ambient.color.y *
-                lighting.ambient.intensity,
-            lighting.ambient.color.z *
-                lighting.ambient.intensity,
-        };
+        const SunAmbientLanes lanes = sunAmbientLanes(lighting);
         const GpuDrawInstance constants {
-            .vertices = {
-                Vec4 {
-                    vertices[0].x,
-                    vertices[0].y,
-                    vertices[0].z,
-                    clipSpace ? clipSpaceQuad : worldSpaceQuad },
-                Vec4 {
-                    vertices[1].x,
-                    vertices[1].y,
-                    vertices[1].z,
-                    clipSpace ? clipSpaceQuad : worldSpaceQuad },
-                Vec4 {
-                    vertices[2].x,
-                    vertices[2].y,
-                    vertices[2].z,
-                    clipSpace ? clipSpaceQuad : worldSpaceQuad },
-                Vec4 {
-                    vertices[3].x,
-                    vertices[3].y,
-                    vertices[3].z,
-                    clipSpace ? clipSpaceQuad : worldSpaceQuad },
-            },
+            .vertices = quadVertices(
+                vertices, clipSpace ? clipSpaceQuad : worldSpaceQuad),
             .color = color,
             .normalAndAmbientRed = {
                 normal.x,
                 normal.y,
                 normal.z,
-                ambientRadiance.x,
+                lanes.ambientRed,
             },
-            .sunDirectionAndAmbientGreen = {
-                lighting.sun.direction.x,
-                lighting.sun.direction.y,
-                lighting.sun.direction.z,
-                ambientRadiance.y,
-            },
-            .sunRadianceAndAmbientBlue = {
-                sunRadiance.x,
-                sunRadiance.y,
-                sunRadiance.z,
-                ambientRadiance.z,
-            },
-            .shadowOptions = {
-                lighting.shadows.enabled ? 1.0f : 0.0f,
-                std::clamp(
-                    lighting.shadows.opacity, 0.0f, 1.0f),
-                std::max(lighting.shadows.bias, 0.0f),
-                gridColor.w > 0.0f &&
-                        gridLineWidth > 0.0f &&
-                        gridSize.x > 0.0f &&
-                        gridSize.y > 0.0f
-                    ? gridLineWidth
-                    : 0.0f,
-            },
+            .sunDirectionAndAmbientGreen = lanes.sunDirectionAndAmbientGreen,
+            .sunRadianceAndAmbientBlue = lanes.sunRadianceAndAmbientBlue,
+            .shadowOptions = faceShadowOptions(
+                lighting, gridColor, gridLineWidth, gridSize),
             .materialOptions = {
                 blurBehind ? 1.0f : 0.0f,
                 gridSize.x,
@@ -2269,9 +2191,10 @@ private:
     }
 
     // Ground tops blended from two textures via a splat map. Lighting,
-    // shadowing, grid, and dithering match drawFace exactly; only the free
-    // push-constant slots differ: materialOptions.x carries the face's world
-    // origin X (opaque ground never blurs) and textureOptions carries the
+    // shadowing, grid, and dithering come from the same helpers drawFace uses,
+    // so they now agree by construction rather than by being kept in step. Only
+    // the free push-constant slots differ: materialOptions.x carries the face's
+    // world origin X (opaque ground never blurs) and textureOptions carries the
     // three one-based texture handles plus world origin Y.
     [[nodiscard]] uint32_t drawGroundSplatFace(
         VkCommandBuffer commandBuffer,
@@ -2286,60 +2209,22 @@ private:
         bool isEditorPreview,
         const GroundSplatTextures& textures)
     {
-        vkCmdSetPrimitiveTopology(
-            commandBuffer,
-            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-        ++stats_.visibleFaces;
-        stats_.vertices += 6;
-        stats_.triangles += 2;
+        beginQuadDraw(commandBuffer);
 
-        const Vec3 sunRadiance {
-            lighting.sun.color.x * lighting.sun.intensity,
-            lighting.sun.color.y * lighting.sun.intensity,
-            lighting.sun.color.z * lighting.sun.intensity,
-        };
-        const Vec3 ambientRadiance {
-            lighting.ambient.color.x * lighting.ambient.intensity,
-            lighting.ambient.color.y * lighting.ambient.intensity,
-            lighting.ambient.color.z * lighting.ambient.intensity,
-        };
+        const SunAmbientLanes lanes = sunAmbientLanes(lighting);
         const GpuDrawInstance constants {
-            .vertices = {
-                Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, worldSpaceQuad },
-                Vec4 { vertices[1].x, vertices[1].y, vertices[1].z, worldSpaceQuad },
-                Vec4 { vertices[2].x, vertices[2].y, vertices[2].z, worldSpaceQuad },
-                Vec4 { vertices[3].x, vertices[3].y, vertices[3].z, worldSpaceQuad },
-            },
+            .vertices = quadVertices(vertices, worldSpaceQuad),
             .color = color,
             .normalAndAmbientRed = {
                 normal.x,
                 normal.y,
                 normal.z,
-                ambientRadiance.x,
+                lanes.ambientRed,
             },
-            .sunDirectionAndAmbientGreen = {
-                lighting.sun.direction.x,
-                lighting.sun.direction.y,
-                lighting.sun.direction.z,
-                ambientRadiance.y,
-            },
-            .sunRadianceAndAmbientBlue = {
-                sunRadiance.x,
-                sunRadiance.y,
-                sunRadiance.z,
-                ambientRadiance.z,
-            },
-            .shadowOptions = {
-                lighting.shadows.enabled ? 1.0f : 0.0f,
-                std::clamp(lighting.shadows.opacity, 0.0f, 1.0f),
-                std::max(lighting.shadows.bias, 0.0f),
-                gridColor.w > 0.0f &&
-                        gridLineWidth > 0.0f &&
-                        gridSize.x > 0.0f &&
-                        gridSize.y > 0.0f
-                    ? gridLineWidth
-                    : 0.0f,
-            },
+            .sunDirectionAndAmbientGreen = lanes.sunDirectionAndAmbientGreen,
+            .sunRadianceAndAmbientBlue = lanes.sunRadianceAndAmbientBlue,
+            .shadowOptions = faceShadowOptions(
+                lighting, gridColor, gridLineWidth, gridSize),
             .materialOptions = {
                 worldOrigin.x,
                 gridSize.x,
@@ -2373,23 +2258,13 @@ private:
         const IsoRenderLayout& layout,
         bool isEditorPreview)
     {
-        vkCmdSetPrimitiveTopology(
-            commandBuffer,
-            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-        ++stats_.visibleFaces;
-        stats_.vertices += 6;
-        stats_.triangles += 2;
+        beginQuadDraw(commandBuffer);
 
         const float waterRenderingMode =
             rendering.visualizeCausticsOnly ? 2.0f : 1.0f;
 
         const GpuDrawInstance constants {
-            .vertices = {
-                Vec4 { vertices[0].x, vertices[0].y, vertices[0].z, worldSpaceQuad },
-                Vec4 { vertices[1].x, vertices[1].y, vertices[1].z, worldSpaceQuad },
-                Vec4 { vertices[2].x, vertices[2].y, vertices[2].z, worldSpaceQuad },
-                Vec4 { vertices[3].x, vertices[3].y, vertices[3].z, worldSpaceQuad },
-            },
+            .vertices = quadVertices(vertices, worldSpaceQuad),
             // Water is the pass that claims passData. These are its border
             // and ripple parameters, not geometry.
             .passData = {
@@ -2546,19 +2421,7 @@ private:
     {
         const VulkanModelResources::MaterialBinding material =
             models_.materialForModel(tile.model);
-        const Vec3 sunRadiance {
-            lighting.sun.color.x * lighting.sun.intensity,
-            lighting.sun.color.y * lighting.sun.intensity,
-            lighting.sun.color.z * lighting.sun.intensity,
-        };
-        const Vec3 ambientRadiance {
-            lighting.ambient.color.x *
-                lighting.ambient.intensity,
-            lighting.ambient.color.y *
-                lighting.ambient.intensity,
-            lighting.ambient.color.z *
-                lighting.ambient.intensity,
-        };
+        const SunAmbientLanes lanes = sunAmbientLanes(lighting);
         const bool mirrorEnergy =
             tile.effect == RenderSurfaceEffect::MirrorEnergy;
         const float editorHighlightState =
@@ -2598,24 +2461,9 @@ private:
             },
             .color = tile.color,
             // xyz free; see above. w is the ambient term's red channel.
-            .normalAndAmbientRed = {
-                0.0f,
-                0.0f,
-                0.0f,
-                ambientRadiance.x,
-            },
-            .sunDirectionAndAmbientGreen = {
-                lighting.sun.direction.x,
-                lighting.sun.direction.y,
-                lighting.sun.direction.z,
-                ambientRadiance.y,
-            },
-            .sunRadianceAndAmbientBlue = {
-                sunRadiance.x,
-                sunRadiance.y,
-                sunRadiance.z,
-                ambientRadiance.z,
-            },
+            .normalAndAmbientRed = { 0.0f, 0.0f, 0.0f, lanes.ambientRed },
+            .sunDirectionAndAmbientGreen = lanes.sunDirectionAndAmbientGreen,
+            .sunRadianceAndAmbientBlue = lanes.sunRadianceAndAmbientBlue,
             .shadowOptions = {
                 mirrorEnergy
                     ? config::mirrorEnergyScanlineFrequency

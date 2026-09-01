@@ -1400,43 +1400,64 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
     search will never surface but which still has to be edited in lockstep.
   </p>
 
-  <article class="finding is-moderate">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-moderate">Moderate</span>
-      <span class="tag">Structural</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: moderate · structural</span>
+      <span class="tag">Corrected</span>
     </div>
-    <h3>Five face-draw functions rebuild the same lighting payload</h3>
+    <h3>The draws that share a lighting payload were writing it out three times</h3>
     <div class="loc">
-      <code>VulkanSceneRecorder.cpp:1703</code>
-      <code>:1794</code>
-      <code>:1907</code>
-      <code>:1993</code>
-      <code>:2101</code>
-      <code>:2129</code>
+      <code>VulkanSceneRecorder.cpp — drawFace</code>
+      <code>drawGroundSplatFace</code>
+      <code>modelPushConstants</code>
     </div>
     <p>
-      <code>drawFace</code>, <code>drawGroundSplatFace</code>,
+      <strong>This finding was wrong as filed</strong> and is rewritten here. It claimed
+      five face-draw functions rebuilt the same lighting payload, and named
       <code>drawWaterFace</code>, <code>drawMirrorEnergyFace</code> and
-      <code>drawParticle</code> each construct a <code>GpuDrawInstance</code>
-      from scratch. The sun-radiance and ambient-radiance packing block is
-      byte-identical in three of them (lines 1815, 1928, 2167), and the
-      <code>shadowOptions</code> block with its four-way grid-validity ternary is
-      identical in the same three. The code says so itself:
+      <code>drawParticle</code> among them. Counting the actual call sites: the
+      radiance block appears three times, and the third is
+      <code>modelPushConstants</code> — the model path, not a face draw at all.
+      The three functions I named do not contain it. Water reuses those same
+      lanes for border and ripple parameters, and mirror-energy for scanline
+      constants, so the “one base instance every variant starts from” fix I
+      recommended would have been actively wrong: it would have written a
+      lighting payload into lanes that mean something else, and the only thing
+      stopping it from shipping is that every one of those writes is later
+      overwritten.
     </p>
-    <pre><span class="cmt">// Ground tops blended from two textures via a splat map. Lighting,
-// shadowing, grid, and dithering match drawFace exactly; only the free
-// push-constant slots differ...</span></pre>
     <p>
-      <code>drawShadowFace</code> and <code>drawPointShadowFace</code> are a
-      smaller instance of the same pattern — identical except for which projection
-      function they call.
+      What was genuinely shared, measured rather than assumed: the sun and
+      ambient radiance packing in three functions; the <code>shadowOptions</code>
+      block with its four-way grid-validity ternary in two; the four-corner
+      vertex packing in five; and the topology-plus-statistics preamble in five.
     </p>
     <div class="fix">
-      One <code>GpuDrawInstance baseSceneInstance(vertices, color, normal, lighting, gridColor, gridLineWidth, gridSize)</code>
-      that every variant starts from and then overwrites its own lanes on.
-      Roughly 150 lines disappear and the “these must stay in sync” comment
-      becomes unnecessary.
+      Four small helpers in a Vulkan-free <code>SceneDrawLanes.hpp</code> —
+      <code>sunAmbientLanes</code>, <code>faceShadowOptions</code>,
+      <code>gridLineWidthOrZero</code> and <code>quadVertices</code> — plus a
+      <code>beginQuadDraw</code> on the recorder for the preamble. No shared base
+      instance, because there is no shared base.
     </div>
+    <p>
+      <strong>Done.</strong> <code>VulkanSceneRecorder.cpp</code> is 153 lines
+      lighter and <code>drawFace</code> roughly halved. The ground-splat comment
+      that used to promise its lighting “match<em>es</em> drawFace exactly” now
+      says the two agree by construction, because they call the same function.
+    </p>
+    <p>
+      The packing is read by shaders as bare floats in fixed slots, so a wrong
+      lane does not fail — it renders. Two pieces of evidence rather than one:
+      <code>SceneDrawLanesTests</code> covers the helpers with 59 checks, and a
+      throwaway differential ran the extracted helpers against a verbatim
+      transcription of the code they replaced over 2 million randomised inputs —
+      including infinities, denormals and signed zero — comparing raw bits, not
+      printed values. Bit-identical throughout. Eleven of twelve mutants of the
+      helpers were caught; the twelfth changes <code>&gt;</code> to
+      <code>&gt;=</code> on a value that returns zero either way at the boundary,
+      which is a provably equivalent mutant rather than a gap.
+    </p>
   </article>
 
   <article class="finding is-moderate">
@@ -2262,12 +2283,18 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
       holding them together. <span class="code">C1</span> has had its second
       seam cut — the material range allocator is out, tested, and proven
       equivalent to the code it replaced over 1.26 million randomised
-      operations — but the class split itself is still open, as are
-      <span class="code">C2</span> (the long functions),
-      <span class="code">D1</span> (the face-draw payload) and
-      <span class="code">B3</span> (the overloaded lanes), plus the two
-      behavioural questions parked along the way: the divergent point-shadow
-      filtering and the double-counted eviction victim.
+      operations — but the class split itself is still open.
+      <span class="code">D1</span> is done, though not as filed: investigating it
+      showed the recommended fix would have been wrong, and the finding is
+      rewritten above with what the call sites actually contain. Still open are
+      <span class="code">C2</span> (the long functions) and
+      <span class="code">B3</span> (the overloaded lanes) — and
+      <span class="code">B3</span> is now the more interesting of the two, since
+      <span class="code">D1</span> turned out to be a symptom of it: the reason
+      water and mirror-energy share no payload with the scene draws is that they
+      are reusing the same lanes for unrelated data. Both behavioural questions
+      remain parked: the divergent point-shadow filtering and the double-counted
+      eviction victim.
     </li>
   </ol>
 </section>
@@ -2275,7 +2302,7 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
 <footer>
   <span>Sokoban 3D engine · code-quality audit</span>
   <span>Reviewed against HEAD 21dff13a · 31 Aug 2026</span>
-  <span>37 findings · 9 resolved · 0 live defects</span>
+  <span>37 findings · 10 resolved · 0 live defects</span>
 </footer>
 
 </div>
