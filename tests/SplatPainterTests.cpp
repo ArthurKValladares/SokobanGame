@@ -2,6 +2,8 @@
 // to, loading and saving maps, stroke-level undo, and the failure modes the
 // editor reports rather than silently swallowing.
 
+#include "TestHarness.hpp"
+
 #include "engine/AssetManifest.hpp"
 #include "engine/SplatPainter.hpp"
 #include "engine/render/ImageData.hpp"
@@ -15,23 +17,6 @@
 namespace {
 
 using namespace sokoban;
-
-int failures = 0;
-int checks = 0;
-const char* currentTest = "";
-
-void checkImpl(bool ok, const char* expression, int line)
-{
-    ++checks;
-    if (!ok) {
-        ++failures;
-        std::cerr << "FAIL [" << currentTest << "] line "
-                  << line << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
-#define TEST(name) currentTest = name
 
 class TemporaryDirectory {
 public:

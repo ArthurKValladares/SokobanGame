@@ -1,5 +1,7 @@
 // Headless tests for the engine task system: standard library only.
 
+#include "TestHarness.hpp"
+
 #include "engine/TaskSystem.hpp"
 
 #include <atomic>
@@ -10,22 +12,6 @@
 #include <vector>
 
 namespace {
-
-int failures = 0;
-int checks = 0;
-const char* currentTest = "";
-
-void checkImpl(bool ok, const char* expression, int line)
-{
-    ++checks;
-    if (!ok) {
-        ++failures;
-        std::cerr << "FAIL [" << currentTest << "] line " << line << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
-#define TEST(name) currentTest = name
 
 void testEnqueueReturnsValues()
 {

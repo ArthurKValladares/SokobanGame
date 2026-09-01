@@ -1,3 +1,5 @@
+#include "TestHarness.hpp"
+
 #include "engine/render/Tonemap.hpp"
 
 #include <cmath>
@@ -5,20 +7,6 @@
 #include <limits>
 
 namespace {
-
-int failures = 0;
-int checks = 0;
-
-void checkImpl(bool ok, const char* expression, int line)
-{
-    ++checks;
-    if (!ok) {
-        ++failures;
-        std::cerr << "FAIL line " << line << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
 
 bool near(float left, float right)
 {

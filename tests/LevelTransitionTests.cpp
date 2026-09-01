@@ -1,23 +1,11 @@
+#include "TestHarness.hpp"
+
 #include "engine/LevelTransition.hpp"
 
 #include <cmath>
 #include <iostream>
 
 namespace {
-
-int failures = 0;
-int checks = 0;
-
-void checkImpl(bool ok, const char* expression, int line)
-{
-    ++checks;
-    if (!ok) {
-        ++failures;
-        std::cerr << "FAIL line " << line << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
 
 void testClosesSwapsAndOpens()
 {

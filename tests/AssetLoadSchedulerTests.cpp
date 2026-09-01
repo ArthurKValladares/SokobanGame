@@ -1,3 +1,5 @@
+#include "TestHarness.hpp"
+
 #include "engine/render/AssetLoadScheduler.hpp"
 
 #include <iostream>
@@ -6,23 +8,6 @@
 namespace {
 
 using namespace sokoban;
-
-int failures = 0;
-int checks = 0;
-const char* currentTest = "";
-
-void checkImpl(bool ok, const char* expression, int line)
-{
-    ++checks;
-    if (!ok) {
-        ++failures;
-        std::cerr << "FAIL [" << currentTest << "] line " << line
-                  << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
-#define TEST(name) currentTest = name
 
 constexpr AssetLoadKey model(uint32_t index)
 {

@@ -1,6 +1,8 @@
 // Headless tests for editor document commands and project filesystem behavior.
 // No SDL, Vulkan, ImGui, rendering, or window dependencies.
 
+#include "TestHarness.hpp"
+
 #include "engine/LevelEditor.hpp"
 #include "engine/OverworldMapEditor.hpp"
 #include "engine/TileTypes.hpp"
@@ -18,22 +20,6 @@
 namespace {
 
 using namespace sokoban;
-
-int failures = 0;
-int checks = 0;
-const char* currentTest = "";
-
-void checkImpl(bool ok, const char* expression, int line)
-{
-    ++checks;
-    if (!ok) {
-        ++failures;
-        std::cerr << "FAIL [" << currentTest << "] line " << line << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
-#define TEST(name) currentTest = name
 
 struct TemporaryProject {
     TemporaryProject()

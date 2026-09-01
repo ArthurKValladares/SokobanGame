@@ -12,6 +12,8 @@
 // ahead of a moving entity is refused, deliberately - see "What the concurrency
 // is for" in DESIGN-deterministic-actions.md.
 
+#include "TestHarness.hpp"
+
 #include "engine/Reservation.hpp"
 
 #include <cstddef>
@@ -22,23 +24,6 @@
 namespace {
 
 using namespace sokoban;
-
-int failures = 0;
-int checks = 0;
-const char* currentTest = "";
-
-void checkImpl(bool ok, const char* expression, int line)
-{
-    ++checks;
-    if (!ok) {
-        ++failures;
-        std::cerr << "FAIL [" << currentTest << "] line "
-                  << line << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
-#define TEST(name) currentTest = name
 
 [[nodiscard]] GridPosition3 cell(int x, int y, int z = 1)
 {

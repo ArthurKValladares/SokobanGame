@@ -1,3 +1,5 @@
+#include "TestHarness.hpp"
+
 #include "engine/AssetManifest.hpp"
 #include "engine/ui/FontAtlas.hpp"
 #include "engine/ui/InputPrompts.hpp"
@@ -17,20 +19,6 @@
 #include <variant>
 
 namespace {
-
-int failures = 0;
-int checks = 0;
-
-void checkImpl(bool condition, const char* expression, int line)
-{
-    ++checks;
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL line " << line << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
 
 [[nodiscard]] bool settingsChanged(const std::optional<sokoban::OptionsAction>& action)
 {

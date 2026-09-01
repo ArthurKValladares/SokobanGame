@@ -1,6 +1,8 @@
 // Headless tests for the title screen, level select, level-complete overlay,
 // and the pause menu's title-exit entry.
 
+#include "TestHarness.hpp"
+
 #include "engine/ui/FontAtlas.hpp"
 #include "engine/ui/LevelCompleteOverlay.hpp"
 #include "engine/ui/OptionsMenu.hpp"
@@ -14,20 +16,6 @@
 #include <vector>
 
 namespace {
-
-int failures = 0;
-int checks = 0;
-
-void checkImpl(bool condition, const char* expression, int line)
-{
-    ++checks;
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL line " << line << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
 
 template <typename Alternative, typename Action>
 [[nodiscard]] bool isAction(const std::optional<Action>& action)

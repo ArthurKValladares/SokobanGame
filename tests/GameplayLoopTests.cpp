@@ -1,3 +1,5 @@
+#include "TestHarness.hpp"
+
 #include "engine/GameplayLoop.hpp"
 #include "engine/Time.hpp"
 
@@ -10,23 +12,6 @@
 namespace {
 
 using namespace sokoban;
-
-int failures = 0;
-int checks = 0;
-const char* currentTest = "";
-
-void checkImpl(bool value, const char* expression, int line)
-{
-    ++checks;
-    if (!value) {
-        ++failures;
-        std::cerr << "FAIL [" << currentTest << "] line " << line
-                  << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
-#define TEST(name) currentTest = name
 
 Level makeLevel(const std::vector<std::vector<std::string>>& layers)
 {

@@ -8,6 +8,8 @@
 // evicted its own victims still failing - there is a test saying so, because
 // those are the rules the fence-owned retirement contract depends on.
 
+#include "TestHarness.hpp"
+
 #include "engine/render/ResidencyBudget.hpp"
 
 #include <cstdint>
@@ -18,23 +20,6 @@
 namespace {
 
 using namespace sokoban;
-
-int failures = 0;
-int checks = 0;
-const char* currentTest = "";
-
-void checkImpl(bool ok, const char* expression, int line)
-{
-    ++checks;
-    if (!ok) {
-        ++failures;
-        std::cerr << "FAIL [" << currentTest << "] line "
-                  << line << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
-#define TEST(name) currentTest = name
 
 // Stands in for ModelSlot and TextureSlot, which agree on the three fields the
 // policy reads. `ready` plays the part of their LoadState.

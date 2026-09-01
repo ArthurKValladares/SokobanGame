@@ -1,3 +1,5 @@
+#include "TestHarness.hpp"
+
 #include "engine/ParticleSystem.hpp"
 
 #include <cmath>
@@ -6,20 +8,6 @@
 namespace {
 
 using namespace sokoban;
-
-int failures = 0;
-int checks = 0;
-
-void checkImpl(bool condition, const char* expression, int line)
-{
-    ++checks;
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL line " << line << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
 
 bool near(float left, float right)
 {

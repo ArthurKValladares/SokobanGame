@@ -5,6 +5,8 @@
 // that separation: the planners decide everything except the running move
 // total, and re-planning the same inputs gives the same answer.
 
+#include "TestHarness.hpp"
+
 #include "engine/ActionPlan.hpp"
 #include "engine/Reservation.hpp"
 
@@ -20,23 +22,6 @@
 namespace {
 
 using namespace sokoban;
-
-int failures = 0;
-int checks = 0;
-const char* currentTest = "";
-
-void checkImpl(bool ok, const char* expression, int line)
-{
-    ++checks;
-    if (!ok) {
-        ++failures;
-        std::cerr << "FAIL [" << currentTest << "] line "
-                  << line << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
-#define TEST(name) currentTest = name
 
 [[nodiscard]] GridPosition3 cell(int x, int y, int z)
 {

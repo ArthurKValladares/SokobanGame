@@ -1,6 +1,8 @@
 // Headless tests for mutable presentation settings, entity interpolation, and
 // render-frame construction.
 
+#include "TestHarness.hpp"
+
 #include "engine/AnimationCatalog.hpp"
 #include "engine/AnimationPreviewScene.hpp"
 #include "engine/AssetManifest.hpp"
@@ -25,23 +27,6 @@
 namespace {
 
 using namespace sokoban;
-
-int failures = 0;
-int checks = 0;
-const char* currentTest = "";
-
-void checkImpl(bool ok, const char* expression, int line)
-{
-    ++checks;
-    if (!ok) {
-        ++failures;
-        std::cerr << "FAIL [" << currentTest << "] line "
-                  << line << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
-#define TEST(name) currentTest = name
 
 struct TemporaryEditorProject {
     TemporaryEditorProject()
@@ -201,7 +186,6 @@ AnimationCatalog testAnimationCatalog()
       ]
     })json", testManifest());
 }
-
 
 bool near(float left, float right)
 {

@@ -1,26 +1,14 @@
 // Headless tests for the shell routing rules: menu precedence, Options
 // context, the new-game slot-pick chain, and completion resolution.
 
+#include "TestHarness.hpp"
+
 #include "engine/ShellFlow.hpp"
 
 #include <iostream>
 #include <vector>
 
 namespace {
-
-int failures = 0;
-int checks = 0;
-
-void checkImpl(bool condition, const char* expression, int line)
-{
-    ++checks;
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL line " << line << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
 
 using sokoban::ShellCommand;
 using sokoban::ShellFacts;

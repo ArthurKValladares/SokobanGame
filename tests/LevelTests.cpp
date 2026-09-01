@@ -1,5 +1,7 @@
 // Headless tests for the .scr parser, serializer, normalization, and queries.
 
+#include "TestHarness.hpp"
+
 #include "engine/Level.hpp"
 
 #include <chrono>
@@ -14,22 +16,6 @@
 namespace {
 
 using namespace sokoban;
-
-int failures = 0;
-int checks = 0;
-const char* currentTest = "";
-
-void checkImpl(bool ok, const char* expression, int line)
-{
-    ++checks;
-    if (!ok) {
-        ++failures;
-        std::cerr << "FAIL [" << currentTest << "] line " << line << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
-#define TEST(name) currentTest = name
 
 void checkThrowsContaining(const std::function<void()>& operation, std::string_view expected)
 {

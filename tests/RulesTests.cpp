@@ -1,6 +1,8 @@
 // Headless tests for the step-based gameplay rules engine. No SDL/Vulkan
 // dependencies: this file compiles against Level, TileTypes, and Rules only.
 
+#include "TestHarness.hpp"
+
 #include "engine/Level.hpp"
 #include "engine/Rules.hpp"
 
@@ -12,23 +14,6 @@
 namespace {
 
 using namespace sokoban;
-
-int failures = 0;
-int checks = 0;
-const char* currentTest = "";
-
-void checkImpl(bool ok, const char* expression, int line)
-{
-    ++checks;
-    if (!ok) {
-        ++failures;
-        std::cerr << "FAIL [" << currentTest << "] line " << line << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
-
-#define TEST(name) currentTest = name
 
 Level makeLevel(const std::vector<std::vector<std::string>>& layers)
 {
@@ -544,7 +529,6 @@ void testConveyorCarriesPlayer()
     const GameState steered = rules::step(level, state, MoveDirection::Left);
     CHECK(steered.players[0].cell == cell(0, 0, 1));
 }
-
 
 void testFastConveyorRate()
 {

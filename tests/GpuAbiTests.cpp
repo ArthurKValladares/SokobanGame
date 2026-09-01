@@ -34,6 +34,8 @@
 // Blocks are matched by descriptor binding for the same reason: with names
 // gone, the binding is the only stable identity a module still carries.
 
+#include "TestHarness.hpp"
+
 #include "engine/render/GpuSkinning.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 
@@ -56,23 +58,6 @@
 namespace {
 
 using namespace sokoban;
-
-int failures = 0;
-int checks = 0;
-const char* currentTest = "";
-
-void checkImpl(bool ok, const char* expression, int line)
-{
-    ++checks;
-    if (!ok) {
-        ++failures;
-        std::cerr << "FAIL [" << currentTest << "] line "
-                  << line << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
-#define TEST(name) currentTest = name
 
 // offsetof is only guaranteed on standard-layout types. Every block below is
 // one; saying so here means a future member that breaks it fails to compile

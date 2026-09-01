@@ -6,6 +6,8 @@
 // pixel, and require the original position back. That catches sign flips,
 // swapped axes, and interpolation error without needing a GPU.
 
+#include "TestHarness.hpp"
+
 #include "engine/render/IsoScenePreparer.hpp"
 
 #include <cmath>
@@ -14,23 +16,6 @@
 namespace {
 
 using namespace sokoban;
-
-int failures = 0;
-int checks = 0;
-const char* currentTest = "";
-
-void checkImpl(bool ok, const char* expression, int line)
-{
-    ++checks;
-    if (!ok) {
-        ++failures;
-        std::cerr << "FAIL [" << currentTest << "] line "
-                  << line << ": " << expression << '\n';
-    }
-}
-
-#define CHECK(expression) checkImpl((expression), #expression, __LINE__)
-#define TEST(name) currentTest = name
 
 constexpr Vec2 outputExtent { 1280.0f, 720.0f };
 
