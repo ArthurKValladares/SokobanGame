@@ -1436,6 +1436,16 @@ layout changes affect modules that appear unrelated to the immediate feature.
   destroys and rethrows, and catching inside would destroy twice. `destroy()`
   is idempotent and accepts a null allocator, because teardown runs on
   half-built objects.
+- Both model paths map texture indices the same way. `create()` and
+  `syncManifestModels()` (the editor's append path) route dependencies through
+  `TextureDescriptorSpace::descriptorIndexFor` and bindings through
+  `remapBindingTextures`. `syncManifestTextures()` must keep running before
+  `syncManifestModels()` - `ApplicationTools` does - so the manifest range
+  covers every index the append path sees. Editor-appended models bind base
+  colour only, and that is the manifest format, not an omission: a manifest
+  primitive material has a texture and a scroll flag, while normal,
+  metallic-roughness, emissive and occlusion handles come from glTF discovery
+  at startup.
 - `src/engine/render/TextureDescriptorSpace.hpp`: how the texture descriptor
   heap is split - manifest textures on stable low indices, glTF textures
   discovered at load time taking the top downward, and the rule that the two

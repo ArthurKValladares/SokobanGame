@@ -2375,21 +2375,40 @@ bool VulkanModelResources::syncManifestModels()
          ++modelIndex) {
         const AssetManifest::Model& definition =
             manifest_->models()[modelIndex];
+        // Both of these are logical texture indices and have to be mapped into
+        // the descriptor heap, exactly as create() does for the startup path.
+        // The mapping is the identity for a manifest texture, which is all an
+        // editor-appended model can reference today - so this changes nothing
+        // now, and stops the path depending on an invariant stated nowhere.
+        // syncManifestTextures() runs immediately before this (ApplicationTools),
+        // so the manifest range already covers every index seen here.
+        //
+        // The bindings carry base colour only. That is not an omission: a
+        // manifest primitive material has a texture and a scroll flag and
+        // nothing else. Normal, metallic-roughness, emissive and occlusion
+        // handles come from glTF discovery, which builds the runtime catalog at
+        // startup and has no equivalent for a model appended later.
         if (definition.materialMode == ModelMaterialMode::SingleTexture) {
             modelTextureDependencies_[modelIndex].push_back(
-                definition.textureIndex);
+                textureSpace_.descriptorIndexFor(definition.textureIndex));
         } else if (
             definition.materialMode == ModelMaterialMode::PrimitiveMaterials) {
             for (const AssetManifest::Model::PrimitiveMaterial& material :
                  definition.primitiveMaterials) {
                 modelTextureDependencies_[modelIndex].push_back(
-                    material.textureIndex);
+                    textureSpace_.descriptorIndexFor(material.textureIndex));
                 modelMaterialBindings_[modelIndex].push_back({
                     .textureIndex = material.textureIndex,
                     .flags = material.scrollV
                         ? PrimitiveMaterialScrollV
                         : PrimitiveMaterialNone,
                 });
+                // The same call the startup path makes, so the two cannot
+                // drift: if a map handle is ever added here it is remapped too.
+                remapBindingTextures(
+                    modelMaterialBindings_[modelIndex].back(),
+                    textureSpace_.manifestCount(),
+                    textureSpace_.discoveredBase());
             }
         }
     }

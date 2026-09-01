@@ -168,6 +168,25 @@ void testTheInstanceFormAgreesWithTheStaticOne()
     }
 }
 
+void testMappingAManifestIndexIsTheIdentity()
+{
+    TEST("mappingAManifestIndexIsTheIdentity");
+    // Load-bearing beyond the obvious. VulkanModelResources::syncManifestModels
+    // - the editor's model-append path - used to push raw logical indices where
+    // the startup path pushed mapped ones. Routing it through the mapping made
+    // the two agree, and this is why that was a no-op rather than a change:
+    // below the manifest count the mapping returns its argument, whatever the
+    // discovered range happens to be.
+    for (uint32_t manifestCount = 1; manifestCount <= 32; ++manifestCount) {
+        for (uint32_t base = manifestCount; base <= 64; base += 7) {
+            for (uint32_t logical = 0; logical < manifestCount; ++logical) {
+                CHECK(Space::descriptorIndexFor(logical, manifestCount, base)
+                    == logical);
+            }
+        }
+    }
+}
+
 void testAFullHeapMapsEveryLogicalIndexExactlyOnce()
 {
     TEST("aFullHeapMapsEveryLogicalIndexExactlyOnce");
@@ -216,6 +235,7 @@ int main()
     testManifestCanHoldIsTheSameBoundary();
     testClearForgetsEverything();
     testTheInstanceFormAgreesWithTheStaticOne();
+    testMappingAManifestIndexIsTheIdentity();
     testAFullHeapMapsEveryLogicalIndexExactlyOnce();
 
     if (failures != 0) {

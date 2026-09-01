@@ -818,9 +818,10 @@ if (model.isCube() ||
     </div>
   </article>
 
-  <article class="finding is-moderate">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-moderate">Moderate</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: moderate · latent</span>
       <span class="tag">Divergent paths</span>
     </div>
     <h3>Runtime-appended models skip the descriptor remap the startup path applies</h3>
@@ -851,6 +852,36 @@ if (model.isCube() ||
       same, and either extend the binding construction to the full map set or add
       a comment stating that editor decorations are deliberately base-colour only.
     </div>
+    <p>
+      <strong>Done, and one half of the recommendation was wrong.</strong> Both
+      paths route through the same mapping now, and the binding goes through the
+      very same <code>remapBindingTextures</code> the startup path calls, so if a
+      map handle is ever added here it is remapped too. The change is a no-op
+      today and that is checked rather than argued: the mapping returns its
+      argument for any index below the manifest count, which
+      <code>texture_descriptor_space</code> now pins by name, saying why it
+      matters. Ordering was worth confirming too — <code>ApplicationTools</code>
+      syncs textures immediately before models, so the manifest range already
+      covers every index this sees.
+    </p>
+    <p>
+      The half I got wrong: I wrote that the path “also builds bindings with base
+      colour only” and suggested either extending it to the full map set or
+      documenting the choice. Extending it is not possible. A manifest primitive
+      material carries a texture name, an index and a scroll flag and nothing
+      else — normal, metallic-roughness, emissive and occlusion handles come from
+      glTF discovery, which builds the runtime catalog at startup and has no
+      equivalent for a model appended later. There was nothing to copy. The
+      comment is the whole answer, and it now says that rather than implying an
+      omission.
+    </p>
+    <p>
+      One thing checked and cleared rather than found:
+      <code>PrimitiveMaterialBinding::bindBaseColorTexture</code> defaults to
+      <code>true</code>, so the shorthand construction here does bind its base
+      colour. Had it defaulted to false, these models would have been silently
+      untextured — which is what I was looking for.
+    </p>
   </article>
 
   <article class="finding is-minor">
@@ -2741,7 +2772,7 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
 <footer>
   <span>Sokoban 3D engine · code-quality audit</span>
   <span>Reviewed against HEAD 21dff13a · 31 Aug 2026</span>
-  <span>38 findings · 14 resolved · 0 live defects</span>
+  <span>38 findings · 15 resolved · 0 live defects</span>
 </footer>
 
 </div>
