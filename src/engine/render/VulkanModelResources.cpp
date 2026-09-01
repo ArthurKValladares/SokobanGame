@@ -386,6 +386,8 @@ void VulkanModelResources::destroy()
     modelResidency_.reset();
     textureResidency_.reset();
     residencyEvictions_ = 0;
+    droppedDrawInstances_ = 0;
+    droppedSkinningInstances_ = 0;
     residencyBudgetBlocks_ = 0;
     residencyOversizedBlocks_ = 0;
     residencyMipPlanBlocks_ = 0;
@@ -1396,7 +1398,14 @@ void VulkanModelResources::updateAnimations(
         auto [instance, inserted] = skinnedInstances_.try_emplace(key, 0);
         if (inserted) {
             if (skinningInstanceCount_ >= maxSkinnedInstancesPerFrame) {
-                throw std::runtime_error("GPU skinning instance budget exceeded");
+                // Same reasoning as the draw-instance buffer: more skinned
+                // actors on screen than the palette holds is content, not a
+                // fault. Leave the instance unregistered and drop the entry -
+                // the recorder already skips an instance whose pose has not
+                // been published, which is exactly the state this leaves it in.
+                skinnedInstances_.erase(instance);
+                ++droppedSkinningInstances_;
+                continue;
             }
             instance->second = skinningInstanceCount_++;
         }
@@ -1429,9 +1438,15 @@ uint32_t VulkanModelResources::writeDrawInstance(
     uint32_t frameIndex,
     const GpuDrawInstance& instance)
 {
-    if (frameIndex >= gpuSkinningFrameCount || !drawInstanceBuffer_.mapped() ||
-        drawInstanceCount_ >= maxDrawInstancesPerFrame) {
-        throw std::runtime_error("Draw instance buffer is exhausted or invalid");
+    // An invalid frame index or an unmapped buffer is a programming error and
+    // stays fatal. Running out of entries is not: that is the level being
+    // bigger than the buffer was sized for.
+    if (frameIndex >= gpuSkinningFrameCount || !drawInstanceBuffer_.mapped()) {
+        throw std::runtime_error("Draw instance buffer is not mapped");
+    }
+    if (drawInstanceCount_ >= drawInstanceDiscardSlot) {
+        ++droppedDrawInstances_;
+        return frameIndex * maxDrawInstancesPerFrame + drawInstanceDiscardSlot;
     }
     const uint32_t result = frameIndex * maxDrawInstancesPerFrame +
         drawInstanceCount_++;
@@ -1619,6 +1634,8 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
     result.modelResidencyBudgetBytes = scheduler_.budget().modelResidencyBytes;
     result.textureResidencyBudgetBytes = scheduler_.budget().textureResidencyBytes;
     result.residencyEvictions = residencyEvictions_;
+    result.droppedDrawInstances = droppedDrawInstances_;
+    result.droppedSkinningInstances = droppedSkinningInstances_;
     result.residencyBudgetBlocks = residencyBudgetBlocks_;
     result.residencyOversizedBlocks = residencyOversizedBlocks_;
     result.residencyMipPlanBlocks = residencyMipPlanBlocks_;

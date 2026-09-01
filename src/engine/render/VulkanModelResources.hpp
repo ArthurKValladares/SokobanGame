@@ -108,6 +108,11 @@ public:
         uint64_t modelResidencyBudgetBytes = 0;
         uint64_t textureResidencyBudgetBytes = 0;
         uint64_t residencyEvictions = 0;
+        // Draws and skinned poses a frame asked for beyond what the buffers
+        // hold. Both used to terminate the process; they are dropped now, so
+        // these are the only sign it happened.
+        uint64_t droppedDrawInstances = 0;
+        uint64_t droppedSkinningInstances = 0;
         // Total refusals, and the three unrelated reasons behind them. They
         // were one number, which made it useless: under a small budget the
         // first two are permanent and expected, so a large total said nothing
@@ -577,6 +582,8 @@ private:
     ResidencyBudget modelResidency_;
     ResidencyBudget textureResidency_;
     uint64_t residencyEvictions_ = 0;
+    uint64_t droppedDrawInstances_ = 0;
+    uint64_t droppedSkinningInstances_ = 0;
     uint64_t residencyBudgetBlocks_ = 0;
     uint64_t residencyOversizedBlocks_ = 0;
     uint64_t residencyMipPlanBlocks_ = 0;

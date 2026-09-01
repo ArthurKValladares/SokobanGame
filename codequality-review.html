@@ -614,9 +614,10 @@ if (model.isCube() ||
     </p>
 </article>
 
-  <article class="finding is-major">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-major">Major</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: major · correctness</span>
       <span class="tag">Failure handling</span>
     </div>
     <h3>Content-driven budget overflow terminates the process</h3>
@@ -653,6 +654,39 @@ if (model.isCube() ||
       same way <code>unavailableModels</code> already is. Log once per frame
       rather than per instance so a full board does not flood the log.
     </div>
+    <p>
+      <strong>Both paths degrade now, and neither needed the recorder to
+      change.</strong> The draw-instance overflow was the harder one: ten call
+      sites feed the returned index straight into <code>firstInstance</code>, and
+      a sentinel any one of them forgot to check would have drawn from an
+      out-of-range entry — trading a crash for corruption.
+    </p>
+    <p>
+      So the last entry of each frame's range is kept back instead. It is zeroed
+      when the buffer is created and never written again, and an overflowing draw
+      is pointed at it. That is safe by construction rather than by vigilance:
+      <code>triangle.vert</code> takes every corner from
+      <code>draw.vertices[index]</code>, so four identical zero corners give all
+      four vertices the same clip position and both triangles have zero area.
+      Nothing rasterizes. I checked that in the shader source rather than
+      assuming it — and the model pipelines are covered by the same argument,
+      since a zeroed transform collapses their geometry to the origin too.
+    </p>
+    <p>
+      The skinning overflow needed less. Its loop already had a
+      <code>continue</code> for an instance whose pose is not ready, and that is
+      exactly the state an unregistered instance is in, so the throw became an
+      erase and a continue. The recorder was already written to skip it.
+    </p>
+    <p>
+      One distinction kept rather than flattened: an invalid frame index or an
+      unmapped buffer still throws. Those are programming errors, and the
+      original message covered both them and the overflow, which is part of why
+      a content condition was being handled like a device fault. Both drops are
+      counted cumulatively and reported in the smoke summary beside the residency
+      counters, so a level that overflows says so instead of disappearing
+      quietly — the failure mode this trades into.
+    </p>
   </article>
 
   <article class="finding is-resolved">
@@ -2707,7 +2741,7 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
 <footer>
   <span>Sokoban 3D engine · code-quality audit</span>
   <span>Reviewed against HEAD 21dff13a · 31 Aug 2026</span>
-  <span>38 findings · 13 resolved · 0 live defects</span>
+  <span>38 findings · 14 resolved · 0 live defects</span>
 </footer>
 
 </div>

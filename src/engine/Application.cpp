@@ -700,6 +700,9 @@ void Application::run()
                 << " no mip tail fits, "
                 << assetStats.residencyNoVictimBlocks
                 << " nothing evictable)"
+                << "; dropped draws " << assetStats.droppedDrawInstances
+                << ", dropped skinned poses "
+                << assetStats.droppedSkinningInstances
                 << "; model residency " << assetStats.modelResidencyBytes
                 << " / " << assetStats.modelResidencyBudgetBytes
                 << " bytes (peak " << assetStats.modelResidencyPeakBytes

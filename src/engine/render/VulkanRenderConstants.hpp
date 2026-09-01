@@ -215,6 +215,23 @@ static_assert(sizeof(GpuDrawInstance) == 256);
 inline constexpr uint32_t maxDrawInstancesPerFrame =
     RenderFrameData::tileCapacity * 4;
 
+// The last entry of each frame's range, kept back and never handed out.
+//
+// A frame that wants more draws than the buffer holds is a content condition -
+// a level with far more on screen than the capacity was sized for - not a
+// device fault, and it used to throw a plain runtime_error from inside
+// recording. Nothing caught that: it unwound the frame loop and reached main's
+// fatal handler, so an over-full level closed the game.
+//
+// An overflowing draw is pointed here instead. The slot is zeroed when the
+// buffer is created and never written again, and four identical zero corners
+// make two zero-area triangles, so the draw rasterizes nothing. That makes the
+// degradation safe without the recorder having to check a sentinel at ten call
+// sites: a dropped draw costs a draw call and disappears, rather than
+// corrupting the run it was part of.
+inline constexpr uint32_t drawInstanceDiscardSlot =
+    maxDrawInstancesPerFrame - 1;
+
 // Four explicit 32-bit integer lanes with the size and alignment of a GLSL
 // uvec4 under std430. Keeping this separate from Math.hpp avoids making an
 // integer GPU transport type look like general-purpose engine math.

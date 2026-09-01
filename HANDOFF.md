@@ -1416,6 +1416,18 @@ layout changes affect modules that appear unrelated to the immediate feature.
 - `src/engine/render/VulkanMemoryAllocator.*`: completed VMA ownership and the
   only renderer memory-policy seam; extend this instead of reintroducing raw
   Vulkan allocation calls.
+- Frame budget overflow is no longer fatal. More draws than
+  `maxDrawInstancesPerFrame`, or more skinned poses than
+  `maxSkinnedInstancesPerFrame`, used to throw a plain `runtime_error` from
+  inside recording; nothing caught it, so an over-full level reached main's
+  fatal handler and closed the game. Overflowing draws are now pointed at
+  `drawInstanceDiscardSlot` - the last entry of each frame's range, zeroed at
+  creation and never written, so its four identical corners give both triangles
+  zero area and it rasterizes nothing. Skinned overflow drops the instance,
+  which leaves it in the same state the recorder already skips. An invalid
+  frame index or unmapped buffer still throws: those are programming errors.
+  Both drops are counted cumulatively and reported in the smoke summary. Do not
+  hand `drawInstanceDiscardSlot` out to a real draw, and do not write to it.
 - `src/engine/render/GpuMappedBuffer.hpp`: one host-visible buffer type and one
   buffer view, replacing four identical owning structs (the skinning palette,
   the draw-instance array, the material table, and `OwnedBuffer` in
