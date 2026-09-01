@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/render/VulkanModelResources.hpp"
+#include "engine/render/GpuMappedBuffer.hpp"
 #include "engine/render/VulkanMemoryAllocator.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/RenderTypes.hpp"
@@ -73,13 +74,7 @@ public:
         uint32_t setIndex = 0) const;
 
 private:
-    struct OwnedBuffer {
-        VkBuffer buffer = VK_NULL_HANDLE;
-        VulkanAllocation allocation = nullptr;
-        void* mapped = nullptr;
-    };
-
-    [[nodiscard]] OwnedBuffer createFrameBuffer() const;
+    [[nodiscard]] GpuMappedBuffer createFrameBuffer() const;
     void updateInternal(
         uint32_t internalSetIndex,
         const Resources& resources) const;
@@ -94,7 +89,7 @@ private:
     VkDescriptorPool pool_ = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> sets_;
     std::vector<VkDescriptorSet> textureSets_;
-    std::vector<OwnedBuffer> frameBuffers_;
+    std::vector<GpuMappedBuffer> frameBuffers_;
     uint32_t frameSetCount_ = 0;
     uint32_t modelTextureCount_ = 0;
 };

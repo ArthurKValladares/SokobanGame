@@ -1416,6 +1416,14 @@ layout changes affect modules that appear unrelated to the immediate feature.
 - `src/engine/render/VulkanMemoryAllocator.*`: completed VMA ownership and the
   only renderer memory-policy seam; extend this instead of reintroducing raw
   Vulkan allocation calls.
+- `src/engine/render/GpuMappedBuffer.hpp`: one host-visible buffer type and one
+  buffer view, replacing four identical owning structs (the skinning palette,
+  the draw-instance array, the material table, and `OwnedBuffer` in
+  `VulkanSceneDescriptors`) and three identical views. Creation does not catch:
+  every caller already wraps creation and its first fill in one try/catch that
+  destroys and rethrows, and catching inside would destroy twice. `destroy()`
+  is idempotent and accepts a null allocator, because teardown runs on
+  half-built objects.
 - `src/engine/render/TextureDescriptorSpace.hpp`: how the texture descriptor
   heap is split - manifest textures on stable low indices, glTF textures
   discovered at load time taking the top downward, and the rule that the two

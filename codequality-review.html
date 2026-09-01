@@ -1533,9 +1533,50 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       with a comment saying why it is ordered that way.
     </p>
     <p>
+      <strong>Fifth seam: the mapped buffers.</strong> The skinning palette, the
+      draw-instance array and the material table were three structs with the
+      same three fields and three create/destroy pairs differing only in a size
+      expression, a member name and a debug label. A fourth,
+      <code>OwnedBuffer</code> in <code>VulkanSceneDescriptors</code>, was the
+      same again. The duplication was not the length — it was that each copy
+      separately got the usage flags, the sharing mode, the memory-usage class
+      and the destroy order right, and a fifth buffer would have had to get them
+      right again. They are one <code>GpuMappedBuffer</code> now, which is also
+      the fix for the four-way half of <span class="code">D2</span>.
+    </p>
+    <p>
+      The three view structs went the same way. <code>SkinningBufferView</code>,
+      <code>DrawInstanceBufferView</code> and <code>MaterialBufferView</code> had
+      identical fields and an identical validity test; they are aliases of one
+      <code>GpuBufferView</code>. The names are kept because a signature saying
+      <code>MaterialBufferView</code> says which binding it feeds — but they are
+      now the same type, so a caller cannot be handed the wrong one and have it
+      compile.
+    </p>
+    <p>
+      This seam could not be a Vulkan-free tested header like the four before
+      it, so the checks are different in kind: the class was compiled and
+      exercised against the real Vulkan headers with a stub allocator, covering
+      what the call sites actually rely on — that a view with a zero range
+      reports invalid, that <code>handle()</code> and <code>mapped()</code>
+      survive creation, and that <code>destroy()</code> is both idempotent and
+      safe with a null allocator, because teardown runs on half-built objects.
+      Creation deliberately does not catch: every caller already wraps creation
+      and its first fill in one try/catch that destroys and rethrows, and
+      catching here too would destroy twice.
+    </p>
+    <p>
+      Two things the extraction turned up in passing. A blanket
+      <code>.mapped</code> → <code>.mapped()</code> rewrite produced two
+      <code>.mapped()()</code> at the sites already converted by hand — caught by
+      grepping for the result rather than trusting the edit. And once the three
+      view accessors used <code>view()</code>, the <code>size()</code> accessor I
+      had added had no callers at all; it is gone, since a convenience nobody
+      calls is just a second thing to keep correct.
+    </p>
+    <p>
       What remains is the part the finding is actually about: the class still
-      owns mesh upload, texture format selection and mip generation, animation
-      clips, and the skinning and draw-instance buffers.
+      owns mesh upload, and texture format selection and mip generation.
     </p>
   </article>
 

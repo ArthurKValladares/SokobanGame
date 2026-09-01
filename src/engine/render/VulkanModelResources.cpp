@@ -1429,14 +1429,14 @@ uint32_t VulkanModelResources::writeDrawInstance(
     uint32_t frameIndex,
     const GpuDrawInstance& instance)
 {
-    if (frameIndex >= gpuSkinningFrameCount || !drawInstanceBuffer_.mapped ||
+    if (frameIndex >= gpuSkinningFrameCount || !drawInstanceBuffer_.mapped() ||
         drawInstanceCount_ >= maxDrawInstancesPerFrame) {
         throw std::runtime_error("Draw instance buffer is exhausted or invalid");
     }
     const uint32_t result = frameIndex * maxDrawInstancesPerFrame +
         drawInstanceCount_++;
     std::memcpy(
-        static_cast<std::byte*>(drawInstanceBuffer_.mapped) +
+        static_cast<std::byte*>(drawInstanceBuffer_.mapped()) +
             static_cast<uint64_t>(result) * sizeof(GpuDrawInstance),
         &instance,
         sizeof(instance));
@@ -1540,31 +1540,24 @@ uint32_t VulkanModelResources::textureCount() const
 
 VulkanModelResources::SkinningBufferView VulkanModelResources::skinningBuffer() const
 {
-    return {
-        .buffer = skinningBuffer_.buffer,
-        .range = static_cast<VkDeviceSize>(gpuSkinningFrameCount) *
-            maxSkinnedInstancesPerFrame * sizeof(GpuSkinningInstance),
-    };
+    return skinningBuffer_.view(
+        static_cast<VkDeviceSize>(gpuSkinningFrameCount) *
+        maxSkinnedInstancesPerFrame * sizeof(GpuSkinningInstance));
 }
 
 VulkanModelResources::DrawInstanceBufferView
 VulkanModelResources::drawInstanceBuffer() const
 {
-    return {
-        .buffer = drawInstanceBuffer_.buffer,
-        .range = static_cast<VkDeviceSize>(gpuSkinningFrameCount) *
-            maxDrawInstancesPerFrame * sizeof(GpuDrawInstance),
-    };
+    return drawInstanceBuffer_.view(
+        static_cast<VkDeviceSize>(gpuSkinningFrameCount) *
+        maxDrawInstancesPerFrame * sizeof(GpuDrawInstance));
 }
 
 VulkanModelResources::MaterialBufferView
 VulkanModelResources::materialBuffer() const
 {
-    return {
-        .buffer = materialBuffer_.buffer,
-        .range = static_cast<VkDeviceSize>(maxModelMaterials) *
-            sizeof(GpuMaterial),
-    };
+    return materialBuffer_.view(
+        static_cast<VkDeviceSize>(maxModelMaterials) * sizeof(GpuMaterial));
 }
 
 VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
@@ -1694,21 +1687,13 @@ void VulkanModelResources::createSkinningBuffer()
 {
     const VkDeviceSize size = static_cast<VkDeviceSize>(gpuSkinningFrameCount) *
         maxSkinnedInstancesPerFrame * sizeof(GpuSkinningInstance);
-    const VkBufferCreateInfo bufferInfo {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = size,
-        .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-    };
     try {
-        allocator_->createBuffer(
-            bufferInfo,
-            VulkanMemoryUsage::HostSequentialWrite,
-            skinningBuffer_.buffer,
-            skinningBuffer_.allocation,
-            &skinningBuffer_.mapped,
+        skinningBuffer_.create(
+            *allocator_,
+            size,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
             "GPU skinning palette");
-        std::memset(skinningBuffer_.mapped, 0, static_cast<std::size_t>(size));
+        std::memset(skinningBuffer_.mapped(), 0, static_cast<std::size_t>(size));
     } catch (...) {
         destroySkinningBuffer();
         throw;
@@ -1717,32 +1702,21 @@ void VulkanModelResources::createSkinningBuffer()
 
 void VulkanModelResources::destroySkinningBuffer()
 {
-    if (allocator_) {
-        allocator_->destroyBuffer(
-            skinningBuffer_.buffer, skinningBuffer_.allocation);
-    }
-    skinningBuffer_ = {};
+    skinningBuffer_.destroy(allocator_);
 }
 
 void VulkanModelResources::createModelInstanceBuffer()
 {
     const VkDeviceSize size = static_cast<VkDeviceSize>(gpuSkinningFrameCount) *
         maxDrawInstancesPerFrame * sizeof(GpuDrawInstance);
-    const VkBufferCreateInfo bufferInfo {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = size,
-        .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-    };
     try {
-        allocator_->createBuffer(
-            bufferInfo,
-            VulkanMemoryUsage::HostSequentialWrite,
-            drawInstanceBuffer_.buffer,
-            drawInstanceBuffer_.allocation,
-            &drawInstanceBuffer_.mapped,
+        drawInstanceBuffer_.create(
+            *allocator_,
+            size,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
             "Static model instances");
-        std::memset(drawInstanceBuffer_.mapped, 0, static_cast<std::size_t>(size));
+        std::memset(
+            drawInstanceBuffer_.mapped(), 0, static_cast<std::size_t>(size));
     } catch (...) {
         destroyModelInstanceBuffer();
         throw;
@@ -1751,30 +1725,16 @@ void VulkanModelResources::createModelInstanceBuffer()
 
 void VulkanModelResources::destroyModelInstanceBuffer()
 {
-    if (allocator_) {
-        allocator_->destroyBuffer(
-            drawInstanceBuffer_.buffer, drawInstanceBuffer_.allocation);
-    }
-    drawInstanceBuffer_ = {};
+    drawInstanceBuffer_.destroy(allocator_);
 }
 
 void VulkanModelResources::createMaterialBuffer()
 {
     const VkDeviceSize size =
         static_cast<VkDeviceSize>(maxModelMaterials) * sizeof(GpuMaterial);
-    const VkBufferCreateInfo bufferInfo {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = size,
-        .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-    };
     try {
-        allocator_->createBuffer(
-            bufferInfo,
-            VulkanMemoryUsage::HostSequentialWrite,
-            materialBuffer_.buffer,
-            materialBuffer_.allocation,
-            &materialBuffer_.mapped,
+        materialBuffer_.create(
+            *allocator_, size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
             "Model materials");
         // Entry zero is the material a draw lands on when nothing has been
         // published for it yet, so it has to read as an untextured white
@@ -1784,7 +1744,7 @@ void VulkanModelResources::createMaterialBuffer()
         const GpuMaterial fallback {};
         for (uint32_t index = 0; index < maxModelMaterials; ++index) {
             std::memcpy(
-                static_cast<std::byte*>(materialBuffer_.mapped) +
+                static_cast<std::byte*>(materialBuffer_.mapped()) +
                     static_cast<std::size_t>(index) * sizeof(GpuMaterial),
                 &fallback,
                 sizeof(GpuMaterial));
@@ -1799,11 +1759,7 @@ void VulkanModelResources::createMaterialBuffer()
 
 void VulkanModelResources::destroyMaterialBuffer()
 {
-    if (allocator_) {
-        allocator_->destroyBuffer(
-            materialBuffer_.buffer, materialBuffer_.allocation);
-    }
-    materialBuffer_ = {};
+    materialBuffer_.destroy(allocator_);
 }
 
 uint32_t VulkanModelResources::writeMaterials(
@@ -1812,7 +1768,7 @@ uint32_t VulkanModelResources::writeMaterials(
     if (materials.empty()) {
         return 0;
     }
-    if (!materialBuffer_.mapped) {
+    if (!materialBuffer_.mapped()) {
         throw std::runtime_error("Material buffer is not mapped");
     }
 
@@ -1828,7 +1784,7 @@ uint32_t VulkanModelResources::writeMaterials(
         materialStorage_[base + index] = gpuMaterialFrom(materials[index]);
     }
     std::memcpy(
-        static_cast<std::byte*>(materialBuffer_.mapped) +
+        static_cast<std::byte*>(materialBuffer_.mapped()) +
             base * sizeof(GpuMaterial),
         materialStorage_.data() + base,
         materials.size() * sizeof(GpuMaterial));
@@ -1841,7 +1797,7 @@ void VulkanModelResources::writeSkinningInstance(
     const SkinnedMeshData& mesh,
     const AnimationController::SkinningRequest& request)
 {
-    if (!skinningBuffer_.mapped || instanceSlot >= maxSkinnedInstancesPerFrame ||
+    if (!skinningBuffer_.mapped() || instanceSlot >= maxSkinnedInstancesPerFrame ||
         request.toClip == nullptr) {
         throw std::runtime_error("GPU skinning palette write is invalid");
     }
@@ -1858,7 +1814,7 @@ void VulkanModelResources::writeSkinningInstance(
     const uint64_t linearIndex =
         static_cast<uint64_t>(frameIndex) * maxSkinnedInstancesPerFrame + instanceSlot;
     std::memcpy(
-        static_cast<std::byte*>(skinningBuffer_.mapped) +
+        static_cast<std::byte*>(skinningBuffer_.mapped()) +
             linearIndex * sizeof(GpuSkinningInstance),
         &instance,
         sizeof(instance));

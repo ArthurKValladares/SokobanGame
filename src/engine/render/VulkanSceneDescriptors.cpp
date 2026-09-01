@@ -321,7 +321,7 @@ void VulkanSceneDescriptors::updateInternal(
         .imageLayout = resources.pointShadows.imageLayout,
     };
     const VkDescriptorBufferInfo lighting {
-        .buffer = frameBuffers_[internalSetIndex].buffer,
+        .buffer = frameBuffers_[internalSetIndex].handle(),
         .offset = 0,
         .range = sizeof(SceneFrameUniform),
     };
@@ -512,8 +512,8 @@ void VulkanSceneDescriptors::updateTextureSet(
 void VulkanSceneDescriptors::destroy()
 {
     if (device_) {
-        for (OwnedBuffer& buffer : frameBuffers_) {
-            allocator_->destroyBuffer(buffer.buffer, buffer.allocation);
+        for (GpuMappedBuffer& buffer : frameBuffers_) {
+            buffer.destroy(allocator_);
         }
         if (pool_) {
             vkDestroyDescriptorPool(device_, pool_, nullptr);
@@ -537,30 +537,21 @@ void VulkanSceneDescriptors::destroy()
     allocator_ = nullptr;
 }
 
-VulkanSceneDescriptors::OwnedBuffer
-VulkanSceneDescriptors::createFrameBuffer() const
+GpuMappedBuffer VulkanSceneDescriptors::createFrameBuffer() const
 {
-    OwnedBuffer result;
-    const VkBufferCreateInfo info {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = sizeof(SceneFrameUniform),
-        .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-    };
+    GpuMappedBuffer result;
     try {
-        allocator_->createBuffer(
-            info,
-            VulkanMemoryUsage::HostSequentialWrite,
-            result.buffer,
-            result.allocation,
-            &result.mapped,
+        result.create(
+            *allocator_,
+            sizeof(SceneFrameUniform),
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
             "Scene frame uniform buffer");
         vulkanDebug::setObjectName(
-            device_, VK_OBJECT_TYPE_BUFFER, result.buffer,
+            device_, VK_OBJECT_TYPE_BUFFER, result.handle(),
             "Scene frame uniform buffer");
-        std::memset(result.mapped, 0, sizeof(SceneFrameUniform));
+        std::memset(result.mapped(), 0, sizeof(SceneFrameUniform));
     } catch (...) {
-        allocator_->destroyBuffer(result.buffer, result.allocation);
+        result.destroy(allocator_);
         throw;
     }
     return result;
@@ -574,7 +565,7 @@ void VulkanSceneDescriptors::updateFrame(
 {
     const uint32_t internalSetIndex = setIndex * 2 + (preview ? 1U : 0U);
     if (internalSetIndex >= frameBuffers_.size() ||
-        !frameBuffers_[internalSetIndex].mapped) {
+        !frameBuffers_[internalSetIndex].mapped()) {
         throw std::runtime_error("Scene frame uniform buffer is unavailable");
     }
     SceneFrameUniform uniform {
@@ -616,7 +607,7 @@ void VulkanSceneDescriptors::updateFrame(
     }
     uniform.pointLightMeta.x = static_cast<float>(count);
     std::memcpy(
-        frameBuffers_[internalSetIndex].mapped,
+        frameBuffers_[internalSetIndex].mapped(),
         &uniform,
         sizeof(uniform));
 }

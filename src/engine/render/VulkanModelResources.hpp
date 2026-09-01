@@ -4,6 +4,7 @@
 #include "engine/render/AnimationController.hpp"
 #include "engine/render/AssetLoadScheduler.hpp"
 #include "engine/render/FrameRetirementQueue.hpp"
+#include "engine/render/GpuMappedBuffer.hpp"
 #include "engine/render/GpuSkinning.hpp"
 #include "engine/render/ImageData.hpp"
 #include "engine/render/MaterialRangeAllocator.hpp"
@@ -49,26 +50,13 @@ public:
         bool skinned = false;
     };
 
-    struct SkinningBufferView {
-        VkBuffer buffer = VK_NULL_HANDLE;
-        VkDeviceSize range = 0;
-
-        [[nodiscard]] bool valid() const { return buffer && range > 0; }
-    };
-
-    struct DrawInstanceBufferView {
-        VkBuffer buffer = VK_NULL_HANDLE;
-        VkDeviceSize range = 0;
-
-        [[nodiscard]] bool valid() const { return buffer && range > 0; }
-    };
-
-    struct MaterialBufferView {
-        VkBuffer buffer = VK_NULL_HANDLE;
-        VkDeviceSize range = 0;
-
-        [[nodiscard]] bool valid() const { return buffer && range > 0; }
-    };
+    // One shape, three jobs. The names are kept because a signature saying
+    // MaterialBufferView says which binding it feeds, which GpuBufferView on
+    // its own would not - but they are the same type, so a caller can no longer
+    // be handed the wrong one and have it compile.
+    using SkinningBufferView = GpuBufferView;
+    using DrawInstanceBufferView = GpuBufferView;
+    using MaterialBufferView = GpuBufferView;
 
     struct TextureView {
         VkImageView imageView = VK_NULL_HANDLE;
@@ -291,24 +279,6 @@ private:
     struct GpuSkinnedMesh {
         VulkanGeometryArena::Allocation allocation {};
         uint32_t indexCount = 0;
-    };
-
-    struct SkinningBuffer {
-        VkBuffer buffer = VK_NULL_HANDLE;
-        VulkanAllocation allocation = nullptr;
-        void* mapped = nullptr;
-    };
-
-    struct ModelInstanceBuffer {
-        VkBuffer buffer = VK_NULL_HANDLE;
-        VulkanAllocation allocation = nullptr;
-        void* mapped = nullptr;
-    };
-
-    struct MaterialBuffer {
-        VkBuffer buffer = VK_NULL_HANDLE;
-        VulkanAllocation allocation = nullptr;
-        void* mapped = nullptr;
     };
 
     struct TextureResource {
@@ -566,9 +536,9 @@ private:
     TextureResource fallbackTexture_ {};
     VulkanUploadRing uploadRing_ {};
     VulkanGeometryArena geometryArena_ {};
-    SkinningBuffer skinningBuffer_ {};
-    ModelInstanceBuffer drawInstanceBuffer_ {};
-    MaterialBuffer materialBuffer_ {};
+    GpuMappedBuffer skinningBuffer_ {};
+    GpuMappedBuffer drawInstanceBuffer_ {};
+    GpuMappedBuffer materialBuffer_ {};
     // Mirrors the mapped buffer, sized to the allocator's high-water mark.
     // Live ranges never move, and retired ranges return to materialRanges_
     // only after their frame fences complete.
