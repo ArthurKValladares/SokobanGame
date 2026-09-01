@@ -86,6 +86,34 @@ inline constexpr float clipSpaceQuad = 0.0f;
 // They are not instanced, they have one camera per pass, and nothing in a
 // shadow pass reads material state - so the transport differs while the
 // layout stays identical, and there is only one struct to keep in step.
+// Which shading path a draw takes. Lives in GpuDrawInstance::textureOptions.x
+// and is what the scene, mirror and UI fragment shaders branch on.
+//
+// One numeric space, previously written down in four places: ModelMaterialMode
+// covered 0 to 2, a lone constant named 5, a nested ternary in the recorder
+// produced 3, 4, 6 and 7 as bare floats, and each shader repeated whichever
+// values it happened to care about.
+//
+// shaders/include/DrawMode.glsl mirrors these values and DrawModeTests pins the
+// two together, so the numbering can no longer drift.
+enum class DrawMaterialMode : uint32_t {
+    Untextured = 0,
+    ManifestTexture = 1,
+    GltfMaterial = 2,
+    FontGlyph = 3,
+    TitleBackground = 4,
+    ProceduralTexture = 5,
+    SceneImage = 6,
+    TextureImage = 7,
+};
+
+// The lane is a float because every other lane of that vec4 is one; the shader
+// recovers the integer with int(x + 0.5).
+[[nodiscard]] constexpr float shaderValue(DrawMaterialMode mode)
+{
+    return static_cast<float>(static_cast<uint32_t>(mode));
+}
+
 struct GpuDrawInstance {
     // Four **world-space** corners for a quad, or the four columns of
     // worldFromModel for a mesh. Before C1 these were clip-space corners and

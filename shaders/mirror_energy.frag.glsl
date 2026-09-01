@@ -21,6 +21,8 @@ layout(location = 0) out vec4 outColor;
 
 #include "Material.glsl"
 
+#include "DrawMode.glsl"
+
 #include "SceneFrame.glsl"
 
 Material modelMaterial()
@@ -36,7 +38,7 @@ vec3 sampledMaterialRgb(Material material)
 {
     int materialMode = int(draw.textureOptions.x + 0.5);
     vec3 result = material.baseColorFactor.rgb;
-    if (materialMode == 2) {
+    if (materialMode == DRAW_MODE_GLTF_MATERIAL) {
         int materialTexture = int(material.primaryTextureHandles.x);
         // Mirror energy's explicit material subset is base-colour RGB, its UV
         // selection, and scrolling. Factor/texture alpha, alpha mode/cutoff,
@@ -55,7 +57,7 @@ vec3 sampledMaterialRgb(Material material)
         return result * texture(
             modelTextures[nonuniformEXT(textureIndex)], uv).rgb;
     }
-    if (materialMode == 1) {
+    if (materialMode == DRAW_MODE_MANIFEST_TEXTURE) {
         int textureIndex = max(int(draw.materialOptions.z + 0.5), 0);
         return result * texture(
             modelTextures[nonuniformEXT(textureIndex)],

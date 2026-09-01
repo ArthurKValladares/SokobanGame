@@ -97,7 +97,7 @@ vec3 mappedSurfaceNormal(Material material)
 
 #include "SceneFrame.glsl"
 
-const int MATERIAL_MODE_PROCEDURAL_TEXTURE = 5;
+#include "DrawMode.glsl"
 
 #include "AmbientMask.glsl"
 
@@ -348,7 +348,7 @@ void main()
     }
 
     vec4 baseColorSample = vec4(1.0);
-    if (materialMode == 2) {
+    if (materialMode == DRAW_MODE_GLTF_MATERIAL) {
         int materialTexture = int(material.primaryTextureHandles.x);
         if (materialTexture != 0) {
             int textureIndex = max(materialTexture - 1, 0);
@@ -359,7 +359,7 @@ void main()
             baseColorSample = texture(
                 modelTextures[nonuniformEXT(textureIndex)], uv);
         }
-    } else if (materialMode == MATERIAL_MODE_PROCEDURAL_TEXTURE) {
+    } else if (materialMode == DRAW_MODE_PROCEDURAL_TEXTURE) {
         // Procedural quads use a one-based texture handle because zero means
         // that no runtime texture was resolved.
         float selectedTexture = draw.textureOptions.y - 1.0;
@@ -367,7 +367,7 @@ void main()
         materialColor *= texture(
             modelTextures[nonuniformEXT(textureIndex)],
             vec2(inFaceCoordU, inFaceCoordV));
-    } else if (materialMode == 1) {
+    } else if (materialMode == DRAW_MODE_MANIFEST_TEXTURE) {
         int textureIndex = max(int(draw.materialOptions.z + 0.5), 0);
         baseColorSample = texture(
             modelTextures[nonuniformEXT(textureIndex)],
@@ -389,7 +389,8 @@ void main()
         if (material.materialState.y == 2u) {
             materialColor.a *= authoredAlpha;
         }
-    } else if (materialMode == 1 || materialMode == 2) {
+    } else if (materialMode == DRAW_MODE_MANIFEST_TEXTURE ||
+        materialMode == DRAW_MODE_GLTF_MATERIAL) {
         materialColor *= baseColorSample;
     }
     vec3 color = mix(materialColor.rgb, draw.gridColor.rgb, gridMask());

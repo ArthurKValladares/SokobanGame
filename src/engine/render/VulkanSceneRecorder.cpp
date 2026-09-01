@@ -40,7 +40,38 @@
 namespace sokoban {
 namespace {
 
-constexpr float particleTextureMaterialMode = 5.0f;
+// A model draw passes its authored material mode straight through, so the
+// first three DrawMaterialMode values have to keep agreeing with the manifest
+// enum. Nothing else forces that: they are declared in different headers for
+// different reasons.
+static_assert(static_cast<uint32_t>(DrawMaterialMode::Untextured)
+    == static_cast<uint32_t>(ModelMaterialMode::Untextured));
+static_assert(static_cast<uint32_t>(DrawMaterialMode::ManifestTexture)
+    == static_cast<uint32_t>(ModelMaterialMode::SingleTexture));
+static_assert(static_cast<uint32_t>(DrawMaterialMode::GltfMaterial)
+    == static_cast<uint32_t>(ModelMaterialMode::PrimitiveMaterials));
+
+// Which shading path a UI command takes. A switch rather than the nested
+// ternary this replaced, so adding a UiDrawKind is a compiler error here
+// instead of silently falling through to the title background.
+[[nodiscard]] constexpr DrawMaterialMode uiDrawMaterialMode(UiDrawKind kind)
+{
+    switch (kind) {
+    case UiDrawKind::FontGlyph:
+        return DrawMaterialMode::FontGlyph;
+    case UiDrawKind::SceneImage:
+        return DrawMaterialMode::SceneImage;
+    case UiDrawKind::TextureImage:
+        return DrawMaterialMode::TextureImage;
+    case UiDrawKind::Image:
+        return DrawMaterialMode::TitleBackground;
+    case UiDrawKind::Solid:
+        break;
+    }
+    // Solid never reaches here: it returns through drawFace above, which uses
+    // no texture at all.
+    return DrawMaterialMode::Untextured;
+}
 
 double elapsedMilliseconds(std::chrono::steady_clock::time_point start)
 {
@@ -2117,7 +2148,7 @@ private:
             .color = particle.color,
             .materialOptions = { 0.0f, 1.0f, 1.0f, 0.0f },
             .textureOptions = {
-                particleTextureMaterialMode,
+                shaderValue(DrawMaterialMode::ProceduralTexture),
                 static_cast<float>(particle.texture.value),
                 0.0f,
                 1.0f,
@@ -2793,11 +2824,8 @@ private:
         ++stats_.visibleFaces;
         stats_.vertices += 6;
         stats_.triangles += 2;
-        const float materialMode = command.kind == UiDrawKind::FontGlyph
-            ? 3.0f
-            : (command.kind == UiDrawKind::SceneImage
-                    ? 6.0f
-                    : (command.kind == UiDrawKind::TextureImage ? 7.0f : 4.0f));
+        const float materialMode =
+            shaderValue(uiDrawMaterialMode(command.kind));
         const GpuDrawInstance constants {
             .vertices = {
                 Vec4 { left, top, 0.0f, clipSpaceQuad },

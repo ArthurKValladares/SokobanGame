@@ -983,6 +983,16 @@ if(SOKOBAN_BUILD_TESTS)
     target_compile_definitions(sokoban_gpu_abi_tests PRIVATE
         SOKOBAN_TEST_SHADER_DIR="${SHADER_OUTPUT_DIR}")
     add_dependencies(sokoban_gpu_abi_tests sokoban_shaders)
+    # Reads DrawMode.glsl as text and compares it to DrawMaterialMode. Needs
+    # the shader *source* directory, not the compiled one: the value it checks
+    # is folded into a branch by the optimizer and cannot be read back out of
+    # SPIR-V, so the header itself is the only place to see it.
+    sokoban_add_test(NAME draw_mode TARGET sokoban_draw_mode_tests
+        LIBS sokoban_core
+        SOURCES tests/DrawModeTests.cpp
+    )
+    target_compile_definitions(sokoban_draw_mode_tests PRIVATE
+        SOKOBAN_TEST_SHADER_INCLUDE_DIR="${SHADER_INCLUDE_DIR}")
     sokoban_add_test(NAME opaque_draw_sorter TARGET sokoban_opaque_draw_sorter_tests
         LIBS sokoban_core
         SOURCES tests/OpaqueDrawSorterTests.cpp

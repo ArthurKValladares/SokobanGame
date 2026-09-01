@@ -19,11 +19,7 @@ layout(location = 0) out vec4 outColor;
 
 #define draw drawInstances.instances[inDrawInstance]
 
-const int UI_MODE_SOLID = 0;
-const int UI_MODE_FONT_GLYPH = 3;
-const int UI_MODE_TITLE_BACKGROUND = 4;
-const int UI_MODE_SCENE_IMAGE = 6;
-const int UI_MODE_TEXTURE_IMAGE = 7;
+#include "DrawMode.glsl"
 
 float sceneImageCutoutOpacity()
 {
@@ -63,19 +59,19 @@ void main()
     vec2 uv = draw.gridColor.xy + vec2(inFaceCoordU, inFaceCoordV);
     int mode = int(draw.textureOptions.x + 0.5);
 
-    if (mode == UI_MODE_FONT_GLYPH) {
+    if (mode == DRAW_MODE_FONT_GLYPH) {
         color.a *= texture(uiFont, uv).r;
-    } else if (mode == UI_MODE_TITLE_BACKGROUND) {
+    } else if (mode == DRAW_MODE_TITLE_BACKGROUND) {
         color *= texture(titleBackground, uv);
-    } else if (mode == UI_MODE_SCENE_IMAGE) {
+    } else if (mode == DRAW_MODE_SCENE_IMAGE) {
         // Scene alpha carries the ambient-light ratio, not opacity.
         color.rgb *= texture(sceneColor, uv).rgb;
         color.a *= 1.0 - sceneImageCutoutOpacity();
-    } else if (mode == UI_MODE_TEXTURE_IMAGE) {
+    } else if (mode == DRAW_MODE_TEXTURE_IMAGE) {
         int textureIndex = max(int(draw.textureOptions.y + 0.5) - 1, 0);
         color *= texture(
             modelTextures[nonuniformEXT(textureIndex)], uv);
-    } else if (mode != UI_MODE_SOLID) {
+    } else if (mode != DRAW_MODE_UNTEXTURED) {
         // UiDrawKind is a closed CPU enum. Make a future unmapped kind
         // conspicuous instead of accidentally rendering it as a solid quad.
         color = vec4(1.0, 0.0, 1.0, color.a);
