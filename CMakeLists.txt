@@ -962,6 +962,18 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/GpuMaterialTests.cpp
     )
+    # Reads the layout out of the .spv modules the build just produced and
+    # compares it to offsetof() on the matching struct, so the GLSL and C++
+    # descriptions of each GPU block cannot drift apart unnoticed. Needs the
+    # shaders built, and needs to be told where they landed - SHADER_OUTPUT_DIR
+    # has no $<CONFIG> component, so one path serves every configuration.
+    sokoban_add_test(NAME gpu_abi TARGET sokoban_gpu_abi_tests
+        LIBS sokoban_core
+        SOURCES tests/GpuAbiTests.cpp
+    )
+    target_compile_definitions(sokoban_gpu_abi_tests PRIVATE
+        SOKOBAN_TEST_SHADER_DIR="${SHADER_OUTPUT_DIR}")
+    add_dependencies(sokoban_gpu_abi_tests sokoban_shaders)
     sokoban_add_test(NAME opaque_draw_sorter TARGET sokoban_opaque_draw_sorter_tests
         LIBS sokoban_core
         SOURCES tests/OpaqueDrawSorterTests.cpp
