@@ -1,4 +1,5 @@
 #version 460
+#extension GL_GOOGLE_include_directive : require
 #extension GL_EXT_nonuniform_qualifier : require
 
 layout(set = 1, binding = 0) uniform sampler2D modelTextures[];
@@ -14,61 +15,13 @@ layout(location = 9) in vec2 inUv1;
 layout(location = 10) flat in uint inMaterialIndex;
 layout(location = 0) out vec4 outColor;
 
-// One draw's parameters, read back by instance index. T1 moved these out of
-// push constants so that consecutive draws sharing a pipeline can collapse
-// into a single instanced draw.
-struct DrawInstance
-{
-    vec4 vertices[4];
-    vec4 passData[4];
-    vec4 color;
-    vec4 normalAndAmbientRed;
-    vec4 sunDirectionAndAmbientGreen;
-    vec4 sunRadianceAndAmbientBlue;
-    vec4 shadowOptions;
-    vec4 materialOptions;
-    vec4 gridColor;
-    vec4 textureOptions;
-};
-layout(std430, set = 0, binding = 10) readonly buffer DrawInstances
-{
-    DrawInstance instances[];
-} drawInstances;
+#include "DrawInstance.glsl"
 
 #define draw drawInstances.instances[inDrawInstance]
 
-// One glTF material. Mirrors GpuMaterial in VulkanRenderConstants.hpp, the
-// same way DrawInstance above mirrors GpuDrawInstance.
-struct Material
-{
-    vec4 baseColorFactor;
-    vec4 emissiveAndMetallic;
-    vec4 materialScalars;
-    uvec4 primaryTextureHandles;
-    uvec4 occlusionTextureAndPadding;
-    uvec4 textureUvSets;
-    uvec4 materialState;
-};
-layout(std430, set = 0, binding = 12) readonly buffer Materials
-{
-    Material entries[];
-} materials;
+#include "Material.glsl"
 
-
-struct PointLightData
-{
-    vec4 positionAndRange;
-    vec4 colorAndIntensity;
-    vec4 shadowOptions;
-};
-layout(std140, set = 0, binding = 7) uniform SceneFrame
-{
-    mat4 clipFromWorld;
-    mat4 shadowFromWorld;
-    vec4 cameraPositionAndNearPlane;
-    PointLightData pointLights[8];
-    vec4 pointLightMeta;
-} frame;
+#include "SceneFrame.glsl"
 
 Material modelMaterial()
 {

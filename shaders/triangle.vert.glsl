@@ -1,4 +1,5 @@
 #version 460
+#extension GL_GOOGLE_include_directive : require
 
 layout(location = 0) out vec4 outShadowPosition;
 layout(location = 1) out float outFaceCoordU;
@@ -18,41 +19,11 @@ layout(location = 8) out vec4 outTangent;
 layout(location = 9) out vec2 outUv1;
 layout(location = 10) flat out uint outMaterialIndex;
 
-struct DrawInstance
-{
-    vec4 vertices[4];
-    vec4 passData[4];
-    vec4 color;
-    vec4 normalAndAmbientRed;
-    vec4 sunDirectionAndAmbientGreen;
-    vec4 sunRadianceAndAmbientBlue;
-    vec4 shadowOptions;
-    vec4 materialOptions;
-    vec4 gridColor;
-    vec4 textureOptions;
-};
-layout(std430, set = 0, binding = 10) readonly buffer DrawInstances
-{
-    DrawInstance instances[];
-} drawInstances;
+#include "DrawInstance.glsl"
 
 #define draw drawInstances.instances[gl_InstanceIndex]
 
-
-struct PointLightData
-{
-    vec4 positionAndRange;
-    vec4 colorAndIntensity;
-    vec4 shadowOptions;
-};
-layout(std140, set = 0, binding = 7) uniform SceneFrame
-{
-    mat4 clipFromWorld;
-    mat4 shadowFromWorld;
-    vec4 cameraPositionAndNearPlane;
-    PointLightData pointLights[8];
-    vec4 pointLightMeta;
-} frame;
+#include "SceneFrame.glsl"
 const int indices[6] = int[6](0, 1, 2, 0, 2, 3);
 const vec2 faceCoords[4] = vec2[4](
     vec2(0.0, 0.0),

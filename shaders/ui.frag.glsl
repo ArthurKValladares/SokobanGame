@@ -1,4 +1,5 @@
 #version 460
+#extension GL_GOOGLE_include_directive : require
 #extension GL_EXT_nonuniform_qualifier : require
 
 // Player-facing UI is composed into the display image after tonemapping. This
@@ -14,26 +15,7 @@ layout(location = 2) in float inFaceCoordV;
 layout(location = 7) flat in uint inDrawInstance;
 layout(location = 0) out vec4 outColor;
 
-// This is the shared instanced-quad transport. The full declaration mirrors
-// GpuDrawInstance because std430 array stride is part of the descriptor ABI,
-// even though UI reads only the final four lanes.
-struct DrawInstance
-{
-    vec4 vertices[4];
-    vec4 passData[4];
-    vec4 color;
-    vec4 normalAndAmbientRed;
-    vec4 sunDirectionAndAmbientGreen;
-    vec4 sunRadianceAndAmbientBlue;
-    vec4 shadowOptions;
-    vec4 materialOptions;
-    vec4 gridColor;
-    vec4 textureOptions;
-};
-layout(std430, set = 0, binding = 10) readonly buffer DrawInstances
-{
-    DrawInstance instances[];
-} drawInstances;
+#include "DrawInstance.glsl"
 
 #define draw drawInstances.instances[inDrawInstance]
 

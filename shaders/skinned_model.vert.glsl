@@ -1,4 +1,5 @@
 #version 460
+#extension GL_GOOGLE_include_directive : require
 
 #ifndef MAX_SKIN_JOINTS
 #define MAX_SKIN_JOINTS 128
@@ -32,32 +33,11 @@ layout(location = 9) out vec2 outUv1;
 // where it stops being the vertex's job to carry a texture index at all.
 layout(location = 10) flat out uint outMaterialIndex;
 
-struct SkinningInstance {
-    mat4 palette[MAX_SKIN_JOINTS + 128];
-    mat4 modelFromSource;
-    mat4 normalFromSource;
-};
-layout(std430, set = 0, binding = 9) readonly buffer SkinningPalette
-{
-    SkinningInstance instances[];
-} skinning;
+#include "Skinning.glsl"
 
-struct PointLightData { vec4 positionAndRange; vec4 colorAndIntensity; vec4 shadowOptions; };
-layout(std140, set = 0, binding = 7) uniform SceneFrame {
-    mat4 clipFromWorld; mat4 shadowFromWorld;
-    vec4 cameraPositionAndNearPlane;
-    PointLightData pointLights[8]; vec4 pointLightMeta;
-} frame;
+#include "SceneFrame.glsl"
 
-struct DrawInstance {
-    vec4 vertices[4]; vec4 passData[4]; vec4 color;
-    vec4 normalAndAmbientRed; vec4 sunDirectionAndAmbientGreen;
-    vec4 sunRadianceAndAmbientBlue; vec4 shadowOptions; vec4 materialOptions;
-    vec4 gridColor; vec4 textureOptions;
-};
-layout(std430, set = 0, binding = 10) readonly buffer DrawInstances {
-    DrawInstance instances[];
-} drawInstances;
+#include "DrawInstance.glsl"
 
 // gl_InstanceIndex is spoken for here - it indexes the skinning palette - so
 // this pipeline is the one that still needs its draw-instance index pushed.

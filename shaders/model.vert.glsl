@@ -1,4 +1,5 @@
 #version 460
+#extension GL_GOOGLE_include_directive : require
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -28,38 +29,9 @@ layout(location = 9) out vec2 outUv1;
 // made this the only material identity a vertex carries.
 layout(location = 10) flat out uint outMaterialIndex;
 
-struct PointLightData
-{
-    vec4 positionAndRange;
-    vec4 colorAndIntensity;
-    vec4 shadowOptions;
-};
-layout(std140, set = 0, binding = 7) uniform SceneFrame
-{
-    mat4 clipFromWorld;
-    mat4 shadowFromWorld;
-    vec4 cameraPositionAndNearPlane;
-    PointLightData pointLights[8];
-    vec4 pointLightMeta;
-} frame;
+#include "SceneFrame.glsl"
 
-struct DrawInstance
-{
-    vec4 vertices[4];
-    vec4 passData[4];
-    vec4 color;
-    vec4 normalAndAmbientRed;
-    vec4 sunDirectionAndAmbientGreen;
-    vec4 sunRadianceAndAmbientBlue;
-    vec4 shadowOptions;
-    vec4 materialOptions;
-    vec4 gridColor;
-    vec4 textureOptions;
-};
-layout(std430, set = 0, binding = 10) readonly buffer DrawInstances
-{
-    DrawInstance instances[];
-} drawInstances;
+#include "DrawInstance.glsl"
 
 #define draw drawInstances.instances[gl_InstanceIndex]
 

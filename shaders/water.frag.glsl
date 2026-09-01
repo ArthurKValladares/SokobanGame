@@ -1,4 +1,5 @@
 #version 460
+#extension GL_GOOGLE_include_directive : require
 
 layout(set = 0, binding = 1) uniform sampler2D sceneColor;
 layout(set = 0, binding = 5) uniform sampler2D sceneDepth;
@@ -8,26 +9,7 @@ layout(location = 2) in float inFaceCoordV;
 layout(location = 7) flat in uint inDrawInstance;
 layout(location = 0) out vec4 outColor;
 
-// One draw's parameters, read back by instance index. T1 moved these out of
-// push constants so that consecutive draws sharing a pipeline can collapse
-// into a single instanced draw.
-struct DrawInstance
-{
-    vec4 vertices[4];
-    vec4 passData[4];
-    vec4 color;
-    vec4 normalAndAmbientRed;
-    vec4 sunDirectionAndAmbientGreen;
-    vec4 sunRadianceAndAmbientBlue;
-    vec4 shadowOptions;
-    vec4 materialOptions;
-    vec4 gridColor;
-    vec4 textureOptions;
-};
-layout(std430, set = 0, binding = 10) readonly buffer DrawInstances
-{
-    DrawInstance instances[];
-} drawInstances;
+#include "DrawInstance.glsl"
 
 #define draw drawInstances.instances[inDrawInstance]
 

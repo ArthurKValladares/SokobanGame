@@ -1,4 +1,5 @@
 #version 460
+#extension GL_GOOGLE_include_directive : require
 #extension GL_EXT_nonuniform_qualifier : require
 
 // Ground splatting: blends two ground textures (a base and a detail layer)
@@ -23,60 +24,13 @@ layout(location = 6) in vec3 inWorldPosition;
 layout(location = 7) flat in uint inDrawInstance;
 layout(location = 0) out vec4 outColor;
 
-// Set on the opaque pipelines only. Screen-space occlusion estimates *ambient*
-// visibility, so multiplying the finished pixel by it - which is what the AO
-// composite used to do - darkens direct sunlight as well, which no amount of
-// occlusion should. When this is set the alpha channel stops carrying the
-// material's alpha and carries the share of this pixel's light that came from
-// the ambient term instead, and the composite scales its effect by it.
-//
-// Only the opaque pipelines can do this: a blended draw needs alpha to mean
-// alpha. Those pipelines are created with the alpha channel masked out of
-// their colour writes, so a translucent surface inherits the mask of whatever
-// opaque geometry it sits in front of, which is the right answer anyway.
-layout(constant_id = 0) const bool writeAmbientMask = false;
+#include "AmbientMask.glsl"
 
-const vec3 luminanceWeights = vec3(0.2126, 0.7152, 0.0722);
-
-
-// One draw's parameters, read back by instance index. T1 moved these out of
-// push constants so that consecutive draws sharing a pipeline can collapse
-// into a single instanced draw.
-struct DrawInstance
-{
-    vec4 vertices[4];
-    vec4 passData[4];
-    vec4 color;
-    vec4 normalAndAmbientRed;
-    vec4 sunDirectionAndAmbientGreen;
-    vec4 sunRadianceAndAmbientBlue;
-    vec4 shadowOptions;
-    vec4 materialOptions;
-    vec4 gridColor;
-    vec4 textureOptions;
-};
-layout(std430, set = 0, binding = 10) readonly buffer DrawInstances
-{
-    DrawInstance instances[];
-} drawInstances;
+#include "DrawInstance.glsl"
 
 #define draw drawInstances.instances[inDrawInstance]
 
-
-struct PointLightData
-{
-    vec4 positionAndRange;
-    vec4 colorAndIntensity;
-    vec4 shadowOptions;
-};
-layout(std140, set = 0, binding = 7) uniform SceneFrame
-{
-    mat4 clipFromWorld;
-    mat4 shadowFromWorld;
-    vec4 cameraPositionAndNearPlane;
-    PointLightData pointLights[8];
-    vec4 pointLightMeta;
-} frame;
+#include "SceneFrame.glsl"
 
 // Local origin of this face inside its splat region: X rides in the blur slot
 // (opaque ground never blurs) and Y in the last texture slot.
@@ -170,14 +124,7 @@ float shadowFactor(vec4 shadowPosition, float diffuse)
     return 1.0 - shadowAmount * draw.shadowOptions.y;
 }
 
-float pointShadowWorldDistance(
-    float depth, float nearPlane, float farPlane)
-{
-    float denominator = farPlane - depth * (farPlane - nearPlane);
-    return denominator > 0.000001
-        ? farPlane * nearPlane / denominator
-        : farPlane;
-}
+#include "PointShadow.glsl"
 
 float pointShadowFactor(
     int lightIndex, vec3 fromLight, vec3 surfaceNormal)

@@ -176,6 +176,17 @@ find_program(GLSLC_EXECUTABLE glslc
 )
 
 set(SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
+set(SHADER_INCLUDE_DIR "${SHADER_SOURCE_DIR}/include")
+# Declarations shared by more than one shader - the GPU-side mirrors of
+# GpuDrawInstance, SceneFrameUniform, GpuMaterial and GpuSkinningInstance -
+# live here and are pulled in with #include rather than retyped per module.
+#
+# Globbed rather than listed because these are a build dependency, not a
+# compilation unit: a header nobody lists is a shader that silently does not
+# rebuild when the ABI under it changes, which is the same class of failure
+# ShaderCatalog.hpp exists to prevent. CONFIGURE_DEPENDS re-globs so a new
+# header is picked up without a manual reconfigure.
+file(GLOB SHADER_INCLUDES CONFIGURE_DEPENDS "${SHADER_INCLUDE_DIR}/*.glsl")
 set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders")
 set(LEVEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/levels")
 
@@ -251,8 +262,13 @@ foreach(shader_source IN LISTS SHADER_SOURCES)
         # config-dependent flag would bake in whichever config compiled first
         # and never rebuild. Optimize always, and pass -g by hand when a
         # specific shader needs to be stepped through.
-        COMMAND "${GLSLC_EXECUTABLE}" --target-env=vulkan1.3 -O -DMAX_SKIN_JOINTS=128 -fshader-stage=${shader_stage} "${shader_source}" -o "${shader_output}"
-        DEPENDS "${shader_source}"
+        COMMAND "${GLSLC_EXECUTABLE}" --target-env=vulkan1.3 -O -DMAX_SKIN_JOINTS=128 -fshader-stage=${shader_stage} -I "${SHADER_INCLUDE_DIR}" "${shader_source}" -o "${shader_output}"
+        # Every shared header, not just this module's: glslc resolves
+        # includes itself, so CMake has no view of which shader reads
+        # which header. Depending on all of them rebuilds 16 small
+        # modules when one changes, which costs about a second and
+        # cannot leave a stale .spv behind.
+        DEPENDS "${shader_source}" ${SHADER_INCLUDES}
         VERBATIM
     )
 endforeach()
