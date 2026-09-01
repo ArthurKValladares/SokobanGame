@@ -8,10 +8,100 @@
 
 #include <array>
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <stdexcept>
 
 namespace sokoban {
+
+namespace {
+
+// The scene set's layout, as data.
+//
+// This was twelve VkDescriptorSetLayoutBinding aggregates written out longhand,
+// eighty-five lines of which the only varying parts were these three fields.
+// The length was the smaller problem. The descriptor pool has to be sized per
+// descriptor type, and those sizes were three separate hand-kept numbers -
+// `sceneSingleImageBindings`, an implicit 1 for the uniform buffer, and a bare
+// literal 3 for the storage buffers. Adding a binding meant remembering to
+// change the matching one, with nothing to say which that was. They are counted
+// off the table now.
+//
+// The binding numbers are the contract with the shaders, which declare them by
+// hand; they are not indices into this array and their order here is only
+// convention. Binding 2 is absent - no shader declares it and nothing explains
+// the hole, so it is left as it is rather than closed, since renumbering would
+// mean editing every shader that names a later one.
+struct SceneBinding {
+    uint32_t binding;
+    VkDescriptorType type;
+    VkShaderStageFlags stages;
+};
+
+constexpr std::array<SceneBinding, 12> sceneBindings {
+    SceneBinding { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+    SceneBinding { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+    SceneBinding { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+    SceneBinding { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+    SceneBinding { 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+    SceneBinding { 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+    SceneBinding { 7, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT },
+    SceneBinding { 8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+    SceneBinding { 9, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT },
+    // Fragment too since T1: the material half of a draw's parameters is read
+    // here rather than pushed.
+    SceneBinding { 10, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT },
+    SceneBinding { 11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+    // Fragment only for now. A vertex stage that wanted to fold a material into
+    // its transform would have to be added here as well as declared there.
+    SceneBinding { 12, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
+};
+
+// How many of the set's bindings ask for `type`, which is what the descriptor
+// pool needs to be told.
+[[nodiscard]] constexpr uint32_t bindingsOfType(VkDescriptorType type)
+{
+    uint32_t count = 0;
+    for (const SceneBinding& binding : sceneBindings) {
+        if (binding.type == type) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+// sceneSingleImageBindings is also read by VulkanDeviceContext to size the
+// texture heap's share of the pool, so it stays a named constant rather than
+// becoming a call - but it has to keep agreeing with the table.
+static_assert(
+    bindingsOfType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+        == sceneSingleImageBindings,
+    "sceneSingleImageBindings must equal the number of sampler bindings in "
+    "sceneBindings; the descriptor pool and the texture heap are both sized "
+    "from it");
+
+// Every binding here is one descriptor. The texture heap is the only
+// variable-count binding and it lives in its own set, which is what a variable
+// count requires.
+[[nodiscard]] constexpr std::array<
+    VkDescriptorSetLayoutBinding, sceneBindings.size()>
+sceneLayoutBindings()
+{
+    std::array<VkDescriptorSetLayoutBinding, sceneBindings.size()> layout {};
+    for (std::size_t index = 0; index < sceneBindings.size(); ++index) {
+        layout[index] = VkDescriptorSetLayoutBinding {
+            .binding = sceneBindings[index].binding,
+            .descriptorType = sceneBindings[index].type,
+            .descriptorCount = 1,
+            .stageFlags = sceneBindings[index].stages,
+        };
+    }
+    return layout;
+}
+
+} // namespace
 
 VulkanSceneDescriptors::~VulkanSceneDescriptors()
 {
@@ -38,88 +128,7 @@ void VulkanSceneDescriptors::create(
     modelTextureCount_ = static_cast<uint32_t>(resources.modelTextures.size());
 
     try {
-        std::array<VkDescriptorSetLayoutBinding, sceneSingleImageBindings + 4>
-            bindings {
-            VkDescriptorSetLayoutBinding {
-                .binding = 0,
-                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-            },
-            VkDescriptorSetLayoutBinding {
-                .binding = 1,
-                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-            },
-            VkDescriptorSetLayoutBinding {
-                .binding = 3,
-                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-            },
-            VkDescriptorSetLayoutBinding {
-                .binding = 4,
-                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-            },
-            VkDescriptorSetLayoutBinding {
-                .binding = 5,
-                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-            },
-            VkDescriptorSetLayoutBinding {
-                .binding = 6,
-                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-            },
-            VkDescriptorSetLayoutBinding {
-                .binding = 7,
-                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT |
-                    VK_SHADER_STAGE_FRAGMENT_BIT,
-            },
-            VkDescriptorSetLayoutBinding {
-                .binding = 8,
-                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-            },
-            VkDescriptorSetLayoutBinding {
-                .binding = 9,
-                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-            },
-            VkDescriptorSetLayoutBinding {
-                .binding = 10,
-                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .descriptorCount = 1,
-                // Fragment too since T1: the material half of a draw's
-                // parameters is read here rather than pushed.
-                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT |
-                    VK_SHADER_STAGE_FRAGMENT_BIT,
-            },
-            VkDescriptorSetLayoutBinding {
-                .binding = 11,
-                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-            },
-            VkDescriptorSetLayoutBinding {
-                .binding = 12,
-                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .descriptorCount = 1,
-                // Fragment only for now. A vertex stage that wanted to fold
-                // a material into its transform would have to be added here
-                // as well as declared there.
-                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-            },
-        };
+        static constexpr auto bindings = sceneLayoutBindings();
         VkDescriptorSetLayoutCreateInfo layoutInfo {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
             .bindingCount = static_cast<uint32_t>(bindings.size()),
@@ -187,16 +196,22 @@ void VulkanSceneDescriptors::create(
             VkDescriptorPoolSize {
                 .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .descriptorCount =
-                    sceneSingleImageBindings * sceneSetCount +
+                    bindingsOfType(
+                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) *
+                        sceneSetCount +
                     modelTextureCount_ * frameSetCount_,
             },
             VkDescriptorPoolSize {
                 .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                .descriptorCount = sceneSetCount,
+                .descriptorCount =
+                    bindingsOfType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) *
+                    sceneSetCount,
             },
             VkDescriptorPoolSize {
                 .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .descriptorCount = 3 * sceneSetCount,
+                .descriptorCount =
+                    bindingsOfType(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) *
+                    sceneSetCount,
             },
         };
         VkDescriptorPoolCreateInfo poolInfo {

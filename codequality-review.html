@@ -1349,46 +1349,97 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       <span class="sev is-major">Major</span>
       <span class="tag">Function length</span>
     </div>
-    <h3>Eight functions run past 200 lines</h3>
+    <h3>Seventeen functions run past 200 lines</h3>
+    <p>
+      <strong>The count in the first version of this finding was wrong.</strong>
+      It said eight and listed eight. Measuring every function body in
+      <code>src/</code> with a brace-matching pass finds <strong>17</strong> at or
+      past 200 lines, 38 past 150 and 77 past 100 — and several of the longest
+      were never named, including <code>drawIsoFrame</code> at 487 and
+      <code>buildRenderFrame</code> at 302. The one function I did name as the
+      worst was also understated: <code>ApplicationDebugUi::draw</code> is 846
+      lines, not 755.
+    </p>
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Lines</th><th>Function</th><th>What it mixes</th></tr>
+          <tr><th>Lines</th><th>Function</th><th>Status</th></tr>
         </thead>
         <tbody>
-          <tr><td class="num">755</td><td><code>ApplicationDebugUi.cpp:93</code> · <code>draw</code></td><td>Every developer panel in one function</td></tr>
-          <tr><td class="num">494</td><td><code>IsoScenePreparer.cpp:1037</code> · <code>prepare</code></td><td>Culling, face emission, sorting, picking, water, decorations</td></tr>
-          <tr><td class="num">377</td><td><code>ui/OptionsMenu.cpp:1063</code> · <code>draw</code></td><td>All option categories and their layout</td></tr>
-          <tr><td class="num">318</td><td><code>AnimationCatalogDebugUi.cpp:41</code> · <code>draw</code></td><td>Catalog browser, editor and preview controls</td></tr>
-          <tr><td class="num">275</td><td><code>RenderFrameBuilder.cpp:1469</code> · <code>appendMirrorPreview</code></td><td>Beam prism, ghost, destination preview</td></tr>
-          <tr><td class="num">259</td><td><code>Application.cpp:386</code> · <code>run</code></td><td>Frame loop, events, UI, render, smoke run, evidence</td></tr>
-          <tr><td class="num">230</td><td><code>VulkanSceneDescriptors.cpp:26</code> · <code>create</code></td><td>12 layout bindings written out longhand</td></tr>
-          <tr><td class="num">224</td><td><code>VulkanRenderer.cpp:404</code> · <code>drawFrame</code></td><td>Requirements, sync, acquire, record, stats, submit, present</td></tr>
+          <tr><td class="num">846</td><td><code>ApplicationDebugUi.cpp</code> · <code>draw</code></td><td>open — UI</td></tr>
+          <tr><td class="num">508</td><td><code>IsoScenePreparer.cpp</code> · <code>prepare</code></td><td>open</td></tr>
+          <tr><td class="num">487</td><td><code>VulkanSceneRecorder.cpp</code> · <code>drawIsoFrame</code></td><td>open — unlisted before</td></tr>
+          <tr><td class="num">378</td><td><code>ui/OptionsMenu.cpp</code> · <code>draw</code></td><td>open — UI</td></tr>
+          <tr><td class="num">319</td><td><code>AnimationCatalogDebugUi.cpp</code> · <code>draw</code></td><td>open — UI</td></tr>
+          <tr><td class="num">305</td><td><code>VulkanSceneRecorder.cpp</code> · <code>record</code></td><td>open — unlisted before</td></tr>
+          <tr><td class="num">302</td><td><code>Application.cpp</code> · <code>buildRenderFrame</code></td><td>open — unlisted before</td></tr>
+          <tr><td class="num">276</td><td><code>RenderFrameBuilder.cpp</code> · <code>appendMirrorPreview</code></td><td>open</td></tr>
+          <tr><td class="num">269</td><td><code>LevelEditorDebugUi.cpp</code> · <code>drawOverworldTab</code></td><td>open — UI, unlisted before</td></tr>
+          <tr><td class="num">260</td><td><code>Application.cpp</code> · <code>run</code></td><td>open</td></tr>
+          <tr><td class="num">269&nbsp;→&nbsp;250</td><td><code>VulkanRenderer.cpp</code> · <code>drawFrame</code></td><td><b>done in part</b></td></tr>
+          <tr><td class="num">231&nbsp;→&nbsp;156</td><td><code>VulkanSceneDescriptors.cpp</code> · <code>create</code></td><td><b>done</b></td></tr>
+          <tr><td class="num">223</td><td><code>OverworldMap.cpp</code> · <code>load</code></td><td>open — unlisted before</td></tr>
+          <tr><td class="num">218</td><td><code>ui/OptionsMenu.cpp</code> · <code>optionsMenuRows</code></td><td>open — unlisted before</td></tr>
+          <tr><td class="num">208</td><td><code>ContentPipeline.cpp</code> · <code>addLevels</code></td><td>open — unlisted before</td></tr>
+          <tr><td class="num">204</td><td><code>VulkanPipelineFactory.cpp</code> · <code>createScenePipeline</code></td><td>open — unlisted before</td></tr>
+          <tr><td class="num">200</td><td><code>LevelEditorDebugUi.cpp</code> · <code>drawDecorationPalette</code></td><td>open — UI, unlisted before</td></tr>
         </tbody>
       </table>
     </div>
     <p>
-      <code>Application::run</code> is the clearest case: it interleaves eight
-      separate <code>#if SOKOBAN_ENABLE_DEBUG_UI</code> blocks with the frame
-      loop, and repeats
-      <code>preparedRenderFrame_ ? &amp;*preparedRenderFrame_ : nullptr</code>
-      five times in one body. <code>drawFrame</code> is second: 30 of its lines are
-      nothing but copying three <code>FrameTimeSummary</code> values into
-      differently-named <code>RenderStats</code> fields, three times over.
-      It also opens a <code>try</code> block whose 130-line body is left at the
-      outer indentation level, so the scope is invisible when reading.
+      Two were taken, chosen because their correctness can be demonstrated rather
+      than asserted. The five marked <em>UI</em> are deliberately left: splitting
+      an ImGui function is mechanical, but the only check that it still does the
+      same thing is to look at the screen, and that is not a check available
+      here. Length alone is not a reason to touch code nobody can verify.
     </p>
     <div class="fix">
-      <code>run()</code> → <code>pumpEvents</code>, <code>drawShellUi</code>,
-      <code>drawDeveloperUi</code>, <code>renderFrame</code>,
-      <code>serviceSmokeRun</code>. <code>drawFrame</code> → extract
-      <code>publishFrameStatistics()</code>, and either re-indent the
-      <code>try</code> body or move it into a private
-      <code>drawFrameUnguarded()</code> so the guard is one line.
-      <code>VulkanSceneDescriptors::create</code> → a
-      <code>constexpr std::array</code> of <code>{binding, type, stages}</code>
-      and one loop.
+      <b><code>VulkanSceneDescriptors::create</code>, 231 → 156.</b> Twelve
+      <code>VkDescriptorSetLayoutBinding</code> aggregates written out longhand
+      became one <code>constexpr</code> table of
+      <code>{binding, type, stages}</code>. The length was the smaller problem:
+      the descriptor pool was sized from <em>three separate hand-kept numbers</em>
+      — <code>sceneSingleImageBindings</code>, an implicit 1 for the uniform
+      buffer, and a bare literal <code>3</code> for the storage buffers — and
+      adding a binding meant remembering which one to change, with nothing saying
+      which. All three are counted off the table now, and the constant that
+      <code>VulkanDeviceContext</code> also reads is held to it by a
+      <code>static_assert</code>.
     </div>
+    <p>
+      Verified by compiling the original longhand array and the table-generated
+      one against real Vulkan headers and comparing the raw bytes: 12 bindings
+      byte-identical, pool counts 8/1/3 preserved. Six mutants of the table were
+      all caught — and one, retyping a storage buffer as a sampler, was caught
+      <em>at compile time</em> by the new assertion, which is the invariant doing
+      exactly the job it was added for. The check was then re-run against the
+      text as it actually landed in the file, not just the draft.
+    </p>
+    <div class="fix">
+      <b><code>VulkanRenderer::drawFrame</code>, 269 → 250.</b> This one turned
+      out to be unfinished work rather than sprawl. <code>RenderStats</code>
+      already holds seventeen <code>RenderPhaseTiming</code> members; scene
+      preparation, CPU frame and GPU frame were the three left behind as
+      eighteen loose fields when the rest were converted. That is why the
+      renderer had the same six-line assignment three times, and why the debug UI
+      and the evidence report each had bespoke readers. Finishing the conversion
+      collapsed 18 assignment lines to 3 and 49 read sites to the same field
+      names everything else uses.
+    </p>
+    <p>
+      Two traps sat in that, both of which a mechanical rename would have walked
+      into. The GPU assignment is guarded by
+      <code>if (gpuTiming.available())</code>, so on a device without timestamp
+      support the previous value has to survive rather than being overwritten
+      with an unavailable summary every frame; the guard is kept, and now says
+      why. And the evidence report's shared <code>writePhase</code> writer is
+      <em>not</em> interchangeable with all three bespoke blocks: the CPU line has
+      no unavailable branch at all and the GPU line's explains that timestamps
+      are missing. Only scene preparation matches, which was confirmed by
+      rendering both versions 200,000 times and comparing characters before
+      swapping it. The other two stay written out, with a comment saying the
+      difference is deliberate.
+    </p>
   </article>
 
   <article class="finding is-moderate">
@@ -2354,8 +2405,11 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
       marker is named and pinned at both ends, and the case for the larger ABI
       change is now made from evidence rather than suspicion — but that change
       itself is left for someone who can run the renderer.
-      <span class="code">C2</span> (the long functions) is the last item still
-      open, and both behavioural questions remain parked: the divergent
+      <span class="code">C2</span> is partly done and partly declined on
+      purpose: the count was wrong — 17 functions past 200 lines, not eight —
+      and the two whose correctness could be demonstrated were taken, while the
+      five ImGui panels are left because the only check on them is to look at
+      the screen. Both behavioural questions remain parked: the divergent
       point-shadow filtering and the double-counted eviction victim.
     </li>
   </ol>

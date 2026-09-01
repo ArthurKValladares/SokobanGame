@@ -111,6 +111,10 @@ sampling have different failure modes and should be independently reviewable.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
 - Current tests: 74 CTest suites in the newest configured build tree.
+- `RenderStats` carries every phase timing as a `RenderPhaseTiming`. The GPU
+  frame timing is written only when the device reports timestamps, so an
+  unsupported device keeps the last value instead of being overwritten with an
+  unavailable summary each frame; keep that guard.
 - Shader contract: `shaders/include/DrawMode.glsl` carries the draw-mode
   numbering and the `isModelDraw` sign test; `draw_mode` pins both against
   `VulkanRenderConstants.hpp` and fails if either spelling moves.
@@ -266,12 +270,19 @@ declarations under `shaders/include/`, with `gpu_abi` checking SPIR-V member
 offsets against `offsetof` and `draw_mode` pinning `DrawMode.glsl` to
 `DrawMaterialMode`; one `TestHarness.hpp` behind 55 suites; `ResidencyBudget`
 and `MaterialRangeAllocator` extracted from `VulkanModelResources`;
-`SceneDrawLanes` extracted from `VulkanSceneRecorder`; and the
-`GpuDrawInstance` lane union traced and written down.
+`SceneDrawLanes` extracted from `VulkanSceneRecorder`; the
+`GpuDrawInstance` lane union traced and written down; the scene descriptor
+layout made table-driven; and the last three phase timings converted to
+`RenderPhaseTiming`.
 
 Still open, in the order the report recommends: splitting
 `VulkanModelResources` proper and collapsing its three copies of the load-state
-machine, then the eight functions past 200 lines.
+machine, then the remaining long functions. There are 17 functions at or past
+200 lines, not the eight the review first reported - `drawIsoFrame` (487),
+`VulkanSceneRecorder::record` (305) and `Application::buildRenderFrame` (302)
+are among those it never named. Five of the sixteen still open are ImGui panels
+and are deliberately last: splitting one is mechanical, but the only check that
+it still behaves is to look at the screen.
 
 Three items are parked deliberately rather than fixed, because each needs a
 judgement this review cannot make from the source alone:

@@ -606,28 +606,14 @@ void VulkanRenderer::drawFrame(
     lastStats_.pointShadowOptimizationsEnabled =
         pointShadowOptimizationsEnabled_;
     lastStats_.recorderScratchReuseEnabled = recorderScratchReuseEnabled_;
-    const FrameTimeSummary preparationTiming =
-        scenePreparationTimeTelemetry_.summary();
-    lastStats_.scenePreparationTimingAvailable =
-        preparationTiming.available();
-    lastStats_.scenePreparationTimingSamples =
-        preparationTiming.sampleCount;
-    lastStats_.scenePreparationMilliseconds =
-        preparationTiming.latestMilliseconds;
-    lastStats_.scenePreparationAverageMilliseconds =
-        preparationTiming.averageMilliseconds;
-    lastStats_.scenePreparationP95Milliseconds =
-        preparationTiming.p95Milliseconds;
-    lastStats_.scenePreparationMaximumMilliseconds =
-        preparationTiming.maximumMilliseconds;
+    lastStats_.scenePreparationTiming =
+        renderPhaseTiming(scenePreparationTimeTelemetry_.summary());
     const FrameTimeSummary gpuTiming = gpuProfiler_.frameTimeSummary();
+    // Guarded, unlike the other two: on a device without timestamp support
+    // this must keep whatever it last held rather than being overwritten with
+    // an unavailable summary every frame.
     if (gpuTiming.available()) {
-        lastStats_.gpuFrameTimingAvailable = true;
-        lastStats_.gpuFrameTimingSamples = gpuTiming.sampleCount;
-        lastStats_.gpuFrameMilliseconds = gpuTiming.latestMilliseconds;
-        lastStats_.gpuFrameAverageMilliseconds = gpuTiming.averageMilliseconds;
-        lastStats_.gpuFrameP95Milliseconds = gpuTiming.p95Milliseconds;
-        lastStats_.gpuFrameMaximumMilliseconds = gpuTiming.maximumMilliseconds;
+        lastStats_.gpuFrameTiming = renderPhaseTiming(gpuTiming);
     }
 
     VkSemaphoreSubmitInfo waitSemaphore {
@@ -693,13 +679,8 @@ void VulkanRenderer::drawFrame(
 
     cpuFrameTimeTelemetry_.record(std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - cpuFrameStart).count());
-    const FrameTimeSummary cpuTiming = cpuFrameTimeTelemetry_.summary();
-    lastStats_.cpuFrameTimingAvailable = cpuTiming.available();
-    lastStats_.cpuFrameTimingSamples = cpuTiming.sampleCount;
-    lastStats_.cpuFrameMilliseconds = cpuTiming.latestMilliseconds;
-    lastStats_.cpuFrameAverageMilliseconds = cpuTiming.averageMilliseconds;
-    lastStats_.cpuFrameP95Milliseconds = cpuTiming.p95Milliseconds;
-    lastStats_.cpuFrameMaximumMilliseconds = cpuTiming.maximumMilliseconds;
+    lastStats_.cpuFrameTiming =
+        renderPhaseTiming(cpuFrameTimeTelemetry_.summary());
     lastStats_.assetPublications = assetPublications_;
     lastStats_.assetPublicationFrames = assetPublicationFrames_;
     const VulkanModelResources::LoadingStats loadingStats =

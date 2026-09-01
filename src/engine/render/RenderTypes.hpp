@@ -578,25 +578,17 @@ struct RenderStats {
     uint64_t textureUploadSubmissions = 0;
     uint64_t textureUploadCompletions = 0;
     uint32_t textureUploadsInFlight = 0;
-    bool scenePreparationTimingAvailable = false;
-    uint32_t scenePreparationTimingSamples = 0;
-    double scenePreparationMilliseconds = 0.0;
-    double scenePreparationAverageMilliseconds = 0.0;
-    double scenePreparationP95Milliseconds = 0.0;
-    double scenePreparationMaximumMilliseconds = 0.0;
-    bool cpuFrameTimingAvailable = false;
-    uint32_t cpuFrameTimingSamples = 0;
-    double cpuFrameMilliseconds = 0.0;
-    double cpuFrameAverageMilliseconds = 0.0;
-    double cpuFrameP95Milliseconds = 0.0;
-    double cpuFrameMaximumMilliseconds = 0.0;
+    // The last three phase timings to be written out field by field. Every
+    // other timing in this struct is a RenderPhaseTiming; these were left
+    // behind when the rest were converted, which is why the renderer had three
+    // copies of the same six-line assignment and the debug UI and the evidence
+    // report each had bespoke readers for them.
+    RenderPhaseTiming scenePreparationTiming {};
+    RenderPhaseTiming cpuFrameTiming {};
     bool gpuTimestampsSupported = false;
-    bool gpuFrameTimingAvailable = false;
-    uint32_t gpuFrameTimingSamples = 0;
-    double gpuFrameMilliseconds = 0.0;
-    double gpuFrameAverageMilliseconds = 0.0;
-    double gpuFrameP95Milliseconds = 0.0;
-    double gpuFrameMaximumMilliseconds = 0.0;
+    // Only written when the device reports timestamps, so an unsupported
+    // device leaves this default-constructed rather than zeroed each frame.
+    RenderPhaseTiming gpuFrameTiming {};
     RenderPhaseTiming gpuShadowTiming {};
     RenderPhaseTiming gpuSceneTiming {};
     RenderPhaseTiming gpuSceneRasterTiming {};

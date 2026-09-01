@@ -656,25 +656,25 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             "Frame %.3f ms (%.1f FPS)",
             io.DeltaTime * 1000.0f,
             io.Framerate);
-        if (renderStats.cpuFrameTimingAvailable) {
+        if (renderStats.cpuFrameTiming.available) {
             ImGui::Text(
                 "CPU frame %.3f ms (avg %.3f, p95 %.3f, worst %.3f; %u samples)",
-                renderStats.cpuFrameMilliseconds,
-                renderStats.cpuFrameAverageMilliseconds,
-                renderStats.cpuFrameP95Milliseconds,
-                renderStats.cpuFrameMaximumMilliseconds,
-                renderStats.cpuFrameTimingSamples);
+                renderStats.cpuFrameTiming.latestMilliseconds,
+                renderStats.cpuFrameTiming.averageMilliseconds,
+                renderStats.cpuFrameTiming.p95Milliseconds,
+                renderStats.cpuFrameTiming.maximumMilliseconds,
+                renderStats.cpuFrameTiming.samples);
         } else {
             ImGui::TextUnformatted("CPU frame timing pending");
         }
-        if (renderStats.gpuFrameTimingAvailable) {
+        if (renderStats.gpuFrameTiming.available) {
             ImGui::Text(
                 "GPU frame %.3f ms (avg %.3f, p95 %.3f, worst %.3f; %u samples)",
-                renderStats.gpuFrameMilliseconds,
-                renderStats.gpuFrameAverageMilliseconds,
-                renderStats.gpuFrameP95Milliseconds,
-                renderStats.gpuFrameMaximumMilliseconds,
-                renderStats.gpuFrameTimingSamples);
+                renderStats.gpuFrameTiming.latestMilliseconds,
+                renderStats.gpuFrameTiming.averageMilliseconds,
+                renderStats.gpuFrameTiming.p95Milliseconds,
+                renderStats.gpuFrameTiming.maximumMilliseconds,
+                renderStats.gpuFrameTiming.samples);
         } else if (!renderStats.gpuTimestampsSupported) {
             ImGui::TextUnformatted("GPU timestamps unavailable");
         } else {
@@ -830,13 +830,13 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
             static_cast<unsigned long long>(
                 renderStats.textureUploadSubmissions),
             renderStats.textureUploadsInFlight);
-        if (renderStats.scenePreparationTimingAvailable) {
+        if (renderStats.scenePreparationTiming.available) {
             ImGui::Text(
                 "Scene preparation %.3f ms avg (p95 %.3f, max %.3f; %u samples)",
-                renderStats.scenePreparationAverageMilliseconds,
-                renderStats.scenePreparationP95Milliseconds,
-                renderStats.scenePreparationMaximumMilliseconds,
-                renderStats.scenePreparationTimingSamples);
+                renderStats.scenePreparationTiming.averageMilliseconds,
+                renderStats.scenePreparationTiming.p95Milliseconds,
+                renderStats.scenePreparationTiming.maximumMilliseconds,
+                renderStats.scenePreparationTiming.samples);
         }
         ImGui::Text("Draw calls %u", renderStats.drawCalls);
         ImGui::Text("Triangles %u", renderStats.triangles);

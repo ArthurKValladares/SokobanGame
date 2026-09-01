@@ -238,29 +238,22 @@ void Application::finishEvidenceCapture()
            << evidenceStats_.textureUploadSubmissions << " submitted, "
            << evidenceStats_.textureUploadCompletions << " completed, "
            << evidenceStats_.textureUploadsInFlight << " in flight\n";
-    if (evidenceStats_.scenePreparationTimingAvailable) {
-        report << "- Scene preparation: average "
-               << evidenceStats_.scenePreparationAverageMilliseconds
-               << " ms, p95 "
-               << evidenceStats_.scenePreparationP95Milliseconds
-               << " ms, maximum "
-               << evidenceStats_.scenePreparationMaximumMilliseconds
-               << " ms (" << evidenceStats_.scenePreparationTimingSamples
-               << " samples)\n";
-    } else {
-        report << "- Scene preparation: unavailable\n";
-    }
+    // Character-identical to the block this replaces, which is why it can use
+    // the shared writer. The CPU and GPU lines below cannot: the CPU line has
+    // no unavailable branch at all, and the GPU line's says why timestamps are
+    // missing. Those differences are deliberate, so they stay written out.
+    writePhase("Scene preparation", evidenceStats_.scenePreparationTiming);
     report << "- CPU frame: average "
-           << evidenceStats_.cpuFrameAverageMilliseconds << " ms, p95 "
-           << evidenceStats_.cpuFrameP95Milliseconds << " ms, maximum "
-           << evidenceStats_.cpuFrameMaximumMilliseconds << " ms ("
-           << evidenceStats_.cpuFrameTimingSamples << " samples)\n";
-    if (evidenceStats_.gpuFrameTimingAvailable) {
+           << evidenceStats_.cpuFrameTiming.averageMilliseconds << " ms, p95 "
+           << evidenceStats_.cpuFrameTiming.p95Milliseconds << " ms, maximum "
+           << evidenceStats_.cpuFrameTiming.maximumMilliseconds << " ms ("
+           << evidenceStats_.cpuFrameTiming.samples << " samples)\n";
+    if (evidenceStats_.gpuFrameTiming.available) {
         report << "- GPU frame: average "
-               << evidenceStats_.gpuFrameAverageMilliseconds << " ms, p95 "
-               << evidenceStats_.gpuFrameP95Milliseconds << " ms, maximum "
-               << evidenceStats_.gpuFrameMaximumMilliseconds << " ms ("
-               << evidenceStats_.gpuFrameTimingSamples << " samples)\n";
+               << evidenceStats_.gpuFrameTiming.averageMilliseconds << " ms, p95 "
+               << evidenceStats_.gpuFrameTiming.p95Milliseconds << " ms, maximum "
+               << evidenceStats_.gpuFrameTiming.maximumMilliseconds << " ms ("
+               << evidenceStats_.gpuFrameTiming.samples << " samples)\n";
     } else {
         report << "- GPU frame: unavailable (timestamp support: "
                << (evidenceStats_.gpuTimestampsSupported ? "yes" : "no")
