@@ -395,6 +395,8 @@ add_library(sokoban_core STATIC
     src/engine/PlayerProfileMigrations.cpp
     src/engine/PresentationTransactionBuilder.cpp
     src/engine/RenderFrameBuilder.cpp
+    src/engine/RenderFrameBuilderEditor.cpp
+    src/engine/RenderFrameParts.cpp
     src/engine/Reservation.cpp
     src/engine/Rules.cpp
     src/engine/RuntimeContent.cpp

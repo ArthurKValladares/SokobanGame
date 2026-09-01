@@ -1807,10 +1807,11 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
     </div>
   </article>
 
-  <article class="finding is-moderate">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-moderate">Moderate</span>
-      <span class="tag">Structure</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: moderate · structure</span>
+      <span class="tag">Corrected</span>
     </div>
     <h3><code>RenderFrameBuilder.cpp</code> is two independent builders in one file</h3>
     <div class="loc"><code>src/engine/RenderFrameBuilder.cpp — 2,562 lines</code></div>
@@ -1827,6 +1828,76 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       <code>applyTileScale</code>) in a small internal header. Build times and
       diff noise both improve immediately.
     </div>
+    <p>
+      <strong>“Independent” was the wrong word, and “a small internal header”
+      was the wrong size.</strong> I read the file's shape — two anonymous
+      namespaces, no shared state — and inferred independence from it without
+      checking who called whom. Building the call graph says otherwise: the
+      editor calls <strong>16</strong> of the gameplay helpers directly and
+      pulls in <strong>6</strong> more through them. That is 22 of 40
+      definitions and <strong>718 of 1,698 lines — 42%</strong> of the helper
+      code. The two builders were never independent. They were one shared layer
+      with two entry points sitting on top of it, and nothing in the file said
+      which was which.
+    </p>
+    <p>
+      The four helpers I named as “genuinely shared” were a coin flip:
+      <code>shade</code> and <code>applyTileScale</code> are;
+      <code>toRenderPoint</code> and <code>interpolate</code> are used only by
+      gameplay. I picked plausible-sounding names instead of measuring.
+    </p>
+    <p>
+      <strong>What the shared layer actually is.</strong> Grouped rather than
+      listed, it has obvious seams: water (six helpers, 265 lines — surface
+      cells, edge faces, the shoreline mask and the unbounded exterior),
+      ladders (three, 113), decorations (three, 135), the screen selector (61),
+      the camera extent (63), animation lookups (27) and a handful of small
+      shaping helpers. Every one is called by both builders. Five are templates,
+      and they are templates for one reason: gameplay asks the level what tile
+      is at a cell and the editor asks the document under edit. That single
+      disagreement is the only thing parameterised.
+    </p>
+    <div class="fix">
+      <code>RenderFrameParts.{hpp,cpp}</code> is that layer, named and grouped
+      by subsystem, in its own namespace — these are names like
+      <code>shade</code> and <code>animationFor</code> that had internal linkage
+      before and would be collision-prone in <code>sokoban</code>.
+      <code>RenderFrameBuilder.cpp</code> keeps gameplay;
+      <code>RenderFrameBuilderEditor.cpp</code> takes the 692-line
+      <code>EditorFrameBuild</code> class, both <code>buildEditor</code>
+      overloads and <code>tileVisual</code>. 2,562 lines become 435 + 501 +
+      1,052 + 812.
+    </div>
+    <p>
+      <strong>Evidence: the split only moved text.</strong> A checker takes
+      every top-level region of the original file and requires it to appear
+      <em>verbatim</em> in exactly one of the four new files. 37 of 44 regions
+      are byte-identical. Six differ only because a default argument cannot be
+      repeated on a definition in another translation unit, so it moved to the
+      declaration — those are compared after applying exactly that
+      transformation, and the original signature with its defaults is required
+      to survive in the header. One region was dropped deliberately and is named
+      as such: the forward declaration of
+      <code>gameplayExtentForTiles</code>, which only existed because its
+      definition sat below <code>includeCameraCell</code> in the old file. The
+      checker also runs the other way, requiring every non-scaffold line in the
+      four new files to exist in the original; the 28 that do not are the
+      declaration terminators and the stripped parameter lines, which is exactly
+      the set the default-argument move predicts.
+    </p>
+    <p>
+      All 130 translation units compile under GCC with
+      <code>-Wall -Wextra -Wpedantic</code>, and the warning census is unchanged
+      at 942 — which is what a pure move should do.
+    </p>
+    <p>
+      Worth saying plainly: this buys build parallelism, smaller diffs and a
+      named home for the shared layer. It does not make any single function
+      easier to read. <code>EditorFrameBuild</code> is still 692 lines and
+      <code>appendMirrorPreview</code> is still 279; they are now in files where
+      that is the obvious next thing to do rather than one of many things buried
+      in a 2,500-line file.
+    </p>
   </article>
 </section>
 
@@ -3042,7 +3113,7 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
 <footer>
   <span>Sokoban 3D engine · code-quality audit</span>
   <span>Reviewed against HEAD 21dff13a · 31 Aug 2026</span>
-  <span>39 findings · 19 resolved · 0 live defects</span>
+  <span>39 findings · 20 resolved · 0 live defects</span>
 </footer>
 
 </div>

@@ -321,7 +321,9 @@ layout made table-driven; the last three phase timings converted to
 `PointShadow.glsl` given both copies of the point-shadow filter; and
 `Geometry.hpp`'s `Aabb` given the two hand-rolled bounds structs and the four
 eight-corner expansions; and `beginOneShotCommands`/`submitOneShotCommands`
-given the six copies of one-shot command-buffer and fence lifetime.
+given the six copies of one-shot command-buffer and fence lifetime; and
+`RenderFrameParts` given the 42% of `RenderFrameBuilder.cpp` that both the
+gameplay and the editor builders were sharing without saying so.
 
 Still open, in the order the report recommends: splitting
 `VulkanModelResources` proper and collapsing its three copies of the load-state
@@ -331,6 +333,13 @@ machine, then the remaining long functions. There are 17 functions at or past
 are among those it never named. Five of the sixteen still open are ImGui panels
 and are deliberately last: splitting one is mechanical, but the only check that
 it still behaves is to look at the screen.
+
+The two largest frame-building offenders now sit alone in their own files -
+`EditorFrameBuild` (692 lines) is all of `RenderFrameBuilderEditor.cpp` bar two
+entry points, and `appendMirrorPreview` (279) is the largest thing left in
+`RenderFrameBuilder.cpp`. That was the point of the split: neither is smaller,
+but each is now the obvious next thing in its file rather than one of forty
+helpers in a 2,500-line one.
 
 One item is parked deliberately rather than fixed, because it needs a
 judgement this review cannot make from the source alone:
@@ -1450,6 +1459,24 @@ layout changes affect modules that appear unrelated to the immediate feature.
   against no fence and waits on the whole queue. That is wider than it needs
   and is left as it was, with a comment, because narrowing it is a change to
   queue synchronisation and wants a run.
+- `src/engine/RenderFrameParts.{hpp,cpp}`: the frame pieces both builders
+  build - water, ladders, decorations, the screen selector, the camera extent,
+  animation lookups and the small shaping helpers. The review called
+  `RenderFrameBuilder.cpp` "two independent builders in one file"; it was not.
+  The editor called 16 gameplay helpers directly and 6 more through them, 718
+  of 1,698 lines. Those are here now, grouped by subsystem, in
+  `sokoban::renderFrameParts` - a namespace of its own because names like
+  `shade` and `animationFor` had internal linkage before the split and would be
+  collision-prone in `sokoban`. Both builders open it with `using namespace
+  renderFrameParts;`.
+  Five entries are templates over a tile or shoreline lookup. That is the only
+  thing the two callers disagree about - gameplay asks the level, the editor
+  asks the document under edit - so it is the only thing parameterised; resist
+  adding a second template parameter for anything else.
+  The gameplay builder stays in `RenderFrameBuilder.cpp`; the editor builder,
+  both `buildEditor` overloads and `tileVisual` are in
+  `RenderFrameBuilderEditor.cpp`. Anything a new builder needs from both goes
+  in `RenderFrameParts`, not copied into one of them.
 - `src/engine/Geometry.hpp`'s `Aabb` is the only axis-aligned box type. There
   were three: `Aabb`, `GltfMesh.cpp`'s `SourceBounds` (character-for-character
   the same struct, with `includeBounds` as `expand`) and
