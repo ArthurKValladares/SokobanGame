@@ -70,22 +70,8 @@ ImageData captureImageRegion(
             &mapped,
             "Frame capture readback");
 
-        const VkCommandBufferAllocateInfo commandBufferInfo {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            .commandPool = commandPool,
-            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-            .commandBufferCount = 1,
-        };
-        vkCheck(
-            vkAllocateCommandBuffers(device, &commandBufferInfo, &commandBuffer),
-            "vkAllocateCommandBuffers capture failed");
-
-        const VkCommandBufferBeginInfo beginInfo {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-        };
-        vkCheck(vkBeginCommandBuffer(commandBuffer, &beginInfo),
-            "vkBeginCommandBuffer capture failed");
+        commandBuffer = vulkanResources::beginOneShotCommands(
+            device, commandPool, "capture");
 
         // The caller has already finished rendering into this image, so the
         // only synchronisation needed is the layout move to transfer-source
@@ -134,26 +120,8 @@ ImageData captureImageRegion(
                 VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
                 sourceLayout,
             });
-        vkCheck(vkEndCommandBuffer(commandBuffer),
-            "vkEndCommandBuffer capture failed");
-
-        const VkFenceCreateInfo fenceInfo {
-            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-        };
-        vkCheck(vkCreateFence(device, &fenceInfo, nullptr, &fence),
-            "vkCreateFence capture failed");
-
-        const VkCommandBufferSubmitInfo commandBufferSubmit {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-            .commandBuffer = commandBuffer,
-        };
-        const VkSubmitInfo2 submit {
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-            .commandBufferInfoCount = 1,
-            .pCommandBufferInfos = &commandBufferSubmit,
-        };
-        vkCheck(vkQueueSubmit2(graphicsQueue, 1, &submit, fence),
-            "vkQueueSubmit2 capture failed");
+        fence = vulkanResources::submitOneShotCommands(
+            device, graphicsQueue, commandBuffer, "capture");
         vkCheck(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX),
             "vkWaitForFences capture failed");
 

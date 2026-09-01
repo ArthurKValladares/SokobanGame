@@ -5,6 +5,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace sokoban {
 
@@ -17,7 +18,89 @@ void vkCheck(VkResult result, const char* message)
     }
 }
 
+void vkCheck(VkResult result, const char* call, std::string_view label)
+{
+    if (result != VK_SUCCESS) {
+        throw VulkanError(
+            result,
+            std::string(call) + ' ' + std::string(label)
+                + " failed (VkResult " + std::to_string(result) + ")");
+    }
+}
+
 namespace vulkanResources {
+
+VkCommandBuffer beginOneShotCommands(
+    VkDevice device,
+    VkCommandPool pool,
+    std::string_view label,
+    const char* debugName)
+{
+    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+    const VkCommandBufferAllocateInfo commandBufferInfo {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    vkCheck(
+        vkAllocateCommandBuffers(device, &commandBufferInfo, &commandBuffer),
+        "vkAllocateCommandBuffers",
+        label);
+    if (debugName != nullptr) {
+        vulkanDebug::setObjectName(
+            device, VK_OBJECT_TYPE_COMMAND_BUFFER, commandBuffer, debugName);
+    }
+    const VkCommandBufferBeginInfo beginInfo {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    const VkResult begun = vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    if (begun != VK_SUCCESS) {
+        vkFreeCommandBuffers(device, pool, 1, &commandBuffer);
+        vkCheck(begun, "vkBeginCommandBuffer", label);
+    }
+    return commandBuffer;
+}
+
+VkFence submitOneShotCommands(
+    VkDevice device,
+    VkQueue queue,
+    VkCommandBuffer commandBuffer,
+    std::string_view label,
+    const char* debugFenceName)
+{
+    vkCheck(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer", label);
+
+    VkFence fence = VK_NULL_HANDLE;
+    const VkFenceCreateInfo fenceInfo {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+    };
+    vkCheck(
+        vkCreateFence(device, &fenceInfo, nullptr, &fence),
+        "vkCreateFence",
+        label);
+    if (debugFenceName != nullptr) {
+        vulkanDebug::setObjectName(
+            device, VK_OBJECT_TYPE_FENCE, fence, debugFenceName);
+    }
+
+    const VkCommandBufferSubmitInfo commandBufferSubmit {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+        .commandBuffer = commandBuffer,
+    };
+    const VkSubmitInfo2 submit {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+        .commandBufferInfoCount = 1,
+        .pCommandBufferInfos = &commandBufferSubmit,
+    };
+    const VkResult submitted = vkQueueSubmit2(queue, 1, &submit, fence);
+    if (submitted != VK_SUCCESS) {
+        vkDestroyFence(device, fence, nullptr);
+        vkCheck(submitted, "vkQueueSubmit2", label);
+    }
+    return fence;
+}
 
 VkImageMemoryBarrier2 imageBarrier(
     VkImage image,

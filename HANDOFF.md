@@ -110,7 +110,7 @@ sampling have different failure modes and should be independently reviewable.
 - Language and platform: C++20, SDL3, Vulkan 1.3, GLSL compiled to SPIR-V.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
-- Current tests: 75 CTest suites in the newest configured build tree.
+- Current tests: 76 CTest suites in the newest configured build tree.
 - Residency eviction: `ResidencyBudget::needsEviction` takes `(bytes, limit)`
   and reads `retiring_` as its only running total. It used to take a third
   argument that duplicated `retiring_`, so each victim counted twice and the
@@ -320,7 +320,8 @@ layout made table-driven; the last three phase timings converted to
 `GpuMappedBuffer` given the four owning buffer structs and three views;
 `PointShadow.glsl` given both copies of the point-shadow filter; and
 `Geometry.hpp`'s `Aabb` given the two hand-rolled bounds structs and the four
-eight-corner expansions.
+eight-corner expansions; and `beginOneShotCommands`/`submitOneShotCommands`
+given the six copies of one-shot command-buffer and fence lifetime.
 
 Still open, in the order the report recommends: splitting
 `VulkanModelResources` proper and collapsing its three copies of the load-state
@@ -1431,6 +1432,24 @@ layout changes affect modules that appear unrelated to the immediate feature.
 - `src/engine/render/VulkanMemoryAllocator.*`: completed VMA ownership and the
   only renderer memory-policy seam; extend this instead of reintroducing raw
   Vulkan allocation calls.
+- One-shot submits go through `vulkanResources::beginOneShotCommands` and
+  `submitOneShotCommands`. Every upload or readback outside the frame loop -
+  geometry, texture, compressed texture, frame capture, tile thumbnails, UI
+  images - allocates a primary command buffer, begins it `ONE_TIME_SUBMIT`,
+  records, ends, fences and submits. Only the recording differs, and only the
+  recording belongs at the call site. Both helpers return the handle they
+  built and release it themselves if a later step throws, so a caller never
+  holds a half-constructed buffer or fence; the catch blocks that free them on
+  success paths still guard on null and must keep doing so.
+  The `label` argument is not decoration: the six sites spelled their
+  diagnostics `"<vkFunction> <label> failed"` and `vkCheck(result, call,
+  label)` reproduces that text exactly, composing only when it throws. The
+  `vulkan_diagnostics` suite pins all thirty messages, so renaming a label
+  changes a test, not a crash report nobody reads until it matters.
+  `VulkanUiResources` shares the prologue but not the epilogue: it submits
+  against no fence and waits on the whole queue. That is wider than it needs
+  and is left as it was, with a comment, because narrowing it is a change to
+  queue synchronisation and wants a run.
 - `src/engine/Geometry.hpp`'s `Aabb` is the only axis-aligned box type. There
   were three: `Aabb`, `GltfMesh.cpp`'s `SourceBounds` (character-for-character
   the same struct, with `includeBounds` as `expand`) and
@@ -1567,8 +1586,9 @@ copyable pairs, where the copy is cheaper than the reference GCC asks for.
 Ten suites also compile and run with no library link, which makes them usable
 without a Windows build: `command_line`, `math`, `geometry`,
 `frame_descriptor_sync`, `frame_pacing`, `material_range_allocator`,
-`residency_budget`, `scene_draw_lanes`, `texture_descriptor_space` and
-`draw_mode`. The last needs `-DSOKOBAN_TEST_SHADER_INCLUDE_DIR='"<repo>/shaders/include"'`;
+`residency_budget`, `scene_draw_lanes`, `texture_descriptor_space`,
+`draw_mode` and - with a stub loader supplying the `vk*` entry points -
+`vulkan_diagnostics`. `draw_mode` needs `-DSOKOBAN_TEST_SHADER_INCLUDE_DIR='"<repo>/shaders/include"'`;
 `gpu_abi` needs built `.spv` modules and so needs `glslc`. Everything else in
 `tests/` links `sokoban_core` and needs a real build. This is a fast pre-check,
 not a substitute for MSVC: it will not catch a `/W4` diagnostic, a link error

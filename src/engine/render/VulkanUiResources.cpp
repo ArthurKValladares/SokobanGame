@@ -89,20 +89,8 @@ vulkanResources::OwnedImage uploadImage(
             VK_IMAGE_ASPECT_COLOR_BIT,
             "UI texture");
 
-        const VkCommandBufferAllocateInfo allocateInfo {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            .commandPool = commandPool,
-            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-            .commandBufferCount = 1,
-        };
-        vkCheck(vkAllocateCommandBuffers(device, &allocateInfo, &commandBuffer),
-            "vkAllocateCommandBuffers UI image upload failed");
-        const VkCommandBufferBeginInfo beginInfo {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-        };
-        vkCheck(vkBeginCommandBuffer(commandBuffer, &beginInfo),
-            "vkBeginCommandBuffer UI image upload failed");
+        commandBuffer = vulkanResources::beginOneShotCommands(
+            device, commandPool, "UI image upload");
 
         vulkanResources::transitionImage(
             commandBuffer,
@@ -141,6 +129,11 @@ vulkanResources::OwnedImage uploadImage(
                 VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             });
+        // The only one of the six one-shot submits that does not close with
+        // submitOneShotCommands. It submits against no fence and then waits on
+        // the whole queue, which is a wider wait than this upload needs;
+        // switching it to a fence is a behavioural change and wants a run to
+        // confirm, not a cleanup.
         vkCheck(vkEndCommandBuffer(commandBuffer),
             "vkEndCommandBuffer UI image upload failed");
 

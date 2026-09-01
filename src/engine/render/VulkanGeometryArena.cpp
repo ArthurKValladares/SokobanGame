@@ -153,21 +153,8 @@ VulkanGeometryArena::Upload VulkanGeometryArena::beginUpload(
             indexData,
             static_cast<std::size_t>(indexBytes));
 
-        const VkCommandBufferAllocateInfo commandBufferInfo {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            .commandPool = commandPool_,
-            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-            .commandBufferCount = 1,
-        };
-        vkCheck(vkAllocateCommandBuffers(
-                    device_, &commandBufferInfo, &upload.commandBuffer),
-            "vkAllocateCommandBuffers geometry upload failed");
-        const VkCommandBufferBeginInfo beginInfo {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-        };
-        vkCheck(vkBeginCommandBuffer(upload.commandBuffer, &beginInfo),
-            "vkBeginCommandBuffer geometry upload failed");
+        upload.commandBuffer = vulkanResources::beginOneShotCommands(
+            device_, commandPool_, "geometry upload");
 
         const VkBufferCopy vertexCopy {
             .srcOffset = upload.staging.offset,
@@ -220,25 +207,8 @@ VulkanGeometryArena::Upload VulkanGeometryArena::beginUpload(
             .pBufferMemoryBarriers = barriers,
         };
         vkCmdPipelineBarrier2(upload.commandBuffer, &dependency);
-        vkCheck(vkEndCommandBuffer(upload.commandBuffer),
-            "vkEndCommandBuffer geometry upload failed");
-
-        const VkFenceCreateInfo fenceInfo {
-            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-        };
-        vkCheck(vkCreateFence(device_, &fenceInfo, nullptr, &upload.fence),
-            "vkCreateFence geometry upload failed");
-        const VkCommandBufferSubmitInfo commandBufferSubmit {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-            .commandBuffer = upload.commandBuffer,
-        };
-        const VkSubmitInfo2 submit {
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-            .commandBufferInfoCount = 1,
-            .pCommandBufferInfos = &commandBufferSubmit,
-        };
-        vkCheck(vkQueueSubmit2(graphicsQueue_, 1, &submit, upload.fence),
-            "vkQueueSubmit2 geometry upload failed");
+        upload.fence = vulkanResources::submitOneShotCommands(
+            device_, graphicsQueue_, upload.commandBuffer, "geometry upload");
         uploadRing_->commit(upload.staging);
         upload.submitted = true;
         return upload;

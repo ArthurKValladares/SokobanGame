@@ -825,6 +825,11 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_render_vulkan
         SOURCES tests/VulkanDeviceSelectionTests.cpp
     )
+    # Needs no device: vkCheck only formats and throws.
+    sokoban_add_test(NAME vulkan_diagnostics TARGET sokoban_vulkan_diagnostics_tests
+        LIBS sokoban_render_vulkan
+        SOURCES tests/VulkanDiagnosticsTests.cpp
+    )
     sokoban_add_test(NAME input_router TARGET sokoban_input_router_tests
         LIBS sokoban_ui
         SOURCES tests/InputRouterTests.cpp

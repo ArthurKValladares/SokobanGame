@@ -2034,26 +2034,11 @@ void VulkanModelResources::recordTextureCopy(
     upload.staging = *staging;
     uploadRing_.write(upload.staging, 0, image.rgba.data(), image.rgba.size());
 
-    VkCommandBufferAllocateInfo commandBufferInfo {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = commandPool_,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1,
-    };
-    vkCheck(vkAllocateCommandBuffers(
-            device_, &commandBufferInfo, &upload.commandBuffer),
-        "vkAllocateCommandBuffers texture upload failed");
-    vulkanDebug::setObjectName(
+    upload.commandBuffer = vulkanResources::beginOneShotCommands(
         device_,
-        VK_OBJECT_TYPE_COMMAND_BUFFER,
-        upload.commandBuffer,
+        commandPool_,
+        "texture upload",
         "Model texture upload command buffer");
-    VkCommandBufferBeginInfo beginInfo {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    };
-    vkCheck(vkBeginCommandBuffer(upload.commandBuffer, &beginInfo),
-        "vkBeginCommandBuffer texture upload failed");
 
     const VkImageSubresourceRange allMipLevels {
         .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -2174,28 +2159,12 @@ void VulkanModelResources::recordTextureCopy(
             VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         });
-    vkCheck(vkEndCommandBuffer(upload.commandBuffer),
-        "vkEndCommandBuffer texture upload failed");
-
-    VkFenceCreateInfo fenceInfo {
-        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-    };
-    vkCheck(vkCreateFence(device_, &fenceInfo, nullptr, &upload.fence),
-        "vkCreateFence texture upload failed");
-    vulkanDebug::setObjectName(
-        device_, VK_OBJECT_TYPE_FENCE, upload.fence, "Model texture upload fence");
-
-    VkCommandBufferSubmitInfo commandBufferSubmit {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-        .commandBuffer = upload.commandBuffer,
-    };
-    VkSubmitInfo2 submit {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .commandBufferInfoCount = 1,
-        .pCommandBufferInfos = &commandBufferSubmit,
-    };
-    vkCheck(vkQueueSubmit2(graphicsQueue_, 1, &submit, upload.fence),
-        "vkQueueSubmit2 texture upload failed");
+    upload.fence = vulkanResources::submitOneShotCommands(
+        device_,
+        graphicsQueue_,
+        upload.commandBuffer,
+        "texture upload",
+        "Model texture upload fence");
     uploadRing_.commit(upload.staging);
     upload.submitted = true;
 }
@@ -2241,26 +2210,11 @@ void VulkanModelResources::recordTextureCopy(
         });
     }
 
-    const VkCommandBufferAllocateInfo commandBufferInfo {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = commandPool_,
-        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1,
-    };
-    vkCheck(vkAllocateCommandBuffers(
-            device_, &commandBufferInfo, &upload.commandBuffer),
-        "vkAllocateCommandBuffers compressed texture upload failed");
-    vulkanDebug::setObjectName(
+    upload.commandBuffer = vulkanResources::beginOneShotCommands(
         device_,
-        VK_OBJECT_TYPE_COMMAND_BUFFER,
-        upload.commandBuffer,
+        commandPool_,
+        "compressed texture upload",
         "BC7 texture upload command buffer");
-    const VkCommandBufferBeginInfo beginInfo {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    };
-    vkCheck(vkBeginCommandBuffer(upload.commandBuffer, &beginInfo),
-        "vkBeginCommandBuffer compressed texture upload failed");
 
     const VkImageSubresourceRange allMipLevels {
         .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -2300,28 +2254,12 @@ void VulkanModelResources::recordTextureCopy(
             VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         });
-    vkCheck(vkEndCommandBuffer(upload.commandBuffer),
-        "vkEndCommandBuffer compressed texture upload failed");
-
-    const VkFenceCreateInfo fenceInfo {
-        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-    };
-    vkCheck(vkCreateFence(device_, &fenceInfo, nullptr, &upload.fence),
-        "vkCreateFence compressed texture upload failed");
-    vulkanDebug::setObjectName(
-        device_, VK_OBJECT_TYPE_FENCE, upload.fence,
+    upload.fence = vulkanResources::submitOneShotCommands(
+        device_,
+        graphicsQueue_,
+        upload.commandBuffer,
+        "compressed texture upload",
         "BC7 texture upload fence");
-    const VkCommandBufferSubmitInfo commandBufferSubmit {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-        .commandBuffer = upload.commandBuffer,
-    };
-    const VkSubmitInfo2 submit {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .commandBufferInfoCount = 1,
-        .pCommandBufferInfos = &commandBufferSubmit,
-    };
-    vkCheck(vkQueueSubmit2(graphicsQueue_, 1, &submit, upload.fence),
-        "vkQueueSubmit2 compressed texture upload failed");
     uploadRing_.commit(upload.staging);
     upload.submitted = true;
 }

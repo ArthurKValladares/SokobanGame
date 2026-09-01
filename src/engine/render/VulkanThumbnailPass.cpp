@@ -213,22 +213,8 @@ bool VulkanThumbnailPass::loadThumbnail(TileType tile, Thumbnail& target)
             "Tile thumbnail staging");
         std::memcpy(mapped, image.rgba.data(), image.rgba.size());
 
-        const VkCommandBufferAllocateInfo commandBufferInfo {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            .commandPool = commandPool_,
-            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-            .commandBufferCount = 1,
-        };
-        vkCheck(
-            vkAllocateCommandBuffers(
-                device_, &commandBufferInfo, &commandBuffer),
-            "vkAllocateCommandBuffers thumbnail failed");
-        const VkCommandBufferBeginInfo beginInfo {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-        };
-        vkCheck(vkBeginCommandBuffer(commandBuffer, &beginInfo),
-            "vkBeginCommandBuffer thumbnail failed");
+        commandBuffer = vulkanResources::beginOneShotCommands(
+            device_, commandPool_, "thumbnail");
 
         vulkanResources::transitionImage(
             commandBuffer,
@@ -267,25 +253,8 @@ bool VulkanThumbnailPass::loadThumbnail(TileType tile, Thumbnail& target)
                 VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             });
-        vkCheck(vkEndCommandBuffer(commandBuffer),
-            "vkEndCommandBuffer thumbnail failed");
-
-        const VkFenceCreateInfo fenceInfo {
-            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-        };
-        vkCheck(vkCreateFence(device_, &fenceInfo, nullptr, &fence),
-            "vkCreateFence thumbnail failed");
-        const VkCommandBufferSubmitInfo commandBufferSubmit {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-            .commandBuffer = commandBuffer,
-        };
-        const VkSubmitInfo2 submit {
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-            .commandBufferInfoCount = 1,
-            .pCommandBufferInfos = &commandBufferSubmit,
-        };
-        vkCheck(vkQueueSubmit2(graphicsQueue_, 1, &submit, fence),
-            "vkQueueSubmit2 thumbnail failed");
+        fence = vulkanResources::submitOneShotCommands(
+            device_, graphicsQueue_, commandBuffer, "thumbnail");
         // Loaded once and cached, so this stall costs one upload per tile the
         // first time the palette is opened.
         vkCheck(vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX),

@@ -2003,6 +2003,110 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
   <article class="finding is-resolved">
     <div class="finding-top">
       <span class="sev is-good">Resolved</span>
+      <span class="tag">Not in the original review</span>
+      <span class="tag">Duplication</span>
+    </div>
+    <h3>Six places open and close a one-shot command buffer, identically</h3>
+    <div class="loc">
+      <code>VulkanGeometryArena.cpp:156</code>
+      <code>VulkanModelResources.cpp:2037, :2216</code>
+      <code>VulkanFrameCapture.cpp:73</code>
+      <code>VulkanThumbnailPass.cpp:215</code>
+      <code>VulkanUiResources.cpp:93</code>
+    </div>
+    <p>
+      <strong>This finding is not one of the original 38.</strong> I went
+      looking for the largest functions left in
+      <code>VulkanModelResources.cpp</code> and found its top two were the
+      <code>recordTextureCopy</code> overloads at 178 and 125 lines. Comparing
+      them showed the difference was entirely in the middle: what they
+      <em>record</em> genuinely differs, but the fourteen lines that open a
+      command buffer and the eighteen that close it were the same text. Grepping
+      for <code>vkAllocateCommandBuffers</code> then turned up four more copies
+      in four more files.
+    </p>
+    <p>
+      Every upload and readback in the renderer that is not part of the frame
+      loop follows the same three beats: allocate a primary command buffer from
+      a pool and begin it <code>ONE_TIME_SUBMIT</code>; record something; end
+      it, create a fence, submit against that fence. Only the middle beat
+      differed. The other two were copied six times, in the part of the renderer
+      where a single missed <code>vkEndCommandBuffer</code> or an unfreed fence
+      is a leak that only shows up under validation on someone else's machine.
+    </p>
+    <div class="fix">
+      <code>vulkanResources::beginOneShotCommands</code> and
+      <code>submitOneShotCommands</code> now own the prologue and the epilogue.
+      The recorded stream stays with the caller, which is the part that is
+      legitimately different at all six sites.
+    </div>
+    <p>
+      <strong>The diagnostics were the constraint, and they turned out to be
+      regular.</strong> Each site carried five literals like
+      <code>"vkQueueSubmit2 compressed texture upload failed"</code>, and that
+      text is what a crash report shows and what someone greps for, so it could
+      not be approximated. Every one of the thirty followed
+      <code>"&lt;vkFunction&gt; &lt;label&gt; failed"</code> without exception,
+      so the helpers take the label and a second <code>vkCheck</code> overload
+      composes the message — only on the throwing path, where the old form had
+      the literal sitting in the binary either way.
+      <code>VulkanDiagnosticsTests</code> pins all thirty against the literals
+      they replaced, plus the <code>VkResult</code> suffix and the typed result
+      on the exception: 35 checks, and five mutations of the composition rule
+      (colon separator, dropped suffix, swapped operands, lost
+      <code>VkResult</code>, throwing on success) were all caught.
+    </p>
+    <p>
+      <strong>Evidence: the recorded call stream, not a reading of it.</strong>
+      A fake Vulkan loader records every call it is handed, and the six
+      prologue/epilogue pairs were transcribed from the files as they stood and
+      run against it beside the new helpers. Both were driven through six
+      failure injections each — no failure, and one per <code>vk</code> call —
+      giving 36 command streams compared on call order, every argument, the
+      exception text, and how many buffers and fences were still outstanding
+      afterwards. All 36 are identical. Eight mutations of the helpers were
+      caught, including <code>SECONDARY</code> instead of
+      <code>PRIMARY</code>, a dropped <code>ONE_TIME_SUBMIT</code>, naming the
+      buffer after the begin rather than before it, and both of the leaks below.
+    </p>
+    <p>
+      The one thing that genuinely moved is <em>who</em> releases a handle when
+      construction fails halfway. A helper that returns by value cannot leave
+      the caller holding a command buffer whose <code>vkBeginCommandBuffer</code>
+      failed, so it frees it itself; likewise the fence of a failed submit. I
+      expected that to show up as a reordering and built the harness to
+      distinguish “same calls, different order, nothing outstanding” from a real
+      difference. It did not show up at all: the catch blocks at all six sites
+      already destroyed the fence before freeing the buffer, which is the order
+      the helpers use. Worth noting that the harness caught a mistake in
+      <em>my</em> transcription first — I had modelled the originals as
+      returning a handle when they wrote through the caller's own variable,
+      which is exactly the difference under examination.
+    </p>
+    <p>
+      <strong>What this is not: a line-count win.</strong> 162 lines leave the
+      five call sites and 124 arrive in the shared header and its
+      implementation, about half of them the comment explaining the contract.
+      Net, the tree is 38 lines shorter. The win is that command-buffer and
+      fence lifetime is now written once instead of six times. One side effect
+      is measurable, though: deleting 55 designated-initializer Vulkan structs
+      took GCC's <code>-Wextra</code> census from 997 warnings to 942.
+    </p>
+    <p>
+      <strong>One site was left alone, deliberately.</strong>
+      <code>VulkanUiResources</code> is the only one that submits against no
+      fence and then calls <code>vkQueueWaitIdle</code> — a wait on the entire
+      queue rather than on its own submission. Its prologue is shared like the
+      rest; its epilogue is not, and now carries a comment saying why. Switching
+      it to a fence is very likely correct and equally likely invisible, but it
+      is a behavioural change to queue synchronisation and wants a run to
+      confirm, not a cleanup.
+    </p>
+  </article>
+
+  <article class="finding is-resolved">
+    <div class="finding-top">
+      <span class="sev is-good">Resolved</span>
       <span class="tag">Was: moderate · reinvention</span>
       <span class="tag">Reinvention</span>
     </div>
@@ -2938,7 +3042,7 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
 <footer>
   <span>Sokoban 3D engine · code-quality audit</span>
   <span>Reviewed against HEAD 21dff13a · 31 Aug 2026</span>
-  <span>38 findings · 18 resolved · 0 live defects</span>
+  <span>39 findings · 19 resolved · 0 live defects</span>
 </footer>
 
 </div>
