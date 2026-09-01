@@ -239,6 +239,8 @@ h2 {
 .finding.is-major { border-left-color: var(--major); }
 .finding.is-moderate { border-left-color: var(--moderate); }
 .finding.is-minor { border-left-color: var(--minor); }
+.finding.is-resolved { border-left-color: var(--good); background: color-mix(in srgb, var(--good-soft) 45%, var(--panel)); }
+.finding.is-resolved h3 { text-decoration-color: var(--muted); }
 
 .finding-top {
   display: flex;
@@ -525,8 +527,8 @@ a { color: var(--accent); }
 
 <div class="tally">
   <div class="tally-cell is-major">
-    <span class="tally-n">11</span>
-    <span class="tally-label">Major</span>
+    <span class="tally-n">10</span>
+    <span class="tally-label">Major open</span>
   </div>
   <div class="tally-cell is-moderate">
     <span class="tally-n">14</span>
@@ -536,9 +538,9 @@ a { color: var(--accent); }
     <span class="tally-n">13</span>
     <span class="tally-label">Minor</span>
   </div>
-  <div class="tally-cell">
-    <span class="tally-n">8</span>
-    <span class="tally-label">Duplicated ABI copies</span>
+  <div class="tally-cell is-good">
+    <span class="tally-n">1</span>
+    <span class="tally-label">Resolved</span>
   </div>
   <div class="tally-cell is-good">
     <span class="tally-n">0</span>
@@ -1659,58 +1661,75 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
     <h2>Build, CI and consistency</h2>
   </div>
 
-  <article class="finding is-major">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-major">Major</span>
-      <span class="tag">Open handoff item</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: open handoff item 0.3</span>
+      <span class="tag">Corrected</span>
     </div>
-    <h3>52 files have inconsistent line endings, and <code>.gitattributes</code> is still missing</h3>
+    <h3>191 working-tree files had drifted to CRLF, invisibly — <code>.gitattributes</code> now pins the policy</h3>
     <p>
-      Handoff item 0.3 calls for “a small <code>.gitattributes</code> policy” and
-      normalised line endings “in its own commit, never mixed with semantic
-      changes”. The sibling clean-up in that item — deleting
-      <code>GpuModelInstance.hpp</code> — is done; this half is not, and the
-      working tree has drifted further:
+      <strong>Correction to the first version of this finding.</strong> It
+      reported the drift as if it were committed, based on a scan of the working
+      tree alone. Comparing against <code>HEAD</code> showed the opposite and
+      much better situation: <strong>the repository was already clean.</strong>
+      2,338 of 2,348 committed text files were LF-only and none were mixed. The
+      ten exceptions were vendored Kenney licence files, plus imgui’s own CRLF
+      Visual Studio projects, all deliberate.
+    </p>
+    <p>
+      All the drift lived in the working tree — 191 files, and
+      <strong>zero content differences</strong> against <code>HEAD</code>. Git
+      for Windows’ <code>core.autocrlf=true</code> normalises on the way in, so
+      Arthur’s <code>git status</code> reported nothing while
+      <code>RenderFrameBuilder.cpp</code> carried 923 CRLF lines on disk. The
+      real exposure was never <code>git blame</code>; it was anything reading the
+      bytes directly — a Linux CI checkout, a patch tool, an editor that
+      preserves per-line endings.
     </p>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Count</th><th>State</th><th>Examples</th></tr></thead>
+        <thead><tr><th>Count</th><th>Action taken</th><th>Where</th></tr></thead>
         <tbody>
           <tr>
-            <td class="num">46</td>
-            <td>Mixed CRLF and LF <em>within one file</em></td>
-            <td><code>RenderFrameBuilder.cpp</code> (923 of 2,562), <code>VulkanSwapchainResources.cpp</code> (346 of 1,141), <code>ApplicationDebugUi.cpp</code> (553 of 853)</td>
+            <td class="num">136</td>
+            <td>Converted CRLF → LF in place</td>
+            <td>60 <code>assets</code>, 45 <code>src</code>, 18 <code>levels</code>, 7 <code>docs</code>, 5 <code>tests</code>, 1 <code>.github</code></td>
           </tr>
           <tr>
-            <td class="num">6</td>
-            <td>CRLF throughout</td>
-            <td><code>TileTypes.hpp</code>, <code>Window.hpp</code>, <code>ui/FontAtlas.*</code>, <code>GameplaySessionTests.cpp</code>, <code>ImageDataTests.cpp</code></td>
+            <td class="num">55</td>
+            <td>Restored byte-exact to <code>HEAD</code></td>
+            <td>45 <code>third_party</code>, 10 in the vendored Kenney pack — both now marked <code>-text</code></td>
           </tr>
           <tr>
-            <td class="num">322</td>
-            <td>LF throughout</td>
-            <td>The rest</td>
+            <td class="num">1</td>
+            <td>Added</td>
+            <td><code>.gitattributes</code></td>
           </tr>
         </tbody>
       </table>
     </div>
     <p>
-      Mixed endings inside a single file are the costly case: an editor that
-      normalises on save rewrites hundreds of untouched lines, so the next real
-      change arrives as a 900-line diff that <code>git blame</code> can no longer
-      see through. Two of the worst-affected files —
-      <code>RenderFrameBuilder.cpp</code> and
-      <code>VulkanSwapchainResources.cpp</code> — are also two of the largest.
-      <code>.github/workflows/required-tests.yml</code> is affected too.
+      The policy is <code>* text=auto eol=lf</code>, so the working tree is
+      pinned to LF on every platform rather than relying on each developer’s
+      <code>core.autocrlf</code>. Windows tooling keeps CRLF through explicit
+      <code>*.bat</code>&#8202;/&#8202;<code>*.sln</code>&#8202;/&#8202;<code>*.vcxproj</code>
+      rules; <code>third_party/**</code> and the vendored Kenney pack are
+      <code>-text</code> so re-vendoring produces a diff about the release rather
+      than about line endings; and <code>*.obj</code> and <code>*.mtl</code> are
+      deliberately left out of the binary list, because here they are Wavefront
+      model text rather than Windows object files.
     </p>
-    <div class="fix">
-      <code>.gitattributes</code> with <code>* text=auto eol=lf</code> and
-      binary exclusions, then <code>git add --renormalize .</code> as a single
-      commit touching nothing else, and a CI step that fails on a non-empty
-      <code>git diff --exit-code</code> after renormalising. Do this before the
-      refactors above, not after — otherwise every one of them lands as an
-      unreviewable diff.
-    </div>
+    <p>
+      Verified after the change: all 25,440 tracked files byte-identical to
+      <code>HEAD</code>, <code>git diff --stat HEAD</code> empty across the whole
+      project tree, and <code>git ls-files --others</code> reporting exactly one
+      new file. <strong>The resulting commit is one added file with no content
+      churn at all</strong> — which is a cleaner outcome than the
+      <code>git add --renormalize</code> sweep this finding originally proposed,
+      and it means the refactors below can proceed without an unreviewable diff
+      in front of them.
+    </p>
   </article>
 
   <article class="finding is-moderate">
@@ -1910,10 +1929,13 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
   </p>
   <ol class="steps">
     <li>
-      <b>Normalise line endings and add <code>.gitattributes</code>.</b>
-      <span class="code">G1</span> — one commit, no semantic change, with a CI
-      guard. Every refactor below produces a reviewable diff afterwards and an
-      unreviewable one before. This is the open handoff item 0.3.
+      <b>Normalise line endings and add <code>.gitattributes</code>. — done</b>
+      <span class="code">G1</span> — handoff item 0.3 is closed. 191 working-tree
+      files repaired, policy pinned, tree verified byte-identical to
+      <code>HEAD</code>. Staged as one added file, uncommitted: commits belong to
+      the project owner. The CI guard that would keep it that way
+      (<code>git diff --exit-code</code> after a renormalise check) is
+      deliberately left as its own separate change.
     </li>
     <li>
       <b>Turn on <code>#include</code> for shaders and move the shared declarations.</b>
@@ -1957,8 +1979,8 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
 
 <footer>
   <span>Sokoban 3D engine · code-quality audit</span>
-  <span>Reviewed against the working tree at 30 Aug 2026</span>
-  <span>38 findings · 0 live defects</span>
+  <span>Reviewed against HEAD 21dff13a · 31 Aug 2026</span>
+  <span>38 findings · 1 resolved · 0 live defects</span>
 </footer>
 
 </div>

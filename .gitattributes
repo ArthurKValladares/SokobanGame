@@ -1,0 +1,63 @@
+# Line-ending policy.
+#
+# The repository stores LF for every text file. `eol=lf` additionally pins the
+# *working tree* to LF on every platform, so a Windows checkout cannot quietly
+# reintroduce CRLF the way it did before this file existed: a Git for Windows
+# default of core.autocrlf=true hides the drift locally, but anything that
+# reads the bytes directly - a Linux CI checkout, an editor that preserves
+# per-line endings, a patch tool - sees it.
+#
+# `text=auto` still detects binary content and leaves it alone.
+* text=auto eol=lf
+
+# Windows tooling that expects CRLF. Normalized to LF in the repository and
+# checked out as CRLF. Nothing outside third_party/ currently matches these;
+# the rules exist so that adding a build script under tools/ does the right
+# thing without anyone having to remember this file.
+*.bat             text eol=crlf
+*.cmd             text eol=crlf
+*.sln             text eol=crlf
+*.props           text eol=crlf
+*.vcxproj         text eol=crlf
+*.vcxproj.filters text eol=crlf
+
+# Binary content Git must never inspect, diff or convert. `text=auto` would
+# classify all of these correctly on its own; naming them keeps the common
+# cases off the content-sniffing path entirely.
+#
+# Deliberately absent: *.obj and *.mtl. Those are Wavefront model *text* here,
+# not Windows object files, and must stay under the rules above.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.webp binary
+*.ico  binary
+*.icns binary
+*.fbx  binary
+*.blend binary
+*.glb  binary
+*.bin  binary
+*.ktx2 binary
+*.ogg  binary
+*.wav  binary
+*.flac binary
+*.opus binary
+*.ttf  binary
+*.otf  binary
+*.pdf  binary
+*.jar  binary
+*.lib  binary
+*.unitypackage binary
+
+# Vendored dependencies stay byte-exact with upstream, so that re-vendoring a
+# release produces a diff about the release rather than about line endings.
+# Deeper .gitattributes files still win inside their own subtree, which is how
+# third_party/imgui keeps its CRLF Visual Studio projects.
+#
+# This must stay below the rules above: within one .gitattributes file, the
+# last matching line wins.
+third_party/** -text
+
+# Vendored asset pack shipped with CRLF licence files. Left byte-exact for the
+# same reason as third_party/, and quoted because the path contains spaces.
+"assets/Kenney Game Assets All-in-1 3.5.0/**" -text
