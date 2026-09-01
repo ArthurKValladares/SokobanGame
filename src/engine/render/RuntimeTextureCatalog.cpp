@@ -1,6 +1,7 @@
 #include "engine/render/RuntimeTextureCatalog.hpp"
 
 #include "engine/AssetManifest.hpp"
+#include "engine/render/TextureDescriptorSpace.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -76,16 +77,23 @@ uint32_t RuntimeTextureCatalog::descriptorIndex(
         throw std::out_of_range(
             "Runtime texture index or descriptor capacity is invalid");
     }
+    // Kept ahead of the overlap test, exactly as before: a manifest index is
+    // answerable even from a heap whose ranges collide, and callers rely on
+    // that. Only the discovered half needs a well-formed partition.
     if (logicalIndex < manifestTextureCount_) {
         return logicalIndex;
     }
-    const uint32_t discoveredBase =
-        descriptorCapacity - discoveredTextureCount();
-    if (manifestTextureCount_ > discoveredBase) {
+    // The partition arithmetic is shared with the renderer, which lays out
+    // the same heap from the other side; only this error is ours.
+    const uint32_t discoveredBase = TextureDescriptorSpace::discoveredBaseFor(
+        descriptorCapacity, discoveredTextureCount());
+    if (TextureDescriptorSpace::rangesOverlap(
+            manifestTextureCount_, discoveredBase)) {
         throw std::out_of_range(
             "Runtime texture ranges overlap in the descriptor heap");
     }
-    return discoveredBase + logicalIndex - manifestTextureCount_;
+    return TextureDescriptorSpace::descriptorIndexFor(
+        logicalIndex, manifestTextureCount_, discoveredBase);
 }
 
 RuntimeTextureCatalog buildRuntimeTextureCatalog(

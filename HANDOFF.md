@@ -110,7 +110,7 @@ sampling have different failure modes and should be independently reviewable.
 - Language and platform: C++20, SDL3, Vulkan 1.3, GLSL compiled to SPIR-V.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
-- Current tests: 74 CTest suites in the newest configured build tree.
+- Current tests: 75 CTest suites in the newest configured build tree.
 - Residency eviction: `ResidencyBudget::needsEviction` takes `(bytes, limit)`
   and reads `retiring_` as its only running total. It used to take a third
   argument that duplicated `retiring_`, so each victim counted twice and the
@@ -1416,6 +1416,27 @@ layout changes affect modules that appear unrelated to the immediate feature.
 - `src/engine/render/VulkanMemoryAllocator.*`: completed VMA ownership and the
   only renderer memory-policy seam; extend this instead of reintroducing raw
   Vulkan allocation calls.
+- `src/engine/render/TextureDescriptorSpace.hpp`: how the texture descriptor
+  heap is split - manifest textures on stable low indices, glTF textures
+  discovered at load time taking the top downward, and the rule that the two
+  must never meet. That rule was written in three places in three wordings and
+  the index formula in two; both live here now, with 707 checks over them. The
+  header owns the arithmetic but not the throw: `RuntimeTextureCatalog` raises
+  `std::out_of_range` and `VulkanModelResources` raises `std::runtime_error`,
+  with different messages, and those are part of their contracts. Note that
+  `RuntimeTextureCatalog::descriptorIndex` answers manifest indices *before*
+  testing for overlap, deliberately - a heap whose ranges collide can still
+  answer for its low half.
+- `src/engine/render/VulkanModelResources.*`: the three publish functions share
+  one entry gate (`publishGate`) and one failure tail (`recordPublishFailure`).
+  The tail is the part that must not drift - remember the exception, mark the
+  slot failed, rethrow when a caller is waiting, otherwise log - and it had five
+  copies. Their middles stay separate on purpose: what a model does with a
+  CpuReady slot is genuinely not what a texture does. Before merging the gate,
+  the three ladders were compared over every load state against both values of
+  `wait` (forty reachable cases, checking the return value *and* whether
+  `throwIfFailed` was reached) and reproduce exactly; animations never reach
+  `Uploading`, which is why that case is excluded rather than assumed.
 - `src/engine/render/VulkanModelResources.*` and `TextureMipResidency.*`:
   completed A3 residency; preserve fence-owned retirement, finest-fitting mip
   tails, exact-byte accounting and stable material ranges. Two policies have

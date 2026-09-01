@@ -11,6 +11,7 @@
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/ResidencyBudget.hpp"
 #include "engine/render/RuntimeTextureCatalog.hpp"
+#include "engine/render/TextureDescriptorSpace.hpp"
 #include "engine/render/TextureSourceLoader.hpp"
 #include "engine/render/TextureMipResidency.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
@@ -436,6 +437,34 @@ private:
         const PreparedTextureSource& texture,
         const TextureInterpretation& interpretation);
 
+    // Whether a publication attempt should do any work at all.
+    //
+    // All three publish functions opened with the same ladder, and the three
+    // copies had drifted in shape without drifting in behaviour: models fell
+    // through on Uploading and returned false further down, textures rejected
+    // it in the ladder, animations never reach it. Checked exhaustively over
+    // every load state and both values of `wait` before merging - forty
+    // reachable cases, all three reproduced exactly.
+    enum class PublishGate { Stop, Proceed };
+    template <typename Slot>
+    [[nodiscard]] PublishGate publishGate(
+        const Slot& slot,
+        const std::filesystem::path& path,
+        const char* kind,
+        bool wait) const;
+
+    // The tail every publication failure shares. Any cleanup particular to one
+    // asset kind happens at the call site before this; what is here is the part
+    // that must never differ - remember the exception, mark the slot failed,
+    // rethrow for a caller that is waiting, and otherwise say so in the log.
+    template <typename Slot>
+    void recordPublishFailure(
+        Slot& slot,
+        const std::filesystem::path& path,
+        const char* kind,
+        const char* phase,
+        bool wait);
+
     [[nodiscard]] bool publishModel(RenderModel model, bool wait);
     [[nodiscard]] bool publishTexture(std::size_t textureIndex, bool wait);
     [[nodiscard]] bool publishAnimation(RenderAnimation animation, bool wait);
@@ -528,12 +557,12 @@ private:
     // Descriptor-indexed. Manifest/editor definitions occupy low indices;
     // discovered glTF definitions occupy stable high indices.
     std::vector<std::optional<RuntimeTextureDefinition>> textureDefinitions_;
-    std::vector<uint32_t> activeTextureIndices_;
+    // How the heap is split between the manifest's stable low indices and the
+    // glTF textures discovered at load time, and which slots are live.
+    TextureDescriptorSpace textureSpace_;
     std::vector<std::vector<uint32_t>> modelTextureDependencies_;
     std::vector<std::vector<PrimitiveMaterialBinding>> modelMaterialBindings_;
     std::vector<TextureSlot> textures_;
-    uint32_t manifestTextureCount_ = 0;
-    uint32_t discoveredTextureBase_ = 0;
     TextureResource fallbackTexture_ {};
     VulkanUploadRing uploadRing_ {};
     VulkanGeometryArena geometryArena_ {};

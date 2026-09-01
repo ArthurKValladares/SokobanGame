@@ -1001,6 +1001,10 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/SceneDrawLanesTests.cpp
     )
+    sokoban_add_test(NAME texture_descriptor_space TARGET sokoban_texture_descriptor_space_tests
+        LIBS sokoban_core
+        SOURCES tests/TextureDescriptorSpaceTests.cpp
+    )
     sokoban_add_test(NAME opaque_draw_sorter TARGET sokoban_opaque_draw_sorter_tests
         LIBS sokoban_core
         SOURCES tests/OpaqueDrawSorterTests.cpp

@@ -1457,10 +1457,85 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       buffer looks half empty.
     </p>
     <p>
+      <strong>Third seam: the load-state machine's shared edges.</strong> The
+      three publish functions opened with the same ladder and closed with the
+      same failure tail, five copies of the latter between them. Those are one
+      each now — <code>publishGate</code> and <code>recordPublishFailure</code>.
+      The middles stay separate, because what a model does with a CpuReady slot
+      genuinely is not what a texture does, and collapsing that into a template
+      would hide a real difference rather than remove a duplicated one.
+    </p>
+    <p>
+      The gate merge needed proof rather than a reading, because the three
+      ladders were not textually identical: models fell through on
+      <code>Uploading</code> and returned false further down, textures rejected
+      it up front, and animations never reach it at all. So the ladders were
+      modelled and compared over every load state against both values of
+      <code>wait</code> — forty reachable cases — checking not just the return
+      value but whether <code>throwIfFailed</code> was reached. All three
+      reproduce exactly. The one case skipped is animations at
+      <code>Uploading</code>, and that was skipped only after confirming nothing
+      in the file ever assigns that state to an animation slot; it is reported as
+      unreachable rather than quietly counted as agreement.
+    </p>
+    <p>
+      The failure tail is where the real risk was. Five copies of “remember the
+      exception, mark the slot failed, rethrow if someone is waiting, otherwise
+      log it” is five chances for one of them to stop rethrowing. They had not
+      drifted, but two of them already disagree on wording — the texture
+      preparation path says “preparation” where the model path at the same point
+      in the lifecycle says “publication” — which is exactly how that kind of
+      copy starts to rot. Both spellings are preserved as a parameter rather than
+      silently unified, since they are log text someone may be grepping for.
+    </p>
+    <p>
+      <strong>Fourth seam: the descriptor-index map.</strong> The texture
+      descriptor heap is one fixed array shared by two populations — manifest
+      textures holding stable low indices, because an editor writes a
+      <code>RenderTexture</code> id into a level file and slot 7 must still be
+      slot 7 next session, and glTF textures discovered at load time taking the
+      top of the range downward, since their count is not known until the models
+      are read. The gap between them is what lets the manifest grow later.
+    </p>
+    <p>
+      The rule that the two must never meet was written in <strong>three</strong>
+      places in three wordings, and the index formula itself in two — once in
+      <code>RuntimeTextureCatalog</code> and once as a free function in
+      <code>VulkanModelResources.cpp</code>. Two of the three sat behind a Vulkan
+      device, so none of it could be reached from a test. Getting it wrong does
+      not crash: a manifest index colliding with a discovered one means a model
+      samples another model's texture, which reads as an authoring mistake.
+    </p>
+    <div class="fix">
+      <code>TextureDescriptorSpace.hpp</code> now owns the arithmetic — where the
+      discovered range starts, whether the two collide, and where a logical index
+      lands — plus the live partition and its active-slot list. It deliberately
+      does <em>not</em> own the throw: the three callers raise different
+      exception types with different messages (<code>std::out_of_range</code>
+      from the catalog, <code>std::runtime_error</code> from the renderer) and
+      those are part of their contracts. What is shared is the question; what to
+      say about a bad answer stays with the caller.
+    </div>
+    <p>
+      707 checks, including an exhaustive one: over every way to split a
+      24-slot heap, no two logical textures may land on the same descriptor and
+      none may escape the heap. All ten mutants of the partition are caught —
+      the overlap boundary in both directions, the rebase, the membership test,
+      and the saturation that stops an already-broken heap reporting four
+      billion slots of headroom.
+    </p>
+    <p>
+      Delegating the catalog's copy caught a real mistake on the way. My first
+      version put the overlap test ahead of the manifest early-return, which
+      would have made <code>descriptorIndex</code> throw for a manifest index it
+      previously answered — a heap whose ranges collide can still answer for its
+      low half, and callers rely on that. The early return is back where it was,
+      with a comment saying why it is ordered that way.
+    </p>
+    <p>
       What remains is the part the finding is actually about: the class still
       owns mesh upload, texture format selection and mip generation, animation
-      clips, the skinning and draw-instance buffers, and the descriptor-index
-      map, and the load-state machine is still written three times.
+      clips, and the skinning and draw-instance buffers.
     </p>
   </article>
 

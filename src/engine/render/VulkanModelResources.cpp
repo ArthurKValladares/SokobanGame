@@ -105,16 +105,6 @@ bool supportsBc7Textures(VkPhysicalDevice physicalDevice)
     return true;
 }
 
-uint32_t descriptorIndexForLogicalTexture(
-    uint32_t logicalIndex,
-    uint32_t manifestTextureCount,
-    uint32_t discoveredTextureBase)
-{
-    return logicalIndex < manifestTextureCount
-        ? logicalIndex
-        : discoveredTextureBase + logicalIndex - manifestTextureCount;
-}
-
 void remapBindingTextures(
     PrimitiveMaterialBinding& binding,
     uint32_t manifestTextureCount,
@@ -122,12 +112,12 @@ void remapBindingTextures(
 {
     const auto remap = [=](std::optional<uint32_t>& index) {
         if (index) {
-            *index = descriptorIndexForLogicalTexture(
+            *index = TextureDescriptorSpace::descriptorIndexFor(
                 *index, manifestTextureCount, discoveredTextureBase);
         }
     };
     if (binding.bindBaseColorTexture) {
-        binding.textureIndex = descriptorIndexForLogicalTexture(
+        binding.textureIndex = TextureDescriptorSpace::descriptorIndexFor(
             binding.textureIndex,
             manifestTextureCount,
             discoveredTextureBase);
@@ -242,14 +232,16 @@ void VulkanModelResources::create(
     animations_.resize(manifest.animations().size());
     textures_.resize(textureDescriptorCapacity_);
     textureDefinitions_.resize(textureDescriptorCapacity_);
-    manifestTextureCount_ = textureCatalog.manifestTextureCount();
-    discoveredTextureBase_ = textureDescriptorCapacity_ -
-        textureCatalog.discoveredTextureCount();
-    if (manifestTextureCount_ > discoveredTextureBase_) {
+    textureSpace_.reset(
+        textureDescriptorCapacity_,
+        textureCatalog.manifestTextureCount(),
+        textureCatalog.discoveredTextureCount());
+    if (TextureDescriptorSpace::rangesOverlap(
+            textureSpace_.manifestCount(), textureSpace_.discoveredBase())) {
         throw std::runtime_error(
             "Runtime texture catalog leaves no stable manifest descriptor range");
     }
-    activeTextureIndices_.reserve(textureCatalog.textures().size());
+    textureSpace_.reserveActive(textureCatalog.textures().size());
     for (uint32_t logicalIndex = 0;
          logicalIndex < textureCatalog.textures().size();
          ++logicalIndex) {
@@ -257,7 +249,7 @@ void VulkanModelResources::create(
             logicalIndex, textureDescriptorCapacity_);
         textureDefinitions_[descriptorIndex] =
             textureCatalog.textures()[logicalIndex];
-        activeTextureIndices_.push_back(descriptorIndex);
+        textureSpace_.markActive(descriptorIndex);
     }
     modelTextureDependencies_.resize(models_.size());
     modelMaterialBindings_.resize(models_.size());
@@ -275,7 +267,9 @@ void VulkanModelResources::create(
         for (PrimitiveMaterialBinding& binding :
              modelMaterialBindings_[modelIndex]) {
             remapBindingTextures(
-                binding, manifestTextureCount_, discoveredTextureBase_);
+                binding,
+                textureSpace_.manifestCount(),
+                textureSpace_.discoveredBase());
         }
     }
     animationController_.configure(
@@ -369,7 +363,6 @@ void VulkanModelResources::destroy()
     animations_.clear();
     textures_.clear();
     textureDefinitions_.clear();
-    activeTextureIndices_.clear();
     modelTextureDependencies_.clear();
     modelMaterialBindings_.clear();
     materialStorage_.clear();
@@ -385,8 +378,7 @@ void VulkanModelResources::destroy()
     physicalDevice_ = VK_NULL_HANDLE;
     supportsBc7_ = false;
     textureDescriptorCapacity_ = 0;
-    manifestTextureCount_ = 0;
-    discoveredTextureBase_ = 0;
+    textureSpace_.clear();
     textureUploadSubmissions_ = 0;
     textureUploadCompletions_ = 0;
     scheduler_.clear();
@@ -424,7 +416,7 @@ void VulkanModelResources::requestAssets(
             queueAnimation(animation, priority);
         }
     }
-    for (uint32_t i = 0; i < manifestTextureCount_; ++i) {
+    for (uint32_t i = 0; i < textureSpace_.manifestCount(); ++i) {
         if (requirements.contains(RenderTexture { i + 1 })) {
             queueTexture(i, priority);
         }
@@ -464,7 +456,7 @@ bool VulkanModelResources::waitForAssets(const RenderAssetRequirements& requirem
                 break;
             }
         }
-        for (uint32_t textureIndex : activeTextureIndices_) {
+        for (uint32_t textureIndex : textureSpace_.active()) {
             if (textures_[textureIndex].state == LoadState::Loading) {
                 (void)publishTexture(textureIndex, true);
                 break;
@@ -552,7 +544,7 @@ VulkanModelResources::PublicationResult VulkanModelResources::publishReadyAssets
         }
     }
 
-    for (uint32_t i : activeTextureIndices_) {
+    for (uint32_t i : textureSpace_.active()) {
         if (publications >= maxPublications) {
             return finish();
         }
@@ -860,21 +852,56 @@ void VulkanModelResources::completeCpuJob(AssetLoadKey key)
     scheduler_.complete(key);
 }
 
+template <typename Slot>
+VulkanModelResources::PublishGate VulkanModelResources::publishGate(
+    const Slot& slot,
+    const std::filesystem::path& path,
+    const char* kind,
+    bool wait) const
+{
+    // Uploading belongs here with Ready: its bytes are already charged and its
+    // fence is already in flight, so there is nothing a second attempt could
+    // usefully do.
+    if (slot.state == LoadState::Ready || slot.state == LoadState::Uploading) {
+        return PublishGate::Stop;
+    }
+    if (slot.state == LoadState::Failed) {
+        if (wait) {
+            throwIfFailed(slot.state, slot.failure, path, kind);
+        }
+        return PublishGate::Stop;
+    }
+    if (slot.state == LoadState::Unrequested ||
+        slot.state == LoadState::Queued) {
+        return PublishGate::Stop;
+    }
+    return PublishGate::Proceed;
+}
+
+template <typename Slot>
+void VulkanModelResources::recordPublishFailure(
+    Slot& slot,
+    const std::filesystem::path& path,
+    const char* kind,
+    const char* phase,
+    bool wait)
+{
+    slot.failure = std::current_exception();
+    slot.state = LoadState::Failed;
+    if (wait) {
+        throwIfFailed(slot.state, slot.failure, path, kind);
+    }
+    log::error(log::Category::Assets)
+        << "Background " << kind << " " << phase << " failed: "
+        << path.string();
+}
+
 bool VulkanModelResources::publishModel(RenderModel model, bool wait)
 {
     ModelSlot& slot = models_[model.index()];
     const AssetManifest::Model& definition = manifest_->model(model);
-    if (slot.state == LoadState::Ready) {
-        return false;
-    }
-    if (slot.state == LoadState::Failed) {
-        if (wait) {
-            throwIfFailed(slot.state, slot.failure, assetRoot_ / definition.path, "model");
-        }
-        return false;
-    }
-    if (slot.state == LoadState::Unrequested ||
-        slot.state == LoadState::Queued) {
+    const std::filesystem::path path = assetRoot_ / definition.path;
+    if (publishGate(slot, path, "model", wait) == PublishGate::Stop) {
         return false;
     }
     if (slot.state == LoadState::CpuReady) {
@@ -933,14 +960,7 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
             slot.materialBase = 0;
             slot.materialCount = 0;
             slot.materialPolicy = {};
-            slot.failure = std::current_exception();
-            slot.state = LoadState::Failed;
-            if (wait) {
-                throwIfFailed(slot.state, slot.failure, assetRoot_ / definition.path, "model");
-            }
-            log::error(log::Category::Assets)
-                << "Background model publication failed: "
-                << (assetRoot_ / definition.path).string();
+            recordPublishFailure(slot, path, "model", "publication", wait);
         }
         return slot.state == LoadState::Ready ||
             slot.state == LoadState::Uploading ||
@@ -969,14 +989,7 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
         }
         return publishModel(model, wait);
     } catch (...) {
-        slot.failure = std::current_exception();
-        slot.state = LoadState::Failed;
-        if (wait) {
-            throwIfFailed(slot.state, slot.failure, assetRoot_ / definition.path, "model");
-        }
-        log::error(log::Category::Assets)
-            << "Background model publication failed: "
-            << (assetRoot_ / definition.path).string();
+        recordPublishFailure(slot, path, "model", "publication", wait);
     }
     return true;
 }
@@ -985,17 +998,7 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
 {
     TextureSlot& slot = textures_.at(textureIndex);
     const std::filesystem::path path = textureDiagnosticPath(textureIndex);
-    if (slot.state == LoadState::Uploading || slot.state == LoadState::Ready) {
-        return false;
-    }
-    if (slot.state == LoadState::Failed) {
-        if (wait) {
-            throwIfFailed(slot.state, slot.failure, path, "texture");
-        }
-        return false;
-    }
-    if (slot.state == LoadState::Unrequested ||
-        slot.state == LoadState::Queued) {
+    if (publishGate(slot, path, "texture", wait) == PublishGate::Stop) {
         return false;
     }
     if (slot.state == LoadState::Loading &&
@@ -1016,14 +1019,7 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
                 destroyTextureUpload(slot.upload);
                 destroyTexture(slot.gpu.image, slot.gpu.sampler);
             }
-            slot.failure = std::current_exception();
-            slot.state = LoadState::Failed;
-            if (wait) {
-                throwIfFailed(slot.state, slot.failure, path, "texture");
-            }
-            log::error(log::Category::Assets)
-                << "Background texture preparation failed: "
-                << path.string();
+            recordPublishFailure(slot, path, "texture", "preparation", wait);
             return true;
         }
     }
@@ -1093,14 +1089,7 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
             destroyTextureUpload(slot.upload);
             destroyTexture(slot.gpu.image, slot.gpu.sampler);
         }
-        slot.failure = std::current_exception();
-        slot.state = LoadState::Failed;
-        if (wait) {
-            throwIfFailed(slot.state, slot.failure, path, "texture");
-        }
-        log::error(log::Category::Assets)
-            << "Background texture publication failed: "
-            << path.string();
+        recordPublishFailure(slot, path, "texture", "publication", wait);
     }
     return true;
 }
@@ -1285,17 +1274,7 @@ bool VulkanModelResources::publishAnimation(RenderAnimation animation, bool wait
     AnimationSlot& slot = animations_[animation.index()];
     const AssetManifest::Animation& definition = manifest_->animation(animation);
     const std::filesystem::path path = assetRoot_ / definition.path;
-    if (slot.state == LoadState::Ready) {
-        return false;
-    }
-    if (slot.state == LoadState::Failed) {
-        if (wait) {
-            throwIfFailed(slot.state, slot.failure, path, "animation");
-        }
-        return false;
-    }
-    if (slot.state == LoadState::Unrequested ||
-        slot.state == LoadState::Queued) {
+    if (publishGate(slot, path, "animation", wait) == PublishGate::Stop) {
         return false;
     }
     if (!wait && !futureReady(slot.future)) {
@@ -1310,14 +1289,7 @@ bool VulkanModelResources::publishAnimation(RenderAnimation animation, bool wait
         animationController_.setClip(animation, slot.future.get());
         slot.state = LoadState::Ready;
     } catch (...) {
-        slot.failure = std::current_exception();
-        slot.state = LoadState::Failed;
-        if (wait) {
-            throwIfFailed(slot.state, slot.failure, path, "animation");
-        }
-        log::error(log::Category::Assets)
-            << "Background animation publication failed: "
-            << path.string();
+        recordPublishFailure(slot, path, "animation", "publication", wait);
     }
     return true;
 }
@@ -1349,7 +1321,7 @@ std::vector<bool> VulkanModelResources::requiredTextures(
     const RenderAssetRequirements& requirements) const
 {
     std::vector<bool> result(textures_.size(), false);
-    for (uint32_t i = 0; i < manifestTextureCount_; ++i) {
+    for (uint32_t i = 0; i < textureSpace_.manifestCount(); ++i) {
         result[i] = requirements.contains(RenderTexture { i + 1 });
     }
     for (uint32_t i = 0; i < models_.size(); ++i) {
@@ -1599,7 +1571,8 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
 {
     LoadingStats result {
         .totalModels = static_cast<uint32_t>(models_.size()),
-        .totalTextures = static_cast<uint32_t>(activeTextureIndices_.size()),
+        .totalTextures =
+            static_cast<uint32_t>(textureSpace_.active().size()),
         .totalAnimations = static_cast<uint32_t>(animations_.size()),
     };
     auto countState = [&result](LoadState state, uint32_t& loaded, uint32_t& pending) {
@@ -1619,7 +1592,7 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
         countState(model.state, result.loadedModels, result.pendingModels);
         result.requestedAssets += model.state != LoadState::Unrequested;
     }
-    for (uint32_t textureIndex : activeTextureIndices_) {
+    for (uint32_t textureIndex : textureSpace_.active()) {
         const TextureSlot& texture = textures_[textureIndex];
         countState(texture.state, result.loadedTextures, result.pendingTextures);
         result.requestedAssets += texture.state != LoadState::Unrequested;
@@ -2392,26 +2365,25 @@ void VulkanModelResources::recordTextureCopy(
 bool VulkanModelResources::syncManifestTextures()
 {
     if (manifest_ == nullptr ||
-        manifestTextureCount_ >= manifest_->textures().size()) {
+        textureSpace_.manifestCount() >= manifest_->textures().size()) {
         return false;
     }
-    if (manifest_->textures().size() > discoveredTextureBase_) {
+    const uint32_t wanted =
+        static_cast<uint32_t>(manifest_->textures().size());
+    if (!textureSpace_.manifestCanHold(wanted)) {
         throw std::runtime_error(
             "Runtime manifest requires " +
             std::to_string(manifest_->textures().size()) +
             " stable low texture descriptors, but discovered glTF textures "
             "begin at descriptor " +
-            std::to_string(discoveredTextureBase_));
+            std::to_string(textureSpace_.discoveredBase()));
     }
-    for (uint32_t index = manifestTextureCount_;
-         index < manifest_->textures().size();
+    for (uint32_t index = textureSpace_.manifestCount(); index < wanted;
          ++index) {
         textureDefinitions_[index] = runtimeTextureDefinitionFor(
             manifest_->textures()[index]);
-        activeTextureIndices_.push_back(index);
     }
-    manifestTextureCount_ =
-        static_cast<uint32_t>(manifest_->textures().size());
+    textureSpace_.growManifestRange(wanted);
     return true;
 }
 
@@ -2454,7 +2426,9 @@ bool VulkanModelResources::syncManifestModels()
 VulkanModelResources::TextureUpdate VulkanModelResources::updateTexture(
     RenderTexture texture, const ImageData& image)
 {
-    if (texture.isNone() || texture.index() >= manifestTextureCount_) {
+    if (texture.isNone() ||
+        !textureSpace_.isManifestTexture(
+            static_cast<uint32_t>(texture.index()))) {
         return {};
     }
     TextureSlot& slot = textures_[texture.index()];
