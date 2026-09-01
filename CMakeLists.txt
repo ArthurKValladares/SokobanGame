@@ -962,6 +962,10 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/UploadRingAllocatorTests.cpp
     )
+    sokoban_add_test(NAME material_range_allocator TARGET sokoban_material_range_allocator_tests
+        LIBS sokoban_core
+        SOURCES tests/MaterialRangeAllocatorTests.cpp
+    )
     sokoban_add_test(NAME gpu_skinning TARGET sokoban_gpu_skinning_tests
         LIBS sokoban_core
         ASSET_DIR

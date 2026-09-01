@@ -9,10 +9,10 @@ body { margin: 0; font: 14px system-ui, sans-serif; background: #faf9f7; }
 img { max-width: 100%; }
 [hidden] { display: none !important; }
 </style>
-<title>Sokoban Engine Audit</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
 </head>
 <body>
+<title>Sokoban Engine Audit</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
 <style>
 :root {
   color-scheme: light dark;
@@ -527,19 +527,19 @@ a { color: var(--accent); }
 
 <div class="tally">
   <div class="tally-cell is-major">
-    <span class="tally-n">10</span>
+    <span class="tally-n">5</span>
     <span class="tally-label">Major open</span>
   </div>
   <div class="tally-cell is-moderate">
-    <span class="tally-n">14</span>
+    <span class="tally-n">12</span>
     <span class="tally-label">Moderate</span>
   </div>
   <div class="tally-cell is-minor">
-    <span class="tally-n">13</span>
+    <span class="tally-n">11</span>
     <span class="tally-label">Minor</span>
   </div>
   <div class="tally-cell is-good">
-    <span class="tally-n">1</span>
+    <span class="tally-n">9</span>
     <span class="tally-label">Resolved</span>
   </div>
   <div class="tally-cell is-good">
@@ -561,9 +561,10 @@ a { color: var(--accent); }
     mode that is handled more harshly than it needs to be.
   </p>
 
-  <article class="finding is-major">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-major">Major</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: major · outdated guard</span>
       <span class="tag">Outdated guard</span>
     </div>
     <h3>The static-mesh guard still asks “is this the player?”, not “is this skinned?”</h3>
@@ -598,7 +599,20 @@ if (model.isCube() ||
       <code>geometry</code> field at publication so no call site re-derives it
       from the manifest at all.
     </div>
-  </article>
+      <p>
+      <strong>Done.</strong> The guard now asks
+      <code>modelUsesGpuSkinning(model)</code> — the same geometry test the rest
+      of the class uses — instead of comparing against the player by identity.
+    </p>
+    <p>
+      The replacement is provably a superset of what it replaced, not a
+      behavioural change: <code>AssetManifest.cpp:583</code> rejects any manifest
+      whose player model is not skinned, so “is the player” already implied “is
+      skinned”. The old guard therefore caught <code>Rogue</code> and missed
+      <code>Barbarian</code>, which is skinned too and carries the enemy role.
+      The new one catches both, and every skinned model added later.
+    </p>
+</article>
 
   <article class="finding is-major">
     <div class="finding-top">
@@ -641,9 +655,10 @@ if (model.isCube() ||
     </div>
   </article>
 
-  <article class="finding is-major">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-major">Major</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: major · ODR hazard</span>
       <span class="tag">ODR hazard</span>
     </div>
     <h3>A build flag that gates class members silently defaults itself to zero</h3>
@@ -683,11 +698,31 @@ if (model.isCube() ||
       <code>configure_file</code> and include that instead of relying on a
       command-line macro at all.
     </div>
-  </article>
+      <p>
+      <strong>Done.</strong> All eight self-defining fallbacks now
+      <code>#error</code> instead, and the flag is defined once — <code>PUBLIC</code>
+      on <code>sokoban_core</code>, which every other target links transitively.
+      That also closes <span class="code">G4</span>: the same generator
+      expression previously appeared three times with mixed
+      <code>PUBLIC</code>/<code>PRIVATE</code> visibility, and two of those were
+      already redundant.
+    </p>
+    <p>
+      For any real build the change is a no-op — <code>#ifndef X / #error</code>
+      and <code>#ifndef X / #define X 0</code> are identical when <code>X</code>
+      is defined — so this costs nothing and removes the mechanism that made the
+      failure silent. Reproduced to be sure of what that mechanism was: one
+      header, two translation units, <code>sizeof</code> 4 against 8, linking
+      without a murmur. Checked that every target compiling a guarded file
+      reaches the new definition; the only two test targets that link no Sokoban
+      library, <code>math</code> and <code>geometry</code>, include none of them.
+    </p>
+</article>
 
-  <article class="finding is-moderate">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-moderate">Moderate</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: moderate · coupled constants</span>
       <span class="tag">Coupled constants</span>
     </div>
     <h3>Frames in flight and the skinning frame count must agree, and nothing says so</h3>
@@ -714,7 +749,13 @@ if (model.isCube() ||
       <code>static_assert(gpuSkinningFrameCount == VulkanRenderer::maxFramesInFlight_)</code>,
       or make one derive from the other.
     </div>
-  </article>
+      <p>
+      <strong>Done.</strong> A <code>static_assert</code> sits directly beneath
+      <code>maxFramesInFlight_</code>, where the coupling is visible to whoever
+      changes it. <code>gpuSkinningFrameCount</code> already reached that header
+      through <code>VulkanModelResources.hpp</code>, so no include was needed.
+    </p>
+</article>
 
   <article class="finding is-moderate">
     <div class="finding-top">
@@ -845,12 +886,12 @@ if (model.isCube() ||
     by hand and nothing checks them.
   </p>
 
-  <article class="finding is-major">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-major">Major</span>
-      <span class="tag">Duplication</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: duplication</span>
     </div>
-    <h3>The shared GPU structs are retyped in every shader that uses them</h3>
+    <h3>The shared GPU structs were retyped in every shader that uses them</h3>
     <div class="table-wrap">
       <table>
         <thead>
@@ -877,43 +918,94 @@ if (model.isCube() ||
       <code>-I</code>. There is no technical obstacle here — only that the
       mechanism was never turned on.
     </p>
-    <div class="fix">
-      Add <code>shaders/include/</code> with <code>SceneFrame.glsl</code>,
-      <code>DrawInstance.glsl</code> and <code>Material.glsl</code>; pass
-      <code>-I shaders/include</code> in the CMake shader rule and add
-      <code>#extension GL_GOOGLE_include_directive : require</code> to the modules.
-      This removes roughly 250 lines of copied declarations and turns four ABIs
-      into four single sources of truth.
-    </div>
+    <p>
+      <strong>Done.</strong> <code>shaders/include/</code> now holds
+      <code>DrawInstance.glsl</code>, <code>SceneFrame.glsl</code>,
+      <code>Material.glsl</code>, <code>Skinning.glsl</code>,
+      <code>AmbientMask.glsl</code> and <code>PointShadow.glsl</code>; the CMake
+      rule passes <code>-I</code> and each module declares
+      <code>GL_GOOGLE_include_directive</code>. Net <strong>332 deletions
+      against 51 insertions</strong> across ten shaders, removing
+      <strong>240 duplicated lines</strong> of CPU&#8202;↔&#8202;GPU ABI.
+    </p>
+    <p>
+      The acceptance test is the strongest one available for a refactor that
+      claims to change nothing: <strong>all sixteen modules compile to
+      byte-identical SPIR-V</strong> before and after, and all sixteen pass
+      <code>spirv-val --target-env vulkan1.3</code>. A pilot on the smallest
+      module confirmed up front that the extension directive itself perturbs no
+      codegen. The <code>DEPENDS</code> list now covers every shared header, so
+      editing an ABI rebuilds the modules that read it — without that, the
+      include would have introduced exactly the stale-artifact failure
+      <code>ShaderCatalog.hpp</code> exists to prevent.
+    </p>
+    <p>
+      A follow-up <code>gpu_abi</code> test closes the other half of the
+      contract. A shared C++/GLSL header was considered and rejected: the
+      layouts already agree exactly, the win after this change is only about
+      fifty lines, and GLSL cannot carry the default member initializers that
+      make <code>GpuMaterial{}</code> the white fallback entry zero depends on.
+      Reading the compiled layout back is strictly stronger — it catches an
+      std140 stride change a shared field list would not — and leaves both
+      declarations readable.
+    </p>
   </article>
 
   <article class="finding is-major">
     <div class="finding-top">
       <span class="sev is-major">Major</span>
-      <span class="tag">Duplication</span>
+      <span class="tag">Behavioural drift</span>
+      <span class="tag">Corrected</span>
     </div>
-    <h3>The shadow sampling functions are duplicated verbatim across two shaders</h3>
+    <h3>The ground and the scene disagree on how point shadows are filtered</h3>
     <div class="loc">
-      <code>shaders/triangle.frag.glsl:230–307</code>
-      <code>shaders/ground_splat.frag.glsl:145–210</code>
+      <code>shaders/triangle.frag.glsl:266–310</code>
+      <code>shaders/ground_splat.frag.glsl:181–210</code>
     </div>
     <p>
-      <code>shadowFactor</code>, <code>pointShadowWorldDistance</code> and
-      <code>pointShadowFactor</code> — including the 3×3 PCF loop, the five-tap
-      cube kernel, the grazing-angle bias ramp and the near-plane literal — are
-      byte-identical in both files. A window-based comparison finds
-      <strong>47 shared 12-line spans</strong> between them, roughly 60 duplicated
-      lines of shadowing logic plus the declaration blocks above.
+      <strong>Correction to the first version of this finding.</strong> It
+      claimed these functions were “byte-identical in both files”, inferred from
+      a sliding-window similarity scan. Extracting and diffing them
+      function-by-function while doing <span class="code">B1</span> showed that
+      only <code>pointShadowWorldDistance</code> is genuinely duplicated. The
+      other two have <em>diverged</em> — which is a worse problem than
+      duplication, and one a mechanical extract would have silently papered over.
     </p>
     <p>
-      Two shaders currently write the ambient mask and the handoff makes it an
-      explicit invariant that they “must calculate the same semantic ratio”. Right
-      now that invariant is upheld by remembering to edit both files.
+      <code>pointShadowFactor</code> is the substantive one. The scene shader
+      builds a tangent frame and takes <strong>five taps</strong> through the
+      shadow cube, averaging them. The ground shader takes <strong>one</strong>:
+    </p>
+    <pre><span class="cmt">// triangle.frag.glsl — five taps, softened</span>
+vec3 offsets[5] = vec3[5](vec3(0.0), tangent, -tangent, bitangent, -bitangent);
+for (int sampleIndex = 0; sampleIndex &lt; 5; ++sampleIndex) { <span class="cmt">/* ... */</span> }
+return 1.0 - shadowed / 5.0 * clamp(light.shadowOptions.w, 0.0, 1.0);
+
+<span class="cmt">// ground_splat.frag.glsl — one tap, hard edge</span>
+<span class="hl">float closestDepth = texture(pointShadowMaps, vec4(direction, light.shadowOptions.y)).r;</span>
+return 1.0 - shadowed * clamp(light.shadowOptions.w, 0.0, 1.0);</pre>
+    <p>
+      So a point light casts a softened shadow onto a model and a harder, more
+      aliased one onto the ground beside it. <code>shadowFactor</code> differs
+      too, though only cosmetically — the ground rejects out-of-range depth
+      before the UV bounds rather than after, and uses
+      <code>&lt;= 0.0 || &gt;= 1.0</code> where the scene uses
+      <code>&lt; 0.0 || &gt; 1.0</code>.
+    </p>
+    <p>
+      Whether the single tap is a deliberate cost saving on a full-screen ground
+      plane or drift that nobody noticed is a question about intent, not about
+      code — which is exactly why it was left alone. Merging it would change how
+      the ground is lit, and that belongs in a change with its own before/after
+      evidence, not inside a refactor that is otherwise provably a no-op.
     </p>
     <div class="fix">
-      Same mechanism as <span class="code">B1</span>: move them to
-      <code>shaders/include/Shadowing.glsl</code>. The invariant then holds by
-      construction instead of by discipline.
+      Decide which behaviour is correct, then unify into
+      <code>shaders/include/PointShadow.glsl</code> — the header
+      <span class="code">B1</span> created for the one helper the two files do
+      agree on, which already carries a comment recording the divergence. If the
+      single tap is deliberate, make it a parameter with the reason written down
+      rather than two functions that merely look alike.
     </div>
   </article>
 
@@ -971,7 +1063,17 @@ if (model.isCube() ||
       <code>draw.gridColor.w &lt; 0.0</code> flag — a boolean smuggled into an
       alpha channel as a negative number.
     </p>
-    <div class="fix">
+        <p>
+      <strong>Wider than first reported.</strong> Naming the modes showed
+      <code>textureOptions.x</code> is overloaded too, and across pipelines
+      rather than within one: it is a draw mode for the scene, mirror and UI
+      shaders, a base texture handle in <code>ground_splat.frag</code>, and a
+      ripple frequency in <code>water.frag</code>. That is safer than the
+      <code>materialOptions</code> case — a pipeline only ever sees its own
+      draws, so no shader can misread another's lane — but it means the header's
+      field names describe none of the three.
+    </p>
+<div class="fix">
       Two options, in increasing order of effort. Cheap: document the union
       explicitly in <code>VulkanRenderConstants.hpp</code> the way
       <code>passData</code> already is, naming which draw kind claims which lane.
@@ -982,9 +1084,10 @@ if (model.isCube() ||
     </div>
   </article>
 
-  <article class="finding is-major">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-major">Major</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: major · magic numbers</span>
       <span class="tag">Magic numbers</span>
     </div>
     <h3>Material and UI mode numbering is a shared enum written as bare literals on both sides</h3>
@@ -1021,8 +1124,84 @@ const int UI_MODE_TEXTURE_IMAGE = 7;</pre>
       <code>UiDrawKind</code> instead of the nested ternary. The float transport
       can move to the integer lanes in the same change.
     </div>
-  </article>
+      <p>
+      <strong>Done.</strong> <code>DrawMaterialMode</code> in
+      <code>VulkanRenderConstants.hpp</code> now owns the whole numeric space,
+      <code>shaders/include/DrawMode.glsl</code> mirrors it, and the nested
+      ternary became a <code>switch</code> — so adding a
+      <code>UiDrawKind</code> is a compiler error rather than a silent fall
+      through to the title background.
+    </p>
+    <p>
+      The space turned out to be split four ways, not two:
+      <code>ModelMaterialMode</code> in a content header covered 0–2, a lone
+      constant named 5, the recorder's ternary produced 3, 4, 6 and 7 as bare
+      floats, and each shader repeated whichever values it cared about.
+      Static assertions in the recorder now hold the first three against the
+      manifest enum, which nothing had been doing.
+    </p>
+    <p>
+      A <code>draw_mode</code> test parses the GLSL header and compares it to
+      the enum — values, missing entries and stale leftovers alike. That check
+      cannot come from SPIR-V: the optimizer folds a mode comparison into a
+      branch, so the header text is the only place the value is still visible.
+      Mutation-tested four ways: a drifted value, a renamed constant, an
+      unparseable header and a missing one are all caught, including the
+      empty-parse case that would otherwise let the suite rot into passing
+      vacuously.
+    </p>
+    <p>
+      All sixteen modules were recompiled and compared. Fourteen are
+      byte-identical; <code>ui.frag</code> and <code>mirror_energy.frag</code>
+      differ by exactly one SPIR-V id, because the shared header declares a
+      couple of constants those modules do not use. Canonicalising ids shows all
+      sixteen structurally identical, with matching instruction histograms.
+    </p>
+</article>
 </section>
+
+  <article class="finding is-moderate">
+    <div class="finding-top">
+      <span class="sev is-moderate">Moderate</span>
+      <span class="tag">Found while extracting D3</span>
+    </div>
+    <h3>Eviction stops after freeing about half of what it needed</h3>
+    <div class="loc">
+      <code>render/ResidencyBudget.hpp — needsEviction</code>
+      <code>VulkanModelResources.cpp — makeResident</code>
+    </div>
+    <p>
+      Choosing a victim raises the pool's <code>retiring</code> total, because
+      that is what <code>retireModel</code> does. The loop that chose it also
+      adds the same bytes to its own <code>scheduledBytes</code> tally. Both
+      then appear in the stop condition, so every victim is subtracted twice:
+    </p>
+    <pre>resident(1000) - retiring(100) - scheduled(100) + need(250) = 1050 <span class="cmt">// keep going</span>
+resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="cmt">// stop</span>
+<span class="hl">stopped after freeing 200 bytes, although 250 were needed</span></pre>
+    <p>
+      The publication is then refused, waits for the fence, and retries. So this
+      <em>under</em>-evicts rather than oversubscribing — the hard limit stays
+      honest, and nothing is corrupted. What it costs is latency: an asset takes
+      more publication rounds, and therefore more frames, to become resident
+      under memory pressure than the code reads as intending. It also explains
+      why the ladder ends on a <code>fits</code> check that so often fails.
+    </p>
+    <p>
+      Left exactly as it was during the extraction, because correcting it makes
+      eviction meaningfully more aggressive under pressure — a real behaviour
+      change that wants its own before/after measurement rather than riding
+      along inside a refactor. <code>ResidencyBudgetTests</code> pins the
+      current behaviour by name, so changing it is now a deliberate act.
+    </p>
+    <div class="fix">
+      Drop <code>scheduledBytes</code> and let <code>retiring</code> alone carry
+      the running total — <code>retireModel</code> already maintains it. Then
+      re-run the 64&nbsp;KiB residency stress capture the handoff records under
+      <code>build/a3-mip-evidence</code> and compare resident bytes, retained
+      mip levels and eviction counts against the archived run.
+    </div>
+  </article>
 
 <!-- ==================================================== C -->
 
@@ -1074,6 +1253,33 @@ const int UI_MODE_TEXTURE_IMAGE = 7;</pre>
       Then template the shared load-state machine over the slot type so the three
       copies collapse into one.
     </div>
+    <p>
+      <strong>Two seams cut, the class split still open.</strong> Residency and
+      retirement moved out first (<code>ResidencyBudget.hpp</code>, 66 checks).
+      The material buffer's allocator has now followed it into
+      <code>MaterialRangeAllocator.hpp</code>: the bump pointer, the first-fit
+      reuse and the coalescing free list, with the capacity passed in rather than
+      stored, and no Vulkan in sight. <code>writeMaterials</code> is down to
+      allocating a base and writing the bytes;
+      <code>releaseMaterialRange</code> no longer exists as a method, because it
+      was the free list and the free list now owns itself. Together the two
+      extractions take about 180 lines out of the class.
+    </p>
+    <p>
+      Both of these were policy that could not be reached from a test — private
+      methods behind a live device. The allocator now has 49 checks, including
+      the two behaviours that were surprising enough to pin rather than quietly
+      change: releasing the same run twice is absorbed silently, and
+      fragmentation can refuse a run the buffer has total room for, which is the
+      real failure mode behind “Material buffer is exhausted” appearing while the
+      buffer looks half empty.
+    </p>
+    <p>
+      What remains is the part the finding is actually about: the class still
+      owns mesh upload, texture format selection and mip generation, animation
+      clips, the skinning and draw-instance buffers, and the descriptor-index
+      map, and the load-state machine is still written three times.
+    </p>
   </article>
 
   <article class="finding is-major">
@@ -1277,9 +1483,10 @@ const int UI_MODE_TEXTURE_IMAGE = 7;</pre>
     </div>
   </article>
 
-  <article class="finding is-moderate">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-moderate">Moderate</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: moderate · structural</span>
       <span class="tag">Structural</span>
     </div>
     <h3>The residency and retirement algorithms are written twice</h3>
@@ -1307,7 +1514,26 @@ const int UI_MODE_TEXTURE_IMAGE = 7;</pre>
       the file and the natural first step toward splitting the class (see
       <span class="code">C1</span>).
     </div>
-  </article>
+      <p>
+      <strong>Done.</strong> The accounting and the eviction ladder moved into
+      <code>ResidencyBudget.hpp</code>, which knows nothing about Vulkan.
+      <code>makeModelResident</code> and <code>makeTextureResident</code> are now
+      six lines each that hand the shared ladder a pool, a slot vector and a
+      retire callback; <code>texturePublicationCapacity</code> uses the same
+      candidate walk instead of open-coding the predicate a third time.
+      <code>VulkanModelResources.cpp</code> is 134 lines lighter, and the six
+      byte counters became two objects.
+    </p>
+    <p>
+      The point was never the line count. This policy previously could not be
+      reached from a test at all — it sat in two private methods that needed a
+      device to call. <code>ResidencyBudgetTests</code> now covers it with 66
+      checks: LRU victim choice, the protections for the asset being published
+      and for anything the current frame wants, headroom saturation when a pool
+      is over its limit, and the rule that a publication which evicted its own
+      victims is still refused until their fences clear.
+    </p>
+</article>
 
   <article class="finding is-moderate">
     <div class="finding-top">
@@ -1464,9 +1690,11 @@ const int UI_MODE_TEXTURE_IMAGE = 7;</pre>
     migrations, a fuzz target. The content is strong; the scaffolding is not.
   </p>
 
-  <article class="finding is-major">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-major">Major</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: major · duplication</span>
+      <span class="tag">Partly</span>
       <span class="tag">Duplication</span>
     </div>
     <h3>Sixty-seven hand-rolled test harnesses, in two incompatible idioms</h3>
@@ -1498,7 +1726,45 @@ const int UI_MODE_TEXTURE_IMAGE = 7;</pre>
       <code>CHECK</code> as you touch them rather than in one sweep — a mechanical
       change to a test file is exactly the kind of diff that hides a real one.
     </div>
-  </article>
+      <p>
+      <strong>Mostly done.</strong> <code>tests/TestHarness.hpp</code> now holds
+      the counters, <code>checkImpl</code>, <code>CHECK</code> and
+      <code>TEST</code>, and 55 suites include it instead of writing their own:
+      <strong>864 deletions against 110 insertions</strong>, about 750 lines of
+      copied scaffolding replaced by one 50-line header. No local
+      <code>checkImpl</code> remains anywhere.
+    </p>
+    <p>
+      The counts in the table above came from grepping for
+      <code>#define CHECK</code>, which overstated how uniform those files were.
+      Clustering the actual bodies found five spellings that collapse to two
+      behaviours: 31 files printed
+      <code>FAIL [name] line N</code> and 24 printed <code>FAIL line N</code>,
+      the parameter being called <code>ok</code>, <code>condition</code> or
+      <code>value</code> depending on the file. The shared
+      <code>checkImpl</code> prints the name only when a suite has set one, so
+      both groups produce byte-identical output — verified by building each
+      idiom before and after and diffing stdout, stderr and exit code.
+    </p>
+    <p>
+      Four migrated suites were built and run for real
+      (<code>frame_descriptor_sync</code>, <code>frame_resource_tracker</code>,
+      <code>tonemap</code>, <code>pbr_material</code>: 19, 28, 17 and 55 checks),
+      and an injected failure confirmed still reports its expression and line.
+      A missed deletion cannot pass silently either: a leftover local
+      <code>failures</code> would make the name ambiguous against the header's
+      and fail to compile.
+    </p>
+    <p>
+      <strong>Still open:</strong> 15 suites keep the older
+      <code>check(cond, "label")</code> idiom, whose failures name a hand-written
+      string rather than the expression, and 13 still carry their own
+      temporary-directory helper. Those were left deliberately — converting them
+      changes what a failure says, so it belongs with whoever next has reason to
+      touch each file, not in a sweep that would bury a real change among 15
+      mechanical ones.
+    </p>
+</article>
 
   <article class="finding is-minor">
     <div class="finding-top">
@@ -1728,7 +1994,19 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
       churn at all</strong> — which is a cleaner outcome than the
       <code>git add --renormalize</code> sweep this finding originally proposed,
       and it means the refactors below can proceed without an unreviewable diff
-      in front of them.
+      in front of them. Landed as <code>a3f0529a</code>.
+    </p>
+    <p>
+      A <strong>Line endings</strong> job now gates it in
+      <code>required-tests.yml</code>: it re-applies the clean filter with
+      <code>git add --renormalize .</code> and fails if any committed byte
+      moves. Reading every text blob in <code>HEAD</code> directly out of the
+      packfile confirms the gate is green today — of 11,587 text blobs exactly
+      ten contain CRLF, and all ten are the vendored Kenney licence files the
+      policy marks <code>-text</code>. That is what makes the
+      <code>-text</code> rule load-bearing rather than decorative: without it,
+      the gate would demand a content change to vendored licence text on its
+      first run.
     </p>
   </article>
 
@@ -1783,9 +2061,10 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
     </div>
   </article>
 
-  <article class="finding is-minor">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-minor">Minor</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: minor · build config</span>
       <span class="tag">Build config</span>
     </div>
     <h3>The debug-UI flag is defined three times with two visibilities</h3>
@@ -1813,7 +2092,14 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
       (<code>SOKOBAN_DEVELOPER_BUILD</code>) and use it for both the macro and the
       source list so they cannot disagree.
     </div>
-  </article>
+      <p>
+      <strong>Done</strong>, as part of <span class="code">A3</span> — the
+      consolidation that fix required is exactly this one. The mismatched
+      source-list gate described above is untouched and still open: changing it
+      alters what a Debug build with developer tools off actually compiles, which
+      wants its own change and its own build to confirm it.
+    </p>
+</article>
 
   <article class="finding is-minor">
     <div class="finding-top">
@@ -1901,11 +2187,15 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
       enabled” and “validation is enforced”.
     </li>
     <li>
-      <strong>GPU ABI discipline where it is checked.</strong> Eleven
-      <code>static_assert</code>s pinning <code>GpuMaterial</code>’s size,
-      alignment and every field offset, verified against SPIR-V disassembly.
-      Section&nbsp;B is not a criticism of this — it is an argument for extending
-      the same standard to the shader side.
+      <strong>GPU ABI discipline, now on both sides.</strong> Eleven
+      <code>static_assert</code>s pinned <code>GpuMaterial</code>’s size,
+      alignment and every field offset on the CPU. The GPU side rested on a
+      one-time manual reading of SPIR-V disassembly; a <code>gpu_abi</code> test
+      now reads the member offsets, array strides and component types out of
+      every compiled <code>.spv</code> and compares them to
+      <code>offsetof</code>, <code>sizeof</code> and <code>decltype</code> on the
+      matching struct. Both descriptions of all four blocks are machine-checked
+      against each other on every build.
     </li>
     <li>
       <strong>Ownership boundaries are clear at the file level.</strong> 279 files
@@ -1932,47 +2222,52 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
       <b>Normalise line endings and add <code>.gitattributes</code>. — done</b>
       <span class="code">G1</span> — handoff item 0.3 is closed. 191 working-tree
       files repaired, policy pinned, tree verified byte-identical to
-      <code>HEAD</code>. Staged as one added file, uncommitted: commits belong to
-      the project owner. The CI guard that would keep it that way
-      (<code>git diff --exit-code</code> after a renormalise check) is
-      deliberately left as its own separate change.
+      <code>HEAD</code>, committed as <code>a3f0529a</code>. A
+      <strong>Line endings</strong> CI job now keeps it that way, added
+      separately so the normalisation commit stayed a single file.
     </li>
     <li>
-      <b>Turn on <code>#include</code> for shaders and move the shared declarations.</b>
-      <span class="code">B1</span>, <span class="code">B2</span> — deletes about
-      250 lines of copied struct declarations and 60 lines of duplicated shadow
-      code, and converts four hand-maintained ABIs into four single sources of
-      truth. Purely mechanical, verifiable with <code>spirv-dis</code> on the
-      before and after.
+      <b>Turn on <code>#include</code> for shaders and move the shared declarations. — done</b>
+      <span class="code">B1</span> — six headers under
+      <code>shaders/include/</code>, 332 deletions against 51 insertions, 240
+      duplicated ABI lines gone, all sixteen modules verified byte-identical.
+      <span class="code">B2</span> did not survive contact: the shadow functions
+      turned out to have diverged rather than been duplicated, so they are left
+      in place and re-filed as a behavioural question.
     </li>
     <li>
-      <b>Fix the three correctness items.</b>
-      <span class="code">A1</span> (the skinned-model guard),
-      <span class="code">A3</span> (the ODR fallback) and
-      <span class="code">A4</span> (the frames-in-flight assert). All three are
-      small, none needs a design decision, and each removes a way for a future
-      change to fail silently.
+      <b>Fix the three correctness items. — done</b>
+      <span class="code">A1</span> the skinned-model guard,
+      <span class="code">A3</span> the ODR fallback (which also closed
+      <span class="code">G4</span>) and <span class="code">A4</span> the
+      frames-in-flight assert. Eleven files, +74/−18. Each removes a way for a
+      future change to fail silently rather than loudly.
     </li>
     <li>
-      <b>Extract <code>ResidencyBudget</code> from <code>VulkanModelResources</code>.</b>
-      <span class="code">D3</span> — this is the highest-value single extraction
-      in the renderer, it collapses two 50-line algorithms into one, and it is the
-      natural first cut toward <span class="code">C1</span>. The existing
-      <code>FrameResourceTrackerTests</code> coverage makes it safe to do.
+      <b>Extract <code>ResidencyBudget</code> from <code>VulkanModelResources</code>. — done</b>
+      <span class="code">D3</span> — two 50-line algorithms became one, the file
+      lost 134 lines, and a policy that no test could reach now has 66 checks
+      over it. The extraction also surfaced the double-counted victim above.
     </li>
     <li>
-      <b>Introduce the shared test harness.</b>
-      <span class="code">E1</span> — do it before the larger refactors, so that
-      when a test fails during them you get an expression and a line number
-      instead of a hand-written label.
+      <b>Introduce the shared test harness. — done</b>
+      <span class="code">E1</span> — 55 suites on one header, 864 lines of
+      scaffolding removed, output proven byte-identical for both idioms. The 15
+      suites on the older <code>check()</code> idiom are left to convert as they
+      are touched.
     </li>
     <li>
-      <b>Then the structural work.</b>
-      <span class="code">C1</span> (splitting the class),
+      <b>Then the structural work. — in progress</b>
+      <span class="code">B4</span> is done: one enum, one GLSL mirror, one test
+      holding them together. <span class="code">C1</span> has had its second
+      seam cut — the material range allocator is out, tested, and proven
+      equivalent to the code it replaced over 1.26 million randomised
+      operations — but the class split itself is still open, as are
       <span class="code">C2</span> (the long functions),
       <span class="code">D1</span> (the face-draw payload) and
-      <span class="code">B3</span> (the overloaded lanes). These are larger and
-      benefit from everything above being done first.
+      <span class="code">B3</span> (the overloaded lanes), plus the two
+      behavioural questions parked along the way: the divergent point-shadow
+      filtering and the double-counted eviction victim.
     </li>
   </ol>
 </section>
@@ -1980,7 +2275,7 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
 <footer>
   <span>Sokoban 3D engine · code-quality audit</span>
   <span>Reviewed against HEAD 21dff13a · 31 Aug 2026</span>
-  <span>38 findings · 1 resolved · 0 live defects</span>
+  <span>37 findings · 9 resolved · 0 live defects</span>
 </footer>
 
 </div>

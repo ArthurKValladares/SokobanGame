@@ -110,9 +110,11 @@ sampling have different failure modes and should be independently reviewable.
 - Language and platform: C++20, SDL3, Vulkan 1.3, GLSL compiled to SPIR-V.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
-- Current tests: 69 CTest suites in the newest configured build tree.
-- Current shaders: 16 GLSL files. `triangle.frag.glsl` is 669 physical lines;
-  player-facing UI uses the 93-line `ui.frag.glsl` path.
+- Current tests: 73 CTest suites in the newest configured build tree.
+- Current shaders: 16 GLSL files plus shared declarations under
+  `shaders/include/`, which the shader build passes to `glslc` with `-I`.
+  `triangle.frag.glsl` is 669 physical lines; player-facing UI uses the
+  93-line `ui.frag.glsl` path.
 - Texture capacity: selected at startup from a configured 1,024-slot ceiling,
   device limits, 16 editor-reserved slots and 32 import-reserved slots. The
   validated RTX 4060 configuration selects 1,024 slots for 42 manifest entries.
@@ -250,6 +252,33 @@ future tasks:
   texture heap is therefore the only binding in set 1; do not merge it back
   into the scene set, whose bindings continue through 12.
 
+## Code-quality track
+
+A separate, non-packet track runs against `codequality-review.html`, which holds
+the full findings list and the evidence behind each change. It is status, not a
+second roadmap: consult it before reopening any item below.
+
+Landed so far: the line-ending policy and its CI gate; shared GPU struct
+declarations under `shaders/include/`, with `gpu_abi` checking SPIR-V member
+offsets against `offsetof` and `draw_mode` pinning `DrawMode.glsl` to
+`DrawMaterialMode`; one `TestHarness.hpp` behind 55 suites; `ResidencyBudget`
+and `MaterialRangeAllocator` extracted from `VulkanModelResources`.
+
+Still open, in the order the report recommends: splitting
+`VulkanModelResources` proper and collapsing its three copies of the load-state
+machine; the eight functions past 200 lines; the five face-draw functions that
+rebuild the same lighting payload; and the overloaded `materialOptions` /
+`textureOptions` lanes.
+
+Two behavioural questions are parked deliberately rather than fixed, because
+either answer is a visual or performance decision, not a cleanup:
+
+- The ground and the scene filter point shadows differently — five taps against
+  one. The difference is real, not a refactoring artifact.
+- Eviction double-counts a victim and so stops after freeing roughly half of
+  what it asked for. `ResidencyBudgetTests` pins the current behaviour and says
+  why; it is not silently corrected.
+
 ## Rendering invariants
 
 These rules fail visually or under validation if they drift.
@@ -350,11 +379,15 @@ only, and malformed output counts.
 
 **Gate:** keep `animation_controller` in the required regression suite.
 
-#### 0.3 Normalize line endings separately
+#### 0.3 Normalize line endings separately — complete
 
 - The unused `src/engine/render/GpuModelInstance.hpp` has been deleted.
-- Add a small `.gitattributes` policy and normalize line endings in its own
-  commit, never mixed with semantic changes.
+- `.gitattributes` pins the policy: LF in the repository, CRLF checked out for
+  the MSVC-owned file types, `-text` for `third_party/**` and the vendored
+  asset pack. The committed tree was already clean; the drift was working-tree
+  only, with no content differences.
+- A `line-endings` CI job runs `git add --renormalize .` and fails on any
+  staged difference, so the policy cannot silently lapse.
 
 ### 1. Descriptor-indexing device contract — complete
 
@@ -1322,7 +1355,12 @@ layout changes affect modules that appear unrelated to the immediate feature.
   Vulkan allocation calls.
 - `src/engine/render/VulkanModelResources.*` and `TextureMipResidency.*`:
   completed A3 residency; preserve fence-owned retirement, finest-fitting mip
-  tails, exact-byte accounting and stable material ranges.
+  tails, exact-byte accounting and stable material ranges. Two policies have
+  been lifted out of this class and are now Vulkan-free and directly tested:
+  `ResidencyBudget.hpp` (byte accounting, victim choice, eviction ladder) and
+  `MaterialRangeAllocator.hpp` (the material buffer's bump pointer, first-fit
+  reuse and coalescing free list). Change either policy there, with its test,
+  rather than reintroducing the logic here.
 - `src/engine/render/VulkanSceneRecorder.*`: consumer of the prepared visible
   lists and owner of retained model-recording and point-shadow model-state
   scratch; it also owns the low-overhead recorder-phase histories and batches

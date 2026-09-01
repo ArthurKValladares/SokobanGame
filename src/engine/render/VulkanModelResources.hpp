@@ -6,6 +6,7 @@
 #include "engine/render/FrameRetirementQueue.hpp"
 #include "engine/render/GpuSkinning.hpp"
 #include "engine/render/ImageData.hpp"
+#include "engine/render/MaterialRangeAllocator.hpp"
 #include "engine/render/MaterialRenderPolicy.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/ResidencyBudget.hpp"
@@ -374,11 +375,6 @@ private:
         uint64_t gpuBytes = 0;
     };
 
-    struct MaterialFreeRange {
-        uint32_t base = 0;
-        uint32_t count = 0;
-    };
-
     void queueModel(RenderModel model, AssetLoadPriority priority);
     void queueTexture(std::size_t textureIndex, AssetLoadPriority priority);
     void queueAnimation(RenderAnimation animation, AssetLoadPriority priority);
@@ -414,7 +410,6 @@ private:
     void retireModel(ModelSlot& slot);
     void retireTexture(TextureSlot& slot);
     void destroyCompletedResidencyRetirements();
-    void releaseMaterialRange(uint32_t base, uint32_t count);
     void markResidencyBudgetBlocked();
     [[nodiscard]] static uint64_t meshBytes(const MeshData& mesh);
     [[nodiscard]] static uint64_t textureBytes(
@@ -525,10 +520,11 @@ private:
     SkinningBuffer skinningBuffer_ {};
     ModelInstanceBuffer drawInstanceBuffer_ {};
     MaterialBuffer materialBuffer_ {};
-    // Mirrors the mapped buffer. Live ranges never move, and retired ranges
-    // return to freeMaterialRanges_ only after their frame fences complete.
+    // Mirrors the mapped buffer, sized to the allocator's high-water mark.
+    // Live ranges never move, and retired ranges return to materialRanges_
+    // only after their frame fences complete.
     std::vector<GpuMaterial> materialStorage_;
-    std::vector<MaterialFreeRange> freeMaterialRanges_;
+    MaterialRangeAllocator materialRanges_;
     FrameRetirementQueue<RetiredModelResources> retiredModels_;
     FrameRetirementQueue<RetiredTextureResources> retiredTextures_;
     AnimationController animationController_ {};

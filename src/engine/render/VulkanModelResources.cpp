@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -372,7 +373,7 @@ void VulkanModelResources::destroy()
     modelTextureDependencies_.clear();
     modelMaterialBindings_.clear();
     materialStorage_.clear();
-    freeMaterialRanges_.clear();
+    materialRanges_.reset(0);
     fallbackTexture_ = {};
     animationController_.clear();
     manifest_ = nullptr;
@@ -925,7 +926,7 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
         } catch (...) {
             // This range was never published to a frame and is safe to reuse
             // immediately when Vulkan publication fails.
-            releaseMaterialRange(slot.materialBase, slot.materialCount);
+            materialRanges_.release(slot.materialBase, slot.materialCount);
             slot.materialBase = 0;
             slot.materialCount = 0;
             slot.materialPolicy = {};
@@ -1254,7 +1255,7 @@ void VulkanModelResources::destroyCompletedResidencyRetirements()
         [this](RetiredModelResources& retired) {
             destroyMesh(retired.gpu);
             destroySkinnedMesh(retired.skinnedGpu);
-            releaseMaterialRange(
+            materialRanges_.release(
                 retired.materialBase, retired.materialCount);
             modelResidency_.finishRetiring(retired.gpuBytes);
         });
@@ -1788,8 +1789,8 @@ void VulkanModelResources::createMaterialBuffer()
         // Entry zero is the material a draw lands on when nothing has been
         // published for it yet, so it has to read as an untextured white
         // surface rather than as whatever the allocation happened to hold.
-        // Reserving it in materialStorage_ as well is what keeps the first
-        // model to publish from being handed base zero and overwriting it.
+        // Reserving it with the allocator is what keeps the first model to
+        // publish from being handed base zero and overwriting it.
         const GpuMaterial fallback {};
         for (uint32_t index = 0; index < maxModelMaterials; ++index) {
             std::memcpy(
@@ -1798,7 +1799,8 @@ void VulkanModelResources::createMaterialBuffer()
                 &fallback,
                 sizeof(GpuMaterial));
         }
-        materialStorage_.assign(1, fallback);
+        materialRanges_.reset(1);
+        materialStorage_.assign(materialRanges_.highWaterMark(), fallback);
     } catch (...) {
         destroyMaterialBuffer();
         throw;
@@ -1824,32 +1826,14 @@ uint32_t VulkanModelResources::writeMaterials(
         throw std::runtime_error("Material buffer is not mapped");
     }
 
-    std::size_t base = materialStorage_.size();
-    const uint32_t required = static_cast<uint32_t>(materials.size());
-    for (auto range = freeMaterialRanges_.begin();
-         range != freeMaterialRanges_.end();
-         ++range) {
-        if (range->count < required) {
-            continue;
-        }
-        base = range->base;
-        range->base += required;
-        range->count -= required;
-        if (range->count == 0) {
-            freeMaterialRanges_.erase(range);
-        }
-        break;
-    }
-
-    // Never zero: createMaterialBuffer seeds the reserved fallback entry, so
-    // the first real range starts at one.
-    if (base == 0 || base + materials.size() > maxModelMaterials) {
+    const std::optional<uint32_t> allocated = materialRanges_.allocate(
+        static_cast<uint32_t>(materials.size()), maxModelMaterials);
+    if (!allocated) {
         throw std::runtime_error(
             "Material buffer is exhausted; raise maxModelMaterials");
     }
-    if (base + materials.size() > materialStorage_.size()) {
-        materialStorage_.resize(base + materials.size());
-    }
+    const std::size_t base = *allocated;
+    materialStorage_.resize(materialRanges_.highWaterMark());
     for (std::size_t index = 0; index < materials.size(); ++index) {
         materialStorage_[base + index] = gpuMaterialFrom(materials[index]);
     }
@@ -1859,37 +1843,6 @@ uint32_t VulkanModelResources::writeMaterials(
         materialStorage_.data() + base,
         materials.size() * sizeof(GpuMaterial));
     return static_cast<uint32_t>(base);
-}
-
-void VulkanModelResources::releaseMaterialRange(uint32_t base, uint32_t count)
-{
-    if (base == 0 || count == 0) {
-        return;
-    }
-
-    const auto position = std::lower_bound(
-        freeMaterialRanges_.begin(),
-        freeMaterialRanges_.end(),
-        base,
-        [](const MaterialFreeRange& range, uint32_t value) {
-            return range.base < value;
-        });
-    freeMaterialRanges_.insert(position, { .base = base, .count = count });
-
-    std::vector<MaterialFreeRange> merged;
-    merged.reserve(freeMaterialRanges_.size());
-    for (const MaterialFreeRange& range : freeMaterialRanges_) {
-        if (!merged.empty() &&
-            merged.back().base + merged.back().count >= range.base) {
-            const uint32_t end = std::max(
-                merged.back().base + merged.back().count,
-                range.base + range.count);
-            merged.back().count = end - merged.back().base;
-        } else {
-            merged.push_back(range);
-        }
-    }
-    freeMaterialRanges_ = std::move(merged);
 }
 
 void VulkanModelResources::writeSkinningInstance(
