@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/AssetManifest.hpp"
+#include "engine/Geometry.hpp"
 #include "engine/render/AnimationController.hpp"
 #include "engine/render/AssetLoadScheduler.hpp"
 #include "engine/render/FrameRetirementQueue.hpp"
@@ -74,15 +75,6 @@ public:
         // recorded a frame early reads white rather than another model.
         uint32_t materialBase = 0;
         ModelMaterialPolicy policy {};
-    };
-
-    // Axis-aligned extent of a model's mesh in its own space. Needed to frame
-    // a model on its own (palette thumbnails); the scene never needs it,
-    // because tiles are drawn at a known grid size.
-    struct ModelBounds {
-        Vec3 minimum {};
-        Vec3 maximum {};
-        bool valid = false;
     };
 
     struct LoadingStats {
@@ -238,8 +230,15 @@ public:
         const RenderFrameData::Tile& tile,
         uint32_t frameIndex) const;
     [[nodiscard]] MaterialBinding materialForModel(RenderModel model) const;
-    // Invalid until the model has finished uploading.
-    [[nodiscard]] ModelBounds boundsForModel(RenderModel model) const;
+    // Axis-aligned extent of a model's mesh in its own space: the editor
+    // frames a model on its own from it, and the recorder transforms it to
+    // world space to range-test point-shadow casters. Tiles are drawn at a
+    // known grid size and do not consult it.
+    //
+    // Invalid until the model has finished uploading. Every caller must check
+    // valid() before reading the extent - an invalid box is inverted, not
+    // empty, so its minimum and maximum are not points in the scene.
+    [[nodiscard]] Aabb boundsForModel(RenderModel model) const;
     // True once the model's mesh is resident. Skinned instances additionally
     // need tileReadyForDraw(), because their pose is published per frame.
     [[nodiscard]] bool modelReady(RenderModel model) const;
@@ -315,7 +314,7 @@ private:
         std::exception_ptr failure;
         // Captured at upload, because the CPU mesh is released immediately
         // afterwards and nothing else keeps it.
-        ModelBounds bounds {};
+        Aabb bounds {};
         // Where this model's materials sit in the shared material buffer.
         // Zero means unpublished: the range never starts at the reserved
         // fallback entry. The recorder reads the base off this slot for every
@@ -452,7 +451,7 @@ private:
     [[nodiscard]] std::vector<bool> requiredTextures(const RenderAssetRequirements& requirements) const;
     [[nodiscard]] bool assetsReady(const RenderAssetRequirements& requirements) const;
 
-    [[nodiscard]] static ModelBounds boundsOf(
+    [[nodiscard]] static Aabb boundsOf(
         const std::vector<MeshVertex>& vertices);
     [[nodiscard]] GpuMesh uploadMesh(
         const MeshData& mesh,

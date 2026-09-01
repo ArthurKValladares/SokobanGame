@@ -30,6 +30,16 @@
 #error "POINT_SHADOW_TAPS must be 1 or 5"
 #endif
 
+// The near plane the cube-face projections were built with.
+//
+// This is the other half of a pair: VulkanSceneRecorder builds each face's
+// projection from config::pointShadowNearPlane, and the reconstruction below
+// inverts it. If the two ever disagree the recovered distance is wrong by a
+// constant, which shows up as acne or as shadows detaching from their caster -
+// neither of which reads as a mismatched constant. The draw_mode suite pins
+// them against each other.
+const float POINT_SHADOW_NEAR_PLANE = 0.05;
+
 // Cube-map depth back to a world-space distance from the light.
 float pointShadowWorldDistance(
     float depth, float nearPlane, float farPlane)
@@ -47,7 +57,7 @@ float pointShadowFactor(
     if (light.shadowOptions.x <= 0.5) {
         return 1.0;
     }
-    const float nearPlane = 0.05;
+    const float nearPlane = POINT_SHADOW_NEAR_PLANE;
     float farPlane = max(light.positionAndRange.w, nearPlane + 0.001);
     float majorDistance = max(
         abs(fromLight.x), max(abs(fromLight.y), abs(fromLight.z)));

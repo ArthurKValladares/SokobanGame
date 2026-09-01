@@ -1,4 +1,8 @@
-// Pins shaders/include/DrawMode.glsl to DrawMaterialMode.
+// Pins the constants that shaders/include/ shares with C++.
+//
+// Named for the draw-mode numbering it started with; it now also covers the
+// point-shadow near plane. Both are values that cross the CPU/GPU boundary as
+// plain numbers, where a mismatch is silent and does not look like a mismatch.
 //
 // The two describe one numeric space that crosses the CPU/GPU boundary, and a
 // mismatch is silent: a UI glyph would sample the title background, or a model
@@ -13,6 +17,7 @@
 
 #include "TestHarness.hpp"
 
+#include "engine/render/LightingConfig.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 
 #include <cstdint>
@@ -137,6 +142,54 @@ void testGlslMirrorsTheEnum()
     }
 }
 
+// Every `const float NAME = VALUE;` a shared header declares.
+std::map<std::string, double> parseGlslFloats(const std::filesystem::path& path)
+{
+    std::map<std::string, double> values;
+    std::ifstream file(path);
+    if (!file) {
+        return values;
+    }
+    const std::regex pattern {
+        R"(^\s*const\s+float\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*)"
+        R"((-?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)\s*;)"
+    };
+    std::string line;
+    while (std::getline(file, line)) {
+        std::smatch match;
+        if (std::regex_search(line, match, pattern)) {
+            values[match[1].str()] = std::stod(match[2].str());
+        }
+    }
+    return values;
+}
+
+void testThePointShadowNearPlaneAgrees()
+{
+    TEST("thePointShadowNearPlaneAgrees");
+    // VulkanSceneRecorder builds each cube face's projection from this value
+    // and PointShadow.glsl inverts it to recover a world distance from depth.
+    // Disagreement offsets every recovered distance by a constant, which looks
+    // like shadow acne or like shadows coming loose from their casters.
+    const std::filesystem::path header =
+        std::filesystem::path { SOKOBAN_TEST_SHADER_INCLUDE_DIR }
+        / "PointShadow.glsl";
+    const std::map<std::string, double> glsl = parseGlslFloats(header);
+
+    const auto found = glsl.find("POINT_SHADOW_NEAR_PLANE");
+    const bool present = found != glsl.end();
+    CHECK(present);
+    if (!present) {
+        std::cerr << "  POINT_SHADOW_NEAR_PLANE is missing from "
+                  << header.string()
+                  << "; the header's formatting has moved away from"
+                     " `const float NAME = VALUE;`\n";
+        return;
+    }
+    // Compared as float, because that is the width the shader stores it at.
+    CHECK(static_cast<float>(found->second) == config::pointShadowNearPlane);
+}
+
 void testTheModelMarkerIsASignTest()
 {
     TEST("theModelMarkerIsASignTest");
@@ -198,6 +251,7 @@ int main()
     testGlslMirrorsTheEnum();
     testModesAreDistinctAndContiguous();
     testTheModelMarkerIsASignTest();
+    testThePointShadowNearPlaneAgrees();
 
     if (failures != 0) {
         std::cerr << failures << " of " << checks << " checks failed\n";

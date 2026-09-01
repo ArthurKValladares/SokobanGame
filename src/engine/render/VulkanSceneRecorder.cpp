@@ -163,24 +163,16 @@ Vec3 transformModelPoint(
                 multiply(zAxis, point.z))));
 }
 
-Aabb modelWorldBounds(
-    const RenderFrameData::Tile& tile,
-    const VulkanModelResources::ModelBounds& bounds)
+Aabb modelWorldBounds(const RenderFrameData::Tile& tile, const Aabb& bounds)
 {
-    if (!bounds.valid) {
+    if (!bounds.valid()) {
         return {};
     }
     const ModelTransformPoints transform =
         IsoScenePreparer::modelTransformPoints(tile);
     Aabb result;
-    for (float x : { bounds.minimum.x, bounds.maximum.x }) {
-        for (float y : { bounds.minimum.y, bounds.maximum.y }) {
-            for (float z : { bounds.minimum.z, bounds.maximum.z }) {
-                result = expand(
-                    result,
-                    transformModelPoint(transform, { x, y, z }));
-            }
-        }
+    for (Vec3 corner : corners(bounds)) {
+        result = expand(result, transformModelPoint(transform, corner));
     }
     return result;
 }

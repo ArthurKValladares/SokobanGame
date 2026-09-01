@@ -791,9 +791,10 @@ if (model.isCube() ||
     </p>
 </article>
 
-  <article class="finding is-moderate">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-moderate">Moderate</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: moderate · coupled constants</span>
       <span class="tag">Constant drift</span>
     </div>
     <h3>The point-shadow near plane exists three times, as three unrelated literals</h3>
@@ -816,6 +817,35 @@ if (model.isCube() ||
       frame-wide lighting data, or (see&nbsp;<span class="code">B1</span>) emit it
       into a generated GLSL constants header that both shaders include.
     </div>
+    <p>
+      <strong>Three down to two, and the two are now held together.</strong> The
+      point-shadow unification took care of the first pair on its own: both
+      shaders carried their own <code>const float nearPlane = 0.05;</code> and
+      those became one when the function moved into
+      <code>PointShadow.glsl</code>.
+    </p>
+    <p>
+      What was left is the pair that actually matters, because it crosses the
+      CPU/GPU boundary. <code>VulkanSceneRecorder</code> builds each cube face's
+      projection from <code>config::pointShadowNearPlane</code>, and the shader
+      inverts that projection to recover a world distance from depth. Drift
+      offsets every recovered distance by a constant, which appears as shadow
+      acne or as shadows detaching from their casters — not as a mismatched
+      number. So the shader value is a named
+      <code>POINT_SHADOW_NEAR_PLANE</code> now, and <code>draw_mode</code> parses
+      it and compares it to the C++ constant.
+    </p>
+    <p>
+      Four mutants, all caught — including one set to <code>0.050001</code>, a
+      drift far too small to see, which is the case a text comparison is for.
+      Compiling all sixteen shaders before and after shows every module
+      byte-identical, so naming the constant changed nothing that runs.
+    </p>
+    <p>
+      The suite's name is now narrower than its contents, and its header comment
+      says so: it began as the draw-mode numbering and covers every constant this
+      header set shares with C++.
+    </p>
   </article>
 
   <article class="finding is-resolved">
@@ -1970,9 +2000,10 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
     </p>
 </article>
 
-  <article class="finding is-moderate">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-moderate">Moderate</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: moderate · reinvention</span>
       <span class="tag">Reinvention</span>
     </div>
     <h3><code>ModelBounds</code> reimplements <code>Aabb</code></h3>
@@ -2006,11 +2037,86 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       <code>primaryPlayerBoundsToPixels</code> then becomes one shared
       <code>corners(Aabb)</code> helper.
     </div>
+    <p>
+      <strong>I counted the copies wrong: there were three, not two.</strong>
+      <code>GltfMesh.cpp:528</code> declares <code>SourceBounds</code>, which is
+      not merely similar to <code>Aabb</code> — it is the same two members with
+      the same <code>max</code>/<code>lowest</code> defaults, and its
+      <code>includeBounds</code> is <code>expand</code> written out. Three
+      translation units, three names, one box. I found it only because
+      <code>ModelBounds</code>’ second writer led into the skinned loader.
+    </p>
+    <p>
+      <code>aabbFromPoints</code> could not be used. It takes
+      <code>span&lt;const Vec3&gt;</code>, and the vertices are
+      <code>MeshVertex</code>, so there is no contiguous <code>Vec3</code> view to
+      hand it and no cheap way to make one. <code>boundsOf</code> became a fold
+      over <code>expand</code> instead, which is what <code>aabbFromPoints</code>
+      itself is. It also lost its seed and its empty-input branch: the inverted
+      default is exactly what makes both unnecessary.
+    </p>
+    <p>
+      <strong>Evidence.</strong> <code>includeBounds</code> against
+      <code>expand</code>: bit-identical over 200,000 randomised point streams
+      drawn from ±0, ±∞, NaN, denormals, <code>FLT_MAX</code> and ordinary
+      magnitudes. <code>boundsOf</code>: bit-identical on all 42,759 all-finite
+      vertex sets. It diverges only where a coordinate is ±∞ or NaN — there the
+      old seed propagated the infinity and the new fold clamps to
+      <code>FLT_MAX</code>, and an all-NaN mesh now reports invalid instead of
+      valid-with-NaN-extent. Nothing validates finiteness on the way in (cgltf
+      hands through whatever floats the file carries), so a corrupt asset can
+      reach it; both results are unusable, and the new one at least fails the
+      <code>valid()</code> test that both readers already run. Five mutations of
+      the replacement — a dropped vertex, a swapped min/max, a zero seed, a
+      1-ulp perturbation, a point-box <code>merge</code> — were all caught.
+    </p>
+    <p>
+      <strong>The stored flag is gone, and that is the one real change.</strong>
+      <code>ModelBounds{}</code> held a zero box with <code>valid = false</code>;
+      <code>Aabb{}</code> holds an inverted-infinite box whose
+      <code>valid()</code> is derived. Anything reading the extent without
+      checking would now see <code>±FLT_MAX</code> rather than the origin. Both
+      readers check first — <code>VulkanRenderer::pickDecoration</code>
+      substitutes a unit box, <code>modelWorldBounds</code> returns early — and
+      the contract is now stated on <code>boundsForModel</code> rather than left
+      to the two call sites to remember. The skinned writer constructs
+      <code>Aabb{min, max}</code> deliberately and not
+      <code>aabbFromMinMax</code>: that sorts its pair, which would repair an
+      inverted box into a valid one instead of leaving it invalid.
+    </p>
+    <p>
+      <strong><code>corners(Aabb)</code> served four sites, not the two I
+      named.</strong> Besides <code>pickDecoration</code> and
+      <code>primaryPlayerBoundsToPixels</code>, the same eight-corner walk was
+      open-coded as a triple loop in <code>VulkanSceneRecorder::modelWorldBounds</code>
+      and as an eight-element literal over the camera extent in
+      <code>IsoScenePreparer</code>, in three different orders. Two of the four
+      index into the list — one averages a depth over all eight — so the helper
+      fixes an order (bit <em>k</em> of the index selects the maximum on axis
+      <em>k</em>) and the <code>geometry</code> suite pins it, with eleven new
+      checks and five of five mutants killed. At the two indexing sites the
+      replacement is element-for-element the same list in the same order. At the
+      two folding sites the order differs but the point <em>set</em> does not,
+      and a min/max fold over a set that contains both extremes on every axis
+      returns that box regardless of order — which is a stronger argument than a
+      differential, since a differential here cannot fail.
+    </p>
+    <p>
+      <strong>What this did not fix.</strong> I claimed the handoff’s note about
+      model-backed tiles “failing open because their retained unit transform is
+      not yet the loaded mesh’s true local AABB” would close “more naturally when
+      both sides speak the same type”. It does not close at all.
+      <code>primaryPlayerBoundsToPixels</code> still builds the unit cube rather
+      than asking for the model’s bounds; sharing a type made that one line
+      instead of ten and put a comment on it, which is all. The gap is a
+      behavioural change and needs someone who can look at the selector prompt.
+    </p>
   </article>
 
-  <article class="finding is-moderate">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-moderate">Moderate</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: moderate · coupled maths</span>
       <span class="tag">Coupled maths</span>
     </div>
     <h3>The isometric projection has two independent implementations</h3>
@@ -2042,6 +2148,33 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       near-plane clamp applied first), or add a comment at both sites naming the
       test that pins them together.
     </div>
+    <p>
+      <strong>Half of this finding was already wrong when I filed it.</strong> I
+      recommended “a comment at both sites naming the test”.
+      <code>IsoScenePreparer.hpp</code> already had one — a good one, explaining
+      why both forms exist, that the scalar form can clamp view-space z where a
+      matrix cannot, and that <code>IsoScenePreparerTests</code> pins them
+      together. I had read the two implementations and not the declaration above
+      one of them. Only the scalar site in the <code>.cpp</code> was missing it,
+      and that is the site someone editing the scalar form reaches first.
+    </p>
+    <p>
+      Investigating turned up something neither the finding nor that comment
+      said: <strong>the two are not bit-identical, and cannot be.</strong> The
+      scalar form multiplies by <code>fitScale</code> once at the end; the matrix
+      folds it into each coefficient. Same algebra, different rounding. Over
+      200,000 randomised camera states the relative difference is exactly zero at
+      the median, 4.4e-7 at p99, and 1.3e-4 at its worst — always in components
+      whose two terms nearly cancel — and never reached 1e-3.
+    </p>
+    <p>
+      That number turns out to justify one already in the tree.
+      <code>IsoScenePreparerTests</code> compares the two after the perspective
+      divide with an absolute tolerance of <code>0.0005f</code>, which had no
+      stated basis. It sits comfortably above the measured worst case, so it is
+      right — and the comment now says why it is that number rather than leaving
+      the next person to guess whether it is tight enough.
+    </p>
   </article>
 
   <article class="finding is-minor">
@@ -2513,6 +2646,39 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
       builds and ON in the CI matrix. Turning it on will surface a batch of
       existing warnings; fix or suppress them once, then it stays clean for free.
     </div>
+    <p>
+      <strong>“A batch of existing warnings” was a guess. Here is the
+      number.</strong> Every one of the 128 files under <code>src/</code> now
+      compiles with GCC 11 on Linux using only the vendored headers — SDL
+      vendors the Khronos ones, so no Vulkan SDK is needed — and the flag set
+      the project actually uses off-MSVC (<code>-Wall -Wextra -Wpedantic</code>)
+      produces <strong>997 warnings</strong>. 995 of them are one diagnostic:
+      <code>-Wmissing-field-initializers</code>. Every instance I sampled is a
+      <em>designated</em> initializer — <code>VkCommandBufferBeginInfo{ .sType =
+      …, .flags = … }</code> and its hundreds of siblings — which GCC 11 warns
+      about and clang and MSVC do not. That is not a latent bug surface; it is
+      one compiler disagreeing with the initialization style used deliberately
+      throughout the renderer.
+    </p>
+    <p>
+      Subtract it and the entire codebase has <strong>two</strong> warnings,
+      both <code>-Wrange-loop-construct</code> in
+      <code>PlayerProfileMigrations.cpp</code>, and both wrong: the loop
+      variables are 16-byte trivially copyable pairs, where the copy GCC objects
+      to is cheaper than the reference it recommends. So the gate is far cheaper
+      than the finding implied — <code>-Werror
+      -Wno-missing-field-initializers</code> on GCC and clang, <code>/WX</code>
+      on MSVC, is essentially free today. Deciding to suppress that diagnostic is
+      the whole of the work, and it belongs in
+      <code>sokoban_enable_warnings</code> next to the flags it qualifies, with
+      the reason written down, rather than being rediscovered by whoever first
+      turns the gate on and sees a thousand errors.
+    </p>
+    <p>
+      The two‑warning result is also the first evidence that the non-MSVC half
+      of the CI matrix compiles this tree cleanly at all; the recipe is recorded
+      under <em>Build and test commands</em> in the handoff so it can be re-run.
+    </p>
   </article>
 
   <article class="finding is-moderate">
@@ -2772,7 +2938,7 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
 <footer>
   <span>Sokoban 3D engine · code-quality audit</span>
   <span>Reviewed against HEAD 21dff13a · 31 Aug 2026</span>
-  <span>38 findings · 15 resolved · 0 live defects</span>
+  <span>38 findings · 18 resolved · 0 live defects</span>
 </footer>
 
 </div>

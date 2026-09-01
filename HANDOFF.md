@@ -139,13 +139,24 @@ sampling have different failure modes and should be independently reviewable.
 - Shader contract: `shaders/include/DrawMode.glsl` carries the draw-mode
   numbering and the `isModelDraw` sign test; `draw_mode` pins both against
   `VulkanRenderConstants.hpp` and fails if either spelling moves.
+- The isometric projection exists as a scalar form and a matrix, on purpose -
+  only the scalar one can clamp view-space z. They are algebraically identical
+  but not bit-identical, because the scalar form applies `fitScale` once at the
+  end while the matrix folds it into each coefficient. Measured over 200,000
+  randomised camera states: zero difference at the median, 1.3e-4 relative at
+  worst, never past 1e-3. `IsoScenePreparerTests` compares them after the
+  perspective divide with an absolute tolerance of 5e-4, which is why that
+  number is the number.
 - Point shadowing lives once, in `shaders/include/PointShadow.glsl`. Each shader
   picks its filter with `#define POINT_SHADOW_TAPS` before including it: the
   scene asks for 5, the ground for 1. The split is deliberate - both loop over
   up to eight point lights, so five taps on the ground would be up to forty
   cube-map samples on the largest surface in the frame against eight now.
   Changing it is a one-token experiment and wants a `--evidence-point-light`
-  capture, not a cleanup. Do not replace the two sampling bodies with a shared
+  capture, not a cleanup. The near plane the cube-face projections are built
+  with is `POINT_SHADOW_NEAR_PLANE` there, pinned against
+  `config::pointShadowNearPlane` by `draw_mode`; drift offsets every recovered
+  distance by a constant and looks like acne, not like a bad number. Do not replace the two sampling bodies with a shared
   loop run once: glslc does not unroll a one-iteration loop and the ground pays
   204 bytes and 14 instructions of loop overhead for it. The directional filter
   is a 3x3 kernel in both shaders and already agrees.
@@ -304,8 +315,12 @@ and `MaterialRangeAllocator` extracted from `VulkanModelResources`;
 `SceneDrawLanes` extracted from `VulkanSceneRecorder`; the eviction ladder's
 double-counted victim corrected; the
 `GpuDrawInstance` lane union traced and written down; the scene descriptor
-layout made table-driven; and the last three phase timings converted to
-`RenderPhaseTiming`.
+layout made table-driven; the last three phase timings converted to
+`RenderPhaseTiming`; `TextureDescriptorSpace` given the heap partition;
+`GpuMappedBuffer` given the four owning buffer structs and three views;
+`PointShadow.glsl` given both copies of the point-shadow filter; and
+`Geometry.hpp`'s `Aabb` given the two hand-rolled bounds structs and the four
+eight-corner expansions.
 
 Still open, in the order the report recommends: splitting
 `VulkanModelResources` proper and collapsing its three copies of the load-state
@@ -1416,6 +1431,20 @@ layout changes affect modules that appear unrelated to the immediate feature.
 - `src/engine/render/VulkanMemoryAllocator.*`: completed VMA ownership and the
   only renderer memory-policy seam; extend this instead of reintroducing raw
   Vulkan allocation calls.
+- `src/engine/Geometry.hpp`'s `Aabb` is the only axis-aligned box type. There
+  were three: `Aabb`, `GltfMesh.cpp`'s `SourceBounds` (character-for-character
+  the same struct, with `includeBounds` as `expand`) and
+  `VulkanModelResources::ModelBounds` (a zeroed box plus a stored `bool
+  valid`). `Aabb`'s default is *inverted*, not zero, which is what lets a fold
+  start from it with no first-point special case - so `boundsOf` lost its seed
+  and its empty-input branch as well as its six min/max lines. The stored flag
+  is gone: validity is derived, and every reader must call `valid()` before
+  touching the extent, because an invalid box holds `+FLT_MAX`/`lowest`, not
+  points in the scene. Construct from a known-ordered pair with `Aabb { min,
+  max }` and not `aabbFromMinMax`, which sorts and would quietly repair an
+  inverted box into a valid one. `corners(Aabb)` gives the eight corners, x
+  varying fastest; four call sites wrote that list out, and two of them index
+  into it, so the order is fixed and tested rather than incidental.
 - Frame budget overflow is no longer fatal. More draws than
   `maxDrawInstancesPerFrame`, or more skinned poses than
   `maxSkinnedInstancesPerFrame`, used to throw a plain `runtime_error` from
@@ -1512,6 +1541,38 @@ cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure --no-tests=error
 ```
+
+### Compiler check without the SDK
+
+Every file under `src/` parses with GCC 11 on Linux using only vendored
+headers - no Vulkan SDK and no installed SDL. SDL vendors the Khronos headers,
+which is what makes this possible:
+
+```bash
+INC="-I src -isystem third_party/SDL/src/video/khronos -isystem third_party/SDL/include \
+     -isystem third_party/vma -isystem third_party/imgui -isystem third_party/imgui/backends \
+     -isystem third_party/imgui/misc/cpp -isystem third_party/cgltf -isystem third_party/stb \
+     -isystem third_party/nlohmann -isystem third_party -isystem third_party/miniaudio \
+     -isystem third_party/bc7enc16"
+DEF="-DSOKOBAN_ENABLE_DEBUG_UI=1 -DSOKOBAN_ENABLE_VALIDATION=1 -DSOKOBAN_GAME_VERSION='\"0.0.0\"' \
+     -DSOKOBAN_SOURCE_LEVEL_DIR='\"/l\"' -DSOKOBAN_SOURCE_ASSET_DIR='\"/a\"'"
+find src -name '*.cpp' | xargs -P "$(nproc)" -I{} g++ -std=c++20 -fsyntax-only -Wall $DEF $INC {}
+```
+
+All 128 translation units pass, in both `SOKOBAN_ENABLE_DEBUG_UI` settings,
+with two `-Wrange-loop-construct` warnings in `PlayerProfileMigrations.cpp`
+that are GCC false positives - both loop variables are 16-byte trivially
+copyable pairs, where the copy is cheaper than the reference GCC asks for.
+
+Ten suites also compile and run with no library link, which makes them usable
+without a Windows build: `command_line`, `math`, `geometry`,
+`frame_descriptor_sync`, `frame_pacing`, `material_range_allocator`,
+`residency_budget`, `scene_draw_lanes`, `texture_descriptor_space` and
+`draw_mode`. The last needs `-DSOKOBAN_TEST_SHADER_INCLUDE_DIR='"<repo>/shaders/include"'`;
+`gpu_abi` needs built `.spv` modules and so needs `glslc`. Everything else in
+`tests/` links `sokoban_core` and needs a real build. This is a fast pre-check,
+not a substitute for MSVC: it will not catch a `/W4` diagnostic, a link error
+or anything that has to run on a GPU.
 
 Exercise normal and forced mip residency with validation enabled:
 

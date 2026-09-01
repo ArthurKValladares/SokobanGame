@@ -1,5 +1,6 @@
 #include "engine/render/GltfMesh.hpp"
 
+#include "engine/Geometry.hpp"
 #include "engine/TaskSystem.hpp"
 
 // glTF parsing is cgltf's job (review item A1). This replaced a hand-rolled
@@ -525,19 +526,6 @@ uint32_t materialSlotIndex(
         : 0U;
 }
 
-struct SourceBounds {
-    Vec3 minimum {
-        std::numeric_limits<float>::max(),
-        std::numeric_limits<float>::max(),
-        std::numeric_limits<float>::max(),
-    };
-    Vec3 maximum {
-        std::numeric_limits<float>::lowest(),
-        std::numeric_limits<float>::lowest(),
-        std::numeric_limits<float>::lowest(),
-    };
-};
-
 // One keyframe's value, whichever layout the channel uses. A cubic-spline
 // channel keeps a tangent either side of every value, so key N is at 3N + 1.
 Vec4 keyframeValue(const AnimationKeyframes& keyframes, size_t index)
@@ -617,16 +605,6 @@ Vec4 sampleKeyframes(const AnimationKeyframes& keyframes, float timeSeconds, boo
         t));
 }
 
-void includeBounds(SourceBounds& bounds, Vec3 position)
-{
-    bounds.minimum.x = std::min(bounds.minimum.x, position.x);
-    bounds.minimum.y = std::min(bounds.minimum.y, position.y);
-    bounds.minimum.z = std::min(bounds.minimum.z, position.z);
-    bounds.maximum.x = std::max(bounds.maximum.x, position.x);
-    bounds.maximum.y = std::max(bounds.maximum.y, position.y);
-    bounds.maximum.z = std::max(bounds.maximum.z, position.z);
-}
-
 // Source space to engine space, for one vertex.
 //
 // This used to exist twice - once here for the skinning path and once inlined
@@ -639,7 +617,7 @@ void includeBounds(SourceBounds& bounds, Vec3 position)
 // not a reflection. So `tangent.w` passes through untouched.
 MeshVertex normalizedVertex(
     MeshVertex source,
-    SourceBounds bounds,
+    Aabb bounds,
     GltfMeshLoadOptions options)
 {
     const Vec3 position = source.position;
@@ -980,7 +958,7 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
 
     MeshData mesh;
     mesh.materials = meshMaterials(data, options);
-    SourceBounds bounds;
+    Aabb bounds;
 
     // Every mesh, every primitive, in document order, with node transforms
     // ignored - which is what the previous loader did and what the manifest's
@@ -1047,7 +1025,7 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
                     .uv1 = optionalUv(secondUvs, index, uv),
                     .materialIndex = materialIndex,
                 });
-                includeBounds(bounds, position);
+                bounds = expand(bounds, position);
             }
 
             mesh.indices.reserve(mesh.indices.size() + indices.count);
@@ -1126,7 +1104,7 @@ SkinnedMeshData loadGltfSkinnedMesh(
     // Skinned vertices stay in source space. Normalization happens per pose,
     // in skinWithPoses, because the bounds a pose occupies are not the bounds
     // of the bind pose.
-    SourceBounds bounds;
+    Aabb bounds;
     for (cgltf_size meshIndex = 0; meshIndex < data.meshes_count; ++meshIndex) {
         const cgltf_mesh& sourceMesh = data.meshes[meshIndex];
         for (cgltf_size primitiveIndex = 0;
@@ -1193,7 +1171,7 @@ SkinnedMeshData loadGltfSkinnedMesh(
                     .joints = jointValues,
                     .weights = weightValues,
                 });
-                includeBounds(bounds, position);
+                bounds = expand(bounds, position);
             }
 
             mesh.indices.reserve(mesh.indices.size() + indices.count);
@@ -1466,9 +1444,10 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
 
     const SkinnedPoseMatrices pose = poseMatricesFromPoses(mesh, poses);
 
-    SourceBounds bounds;
-    bounds.minimum = mesh.sourceMinimum;
-    bounds.maximum = mesh.sourceMaximum;
+    // Not aabbFromMinMax: that sorts the pair, which would silently repair an
+    // inverted box instead of leaving it invalid. These two are already
+    // ordered, having come from a fold over at least one vertex.
+    const Aabb bounds { mesh.sourceMinimum, mesh.sourceMaximum };
     GltfMeshLoadOptions options {
         .preserveAspectRatio = mesh.preserveAspectRatio,
         .preserveSourceScale = mesh.preserveSourceScale,

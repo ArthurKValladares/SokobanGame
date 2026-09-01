@@ -83,6 +83,29 @@ struct Aabb {
     return result;
 }
 
+// The eight corners. Bit k of the index selects the maximum on axis k, so 0
+// is the minimum corner, 7 the maximum, and x varies fastest. Nothing today
+// indexes into the result - all four callers fold or project every corner, so
+// the order is free - but a fixed one is worth stating rather than leaving to
+// be rediscovered from the initializer.
+//
+// Valid() is not required and not checked: this only recombines the two
+// stored points, so an inverted box yields the same eight points a hand-written
+// initializer over the same minimum and maximum would.
+[[nodiscard]] constexpr std::array<Vec3, 8> corners(Aabb box)
+{
+    return {
+        Vec3 { box.minimum.x, box.minimum.y, box.minimum.z },
+        Vec3 { box.maximum.x, box.minimum.y, box.minimum.z },
+        Vec3 { box.minimum.x, box.maximum.y, box.minimum.z },
+        Vec3 { box.maximum.x, box.maximum.y, box.minimum.z },
+        Vec3 { box.minimum.x, box.minimum.y, box.maximum.z },
+        Vec3 { box.maximum.x, box.minimum.y, box.maximum.z },
+        Vec3 { box.minimum.x, box.maximum.y, box.maximum.z },
+        Vec3 { box.maximum.x, box.maximum.y, box.maximum.z },
+    };
+}
+
 [[nodiscard]] constexpr Vec3 center(Aabb box)
 {
     return (box.minimum + box.maximum) * 0.5f;

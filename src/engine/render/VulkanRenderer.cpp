@@ -999,28 +999,17 @@ std::optional<std::size_t> VulkanRenderer::pickDecoration(
         if (!tile.editorDecorationIndex || tile.model.isCube()) {
             continue;
         }
-        VulkanModelResources::ModelBounds bounds =
-            modelResources_.boundsForModel(tile.model);
-        if (!bounds.valid) {
-            bounds = {
-                .minimum = { 0.0f, 0.0f, 0.0f },
-                .maximum = { 1.0f, 1.0f, 1.0f },
-                .valid = true,
+        Aabb bounds = modelResources_.boundsForModel(tile.model);
+        if (!bounds.valid()) {
+            bounds = Aabb {
+                Vec3 { 0.0f, 0.0f, 0.0f },
+                Vec3 { 1.0f, 1.0f, 1.0f },
             };
         }
 
         const ModelTransformPoints transform =
             IsoScenePreparer::modelTransformPoints(tile);
-        const std::array<Vec3, 8> localCorners {
-            Vec3 { bounds.minimum.x, bounds.minimum.y, bounds.minimum.z },
-            Vec3 { bounds.maximum.x, bounds.minimum.y, bounds.minimum.z },
-            Vec3 { bounds.minimum.x, bounds.maximum.y, bounds.minimum.z },
-            Vec3 { bounds.maximum.x, bounds.maximum.y, bounds.minimum.z },
-            Vec3 { bounds.minimum.x, bounds.minimum.y, bounds.maximum.z },
-            Vec3 { bounds.maximum.x, bounds.minimum.y, bounds.maximum.z },
-            Vec3 { bounds.minimum.x, bounds.maximum.y, bounds.maximum.z },
-            Vec3 { bounds.maximum.x, bounds.maximum.y, bounds.maximum.z },
-        };
+        const std::array<Vec3, 8> localCorners = corners(bounds);
         Vec2 minimum {
             std::numeric_limits<float>::max(),
             std::numeric_limits<float>::max(),
@@ -1124,16 +1113,10 @@ std::optional<UiRect> VulkanRenderer::primaryPlayerBoundsToPixels(
 
     const ModelTransformPoints transform =
         IsoScenePreparer::modelTransformPoints(*player);
-    constexpr std::array<Vec3, 8> localCorners {
-        Vec3 { 0.0f, 0.0f, 0.0f },
-        Vec3 { 1.0f, 0.0f, 0.0f },
-        Vec3 { 0.0f, 1.0f, 0.0f },
-        Vec3 { 1.0f, 1.0f, 0.0f },
-        Vec3 { 0.0f, 0.0f, 1.0f },
-        Vec3 { 1.0f, 0.0f, 1.0f },
-        Vec3 { 0.0f, 1.0f, 1.0f },
-        Vec3 { 1.0f, 1.0f, 1.0f },
-    };
+    // The player's retained unit transform, not its mesh bounds - see the
+    // handoff note about model-backed tiles failing open here.
+    constexpr std::array<Vec3, 8> localCorners = corners(
+        Aabb { Vec3 { 0.0f, 0.0f, 0.0f }, Vec3 { 1.0f, 1.0f, 1.0f } });
     Vec2 minimum {
         std::numeric_limits<float>::max(),
         std::numeric_limits<float>::max(),

@@ -48,6 +48,21 @@ private:
     std::future<void> task_;
 };
 
+// The scalar half of a pair. isoClipFromView builds the same projection as a
+// matrix, and IsoScenePreparer.hpp explains why both exist - briefly, this one
+// can clamp view-space z where a matrix cannot, and the CPU still projects for
+// picking and camera fitting.
+//
+// The two are algebraically identical but not bit-identical, and cannot be:
+// this form multiplies by fitScale once at the end, while the matrix folds it
+// into each coefficient, so the roundings differ. Measured over 200,000
+// randomised camera states the difference is exactly zero at the median and
+// 1.3e-4 relative at its worst, where the two terms of a component nearly
+// cancel; it never reached 1e-3. IsoScenePreparerTests compares them after the
+// perspective divide with an absolute tolerance of 5e-4, which is why that
+// number is what it is.
+//
+// Change either side and that test is what tells you about the other.
 Vec4 projectIsoPointToClip(
     const IsoRenderLayout& layout,
     Vec2 renderExtent,
@@ -342,16 +357,10 @@ IsoRenderLayout calculateIsoLayout(
     const float farY = nearY + cameraExtent.height;
     const float bottom = cameraExtent.originZ;
     const float top = bottom + std::max(cameraExtent.depth, 1.0f);
-    for (Vec3 point : std::array<Vec3, 8> {
+    for (Vec3 point : corners(Aabb {
              Vec3 { left, nearY, bottom },
-             Vec3 { right, nearY, bottom },
-             Vec3 { right, farY, bottom },
-             Vec3 { left, farY, bottom },
-             Vec3 { left, nearY, top },
-             Vec3 { right, nearY, top },
              Vec3 { right, farY, top },
-             Vec3 { left, farY, top },
-         }) {
+         })) {
         includePoint(point);
     }
     // Every tile is walked for depth. Only the ones that own the framing are

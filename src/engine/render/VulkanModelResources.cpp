@@ -130,30 +130,19 @@ void remapBindingTextures(
 
 } // namespace
 
-VulkanModelResources::ModelBounds VulkanModelResources::boundsOf(
-    const std::vector<MeshVertex>& vertices)
+// A default Aabb is inverted, so the empty case needs no special handling:
+// folding nothing into it leaves it invalid, and folding the first vertex in
+// yields exactly that vertex.
+Aabb VulkanModelResources::boundsOf(const std::vector<MeshVertex>& vertices)
 {
-    if (vertices.empty()) {
-        return {};
-    }
-    ModelBounds bounds {
-        .minimum = vertices.front().position,
-        .maximum = vertices.front().position,
-        .valid = true,
-    };
+    Aabb bounds;
     for (const MeshVertex& vertex : vertices) {
-        bounds.minimum.x = std::min(bounds.minimum.x, vertex.position.x);
-        bounds.minimum.y = std::min(bounds.minimum.y, vertex.position.y);
-        bounds.minimum.z = std::min(bounds.minimum.z, vertex.position.z);
-        bounds.maximum.x = std::max(bounds.maximum.x, vertex.position.x);
-        bounds.maximum.y = std::max(bounds.maximum.y, vertex.position.y);
-        bounds.maximum.z = std::max(bounds.maximum.z, vertex.position.z);
+        bounds = expand(bounds, vertex.position);
     }
     return bounds;
 }
 
-VulkanModelResources::ModelBounds VulkanModelResources::boundsForModel(
-    RenderModel model) const
+Aabb VulkanModelResources::boundsForModel(RenderModel model) const
 {
     if (model.isCube() || model.index() >= models_.size()) {
         return {};
@@ -983,10 +972,12 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
         if (std::holds_alternative<SkinnedMeshData>(*slot.prepared)) {
             const SkinnedMeshData& skinned =
                 std::get<SkinnedMeshData>(*slot.prepared);
-            slot.bounds = {
-                .minimum = skinned.sourceMinimum,
-                .maximum = skinned.sourceMaximum,
-                .valid = true,
+            // Not aabbFromMinMax: sorting the pair would repair an
+            // inverted box rather than leave it invalid. The loader rejects
+            // an empty skinned mesh, so these are already ordered.
+            slot.bounds = Aabb {
+                skinned.sourceMinimum,
+                skinned.sourceMaximum,
             };
         }
         return publishModel(model, wait);

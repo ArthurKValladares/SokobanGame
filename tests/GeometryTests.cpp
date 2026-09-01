@@ -71,6 +71,55 @@ void testAabbBuilding()
     check(merge(box, empty) == box, "merging an invalid box in is a no-op");
 }
 
+void testAabbCorners()
+{
+    // Four call sites fold or project all eight corners of a box. Three of
+    // them wrote the list out; the ordering below is the one two of them
+    // already used, so those two are textually the same points in the same
+    // order. The remaining two only fold, and a min/max fold over a set that
+    // contains both extremes on every axis returns that box whatever the
+    // order - which is why they could adopt this order safely.
+    const Aabb box = aabbFromMinMax({ -1.0f, 2.0f, -3.0f }, { 4.0f, 5.0f, 6.0f });
+    const std::array<Vec3, 8> got = corners(box);
+
+    // Bit k of the index selects the maximum on axis k.
+    for (std::size_t index = 0; index < got.size(); ++index) {
+        const Vec3 expected {
+            (index & 1U) != 0U ? box.maximum.x : box.minimum.x,
+            (index & 2U) != 0U ? box.maximum.y : box.minimum.y,
+            (index & 4U) != 0U ? box.maximum.z : box.minimum.z,
+        };
+        checkNear(got[index], expected, "corner index selects by bit");
+    }
+
+    // Every component extreme appears, which is what makes the folding
+    // callers order-independent.
+    check(aabbFromPoints(got) == box, "folding the corners back gives the box");
+
+    // A flat box repeats corners rather than losing them: the count is fixed
+    // so that indexed callers - one averages a depth over all eight - keep a
+    // stable divisor.
+    const std::array<Vec3, 8> flat =
+        corners(aabbFromMinMax({ 0.0f, 0.0f, 5.0f }, { 2.0f, 2.0f, 5.0f }));
+    check(flat.size() == 8, "a flat box still yields eight corners");
+    checkNear(flat[0].z, 5.0f, "a flat axis repeats its single value");
+    checkNear(flat[7].z, 5.0f, "a flat axis repeats its single value");
+
+    // No validity check: this only recombines the two stored points, so an
+    // inverted box gives the same eight points a literal would.
+    const Aabb inverted { Vec3 { 1.0f, 1.0f, 1.0f }, Vec3 { 0.0f, 0.0f, 0.0f } };
+    check(!inverted.valid(), "the fixture really is inverted");
+    checkNear(corners(inverted)[0], { 1.0f, 1.0f, 1.0f },
+        "an inverted box still reports its stored minimum as corner 0");
+    checkNear(corners(inverted)[7], { 0.0f, 0.0f, 0.0f },
+        "an inverted box still reports its stored maximum as corner 7");
+
+    // Usable at compile time, because one caller is constexpr.
+    static_assert(
+        corners(Aabb { Vec3 { 0.0f, 0.0f, 0.0f }, Vec3 { 1.0f, 1.0f, 1.0f } })[6]
+            .y == 1.0f);
+}
+
 void testAabbQueries()
 {
     const Aabb box = aabbFromMinMax({ 0.0f, 0.0f, 0.0f }, { 2.0f, 2.0f, 2.0f });
@@ -249,6 +298,7 @@ void testFrustum()
 int main()
 {
     testAabbBuilding();
+    testAabbCorners();
     testAabbQueries();
     testAabbTransform();
     testPlaneAndRay();
