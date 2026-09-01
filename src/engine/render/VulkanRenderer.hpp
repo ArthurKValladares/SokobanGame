@@ -323,6 +323,14 @@ private:
     std::vector<RetiredRenderResources> retiredResources_;
 
     static constexpr uint32_t maxFramesInFlight_ = 2;
+    // The skinning palette and the draw-instance buffer are sized for a fixed
+    // number of frame slots and indexed by the frame this renderer is on, so
+    // the two counts are one number wearing two names. Raising this alone
+    // would not fail to build; it would throw out of beginAnimationFrame on
+    // the first frame that used the new slot.
+    static_assert(
+        maxFramesInFlight_ == gpuSkinningFrameCount,
+        "VulkanRenderer frame slots must match the GPU skinning frame count");
     static constexpr uint32_t preparedFrameSlotCount_ = 2;
     std::array<FrameResources, maxFramesInFlight_> frames_ {};
     FrameResourceTracker frameResourceTracker_ {

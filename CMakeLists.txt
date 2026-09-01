@@ -450,6 +450,18 @@ endif()
 target_compile_definitions(sokoban_core PRIVATE
     SOKOBAN_GAME_VERSION="${PROJECT_VERSION}"
 )
+
+# Defined once, PUBLIC, on the library every other target links. This flag
+# decides whether Application and DebugUi declare some of their members, so a
+# translation unit that saw a different value would disagree with the rest of
+# the program about the size and layout of those classes - an ODR violation
+# that links cleanly and misbehaves at runtime. The headers used to guard
+# against an undefined flag by quietly defining it to 0 themselves, which is
+# what made that failure silent; they now refuse to compile instead, and this
+# is the definition that keeps them satisfied.
+target_compile_definitions(sokoban_core PUBLIC
+    SOKOBAN_ENABLE_DEBUG_UI=$<IF:$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_DEVELOPER_TOOLS}>>,1,0>
+)
 if(UNIX AND NOT APPLE)
     # miniaudio dynamically loads native audio backends on Unix-like systems.
     target_link_libraries(sokoban_core PRIVATE ${CMAKE_DL_LIBS} m)
@@ -476,9 +488,6 @@ target_include_directories(sokoban_ui PUBLIC src)
 target_link_libraries(sokoban_ui
     PUBLIC sokoban_core
     PRIVATE sokoban_stb
-)
-target_compile_definitions(sokoban_ui PUBLIC
-    SOKOBAN_ENABLE_DEBUG_UI=$<IF:$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_DEVELOPER_TOOLS}>>,1,0>
 )
 sokoban_enable_warnings(sokoban_ui)
 sokoban_enable_lto(sokoban_ui)
@@ -527,9 +536,6 @@ target_link_libraries(sokoban_render_vulkan
         sokoban_ui
         Vulkan::Vulkan
         SDL3::SDL3
-)
-target_compile_definitions(sokoban_render_vulkan PRIVATE
-    SOKOBAN_ENABLE_DEBUG_UI=$<IF:$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_DEVELOPER_TOOLS}>>,1,0>
 )
 target_compile_definitions(sokoban_render_vulkan PRIVATE
     SOKOBAN_ENABLE_VALIDATION=$<IF:$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_VALIDATION}>>,1,0>
@@ -642,7 +648,6 @@ target_link_libraries(sokoban PRIVATE
 target_compile_definitions(sokoban PRIVATE
     SDL_MAIN_USE_CALLBACKS=0
     SOKOBAN_GAME_VERSION="${PROJECT_VERSION}"
-    SOKOBAN_ENABLE_DEBUG_UI=$<IF:$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_DEVELOPER_TOOLS}>>,1,0>
     $<$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_DEVELOPER_TOOLS}>>:SOKOBAN_SOURCE_LEVEL_DIR="${LEVEL_SOURCE_DIR}">
     $<$<AND:$<CONFIG:Debug>,$<BOOL:${SOKOBAN_ENABLE_DEVELOPER_TOOLS}>>:SOKOBAN_SOURCE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets">
 )

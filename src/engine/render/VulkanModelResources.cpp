@@ -2671,9 +2671,12 @@ void VulkanModelResources::destroySkinnedMesh(GpuSkinnedMesh& mesh)
 const VulkanModelResources::GpuMesh& VulkanModelResources::gpuMeshForModel(
     RenderModel model) const
 {
-    if (model.isCube() ||
-        model == manifest_->playerModel() ||
-        model.index() >= models_.size()) {
+    // Skinned meshes live in skinnedGpu and are reached through meshForTile's
+    // other branch. Ask what the model's geometry is rather than whether it is
+    // the player: the player was the only skinned model when this was written,
+    // and the manifest has carried more than one for a while now.
+    if (model.isCube() || model.index() >= models_.size() ||
+        modelUsesGpuSkinning(model)) {
         throw std::runtime_error("Render model does not have a static GPU mesh");
     }
     const ModelSlot& slot = models_[model.index()];

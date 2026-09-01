@@ -28,7 +28,12 @@
 #include <utility>
 
 #ifndef SOKOBAN_ENABLE_DEBUG_UI
-#define SOKOBAN_ENABLE_DEBUG_UI 0
+// Deliberately fatal rather than defaulting to 0. This flag decides whether
+// Application and DebugUi declare some of their members, so a translation unit
+// that quietly assumed a value would disagree with the rest of the program
+// about those class layouts - and link anyway. CMake defines it PUBLIC on
+// sokoban_core, so anything linking a Sokoban library already has it.
+#error "SOKOBAN_ENABLE_DEBUG_UI must be defined by the build (see CMakeLists.txt)"
 #endif
 
 namespace sokoban {
