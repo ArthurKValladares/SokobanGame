@@ -114,6 +114,56 @@ enum class DrawMaterialMode : uint32_t {
     return static_cast<float>(static_cast<uint32_t>(mode));
 }
 
+// What a model draw puts in GpuDrawInstance::gridColor.w to say it is a model.
+//
+// Only the sign is the contract; the shaders test `< 0.0` and isModelDraw() in
+// shaders/include/DrawMode.glsl is the one place that spelling lives. The value
+// is -1 because it has to be a colour alpha the rest of the time.
+//
+// This is a flag hidden in an alpha channel, which is not a design anyone would
+// choose. It survives because gridColor has no free lane and it is doing two
+// jobs at once: it tells the fragment stage which of the two claimants of
+// materialOptions.y and .z is speaking, and, because gridMask() bails on a
+// non-positive grid alpha, it is also what keeps a model from picking up a grid
+// overlay. See the lane table on GpuDrawInstance below.
+inline constexpr float modelDrawMarkerAlpha = -1.0f;
+
+// A fixed 256-byte block, so the lanes below are a union rather than a record:
+// which draw kind wrote an instance decides what its lanes mean. Two rules keep
+// that readable, and both are load-bearing.
+//
+// First, a pipeline only ever sees its own draws. ground_splat.frag reads
+// textureOptions.x as a base texture handle and water.frag reads it as a ripple
+// frequency, while the scene, mirror and UI shaders read it as a DrawMaterialMode
+// - and none of them can be handed another's instance, so those three meanings
+// never meet. Most of the apparent overloading is this, and it is safe.
+//
+// Second, inside the scene pipeline, where quad draws and model draws really do
+// share one fragment shader, modelDrawMarkerAlpha separates them.
+//
+//   lane                 quad draw (drawFace etc.)      model draw
+//   -------------------  -----------------------------  --------------------------
+//   materialOptions.x    blur-behind flag, or the        blur-behind flag
+//                        face world origin X on ground
+//   materialOptions.y    grid cell width                 scrolling-material UV offset
+//   materialOptions.z    grid cell height                manifest texture index
+//   materialOptions.w    +/- ice blur radius,            effect animation clock, or
+//                        sign = editor preview           +/- ice blur radius
+//   gridColor.xyz        grid line colour                free (mirror: rim/pulse)
+//   gridColor.w          grid line opacity               modelDrawMarkerAlpha
+//   textureOptions.y     procedural texture handle       editor highlight enum
+//   textureOptions.z     specular strength               specular strength
+//   textureOptions.w     unused                          alpha selection
+//
+// materialOptions.y is the pair worth knowing about. gridMask() rejects a draw
+// whose grid cell size is not positive, and every model with a scrolling
+// material writes a non-zero scroll offset into that lane - so the only thing
+// standing between an animated model and a grid overlay drawn across it is that
+// gridMask() checks the grid alpha first and the marker is negative. Mirror
+// energy models do not carry the marker, and are safe only because they are
+// routed to a fragment shader that has no gridMask() at all. Neither of those is
+// something to rely on twice: a lane added here should get its own slot rather
+// than a third claimant.
 struct GpuDrawInstance {
     // Four **world-space** corners for a quad, or the four columns of
     // worldFromModel for a mesh. Before C1 these were clip-space corners and

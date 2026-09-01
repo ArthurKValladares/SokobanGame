@@ -111,6 +111,9 @@ sampling have different failure modes and should be independently reviewable.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
 - Current tests: 74 CTest suites in the newest configured build tree.
+- Shader contract: `shaders/include/DrawMode.glsl` carries the draw-mode
+  numbering and the `isModelDraw` sign test; `draw_mode` pins both against
+  `VulkanRenderConstants.hpp` and fails if either spelling moves.
 - Current shaders: 16 GLSL files plus shared declarations under
   `shaders/include/`, which the shader build passes to `glslc` with `-I`.
   `triangle.frag.glsl` is 669 physical lines; player-facing UI uses the
@@ -262,25 +265,34 @@ Landed so far: the line-ending policy and its CI gate; shared GPU struct
 declarations under `shaders/include/`, with `gpu_abi` checking SPIR-V member
 offsets against `offsetof` and `draw_mode` pinning `DrawMode.glsl` to
 `DrawMaterialMode`; one `TestHarness.hpp` behind 55 suites; `ResidencyBudget`
-and `MaterialRangeAllocator` extracted from `VulkanModelResources`; and
-`SceneDrawLanes` extracted from `VulkanSceneRecorder`.
+and `MaterialRangeAllocator` extracted from `VulkanModelResources`;
+`SceneDrawLanes` extracted from `VulkanSceneRecorder`; and the
+`GpuDrawInstance` lane union traced and written down.
 
 Still open, in the order the report recommends: splitting
 `VulkanModelResources` proper and collapsing its three copies of the load-state
-machine; the eight functions past 200 lines; and the overloaded
-`materialOptions` / `textureOptions` lanes. That last one has grown in
-importance: the reason water and mirror-energy draws share no lighting payload
-with the scene draws is that they reuse the same vec4 slots for unrelated data,
-so the lane overloading is the root of what looked like unrelated duplication.
+machine, then the eight functions past 200 lines.
 
-Two behavioural questions are parked deliberately rather than fixed, because
-either answer is a visual or performance decision, not a cleanup:
+Three items are parked deliberately rather than fixed, because each needs a
+judgement this review cannot make from the source alone:
 
 - The ground and the scene filter point shadows differently — five taps against
   one. The difference is real, not a refactoring artifact.
 - Eviction double-counts a victim and so stops after freeing roughly half of
   what it asked for. `ResidencyBudgetTests` pins the current behaviour and says
   why; it is not silently corrected.
+- `GpuDrawInstance` is a 256-byte union, and inside the scene pipeline
+  `materialOptions.y` is a grid cell width for a quad draw and a
+  scrolling-material UV offset for a model. Nothing separates the two but
+  `modelDrawMarkerAlpha`: `gridMask()` rejects a non-positive grid alpha and a
+  model writes a negative one. Mirror-energy models carry no marker and are safe
+  only because their pipeline uses a fragment shader with no `gridMask()` at
+  all. The review's recommended fix - a `uvec4` of explicit integer lanes
+  carrying a draw-kind tag - is a real ABI change in a struct that is already
+  exactly full, and its only proof is that the picture still looks right, so it
+  is left for an implementer who can run the renderer. The lane table on
+  `GpuDrawInstance` is the current contract; a new lane needs its own slot
+  rather than a third claimant.
 
 ## Rendering invariants
 

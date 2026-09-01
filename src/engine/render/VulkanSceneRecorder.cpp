@@ -2504,11 +2504,14 @@ private:
                       config::mirrorEnergyPulseSpeed,
                       config::mirrorEnergyPulseStrength,
                   }
-                // xyz free; see above. The negative w is still the marker
-                // that says "this draw is a model", which the fragment stage
-                // reads to decide the editor highlight and to keep the grid
-                // overlay off.
-                : Vec4 { 0.0f, 0.0f, 0.0f, -1.0f },
+                // xyz free; see above. The marker in w is what the fragment
+                // stage reads to decide the editor highlight and to keep the
+                // grid overlay off; see modelDrawMarkerAlpha.
+                //
+                // Mirror energy takes the other branch and so carries no
+                // marker. It is safe because it is a different pipeline with a
+                // different fragment shader, not because anything here checks.
+                : Vec4 { 0.0f, 0.0f, 0.0f, modelDrawMarkerAlpha },
             .textureOptions = {
                 shaderValue(material.mode),
                 editorHighlightState,

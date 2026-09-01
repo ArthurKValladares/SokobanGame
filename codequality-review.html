@@ -1009,9 +1009,10 @@ return 1.0 - shadowed * clamp(light.shadowOptions.w, 0.0, 1.0);</pre>
     </div>
   </article>
 
-  <article class="finding is-major">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-major">Major</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: major · fragile encoding</span>
       <span class="tag">Fragile encoding</span>
     </div>
     <h3>One <code>vec4</code> lane carries three unrelated meanings depending on the draw</h3>
@@ -1082,6 +1083,67 @@ return 1.0 - shadowed * clamp(light.shadowOptions.w, 0.0, 1.0);</pre>
       the flags, so the shader branches on a named kind instead of inferring it
       from the sign of an alpha channel.
     </div>
+    <p>
+      <strong>Traced, documented and pinned; the ABI change deliberately not
+      taken.</strong> Adding a draw-kind tag means a new lane in a struct that is
+      exactly full at 256 bytes, and its only proof of correctness is that the
+      picture still looks right — which is not a check this review can run. The
+      cheap option was taken instead, but written from the traced map rather than
+      from the field names.
+    </p>
+    <p>
+      Tracing it settled the question the finding could not: <strong>there is no
+      live defect, and the two things preventing one are unrelated to each
+      other.</strong> Most of the apparent overloading is harmless because a
+      pipeline only ever sees its own draws — <code>ground_splat.frag</code>
+      cannot be handed a water instance. The real collision is inside the scene
+      pipeline, where quad draws and model draws share one fragment shader:
+      <code>materialOptions.y</code> is a grid cell width for a face and a
+      scrolling-material UV offset for a model, and <code>gridMask()</code> reads
+      that lane without knowing which produced it. Every model with a scrolling
+      material puts a non-zero value there. What saves it is that
+      <code>gridMask()</code> tests the grid alpha first and a model marks itself
+      with a negative one — a boolean smuggled into an alpha channel turns out to
+      be the only thing standing between an animated model and a grid drawn
+      across it.
+    </p>
+    <p>
+      Mirror-energy models are the exception that proves how thin this is: they
+      take the other branch and carry no marker, and their grid alpha
+      (<code>0.16</code>) and shadow width (<code>0.38</code>) would both pass
+      <code>gridMask()</code>'s gates. They are safe only because they are routed
+      to a different fragment shader that has no <code>gridMask()</code> — a fact
+      stated nowhere near either the lane or the shader until now.
+    </p>
+    <div class="fix">
+      What landed: the lane union written out per draw kind on
+      <code>GpuDrawInstance</code>, including which of the two mechanisms covers
+      which case; the bare <code>-1.0f</code> named
+      <code>modelDrawMarkerAlpha</code>; the marker's sign test given one
+      spelling as <code>isModelDraw()</code> in <code>DrawMode.glsl</code>; and
+      the second open-coded copy of that test in
+      <code>triangle.frag.glsl</code> replaced by the variable already holding
+      the answer.
+    </div>
+    <p>
+      Verified by compiling all sixteen shaders before and after: fifteen are
+      byte-identical, including the two others that include
+      <code>DrawMode.glsl</code>, which confirms the new function is stripped
+      when unused. <code>triangle.frag</code> is 16 bytes <em>smaller</em>, and an
+      id-independent instruction diff shows why — one <code>OpLoad</code> and one
+      <code>OpFOrdLessThan</code> gone, being the duplicate comparison, against
+      one added register-level <code>OpCompositeExtract</code>. Both modules pass
+      <code>spirv-val</code>.
+    </p>
+    <p>
+      The invariant is pinned at both ends rather than described:
+      <code>draw_mode</code> now checks that the marker is negative and that the
+      shader still tests its <em>sign</em> — an equality test would silently
+      reject any other negative a caller is entitled to pick — and
+      <code>scene_draw_lanes</code> checks that a grid colour carrying the marker
+      yields no grid line whatever else is in the lanes. All five mutants of the
+      marker and its shader predicate are caught.
+    </p>
   </article>
 
   <article class="finding is-resolved">
@@ -2286,15 +2348,15 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
       operations — but the class split itself is still open.
       <span class="code">D1</span> is done, though not as filed: investigating it
       showed the recommended fix would have been wrong, and the finding is
-      rewritten above with what the call sites actually contain. Still open are
-      <span class="code">C2</span> (the long functions) and
-      <span class="code">B3</span> (the overloaded lanes) — and
-      <span class="code">B3</span> is now the more interesting of the two, since
-      <span class="code">D1</span> turned out to be a symptom of it: the reason
-      water and mirror-energy share no payload with the scene draws is that they
-      are reusing the same lanes for unrelated data. Both behavioural questions
-      remain parked: the divergent point-shadow filtering and the double-counted
-      eviction victim.
+      rewritten above with what the call sites actually contain.
+      <span class="code">B3</span> is done as far as it should be done without a
+      way to look at the picture: the lane union is traced and written down, the
+      marker is named and pinned at both ends, and the case for the larger ABI
+      change is now made from evidence rather than suspicion — but that change
+      itself is left for someone who can run the renderer.
+      <span class="code">C2</span> (the long functions) is the last item still
+      open, and both behavioural questions remain parked: the divergent
+      point-shadow filtering and the double-counted eviction victim.
     </li>
   </ol>
 </section>
@@ -2302,7 +2364,7 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
 <footer>
   <span>Sokoban 3D engine · code-quality audit</span>
   <span>Reviewed against HEAD 21dff13a · 31 Aug 2026</span>
-  <span>37 findings · 10 resolved · 0 live defects</span>
+  <span>37 findings · 11 resolved · 0 live defects</span>
 </footer>
 
 </div>

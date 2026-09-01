@@ -27,4 +27,28 @@ const int DRAW_MODE_TEXTURE_IMAGE = 7;
 // Only the pipelines that branch on a mode read textureOptions.x this way.
 // ground_splat reads it as a base texture handle and water reads it as a ripple
 // frequency, because a pipeline can only ever see its own draws.
+
+// Whether this draw is a model rather than a quad.
+//
+// The mode above says how to shade a draw; this says what kind of thing it is,
+// and the two are carried separately because a model and a tile can share a
+// mode. A model draw marks itself by making gridColor.w negative - see
+// modelDrawMarkerAlpha in VulkanRenderConstants.hpp, which is where the value
+// is written and documented.
+//
+// Only the sign is the contract. Do not compare against the exact value: a
+// caller is entitled to pick any negative alpha, and gridMask() below relies on
+// the sign, not on -1.
+//
+// This overlaps with the grid gate on purpose. gridMask() bails when
+// gridColor.a is not positive, which rejects a face with no visible grid and a
+// model with the marker by the same test - so a model can never pick up a grid
+// overlay even though it writes a grid dimension into the lane the grid gate
+// reads. That coincidence is load-bearing: every model with a scrolling
+// material puts a non-zero scroll offset in materialOptions.y, which is the
+// lane gridMask() would otherwise read as a live grid cell size.
+bool isModelDraw(vec4 gridColor)
+{
+    return gridColor.w < 0.0;
+}
 #endif

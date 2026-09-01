@@ -151,6 +151,32 @@ void testGridRejectsNegatives()
         0.0f));
 }
 
+void testAModelMarkerCanNeverProduceAGridLine()
+{
+    TEST("aModelMarkerCanNeverProduceAGridLine");
+    // The one collision worth guarding. A model draw writes its scrolling
+    // material's UV offset into materialOptions.y, which for a face is the grid
+    // cell width - and the fragment shader's gridMask() reads that lane without
+    // knowing which kind of draw produced it. What separates them is that
+    // gridMask() checks the grid alpha first, and a model marks itself with a
+    // negative one.
+    //
+    // This is the CPU end of the same predicate: whatever else a draw carrying
+    // the marker puts in the other lanes, it gets no grid line. If that ever
+    // stops holding, an animated model picks up a grid drawn across it.
+    const Vec4 marker { 0.0f, 0.0f, 0.0f, modelDrawMarkerAlpha };
+    CHECK(sameFloat(
+        gridLineWidthOrZero(marker, 0.02f, Vec2 { 1.0f, 1.0f }), 0.0f));
+    // Including with a scroll offset sitting in the lane the grid would read.
+    CHECK(sameFloat(
+        gridLineWidthOrZero(marker, 0.02f, Vec2 { 0.37f, 1.0f }), 0.0f));
+    CHECK(sameFloat(
+        faceShadowOptions(litScene(), marker, 0.02f, Vec2 { 1.0f, 1.0f }).w,
+        0.0f));
+    // And the marker really is the negative the shader's sign test expects.
+    CHECK(modelDrawMarkerAlpha < 0.0f);
+}
+
 void testFaceShadowOptionsPacksInOrder()
 {
     TEST("faceShadowOptionsPacksInOrder");
@@ -267,6 +293,7 @@ int main()
 
     testGridNeedsAllFourConditions();
     testGridRejectsNegatives();
+    testAModelMarkerCanNeverProduceAGridLine();
 
     testFaceShadowOptionsPacksInOrder();
     testShadowsOffIsAFlagNotAZeroOpacity();

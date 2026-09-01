@@ -21,6 +21,7 @@
 #include <iostream>
 #include <map>
 #include <regex>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -136,6 +137,44 @@ void testGlslMirrorsTheEnum()
     }
 }
 
+void testTheModelMarkerIsASignTest()
+{
+    TEST("theModelMarkerIsASignTest");
+    // A model draw identifies itself by putting a negative alpha in
+    // gridColor.w, and every shader that cares tests the sign rather than the
+    // value. Both halves of that need pinning: a positive marker would make
+    // every model draw look like a quad, and a shader that compared for
+    // equality with -1 would silently reject any other negative a caller
+    // picked - which the constant's own comment says is allowed.
+    CHECK(modelDrawMarkerAlpha < 0.0f);
+
+    const std::filesystem::path header =
+        std::filesystem::path { SOKOBAN_TEST_SHADER_INCLUDE_DIR }
+        / "DrawMode.glsl";
+    std::ifstream file(header);
+    CHECK(static_cast<bool>(file));
+    const std::string source {
+        std::istreambuf_iterator<char> { file },
+        std::istreambuf_iterator<char> {}
+    };
+    CHECK(!source.empty());
+
+    // Deliberately strict, and reported rather than silently unmatched: this is
+    // a text coupling, so it has to say when the text has moved.
+    const std::regex signTest {
+        R"(bool\s+isModelDraw\s*\(\s*vec4\s+\w+\s*\)\s*\{\s*)"
+        R"(return\s+\w+\.w\s*<\s*0\.0\s*;\s*\})"
+    };
+    const bool matched = std::regex_search(source, signTest);
+    CHECK(matched);
+    if (!matched) {
+        std::cerr << "  isModelDraw in " << header.string()
+                  << " is no longer `return <param>.w < 0.0;`. If that is"
+                     " deliberate, confirm it still accepts every negative"
+                     " alpha and update this test.\n";
+    }
+}
+
 void testModesAreDistinctAndContiguous()
 {
     TEST("modesAreDistinctAndContiguous");
@@ -158,6 +197,7 @@ int main()
 {
     testGlslMirrorsTheEnum();
     testModesAreDistinctAndContiguous();
+    testTheModelMarkerIsASignTest();
 
     if (failures != 0) {
         std::cerr << failures << " of " << checks << " checks failed\n";

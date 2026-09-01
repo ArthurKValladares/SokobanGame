@@ -328,7 +328,7 @@ void main()
     Material material = modelMaterial();
     vec4 materialColor = draw.color;
     int materialMode = int(draw.textureOptions.x + 0.5);
-    bool modelDraw = draw.gridColor.w < 0.0;
+    bool modelDraw = isModelDraw(draw.gridColor);
     if (modelDraw) {
         // A mixed glTF mesh may be submitted to both passes. The recorder
         // selects the pass's material subset without multiplying pipelines.
@@ -567,7 +567,7 @@ void main()
     }
 
     int editorHighlight = int(draw.textureOptions.y + 0.5);
-    if (draw.gridColor.w < 0.0 && editorHighlight > 0) {
+    if (modelDraw && editorHighlight > 0) {
         vec3 highlightColor = editorHighlight == 2
             ? vec3(1.0, 0.48, 0.08)
             : vec3(0.08, 0.88, 1.0);
