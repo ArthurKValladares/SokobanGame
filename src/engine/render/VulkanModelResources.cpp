@@ -390,12 +390,8 @@ void VulkanModelResources::destroy()
     textureUploadCompletions_ = 0;
     scheduler_.clear();
     visibleRequestStamp_ = 0;
-    modelResidencyBytes_ = 0;
-    textureResidencyBytes_ = 0;
-    modelResidencyPeakBytes_ = 0;
-    textureResidencyPeakBytes_ = 0;
-    retiringModelBytes_ = 0;
-    retiringTextureBytes_ = 0;
+    modelResidency_.reset();
+    textureResidency_.reset();
     residencyEvictions_ = 0;
     residencyBudgetBlocks_ = 0;
     residencyBudgetBlocked_ = false;
@@ -895,9 +891,7 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                     static_cast<uint32_t>(mesh.materials.size());
                 slot.gpu = uploadMesh(mesh, slot.upload);
                 slot.gpuBytes = bytes;
-                modelResidencyBytes_ += bytes;
-                modelResidencyPeakBytes_ = std::max(
-                    modelResidencyPeakBytes_, modelResidencyBytes_);
+                modelResidency_.addResident(bytes);
                 slot.state = LoadState::Uploading;
             } else {
                 slot.skinnedSource = std::make_shared<SkinnedMeshData>(
@@ -924,9 +918,7 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                     slot.skinnedSource->materials.size());
                 slot.skinnedGpu = uploadSkinnedMesh(*slot.skinnedSource, slot.upload);
                 slot.gpuBytes = bytes;
-                modelResidencyBytes_ += bytes;
-                modelResidencyPeakBytes_ = std::max(
-                    modelResidencyPeakBytes_, modelResidencyBytes_);
+                modelResidency_.addResident(bytes);
                 slot.state = LoadState::Uploading;
             }
             slot.prepared.reset();
@@ -1088,9 +1080,7 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
             slot.residentBaseMip = 0;
         }
         slot.gpuBytes = bytes;
-        textureResidencyBytes_ += bytes;
-        textureResidencyPeakBytes_ = std::max(
-            textureResidencyPeakBytes_, textureResidencyBytes_);
+        textureResidency_.addResident(bytes);
         slot.prepared.reset();
         slot.state = LoadState::Uploading;
         ++textureUploadSubmissions_;
@@ -1147,20 +1137,24 @@ void VulkanModelResources::markResidencyBudgetBlocked()
     ++residencyBudgetBlocks_;
 }
 
-bool VulkanModelResources::makeModelResident(
-    RenderModel protectedModel,
-    uint64_t requiredBytes)
+template <typename Slot, typename Retire>
+bool VulkanModelResources::makeResident(
+    ResidencyBudget& budget,
+    std::vector<Slot>& slots,
+    std::size_t protectedIndex,
+    uint64_t requiredBytes,
+    uint64_t limitBytes,
+    Retire retire)
 {
     destroyCompletedResidencyRetirements();
-    const uint64_t budget = scheduler_.budget().modelResidencyBytes;
-    if (requiredBytes > budget) {
+    if (requiredBytes > limitBytes) {
         markResidencyBudgetBlocked();
         return false;
     }
-    if (modelResidencyBytes_ + requiredBytes <= budget) {
+    if (budget.fits(requiredBytes, limitBytes)) {
         return true;
     }
-    if (retiringModelBytes_ != 0) {
+    if (budget.retirementPending()) {
         // A previous publication already selected enough victims for its own
         // retry. Do not let other CPU-ready slots cascade into additional
         // evictions while the first fence-owned retirement is still pending.
@@ -1168,123 +1162,69 @@ bool VulkanModelResources::makeModelResident(
         return false;
     }
 
-    auto findVictim = [&]() -> std::optional<std::size_t> {
-        std::optional<std::size_t> victim;
-        for (std::size_t index = 0; index < models_.size(); ++index) {
-            const ModelSlot& slot = models_[index];
-            if (index == protectedModel.index() ||
-                slot.state != LoadState::Ready || slot.gpuBytes == 0 ||
-                (visibleRequestStamp_ != 0 &&
-                    slot.lastRequested == visibleRequestStamp_)) {
-                continue;
-            }
-            if (!victim ||
-                slot.lastRequested < models_[*victim].lastRequested) {
-                victim = index;
-            }
-        }
-        return victim;
-    };
     uint64_t scheduledBytes = 0;
-    while (modelResidencyBytes_ - retiringModelBytes_ - scheduledBytes +
-        requiredBytes > budget) {
-        const std::optional<std::size_t> victim = findVictim();
+    while (budget.needsEviction(requiredBytes, scheduledBytes, limitBytes)) {
+        const std::optional<std::size_t> victim = chooseResidencyVictim(
+            slots,
+            protectedIndex,
+            visibleRequestStamp_,
+            [](const Slot& slot) { return slot.state == LoadState::Ready; });
         if (!victim) {
             markResidencyBudgetBlocked();
             return false;
         }
-        ModelSlot& slot = models_[*victim];
-        scheduledBytes += slot.gpuBytes;
-        retireModel(slot);
+        scheduledBytes += slots[*victim].gpuBytes;
+        retire(slots[*victim]);
     }
     destroyCompletedResidencyRetirements();
     residencyBudgetBlocked_ = false;
     // Retired allocations remain part of the physical residency total until
     // every referencing frame fence completes. Keep this CPU-ready asset for
     // a later publication instead of oversubscribing the hard budget.
-    return modelResidencyBytes_ + requiredBytes <= budget;
+    return budget.fits(requiredBytes, limitBytes);
+}
+
+bool VulkanModelResources::makeModelResident(
+    RenderModel protectedModel,
+    uint64_t requiredBytes)
+{
+    return makeResident(
+        modelResidency_,
+        models_,
+        protectedModel.index(),
+        requiredBytes,
+        scheduler_.budget().modelResidencyBytes,
+        [this](ModelSlot& slot) { retireModel(slot); });
 }
 
 bool VulkanModelResources::makeTextureResident(
     std::size_t protectedTexture,
     uint64_t requiredBytes)
 {
-    destroyCompletedResidencyRetirements();
-    const uint64_t budget = scheduler_.budget().textureResidencyBytes;
-    if (requiredBytes > budget) {
-        markResidencyBudgetBlocked();
-        return false;
-    }
-    if (textureResidencyBytes_ + requiredBytes <= budget) {
-        return true;
-    }
-    if (retiringTextureBytes_ != 0) {
-        residencyBudgetBlocked_ = false;
-        return false;
-    }
-
-    auto findVictim = [&]() -> std::optional<std::size_t> {
-        std::optional<std::size_t> victim;
-        for (std::size_t index = 0; index < textures_.size(); ++index) {
-            const TextureSlot& slot = textures_[index];
-            if (index == protectedTexture ||
-                slot.state != LoadState::Ready || slot.gpuBytes == 0 ||
-                (visibleRequestStamp_ != 0 &&
-                    slot.lastRequested == visibleRequestStamp_)) {
-                continue;
-            }
-            if (!victim ||
-                slot.lastRequested < textures_[*victim].lastRequested) {
-                victim = index;
-            }
-        }
-        return victim;
-    };
-    uint64_t scheduledBytes = 0;
-    while (textureResidencyBytes_ - retiringTextureBytes_ - scheduledBytes +
-        requiredBytes > budget) {
-        const std::optional<std::size_t> victim = findVictim();
-        if (!victim) {
-            markResidencyBudgetBlocked();
-            return false;
-        }
-        TextureSlot& slot = textures_[*victim];
-        scheduledBytes += slot.gpuBytes;
-        retireTexture(slot);
-    }
-    destroyCompletedResidencyRetirements();
-    residencyBudgetBlocked_ = false;
-    return textureResidencyBytes_ + requiredBytes <= budget;
+    return makeResident(
+        textureResidency_,
+        textures_,
+        protectedTexture,
+        requiredBytes,
+        scheduler_.budget().textureResidencyBytes,
+        [this](TextureSlot& slot) { retireTexture(slot); });
 }
 
 uint64_t VulkanModelResources::texturePublicationCapacity(
     std::size_t protectedTexture) const
 {
-    const uint64_t budget = scheduler_.budget().textureResidencyBytes;
-    const uint64_t nonRetiringBytes =
-        textureResidencyBytes_ - retiringTextureBytes_;
-    uint64_t capacity = budget > nonRetiringBytes
-        ? budget - nonRetiringBytes
-        : 0;
-    for (std::size_t index = 0; index < textures_.size(); ++index) {
-        const TextureSlot& slot = textures_[index];
-        if (index == protectedTexture || slot.state != LoadState::Ready ||
-            slot.gpuBytes == 0 ||
-            (visibleRequestStamp_ != 0 &&
-                slot.lastRequested == visibleRequestStamp_)) {
-            continue;
-        }
-        capacity += std::min(slot.gpuBytes, budget - capacity);
-        if (capacity == budget) {
-            break;
-        }
-    }
-    return capacity;
+    return evictableCapacity(
+        textures_,
+        protectedTexture,
+        visibleRequestStamp_,
+        [](const TextureSlot& slot) { return slot.state == LoadState::Ready; },
+        textureResidency_,
+        scheduler_.budget().textureResidencyBytes);
 }
 
 void VulkanModelResources::retireModel(ModelSlot& slot)
 {
-    retiringModelBytes_ += slot.gpuBytes;
+    modelResidency_.beginRetiring(slot.gpuBytes);
     retiredModels_.retire({
         .gpu = std::exchange(slot.gpu, {}),
         .skinnedGpu = std::exchange(slot.skinnedGpu, {}),
@@ -1298,7 +1238,7 @@ void VulkanModelResources::retireModel(ModelSlot& slot)
 
 void VulkanModelResources::retireTexture(TextureSlot& slot)
 {
-    retiringTextureBytes_ += slot.gpuBytes;
+    textureResidency_.beginRetiring(slot.gpuBytes);
     retiredTextures_.retire({
         .gpu = std::exchange(slot.gpu, {}),
         .gpuBytes = slot.gpuBytes,
@@ -1316,14 +1256,12 @@ void VulkanModelResources::destroyCompletedResidencyRetirements()
             destroySkinnedMesh(retired.skinnedGpu);
             releaseMaterialRange(
                 retired.materialBase, retired.materialCount);
-            modelResidencyBytes_ -= retired.gpuBytes;
-            retiringModelBytes_ -= retired.gpuBytes;
+            modelResidency_.finishRetiring(retired.gpuBytes);
         });
     retiredTextures_.drainCompleted(
         [this](RetiredTextureResources& retired) {
             destroyTexture(retired.gpu.image, retired.gpu.sampler);
-            textureResidencyBytes_ -= retired.gpuBytes;
-            retiringTextureBytes_ -= retired.gpuBytes;
+            textureResidency_.finishRetiring(retired.gpuBytes);
         });
 }
 
@@ -1693,18 +1631,18 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
     result.queuedAssets = static_cast<uint32_t>(scheduler_.queuedCount());
     result.activeCpuJobs = static_cast<uint32_t>(scheduler_.activeCount());
     result.cancelledPrefetches = scheduler_.cancelledPrefetchCount();
-    result.modelResidencyBytes = modelResidencyBytes_;
-    result.textureResidencyBytes = textureResidencyBytes_;
-    result.modelResidencyPeakBytes = modelResidencyPeakBytes_;
-    result.textureResidencyPeakBytes = textureResidencyPeakBytes_;
+    result.modelResidencyBytes = modelResidency_.resident();
+    result.textureResidencyBytes = textureResidency_.resident();
+    result.modelResidencyPeakBytes = modelResidency_.peak();
+    result.textureResidencyPeakBytes = textureResidency_.peak();
     result.modelResidencyBudgetBytes = scheduler_.budget().modelResidencyBytes;
     result.textureResidencyBudgetBytes = scheduler_.budget().textureResidencyBytes;
     result.residencyEvictions = residencyEvictions_;
     result.residencyBudgetBlocks = residencyBudgetBlocks_;
     result.retiringModels = static_cast<uint32_t>(retiredModels_.size());
     result.retiringTextures = static_cast<uint32_t>(retiredTextures_.size());
-    result.retiringModelBytes = retiringModelBytes_;
-    result.retiringTextureBytes = retiringTextureBytes_;
+    result.retiringModelBytes = modelResidency_.retiring();
+    result.retiringTextureBytes = textureResidency_.retiring();
     result.residencyBudgetBlocked = residencyBudgetBlocked_;
     result.textureUploadSubmissions = textureUploadSubmissions_;
     result.textureUploadCompletions = textureUploadCompletions_;
@@ -2589,10 +2527,7 @@ VulkanModelResources::TextureUpdate VulkanModelResources::updateTexture(
         slot.fullQualityBytes = slot.gpuBytes;
         slot.sourceMipLevels = slot.gpu.image.mipLevels;
         slot.residentBaseMip = 0;
-        textureResidencyBytes_ = textureResidencyBytes_ - previousBytes +
-            slot.gpuBytes;
-        textureResidencyPeakBytes_ = std::max(
-            textureResidencyPeakBytes_, textureResidencyBytes_);
+        textureResidency_.replaceResident(previousBytes, slot.gpuBytes);
         return { .updated = true, .descriptorsChanged = true };
     }
 

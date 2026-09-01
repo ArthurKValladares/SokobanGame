@@ -8,6 +8,7 @@
 #include "engine/render/ImageData.hpp"
 #include "engine/render/MaterialRenderPolicy.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
+#include "engine/render/ResidencyBudget.hpp"
 #include "engine/render/RuntimeTextureCatalog.hpp"
 #include "engine/render/TextureSourceLoader.hpp"
 #include "engine/render/TextureMipResidency.hpp"
@@ -392,6 +393,16 @@ private:
     void resetCancelledAsset(AssetLoadKey key);
     void completeCpuJob(AssetLoadKey key);
     void retireCompletedGeometryUploads(bool wait);
+    // The eviction ladder, shared by both pools. `retire` moves one slot into
+    // its fence-owned retirement queue; everything else is pool-agnostic.
+    template <typename Slot, typename Retire>
+    [[nodiscard]] bool makeResident(
+        ResidencyBudget& budget,
+        std::vector<Slot>& slots,
+        std::size_t protectedIndex,
+        uint64_t requiredBytes,
+        uint64_t limitBytes,
+        Retire retire);
     [[nodiscard]] bool makeModelResident(
         RenderModel protectedModel,
         uint64_t requiredBytes);
@@ -546,12 +557,10 @@ private:
     uint64_t textureUploadCompletions_ = 0;
     AssetLoadScheduler scheduler_ {};
     uint64_t visibleRequestStamp_ = 0;
-    uint64_t modelResidencyBytes_ = 0;
-    uint64_t textureResidencyBytes_ = 0;
-    uint64_t modelResidencyPeakBytes_ = 0;
-    uint64_t textureResidencyPeakBytes_ = 0;
-    uint64_t retiringModelBytes_ = 0;
-    uint64_t retiringTextureBytes_ = 0;
+    // One pool each, with the same policy applied to both. The eviction
+    // counters below stay shared because they report activity across the two.
+    ResidencyBudget modelResidency_;
+    ResidencyBudget textureResidency_;
     uint64_t residencyEvictions_ = 0;
     uint64_t residencyBudgetBlocks_ = 0;
     bool residencyBudgetBlocked_ = false;
