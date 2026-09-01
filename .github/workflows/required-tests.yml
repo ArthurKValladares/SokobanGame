@@ -29,6 +29,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Cheapest gate in the workflow, so it goes first: it needs no toolchain and
+  # answers the one question every other job would otherwise inherit a bad
+  # answer to - do the committed bytes still match the line-ending policy?
+  #
+  # This is worth gating because the failure is invisible where it happens. A
+  # Git for Windows default of core.autocrlf=true normalizes on the way in, so
+  # a working tree can accumulate CRLF for months while git status stays clean;
+  # only something reading the bytes directly - this checkout, a patch tool, a
+  # diff - ever sees it.
+  line-endings:
+    name: Line endings
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Re-apply .gitattributes to every tracked file
+        run: |
+          set -euo pipefail
+
+          if [ ! -f .gitattributes ]; then
+            echo "::error file=.gitattributes::.gitattributes is missing."
+            echo "It is the only thing keeping a Windows working tree from"
+            echo "committing CRLF, and its absence is not otherwise visible."
+            exit 1
+          fi
+
+          # Re-run the clean filter over every tracked file and stage the
+          # result. Nothing should move: the checkout above already applied
+          # the same policy, so any change means the committed bytes and
+          # .gitattributes disagree. The checkout is disposable, so staging
+          # into its index costs nothing.
+          git add --renormalize .
+
+          if git diff --cached --quiet; then
+            echo "All tracked files agree with .gitattributes."
+            exit 0
+          fi
+
+          echo "::error::Committed line endings disagree with .gitattributes."
+          echo
+          echo "Re-applying the policy changes these files:"
+          git diff --cached --name-only | sed 's/^/  /'
+          echo
+          echo "Fix on a clean working tree, in a commit of its own:"
+          echo "  git add --renormalize ."
+          echo "  git commit -m 'Normalize line endings'"
+          exit 1
+
   quality:
     name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
