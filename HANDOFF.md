@@ -345,6 +345,16 @@ verbatim; the one deleted line was `draw`'s now-unused `settings` local, which
 the warnings gate found. `drawRenderingStatsSection` is still 293 lines and is
 where the next cut starts.
 
+`IsoScenePreparer::prepare` is 513 lines down to 459: its 60-line
+`appendIsoFace` lambda is now a file-local free function taking an
+`IsoFaceRequest` struct, which also retires the thirteen positional parameters
+(five of them consecutive booleans) the review flagged. It is a free function
+because the `[&]` lambda turned out to use only `scene` out of everything it
+could see - no members - which is also what makes the 303-line isometric block
+inside `prepare` extractable now: it called two lambdas defined in `prepare`,
+and one of them has left. `appendRenderable` is the other, and is the next
+thing to look at before that block can move.
+
 Re-measured while doing it: **15** functions are at or past 200 lines, not the
 17 the review reported and not the 16 recorded here - two fell below the line
 during other work, and `drawIsoFrame` (487) no longer exists in that shape. The

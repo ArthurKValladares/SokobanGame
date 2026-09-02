@@ -1096,6 +1096,87 @@ static void prepareAuxiliaryGeometry(
     }
 }
 
+namespace {
+
+// One face of the isometric scene, as asked for rather than as positioned.
+//
+// This was a thirteen-parameter lambda inside prepare(), five of whose
+// parameters were consecutive booleans - `false, false, water.isEditorPreview,
+// water.pickable && !water.isEditorPreview, mainSceneVisible` was a real call
+// site, and getting one of those wrong produces a face that is subtly wrong
+// rather than a crash. Named fields cost nothing and the call sites now say
+// which flag is which.
+//
+// A free function rather than a member because it needs nothing but the scene:
+// the lambda captured by reference but used only `scene` out of everything in
+// view, which is also what made it safe to lift out of prepare() at all.
+struct IsoFaceRequest {
+    std::array<Vec3, 4> vertices {};
+    Vec3 normal {};
+    Vec4 color {};
+    GridPosition3 cell {};
+    GridPosition pickBoundsCell {};
+    bool blurBehind = false;
+    bool showGrid = false;
+    bool editorPreview = false;
+    bool pickable = false;
+    bool drawable = false;
+    Vec2 gridSize {};
+    PreparedSurfaceMaterial material {};
+    uint32_t shorelineMask = 0;
+};
+
+void appendIsoFace(PreparedRenderScene& scene, const IsoFaceRequest& request)
+{
+    if (!faceVisible(scene.isoLayout, request.vertices, request.normal)) {
+        return;
+    }
+    PreparedIsoFace face {
+        .normal = request.normal,
+        .color = request.color,
+        .cell = request.cell,
+        .pickBoundsCell = request.pickBoundsCell,
+        .blurBehind = request.blurBehind,
+        .showGrid = request.showGrid,
+        .isEditorPreview = request.editorPreview,
+        .pickable = request.pickable,
+        .gridSize = request.gridSize,
+        .worldOrigin = {
+            request.vertices[0].x,
+            request.vertices[0].y,
+        },
+        .worldHeight = request.vertices[0].z,
+        .material = request.material,
+        .shorelineMask = request.shorelineMask,
+        .depth = faceDepth(scene.isoLayout, request.vertices),
+    };
+    for (std::size_t i = 0; i < request.vertices.size(); ++i) {
+        face.worldVertices[i] = request.vertices[i];
+        face.vertices[i] = IsoScenePreparer::projectIsoPoint(
+            scene.isoLayout, scene.renderExtent, request.vertices[i]);
+        face.clipW[i] = std::max(
+            dot(
+                subtract(request.vertices[i], scene.isoLayout.cameraPosition),
+                scene.isoLayout.cameraForward),
+            0.001f);
+    }
+    const std::size_t index = scene.isoFaces.size();
+    scene.isoFaces.push_back(face);
+    if (request.drawable) {
+        (request.blurBehind ||
+                request.material == PreparedSurfaceMaterial::Water ||
+                request.material == PreparedSurfaceMaterial::MirrorEnergy
+                ? scene.translucentFaceIndices
+                : scene.opaqueFaceIndices)
+            .push_back(index);
+    }
+    if (request.pickable) {
+        scene.pickFaceIndices.push_back(index);
+    }
+}
+
+} // namespace
+
 void IsoScenePreparer::prepare(
     const RenderFrameData& frameData,
     Vec2 renderExtent,
@@ -1238,67 +1319,6 @@ void IsoScenePreparer::prepare(
             true);
     }
 
-    auto appendIsoFace = [&](
-                             const std::array<Vec3, 4>& vertices,
-                             Vec3 normal,
-                             Vec4 color,
-                             GridPosition3 cell,
-                             GridPosition pickBoundsCell,
-                             bool blurBehind,
-                             bool showGrid,
-                             bool editorPreview,
-                             bool pickable,
-                             bool drawable,
-                             Vec2 gridSize,
-                             PreparedSurfaceMaterial material,
-                             uint32_t shorelineMask) {
-        if (!faceVisible(scene.isoLayout, vertices, normal)) {
-            return;
-        }
-        PreparedIsoFace face {
-            .normal = normal,
-            .color = color,
-            .cell = cell,
-            .pickBoundsCell = pickBoundsCell,
-            .blurBehind = blurBehind,
-            .showGrid = showGrid,
-            .isEditorPreview = editorPreview,
-            .pickable = pickable,
-            .gridSize = gridSize,
-            .worldOrigin = {
-                vertices[0].x,
-                vertices[0].y,
-            },
-            .worldHeight = vertices[0].z,
-            .material = material,
-            .shorelineMask = shorelineMask,
-            .depth = faceDepth(scene.isoLayout, vertices),
-        };
-        for (std::size_t i = 0; i < vertices.size(); ++i) {
-            face.worldVertices[i] = vertices[i];
-            face.vertices[i] = projectIsoPoint(
-                scene.isoLayout, scene.renderExtent, vertices[i]);
-            face.clipW[i] = std::max(
-                dot(
-                    subtract(vertices[i], scene.isoLayout.cameraPosition),
-                    scene.isoLayout.cameraForward),
-                0.001f);
-        }
-        const std::size_t index = scene.isoFaces.size();
-        scene.isoFaces.push_back(face);
-        if (drawable) {
-            (blurBehind ||
-                    material == PreparedSurfaceMaterial::Water ||
-                    material == PreparedSurfaceMaterial::MirrorEnergy
-                    ? scene.translucentFaceIndices
-                    : scene.opaqueFaceIndices)
-                .push_back(index);
-        }
-        if (pickable) {
-            scene.pickFaceIndices.push_back(index);
-        }
-    };
-
     if (frameData.viewMode == RenderViewMode::Isometric3D) {
         for (std::size_t tileIndex = 0;
              tileIndex < frameData.tiles.size();
@@ -1341,91 +1361,109 @@ void IsoScenePreparer::prepare(
             };
 
             if (height <= 0.0f) {
-                appendIsoFace(
-                    { corners[0], corners[1], corners[2], corners[3] },
-                    { 0.0f, 0.0f, 1.0f },
-                    tile.color,
-                    tile.cell,
-                    pickBoundsCell,
-                    tile.blurBehind,
-                    tile.showGrid,
-                    tile.isEditorPreview,
-                    pickable,
-                    drawCube && mainSceneVisible,
-                    { width, depth },
-                    topMaterial,
-                    0);
+                appendIsoFace(scene, {
+                    .vertices = {
+                        corners[0], corners[1], corners[2], corners[3]
+                    },
+                    .normal = { 0.0f, 0.0f, 1.0f },
+                    .color = tile.color,
+                    .cell = tile.cell,
+                    .pickBoundsCell = pickBoundsCell,
+                    .blurBehind = tile.blurBehind,
+                    .showGrid = tile.showGrid,
+                    .editorPreview = tile.isEditorPreview,
+                    .pickable = pickable,
+                    .drawable = drawCube && mainSceneVisible,
+                    .gridSize = { width, depth },
+                    .material = topMaterial,
+                    .shorelineMask = 0,
+                });
             } else {
-                appendIsoFace(
-                    { corners[0], corners[1], corners[5], corners[4] },
-                    { 0.0f, -1.0f, 0.0f },
-                    tile.color,
-                    tile.cell,
-                    pickBoundsCell,
-                    tile.blurBehind,
-                    tile.showGrid,
-                    tile.isEditorPreview,
-                    pickable,
-                    drawCube && mainSceneVisible,
-                    { width, height },
-                    tileMaterial,
-                    0);
-                appendIsoFace(
-                    { corners[1], corners[2], corners[6], corners[5] },
-                    { 1.0f, 0.0f, 0.0f },
-                    tile.color,
-                    tile.cell,
-                    pickBoundsCell,
-                    tile.blurBehind,
-                    tile.showGrid,
-                    tile.isEditorPreview,
-                    pickable,
-                    drawCube && mainSceneVisible,
-                    { depth, height },
-                    tileMaterial,
-                    0);
-                appendIsoFace(
-                    { corners[2], corners[3], corners[7], corners[6] },
-                    { 0.0f, 1.0f, 0.0f },
-                    tile.color,
-                    tile.cell,
-                    pickBoundsCell,
-                    tile.blurBehind,
-                    tile.showGrid,
-                    tile.isEditorPreview,
-                    pickable,
-                    drawCube && mainSceneVisible,
-                    { width, height },
-                    tileMaterial,
-                    0);
-                appendIsoFace(
-                    { corners[3], corners[0], corners[4], corners[7] },
-                    { -1.0f, 0.0f, 0.0f },
-                    tile.color,
-                    tile.cell,
-                    pickBoundsCell,
-                    tile.blurBehind,
-                    tile.showGrid,
-                    tile.isEditorPreview,
-                    pickable,
-                    drawCube && mainSceneVisible,
-                    { depth, height },
-                    tileMaterial,
-                    0);
-                appendIsoFace(
-                    { corners[4], corners[5], corners[6], corners[7] },
-                    { 0.0f, 0.0f, 1.0f },
-                    tile.color,
-                    tile.cell,
-                    pickBoundsCell,
-                    tile.blurBehind,
-                    tile.showGrid,
-                    tile.isEditorPreview,
-                    pickable,
-                    drawCube && mainSceneVisible,
-                    { width, depth },
-                    topMaterial,
-                    0);
+                appendIsoFace(scene, {
+                    .vertices = {
+                        corners[0], corners[1], corners[5], corners[4]
+                    },
+                    .normal = { 0.0f, -1.0f, 0.0f },
+                    .color = tile.color,
+                    .cell = tile.cell,
+                    .pickBoundsCell = pickBoundsCell,
+                    .blurBehind = tile.blurBehind,
+                    .showGrid = tile.showGrid,
+                    .editorPreview = tile.isEditorPreview,
+                    .pickable = pickable,
+                    .drawable = drawCube && mainSceneVisible,
+                    .gridSize = { width, height },
+                    .material = tileMaterial,
+                    .shorelineMask = 0,
+                });
+                appendIsoFace(scene, {
+                    .vertices = {
+                        corners[1], corners[2], corners[6], corners[5]
+                    },
+                    .normal = { 1.0f, 0.0f, 0.0f },
+                    .color = tile.color,
+                    .cell = tile.cell,
+                    .pickBoundsCell = pickBoundsCell,
+                    .blurBehind = tile.blurBehind,
+                    .showGrid = tile.showGrid,
+                    .editorPreview = tile.isEditorPreview,
+                    .pickable = pickable,
+                    .drawable = drawCube && mainSceneVisible,
+                    .gridSize = { depth, height },
+                    .material = tileMaterial,
+                    .shorelineMask = 0,
+                });
+                appendIsoFace(scene, {
+                    .vertices = {
+                        corners[2], corners[3], corners[7], corners[6]
+                    },
+                    .normal = { 0.0f, 1.0f, 0.0f },
+                    .color = tile.color,
+                    .cell = tile.cell,
+                    .pickBoundsCell = pickBoundsCell,
+                    .blurBehind = tile.blurBehind,
+                    .showGrid = tile.showGrid,
+                    .editorPreview = tile.isEditorPreview,
+                    .pickable = pickable,
+                    .drawable = drawCube && mainSceneVisible,
+                    .gridSize = { width, height },
+                    .material = tileMaterial,
+                    .shorelineMask = 0,
+                });
+                appendIsoFace(scene, {
+                    .vertices = {
+                        corners[3], corners[0], corners[4], corners[7]
+                    },
+                    .normal = { -1.0f, 0.0f, 0.0f },
+                    .color = tile.color,
+                    .cell = tile.cell,
+                    .pickBoundsCell = pickBoundsCell,
+                    .blurBehind = tile.blurBehind,
+                    .showGrid = tile.showGrid,
+                    .editorPreview = tile.isEditorPreview,
+                    .pickable = pickable,
+                    .drawable = drawCube && mainSceneVisible,
+                    .gridSize = { depth, height },
+                    .material = tileMaterial,
+                    .shorelineMask = 0,
+                });
+                appendIsoFace(scene, {
+                    .vertices = {
+                        corners[4], corners[5], corners[6], corners[7]
+                    },
+                    .normal = { 0.0f, 0.0f, 1.0f },
+                    .color = tile.color,
+                    .cell = tile.cell,
+                    .pickBoundsCell = pickBoundsCell,
+                    .blurBehind = tile.blurBehind,
+                    .showGrid = tile.showGrid,
+                    .editorPreview = tile.isEditorPreview,
+                    .pickable = pickable,
+                    .drawable = drawCube && mainSceneVisible,
+                    .gridSize = { width, depth },
+                    .material = topMaterial,
+                    .shorelineMask = 0,
+                });
             }
 
             if (!tile.model.isCube() && !tile.pickOnly && mainSceneVisible) {
@@ -1497,23 +1535,24 @@ void IsoScenePreparer::prepare(
                     0,
                     water.shorelineMask),
                 true);
-            appendIsoFace(
-                waterVertices,
-                { 0.0f, 0.0f, 1.0f },
-                water.color,
-                water.cell,
-                {
+            appendIsoFace(scene, {
+                .vertices = waterVertices,
+                .normal = { 0.0f, 0.0f, 1.0f },
+                .color = water.color,
+                .cell = water.cell,
+                .pickBoundsCell = {
                     static_cast<int>(std::floor(left + 0.0001f)),
                     static_cast<int>(std::floor(top + 0.0001f)),
-                },
-                false,
-                false,
-                water.isEditorPreview,
-                water.pickable && !water.isEditorPreview,
-                mainSceneVisible,
-                { right - left, bottom - top },
-                PreparedSurfaceMaterial::Water,
-                water.shorelineMask);
+                    },
+                .blurBehind = false,
+                .showGrid = false,
+                .editorPreview = water.isEditorPreview,
+                .pickable = water.pickable && !water.isEditorPreview,
+                .drawable = mainSceneVisible,
+                .gridSize = { right - left, bottom - top },
+                .material = PreparedSurfaceMaterial::Water,
+                .shorelineMask = water.shorelineMask,
+            });
         }
 
         for (std::size_t sourceIndex = 0;

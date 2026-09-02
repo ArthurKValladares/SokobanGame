@@ -1908,6 +1908,19 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       named thing now rather than the tail of an 854-line function, which is
       where the next cut starts.
     </p>
+    <p>
+      <strong><code>IsoScenePreparer::prepare</code>: 513 lines to 459</strong>,
+      by lifting out the 60-line <code>appendIsoFace</code> lambda. That is a
+      modest cut on its own; what it actually buys is the 303-line isometric
+      block becoming extractable. The block was awkward to move because it
+      called two lambdas defined in <code>prepare</code>, and putting those
+      behind <code>std::function</code> in a per-face path was not acceptable.
+      Measuring what the lambda captured settled it: out of everything a
+      <code>[&amp;]</code> capture had in view, it used <strong>only
+      <code>scene</code></strong> — no members at all — so it is a free
+      function taking the scene, and the block now has one fewer thing holding
+      it in place.
+    </p>
 </article>
 
   <article class="finding is-resolved">
@@ -1954,11 +1967,26 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       cannot have moved.
     </p>
     <p>
-      <code>drawFace</code>'s eleven parameters and
-      <code>appendIsoFace</code>'s thirteen are not done. They are the same
-      medicine, but each is threaded through a long body where the parameters
-      are read dozens of times, so the change is larger than it looks and
-      belongs with the work on those functions rather than ahead of it.
+      <code>appendIsoFace</code>'s thirteen are done too, and it came for free
+      with the work on <code>prepare</code> — which is what "belongs with the
+      work on those functions" was pointing at. It is a free function taking an
+      <code>IsoFaceRequest</code> now, and the call site that read
+      <code>false, false, water.isEditorPreview, water.pickable &amp;&amp;
+      !water.isEditorPreview, mainSceneVisible</code> says which flag is which.
+    </p>
+    <p>
+      The rewrite was mechanical rather than typed: each call's thirteen
+      arguments were split depth-aware and emitted as
+      <code>.field = argument</code> in position order, then a separate check
+      re-parsed both versions and confirmed <em>every argument landed on the
+      field it had occupied positionally</em>, at all seven call sites. The
+      function body is the lambda body verbatim, modulo two named
+      substitutions (the parameters becoming <code>request.</code> members, and
+      one call needing <code>IsoScenePreparer::</code> qualification once it
+      left the class).
+    </p>
+    <p>
+      <code>drawFace</code>'s eleven remain.
     </p>
 </article>
 
