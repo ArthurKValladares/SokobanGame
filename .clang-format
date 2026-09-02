@@ -1,0 +1,63 @@
+# Sokoban's formatting, written down.
+#
+# NOT YET APPLIED. This file describes how the codebase is already written; it
+# has deliberately not been run over the tree. Read the cost below before you
+# do, because the decision is a repository-history decision, not a cleanup.
+#
+# How it was derived: twenty clang-format options were tuned against the actual
+# source rather than picked from a house style, keeping whichever value moved
+# the fewest lines. Measured with clang-format 18 over all 367 files under
+# src/ and tests/ (104,573 lines):
+#
+#   stock LLVM/Google/Chromium/Mozilla   167,000 - 171,000 lines rewritten
+#   stock Microsoft                       75,559
+#   stock WebKit (closest of the stock)   41,488
+#   this file                             24,672 lines, 296 of 367 files
+#   this file with ColumnLimit: 0         10,573 lines, 210 of 367 files
+#
+# So: no configuration reproduces this codebase. 71 files are already exactly
+# conformant, which says the *style* is consistent - braces, indentation,
+# pointer alignment, initializer lists all agree. What no tool reproduces is
+# where a long call gets broken. Those wrap points are hand-chosen for
+# readability, and clang-format has one algorithm where a person has judgment.
+#
+# Three ways to adopt, in increasing cost:
+#
+#   1. New files only. Nothing existing moves. The tree converges as files are
+#      rewritten anyway. Costs nothing and buys nothing immediately.
+#   2. Format on touch: run it over a file you were already substantially
+#      editing. Keeps each reformat inside a change that was going to churn
+#      that file regardless.
+#   3. One reformat commit. 24,672 lines, 296 files, and `git blame` points at
+#      that commit for most of the repository afterwards. `git blame -w
+#      --ignore-rev` and a .git-blame-ignore-revs file make that survivable,
+#      but every tool that reads blame has to know about it.
+#
+# Setting ColumnLimit to 0 tells clang-format never to re-wrap, which more than
+# halves the churn - but it still restructures 10,573 lines, because it will
+# still join lines that fit. It is not a free option either.
+
+BasedOnStyle: WebKit
+Language: Cpp
+Standard: c++20
+
+ColumnLimit: 80
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+NamespaceIndentation: None
+
+# Parameters go one per line once a signature breaks; arguments follow the same
+# rule. This is the single strongest pattern in the codebase.
+BinPackParameters: false
+BinPackArguments: false
+AllowAllParametersOfDeclarationOnNextLine: false
+AllowAllArgumentsOnNextLine: true
+AlignAfterOpenBracket: AlwaysBreak
+
+BreakBeforeBinaryOperators: None
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: WithoutElse
+# A return type almost never sits on its own line here; the signature breaks
+# after the open bracket instead.
+PenaltyReturnTypeOnItsOwnLine: 1000

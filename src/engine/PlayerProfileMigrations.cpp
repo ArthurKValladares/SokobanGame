@@ -447,7 +447,12 @@ void migrate16to17(Json& root)
         }
         constexpr uint64_t movableBase = uint64_t { 1 } << 20;
         constexpr uint64_t enemyBase = uint64_t { 2 } << 20;
-        for (const auto [name, base] : {
+        // `const auto&`, not `const auto`: GCC's -Wrange-loop-construct
+        // objects to the copy. It is a 16-byte trivially copyable pair, so
+        // the copy is if anything cheaper than the reference - but this is
+        // one of exactly two warnings the tree produces, and a warning gate
+        // is worth more than the argument.
+        for (const auto& [name, base] : {
                  std::pair { "players", uint64_t { 1 } },
                  std::pair { "movables", movableBase },
                  std::pair { "enemies", enemyBase },
@@ -511,7 +516,8 @@ void migrate16to17(Json& root)
         const float motionStart = old.value("motionStartSeconds", 0.0f);
         const float motionDuration = old.value("motionDurationSeconds", 0.0f);
         Json motions = Json::array();
-        for (const auto [arrayName, kind] : {
+        // See the note on the same loop shape in `assignIds` above.
+        for (const auto& [arrayName, kind] : {
                  std::pair { "players", "player" },
                  std::pair { "movables", "movable" },
                  std::pair { "enemies", "enemy" },

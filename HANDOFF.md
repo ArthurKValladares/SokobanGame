@@ -323,7 +323,9 @@ layout made table-driven; the last three phase timings converted to
 eight-corner expansions; and `beginOneShotCommands`/`submitOneShotCommands`
 given the six copies of one-shot command-buffer and fence lifetime; and
 `RenderFrameParts` given the 42% of `RenderFrameBuilder.cpp` that both the
-gameplay and the editor builders were sharing without saying so.
+gameplay and the editor builders were sharing without saying so; and the three
+tooling gates - warnings-as-errors, a widened clang-tidy set, and a measured
+`.clang-format` - given numbers instead of opinions.
 
 Still open, in the order the report recommends: splitting
 `VulkanModelResources` proper and collapsing its three copies of the load-state
@@ -1588,6 +1590,38 @@ cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure --no-tests=error
 ```
 
+### Gates
+
+Three things now check the tree, and each was measured before being switched
+on. The numbers are the point: a gate nobody measured is a gate that goes red
+on someone else's morning.
+
+- `SOKOBAN_WARNINGS_AS_ERRORS` (default OFF, ON in the three Linux CI jobs).
+  With `-Wall -Wextra -Wpedantic -Wno-missing-field-initializers`, all 130
+  translation units under `src/` and all 77 under `tests/` compile with **zero
+  warnings**. The suppression is not laziness: GCC reports a missing
+  initializer for every field a *designated* initializer does not name, which
+  is how every Vulkan struct in this codebase is written, so it fires about a
+  thousand times and is right about none of them. Clang and MSVC do not warn
+  there.
+  MSVC is deliberately not gated. `/WX` is wired and the Windows job does not
+  pass the option, because nobody has yet counted what `/W4` says about this
+  tree. Run it once, look, then turn it on - not the other way round.
+- `.clang-tidy` replaces the `-checks=` argument CMake used to pass (CMake
+  passing one would override the file). `clang-analyzer-*` is unchanged;
+  `bugprone-*`, `performance-*`, `concurrency-*` and `portability-*` are added
+  minus 15 named checks that do not pass yet, each listed with its count so the
+  exclusion list reads as a work queue. 89 of those 104 checks pass clean
+  today. The file explains why the other four groups (`misc`, `modernize`,
+  `readability`, `cppcoreguidelines`) are style rather than gate material, with
+  the census behind that judgement.
+- `.clang-format` exists and is **deliberately not applied**. It reproduces
+  this codebase's style closely - 71 files are already byte-identical to it -
+  but no configuration reproduces the hand-chosen wrap points, so running it
+  would rewrite 24,672 lines across 296 of 367 files. The file's header carries
+  the measurement and the three adoption paths. Do not run it over the tree
+  without deciding which one you are taking.
+
 ### Compiler check without the SDK
 
 Every file under `src/` parses with GCC 11 on Linux using only vendored
@@ -1605,10 +1639,10 @@ DEF="-DSOKOBAN_ENABLE_DEBUG_UI=1 -DSOKOBAN_ENABLE_VALIDATION=1 -DSOKOBAN_GAME_VE
 find src -name '*.cpp' | xargs -P "$(nproc)" -I{} g++ -std=c++20 -fsyntax-only -Wall $DEF $INC {}
 ```
 
-All 128 translation units pass, in both `SOKOBAN_ENABLE_DEBUG_UI` settings,
-with two `-Wrange-loop-construct` warnings in `PlayerProfileMigrations.cpp`
-that are GCC false positives - both loop variables are 16-byte trivially
-copyable pairs, where the copy is cheaper than the reference GCC asks for.
+All 130 translation units pass, in both `SOKOBAN_ENABLE_DEBUG_UI` settings.
+Add `-Wno-missing-field-initializers` to match what the build actually uses and
+the count is zero; without it, about a thousand designated-initializer false
+positives.
 
 Ten suites also compile and run with no library link, which makes them usable
 without a Windows build: `command_line`, `math`, `geometry`,

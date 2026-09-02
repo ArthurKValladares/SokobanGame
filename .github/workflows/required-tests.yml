@@ -95,21 +95,21 @@ jobs:
             # smoke test defaults to OFF and had never been switched on here,
             # which meant mesa-vulkan-drivers and vulkan-validationlayers were
             # installed for nothing.
-            cmake_options: -DSOKOBAN_BUILD_TESTS=ON -DSOKOBAN_BUILD_VULKAN_SMOKE_TESTS=ON
+            cmake_options: -DSOKOBAN_BUILD_TESTS=ON -DSOKOBAN_BUILD_VULKAN_SMOKE_TESTS=ON -DSOKOBAN_WARNINGS_AS_ERRORS=ON
             build_target: all
             run_tests: true
             run_fuzz: false
             run_smoke: true
           - name: Tests (Release)
             build_type: Release
-            cmake_options: -DSOKOBAN_BUILD_TESTS=ON
+            cmake_options: -DSOKOBAN_BUILD_TESTS=ON -DSOKOBAN_WARNINGS_AS_ERRORS=ON
             build_target: all
             run_tests: true
             run_fuzz: false
             run_smoke: false
           - name: Sanitizers (ASan + UBSan)
             build_type: Debug
-            cmake_options: -DSOKOBAN_BUILD_TESTS=ON -DSOKOBAN_ENABLE_SANITIZERS=ON
+            cmake_options: -DSOKOBAN_BUILD_TESTS=ON -DSOKOBAN_ENABLE_SANITIZERS=ON -DSOKOBAN_WARNINGS_AS_ERRORS=ON
             build_target: all
             run_tests: true
             run_fuzz: false

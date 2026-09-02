@@ -2801,9 +2801,10 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
     </p>
   </article>
 
-  <article class="finding is-moderate">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-moderate">Moderate</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: moderate · CI gate</span>
       <span class="tag">CI gate</span>
     </div>
     <h3>Warnings are enabled everywhere and gated nowhere</h3>
@@ -2854,11 +2855,49 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
       of the CI matrix compiles this tree cleanly at all; the recipe is recorded
       under <em>Build and test commands</em> in the handoff so it can be re-run.
     </p>
+    <div class="fix">
+      <code>SOKOBAN_WARNINGS_AS_ERRORS</code>, off by default and on in the
+      three Linux CI jobs. <code>-Wno-missing-field-initializers</code> is
+      unconditional, with the reason written beside it — a diagnostic that is
+      wrong a thousand times and right none is not something to leave firing
+      locally either.
+    </div>
+    <p>
+      <strong>The gate is green, measured end to end.</strong> The earlier
+      census covered <code>src/</code>; the gate also covers
+      <code>tests/</code>, which nobody had counted. Both were swept with the
+      exact production flag set: <strong>130 source translation units and 77
+      test translation units, zero warnings</strong>.
+    </p>
+    <p>
+      Getting there needed two small changes and they were both worth making.
+      The <code>-Wrange-loop-construct</code> pair in
+      <code>PlayerProfileMigrations.cpp</code> I had earlier called “wrong” and
+      left alone — GCC objects to copying a 16-byte trivially copyable pair and
+      recommends a reference that is no cheaper. That argument is still right
+      and it stops mattering when the diagnostic is the last thing between the
+      project and a working gate, so both loops now take <code>const auto&amp;</code>
+      with a note saying exactly that. And <code>GameplayLoopTests.cpp</code>
+      discarded a <code>[[nodiscard]]</code> result three times: those three
+      cases drive frames to watch <code>presentation</code> move and genuinely
+      do not care what the step returned, so they say so with
+      <code>static_cast&lt;void&gt;</code> rather than being rewritten.
+    </p>
+    <p>
+      <strong>MSVC is deliberately left out.</strong> The option wires
+      <code>/WX</code>, but the Windows job does not pass it, because I have no
+      MSVC and have therefore never counted what <code>/W4</code> says about
+      this tree. Switching it on there is a one-line change for whoever runs
+      that build once and looks. Turning a gate on for a compiler you have not
+      measured is how a green pipeline becomes a red one on someone else's
+      Monday.
+    </p>
   </article>
 
-  <article class="finding is-moderate">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-moderate">Moderate</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: moderate · static analysis</span>
       <span class="tag">Static analysis</span>
     </div>
     <h3>clang-tidy runs with one check group enabled</h3>
@@ -2883,6 +2922,96 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
       if the noise is not worth it. Add a <code>.clang-tidy</code> file so the
       configuration is visible to editors, not just to CMake.
     </div>
+    <p>
+      <strong>“If the noise is not worth it” was a guess that happened to be
+      right.</strong> Every group was run across all 130 files under
+      <code>src/</code> with clang-tidy 18, and
+      <code>bugprone-easily-swappable-parameters</code> is indeed the single
+      noisiest check in the two groups I recommended — 56 of
+      <code>bugprone</code>'s 118 diagnostics on its own.
+    </p>
+    <p>
+      What the census says, by group — checks in the group, checks that fire,
+      diagnostics, and what dominates:
+    </p>
+    <div class="loc" style="display:block">
+      <code style="display:block;white-space:pre">bugprone            80   10     118   56 easily-swappable-parameters
+performance         19    5      28   14 move-const-arg
+concurrency          2    0       0   —
+portability          3    0       0   —
+misc                22    7   2,864   2,654 include-cleaner
+modernize           37    ?   1,369   979 use-trailing-return-type
+readability         49    ?   3,998*  2,180 uppercase-literal-suffix
+cppcoreguidelines   40    ?   1,272*  903 avoid-magic-numbers
+
+* sampled over 107 and 79 of the 130 files; the real counts are higher.
+  Those two runs were stopped once the shape was obvious.</code>
+    </div>
+    <p>
+      The bottom four are style, decisively.
+      <code>misc-include-cleaner</code> alone is a whole-repository
+      include-hygiene project; <code>use-trailing-return-type</code> and
+      <code>uppercase-literal-suffix</code> are house-style questions this
+      codebase has already answered the other way. The original comment in
+      <code>CMakeLists.txt</code> calling broader sets a “separately agreed
+      formatting policy” was right about them, and my finding was a little
+      unfair in framing the narrow gate as an oversight.
+    </p>
+    <p>
+      The top four are not style, and 89 of their 104 checks
+      <strong>pass clean on this tree today</strong> — so they are on. The 15
+      that do not are excluded by name in <code>.clang-tidy</code>, each with
+      its current count, which turns the exclusion list into a work queue
+      instead of a hole. A gate that starts red is a gate people learn to
+      ignore.
+    </p>
+    <p>
+      Two exclusions are on merit rather than backlog.
+      <code>easily-swappable-parameters</code> cannot tell a genuinely
+      confusable pair from a <code>Vec3</code>'s three floats. And
+      <code>bugprone-unchecked-optional-access</code>'s 24 hits were
+      <em>inspected</em>, not counted: every one sampled is guarded, usually by
+      a short-circuiting <code>||</code> or an early <code>continue</code> its
+      dataflow model does not follow. That is worth stating plainly, because 24
+      unguarded optional dereferences would have been the first live defects in
+      this report — and they are not there.
+    </p>
+    <p>
+      The configuration moved out of <code>CMakeLists.txt</code> into
+      <code>.clang-tidy</code>, so editors see it too and each check has room to
+      say why it is on the list. CMake now passes no <code>-checks</code>
+      argument at all, because one would silently override the file; it keeps
+      only <code>--header-filter</code>, which needs an absolute path the config
+      file cannot know.
+    </p>
+    <p>
+      <strong>Verified rather than reasoned: the widening adds nothing.</strong>
+      The shipped config was run over all 130 files with the same
+      <code>--header-filter</code> CMake passes. Four diagnostics come back, and
+      every one of them is produced <em>identically</em> by the old
+      <code>clang-analyzer-*</code>-only configuration — checked file by file on
+      the three files that fire. So 208 enabled checks report exactly what 
+      the previous configuration reported.
+    </p>
+    <p>
+      <strong>Those four are worth a separate look, and they are not mine.</strong>
+      Two are <code>clang-analyzer-unix.Malloc</code> inside
+      <code>third_party/stb/stb_image.h</code>. One is the same checker on
+      <code>GltfMesh.cpp:1260</code>, and that one is provably wrong: the
+      pointer it calls leaked is held by
+      <code>std::unique_ptr&lt;cgltf_data, DocumentDeleter&gt;</code>, and the
+      analyzer does not follow a custom deleter. The fourth is
+      <code>optin.performance.Padding</code> on <code>Application</code> — 34
+      bytes of padding in a class that exists once.
+    </p>
+    <p>
+      What matters is that the existing gate produces all four with
+      <code>-warnings-as-errors=*</code>. Either the clang-tidy CI job is red
+      today and has been for a while, or the real CMake invocation suppresses
+      them in a way a hand-rolled command line does not. I could not settle
+      which without running that job, and it is worth settling — but it is a
+      property of the gate as it already stood, not of this change.
+    </p>
   </article>
 
   <article class="finding is-resolved">
@@ -2950,10 +3079,11 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
     </div>
   </article>
 
-  <article class="finding is-minor">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-minor">Minor</span>
-      <span class="tag">Consistency</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: minor · consistency</span>
+      <span class="tag">Corrected</span>
     </div>
     <h3>No formatting configuration exists</h3>
     <p>
@@ -2970,6 +3100,46 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
       representative file, then hand-tune), and land the reformat in the same
       commit as the line-ending normalisation so there is exactly one noisy diff
       in the history rather than two.
+    </div>
+    <p>
+      <strong>“Generate a config that reproduces the current style” is not
+      possible, and I should not have written it as if it were a chore.</strong>
+      Twenty clang-format options were tuned against the actual tree, keeping
+      whichever value moved the fewest lines, measured over all 367 files under
+      <code>src/</code> and <code>tests/</code> (104,573 lines):
+    </p>
+    <div class="loc" style="display:block">
+      <code style="display:block;white-space:pre">stock LLVM / Google / Chromium / Mozilla   167,000 – 171,000 lines rewritten
+stock Microsoft                             75,559
+stock WebKit (closest of the stock styles)  41,488
+tuned to this codebase                      24,672   (296 of 367 files)
+tuned, with ColumnLimit: 0 (never re-wrap)  10,573   (210 of 367 files)</code>
+    </div>
+    <p>
+      <strong>71 files are already exactly conformant</strong>, which is the
+      interesting part: the style genuinely is consistent — braces, indentation,
+      pointer alignment, initializer lists and namespace handling all agree, and
+      a tuned config reproduces them exactly. What no tool reproduces is
+      <em>where a long call gets broken</em>. Those wrap points are chosen for
+      readability, one at a time, and clang-format has one algorithm where a
+      person has judgment. Even telling it never to re-wrap still restructures
+      10,573 lines, because it will still join lines that fit.
+    </p>
+    <p>
+      The other half of the fix has expired. “Land the reformat in the same
+      commit as the line-ending normalisation” was sound advice in the original
+      report; the line-ending change landed first, months of this review ago, so
+      that free ride is gone and a reformat now is its own commit.
+    </p>
+    <div class="fix">
+      <code>.clang-format</code> is written, tuned and <strong>deliberately not
+      applied</strong>. Its own header carries the numbers above and the three
+      ways to adopt it: new files only (free, converges slowly); format a file
+      you were already substantially rewriting (keeps each reformat inside a
+      change that was churning that file anyway); or one 24,672-line commit
+      plus a <code>.git-blame-ignore-revs</code> entry. Which of those to take
+      is a repository-history decision, not a cleanup, so the file describes the
+      cost and leaves the decision where it belongs.
     </div>
   </article>
 </section>
@@ -3113,7 +3283,7 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
 <footer>
   <span>Sokoban 3D engine · code-quality audit</span>
   <span>Reviewed against HEAD 21dff13a · 31 Aug 2026</span>
-  <span>39 findings · 20 resolved · 0 live defects</span>
+  <span>39 findings · 23 resolved · 0 live defects</span>
 </footer>
 
 </div>

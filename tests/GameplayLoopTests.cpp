@@ -143,13 +143,16 @@ void testRenderedPlayerNeverGoesBackwards()
         // Turning corners, which is where the video flickers: a direction
         // change ends one action and starts another on the same frame.
         const bool goRight = (frame / 10) % 2 == 0;
-        GameplayLoop::update(
+        // Discarded on purpose: these three cases drive frames to watch
+        // `presentation` move, and say nothing about what the step returned.
+        // The rest of this file captures the result, because it checks it.
+        static_cast<void>(GameplayLoop::update(
             level,
             session,
             presentation,
             goRight ? holdRight : holdDown,
             1.0f / 60.0f,
-            false);
+            false));
 
         const Vec3 at = presentation.players().front().motion.renderPosition;
         const float moved = std::abs(at.x - previous.x) +
@@ -196,14 +199,15 @@ void testChainedSlideIsDrawnTileByTile()
     };
     const GameplayLoop::InputFrame idle {};
 
-    GameplayLoop::update(level, session, presentation, push, 1.0f / 60.0f, false);
+    static_cast<void>(GameplayLoop::update(
+        level, session, presentation, push, 1.0f / 60.0f, false));
     float previous = presentation.movables().front().renderPosition.x;
     float worst = 0.0f;
     int jumps = 0;
     // Only the push is driven; the rest is the slide playing out on its own.
     for (int frame = 0; frame < 20; ++frame) {
-        GameplayLoop::update(
-            level, session, presentation, idle, 1.0f / 60.0f, false);
+        static_cast<void>(GameplayLoop::update(
+            level, session, presentation, idle, 1.0f / 60.0f, false));
         const float x = presentation.movables().front().renderPosition.x;
         const float moved = std::abs(x - previous);
         // A frame carries dt/stepDuration of a tile; a whole tile is a snap.

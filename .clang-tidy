@@ -1,0 +1,93 @@
+# Which clang-tidy checks gate a build, and what it cost to find out.
+#
+# The gate was `clang-analyzer-*` alone, with a note in CMakeLists.txt that
+# broader sets "belong in a separately agreed formatting policy". That is a
+# defensible default, but nobody had measured which of the other groups are
+# style opinions and which find bugs. Measured with clang-tidy 18 across all
+# 130 translation units under src/:
+#
+#   group              checks  fire  diagnostics  what dominates
+#   bugprone               80    10          118  56 easily-swappable-parameters
+#   performance            19     5           28  14 move-const-arg
+#   concurrency             2     0            0  -
+#   portability             3     0            0  -
+#   misc                   22     7        2,864  2,654 include-cleaner
+#   modernize              37     ?        1,369  979 use-trailing-return-type
+#   readability            49     ?       3,998*  2,180 uppercase-literal-suffix
+#   cppcoreguidelines      40     ?       1,272*  903 avoid-magic-numbers
+#
+#   * readability and cppcoreguidelines were sampled over 107 and 79 of the
+#     130 files; the full counts are higher. They were not finished because
+#     the shape was already clear.
+#
+# The bottom four groups are style. `misc-include-cleaner` alone is a
+# whole-repository include-hygiene project; `use-trailing-return-type` and
+# `uppercase-literal-suffix` are house-style preferences this codebase has
+# already made the other way. None of them belongs in a gate.
+#
+# The top four are not. 104 of their 104 checks are about correctness and
+# cost, and 89 of them pass clean today - so they are enabled here. The 15
+# that do not pass are excluded by name, each with its current count, which
+# makes the exclusion list a work queue rather than a hole. A gate that starts
+# red is a gate people learn to ignore.
+#
+# clang-analyzer-* stays, unchanged, for the reason it was there.
+
+Checks: >
+  -*,
+  clang-analyzer-*,
+  bugprone-*,
+  performance-*,
+  concurrency-*,
+  portability-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-unchecked-optional-access,
+  -bugprone-narrowing-conversions,
+  -bugprone-optional-value-conversion,
+  -bugprone-empty-catch,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-branch-clone,
+  -bugprone-suspicious-include,
+  -bugprone-inc-dec-in-conditions,
+  -bugprone-switch-missing-default-case,
+  -performance-move-const-arg,
+  -performance-unnecessary-value-param,
+  -performance-enum-size,
+  -performance-no-automatic-move,
+  -performance-inefficient-vector-operation
+
+# The work queue, in the order worth doing:
+#
+#   performance-move-const-arg                14  std::move on a const argument
+#                                                 does nothing; the fix deletes
+#                                                 the call.
+#   performance-unnecessary-value-param        9  by-value parameters that are
+#                                                 only read.
+#   bugprone-narrowing-conversions             9
+#   bugprone-optional-value-conversion         8
+#   bugprone-empty-catch                       7  each needs a decision, not a
+#                                                 rewrite: silence is sometimes
+#                                                 right and should say so.
+#   bugprone-implicit-widening-of-mult-result  5
+#   bugprone-branch-clone                      4
+#   performance-enum-size                      3
+#   bugprone-inc-dec-in-conditions             2
+#   bugprone-suspicious-include                2
+#   performance-no-automatic-move              1
+#   performance-inefficient-vector-operation   1
+#   bugprone-switch-missing-default-case       1
+#
+# Two are excluded on their merits rather than as a queue:
+#
+#   bugprone-easily-swappable-parameters (56) fires on any run of same-typed
+#   parameters. The concern is real - the review has its own finding about
+#   positional booleans - but the check cannot tell a genuinely confusable
+#   pair from a Vec3's three floats, so it is not gate material.
+#
+#   bugprone-unchecked-optional-access (24) was inspected rather than counted.
+#   Every site sampled is guarded, mostly by a short-circuiting `||` or an
+#   early `continue` that its dataflow model does not follow. Enabling it
+#   would gate on false positives.
+
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(^|/)(src|tools)/'

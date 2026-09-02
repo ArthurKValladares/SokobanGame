@@ -34,6 +34,8 @@ option(SOKOBAN_ENABLE_SANITIZERS
     "Instrument Sokoban targets with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(SOKOBAN_ENABLE_CLANG_TIDY
     "Run the selected clang-tidy checks while compiling Sokoban targets" OFF)
+option(SOKOBAN_WARNINGS_AS_ERRORS
+    "Fail the build on any compiler warning in Sokoban's own targets" OFF)
 option(SOKOBAN_BUILD_FUZZ_TESTS
     "Build libFuzzer harnesses for hostile serialized input" OFF)
 option(SOKOBAN_BUILD_INSTALLER
@@ -275,11 +277,41 @@ endforeach()
 
 add_custom_target(sokoban_shaders DEPENDS ${SHADER_OUTPUTS})
 
+# Warnings, and optionally the gate that makes them mean something.
+#
+# The flags below were on from the start; nothing enforced them, so a warning
+# introduced today would have sat unnoticed among the rest. Measured before
+# switching the gate on: compiling every file under src/ with GCC 11 and
+# -Wall -Wextra -Wpedantic produced 942 warnings, 940 of them the one
+# diagnostic suppressed below; the other two were fixed. So the gate costs
+# nothing to keep green. It is on in CI and off locally, because a warning
+# should stop a merge, not stop someone mid-edit.
+#
+# That census is a floor, not a guarantee: CI builds on ubuntu-24.04 with the
+# distribution's default GCC and its `clang` package, both newer than the GCC
+# that produced the count, and newer compilers know diagnostics older ones do
+# not. The first CI run with this on is the real measurement.
 function(sokoban_enable_warnings target)
     if(MSVC)
         target_compile_options(${target} PRIVATE /W4 /permissive-)
+        if(SOKOBAN_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE /WX)
+        endif()
     else()
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+        # GCC reports a missing initializer for every field a *designated*
+        # initializer does not name. That is the initialization style this
+        # codebase uses for Vulkan structs everywhere - `.sType = ...,
+        # .flags = ...` with the rest deliberately value-initialized - so the
+        # diagnostic fires about a thousand times and is right about none of
+        # them. Clang and MSVC do not warn here. Suppressed rather than worked
+        # around, because the alternative is naming every field of every
+        # VkCreateInfo by hand.
+        target_compile_options(${target} PRIVATE
+            -Wno-missing-field-initializers)
+        if(SOKOBAN_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE -Werror)
+        endif()
     endif()
 
     if(SOKOBAN_ENABLE_SANITIZERS)
@@ -306,14 +338,16 @@ function(sokoban_enable_warnings target)
             message(FATAL_ERROR
                 "SOKOBAN_ENABLE_CLANG_TIDY is ON but clang-tidy was not found")
         endif()
-        # Keep this a high-signal gate. Broader style check sets belong in a
-        # separately agreed formatting policy rather than blocking every build.
-        # Main files are always checked; restrict included-header diagnostics
-        # to project-owned code so findings in third_party never gate CI.
+        # The check set, the reason for it and the measurement behind it live
+        # in .clang-tidy at the repository root, not here - a list of checks
+        # wants the room to say why each one is on the list. This deliberately
+        # passes no -checks argument, because one would override that file.
+        #
+        # --header-filter stays here because it needs the absolute source
+        # directory, which the config file cannot know; it keeps diagnostics
+        # from third_party headers out of the gate.
         set(SOKOBAN_CLANG_TIDY_COMMAND
             "${SOKOBAN_CLANG_TIDY_EXECUTABLE}"
-            "-checks=-*,clang-analyzer-*"
-            "-warnings-as-errors=*"
             "--header-filter=^${CMAKE_CURRENT_SOURCE_DIR}/(src|tools)/"
         )
         set_property(TARGET ${target} PROPERTY CXX_CLANG_TIDY
