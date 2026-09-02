@@ -6,11 +6,13 @@
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstring>
 #include <stdexcept>
+#include <string>
+#include <utility>
 
 namespace sokoban {
 
@@ -29,16 +31,24 @@ namespace {
 //
 // The binding numbers are the contract with the shaders, which declare them by
 // hand; they are not indices into this array and their order here is only
-// convention. Binding 2 is absent - no shader declares it and nothing explains
-// the hole, so it is left as it is rather than closed, since renumbering would
-// mean editing every shader that names a later one.
+// convention.
+//
+// Binding 2 is deliberately vacant. No shader declares it and no C++ writes
+// it, and this file is the only record of that: the slot was retired and the
+// numbering was not compacted, because every later binding is named by hand in
+// the shaders that use it and renumbering would mean editing all of them to no
+// effect. **Do not reuse 2.** A new binding continues at 13; a reused 2 would
+// silently match any shader still carrying an old declaration.
+//
+// The array's size is deduced from the table rather than written beside it, so
+// adding a row cannot leave a count behind.
 struct SceneBinding {
     uint32_t binding;
     VkDescriptorType type;
     VkShaderStageFlags stages;
 };
 
-constexpr std::array<SceneBinding, 12> sceneBindings {
+constexpr auto sceneBindings = std::to_array<SceneBinding>({
     SceneBinding { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
     SceneBinding { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
     SceneBinding { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
@@ -57,7 +67,7 @@ constexpr std::array<SceneBinding, 12> sceneBindings {
     // Fragment only for now. A vertex stage that wanted to fold a material into
     // its transform would have to be added here as well as declared there.
     SceneBinding { 12, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
-};
+});
 
 // How many of the set's bindings ask for `type`, which is what the descriptor
 // pool needs to be told.
@@ -297,17 +307,29 @@ void VulkanSceneDescriptors::updateInternal(
     if (!descriptorSet) {
         throw std::runtime_error("Scene descriptors have not been created");
     }
-    if (!resources.shadow.valid() ||
-        !resources.pointShadows.valid() ||
-        !resources.sceneColor.valid() ||
-        !resources.sceneHdrColor.valid() ||
-        !resources.sceneDepth.valid() ||
-        !resources.ssao.valid() ||
-        !resources.uiFont.valid() ||
-        !resources.titleBackground.valid() ||
-        !resources.skinning.valid() || !resources.drawInstances.valid() ||
-        !resources.materials.valid()) {
-        throw std::runtime_error("Scene descriptor resources are incomplete");
+    // Named rather than or-ed together, for two reasons: an eleven-clause
+    // condition is one a reader has to check against the writes below by eye,
+    // and "resources are incomplete" told whoever hit it nothing about which
+    // one. A missing entry here is a descriptor written from a null handle,
+    // which validation catches but only on a validation build.
+    const std::array<std::pair<const char*, bool>, 11> required {
+        std::pair { "shadow", resources.shadow.valid() },
+        std::pair { "pointShadows", resources.pointShadows.valid() },
+        std::pair { "sceneColor", resources.sceneColor.valid() },
+        std::pair { "sceneHdrColor", resources.sceneHdrColor.valid() },
+        std::pair { "sceneDepth", resources.sceneDepth.valid() },
+        std::pair { "ssao", resources.ssao.valid() },
+        std::pair { "uiFont", resources.uiFont.valid() },
+        std::pair { "titleBackground", resources.titleBackground.valid() },
+        std::pair { "skinning", resources.skinning.valid() },
+        std::pair { "drawInstances", resources.drawInstances.valid() },
+        std::pair { "materials", resources.materials.valid() },
+    };
+    for (const auto& [name, present] : required) {
+        if (!present) {
+            throw std::runtime_error(
+                std::string("Scene descriptor resource is missing: ") + name);
+        }
     }
 
     const VkDescriptorImageInfo shadow {

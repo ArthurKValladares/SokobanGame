@@ -1395,8 +1395,14 @@ Two stable warmed Release repetitions measure 0.388–0.390 ms translucency and
 0.970–0.977 ms for the full GPU frame, down from 0.466 and 1.050 ms
 respectively. The pre-change, Debug validation and all three post-change
 Release scene/AO pairs have the exact hashes above. The optimized 120-frame
-Debug run is validation-clean, the water shader compiles to Vulkan 1.3 SPIR-V,
-and all 69 Debug suites pass.
+Debug run is free of validation *errors*, the water shader compiles to Vulkan
+1.3 SPIR-V, and all 69 Debug suites pass.
+
+"Validation-clean" was the wording here and it was not accurate: these runs
+emit eight `WARNING-Shader-OutputNotConsumed`, all the same one. See
+*Known validation warnings* below - they are expected, they are not a defect,
+and calling a run clean when it prints eight warnings is how people stop
+reading the log.
 
 Evidence is under `build/gpu-water-debug-4x`,
 `build/gpu-water-release-control-4x`, `build/gpu-water-release-4x-a`,
@@ -1407,6 +1413,34 @@ Evidence is under `build/gpu-water-debug-4x`,
 bottleneck. `S1` fixed-tick simulation is conditional on continuous physics or
 gameplay motion. `F5` RHI work is conditional on a real second renderer or
 platform; do not add virtual abstractions speculatively.
+
+### Known validation warnings
+
+A `--require-validation` run emits eight
+`WARNING-Shader-OutputNotConsumed`, all of one kind: `triangle.vert` declares
+an output at location 10 (`outMaterialIndex`) that four of its five fragment
+partners do not declare as an input - `water.frag`, `ground_splat.frag` in two
+pipelines, and `ui.frag`. The swapchain is built twice in a smoke run
+(1280x720, then 2880x1800), which is where eight comes from. An unconsumed
+vertex output is legal; the cost is one constant store per vertex.
+
+`triangle.vert` writes it because `triangle.frag` reads it, and `triangle.frag`
+reads it because it is also the fragment stage for `model.vert` and
+`skinned_model.vert`, where the material index is real per-vertex data.
+
+**Declaring the input in the three fragment shaders that lack it does not
+work**, which is worth writing down because it is the obvious fix and it was
+tried. glslc strips a declared-but-unused input at `-O`, and this project
+compiles every shader with `-O` unconditionally (see the note on the shader
+custom command in CMakeLists.txt). Measured: the declaration survives at
+`-O0` and is gone at `-O`, so the warning would come back unchanged. Forcing
+it to survive means referencing it, which is real per-fragment work in three
+shaders to silence a warning.
+
+The fix that works is the one B3 is already about: split `triangle.frag` so
+the quad pipelines stop carrying a model-only interface. Until then these
+eight are expected, and a run with more than eight, or with a different
+warning, is the thing to look at.
 
 ## Verification matrix
 

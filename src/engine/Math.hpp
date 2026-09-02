@@ -208,11 +208,6 @@ inline constexpr float normalizeEpsilonSquared = 1e-12f;
     return { std::max(a.x, b.x), std::max(a.y, b.y), std::max(a.z, b.z) };
 }
 
-[[nodiscard]] inline Vec3 absComponents(Vec3 v)
-{
-    return { std::abs(v.x), std::abs(v.y), std::abs(v.z) };
-}
-
 [[nodiscard]] constexpr Vec3 xyz(Vec4 v) { return { v.x, v.y, v.z }; }
 [[nodiscard]] constexpr Vec4 toVec4(Vec3 v, float w) { return { v.x, v.y, v.z, w }; }
 

@@ -275,6 +275,18 @@ private:
         uint32_t pendingFrameMask = 0;
     };
 
+    // The preamble every pick shares: an isometric frame, a non-zero output
+    // extent, and a pointer that maps inside the game viewport. Returns the
+    // mapped position together with the extent it was mapped against, because
+    // each caller needs both, and nullopt for any of the three refusals.
+    struct PickTarget {
+        Vec2 position {};
+        VkExtent2D extent {};
+    };
+    [[nodiscard]] std::optional<PickTarget> pickTargetFor(
+        const PreparedFrameScratch& prepared,
+        Vec2 pixelPosition) const;
+
     [[nodiscard]] const PreparedFrameScratch& resolvePreparedFrame(
         const PreparedFrame& frame) const;
     [[nodiscard]] VulkanSceneDescriptors::Resources descriptorResources(

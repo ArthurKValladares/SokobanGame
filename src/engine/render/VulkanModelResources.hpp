@@ -275,6 +275,16 @@ private:
         uint32_t mipLevels = 1;
     };
 
+    // Two structurally identical types, kept apart on purpose.
+    //
+    // A ModelSlot holds one of each - a static mesh and, for a skinned model,
+    // the posed mesh uploaded per frame - and they are produced by different
+    // functions and consumed by different pipelines. Merging them into one
+    // type would save four lines and make `slot.gpu = uploadSkinnedMesh(...)`
+    // compile, which is a mix-up nothing downstream would catch: the draw
+    // would bind the wrong index range and render whatever geometry happened
+    // to be at that offset. Distinct types are worth keeping exactly where
+    // they prevent that, and this is such a place.
     struct GpuMesh {
         VulkanGeometryArena::Allocation allocation {};
         uint32_t indexCount = 0;

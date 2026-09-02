@@ -5,3 +5,5 @@ out/
 *.suo
 *.log
 imgui.ini
+__pycache__/
+*.pyc

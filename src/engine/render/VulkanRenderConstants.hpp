@@ -203,10 +203,6 @@ struct GpuDrawInstance {
 
 static_assert(sizeof(GpuDrawInstance) == 256);
 
-// Which entry of the draw-instance buffer a draw should read. Only the
-// skinned-model pipeline needs it: gl_InstanceIndex is already spoken for
-// there, indexing the skinning palette. Everything else gets its entry from
-// gl_InstanceIndex via firstInstance, which is also what makes batching work.
 // How many draws one frame may record. Quads dominate: a tile emits up to
 // five faces, and particles, the grid overlay and the UI all take an entry
 // too. Four per tile of capacity is roughly thirty times what a real board
@@ -296,6 +292,10 @@ struct MeshMaterial;
 // appears, this is the knob.
 inline constexpr uint32_t maxModelMaterials = 1024;
 
+// Which entry of the draw-instance buffer a draw should read. Only the
+// skinned-model pipeline needs it: gl_InstanceIndex is already spoken for
+// there, indexing the skinning palette. Everything else gets its entry from
+// gl_InstanceIndex via firstInstance, which is also what makes batching work.
 struct DrawInstanceIndexPushConstants {
     uint32_t drawInstance = 0;
     uint32_t padding[3] {};

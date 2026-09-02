@@ -27,9 +27,23 @@ namespace sokoban::shaderCatalog {
 //    included, or CMake will try to compile it. Name them without quotes
 //    when you have to mention one.
 //
-// Adding a shader is: one constant, one entry in `sources`, one bump of its
-// declared size. CMake fails the configure if the count and the array
-// disagree, so a half-finished addition cannot reach a build.
+// Adding a shader is one constant and one entry in `sources`. There is no
+// third step: `sources` deduces its own size, so there is no declared count
+// to keep in step and no way to get that wrong.
+//
+// That deduction also removed the one genuinely brittle thing about this
+// arrangement. CMake used to regex the array's declared size out of the
+// C++ - `std::array<std::string_view, 16> sources` - which meant rewrapping
+// that line broke the build for reasons having nothing to do with shaders.
+// What is left is a match on quoted *.glsl literals, which survives any
+// reformatting.
+//
+// What that trade gives up: CMake can no longer tell that a constant below is
+// missing from `sources`. Such a shader gets compiled and then loaded by
+// nothing - a wasted build step. The failure this catalog exists to prevent
+// is the opposite one, a shader CMake compiles that the runtime never learns
+// about, and that is still impossible, because CMake reads its list from
+// here.
 
 inline constexpr std::string_view triangleVert = "triangle.vert.glsl";
 inline constexpr std::string_view triangleFrag = "triangle.frag.glsl";
@@ -50,7 +64,7 @@ inline constexpr std::string_view tonemapFrag = "tonemap.frag.glsl";
 inline constexpr std::string_view worldTransitionFrag =
     "world_transition.frag.glsl";
 
-inline constexpr std::array<std::string_view, 16> sources {
+inline constexpr auto sources = std::to_array<std::string_view>({
     triangleVert,
     triangleFrag,
     uiFrag,
@@ -67,7 +81,7 @@ inline constexpr std::array<std::string_view, 16> sources {
     ssaoCompositeFrag,
     tonemapFrag,
     worldTransitionFrag,
-};
+});
 
 // The compiled module's filename. The build writes one SPIR-V blob per source
 // under this name, and the runtime only ever reads the staged tree, so this

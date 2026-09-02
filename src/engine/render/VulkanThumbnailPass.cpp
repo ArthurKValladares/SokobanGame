@@ -73,7 +73,10 @@ void VulkanThumbnailPass::invalidate()
     }
     // The descriptor sets may still be referenced by an in-flight frame's
     // ImGui draw data.
-    vkDeviceWaitIdle(device_);
+    //
+    // Discarded for the same reason as VulkanDeviceContext::waitIdle: destroy()
+    // calls this during teardown, where throwing is not an option.
+    (void)vkDeviceWaitIdle(device_);
     const bool imguiBackendAvailable =
 #if SOKOBAN_ENABLE_DEBUG_UI
         ImGui::GetCurrentContext() != nullptr &&

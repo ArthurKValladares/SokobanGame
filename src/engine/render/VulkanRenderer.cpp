@@ -903,31 +903,49 @@ Vec2 VulkanRenderer::mapPointerToGameViewport(
     };
 }
 
-std::optional<GridPosition3> VulkanRenderer::pickIsoGridCell(
-    const PreparedFrame& frame,
+std::optional<VulkanRenderer::PickTarget> VulkanRenderer::pickTargetFor(
+    const PreparedFrameScratch& prepared,
     Vec2 pixelPosition) const
 {
-    const PreparedFrameScratch& prepared = resolvePreparedFrame(frame);
-    const RenderFrameData& frameData = prepared.frameData;
-    if (frameData.viewMode != RenderViewMode::Isometric3D ||
-        frameData.levelWidth == 0 ||
-        frameData.levelHeight == 0 ||
-        activeResources_.swapchain->extent().width == 0 ||
-        activeResources_.swapchain->extent().height == 0) {
+    if (prepared.frameData.viewMode != RenderViewMode::Isometric3D) {
         return std::nullopt;
     }
-
-    const VkExtent2D outputExtent =
-        activeResources_.swapchain->extent();
+    const VkExtent2D outputExtent = activeResources_.swapchain->extent();
+    if (outputExtent.width == 0 || outputExtent.height == 0) {
+        return std::nullopt;
+    }
     const Vec2 mappedPosition = mapPointerToGameViewport(
         pixelPosition,
         {
             static_cast<float>(outputExtent.width),
             static_cast<float>(outputExtent.height),
         });
+    // Negative means the pointer is outside the game viewport - in the debug
+    // UI's chrome, say - which is not a miss but a question that does not
+    // apply.
     if (mappedPosition.x < 0.0f || mappedPosition.y < 0.0f) {
         return std::nullopt;
     }
+    return PickTarget { mappedPosition, outputExtent };
+}
+
+std::optional<GridPosition3> VulkanRenderer::pickIsoGridCell(
+    const PreparedFrame& frame,
+    Vec2 pixelPosition) const
+{
+    const PreparedFrameScratch& prepared = resolvePreparedFrame(frame);
+    const RenderFrameData& frameData = prepared.frameData;
+    // The one guard that is not shared: a grid cell needs a board to be on.
+    if (frameData.levelWidth == 0 || frameData.levelHeight == 0) {
+        return std::nullopt;
+    }
+    const std::optional<PickTarget> target =
+        pickTargetFor(prepared, pixelPosition);
+    if (!target) {
+        return std::nullopt;
+    }
+    const VkExtent2D outputExtent = target->extent;
+    const Vec2 mappedPosition = target->position;
     return scenePreparer_.pickGridCell(
         prepared.scene,
         mappedPosition,
@@ -945,23 +963,13 @@ std::optional<Vec3> VulkanRenderer::pickIsoGroundPoint(
     Vec2 pixelPosition) const
 {
     const PreparedFrameScratch& prepared = resolvePreparedFrame(frame);
-    const RenderFrameData& frameData = prepared.frameData;
-    if (frameData.viewMode != RenderViewMode::Isometric3D ||
-        activeResources_.swapchain->extent().width == 0 ||
-        activeResources_.swapchain->extent().height == 0) {
+    const std::optional<PickTarget> target =
+        pickTargetFor(prepared, pixelPosition);
+    if (!target) {
         return std::nullopt;
     }
-
-    const VkExtent2D outputExtent = activeResources_.swapchain->extent();
-    const Vec2 mappedPosition = mapPointerToGameViewport(
-        pixelPosition,
-        {
-            static_cast<float>(outputExtent.width),
-            static_cast<float>(outputExtent.height),
-        });
-    if (mappedPosition.x < 0.0f || mappedPosition.y < 0.0f) {
-        return std::nullopt;
-    }
+    const VkExtent2D outputExtent = target->extent;
+    const Vec2 mappedPosition = target->position;
     return scenePreparer_.pickGroundPoint(
         prepared.scene,
         mappedPosition,
@@ -976,22 +984,13 @@ std::optional<std::size_t> VulkanRenderer::pickDecoration(
     Vec2 pixelPosition) const
 {
     const PreparedFrameScratch& prepared = resolvePreparedFrame(frame);
-    if (prepared.frameData.viewMode != RenderViewMode::Isometric3D) {
+    const std::optional<PickTarget> target =
+        pickTargetFor(prepared, pixelPosition);
+    if (!target) {
         return std::nullopt;
     }
-    const VkExtent2D outputExtent = activeResources_.swapchain->extent();
-    if (outputExtent.width == 0 || outputExtent.height == 0) {
-        return std::nullopt;
-    }
-    const Vec2 mappedPosition = mapPointerToGameViewport(
-        pixelPosition,
-        {
-            static_cast<float>(outputExtent.width),
-            static_cast<float>(outputExtent.height),
-        });
-    if (mappedPosition.x < 0.0f || mappedPosition.y < 0.0f) {
-        return std::nullopt;
-    }
+    const VkExtent2D outputExtent = target->extent;
+    const Vec2 mappedPosition = target->position;
 
     std::optional<std::size_t> result;
     float nearestDepth = std::numeric_limits<float>::max();

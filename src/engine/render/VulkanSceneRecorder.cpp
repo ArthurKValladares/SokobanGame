@@ -879,11 +879,13 @@ private:
             resolveView,
             frameData,
             scene,
-            false,
-            false,
-            hasTranslucency || !resolveView,
-            false,
-            true,
+            ScenePassOptions {
+                .translucent = false,
+                .loadColor = false,
+                .storeColor = hasTranslucency || !resolveView,
+                .loadDepth = false,
+                .writeDepth = true,
+            },
             { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });
         if (directSsaoColor) {
             swapchain_.publishSceneColor(commandBuffer, stats_);
@@ -931,11 +933,13 @@ private:
             resolveView,
             frameData,
             scene,
-            true,
-            true,
-            !resolveView,
-            true,
-            false,
+            ScenePassOptions {
+                .translucent = true,
+                .loadColor = true,
+                .storeColor = !resolveView,
+                .loadDepth = true,
+                .writeDepth = false,
+            },
             { .offset = { 0, 0 }, .extent = swapchain_.renderExtent() });
         gpuProfiler_.endPhase(
             commandBuffer,
@@ -982,11 +986,13 @@ private:
             resolveView,
             frameData,
             scene,
-            false,
-            false,
-            hasTranslucency || !resolveView,
-            false,
-            true,
+            ScenePassOptions {
+                .translucent = false,
+                .loadColor = false,
+                .storeColor = hasTranslucency || !resolveView,
+                .loadDepth = false,
+                .writeDepth = true,
+            },
             inset);
         if (!hasTranslucency) {
             return;
@@ -1001,11 +1007,13 @@ private:
             resolveView,
             frameData,
             scene,
-            true,
-            true,
-            !resolveView,
-            true,
-            false,
+            ScenePassOptions {
+                .translucent = true,
+                .loadColor = true,
+                .storeColor = !resolveView,
+                .loadDepth = true,
+                .writeDepth = false,
+            },
             inset);
         swapchain_.prepareSceneDepthAttachment(commandBuffer, stats_);
     }
@@ -1151,19 +1159,32 @@ private:
         vkCmdEndRendering(commandBuffer);
     }
 
+    // Five booleans in a row, at a call site where getting one wrong produces
+    // a subtly wrong frame rather than a crash - the opaque and translucent
+    // passes differ in every one of them. Named at the call site instead, the
+    // way FrameConfiguration and GltfMeshLoadOptions already are.
+    struct ScenePassOptions {
+        bool translucent = false;
+        bool loadColor = false;
+        bool storeColor = false;
+        bool loadDepth = false;
+        bool writeDepth = false;
+    };
+
     void recordScenePass(
         VkCommandBuffer commandBuffer,
         VkImageView colorView,
         VkImageView resolveView,
         const RenderFrameData& frameData,
         const PreparedRenderScene& scene,
-        bool translucentPass,
-        bool loadColor,
-        bool storeColor,
-        bool loadDepth,
-        bool writeDepth,
+        ScenePassOptions options,
         VkRect2D renderArea)
     {
+        const bool translucentPass = options.translucent;
+        const bool loadColor = options.loadColor;
+        const bool storeColor = options.storeColor;
+        const bool loadDepth = options.loadDepth;
+        const bool writeDepth = options.writeDepth;
         // Alpha is the ambient mask, not an opacity: a pixel no geometry
         // covered has no ambient term to occlude, so it clears to zero and
         // the SSAO composite leaves it alone. That matters beyond the

@@ -611,13 +611,13 @@ void VulkanModelResources::queueModel(
     if (priority == AssetLoadPriority::Visible) {
         slot.lastRequested = visibleRequestStamp_;
     }
-    if (slot.state == LoadState::Unrequested) {
+    // Both states re-request, and the second is not redundant: the scheduler
+    // raises an inactive entry's priority, so an already-queued asset that has
+    // just become visible gets promoted by this call. Assigning Queued to a
+    // slot that is already Queued is the no-op it looks like.
+    if (slot.state == LoadState::Unrequested ||
+        slot.state == LoadState::Queued) {
         slot.state = LoadState::Queued;
-        scheduler_.request({
-            AssetLoadKind::Model,
-            static_cast<uint32_t>(model.index()),
-        }, priority);
-    } else if (slot.state == LoadState::Queued) {
         scheduler_.request({
             AssetLoadKind::Model,
             static_cast<uint32_t>(model.index()),
@@ -681,13 +681,13 @@ void VulkanModelResources::queueTexture(
     if (priority == AssetLoadPriority::Visible) {
         slot.lastRequested = visibleRequestStamp_;
     }
-    if (slot.state == LoadState::Unrequested) {
+    // Both states re-request, and the second is not redundant: the scheduler
+    // raises an inactive entry's priority, so an already-queued asset that has
+    // just become visible gets promoted by this call. Assigning Queued to a
+    // slot that is already Queued is the no-op it looks like.
+    if (slot.state == LoadState::Unrequested ||
+        slot.state == LoadState::Queued) {
         slot.state = LoadState::Queued;
-        scheduler_.request({
-            AssetLoadKind::Texture,
-            static_cast<uint32_t>(textureIndex),
-        }, priority);
-    } else if (slot.state == LoadState::Queued) {
         scheduler_.request({
             AssetLoadKind::Texture,
             static_cast<uint32_t>(textureIndex),
@@ -740,13 +740,13 @@ void VulkanModelResources::queueAnimation(
     if (priority == AssetLoadPriority::Visible) {
         slot.lastRequested = visibleRequestStamp_;
     }
-    if (slot.state == LoadState::Unrequested) {
+    // Both states re-request, and the second is not redundant: the scheduler
+    // raises an inactive entry's priority, so an already-queued asset that has
+    // just become visible gets promoted by this call. Assigning Queued to a
+    // slot that is already Queued is the no-op it looks like.
+    if (slot.state == LoadState::Unrequested ||
+        slot.state == LoadState::Queued) {
         slot.state = LoadState::Queued;
-        scheduler_.request({
-            AssetLoadKind::Animation,
-            static_cast<uint32_t>(animation.index()),
-        }, priority);
-    } else if (slot.state == LoadState::Queued) {
         scheduler_.request({
             AssetLoadKind::Animation,
             static_cast<uint32_t>(animation.index()),
@@ -1920,7 +1920,10 @@ void VulkanModelResources::beginTextureUpload(
         .mipmapMode = vulkanMipmapMode(sampling.minFilter),
         .addressModeU = vulkanAddressMode(sampling.wrapU),
         .addressModeV = vulkanAddressMode(sampling.wrapV),
-        .addressModeW = vulkanAddressMode(sampling.wrapV),
+        // glTF authors U and V only; there is no third axis to author. Every
+        // other sampler in the renderer clamps W for the same reason, and
+        // copying V here read as an unfinished line rather than a decision.
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
         // Anisotropy only earns its cost where a mip chain exists and the
         // surface is viewed obliquely - the splatted ground being the case
         // that motivated it. Point-sampled atlases keep their crisp texels.
@@ -2006,7 +2009,10 @@ void VulkanModelResources::beginTextureUpload(
         .mipmapMode = vulkanMipmapMode(sampling.minFilter),
         .addressModeU = vulkanAddressMode(sampling.wrapU),
         .addressModeV = vulkanAddressMode(sampling.wrapV),
-        .addressModeW = vulkanAddressMode(sampling.wrapV),
+        // glTF authors U and V only; there is no third axis to author. Every
+        // other sampler in the renderer clamps W for the same reason, and
+        // copying V here read as an unfinished line rather than a decision.
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
         .anisotropyEnable = anisotropy > 1.0f ? VK_TRUE : VK_FALSE,
         .maxAnisotropy = anisotropy,
         .compareEnable = VK_FALSE,
@@ -2367,7 +2373,12 @@ VulkanModelResources::TextureUpdate VulkanModelResources::updateTexture(
     // only in the editor and only when something actually changed, so a full
     // idle here is far simpler than tracking each sampled descriptor lifetime
     // and costs nothing during normal play.
-    vkDeviceWaitIdle(device_);
+    //
+    // Checked rather than discarded, unlike the two waits in the catch blocks
+    // below and the one in VulkanDeviceContext: this is an ordinary editor
+    // path with a caller that can take an exception, and continuing past a
+    // failed wait would rewrite an image the GPU is still reading.
+    vkCheck(vkDeviceWaitIdle(device_), "vkDeviceWaitIdle", "texture repaint");
 
     const bool sizeChanged =
         image.width != slot.gpu.width || image.height != slot.gpu.height;

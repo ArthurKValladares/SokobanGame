@@ -206,23 +206,18 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 file(READ "${SHADER_CATALOG_HEADER}" SHADER_CATALOG_TEXT)
 string(REGEX MATCHALL "\"[A-Za-z0-9_]+\\.(vert|frag)\\.glsl\""
     SHADER_CATALOG_NAMES "${SHADER_CATALOG_TEXT}")
-string(REGEX MATCH "std::array<std::string_view,[ \t\r\n]*([0-9]+)>[ \t\r\n]*sources"
-    SHADER_CATALOG_SIZE_MATCH "${SHADER_CATALOG_TEXT}")
-if(NOT CMAKE_MATCH_1)
-    message(FATAL_ERROR
-        "Could not read the shader catalog size from ${SHADER_CATALOG_HEADER}.")
-endif()
-set(SHADER_CATALOG_SIZE ${CMAKE_MATCH_1})
 list(LENGTH SHADER_CATALOG_NAMES SHADER_CATALOG_NAME_COUNT)
-# A half-finished addition - a name without an array entry, or the reverse -
-# is the exact mistake this catalog exists to prevent, so it fails configure
-# rather than producing a build that is missing a shader.
-if(NOT SHADER_CATALOG_NAME_COUNT EQUAL SHADER_CATALOG_SIZE)
+# The catalog's array deduces its own size, so there is no declared count to
+# cross-check against - that check, and the regex that read the count out of
+# the C++, are both gone. What is worth keeping is the guard against the
+# match itself failing: zero names means the header was reformatted past what
+# this regex understands, and the build would otherwise cheerfully compile no
+# shaders at all and fail at launch.
+if(SHADER_CATALOG_NAME_COUNT LESS 1)
     message(FATAL_ERROR
-        "${SHADER_CATALOG_HEADER} spells ${SHADER_CATALOG_NAME_COUNT} shader "
-        "filenames but declares sources as an array of ${SHADER_CATALOG_SIZE}. "
-        "Every name needs a constant and an entry in sources, and nothing "
-        "else in that header may quote a shader filename.")
+        "Found no shader filenames in ${SHADER_CATALOG_HEADER}. Every entry "
+        "must be a plain quoted string literal ending in .vert.glsl or "
+        ".frag.glsl; a name assembled from pieces is invisible here.")
 endif()
 set(SHADER_SOURCES)
 foreach(quoted_shader_name IN LISTS SHADER_CATALOG_NAMES)
@@ -238,7 +233,7 @@ foreach(quoted_shader_name IN LISTS SHADER_CATALOG_NAMES)
     endif()
     list(APPEND SHADER_SOURCES "${shader_catalog_path}")
 endforeach()
-message(STATUS "Shader catalog: ${SHADER_CATALOG_SIZE} shaders")
+message(STATUS "Shader catalog: ${SHADER_CATALOG_NAME_COUNT} shaders")
 
 set(SHADER_OUTPUTS)
 foreach(shader_source IN LISTS SHADER_SOURCES)

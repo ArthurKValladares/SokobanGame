@@ -13,9 +13,16 @@ layout(location = 2) in float inFaceCoordV;
 layout(location = 3) in vec3 inNormal;
 layout(location = 6) in vec3 inWorldPosition;
 layout(location = 7) flat in uint inDrawInstance;
-// Not read yet. It arrives here so that the vertex format, the pipelines and
-// the interface between the stages are all in place and provably unchanged
-// before the lighting that uses it changes everything at once.
+// glTF's tangent, unchanged: xyz is the direction, w is the handedness of the
+// bitangent (-1 or +1). mappedSurfaceNormal re-orthogonalises xyz against the
+// interpolated geometric normal per fragment before building the frame,
+// because interpolation does not preserve the right angle between them.
+//
+// This comment used to say "not read yet", which was true when the attribute
+// was plumbed through ahead of the lighting that would use it. Normal mapping
+// landed in packet 7.2 and the note outlived it - which is worse than no
+// comment, because someone deciding whether the vertex layout is safe to
+// change would have read it and concluded nothing depends on this.
 layout(location = 8) in vec4 inTangent;
 layout(location = 9) in vec2 inUv1;
 // Which of the owning model's materials this fragment belongs to, relative to

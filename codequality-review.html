@@ -527,19 +527,19 @@ a { color: var(--accent); }
 
 <div class="tally">
   <div class="tally-cell is-major">
-    <span class="tally-n">5</span>
+    <span class="tally-n" data-tally="major">&mdash;</span>
     <span class="tally-label">Major open</span>
   </div>
   <div class="tally-cell is-moderate">
-    <span class="tally-n">12</span>
+    <span class="tally-n" data-tally="moderate">&mdash;</span>
     <span class="tally-label">Moderate</span>
   </div>
   <div class="tally-cell is-minor">
-    <span class="tally-n">11</span>
+    <span class="tally-n" data-tally="minor">&mdash;</span>
     <span class="tally-label">Minor</span>
   </div>
   <div class="tally-cell is-good">
-    <span class="tally-n">9</span>
+    <span class="tally-n" data-tally="resolved">&mdash;</span>
     <span class="tally-label">Resolved</span>
   </div>
   <div class="tally-cell is-good">
@@ -914,9 +914,10 @@ if (model.isCube() ||
     </p>
   </article>
 
-  <article class="finding is-minor">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-minor">Minor</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: minor · copy-paste</span>
       <span class="tag">Copy-paste</span>
     </div>
     <h3>Sampler W address mode is copied from V</h3>
@@ -937,17 +938,23 @@ if (model.isCube() ||
       saying 2D images never sample W, matching the other five sampler sites in
       the renderer.
     </div>
-  </article>
+      <p>
+      <strong>Done.</strong> Both sites clamp W, with a line saying why: glTF
+      authors U and V only, so there is no third axis to copy from, and every
+      other sampler in the renderer already clamps.
+    </p>
+</article>
 
-  <article class="finding is-minor">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-minor">Minor</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: minor · error handling</span>
       <span class="tag">Error handling</span>
     </div>
     <h3>Three <code>vkDeviceWaitIdle</code> calls drop their result</h3>
     <div class="loc">
       <code>VulkanDeviceContext.cpp:224</code>
-      <code>VulkanModelResources.cpp:2563</code>
+      <code>VulkanModelResources.cpp:2370</code>
       <code>VulkanThumbnailPass.cpp:76</code>
     </div>
     <p>
@@ -963,7 +970,23 @@ if (model.isCube() ||
       (teardown). Both are one-line changes; the point is that a reader can tell
       which was intended.
     </div>
-  </article>
+      <p>
+      <strong>Done, and the finding's own prescription was half wrong.</strong>
+      I wrote “<code>vkCheck</code> where a failure should be fatal,
+      <code>(void)</code> where it should not (teardown)” without checking which
+      was which. Two of the three <em>cannot</em> be checked:
+      <code>VulkanDeviceContext::waitIdle</code> is called by
+      <code>~VulkanRenderer</code>, and <code>VulkanThumbnailPass::invalidate</code>
+      by its own <code>destroy()</code> — a throw from either leaves a destructor
+      by exception and terminates. Both are explicit <code>(void)</code> discards
+      now, with the reason beside them, matching the two waits already spelled
+      that way inside catch blocks. Only the texture repaint in
+      <code>updateTexture</code> takes a <code>vkCheck</code>: an ordinary editor
+      path whose caller can take an exception, and continuing past a failed wait
+      there would rewrite an image the GPU is still reading. All five wait sites
+      in the renderer now say which they are.
+    </p>
+</article>
 </section>
 
 <!-- ==================================================== B -->
@@ -1500,8 +1523,8 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
     </div>
     <h3><code>VulkanModelResources</code> owns eight things at once</h3>
     <div class="loc">
-      <code>VulkanModelResources.cpp — 2,710 lines</code>
-      <code>VulkanModelResources.hpp — 557 lines</code>
+      <code>VulkanModelResources.cpp — 2,710 lines at review; 2,517 now</code>
+      <code>VulkanModelResources.hpp — 557 at review; 595 now</code>
     </div>
     <p>
       3,267 lines, 40 private members and 60-odd methods covering: mesh loading
@@ -1773,9 +1796,10 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
     </p>
   </article>
 
-  <article class="finding is-moderate">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-moderate">Moderate</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: moderate · readability</span>
       <span class="tag">Readability</span>
     </div>
     <h3>Positional boolean parameters at the busiest call sites</h3>
@@ -1805,7 +1829,24 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       <code>{ .translucent = false, .loadColor = false, ... }</code> makes these
       call sites self-describing at no runtime cost.
     </div>
-  </article>
+      <p>
+      <strong>Done for <code>recordScenePass</code>.</strong> Its five
+      booleans are a <code>ScenePassOptions</code> struct, and all four call
+      sites now read <code>{ .translucent = false, .loadColor = false,
+      .storeColor = hasTranslucency || !resolveView, … }</code>. The function
+      body is untouched: the five parameters became five
+      <code>const bool</code> locals with the same names, so the change is
+      confined to the signature and the call sites and the recorded commands
+      cannot have moved.
+    </p>
+    <p>
+      <code>drawFace</code>'s eleven parameters and
+      <code>appendIsoFace</code>'s thirteen are not done. They are the same
+      medicine, but each is threaded through a long body where the parameters
+      are read dozens of times, so the change is larger than it looks and
+      belongs with the work on those functions rather than ahead of it.
+    </p>
+</article>
 
   <article class="finding is-resolved">
     <div class="finding-top">
@@ -1814,7 +1855,7 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       <span class="tag">Corrected</span>
     </div>
     <h3><code>RenderFrameBuilder.cpp</code> is two independent builders in one file</h3>
-    <div class="loc"><code>src/engine/RenderFrameBuilder.cpp — 2,562 lines</code></div>
+    <div class="loc"><code>src/engine/RenderFrameBuilder.cpp — 2,562 lines at review; now split into four files</code></div>
     <p>
       The file contains two separate anonymous namespaces — one at line 17 for the
       gameplay frame, one at line 1782 for the editor frame — with about 45 free
@@ -1975,9 +2016,10 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
     </p>
   </article>
 
-  <article class="finding is-moderate">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-moderate">Moderate</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: moderate · structural</span>
       <span class="tag">Structural</span>
     </div>
     <h3>Nine structurally identical small structs</h3>
@@ -2017,7 +2059,25 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       where they prevent a real mix-up; here they are all consumed through the
       same descriptor-write path.
     </div>
-  </article>
+      <p>
+      <strong>Two of the three groups collapsed; the third is kept, and that
+      is the finding's own test being applied.</strong> The four mapped-buffer
+      structs and the three views became <code>GpuMappedBuffer</code> and
+      <code>GpuBufferView</code> earlier in this review.
+    </p>
+    <p>
+      <code>GpuMesh</code> and <code>GpuSkinnedMesh</code> stay separate. I
+      wrote that “distinct types are worth keeping only where they prevent a
+      real mix-up”, and then did not check whether this was such a place. It
+      is: a <code>ModelSlot</code> holds <em>one of each</em> — a static mesh
+      and, for a skinned model, the posed mesh uploaded per frame. Merged, a
+      slip like <code>slot.gpu = uploadSkinnedMesh(...)</code> would compile,
+      bind the wrong index range and draw whatever geometry sat at that
+      offset, with nothing downstream to catch it. The header now says so,
+      because “these two are identical, why not merge them” is a question
+      someone will ask again.
+    </p>
+</article>
 
   <article class="finding is-resolved">
     <div class="finding-top">
@@ -2352,9 +2412,10 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
     </p>
   </article>
 
-  <article class="finding is-minor">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-minor">Minor</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: minor · dead branch</span>
       <span class="tag">Dead branch</span>
     </div>
     <h3>Three queue functions each contain the same do-nothing <code>else if</code></h3>
@@ -2381,11 +2442,28 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       <code>if (slot.state == LoadState::Unrequested || slot.state == LoadState::Queued) { slot.state = LoadState::Queued; scheduler_.request(key, priority); }</code>,
       then hoist into one template over the slot type.
     </div>
-  </article>
+      <p>
+      <strong>It is not a do-nothing branch, and calling it one was careless.</strong>
+      <code>AssetLoadScheduler::request</code> <em>raises</em> an inactive
+      entry's priority, so the second branch promotes an already-queued asset
+      that has just become visible — real work, in the path that decides what
+      loads first when a level opens. What is actually wrong is that both
+      branches call it with identical arguments, so the duplication reads as
+      copy-paste and hides the promotion.
+    </p>
+    <p>
+      All three now test both states in one condition and request once;
+      assigning <code>Queued</code> to a slot that is already <code>Queued</code>
+      is the no-op it looks like, so behaviour is unchanged. Each carries a
+      comment saying what the second state is for — which a reader previously
+      could not find out without going and reading the scheduler.
+    </p>
+</article>
 
-  <article class="finding is-minor">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-minor">Minor</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: minor · boilerplate</span>
       <span class="tag">Boilerplate</span>
     </div>
     <h3>Repeated preambles in the renderer’s public surface</h3>
@@ -2417,7 +2495,29 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
         <code>{binding, type, source}</code> plus one loop replaces all of it.
       </li>
     </ul>
-  </article>
+      <p>
+      <strong>Two of the three done; the third is deliberately left.</strong>
+      The three pick functions share one
+      <code>pickTargetFor(prepared, pixel)</code> returning the mapped position
+      and the extent it was mapped against. <code>pickIsoGridCell</code>'s
+      extra guard — a grid cell needs a board to be on — stays at its own call
+      site, which is the point: what was shared is now obviously shared, and
+      what was not is obviously not.
+    </p>
+    <p>
+      The <code>FrameTimeSummary</code> copies were already fixed:
+      <code>renderPhaseTiming()</code> is one function with twenty callers.
+    </p>
+    <p>
+      <code>VulkanSceneDescriptors::updateInternal</code> keeps its twelve
+      hand-written descriptor writes. The eleven-clause validity check above
+      them is gone — it is a named list now, and the error says <em>which</em>
+      resource is missing instead of that something is. But turning the writes
+      themselves into a table is a change to what the frame binds, verifiable
+      here only by “it compiles”, and a wrong binding draws garbage rather
+      than failing. That one wants someone who can look at a frame.
+    </p>
+</article>
 </section>
 
 <!-- ==================================================== E -->
@@ -2509,9 +2609,10 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
     </p>
 </article>
 
-  <article class="finding is-minor">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-minor">Minor</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: minor · unused api</span>
       <span class="tag">Unused API</span>
     </div>
     <h3>Part of <code>Geometry.hpp</code> exists only to be tested</h3>
@@ -2537,7 +2638,15 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       <code>Sphere</code> section recording that it is provided for future
       bounding work and currently exercised only by tests.
     </div>
-  </article>
+      <p>
+      <strong>Done, both halves.</strong> <code>absComponents</code> had no
+      caller anywhere in <code>src/</code> or <code>tests/</code> and is gone.
+      The <code>Sphere</code> section carries a note saying it is provided ahead
+      of its use for the broad-phase half of culling, that its only caller today
+      is <code>GeometryTests</code>, and — the part worth writing down — that
+      this means it is unit-tested and nothing else.
+    </p>
+</article>
 </section>
 
 <!-- ==================================================== F -->
@@ -2548,9 +2657,10 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
     <h2>Stale and leftover</h2>
   </div>
 
-  <article class="finding is-minor">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-minor">Minor</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: minor · found in a build log</span>
       <span class="tag">Found in a build log</span>
     </div>
     <h3>The “validation-clean” captures emit eight validation warnings</h3>
@@ -2594,11 +2704,41 @@ but is not an Input declared by VK_SHADER_STAGE_FRAGMENT_BIT</pre>
       these captures are <em>free of validation errors</em>, which is a different
       claim from clean.
     </div>
-  </article>
+      <p>
+      <strong>One of the two fixes I offered does not work, and I checked
+      rather than guessing.</strong> “Declare the input in the three fragment
+      shaders that lack it and accept three dead declarations” is the obvious
+      move. glslc strips a declared-but-unused input at <code>-O</code>, and
+      this project compiles every shader with <code>-O</code>
+      unconditionally — the custom command says why, and it cannot be made
+      per-configuration. Measured: the declaration survives at <code>-O0</code>
+      and is gone at <code>-O</code>, against a positive control showing that
+      the <em>used</em> location-10 input in <code>triangle.frag</code> does
+      survive. So the warnings would return unchanged. Making it survive means
+      referencing it — real per-fragment work in three shaders, to silence a
+      warning.
+    </p>
+    <p>
+      That leaves the other fix, which is the <span class="code">B3</span>
+      seam: split <code>triangle.frag</code> so the quad pipelines stop
+      carrying a model-only interface. Deferred with B3, to someone who can
+      run the renderer.
+    </p>
+    <p>
+      <strong>The handoff is corrected either way, which was the half of this
+      finding that mattered.</strong> It said the captures were
+      “validation-clean”; they are free of validation <em>errors</em> and emit
+      eight warnings. A new <em>Known validation warnings</em> section records
+      what the eight are, why they are legal, why the obvious fix does not
+      work, and — the useful part — that <strong>more than eight, or a
+      different one, is the thing to look at</strong>.
+    </p>
+</article>
 
-  <article class="finding is-moderate">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-moderate">Moderate</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: moderate · stale comment</span>
       <span class="tag">Stale comment</span>
     </div>
     <h3>The scene shader says tangents are unread; they have been read since packet 7.2</h3>
@@ -2620,11 +2760,21 @@ layout(location = 8) in vec4 inTangent;</pre>
       handedness in w, re-orthogonalised per fragment against the geometric
       normal. The handoff already contains that sentence.
     </div>
-  </article>
+      <p>
+      <strong>Done.</strong> The comment now states the contract the shader
+      implements: glTF's <code>vec4</code>, <code>xyz</code> the direction and
+      <code>w</code> the bitangent handedness, re-orthogonalised per fragment
+      against the interpolated geometric normal — with a line saying it used to
+      claim the opposite and why that was worse than no comment at all.
+      Compiled before and after with the project's own flags: the SPIR-V is
+      byte-identical, which is what a comment-only change should be.
+    </p>
+</article>
 
-  <article class="finding is-minor">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-minor">Minor</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: minor · stale comment</span>
       <span class="tag">Stale comment</span>
     </div>
     <h3>An orphaned comment now documents the wrong constant</h3>
@@ -2640,11 +2790,17 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
       constant that only the second describes.
     </p>
     <div class="fix">Move the paragraph back to line 204.</div>
-  </article>
+      <p>
+      <strong>Done.</strong> The paragraph is back above
+      <code>DrawInstanceIndexPushConstants</code>, and the constant it had been
+      leaning against keeps only the paragraph that describes it.
+    </p>
+</article>
 
-  <article class="finding is-minor">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-minor">Minor</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: minor · undocumented hole</span>
       <span class="tag">Undocumented hole</span>
     </div>
     <h3>Descriptor binding 2 is a gap nobody explains, and the array size is arithmetic</h3>
@@ -2666,12 +2822,31 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
       <code>std::size(bindings)</code> rather than an expression the author has to
       keep balanced.
     </div>
-  </article>
+      <p>
+      <strong>Done, and half of it was already done.</strong> The layout array
+      became a <code>constexpr</code> table of <code>{binding, type, stages}</code>
+      earlier in this review, with a <code>static_assert</code> tying
+      <code>sceneSingleImageBindings</code> to it — so the arithmetic size is
+      long gone. What remained was a hand-written <code>12</code> in
+      <code>std::array&lt;SceneBinding, 12&gt;</code>; it is
+      <code>std::to_array</code> now, so adding a row cannot leave a count
+      behind.
+    </p>
+    <p>
+      The comment on binding 2 says what the old one could not: that the slot
+      is deliberately vacant, that this file is the only record of it, that
+      the numbering was not compacted because every later binding is named by
+      hand in a shader — and, the part that matters, <strong>do not reuse
+      2</strong>, new bindings continue at 13. A reused 2 would silently match
+      any shader still carrying an old declaration.
+    </p>
+</article>
 
-  <article class="finding is-minor">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-minor">Minor</span>
-      <span class="tag">Redundant API</span>
+      <span class="sev is-good">Withdrawn</span>
+      <span class="tag">Was: minor · redundant api</span>
+      <span class="tag">Withdrawn</span>
     </div>
     <h3>Vector arithmetic has two spellings, used inconsistently</h3>
     <div class="loc"><code>Math.hpp:118–126</code></div>
@@ -2688,11 +2863,30 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
       converting six call sites and deleting nine forwarders removes a decision
       every future author has to make.
     </div>
-  </article>
+      <p>
+      <strong>Withdrawn. “Six call sites” is wrong by a factor of sixteen:
+      there are 98</strong>, across eight files, concentrated in exactly the
+      places where a silent transcription slip is invisible —
+      <code>IsoScenePreparer</code>, <code>SsaoMath</code> and
+      <code>VulkanSceneRecorder</code>. I counted narrowly and generalised.
+    </p>
+    <p>
+      Worse, <code>Math.hpp</code> already answers this directly above the
+      forwarders: they exist “because they are what the engine already says at
+      several hundred call sites, and rewriting all of them to reach one
+      definition would have been a large silent-transcription risk in projection
+      code for a purely cosmetic gain”, with new code told to prefer the
+      operators. That is the same trade I was proposing to make the other way,
+      already made deliberately and written down — and it is the right call.
+      Both spellings resolve to one definition, which is the part that could
+      have been a correctness problem and is not.
+    </p>
+</article>
 
-  <article class="finding is-minor">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-minor">Minor</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: minor · repo hygiene</span>
       <span class="tag">Repo hygiene</span>
     </div>
     <h3>Compiled Python bytecode is tracked in the repository</h3>
@@ -2707,7 +2901,14 @@ inline constexpr uint32_t maxDrawInstancesPerFrame = ...;</pre>
       <code>git rm -r --cached tools/__pycache__</code> and add
       <code>__pycache__/</code> to <code>.gitignore</code>.
     </div>
-  </article>
+      <p>
+      <strong>Half done; the other half is a commit.</strong>
+      <code>__pycache__/</code> and <code>*.pyc</code> are in
+      <code>.gitignore</code>, so nothing new gets tracked. Untracking the file
+      already in the index is <code>git rm -r --cached tools/__pycache__</code>,
+      which is not mine to run under this repository's working-tree policy.
+    </p>
+</article>
 </section>
 
 <!-- ==================================================== G -->
@@ -3054,9 +3255,10 @@ cppcoreguidelines   40    ?   1,272*  903 avoid-magic-numbers
     </p>
 </article>
 
-  <article class="finding is-minor">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-minor">Minor</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: minor · build config</span>
       <span class="tag">Build config</span>
     </div>
     <h3>CMake regex-parses a C++ header to build the shader list</h3>
@@ -3077,7 +3279,33 @@ cppcoreguidelines   40    ?   1,272*  903 avoid-magic-numbers
       <code>ShaderCatalog.hpp</code> with <code>configure_file</code>. CMake then
       owns the list, C++ consumes it, and the two cannot disagree.
     </div>
-  </article>
+      <p>
+      <strong>Done, but not by the inversion I proposed.</strong> Generating
+      <code>ShaderCatalog.hpp</code> from CMake would move sixteen C++
+      identifiers into CMake and put the header in the build tree, where an
+      editor cannot open it without a configured build. That trades one
+      coupling for another.
+    </p>
+    <p>
+      The brittleness was specific and is gone. Two regexes read the header:
+      one matches quoted <code>*.glsl</code> literals, which survives any
+      reformatting, and one read the array's <em>declared size</em> out of
+      <code>std::array&lt;std::string_view, 16&gt; sources</code> — that is
+      the one that broke if the line was rewrapped. <code>sources</code> uses
+      <code>std::to_array</code> now, so there is no declared size to parse,
+      and the size regex and its cross-check are deleted. Adding a shader lost
+      a step too: one constant and one entry, no count to bump.
+    </p>
+    <p>
+      What that gives up, stated in the header: CMake can no longer notice a
+      constant that is missing from <code>sources</code>. That shader gets
+      compiled and loaded by nothing — a wasted build step. The failure the
+      catalog exists to prevent is the opposite one, a shader CMake compiles
+      that the runtime never hears about, and it is still impossible. A new
+      guard fails the configure if the name regex ever matches nothing, so a
+      reformat cannot silently produce a build with no shaders in it.
+    </p>
+</article>
 
   <article class="finding is-resolved">
     <div class="finding-top">
@@ -3283,10 +3511,39 @@ tuned, with ColumnLimit: 0 (never re-wrap)  10,573   (210 of 367 files)</code>
 <footer>
   <span>Sokoban 3D engine · code-quality audit</span>
   <span>Reviewed against HEAD 21dff13a · 31 Aug 2026</span>
-  <span>39 findings · 23 resolved · 0 live defects</span>
+  <span data-tally="summary">39 findings · 23 resolved · 0 live defects</span>
 </footer>
 
 </div>
+
+<script>
+// The tally counts the findings rather than being typed out beside them.
+//
+// It was typed out, and it went stale: the header still read "5 major, 12
+// moderate, 9 resolved" long after fourteen of those had been closed, because
+// the footer line and the article badges were being kept current and this was
+// not. A number maintained in two places is a number that disagrees with
+// itself. This reads the severity off each <article> and writes both.
+(function () {
+  var order = ['major', 'moderate', 'minor', 'resolved'];
+  var n = { major: 0, moderate: 0, minor: 0, resolved: 0 };
+  document.querySelectorAll('article.finding').forEach(function (el) {
+    order.forEach(function (k) {
+      if (el.classList.contains('is-' + k)) { n[k] += 1; }
+    });
+  });
+  order.forEach(function (k) {
+    document.querySelectorAll('[data-tally="' + k + '"]').forEach(function (el) {
+      el.textContent = String(n[k]);
+    });
+  });
+  var total = n.major + n.moderate + n.minor + n.resolved;
+  document.querySelectorAll('[data-tally="summary"]').forEach(function (el) {
+    el.textContent = total + ' findings \u00b7 ' + n.resolved +
+      ' resolved \u00b7 0 live defects';
+  });
+})();
+</script>
 
 </body>
 </html>

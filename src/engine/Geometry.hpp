@@ -160,6 +160,17 @@ struct Aabb {
 }
 
 // ------------------------------------------------------------------- Sphere
+//
+// Provided ahead of its use, deliberately. `Sphere`, `boundingSphere`,
+// `intersects(Frustum, Sphere)` and `pointAt` have exactly one caller each
+// today and it is `tests/GeometryTests.cpp`: frustum culling ships and uses
+// the `Aabb` overload only. That is not an API that lost its callers - it is
+// the cheap-reject half of the culling work this file was split out to hold,
+// and a sphere test is what a broad-phase over many objects will want.
+//
+// Said here so nobody deletes it as dead code, and so nobody assumes it is
+// battle-tested: everything below is exercised by unit tests and by nothing
+// else. `absComponents` in Math.hpp had no such story and has been removed.
 
 struct Sphere {
     Vec3 center {};

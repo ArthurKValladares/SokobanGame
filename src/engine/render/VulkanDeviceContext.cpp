@@ -226,7 +226,14 @@ VkSampleCountFlagBits VulkanDeviceContext::supportedSampleCount(
 void VulkanDeviceContext::waitIdle() const
 {
     if (device_) {
-        vkDeviceWaitIdle(device_);
+        // Discarded, not checked, and that is forced: ~VulkanRenderer calls
+        // this, so a throw here would leave a destructor by exception and
+        // terminate. A lost device has already made every later call
+        // meaningless anyway - the failure is reported by whatever submits
+        // next, which can throw. The explicit cast says the result was
+        // considered rather than forgotten, which is the convention the two
+        // waits in VulkanModelResources' catch blocks already follow.
+        (void)vkDeviceWaitIdle(device_);
     }
 }
 
