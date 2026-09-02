@@ -1,5 +1,7 @@
 #include "engine/render/CompressedTextureArtifact.hpp"
 
+#include "engine/render/TextureUploadPlan.hpp"
+
 #include <bc7enc16.h>
 
 #include <algorithm>
@@ -29,31 +31,13 @@ constexpr uint64_t fnvPrime = 1099511628211ULL;
 constexpr uint32_t ktx2HeaderBytes = 80;
 constexpr uint32_t dfdBytes = 44;
 
-bool usesMipmaps(TextureMinificationFilter filter)
-{
-    switch (filter) {
-    case TextureMinificationFilter::NearestMipmapNearest:
-    case TextureMinificationFilter::LinearMipmapNearest:
-    case TextureMinificationFilter::NearestMipmapLinear:
-    case TextureMinificationFilter::LinearMipmapLinear:
-        return true;
-    case TextureMinificationFilter::Nearest:
-    case TextureMinificationFilter::Linear:
-        return false;
-    }
-    return false;
-}
-
-uint32_t mipCount(uint32_t width, uint32_t height)
-{
-    uint32_t result = 1;
-    while (width > 1 || height > 1) {
-        width = std::max(width / 2U, 1U);
-        height = std::max(height / 2U, 1U);
-        ++result;
-    }
-    return result;
-}
+// usesMipmaps and mipCount lived here as well as in VulkanModelResources,
+// under two names and, for the count, two algorithms. Both now come from
+// TextureUploadPlan, which is also what the upload side reads - the chain
+// built here and the image sized there cannot disagree if they ask the same
+// function.
+using textureUploadPlan::usesMipmaps;
+constexpr auto mipCount = textureUploadPlan::mipLevelCount;
 
 float srgbToLinear(float value)
 {

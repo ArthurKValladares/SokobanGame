@@ -110,7 +110,7 @@ sampling have different failure modes and should be independently reviewable.
 - Language and platform: C++20, SDL3, Vulkan 1.3, GLSL compiled to SPIR-V.
 - Runtime content: strict `assets/manifest.json`, staged by the content tool.
 - Current manifest: 36 models, 42 textures and 6 named animations.
-- Current tests: 76 CTest suites in the newest configured build tree.
+- Current tests: 77 CTest suites in the newest configured build tree.
 - Residency eviction: `ResidencyBudget::needsEviction` takes `(bytes, limit)`
   and reads `retiring_` as its only running total. It used to take a third
   argument that duplicated `retiring_`, so each victim counted twice and the
@@ -1495,6 +1495,25 @@ layout changes affect modules that appear unrelated to the immediate feature.
   against no fence and waits on the whole queue. That is wider than it needs
   and is left as it was, with a comment, because narrowing it is a change to
   queue synchronisation and wants a run.
+- `src/engine/render/TextureUploadPlan.hpp`: what a texture upload decides
+  before it touches the device - the VkFormat, the mip level count, and
+  whether the source is usable. It was spread through two `beginTextureUpload`
+  overloads behind a live VkDevice, so none of it could be tested; 151 checks
+  cover it now.
+  Two predicates in it were duplicated before the extraction and the second
+  copy is the interesting one. `usesMipmaps` existed in two files, and the mip
+  count existed twice under two names and two algorithms: a `log2` form that
+  sized the image and a halving loop that built the chain the image has to
+  hold. They agree - checked over 708,876 dimension pairs to 2^31 - and that
+  equivalence is a test now. Keep the integer form; a size calculation should
+  not route through a double.
+  `generatesMipmaps` is deliberately separate from the level count. They are
+  not the same question: a 1x1 texture with a mipmap filter generates mipmaps
+  and has one level. The uncompressed path gates anisotropy on the predicate
+  and the compressed path on `mipLevels > 1`, so the two disagree for a 1x1
+  compressed texture. That is pre-existing, is not obviously wrong, and wants
+  a look at a frame rather than a blind edit - but it is now visible instead
+  of buried in a local.
 - `src/engine/RenderFrameParts.{hpp,cpp}`: the frame pieces both builders
   build - water, ladders, decorations, the screen selector, the camera extent,
   animation lookups and the small shaping helpers. The review called

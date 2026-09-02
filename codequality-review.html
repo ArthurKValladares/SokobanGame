@@ -1696,7 +1696,52 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       What remains is the part the finding is actually about: the class still
       owns mesh upload, and texture format selection and mip generation.
     </p>
-  </article>
+      <p>
+      <strong>Fifth seam: what an upload decides before it touches the
+      device.</strong> Choosing a <code>VkFormat</code>, deciding how many mip
+      levels an image gets, and judging whether a source is usable at all are
+      policy — they depend on the source, the authored sampler and one
+      capability answer, and on nothing else. All of it sat inside two 80-line
+      <code>beginTextureUpload</code> overloads behind a live
+      <code>VkDevice</code>, so none of it could be reached from a test.
+      <code>TextureUploadPlan.hpp</code> holds it now, with 151 checks and
+      thirteen of thirteen mutants killed.
+    </p>
+    <p>
+      <strong>Two of those predicates existed twice, and one pair did the same
+      arithmetic two different ways.</strong> <code>usesMipmaps</code> was an
+      <code>||</code> chain in <code>VulkanModelResources.cpp</code> and an
+      exhaustive <code>switch</code> in
+      <code>CompressedTextureArtifact.cpp</code>; only the switch would have
+      complained when the filter enum grew. Worse, the mip count existed under
+      two names and two algorithms — <code>mipLevelCount</code> as
+      <code>1 + floor(log2(max))</code> in double precision, sizing the
+      <em>image</em>, and <code>mipCount</code> as a halving loop, building the
+      <em>chain that image has to hold</em>. Two implementations of one number,
+      in two files, one feeding the other, with nothing checking they agree.
+    </p>
+    <p>
+      They do agree — verified over 708,876 dimension pairs including every
+      power-of-two boundary to 2<sup>31</sup> before merging them, and that
+      equivalence is now a test rather than a thing I checked once. The
+      surviving form is the integer loop, because a size calculation has no
+      business going through a <code>double</code>.
+    </p>
+    <p>
+      <strong>The compiler caught something I would have shipped.</strong>
+      Folding the mip-level decision into one call removed a local
+      <code>supportsMipmaps</code> that also gates <em>anisotropy</em> further
+      down — and that is not the same question as “more than one level”. A 1×1
+      texture with a mipmap filter generates mipmaps and has exactly one level,
+      so the two tests diverge in that one case. They diverge in the shipping
+      code too: the uncompressed path decides anisotropy on
+      <code>supportsMipmaps</code> and the compressed path on
+      <code>mipLevels &gt; 1</code>. That divergence is pre-existing and is
+      left alone; what changed is that <code>generatesMipmaps</code> is now a
+      named predicate with a test showing exactly where it differs, instead of
+      a local that could be quietly replaced by the wrong thing.
+    </p>
+</article>
 
   <article class="finding is-major">
     <div class="finding-top">

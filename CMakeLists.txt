@@ -1041,6 +1041,11 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/TextureDescriptorSpaceTests.cpp
     )
+    # Header-only and constexpr; it needs the Vulkan enums, not a device.
+    sokoban_add_test(NAME texture_upload_plan TARGET sokoban_texture_upload_plan_tests
+        LIBS sokoban_render_vulkan
+        SOURCES tests/TextureUploadPlanTests.cpp
+    )
     sokoban_add_test(NAME opaque_draw_sorter TARGET sokoban_opaque_draw_sorter_tests
         LIBS sokoban_core
         SOURCES tests/OpaqueDrawSorterTests.cpp

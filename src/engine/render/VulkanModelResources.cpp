@@ -3,6 +3,7 @@
 #include "engine/Log.hpp"
 #include "engine/TaskSystem.hpp"
 #include "engine/render/TextureSourceLoader.hpp"
+#include "engine/render/TextureUploadPlan.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 
@@ -23,23 +24,6 @@ bool futureReady(std::future<Result>& future)
 {
     return future.valid() &&
         future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
-}
-
-uint32_t mipLevelCount(uint32_t width, uint32_t height)
-{
-    const uint32_t largestDimension = std::max(width, height);
-    return largestDimension == 0
-        ? 1U
-        : 1U + static_cast<uint32_t>(
-              std::floor(std::log2(static_cast<double>(largestDimension))));
-}
-
-bool usesMipmaps(TextureMinificationFilter filter)
-{
-    return filter == TextureMinificationFilter::NearestMipmapNearest ||
-        filter == TextureMinificationFilter::LinearMipmapNearest ||
-        filter == TextureMinificationFilter::NearestMipmapLinear ||
-        filter == TextureMinificationFilter::LinearMipmapLinear;
 }
 
 VkSamplerAddressMode vulkanAddressMode(TextureAddressMode mode)
@@ -87,10 +71,6 @@ VkSamplerMipmapMode vulkanMipmapMode(TextureMinificationFilter filter)
 
 bool supportsBc7Textures(VkPhysicalDevice physicalDevice)
 {
-    constexpr VkFormatFeatureFlags required =
-        VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
-        VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
-        VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
     for (VkFormat format : {
              VK_FORMAT_BC7_UNORM_BLOCK,
              VK_FORMAT_BC7_SRGB_BLOCK,
@@ -98,7 +78,9 @@ bool supportsBc7Textures(VkPhysicalDevice physicalDevice)
         VkFormatProperties properties {};
         vkGetPhysicalDeviceFormatProperties(
             physicalDevice, format, &properties);
-        if ((properties.optimalTilingFeatures & required) != required) {
+        if (!textureUploadPlan::supports(
+                properties.optimalTilingFeatures,
+                textureUploadPlan::compressedSamplingFeatures)) {
             return false;
         }
     }
@@ -1858,28 +1840,24 @@ void VulkanModelResources::beginTextureUpload(
     PendingTextureUpload& upload,
     TextureInterpretation sampling)
 {
-    if (image.width == 0 || image.height == 0 || image.rgba.empty()) {
+    if (!textureUploadPlan::uncompressedSourceIsUsable(
+            image.width, image.height, !image.rgba.empty())) {
         throw std::runtime_error("Texture image contains no pixels");
     }
-    // Colour textures decode sRGB on read; data textures (the splat weight
-    // map) must not, or a painted 0.5 arrives at the shader as 0.21.
     const VkFormat textureFormat =
-        sampling.colorSpace == TextureColorSpace::Linear
-        ? VK_FORMAT_R8G8B8A8_UNORM
-        : VK_FORMAT_R8G8B8A8_SRGB;
+        textureUploadPlan::uncompressedFormat(sampling.colorSpace);
     VkFormatProperties formatProperties {};
     vkGetPhysicalDeviceFormatProperties(
         physicalDevice_, textureFormat, &formatProperties);
-    const VkFormatFeatureFlags requiredBlitFeatures =
-        VK_FORMAT_FEATURE_BLIT_SRC_BIT |
-        VK_FORMAT_FEATURE_BLIT_DST_BIT |
-        VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
-    const bool supportsMipmaps = usesMipmaps(sampling.minFilter) &&
-        (formatProperties.optimalTilingFeatures & requiredBlitFeatures) ==
-            requiredBlitFeatures;
-    textureImage.mipLevels = supportsMipmaps
-        ? mipLevelCount(image.width, image.height)
-        : 1U;
+    // Held because it also gates anisotropy below, where it is not the same
+    // question as "more than one level" - see the note on generatesMipmaps.
+    const bool supportsMipmaps = textureUploadPlan::generatesMipmaps(
+        sampling.minFilter, formatProperties.optimalTilingFeatures);
+    textureImage.mipLevels = textureUploadPlan::uncompressedMipLevels(
+        image.width,
+        image.height,
+        sampling.minFilter,
+        formatProperties.optimalTilingFeatures);
     VkImageCreateInfo imageInfo {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = VK_IMAGE_TYPE_2D,
@@ -1949,23 +1927,23 @@ void VulkanModelResources::beginTextureUpload(
     PendingTextureUpload& upload,
     TextureInterpretation sampling)
 {
-    if (texture.width == 0 || texture.height == 0 || texture.mips.empty() ||
-        sourceBaseMip >= texture.mips.size()) {
+    if (!textureUploadPlan::compressedSourceIsUsable(
+            texture.width,
+            texture.height,
+            texture.mips.size(),
+            sourceBaseMip)) {
         throw std::runtime_error("Compressed texture contains no mip data");
     }
-    const VkFormat textureFormat = texture.format ==
-            CompressedTextureFormat::Bc7Srgb
-        ? VK_FORMAT_BC7_SRGB_BLOCK
-        : VK_FORMAT_BC7_UNORM_BLOCK;
-    const bool expectsSrgb =
-        sampling.colorSpace == TextureColorSpace::Srgb;
-    if ((textureFormat == VK_FORMAT_BC7_SRGB_BLOCK) != expectsSrgb) {
+    const VkFormat textureFormat =
+        textureUploadPlan::compressedFormat(texture.format);
+    if (!textureUploadPlan::colorSpaceAgrees(
+            textureFormat, sampling.colorSpace)) {
         throw std::runtime_error(
             "Compressed texture format disagrees with source colour space");
     }
     const CompressedTextureMip& residentBase = texture.mips[sourceBaseMip];
-    textureImage.mipLevels =
-        static_cast<uint32_t>(texture.mips.size()) - sourceBaseMip;
+    textureImage.mipLevels = textureUploadPlan::compressedMipLevels(
+        texture.mips.size(), sourceBaseMip);
     const VkImageCreateInfo imageInfo {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = VK_IMAGE_TYPE_2D,
