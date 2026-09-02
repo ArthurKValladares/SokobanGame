@@ -1867,7 +1867,48 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       swapping it. The other two stay written out, with a comment saying the
       difference is deliberate.
     </p>
-  </article>
+      <p>
+      <strong>Fifteen, not seventeen — and the count itself had drifted.</strong>
+      Re-measured against the tree as it now stands: two functions fell below
+      200 lines during other work, and one the report named
+      (<code>drawIsoFrame</code>, 487) no longer exists in that shape. The
+      largest is <code>IsoScenePreparer::prepare</code> at 513;
+      <code>ApplicationDebugUi::draw</code> was 854.
+    </p>
+    <p>
+      <strong><code>ApplicationDebugUi::draw</code>: 854 lines to 185.</strong>
+      It was a preamble and seven independent debug panels, and the analysis
+      that made the split safe is the interesting part: measuring what each
+      panel actually captures from the preamble showed <em>nothing but
+      <code>context</code></em>. My first pass said the stats panel captured
+      two wireframe locals; that was a regex matching
+      <code>renderStats.wireframeEnabled</code> after the dot. Redone with the
+      member accesses excluded, all seven sections were independent.
+    </p>
+    <p>
+      Each panel is now a file-local function — <code>drawWaterSection</code>,
+      <code>drawLightingSection</code> and so on — with its
+      <code>CollapsingHeader</code> call inside it, so each keeps its own
+      open/closed state and <code>draw</code> keeps the exact call order ImGui
+      renders in. No header change: they are free functions in the anonymous
+      namespace already guarded by <code>SOKOBAN_ENABLE_DEBUG_UI</code>, so the
+      flag question that surrounds this class does not arise.
+    </p>
+    <p>
+      <strong>Evidence.</strong> All seven bodies appear <em>verbatim</em> in
+      the new file (dedented one level, nothing else); the call order matches
+      the original panel order exactly; and of the lines outside the seven
+      sections, zero are missing. One line was deliberately deleted —
+      <code>draw</code>'s <code>settings</code> local, which had no users left
+      once the panels moved — and the warnings gate is what found it. Compiles
+      clean in both <code>SOKOBAN_ENABLE_DEBUG_UI</code> settings.
+    </p>
+    <p>
+      <code>drawRenderingStatsSection</code> is still 293 lines. It is one
+      named thing now rather than the tail of an 854-line function, which is
+      where the next cut starts.
+    </p>
+</article>
 
   <article class="finding is-resolved">
     <div class="finding-top">

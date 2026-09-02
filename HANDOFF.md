@@ -336,6 +336,22 @@ are among those it never named. Five of the sixteen still open are ImGui panels
 and are deliberately last: splitting one is mechanical, but the only check that
 it still behaves is to look at the screen.
 
+`ApplicationDebugUi::draw` is done: 854 lines to 185, its seven debug panels
+now file-local functions (`drawWaterSection`, `drawLightingSection` and the
+rest) in the anonymous namespace already guarded by the debug-UI flag, so no
+header changed. Each panel keeps its own `CollapsingHeader` call, so its
+open/closed state and ImGui's draw order are unchanged. Every body moved
+verbatim; the one deleted line was `draw`'s now-unused `settings` local, which
+the warnings gate found. `drawRenderingStatsSection` is still 293 lines and is
+where the next cut starts.
+
+Re-measured while doing it: **15** functions are at or past 200 lines, not the
+17 the review reported and not the 16 recorded here - two fell below the line
+during other work, and `drawIsoFrame` (487) no longer exists in that shape. The
+largest is now `IsoScenePreparer::prepare` at 513. Its 303-line isometric block
+is the obvious cut but captures two per-tile lambdas, so it needs a shape that
+does not put them behind `std::function` in a per-face path.
+
 The two largest frame-building offenders now sit alone in their own files -
 `EditorFrameBuild` (692 lines) is all of `RenderFrameBuilderEditor.cpp` bar two
 entry points, and `appendMirrorPreview` (279) is the largest thing left in
