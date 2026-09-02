@@ -329,14 +329,14 @@ gameplay and the editor builders were sharing without saying so; and
 warnings-as-errors, a widened clang-tidy set, and a measured `.clang-format` -
 given numbers instead of opinions.
 
-Still open, in the order the report recommends: splitting
-`VulkanModelResources` proper and collapsing its three copies of the load-state
-machine, then the remaining long functions. **14** are at or past 200 lines as
-of the `IsoScenePreparer` split below, not the eight the review first reported -
-`drawIsoFrame` (487), `VulkanSceneRecorder::record` (305) and
-`Application::buildRenderFrame` (304) are among those it never named. Five of
-the fourteen are ImGui panels and are deliberately last: splitting one is
-mechanical, but the only check that it still behaves is to look at the screen.
+Still open, in the order the report recommends: collapsing
+`VulkanModelResources`'s three copies of the load-state machine, then the
+remaining long functions. **12** are at or past 200 lines and 29 past 150, not
+the eight the review first reported - `drawIsoFrame` (487),
+`VulkanSceneRecorder::record` (305) and `Application::buildRenderFrame` (304)
+are among those it never named. Five of the twelve are ImGui panels and are
+deliberately last: splitting one is mechanical, but the only check that it still
+behaves is to look at the screen.
 
 `ApplicationDebugUi::draw` is done: 854 lines to 185, its seven debug panels
 now file-local functions (`drawWaterSection`, `drawLightingSection` and the
@@ -346,6 +346,101 @@ open/closed state and ImGui's draw order are unchanged. Every body moved
 verbatim; the one deleted line was `draw`'s now-unused `settings` local, which
 the warnings gate found. `drawRenderingStatsSection` is still 293 lines and is
 where the next cut starts.
+
+Two more long functions are down, both chosen because a real test suite covers
+them rather than because they were the largest.
+
+`OverworldMap::load`: **226 lines to 128**, and out of the 150-line list. Three
+stages came out - the draft-override guard (a file-local free function, since it
+needs nothing but the override), the slot bounding box and normalisation, and
+the screen composition pass. The last two are private statics taking the map,
+because `load` is a factory building an object that is not valid yet and they
+touch private state. All three bodies are verbatim; the only addition is a
+`SlotExtent` return type, because four locals from the bounding-box block are
+read later by the screen loop and had to come back out rather than be
+recomputed.
+
+`optionsMenuRows`: **221 lines to 27**. It was a six-case switch whose cases had
+nothing to do with each other, one per page of the menu; each is now its own
+function taking exactly what its case used, which is why three of the six never
+see the settings. All six bodies moved as a pure dedent, verified by search.
+
+**Mutation testing found a real coverage gap.** Deleting the entire
+draft-override guard left all 82 `OverworldMapTests` checks passing: nothing
+anywhere constructed an `OverworldDraftOverride` with a zero or duplicate screen
+id, so a check that has been throwing for four cases was never exercised.
+`testDraftOverridesMustNameEachScreenOnce` now covers it - zero id, adjacent
+duplicate, non-adjacent duplicate, the valid case, and the neighbouring
+"references a missing screen" error that this guard deliberately does *not*
+raise. 82 checks to 89, and the mutation now fails three of them. Two further
+mutations - swapping the returned minimum slot, and starting selector runtime
+ids at 2 - are caught by the existing checks. `OverworldMapEditorTests` (59),
+`UiTests` (190), `TitleScreenTests` (82) and `ShellFlowTests` (38) all pass.
+
+One gap is left open on purpose: `UiTests` does not assert row *tones*, so
+removing `OptionsMenuRowTone::Danger` from the quit row passes all 190 checks.
+That is presentation rather than behaviour, and pinning it needs a decision
+about how much of the menu's appearance belongs in a unit test, so it is
+recorded rather than fixed.
+
+`VulkanTextureUploader` is out: **594 lines and nine methods** left
+`VulkanModelResources`, which is 3,134 lines down to 2,540. The new class is
+everything between "here are some pixels" and "there is a sampled image on the
+device" - format choice, image and view creation, sampler policy, the staging
+copy, mip generation or block upload, and the fence that says when it is done.
+
+The boundary was chosen by measurement, not by eye. Attributing every member
+function to the state it touches gives 15 texture-only, 35 model-only, 12
+touching both and 19 touching neither - and inside the texture group, nine
+functions touch **seven device handles between them and not one piece of
+catalog, slot, residency or scheduler state**. That is the set that moved. The
+rest of the texture half did not, and the report now says why: the eviction
+ladder drains *both* retirement queues, so a texture eviction frees model
+memory too, and splitting the pools apart would change when models retire -
+a behaviour change no compile check here could catch.
+
+The uploader owns nothing. It borrows the device handles, the allocator and the
+upload ring; the ring is shared with the geometry arena, so it could not have
+moved even if textures were its only user. Three handles - `physicalDevice_`,
+`commandPool_`, `graphicsQueue_` - and `maxSamplerAnisotropy_` turned out to be
+pure pass-through once the nine functions left, read only in `create()` to hand
+onward, so they are locals now and the class carries four fewer members.
+
+All ten moved blocks - the nine functions and the four sampler-enum helpers -
+are **byte-identical**: each appears verbatim exactly once in the new file,
+found by search rather than by reading. Two mechanical substitutions and
+nothing else: the class-name prefix, and `uploadRing_.` becoming `uploadRing_->`
+at ten sites because the ring is borrowed. A residue diff of the old file minus
+the moved regions against the new one shows exactly the 18 call sites that
+gained a `textureUploader_.` prefix, the uploader's `create`/`destroy` calls,
+and the anisotropy local - nothing else.
+
+Verified by play as well: the ground-splat repaint exercises the one runtime
+path that crosses the new boundary three ways in a single operation -
+`destroyTexture`, `createTextureBlocking` and `recordTextureCopy` - and shutdown
+runs `destroyTexture` over every texture and the fallback.
+
+The retirement drain is the one path play does **not** reach by default, and the
+reason is arithmetic rather than anything subtle: the whole compiled texture set
+is 52 files totalling 29.5 MiB, a normal run holds about 9.8 MiB of it, and the
+production budget is 256 MiB, so residency never comes under pressure. To force
+it, run with `--texture-residency-kib 6144`: 6 MiB is comfortably above the
+largest single texture (1.42 MiB, so nothing is refused as oversized) and well
+below the working set, which makes the ladder evict rather than degrade mips.
+The debug panel's "Residency evictions" should climb past zero and "Fence
+retirement ... N textures" should go non-zero and back - that second line is the
+drain that calls into the uploader. `--texture-residency-kib 4096` pushes harder;
+below about 1500 KiB the run turns into oversized blocks and mip reduction
+instead, which is what the old 64 KiB stress capture measured.
+
+The 17,712-case upload differential was regenerated from the moved source and
+still reports zero differences, so the chain from the pre-refactor originals
+through the de-duplication to the new file is closed end to end. All 12
+translation units that transitively include either header compile clean under
+the production warning set, in both `SOKOBAN_ENABLE_DEBUG_UI` settings, and no
+`sokoban_core` source reaches the new header - checked as a transitive include
+closure over the 86 core sources, which is the rule
+`tools/check_core_is_vulkan_free.sh` exists to enforce.
 
 The seventh `VulkanModelResources` seam is cut. With the upload *decisions*
 already out in `TextureUploadPlan`, what was left duplicated in the two

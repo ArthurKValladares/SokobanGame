@@ -19,6 +19,7 @@
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanGeometryArena.hpp"
 #include "engine/render/VulkanMemoryAllocator.hpp"
+#include "engine/render/VulkanTextureUploader.hpp"
 #include "engine/render/VulkanUploadRing.hpp"
 
 #include <vulkan/vulkan.h>
@@ -268,12 +269,10 @@ private:
         Failed,
     };
 
-    struct OwnedImage {
-        VkImage image = VK_NULL_HANDLE;
-        VulkanAllocation allocation = nullptr;
-        VkImageView view = VK_NULL_HANDLE;
-        uint32_t mipLevels = 1;
-    };
+    // Both types belong to the uploader; these keep the spelling everything
+    // here already used.
+    using OwnedImage = VulkanTextureUploader::OwnedImage;
+    using PendingTextureUpload = VulkanTextureUploader::PendingTextureUpload;
 
     // Two structurally identical types, kept apart on purpose.
     //
@@ -303,13 +302,6 @@ private:
         uint32_t width = 0;
         uint32_t height = 0;
         bool compressed = false;
-    };
-
-    struct PendingTextureUpload {
-        VulkanUploadRing::Reservation staging {};
-        VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-        VkFence fence = VK_NULL_HANDLE;
-        bool submitted = false;
     };
 
     using PreparedModel = std::variant<MeshData, SkinnedMeshData>;
@@ -485,83 +477,14 @@ private:
         uint32_t instanceSlot,
         const SkinnedMeshData& mesh,
         const AnimationController::SkinningRequest& request);
-    void createTextureBlocking(
-        const ImageData& image,
-        OwnedImage& gpuImage,
-        VkSampler& sampler,
-        TextureInterpretation sampling);
-    // What the two upload paths disagree about. Everything after this - the
-    // image, its view, its sampler and the four debug strings - is the same
-    // work, and was written out twice in full.
-    struct TextureImagePlan {
-        VkFormat format = VK_FORMAT_UNDEFINED;
-        VkExtent3D extent {};
-        uint32_t mipLevels = 1;
-        VkImageUsageFlags usage = 0;
-        // Whether this upload may filter anisotropically. The two paths ask
-        // different questions and both are kept: an uncompressed upload asks
-        // whether the format can generate a chain at all, a compressed one
-        // whether the chain it was handed has more than one level. The two
-        // disagree only for a 1x1 uncompressed image, where the answer cannot
-        // matter - but they are not the same question, so they are not
-        // written as if they were.
-        bool anisotropyAllowed = false;
-        const char* imageName = "";
-        const char* viewName = "";
-        const char* samplerName = "";
-        // Composed into "vkCreateSampler <label> failed" only on failure.
-        const char* failureLabel = "";
-    };
-
-    // Creates the image, its view and its sampler, and names all three.
-    void createTextureImageAndSampler(
-        const TextureImagePlan& plan,
-        TextureInterpretation sampling,
-        OwnedImage& textureImage,
-        VkSampler& sampler) const;
-    void beginTextureUpload(
-        const ImageData& image,
-        OwnedImage& gpuImage,
-        VkSampler& sampler,
-        PendingTextureUpload& upload,
-        TextureInterpretation sampling);
-    void beginTextureUpload(
-        const CompressedTextureArtifact& texture,
-        uint32_t sourceBaseMip,
-        OwnedImage& gpuImage,
-        VkSampler& sampler,
-        PendingTextureUpload& upload,
-        TextureInterpretation sampling);
-    // Stages `image` and records the copy into an image that already exists,
-    // leaving it shader-readable. Shared by first upload and repaint.
-    void recordTextureCopy(
-        const ImageData& image,
-        OwnedImage& gpuImage,
-        PendingTextureUpload& upload);
-    void recordTextureCopy(
-        const CompressedTextureArtifact& texture,
-        uint32_t sourceBaseMip,
-        OwnedImage& gpuImage,
-        PendingTextureUpload& upload);
-    void destroyTextureUpload(PendingTextureUpload& upload);
-    void destroyTexture(OwnedImage& image, VkSampler& sampler);
     void destroyMesh(GpuMesh& mesh);
     void destroySkinnedMesh(GpuSkinnedMesh& mesh);
     [[nodiscard]] const GpuMesh& gpuMeshForModel(RenderModel model) const;
-    [[nodiscard]] VkImageView createImageView(
-        VkImage image,
-        VkFormat format,
-        VkImageAspectFlags aspectMask,
-        uint32_t mipLevels) const;
 
-    VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     bool supportsBc7_ = false;
     VulkanMemoryAllocator* allocator_ = nullptr;
-    float maxSamplerAnisotropy_ = 1.0f;
     uint32_t textureDescriptorCapacity_ = 0;
     VkDevice device_ = VK_NULL_HANDLE;
-    VkCommandPool commandPool_ = VK_NULL_HANDLE;
-    VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     std::filesystem::path assetRoot_;
     const AssetManifest* manifest_ = nullptr;
 
@@ -578,6 +501,8 @@ private:
     std::vector<TextureSlot> textures_;
     TextureResource fallbackTexture_ {};
     VulkanUploadRing uploadRing_ {};
+    // Borrows the ring above, the allocator and the device handles.
+    VulkanTextureUploader textureUploader_ {};
     VulkanGeometryArena geometryArena_ {};
     GpuMappedBuffer skinningBuffer_ {};
     GpuMappedBuffer drawInstanceBuffer_ {};

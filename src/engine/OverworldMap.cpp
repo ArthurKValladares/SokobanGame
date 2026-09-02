@@ -315,6 +315,33 @@ uint64_t mapFingerprint(
     return hash;
 }
 
+// Every screen override names a real screen, exactly once.
+//
+// Lifted out of load() unchanged. It needs nothing but the override, which is
+// why it is a free function while the two stages below are not.
+void validateDraftOverrides(
+    const std::optional<OverworldDraftOverride>& draftOverride)
+{
+    if (draftOverride) {
+        for (std::size_t index = 0;
+             index < draftOverride->definitions.size();
+             ++index) {
+            const OverworldScreenId id =
+                draftOverride->definitions[index].screen;
+            if (id == 0 || std::ranges::any_of(
+                    draftOverride->definitions.begin(),
+                    draftOverride->definitions.begin() +
+                        static_cast<std::ptrdiff_t>(index),
+                    [id](const OverworldDefinitionOverride& candidate) {
+                        return candidate.screen == id;
+                    })) {
+                throw std::runtime_error(
+                    "overworld draft contains a missing or duplicate screen override");
+            }
+        }
+    }
+}
+
 } // namespace
 
 OverworldLayout loadOverworldLayout(const std::filesystem::path& path)
@@ -401,59 +428,9 @@ OverworldMap OverworldMap::load(
         : loadOverworldLayout(overworldRoot / "layout.json");
     validateBasicLayout(map.layout_);
 
-    if (draftOverride) {
-        for (std::size_t index = 0;
-             index < draftOverride->definitions.size();
-             ++index) {
-            const OverworldScreenId id =
-                draftOverride->definitions[index].screen;
-            if (id == 0 || std::ranges::any_of(
-                    draftOverride->definitions.begin(),
-                    draftOverride->definitions.begin() +
-                        static_cast<std::ptrdiff_t>(index),
-                    [id](const OverworldDefinitionOverride& candidate) {
-                        return candidate.screen == id;
-                    })) {
-                throw std::runtime_error(
-                    "overworld draft contains a missing or duplicate screen override");
-            }
-        }
-    }
+    validateDraftOverrides(draftOverride);
 
-    const int minSlotX = std::ranges::min(map.layout_.screens, {},
-        [](const OverworldScreenSpec& value) { return value.slot.x; }).slot.x;
-    const int maxSlotX = std::ranges::max(map.layout_.screens, {},
-        [](const OverworldScreenSpec& value) { return value.slot.x; }).slot.x;
-    const int minSlotY = std::ranges::min(map.layout_.screens, {},
-        [](const OverworldScreenSpec& value) { return value.slot.y; }).slot.y;
-    const int maxSlotY = std::ranges::max(map.layout_.screens, {},
-        [](const OverworldScreenSpec& value) { return value.slot.y; }).slot.y;
-    const int64_t slotSpanX =
-        static_cast<int64_t>(maxSlotX) - minSlotX + 1;
-    const int64_t slotSpanY =
-        static_cast<int64_t>(maxSlotY) - minSlotY + 1;
-    if (slotSpanX <= 0 || slotSpanY <= 0 ||
-        slotSpanX > maxSlotSpan || slotSpanY > maxSlotSpan) {
-        throw std::runtime_error(
-            "overworld slot span exceeds the safety limit of " +
-            std::to_string(maxSlotSpan));
-    }
-
-    const int64_t normalizationX =
-        -static_cast<int64_t>(minSlotX) * map.layout_.screenWidth;
-    const int64_t normalizationY =
-        -static_cast<int64_t>(minSlotY) * map.layout_.screenHeight;
-    if (normalizationX < std::numeric_limits<int>::min() ||
-        normalizationX > std::numeric_limits<int>::max() ||
-        normalizationY < std::numeric_limits<int>::min() ||
-        normalizationY > std::numeric_limits<int>::max()) {
-        throw std::runtime_error(
-            "overworld slot coordinates exceed the supported range");
-    }
-    map.normalizationOffset_ = {
-        static_cast<int>(normalizationX),
-        static_cast<int>(normalizationY),
-    };
+    const SlotExtent slots = validateSlotSpanAndNormalize(map);
 
     std::optional<uint32_t> commonWaterLayer;
     bool firstScreen = true;
@@ -504,9 +481,11 @@ OverworldMap OverworldMap::load(
             .file = spec.file,
             .slot = spec.slot,
             .origin = {
-                static_cast<int>((static_cast<int64_t>(spec.slot.x) - minSlotX) *
+                static_cast<int>(
+                    (static_cast<int64_t>(spec.slot.x) - slots.minimum.x) *
                     map.layout_.screenWidth),
-                static_cast<int>((static_cast<int64_t>(spec.slot.y) - minSlotY) *
+                static_cast<int>(
+                    (static_cast<int64_t>(spec.slot.y) - slots.minimum.y) *
                     map.layout_.screenHeight),
             },
             .depth = static_cast<uint32_t>(definition.layers.size()),
@@ -525,9 +504,9 @@ OverworldMap OverworldMap::load(
     }
 
     const uint64_t composedWidth =
-        static_cast<uint64_t>(slotSpanX) * map.layout_.screenWidth;
+        static_cast<uint64_t>(slots.spanX) * map.layout_.screenWidth;
     const uint64_t composedHeight =
-        static_cast<uint64_t>(slotSpanY) * map.layout_.screenHeight;
+        static_cast<uint64_t>(slots.spanY) * map.layout_.screenHeight;
     const uint64_t composedCells = composedWidth * composedHeight * maximumDepth;
     if (composedWidth > static_cast<uint64_t>(std::numeric_limits<int>::max()) ||
         composedHeight > static_cast<uint64_t>(std::numeric_limits<int>::max()) ||
@@ -560,6 +539,68 @@ OverworldMap OverworldMap::load(
         }
     }
 
+    composeScreenGrid(map, composed, maximumDepth);
+
+    map.level_ = Level::loadFromDefinition(composed, "composed overworld");
+
+    map.fingerprint_ = mapFingerprint(map.layout_, map.screens_);
+    return map;
+}
+
+// The slot bounding box, checked against the safety limit, and the offset that
+// puts the top-left screen at the origin.
+//
+// A private static stage of the load() factory rather than a free function: it
+// reads the layout and writes the offset, both private, and load() is building
+// an OverworldMap that is not a valid object yet. The body is what was inline,
+// unchanged; the four values that outlive it come back in a SlotExtent instead
+// of being four loose locals in a 226-line function.
+OverworldMap::SlotExtent OverworldMap::validateSlotSpanAndNormalize(
+    OverworldMap& map)
+{
+    const int minSlotX = std::ranges::min(map.layout_.screens, {},
+        [](const OverworldScreenSpec& value) { return value.slot.x; }).slot.x;
+    const int maxSlotX = std::ranges::max(map.layout_.screens, {},
+        [](const OverworldScreenSpec& value) { return value.slot.x; }).slot.x;
+    const int minSlotY = std::ranges::min(map.layout_.screens, {},
+        [](const OverworldScreenSpec& value) { return value.slot.y; }).slot.y;
+    const int maxSlotY = std::ranges::max(map.layout_.screens, {},
+        [](const OverworldScreenSpec& value) { return value.slot.y; }).slot.y;
+    const int64_t slotSpanX =
+        static_cast<int64_t>(maxSlotX) - minSlotX + 1;
+    const int64_t slotSpanY =
+        static_cast<int64_t>(maxSlotY) - minSlotY + 1;
+    if (slotSpanX <= 0 || slotSpanY <= 0 ||
+        slotSpanX > maxSlotSpan || slotSpanY > maxSlotSpan) {
+        throw std::runtime_error(
+            "overworld slot span exceeds the safety limit of " +
+            std::to_string(maxSlotSpan));
+    }
+
+    const int64_t normalizationX =
+        -static_cast<int64_t>(minSlotX) * map.layout_.screenWidth;
+    const int64_t normalizationY =
+        -static_cast<int64_t>(minSlotY) * map.layout_.screenHeight;
+    if (normalizationX < std::numeric_limits<int>::min() ||
+        normalizationX > std::numeric_limits<int>::max() ||
+        normalizationY < std::numeric_limits<int>::min() ||
+        normalizationY > std::numeric_limits<int>::max()) {
+        throw std::runtime_error(
+            "overworld slot coordinates exceed the supported range");
+    }
+    map.normalizationOffset_ = {
+        static_cast<int>(normalizationX),
+        static_cast<int>(normalizationY),
+    };
+    return { { minSlotX, minSlotY }, slotSpanX, slotSpanY };
+}
+
+// Copies every screen's authored layers into the composed level, caps the
+// unauthored volume of short screens, translates decorations, and gives each
+// selector a runtime id. Also a stage of the factory, for the same reason.
+void OverworldMap::composeScreenGrid(
+    OverworldMap& map, Level::Definition& composed, uint32_t maximumDepth)
+{
     uint32_t nextRuntimeSelectorId = 1;
     for (const OverworldScreenRuntime& screen : map.screens_) {
         for (std::size_t z = 0; z < screen.definition.layers.size(); ++z) {
@@ -611,11 +652,6 @@ OverworldMap OverworldMap::load(
             });
         }
     }
-
-    map.level_ = Level::loadFromDefinition(composed, "composed overworld");
-
-    map.fingerprint_ = mapFingerprint(map.layout_, map.screens_);
-    return map;
 }
 
 const OverworldScreenRuntime* OverworldMap::screen(

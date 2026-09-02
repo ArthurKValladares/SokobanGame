@@ -534,6 +534,7 @@ add_library(sokoban_render_vulkan STATIC
     src/engine/render/VulkanMemoryAllocator.cpp
     src/engine/render/VulkanMemoryAllocatorImplementation.cpp
     src/engine/render/VulkanModelResources.cpp
+    src/engine/render/VulkanTextureUploader.cpp
     src/engine/render/VulkanUploadRing.cpp
     src/engine/render/VulkanPipelineCache.cpp
     src/engine/render/VulkanPipelineFactory.cpp

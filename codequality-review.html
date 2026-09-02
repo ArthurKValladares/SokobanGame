@@ -1523,8 +1523,9 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
     </div>
     <h3><code>VulkanModelResources</code> owns eight things at once</h3>
     <div class="loc">
-      <code>VulkanModelResources.cpp — 2,710 lines at review; 2,517 now</code>
-      <code>VulkanModelResources.hpp — 557 at review; 595 now</code>
+      <code>VulkanModelResources.cpp — 2,710 lines at review; 1,981 now</code>
+      <code>VulkanModelResources.hpp — 557 at review; 559 now</code>
+      <code>VulkanTextureUploader.{hpp,cpp} — 722 lines, new</code>
     </div>
     <p>
       3,267 lines, 40 private members and 60-odd methods covering: mesh loading
@@ -1756,6 +1757,82 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       version and passes on the fixed one, and it runs in CI before configure.
     </p>
     <p>
+      <strong>The class did split — <code>VulkanTextureUploader</code>, 594
+      lines and nine methods out.</strong> <code>VulkanModelResources</code> is
+      3,134 lines down to 2,540, and carries four fewer members. The new class
+      is everything between “here are some pixels” and “there is a sampled
+      image on the device”: format choice, image and view creation, sampler
+      policy, the staging copy, mip generation or block upload, and the fence
+      that says when it is done.
+    </p>
+    <p>
+      <strong>The boundary was measured, not chosen.</strong> Attributing every
+      one of the class&#39;s member functions to the state it actually touches
+      gives 15 texture-only, 35 model-only, 12 touching both halves and 19
+      touching neither. Inside the texture group, nine functions touch
+      <em>seven device handles between them and not one piece of catalog, slot,
+      residency or scheduler state</em>. That is a class, and that is what
+      moved. It owns nothing: the allocator and the upload ring are borrowed,
+      and the ring is shared with the geometry arena, so it could not have moved
+      in here even if textures were its only user.
+    </p>
+    <p>
+      <strong>And the reason the rest of the texture half stayed.</strong> The
+      obvious next cut — a <code>TextureHeap</code> owning slots, definitions
+      and descriptor mapping — runs into the eviction ladder, which calls
+      <code>destroyCompletedResidencyRetirements</code>, which drains
+      <em>both</em> retirement queues. A texture eviction frees model memory as
+      a side effect, and a model publication that would otherwise block gets
+      through because of it. Splitting the pools apart changes when models
+      retire under memory pressure: a real behaviour change, on the path that
+      only shows up when the budget is tight, and one that neither a compile
+      gate nor a unit test here can check. The recommendation is unchanged but
+      the order is now explicit: the shared residency ladder has to become one
+      named thing owning both queues before the two asset halves can be
+      separated, and that step needs a device to verify, not a compiler.
+    </p>
+    <p>
+      Three device handles and the anisotropy limit turned out to be pure
+      pass-through once the nine functions left — written in
+      <code>create()</code>, read once to hand onward, and reset in
+      <code>destroy()</code>. They are locals now.
+    </p>
+    <p>
+      <strong>Evidence.</strong> All ten moved blocks — the nine functions and
+      the four sampler-enum helpers — are <strong>byte-identical</strong>: each
+      appears verbatim exactly once in the new file, located by search rather
+      than by reading. Two mechanical substitutions in the whole move: the
+      class-name prefix, and <code>uploadRing_.</code> becoming
+      <code>uploadRing_-&gt;</code> at ten sites because the ring is borrowed. A
+      residue diff — the old file minus the moved regions, against the new one —
+      shows exactly the 18 call sites that gained a
+      <code>textureUploader_.</code> prefix, the uploader&#39;s
+      <code>create</code>/<code>destroy</code> calls and the anisotropy local,
+      and nothing else. The 17,712-case upload differential was regenerated from
+      the moved source and still reports zero differences, closing the chain
+      from the pre-refactor originals through the de-duplication to the file
+      they now live in. All 12 translation units that transitively include
+      either header compile clean under the production warning set in both
+      debug-UI settings, and no <code>sokoban_core</code> source reaches the new
+      header — checked as a transitive include closure over all 86 core sources,
+      which is the rule the layering script exists to enforce.
+    </p>
+    <p>
+      <strong>And in the running game.</strong> The ground-splat repaint is the
+      one runtime path that crosses the new boundary three ways in a single
+      operation — <code>destroyTexture</code>,
+      <code>createTextureBlocking</code> and <code>recordTextureCopy</code> —
+      and shutdown runs <code>destroyTexture</code> over every texture and the
+      fallback; both were exercised. The retirement drain is the one path play
+      does not reach by default, for a reason worth writing down: the whole
+      compiled texture set is 52 files totalling 29.5 MiB, a normal run holds
+      about 9.8 MiB of it, and the production budget is 256 MiB, so residency is
+      never under pressure. <code>--texture-residency-kib 6144</code> forces it —
+      above the largest single texture at 1.42 MiB, so nothing is refused as
+      oversized, and below the working set, so the ladder evicts rather than
+      degrading mips.
+    </p>
+    <p>
       <strong>Seventh seam: the two upload paths' shared middle.</strong> With
       the decisions out, what was left in the two
       <code>beginTextureUpload</code> overloads was 45 near-identical lines
@@ -1852,8 +1929,8 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
           <tr><td class="num">260</td><td><code>Application.cpp</code> · <code>run</code></td><td>open</td></tr>
           <tr><td class="num">269&nbsp;→&nbsp;250</td><td><code>VulkanRenderer.cpp</code> · <code>drawFrame</code></td><td><b>done in part</b></td></tr>
           <tr><td class="num">231&nbsp;→&nbsp;156</td><td><code>VulkanSceneDescriptors.cpp</code> · <code>create</code></td><td><b>done</b></td></tr>
-          <tr><td class="num">223</td><td><code>OverworldMap.cpp</code> · <code>load</code></td><td>open — unlisted before</td></tr>
-          <tr><td class="num">218</td><td><code>ui/OptionsMenu.cpp</code> · <code>optionsMenuRows</code></td><td>open — unlisted before</td></tr>
+          <tr><td class="num">226&nbsp;&rarr;&nbsp;128</td><td><code>OverworldMap.cpp</code> · <code>load</code></td><td><b>done</b></td></tr>
+          <tr><td class="num">221&nbsp;&rarr;&nbsp;27</td><td><code>ui/OptionsMenu.cpp</code> · <code>optionsMenuRows</code></td><td><b>done</b></td></tr>
           <tr><td class="num">208</td><td><code>ContentPipeline.cpp</code> · <code>addLevels</code></td><td>open — unlisted before</td></tr>
           <tr><td class="num">204</td><td><code>VulkanPipelineFactory.cpp</code> · <code>createScenePipeline</code></td><td>open — unlisted before</td></tr>
           <tr><td class="num">200</td><td><code>LevelEditorDebugUi.cpp</code> · <code>drawDecorationPalette</code></td><td>open — UI, unlisted before</td></tr>
@@ -1915,15 +1992,17 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       difference is deliberate.
     </p>
       <p>
-      <strong>Fourteen, not seventeen — and the count itself had drifted.</strong>
+      <strong>Twelve, not seventeen — and the count itself had drifted.</strong>
       Re-measured against the tree as it now stands: two functions fell below
       200 lines during other work, one the report named
-      (<code>drawIsoFrame</code>, 487) no longer exists in that shape, and
-      <code>IsoScenePreparer::prepare</code> — the largest of them at 513 — has
-      since been taken apart. <code>ApplicationDebugUi::draw</code> was 854. The
-      largest remaining is <code>OptionsMenu::draw</code> at 385, which is one of
-      the five UI panels held back deliberately; the largest that is not a panel
-      is <code>Application::buildRenderFrame</code> at 304.
+      (<code>drawIsoFrame</code>, 487) no longer exists in that shape, and four
+      more have since been taken apart — <code>ApplicationDebugUi::draw</code>
+      (854), <code>IsoScenePreparer::prepare</code> (513),
+      <code>OverworldMap::load</code> (226) and <code>optionsMenuRows</code>
+      (221). Twenty-nine functions are past 150. The largest remaining is
+      <code>OptionsMenu::draw</code> at 385, one of the five UI panels held back
+      deliberately; the largest that is not a panel is
+      <code>Application::buildRenderFrame</code> at 304.
     </p>
     <p>
       <strong><code>ApplicationDebugUi::draw</code>: 854 lines to 185.</strong>
@@ -1957,6 +2036,44 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       <code>drawRenderingStatsSection</code> is still 293 lines. It is one
       named thing now rather than the tail of an 854-line function, which is
       where the next cut starts.
+    </p>
+    <p>
+      <strong>Two more, chosen for their test suites rather than their
+      size.</strong> <code>OverworldMap::load</code> is <strong>226 lines to
+      128</strong> and out of the 150-line list: the draft-override guard is a
+      file-local free function now (it needs nothing but the override), and the
+      slot bounding box and the screen composition pass are private statics
+      taking the map, because <code>load</code> is a factory building an object
+      that is not valid yet. All three bodies are verbatim. The one addition is
+      a <code>SlotExtent</code> return type — four locals from the bounding-box
+      block are read later by the screen loop, so they come back out rather than
+      being recomputed. <code>optionsMenuRows</code> is <strong>221 lines to
+      27</strong>: a six-case switch whose cases had nothing to do with each
+      other, one per page, each now a function taking exactly what its case
+      used, which is why three of the six never see the settings. All six moved
+      as a pure dedent.
+    </p>
+    <p>
+      <strong>Mutation testing found a real hole, which is the more useful
+      result.</strong> Deleting the <em>entire</em> draft-override guard left
+      all 82 <code>OverworldMapTests</code> checks passing. Nothing anywhere
+      constructed an <code>OverworldDraftOverride</code> with a zero or
+      duplicate screen id, so a check that has been throwing for four cases was
+      never once exercised — the extraction is what made it visible, because a
+      named function is something you can think about deleting.
+      <code>testDraftOverridesMustNameEachScreenOnce</code> now covers zero id,
+      adjacent duplicate, non-adjacent duplicate, the valid case, and the
+      neighbouring “references a missing screen” error that this guard
+      deliberately does <em>not</em> raise. 82 checks to 89, and the mutation
+      now fails three of them.
+    </p>
+    <p>
+      One gap is left open on purpose. <code>UiTests</code> does not assert row
+      <em>tones</em>, so removing <code>OptionsMenuRowTone::Danger</code> from
+      the quit row passes all 190 checks. That is presentation rather than
+      behaviour, and pinning it needs a decision about how much of a menu's
+      appearance belongs in a unit test — so it is written down here rather than
+      quietly fixed.
     </p>
     <p>
       <strong><code>IsoScenePreparer::prepare</code>: 513 lines to 135.</strong>
@@ -3755,10 +3872,14 @@ tuned, with ColumnLimit: 0 (never re-wrap)  10,573   (210 of 367 files)</code>
     <li>
       <b>Then the structural work. — in progress</b>
       <span class="code">B4</span> is done: one enum, one GLSL mirror, one test
-      holding them together. <span class="code">C1</span> has had its second
-      seam cut — the material range allocator is out, tested, and proven
-      equivalent to the code it replaced over 1.26 million randomised
-      operations — but the class split itself is still open.
+      holding them together. <span class="code">C1</span> has had seven seams
+      cut and has now split: <code>VulkanTextureUploader</code> takes 594 lines
+      and nine methods out, chosen by attributing every member function to the
+      state it touches. What is left is one specific thing rather than an
+      open-ended job — the shared residency ladder drains both retirement
+      queues, so the two asset halves cannot separate until that ladder is one
+      named owner, and that step needs a device to verify rather than a
+      compiler.
       <span class="code">D1</span> is done, though not as filed: investigating it
       showed the recommended fix would have been wrong, and the finding is
       rewritten above with what the call sites actually contain.
@@ -3769,17 +3890,19 @@ tuned, with ColumnLimit: 0 (never re-wrap)  10,573   (210 of 367 files)</code>
       itself is left for someone who can run the renderer.
       <span class="code">C2</span> is partly done and partly declined on
       purpose: the count was wrong — 17 functions past 200 lines, not eight, and
-      14 today — and the ones whose correctness could be demonstrated were taken,
+      12 today — and the ones whose correctness could be demonstrated were taken,
       including the two largest, <code>ApplicationDebugUi::draw</code>
       (854&nbsp;&rarr;&nbsp;185) and <code>IsoScenePreparer::prepare</code>
-      (513&nbsp;&rarr;&nbsp;135). The five ImGui panels are left because the only
+      (513&nbsp;&rarr;&nbsp;135), plus <code>OverworldMap::load</code> and
+      <code>optionsMenuRows</code>, which were picked for their test suites
+      rather than their size. The five ImGui panels are left because the only
       check on them is to look at the screen. The double-counted eviction victim is fixed — measured first,
       which showed it was costing frames rather than memory. The point-shadow
       divergence is unified with the split deliberately kept, so the tap count is
       now one token per shader rather than two functions that look alike. Nothing
-      is parked any more; what remains open is the class split, the long
-      functions, and the draw-kind tag, each of which needs a build or a pair of
-      eyes rather than a decision.
+      is parked any more; what remains open is the residency ladder that blocks
+      the rest of the class split, the long functions, and the draw-kind tag,
+      each of which needs a device or a pair of eyes rather than a decision.
     </li>
   </ol>
 </section>

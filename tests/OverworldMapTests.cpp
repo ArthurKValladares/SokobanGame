@@ -476,6 +476,92 @@ void testSelectorOwnershipAndCoverage()
     }
 }
 
+// The draft-override guard in load(): every override names a real screen, and
+// names it once.
+//
+// This existed and threw for four cases, and nothing tested any of them. It
+// was found by mutation: deleting the whole check left all 82 checks passing.
+void testDraftOverridesMustNameEachScreenOnce()
+{
+    TEST("draftOverridesMustNameEachScreenOnce");
+    TestProject project("draft-overrides");
+    project.writeScreen(1, westDefinition());
+    project.writeScreen(2, eastDefinition());
+    project.writeLayout(eastWestLayout());
+
+    // A screen id of zero is not a screen.
+    checkThrowsContaining(
+        [&] {
+            (void)OverworldMap::load(
+                project.root,
+                OverworldDraftOverride {
+                    .definitions = { { .screen = 0,
+                        .definition = westDefinition() } },
+                });
+        },
+        "missing or duplicate screen override");
+
+    // The same screen twice: the second would silently win.
+    checkThrowsContaining(
+        [&] {
+            (void)OverworldMap::load(
+                project.root,
+                OverworldDraftOverride {
+                    .definitions = {
+                        { .screen = 1, .definition = westDefinition() },
+                        { .screen = 1, .definition = westDefinition() },
+                    },
+                });
+        },
+        "missing or duplicate screen override");
+
+    // A duplicate anywhere in the list, not just adjacent to its twin.
+    checkThrowsContaining(
+        [&] {
+            (void)OverworldMap::load(
+                project.root,
+                OverworldDraftOverride {
+                    .definitions = {
+                        { .screen = 1, .definition = westDefinition() },
+                        { .screen = 2, .definition = eastDefinition() },
+                        { .screen = 1, .definition = westDefinition() },
+                    },
+                });
+        },
+        "missing or duplicate screen override");
+
+    // Distinct, non-zero ids are accepted, and the override is what loads:
+    // the two screens swap shapes, so the composition has the same extent as
+    // the file-backed one and a different identity.
+    const OverworldMap overridden = OverworldMap::load(
+        project.root,
+        OverworldDraftOverride {
+            .definitions = {
+                { .screen = 1, .definition = eastDefinition() },
+                { .screen = 2, .definition = westDefinition() },
+            },
+        });
+    const OverworldMap plain = OverworldMap::load(project.root);
+    CHECK(overridden.level().width() == plain.level().width());
+    CHECK(overridden.level().height() == plain.level().height());
+    CHECK(overridden.fingerprint() != plain.fingerprint());
+
+    // An override naming a screen the layout does not contain is deliberately
+    // *not* this guard's job, and says so with a different message: the guard
+    // only rejects ids that are zero or repeated, and the screen loop is what
+    // notices an override nothing consumed.
+    checkThrowsContaining(
+        [&] {
+            (void)OverworldMap::load(
+                project.root,
+                OverworldDraftOverride {
+                    .definitions = { { .screen = 9,
+                        .definition = westDefinition() } },
+                });
+        },
+        "references a missing screen");
+}
+
 } // namespace
 
 int main()
@@ -486,6 +572,7 @@ int main()
     testActionAdmissionAndCameraTransition();
     testLayoutValidationAndIndependentScreens();
     testSelectorOwnershipAndCoverage();
+    testDraftOverridesMustNameEachScreenOnce();
 
     if (failures != 0) {
         std::cerr << failures << " of " << checks << " checks failed\n";

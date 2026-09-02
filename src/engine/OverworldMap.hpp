@@ -135,6 +135,19 @@ public:
         OverworldValidationMode mode) const;
 
 private:
+    // What measuring the slot bounding box tells the rest of load().
+    struct SlotExtent {
+        GridPosition minimum {};
+        int64_t spanX = 0;
+        int64_t spanY = 0;
+    };
+
+    // Stages of the load() factory. Static and taking the map because they run
+    // while it is still being built.
+    static SlotExtent validateSlotSpanAndNormalize(OverworldMap& map);
+    static void composeScreenGrid(
+        OverworldMap& map, Level::Definition& composed, uint32_t maximumDepth);
+
     OverworldLayout layout_;
     Level level_;
     GridPosition normalizationOffset_ {};

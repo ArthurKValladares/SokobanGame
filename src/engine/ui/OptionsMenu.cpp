@@ -556,6 +556,251 @@ bool drawBindingRowPrompts(
 
 } // namespace
 
+// One function per page of the options menu.
+//
+// optionsMenuRows() was a 221-line switch whose six cases had nothing to do
+// with each other: each builds the rows for one page and touches nothing the
+// others touch. Each takes exactly what its own case used, which is why the
+// signatures differ - three of them never look at the settings.
+
+// The main page: the four section buttons plus whatever the active game allows.
+void appendMainRows(
+    std::vector<OptionsMenuRow>& rows, const OptionsMenuState& state)
+{
+    rows.push_back({
+        .id = OptionsMenuRowId::Graphics,
+        .kind = OptionsMenuRowKind::Button,
+        .label = "Graphics",
+        .tone = OptionsMenuRowTone::Accent,
+    });
+    rows.push_back({
+        .id = OptionsMenuRowId::Audio,
+        .kind = OptionsMenuRowKind::Button,
+        .label = "Audio",
+    });
+    rows.push_back({
+        .id = OptionsMenuRowId::Controls,
+        .kind = OptionsMenuRowKind::Button,
+        .label = "Controls",
+    });
+    if (state.allowTitleExit) {
+        rows.push_back({
+            .id = OptionsMenuRowId::ExitToTitle,
+            .kind = OptionsMenuRowKind::Button,
+            .label = "Exit To Title",
+        });
+    }
+    rows.push_back({
+        .id = OptionsMenuRowId::Quit,
+        .kind = OptionsMenuRowKind::Button,
+        .label = "Quit Game",
+        .tone = OptionsMenuRowTone::Danger,
+        .flexibleSpaceBefore = true,
+        .dividerBefore = true,
+    });
+}
+
+// The graphics page: the display, quality and scaling rows.
+void appendGraphicsRows(
+    std::vector<OptionsMenuRow>& rows,
+    const OptionsMenuState& state,
+    const UserSettings& settings)
+{
+    rows = {
+        {
+            .id = OptionsMenuRowId::AntiAliasing,
+            .kind = OptionsMenuRowKind::SegmentedChoice,
+            .label = "Anti-aliasing",
+            .choices = sampleCountChoices,
+            .choiceValue = settings.video.antiAliasingSamples,
+        },
+        {
+            .id = OptionsMenuRowId::Vsync,
+            .kind = OptionsMenuRowKind::Toggle,
+            .label = "VSync",
+            .toggleValue = settings.video.vsync,
+        },
+        {
+            .id = OptionsMenuRowId::AllowTearing,
+            .kind = OptionsMenuRowKind::Toggle,
+            .label = "Allow tearing",
+            .toggleValue = settings.video.allowTearing,
+            .enabled = !settings.video.vsync,
+        },
+        {
+            .id = OptionsMenuRowId::FrameRateLimit,
+            .kind = OptionsMenuRowKind::StepperChoice,
+            .label = "Frame rate limit",
+            .choices = frameRateLimitChoices,
+            .choiceValue = settings.video.frameRateLimit,
+        },
+        {
+            .id = OptionsMenuRowId::RenderScalePreset,
+            .kind = OptionsMenuRowKind::SegmentedChoice,
+            .label = "Render scale",
+            .choices = renderScaleChoices,
+            .choiceValue = settings.video.renderScalePercent,
+        },
+        {
+            .id = OptionsMenuRowId::CustomRenderScale,
+            .kind = OptionsMenuRowKind::CustomRenderScale,
+            .label = "Custom",
+            .sliderValue = static_cast<float>(
+                state.customRenderScalePreview.value_or(
+                    settings.video.customRenderScalePercent)) / 100.0f,
+            .toggleValue = settings.video.customRenderScale,
+            .enabled = settings.video.customRenderScale,
+        },
+        {
+            .id = OptionsMenuRowId::Exposure,
+            .kind = OptionsMenuRowKind::Slider,
+            .label = "Exposure",
+            .sliderValue = settings.video.exposureEv,
+            .sliderMinimum = minimumExposureEv,
+            .sliderMaximum = maximumExposureEv,
+            .sliderDisplay = OptionsMenuSliderDisplay::ExposureEv,
+        },
+        {
+            .id = OptionsMenuRowId::AmbientOcclusion,
+            .kind = OptionsMenuRowKind::Toggle,
+            .label = "Ambient occlusion",
+            .toggleValue = settings.video.ambientOcclusion,
+        },
+        {
+            .id = OptionsMenuRowId::AmbientOcclusionStrength,
+            .kind = OptionsMenuRowKind::Slider,
+            .label = "AO strength",
+            .sliderValue =
+                settings.video.ambientOcclusionStrength,
+            .enabled = settings.video.ambientOcclusion,
+        },
+        {
+            .id = OptionsMenuRowId::Display,
+            .kind = OptionsMenuRowKind::StepperChoice,
+            .label = "Display",
+            .choices = displayChoices,
+            .choiceValue = displayIndex(settings),
+        },
+        {
+            .id = OptionsMenuRowId::Back,
+            .kind = OptionsMenuRowKind::Button,
+            .label = "Back",
+            .flexibleSpaceBefore = true,
+        },
+    };
+}
+
+// The audio page: the three volume sliders.
+void appendAudioRows(
+    std::vector<OptionsMenuRow>& rows, const UserSettings& settings)
+{
+    rows = {
+        {
+            .id = OptionsMenuRowId::MasterVolume,
+            .kind = OptionsMenuRowKind::Slider,
+            .label = "Master volume",
+            .sliderValue = settings.audio.masterVolume,
+        },
+        {
+            .id = OptionsMenuRowId::MusicVolume,
+            .kind = OptionsMenuRowKind::Slider,
+            .label = "Music volume",
+            .sliderValue = settings.audio.musicVolume,
+        },
+        {
+            .id = OptionsMenuRowId::Back,
+            .kind = OptionsMenuRowKind::Button,
+            .label = "Back",
+            .flexibleSpaceBefore = true,
+        },
+    };
+}
+
+// The gameplay bindings page.
+void appendControlsRows(
+    std::vector<OptionsMenuRow>& rows, const OptionsMenuState& state)
+{
+    rows.push_back({
+        .id = OptionsMenuRowId::BindingDevice,
+        .kind = OptionsMenuRowKind::Tabs,
+        .choices = bindingDeviceChoices,
+        .choiceValue = bindingDeviceChoice(
+            state.controlsBindingDevice),
+    });
+    for (const BindingRow& binding : bindingRows) {
+        rows.push_back({
+            .id = binding.row,
+            .kind = OptionsMenuRowKind::Binding,
+            .label = binding.label,
+            .tone = state.capturingAction == binding.action
+                ? OptionsMenuRowTone::Accent
+                : OptionsMenuRowTone::Normal,
+        });
+    }
+    rows.push_back({
+        .id = OptionsMenuRowId::ResetBindings,
+        .kind = OptionsMenuRowKind::Button,
+        .label = "Reset To Defaults",
+        .flexibleSpaceBefore = true,
+    });
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (state.controlsBindingDevice ==
+        BindingDeviceClass::Keyboard) {
+        rows.push_back({
+            .id = OptionsMenuRowId::EditorControls,
+            .kind = OptionsMenuRowKind::Button,
+            .label = "Editor Controls",
+        });
+    }
+#endif
+    rows.push_back({
+        .id = OptionsMenuRowId::Back,
+        .kind = OptionsMenuRowKind::Button,
+        .label = "Back",
+    });
+}
+
+// The editor bindings page.
+void appendEditorControlsRows(
+    std::vector<OptionsMenuRow>& rows, const OptionsMenuState& state)
+{
+    for (const BindingRow& binding : editorBindingRows) {
+        rows.push_back({
+            .id = binding.row,
+            .kind = OptionsMenuRowKind::Binding,
+            .label = binding.label,
+            .tone = state.capturingAction == binding.action
+                ? OptionsMenuRowTone::Accent
+                : OptionsMenuRowTone::Normal,
+        });
+    }
+    rows.push_back({
+        .id = OptionsMenuRowId::Back,
+        .kind = OptionsMenuRowKind::Button,
+        .label = "Back",
+        .flexibleSpaceBefore = true,
+    });
+}
+
+// The quit confirmation: cancel, and the one row with a danger tone.
+void appendQuitConfirmationRows(
+    std::vector<OptionsMenuRow>& rows)
+{
+    rows = {
+        {
+            .id = OptionsMenuRowId::CancelQuit,
+            .kind = OptionsMenuRowKind::Button,
+            .label = "Cancel",
+        },
+        {
+            .id = OptionsMenuRowId::ConfirmQuit,
+            .kind = OptionsMenuRowKind::Button,
+            .label = "Quit",
+            .tone = OptionsMenuRowTone::Danger,
+        },
+    };
+}
+
 std::vector<OptionsMenuRow> optionsMenuRows(
     const OptionsMenuState& state,
     const UserSettings& settings)
@@ -563,216 +808,22 @@ std::vector<OptionsMenuRow> optionsMenuRows(
     std::vector<OptionsMenuRow> rows;
     switch (state.page) {
     case OptionsMenuPage::Main:
-        rows.push_back({
-            .id = OptionsMenuRowId::Graphics,
-            .kind = OptionsMenuRowKind::Button,
-            .label = "Graphics",
-            .tone = OptionsMenuRowTone::Accent,
-        });
-        rows.push_back({
-            .id = OptionsMenuRowId::Audio,
-            .kind = OptionsMenuRowKind::Button,
-            .label = "Audio",
-        });
-        rows.push_back({
-            .id = OptionsMenuRowId::Controls,
-            .kind = OptionsMenuRowKind::Button,
-            .label = "Controls",
-        });
-        if (state.allowTitleExit) {
-            rows.push_back({
-                .id = OptionsMenuRowId::ExitToTitle,
-                .kind = OptionsMenuRowKind::Button,
-                .label = "Exit To Title",
-            });
-        }
-        rows.push_back({
-            .id = OptionsMenuRowId::Quit,
-            .kind = OptionsMenuRowKind::Button,
-            .label = "Quit Game",
-            .tone = OptionsMenuRowTone::Danger,
-            .flexibleSpaceBefore = true,
-            .dividerBefore = true,
-        });
+        appendMainRows(rows, state);
         break;
     case OptionsMenuPage::Graphics:
-        rows = {
-            {
-                .id = OptionsMenuRowId::AntiAliasing,
-                .kind = OptionsMenuRowKind::SegmentedChoice,
-                .label = "Anti-aliasing",
-                .choices = sampleCountChoices,
-                .choiceValue = settings.video.antiAliasingSamples,
-            },
-            {
-                .id = OptionsMenuRowId::Vsync,
-                .kind = OptionsMenuRowKind::Toggle,
-                .label = "VSync",
-                .toggleValue = settings.video.vsync,
-            },
-            {
-                .id = OptionsMenuRowId::AllowTearing,
-                .kind = OptionsMenuRowKind::Toggle,
-                .label = "Allow tearing",
-                .toggleValue = settings.video.allowTearing,
-                .enabled = !settings.video.vsync,
-            },
-            {
-                .id = OptionsMenuRowId::FrameRateLimit,
-                .kind = OptionsMenuRowKind::StepperChoice,
-                .label = "Frame rate limit",
-                .choices = frameRateLimitChoices,
-                .choiceValue = settings.video.frameRateLimit,
-            },
-            {
-                .id = OptionsMenuRowId::RenderScalePreset,
-                .kind = OptionsMenuRowKind::SegmentedChoice,
-                .label = "Render scale",
-                .choices = renderScaleChoices,
-                .choiceValue = settings.video.renderScalePercent,
-            },
-            {
-                .id = OptionsMenuRowId::CustomRenderScale,
-                .kind = OptionsMenuRowKind::CustomRenderScale,
-                .label = "Custom",
-                .sliderValue = static_cast<float>(
-                    state.customRenderScalePreview.value_or(
-                        settings.video.customRenderScalePercent)) / 100.0f,
-                .toggleValue = settings.video.customRenderScale,
-                .enabled = settings.video.customRenderScale,
-            },
-            {
-                .id = OptionsMenuRowId::Exposure,
-                .kind = OptionsMenuRowKind::Slider,
-                .label = "Exposure",
-                .sliderValue = settings.video.exposureEv,
-                .sliderMinimum = minimumExposureEv,
-                .sliderMaximum = maximumExposureEv,
-                .sliderDisplay = OptionsMenuSliderDisplay::ExposureEv,
-            },
-            {
-                .id = OptionsMenuRowId::AmbientOcclusion,
-                .kind = OptionsMenuRowKind::Toggle,
-                .label = "Ambient occlusion",
-                .toggleValue = settings.video.ambientOcclusion,
-            },
-            {
-                .id = OptionsMenuRowId::AmbientOcclusionStrength,
-                .kind = OptionsMenuRowKind::Slider,
-                .label = "AO strength",
-                .sliderValue =
-                    settings.video.ambientOcclusionStrength,
-                .enabled = settings.video.ambientOcclusion,
-            },
-            {
-                .id = OptionsMenuRowId::Display,
-                .kind = OptionsMenuRowKind::StepperChoice,
-                .label = "Display",
-                .choices = displayChoices,
-                .choiceValue = displayIndex(settings),
-            },
-            {
-                .id = OptionsMenuRowId::Back,
-                .kind = OptionsMenuRowKind::Button,
-                .label = "Back",
-                .flexibleSpaceBefore = true,
-            },
-        };
+        appendGraphicsRows(rows, state, settings);
         break;
     case OptionsMenuPage::Audio:
-        rows = {
-            {
-                .id = OptionsMenuRowId::MasterVolume,
-                .kind = OptionsMenuRowKind::Slider,
-                .label = "Master volume",
-                .sliderValue = settings.audio.masterVolume,
-            },
-            {
-                .id = OptionsMenuRowId::MusicVolume,
-                .kind = OptionsMenuRowKind::Slider,
-                .label = "Music volume",
-                .sliderValue = settings.audio.musicVolume,
-            },
-            {
-                .id = OptionsMenuRowId::Back,
-                .kind = OptionsMenuRowKind::Button,
-                .label = "Back",
-                .flexibleSpaceBefore = true,
-            },
-        };
+        appendAudioRows(rows, settings);
         break;
     case OptionsMenuPage::Controls:
-        rows.push_back({
-            .id = OptionsMenuRowId::BindingDevice,
-            .kind = OptionsMenuRowKind::Tabs,
-            .choices = bindingDeviceChoices,
-            .choiceValue = bindingDeviceChoice(
-                state.controlsBindingDevice),
-        });
-        for (const BindingRow& binding : bindingRows) {
-            rows.push_back({
-                .id = binding.row,
-                .kind = OptionsMenuRowKind::Binding,
-                .label = binding.label,
-                .tone = state.capturingAction == binding.action
-                    ? OptionsMenuRowTone::Accent
-                    : OptionsMenuRowTone::Normal,
-            });
-        }
-        rows.push_back({
-            .id = OptionsMenuRowId::ResetBindings,
-            .kind = OptionsMenuRowKind::Button,
-            .label = "Reset To Defaults",
-            .flexibleSpaceBefore = true,
-        });
-#if SOKOBAN_ENABLE_DEBUG_UI
-        if (state.controlsBindingDevice ==
-            BindingDeviceClass::Keyboard) {
-            rows.push_back({
-                .id = OptionsMenuRowId::EditorControls,
-                .kind = OptionsMenuRowKind::Button,
-                .label = "Editor Controls",
-            });
-        }
-#endif
-        rows.push_back({
-            .id = OptionsMenuRowId::Back,
-            .kind = OptionsMenuRowKind::Button,
-            .label = "Back",
-        });
+        appendControlsRows(rows, state);
         break;
     case OptionsMenuPage::EditorControls:
-        for (const BindingRow& binding : editorBindingRows) {
-            rows.push_back({
-                .id = binding.row,
-                .kind = OptionsMenuRowKind::Binding,
-                .label = binding.label,
-                .tone = state.capturingAction == binding.action
-                    ? OptionsMenuRowTone::Accent
-                    : OptionsMenuRowTone::Normal,
-            });
-        }
-        rows.push_back({
-            .id = OptionsMenuRowId::Back,
-            .kind = OptionsMenuRowKind::Button,
-            .label = "Back",
-            .flexibleSpaceBefore = true,
-        });
+        appendEditorControlsRows(rows, state);
         break;
     case OptionsMenuPage::QuitConfirmation:
-        rows = {
-            {
-                .id = OptionsMenuRowId::CancelQuit,
-                .kind = OptionsMenuRowKind::Button,
-                .label = "Cancel",
-            },
-            {
-                .id = OptionsMenuRowId::ConfirmQuit,
-                .kind = OptionsMenuRowKind::Button,
-                .label = "Quit",
-                .tone = OptionsMenuRowTone::Danger,
-            },
-        };
+        appendQuitConfirmationRows(rows);
         break;
     }
     return rows;

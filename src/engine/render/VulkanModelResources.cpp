@@ -26,49 +26,6 @@ bool futureReady(std::future<Result>& future)
         future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
 }
 
-VkSamplerAddressMode vulkanAddressMode(TextureAddressMode mode)
-{
-    switch (mode) {
-    case TextureAddressMode::ClampToEdge:
-        return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    case TextureAddressMode::MirroredRepeat:
-        return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
-    case TextureAddressMode::Repeat:
-        return VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    }
-    return VK_SAMPLER_ADDRESS_MODE_REPEAT;
-}
-
-VkFilter vulkanMagnificationFilter(TextureMagnificationFilter filter)
-{
-    return filter == TextureMagnificationFilter::Nearest
-        ? VK_FILTER_NEAREST
-        : VK_FILTER_LINEAR;
-}
-
-VkFilter vulkanMinificationFilter(TextureMinificationFilter filter)
-{
-    switch (filter) {
-    case TextureMinificationFilter::Nearest:
-    case TextureMinificationFilter::NearestMipmapNearest:
-    case TextureMinificationFilter::NearestMipmapLinear:
-        return VK_FILTER_NEAREST;
-    case TextureMinificationFilter::Linear:
-    case TextureMinificationFilter::LinearMipmapNearest:
-    case TextureMinificationFilter::LinearMipmapLinear:
-        return VK_FILTER_LINEAR;
-    }
-    return VK_FILTER_LINEAR;
-}
-
-VkSamplerMipmapMode vulkanMipmapMode(TextureMinificationFilter filter)
-{
-    return filter == TextureMinificationFilter::NearestMipmapLinear ||
-            filter == TextureMinificationFilter::LinearMipmapLinear
-        ? VK_SAMPLER_MIPMAP_MODE_LINEAR
-        : VK_SAMPLER_MIPMAP_MODE_NEAREST;
-}
-
 bool supportsBc7Textures(VkPhysicalDevice physicalDevice)
 {
     for (VkFormat format : {
@@ -189,14 +146,13 @@ void VulkanModelResources::create(
         throw std::runtime_error(
             "Runtime texture catalog exceeds the selected descriptor capacity");
     }
-    physicalDevice_ = physicalDevice;
-    supportsBc7_ = supportsBc7Textures(physicalDevice_);
+    supportsBc7_ = supportsBc7Textures(physicalDevice);
     allocator_ = &allocator;
-    maxSamplerAnisotropy_ = std::max(maxSamplerAnisotropy, 1.0f);
+    // A local now, not a member: create() is the only thing that reads it,
+    // and it reads it once, to hand to the uploader.
+    const float clampedSamplerAnisotropy = std::max(maxSamplerAnisotropy, 1.0f);
     textureDescriptorCapacity_ = textureDescriptorCapacity;
     device_ = device;
-    commandPool_ = commandPool;
-    graphicsQueue_ = graphicsQueue;
     assetRoot_ = std::move(assetRoot);
     manifest_ = &manifest;
     models_.resize(manifest.models().size());
@@ -248,8 +204,16 @@ void VulkanModelResources::create(
 
     try {
         uploadRing_.create(*allocator_, device_);
+        textureUploader_.create(
+            physicalDevice,
+            *allocator_,
+            device_,
+            commandPool,
+            graphicsQueue,
+            uploadRing_,
+            clampedSamplerAnisotropy);
         geometryArena_.create(
-            *allocator_, device_, commandPool_, graphicsQueue_, uploadRing_);
+            *allocator_, device_, commandPool, graphicsQueue, uploadRing_);
         createSkinningBuffer();
         createModelInstanceBuffer();
         createMaterialBuffer();
@@ -263,7 +227,7 @@ void VulkanModelResources::create(
                 std::byte { 0xff },
             },
         };
-        createTextureBlocking(
+        textureUploader_.createTextureBlocking(
             fallback,
             fallbackTexture_.image,
             fallbackTexture_.sampler,
@@ -305,10 +269,12 @@ void VulkanModelResources::destroy()
 
         skinnedInstances_.clear();
         for (auto texture = textures_.rbegin(); texture != textures_.rend(); ++texture) {
-            destroyTextureUpload(texture->upload);
-            destroyTexture(texture->gpu.image, texture->gpu.sampler);
+            textureUploader_.destroyTextureUpload(texture->upload);
+            textureUploader_.destroyTexture(
+                texture->gpu.image, texture->gpu.sampler);
         }
-        destroyTexture(fallbackTexture_.image, fallbackTexture_.sampler);
+        textureUploader_.destroyTexture(
+            fallbackTexture_.image, fallbackTexture_.sampler);
         for (auto model = models_.rbegin(); model != models_.rend(); ++model) {
             geometryArena_.destroyUpload(model->upload);
             destroyMesh(model->gpu);
@@ -316,7 +282,8 @@ void VulkanModelResources::destroy()
         }
         retiredTextures_.drainAll(
             [this](RetiredTextureResources& retired) {
-                destroyTexture(retired.gpu.image, retired.gpu.sampler);
+                textureUploader_.destroyTexture(
+                    retired.gpu.image, retired.gpu.sampler);
             });
         retiredModels_.drainAll(
             [this](RetiredModelResources& retired) {
@@ -342,11 +309,9 @@ void VulkanModelResources::destroy()
     animationController_.clear();
     manifest_ = nullptr;
     assetRoot_.clear();
-    graphicsQueue_ = VK_NULL_HANDLE;
-    commandPool_ = VK_NULL_HANDLE;
+    textureUploader_.destroy();
     device_ = VK_NULL_HANDLE;
     allocator_ = nullptr;
-    physicalDevice_ = VK_NULL_HANDLE;
     supportsBc7_ = false;
     textureDescriptorCapacity_ = 0;
     textureSpace_.clear();
@@ -553,7 +518,7 @@ void VulkanModelResources::retireCompletedUploads()
             continue;
         }
         vkCheck(status, "vkGetFenceStatus texture upload failed");
-        destroyTextureUpload(slot.upload);
+        textureUploader_.destroyTextureUpload(slot.upload);
         slot.state = LoadState::Ready;
         ++textureUploadCompletions_;
     }
@@ -991,8 +956,9 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
             slot.state = LoadState::CpuReady;
         } catch (...) {
             if (!slot.upload.submitted) {
-                destroyTextureUpload(slot.upload);
-                destroyTexture(slot.gpu.image, slot.gpu.sampler);
+                textureUploader_.destroyTextureUpload(slot.upload);
+                textureUploader_.destroyTexture(
+                    slot.gpu.image, slot.gpu.sampler);
             }
             recordPublishFailure(slot, path, "texture", "preparation", wait);
             return true;
@@ -1025,7 +991,7 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
         }
         if (const auto* compressed =
                 std::get_if<CompressedTextureArtifact>(&texture)) {
-            beginTextureUpload(
+            textureUploader_.beginTextureUpload(
                 *compressed,
                 mipPlan->sourceBaseMip,
                 slot.gpu.image,
@@ -1041,7 +1007,7 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
             slot.residentBaseMip = mipPlan->sourceBaseMip;
         } else {
             const ImageData& image = std::get<ImageData>(texture);
-            beginTextureUpload(
+            textureUploader_.beginTextureUpload(
                 image,
                 slot.gpu.image,
                 slot.gpu.sampler,
@@ -1061,8 +1027,8 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
         ++textureUploadSubmissions_;
     } catch (...) {
         if (!slot.upload.submitted) {
-            destroyTextureUpload(slot.upload);
-            destroyTexture(slot.gpu.image, slot.gpu.sampler);
+            textureUploader_.destroyTextureUpload(slot.upload);
+            textureUploader_.destroyTexture(slot.gpu.image, slot.gpu.sampler);
         }
         recordPublishFailure(slot, path, "texture", "publication", wait);
     }
@@ -1239,7 +1205,8 @@ void VulkanModelResources::destroyCompletedResidencyRetirements()
         });
     retiredTextures_.drainCompleted(
         [this](RetiredTextureResources& retired) {
-            destroyTexture(retired.gpu.image, retired.gpu.sampler);
+            textureUploader_.destroyTexture(
+                retired.gpu.image, retired.gpu.sampler);
             textureResidency_.finishRetiring(retired.gpuBytes);
         });
 }
@@ -1810,29 +1777,6 @@ void VulkanModelResources::writeSkinningInstance(
         sizeof(instance));
 }
 
-void VulkanModelResources::createTextureBlocking(
-    const ImageData& image,
-    OwnedImage& textureImage,
-    VkSampler& sampler,
-    TextureInterpretation sampling)
-{
-    PendingTextureUpload upload;
-    try {
-        beginTextureUpload(image, textureImage, sampler, upload, sampling);
-        vkCheck(
-            vkWaitForFences(device_, 1, &upload.fence, VK_TRUE, UINT64_MAX),
-            "vkWaitForFences initial texture upload failed");
-        destroyTextureUpload(upload);
-    } catch (...) {
-        if (upload.submitted) {
-            (void)vkDeviceWaitIdle(device_);
-        }
-        destroyTextureUpload(upload);
-        destroyTexture(textureImage, sampler);
-        throw;
-    }
-}
-
 // The image, its view and its sampler, from a plan naming only what the two
 // upload paths disagree about.
 //
@@ -1840,408 +1784,6 @@ void VulkanModelResources::createTextureBlocking(
 // beginTextureUpload overloads. The sampler block in particular was verbatim
 // in both apart from one comment and the anisotropy condition - the kind of
 // duplicate that stays correct right up until someone changes one copy.
-void VulkanModelResources::createTextureImageAndSampler(
-    const TextureImagePlan& plan,
-    TextureInterpretation sampling,
-    OwnedImage& textureImage,
-    VkSampler& sampler) const
-{
-    textureImage.mipLevels = plan.mipLevels;
-    const VkImageCreateInfo imageInfo {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
-        .format = plan.format,
-        .extent = plan.extent,
-        .mipLevels = textureImage.mipLevels,
-        .arrayLayers = 1,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = plan.usage,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-    };
-    allocator_->createDeviceImage(
-        imageInfo,
-        textureImage.image,
-        textureImage.allocation,
-        plan.imageName);
-    vulkanDebug::setObjectName(
-        device_, VK_OBJECT_TYPE_IMAGE, textureImage.image, plan.imageName);
-
-    textureImage.view = createImageView(
-        textureImage.image,
-        plan.format,
-        VK_IMAGE_ASPECT_COLOR_BIT,
-        textureImage.mipLevels);
-    vulkanDebug::setObjectName(
-        device_, VK_OBJECT_TYPE_IMAGE_VIEW, textureImage.view, plan.viewName);
-
-    const VkFilter minFilter = vulkanMinificationFilter(sampling.minFilter);
-    // Anisotropy only earns its cost where a mip chain exists and the surface
-    // is viewed obliquely - the splatted ground being the case that motivated
-    // it. Point-sampled atlases keep their crisp texels.
-    const float anisotropy =
-        plan.anisotropyAllowed && minFilter == VK_FILTER_LINEAR
-        ? maxSamplerAnisotropy_
-        : 1.0f;
-    const VkSamplerCreateInfo samplerInfo {
-        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-        .magFilter = vulkanMagnificationFilter(sampling.magFilter),
-        .minFilter = minFilter,
-        .mipmapMode = vulkanMipmapMode(sampling.minFilter),
-        .addressModeU = vulkanAddressMode(sampling.wrapU),
-        .addressModeV = vulkanAddressMode(sampling.wrapV),
-        // glTF authors U and V only; there is no third axis to author. Every
-        // other sampler in the renderer clamps W for the same reason, and
-        // copying V here read as an unfinished line rather than a decision.
-        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .anisotropyEnable = anisotropy > 1.0f ? VK_TRUE : VK_FALSE,
-        .maxAnisotropy = anisotropy,
-        .compareEnable = VK_FALSE,
-        .minLod = 0.0f,
-        .maxLod = static_cast<float>(textureImage.mipLevels - 1U),
-    };
-    vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &sampler),
-        "vkCreateSampler", plan.failureLabel);
-    vulkanDebug::setObjectName(
-        device_, VK_OBJECT_TYPE_SAMPLER, sampler, plan.samplerName);
-}
-
-void VulkanModelResources::beginTextureUpload(
-    const ImageData& image,
-    OwnedImage& textureImage,
-    VkSampler& sampler,
-    PendingTextureUpload& upload,
-    TextureInterpretation sampling)
-{
-    if (!textureUploadPlan::uncompressedSourceIsUsable(
-            image.width, image.height, !image.rgba.empty())) {
-        throw std::runtime_error("Texture image contains no pixels");
-    }
-    const VkFormat textureFormat =
-        textureUploadPlan::uncompressedFormat(sampling.colorSpace);
-    VkFormatProperties formatProperties {};
-    vkGetPhysicalDeviceFormatProperties(
-        physicalDevice_, textureFormat, &formatProperties);
-    createTextureImageAndSampler(
-        {
-            .format = textureFormat,
-            .extent = { image.width, image.height, 1 },
-            .mipLevels = textureUploadPlan::uncompressedMipLevels(
-                image.width,
-                image.height,
-                sampling.minFilter,
-                formatProperties.optimalTilingFeatures),
-            // The chain is generated here by blitting down the levels, so the
-            // image is a transfer source as well as a destination.
-            .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-            // Not the same question as "more than one level" - see the note on
-            // the plan. A 1x1 image generates no chain and still answers yes.
-            .anisotropyAllowed = textureUploadPlan::generatesMipmaps(
-                sampling.minFilter, formatProperties.optimalTilingFeatures),
-            .imageName = "Model texture",
-            .viewName = "Model texture view",
-            .samplerName = "Model texture sampler",
-            .failureLabel = "model texture",
-        },
-        sampling,
-        textureImage,
-        sampler);
-
-    recordTextureCopy(image, textureImage, upload);
-}
-
-void VulkanModelResources::beginTextureUpload(
-    const CompressedTextureArtifact& texture,
-    uint32_t sourceBaseMip,
-    OwnedImage& textureImage,
-    VkSampler& sampler,
-    PendingTextureUpload& upload,
-    TextureInterpretation sampling)
-{
-    if (!textureUploadPlan::compressedSourceIsUsable(
-            texture.width,
-            texture.height,
-            texture.mips.size(),
-            sourceBaseMip)) {
-        throw std::runtime_error("Compressed texture contains no mip data");
-    }
-    const VkFormat textureFormat =
-        textureUploadPlan::compressedFormat(texture.format);
-    if (!textureUploadPlan::colorSpaceAgrees(
-            textureFormat, sampling.colorSpace)) {
-        throw std::runtime_error(
-            "Compressed texture format disagrees with source colour space");
-    }
-    const CompressedTextureMip& residentBase = texture.mips[sourceBaseMip];
-    const uint32_t mipLevels = textureUploadPlan::compressedMipLevels(
-        texture.mips.size(), sourceBaseMip);
-    createTextureImageAndSampler(
-        {
-            .format = textureFormat,
-            .extent = { residentBase.width, residentBase.height, 1 },
-            .mipLevels = mipLevels,
-            // Blocks are uploaded, never blitted, so this one is a transfer
-            // destination only.
-            .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                VK_IMAGE_USAGE_SAMPLED_BIT,
-            .anisotropyAllowed = mipLevels > 1U,
-            .imageName = "BC7 model texture",
-            .viewName = "BC7 model texture view",
-            .samplerName = "BC7 model texture sampler",
-            .failureLabel = "BC7 model texture",
-        },
-        sampling,
-        textureImage,
-        sampler);
-
-    recordTextureCopy(texture, sourceBaseMip, textureImage, upload);
-}
-
-void VulkanModelResources::recordTextureCopy(
-    const ImageData& image,
-    OwnedImage& textureImage,
-    PendingTextureUpload& upload)
-{
-    const VkDeviceSize imageBytes = image.rgba.size();
-    const auto staging = uploadRing_.reserve(imageBytes, 4);
-    if (!staging) {
-        throw std::runtime_error("Shared upload ring is full for texture upload");
-    }
-    upload.staging = *staging;
-    uploadRing_.write(upload.staging, 0, image.rgba.data(), image.rgba.size());
-
-    upload.commandBuffer = vulkanResources::beginOneShotCommands(
-        device_,
-        commandPool_,
-        "texture upload",
-        "Model texture upload command buffer");
-
-    const VkImageSubresourceRange allMipLevels {
-        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-        .baseMipLevel = 0,
-        .levelCount = textureImage.mipLevels,
-        .baseArrayLayer = 0,
-        .layerCount = 1,
-    };
-    vulkanResources::transitionImage(
-        upload.commandBuffer,
-        textureImage.image,
-        allMipLevels,
-        {},
-        {
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        });
-
-    VkBufferImageCopy copyRegion {
-        .bufferOffset = upload.staging.offset,
-        .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-        .imageExtent = { image.width, image.height, 1 },
-    };
-    vkCmdCopyBufferToImage(
-        upload.commandBuffer,
-        uploadRing_.buffer(),
-        textureImage.image,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        1,
-        &copyRegion);
-
-    int32_t sourceWidth = static_cast<int32_t>(image.width);
-    int32_t sourceHeight = static_cast<int32_t>(image.height);
-    for (uint32_t level = 1; level < textureImage.mipLevels; ++level) {
-        const VkImageSubresourceRange sourceLevel {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = level - 1,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        };
-        vulkanResources::transitionImage(
-            upload.commandBuffer,
-            textureImage.image,
-            sourceLevel,
-            {
-                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            },
-            {
-                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                VK_ACCESS_2_TRANSFER_READ_BIT,
-                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            });
-
-        const int32_t destinationWidth = std::max(sourceWidth / 2, 1);
-        const int32_t destinationHeight = std::max(sourceHeight / 2, 1);
-        const VkImageBlit blit {
-            .srcSubresource = {
-                VK_IMAGE_ASPECT_COLOR_BIT, level - 1, 0, 1 },
-            .srcOffsets = {
-                VkOffset3D { 0, 0, 0 },
-                VkOffset3D { sourceWidth, sourceHeight, 1 },
-            },
-            .dstSubresource = {
-                VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1 },
-            .dstOffsets = {
-                VkOffset3D { 0, 0, 0 },
-                VkOffset3D { destinationWidth, destinationHeight, 1 },
-            },
-        };
-        vkCmdBlitImage(
-            upload.commandBuffer,
-            textureImage.image,
-            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            textureImage.image,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            1,
-            &blit,
-            VK_FILTER_LINEAR);
-        vulkanResources::transitionImage(
-            upload.commandBuffer,
-            textureImage.image,
-            sourceLevel,
-            {
-                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                VK_ACCESS_2_TRANSFER_READ_BIT,
-                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            },
-            {
-                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            });
-        sourceWidth = destinationWidth;
-        sourceHeight = destinationHeight;
-    }
-    const VkImageSubresourceRange finalLevel {
-        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-        .baseMipLevel = textureImage.mipLevels - 1,
-        .levelCount = 1,
-        .baseArrayLayer = 0,
-        .layerCount = 1,
-    };
-    vulkanResources::transitionImage(
-        upload.commandBuffer,
-        textureImage.image,
-        finalLevel,
-        {
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        },
-        {
-            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        });
-    upload.fence = vulkanResources::submitOneShotCommands(
-        device_,
-        graphicsQueue_,
-        upload.commandBuffer,
-        "texture upload",
-        "Model texture upload fence");
-    uploadRing_.commit(upload.staging);
-    upload.submitted = true;
-}
-
-void VulkanModelResources::recordTextureCopy(
-    const CompressedTextureArtifact& texture,
-    uint32_t sourceBaseMip,
-    OwnedImage& textureImage,
-    PendingTextureUpload& upload)
-{
-    std::vector<VkDeviceSize> levelOffsets;
-    levelOffsets.reserve(textureImage.mipLevels);
-    VkDeviceSize uploadBytes = 0;
-    for (uint32_t sourceLevel = sourceBaseMip;
-         sourceLevel < texture.mips.size();
-         ++sourceLevel) {
-        const CompressedTextureMip& mip = texture.mips[sourceLevel];
-        uploadBytes = (uploadBytes + 15U) & ~VkDeviceSize { 15U };
-        levelOffsets.push_back(uploadBytes);
-        uploadBytes += mip.bytes.size();
-    }
-    const auto staging = uploadRing_.reserve(uploadBytes, 16);
-    if (!staging) {
-        throw std::runtime_error(
-            "Shared upload ring is full for compressed texture upload");
-    }
-    upload.staging = *staging;
-    std::vector<VkBufferImageCopy> copyRegions;
-    copyRegions.reserve(textureImage.mipLevels);
-    for (uint32_t level = 0; level < textureImage.mipLevels; ++level) {
-        const CompressedTextureMip& mip =
-            texture.mips[sourceBaseMip + level];
-        uploadRing_.write(
-            upload.staging,
-            levelOffsets[level],
-            mip.bytes.data(),
-            mip.bytes.size());
-        copyRegions.push_back({
-            .bufferOffset = upload.staging.offset + levelOffsets[level],
-            .imageSubresource = {
-                VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1 },
-            .imageExtent = { mip.width, mip.height, 1 },
-        });
-    }
-
-    upload.commandBuffer = vulkanResources::beginOneShotCommands(
-        device_,
-        commandPool_,
-        "compressed texture upload",
-        "BC7 texture upload command buffer");
-
-    const VkImageSubresourceRange allMipLevels {
-        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-        .baseMipLevel = 0,
-        .levelCount = textureImage.mipLevels,
-        .baseArrayLayer = 0,
-        .layerCount = 1,
-    };
-    vulkanResources::transitionImage(
-        upload.commandBuffer,
-        textureImage.image,
-        allMipLevels,
-        {},
-        {
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        });
-    vkCmdCopyBufferToImage(
-        upload.commandBuffer,
-        uploadRing_.buffer(),
-        textureImage.image,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        static_cast<uint32_t>(copyRegions.size()),
-        copyRegions.data());
-    vulkanResources::transitionImage(
-        upload.commandBuffer,
-        textureImage.image,
-        allMipLevels,
-        {
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        },
-        {
-            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        });
-    upload.fence = vulkanResources::submitOneShotCommands(
-        device_,
-        graphicsQueue_,
-        upload.commandBuffer,
-        "compressed texture upload",
-        "BC7 texture upload fence");
-    uploadRing_.commit(upload.staging);
-    upload.submitted = true;
-}
-
 bool VulkanModelResources::syncManifestTextures()
 {
     if (manifest_ == nullptr ||
@@ -2359,8 +1901,8 @@ VulkanModelResources::TextureUpdate VulkanModelResources::updateTexture(
         // sampler go with it, so descriptor sets pointing at them must be
         // rewritten - reported back rather than done here, because this class
         // does not own the descriptor sets.
-        destroyTexture(slot.gpu.image, slot.gpu.sampler);
-        createTextureBlocking(
+        textureUploader_.destroyTexture(slot.gpu.image, slot.gpu.sampler);
+        textureUploader_.createTextureBlocking(
             image,
             slot.gpu.image,
             slot.gpu.sampler,
@@ -2384,55 +1926,19 @@ VulkanModelResources::TextureUpdate VulkanModelResources::updateTexture(
         // Reuses the existing image, view and sampler, so every descriptor
         // that already points at this texture stays valid and no descriptor
         // rewrite is needed.
-        recordTextureCopy(image, slot.gpu.image, upload);
+        textureUploader_.recordTextureCopy(image, slot.gpu.image, upload);
         vkCheck(
             vkWaitForFences(device_, 1, &upload.fence, VK_TRUE, UINT64_MAX),
             "vkWaitForFences painted texture update failed");
-        destroyTextureUpload(upload);
+        textureUploader_.destroyTextureUpload(upload);
     } catch (...) {
         if (upload.submitted) {
             (void)vkDeviceWaitIdle(device_);
         }
-        destroyTextureUpload(upload);
+        textureUploader_.destroyTextureUpload(upload);
         throw;
     }
     return { .updated = true, .descriptorsChanged = false };
-}
-
-void VulkanModelResources::destroyTextureUpload(
-    PendingTextureUpload& upload)
-{
-    if (upload.staging.valid()) {
-        if (upload.submitted) {
-            uploadRing_.complete(upload.staging);
-        } else {
-            uploadRing_.abandon(upload.staging);
-        }
-    }
-    if (upload.fence) {
-        vkDestroyFence(device_, upload.fence, nullptr);
-    }
-    if (upload.commandBuffer) {
-        vkFreeCommandBuffers(
-            device_, commandPool_, 1, &upload.commandBuffer);
-    }
-    upload = {};
-}
-
-void VulkanModelResources::destroyTexture(
-    OwnedImage& textureImage,
-    VkSampler& sampler)
-{
-    if (sampler) {
-        vkDestroySampler(device_, sampler, nullptr);
-        sampler = VK_NULL_HANDLE;
-    }
-    if (textureImage.view) {
-        vkDestroyImageView(device_, textureImage.view, nullptr);
-        textureImage.view = VK_NULL_HANDLE;
-    }
-    allocator_->destroyImage(textureImage.image, textureImage.allocation);
-    textureImage = {};
 }
 
 void VulkanModelResources::destroyMesh(GpuMesh& mesh)
@@ -2470,31 +1976,6 @@ const VulkanModelResources::GpuMesh& VulkanModelResources::gpuMeshForModel(
         throw std::runtime_error("Render model mesh was used before it was ready");
     }
     return slot.gpu;
-}
-
-VkImageView VulkanModelResources::createImageView(
-    VkImage image,
-    VkFormat format,
-    VkImageAspectFlags aspectMask,
-    uint32_t mipLevels) const
-{
-    VkImageViewCreateInfo createInfo {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = image,
-        .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = format,
-        .components = {
-            VK_COMPONENT_SWIZZLE_IDENTITY,
-            VK_COMPONENT_SWIZZLE_IDENTITY,
-            VK_COMPONENT_SWIZZLE_IDENTITY,
-            VK_COMPONENT_SWIZZLE_IDENTITY,
-        },
-        .subresourceRange = { aspectMask, 0, mipLevels, 0, 1 },
-    };
-    VkImageView imageView = VK_NULL_HANDLE;
-    vkCheck(vkCreateImageView(device_, &createInfo, nullptr, &imageView),
-        "vkCreateImageView model texture failed");
-    return imageView;
 }
 
 } // namespace sokoban
