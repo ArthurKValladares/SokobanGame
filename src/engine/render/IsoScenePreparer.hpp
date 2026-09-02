@@ -306,6 +306,15 @@ private:
         Aabb worldBounds;
     };
 
+    // The water half of the isometric block, which is the only part of it that
+    // records renderables and so the only part that has to be a member. The
+    // tile faces, the authored faces and the depth sort are file-local free
+    // functions in the .cpp.
+    void appendWaterFaces(
+        PreparedRenderScene& scene,
+        const RenderFrameData& frameData,
+        const Frustum& mainSceneFrustum) const;
+
     PreparedRenderable reconcileRenderable(
         PreparedRenderable::Kind kind,
         std::size_t sourceIndex,

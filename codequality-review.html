@@ -1697,7 +1697,7 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       owns mesh upload, and texture format selection and mip generation.
     </p>
       <p>
-      <strong>Fifth seam: what an upload decides before it touches the
+      <strong>Sixth seam: what an upload decides before it touches the
       device.</strong> Choosing a <code>VkFormat</code>, deciding how many mip
       levels an image gets, and judging whether a source is usable at all are
       policy — they depend on the source, the authored sampler and one
@@ -1756,6 +1756,53 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       version and passes on the fixed one, and it runs in CI before configure.
     </p>
     <p>
+      <strong>Seventh seam: the two upload paths' shared middle.</strong> With
+      the decisions out, what was left in the two
+      <code>beginTextureUpload</code> overloads was 45 near-identical lines
+      each: create the image, name it, create its view, name that, build the
+      sampler, name that. The sampler block was <em>verbatim</em> in both apart
+      from one comment and the anisotropy condition — the shape that stays
+      correct exactly until someone changes one copy. It is now one
+      <code>createTextureImageAndSampler</code>, driven by a
+      <code>TextureImagePlan</code> that enumerates the six things the two
+      paths actually disagree about: format, extent, level count, usage flags,
+      whether anisotropy is allowed, and four debug strings.
+    </p>
+    <p>
+      Note what this did <em>not</em> do: it did not make the file shorter. The
+      two overloads plus the shared function come to 156 lines where the two
+      alone were 170, and the plan struct and its comments add 29 to the
+      header — <strong>+23 lines overall</strong>. The duplication was the
+      problem, not the length, and pretending otherwise would misreport it.
+    </p>
+    <p>
+      <strong>Evidence: 17,712 cases, zero differences.</strong> Both old
+      bodies and both new ones were compiled into one program against real
+      Vulkan headers with every entry point they reach stubbed to record its
+      arguments, then run over the cross product of five format-capability
+      sets, all six minification filters, both magnification filters, all nine
+      wrap-mode pairs, both colour spaces, eight image sizes, both BC7 formats,
+      four mip counts and every resident base mip in each. Compared: the raw
+      bytes of <code>VkImageCreateInfo</code> and
+      <code>VkSamplerCreateInfo</code>, all four debug strings, the failure
+      message each path would throw, the view's format and level count, the
+      resulting <code>mipLevels</code>, and whether an exception was thrown and
+      with what text. Seven mutations of the new code were all caught,
+      including two inside the shared block (swapping
+      <code>addressModeU</code>/<code>V</code>, and <code>maxLod</code> off by
+      one).
+    </p>
+    <p>
+      One of those mutations is the interesting one. Making the uncompressed
+      path ask the compressed path's anisotropy question — <code>mipLevels &gt;
+      1</code> instead of <code>generatesMipmaps</code> — produces
+      <strong>144 differences</strong>, all of them 1×1 images, which is
+      exactly the divergence described below. The refactor preserves it rather
+      than tidying it away, the plan struct says in so many words that the two
+      are not the same question, and the matrix now fails if anyone makes them
+      one.
+    </p>
+    <p>
       <strong>The compiler caught something I would have shipped.</strong>
       Folding the mip-level decision into one call removed a local
       <code>supportsMipmaps</code> that also gates <em>anisotropy</em> further
@@ -1794,7 +1841,7 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
         </thead>
         <tbody>
           <tr><td class="num">846</td><td><code>ApplicationDebugUi.cpp</code> · <code>draw</code></td><td>open — UI</td></tr>
-          <tr><td class="num">508</td><td><code>IsoScenePreparer.cpp</code> · <code>prepare</code></td><td>open</td></tr>
+          <tr><td class="num">513&nbsp;&rarr;&nbsp;135</td><td><code>IsoScenePreparer.cpp</code> · <code>prepare</code></td><td><b>done</b></td></tr>
           <tr><td class="num">487</td><td><code>VulkanSceneRecorder.cpp</code> · <code>drawIsoFrame</code></td><td>open — unlisted before</td></tr>
           <tr><td class="num">378</td><td><code>ui/OptionsMenu.cpp</code> · <code>draw</code></td><td>open — UI</td></tr>
           <tr><td class="num">319</td><td><code>AnimationCatalogDebugUi.cpp</code> · <code>draw</code></td><td>open — UI</td></tr>
@@ -1868,12 +1915,15 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       difference is deliberate.
     </p>
       <p>
-      <strong>Fifteen, not seventeen — and the count itself had drifted.</strong>
+      <strong>Fourteen, not seventeen — and the count itself had drifted.</strong>
       Re-measured against the tree as it now stands: two functions fell below
-      200 lines during other work, and one the report named
-      (<code>drawIsoFrame</code>, 487) no longer exists in that shape. The
-      largest is <code>IsoScenePreparer::prepare</code> at 513;
-      <code>ApplicationDebugUi::draw</code> was 854.
+      200 lines during other work, one the report named
+      (<code>drawIsoFrame</code>, 487) no longer exists in that shape, and
+      <code>IsoScenePreparer::prepare</code> — the largest of them at 513 — has
+      since been taken apart. <code>ApplicationDebugUi::draw</code> was 854. The
+      largest remaining is <code>OptionsMenu::draw</code> at 385, which is one of
+      the five UI panels held back deliberately; the largest that is not a panel
+      is <code>Application::buildRenderFrame</code> at 304.
     </p>
     <p>
       <strong><code>ApplicationDebugUi::draw</code>: 854 lines to 185.</strong>
@@ -1909,17 +1959,59 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       where the next cut starts.
     </p>
     <p>
-      <strong><code>IsoScenePreparer::prepare</code>: 513 lines to 459</strong>,
-      by lifting out the 60-line <code>appendIsoFace</code> lambda. That is a
-      modest cut on its own; what it actually buys is the 303-line isometric
-      block becoming extractable. The block was awkward to move because it
-      called two lambdas defined in <code>prepare</code>, and putting those
-      behind <code>std::function</code> in a per-face path was not acceptable.
-      Measuring what the lambda captured settled it: out of everything a
-      <code>[&amp;]</code> capture had in view, it used <strong>only
-      <code>scene</code></strong> — no members at all — so it is a free
-      function taking the scene, and the block now has one fewer thing holding
-      it in place.
+      <strong><code>IsoScenePreparer::prepare</code>: 513 lines to 135.</strong>
+      It is no longer in the 150-line list at all. The obstacle was never the
+      length: the 321-line isometric block at the centre of it called two
+      lambdas defined in <code>prepare</code>, and putting those behind
+      <code>std::function</code> in a per-face path was not acceptable. So the
+      lambdas had to go first, and each needed its own answer.
+    </p>
+    <p>
+      <code>appendIsoFace</code> — 60 lines, thirteen positional parameters,
+      five of them consecutive booleans — turned out to use <strong>only
+      <code>scene</code></strong> out of everything its <code>[&amp;]</code>
+      capture had in view. No members at all. So it is a file-local free
+      function taking an <code>IsoFaceRequest</code> struct, which retires the
+      positional parameters in the same move. <code>appendRenderable</code>
+      captured four things — <code>scene</code>, <code>frameData</code>,
+      <code>mainSceneFrustum</code> and <code>this</code> — but those four are
+      one idea, not four arguments: they are everything a renderable is culled
+      against. Bundled as a <code>RenderableCulling</code> aggregate, it is a
+      free function too, and the block was free to move.
+    </p>
+    <p>
+      It then split four ways along boundaries that were already in it:
+      <code>appendTileFaces</code> (158), <code>appendWaterFaces</code> (79),
+      <code>appendSourceIsoFaces</code> (32) and <code>orderIsoFaces</code> (52).
+      Only the water step records renderables through
+      <code>reconcileRenderable</code>, which owns the per-kind caches and the
+      identity counter — so only that one is a member, and it rebuilds its own
+      <code>RenderableCulling</code> rather than making the header name a
+      file-local type. <code>prepare</code> now reads as its own summary: clear,
+      lay out, kick off the auxiliary task, reserve, record tiles and authored
+      faces, then four named calls if the view is isometric.
+    </p>
+    <p>
+      <strong>Evidence.</strong> All four bodies moved
+      <strong>byte-identical</strong> — each is a contiguous verbatim run of the
+      pre-split file, found exactly once, at the same indentation, so not a line
+      was retyped. Exactly two tokens changed in the whole move and both were
+      forced: <code>opaqueFrontToBackSort_</code> became the
+      <code>opaqueFrontToBackSort</code> parameter, and
+      <code>projectIsoPoint</code> picked up its <code>IsoScenePreparer::</code>
+      qualifier once it left the class. The one way an extraction like this
+      changes behaviour <em>and still compiles</em> is a block-level
+      <code>return</code>, which would stop returning from <code>prepare</code>
+      and start returning from the new function, silently skipping the
+      auxiliary-task join and the translucency flag that follow; the original
+      block has none — all three <code>return</code>s in it are inside lambdas.
+      <code>IsoScenePreparerTests</code> (1764 checks) and
+      <code>GroundPickTests</code> (67) pass, and both mutations of the new seam
+      fail them: flipping the <code>opaqueFrontToBackSort</code> argument, and
+      calling <code>orderIsoFaces</code> before the authored faces are in. All
+      18 translation units that transitively include
+      <code>IsoScenePreparer.hpp</code> compile clean under the production
+      warning set.
     </p>
 </article>
 
@@ -3373,7 +3465,7 @@ cppcoreguidelines   40    ?   1,272*  903 avoid-magic-numbers
       <code>--header-filter</code> CMake passes. Four diagnostics come back, and
       every one of them is produced <em>identically</em> by the old
       <code>clang-analyzer-*</code>-only configuration — checked file by file on
-      the three files that fire. So 208 enabled checks report exactly what 
+      the three files that fire. So 208 enabled checks report exactly what
       the previous configuration reported.
     </p>
     <p>
@@ -3676,10 +3768,12 @@ tuned, with ColumnLimit: 0 (never re-wrap)  10,573   (210 of 367 files)</code>
       change is now made from evidence rather than suspicion — but that change
       itself is left for someone who can run the renderer.
       <span class="code">C2</span> is partly done and partly declined on
-      purpose: the count was wrong — 17 functions past 200 lines, not eight —
-      and the two whose correctness could be demonstrated were taken, while the
-      five ImGui panels are left because the only check on them is to look at
-      the screen. The double-counted eviction victim is fixed — measured first,
+      purpose: the count was wrong — 17 functions past 200 lines, not eight, and
+      14 today — and the ones whose correctness could be demonstrated were taken,
+      including the two largest, <code>ApplicationDebugUi::draw</code>
+      (854&nbsp;&rarr;&nbsp;185) and <code>IsoScenePreparer::prepare</code>
+      (513&nbsp;&rarr;&nbsp;135). The five ImGui panels are left because the only
+      check on them is to look at the screen. The double-counted eviction victim is fixed — measured first,
       which showed it was costing frames rather than memory. The point-shadow
       divergence is unified with the split deliberately kept, so the tap count is
       now one token per shader rather than two functions that look alike. Nothing

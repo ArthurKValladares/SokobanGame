@@ -1098,6 +1098,48 @@ static void prepareAuxiliaryGeometry(
 
 namespace {
 
+// Record a renderable and decide whether the main scene can see it.
+//
+// Was a lambda inside prepare() capturing scene, frameData, mainSceneFrustum
+// and `this`. Those four are a context rather than four arguments, so they are
+// one - which is what lets the isometric block below take the same object
+// instead of the lambda.
+struct RenderableCulling {
+    PreparedRenderScene& scene;
+    const RenderFrameData& frameData;
+    const Frustum& mainSceneFrustum;
+    bool enabled = false;
+};
+
+bool appendRenderable(
+    const RenderableCulling& culling,
+    PreparedRenderable renderable,
+    bool boundsTrusted)
+{
+    if (renderable.boundsReused) {
+        ++culling.scene.reusedRenderableBounds;
+    } else {
+        ++culling.scene.rebuiltRenderableBounds;
+    }
+    // An invalid or provisional bound must fail open. Non-cube model
+    // records currently retain their authored unit transform rather than
+    // the loaded mesh's local AABB, so they also remain visible until the
+    // mesh bound becomes part of the persistent contract.
+    renderable.mainSceneVisible =
+        !culling.enabled ||
+        culling.frameData.viewMode != RenderViewMode::Isometric3D ||
+        !boundsTrusted ||
+        !renderable.worldBounds.valid() ||
+        intersects(culling.mainSceneFrustum, renderable.worldBounds);
+    if (renderable.mainSceneVisible) {
+        ++culling.scene.visibleRenderables;
+    } else {
+        ++culling.scene.culledRenderables;
+    }
+    culling.scene.renderables.push_back(renderable);
+    return renderable.mainSceneVisible;
+}
+
 // One face of the isometric scene, as asked for rather than as positioned.
 //
 // This was a thirteen-parameter lambda inside prepare(), five of whose
@@ -1175,8 +1217,370 @@ void appendIsoFace(PreparedRenderScene& scene, const IsoFaceRequest& request)
     }
 }
 
+// Tile faces: the five faces of every tile in the frame, each with the
+// material, pick bounds and grid overlay that tile asks for.
+//
+// A free function because it needs nothing but the scene and the frame. Only
+// the water step below records renderables, so only that one has to stay a
+// member.
+void appendTileFaces(
+    PreparedRenderScene& scene, const RenderFrameData& frameData)
+{
+    for (std::size_t tileIndex = 0;
+         tileIndex < frameData.tiles.size();
+         ++tileIndex) {
+        const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
+        const bool mainSceneVisible =
+            scene.renderables[tileIndex].mainSceneVisible;
+        const float width = tile.size.x;
+        const float depth = tile.size.y;
+        const float height = std::max(tile.height, 0.0f);
+        const bool drawCube = tile.model.isCube() && !tile.pickOnly;
+        // Authored model transforms describe how mesh-local coordinates
+        // reach the world, but their unit cube is not necessarily the
+        // model's logical editor hit box. Model-backed editor objects such
+        // as selector flags carry an explicit centered position/size/
+        // height for picking, so use that volume for their invisible
+        // faces while leaving their visual transform untouched.
+        const std::array<Vec3, 8> corners = drawCube
+            ? tileCorners(tile)
+            : logicalTileCorners(tile);
+        const bool pickable =
+            tile.pickable &&
+            !tile.isEditorPreview &&
+            tile.effect != RenderSurfaceEffect::MirrorEnergy;
+        const PreparedSurfaceMaterial tileMaterial =
+            tile.effect == RenderSurfaceEffect::MirrorEnergy
+            ? PreparedSurfaceMaterial::MirrorEnergy
+            : PreparedSurfaceMaterial::Standard;
+        // Splatting is a top-surface treatment: the sides of a ground
+        // block keep the flat tile material.
+        const PreparedSurfaceMaterial topMaterial =
+            tile.effect == RenderSurfaceEffect::GroundSplat && drawCube
+            ? PreparedSurfaceMaterial::GroundSplat
+            : tileMaterial;
+        const GridPosition pickBoundsCell {
+            static_cast<int>(
+                std::floor(tile.position.x + 0.0001f)),
+            static_cast<int>(
+                std::floor(tile.position.y + 0.0001f)),
+        };
+
+        if (height <= 0.0f) {
+            appendIsoFace(scene, {
+                .vertices = {
+                    corners[0], corners[1], corners[2], corners[3]
+                },
+                .normal = { 0.0f, 0.0f, 1.0f },
+                .color = tile.color,
+                .cell = tile.cell,
+                .pickBoundsCell = pickBoundsCell,
+                .blurBehind = tile.blurBehind,
+                .showGrid = tile.showGrid,
+                .editorPreview = tile.isEditorPreview,
+                .pickable = pickable,
+                .drawable = drawCube && mainSceneVisible,
+                .gridSize = { width, depth },
+                .material = topMaterial,
+                .shorelineMask = 0,
+            });
+        } else {
+            appendIsoFace(scene, {
+                .vertices = {
+                    corners[0], corners[1], corners[5], corners[4]
+                },
+                .normal = { 0.0f, -1.0f, 0.0f },
+                .color = tile.color,
+                .cell = tile.cell,
+                .pickBoundsCell = pickBoundsCell,
+                .blurBehind = tile.blurBehind,
+                .showGrid = tile.showGrid,
+                .editorPreview = tile.isEditorPreview,
+                .pickable = pickable,
+                .drawable = drawCube && mainSceneVisible,
+                .gridSize = { width, height },
+                .material = tileMaterial,
+                .shorelineMask = 0,
+            });
+            appendIsoFace(scene, {
+                .vertices = {
+                    corners[1], corners[2], corners[6], corners[5]
+                },
+                .normal = { 1.0f, 0.0f, 0.0f },
+                .color = tile.color,
+                .cell = tile.cell,
+                .pickBoundsCell = pickBoundsCell,
+                .blurBehind = tile.blurBehind,
+                .showGrid = tile.showGrid,
+                .editorPreview = tile.isEditorPreview,
+                .pickable = pickable,
+                .drawable = drawCube && mainSceneVisible,
+                .gridSize = { depth, height },
+                .material = tileMaterial,
+                .shorelineMask = 0,
+            });
+            appendIsoFace(scene, {
+                .vertices = {
+                    corners[2], corners[3], corners[7], corners[6]
+                },
+                .normal = { 0.0f, 1.0f, 0.0f },
+                .color = tile.color,
+                .cell = tile.cell,
+                .pickBoundsCell = pickBoundsCell,
+                .blurBehind = tile.blurBehind,
+                .showGrid = tile.showGrid,
+                .editorPreview = tile.isEditorPreview,
+                .pickable = pickable,
+                .drawable = drawCube && mainSceneVisible,
+                .gridSize = { width, height },
+                .material = tileMaterial,
+                .shorelineMask = 0,
+            });
+            appendIsoFace(scene, {
+                .vertices = {
+                    corners[3], corners[0], corners[4], corners[7]
+                },
+                .normal = { -1.0f, 0.0f, 0.0f },
+                .color = tile.color,
+                .cell = tile.cell,
+                .pickBoundsCell = pickBoundsCell,
+                .blurBehind = tile.blurBehind,
+                .showGrid = tile.showGrid,
+                .editorPreview = tile.isEditorPreview,
+                .pickable = pickable,
+                .drawable = drawCube && mainSceneVisible,
+                .gridSize = { depth, height },
+                .material = tileMaterial,
+                .shorelineMask = 0,
+            });
+            appendIsoFace(scene, {
+                .vertices = {
+                    corners[4], corners[5], corners[6], corners[7]
+                },
+                .normal = { 0.0f, 0.0f, 1.0f },
+                .color = tile.color,
+                .cell = tile.cell,
+                .pickBoundsCell = pickBoundsCell,
+                .blurBehind = tile.blurBehind,
+                .showGrid = tile.showGrid,
+                .editorPreview = tile.isEditorPreview,
+                .pickable = pickable,
+                .drawable = drawCube && mainSceneVisible,
+                .gridSize = { width, depth },
+                .material = topMaterial,
+                .shorelineMask = 0,
+            });
+        }
+
+        if (!tile.model.isCube() && !tile.pickOnly && mainSceneVisible) {
+            (tile.blurBehind || tile.color.w < 1.0f ||
+                    tile.effect == RenderSurfaceEffect::MirrorEnergy
+                    ? scene.translucentModelIndices
+                    : scene.opaqueModelIndices)
+                .push_back(tileIndex);
+        }
+    }
+}
+
+// Authored isometric faces: projected into the same face list as the tiles,
+// and visible on the same terms as the renderable that carries them.
+void appendSourceIsoFaces(
+    PreparedRenderScene& scene, const RenderFrameData& frameData)
+{
+    for (std::size_t sourceIndex = 0;
+         sourceIndex < frameData.isoFaces.size();
+         ++sourceIndex) {
+        const RenderFrameData::IsoFace& source =
+            frameData.isoFaces[sourceIndex];
+        const Vec3 normal = normalize(cross(
+            subtract(source.vertices[1], source.vertices[0]),
+            subtract(source.vertices[2], source.vertices[0])));
+        PreparedIsoFace face {
+            .normal = normal,
+            .color = source.color,
+            .material =
+                source.effect == RenderSurfaceEffect::MirrorEnergy
+                ? PreparedSurfaceMaterial::MirrorEnergy
+                : PreparedSurfaceMaterial::Standard,
+            .depth = faceDepth(scene.isoLayout, source.vertices),
+        };
+        for (std::size_t i = 0; i < source.vertices.size(); ++i) {
+            face.worldVertices[i] = source.vertices[i];
+            face.vertices[i] = IsoScenePreparer::projectIsoPoint(
+                scene.isoLayout, scene.renderExtent, source.vertices[i]);
+        }
+        const std::size_t renderableIndex =
+            frameData.tiles.size() + sourceIndex;
+        if (scene.renderables[renderableIndex].mainSceneVisible) {
+            (face.material == PreparedSurfaceMaterial::MirrorEnergy
+                    ? scene.translucentFaceIndices
+                    : scene.opaqueFaceIndices)
+                .push_back(scene.isoFaces.size());
+        }
+        scene.isoFaces.push_back(face);
+    }
+}
+
+// The order the recorder draws the finished face lists in. Runs last, once
+// every face is in.
+void orderIsoFaces(PreparedRenderScene& scene, bool opaqueFrontToBackSort)
+{
+    auto fartherFirst = [&](std::size_t left, std::size_t right) {
+        return scene.isoFaces[left].depth > scene.isoFaces[right].depth;
+    };
+    auto nearerFirst = [&](std::size_t left, std::size_t right) {
+        return scene.isoFaces[left].depth < scene.isoFaces[right].depth;
+    };
+    // Opaque geometry draws nearest first so the depth test rejects
+    // occluded fragments before they are shaded. Back-to-front is the
+    // painter's-algorithm order, which guarantees the opposite: every
+    // hidden surface is shaded and then overwritten. Picking is unaffected
+    // - it walks pickFaceIndices, which is unsorted and compares depth
+    // explicitly.
+    //
+    // Two things make the opaque order matter anyway, and front-to-back
+    // has to handle both or it silently breaks geometry that the
+    // painter's order was covering for:
+    //
+    // 1. A face in this list may carry a sub-1.0 alpha - the editor's
+    //    ladder-rung preview does. Those blend, and they write depth.
+    //    Drawn front to back, such a face writes depth before the
+    //    geometry behind it is drawn, so it blends against the
+    //    background instead of against that geometry, and the result is
+    //    a hole rather than a tint. They are partitioned off and drawn
+    //    last, farthest first, which is the order the whole list used to
+    //    be in.
+    // 2. Coincident fully opaque surfaces are resolved by the depth
+    //    test, and LESS_OR_EQUAL hands the pixel to whichever drew last.
+    //    Reversing the order therefore reverses every tie. The recorder
+    //    answers that by running this prefix on LESS; the partition is
+    //    what tells it where the prefix ends.
+    if (opaqueFrontToBackSort) {
+        const auto blendedBegin = std::stable_partition(
+            scene.opaqueFaceIndices.begin(),
+            scene.opaqueFaceIndices.end(),
+            [&scene](std::size_t index) {
+                return scene.isoFaces[index].color.w >= 1.0f;
+            });
+        std::sort(
+            scene.opaqueFaceIndices.begin(), blendedBegin, nearerFirst);
+        std::sort(
+            blendedBegin, scene.opaqueFaceIndices.end(), fartherFirst);
+        scene.opaqueBlendedFirst = static_cast<std::size_t>(
+            blendedBegin - scene.opaqueFaceIndices.begin());
+    } else {
+        // Legacy order: one back-to-front list, blended faces left
+        // interleaved, and no LESS prefix for the recorder to apply.
+        std::ranges::sort(scene.opaqueFaceIndices, fartherFirst);
+        scene.opaqueBlendedFirst = scene.opaqueFaceIndices.size();
+    }
+    // Translucent geometry has no such freedom: blending is order
+    // dependent, so it must stay farthest first.
+    std::ranges::sort(scene.translucentFaceIndices, fartherFirst);
+}
+
 } // namespace
 
+// Water surfaces: a plane footprint each, clipped to the visible board.
+//
+// The one isometric step that stays a member: it records renderables through
+// reconcileRenderable, which owns the per-kind caches and the identity
+// counter. The body is the block verbatim - scene and frameData arrive as
+// arguments under their own names.
+void IsoScenePreparer::appendWaterFaces(
+    PreparedRenderScene& scene,
+    const RenderFrameData& frameData,
+    const Frustum& mainSceneFrustum) const
+{
+    // What every renderable is culled against, rebuilt here rather than
+    // passed in: RenderableCulling is file-local, and keeping it that way is
+    // what lets this take three ordinary arguments the header can name.
+    const RenderableCulling culling {
+        scene,
+        frameData,
+        mainSceneFrustum,
+        frustumCulling_,
+    };
+    for (const RenderFrameData::WaterSurface& water :
+         frameData.waterSurfaces) {
+        const std::size_t waterIndex = static_cast<std::size_t>(
+            &water - frameData.waterSurfaces.data());
+        float left = water.position.x;
+        float top = water.position.y;
+        float right = left + water.size.x;
+        float bottom = top + water.size.y;
+
+        // The exterior strips are deliberately excluded from camera fit,
+        // but still need to reach every visible ray/plane intersection.
+        // Extending only these large, non-pickable strips preserves the
+        // authored shoreline cells while avoiding a far-edge seam at
+        // wide aspect ratios or low camera pitches.
+        if (!water.pickable &&
+            (water.size.x > 1.0f || water.size.y > 1.0f)) {
+            const PlaneFootprint footprint = visiblePlaneFootprint(
+                scene.isoLayout,
+                scene.renderExtent,
+                water.elevation);
+            if (footprint.valid) {
+                const float boardRight =
+                    static_cast<float>(frameData.levelWidth);
+                const float boardBottom =
+                    static_cast<float>(frameData.levelHeight);
+                if (right <= -1.0f) {
+                    left = std::min(left, footprint.left);
+                    top = std::min(top, footprint.top);
+                    bottom = std::max(bottom, footprint.bottom);
+                } else if (left >= boardRight + 1.0f) {
+                    right = std::max(right, footprint.right);
+                    top = std::min(top, footprint.top);
+                    bottom = std::max(bottom, footprint.bottom);
+                } else if (bottom <= -1.0f) {
+                    left = std::min(left, footprint.left);
+                    right = std::max(right, footprint.right);
+                    top = std::min(top, footprint.top);
+                } else if (top >= boardBottom + 1.0f) {
+                    left = std::min(left, footprint.left);
+                    right = std::max(right, footprint.right);
+                    bottom = std::max(bottom, footprint.bottom);
+                }
+            }
+        }
+        const std::array<Vec3, 4> waterVertices {
+                Vec3 { left, top, water.elevation },
+                Vec3 { right, top, water.elevation },
+                Vec3 { right, bottom, water.elevation },
+                Vec3 { left, bottom, water.elevation },
+        };
+        const bool mainSceneVisible = appendRenderable(culling,
+            reconcileRenderable(
+                PreparedRenderable::Kind::WaterSurface,
+                waterIndex,
+                waterVertices,
+                water.cell,
+                cubeModel,
+                0,
+                water.shorelineMask),
+            true);
+        appendIsoFace(scene, {
+            .vertices = waterVertices,
+            .normal = { 0.0f, 0.0f, 1.0f },
+            .color = water.color,
+            .cell = water.cell,
+            .pickBoundsCell = {
+                static_cast<int>(std::floor(left + 0.0001f)),
+                static_cast<int>(std::floor(top + 0.0001f)),
+                },
+            .blurBehind = false,
+            .showGrid = false,
+            .editorPreview = water.isEditorPreview,
+            .pickable = water.pickable && !water.isEditorPreview,
+            .drawable = mainSceneVisible,
+            .gridSize = { right - left, bottom - top },
+            .material = PreparedSurfaceMaterial::Water,
+            .shorelineMask = water.shorelineMask,
+        });
+    }
+}
 void IsoScenePreparer::prepare(
     const RenderFrameData& frameData,
     Vec2 renderExtent,
@@ -1257,42 +1661,21 @@ void IsoScenePreparer::prepare(
     waterRenderableCache_.resize(frameData.waterSurfaces.size());
     isoFaceRenderableCache_.resize(frameData.isoFaces.size());
 
-    const auto appendRenderable = [
-                                      &scene,
-                                      &frameData,
-                                      &mainSceneFrustum,
-                                      this](
-                                      PreparedRenderable renderable,
-                                      bool boundsTrusted) {
-        if (renderable.boundsReused) {
-            ++scene.reusedRenderableBounds;
-        } else {
-            ++scene.rebuiltRenderableBounds;
-        }
-        // An invalid or provisional bound must fail open. Non-cube model
-        // records currently retain their authored unit transform rather than
-        // the loaded mesh's local AABB, so they also remain visible until the
-        // mesh bound becomes part of the persistent contract.
-        renderable.mainSceneVisible =
-            !frustumCulling_ ||
-            frameData.viewMode != RenderViewMode::Isometric3D ||
-            !boundsTrusted ||
-            !renderable.worldBounds.valid() ||
-            intersects(mainSceneFrustum, renderable.worldBounds);
-        if (renderable.mainSceneVisible) {
-            ++scene.visibleRenderables;
-        } else {
-            ++scene.culledRenderables;
-        }
-        scene.renderables.push_back(renderable);
-        return renderable.mainSceneVisible;
+    // What every renderable is culled against. Bundled because the three
+    // references and the flag travel together to every caller, including the
+    // isometric block below.
+    const RenderableCulling culling {
+        scene,
+        frameData,
+        mainSceneFrustum,
+        frustumCulling_,
     };
     for (std::size_t tileIndex = 0;
          tileIndex < frameData.tiles.size();
          ++tileIndex) {
         const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
         const std::array<Vec3, 8> corners = tileCorners(tile);
-        appendRenderable(
+        appendRenderable(culling,
             reconcileRenderable(
                 PreparedRenderable::Kind::Tile,
                 tileIndex,
@@ -1307,7 +1690,7 @@ void IsoScenePreparer::prepare(
          faceIndex < frameData.isoFaces.size();
          ++faceIndex) {
         const RenderFrameData::IsoFace& face = frameData.isoFaces[faceIndex];
-        appendRenderable(
+        appendRenderable(culling,
             reconcileRenderable(
                 PreparedRenderable::Kind::IsoFace,
                 faceIndex,
@@ -1320,327 +1703,10 @@ void IsoScenePreparer::prepare(
     }
 
     if (frameData.viewMode == RenderViewMode::Isometric3D) {
-        for (std::size_t tileIndex = 0;
-             tileIndex < frameData.tiles.size();
-             ++tileIndex) {
-            const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
-            const bool mainSceneVisible =
-                scene.renderables[tileIndex].mainSceneVisible;
-            const float width = tile.size.x;
-            const float depth = tile.size.y;
-            const float height = std::max(tile.height, 0.0f);
-            const bool drawCube = tile.model.isCube() && !tile.pickOnly;
-            // Authored model transforms describe how mesh-local coordinates
-            // reach the world, but their unit cube is not necessarily the
-            // model's logical editor hit box. Model-backed editor objects such
-            // as selector flags carry an explicit centered position/size/
-            // height for picking, so use that volume for their invisible
-            // faces while leaving their visual transform untouched.
-            const std::array<Vec3, 8> corners = drawCube
-                ? tileCorners(tile)
-                : logicalTileCorners(tile);
-            const bool pickable =
-                tile.pickable &&
-                !tile.isEditorPreview &&
-                tile.effect != RenderSurfaceEffect::MirrorEnergy;
-            const PreparedSurfaceMaterial tileMaterial =
-                tile.effect == RenderSurfaceEffect::MirrorEnergy
-                ? PreparedSurfaceMaterial::MirrorEnergy
-                : PreparedSurfaceMaterial::Standard;
-            // Splatting is a top-surface treatment: the sides of a ground
-            // block keep the flat tile material.
-            const PreparedSurfaceMaterial topMaterial =
-                tile.effect == RenderSurfaceEffect::GroundSplat && drawCube
-                ? PreparedSurfaceMaterial::GroundSplat
-                : tileMaterial;
-            const GridPosition pickBoundsCell {
-                static_cast<int>(
-                    std::floor(tile.position.x + 0.0001f)),
-                static_cast<int>(
-                    std::floor(tile.position.y + 0.0001f)),
-            };
-
-            if (height <= 0.0f) {
-                appendIsoFace(scene, {
-                    .vertices = {
-                        corners[0], corners[1], corners[2], corners[3]
-                    },
-                    .normal = { 0.0f, 0.0f, 1.0f },
-                    .color = tile.color,
-                    .cell = tile.cell,
-                    .pickBoundsCell = pickBoundsCell,
-                    .blurBehind = tile.blurBehind,
-                    .showGrid = tile.showGrid,
-                    .editorPreview = tile.isEditorPreview,
-                    .pickable = pickable,
-                    .drawable = drawCube && mainSceneVisible,
-                    .gridSize = { width, depth },
-                    .material = topMaterial,
-                    .shorelineMask = 0,
-                });
-            } else {
-                appendIsoFace(scene, {
-                    .vertices = {
-                        corners[0], corners[1], corners[5], corners[4]
-                    },
-                    .normal = { 0.0f, -1.0f, 0.0f },
-                    .color = tile.color,
-                    .cell = tile.cell,
-                    .pickBoundsCell = pickBoundsCell,
-                    .blurBehind = tile.blurBehind,
-                    .showGrid = tile.showGrid,
-                    .editorPreview = tile.isEditorPreview,
-                    .pickable = pickable,
-                    .drawable = drawCube && mainSceneVisible,
-                    .gridSize = { width, height },
-                    .material = tileMaterial,
-                    .shorelineMask = 0,
-                });
-                appendIsoFace(scene, {
-                    .vertices = {
-                        corners[1], corners[2], corners[6], corners[5]
-                    },
-                    .normal = { 1.0f, 0.0f, 0.0f },
-                    .color = tile.color,
-                    .cell = tile.cell,
-                    .pickBoundsCell = pickBoundsCell,
-                    .blurBehind = tile.blurBehind,
-                    .showGrid = tile.showGrid,
-                    .editorPreview = tile.isEditorPreview,
-                    .pickable = pickable,
-                    .drawable = drawCube && mainSceneVisible,
-                    .gridSize = { depth, height },
-                    .material = tileMaterial,
-                    .shorelineMask = 0,
-                });
-                appendIsoFace(scene, {
-                    .vertices = {
-                        corners[2], corners[3], corners[7], corners[6]
-                    },
-                    .normal = { 0.0f, 1.0f, 0.0f },
-                    .color = tile.color,
-                    .cell = tile.cell,
-                    .pickBoundsCell = pickBoundsCell,
-                    .blurBehind = tile.blurBehind,
-                    .showGrid = tile.showGrid,
-                    .editorPreview = tile.isEditorPreview,
-                    .pickable = pickable,
-                    .drawable = drawCube && mainSceneVisible,
-                    .gridSize = { width, height },
-                    .material = tileMaterial,
-                    .shorelineMask = 0,
-                });
-                appendIsoFace(scene, {
-                    .vertices = {
-                        corners[3], corners[0], corners[4], corners[7]
-                    },
-                    .normal = { -1.0f, 0.0f, 0.0f },
-                    .color = tile.color,
-                    .cell = tile.cell,
-                    .pickBoundsCell = pickBoundsCell,
-                    .blurBehind = tile.blurBehind,
-                    .showGrid = tile.showGrid,
-                    .editorPreview = tile.isEditorPreview,
-                    .pickable = pickable,
-                    .drawable = drawCube && mainSceneVisible,
-                    .gridSize = { depth, height },
-                    .material = tileMaterial,
-                    .shorelineMask = 0,
-                });
-                appendIsoFace(scene, {
-                    .vertices = {
-                        corners[4], corners[5], corners[6], corners[7]
-                    },
-                    .normal = { 0.0f, 0.0f, 1.0f },
-                    .color = tile.color,
-                    .cell = tile.cell,
-                    .pickBoundsCell = pickBoundsCell,
-                    .blurBehind = tile.blurBehind,
-                    .showGrid = tile.showGrid,
-                    .editorPreview = tile.isEditorPreview,
-                    .pickable = pickable,
-                    .drawable = drawCube && mainSceneVisible,
-                    .gridSize = { width, depth },
-                    .material = topMaterial,
-                    .shorelineMask = 0,
-                });
-            }
-
-            if (!tile.model.isCube() && !tile.pickOnly && mainSceneVisible) {
-                (tile.blurBehind || tile.color.w < 1.0f ||
-                        tile.effect == RenderSurfaceEffect::MirrorEnergy
-                        ? scene.translucentModelIndices
-                        : scene.opaqueModelIndices)
-                    .push_back(tileIndex);
-            }
-        }
-
-        for (const RenderFrameData::WaterSurface& water :
-             frameData.waterSurfaces) {
-            const std::size_t waterIndex = static_cast<std::size_t>(
-                &water - frameData.waterSurfaces.data());
-            float left = water.position.x;
-            float top = water.position.y;
-            float right = left + water.size.x;
-            float bottom = top + water.size.y;
-
-            // The exterior strips are deliberately excluded from camera fit,
-            // but still need to reach every visible ray/plane intersection.
-            // Extending only these large, non-pickable strips preserves the
-            // authored shoreline cells while avoiding a far-edge seam at
-            // wide aspect ratios or low camera pitches.
-            if (!water.pickable &&
-                (water.size.x > 1.0f || water.size.y > 1.0f)) {
-                const PlaneFootprint footprint = visiblePlaneFootprint(
-                    scene.isoLayout,
-                    scene.renderExtent,
-                    water.elevation);
-                if (footprint.valid) {
-                    const float boardRight =
-                        static_cast<float>(frameData.levelWidth);
-                    const float boardBottom =
-                        static_cast<float>(frameData.levelHeight);
-                    if (right <= -1.0f) {
-                        left = std::min(left, footprint.left);
-                        top = std::min(top, footprint.top);
-                        bottom = std::max(bottom, footprint.bottom);
-                    } else if (left >= boardRight + 1.0f) {
-                        right = std::max(right, footprint.right);
-                        top = std::min(top, footprint.top);
-                        bottom = std::max(bottom, footprint.bottom);
-                    } else if (bottom <= -1.0f) {
-                        left = std::min(left, footprint.left);
-                        right = std::max(right, footprint.right);
-                        top = std::min(top, footprint.top);
-                    } else if (top >= boardBottom + 1.0f) {
-                        left = std::min(left, footprint.left);
-                        right = std::max(right, footprint.right);
-                        bottom = std::max(bottom, footprint.bottom);
-                    }
-                }
-            }
-            const std::array<Vec3, 4> waterVertices {
-                    Vec3 { left, top, water.elevation },
-                    Vec3 { right, top, water.elevation },
-                    Vec3 { right, bottom, water.elevation },
-                    Vec3 { left, bottom, water.elevation },
-            };
-            const bool mainSceneVisible = appendRenderable(
-                reconcileRenderable(
-                    PreparedRenderable::Kind::WaterSurface,
-                    waterIndex,
-                    waterVertices,
-                    water.cell,
-                    cubeModel,
-                    0,
-                    water.shorelineMask),
-                true);
-            appendIsoFace(scene, {
-                .vertices = waterVertices,
-                .normal = { 0.0f, 0.0f, 1.0f },
-                .color = water.color,
-                .cell = water.cell,
-                .pickBoundsCell = {
-                    static_cast<int>(std::floor(left + 0.0001f)),
-                    static_cast<int>(std::floor(top + 0.0001f)),
-                    },
-                .blurBehind = false,
-                .showGrid = false,
-                .editorPreview = water.isEditorPreview,
-                .pickable = water.pickable && !water.isEditorPreview,
-                .drawable = mainSceneVisible,
-                .gridSize = { right - left, bottom - top },
-                .material = PreparedSurfaceMaterial::Water,
-                .shorelineMask = water.shorelineMask,
-            });
-        }
-
-        for (std::size_t sourceIndex = 0;
-             sourceIndex < frameData.isoFaces.size();
-             ++sourceIndex) {
-            const RenderFrameData::IsoFace& source =
-                frameData.isoFaces[sourceIndex];
-            const Vec3 normal = normalize(cross(
-                subtract(source.vertices[1], source.vertices[0]),
-                subtract(source.vertices[2], source.vertices[0])));
-            PreparedIsoFace face {
-                .normal = normal,
-                .color = source.color,
-                .material =
-                    source.effect == RenderSurfaceEffect::MirrorEnergy
-                    ? PreparedSurfaceMaterial::MirrorEnergy
-                    : PreparedSurfaceMaterial::Standard,
-                .depth = faceDepth(scene.isoLayout, source.vertices),
-            };
-            for (std::size_t i = 0; i < source.vertices.size(); ++i) {
-                face.worldVertices[i] = source.vertices[i];
-                face.vertices[i] = projectIsoPoint(
-                    scene.isoLayout, scene.renderExtent, source.vertices[i]);
-            }
-            const std::size_t renderableIndex =
-                frameData.tiles.size() + sourceIndex;
-            if (scene.renderables[renderableIndex].mainSceneVisible) {
-                (face.material == PreparedSurfaceMaterial::MirrorEnergy
-                        ? scene.translucentFaceIndices
-                        : scene.opaqueFaceIndices)
-                    .push_back(scene.isoFaces.size());
-            }
-            scene.isoFaces.push_back(face);
-        }
-
-        auto fartherFirst = [&](std::size_t left, std::size_t right) {
-            return scene.isoFaces[left].depth > scene.isoFaces[right].depth;
-        };
-        auto nearerFirst = [&](std::size_t left, std::size_t right) {
-            return scene.isoFaces[left].depth < scene.isoFaces[right].depth;
-        };
-        // Opaque geometry draws nearest first so the depth test rejects
-        // occluded fragments before they are shaded. Back-to-front is the
-        // painter's-algorithm order, which guarantees the opposite: every
-        // hidden surface is shaded and then overwritten. Picking is unaffected
-        // - it walks pickFaceIndices, which is unsorted and compares depth
-        // explicitly.
-        //
-        // Two things make the opaque order matter anyway, and front-to-back
-        // has to handle both or it silently breaks geometry that the
-        // painter's order was covering for:
-        //
-        // 1. A face in this list may carry a sub-1.0 alpha - the editor's
-        //    ladder-rung preview does. Those blend, and they write depth.
-        //    Drawn front to back, such a face writes depth before the
-        //    geometry behind it is drawn, so it blends against the
-        //    background instead of against that geometry, and the result is
-        //    a hole rather than a tint. They are partitioned off and drawn
-        //    last, farthest first, which is the order the whole list used to
-        //    be in.
-        // 2. Coincident fully opaque surfaces are resolved by the depth
-        //    test, and LESS_OR_EQUAL hands the pixel to whichever drew last.
-        //    Reversing the order therefore reverses every tie. The recorder
-        //    answers that by running this prefix on LESS; the partition is
-        //    what tells it where the prefix ends.
-        if (opaqueFrontToBackSort_) {
-            const auto blendedBegin = std::stable_partition(
-                scene.opaqueFaceIndices.begin(),
-                scene.opaqueFaceIndices.end(),
-                [&scene](std::size_t index) {
-                    return scene.isoFaces[index].color.w >= 1.0f;
-                });
-            std::sort(
-                scene.opaqueFaceIndices.begin(), blendedBegin, nearerFirst);
-            std::sort(
-                blendedBegin, scene.opaqueFaceIndices.end(), fartherFirst);
-            scene.opaqueBlendedFirst = static_cast<std::size_t>(
-                blendedBegin - scene.opaqueFaceIndices.begin());
-        } else {
-            // Legacy order: one back-to-front list, blended faces left
-            // interleaved, and no LESS prefix for the recorder to apply.
-            std::ranges::sort(scene.opaqueFaceIndices, fartherFirst);
-            scene.opaqueBlendedFirst = scene.opaqueFaceIndices.size();
-        }
-        // Translucent geometry has no such freedom: blending is order
-        // dependent, so it must stay farthest first.
-        std::ranges::sort(scene.translucentFaceIndices, fartherFirst);
-
+        appendTileFaces(scene, frameData);
+        appendWaterFaces(scene, frameData, mainSceneFrustum);
+        appendSourceIsoFaces(scene, frameData);
+        orderIsoFaces(scene, opaqueFrontToBackSort_);
     }
     auxiliaryTask.finish();
     scene.hasTranslucentContent =

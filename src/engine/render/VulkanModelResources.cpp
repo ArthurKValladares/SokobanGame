@@ -1833,6 +1833,80 @@ void VulkanModelResources::createTextureBlocking(
     }
 }
 
+// The image, its view and its sampler, from a plan naming only what the two
+// upload paths disagree about.
+//
+// This was forty-five near-identical lines in each of the two
+// beginTextureUpload overloads. The sampler block in particular was verbatim
+// in both apart from one comment and the anisotropy condition - the kind of
+// duplicate that stays correct right up until someone changes one copy.
+void VulkanModelResources::createTextureImageAndSampler(
+    const TextureImagePlan& plan,
+    TextureInterpretation sampling,
+    OwnedImage& textureImage,
+    VkSampler& sampler) const
+{
+    textureImage.mipLevels = plan.mipLevels;
+    const VkImageCreateInfo imageInfo {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = plan.format,
+        .extent = plan.extent,
+        .mipLevels = textureImage.mipLevels,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = plan.usage,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    allocator_->createDeviceImage(
+        imageInfo,
+        textureImage.image,
+        textureImage.allocation,
+        plan.imageName);
+    vulkanDebug::setObjectName(
+        device_, VK_OBJECT_TYPE_IMAGE, textureImage.image, plan.imageName);
+
+    textureImage.view = createImageView(
+        textureImage.image,
+        plan.format,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        textureImage.mipLevels);
+    vulkanDebug::setObjectName(
+        device_, VK_OBJECT_TYPE_IMAGE_VIEW, textureImage.view, plan.viewName);
+
+    const VkFilter minFilter = vulkanMinificationFilter(sampling.minFilter);
+    // Anisotropy only earns its cost where a mip chain exists and the surface
+    // is viewed obliquely - the splatted ground being the case that motivated
+    // it. Point-sampled atlases keep their crisp texels.
+    const float anisotropy =
+        plan.anisotropyAllowed && minFilter == VK_FILTER_LINEAR
+        ? maxSamplerAnisotropy_
+        : 1.0f;
+    const VkSamplerCreateInfo samplerInfo {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = vulkanMagnificationFilter(sampling.magFilter),
+        .minFilter = minFilter,
+        .mipmapMode = vulkanMipmapMode(sampling.minFilter),
+        .addressModeU = vulkanAddressMode(sampling.wrapU),
+        .addressModeV = vulkanAddressMode(sampling.wrapV),
+        // glTF authors U and V only; there is no third axis to author. Every
+        // other sampler in the renderer clamps W for the same reason, and
+        // copying V here read as an unfinished line rather than a decision.
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .anisotropyEnable = anisotropy > 1.0f ? VK_TRUE : VK_FALSE,
+        .maxAnisotropy = anisotropy,
+        .compareEnable = VK_FALSE,
+        .minLod = 0.0f,
+        .maxLod = static_cast<float>(textureImage.mipLevels - 1U),
+    };
+    vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &sampler),
+        "vkCreateSampler", plan.failureLabel);
+    vulkanDebug::setObjectName(
+        device_, VK_OBJECT_TYPE_SAMPLER, sampler, plan.samplerName);
+}
+
 void VulkanModelResources::beginTextureUpload(
     const ImageData& image,
     OwnedImage& textureImage,
@@ -1849,72 +1923,31 @@ void VulkanModelResources::beginTextureUpload(
     VkFormatProperties formatProperties {};
     vkGetPhysicalDeviceFormatProperties(
         physicalDevice_, textureFormat, &formatProperties);
-    // Held because it also gates anisotropy below, where it is not the same
-    // question as "more than one level" - see the note on generatesMipmaps.
-    const bool supportsMipmaps = textureUploadPlan::generatesMipmaps(
-        sampling.minFilter, formatProperties.optimalTilingFeatures);
-    textureImage.mipLevels = textureUploadPlan::uncompressedMipLevels(
-        image.width,
-        image.height,
-        sampling.minFilter,
-        formatProperties.optimalTilingFeatures);
-    VkImageCreateInfo imageInfo {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
-        .format = textureFormat,
-        .extent = { image.width, image.height, 1 },
-        .mipLevels = textureImage.mipLevels,
-        .arrayLayers = 1,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-            VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-    };
-    allocator_->createDeviceImage(
-        imageInfo,
-        textureImage.image,
-        textureImage.allocation,
-        "Model texture");
-    vulkanDebug::setObjectName(
-        device_, VK_OBJECT_TYPE_IMAGE, textureImage.image, "Model texture");
-
-    textureImage.view = createImageView(
-        textureImage.image,
-        textureFormat,
-        VK_IMAGE_ASPECT_COLOR_BIT,
-        textureImage.mipLevels);
-    vulkanDebug::setObjectName(
-        device_, VK_OBJECT_TYPE_IMAGE_VIEW, textureImage.view, "Model texture view");
-    const VkFilter minFilter = vulkanMinificationFilter(sampling.minFilter);
-    const float anisotropy = supportsMipmaps && minFilter == VK_FILTER_LINEAR
-        ? maxSamplerAnisotropy_
-        : 1.0f;
-    VkSamplerCreateInfo samplerInfo {
-        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-        .magFilter = vulkanMagnificationFilter(sampling.magFilter),
-        .minFilter = minFilter,
-        .mipmapMode = vulkanMipmapMode(sampling.minFilter),
-        .addressModeU = vulkanAddressMode(sampling.wrapU),
-        .addressModeV = vulkanAddressMode(sampling.wrapV),
-        // glTF authors U and V only; there is no third axis to author. Every
-        // other sampler in the renderer clamps W for the same reason, and
-        // copying V here read as an unfinished line rather than a decision.
-        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        // Anisotropy only earns its cost where a mip chain exists and the
-        // surface is viewed obliquely - the splatted ground being the case
-        // that motivated it. Point-sampled atlases keep their crisp texels.
-        .anisotropyEnable = anisotropy > 1.0f ? VK_TRUE : VK_FALSE,
-        .maxAnisotropy = anisotropy,
-        .compareEnable = VK_FALSE,
-        .minLod = 0.0f,
-        .maxLod = static_cast<float>(textureImage.mipLevels - 1U),
-    };
-    vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &sampler),
-        "vkCreateSampler model texture failed");
-    vulkanDebug::setObjectName(
-        device_, VK_OBJECT_TYPE_SAMPLER, sampler, "Model texture sampler");
+    createTextureImageAndSampler(
+        {
+            .format = textureFormat,
+            .extent = { image.width, image.height, 1 },
+            .mipLevels = textureUploadPlan::uncompressedMipLevels(
+                image.width,
+                image.height,
+                sampling.minFilter,
+                formatProperties.optimalTilingFeatures),
+            // The chain is generated here by blitting down the levels, so the
+            // image is a transfer source as well as a destination.
+            .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            // Not the same question as "more than one level" - see the note on
+            // the plan. A 1x1 image generates no chain and still answers yes.
+            .anisotropyAllowed = textureUploadPlan::generatesMipmaps(
+                sampling.minFilter, formatProperties.optimalTilingFeatures),
+            .imageName = "Model texture",
+            .viewName = "Model texture view",
+            .samplerName = "Model texture sampler",
+            .failureLabel = "model texture",
+        },
+        sampling,
+        textureImage,
+        sampler);
 
     recordTextureCopy(image, textureImage, upload);
 }
@@ -1942,66 +1975,27 @@ void VulkanModelResources::beginTextureUpload(
             "Compressed texture format disagrees with source colour space");
     }
     const CompressedTextureMip& residentBase = texture.mips[sourceBaseMip];
-    textureImage.mipLevels = textureUploadPlan::compressedMipLevels(
+    const uint32_t mipLevels = textureUploadPlan::compressedMipLevels(
         texture.mips.size(), sourceBaseMip);
-    const VkImageCreateInfo imageInfo {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
-        .format = textureFormat,
-        .extent = { residentBase.width, residentBase.height, 1 },
-        .mipLevels = textureImage.mipLevels,
-        .arrayLayers = 1,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-            VK_IMAGE_USAGE_SAMPLED_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-    };
-    allocator_->createDeviceImage(
-        imageInfo,
-        textureImage.image,
-        textureImage.allocation,
-        "BC7 model texture");
-    vulkanDebug::setObjectName(
-        device_, VK_OBJECT_TYPE_IMAGE, textureImage.image,
-        "BC7 model texture");
-    textureImage.view = createImageView(
-        textureImage.image,
-        textureFormat,
-        VK_IMAGE_ASPECT_COLOR_BIT,
-        textureImage.mipLevels);
-    vulkanDebug::setObjectName(
-        device_, VK_OBJECT_TYPE_IMAGE_VIEW, textureImage.view,
-        "BC7 model texture view");
+    createTextureImageAndSampler(
+        {
+            .format = textureFormat,
+            .extent = { residentBase.width, residentBase.height, 1 },
+            .mipLevels = mipLevels,
+            // Blocks are uploaded, never blitted, so this one is a transfer
+            // destination only.
+            .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                VK_IMAGE_USAGE_SAMPLED_BIT,
+            .anisotropyAllowed = mipLevels > 1U,
+            .imageName = "BC7 model texture",
+            .viewName = "BC7 model texture view",
+            .samplerName = "BC7 model texture sampler",
+            .failureLabel = "BC7 model texture",
+        },
+        sampling,
+        textureImage,
+        sampler);
 
-    const VkFilter minFilter = vulkanMinificationFilter(sampling.minFilter);
-    const float anisotropy = textureImage.mipLevels > 1U &&
-            minFilter == VK_FILTER_LINEAR
-        ? maxSamplerAnisotropy_
-        : 1.0f;
-    const VkSamplerCreateInfo samplerInfo {
-        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-        .magFilter = vulkanMagnificationFilter(sampling.magFilter),
-        .minFilter = minFilter,
-        .mipmapMode = vulkanMipmapMode(sampling.minFilter),
-        .addressModeU = vulkanAddressMode(sampling.wrapU),
-        .addressModeV = vulkanAddressMode(sampling.wrapV),
-        // glTF authors U and V only; there is no third axis to author. Every
-        // other sampler in the renderer clamps W for the same reason, and
-        // copying V here read as an unfinished line rather than a decision.
-        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-        .anisotropyEnable = anisotropy > 1.0f ? VK_TRUE : VK_FALSE,
-        .maxAnisotropy = anisotropy,
-        .compareEnable = VK_FALSE,
-        .minLod = 0.0f,
-        .maxLod = static_cast<float>(textureImage.mipLevels - 1U),
-    };
-    vkCheck(vkCreateSampler(device_, &samplerInfo, nullptr, &sampler),
-        "vkCreateSampler BC7 model texture failed");
-    vulkanDebug::setObjectName(
-        device_, VK_OBJECT_TYPE_SAMPLER, sampler,
-        "BC7 model texture sampler");
     recordTextureCopy(texture, sourceBaseMip, textureImage, upload);
 }
 

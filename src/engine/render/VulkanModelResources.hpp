@@ -490,6 +490,35 @@ private:
         OwnedImage& gpuImage,
         VkSampler& sampler,
         TextureInterpretation sampling);
+    // What the two upload paths disagree about. Everything after this - the
+    // image, its view, its sampler and the four debug strings - is the same
+    // work, and was written out twice in full.
+    struct TextureImagePlan {
+        VkFormat format = VK_FORMAT_UNDEFINED;
+        VkExtent3D extent {};
+        uint32_t mipLevels = 1;
+        VkImageUsageFlags usage = 0;
+        // Whether this upload may filter anisotropically. The two paths ask
+        // different questions and both are kept: an uncompressed upload asks
+        // whether the format can generate a chain at all, a compressed one
+        // whether the chain it was handed has more than one level. The two
+        // disagree only for a 1x1 uncompressed image, where the answer cannot
+        // matter - but they are not the same question, so they are not
+        // written as if they were.
+        bool anisotropyAllowed = false;
+        const char* imageName = "";
+        const char* viewName = "";
+        const char* samplerName = "";
+        // Composed into "vkCreateSampler <label> failed" only on failure.
+        const char* failureLabel = "";
+    };
+
+    // Creates the image, its view and its sampler, and names all three.
+    void createTextureImageAndSampler(
+        const TextureImagePlan& plan,
+        TextureInterpretation sampling,
+        OwnedImage& textureImage,
+        VkSampler& sampler) const;
     void beginTextureUpload(
         const ImageData& image,
         OwnedImage& gpuImage,

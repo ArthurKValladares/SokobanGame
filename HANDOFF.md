@@ -323,18 +323,20 @@ layout made table-driven; the last three phase timings converted to
 eight-corner expansions; and `beginOneShotCommands`/`submitOneShotCommands`
 given the six copies of one-shot command-buffer and fence lifetime; and
 `RenderFrameParts` given the 42% of `RenderFrameBuilder.cpp` that both the
-gameplay and the editor builders were sharing without saying so; and the three
-tooling gates - warnings-as-errors, a widened clang-tidy set, and a measured
-`.clang-format` - given numbers instead of opinions.
+gameplay and the editor builders were sharing without saying so; and
+`createTextureImageAndSampler` given the 45 duplicated lines in each of the two
+`beginTextureUpload` overloads; and the three tooling gates -
+warnings-as-errors, a widened clang-tidy set, and a measured `.clang-format` -
+given numbers instead of opinions.
 
 Still open, in the order the report recommends: splitting
 `VulkanModelResources` proper and collapsing its three copies of the load-state
-machine, then the remaining long functions. There are 17 functions at or past
-200 lines, not the eight the review first reported - `drawIsoFrame` (487),
-`VulkanSceneRecorder::record` (305) and `Application::buildRenderFrame` (302)
-are among those it never named. Five of the sixteen still open are ImGui panels
-and are deliberately last: splitting one is mechanical, but the only check that
-it still behaves is to look at the screen.
+machine, then the remaining long functions. **14** are at or past 200 lines as
+of the `IsoScenePreparer` split below, not the eight the review first reported -
+`drawIsoFrame` (487), `VulkanSceneRecorder::record` (305) and
+`Application::buildRenderFrame` (304) are among those it never named. Five of
+the fourteen are ImGui panels and are deliberately last: splitting one is
+mechanical, but the only check that it still behaves is to look at the screen.
 
 `ApplicationDebugUi::draw` is done: 854 lines to 185, its seven debug panels
 now file-local functions (`drawWaterSection`, `drawLightingSection` and the
@@ -345,22 +347,74 @@ verbatim; the one deleted line was `draw`'s now-unused `settings` local, which
 the warnings gate found. `drawRenderingStatsSection` is still 293 lines and is
 where the next cut starts.
 
-`IsoScenePreparer::prepare` is 513 lines down to 459: its 60-line
-`appendIsoFace` lambda is now a file-local free function taking an
-`IsoFaceRequest` struct, which also retires the thirteen positional parameters
-(five of them consecutive booleans) the review flagged. It is a free function
-because the `[&]` lambda turned out to use only `scene` out of everything it
-could see - no members - which is also what makes the 303-line isometric block
-inside `prepare` extractable now: it called two lambdas defined in `prepare`,
-and one of them has left. `appendRenderable` is the other, and is the next
-thing to look at before that block can move.
+The seventh `VulkanModelResources` seam is cut. With the upload *decisions*
+already out in `TextureUploadPlan`, what was left duplicated in the two
+`beginTextureUpload` overloads was 45 near-identical lines each: create the
+image, name it, create its view, name that, build the sampler, name that. The
+sampler block was verbatim in both apart from one comment and the anisotropy
+condition. It is now one `createTextureImageAndSampler` driven by a
+`TextureImagePlan` naming the six things the two paths genuinely disagree
+about.
 
-Re-measured while doing it: **15** functions are at or past 200 lines, not the
-17 the review reported and not the 16 recorded here - two fell below the line
-during other work, and `drawIsoFrame` (487) no longer exists in that shape. The
-largest is now `IsoScenePreparer::prepare` at 513. Its 303-line isometric block
-is the obvious cut but captures two per-tile lambdas, so it needs a shape that
-does not put them behind `std::function` in a per-face path.
+This does **not** make the file shorter: 156 lines where the two overloads were
+170, plus 29 in the header for the plan and its comments, so +23 overall. The
+duplication was the problem, not the length.
+
+Verified by differential: both old bodies and both new ones compiled into one
+program against real Vulkan headers with every entry point stubbed to record
+its arguments, run over 17,712 cases - five format-capability sets x six
+minification filters x two magnification filters x nine wrap pairs x two colour
+spaces x eight sizes, and for the compressed path two BC7 formats x four mip
+counts x every resident base mip. Compared: the raw bytes of
+`VkImageCreateInfo` and `VkSamplerCreateInfo`, all four debug strings, the
+failure message, the view's format and level count, the resulting `mipLevels`,
+and thrown-exception equivalence. **Zero differences.** Seven mutations were all
+caught, two of them inside the shared block.
+
+The one to keep in mind: making the uncompressed path ask the compressed path's
+anisotropy question (`mipLevels > 1` instead of `generatesMipmaps`) produces
+144 differences, all 1x1 images. That divergence is pre-existing and deliberate,
+it is now stated in the plan struct, and the matrix fails if anyone unifies the
+two questions.
+
+`IsoScenePreparer::prepare` is done: **513 lines to 135**, and it is no longer
+in the 150-line list at all. It went in four steps, each of which had to happen
+before the next was possible:
+
+1. The 60-line `appendIsoFace` lambda became a file-local free function taking
+   an `IsoFaceRequest` struct, retiring the thirteen positional parameters
+   (five of them consecutive booleans) the review flagged. Free rather than a
+   member because the `[&]` lambda turned out to use only `scene`.
+2. The `appendRenderable` lambda - which captured `scene`, `frameData`,
+   `mainSceneFrustum` and `this` - became a free function taking a
+   `RenderableCulling` aggregate of those four. That is what unblocked the
+   block: it called two lambdas defined in `prepare`, and both had now left.
+3. The 321-line isometric block moved out whole.
+4. That block split four ways along the boundaries already in it:
+   `appendTileFaces` (158), `IsoScenePreparer::appendWaterFaces` (79),
+   `appendSourceIsoFaces` (32) and `orderIsoFaces` (52). Three are file-local
+   free functions; only the water step records renderables through
+   `reconcileRenderable`, so only it stays a member, and it rebuilds its own
+   `RenderableCulling` so the header never has to name that file-local type.
+
+All four bodies moved **byte-identical** - each is a contiguous verbatim run of
+the pre-split file, found exactly once, at the same 4-space indent. Two tokens
+changed in total and both were forced: `opaqueFrontToBackSort_` became the
+`opaqueFrontToBackSort` parameter in `orderIsoFaces`, and `projectIsoPoint`
+picked up its `IsoScenePreparer::` qualifier once it left the class. The
+original block contains no block-level `return` (all three `return`s in it are
+inside lambdas), so nothing that used to run after it can be skipped now - which
+was the one way an extraction like this can change behaviour silently and
+still compile.
+
+Verified: `IsoScenePreparerTests` 1764 checks and `GroundPickTests` 67 checks
+pass, and both mutations of the new seam fail them - flipping the
+`opaqueFrontToBackSort` argument, and calling `orderIsoFaces` before
+`appendSourceIsoFaces`. All 18 translation units that transitively include
+`IsoScenePreparer.hpp` compile clean under the production warning set.
+`prepare` now reads as its own summary: clear the scene, lay out, kick off the
+auxiliary task, reserve, record tiles and authored faces, then - if the view is
+isometric - the four calls above.
 
 The two largest frame-building offenders now sit alone in their own files -
 `EditorFrameBuild` (692 lines) is all of `RenderFrameBuilderEditor.cpp` bar two
