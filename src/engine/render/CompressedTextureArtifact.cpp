@@ -1,6 +1,6 @@
 #include "engine/render/CompressedTextureArtifact.hpp"
 
-#include "engine/render/TextureUploadPlan.hpp"
+#include "engine/render/TextureMipChain.hpp"
 
 #include <bc7enc16.h>
 
@@ -33,11 +33,15 @@ constexpr uint32_t dfdBytes = 44;
 
 // usesMipmaps and mipCount lived here as well as in VulkanModelResources,
 // under two names and, for the count, two algorithms. Both now come from
-// TextureUploadPlan, which is also what the upload side reads - the chain
-// built here and the image sized there cannot disagree if they ask the same
-// function.
-using textureUploadPlan::usesMipmaps;
-constexpr auto mipCount = textureUploadPlan::mipLevelCount;
+// TextureMipChain, which the upload side also reads through
+// TextureUploadPlan - the chain built here and the image sized there cannot
+// disagree if they ask the same function.
+//
+// TextureMipChain rather than TextureUploadPlan directly, and that matters:
+// this file is in sokoban_core, which does not link Vulkan, so it cannot see
+// a header that includes <vulkan/vulkan.h>.
+using textureMipChain::usesMipmaps;
+constexpr auto mipCount = textureMipChain::mipLevelCount;
 
 float srgbToLinear(float value)
 {

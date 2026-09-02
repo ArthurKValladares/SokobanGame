@@ -209,6 +209,15 @@ jobs:
           echo "CMAKE_PREFIX_PATH=${sdk}:${sdk}/lib/VulkanLoader" >> "${GITHUB_ENV}"
           echo "${sdk}/bin" >> "${GITHUB_PATH}"
 
+      # sokoban_core does not link Vulkan, and CMake enforces that only by
+      # omission - so a core file that reaches vulkan.h through a header fails
+      # at compile time with "cannot open source file", and only in a build
+      # configured for that target. This checks the layering directly, before
+      # the build that would otherwise be the first to notice.
+      - name: Check sokoban_core is Vulkan-free
+        if: matrix.build_type == 'Debug'
+        run: tools/check_core_is_vulkan_free.sh
+
       - name: Configure ${{ matrix.name }}
         run: >-
           cmake -S . -B build -G Ninja

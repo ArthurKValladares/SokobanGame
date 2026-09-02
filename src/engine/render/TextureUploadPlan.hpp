@@ -2,6 +2,7 @@
 
 #include "engine/TextureSource.hpp"
 #include "engine/render/CompressedTextureArtifact.hpp"
+#include "engine/render/TextureMipChain.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -27,46 +28,19 @@
 // chain the image has to hold. They agree: checked over 708,876 dimension
 // pairs including every power-of-two boundary to 2^31. One of them is kept,
 // and it is the integer one, because a size calculation has no business going
-// through a double.
+// through a double. That surviving pair lives in TextureMipChain.hpp, which
+// includes no Vulkan header, because sokoban_core needs it and sokoban_core
+// does not link Vulkan.
 //
 // Nothing here calls a vk* function. `vulkan.h` is included for the enums.
 
 namespace sokoban::textureUploadPlan {
 
-// -------------------------------------------------------------- mip levels
-
-// How many levels a full chain has for an image this size: one, plus one per
-// halving until both axes reach 1. A zero dimension yields 1, which is what
-// both previous implementations did and what keeps a degenerate source from
-// producing a zero-level image.
-[[nodiscard]] constexpr uint32_t mipLevelCount(uint32_t width, uint32_t height)
-{
-    uint32_t levels = 1;
-    while (width > 1 || height > 1) {
-        width = std::max(width / 2U, 1U);
-        height = std::max(height / 2U, 1U);
-        ++levels;
-    }
-    return levels;
-}
-
-// Whether an authored minification filter asks for a mip chain. Written as an
-// exhaustive switch on purpose: adding a filter without deciding this is a
-// -Wswitch warning rather than a silent false.
-[[nodiscard]] constexpr bool usesMipmaps(TextureMinificationFilter filter)
-{
-    switch (filter) {
-    case TextureMinificationFilter::NearestMipmapNearest:
-    case TextureMinificationFilter::LinearMipmapNearest:
-    case TextureMinificationFilter::NearestMipmapLinear:
-    case TextureMinificationFilter::LinearMipmapLinear:
-        return true;
-    case TextureMinificationFilter::Nearest:
-    case TextureMinificationFilter::Linear:
-        return false;
-    }
-    return false;
-}
+// The Vulkan-free half lives in TextureMipChain.hpp so sokoban_core can reach
+// it; re-exported here so this header remains the one place the upload side
+// looks.
+using textureMipChain::mipLevelCount;
+using textureMipChain::usesMipmaps;
 
 // ------------------------------------------------------------ format choice
 

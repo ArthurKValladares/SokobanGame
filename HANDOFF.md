@@ -1495,6 +1495,33 @@ layout changes affect modules that appear unrelated to the immediate feature.
   against no fence and waits on the whole queue. That is wider than it needs
   and is left as it was, with a comment, because narrowing it is a change to
   queue synchronisation and wants a run.
+- `src/engine/render/VulkanSceneDescriptors.cpp`: the scene set's twelve
+  descriptor writes are a table, not twelve hand-written blocks. A row says
+  only which binding and which info struct; the descriptor **type** comes from
+  `sceneBindings`, the same table the layout is built from, so the two cannot
+  disagree. Three things now throw that used to write silently: a binding the
+  layout does not declare, an image row on a buffer binding, and a row with
+  nothing to write. `sceneBindingType` returns `VK_DESCRIPTOR_TYPE_MAX_ENUM`
+  for an unknown binding on purpose - a plausible default would turn a mistake
+  into a wrong write instead of an error - and nine `static_assert`s pin that.
+  Adding a binding is now: one row in `sceneBindings`, one row in the write
+  table, and the shader declaration. Nothing else.
+- **sokoban_core does not link Vulkan, and that is load-bearing.** CMake
+  enforces it only by omission: `sokoban_core` links SDL3 and the vendored
+  third-party targets and not `Vulkan::Vulkan`, so a core file that reaches
+  `<vulkan/vulkan.h>` through any header fails with "cannot open source file".
+  That failure appears only in a build configured for that target - a compile
+  check that hands every file every include path will not see it, and one did
+  not: `TextureUploadPlan.hpp` was included from `CompressedTextureArtifact.cpp`
+  and a Visual Studio build was the first thing to notice.
+  `tools/check_core_is_vulkan_free.sh` compiles every `sokoban_core` source
+  with the Vulkan include path deliberately absent; all 86 pass. It runs in the
+  Debug CI job before configure. When adding a header that both libraries
+  share, the Vulkan-free half goes in its own header - which is what
+  `TextureMipChain.hpp` is.
+- `src/engine/render/TextureMipChain.hpp`: the mip arithmetic, with no Vulkan
+  in it, so `sokoban_core` can reach it. `TextureUploadPlan.hpp` includes it
+  and re-exports the two names, so the upload side still has one place to look.
 - `src/engine/render/TextureUploadPlan.hpp`: what a texture upload decides
   before it touches the device - the VkFormat, the mip level count, and
   whether the source is usable. It was spread through two `beginTextureUpload`

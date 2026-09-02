@@ -69,6 +69,49 @@ constexpr auto sceneBindings = std::to_array<SceneBinding>({
     SceneBinding { 12, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
 });
 
+// The type a binding was declared with. Returning MAX_ENUM for an unknown
+// binding is deliberate: it is not a valid descriptor type, so a caller that
+// forgets to check gets a validation error naming the binding rather than a
+// silently wrong write.
+[[nodiscard]] constexpr VkDescriptorType sceneBindingType(uint32_t binding)
+{
+    for (const SceneBinding& entry : sceneBindings) {
+        if (entry.binding == binding) {
+            return entry.type;
+        }
+    }
+    return VK_DESCRIPTOR_TYPE_MAX_ENUM;
+}
+
+[[nodiscard]] constexpr bool isImageBinding(VkDescriptorType type)
+{
+    return type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+}
+
+// One row of the update below: which binding, and which of the two info
+// structs feeds it. The descriptor *type* is deliberately absent - it comes
+// from the layout table above, so a binding cannot be declared one type there
+// and written as another here.
+struct SceneWriteSource {
+    uint32_t binding = 0;
+    const VkDescriptorImageInfo* image = nullptr;
+    const VkDescriptorBufferInfo* buffer = nullptr;
+};
+
+// Pinned at compile time, because sceneBindingType is what the writes below
+// now trust for every descriptor type. Binding 2 is the vacant one, and its
+// answer being MAX_ENUM rather than a plausible default is what turns a
+// mistyped binding into a thrown error instead of a wrong write.
+static_assert(sceneBindingType(0) == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+static_assert(sceneBindingType(7) == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+static_assert(sceneBindingType(9) == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+static_assert(sceneBindingType(12) == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+static_assert(sceneBindingType(2) == VK_DESCRIPTOR_TYPE_MAX_ENUM);
+static_assert(sceneBindingType(13) == VK_DESCRIPTOR_TYPE_MAX_ENUM);
+static_assert(isImageBinding(sceneBindingType(0)));
+static_assert(!isImageBinding(sceneBindingType(7)));
+static_assert(!isImageBinding(sceneBindingType(9)));
+
 // How many of the set's bindings ask for `type`, which is what the descriptor
 // pool needs to be told.
 [[nodiscard]] constexpr uint32_t bindingsOfType(VkDescriptorType type)
@@ -392,104 +435,61 @@ void VulkanSceneDescriptors::updateInternal(
         .imageView = resources.titleBackground.imageView,
         .imageLayout = resources.titleBackground.imageLayout,
     };
-    std::array<VkWriteDescriptorSet, 12> writes {
-        VkWriteDescriptorSet {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = descriptorSet,
-            .dstBinding = 3,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo = &uiFont,
-        },
-        VkWriteDescriptorSet {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = descriptorSet,
-            .dstBinding = 4,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo = &titleBackground,
-        },
-        VkWriteDescriptorSet {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = descriptorSet,
-            .dstBinding = 0,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo = &shadow,
-        },
-        VkWriteDescriptorSet {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = descriptorSet,
-            .dstBinding = 1,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo = &sceneColor,
-        },
-        VkWriteDescriptorSet {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = descriptorSet,
-            .dstBinding = 5,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo = &sceneDepth,
-        },
-        VkWriteDescriptorSet {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = descriptorSet,
-            .dstBinding = 6,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo = &ssao,
-        },
-        VkWriteDescriptorSet {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = descriptorSet,
-            .dstBinding = 7,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .pBufferInfo = &lighting,
-        },
-        VkWriteDescriptorSet {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = descriptorSet,
-            .dstBinding = 8,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo = &pointShadows,
-        },
-        VkWriteDescriptorSet {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = descriptorSet,
-            .dstBinding = 9,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .pBufferInfo = &skinning,
-        },
-        VkWriteDescriptorSet {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = descriptorSet,
-            .dstBinding = 10,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .pBufferInfo = &drawInstances,
-        },
-        VkWriteDescriptorSet {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = descriptorSet,
-            .dstBinding = 11,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .pImageInfo = &sceneHdrColor,
-        },
-        VkWriteDescriptorSet {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = descriptorSet,
-            .dstBinding = 12,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .pBufferInfo = &materials,
-        },
+    // Twelve hand-written VkWriteDescriptorSet blocks, in the binding order
+    // 3, 4, 0, 1, 5, 6, ... - each repeating its binding number and its
+    // descriptor type beside the one thing that actually differed. The order
+    // was not meaningful: writes to distinct descriptors within a single
+    // vkUpdateDescriptorSets are independent, so this now runs in the order
+    // the layout declares, which is the order a reader checks it against.
+    const std::array<SceneWriteSource, sceneBindings.size()> sources {
+        SceneWriteSource { 0, &shadow, nullptr },
+        SceneWriteSource { 1, &sceneColor, nullptr },
+        SceneWriteSource { 3, &uiFont, nullptr },
+        SceneWriteSource { 4, &titleBackground, nullptr },
+        SceneWriteSource { 5, &sceneDepth, nullptr },
+        SceneWriteSource { 6, &ssao, nullptr },
+        SceneWriteSource { 7, nullptr, &lighting },
+        SceneWriteSource { 8, &pointShadows, nullptr },
+        SceneWriteSource { 9, nullptr, &skinning },
+        SceneWriteSource { 10, nullptr, &drawInstances },
+        SceneWriteSource { 11, &sceneHdrColor, nullptr },
+        SceneWriteSource { 12, nullptr, &materials },
     };
+
+    std::array<VkWriteDescriptorSet, sceneBindings.size()> writes {};
+    for (std::size_t index = 0; index < sources.size(); ++index) {
+        const SceneWriteSource& source = sources[index];
+        const VkDescriptorType type = sceneBindingType(source.binding);
+        // Three ways a row can be wrong that the hand-written version could
+        // not notice: a binding the layout does not declare, an image row on
+        // a buffer binding, and a row with nothing to write. All of them
+        // produce a descriptor set the shaders read garbage through, so they
+        // are worth a throw rather than a silent write.
+        if (type == VK_DESCRIPTOR_TYPE_MAX_ENUM) {
+            throw std::runtime_error(
+                "Scene descriptor write names binding "
+                + std::to_string(source.binding)
+                + ", which the scene layout does not declare");
+        }
+        const bool wantsImage = isImageBinding(type);
+        if (wantsImage != (source.image != nullptr)
+            || wantsImage == (source.buffer != nullptr)) {
+            throw std::runtime_error(
+                "Scene descriptor write for binding "
+                + std::to_string(source.binding)
+                + " supplies the wrong kind of descriptor info");
+        }
+        writes[index] = VkWriteDescriptorSet {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = descriptorSet,
+            .dstBinding = source.binding,
+            .descriptorCount = 1,
+            .descriptorType = type,
+            .pImageInfo = source.image,
+            .pBufferInfo = source.buffer,
+        };
+    }
+
     vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 }
 

@@ -1728,6 +1728,34 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       business going through a <code>double</code>.
     </p>
     <p>
+      <strong>And something the compiler did not catch, which a real build
+      did.</strong> <code>TextureUploadPlan.hpp</code> includes
+      <code>&lt;vulkan/vulkan.h&gt;</code> for the format enums, and I had
+      <code>CompressedTextureArtifact.cpp</code> include it — a file that lives
+      in <code>sokoban_core</code>, which deliberately does not link
+      <code>Vulkan::Vulkan</code>. Visual Studio said <em>cannot open source
+      file "vulkan/vulkan.h"</em>, and it was right.
+    </p>
+    <p>
+      The verification gap is the interesting part. The compile sweep this
+      review has leaned on hands <em>every</em> file <em>every</em> include
+      path, so it models a build where the layering does not exist. It cannot
+      see a layering violation by construction, and I had been treating "all
+      130 translation units compile" as though it covered this. It does not.
+    </p>
+    <p>
+      Fixed by splitting rather than by reverting: the mip arithmetic is
+      genuinely Vulkan-free, so it lives in <code>TextureMipChain.hpp</code>
+      with no Vulkan include, and <code>TextureUploadPlan.hpp</code> includes
+      that and adds everything needing a <code>VkFormat</code>. That is a
+      better boundary than the one I first drew — the half both libraries share
+      has no Vulkan in it, and now says so.
+      <code>tools/check_core_is_vulkan_free.sh</code> compiles all 86
+      <code>sokoban_core</code> sources with the Vulkan include path
+      deliberately absent; it reproduces the exact failure on the broken
+      version and passes on the fixed one, and it runs in CI before configure.
+    </p>
+    <p>
       <strong>The compiler caught something I would have shipped.</strong>
       Folding the mip-level decision into one call removed a local
       <code>supportsMipmaps</code> that also gates <em>anisotropy</em> further
@@ -2554,13 +2582,53 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       <code>renderPhaseTiming()</code> is one function with twenty callers.
     </p>
     <p>
-      <code>VulkanSceneDescriptors::updateInternal</code> keeps its twelve
-      hand-written descriptor writes. The eleven-clause validity check above
-      them is gone — it is a named list now, and the error says <em>which</em>
-      resource is missing instead of that something is. But turning the writes
-      themselves into a table is a change to what the frame binds, verifiable
-      here only by “it compiles”, and a wrong binding draws garbage rather
-      than failing. That one wants someone who can look at a frame.
+      <code>VulkanSceneDescriptors::updateInternal</code>'s eleven-clause
+      validity check is gone — it is a named list now, and the error says
+      <em>which</em> resource is missing instead of that something is.
+    </p>
+    <p>
+      <strong>The twelve descriptor writes are a table now too.</strong> This
+      was held back as “verifiable here only by <em>it compiles</em>, and a
+      wrong binding draws garbage rather than failing”; it went ahead once
+      someone was available to run the result. It is still not taken on
+      trust — see the evidence below.
+    </p>
+    <p>
+      Each write repeated its binding number and its descriptor type beside
+      the one thing that actually differed, and the type was repeated from the
+      layout table twenty lines above with nothing tying the two together. The
+      rows now carry only <em>binding → which info struct</em>, and the
+      descriptor type is read from <code>sceneBindings</code> — so a binding
+      cannot be declared one type in the layout and written as another here.
+      Three mistakes the hand-written form could not notice now throw instead
+      of writing: a binding the layout does not declare, an image row on a
+      buffer binding, and a row with nothing to write.
+      <code>sceneBindingType</code> answers <code>MAX_ENUM</code> for an
+      undeclared binding rather than a plausible default, which is what turns
+      that first case into an error.
+    </p>
+    <p>
+      <strong>Evidence, before the run rather than instead of it.</strong> The
+      twelve old writes were extracted from the previous source by pattern and
+      compared against the twelve new rows: <em>every binding writes the same
+      resource, and the type the layout now supplies matches the type the old
+      write hard-coded, in all twelve cases</em>. The order changed — the old
+      one ran 3, 4, 0, 1, 5, 6 … and the new runs in the order the layout
+      declares — and the check confirms the two are the same multiset. That
+      reordering is safe because writes to distinct descriptors within one
+      <code>vkUpdateDescriptorSets</code> are independent, and all twelve
+      target distinct bindings. Nine <code>static_assert</code>s pin
+      <code>sceneBindingType</code> and <code>isImageBinding</code>, including
+      that vacant binding 2 and out-of-range 13 both answer
+      <code>MAX_ENUM</code>; three mutations of those helpers were all caught
+      at compile time.
+    </p>
+    <p>
+      What a run confirms that none of this can: that the descriptor set the
+      shaders actually read is unchanged. Shadows, point shadows, SSAO, the
+      UI font, the title background and the ground splat all come through
+      separate bindings here, so a transposition would show as one of those
+      being wrong while everything else looked right.
     </p>
 </article>
 </section>
