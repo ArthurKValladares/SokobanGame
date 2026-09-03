@@ -33,6 +33,241 @@ RenderModel previewModelForUse(
 
 } // namespace
 
+// The timeline section of the catalog panel, in three pieces. Guarded the same
+// way draw()'s body is: with the debug UI compiled out there is nothing here to
+// call them.
+#if SOKOBAN_ENABLE_DEBUG_UI
+
+// Switches the timeline section to the event editor, seeding the name field and
+// lining the preview up on the event's frame.
+//
+// Was a [&] lambda inside draw(), which is what a 324-line function does to a
+// piece of behaviour that deserves a name.
+void AnimationCatalogDebugUi::openEventEditor(
+    const AnimationCatalog::TimelineEvent* event,
+    const TimelineContext& timeline)
+{
+    AnimationCatalogEditor& editor = timeline.editor;
+    const AssetManifest& manifest = timeline.manifest;
+    AnimationPreviewDebugUi& preview = timeline.preview;
+    VulkanRenderer& renderer = timeline.renderer;
+    const AnimationCatalog& catalog = timeline.catalog;
+    const AnimationUse selectedUse = timeline.selectedUse;
+    const RenderAnimation selectedAnimation =
+        timeline.selectedAnimation;
+    bool& changed = timeline.changed;
+
+    timelinePage_ = TimelinePage::EventEditor;
+    originalEventId_ = event != nullptr ? event->id : "";
+    std::snprintf(
+        eventName_,
+        sizeof(eventName_),
+        "%s",
+        event != nullptr ? event->id.c_str() : "event");
+    if (preview.previewCatalogAnimation(
+            previewModelForUse(selectedUse, manifest),
+            selectedAnimation,
+            manifest,
+            renderer)) {
+        const float sourceDuration =
+            preview.catalogDurationSeconds();
+        if (std::abs(
+                sourceDuration -
+                catalog.clipDuration(selectedAnimation)) >
+            0.0001f) {
+            editor.setClipDuration(
+                selectedAnimation, sourceDuration);
+            changed = true;
+        }
+        preview.setCatalogNormalizedTime(
+            event != nullptr ? event->normalizedTime : 0.0f);
+    }
+}
+
+// The events on the selected use, and the start-gate controls under them.
+void AnimationCatalogDebugUi::drawTimelineEventList(
+    const TimelineContext& timeline,
+    std::span<const AnimationUseDefinition> definitions)
+{
+    AnimationCatalogEditor& editor = timeline.editor;
+    const AnimationCatalog& catalog = timeline.catalog;
+    const AnimationUse selectedUse = timeline.selectedUse;
+    bool& changed = timeline.changed;
+
+    const auto selectedEvents = catalog.events(selectedUse);
+    if (selectedEvents.empty()) {
+        ImGui::TextDisabled("No events attached to this animation.");
+    }
+    for (std::size_t i = 0; i < selectedEvents.size(); ++i) {
+        const AnimationCatalog::TimelineEvent event =
+            selectedEvents[i];
+        ImGui::PushID(static_cast<int>(i));
+        ImGui::TextUnformatted(event.id.c_str());
+        ImGui::SameLine(260.0f);
+        if (ImGui::Button("Edit")) {
+            openEventEditor(&event, timeline);
+        }
+        ImGui::PopID();
+    }
+    if (ImGui::Button("Add New Event")) {
+        openEventEditor(nullptr, timeline);
+    }
+
+    ImGui::SeparatorText("Start Gate");
+    const auto& currentGate = catalog.startGate(selectedUse);
+    if (currentGate) {
+        ImGui::Text(
+            "Waiting for %s / %s",
+            animationUseId(currentGate->sourceUse).data(),
+            currentGate->eventId.c_str());
+    } else {
+        ImGui::TextDisabled("Starts immediately");
+    }
+
+    gateSourceUseIndex_ = std::clamp(
+        gateSourceUseIndex_,
+        0,
+        static_cast<int>(definitions.size()) - 1);
+    if (ImGui::BeginCombo(
+            "Source Use",
+            definitions[
+                static_cast<std::size_t>(gateSourceUseIndex_)]
+                .label.data())) {
+        for (int i = 0; i < static_cast<int>(definitions.size()); ++i) {
+            if (catalog.events(definitions[i].use).empty()) {
+                continue;
+            }
+            const bool selected = i == gateSourceUseIndex_;
+            if (ImGui::Selectable(
+                    definitions[i].label.data(), selected)) {
+                gateSourceUseIndex_ = i;
+                gateEventIndex_ = 0;
+            }
+            if (selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+    const AnimationUse gateSourceUse =
+        definitions[static_cast<std::size_t>(gateSourceUseIndex_)]
+            .use;
+    const auto gateEvents = catalog.events(gateSourceUse);
+    gateEventIndex_ = gateEvents.empty()
+        ? 0
+        : std::clamp(
+              gateEventIndex_,
+              0,
+              static_cast<int>(gateEvents.size()) - 1);
+    const char* gateEventLabel = gateEvents.empty()
+        ? "No events"
+        : gateEvents[static_cast<std::size_t>(gateEventIndex_)]
+              .id.c_str();
+    if (ImGui::BeginCombo("Source Event", gateEventLabel)) {
+        for (int i = 0; i < static_cast<int>(gateEvents.size()); ++i) {
+            const bool selected = i == gateEventIndex_;
+            if (ImGui::Selectable(
+                    gateEvents[i].id.c_str(), selected)) {
+                gateEventIndex_ = i;
+            }
+            if (selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::BeginDisabled(gateEvents.empty());
+    if (ImGui::Button("Set Start Gate")) {
+        editor.setStartGate(selectedUse, AnimationCatalog::EventGate {
+            .sourceUse = gateSourceUse,
+            .eventId = gateEvents[
+                static_cast<std::size_t>(gateEventIndex_)].id,
+        });
+        changed = true;
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!currentGate.has_value());
+    if (ImGui::Button("Clear Start Gate")) {
+        editor.setStartGate(selectedUse, std::nullopt);
+        changed = true;
+    }
+    ImGui::EndDisabled();
+}
+
+// The single-event editor: the name field, the add-at-cursor control, and the
+// scrubbing preview it works against.
+void AnimationCatalogDebugUi::drawTimelineEventEditor(
+    const TimelineContext& timeline)
+{
+    AnimationCatalogEditor& editor = timeline.editor;
+    AnimationPreviewDebugUi& preview = timeline.preview;
+    VulkanRenderer& renderer = timeline.renderer;
+    const AnimationCatalog& catalog = timeline.catalog;
+    const AnimationUse selectedUse = timeline.selectedUse;
+    const RenderAnimation selectedAnimation =
+        timeline.selectedAnimation;
+    bool& changed = timeline.changed;
+
+    if (ImGui::Button("Back to Events")) {
+        timelinePage_ = TimelinePage::EventList;
+        originalEventId_.clear();
+        preview.clearCatalogPreview(renderer);
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled(
+        "%.3fs source clip",
+        catalog.clipDuration(selectedAnimation));
+
+    preview.drawCatalogPreview(catalog.events(selectedUse));
+
+    ImGui::SetNextItemWidth(260.0f);
+    ImGui::InputText(
+        "Event Name", eventName_, sizeof(eventName_));
+    const auto selectedEvents = catalog.events(selectedUse);
+    const bool duplicateName = std::ranges::any_of(
+        selectedEvents,
+        [&](const AnimationCatalog::TimelineEvent& event) {
+            return event.id == eventName_ &&
+                event.id != originalEventId_;
+        });
+    ImGui::SameLine();
+    ImGui::BeginDisabled(
+        eventName_[0] == '\0' || duplicateName ||
+        preview.catalogDurationSeconds() <= 0.0f);
+    if (ImGui::Button("Add at Cursor")) {
+        if (editor.commitTimelineEvent(
+                selectedUse,
+                originalEventId_,
+                eventName_,
+                preview.catalogNormalizedTime())) {
+            changed = true;
+            timelinePage_ = TimelinePage::EventList;
+            originalEventId_.clear();
+            preview.clearCatalogPreview(renderer);
+        }
+    }
+    ImGui::EndDisabled();
+    if (duplicateName) {
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.65f, 0.2f, 1.0f),
+            "An event with this name already exists.");
+    }
+
+    if (!originalEventId_.empty()) {
+        if (ImGui::Button("Delete Event")) {
+            editor.removeTimelineEvent(
+                selectedUse, originalEventId_);
+            changed = true;
+            timelinePage_ = TimelinePage::EventList;
+            originalEventId_.clear();
+            preview.clearCatalogPreview(renderer);
+        }
+    }
+}
+
+#endif
+
 bool AnimationCatalogDebugUi::draw(
     AnimationCatalogEditor& editor,
     const AssetManifest& manifest,
@@ -156,191 +391,21 @@ bool AnimationCatalogDebugUi::draw(
             definitions[static_cast<std::size_t>(timelineUseIndex_)].use;
         const RenderAnimation selectedAnimation =
             catalog.animation(selectedUse);
-        const auto openEventEditor =
-            [&](const AnimationCatalog::TimelineEvent* event) {
-                timelinePage_ = TimelinePage::EventEditor;
-                originalEventId_ = event != nullptr ? event->id : "";
-                std::snprintf(
-                    eventName_,
-                    sizeof(eventName_),
-                    "%s",
-                    event != nullptr ? event->id.c_str() : "event");
-                if (preview.previewCatalogAnimation(
-                        previewModelForUse(selectedUse, manifest),
-                        selectedAnimation,
-                        manifest,
-                        renderer)) {
-                    const float sourceDuration =
-                        preview.catalogDurationSeconds();
-                    if (std::abs(
-                            sourceDuration -
-                            catalog.clipDuration(selectedAnimation)) >
-                        0.0001f) {
-                        editor.setClipDuration(
-                            selectedAnimation, sourceDuration);
-                        changed = true;
-                    }
-                    preview.setCatalogNormalizedTime(
-                        event != nullptr ? event->normalizedTime : 0.0f);
-                }
-            };
+        const TimelineContext timeline {
+            editor,
+            manifest,
+            preview,
+            renderer,
+            catalog,
+            selectedUse,
+            selectedAnimation,
+            changed,
+        };
 
         if (timelinePage_ == TimelinePage::EventList) {
-            const auto selectedEvents = catalog.events(selectedUse);
-            if (selectedEvents.empty()) {
-                ImGui::TextDisabled("No events attached to this animation.");
-            }
-            for (std::size_t i = 0; i < selectedEvents.size(); ++i) {
-                const AnimationCatalog::TimelineEvent event =
-                    selectedEvents[i];
-                ImGui::PushID(static_cast<int>(i));
-                ImGui::TextUnformatted(event.id.c_str());
-                ImGui::SameLine(260.0f);
-                if (ImGui::Button("Edit")) {
-                    openEventEditor(&event);
-                }
-                ImGui::PopID();
-            }
-            if (ImGui::Button("Add New Event")) {
-                openEventEditor(nullptr);
-            }
-
-            ImGui::SeparatorText("Start Gate");
-            const auto& currentGate = catalog.startGate(selectedUse);
-            if (currentGate) {
-                ImGui::Text(
-                    "Waiting for %s / %s",
-                    animationUseId(currentGate->sourceUse).data(),
-                    currentGate->eventId.c_str());
-            } else {
-                ImGui::TextDisabled("Starts immediately");
-            }
-
-            gateSourceUseIndex_ = std::clamp(
-                gateSourceUseIndex_,
-                0,
-                static_cast<int>(definitions.size()) - 1);
-            if (ImGui::BeginCombo(
-                    "Source Use",
-                    definitions[
-                        static_cast<std::size_t>(gateSourceUseIndex_)]
-                        .label.data())) {
-                for (int i = 0; i < static_cast<int>(definitions.size()); ++i) {
-                    if (catalog.events(definitions[i].use).empty()) {
-                        continue;
-                    }
-                    const bool selected = i == gateSourceUseIndex_;
-                    if (ImGui::Selectable(
-                            definitions[i].label.data(), selected)) {
-                        gateSourceUseIndex_ = i;
-                        gateEventIndex_ = 0;
-                    }
-                    if (selected) {
-                        ImGui::SetItemDefaultFocus();
-                    }
-                }
-                ImGui::EndCombo();
-            }
-            const AnimationUse gateSourceUse =
-                definitions[static_cast<std::size_t>(gateSourceUseIndex_)]
-                    .use;
-            const auto gateEvents = catalog.events(gateSourceUse);
-            gateEventIndex_ = gateEvents.empty()
-                ? 0
-                : std::clamp(
-                      gateEventIndex_,
-                      0,
-                      static_cast<int>(gateEvents.size()) - 1);
-            const char* gateEventLabel = gateEvents.empty()
-                ? "No events"
-                : gateEvents[static_cast<std::size_t>(gateEventIndex_)]
-                      .id.c_str();
-            if (ImGui::BeginCombo("Source Event", gateEventLabel)) {
-                for (int i = 0; i < static_cast<int>(gateEvents.size()); ++i) {
-                    const bool selected = i == gateEventIndex_;
-                    if (ImGui::Selectable(
-                            gateEvents[i].id.c_str(), selected)) {
-                        gateEventIndex_ = i;
-                    }
-                    if (selected) {
-                        ImGui::SetItemDefaultFocus();
-                    }
-                }
-                ImGui::EndCombo();
-            }
-            ImGui::BeginDisabled(gateEvents.empty());
-            if (ImGui::Button("Set Start Gate")) {
-                editor.setStartGate(selectedUse, AnimationCatalog::EventGate {
-                    .sourceUse = gateSourceUse,
-                    .eventId = gateEvents[
-                        static_cast<std::size_t>(gateEventIndex_)].id,
-                });
-                changed = true;
-            }
-            ImGui::EndDisabled();
-            ImGui::SameLine();
-            ImGui::BeginDisabled(!currentGate.has_value());
-            if (ImGui::Button("Clear Start Gate")) {
-                editor.setStartGate(selectedUse, std::nullopt);
-                changed = true;
-            }
-            ImGui::EndDisabled();
+            drawTimelineEventList(timeline, definitions);
         } else {
-            if (ImGui::Button("Back to Events")) {
-                timelinePage_ = TimelinePage::EventList;
-                originalEventId_.clear();
-                preview.clearCatalogPreview(renderer);
-            }
-            ImGui::SameLine();
-            ImGui::TextDisabled(
-                "%.3fs source clip",
-                catalog.clipDuration(selectedAnimation));
-
-            preview.drawCatalogPreview(catalog.events(selectedUse));
-
-            ImGui::SetNextItemWidth(260.0f);
-            ImGui::InputText(
-                "Event Name", eventName_, sizeof(eventName_));
-            const auto selectedEvents = catalog.events(selectedUse);
-            const bool duplicateName = std::ranges::any_of(
-                selectedEvents,
-                [&](const AnimationCatalog::TimelineEvent& event) {
-                    return event.id == eventName_ &&
-                        event.id != originalEventId_;
-                });
-            ImGui::SameLine();
-            ImGui::BeginDisabled(
-                eventName_[0] == '\0' || duplicateName ||
-                preview.catalogDurationSeconds() <= 0.0f);
-            if (ImGui::Button("Add at Cursor")) {
-                if (editor.commitTimelineEvent(
-                        selectedUse,
-                        originalEventId_,
-                        eventName_,
-                        preview.catalogNormalizedTime())) {
-                    changed = true;
-                    timelinePage_ = TimelinePage::EventList;
-                    originalEventId_.clear();
-                    preview.clearCatalogPreview(renderer);
-                }
-            }
-            ImGui::EndDisabled();
-            if (duplicateName) {
-                ImGui::TextColored(
-                    ImVec4(1.0f, 0.65f, 0.2f, 1.0f),
-                    "An event with this name already exists.");
-            }
-
-            if (!originalEventId_.empty()) {
-                if (ImGui::Button("Delete Event")) {
-                    editor.removeTimelineEvent(
-                        selectedUse, originalEventId_);
-                    changed = true;
-                    timelinePage_ = TimelinePage::EventList;
-                    originalEventId_.clear();
-                    preview.clearCatalogPreview(renderer);
-                }
-            }
+            drawTimelineEventEditor(timeline);
         }
     }
 

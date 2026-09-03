@@ -58,12 +58,23 @@ private:
     void syncDocumentPath(const LevelEditor& editor);
     void drawGroundPaintTab(SplatPainter& painter, const Callbacks& callbacks);
     void drawTilePalette(LevelEditor& editor, const Callbacks& callbacks);
+    // The two halves of the decoration palette: the mesh library, and the
+    // inspector for whichever decoration is selected.
+    void drawDecorationMeshLibrary(
+        LevelEditor& editor, const Callbacks& callbacks);
+    void drawSelectedDecorationInspector(LevelEditor& editor);
     void drawDecorationPalette(
         LevelEditor& editor,
         const Callbacks& callbacks);
     void drawSelectorPalette(LevelEditor& editor);
     void drawFileBrowser(
         LevelEditor& editor,
+        OverworldMapEditor& overworldEditor);
+    // The three parts of the overworld tab that are not the map canvas.
+    void drawOverworldToolbar(OverworldMapEditor& overworldEditor);
+    void drawSelectedOverworldScreen(
+        LevelEditor& editor, OverworldMapEditor& overworldEditor);
+    void drawOverworldDeletionsAndStatus(
         OverworldMapEditor& overworldEditor);
     void drawOverworldTab(
         LevelEditor& editor,

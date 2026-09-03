@@ -534,6 +534,166 @@ if (ImGui::CollapsingHeader("Lighting")) {
 // independent panels and a preamble, sharing nothing but `context`. The
 // CollapsingHeader call stays inside the function so the panel keeps its own
 // open/closed state and draw() keeps its exact call order.
+// Every phase timing the renderer reports, CPU and GPU, in the order they
+// happen. Forty lines of showPhase() calls that say nothing except which
+// timings exist - which is exactly why they are their own function now.
+void drawPhaseTimings(const RenderStats& renderStats)
+{
+    const auto showPhase = [](const char* label,
+                               const RenderPhaseTiming& timing) {
+        if (!timing.available) {
+            ImGui::Text("%s timing pending", label);
+            return;
+        }
+        ImGui::Text(
+            "%s %.3f ms avg (p95 %.3f, max %.3f; %u samples)",
+            label,
+            timing.averageMilliseconds,
+            timing.p95Milliseconds,
+            timing.maximumMilliseconds,
+            timing.samples);
+    };
+    showPhase("Asset scheduling", renderStats.assetSchedulingTiming);
+    showPhase("Frame-fence wait", renderStats.frameFenceWaitTiming);
+    showPhase("Asset maintenance", renderStats.assetMaintenanceTiming);
+    showPhase("Image acquisition", renderStats.imageAcquisitionTiming);
+    showPhase("Command recording", renderStats.commandRecordingTiming);
+    showPhase("Submit/present", renderStats.submitPresentTiming);
+    showPhase("  Recorder setup", renderStats.recorderSetupTiming);
+    showPhase(
+        "  Game command recording",
+        renderStats.gameCommandRecordingTiming);
+    showPhase(
+        "    Shadow command recording",
+        renderStats.shadowCommandRecordingTiming);
+    showPhase(
+        "    Scene command recording",
+        renderStats.sceneCommandRecordingTiming);
+    showPhase(
+        "  SSAO command recording",
+        renderStats.ssaoCommandRecordingTiming);
+    showPhase(
+        "  Preview command recording",
+        renderStats.previewCommandRecordingTiming);
+    showPhase(
+        "  Output/UI command recording",
+        renderStats.outputCommandRecordingTiming);
+    showPhase(
+        "Asset publication events",
+        renderStats.assetPublicationEventTiming);
+    showPhase("GPU shadows", renderStats.gpuShadowTiming);
+    showPhase("GPU scene color/depth", renderStats.gpuSceneTiming);
+    showPhase("  GPU scene raster/resolve", renderStats.gpuSceneRasterTiming);
+    showPhase(
+        "  GPU scene depth publish", renderStats.gpuSceneDepthPublishTiming);
+    showPhase("  GPU scene translucency", renderStats.gpuSceneTranslucencyTiming);
+    showPhase("GPU SSAO", renderStats.gpuSsaoTiming);
+    showPhase("  GPU SSAO scene snapshot", renderStats.gpuSsaoSnapshotTiming);
+    showPhase("  GPU SSAO occlusion", renderStats.gpuSsaoOcclusionTiming);
+    showPhase("  GPU SSAO composite", renderStats.gpuSsaoCompositeTiming);
+    showPhase("GPU output/UI", renderStats.gpuOutputTiming);
+}
+
+// Assets: publications, uploads in flight, residency against its budget, the
+// eviction ladder's counters, and the mip-residency summary.
+void drawAssetResidencyStats(
+    const RenderStats& renderStats,
+    const VulkanModelResources::LoadingStats& assetStats)
+{
+    ImGui::Text(
+        "Models %u/%u loaded, %u pending",
+        assetStats.loadedModels,
+        assetStats.totalModels,
+        assetStats.pendingModels);
+    ImGui::Text(
+        "Textures %u/%u loaded, %u pending",
+        assetStats.loadedTextures,
+        assetStats.totalTextures,
+        assetStats.pendingTextures);
+    ImGui::Text(
+        "GPU texture uploads %u in flight, %llu submitted, %llu retired",
+        assetStats.uploadingTextures,
+        static_cast<unsigned long long>(
+            assetStats.textureUploadSubmissions),
+        static_cast<unsigned long long>(
+            assetStats.textureUploadCompletions));
+    ImGui::Text(
+        "Animations %u/%u loaded, %u pending",
+        assetStats.loadedAnimations,
+        assetStats.totalAnimations,
+        assetStats.pendingAnimations);
+    ImGui::Text(
+        "Streaming %u requested, %u ready, %u queued, %u CPU jobs",
+        assetStats.requestedAssets,
+        assetStats.readyRequestedAssets,
+        assetStats.queuedAssets,
+        assetStats.activeCpuJobs);
+    ImGui::Text(
+        "Cancelled stale prefetches %llu",
+        static_cast<unsigned long long>(
+            assetStats.cancelledPrefetches));
+    ImGui::Text(
+        "Asset residency %.1f / %.1f MiB meshes (peak %.1f), %.1f / %.1f MiB textures (peak %.1f)",
+        static_cast<double>(assetStats.modelResidencyBytes) / (1024.0 * 1024.0),
+        static_cast<double>(assetStats.modelResidencyBudgetBytes) / (1024.0 * 1024.0),
+        static_cast<double>(assetStats.modelResidencyPeakBytes) / (1024.0 * 1024.0),
+        static_cast<double>(assetStats.textureResidencyBytes) / (1024.0 * 1024.0),
+        static_cast<double>(assetStats.textureResidencyBudgetBytes) / (1024.0 * 1024.0),
+        static_cast<double>(assetStats.textureResidencyPeakBytes) / (1024.0 * 1024.0));
+    ImGui::Text(
+        "Residency evictions %llu, capacity blocks %llu"
+        " (%llu oversized, %llu no mip tail, %llu nothing evictable)%s",
+        static_cast<unsigned long long>(assetStats.residencyEvictions),
+        static_cast<unsigned long long>(assetStats.residencyBudgetBlocks),
+        static_cast<unsigned long long>(
+            assetStats.residencyOversizedBlocks),
+        static_cast<unsigned long long>(assetStats.residencyMipPlanBlocks),
+        static_cast<unsigned long long>(
+            assetStats.residencyNoVictimBlocks),
+        assetStats.residencyBudgetBlocked ? ", capacity blocked" : "");
+    ImGui::Text(
+        "Fence retirement %u meshes (%.1f MiB), %u textures (%.1f MiB)",
+        assetStats.retiringModels,
+        static_cast<double>(assetStats.retiringModelBytes) /
+            (1024.0 * 1024.0),
+        assetStats.retiringTextures,
+        static_cast<double>(assetStats.retiringTextureBytes) /
+            (1024.0 * 1024.0));
+    ImGui::Text(
+        "Texture mip residency %u/%u levels, %u reduced (%.1f MiB omitted)",
+        assetStats.residentTextureMipLevels,
+        assetStats.availableTextureMipLevels,
+        assetStats.mipDegradedTextures,
+        static_cast<double>(assetStats.mipOmittedBytes) /
+            (1024.0 * 1024.0));
+    if (assetStats.failedAssets > 0) {
+        ImGui::Text("Asset load failures %u", assetStats.failedAssets);
+    }
+    ImGui::Text(
+        "Pipeline rebuilds %llu",
+        static_cast<unsigned long long>(renderStats.pipelineRebuilds));
+    ImGui::Text(
+        "Resource reconfigurations %llu, retired %u%s",
+        static_cast<unsigned long long>(
+            renderStats.renderResourceReconfigurations),
+        renderStats.retiredRenderResourceSets,
+        renderStats.rendererReconfigurationPending
+            ? ", pending"
+            : "");
+    ImGui::Text(
+        "Swapchain recreations %llu",
+        static_cast<unsigned long long>(
+            renderStats.swapchainRecreations));
+    ImGui::Text(
+        "Zero-extent recreation deferrals %llu",
+        static_cast<unsigned long long>(
+            renderStats.swapchainRecreationDeferrals));
+    ImGui::Text(
+        "Present-queue retirement waits %llu",
+        static_cast<unsigned long long>(
+            renderStats.presentQueueRetirementWaits));
+}
+
 void drawRenderingStatsSection(const ApplicationDebugUi::Context& context)
 {
 if (ImGui::CollapsingHeader("Rendering Stats")) {
@@ -656,59 +816,7 @@ if (ImGui::CollapsingHeader("Rendering Stats")) {
         renderStats.recorderScratchGrowths,
         static_cast<unsigned long long>(
             renderStats.recorderScratchCapacityBytes));
-    const auto showPhase = [](const char* label,
-                               const RenderPhaseTiming& timing) {
-        if (!timing.available) {
-            ImGui::Text("%s timing pending", label);
-            return;
-        }
-        ImGui::Text(
-            "%s %.3f ms avg (p95 %.3f, max %.3f; %u samples)",
-            label,
-            timing.averageMilliseconds,
-            timing.p95Milliseconds,
-            timing.maximumMilliseconds,
-            timing.samples);
-    };
-    showPhase("Asset scheduling", renderStats.assetSchedulingTiming);
-    showPhase("Frame-fence wait", renderStats.frameFenceWaitTiming);
-    showPhase("Asset maintenance", renderStats.assetMaintenanceTiming);
-    showPhase("Image acquisition", renderStats.imageAcquisitionTiming);
-    showPhase("Command recording", renderStats.commandRecordingTiming);
-    showPhase("Submit/present", renderStats.submitPresentTiming);
-    showPhase("  Recorder setup", renderStats.recorderSetupTiming);
-    showPhase(
-        "  Game command recording",
-        renderStats.gameCommandRecordingTiming);
-    showPhase(
-        "    Shadow command recording",
-        renderStats.shadowCommandRecordingTiming);
-    showPhase(
-        "    Scene command recording",
-        renderStats.sceneCommandRecordingTiming);
-    showPhase(
-        "  SSAO command recording",
-        renderStats.ssaoCommandRecordingTiming);
-    showPhase(
-        "  Preview command recording",
-        renderStats.previewCommandRecordingTiming);
-    showPhase(
-        "  Output/UI command recording",
-        renderStats.outputCommandRecordingTiming);
-    showPhase(
-        "Asset publication events",
-        renderStats.assetPublicationEventTiming);
-    showPhase("GPU shadows", renderStats.gpuShadowTiming);
-    showPhase("GPU scene color/depth", renderStats.gpuSceneTiming);
-    showPhase("  GPU scene raster/resolve", renderStats.gpuSceneRasterTiming);
-    showPhase(
-        "  GPU scene depth publish", renderStats.gpuSceneDepthPublishTiming);
-    showPhase("  GPU scene translucency", renderStats.gpuSceneTranslucencyTiming);
-    showPhase("GPU SSAO", renderStats.gpuSsaoTiming);
-    showPhase("  GPU SSAO scene snapshot", renderStats.gpuSsaoSnapshotTiming);
-    showPhase("  GPU SSAO occlusion", renderStats.gpuSsaoOcclusionTiming);
-    showPhase("  GPU SSAO composite", renderStats.gpuSsaoCompositeTiming);
-    showPhase("GPU output/UI", renderStats.gpuOutputTiming);
+    drawPhaseTimings(renderStats);
     ImGui::Text(
         "Asset publications %llu across %llu frames; texture uploads %llu/%llu complete (%u in flight)",
         static_cast<unsigned long long>(renderStats.assetPublications),
@@ -733,98 +841,7 @@ if (ImGui::CollapsingHeader("Rendering Stats")) {
     ImGui::Text("Pipelines bound %u", renderStats.pipelineBinds);
     ImGui::Text("Render passes %u", renderStats.renderPasses);
     ImGui::Text("Image barriers %u", renderStats.imageBarriers);
-    ImGui::Text(
-        "Models %u/%u loaded, %u pending",
-        assetStats.loadedModels,
-        assetStats.totalModels,
-        assetStats.pendingModels);
-    ImGui::Text(
-        "Textures %u/%u loaded, %u pending",
-        assetStats.loadedTextures,
-        assetStats.totalTextures,
-        assetStats.pendingTextures);
-    ImGui::Text(
-        "GPU texture uploads %u in flight, %llu submitted, %llu retired",
-        assetStats.uploadingTextures,
-        static_cast<unsigned long long>(
-            assetStats.textureUploadSubmissions),
-        static_cast<unsigned long long>(
-            assetStats.textureUploadCompletions));
-    ImGui::Text(
-        "Animations %u/%u loaded, %u pending",
-        assetStats.loadedAnimations,
-        assetStats.totalAnimations,
-        assetStats.pendingAnimations);
-    ImGui::Text(
-        "Streaming %u requested, %u ready, %u queued, %u CPU jobs",
-        assetStats.requestedAssets,
-        assetStats.readyRequestedAssets,
-        assetStats.queuedAssets,
-        assetStats.activeCpuJobs);
-    ImGui::Text(
-        "Cancelled stale prefetches %llu",
-        static_cast<unsigned long long>(
-            assetStats.cancelledPrefetches));
-    ImGui::Text(
-        "Asset residency %.1f / %.1f MiB meshes (peak %.1f), %.1f / %.1f MiB textures (peak %.1f)",
-        static_cast<double>(assetStats.modelResidencyBytes) / (1024.0 * 1024.0),
-        static_cast<double>(assetStats.modelResidencyBudgetBytes) / (1024.0 * 1024.0),
-        static_cast<double>(assetStats.modelResidencyPeakBytes) / (1024.0 * 1024.0),
-        static_cast<double>(assetStats.textureResidencyBytes) / (1024.0 * 1024.0),
-        static_cast<double>(assetStats.textureResidencyBudgetBytes) / (1024.0 * 1024.0),
-        static_cast<double>(assetStats.textureResidencyPeakBytes) / (1024.0 * 1024.0));
-    ImGui::Text(
-        "Residency evictions %llu, capacity blocks %llu"
-        " (%llu oversized, %llu no mip tail, %llu nothing evictable)%s",
-        static_cast<unsigned long long>(assetStats.residencyEvictions),
-        static_cast<unsigned long long>(assetStats.residencyBudgetBlocks),
-        static_cast<unsigned long long>(
-            assetStats.residencyOversizedBlocks),
-        static_cast<unsigned long long>(assetStats.residencyMipPlanBlocks),
-        static_cast<unsigned long long>(
-            assetStats.residencyNoVictimBlocks),
-        assetStats.residencyBudgetBlocked ? ", capacity blocked" : "");
-    ImGui::Text(
-        "Fence retirement %u meshes (%.1f MiB), %u textures (%.1f MiB)",
-        assetStats.retiringModels,
-        static_cast<double>(assetStats.retiringModelBytes) /
-            (1024.0 * 1024.0),
-        assetStats.retiringTextures,
-        static_cast<double>(assetStats.retiringTextureBytes) /
-            (1024.0 * 1024.0));
-    ImGui::Text(
-        "Texture mip residency %u/%u levels, %u reduced (%.1f MiB omitted)",
-        assetStats.residentTextureMipLevels,
-        assetStats.availableTextureMipLevels,
-        assetStats.mipDegradedTextures,
-        static_cast<double>(assetStats.mipOmittedBytes) /
-            (1024.0 * 1024.0));
-    if (assetStats.failedAssets > 0) {
-        ImGui::Text("Asset load failures %u", assetStats.failedAssets);
-    }
-    ImGui::Text(
-        "Pipeline rebuilds %llu",
-        static_cast<unsigned long long>(renderStats.pipelineRebuilds));
-    ImGui::Text(
-        "Resource reconfigurations %llu, retired %u%s",
-        static_cast<unsigned long long>(
-            renderStats.renderResourceReconfigurations),
-        renderStats.retiredRenderResourceSets,
-        renderStats.rendererReconfigurationPending
-            ? ", pending"
-            : "");
-    ImGui::Text(
-        "Swapchain recreations %llu",
-        static_cast<unsigned long long>(
-            renderStats.swapchainRecreations));
-    ImGui::Text(
-        "Zero-extent recreation deferrals %llu",
-        static_cast<unsigned long long>(
-            renderStats.swapchainRecreationDeferrals));
-    ImGui::Text(
-        "Present-queue retirement waits %llu",
-        static_cast<unsigned long long>(
-            renderStats.presentQueueRetirementWaits));
+    drawAssetResidencyStats(renderStats, assetStats);
 }
 }
 

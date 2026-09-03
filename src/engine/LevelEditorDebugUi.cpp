@@ -511,22 +511,16 @@ void LevelEditorDebugUi::drawTilePalette(
 #endif
 }
 
-void LevelEditorDebugUi::drawDecorationPalette(
-    LevelEditor& editor,
-    const Callbacks& callbacks)
+// The mesh library half of the decoration palette: the filter, the list, and
+// the deferred registration.
+//
+// Registration has to happen after the list iteration releases its Entry
+// references, which is why the pending path is a local here rather than an
+// action taken inline - the comment that says so moved with it.
+void LevelEditorDebugUi::drawDecorationMeshLibrary(
+    LevelEditor& editor, const Callbacks& callbacks)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    ImGui::TextUnformatted("Mesh Library");
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Refresh") &&
-        callbacks.refreshDecorationMeshes) {
-        callbacks.refreshDecorationMeshes();
-    }
-    ImGui::InputTextWithHint(
-        "##decoration_filter",
-        "Filter mesh files",
-        &decorationFilter_);
-
     std::optional<std::filesystem::path> meshToRegister;
     if (callbacks.decorationMeshes) {
         const auto& meshes = callbacks.decorationMeshes();
@@ -585,27 +579,17 @@ void LevelEditorDebugUi::drawDecorationPalette(
         ImGui::TextWrapped("%s", decorationRegistrationStatus_.c_str());
     }
 
-    ImGui::Separator();
-    ImGui::Text("Placed Meshes (%zu)", editor.decorations().size());
-    if (ImGui::BeginListBox(
-            "##placed_decorations",
-            ImVec2(-1.0f, 120.0f))) {
-        for (std::size_t index = 0;
-             index < editor.decorations().size();
-             ++index) {
-            const Level::Decoration& decoration =
-                editor.decorations()[index];
-            const std::string label =
-                std::to_string(index + 1) + ": " + decoration.model;
-            const bool selected =
-                editor.selectedDecorationIndex() == index;
-            if (ImGui::Selectable(label.c_str(), selected)) {
-                (void)editor.selectDecoration(index);
-            }
-        }
-        ImGui::EndListBox();
-    }
+#else
+    (void)editor;
+    (void)callbacks;
+#endif
+}
 
+// The transform, point light and actions for whichever decoration is selected.
+// Returns immediately when nothing is.
+void LevelEditorDebugUi::drawSelectedDecorationInspector(LevelEditor& editor)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
     const Level::Decoration* selected = editor.selectedDecoration();
     if (!selected) {
         return;
@@ -709,6 +693,50 @@ void LevelEditorDebugUi::drawDecorationPalette(
     if (ImGui::Button("Delete")) {
         (void)editor.deleteSelectedDecoration();
     }
+#else
+    (void)editor;
+#endif
+}
+
+void LevelEditorDebugUi::drawDecorationPalette(
+    LevelEditor& editor,
+    const Callbacks& callbacks)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    ImGui::TextUnformatted("Mesh Library");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Refresh") &&
+        callbacks.refreshDecorationMeshes) {
+        callbacks.refreshDecorationMeshes();
+    }
+    ImGui::InputTextWithHint(
+        "##decoration_filter",
+        "Filter mesh files",
+        &decorationFilter_);
+
+    drawDecorationMeshLibrary(editor, callbacks);
+    ImGui::Separator();
+    ImGui::Text("Placed Meshes (%zu)", editor.decorations().size());
+    if (ImGui::BeginListBox(
+            "##placed_decorations",
+            ImVec2(-1.0f, 120.0f))) {
+        for (std::size_t index = 0;
+             index < editor.decorations().size();
+             ++index) {
+            const Level::Decoration& decoration =
+                editor.decorations()[index];
+            const std::string label =
+                std::to_string(index + 1) + ": " + decoration.model;
+            const bool selected =
+                editor.selectedDecorationIndex() == index;
+            if (ImGui::Selectable(label.c_str(), selected)) {
+                (void)editor.selectDecoration(index);
+            }
+        }
+        ImGui::EndListBox();
+    }
+
+    drawSelectedDecorationInspector(editor);
 #else
     (void)editor;
     (void)callbacks;
@@ -904,21 +932,12 @@ void LevelEditorDebugUi::drawFileBrowser(
 #endif
 }
 
-void LevelEditorDebugUi::drawOverworldTab(
-    LevelEditor& editor,
+// The overworld tab's toolbar: reload, save, undo, redo, and the modified
+// marker, each disabled when its action is unavailable.
+void LevelEditorDebugUi::drawOverworldToolbar(
     OverworldMapEditor& overworldEditor)
 {
 #if SOKOBAN_ENABLE_DEBUG_UI
-    const std::filesystem::path root = editor.browserRoot().lexically_normal();
-    if (overworldEditorRoot_.lexically_normal() != root) {
-        overworldEditorRoot_ = root;
-        std::optional<std::filesystem::path> runtimeRoot;
-        if (editor.sourceLevelRoot().lexically_normal() == root) {
-            runtimeRoot = editor.runtimeLevelRoot();
-        }
-        overworldEditor.initialize(root, runtimeRoot);
-    }
-
     ImGui::Text("Overworld Map%s", overworldEditor.dirty() ? " (modified)" : "");
     ImGui::SameLine();
     if (ImGui::Button("Reload Map")) {
@@ -942,6 +961,118 @@ void LevelEditorDebugUi::drawOverworldTab(
         (void)overworldEditor.redo();
     }
     ImGui::EndDisabled();
+#else
+    (void)overworldEditor;
+#endif
+}
+
+// The inspector for whichever screen is selected on the map: its slot, its
+// file, and the actions that act on it.
+void LevelEditorDebugUi::drawSelectedOverworldScreen(
+    LevelEditor& editor, OverworldMapEditor& overworldEditor)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (const auto selectedId = overworldEditor.selectedScreen()) {
+        const OverworldScreenSpec* selected =
+            overworldEditor.screen(*selectedId);
+        if (selected) {
+            ImGui::SeparatorText(
+                ("Screen " + std::to_string(*selectedId)).c_str());
+            const std::filesystem::path path =
+                overworldEditor.screenPath(*selectedId);
+            auto openSelectedScreen = [&]() {
+                if (editor.overworldScreenId() == *selectedId) {
+                    editor.setEditingDocument(true);
+                    return true;
+                }
+                if (!std::filesystem::is_regular_file(path)) {
+                    return false;
+                }
+                editor.selectDocument(path);
+                if (!editor.openDocument(path)) {
+                    return false;
+                }
+                syncDocumentPath(editor);
+                return true;
+            };
+            if (ImGui::Button("Open Screen") &&
+                std::filesystem::is_regular_file(path)) {
+                (void)openSelectedScreen();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Delete Screen")) {
+                (void)overworldEditor.deleteScreen(*selectedId);
+            }
+
+            ImGui::InputInt2("Move To Slot", overworldMoveSlot_);
+            if (ImGui::Button("Move Screen")) {
+                (void)overworldEditor.moveScreen(
+                    *selectedId,
+                    { overworldMoveSlot_[0], overworldMoveSlot_[1] });
+            }
+
+            ImGui::TextWrapped(
+                "To add a neighboring screen, use the +N, +E, +S, or +W "
+                "button around this screen's card above. During play, regular "
+                "movement rules decide whether the player can cross an edge. "
+                "Place exactly one Player tile across all overworld screens.");
+        }
+    }
+
+#else
+    (void)editor;
+    (void)overworldEditor;
+#endif
+}
+
+// What the tab reports after the map itself: screens deleted this frame, and
+// the editor's status line.
+void LevelEditorDebugUi::drawOverworldDeletionsAndStatus(
+    OverworldMapEditor& overworldEditor)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    const std::vector<OverworldScreenId> deleted =
+        overworldEditor.deletedScreens();
+    if (!deleted.empty()) {
+        ImGui::SeparatorText("Deleted Screens");
+        ImGui::InputInt2("Restore To Slot", overworldRestoreSlot_);
+        for (OverworldScreenId id : deleted) {
+            ImGui::PushID(static_cast<int>(id));
+            ImGui::Text("Screen %u", static_cast<unsigned>(id));
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Restore")) {
+                (void)overworldEditor.restoreDeletedScreen(
+                    id,
+                    { overworldRestoreSlot_[0], overworldRestoreSlot_[1] });
+            }
+            ImGui::PopID();
+        }
+    }
+
+    if (!overworldEditor.status().empty()) {
+        ImGui::TextWrapped("%s", overworldEditor.status().c_str());
+    }
+#else
+    (void)overworldEditor;
+#endif
+}
+
+void LevelEditorDebugUi::drawOverworldTab(
+    LevelEditor& editor,
+    OverworldMapEditor& overworldEditor)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    const std::filesystem::path root = editor.browserRoot().lexically_normal();
+    if (overworldEditorRoot_.lexically_normal() != root) {
+        overworldEditorRoot_ = root;
+        std::optional<std::filesystem::path> runtimeRoot;
+        if (editor.sourceLevelRoot().lexically_normal() == root) {
+            runtimeRoot = editor.runtimeLevelRoot();
+        }
+        overworldEditor.initialize(root, runtimeRoot);
+    }
+
+    drawOverworldToolbar(overworldEditor);
 
     if (!overworldEditor.loaded()) {
         ImGui::TextWrapped("%s", overworldEditor.status().c_str());
@@ -1103,74 +1234,8 @@ void LevelEditorDebugUi::drawOverworldTab(
         }
     }
 
-    if (const auto selectedId = overworldEditor.selectedScreen()) {
-        const OverworldScreenSpec* selected =
-            overworldEditor.screen(*selectedId);
-        if (selected) {
-            ImGui::SeparatorText(
-                ("Screen " + std::to_string(*selectedId)).c_str());
-            const std::filesystem::path path =
-                overworldEditor.screenPath(*selectedId);
-            auto openSelectedScreen = [&]() {
-                if (editor.overworldScreenId() == *selectedId) {
-                    editor.setEditingDocument(true);
-                    return true;
-                }
-                if (!std::filesystem::is_regular_file(path)) {
-                    return false;
-                }
-                editor.selectDocument(path);
-                if (!editor.openDocument(path)) {
-                    return false;
-                }
-                syncDocumentPath(editor);
-                return true;
-            };
-            if (ImGui::Button("Open Screen") &&
-                std::filesystem::is_regular_file(path)) {
-                (void)openSelectedScreen();
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Delete Screen")) {
-                (void)overworldEditor.deleteScreen(*selectedId);
-            }
-
-            ImGui::InputInt2("Move To Slot", overworldMoveSlot_);
-            if (ImGui::Button("Move Screen")) {
-                (void)overworldEditor.moveScreen(
-                    *selectedId,
-                    { overworldMoveSlot_[0], overworldMoveSlot_[1] });
-            }
-
-            ImGui::TextWrapped(
-                "To add a neighboring screen, use the +N, +E, +S, or +W "
-                "button around this screen's card above. During play, regular "
-                "movement rules decide whether the player can cross an edge. "
-                "Place exactly one Player tile across all overworld screens.");
-        }
-    }
-
-    const std::vector<OverworldScreenId> deleted =
-        overworldEditor.deletedScreens();
-    if (!deleted.empty()) {
-        ImGui::SeparatorText("Deleted Screens");
-        ImGui::InputInt2("Restore To Slot", overworldRestoreSlot_);
-        for (OverworldScreenId id : deleted) {
-            ImGui::PushID(static_cast<int>(id));
-            ImGui::Text("Screen %u", static_cast<unsigned>(id));
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Restore")) {
-                (void)overworldEditor.restoreDeletedScreen(
-                    id,
-                    { overworldRestoreSlot_[0], overworldRestoreSlot_[1] });
-            }
-            ImGui::PopID();
-        }
-    }
-
-    if (!overworldEditor.status().empty()) {
-        ImGui::TextWrapped("%s", overworldEditor.status().c_str());
-    }
+    drawSelectedOverworldScreen(editor, overworldEditor);
+    drawOverworldDeletionsAndStatus(overworldEditor);
 #else
     (void)editor;
     (void)overworldEditor;

@@ -331,13 +331,13 @@ given numbers instead of opinions.
 
 Still open, in the order the report recommends: collapsing
 `VulkanModelResources`'s three copies of the load-state machine, then the
-remaining long functions. **5** are at or past 200 lines and 25 past 150, not
+remaining long functions - **now none**, where the review first reported eight
+and the real count was seventeen. Twenty-three are still past 150. Not
 the eight the review first reported - `drawIsoFrame` (487),
 `VulkanSceneRecorder::record` (305) and `Application::buildRenderFrame` (304)
-are among those it never named. **All five that remain are ImGui panels**, which
-is where this finding was always going to stop without someone at the keyboard:
-splitting one is mechanical, but the only check that it still behaves is to look
-at the screen.
+are among those it never named. The five ImGui panels that were held back to
+the end are done too - three of them by Arthur directly, which is the right
+division of labour for code whose only real check is to look at the screen.
 
 `ApplicationDebugUi::draw` is done: 854 lines to 185, its seven debug panels
 now file-local functions (`drawWaterSection`, `drawLightingSection` and the
@@ -347,6 +347,38 @@ open/closed state and ImGui's draw order are unchanged. Every body moved
 verbatim; the one deleted line was `draw`'s now-unused `settings` local, which
 the warnings gate found. `drawRenderingStatsSection` is still 293 lines and is
 where the next cut starts.
+
+**No function in `src/` is past 200 lines any more.** The five UI panels are
+split, and the division of labour was the sensible one: Arthur took the three
+whose only check is the screen in front of him, and this session took the two
+that could be checked another way.
+
+| Panel | Was | Now | By | Check |
+| --- | --- | --- | --- | --- |
+| `OptionsMenuView::draw` | 385 | 116 | here | `UiTests`, 190 checks |
+| `AnimationCatalogDebugUi::draw` | 324 | 154 | here | compile, both flag settings |
+| `drawRenderingStatsSection` | 293 | 149 | Arthur | on screen |
+| `drawOverworldTab` | 272 | 184 | Arthur | on screen |
+| `drawDecorationPalette` | 203 | 44 | Arthur | on screen |
+
+`OptionsMenuView::draw` is the one that turned out not to belong in the "look at
+the screen" group at all: it is drawn through `UiContext`, not ImGui, and
+`UiTests` calls it directly at four sites. Its centre was a 248-line switch over
+the eight row kinds, and every case wanted the same handful of values, so there
+is an `OptionsRowDraw` bundle and eight `drawXxxRow` functions; the row layout
+pass came out beside them. All nine bodies moved as a pure dedent, and the 190
+checks still pass.
+
+`AnimationCatalogDebugUi::draw` needed a `TimelineContext` for the same reason.
+Its `openEventEditor` was a `[&]` lambda in the middle of a 324-line function -
+now a member. Two lines changed in the whole move, both forced: the two calls to
+that lambda gained the context argument. Guarded with its own
+`#if SOKOBAN_ENABLE_DEBUG_UI`, matching how `draw`'s body is guarded, and
+compiled clean in both settings.
+
+Arthur's three were checked here too: `ApplicationDebugUi.cpp` and
+`LevelEditorDebugUi.cpp` both compile warning-free under `-Werror` with the
+production flags.
 
 The six remaining non-panel long functions are done, all by the same method:
 find the seams already in the function, move the bodies verbatim, and let the

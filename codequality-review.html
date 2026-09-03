@@ -1895,9 +1895,10 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
     </p>
 </article>
 
-  <article class="finding is-major">
+  <article class="finding is-resolved">
     <div class="finding-top">
-      <span class="sev is-major">Major</span>
+      <span class="sev is-good">Resolved</span>
+      <span class="tag">Was: major · function length</span>
       <span class="tag">Function length</span>
     </div>
     <h3>Seventeen functions run past 200 lines</h3>
@@ -1920,12 +1921,12 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
           <tr><td class="num">846</td><td><code>ApplicationDebugUi.cpp</code> · <code>draw</code></td><td>open — UI</td></tr>
           <tr><td class="num">513&nbsp;&rarr;&nbsp;135</td><td><code>IsoScenePreparer.cpp</code> · <code>prepare</code></td><td><b>done</b></td></tr>
           <tr><td class="num">487</td><td><code>VulkanSceneRecorder.cpp</code> · <code>drawIsoFrame</code></td><td>open — unlisted before</td></tr>
-          <tr><td class="num">378</td><td><code>ui/OptionsMenu.cpp</code> · <code>draw</code></td><td>open — UI</td></tr>
-          <tr><td class="num">319</td><td><code>AnimationCatalogDebugUi.cpp</code> · <code>draw</code></td><td>open — UI</td></tr>
+          <tr><td class="num">385&nbsp;&rarr;&nbsp;116</td><td><code>ui/OptionsMenu.cpp</code> · <code>draw</code></td><td><b>done</b></td></tr>
+          <tr><td class="num">324&nbsp;&rarr;&nbsp;154</td><td><code>AnimationCatalogDebugUi.cpp</code> · <code>draw</code></td><td><b>done</b></td></tr>
           <tr><td class="num">305</td><td><code>VulkanSceneRecorder.cpp</code> · <code>record</code></td><td>open — unlisted before</td></tr>
           <tr><td class="num">304&nbsp;&rarr;&nbsp;146</td><td><code>Application.cpp</code> · <code>buildRenderFrame</code></td><td><b>done</b></td></tr>
           <tr><td class="num">279&nbsp;&rarr;&nbsp;166</td><td><code>RenderFrameBuilder.cpp</code> · <code>appendMirrorPreview</code></td><td><b>done</b></td></tr>
-          <tr><td class="num">269</td><td><code>LevelEditorDebugUi.cpp</code> · <code>drawOverworldTab</code></td><td>open — UI, unlisted before</td></tr>
+          <tr><td class="num">272&nbsp;&rarr;&nbsp;184</td><td><code>LevelEditorDebugUi.cpp</code> · <code>drawOverworldTab</code></td><td><b>done</b> — by the author</td></tr>
           <tr><td class="num">281&nbsp;&rarr;&nbsp;115</td><td><code>Application.cpp</code> · <code>run</code></td><td><b>done</b></td></tr>
           <tr><td class="num">269&nbsp;→&nbsp;164</td><td><code>VulkanRenderer.cpp</code> · <code>drawFrame</code></td><td><b>done</b></td></tr>
           <tr><td class="num">231&nbsp;→&nbsp;156</td><td><code>VulkanSceneDescriptors.cpp</code> · <code>create</code></td><td><b>done</b></td></tr>
@@ -1933,7 +1934,7 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
           <tr><td class="num">221&nbsp;&rarr;&nbsp;27</td><td><code>ui/OptionsMenu.cpp</code> · <code>optionsMenuRows</code></td><td><b>done</b></td></tr>
           <tr><td class="num">208</td><td><code>ContentPipeline.cpp</code> · <code>addLevels</code></td><td>open — unlisted before</td></tr>
           <tr><td class="num">213&nbsp;&rarr;&nbsp;139</td><td><code>VulkanPipelineFactory.cpp</code> · <code>createScenePipeline</code></td><td><b>done</b></td></tr>
-          <tr><td class="num">200</td><td><code>LevelEditorDebugUi.cpp</code> · <code>drawDecorationPalette</code></td><td>open — UI, unlisted before</td></tr>
+          <tr><td class="num">203&nbsp;&rarr;&nbsp;44</td><td><code>LevelEditorDebugUi.cpp</code> · <code>drawDecorationPalette</code></td><td><b>done</b> — by the author</td></tr>
         </tbody>
       </table>
     </div>
@@ -1992,18 +1993,12 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       difference is deliberate.
     </p>
       <p>
-      <strong>Five, not seventeen — and every one of the five is a UI panel.</strong>
-      Re-measured against the tree as it now stands: two functions fell below
-      200 lines during other work, one the report named
-      (<code>drawIsoFrame</code>, 487) no longer exists in that shape, and
-      eleven have been taken apart. Twenty-five functions are past 150. What is
-      left past 200 is <em>exactly</em> the five ImGui panels —
-      <code>OptionsMenu::draw</code> (385),
-      <code>AnimationCatalogDebugUi::draw</code> (324),
-      <code>drawRenderingStatsSection</code> (293),
-      <code>drawOverworldTab</code> (272) and
-      <code>drawDecorationPalette</code> (203) — which is where this finding was
-      always going to stop without someone at the keyboard.
+      <strong>Seventeen, then five, then none.</strong>
+      Re-measured repeatedly against the tree as it stood: eight was wrong, the
+      real count was seventeen, and <strong>none is past 200 lines now</strong>.
+      Twenty-three are still past 150, which is the honest remaining number —
+      length alone was never the finding, and nothing here was cut to hit a
+      figure.
     </p>
     <p>
       <strong><code>ApplicationDebugUi::draw</code>: 854 lines to 185.</strong>
@@ -2037,6 +2032,48 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       <code>drawRenderingStatsSection</code> is still 293 lines. It is one
       named thing now rather than the tail of an 854-line function, which is
       where the next cut starts.
+    </p>
+    <p>
+      <strong>And the five UI panels, which is where this was always going to
+      need someone at the keyboard.</strong> The division of labour was the
+      sensible one: the author took the three whose only check is the screen in
+      front of him, and this session took the two that could be checked another
+      way.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Panel</th><th>Was</th><th>Now</th><th>By</th><th>Checked by</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>OptionsMenuView::draw</code></td><td class="num">385</td><td class="num">116</td><td>this review</td><td><code>UiTests</code>, 190 checks</td></tr>
+          <tr><td><code>AnimationCatalogDebugUi::draw</code></td><td class="num">324</td><td class="num">154</td><td>this review</td><td>compile, both flag settings</td></tr>
+          <tr><td><code>drawRenderingStatsSection</code></td><td class="num">293</td><td class="num">149</td><td>the author</td><td>on screen</td></tr>
+          <tr><td><code>drawOverworldTab</code></td><td class="num">272</td><td class="num">184</td><td>the author</td><td>on screen</td></tr>
+          <tr><td><code>drawDecorationPalette</code></td><td class="num">203</td><td class="num">44</td><td>the author</td><td>on screen</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      <code>OptionsMenuView::draw</code> turned out not to belong in the “look
+      at the screen” group at all: it draws through <code>UiContext</code>
+      rather than ImGui, and <code>UiTests</code> calls it directly at four
+      sites. Its centre was a 248-line switch over the eight row kinds, every
+      case wanting the same handful of values — so there is an
+      <code>OptionsRowDraw</code> bundle and eight <code>drawXxxRow</code>
+      functions, with the row-layout pass lifted out beside them. All nine
+      bodies moved as a pure dedent and the 190 checks still pass.
+    </p>
+    <p>
+      <code>AnimationCatalogDebugUi::draw</code> needed a
+      <code>TimelineContext</code> for the same reason, and its
+      <code>openEventEditor</code> — a <code>[&amp;]</code> lambda buried in the
+      middle of a 324-line function — is a member now. <strong>Two lines changed
+      in the whole move</strong>, both forced: the two calls to that lambda
+      gained the context argument. The author's three were checked here too;
+      <code>ApplicationDebugUi.cpp</code> and
+      <code>LevelEditorDebugUi.cpp</code> both compile warning-free under
+      <code>-Werror</code> with the production flags.
     </p>
     <p>
       <strong>The six remaining non-panel functions are done.</strong> All by
@@ -3971,20 +4008,19 @@ tuned, with ColumnLimit: 0 (never re-wrap)  10,573   (210 of 367 files)</code>
       itself is left for someone who can run the renderer.
       <span class="code">C2</span> is partly done and partly declined on
       purpose: the count was wrong — 17 functions past 200 lines, not eight, and
-      5 today, all of them UI panels — and every one whose correctness could be
-      demonstrated was taken,
+      none today — and every one whose correctness could be demonstrated was
+      taken here,
       including the two largest, <code>ApplicationDebugUi::draw</code>
       (854&nbsp;&rarr;&nbsp;185) and <code>IsoScenePreparer::prepare</code>
-      (513&nbsp;&rarr;&nbsp;135), plus <code>OverworldMap::load</code> and
-      <code>optionsMenuRows</code>, which were picked for their test suites
-      rather than their size. The five ImGui panels are left because the only
-      check on them is to look at the screen. The double-counted eviction victim is fixed — measured first,
+      (513&nbsp;&rarr;&nbsp;135). The five ImGui panels finished it: three by the
+      author, at the screen, and two here because they could be checked another
+      way. The double-counted eviction victim is fixed — measured first,
       which showed it was costing frames rather than memory. The point-shadow
       divergence is unified with the split deliberately kept, so the tap count is
       now one token per shader rather than two functions that look alike. Nothing
       is parked any more; what remains open is the residency ladder that blocks
-      the rest of the class split, the five ImGui panels, and the draw-kind tag,
-      each of which needs a device or a pair of eyes rather than a decision.
+      the rest of the class split, and the draw-kind tag — both of which need a
+      device rather than a decision.
     </li>
   </ol>
 </section>

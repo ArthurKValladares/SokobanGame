@@ -1104,41 +1104,40 @@ std::optional<OptionsAction> OptionsMenu::provideBindingCandidate(
         options::intent::ProvideBinding { candidate });
 }
 
-std::optional<OptionsMenuIntent> OptionsMenuView::draw(
-    UiContext& ui,
-    Vec2 viewport,
+// Everything one options row needs in order to draw itself.
+//
+// draw() was 385 lines whose centre was a 248-line switch over the eight row
+// kinds, and every case wanted the same handful of things. Bundling them lets
+// each kind be its own function instead of an eleven-parameter signature; each
+// binds the names back out of the bundle, so the bodies below are exactly what
+// was inside the switch.
+struct OptionsRowDraw {
+    UiContext& ui;
+    menuKit::MenuPage& layout;
+    Vec2 viewport;
+    const OptionsMenuState& state;
+    const UserSettings& settings;
+    const InputPromptCatalog* inputPrompts;
+    const GamepadPresentation* gamepad;
+    const OptionsMenuRow& row;
+    const RowLayout& rowLayout;
+    bool focused;
+    const std::string& controlId;
+    std::optional<OptionsMenuIntent>& intent;
+};
+
+// Where every row sits: one pass that adds each row's nodes to the layout
+// tree before it is arranged. Separated from the drawing pass below, which
+// is what it was already doing - two loops over the same rows, 71 lines and
+// 248 lines, sharing only the row list.
+void layoutOptionsRows(
+    menuKit::MenuPage& layout,
+    const std::vector<OptionsMenuRow>& rows,
+    std::vector<RowLayout>& rowLayouts,
     const OptionsMenuState& state,
-    const UserSettings& settings,
-    const InputPromptCatalog* inputPrompts,
-    const GamepadPresentation* gamepad) const
+    bool compactGraphics,
+    UiLayoutNode& controlsPrompt)
 {
-    if (!state.open) {
-        return std::nullopt;
-    }
-
-    ui.rect(
-        { { 0.0f, 0.0f }, viewport },
-        { 0.015f, 0.020f, 0.021f, 0.78f });
-    const UiRect panel = menuKit::centeredPanel(
-        viewport, 560.0f, pageHeight(state.page), 400.0f);
-    ui.panel(panel);
-
-    const std::vector<OptionsMenuRow> rows =
-        optionsMenuRows(state, settings);
-    const bool compactGraphics =
-        state.page == OptionsMenuPage::Graphics;
-    menuKit::MenuPage layout(
-        state.page == OptionsMenuPage::Controls
-            ? 16.0f
-            : (compactGraphics ? 16.0f : 28.0f));
-    std::vector<RowLayout> rowLayouts(rows.size());
-    UiLayoutNode message {};
-    UiLayoutNode controlsPrompt {};
-    if (state.page == OptionsMenuPage::QuitConfirmation) {
-        layout.tree.spacer(layout.tree.root(), 20.0f);
-        message = layout.tree.item(layout.tree.root(), 44.0f);
-        layout.tree.spacer(layout.tree.root(), 74.0f);
-    }
     for (std::size_t index = 0; index < rows.size(); ++index) {
         const OptionsMenuRow& row = rows[index];
         RowLayout& rowLayout = rowLayouts[index];
@@ -1210,6 +1209,372 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
                             : (compactGraphics ? 3.0f : 10.0f)));
         }
     }
+}
+
+// The page tabs across the top of the main page.
+void drawTabsRow(const OptionsRowDraw& d)
+{
+    UiContext& ui = d.ui;
+    menuKit::MenuPage& layout = d.layout;
+    const OptionsMenuRow& row = d.row;
+    const RowLayout& rowLayout = d.rowLayout;
+    const bool focused = d.focused;
+    std::optional<OptionsMenuIntent>& intent = d.intent;
+
+    std::vector<uiControls::ChoiceOption> choices;
+    choices.reserve(row.choices.size());
+    for (const OptionsMenuChoice& choice : row.choices) {
+        choices.push_back({ choice.value, choice.label });
+    }
+    int value = row.choiceValue;
+    if (uiControls::segmentedControl(
+            ui,
+            layout.tree.rect(rowLayout.primary),
+            choices,
+            value,
+            { .focused = focused })) {
+        intent = options::intent::SelectChoice {
+            row.id, value };
+    }
+}
+
+// A plain button row.
+void drawButtonRow(const OptionsRowDraw& d)
+{
+    UiContext& ui = d.ui;
+    menuKit::MenuPage& layout = d.layout;
+    const OptionsMenuRow& row = d.row;
+    const RowLayout& rowLayout = d.rowLayout;
+    const bool focused = d.focused;
+    std::optional<OptionsMenuIntent>& intent = d.intent;
+
+    if (uiControls::button(
+            ui,
+            layout.tree.rect(rowLayout.primary),
+            row.label,
+            {
+                .tone = buttonTone(row.tone),
+                .focused = focused,
+            })) {
+        intent = options::intent::ActivateRow { row.id };
+    }
+}
+
+// An on/off row.
+void drawToggleRow(const OptionsRowDraw& d)
+{
+    UiContext& ui = d.ui;
+    menuKit::MenuPage& layout = d.layout;
+    const OptionsMenuRow& row = d.row;
+    const RowLayout& rowLayout = d.rowLayout;
+    const bool focused = d.focused;
+    std::optional<OptionsMenuIntent>& intent = d.intent;
+
+    bool value = row.toggleValue;
+    if (uiControls::checkbox(
+            ui,
+            layout.tree.rect(rowLayout.primary),
+            row.label,
+            value,
+            focused && row.enabled)) {
+        intent = options::intent::SetToggle { row.id, value };
+    }
+}
+
+// A row whose options are laid out side by side.
+void drawSegmentedChoiceRow(const OptionsRowDraw& d)
+{
+    UiContext& ui = d.ui;
+    menuKit::MenuPage& layout = d.layout;
+    const OptionsMenuRow& row = d.row;
+    const RowLayout& rowLayout = d.rowLayout;
+    const bool focused = d.focused;
+    std::optional<OptionsMenuIntent>& intent = d.intent;
+
+    ui.text(
+        layout.tree.rect(rowLayout.primary).position,
+        row.label,
+        { 0.83f, 0.86f, 0.83f, 1.0f },
+        22.0f);
+    std::vector<uiControls::ChoiceOption> choices;
+    choices.reserve(row.choices.size());
+    for (const OptionsMenuChoice& choice : row.choices) {
+        choices.push_back({ choice.value, choice.label });
+    }
+    int value = row.choiceValue;
+    if (uiControls::segmentedControl(
+            ui,
+            layout.tree.rect(rowLayout.control),
+            choices,
+            value,
+            { .focused = focused })) {
+        intent = options::intent::SelectChoice {
+            row.id, value };
+    }
+}
+
+// A row whose options are stepped through one at a time.
+void drawStepperChoiceRow(const OptionsRowDraw& d)
+{
+    UiContext& ui = d.ui;
+    menuKit::MenuPage& layout = d.layout;
+    const OptionsMenuRow& row = d.row;
+    const RowLayout& rowLayout = d.rowLayout;
+    const bool focused = d.focused;
+    std::optional<OptionsMenuIntent>& intent = d.intent;
+
+    ui.text(
+        layout.tree.rect(rowLayout.primary).position,
+        row.label,
+        { 0.83f, 0.86f, 0.83f, 1.0f },
+        22.0f);
+    std::vector<std::string_view> labels;
+    labels.reserve(row.choices.size());
+    for (const OptionsMenuChoice& choice : row.choices) {
+        labels.push_back(choice.label);
+    }
+    int value = row.choiceValue;
+    if (uiControls::choiceStepper(
+            ui,
+            layout.tree.rect(rowLayout.control),
+            labels,
+            value,
+            focused)) {
+        intent = options::intent::SelectChoice {
+            row.id, value };
+    }
+}
+
+// A continuous value with a track.
+void drawSliderRow(const OptionsRowDraw& d)
+{
+    UiContext& ui = d.ui;
+    menuKit::MenuPage& layout = d.layout;
+    const OptionsMenuRow& row = d.row;
+    const RowLayout& rowLayout = d.rowLayout;
+    const bool focused = d.focused;
+    std::optional<OptionsMenuIntent>& intent = d.intent;
+    const std::string& controlId = d.controlId;
+
+    const Vec4 labelColor = row.enabled
+        ? Vec4 { 0.83f, 0.86f, 0.83f, 1.0f }
+        : Vec4 { 0.50f, 0.52f, 0.51f, 0.55f };
+    ui.text(
+        layout.tree.rect(rowLayout.primary).position,
+        row.label,
+        labelColor,
+        22.0f);
+    float value = row.sliderValue;
+    if (uiControls::slider(
+            ui,
+            controlId,
+            layout.tree.rect(rowLayout.control),
+            value,
+            row.sliderMinimum,
+            row.sliderMaximum,
+            focused && row.enabled,
+            row.enabled)) {
+        intent = options::intent::SetSlider {
+            row.id, value, true };
+    }
+    std::string displayValue;
+    if (row.sliderDisplay ==
+        OptionsMenuSliderDisplay::ExposureEv) {
+        const int tenths = static_cast<int>(
+            std::round(row.sliderValue * 10.0f));
+        const int magnitude = std::abs(tenths);
+        displayValue = (tenths > 0 ? "+" : (tenths < 0 ? "-" : "")) +
+            std::to_string(magnitude / 10) + "." +
+            std::to_string(magnitude % 10) + " EV";
+    } else {
+        displayValue = std::to_string(static_cast<int>(
+            std::round(row.sliderValue * 100.0f))) + "%";
+    }
+    menuKit::trailingText(
+        ui,
+        layout.tree.rect(rowLayout.primary),
+        displayValue,
+        row.enabled
+            ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
+            : Vec4 { 0.50f, 0.52f, 0.51f, 0.45f },
+        20.0f);
+}
+
+// The render-scale row, which is a slider plus the resolution it works out to.
+void drawCustomRenderScaleRow(const OptionsRowDraw& d)
+{
+    UiContext& ui = d.ui;
+    menuKit::MenuPage& layout = d.layout;
+    const Vec2 viewport = d.viewport;
+    const OptionsMenuRow& row = d.row;
+    const RowLayout& rowLayout = d.rowLayout;
+    const bool focused = d.focused;
+    std::optional<OptionsMenuIntent>& intent = d.intent;
+    const std::string& controlId = d.controlId;
+    const OptionsMenuState& state = d.state;
+    const UserSettings& settings = d.settings;
+
+    bool enabled = row.toggleValue;
+    if (uiControls::checkbox(
+            ui,
+            layout.tree.rect(rowLayout.primary),
+            row.label,
+            enabled,
+            focused)) {
+        intent = options::intent::SetToggle {
+            row.id, enabled };
+    }
+    float value = row.sliderValue;
+    const bool sliderChanged = uiControls::slider(
+        ui,
+        controlId + ".slider",
+        layout.tree.rect(rowLayout.control),
+        value,
+        0.25f,
+        1.0f,
+        focused && row.enabled,
+        row.enabled);
+    if (sliderChanged) {
+        intent = options::intent::SetSlider {
+            row.id, value, !ui.mouseDown() };
+    } else if (state.customRenderScalePreview &&
+        !ui.mouseDown()) {
+        intent = options::intent::SetSlider {
+            row.id,
+            static_cast<float>(
+                *state.customRenderScalePreview) / 100.0f,
+            true,
+        };
+    }
+    const int percentValue = static_cast<int>(
+        std::round(row.sliderValue * 100.0f));
+    const std::string percent =
+        std::to_string(percentValue) + "%";
+    menuKit::trailingText(
+        ui,
+        layout.tree.rect(rowLayout.primary),
+        percent,
+        row.enabled
+            ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
+            : Vec4 { 0.58f, 0.61f, 0.60f, 0.45f },
+        20.0f);
+    const int effectiveScale = row.enabled
+        ? percentValue
+        : settings.video.renderScalePercent;
+    const PixelExtent internal = scaledRenderExtent({
+        .width = static_cast<uint32_t>(std::max(viewport.x, 0.0f)),
+        .height = static_cast<uint32_t>(std::max(viewport.y, 0.0f)),
+    }, effectiveScale);
+    const std::string resolution =
+        std::to_string(internal.width) + " x " +
+        std::to_string(internal.height) + " internal";
+    ui.text(
+        layout.tree.rect(rowLayout.detail).position,
+        resolution,
+        { 0.58f, 0.63f, 0.62f, 1.0f },
+        18.0f);
+}
+
+// One input binding, including the capture state while it is being rebound.
+void drawBindingRow(const OptionsRowDraw& d)
+{
+    UiContext& ui = d.ui;
+    menuKit::MenuPage& layout = d.layout;
+    const OptionsMenuRow& row = d.row;
+    const RowLayout& rowLayout = d.rowLayout;
+    const bool focused = d.focused;
+    std::optional<OptionsMenuIntent>& intent = d.intent;
+    const OptionsMenuState& state = d.state;
+    const UserSettings& settings = d.settings;
+    const InputPromptCatalog* inputPrompts = d.inputPrompts;
+    const GamepadPresentation* gamepad = d.gamepad;
+
+    const std::optional<InputAction> action =
+        actionForRow(row.id);
+    const UiRect bindingRow = layout.tree.rect(rowLayout.primary);
+    if (uiControls::button(
+            ui,
+            bindingRow,
+            "",
+            {
+                .tone = buttonTone(row.tone),
+                .focused = focused,
+            })) {
+        intent = options::intent::ActivateRow { row.id };
+    }
+    const bool capturing = action &&
+        state.capturingAction == action;
+    const GamepadPresentation noGamepad;
+    const bool drewPrompts = !capturing && action && inputPrompts &&
+        drawBindingRowPrompts(
+            ui,
+            bindingRow,
+            row.label,
+            settings.input,
+            *action,
+            state.controlsBindingDevice,
+            *inputPrompts,
+            gamepad ? *gamepad : noGamepad,
+            focused);
+    if (!drewPrompts) {
+        drawBindingRowText(
+            ui,
+            bindingRow,
+            row.label,
+            capturing
+                ? (state.controlsBindingDevice ==
+                          BindingDeviceClass::Keyboard
+                        ? "Press a key..."
+                        : "Press a controller input...")
+                : actionBindingsDisplay(
+                      settings.input,
+                      *action,
+                      state.controlsBindingDevice),
+            capturing
+                ? Vec4 { 0.98f, 0.84f, 0.42f, 1.0f }
+                : (focused
+                        ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
+                        : Vec4 { 0.62f, 0.67f, 0.65f, 1.0f }));
+    }
+}
+
+std::optional<OptionsMenuIntent> OptionsMenuView::draw(
+    UiContext& ui,
+    Vec2 viewport,
+    const OptionsMenuState& state,
+    const UserSettings& settings,
+    const InputPromptCatalog* inputPrompts,
+    const GamepadPresentation* gamepad) const
+{
+    if (!state.open) {
+        return std::nullopt;
+    }
+
+    ui.rect(
+        { { 0.0f, 0.0f }, viewport },
+        { 0.015f, 0.020f, 0.021f, 0.78f });
+    const UiRect panel = menuKit::centeredPanel(
+        viewport, 560.0f, pageHeight(state.page), 400.0f);
+    ui.panel(panel);
+
+    const std::vector<OptionsMenuRow> rows =
+        optionsMenuRows(state, settings);
+    const bool compactGraphics =
+        state.page == OptionsMenuPage::Graphics;
+    menuKit::MenuPage layout(
+        state.page == OptionsMenuPage::Controls
+            ? 16.0f
+            : (compactGraphics ? 16.0f : 28.0f));
+    std::vector<RowLayout> rowLayouts(rows.size());
+    UiLayoutNode message {};
+    UiLayoutNode controlsPrompt {};
+    if (state.page == OptionsMenuPage::QuitConfirmation) {
+        layout.tree.spacer(layout.tree.root(), 20.0f);
+        message = layout.tree.item(layout.tree.root(), 44.0f);
+        layout.tree.spacer(layout.tree.root(), 74.0f);
+    }
+    layoutOptionsRows(
+        layout, rows, rowLayouts, state, compactGraphics, controlsPrompt);
     layout.tree.arrange(panel);
     layout.drawHeader(ui, pageTitle(state.page), 36.0f);
 
@@ -1239,250 +1604,50 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
         if (hasNode(rowLayout.divider)) {
             ui.divider(layout.tree.rect(rowLayout.divider));
         }
+        const OptionsRowDraw rowDraw {
+            ui,
+            layout,
+            viewport,
+            state,
+            settings,
+            inputPrompts,
+            gamepad,
+            row,
+            rowLayout,
+            focused,
+            controlId,
+            intent,
+        };
         switch (row.kind) {
         case OptionsMenuRowKind::Tabs: {
-            std::vector<uiControls::ChoiceOption> choices;
-            choices.reserve(row.choices.size());
-            for (const OptionsMenuChoice& choice : row.choices) {
-                choices.push_back({ choice.value, choice.label });
-            }
-            int value = row.choiceValue;
-            if (uiControls::segmentedControl(
-                    ui,
-                    layout.tree.rect(rowLayout.primary),
-                    choices,
-                    value,
-                    { .focused = focused })) {
-                intent = options::intent::SelectChoice {
-                    row.id, value };
-            }
+            drawTabsRow(rowDraw);
             break;
         }
         case OptionsMenuRowKind::Button:
-            if (uiControls::button(
-                    ui,
-                    layout.tree.rect(rowLayout.primary),
-                    row.label,
-                    {
-                        .tone = buttonTone(row.tone),
-                        .focused = focused,
-                    })) {
-                intent = options::intent::ActivateRow { row.id };
-            }
+            drawButtonRow(rowDraw);
             break;
         case OptionsMenuRowKind::Toggle: {
-            bool value = row.toggleValue;
-            if (uiControls::checkbox(
-                    ui,
-                    layout.tree.rect(rowLayout.primary),
-                    row.label,
-                    value,
-                    focused && row.enabled)) {
-                intent = options::intent::SetToggle { row.id, value };
-            }
+            drawToggleRow(rowDraw);
             break;
         }
         case OptionsMenuRowKind::SegmentedChoice: {
-            ui.text(
-                layout.tree.rect(rowLayout.primary).position,
-                row.label,
-                { 0.83f, 0.86f, 0.83f, 1.0f },
-                22.0f);
-            std::vector<uiControls::ChoiceOption> choices;
-            choices.reserve(row.choices.size());
-            for (const OptionsMenuChoice& choice : row.choices) {
-                choices.push_back({ choice.value, choice.label });
-            }
-            int value = row.choiceValue;
-            if (uiControls::segmentedControl(
-                    ui,
-                    layout.tree.rect(rowLayout.control),
-                    choices,
-                    value,
-                    { .focused = focused })) {
-                intent = options::intent::SelectChoice {
-                    row.id, value };
-            }
+            drawSegmentedChoiceRow(rowDraw);
             break;
         }
         case OptionsMenuRowKind::StepperChoice: {
-            ui.text(
-                layout.tree.rect(rowLayout.primary).position,
-                row.label,
-                { 0.83f, 0.86f, 0.83f, 1.0f },
-                22.0f);
-            std::vector<std::string_view> labels;
-            labels.reserve(row.choices.size());
-            for (const OptionsMenuChoice& choice : row.choices) {
-                labels.push_back(choice.label);
-            }
-            int value = row.choiceValue;
-            if (uiControls::choiceStepper(
-                    ui,
-                    layout.tree.rect(rowLayout.control),
-                    labels,
-                    value,
-                    focused)) {
-                intent = options::intent::SelectChoice {
-                    row.id, value };
-            }
+            drawStepperChoiceRow(rowDraw);
             break;
         }
         case OptionsMenuRowKind::Slider: {
-            const Vec4 labelColor = row.enabled
-                ? Vec4 { 0.83f, 0.86f, 0.83f, 1.0f }
-                : Vec4 { 0.50f, 0.52f, 0.51f, 0.55f };
-            ui.text(
-                layout.tree.rect(rowLayout.primary).position,
-                row.label,
-                labelColor,
-                22.0f);
-            float value = row.sliderValue;
-            if (uiControls::slider(
-                    ui,
-                    controlId,
-                    layout.tree.rect(rowLayout.control),
-                    value,
-                    row.sliderMinimum,
-                    row.sliderMaximum,
-                    focused && row.enabled,
-                    row.enabled)) {
-                intent = options::intent::SetSlider {
-                    row.id, value, true };
-            }
-            std::string displayValue;
-            if (row.sliderDisplay ==
-                OptionsMenuSliderDisplay::ExposureEv) {
-                const int tenths = static_cast<int>(
-                    std::round(row.sliderValue * 10.0f));
-                const int magnitude = std::abs(tenths);
-                displayValue = (tenths > 0 ? "+" : (tenths < 0 ? "-" : "")) +
-                    std::to_string(magnitude / 10) + "." +
-                    std::to_string(magnitude % 10) + " EV";
-            } else {
-                displayValue = std::to_string(static_cast<int>(
-                    std::round(row.sliderValue * 100.0f))) + "%";
-            }
-            menuKit::trailingText(
-                ui,
-                layout.tree.rect(rowLayout.primary),
-                displayValue,
-                row.enabled
-                    ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
-                    : Vec4 { 0.50f, 0.52f, 0.51f, 0.45f },
-                20.0f);
+            drawSliderRow(rowDraw);
             break;
         }
         case OptionsMenuRowKind::CustomRenderScale: {
-            bool enabled = row.toggleValue;
-            if (uiControls::checkbox(
-                    ui,
-                    layout.tree.rect(rowLayout.primary),
-                    row.label,
-                    enabled,
-                    focused)) {
-                intent = options::intent::SetToggle {
-                    row.id, enabled };
-            }
-            float value = row.sliderValue;
-            const bool sliderChanged = uiControls::slider(
-                ui,
-                controlId + ".slider",
-                layout.tree.rect(rowLayout.control),
-                value,
-                0.25f,
-                1.0f,
-                focused && row.enabled,
-                row.enabled);
-            if (sliderChanged) {
-                intent = options::intent::SetSlider {
-                    row.id, value, !ui.mouseDown() };
-            } else if (state.customRenderScalePreview &&
-                !ui.mouseDown()) {
-                intent = options::intent::SetSlider {
-                    row.id,
-                    static_cast<float>(
-                        *state.customRenderScalePreview) / 100.0f,
-                    true,
-                };
-            }
-            const int percentValue = static_cast<int>(
-                std::round(row.sliderValue * 100.0f));
-            const std::string percent =
-                std::to_string(percentValue) + "%";
-            menuKit::trailingText(
-                ui,
-                layout.tree.rect(rowLayout.primary),
-                percent,
-                row.enabled
-                    ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
-                    : Vec4 { 0.58f, 0.61f, 0.60f, 0.45f },
-                20.0f);
-            const int effectiveScale = row.enabled
-                ? percentValue
-                : settings.video.renderScalePercent;
-            const PixelExtent internal = scaledRenderExtent({
-                .width = static_cast<uint32_t>(std::max(viewport.x, 0.0f)),
-                .height = static_cast<uint32_t>(std::max(viewport.y, 0.0f)),
-            }, effectiveScale);
-            const std::string resolution =
-                std::to_string(internal.width) + " x " +
-                std::to_string(internal.height) + " internal";
-            ui.text(
-                layout.tree.rect(rowLayout.detail).position,
-                resolution,
-                { 0.58f, 0.63f, 0.62f, 1.0f },
-                18.0f);
+            drawCustomRenderScaleRow(rowDraw);
             break;
         }
         case OptionsMenuRowKind::Binding: {
-            const std::optional<InputAction> action =
-                actionForRow(row.id);
-            const UiRect bindingRow = layout.tree.rect(rowLayout.primary);
-            if (uiControls::button(
-                    ui,
-                    bindingRow,
-                    "",
-                    {
-                        .tone = buttonTone(row.tone),
-                        .focused = focused,
-                    })) {
-                intent = options::intent::ActivateRow { row.id };
-            }
-            const bool capturing = action &&
-                state.capturingAction == action;
-            const GamepadPresentation noGamepad;
-            const bool drewPrompts = !capturing && action && inputPrompts &&
-                drawBindingRowPrompts(
-                    ui,
-                    bindingRow,
-                    row.label,
-                    settings.input,
-                    *action,
-                    state.controlsBindingDevice,
-                    *inputPrompts,
-                    gamepad ? *gamepad : noGamepad,
-                    focused);
-            if (!drewPrompts) {
-                drawBindingRowText(
-                    ui,
-                    bindingRow,
-                    row.label,
-                    capturing
-                        ? (state.controlsBindingDevice ==
-                                  BindingDeviceClass::Keyboard
-                                ? "Press a key..."
-                                : "Press a controller input...")
-                        : actionBindingsDisplay(
-                              settings.input,
-                              *action,
-                              state.controlsBindingDevice),
-                    capturing
-                        ? Vec4 { 0.98f, 0.84f, 0.42f, 1.0f }
-                        : (focused
-                                ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
-                                : Vec4 { 0.62f, 0.67f, 0.65f, 1.0f }));
-            }
+            drawBindingRow(rowDraw);
             break;
         }
         }
