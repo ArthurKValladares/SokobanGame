@@ -14,6 +14,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -244,12 +245,17 @@ void testEvictableCapacityStopsAtTheLimit()
 
 // ------------------------------------------------- the composed decision
 
-// Mirrors makeModelResident/makeTextureResident so the extracted pieces are
-// exercised in the order the renderer uses them.
+// Runs the real ladder, the way makeModelResident/makeTextureResident run it.
+//
+// This used to be a 38-line hand-written copy of the ladder, with a comment
+// saying it "mirrors" the production one. Seven of the cases below were
+// therefore testing the replica, and any drift between the two was invisible.
+// ResidencyLadder::admit() needs no device, so they call the shipping code now.
 struct Outcome {
     bool admitted = false;
     bool blocked = false;
     std::size_t evicted = 0;
+    int drains = 0;
 };
 
 Outcome admit(
@@ -258,32 +264,33 @@ Outcome admit(
     std::size_t protectedIndex,
     uint64_t stamp,
     uint64_t bytes,
-    uint64_t limit)
+    uint64_t limit,
+    ResidencyLadder* sharedLadder = nullptr,
+    const std::function<void()>& onDrain = {})
 {
+    ResidencyLadder owned;
+    ResidencyLadder& ladder = sharedLadder != nullptr ? *sharedLadder : owned;
     Outcome outcome;
-    if (bytes > limit) {
-        outcome.blocked = true;
-        return outcome;
-    }
-    if (budget.fits(bytes, limit)) {
-        outcome.admitted = true;
-        return outcome;
-    }
-    if (budget.retirementPending()) {
-        return outcome;
-    }
-    while (budget.needsEviction(bytes, limit)) {
-        const std::optional<std::size_t> victim =
-            chooseResidencyVictim(slots, protectedIndex, stamp, isReady);
-        if (!victim) {
-            outcome.blocked = true;
-            return outcome;
-        }
-        budget.beginRetiring(slots[*victim].gpuBytes);
-        slots[*victim] = {};
-        ++outcome.evicted;
-    }
-    outcome.admitted = budget.fits(bytes, limit);
+    outcome.admitted = ladder.admit(
+        budget,
+        slots,
+        protectedIndex,
+        bytes,
+        limit,
+        stamp,
+        isReady,
+        [&](Slot& slot) {
+            budget.beginRetiring(slot.gpuBytes);
+            slot = {};
+            ++outcome.evicted;
+        },
+        [&] {
+            ++outcome.drains;
+            if (onDrain) {
+                onDrain();
+            }
+        });
+    outcome.blocked = ladder.blocked();
     return outcome;
 }
 
@@ -383,6 +390,166 @@ void testLadderEvictsSeveralVictimsWhenOneIsNotEnough()
     CHECK(!slots[2].ready);
 }
 
+// ------------------------------------------------------------- the drain
+//
+// None of this could be tested before: the drain was a private method call
+// inside a private template, and the test file's replica of the ladder simply
+// left it out. It is the coupling between the two asset pools - the reason a
+// model publication can succeed because a *texture's* fences cleared - so it
+// is the part that most needed saying out loud.
+
+void testAdmitDrainsBeforeItDecidesAnything()
+{
+    TEST("admitDrainsBeforeItDecidesAnything");
+    // The pool is full, and the only thing that can save this publication is a
+    // retirement that has already cleared its fences. The ladder drains first,
+    // so it fits without evicting anything.
+    ResidencyBudget budget;
+    budget.addResident(1000);
+    budget.beginRetiring(600);
+    std::vector<Slot> slots { { true, 400, 1 } };
+    const Outcome outcome = admit(
+        budget, slots, 99, 0, 300, 1000, nullptr,
+        [&] { budget.finishRetiring(600); });
+    CHECK(outcome.drains == 1);
+    CHECK(outcome.admitted);
+    CHECK(outcome.evicted == 0);
+    CHECK(budget.resident() == 400);
+    // The slot survived: nothing was given up to make this room.
+    CHECK(slots[0].ready);
+}
+
+void testAdmitDrainsAgainAfterEvicting()
+{
+    TEST("admitDrainsAgainAfterEvicting");
+    // Eviction alone leaves the bytes charged until the fences clear. A drain
+    // that completes them inside the same call is what lets the publication
+    // succeed on its first attempt instead of its second.
+    ResidencyBudget budget;
+    budget.addResident(900);
+    std::vector<Slot> slots { { true, 500, 1 }, { true, 400, 2 } };
+    int drains = 0;
+    const Outcome outcome = admit(
+        budget, slots, 99, 0, 300, 1000, nullptr,
+        [&] {
+            ++drains;
+            if (drains == 2) {
+                budget.finishRetiring(budget.retiring());
+            }
+        });
+    CHECK(outcome.drains == 2);
+    CHECK(outcome.evicted == 1);
+    CHECK(outcome.admitted);
+    CHECK(budget.retiring() == 0);
+}
+
+void testARefusedRequestStillDrainsOnce()
+{
+    TEST("aRefusedRequestStillDrainsOnce");
+    // Even the request that is larger than the whole budget drains first, so a
+    // hopeless publication still advances the other pool's retirements. That
+    // is deliberate and worth pinning: the drain is not the reward for
+    // succeeding.
+    ResidencyBudget budget;
+    std::vector<Slot> slots { { true, 100, 1 } };
+    const Outcome outcome = admit(budget, slots, 99, 0, 2000, 1000);
+    CHECK(outcome.drains == 1);
+    CHECK(!outcome.admitted);
+    CHECK(outcome.blocked);
+}
+
+void testNoSecondDrainWhenTheLadderNeverEvicts()
+{
+    TEST("noSecondDrainWhenTheLadderNeverEvicts");
+    ResidencyBudget budget;
+    std::vector<Slot> slots { { true, 100, 1 } };
+    const Outcome fits = admit(budget, slots, 99, 0, 300, 1000);
+    CHECK(fits.admitted);
+    CHECK(fits.drains == 1);
+
+    ResidencyBudget pending;
+    pending.addResident(900);
+    pending.beginRetiring(500);
+    std::vector<Slot> more { { true, 400, 2 } };
+    const Outcome waiting = admit(pending, more, 99, 0, 300, 1000);
+    CHECK(!waiting.admitted);
+    CHECK(waiting.drains == 1);
+}
+
+// ---------------------------------------------------- why it was refused
+
+void testEachRefusalIsCountedUnderItsOwnReason()
+{
+    TEST("eachRefusalIsCountedUnderItsOwnReason");
+    ResidencyLadder ladder;
+    CHECK(!ladder.blocked());
+    CHECK(ladder.blocks() == 0);
+
+    // Larger than the whole budget.
+    ResidencyBudget oversized;
+    std::vector<Slot> none;
+    (void)admit(oversized, none, 99, 0, 2000, 1000, &ladder);
+    CHECK(ladder.blocked());
+    CHECK(ladder.blocks() == 1);
+    CHECK(ladder.oversizedBlocks() == 1);
+
+    // Nothing may be given up.
+    ResidencyBudget full;
+    full.addResident(900);
+    std::vector<Slot> wanted { { true, 400, 7 }, { true, 500, 7 } };
+    (void)admit(full, wanted, 99, 7, 300, 1000, &ladder);
+    CHECK(ladder.blocks() == 2);
+    CHECK(ladder.noVictimBlocks() == 1);
+
+    // The mip planner gives up before the ladder is ever asked.
+    ladder.markBlocked(ResidencyLadder::Block::NoMipTailFits);
+    CHECK(ladder.blocks() == 3);
+    CHECK(ladder.mipPlanBlocks() == 1);
+    CHECK(ladder.oversizedBlocks() == 1);
+    CHECK(ladder.noVictimBlocks() == 1);
+}
+
+void testBlockedSaysRightNowRatherThanEver()
+{
+    TEST("blockedSaysRightNowRatherThanEver");
+    ResidencyLadder ladder;
+    ResidencyBudget budget;
+    std::vector<Slot> slots { { true, 100, 1 } };
+    (void)admit(budget, slots, 99, 0, 2000, 1000, &ladder);
+    CHECK(ladder.blocked());
+
+    // An admission that got as far as looking clears the flag, while the count
+    // of refusals keeps its history.
+    ResidencyBudget roomy;
+    (void)admit(roomy, slots, 99, 0, 100, 1000, &ladder);
+    CHECK(ladder.blocked());
+    CHECK(ladder.blocks() == 1);
+
+    // ...but only a decision that reached the end of the ladder does. A plain
+    // fit returns before the flag is touched, which is the behaviour the
+    // renderer has always had: the panel's "capacity blocked" light stays on
+    // until an eviction pass actually runs.
+    ResidencyBudget pressured;
+    pressured.addResident(900);
+    std::vector<Slot> spare { { true, 500, 1 }, { true, 400, 2 } };
+    (void)admit(pressured, spare, 99, 0, 300, 1000, &ladder);
+    CHECK(!ladder.blocked());
+}
+
+void testEvictionsAreCountedWhereTheOwnerRetires()
+{
+    TEST("evictionsAreCountedWhereTheOwnerRetires");
+    ResidencyLadder ladder;
+    CHECK(ladder.evictions() == 0);
+    ladder.countEviction();
+    ladder.countEviction();
+    CHECK(ladder.evictions() == 2);
+    ladder.reset();
+    CHECK(ladder.evictions() == 0);
+    CHECK(ladder.blocks() == 0);
+    CHECK(!ladder.blocked());
+}
+
 // The case that used to stop half-served.
 //
 // Each victim was counted twice - once by `retiring_`, which retiring it
@@ -448,6 +615,14 @@ int main()
     testLadderBlocksWhenNothingCanBeGivenUp();
     testLadderEvictsSeveralVictimsWhenOneIsNotEnough();
     testEvictionFreesTheWholeShortfallInOneRound();
+
+    testAdmitDrainsBeforeItDecidesAnything();
+    testAdmitDrainsAgainAfterEvicting();
+    testARefusedRequestStillDrainsOnce();
+    testNoSecondDrainWhenTheLadderNeverEvicts();
+    testEachRefusalIsCountedUnderItsOwnReason();
+    testBlockedSaysRightNowRatherThanEver();
+    testEvictionsAreCountedWhereTheOwnerRetires();
 
     if (failures != 0) {
         std::cerr << failures << " of " << checks << " checks failed\n";

@@ -378,16 +378,6 @@ private:
     void resetCancelledAsset(AssetLoadKey key);
     void completeCpuJob(AssetLoadKey key);
     void retireCompletedGeometryUploads(bool wait);
-    // The eviction ladder, shared by both pools. `retire` moves one slot into
-    // its fence-owned retirement queue; everything else is pool-agnostic.
-    template <typename Slot, typename Retire>
-    [[nodiscard]] bool makeResident(
-        ResidencyBudget& budget,
-        std::vector<Slot>& slots,
-        std::size_t protectedIndex,
-        uint64_t requiredBytes,
-        uint64_t limitBytes,
-        Retire retire);
     [[nodiscard]] bool makeModelResident(
         RenderModel protectedModel,
         uint64_t requiredBytes);
@@ -399,15 +389,6 @@ private:
     void retireModel(ModelSlot& slot);
     void retireTexture(TextureSlot& slot);
     void destroyCompletedResidencyRetirements();
-    // Why a publication was refused. Kept apart because they mean different
-    // things: the first two are properties of the asset against the budget,
-    // the third is a property of the moment.
-    enum class ResidencyBlock {
-        AssetLargerThanBudget,
-        NoMipTailFits,
-        NothingEvictable,
-    };
-    void markResidencyBudgetBlocked(ResidencyBlock reason);
     [[nodiscard]] static uint64_t meshBytes(const MeshData& mesh);
     [[nodiscard]] static uint64_t textureBytes(
         const PreparedTextureSource& texture,
@@ -544,14 +525,12 @@ private:
     // counters below stay shared because they report activity across the two.
     ResidencyBudget modelResidency_;
     ResidencyBudget textureResidency_;
-    uint64_t residencyEvictions_ = 0;
+    // Owns the eviction ladder and every counter that says why a publication
+    // was refused; see ResidencyLadder for why the drain it runs has to cover
+    // both pools.
+    ResidencyLadder residencyLadder_;
     uint64_t droppedDrawInstances_ = 0;
     uint64_t droppedSkinningInstances_ = 0;
-    uint64_t residencyBudgetBlocks_ = 0;
-    uint64_t residencyOversizedBlocks_ = 0;
-    uint64_t residencyMipPlanBlocks_ = 0;
-    uint64_t residencyNoVictimBlocks_ = 0;
-    bool residencyBudgetBlocked_ = false;
     bool textureDescriptorsDirty_ = false;
     uint32_t retirementFrameMask_ = 0;
 };

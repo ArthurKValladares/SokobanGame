@@ -1523,8 +1523,8 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
     </div>
     <h3><code>VulkanModelResources</code> owns eight things at once</h3>
     <div class="loc">
-      <code>VulkanModelResources.cpp — 2,710 lines at review; 1,981 now</code>
-      <code>VulkanModelResources.hpp — 557 at review; 559 now</code>
+      <code>VulkanModelResources.cpp — 2,710 lines at review; 1,919 now</code>
+      <code>VulkanModelResources.hpp — 557 at review; 538 now</code>
       <code>VulkanTextureUploader.{hpp,cpp} — 722 lines, new</code>
     </div>
     <p>
@@ -1777,6 +1777,52 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       in here even if textures were its only user.
     </p>
     <p>
+      <strong>Eighth seam: the eviction ladder — and the tests that were
+      testing a copy of it.</strong> <code>ResidencyLadder</code> now owns the
+      ladder and the six counters that say why a publication was refused, and
+      the class is down from 43 private members to 38. The body is unchanged: a
+      diff against the old <code>makeResident</code>, with the four intended
+      renames applied, shows two re-wrapped comments and the inline
+      <code>LoadState::Ready</code> lambda becoming the <code>resident</code>
+      parameter. No statement moved.
+    </p>
+    <p>
+      <strong>The drain is a named parameter now, and that is the point.</strong>
+      The two pools keep separate budgets but share one retirement clock: the
+      ladder drains before it decides anything and again after evicting, and the
+      drain covers <em>both</em> queues — so a texture whose fences have cleared
+      is what lets a model publish. That coupling was real and invisible,
+      happening only because a private <code>makeResident()</code> called a
+      private method that happened to touch both queues.
+      <code>admit()</code> takes <code>drainRetired</code> with a contract
+      written on it, which is exactly what had to be true before the two halves
+      can separate.
+    </p>
+    <p>
+      <strong>And the tests were testing a copy.</strong>
+      <code>ResidencyBudgetTests.cpp</code> held a 38-line hand-written replica
+      of the ladder, with a comment saying it “mirrors” the production one.
+      Seven cases ran against the replica, so any drift between the two was
+      invisible — and the replica had no drain at all, which is precisely the
+      behaviour that matters here. <code>ResidencyLadder::admit()</code> needs
+      no device, so those seven call the shipping code now, and seven more cover
+      what the replica could not: that the drain runs before the first decision,
+      that it runs again after eviction, that even a hopeless request drains
+      once, and that each refusal is counted under its own reason.
+      <strong>69 checks to 105</strong>, and four mutations of the real ladder
+      are caught — dropping either drain, counting a pending retirement as a
+      block, and stopping after one victim.
+    </p>
+    <p>
+      <strong>One behaviour is pinned that may not be what anyone
+      intended.</strong> <code>blocked()</code> is <em>not</em> cleared by a
+      publication that simply fits — only a decision that reaches the end of the
+      ladder clears it. So the debug panel's “capacity blocked” light stays on
+      through any number of successful trivial publications until an eviction
+      pass actually runs. The test says so rather than changing it; that is a
+      call for whoever owns the panel.
+    </p>
+    <p>
       <strong>And the reason the rest of the texture half stayed.</strong> The
       obvious next cut — a <code>TextureHeap</code> owning slots, definitions
       and descriptor mapping — runs into the eviction ladder, which calls
@@ -1786,10 +1832,16 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       through because of it. Splitting the pools apart changes when models
       retire under memory pressure: a real behaviour change, on the path that
       only shows up when the budget is tight, and one that neither a compile
-      gate nor a unit test here can check. The recommendation is unchanged but
-      the order is now explicit: the shared residency ladder has to become one
-      named thing owning both queues before the two asset halves can be
-      separated, and that step needs a device to verify, not a compiler.
+      gate nor a unit test could check while the drain was an implicit call.
+      That is what the eighth seam above fixes. What remains is one specific
+      piece of work — move <code>textures_</code>,
+      <code>textureDefinitions_</code>, <code>textureSpace_</code>,
+      <code>textureResidency_</code>, <code>retiredTextures_</code> and the
+      descriptor-dirty flag into a texture store that borrows the ladder and the
+      scheduler. It is unblocked; but the path it changes is the eviction path,
+      which a normal run never reaches, so it wants
+      <code>--texture-residency-kib 6144</code> and a person watching rather
+      than another compile gate.
     </p>
     <p>
       Three device handles and the anisotropy limit turned out to be pure
@@ -3990,14 +4042,14 @@ tuned, with ColumnLimit: 0 (never re-wrap)  10,573   (210 of 367 files)</code>
     <li>
       <b>Then the structural work. — in progress</b>
       <span class="code">B4</span> is done: one enum, one GLSL mirror, one test
-      holding them together. <span class="code">C1</span> has had seven seams
+      holding them together. <span class="code">C1</span> has had eight seams
       cut and has now split: <code>VulkanTextureUploader</code> takes 594 lines
       and nine methods out, chosen by attributing every member function to the
       state it touches. What is left is one specific thing rather than an
-      open-ended job — the shared residency ladder drains both retirement
-      queues, so the two asset halves cannot separate until that ladder is one
-      named owner, and that step needs a device to verify rather than a
-      compiler.
+      open-ended job: the shared residency ladder is a named object taking its
+      drain as a parameter now, so the two asset halves <em>can</em> separate —
+      what that last move needs is a run under memory pressure to verify, not a
+      decision.
       <span class="code">D1</span> is done, though not as filed: investigating it
       showed the recommended fix would have been wrong, and the finding is
       rewritten above with what the call sites actually contain.

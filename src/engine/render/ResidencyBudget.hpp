@@ -159,6 +159,139 @@ template <typename Slot, typename ResidentPredicate>
     return victim;
 }
 
+// The eviction ladder both pools run, and the counters that say why a
+// publication was refused.
+//
+// The two pools keep separate budgets but share one retirement clock: the
+// ladder drains retirements *before* it decides anything, and again after
+// evicting, and the drain covers **both** pools - so a texture whose fences
+// have cleared is what lets a model publish. That coupling was real and
+// unnamed: it happened because a private makeResident() called a private
+// method that happened to touch both queues. Here the drain is a parameter
+// with a name and a contract, which is what has to be true before the model
+// and texture halves can become separate classes at all.
+//
+// Everything the ladder needs arrives as an argument, so it runs - and is
+// tested - without a device, a slot type, or a Vulkan handle.
+class ResidencyLadder {
+public:
+    // Why a publication was refused. Kept apart because they mean different
+    // things: the first two are properties of the asset against the budget,
+    // the third is a property of the moment.
+    enum class Block {
+        AssetLargerThanBudget,
+        NoMipTailFits,
+        NothingEvictable,
+    };
+
+    // Admit `requiredBytes` into `budget`, evicting from `slots` if it has to.
+    //
+    // `resident` says whether a slot holds device memory, `retire` moves one
+    // into its fence-owned queue, and `drainRetired` completes every
+    // retirement whose fences have cleared - in both pools, not just this
+    // one's. Returns whether the caller may publish now.
+    template <typename Slot, typename Resident, typename Retire, typename Drain>
+    [[nodiscard]] bool admit(
+        ResidencyBudget& budget,
+        std::vector<Slot>& slots,
+        std::size_t protectedIndex,
+        uint64_t requiredBytes,
+        uint64_t limitBytes,
+        uint64_t visibleRequestStamp,
+        Resident resident,
+        Retire retire,
+        Drain drainRetired)
+    {
+        drainRetired();
+        if (requiredBytes > limitBytes) {
+            markBlocked(Block::AssetLargerThanBudget);
+            return false;
+        }
+        if (budget.fits(requiredBytes, limitBytes)) {
+            return true;
+        }
+        if (budget.retirementPending()) {
+            // A previous publication already selected enough victims for its
+            // own retry. Do not let other CPU-ready slots cascade into
+            // additional evictions while the first fence-owned retirement is
+            // still pending.
+            blocked_ = false;
+            return false;
+        }
+
+        while (budget.needsEviction(requiredBytes, limitBytes)) {
+            const std::optional<std::size_t> victim = chooseResidencyVictim(
+                slots, protectedIndex, visibleRequestStamp, resident);
+            if (!victim) {
+                markBlocked(Block::NothingEvictable);
+                return false;
+            }
+            // retire() raises the budget's retiring total, which is what the
+            // condition above reads; there is no second tally to keep in step.
+            retire(slots[*victim]);
+        }
+        drainRetired();
+        blocked_ = false;
+        // Retired allocations remain part of the physical residency total
+        // until every referencing frame fence completes. Keep this CPU-ready
+        // asset for a later publication instead of oversubscribing the hard
+        // budget.
+        return budget.fits(requiredBytes, limitBytes);
+    }
+
+    // Refused for a reason the ladder itself did not decide - currently the
+    // mip planner, which gives up before admit() is ever called.
+    void markBlocked(Block reason)
+    {
+        blocked_ = true;
+        ++blocks_;
+        switch (reason) {
+        case Block::AssetLargerThanBudget:
+            ++oversizedBlocks_;
+            break;
+        case Block::NoMipTailFits:
+            ++mipPlanBlocks_;
+            break;
+        case Block::NothingEvictable:
+            ++noVictimBlocks_;
+            break;
+        }
+    }
+
+    // Counted where the victim is actually retired, which is the owner's job
+    // because only it knows what a retirement costs to destroy.
+    void countEviction() { ++evictions_; }
+
+    void reset()
+    {
+        evictions_ = 0;
+        blocks_ = 0;
+        oversizedBlocks_ = 0;
+        mipPlanBlocks_ = 0;
+        noVictimBlocks_ = 0;
+        blocked_ = false;
+    }
+
+    [[nodiscard]] uint64_t evictions() const { return evictions_; }
+    [[nodiscard]] uint64_t blocks() const { return blocks_; }
+    [[nodiscard]] uint64_t oversizedBlocks() const { return oversizedBlocks_; }
+    [[nodiscard]] uint64_t mipPlanBlocks() const { return mipPlanBlocks_; }
+    [[nodiscard]] uint64_t noVictimBlocks() const { return noVictimBlocks_; }
+    // True when the most recent decision was a refusal. Cleared by any
+    // admission that got as far as looking, which is why it says "right now"
+    // rather than "ever".
+    [[nodiscard]] bool blocked() const { return blocked_; }
+
+private:
+    uint64_t evictions_ = 0;
+    uint64_t blocks_ = 0;
+    uint64_t oversizedBlocks_ = 0;
+    uint64_t mipPlanBlocks_ = 0;
+    uint64_t noVictimBlocks_ = 0;
+    bool blocked_ = false;
+};
+
+
 // How large a publication could be made to fit: the free headroom plus every
 // byte eviction is allowed to reclaim, capped at the limit. Used to pick how
 // much of a compressed texture's mip chain to upload, so it answers "how much

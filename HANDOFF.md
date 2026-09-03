@@ -329,8 +329,9 @@ gameplay and the editor builders were sharing without saying so; and
 warnings-as-errors, a widened clang-tidy set, and a measured `.clang-format` -
 given numbers instead of opinions.
 
-Still open, in the order the report recommends: collapsing
-`VulkanModelResources`'s three copies of the load-state machine, then the
+Still open, in the order the report recommends: moving the texture half of
+`VulkanModelResources` out now that the ladder no longer blocks it, collapsing
+its three copies of the load-state machine, then the
 remaining long functions - **now none**, where the review first reported eight
 and the real count was seventeen. Twenty-three are still past 150. Not
 the eight the review first reported - `drawIsoFrame` (487),
@@ -484,6 +485,49 @@ removing `OptionsMenuRowTone::Danger` from the quit row passes all 190 checks.
 That is presentation rather than behaviour, and pinning it needs a decision
 about how much of the menu's appearance belongs in a unit test, so it is
 recorded rather than fixed.
+
+The residency ladder is out, and it turned up something worth more than the
+extraction. `ResidencyLadder` in `ResidencyBudget.hpp` now owns the eviction
+ladder and the six counters that say why a publication was refused;
+`VulkanModelResources` is down from 43 private members to 38, and the ladder's
+body is unchanged - a diff against the old `makeResident`, with the four
+intended renames applied, shows only two re-wrapped comments and the inline
+`LoadState::Ready` lambda becoming the `resident` parameter. No statement moved.
+
+**The drain is a named parameter now.** That is the whole point of the step. The
+two pools keep separate budgets but share one retirement clock: the ladder
+drains before it decides anything and again after evicting, and the drain covers
+*both* queues, so a texture whose fences have cleared is what lets a model
+publish. That coupling was real and invisible - it happened because a private
+`makeResident()` called a private method that happened to touch both queues.
+`admit()` takes `drainRetired` with a contract written on it, which is what had
+to be true before the model and texture halves can become separate classes.
+
+**And the tests were testing a copy.** `ResidencyBudgetTests.cpp` contained a
+38-line hand-written replica of the ladder, with a comment saying it "mirrors"
+the production one. Seven cases ran against the replica, so any drift between
+the two was invisible - and the replica had no drain at all, which is precisely
+the behaviour that matters here. `ResidencyLadder::admit()` needs no device, so
+those seven now call the shipping code, and seven more cases cover what the
+replica could not: that the drain runs before the first decision, that it runs
+again after eviction, that even a hopeless request drains once, and that each
+refusal is counted under its own reason. **69 checks to 105.** Four mutations of
+the real ladder are caught: dropping either drain, counting a pending
+retirement as a block, and stopping after one victim.
+
+One behaviour is now pinned that may not be what anyone intended:
+`blocked()` is **not** cleared by a publication that simply fits. Only a
+decision that reaches the end of the ladder clears it, so the debug panel's
+"capacity blocked" light stays on through any number of successful trivial
+publications until an eviction pass actually runs. The test says so rather than
+changing it - that is a call for whoever owns the panel.
+
+What is left of the class split is now one specific piece of work: move
+`textures_`, `textureDefinitions_`, `textureSpace_`, `textureResidency_`,
+`retiredTextures_` and the descriptor-dirty flag into a texture store that
+borrows the ladder and the scheduler. It is unblocked, but the path it changes
+is the eviction path, which is the one a normal run never reaches - so it wants
+`--texture-residency-kib 6144` and a person watching, not another compile gate.
 
 `VulkanTextureUploader` is out: **594 lines and nine methods** left
 `VulkanModelResources`, which is 3,134 lines down to 2,540. The new class is
