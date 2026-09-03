@@ -329,9 +329,9 @@ gameplay and the editor builders were sharing without saying so; and
 warnings-as-errors, a widened clang-tidy set, and a measured `.clang-format` -
 given numbers instead of opinions.
 
-Still open, in the order the report recommends: moving the texture half of
-`VulkanModelResources` out, which is now the only thing left in that finding
-and has nothing structural in front of it. Then the
+Still open: one judgement call on `VulkanModelResources`, described below -
+the texture split the report recommended does not survive measurement, and the
+recommendation is withdrawn rather than done. Then the
 remaining long functions - **now none**, where the review first reported eight
 and the real count was seventeen. Twenty-three are still past 150. Not
 the eight the review first reported - `drawIsoFrame` (487),
@@ -485,6 +485,47 @@ removing `OptionsMenuRowTone::Danger` from the quit row passes all 190 checks.
 That is presentation rather than behaviour, and pinning it needs a decision
 about how much of the menu's appearance belongs in a unit test, so it is
 recorded rather than fixed.
+
+**The texture split is withdrawn, and the measurement is why.** Setting out to
+build `VulkanTextureStore`, the first step was attribution again. The
+texture-only functions are 373 lines across 13 functions - that part held up.
+What did not is the other side: the twelve coordinating functions contain **84
+references to texture state**, and they are not blocks. `create` has them in
+**11 separate runs**, `destroy` in **10**, `loadingStats` in 4,
+`syncManifestModels` in 4. Scattered lines, not a seam.
+
+The reason is concrete rather than stylistic. The texture uploader and the
+geometry arena stage through the *same* upload ring, created once before either.
+Teardown has to release every texture image, every mesh and every staging
+reservation before the arena and the ring are destroyed, and drain both
+retirement queues in between, because what those queues hold are allocations
+from the same two objects. Gathering those lines into a store's own `destroy()`
+would move that ordering constraint, not remove it.
+
+That leaves two shapes, and neither is an improvement:
+
+- A store with roughly thirteen accessors, so the coordinators keep doing the
+  work through one more layer. That encapsulates nothing and adds indirection.
+- Restructuring `create` and `destroy` so the store can own its lifecycle. That
+  reorders Vulkan teardown with no byte-identity to check it against, nothing
+  the compiler can catch, and no test - failing as validation errors or a
+  use-after-free at shutdown, intermittently.
+
+So the change made instead was to **write the ordering down**, in `create` and
+`destroy`, where it is load-bearing and was unstated. Comments only; a diff with
+comments stripped is empty.
+
+For the record, the *animation* half is separable on the same measurement - 133
+lines across seven functions and only **15** references in the coordinators,
+against textures' 84. It is a real module if someone wants one more cut. It is
+also small, which is why it is offered rather than done.
+
+Where that leaves the class: nine seams cut, **3,267 lines to 2,363**, 43
+private members to 38, and both sub-findings closed - the separable pieces are
+out and the load-state machine is one thing instead of three. What remains is a
+coordinator whose job *is* the interleaving. Whether that counts as the finding
+being closed is a judgement call, and it belongs to the project owner rather
+than to the review.
 
 The load-state machine is out: `AssetLoadState.hpp` holds `LoadState`,
 `throwIfFailed`, `PublishGate`, `publishGate` and `recordPublishFailure` as free

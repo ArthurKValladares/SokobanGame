@@ -203,6 +203,9 @@ void VulkanModelResources::create(
         manifest.playerModel(), manifest.playerIdleAnimation());
 
     try {
+        // The ring comes first and is shared: the texture uploader stages
+        // through it and so does the geometry arena. Neither owns it, which is
+        // the same reason destroy() below has to take them apart in order.
         uploadRing_.create(*allocator_, device_);
         textureUploader_.create(
             physicalDevice,
@@ -267,6 +270,16 @@ void VulkanModelResources::destroy()
                 UINT64_MAX);
         }
 
+        // Teardown order is load-bearing, and nothing said so until now. Both
+        // asset kinds hold allocations from the *same* geometry arena and the
+        // *same* upload ring, so every image, mesh and staging reservation has
+        // to be released before either of those is destroyed - and the
+        // retirement queues have to be drained here rather than left, because
+        // what they hold are allocations from those two as well.
+        //
+        // This interleaving is why the texture half is not a module with a
+        // narrow interface: gathering these lines into a texture store's own
+        // destroy() would only move the ordering constraint, not remove it.
         skinnedInstances_.clear();
         for (auto texture = textures_.rbegin(); texture != textures_.rend(); ++texture) {
             textureUploader_.destroyTextureUpload(texture->upload);
