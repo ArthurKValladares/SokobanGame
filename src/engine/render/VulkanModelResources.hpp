@@ -386,19 +386,6 @@ private:
         const PreparedTextureSource& texture,
         const TextureInterpretation& interpretation);
 
-
-    // The tail every publication failure shares. Any cleanup particular to one
-    // asset kind happens at the call site before this; what is here is the part
-    // that must never differ - remember the exception, mark the slot failed,
-    // rethrow for a caller that is waiting, and otherwise say so in the log.
-    template <typename Slot>
-    void recordPublishFailure(
-        Slot& slot,
-        const std::filesystem::path& path,
-        const char* kind,
-        const char* phase,
-        bool wait);
-
     [[nodiscard]] bool publishModel(RenderModel model, bool wait);
     [[nodiscard]] bool publishTexture(std::size_t textureIndex, bool wait);
     [[nodiscard]] bool publishAnimation(RenderAnimation animation, bool wait);

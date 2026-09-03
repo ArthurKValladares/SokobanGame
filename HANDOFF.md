@@ -527,6 +527,33 @@ coordinator whose job *is* the interleaving. Whether that counts as the finding
 being closed is a judgement call, and it belongs to the project owner rather
 than to the review.
 
+**The load-state extraction broke the MSVC link, and the gap is mine, not the
+project's.** Moving `publishGate` and `recordPublishFailure` to namespace scope
+left `recordPublishFailure`'s *declaration* behind in the class. Name lookup
+inside a member function finds the member first and hides the free function, so
+every call site bound to a member that no longer had a definition - three
+unresolved externals, one per slot type, and the first thing to notice was the
+Windows linker.
+
+The compile sweep this review has leaned on runs `-fsyntax-only`. It never
+links, so a member declared and defined nowhere is invisible to it *by
+construction*. This is the second time that sweep has modelled a build the
+project does not have: the first was handing every file every include path,
+which hid a `sokoban_core` layering break. Both times the real build found it
+first.
+
+The fix is one deleted declaration. The check that would have caught it is
+`nm -C -u` on the class's own object, looking for undefined
+`sokoban::<Class>::` symbols - it reproduces exactly the three symbols MSVC
+reported on the broken header and reports none on the fixed one. That now runs
+against every class touched by a change here.
+
+A shipped CI step for it was written and then withdrawn: CI already links, so
+it would only duplicate the build, and the naive form false-positives on classes
+deliberately split across several files - `Application` and
+`ApplicationEvidence` are one class in two translation units, which is fine.
+The script is in `_to_delete/` for the owner to remove.
+
 The load-state machine is out: `AssetLoadState.hpp` holds `LoadState`,
 `throwIfFailed`, `PublishGate`, `publishGate` and `recordPublishFailure` as free
 functions over anything with the fields they read. That is the "implemented
