@@ -1523,8 +1523,8 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
     </div>
     <h3><code>VulkanModelResources</code> owns eight things at once</h3>
     <div class="loc">
-      <code>VulkanModelResources.cpp — 2,710 lines at review; 1,919 now</code>
-      <code>VulkanModelResources.hpp — 557 at review; 538 now</code>
+      <code>VulkanModelResources.cpp — 2,710 lines at review; 1,853 now</code>
+      <code>VulkanModelResources.hpp — 557 at review; 510 now</code>
       <code>VulkanTextureUploader.{hpp,cpp} — 722 lines, new</code>
     </div>
     <p>
@@ -1823,6 +1823,36 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       call for whoever owns the panel.
     </p>
     <p>
+      <strong>Ninth seam: the load-state machine — the other half of this
+      finding.</strong> <code>AssetLoadState.hpp</code> holds
+      <code>LoadState</code>, <code>throwIfFailed</code>,
+      <code>PublishGate</code>, <code>publishGate</code> and
+      <code>recordPublishFailure</code> as free functions over anything with the
+      fields they read. Nothing there knows what an asset is, which is the
+      point: models, textures and animations disagree about everything else. The
+      move cost <strong>zero call-site churn</strong> — the enums and functions
+      kept their names and went to namespace scope, so every
+      <code>LoadState::Ready</code> and
+      <code>publishGate(slot, path, "model", wait)</code> in the class still
+      resolves by ordinary lookup.
+    </p>
+    <p>
+      <strong>Forty cases that were checked once, by hand, are a table
+      now.</strong> The comment on the gate said it had been verified over every
+      load state and both values of <code>wait</code> before the three copies
+      were merged — and then nothing pinned it, because it lived in a private
+      template of a class that needs a Vulkan device to construct.
+      <code>AssetLoadStateTests</code> is 35 checks over that grid and the
+      failure paths, and four mutations are caught: letting
+      <code>Uploading</code> fall through instead of stopping, dropping the
+      rethrow for a waiting caller, keying <code>throwIfFailed</code> off the
+      stored exception instead of the state, and marking the slot <em>after</em>
+      the rethrow instead of before. That last one matters more than it looks:
+      the slot is marked <code>Failed</code> before the rethrow, so a caller
+      that catches does not leave a slot that still looks loadable. Nothing said
+      so before.
+    </p>
+    <p>
       <strong>And the reason the rest of the texture half stayed.</strong> The
       obvious next cut — a <code>TextureHeap</code> owning slots, definitions
       and descriptor mapping — runs into the eviction ladder, which calls
@@ -1838,8 +1868,14 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       <code>textureDefinitions_</code>, <code>textureSpace_</code>,
       <code>textureResidency_</code>, <code>retiredTextures_</code> and the
       descriptor-dirty flag into a texture store that borrows the ladder and the
-      scheduler. It is unblocked; but the path it changes is the eviction path,
-      which a normal run never reaches, so it wants
+      scheduler. With the ladder taking its drain as a parameter and the
+      load-state machine out of the class, that store needs no owner templates
+      at all — only a bundle of the four things the two halves genuinely share
+      (the scheduler, the ladder, the visible-request stamp, the retirement
+      frame mask) plus the drain. The 13 texture-only functions come to 360
+      lines and reference exactly those, so it is a mechanical move rather than
+      a structural question. It still changes the eviction path, which a normal
+      run never reaches — so it wants
       <code>--texture-residency-kib 6144</code> and a person watching rather
       than another compile gate.
     </p>
@@ -4042,7 +4078,7 @@ tuned, with ColumnLimit: 0 (never re-wrap)  10,573   (210 of 367 files)</code>
     <li>
       <b>Then the structural work. — in progress</b>
       <span class="code">B4</span> is done: one enum, one GLSL mirror, one test
-      holding them together. <span class="code">C1</span> has had eight seams
+      holding them together. <span class="code">C1</span> has had nine seams
       cut and has now split: <code>VulkanTextureUploader</code> takes 594 lines
       and nine methods out, chosen by attributing every member function to the
       state it touches. What is left is one specific thing rather than an

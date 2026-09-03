@@ -3,6 +3,7 @@
 #include "engine/AssetManifest.hpp"
 #include "engine/Geometry.hpp"
 #include "engine/render/AnimationController.hpp"
+#include "engine/render/AssetLoadState.hpp"
 #include "engine/render/AssetLoadScheduler.hpp"
 #include "engine/render/FrameRetirementQueue.hpp"
 #include "engine/render/GpuMappedBuffer.hpp"
@@ -259,15 +260,6 @@ public:
     [[nodiscard]] MaterialBufferView materialBuffer() const;
 
 private:
-    enum class LoadState {
-        Unrequested,
-        Queued,
-        Loading,
-        CpuReady,
-        Uploading,
-        Ready,
-        Failed,
-    };
 
     // Both types belong to the uploader; these keep the spelling everything
     // here already used.
@@ -394,21 +386,6 @@ private:
         const PreparedTextureSource& texture,
         const TextureInterpretation& interpretation);
 
-    // Whether a publication attempt should do any work at all.
-    //
-    // All three publish functions opened with the same ladder, and the three
-    // copies had drifted in shape without drifting in behaviour: models fell
-    // through on Uploading and returned false further down, textures rejected
-    // it in the ladder, animations never reach it. Checked exhaustively over
-    // every load state and both values of `wait` before merging - forty
-    // reachable cases, all three reproduced exactly.
-    enum class PublishGate { Stop, Proceed };
-    template <typename Slot>
-    [[nodiscard]] PublishGate publishGate(
-        const Slot& slot,
-        const std::filesystem::path& path,
-        const char* kind,
-        bool wait) const;
 
     // The tail every publication failure shares. Any cleanup particular to one
     // asset kind happens at the call site before this; what is here is the part
@@ -425,11 +402,6 @@ private:
     [[nodiscard]] bool publishModel(RenderModel model, bool wait);
     [[nodiscard]] bool publishTexture(std::size_t textureIndex, bool wait);
     [[nodiscard]] bool publishAnimation(RenderAnimation animation, bool wait);
-    void throwIfFailed(
-        LoadState state,
-        const std::exception_ptr& failure,
-        const std::filesystem::path& path,
-        const char* kind) const;
 
     [[nodiscard]] std::vector<bool> requiredTextures(const RenderAssetRequirements& requirements) const;
     [[nodiscard]] bool assetsReady(const RenderAssetRequirements& requirements) const;

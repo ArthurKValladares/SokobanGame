@@ -785,50 +785,6 @@ void VulkanModelResources::completeCpuJob(AssetLoadKey key)
     scheduler_.complete(key);
 }
 
-template <typename Slot>
-VulkanModelResources::PublishGate VulkanModelResources::publishGate(
-    const Slot& slot,
-    const std::filesystem::path& path,
-    const char* kind,
-    bool wait) const
-{
-    // Uploading belongs here with Ready: its bytes are already charged and its
-    // fence is already in flight, so there is nothing a second attempt could
-    // usefully do.
-    if (slot.state == LoadState::Ready || slot.state == LoadState::Uploading) {
-        return PublishGate::Stop;
-    }
-    if (slot.state == LoadState::Failed) {
-        if (wait) {
-            throwIfFailed(slot.state, slot.failure, path, kind);
-        }
-        return PublishGate::Stop;
-    }
-    if (slot.state == LoadState::Unrequested ||
-        slot.state == LoadState::Queued) {
-        return PublishGate::Stop;
-    }
-    return PublishGate::Proceed;
-}
-
-template <typename Slot>
-void VulkanModelResources::recordPublishFailure(
-    Slot& slot,
-    const std::filesystem::path& path,
-    const char* kind,
-    const char* phase,
-    bool wait)
-{
-    slot.failure = std::current_exception();
-    slot.state = LoadState::Failed;
-    if (wait) {
-        throwIfFailed(slot.state, slot.failure, path, kind);
-    }
-    log::error(log::Category::Assets)
-        << "Background " << kind << " " << phase << " failed: "
-        << path.string();
-}
-
 bool VulkanModelResources::publishModel(RenderModel model, bool wait)
 {
     ModelSlot& slot = models_[model.index()];
@@ -1174,28 +1130,6 @@ bool VulkanModelResources::publishAnimation(RenderAnimation animation, bool wait
     return true;
 }
 
-void VulkanModelResources::throwIfFailed(
-    LoadState state,
-    const std::exception_ptr& failure,
-    const std::filesystem::path& path,
-    const char* kind) const
-{
-    if (state != LoadState::Failed) {
-        return;
-    }
-    try {
-        if (failure) {
-            std::rethrow_exception(failure);
-        }
-    } catch (const std::exception& error) {
-        throw std::runtime_error(
-            "Failed to load " + std::string(kind) + " asset '" +
-            path.string() + "': " + error.what());
-    }
-    throw std::runtime_error(
-        "Failed to load " + std::string(kind) + " asset '" +
-        path.string() + "'");
-}
 
 std::vector<bool> VulkanModelResources::requiredTextures(
     const RenderAssetRequirements& requirements) const

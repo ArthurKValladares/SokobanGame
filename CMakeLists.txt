@@ -983,6 +983,10 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/AssetRequirementsTests.cpp
     )
+    sokoban_add_test(NAME asset_load_state TARGET sokoban_asset_load_state_tests
+        LIBS sokoban_core
+        SOURCES tests/AssetLoadStateTests.cpp
+    )
     sokoban_add_test(NAME residency_budget TARGET sokoban_residency_budget_tests
         LIBS sokoban_core
         SOURCES tests/ResidencyBudgetTests.cpp

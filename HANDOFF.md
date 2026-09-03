@@ -330,8 +330,8 @@ warnings-as-errors, a widened clang-tidy set, and a measured `.clang-format` -
 given numbers instead of opinions.
 
 Still open, in the order the report recommends: moving the texture half of
-`VulkanModelResources` out now that the ladder no longer blocks it, collapsing
-its three copies of the load-state machine, then the
+`VulkanModelResources` out, which is now the only thing left in that finding
+and has nothing structural in front of it. Then the
 remaining long functions - **now none**, where the review first reported eight
 and the real count was seventeen. Twenty-three are still past 150. Not
 the eight the review first reported - `drawIsoFrame` (487),
@@ -485,6 +485,39 @@ removing `OptionsMenuRowTone::Danger` from the quit row passes all 190 checks.
 That is presentation rather than behaviour, and pinning it needs a decision
 about how much of the menu's appearance belongs in a unit test, so it is
 recorded rather than fixed.
+
+The load-state machine is out: `AssetLoadState.hpp` holds `LoadState`,
+`throwIfFailed`, `PublishGate`, `publishGate` and `recordPublishFailure` as free
+functions over anything with the fields they read. That is the "implemented
+three times, once per asset kind" half of the god-object finding, finished.
+
+The extraction cost **zero call-site churn**: the enums and functions kept their
+names and moved to namespace scope, so every `LoadState::Ready`,
+`PublishGate::Stop` and `publishGate(slot, path, "model", wait)` inside the
+class still resolves by ordinary lookup. `VulkanModelResources` is 2,478 lines
+across its pair, down from 3,267 at review.
+
+**Forty cases that were checked once, by hand, are a table now.** The comment on
+the gate said it had been verified over every load state and both values of
+`wait` before the three copies were merged - and then nothing pinned it, because
+it lived in a private template of a class that needs a Vulkan device to
+construct. `AssetLoadStateTests` is 35 checks over that grid plus the failure
+paths, and four mutations are caught: letting `Uploading` fall through instead
+of stopping, dropping the rethrow for a waiting caller, keying `throwIfFailed`
+off the stored exception instead of the state, and marking the slot after the
+rethrow instead of before.
+
+That last one matters more than it looks: `recordPublishFailure` sets
+`slot.state = Failed` *before* it rethrows, so a caller that catches does not
+leave a slot that still looks loadable. Nothing said so before.
+
+**What is left of the god object is one move.** With the ladder taking its drain
+as a parameter and the load-state machine out of the class, a texture store
+needs no owner templates at all - only a bundle of the four things the two
+halves genuinely share (the scheduler, the ladder, the visible-request stamp and
+the retirement frame mask), plus the drain. The 13 texture-only functions come
+to 360 lines and reference exactly those. It is a mechanical move now rather
+than a structural question.
 
 The residency ladder is out, and it turned up something worth more than the
 extraction. `ResidencyLadder` in `ResidencyBudget.hpp` now owns the eviction
