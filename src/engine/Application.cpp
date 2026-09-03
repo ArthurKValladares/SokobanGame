@@ -436,6 +436,193 @@ bool Application::bakeTileThumbnails()
 }
 #endif
 
+// One UI frame: sizes, the pointer mapping, every panel and overlay that can
+// draw, and the ImGui/UI frame that brackets them.
+//
+// Returns whether the developer workspace is visible, because the renderer
+// needs the same answer a few lines later - that one value is the only thing
+// this phase leaves behind, which is what made it liftable out of a 281-line
+// loop body.
+bool Application::drawUiFrame(
+    const InputRouter::Frame& routedInput, [[maybe_unused]] float dt)
+{
+    const Vec2 windowSize = window_.size();
+    const Vec2 pixelSize = window_.sizeInPixels();
+#if SOKOBAN_ENABLE_DEBUG_UI
+    const bool developerWorkspaceVisible =
+        evidenceOutputDirectory_.empty() &&
+        !optionsMenu_.isOpen() && !titleScreen_.isOpen();
+    if (!developerWorkspaceVisible) {
+        renderer_.setGameViewportDisplay(std::nullopt);
+    }
+#else
+    constexpr bool developerWorkspaceVisible = false;
+#endif
+    const Vec2 mouse = routedInput.pointer.position;
+    const Vec2 mousePixels {
+        windowSize.x > 0.0f
+            ? mouse.x * pixelSize.x / windowSize.x
+            : mouse.x,
+        windowSize.y > 0.0f
+            ? mouse.y * pixelSize.y / windowSize.y
+            : mouse.y,
+    };
+    const Vec2 gameMousePixels = renderer_.mapPointerToGameViewport(
+        mousePixels, pixelSize);
+
+    ui_.beginFrame(
+        pixelSize,
+        gameMousePixels,
+        routedInput.pointer.primaryDown,
+        routedInput.pointer.primaryPressed);
+
+    renderer_.beginDebugUiFrame();
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (developerWorkspaceVisible) {
+        const VkExtent2D gameExtent = renderer_.renderExtent();
+        const DebugUi::DrawResult workspace = DebugUi::draw({
+            .texture = renderer_.gameViewportTexture(),
+            .width = gameExtent.width,
+            .height = gameExtent.height,
+        });
+        if (workspace.viewportWidth > 0.0f &&
+            workspace.viewportHeight > 0.0f) {
+            renderer_.setGameViewportDisplay(
+                VulkanRenderer::GameViewportDisplay {
+                    .position = {
+                        workspace.viewportX,
+                        workspace.viewportY,
+                    },
+                    .size = {
+                        workspace.viewportWidth,
+                        workspace.viewportHeight,
+                    },
+                    .hovered = workspace.viewportHovered,
+                    .focused = workspace.viewportFocused,
+                });
+        } else {
+            renderer_.setGameViewportDisplay(std::nullopt);
+        }
+    } else {
+        renderer_.setGameViewportDisplay(std::nullopt);
+    }
+#endif
+    if (screenPreviewActive_) {
+        drawScreenPreviewOverlay(pixelSize);
+    } else {
+        drawSelectorPrompt(
+            preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
+    }
+#if SOKOBAN_ENABLE_DEBUG_UI
+    tools_->drawDraftExitConfirmation();
+    tools_->drawBrushPreview(
+        renderer_,
+        preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
+    tools_->drawDecorationGizmo(
+        renderer_,
+        preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr,
+        input_.mousePosition(),
+        window_.size(),
+        window_.sizeInPixels(),
+        renderer_.wantsMouseCapture());
+    tools_->drawSelectorLabels(
+        renderer_,
+        preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
+#endif
+
+    if (const std::optional<TitleAction> titleAction = titleScreen_.draw(
+            ui_, pixelSize, routedInput.title)) {
+        handleShellEvent(ShellTitleAction { *titleAction });
+    }
+
+    if (const std::optional<OverlayAction> overlayAction =
+            levelCompleteOverlay_.draw(
+                ui_, pixelSize, routedInput.overlay)) {
+        handleShellEvent(ShellOverlayAction { *overlayAction });
+    }
+
+    if (const std::optional<OptionsAction> optionsAction =
+            optionsMenu_.handleInput(
+                settingsCoordinator_.userSettings(),
+                routedInput.options)) {
+        handleShellEvent(ShellOptionsAction { *optionsAction });
+    }
+    const GamepadPresentation gamepadPresentation =
+        input_.activeGamepadPresentation();
+    if (const std::optional<OptionsMenuIntent> intent =
+            optionsMenuView_.draw(
+                ui_,
+                pixelSize,
+                optionsMenu_.state(),
+                settingsCoordinator_.userSettings(),
+                &inputPrompts_,
+                &gamepadPresentation)) {
+        if (const std::optional<OptionsAction> optionsAction =
+                optionsMenu_.dispatch(
+                    settingsCoordinator_.userSettings(),
+                    *intent)) {
+            handleShellEvent(ShellOptionsAction { *optionsAction });
+        }
+    }
+    drawAssetLoadingOverlay(pixelSize);
+#if SOKOBAN_ENABLE_DEBUG_UI
+    tools_->animationPreviewDebugUi.update(dt, renderer_);
+#endif
+    ui_.endFrame();
+    return developerWorkspaceVisible;
+}
+
+// The end of a smoke run: the evidence capture one frame early, the capture
+// finish, the residency and phase-timing report, and the stop.
+void Application::finishSmokeRunIfDue(std::uint64_t renderedFrames)
+{
+    if (!evidenceOutputDirectory_.empty() &&
+        renderedFrames + 1 == smokeFrames_) {
+        captureEvidenceScene();
+    }
+    if (smokeFrames_ > 0 && renderedFrames >= smokeFrames_) {
+        if (!evidenceOutputDirectory_.empty()) {
+            finishEvidenceCapture();
+        }
+        const VulkanModelResources::LoadingStats assetStats =
+            renderer_.assetLoadingStats();
+        log::info(log::Category::Rendering)
+            << "Texture residency "
+            << assetStats.textureResidencyBytes << " / "
+            << assetStats.textureResidencyBudgetBytes
+            << " bytes; mip levels "
+            << assetStats.residentTextureMipLevels << " / "
+            << assetStats.availableTextureMipLevels << "; "
+            << assetStats.mipDegradedTextures
+            << " reduced textures omitted "
+            << assetStats.mipOmittedBytes << " bytes.";
+        // Eviction counters were reachable only from the debug panel,
+        // which a headless smoke run never draws - so the two numbers that
+        // say whether residency was under pressure, and whether it coped,
+        // were missing from exactly the captures taken to find out.
+        log::info(log::Category::Rendering)
+            << "Residency evictions " << assetStats.residencyEvictions
+            << "; capacity blocks " << assetStats.residencyBudgetBlocks
+            << " (" << assetStats.residencyOversizedBlocks
+            << " larger than the budget, "
+            << assetStats.residencyMipPlanBlocks
+            << " no mip tail fits, "
+            << assetStats.residencyNoVictimBlocks
+            << " nothing evictable)"
+            << "; dropped draws " << assetStats.droppedDrawInstances
+            << ", dropped skinned poses "
+            << assetStats.droppedSkinningInstances
+            << "; model residency " << assetStats.modelResidencyBytes
+            << " / " << assetStats.modelResidencyBudgetBytes
+            << " bytes (peak " << assetStats.modelResidencyPeakBytes
+            << ").";
+        log::info(log::Category::Application)
+            << "Smoke run finished after " << renderedFrames
+            << " frames.";
+        running_ = false;
+    }
+}
+
 void Application::run()
 {
     if (smokeFrames_ > 0) {
@@ -531,129 +718,7 @@ void Application::run()
             dt,
             routedInput,
             preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
-        const Vec2 windowSize = window_.size();
-        const Vec2 pixelSize = window_.sizeInPixels();
-#if SOKOBAN_ENABLE_DEBUG_UI
-        const bool developerWorkspaceVisible =
-            evidenceOutputDirectory_.empty() &&
-            !optionsMenu_.isOpen() && !titleScreen_.isOpen();
-        if (!developerWorkspaceVisible) {
-            renderer_.setGameViewportDisplay(std::nullopt);
-        }
-#else
-        constexpr bool developerWorkspaceVisible = false;
-#endif
-        const Vec2 mouse = routedInput.pointer.position;
-        const Vec2 mousePixels {
-            windowSize.x > 0.0f
-                ? mouse.x * pixelSize.x / windowSize.x
-                : mouse.x,
-            windowSize.y > 0.0f
-                ? mouse.y * pixelSize.y / windowSize.y
-                : mouse.y,
-        };
-        const Vec2 gameMousePixels = renderer_.mapPointerToGameViewport(
-            mousePixels, pixelSize);
-
-        ui_.beginFrame(
-            pixelSize,
-            gameMousePixels,
-            routedInput.pointer.primaryDown,
-            routedInput.pointer.primaryPressed);
-
-        renderer_.beginDebugUiFrame();
-#if SOKOBAN_ENABLE_DEBUG_UI
-        if (developerWorkspaceVisible) {
-            const VkExtent2D gameExtent = renderer_.renderExtent();
-            const DebugUi::DrawResult workspace = DebugUi::draw({
-                .texture = renderer_.gameViewportTexture(),
-                .width = gameExtent.width,
-                .height = gameExtent.height,
-            });
-            if (workspace.viewportWidth > 0.0f &&
-                workspace.viewportHeight > 0.0f) {
-                renderer_.setGameViewportDisplay(
-                    VulkanRenderer::GameViewportDisplay {
-                        .position = {
-                            workspace.viewportX,
-                            workspace.viewportY,
-                        },
-                        .size = {
-                            workspace.viewportWidth,
-                            workspace.viewportHeight,
-                        },
-                        .hovered = workspace.viewportHovered,
-                        .focused = workspace.viewportFocused,
-                    });
-            } else {
-                renderer_.setGameViewportDisplay(std::nullopt);
-            }
-        } else {
-            renderer_.setGameViewportDisplay(std::nullopt);
-        }
-#endif
-        if (screenPreviewActive_) {
-            drawScreenPreviewOverlay(pixelSize);
-        } else {
-            drawSelectorPrompt(
-                preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
-        }
-#if SOKOBAN_ENABLE_DEBUG_UI
-        tools_->drawDraftExitConfirmation();
-        tools_->drawBrushPreview(
-            renderer_,
-            preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
-        tools_->drawDecorationGizmo(
-            renderer_,
-            preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr,
-            input_.mousePosition(),
-            window_.size(),
-            window_.sizeInPixels(),
-            renderer_.wantsMouseCapture());
-        tools_->drawSelectorLabels(
-            renderer_,
-            preparedRenderFrame_ ? &*preparedRenderFrame_ : nullptr);
-#endif
-
-        if (const std::optional<TitleAction> titleAction = titleScreen_.draw(
-                ui_, pixelSize, routedInput.title)) {
-            handleShellEvent(ShellTitleAction { *titleAction });
-        }
-
-        if (const std::optional<OverlayAction> overlayAction =
-                levelCompleteOverlay_.draw(
-                    ui_, pixelSize, routedInput.overlay)) {
-            handleShellEvent(ShellOverlayAction { *overlayAction });
-        }
-
-        if (const std::optional<OptionsAction> optionsAction =
-                optionsMenu_.handleInput(
-                    settingsCoordinator_.userSettings(),
-                    routedInput.options)) {
-            handleShellEvent(ShellOptionsAction { *optionsAction });
-        }
-        const GamepadPresentation gamepadPresentation =
-            input_.activeGamepadPresentation();
-        if (const std::optional<OptionsMenuIntent> intent =
-                optionsMenuView_.draw(
-                    ui_,
-                    pixelSize,
-                    optionsMenu_.state(),
-                    settingsCoordinator_.userSettings(),
-                    &inputPrompts_,
-                    &gamepadPresentation)) {
-            if (const std::optional<OptionsAction> optionsAction =
-                    optionsMenu_.dispatch(
-                        settingsCoordinator_.userSettings(),
-                        *intent)) {
-                handleShellEvent(ShellOptionsAction { *optionsAction });
-            }
-        }
-        drawAssetLoadingOverlay(pixelSize);
-#if SOKOBAN_ENABLE_DEBUG_UI
-        tools_->animationPreviewDebugUi.update(dt, renderer_);
-#endif
-        ui_.endFrame();
+        const bool developerWorkspaceVisible = drawUiFrame(routedInput, dt);
         preparedRenderFrame_ = renderer_.prepareFrame(
             buildRenderFrame(routedInput.editor),
             buildScreenPreviewRenderFrame());
@@ -667,51 +732,7 @@ void Application::run()
             running_ = false;
         }
         ++renderedFrames;
-        if (!evidenceOutputDirectory_.empty() &&
-            renderedFrames + 1 == smokeFrames_) {
-            captureEvidenceScene();
-        }
-        if (smokeFrames_ > 0 && renderedFrames >= smokeFrames_) {
-            if (!evidenceOutputDirectory_.empty()) {
-                finishEvidenceCapture();
-            }
-            const VulkanModelResources::LoadingStats assetStats =
-                renderer_.assetLoadingStats();
-            log::info(log::Category::Rendering)
-                << "Texture residency "
-                << assetStats.textureResidencyBytes << " / "
-                << assetStats.textureResidencyBudgetBytes
-                << " bytes; mip levels "
-                << assetStats.residentTextureMipLevels << " / "
-                << assetStats.availableTextureMipLevels << "; "
-                << assetStats.mipDegradedTextures
-                << " reduced textures omitted "
-                << assetStats.mipOmittedBytes << " bytes.";
-            // Eviction counters were reachable only from the debug panel,
-            // which a headless smoke run never draws - so the two numbers that
-            // say whether residency was under pressure, and whether it coped,
-            // were missing from exactly the captures taken to find out.
-            log::info(log::Category::Rendering)
-                << "Residency evictions " << assetStats.residencyEvictions
-                << "; capacity blocks " << assetStats.residencyBudgetBlocks
-                << " (" << assetStats.residencyOversizedBlocks
-                << " larger than the budget, "
-                << assetStats.residencyMipPlanBlocks
-                << " no mip tail fits, "
-                << assetStats.residencyNoVictimBlocks
-                << " nothing evictable)"
-                << "; dropped draws " << assetStats.droppedDrawInstances
-                << ", dropped skinned poses "
-                << assetStats.droppedSkinningInstances
-                << "; model residency " << assetStats.modelResidencyBytes
-                << " / " << assetStats.modelResidencyBudgetBytes
-                << " bytes (peak " << assetStats.modelResidencyPeakBytes
-                << ").";
-            log::info(log::Category::Application)
-                << "Smoke run finished after " << renderedFrames
-                << " frames.";
-            running_ = false;
-        }
+        finishSmokeRunIfDue(renderedFrames);
         if (running_) {
             framePacer_.pace();
         }
@@ -1740,6 +1761,184 @@ FrameArena& Application::beginRenderFrameArena()
     return arena;
 }
 
+#if SOKOBAN_ENABLE_DEBUG_UI
+// The editor's own frame: level directories, the pending move, the overworld
+// neighbours around the edited screen, and the selector states the palette
+// draws. Lifted whole out of buildRenderFrame(), where it was 95 of that
+// function's 304 lines and had nothing to do with the gameplay path below it.
+RenderFrameData Application::buildEditorRenderFrame(
+    const InputRouter::EditorInput& editorInput, float beltScrollOffset)
+{
+    const std::vector<LevelEditor::LevelDirectory> editorLevels =
+        tools_->levelEditor.collectLevelDirectories();
+    const std::optional<LevelEditor::MoveObject>& pendingMove =
+        tools_->levelEditor.pendingMove();
+    const std::optional<TileType> movedTile =
+        pendingMove &&
+            pendingMove->kind == LevelEditor::MoveObject::Kind::Tile
+        ? std::optional<TileType> { pendingMove->tile }
+        : std::nullopt;
+    std::vector<RenderFrameBuilder::EditorInput::OverworldNeighbor>
+        overworldNeighbors;
+    const std::optional<OverworldScreenId> editedOverworldScreen =
+        tools_->levelEditor.overworldScreenId();
+    const OverworldMapEditor& topology = tools_->overworldMapEditor;
+    const bool matchingTopologyRoot =
+        std::filesystem::absolute(topology.projectLevelRoot())
+            .lexically_normal() ==
+        std::filesystem::absolute(tools_->levelEditor.browserRoot())
+            .lexically_normal();
+    if (tools_->levelEditor.showOverworldNeighbors() &&
+        editedOverworldScreen && topology.loaded() &&
+        matchingTopologyRoot) {
+        const OverworldScreenSpec* active =
+            topology.screen(*editedOverworldScreen);
+        if (active) {
+            for (const OverworldMapEditor::ScreenSummary& candidate :
+                 topology.screens()) {
+                const int deltaX = candidate.slot.x - active->slot.x;
+                const int deltaY = candidate.slot.y - active->slot.y;
+                if ((deltaX == 0 && deltaY == 0) ||
+                    std::abs(deltaX) > 1 || std::abs(deltaY) > 1) {
+                    continue;
+                }
+                if (const Level::Definition* definition =
+                        topology.definition(candidate.id)) {
+                    overworldNeighbors.push_back({
+                        .screen = candidate.id,
+                        .origin = {
+                            deltaX * static_cast<int>(
+                                topology.layout().screenWidth),
+                            deltaY * static_cast<int>(
+                                topology.layout().screenHeight),
+                        },
+                        .width = topology.layout().screenWidth,
+                        .height = topology.layout().screenHeight,
+                        .definition = definition,
+                    });
+                }
+            }
+        }
+    }
+    FrameArena& arena = beginRenderFrameArena();
+    return RenderFrameBuilder::buildEditor({
+        .manifest = assetManifest_,
+        .editor = tools_->levelEditor,
+        .settings = presentationSettings_,
+        .animations = &animationCatalog_,
+        .hoverCell = tools_->hoverCell,
+        .hoverDecoration = tools_->hoverDecoration,
+        .deleting =
+            (editorInput.deleting &&
+                tools_->levelEditor.tool() == LevelEditor::Tool::Tiles) ||
+            (editorInput.moving && !pendingMove),
+        .selectingMoveSource = editorInput.moving && !pendingMove,
+        .editorPreviewTile = editorInput.moving
+            ? movedTile
+            : std::nullopt,
+        .worldAnimationTimeSeconds =
+            presentation_.worldAnimationTimeSeconds(),
+        .conveyorBeltScrollOffset = beltScrollOffset,
+        .levelLocation =
+            levelLocationFromScreenPath(tools_->levelEditor.loadedDocumentPath()),
+        .overworldScreen = editedOverworldScreen,
+        .overworldNeighbors = overworldNeighbors,
+        .selectorState = [this, &editorLevels](LevelLocation target) {
+            const auto level = std::ranges::find(
+                editorLevels,
+                target.level,
+                &LevelEditor::LevelDirectory::index);
+            const bool targetExists = level != editorLevels.end() &&
+                std::ranges::find(
+                    level->screens,
+                    target.screen,
+                    &LevelEditor::ScreenFile::index) != level->screens.end();
+            return ScreenSelectorViewState {
+                .status = targetExists
+                    ? playerProfile_.selectorStatus(target)
+                    : ScreenSelectorStatus::Unavailable,
+                .lastScreenInLevel = targetExists &&
+                    level->screens.back().index == target.screen,
+            };
+        },
+    }, arena);
+}
+#endif
+
+// The two evidence point-light fixtures: one animated caster, or the stress
+// grid. Only a capture run turns either on, and neither has anything to say
+// about an ordinary frame, which is why they are out of buildRenderFrame().
+void Application::appendEvidencePointLights(RenderFrameData& frame) const
+{
+    if (evidencePointLightEnabled_) {
+        std::optional<std::size_t> animatedCaster;
+        for (std::size_t tileIndex = 0;
+             tileIndex < frame.tiles.size();
+             ++tileIndex) {
+            if (frame.tiles[tileIndex].animationInstanceId != 0) {
+                animatedCaster = tileIndex;
+                break;
+            }
+        }
+        frame.lighting.pointLightCount = 1;
+        frame.lighting.pointLights[0] = {
+            .position = {
+                static_cast<float>(frame.levelWidth) * 0.42f,
+                static_cast<float>(frame.levelHeight) * 0.45f,
+                2.25f,
+            },
+            .color = { 1.0f, 0.72f, 0.48f },
+            .intensity = 7.0f,
+            .range = 3.5f,
+            .castsShadows = true,
+            .shadowBias = 0.012f,
+            .shadowOpacity = 0.85f,
+            .emitterTileIndex = animatedCaster,
+        };
+    } else if (evidencePointLightStressEnabled_) {
+        constexpr std::array<Vec3, RenderFrameData::pointLightCapacity>
+            stressColors {
+                Vec3 { 1.0f, 0.42f, 0.30f },
+                Vec3 { 0.35f, 0.62f, 1.0f },
+                Vec3 { 0.45f, 1.0f, 0.52f },
+                Vec3 { 1.0f, 0.82f, 0.34f },
+                Vec3 { 0.90f, 0.38f, 1.0f },
+                Vec3 { 0.30f, 1.0f, 0.92f },
+                Vec3 { 1.0f, 0.56f, 0.74f },
+                Vec3 { 0.72f, 0.76f, 1.0f },
+            };
+        constexpr std::array<Vec2, RenderFrameData::pointLightCapacity>
+            stressPositions {
+                Vec2 { 0.18f, 0.18f }, Vec2 { 0.50f, 0.15f },
+                Vec2 { 0.82f, 0.18f }, Vec2 { 0.85f, 0.50f },
+                Vec2 { 0.82f, 0.82f }, Vec2 { 0.50f, 0.85f },
+                Vec2 { 0.18f, 0.82f }, Vec2 { 0.15f, 0.50f },
+            };
+        const float width = static_cast<float>(frame.levelWidth);
+        const float height = static_cast<float>(frame.levelHeight);
+        const float range = std::max(width, height) * 1.35f;
+        frame.lighting.pointLightCount =
+            RenderFrameData::pointLightCapacity;
+        for (std::size_t lightIndex = 0;
+             lightIndex < RenderFrameData::pointLightCapacity;
+             ++lightIndex) {
+            frame.lighting.pointLights[lightIndex] = {
+                .position = {
+                    width * stressPositions[lightIndex].x,
+                    height * stressPositions[lightIndex].y,
+                    2.1f + 0.15f * static_cast<float>(lightIndex % 3),
+                },
+                .color = stressColors[lightIndex],
+                .intensity = 3.5f,
+                .range = range,
+                .castsShadows = true,
+                .shadowBias = 0.012f,
+                .shadowOpacity = 0.72f,
+            };
+        }
+    }
+}
+
 RenderFrameData Application::buildRenderFrame(
     const InputRouter::EditorInput& editorInput)
 {
@@ -1754,99 +1953,7 @@ RenderFrameData Application::buildRenderFrame(
         return *preview;
     }
     if (tools_->levelEditor.editingDocument()) {
-        const std::vector<LevelEditor::LevelDirectory> editorLevels =
-            tools_->levelEditor.collectLevelDirectories();
-        const std::optional<LevelEditor::MoveObject>& pendingMove =
-            tools_->levelEditor.pendingMove();
-        const std::optional<TileType> movedTile =
-            pendingMove &&
-                pendingMove->kind == LevelEditor::MoveObject::Kind::Tile
-            ? std::optional<TileType> { pendingMove->tile }
-            : std::nullopt;
-        std::vector<RenderFrameBuilder::EditorInput::OverworldNeighbor>
-            overworldNeighbors;
-        const std::optional<OverworldScreenId> editedOverworldScreen =
-            tools_->levelEditor.overworldScreenId();
-        const OverworldMapEditor& topology = tools_->overworldMapEditor;
-        const bool matchingTopologyRoot =
-            std::filesystem::absolute(topology.projectLevelRoot())
-                .lexically_normal() ==
-            std::filesystem::absolute(tools_->levelEditor.browserRoot())
-                .lexically_normal();
-        if (tools_->levelEditor.showOverworldNeighbors() &&
-            editedOverworldScreen && topology.loaded() &&
-            matchingTopologyRoot) {
-            const OverworldScreenSpec* active =
-                topology.screen(*editedOverworldScreen);
-            if (active) {
-                for (const OverworldMapEditor::ScreenSummary& candidate :
-                     topology.screens()) {
-                    const int deltaX = candidate.slot.x - active->slot.x;
-                    const int deltaY = candidate.slot.y - active->slot.y;
-                    if ((deltaX == 0 && deltaY == 0) ||
-                        std::abs(deltaX) > 1 || std::abs(deltaY) > 1) {
-                        continue;
-                    }
-                    if (const Level::Definition* definition =
-                            topology.definition(candidate.id)) {
-                        overworldNeighbors.push_back({
-                            .screen = candidate.id,
-                            .origin = {
-                                deltaX * static_cast<int>(
-                                    topology.layout().screenWidth),
-                                deltaY * static_cast<int>(
-                                    topology.layout().screenHeight),
-                            },
-                            .width = topology.layout().screenWidth,
-                            .height = topology.layout().screenHeight,
-                            .definition = definition,
-                        });
-                    }
-                }
-            }
-        }
-        FrameArena& arena = beginRenderFrameArena();
-        return RenderFrameBuilder::buildEditor({
-            .manifest = assetManifest_,
-            .editor = tools_->levelEditor,
-            .settings = presentationSettings_,
-            .animations = &animationCatalog_,
-            .hoverCell = tools_->hoverCell,
-            .hoverDecoration = tools_->hoverDecoration,
-            .deleting =
-                (editorInput.deleting &&
-                    tools_->levelEditor.tool() == LevelEditor::Tool::Tiles) ||
-                (editorInput.moving && !pendingMove),
-            .selectingMoveSource = editorInput.moving && !pendingMove,
-            .editorPreviewTile = editorInput.moving
-                ? movedTile
-                : std::nullopt,
-            .worldAnimationTimeSeconds =
-                presentation_.worldAnimationTimeSeconds(),
-            .conveyorBeltScrollOffset = beltScrollOffset,
-            .levelLocation =
-                levelLocationFromScreenPath(tools_->levelEditor.loadedDocumentPath()),
-            .overworldScreen = editedOverworldScreen,
-            .overworldNeighbors = overworldNeighbors,
-            .selectorState = [this, &editorLevels](LevelLocation target) {
-                const auto level = std::ranges::find(
-                    editorLevels,
-                    target.level,
-                    &LevelEditor::LevelDirectory::index);
-                const bool targetExists = level != editorLevels.end() &&
-                    std::ranges::find(
-                        level->screens,
-                        target.screen,
-                        &LevelEditor::ScreenFile::index) != level->screens.end();
-                return ScreenSelectorViewState {
-                    .status = targetExists
-                        ? playerProfile_.selectorStatus(target)
-                        : ScreenSelectorStatus::Unavailable,
-                    .lastScreenInLevel = targetExists &&
-                        level->screens.back().index == target.screen,
-                };
-            },
-        }, arena);
+        return buildEditorRenderFrame(editorInput, beltScrollOffset);
     }
 #endif
 
@@ -1975,73 +2082,7 @@ RenderFrameData Application::buildRenderFrame(
     if (evidenceWaterEnabled_) {
         appendEvidenceWaterFixture(frame);
     }
-    if (evidencePointLightEnabled_) {
-        std::optional<std::size_t> animatedCaster;
-        for (std::size_t tileIndex = 0;
-             tileIndex < frame.tiles.size();
-             ++tileIndex) {
-            if (frame.tiles[tileIndex].animationInstanceId != 0) {
-                animatedCaster = tileIndex;
-                break;
-            }
-        }
-        frame.lighting.pointLightCount = 1;
-        frame.lighting.pointLights[0] = {
-            .position = {
-                static_cast<float>(frame.levelWidth) * 0.42f,
-                static_cast<float>(frame.levelHeight) * 0.45f,
-                2.25f,
-            },
-            .color = { 1.0f, 0.72f, 0.48f },
-            .intensity = 7.0f,
-            .range = 3.5f,
-            .castsShadows = true,
-            .shadowBias = 0.012f,
-            .shadowOpacity = 0.85f,
-            .emitterTileIndex = animatedCaster,
-        };
-    } else if (evidencePointLightStressEnabled_) {
-        constexpr std::array<Vec3, RenderFrameData::pointLightCapacity>
-            stressColors {
-                Vec3 { 1.0f, 0.42f, 0.30f },
-                Vec3 { 0.35f, 0.62f, 1.0f },
-                Vec3 { 0.45f, 1.0f, 0.52f },
-                Vec3 { 1.0f, 0.82f, 0.34f },
-                Vec3 { 0.90f, 0.38f, 1.0f },
-                Vec3 { 0.30f, 1.0f, 0.92f },
-                Vec3 { 1.0f, 0.56f, 0.74f },
-                Vec3 { 0.72f, 0.76f, 1.0f },
-            };
-        constexpr std::array<Vec2, RenderFrameData::pointLightCapacity>
-            stressPositions {
-                Vec2 { 0.18f, 0.18f }, Vec2 { 0.50f, 0.15f },
-                Vec2 { 0.82f, 0.18f }, Vec2 { 0.85f, 0.50f },
-                Vec2 { 0.82f, 0.82f }, Vec2 { 0.50f, 0.85f },
-                Vec2 { 0.18f, 0.82f }, Vec2 { 0.15f, 0.50f },
-            };
-        const float width = static_cast<float>(frame.levelWidth);
-        const float height = static_cast<float>(frame.levelHeight);
-        const float range = std::max(width, height) * 1.35f;
-        frame.lighting.pointLightCount =
-            RenderFrameData::pointLightCapacity;
-        for (std::size_t lightIndex = 0;
-             lightIndex < RenderFrameData::pointLightCapacity;
-             ++lightIndex) {
-            frame.lighting.pointLights[lightIndex] = {
-                .position = {
-                    width * stressPositions[lightIndex].x,
-                    height * stressPositions[lightIndex].y,
-                    2.1f + 0.15f * static_cast<float>(lightIndex % 3),
-                },
-                .color = stressColors[lightIndex],
-                .intensity = 3.5f,
-                .range = range,
-                .castsShadows = true,
-                .shadowBias = 0.012f,
-                .shadowOpacity = 0.72f,
-            };
-        }
-    }
+    appendEvidencePointLights(frame);
     return frame;
 }
 

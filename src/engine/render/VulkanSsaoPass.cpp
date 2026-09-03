@@ -94,6 +94,86 @@ void VulkanSsaoPass::destroy()
     allocator_ = nullptr;
 }
 
+// The second of the pass's two draws: the estimated occlusion composited over
+// the scene colour, full resolution, covering every pixel.
+//
+// Split from record() because the two draws share only the push-constant block
+// and the descriptor set - the estimator works at half resolution into its own
+// attachment and this one does not - and record() was 206 lines of the two
+// interleaved.
+void VulkanSsaoPass::recordAmbientComposite(
+    VkCommandBuffer commandBuffer,
+    VkImageView targetView,
+    VkDescriptorSet descriptorSet,
+    VkPipelineLayout pipelineLayout,
+    Pipelines pipelines,
+    VulkanGpuProfiler& gpuProfiler,
+    uint32_t frameIndex,
+    RenderStats& stats,
+    const GpuDrawInstance& pushConstants) const
+{
+    gpuProfiler.beginPhase(
+        commandBuffer, frameIndex, VulkanGpuPhase::SsaoComposite);
+    VkViewport compositeViewport {
+        .x = 0.0f,
+        .y = static_cast<float>(renderExtent_.height),
+        .width = static_cast<float>(renderExtent_.width),
+        .height = -static_cast<float>(renderExtent_.height),
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f,
+    };
+    VkRect2D compositeScissor {
+        .offset = { 0, 0 },
+        .extent = renderExtent_,
+    };
+
+    // The composite covers every pixel and no longer blends with what is
+    // already there - it samples the copy the recorder took instead - so the
+    // attachment's previous contents are worth nothing to it.
+    VkRenderingAttachmentInfo compositeAttachment {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView = targetView,
+        .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+    };
+    VkRenderingInfo compositeRenderingInfo {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+        .renderArea = { .offset = { 0, 0 }, .extent = renderExtent_ },
+        .layerCount = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &compositeAttachment,
+    };
+    vkCmdBeginRendering(commandBuffer, &compositeRenderingInfo);
+    ++stats.renderPasses;
+    vkCmdBindPipeline(
+        commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.composite);
+    ++stats.pipelineBinds;
+    vkCmdBindDescriptorSets(
+        commandBuffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        pipelineLayout,
+        0,
+        1,
+        &descriptorSet,
+        0,
+        nullptr);
+    vkCmdSetViewport(commandBuffer, 0, 1, &compositeViewport);
+    vkCmdSetScissor(commandBuffer, 0, 1, &compositeScissor);
+    vkCmdPushConstants(
+        commandBuffer,
+        pipelineLayout,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        0,
+        sizeof(GpuDrawInstance),
+        &pushConstants);
+    vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+    ++stats.drawCalls;
+    vkCmdEndRendering(commandBuffer);
+    gpuProfiler.endPhase(
+        commandBuffer, frameIndex, VulkanGpuPhase::SsaoComposite);
+}
+
 void VulkanSsaoPass::record(
     VkCommandBuffer commandBuffer,
     VkImageView targetView,
@@ -239,66 +319,16 @@ void VulkanSsaoPass::record(
     gpuProfiler.endPhase(
         commandBuffer, frameIndex, VulkanGpuPhase::SsaoOcclusion);
 
-    gpuProfiler.beginPhase(
-        commandBuffer, frameIndex, VulkanGpuPhase::SsaoComposite);
-    VkViewport compositeViewport {
-        .x = 0.0f,
-        .y = static_cast<float>(renderExtent_.height),
-        .width = static_cast<float>(renderExtent_.width),
-        .height = -static_cast<float>(renderExtent_.height),
-        .minDepth = 0.0f,
-        .maxDepth = 1.0f,
-    };
-    VkRect2D compositeScissor {
-        .offset = { 0, 0 },
-        .extent = renderExtent_,
-    };
-
-    // The composite covers every pixel and no longer blends with what is
-    // already there - it samples the copy the recorder took instead - so the
-    // attachment's previous contents are worth nothing to it.
-    VkRenderingAttachmentInfo compositeAttachment {
-        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .imageView = targetView,
-        .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-    };
-    VkRenderingInfo compositeRenderingInfo {
-        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-        .renderArea = { .offset = { 0, 0 }, .extent = renderExtent_ },
-        .layerCount = 1,
-        .colorAttachmentCount = 1,
-        .pColorAttachments = &compositeAttachment,
-    };
-    vkCmdBeginRendering(commandBuffer, &compositeRenderingInfo);
-    ++stats.renderPasses;
-    vkCmdBindPipeline(
-        commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.composite);
-    ++stats.pipelineBinds;
-    vkCmdBindDescriptorSets(
+    recordAmbientComposite(
         commandBuffer,
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        targetView,
+        descriptorSet,
         pipelineLayout,
-        0,
-        1,
-        &descriptorSet,
-        0,
-        nullptr);
-    vkCmdSetViewport(commandBuffer, 0, 1, &compositeViewport);
-    vkCmdSetScissor(commandBuffer, 0, 1, &compositeScissor);
-    vkCmdPushConstants(
-        commandBuffer,
-        pipelineLayout,
-        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-        0,
-        sizeof(GpuDrawInstance),
-        &pushConstants);
-    vkCmdDraw(commandBuffer, 3, 1, 0, 0);
-    ++stats.drawCalls;
-    vkCmdEndRendering(commandBuffer);
-    gpuProfiler.endPhase(
-        commandBuffer, frameIndex, VulkanGpuPhase::SsaoComposite);
+        pipelines,
+        gpuProfiler,
+        frameIndex,
+        stats,
+        pushConstants);
 }
 
 bool VulkanSsaoPass::valid() const

@@ -367,98 +367,17 @@ void appendSelectors(
     }
 }
 
-void appendGameplayWorld(
+// The water surfaces and the shoreline masks around them: three passes over
+// the level volume, plus the two lookups they share.
+//
+// Half of appendGameplayWorld() by line count, and the half that reads the
+// level rather than the presentation - which is why it moves as a unit and
+// takes only the frame, the input and the state.
+void appendGameplayWaterAndShorelines(
     RenderFrameData& frame,
-    const RenderFrameBuilder::GameplayInput& input)
+    const RenderFrameBuilder::GameplayInput& input,
+    const GameState& state)
 {
-    const GameState& state = input.state;
-    const auto& primaryPlayerVisual = input.presentation.players().front();
-    const auto& movableVisuals = input.presentation.movables();
-    const bool endUnlocked = rules::isEndUnlocked(input.level, state);
-
-    frame.tiles.reserve(
-        static_cast<std::size_t>(input.level.width()) *
-        input.level.height() *
-        input.level.depth());
-    auto fallenMovableIsMoving =
-        [&state, &movableVisuals](const GameState::Movable* movable) {
-            const auto index =
-                static_cast<std::size_t>(movable - state.movables.data());
-            return index < movableVisuals.size() && movableVisuals[index].moving;
-        };
-    auto staticCellAt =
-        [&](uint32_t x, uint32_t y, uint32_t z) {
-            const GridPosition3 position {
-                static_cast<int>(x),
-                static_cast<int>(y),
-                static_cast<int>(z),
-            };
-            if (input.visibleCell && !input.visibleCell(position)) {
-                return StaticRenderCell { .tile = TileType::Air };
-            }
-            if (input.level.tileAt(x, y, z) == TileType::Water) {
-                const GridPosition3 entityPosition {
-                    position.x,
-                    position.y,
-                    position.z + 1,
-                };
-                if (const GameState::Movable* fallenMovable =
-                        rules::fallenMovableAt(state, entityPosition)) {
-                    if (!fallenMovableIsMoving(fallenMovable)) {
-                        return StaticRenderCell { .tile = TileType::Air };
-                    }
-                }
-            }
-
-            if (const GameState::Movable* fallenMovable =
-                    rules::fallenMovableAt(state, position)) {
-                if (!fallenMovableIsMoving(fallenMovable)) {
-                    return StaticRenderCell {
-                        .tile = fallenMovable->type,
-                        .showGrid = true,
-                        .baseElevation =
-                            static_cast<float>(std::max(position.z - 1, 0)),
-                        .height = 1.0f,
-                    };
-                }
-            }
-
-            return staticRenderCellFor(
-                input.level,
-                x,
-                y,
-                z,
-                endUnlocked,
-                std::nullopt,
-                input.settings.geometry.surfaceEntityHeight,
-                input.settings.geometry.surfaceEntityWidthDepth,
-                primaryPlayerVisual.facingQuarterTurns);
-        };
-    appendStaticTiles(
-        frame,
-        input.manifest,
-        input.level,
-        staticCellAt,
-        [&](TileType tile) {
-            return input.settings.tileScale(tile);
-        });
-    appendDecorations(
-        frame,
-        input.level.decorations(),
-        input.manifest,
-        std::nullopt,
-        std::nullopt,
-        false,
-        input.visibleCell);
-    appendSelectors(
-        frame,
-        input.level.selectors(),
-        input.manifest,
-        input.selectorState,
-        std::nullopt,
-        false,
-        input.visibleCell);
-
     auto levelTileAt = [&](GridPosition3 position) {
         if (!input.level.inBounds(position)) {
             return TileType::Air;
@@ -566,6 +485,101 @@ void appendGameplayWorld(
                 });
             });
     }
+}
+
+void appendGameplayWorld(
+    RenderFrameData& frame,
+    const RenderFrameBuilder::GameplayInput& input)
+{
+    const GameState& state = input.state;
+    const auto& primaryPlayerVisual = input.presentation.players().front();
+    const auto& movableVisuals = input.presentation.movables();
+    const bool endUnlocked = rules::isEndUnlocked(input.level, state);
+
+    frame.tiles.reserve(
+        static_cast<std::size_t>(input.level.width()) *
+        input.level.height() *
+        input.level.depth());
+    auto fallenMovableIsMoving =
+        [&state, &movableVisuals](const GameState::Movable* movable) {
+            const auto index =
+                static_cast<std::size_t>(movable - state.movables.data());
+            return index < movableVisuals.size() && movableVisuals[index].moving;
+        };
+    auto staticCellAt =
+        [&](uint32_t x, uint32_t y, uint32_t z) {
+            const GridPosition3 position {
+                static_cast<int>(x),
+                static_cast<int>(y),
+                static_cast<int>(z),
+            };
+            if (input.visibleCell && !input.visibleCell(position)) {
+                return StaticRenderCell { .tile = TileType::Air };
+            }
+            if (input.level.tileAt(x, y, z) == TileType::Water) {
+                const GridPosition3 entityPosition {
+                    position.x,
+                    position.y,
+                    position.z + 1,
+                };
+                if (const GameState::Movable* fallenMovable =
+                        rules::fallenMovableAt(state, entityPosition)) {
+                    if (!fallenMovableIsMoving(fallenMovable)) {
+                        return StaticRenderCell { .tile = TileType::Air };
+                    }
+                }
+            }
+
+            if (const GameState::Movable* fallenMovable =
+                    rules::fallenMovableAt(state, position)) {
+                if (!fallenMovableIsMoving(fallenMovable)) {
+                    return StaticRenderCell {
+                        .tile = fallenMovable->type,
+                        .showGrid = true,
+                        .baseElevation =
+                            static_cast<float>(std::max(position.z - 1, 0)),
+                        .height = 1.0f,
+                    };
+                }
+            }
+
+            return staticRenderCellFor(
+                input.level,
+                x,
+                y,
+                z,
+                endUnlocked,
+                std::nullopt,
+                input.settings.geometry.surfaceEntityHeight,
+                input.settings.geometry.surfaceEntityWidthDepth,
+                primaryPlayerVisual.facingQuarterTurns);
+        };
+    appendStaticTiles(
+        frame,
+        input.manifest,
+        input.level,
+        staticCellAt,
+        [&](TileType tile) {
+            return input.settings.tileScale(tile);
+        });
+    appendDecorations(
+        frame,
+        input.level.decorations(),
+        input.manifest,
+        std::nullopt,
+        std::nullopt,
+        false,
+        input.visibleCell);
+    appendSelectors(
+        frame,
+        input.level.selectors(),
+        input.manifest,
+        input.selectorState,
+        std::nullopt,
+        false,
+        input.visibleCell);
+
+    appendGameplayWaterAndShorelines(frame, input, state);
 }
 
 void appendGameplayEntities(
@@ -733,6 +747,180 @@ void appendGameplayEntities(
     }
 }
 
+// One previewed mirror entity, as the two steps below need it.
+//
+// Bundled because both of them want most of these and the loop that computes
+// them was 240 lines of a 279-line function. The two steps take the bundle and
+// bind the names back out of it, so their bodies read exactly as they did
+// inside the loop.
+struct MirrorEntityPreviewContext {
+    const rules::MirrorEntityPreview& entity;
+    const rules::MirrorEntityPreview* matchingEndEntity = nullptr;
+    const GameplayPresentation::PlayerVisual* previewPlayer = nullptr;
+    const GameplayPresentation::EntityVisual* visual = nullptr;
+    float progress = 0.0f;
+    bool animatePreview = false;
+    float previewOpacity = 1.0f;
+};
+
+// The beam segments this entity contributes, in the order the renderer wants
+// them.
+void appendMirrorEntitySegments(
+    const MirrorEntityPreviewContext& preview,
+    std::vector<MirrorRenderSegment>& entitySegments,
+    std::vector<MirrorRenderSegment>& beamSegments)
+{
+    const rules::MirrorEntityPreview& entity = preview.entity;
+    const rules::MirrorEntityPreview* matchingEndEntity =
+        preview.matchingEndEntity;
+    const GameplayPresentation::EntityVisual* visual = preview.visual;
+    const float progress = preview.progress;
+    const bool animatePreview = preview.animatePreview;
+    const float previewOpacity = preview.previewOpacity;
+for (std::size_t segmentIndex = 0;
+     segmentIndex < entity.beamSegments.size();
+     ++segmentIndex) {
+    MirrorRenderSegment segment {
+        .from = toRenderPoint(
+            entity.beamSegments[segmentIndex].from),
+        .to = toRenderPoint(
+            entity.beamSegments[segmentIndex].to),
+        .opacity = previewOpacity,
+    };
+    if (animatePreview) {
+        segment.from = interpolate(
+            segment.from,
+            toRenderPoint(
+                matchingEndEntity
+                    ->beamSegments[segmentIndex].from),
+            progress);
+        segment.to = interpolate(
+            segment.to,
+            toRenderPoint(
+                matchingEndEntity
+                    ->beamSegments[segmentIndex].to),
+            progress);
+    }
+    entitySegments.push_back(segment);
+}
+if (animatePreview && !entitySegments.empty()) {
+    entitySegments.front().from = visual->renderPosition;
+}
+for (const MirrorRenderSegment& segment : entitySegments) {
+    const auto existing = std::ranges::find_if(
+        beamSegments,
+        [&](const MirrorRenderSegment& candidate) {
+            return sameUndirectedSegment(
+                candidate, segment);
+        });
+    if (existing == beamSegments.end()) {
+        beamSegments.push_back(segment);
+    } else {
+        existing->opacity = std::max(
+            existing->opacity, segment.opacity);
+    }
+}
+
+}
+
+// The translucent ghost tile showing where the entity ends up.
+void appendMirrorGhostTile(
+    RenderFrameData& frame,
+    const RenderFrameBuilder::GameplayInput& input,
+    const GameState& state,
+    const MirrorEntityPreviewContext& preview)
+{
+    const rules::MirrorEntityPreview& entity = preview.entity;
+    const rules::MirrorEntityPreview* matchingEndEntity =
+        preview.matchingEndEntity;
+    const GameplayPresentation::PlayerVisual* previewPlayer =
+        preview.previewPlayer;
+    const float progress = preview.progress;
+    const bool animatePreview = preview.animatePreview;
+    const float previewOpacity = preview.previewOpacity;
+auto ghostRenderPosition =
+    [](const rules::MirrorEntityPreview& preview) {
+        Vec3 result = toRenderPoint(preview.destination);
+        if (preview.fallen) {
+            result.z -= preview.player
+                ? config::drownedPlayerDepthBelowGround
+                : config::waterDepthBelowGround;
+        }
+        return result;
+    };
+Vec3 ghostPosition = ghostRenderPosition(entity);
+bool ghostFallen = entity.fallen;
+GridPosition3 ghostCell = entity.destination;
+if (animatePreview) {
+    ghostPosition = interpolate(
+        ghostPosition,
+        ghostRenderPosition(*matchingEndEntity),
+        progress);
+    if (progress >= 0.5f) {
+        ghostFallen = matchingEndEntity->fallen;
+        ghostCell = matchingEndEntity->destination;
+    }
+}
+RenderFrameData::Tile ghost {
+    .cell = ghostCell,
+    .position = {
+        ghostPosition.x,
+        ghostPosition.y,
+    },
+    .color = {
+        config::mirrorGhostColor.x,
+        config::mirrorGhostColor.y,
+        config::mirrorGhostColor.z,
+        config::mirrorGhostColor.w * previewOpacity,
+    },
+    .baseElevation = ghostPosition.z,
+    .height = 1.0f,
+    .showGrid = false,
+    .affectsCameraFit = false,
+    .model = entity.player
+        ? input.manifest.playerModel()
+        : input.manifest.modelForTile(
+              state.movables[entity.movableIndex].type),
+    .animation = entity.player
+        ? (ghostFallen
+                ? animationFor(
+                      input.animations,
+                      AnimationUse::MirrorPreviewPlayerDeadIdle,
+                      input.manifest.playerDeadIdleAnimation())
+                : animationFor(
+                      input.animations,
+                      AnimationUse::MirrorPreviewPlayerIdle,
+                      input.manifest.playerIdleAnimation()))
+        : noAnimation,
+    .animationInstanceId = entity.player
+        ? mirrorGhostAnimationInstance(
+              entity.resultPlayerIndex)
+        : uint64_t { 0 },
+    .animationLoops = true,
+    .animationTimeSeconds = previewPlayer
+        ? animationTimeFor(
+              input.animations,
+              ghostFallen
+                  ? AnimationUse::MirrorPreviewPlayerDeadIdle
+                  : AnimationUse::MirrorPreviewPlayerIdle,
+              previewPlayer->clipTimeSeconds)
+        : 0.0f,
+    .modelRotationQuarterTurns = entity.player
+        ? (previewPlayer
+                ? previewPlayer->facingQuarterTurns
+                : 0U)
+        : 0U,
+    .effect = RenderSurfaceEffect::MirrorEnergy,
+};
+applyTileScale(
+    ghost,
+    input.settings.tileScale(
+        entity.player
+            ? TileType::Player
+            : state.movables[entity.movableIndex].type));
+frame.tiles.push_back(ghost);
+}
+
 void appendMirrorPreview(
     RenderFrameData& frame,
     const RenderFrameBuilder::GameplayInput& input)
@@ -866,131 +1054,18 @@ void appendMirrorPreview(
                 if (previewOpacity <= 0.001f) {
                     continue;
                 }
-                for (std::size_t segmentIndex = 0;
-                     segmentIndex < entity.beamSegments.size();
-                     ++segmentIndex) {
-                    MirrorRenderSegment segment {
-                        .from = toRenderPoint(
-                            entity.beamSegments[segmentIndex].from),
-                        .to = toRenderPoint(
-                            entity.beamSegments[segmentIndex].to),
-                        .opacity = previewOpacity,
-                    };
-                    if (animatePreview) {
-                        segment.from = interpolate(
-                            segment.from,
-                            toRenderPoint(
-                                matchingEndEntity
-                                    ->beamSegments[segmentIndex].from),
-                            progress);
-                        segment.to = interpolate(
-                            segment.to,
-                            toRenderPoint(
-                                matchingEndEntity
-                                    ->beamSegments[segmentIndex].to),
-                            progress);
-                    }
-                    entitySegments.push_back(segment);
-                }
-                if (animatePreview && !entitySegments.empty()) {
-                    entitySegments.front().from = visual->renderPosition;
-                }
-                for (const MirrorRenderSegment& segment : entitySegments) {
-                    const auto existing = std::ranges::find_if(
-                        beamSegments,
-                        [&](const MirrorRenderSegment& candidate) {
-                            return sameUndirectedSegment(
-                                candidate, segment);
-                        });
-                    if (existing == beamSegments.end()) {
-                        beamSegments.push_back(segment);
-                    } else {
-                        existing->opacity = std::max(
-                            existing->opacity, segment.opacity);
-                    }
-                }
-
-                auto ghostRenderPosition =
-                    [](const rules::MirrorEntityPreview& preview) {
-                        Vec3 result = toRenderPoint(preview.destination);
-                        if (preview.fallen) {
-                            result.z -= preview.player
-                                ? config::drownedPlayerDepthBelowGround
-                                : config::waterDepthBelowGround;
-                        }
-                        return result;
-                    };
-                Vec3 ghostPosition = ghostRenderPosition(entity);
-                bool ghostFallen = entity.fallen;
-                GridPosition3 ghostCell = entity.destination;
-                if (animatePreview) {
-                    ghostPosition = interpolate(
-                        ghostPosition,
-                        ghostRenderPosition(*matchingEndEntity),
-                        progress);
-                    if (progress >= 0.5f) {
-                        ghostFallen = matchingEndEntity->fallen;
-                        ghostCell = matchingEndEntity->destination;
-                    }
-                }
-                RenderFrameData::Tile ghost {
-                    .cell = ghostCell,
-                    .position = {
-                        ghostPosition.x,
-                        ghostPosition.y,
-                    },
-                    .color = {
-                        config::mirrorGhostColor.x,
-                        config::mirrorGhostColor.y,
-                        config::mirrorGhostColor.z,
-                        config::mirrorGhostColor.w * previewOpacity,
-                    },
-                    .baseElevation = ghostPosition.z,
-                    .height = 1.0f,
-                    .showGrid = false,
-                    .affectsCameraFit = false,
-                    .model = entity.player
-                        ? input.manifest.playerModel()
-                        : input.manifest.modelForTile(
-                              state.movables[entity.movableIndex].type),
-                    .animation = entity.player
-                        ? (ghostFallen
-                                ? animationFor(
-                                      input.animations,
-                                      AnimationUse::MirrorPreviewPlayerDeadIdle,
-                                      input.manifest.playerDeadIdleAnimation())
-                                : animationFor(
-                                      input.animations,
-                                      AnimationUse::MirrorPreviewPlayerIdle,
-                                      input.manifest.playerIdleAnimation()))
-                        : noAnimation,
-                    .animationInstanceId = entity.player
-                        ? mirrorGhostAnimationInstance(
-                              entity.resultPlayerIndex)
-                        : uint64_t { 0 },
-                    .animationLoops = true,
-                    .animationTimeSeconds = previewPlayer
-                        ? animationTimeFor(
-                              input.animations,
-                              ghostFallen
-                                  ? AnimationUse::MirrorPreviewPlayerDeadIdle
-                                  : AnimationUse::MirrorPreviewPlayerIdle,
-                              previewPlayer->clipTimeSeconds)
-                        : 0.0f,
-                    .modelRotationQuarterTurns = entity.player
-                        ? (previewPlayer
-                                ? previewPlayer->facingQuarterTurns
-                                : 0U)
-                        : 0U,
-                    .effect = RenderSurfaceEffect::MirrorEnergy,
+                const MirrorEntityPreviewContext preview {
+                    entity,
+                    matchingEndEntity,
+                    previewPlayer,
+                    visual,
+                    progress,
+                    animatePreview,
+                    previewOpacity,
                 };
-                applyTileScale(
-                    ghost,
-                    input.settings.tileScale(
-                        entity.player
-                            ? TileType::Player
-                            : state.movables[entity.movableIndex].type));
-                frame.tiles.push_back(ghost);
+                appendMirrorEntitySegments(
+                    preview, entitySegments, beamSegments);
+                appendMirrorGhostTile(frame, input, state, preview);
             }
 
             for (const MirrorRenderSegment& segment : beamSegments) {

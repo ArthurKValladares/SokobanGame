@@ -448,6 +448,118 @@ VulkanRenderer::resolvePreparedFrame(const PreparedFrame& frame) const
     return *frame.scratch;
 }
 
+// Between the fence wait and image acquisition: retire what the completed
+// frame owned, publish whatever finished loading, and bring the descriptor
+// heap up to date if that changed it. Nothing here touches the swapchain.
+void VulkanRenderer::runAssetMaintenance(
+    const PreparedFrameScratch& prepared, const RenderFrameData& frameData)
+{
+    const auto assetMaintenanceStart = std::chrono::steady_clock::now();
+    completeFrame(currentFrame_);
+    gpuProfiler_.collectCompletedFrame(currentFrame_);
+    modelResources_.retireCompletedUploads();
+    const auto assetPublicationStart = std::chrono::steady_clock::now();
+    const VulkanModelResources::PublicationResult publication =
+        modelResources_.publishReadyAssets(1, pendingFrameMask());
+    const double assetPublicationMilliseconds =
+        elapsedMilliseconds(assetPublicationStart);
+    if (publication.publications != 0) {
+        assetPublicationEventTimeTelemetry_.record(
+            assetPublicationMilliseconds);
+        assetPublications_ += publication.publications;
+        ++assetPublicationFrames_;
+    }
+    if (publication.descriptorsChanged) {
+        descriptorSync_.resourcesChanged();
+    }
+    if (descriptorSync_.needsUpdate(currentFrame_)) {
+        activeResources_.sceneDescriptors->update(
+            currentFrame_,
+            descriptorResources(activeResources_));
+        descriptorSync_.markUpdated(currentFrame_);
+    }
+    modelResources_.beginAnimationFrame(currentFrame_);
+    modelResources_.updateAnimations(frameData, currentFrame_);
+    if (prepared.previewFrameData) {
+        modelResources_.updateAnimations(
+            *prepared.previewFrameData, currentFrame_);
+    }
+    assetMaintenanceTimeTelemetry_.record(
+        elapsedMilliseconds(assetMaintenanceStart));
+}
+
+// The submit and the present, with the two semaphores that order them, and
+// the telemetry that times the pair.
+//
+// The signal semaphore is per swapchain image rather than per frame slot,
+// which is the subtlety this keeps in one place: the present that consumes it
+// is bound to the image, and nothing here proves an earlier present on a
+// different image has stopped waiting.
+void VulkanRenderer::submitAndPresent(
+    const FrameResources& frame, uint32_t imageIndex)
+{
+    VkSemaphoreSubmitInfo waitSemaphore {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+        .semaphore = frame.imageAvailable,
+        // The shipping path first writes the acquired image during the
+        // upscale blit, while the developer workspace first uses it as a
+        // colour attachment. Gate both possible first accesses.
+        .stageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT |
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+    };
+
+    VkCommandBufferSubmitInfo commandBuffer {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+        .commandBuffer = frame.commandBuffer,
+    };
+
+    // Signalled per swapchain image, not per frame slot: the present that
+    // consumes it is bound to the image, and nothing here proves an earlier
+    // present on a different image has stopped waiting.
+    const VkSemaphore renderFinished =
+        activeResources_.presentSemaphores.forImage(imageIndex);
+
+    VkSemaphoreSubmitInfo signalSemaphore {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+        .semaphore = renderFinished,
+        .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
+    };
+
+    VkSubmitInfo2 submit {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+        .waitSemaphoreInfoCount = 1,
+        .pWaitSemaphoreInfos = &waitSemaphore,
+        .commandBufferInfoCount = 1,
+        .pCommandBufferInfos = &commandBuffer,
+        .signalSemaphoreInfoCount = 1,
+        .pSignalSemaphoreInfos = &signalSemaphore,
+    };
+
+    const auto submitPresentStart = std::chrono::steady_clock::now();
+    vkCheck(
+        vkQueueSubmit2(
+            deviceContext_.graphicsQueue(),
+            1,
+            &submit,
+            frame.inFlight),
+        "vkQueueSubmit2 failed");
+    frameResourceTracker_.markSubmitted(
+        currentFrame_, activeResourceGeneration_);
+    gpuProfiler_.markSubmitted(currentFrame_);
+
+    const VkResult presented = activeResources_.swapchain->present(
+        deviceContext_.presentQueue(),
+        renderFinished,
+        imageIndex);
+    if (presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR) {
+        swapchainRecreationRequested_ = true;
+    } else {
+        vkCheck(presented, "vkQueuePresentKHR failed");
+    }
+    submitPresentTimeTelemetry_.record(
+        elapsedMilliseconds(submitPresentStart));
+}
+
 void VulkanRenderer::drawFrame(
     const PreparedFrame& preparedFrame,
     const UiDrawData& uiDrawData,
@@ -495,38 +607,7 @@ void VulkanRenderer::drawFrame(
     frameFenceWaitTimeTelemetry_.record(
         elapsedMilliseconds(frameFenceWaitStart));
 
-    const auto assetMaintenanceStart = std::chrono::steady_clock::now();
-    completeFrame(currentFrame_);
-    gpuProfiler_.collectCompletedFrame(currentFrame_);
-    modelResources_.retireCompletedUploads();
-    const auto assetPublicationStart = std::chrono::steady_clock::now();
-    const VulkanModelResources::PublicationResult publication =
-        modelResources_.publishReadyAssets(1, pendingFrameMask());
-    const double assetPublicationMilliseconds =
-        elapsedMilliseconds(assetPublicationStart);
-    if (publication.publications != 0) {
-        assetPublicationEventTimeTelemetry_.record(
-            assetPublicationMilliseconds);
-        assetPublications_ += publication.publications;
-        ++assetPublicationFrames_;
-    }
-    if (publication.descriptorsChanged) {
-        descriptorSync_.resourcesChanged();
-    }
-    if (descriptorSync_.needsUpdate(currentFrame_)) {
-        activeResources_.sceneDescriptors->update(
-            currentFrame_,
-            descriptorResources(activeResources_));
-        descriptorSync_.markUpdated(currentFrame_);
-    }
-    modelResources_.beginAnimationFrame(currentFrame_);
-    modelResources_.updateAnimations(frameData, currentFrame_);
-    if (prepared.previewFrameData) {
-        modelResources_.updateAnimations(
-            *prepared.previewFrameData, currentFrame_);
-    }
-    assetMaintenanceTimeTelemetry_.record(
-        elapsedMilliseconds(assetMaintenanceStart));
+    runAssetMaintenance(prepared, frameData);
 
     uint32_t imageIndex = 0;
     const auto imageAcquisitionStart = std::chrono::steady_clock::now();
@@ -616,66 +697,7 @@ void VulkanRenderer::drawFrame(
         lastStats_.gpuFrameTiming = renderPhaseTiming(gpuTiming);
     }
 
-    VkSemaphoreSubmitInfo waitSemaphore {
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .semaphore = frame.imageAvailable,
-        // The shipping path first writes the acquired image during the
-        // upscale blit, while the developer workspace first uses it as a
-        // colour attachment. Gate both possible first accesses.
-        .stageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT |
-            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-    };
-
-    VkCommandBufferSubmitInfo commandBuffer {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-        .commandBuffer = frame.commandBuffer,
-    };
-
-    // Signalled per swapchain image, not per frame slot: the present that
-    // consumes it is bound to the image, and nothing here proves an earlier
-    // present on a different image has stopped waiting.
-    const VkSemaphore renderFinished =
-        activeResources_.presentSemaphores.forImage(imageIndex);
-
-    VkSemaphoreSubmitInfo signalSemaphore {
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .semaphore = renderFinished,
-        .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
-    };
-
-    VkSubmitInfo2 submit {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .waitSemaphoreInfoCount = 1,
-        .pWaitSemaphoreInfos = &waitSemaphore,
-        .commandBufferInfoCount = 1,
-        .pCommandBufferInfos = &commandBuffer,
-        .signalSemaphoreInfoCount = 1,
-        .pSignalSemaphoreInfos = &signalSemaphore,
-    };
-
-    const auto submitPresentStart = std::chrono::steady_clock::now();
-    vkCheck(
-        vkQueueSubmit2(
-            deviceContext_.graphicsQueue(),
-            1,
-            &submit,
-            frame.inFlight),
-        "vkQueueSubmit2 failed");
-    frameResourceTracker_.markSubmitted(
-        currentFrame_, activeResourceGeneration_);
-    gpuProfiler_.markSubmitted(currentFrame_);
-
-    const VkResult presented = activeResources_.swapchain->present(
-        deviceContext_.presentQueue(),
-        renderFinished,
-        imageIndex);
-    if (presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR) {
-        swapchainRecreationRequested_ = true;
-    } else {
-        vkCheck(presented, "vkQueuePresentKHR failed");
-    }
-    submitPresentTimeTelemetry_.record(
-        elapsedMilliseconds(submitPresentStart));
+    submitAndPresent(frame, imageIndex);
 
     cpuFrameTimeTelemetry_.record(std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - cpuFrameStart).count());

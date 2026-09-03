@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/render/RenderTypes.hpp"
+#include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
 
 #include <vulkan/vulkan.h>
@@ -46,6 +47,18 @@ public:
     void recreate(VkExtent2D extent);
     void destroy();
 
+    // The composite half of record(): the estimated occlusion drawn over the
+    // scene colour at full resolution.
+    void recordAmbientComposite(
+        VkCommandBuffer commandBuffer,
+        VkImageView targetView,
+        VkDescriptorSet descriptorSet,
+        VkPipelineLayout pipelineLayout,
+        Pipelines pipelines,
+        VulkanGpuProfiler& gpuProfiler,
+        uint32_t frameIndex,
+        RenderStats& stats,
+        const GpuDrawInstance& pushConstants) const;
     void record(
         VkCommandBuffer commandBuffer,
         VkImageView targetView,

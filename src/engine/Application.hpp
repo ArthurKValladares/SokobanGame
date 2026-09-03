@@ -167,6 +167,22 @@ private:
     // Advances to the arena the previous prepared frame does not reference,
     // clears it, and returns it. The only place a render-frame arena is reset.
     [[nodiscard]] FrameArena& beginRenderFrameArena();
+    // One UI frame; returns whether the developer workspace is visible, which
+    // the renderer needs too.
+    // dt reaches only the animation preview, so it is unused when the debug
+    // UI is compiled out.
+    [[nodiscard]] bool drawUiFrame(
+        const InputRouter::Frame& routedInput, [[maybe_unused]] float dt);
+    // The end of a smoke run, if this frame is the one that ends it.
+    void finishSmokeRunIfDue(std::uint64_t renderedFrames);
+#if SOKOBAN_ENABLE_DEBUG_UI
+    // The editor's frame, which shares nothing with the gameplay one but the
+    // manifest and the settings.
+    [[nodiscard]] RenderFrameData buildEditorRenderFrame(
+        const InputRouter::EditorInput& editorInput, float beltScrollOffset);
+#endif
+    // Evidence-only point-light fixtures, appended to a finished frame.
+    void appendEvidencePointLights(RenderFrameData& frame) const;
     [[nodiscard]] RenderFrameData buildRenderFrame(
         const InputRouter::EditorInput& editorInput);
 

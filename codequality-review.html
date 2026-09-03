@@ -1923,16 +1923,16 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
           <tr><td class="num">378</td><td><code>ui/OptionsMenu.cpp</code> · <code>draw</code></td><td>open — UI</td></tr>
           <tr><td class="num">319</td><td><code>AnimationCatalogDebugUi.cpp</code> · <code>draw</code></td><td>open — UI</td></tr>
           <tr><td class="num">305</td><td><code>VulkanSceneRecorder.cpp</code> · <code>record</code></td><td>open — unlisted before</td></tr>
-          <tr><td class="num">302</td><td><code>Application.cpp</code> · <code>buildRenderFrame</code></td><td>open — unlisted before</td></tr>
-          <tr><td class="num">276</td><td><code>RenderFrameBuilder.cpp</code> · <code>appendMirrorPreview</code></td><td>open</td></tr>
+          <tr><td class="num">304&nbsp;&rarr;&nbsp;146</td><td><code>Application.cpp</code> · <code>buildRenderFrame</code></td><td><b>done</b></td></tr>
+          <tr><td class="num">279&nbsp;&rarr;&nbsp;166</td><td><code>RenderFrameBuilder.cpp</code> · <code>appendMirrorPreview</code></td><td><b>done</b></td></tr>
           <tr><td class="num">269</td><td><code>LevelEditorDebugUi.cpp</code> · <code>drawOverworldTab</code></td><td>open — UI, unlisted before</td></tr>
-          <tr><td class="num">260</td><td><code>Application.cpp</code> · <code>run</code></td><td>open</td></tr>
-          <tr><td class="num">269&nbsp;→&nbsp;250</td><td><code>VulkanRenderer.cpp</code> · <code>drawFrame</code></td><td><b>done in part</b></td></tr>
+          <tr><td class="num">281&nbsp;&rarr;&nbsp;115</td><td><code>Application.cpp</code> · <code>run</code></td><td><b>done</b></td></tr>
+          <tr><td class="num">269&nbsp;→&nbsp;164</td><td><code>VulkanRenderer.cpp</code> · <code>drawFrame</code></td><td><b>done</b></td></tr>
           <tr><td class="num">231&nbsp;→&nbsp;156</td><td><code>VulkanSceneDescriptors.cpp</code> · <code>create</code></td><td><b>done</b></td></tr>
           <tr><td class="num">226&nbsp;&rarr;&nbsp;128</td><td><code>OverworldMap.cpp</code> · <code>load</code></td><td><b>done</b></td></tr>
           <tr><td class="num">221&nbsp;&rarr;&nbsp;27</td><td><code>ui/OptionsMenu.cpp</code> · <code>optionsMenuRows</code></td><td><b>done</b></td></tr>
           <tr><td class="num">208</td><td><code>ContentPipeline.cpp</code> · <code>addLevels</code></td><td>open — unlisted before</td></tr>
-          <tr><td class="num">204</td><td><code>VulkanPipelineFactory.cpp</code> · <code>createScenePipeline</code></td><td>open — unlisted before</td></tr>
+          <tr><td class="num">213&nbsp;&rarr;&nbsp;139</td><td><code>VulkanPipelineFactory.cpp</code> · <code>createScenePipeline</code></td><td><b>done</b></td></tr>
           <tr><td class="num">200</td><td><code>LevelEditorDebugUi.cpp</code> · <code>drawDecorationPalette</code></td><td>open — UI, unlisted before</td></tr>
         </tbody>
       </table>
@@ -1992,17 +1992,18 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       difference is deliberate.
     </p>
       <p>
-      <strong>Twelve, not seventeen — and the count itself had drifted.</strong>
+      <strong>Five, not seventeen — and every one of the five is a UI panel.</strong>
       Re-measured against the tree as it now stands: two functions fell below
       200 lines during other work, one the report named
-      (<code>drawIsoFrame</code>, 487) no longer exists in that shape, and four
-      more have since been taken apart — <code>ApplicationDebugUi::draw</code>
-      (854), <code>IsoScenePreparer::prepare</code> (513),
-      <code>OverworldMap::load</code> (226) and <code>optionsMenuRows</code>
-      (221). Twenty-nine functions are past 150. The largest remaining is
-      <code>OptionsMenu::draw</code> at 385, one of the five UI panels held back
-      deliberately; the largest that is not a panel is
-      <code>Application::buildRenderFrame</code> at 304.
+      (<code>drawIsoFrame</code>, 487) no longer exists in that shape, and
+      eleven have been taken apart. Twenty-five functions are past 150. What is
+      left past 200 is <em>exactly</em> the five ImGui panels —
+      <code>OptionsMenu::draw</code> (385),
+      <code>AnimationCatalogDebugUi::draw</code> (324),
+      <code>drawRenderingStatsSection</code> (293),
+      <code>drawOverworldTab</code> (272) and
+      <code>drawDecorationPalette</code> (203) — which is where this finding was
+      always going to stop without someone at the keyboard.
     </p>
     <p>
       <strong><code>ApplicationDebugUi::draw</code>: 854 lines to 185.</strong>
@@ -2036,6 +2037,86 @@ resident(1000) - retiring(200) - scheduled(200) + need(250) =  850 <span class="
       <code>drawRenderingStatsSection</code> is still 293 lines. It is one
       named thing now rather than the tail of an 854-line function, which is
       where the next cut starts.
+    </p>
+    <p>
+      <strong>The six remaining non-panel functions are done.</strong> All by
+      the same method: find the seams already in the function, move the bodies
+      verbatim, let the compiler prove the scoping.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Function</th><th>Was</th><th>Now</th><th>What came out</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>Application::buildRenderFrame</code></td><td class="num">304</td><td class="num">146</td><td>the editor frame (95), the evidence point-light fixtures (67)</td></tr>
+          <tr><td><code>Application::run</code></td><td class="num">281</td><td class="num">115</td><td>one UI frame (123), the smoke-run finish (45)</td></tr>
+          <tr><td><code>appendMirrorPreview</code></td><td class="num">279</td><td class="num">166</td><td>per-entity beam segments (44), the ghost tile (81)</td></tr>
+          <tr><td><code>VulkanRenderer::drawFrame</code></td><td class="num">254</td><td class="num">164</td><td>asset maintenance (32), submit and present (60)</td></tr>
+          <tr><td><code>VulkanSsaoPass::record</code></td><td class="num">206</td><td class="num">156</td><td>the composite draw (60)</td></tr>
+          <tr><td><code>appendGameplayWorld</code></td><td class="num">200</td><td class="num">94</td><td>water surfaces and shoreline masks (107)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      Every moved block is verbatim — each found by search exactly once in its
+      new home, at the indentation the move implies and no other change. Two
+      needed a value carried back out rather than recomputed:
+      <code>drawUiFrame</code> returns <code>developerWorkspaceVisible</code>,
+      which the renderer needs a few lines later. One needed a context bundle:
+      the mirror preview's two steps both want most of the seven per-entity
+      values the loop computes, so they take a
+      <code>MirrorEntityPreviewContext</code> and bind the names back out of it,
+      which is what keeps their bodies unchanged.
+    </p>
+    <p>
+      <strong>The evidence here is thinner, and that is worth saying rather than
+      glossing.</strong> None of these six has a unit-test suite behind it. What
+      stands behind them is byte-identity of the moved text, a warning-free
+      compile of all 16 dependent translation units in both
+      <code>SOKOBAN_ENABLE_DEBUG_UI</code> settings, and the core suites that
+      exercise the surrounding code — <code>EditorInteractionTests</code>
+      (3486), <code>IsoScenePreparerTests</code> (1764),
+      <code>PresentationTests</code> (421), <code>LevelEditorTests</code> (381)
+      and five more, all passing. What needs eyes is the running game: the
+      editor frame, the mirror preview's ghosts and beams, water and shorelines,
+      SSAO, and the frame loop itself.
+    </p>
+    <p>
+      <strong><code>createScenePipeline</code>: 213 lines to 139 — and it took a
+      duplicate with it.</strong> Its 76-line vertex-input block and
+      <code>createShadowPipeline</code>'s 31-line one each hand-rolled bindings
+      and attribute tables, and the two agreed on the location numbering only by
+      inspection: position 0, joints 5, weights 6 and attachment node 7 are
+      spelled out in both. That is precisely the trap the comment in the scene
+      table warns about, one function further down the same file — a location
+      that moves depending on the pipeline. There is one table now, and one
+      <code>vertexInputFor(layout)</code> that both creators call.
+    </p>
+    <p>
+      Between them the two functions described every layout twice and
+      half-described it once: the scene block answered “no bindings, no
+      attributes” for the two position layouts, and the shadow block answered
+      the same for the two full ones. Reading the call sites settles that this
+      never mattered — the scene pipeline is built 13 times with
+      <code>None</code>, <code>Mesh</code> and <code>SkinnedMesh</code> only,
+      the shadow pipeline 3 times with <code>None</code>,
+      <code>MeshPosition</code> and <code>SkinnedMeshPosition</code> only, so
+      between them the 16 calls cover each layout exactly once and never cross.
+    </p>
+    <p>
+      <strong>Evidence.</strong> A differential over all five layouts,
+      deep-comparing the counts and then the bytes of every binding and
+      attribute the create-info points at: <strong>zero differences on all six
+      reachable (creator, layout) pairs</strong>. The four unreachable
+      combinations <em>do</em> change — a shadow pipeline asked for
+      <code>Mesh</code> now gets 1 binding and 6 attributes where it used to get
+      nothing — and the harness prints those rather than asserting them, because
+      describing the layout is the right answer and nothing asks for it. Three
+      mutations were caught: giving the skinned binding the mesh stride, moving
+      the tangent from location 8 to 5, and binding the skinned binding for
+      <code>MeshPosition</code>. The file grew 40 lines doing this; as with the
+      texture upload, the duplication went and the line count did not.
     </p>
     <p>
       <strong>Two more, chosen for their test suites rather than their
@@ -3890,7 +3971,8 @@ tuned, with ColumnLimit: 0 (never re-wrap)  10,573   (210 of 367 files)</code>
       itself is left for someone who can run the renderer.
       <span class="code">C2</span> is partly done and partly declined on
       purpose: the count was wrong — 17 functions past 200 lines, not eight, and
-      12 today — and the ones whose correctness could be demonstrated were taken,
+      5 today, all of them UI panels — and every one whose correctness could be
+      demonstrated was taken,
       including the two largest, <code>ApplicationDebugUi::draw</code>
       (854&nbsp;&rarr;&nbsp;185) and <code>IsoScenePreparer::prepare</code>
       (513&nbsp;&rarr;&nbsp;135), plus <code>OverworldMap::load</code> and
@@ -3901,7 +3983,7 @@ tuned, with ColumnLimit: 0 (never re-wrap)  10,573   (210 of 367 files)</code>
       divergence is unified with the split deliberately kept, so the tap count is
       now one token per shader rather than two functions that look alike. Nothing
       is parked any more; what remains open is the residency ladder that blocks
-      the rest of the class split, the long functions, and the draw-kind tag,
+      the rest of the class split, the five ImGui panels, and the draw-kind tag,
       each of which needs a device or a pair of eyes rather than a decision.
     </li>
   </ol>

@@ -30,6 +30,104 @@ std::vector<char> readFile(const std::filesystem::path& path)
     return data;
 }
 
+// Every vertex layout the factory binds, in one table.
+//
+// The scene and the shadow pipelines each hand-rolled their own bindings and
+// attribute lists, and the two agreed on the location numbering only by
+// inspection: position 0, joints 5, weights 6 and attachment node 7 appear in
+// both, spelled out twice. That is exactly the trap the comment below warns
+// about, one function further along. A location exists once now.
+//
+// File scope rather than locals of the helper because a
+// VkPipelineVertexInputStateCreateInfo holds pointers into these, and it
+// outlives the call that builds it.
+constexpr VkVertexInputBindingDescription meshBinding {
+    .binding = 0,
+    .stride = sizeof(MeshVertex),
+    .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+};
+
+constexpr VkVertexInputBindingDescription skinnedBinding {
+    .binding = 0,
+    .stride = sizeof(GpuSkinnedVertex),
+    .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+};
+
+// Locations 8 and 9 rather than 5 and 6 so that a static mesh and a
+// skinned one name the same thing the same way: 5 to 7 are the skinning
+// attributes, and a tangent that moved depending on the pipeline would be
+// a trap in two vertex shaders instead of a number in one table.
+constexpr std::array<VkVertexInputAttributeDescription, 6> meshAttributes {
+    VkVertexInputAttributeDescription {
+        .location = 0,
+        .binding = 0,
+        .format = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset = offsetof(MeshVertex, position),
+    },
+    VkVertexInputAttributeDescription {
+        .location = 1,
+        .binding = 0,
+        .format = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset = offsetof(MeshVertex, normal),
+    },
+    VkVertexInputAttributeDescription {
+        .location = 2,
+        .binding = 0,
+        .format = VK_FORMAT_R32G32_SFLOAT,
+        .offset = offsetof(MeshVertex, uv),
+    },
+    // Locations 3 and 4 are retired: they carried a texture index and a
+    // material flag word per vertex until F3b put both in the material
+    // buffer. The rest keep their numbers because the shadow variants of
+    // these shaders read the same layout and only some of its slots.
+    VkVertexInputAttributeDescription {
+        .location = 8,
+        .binding = 0,
+        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .offset = offsetof(MeshVertex, tangent),
+    },
+    VkVertexInputAttributeDescription {
+        .location = 9,
+        .binding = 0,
+        .format = VK_FORMAT_R32G32_SFLOAT,
+        .offset = offsetof(MeshVertex, uv1),
+    },
+    VkVertexInputAttributeDescription {
+        .location = 10,
+        .binding = 0,
+        .format = VK_FORMAT_R32_UINT,
+        .offset = offsetof(MeshVertex, materialIndex),
+    },
+};
+
+constexpr std::array<VkVertexInputAttributeDescription, 9> skinnedAttributes {
+    VkVertexInputAttributeDescription { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuSkinnedVertex, position) },
+    VkVertexInputAttributeDescription { 1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuSkinnedVertex, normal) },
+    VkVertexInputAttributeDescription { 2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(GpuSkinnedVertex, uv) },
+    VkVertexInputAttributeDescription { 5, 0, VK_FORMAT_R16G16B16A16_UINT, offsetof(GpuSkinnedVertex, joints) },
+    VkVertexInputAttributeDescription { 6, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(GpuSkinnedVertex, weights) },
+    VkVertexInputAttributeDescription { 7, 0, VK_FORMAT_R32_UINT, offsetof(GpuSkinnedVertex, attachmentNodeIndex) },
+    VkVertexInputAttributeDescription { 8, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(GpuSkinnedVertex, tangent) },
+    VkVertexInputAttributeDescription { 9, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(GpuSkinnedVertex, uv1) },
+    VkVertexInputAttributeDescription { 10, 0, VK_FORMAT_R32_UINT, offsetof(GpuSkinnedVertex, materialIndex) },
+};
+
+// The shadow pipelines bind position only - and, for a skinned mesh, the three
+// attributes the skinning needs to compute it.
+constexpr VkVertexInputAttributeDescription meshPositionAttribute {
+    .location = 0,
+    .binding = 0,
+    .format = VK_FORMAT_R32G32B32_SFLOAT,
+    .offset = offsetof(MeshVertex, position),
+};
+
+constexpr std::array<VkVertexInputAttributeDescription, 4> skinnedPositionAttributes {
+    VkVertexInputAttributeDescription { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuSkinnedVertex, position) },
+    VkVertexInputAttributeDescription { 5, 0, VK_FORMAT_R16G16B16A16_UINT, offsetof(GpuSkinnedVertex, joints) },
+    VkVertexInputAttributeDescription { 6, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(GpuSkinnedVertex, weights) },
+    VkVertexInputAttributeDescription { 7, 0, VK_FORMAT_R32_UINT, offsetof(GpuSkinnedVertex, attachmentNodeIndex) },
+};
+
 } // namespace
 
 VulkanPipelineFactory::~VulkanPipelineFactory()
@@ -284,6 +382,51 @@ VkShaderModule VulkanPipelineFactory::createShaderModule(
     return result;
 }
 
+// The vertex-input state for one layout.
+//
+// A private static member rather than a file-local function because
+// VertexLayout is private, and static because it reads nothing but the tables
+// above. Both pipeline creators call it, which is the point: the scene one
+// used to answer "nothing" for the two position layouts and the shadow one
+// "nothing" for the two full ones, so between them every layout was described
+// twice and half-described once.
+VkPipelineVertexInputStateCreateInfo VulkanPipelineFactory::vertexInputFor(
+    VertexLayout layout)
+{
+    VkPipelineVertexInputStateCreateInfo info {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    };
+    switch (layout) {
+    case VertexLayout::None:
+        return info;
+    case VertexLayout::Mesh:
+        info.pVertexBindingDescriptions = &meshBinding;
+        info.pVertexAttributeDescriptions = meshAttributes.data();
+        info.vertexAttributeDescriptionCount =
+            static_cast<uint32_t>(meshAttributes.size());
+        break;
+    case VertexLayout::MeshPosition:
+        info.pVertexBindingDescriptions = &meshBinding;
+        info.pVertexAttributeDescriptions = &meshPositionAttribute;
+        info.vertexAttributeDescriptionCount = 1;
+        break;
+    case VertexLayout::SkinnedMesh:
+        info.pVertexBindingDescriptions = &skinnedBinding;
+        info.pVertexAttributeDescriptions = skinnedAttributes.data();
+        info.vertexAttributeDescriptionCount =
+            static_cast<uint32_t>(skinnedAttributes.size());
+        break;
+    case VertexLayout::SkinnedMeshPosition:
+        info.pVertexBindingDescriptions = &skinnedBinding;
+        info.pVertexAttributeDescriptions = skinnedPositionAttributes.data();
+        info.vertexAttributeDescriptionCount =
+            static_cast<uint32_t>(skinnedPositionAttributes.size());
+        break;
+    }
+    info.vertexBindingDescriptionCount = 1;
+    return info;
+}
+
 VkPipeline VulkanPipelineFactory::createScenePipeline(
     VkShaderModule vertexShader,
     VkShaderModule fragmentShader,
@@ -327,82 +470,8 @@ VkPipeline VulkanPipelineFactory::createScenePipeline(
     };
     stages[1].pSpecializationInfo = &specialization;
 
-    const VkVertexInputBindingDescription meshBinding {
-        .binding = 0,
-        .stride = sizeof(MeshVertex),
-        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-    };
-    const VkVertexInputBindingDescription skinnedBinding {
-        .binding = 0,
-        .stride = sizeof(GpuSkinnedVertex),
-        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-    };
-    // Locations 8 and 9 rather than 5 and 6 so that a static mesh and a
-    // skinned one name the same thing the same way: 5 to 7 are the skinning
-    // attributes, and a tangent that moved depending on the pipeline would be
-    // a trap in two vertex shaders instead of a number in one table.
-    const std::array<VkVertexInputAttributeDescription, 6> attributes {
-        VkVertexInputAttributeDescription {
-            .location = 0,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32B32_SFLOAT,
-            .offset = offsetof(MeshVertex, position),
-        },
-        VkVertexInputAttributeDescription {
-            .location = 1,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32B32_SFLOAT,
-            .offset = offsetof(MeshVertex, normal),
-        },
-        VkVertexInputAttributeDescription {
-            .location = 2,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32_SFLOAT,
-            .offset = offsetof(MeshVertex, uv),
-        },
-        // Locations 3 and 4 are retired: they carried a texture index and a
-        // material flag word per vertex until F3b put both in the material
-        // buffer. The rest keep their numbers because the shadow variants of
-        // these shaders read the same layout and only some of its slots.
-        VkVertexInputAttributeDescription {
-            .location = 8,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-            .offset = offsetof(MeshVertex, tangent),
-        },
-        VkVertexInputAttributeDescription {
-            .location = 9,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32_SFLOAT,
-            .offset = offsetof(MeshVertex, uv1),
-        },
-        VkVertexInputAttributeDescription {
-            .location = 10,
-            .binding = 0,
-            .format = VK_FORMAT_R32_UINT,
-            .offset = offsetof(MeshVertex, materialIndex),
-        },
-    };
-    const std::array<VkVertexInputAttributeDescription, 9> skinnedAttributes {
-        VkVertexInputAttributeDescription { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuSkinnedVertex, position) },
-        VkVertexInputAttributeDescription { 1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuSkinnedVertex, normal) },
-        VkVertexInputAttributeDescription { 2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(GpuSkinnedVertex, uv) },
-        VkVertexInputAttributeDescription { 5, 0, VK_FORMAT_R16G16B16A16_UINT, offsetof(GpuSkinnedVertex, joints) },
-        VkVertexInputAttributeDescription { 6, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(GpuSkinnedVertex, weights) },
-        VkVertexInputAttributeDescription { 7, 0, VK_FORMAT_R32_UINT, offsetof(GpuSkinnedVertex, attachmentNodeIndex) },
-        VkVertexInputAttributeDescription { 8, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(GpuSkinnedVertex, tangent) },
-        VkVertexInputAttributeDescription { 9, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(GpuSkinnedVertex, uv1) },
-        VkVertexInputAttributeDescription { 10, 0, VK_FORMAT_R32_UINT, offsetof(GpuSkinnedVertex, materialIndex) },
-    };
-    const bool meshLayout = vertexLayout == VertexLayout::Mesh;
-    const bool skinnedLayout = vertexLayout == VertexLayout::SkinnedMesh;
-    VkPipelineVertexInputStateCreateInfo vertexInput {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount = (meshLayout || skinnedLayout) ? 1U : 0U,
-        .pVertexBindingDescriptions = meshLayout ? &meshBinding : skinnedLayout ? &skinnedBinding : nullptr,
-        .vertexAttributeDescriptionCount = meshLayout ? static_cast<uint32_t>(attributes.size()) : skinnedLayout ? static_cast<uint32_t>(skinnedAttributes.size()) : 0U,
-        .pVertexAttributeDescriptions = meshLayout ? attributes.data() : skinnedLayout ? skinnedAttributes.data() : nullptr,
-    };
+    const VkPipelineVertexInputStateCreateInfo vertexInput =
+        vertexInputFor(vertexLayout);
     VkPipelineInputAssemblyStateCreateInfo inputAssembly {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
@@ -508,37 +577,8 @@ VkPipeline VulkanPipelineFactory::createShadowPipeline(
         .module = vertexShader,
         .pName = "main",
     };
-    const VkVertexInputBindingDescription binding {
-        .binding = 0,
-        .stride = sizeof(MeshVertex),
-        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-    };
-    const VkVertexInputBindingDescription skinnedBinding {
-        .binding = 0,
-        .stride = sizeof(GpuSkinnedVertex),
-        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-    };
-    const VkVertexInputAttributeDescription attribute {
-        .location = 0,
-        .binding = 0,
-        .format = VK_FORMAT_R32G32B32_SFLOAT,
-        .offset = offsetof(MeshVertex, position),
-    };
-    const std::array<VkVertexInputAttributeDescription, 4> skinnedAttributes {
-        VkVertexInputAttributeDescription { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(GpuSkinnedVertex, position) },
-        VkVertexInputAttributeDescription { 5, 0, VK_FORMAT_R16G16B16A16_UINT, offsetof(GpuSkinnedVertex, joints) },
-        VkVertexInputAttributeDescription { 6, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(GpuSkinnedVertex, weights) },
-        VkVertexInputAttributeDescription { 7, 0, VK_FORMAT_R32_UINT, offsetof(GpuSkinnedVertex, attachmentNodeIndex) },
-    };
-    const bool meshPositionLayout = vertexLayout == VertexLayout::MeshPosition;
-    const bool skinnedPositionLayout = vertexLayout == VertexLayout::SkinnedMeshPosition;
-    VkPipelineVertexInputStateCreateInfo vertexInput {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-        .vertexBindingDescriptionCount = (meshPositionLayout || skinnedPositionLayout) ? 1U : 0U,
-        .pVertexBindingDescriptions = meshPositionLayout ? &binding : skinnedPositionLayout ? &skinnedBinding : nullptr,
-        .vertexAttributeDescriptionCount = meshPositionLayout ? 1U : skinnedPositionLayout ? static_cast<uint32_t>(skinnedAttributes.size()) : 0U,
-        .pVertexAttributeDescriptions = meshPositionLayout ? &attribute : skinnedPositionLayout ? skinnedAttributes.data() : nullptr,
-    };
+    const VkPipelineVertexInputStateCreateInfo vertexInput =
+        vertexInputFor(vertexLayout);
     VkPipelineInputAssemblyStateCreateInfo inputAssembly {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,

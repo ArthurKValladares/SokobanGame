@@ -331,12 +331,13 @@ given numbers instead of opinions.
 
 Still open, in the order the report recommends: collapsing
 `VulkanModelResources`'s three copies of the load-state machine, then the
-remaining long functions. **12** are at or past 200 lines and 29 past 150, not
+remaining long functions. **5** are at or past 200 lines and 25 past 150, not
 the eight the review first reported - `drawIsoFrame` (487),
 `VulkanSceneRecorder::record` (305) and `Application::buildRenderFrame` (304)
-are among those it never named. Five of the twelve are ImGui panels and are
-deliberately last: splitting one is mechanical, but the only check that it still
-behaves is to look at the screen.
+are among those it never named. **All five that remain are ImGui panels**, which
+is where this finding was always going to stop without someone at the keyboard:
+splitting one is mechanical, but the only check that it still behaves is to look
+at the screen.
 
 `ApplicationDebugUi::draw` is done: 854 lines to 185, its seven debug panels
 now file-local functions (`drawWaterSection`, `drawLightingSection` and the
@@ -346,6 +347,75 @@ open/closed state and ImGui's draw order are unchanged. Every body moved
 verbatim; the one deleted line was `draw`'s now-unused `settings` local, which
 the warnings gate found. `drawRenderingStatsSection` is still 293 lines and is
 where the next cut starts.
+
+The six remaining non-panel long functions are done, all by the same method:
+find the seams already in the function, move the bodies verbatim, and let the
+compiler prove the scoping.
+
+| Function | Was | Now | What came out |
+| --- | --- | --- | --- |
+| `Application::buildRenderFrame` | 304 | 146 | the editor frame (95), the evidence point-light fixtures (67) |
+| `Application::run` | 281 | 115 | one UI frame (123), the smoke-run finish (45) |
+| `appendMirrorPreview` | 279 | 166 | per-entity beam segments (44), the ghost tile (81) |
+| `VulkanRenderer::drawFrame` | 254 | 164 | asset maintenance (32), submit and present (60) |
+| `VulkanSsaoPass::record` | 206 | 156 | the composite draw (60) |
+| `appendGameplayWorld` | 200 | 94 | water surfaces and shoreline masks (107) |
+
+Every moved block is verbatim - each found by search exactly once in its new
+home, at the indentation the move implies and no other change. Two functions
+needed a value carried back out rather than recomputed: `drawUiFrame` returns
+`developerWorkspaceVisible`, which the renderer needs a few lines later, and
+`validateSlotSpanAndNormalize` (earlier) returns its `SlotExtent`. One needed a
+context bundle: the mirror preview's two steps both want most of the seven
+per-entity values the loop computes, so they take a
+`MirrorEntityPreviewContext` and bind the names back out of it, which is what
+keeps their bodies unchanged.
+
+`Application::drawUiFrame` takes `[[maybe_unused]] float dt` because `dt`
+reaches only the animation preview, which is compiled out with the debug UI -
+found by the warnings gate, which is the second time this session it has caught
+a parameter that only exists in one configuration.
+
+Evidence is thinner here than elsewhere and worth naming as such: none of these
+six has a unit-test suite behind it, so what stands behind them is byte-identity
+of the moved text, a warning-free compile of all 16 dependent translation units
+in both `SOKOBAN_ENABLE_DEBUG_UI` settings, and the core suites that exercise
+the surrounding code - `EditorInteractionTests` (3486), `IsoScenePreparerTests`
+(1764), `PresentationTests` (421), `LevelEditorTests` (381), `LevelTests` (102),
+`OverworldMapTests` (89), `SceneDrawLanesTests` (63), `GameplayLoopTests` (58)
+and `OpaqueDrawSorterTests`, all passing. **What needs eyes is the running
+game**: the editor frame, the mirror preview's ghost tiles and beams, water and
+shorelines, SSAO, and the frame loop itself.
+
+`createScenePipeline` is **213 lines to 139**, and it took a duplicate with it.
+Its 76-line vertex-input block and `createShadowPipeline`'s 31-line one each
+hand-rolled bindings and attribute tables, and the two agreed on the location
+numbering only by inspection: position 0, joints 5, weights 6 and attachment
+node 7 are spelled out in both. That is precisely the trap the comment in the
+scene table warns about, one function further down the file. There is one table
+now, and one `vertexInputFor(layout)` that both creators call.
+
+Between them the two functions described every layout twice and half-described
+it once: the scene block answered "no bindings, no attributes" for the two
+position layouts, and the shadow block answered the same for the two full ones.
+Reading the call sites settles that this never mattered - the scene pipeline is
+built 13 times with None, Mesh and SkinnedMesh only, the shadow pipeline 3 times
+with None, MeshPosition and SkinnedMeshPosition only, so between them the 16
+calls cover each layout exactly once and never cross.
+
+Verified by differential over all five layouts, deep-comparing counts and then
+the bytes of every binding and attribute the create-info points at: **zero
+differences on all six reachable (creator, layout) pairs**. The four unreachable
+combinations do change - a shadow pipeline asked for `Mesh` now gets 1 binding
+and 6 attributes where it used to get nothing - and the harness prints those
+rather than asserting them, because describing the layout is the right answer
+and nothing calls for it. Three mutations were caught: giving the skinned
+binding the mesh stride, moving the tangent from location 8 to 5, and binding
+the skinned binding for `MeshPosition`.
+
+The file grew by 40 lines doing this - the shared tables carry their comments
+and the switch is longer than the two ternary chains it replaces. Same as the
+texture-upload de-duplication: the duplication went, not the line count.
 
 Two more long functions are down, both chosen because a real test suite covers
 them rather than because they were the largest.

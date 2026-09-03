@@ -94,6 +94,11 @@ private:
         SkinnedMeshPosition,
     };
 
+    // The bindings and attributes one layout needs. Shared by the scene and
+    // shadow pipeline creators, which each described half the layouts.
+    [[nodiscard]] static VkPipelineVertexInputStateCreateInfo vertexInputFor(
+        VertexLayout layout);
+
     [[nodiscard]] VkShaderModule createShaderModule(const std::filesystem::path& path) const;
 
     // What a pipeline draws into, which decides three things together because

@@ -249,6 +249,13 @@ private:
         VkSemaphore imageAvailable = VK_NULL_HANDLE;
         VkFence inFlight = VK_NULL_HANDLE;
     };
+
+    // Retire, publish and re-sync the descriptor heap. Between the fence wait
+    // and image acquisition; touches no swapchain state.
+    void runAssetMaintenance(
+        const PreparedFrameScratch& prepared, const RenderFrameData& frameData);
+    // The submit and the present, with the semaphores that order them.
+    void submitAndPresent(const FrameResources& frame, uint32_t imageIndex);
     // renderFinished deliberately does not live here: it is indexed by
     // swapchain image, not by frame slot. See SwapchainPresentSemaphores.
 
