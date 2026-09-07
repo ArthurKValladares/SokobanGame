@@ -1,0 +1,17 @@
+legacy fixture decodes to level=2
+migration write failure: disposition=5 level=0 message=Corrupt player saves were archived; defaults were restored.
+  "profile.json"
+  "profile.json.corrupt-1788410079307-0"
+backup promotion write failure: disposition=5 level=0 message=Corrupt player saves were archived; defaults were restored.
+  "profile.backup.json.corrupt-1788410079323-1"
+  "profile.json"
+deleted slot: success=1 restored level=3 empty=0
+switch after outgoing save failure: switched=1 active=1 disk level=1 status=
+key released during capture: forwarded=0 key still down=1 gameplay up held=1
+normalized mesh normal dot surface edge (expected 0)=-0.447214
+source GLB loads: vertices=3
+external-buffer GLB registration success=1 staged dependency=0
+  load error=Failed to open glTF buffer: C:\Users\arthu\Documents\Projects\Sokoban Game\build\review\preserved-probe-data\import-runtime\external.glb (file not found)
+puzzle save with blocked mirror: returned=0 source already changed=1 message=Saved source, but failed to update runtime mirror: C:\Users\arthu\Documents\Projects\Sokoban Game\build\review\preserved-probe-data\level-runtime\level0\screen0.scr
+after 1000 move/undo pairs: undo entries=0 retained diagnostic full actions=2000
+indexed package editor save: returned=1 restart rejected=runtime content file size does not match index: levels\level0\screen0.scr

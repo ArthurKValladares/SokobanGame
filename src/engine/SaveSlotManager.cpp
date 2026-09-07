@@ -104,12 +104,24 @@ SaveSlotManager::SaveSlotManager(
 PlayerProfile SaveSlotManager::loadActiveProfile()
 {
     const SaveStore::LoadResult slot = store_->load(progressChannel_);
+    if (slot.disposition == SaveStore::LoadDisposition::UnsupportedFormat) {
+        throw std::runtime_error(
+            "active save slot uses an unsupported profile format: " +
+            slot.message);
+    }
     PlayerProfile profile = slot.profile;
     const SaveStore::LoadResult settings = store_->load(kSettingsChannel);
+    if (settings.disposition == SaveStore::LoadDisposition::UnsupportedFormat) {
+        throw std::runtime_error(
+            "shared settings use an unsupported profile format: " +
+            settings.message);
+    }
     if (settings.disposition == SaveStore::LoadDisposition::CreatedDefault) {
         // Migrate a pre-split combined save's settings into the shared file;
         // a genuinely fresh install writes nothing anywhere.
-        if (slot.disposition != SaveStore::LoadDisposition::CreatedDefault) {
+        if (slot.disposition != SaveStore::LoadDisposition::CreatedDefault &&
+            slot.disposition != SaveStore::LoadDisposition::StorageUnavailable &&
+            slot.disposition != SaveStore::LoadDisposition::UnsupportedFormat) {
             store_->requestSave(
                 kSettingsChannel, profile.settingsOnly(),
                 AsyncSaveStore::Urgency::Immediate);
@@ -184,8 +196,11 @@ SaveSlotManager::SlotSummary SaveSlotManager::inspectSlotSummary(
     SlotSummary summary;
     if (inspection.disposition == SaveStore::InspectionDisposition::Corrupt) {
         summary.state = SaveSlotState::Corrupt;
-    } else if (inspection.disposition ==
-        SaveStore::InspectionDisposition::StorageUnavailable) {
+    } else if (
+        inspection.disposition ==
+            SaveStore::InspectionDisposition::StorageUnavailable ||
+        inspection.disposition ==
+            SaveStore::InspectionDisposition::UnsupportedFormat) {
         summary.state = SaveSlotState::Unavailable;
     }
     return summary;
@@ -210,8 +225,11 @@ SaveSlotManager::SlotSummary SaveSlotManager::inspectSlotSummary(
     SlotSummary summary;
     if (inspection.disposition == SaveStore::InspectionDisposition::Corrupt) {
         summary.state = SaveSlotState::Corrupt;
-    } else if (inspection.disposition ==
-        SaveStore::InspectionDisposition::StorageUnavailable) {
+    } else if (
+        inspection.disposition ==
+            SaveStore::InspectionDisposition::StorageUnavailable ||
+        inspection.disposition ==
+            SaveStore::InspectionDisposition::UnsupportedFormat) {
         summary.state = SaveSlotState::Unavailable;
     }
     return summary;
@@ -299,16 +317,27 @@ std::optional<PlayerProfile> SaveSlotManager::switchTo(
             "save slot " + std::to_string(slot + 1) + " is corrupt");
     }
     if (inspection.disposition ==
-        SaveStore::InspectionDisposition::StorageUnavailable) {
+            SaveStore::InspectionDisposition::StorageUnavailable) {
         throw std::runtime_error(
             "save slot " + std::to_string(slot + 1) +
             " storage is unavailable: " + inspection.message);
+    }
+    if (inspection.disposition ==
+            SaveStore::InspectionDisposition::UnsupportedFormat) {
+        throw std::runtime_error(
+            "save slot " + std::to_string(slot + 1) +
+            " uses an unsupported profile format: " + inspection.message);
     }
     SaveStore::LoadResult loaded = incomingStore.load();
     if (loaded.disposition == SaveStore::LoadDisposition::StorageUnavailable) {
         throw std::runtime_error(
             "save slot " + std::to_string(slot + 1) +
             " could not be loaded: " + loaded.message);
+    }
+    if (loaded.disposition == SaveStore::LoadDisposition::UnsupportedFormat) {
+        throw std::runtime_error(
+            "save slot " + std::to_string(slot + 1) +
+            " uses an unsupported profile format: " + loaded.message);
     }
     if (loaded.disposition == SaveStore::LoadDisposition::ResetCorrupt) {
         throw std::runtime_error(

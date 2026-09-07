@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
+#include <new>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -1275,25 +1276,45 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
     return root.dump(2) + '\n';
 }
 
+UnsupportedPlayerProfileFormat::UnsupportedPlayerProfileFormat(int format)
+    : std::runtime_error(
+          "player profile root: unsupported format " + std::to_string(format))
+    , format_(format)
+{
+}
+
+InvalidPlayerProfileData::InvalidPlayerProfileData(std::string message)
+    : std::runtime_error(std::move(message))
+{
+}
+
 DecodedPlayerProfile decodePlayerProfile(std::string_view text)
 {
-    Json root;
     try {
-        root = Json::parse(text);
-    } catch (const Json::parse_error& error) {
-        throw std::runtime_error(
-            "player profile JSON parse error at byte " +
-            std::to_string(error.byte) + ": " + error.what());
-    }
-    requireObject(root, "root");
-    const int format = nonNegativeIntegerProperty(root, "format", "root");
-    if (format < 1 || format > currentPlayerProfileFormat) {
-        fail("root", "unsupported format " + std::to_string(format));
-    }
+        Json root;
+        try {
+            root = Json::parse(text);
+        } catch (const Json::parse_error& error) {
+            throw std::runtime_error(
+                "player profile JSON parse error at byte " +
+                std::to_string(error.byte) + ": " + error.what());
+        }
+        requireObject(root, "root");
+        const int format = nonNegativeIntegerProperty(root, "format", "root");
+        if (format < 1 || format > currentPlayerProfileFormat) {
+            throw UnsupportedPlayerProfileFormat(format);
+        }
 
-    Json migrated = root;
-    migratePlayerProfileToCurrent(migrated, format);
-    return { .profile = parseCurrent(migrated), .sourceFormat = format };
+        Json migrated = root;
+        migratePlayerProfileToCurrent(migrated, format);
+        return { .profile = parseCurrent(migrated), .sourceFormat = format };
+    } catch (const UnsupportedPlayerProfileFormat&) {
+        throw;
+    } catch (const std::bad_alloc&) {
+        throw;
+    } catch (const std::exception& error) {
+        throw InvalidPlayerProfileData(error.what());
+    }
 }
 
 } // namespace sokoban

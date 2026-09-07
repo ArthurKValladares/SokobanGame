@@ -18,6 +18,13 @@ public:
         Migrated,
         RecoveredInterruptedWrite,
         RecoveredBackup,
+        // The profile decoded successfully, but migration or backup repair
+        // could not be persisted. `profile` contains the usable data and the
+        // original valid file remains available for a later retry.
+        LoadedWithPersistenceError,
+        // The file belongs to a profile format this build cannot decode. It is
+        // preserved in place and `profile` contains defaults.
+        UnsupportedFormat,
         ResetCorrupt,
         StorageUnavailable,
     };
@@ -32,6 +39,7 @@ public:
         Missing,
         PrimaryValid,
         BackupValid,
+        UnsupportedFormat,
         Corrupt,
         StorageUnavailable,
     };

@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -133,9 +134,25 @@ struct DecodedPlayerProfile {
     int sourceFormat = currentPlayerProfileFormat;
 };
 
-// Throws std::runtime_error for malformed, unsupported, or semantically
-// invalid profile data. Older formats migrate through forward JSON
-// patches followed by one strict current-format parse.
+class InvalidPlayerProfileData final : public std::runtime_error {
+public:
+    explicit InvalidPlayerProfileData(std::string message);
+};
+
+class UnsupportedPlayerProfileFormat final : public std::runtime_error {
+public:
+    explicit UnsupportedPlayerProfileFormat(int format);
+
+    [[nodiscard]] int format() const noexcept { return format_; }
+
+private:
+    int format_ = 0;
+};
+
+// Throws UnsupportedPlayerProfileFormat when the version is outside the
+// supported range, and InvalidPlayerProfileData for malformed or semantically
+// invalid data. Older formats migrate through forward JSON patches followed
+// by one strict current-format parse.
 [[nodiscard]] DecodedPlayerProfile decodePlayerProfile(std::string_view text);
 
 } // namespace sokoban

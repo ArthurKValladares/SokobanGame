@@ -7,8 +7,11 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <random>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -63,6 +66,23 @@ constexpr auto instantWrites = std::chrono::milliseconds(0);
     return profile;
 }
 
+[[nodiscard]] std::string futureProfileContents()
+{
+    std::string contents = sokoban::PlayerProfile {}.serialize();
+    const std::string current =
+        "\"format\": " + std::to_string(sokoban::currentPlayerProfileFormat);
+    const std::size_t position = contents.find(current);
+    if (position == std::string::npos) {
+        throw std::runtime_error("serialized profile has no format field");
+    }
+    contents.replace(
+        position,
+        current.size(),
+        "\"format\": " +
+            std::to_string(sokoban::currentPlayerProfileFormat + 1));
+    return contents;
+}
+
 void testFreshInstallWritesNothing()
 {
     TemporaryDirectory directory;
@@ -73,6 +93,67 @@ void testFreshInstallWritesNothing()
     check(profile == sokoban::PlayerProfile {}, "fresh profile is default");
     manager.flush();
     check(directoryEmpty(directory.path()), "fresh install writes no files");
+}
+
+void testUnsupportedActiveDataStopsLoading()
+{
+    TemporaryDirectory directory;
+    const std::string future = futureProfileContents();
+    {
+        std::ofstream stream(
+            directory.path() / "profile.json",
+            std::ios::binary | std::ios::trunc);
+        stream << future;
+    }
+
+    sokoban::SaveSlotManager manager(directory.path(), instantWrites);
+    bool threw = false;
+    try {
+        (void)manager.loadActiveProfile();
+    } catch (const std::runtime_error& error) {
+        threw = std::string_view(error.what()).find("unsupported") !=
+            std::string_view::npos;
+    }
+    check(threw, "unsupported active profile stops loading with an accurate error");
+
+    std::ifstream stream(directory.path() / "profile.json", std::ios::binary);
+    const std::string preserved {
+        std::istreambuf_iterator<char>(stream),
+        std::istreambuf_iterator<char>() };
+    check(preserved == future,
+        "stopped active-profile load preserves the future-version file");
+    check(!std::filesystem::exists(directory.path() / "settings.json"),
+        "stopped active-profile load does not create replacement settings");
+
+    TemporaryDirectory inactiveDirectory;
+    sokoban::SaveSlotManager inactiveManager(
+        inactiveDirectory.path(), instantWrites);
+    const sokoban::PlayerProfile active = inactiveManager.loadActiveProfile();
+    const std::filesystem::path inactivePath =
+        inactiveDirectory.path() / "profile-slot2.json";
+    {
+        std::ofstream inactiveStream(
+            inactivePath, std::ios::binary | std::ios::trunc);
+        inactiveStream << future;
+    }
+    check(inactiveManager.slotSummaries(active, 4)[1].state ==
+            sokoban::SaveSlotState::Unavailable,
+        "unsupported inactive profile is presented as unavailable");
+    bool switchThrew = false;
+    try {
+        (void)inactiveManager.switchTo(1, active);
+    } catch (const std::runtime_error& error) {
+        switchThrew = std::string_view(error.what()).find("unsupported") !=
+            std::string_view::npos;
+    }
+    check(switchThrew,
+        "switching to an unsupported profile stops with an accurate error");
+    std::ifstream inactiveStream(inactivePath, std::ios::binary);
+    const std::string inactivePreserved {
+        std::istreambuf_iterator<char>(inactiveStream),
+        std::istreambuf_iterator<char>() };
+    check(inactivePreserved == future,
+        "rejected slot switch preserves the future-version profile");
 }
 
 void testInterruptedActiveSlotMarkerRecovery()
@@ -469,6 +550,7 @@ void testDeletionFailurePreservesSummaryAndFiles()
 int main()
 {
     testFreshInstallWritesNothing();
+    testUnsupportedActiveDataStopsLoading();
     testInterruptedActiveSlotMarkerRecovery();
     testOverworldTargetSummaries();
     testPreSplitSettingsMigration();

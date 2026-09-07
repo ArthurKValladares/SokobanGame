@@ -40,6 +40,26 @@ void writeFile(const std::filesystem::path& path, std::string_view contents)
     stream << contents;
 }
 
+std::string readFile(const std::filesystem::path& path)
+{
+    std::ifstream stream(path, std::ios::binary);
+    return std::string(
+        std::istreambuf_iterator<char>(stream),
+        std::istreambuf_iterator<char>());
+}
+
+bool hasCorruptArchive(
+    const std::filesystem::path& directory,
+    std::string_view filenamePrefix)
+{
+    for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+        if (entry.path().filename().string().starts_with(filenamePrefix)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 const sokoban::KeyboardBinding* keyboardBinding(
     const sokoban::InputBindings& bindings,
     sokoban::InputAction action)
@@ -1052,6 +1072,103 @@ void testMigrationAndDoubleCorruption()
         "double corruption writes valid replacement");
 }
 
+void testMigrationPersistenceFailuresPreserveDecodedProfiles()
+{
+    constexpr std::string_view legacy = R"json({
+  "format": 1,
+  "unlockedLevel": 3,
+  "currentLevel": 2,
+  "completedLevels": [0],
+  "masterVolume": 0.5,
+  "musicVolume": 0.25,
+  "soundVolume": 0.75
+})json";
+    const sokoban::PlayerProfile expected =
+        sokoban::decodePlayerProfile(legacy).profile;
+
+    const auto checkMigrationFailure = [&](std::uint32_t writesBeforeFailure) {
+        TemporaryDirectory directory;
+        sokoban::SaveStore store(directory.path());
+        writeFile(store.primaryPath(), legacy);
+
+        sokoban::atomicFile::failWriteAfterForTesting(
+            writesBeforeFailure, std::errc::no_space_on_device);
+        const sokoban::SaveStore::LoadResult loaded = store.load();
+
+        check(loaded.disposition ==
+                sokoban::SaveStore::LoadDisposition::LoadedWithPersistenceError,
+            "migration write failure has a distinct load disposition");
+        check(loaded.profile == expected,
+            "migration write failure returns the decoded legacy profile");
+        check(readFile(store.primaryPath()) == legacy,
+            "migration write failure preserves the valid legacy primary");
+        check(!hasCorruptArchive(directory.path(), "profile.json.corrupt-"),
+            "migration write failure does not archive the valid primary");
+        check(loaded.message.starts_with(
+                  "Loaded legacy player profile, but migration could not be saved:"),
+            "migration write failure reports an accurate storage diagnostic");
+    };
+
+    // Migration first protects the old primary in the backup, then installs
+    // the current-format primary. Exercise failure at each write boundary.
+    checkMigrationFailure(0);
+    checkMigrationFailure(1);
+
+    TemporaryDirectory backupDirectory;
+    sokoban::SaveStore backupStore(backupDirectory.path());
+    sokoban::PlayerProfile backup;
+    backup.unlockedLevel = 3;
+    backup.setCurrentLevel(3);
+    backup.normalize();
+    writeFile(backupStore.backupPath(), backup.serialize());
+
+    sokoban::atomicFile::failWriteAfterForTesting(
+        0, std::errc::no_space_on_device);
+    const sokoban::SaveStore::LoadResult recovered = backupStore.load();
+    check(recovered.disposition ==
+            sokoban::SaveStore::LoadDisposition::LoadedWithPersistenceError,
+        "backup repair failure has a distinct load disposition");
+    check(recovered.profile == backup,
+        "backup repair failure returns the decoded backup profile");
+    check(readFile(backupStore.backupPath()) == backup.serialize(),
+        "backup repair failure preserves the valid backup");
+    check(!hasCorruptArchive(
+              backupDirectory.path(), "profile.backup.json.corrupt-"),
+        "backup repair failure does not archive the valid backup");
+    check(recovered.message.starts_with(
+              "Recovered player profile from backup in memory, but primary repair failed:"),
+        "backup repair failure reports an accurate storage diagnostic");
+}
+
+void testUnsupportedProfileFormatsArePreserved()
+{
+    TemporaryDirectory directory;
+    sokoban::SaveStore store(directory.path());
+    nlohmann::json future =
+        nlohmann::json::parse(sokoban::PlayerProfile {}.serialize());
+    future["format"] = sokoban::currentPlayerProfileFormat + 1;
+    const std::string contents = future.dump();
+    writeFile(store.primaryPath(), contents);
+    const std::string staleTemporary = sokoban::PlayerProfile {}.serialize();
+    writeFile(store.primaryPath().string() + ".tmp", staleTemporary);
+
+    const sokoban::SaveStore::InspectionResult inspected = store.inspect();
+    check(inspected.disposition ==
+            sokoban::SaveStore::InspectionDisposition::UnsupportedFormat,
+        "inspection distinguishes an unsupported profile format from corruption");
+
+    const sokoban::SaveStore::LoadResult loaded = store.load();
+    check(loaded.disposition ==
+            sokoban::SaveStore::LoadDisposition::UnsupportedFormat,
+        "loading distinguishes an unsupported profile format from corruption");
+    check(readFile(store.primaryPath()) == contents,
+        "unsupported profile remains byte-for-byte intact");
+    check(readFile(store.primaryPath().string() + ".tmp") == staleTemporary,
+        "unsupported profile prevents recovery from modifying ambiguous artifacts");
+    check(!hasCorruptArchive(directory.path(), "profile.json.corrupt-"),
+        "unsupported profile is not archived as corrupt");
+}
+
 void testAsyncSaveCoalescingAndFlush()
 {
     TemporaryDirectory temporary;
@@ -1354,6 +1471,8 @@ int main()
         testStorageFailuresPreserveCommittedProfile();
         testSaveSlotStems();
         testMigrationAndDoubleCorruption();
+        testMigrationPersistenceFailuresPreserveDecodedProfiles();
+        testUnsupportedProfileFormatsArePreserved();
         testAsyncSaveCoalescingAndFlush();
         testAsyncSaveDestructorFlushesNewestProfile();
         testAsyncStoreMultipleChannels();

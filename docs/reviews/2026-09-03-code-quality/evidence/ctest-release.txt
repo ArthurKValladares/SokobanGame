@@ -1,0 +1,166 @@
+Internal ctest changing into directory: C:/Users/arthu/Documents/Projects/Sokoban Game/build
+Test project C:/Users/arthu/Documents/Projects/Sokoban Game/build
+      Start 18: vulkan_diagnostics
+      Start 49: residency_budget
+      Start 48: asset_load_state
+      Start 53: material_range_allocator
+ 1/78 Test #18: vulkan_diagnostics ...............   Passed    0.35 sec
+ 2/78 Test #49: residency_budget .................   Passed    0.28 sec
+      Start 57: draw_mode
+      Start 59: texture_descriptor_space
+ 3/78 Test #48: asset_load_state .................   Passed    0.33 sec
+      Start 58: scene_draw_lanes
+ 4/78 Test #53: material_range_allocator .........   Passed    0.30 sec
+ 5/78 Test #57: draw_mode ........................   Passed    0.21 sec
+      Start 56: gpu_abi
+      Start  1: vulkan_smoke
+ 6/78 Test #59: texture_descriptor_space .........   Passed    0.41 sec
+      Start 60: texture_upload_plan
+ 7/78 Test #58: scene_draw_lanes .................   Passed    0.53 sec
+ 8/78 Test #56: gpu_abi ..........................   Passed    0.47 sec
+      Start 36: runtime_texture_catalog
+      Start 40: ssao_math
+ 9/78 Test #60: texture_upload_plan ..............   Passed    0.36 sec
+      Start 64: crash_diagnostics
+10/78 Test #40: ssao_math ........................   Passed    0.14 sec
+      Start 39: pbr_material
+11/78 Test #36: runtime_texture_catalog ..........   Passed    0.30 sec
+      Start 54: gpu_skinning
+12/78 Test #39: pbr_material .....................   Passed    0.13 sec
+13/78 Test #64: crash_diagnostics ................   Passed    0.20 sec
+      Start 35: gltf_dependencies
+      Start 61: opaque_draw_sorter
+14/78 Test  #1: vulkan_smoke .....................   Passed    0.90 sec
+      Start 69: content_pipeline
+15/78 Test #54: gpu_skinning .....................   Passed    0.28 sec
+16/78 Test #35: gltf_dependencies ................   Passed    0.21 sec
+      Start 38: tonemap
+      Start 23: gameplay_loop
+17/78 Test #61: opaque_draw_sorter ...............   Passed    0.31 sec
+      Start 37: compressed_texture_artifact
+18/78 Test #38: tonemap ..........................   Passed    0.22 sec
+      Start 71: splat_painter
+19/78 Test #23: gameplay_loop ....................   Passed    0.26 sec
+      Start 10: player_profile
+20/78 Test #37: compressed_texture_artifact ......   Passed    0.49 sec
+      Start 31: decoration_mesh_catalog
+21/78 Test #71: splat_painter ....................   Passed    0.55 sec
+      Start  5: rules
+22/78 Test #31: decoration_mesh_catalog ..........   Passed    0.22 sec
+      Start  4: geometry
+23/78 Test #10: player_profile ...................   Passed    0.63 sec
+      Start 78: tile_thumbnail_bake
+24/78 Test  #5: rules ............................   Passed    0.26 sec
+      Start  9: gameplay_session
+25/78 Test  #4: geometry .........................   Passed    0.38 sec
+      Start  2: command_line
+26/78 Test #78: tile_thumbnail_bake ..............   Passed    0.40 sec
+      Start 55: gpu_material
+27/78 Test  #9: gameplay_session .................   Passed    0.37 sec
+      Start 51: geometry_suballocator
+28/78 Test  #2: command_line .....................   Passed    0.20 sec
+      Start 50: asset_load_scheduler
+29/78 Test #55: gpu_material .....................   Passed    0.19 sec
+      Start 47: asset_requirements
+30/78 Test #51: geometry_suballocator ............   Passed    0.26 sec
+      Start 52: upload_ring_allocator
+31/78 Test #50: asset_load_scheduler .............   Passed    0.27 sec
+      Start 30: level_editor
+32/78 Test #47: asset_requirements ...............   Passed    0.30 sec
+      Start 70: splat_canvas
+33/78 Test #52: upload_ring_allocator ............   Passed    0.23 sec
+      Start 76: reservation
+34/78 Test #70: splat_canvas .....................   Passed    0.15 sec
+      Start  3: math
+35/78 Test #76: reservation ......................   Passed    0.17 sec
+      Start 43: asset_manifest
+36/78 Test #69: content_pipeline .................   Passed    2.29 sec
+      Start 42: animation_event_sequencer
+37/78 Test  #3: math .............................   Passed    0.29 sec
+      Start 63: logging
+38/78 Test #43: asset_manifest ...................   Passed    0.30 sec
+      Start 24: frame_pacing
+39/78 Test #42: animation_event_sequencer ........   Passed    0.25 sec
+      Start 22: level_transition
+40/78 Test #30: level_editor .....................   Passed    0.80 sec
+      Start 41: animation_catalog
+41/78 Test #24: frame_pacing .....................   Passed    0.25 sec
+      Start 29: iso_scene_preparer
+42/78 Test #22: level_transition .................   Passed    0.26 sec
+43/78 Test #63: logging ..........................   Passed    0.43 sec
+      Start 11: save_slots
+      Start 74: action_plan
+44/78 Test #41: animation_catalog ................   Passed    0.56 sec
+      Start  6: level
+45/78 Test #29: iso_scene_preparer ...............   Passed    0.58 sec
+46/78 Test #11: save_slots .......................   Passed    0.48 sec
+      Start 75: action_scheduler
+      Start 65: frame_arena
+47/78 Test #74: action_plan ......................   Passed    0.53 sec
+      Start 19: input_router
+48/78 Test  #6: level ............................   Passed    0.34 sec
+49/78 Test #75: action_scheduler .................   Passed    0.23 sec
+      Start 27: frame_time_telemetry
+      Start 68: overworld_map_editor
+50/78 Test #65: frame_arena ......................   Passed    0.29 sec
+      Start  8: overworld_map
+51/78 Test #19: input_router .....................   Passed    0.26 sec
+52/78 Test #27: frame_time_telemetry .............   Passed    0.19 sec
+      Start 45: presentation
+      Start 20: settings_coordinator
+53/78 Test  #8: overworld_map ....................   Passed    0.33 sec
+54/78 Test #68: overworld_map_editor .............   Passed    0.39 sec
+      Start 26: frame_resource_tracker
+      Start 73: ground_pick
+55/78 Test #45: presentation .....................   Passed    0.36 sec
+      Start 72: png_writer
+56/78 Test #20: settings_coordinator .............   Passed    0.24 sec
+57/78 Test #26: frame_resource_tracker ...........   Passed    0.17 sec
+      Start 66: atomic_file
+      Start 13: input
+58/78 Test #73: ground_pick ......................   Passed    0.29 sec
+      Start 12: shell_flow
+59/78 Test #66: atomic_file ......................   Passed    0.23 sec
+60/78 Test #72: png_writer .......................   Passed    0.30 sec
+      Start 33: editor_interaction
+      Start 17: vulkan_device_selection
+61/78 Test #13: input ............................   Passed    0.26 sec
+      Start 21: campaign_session
+62/78 Test #12: shell_flow .......................   Passed    0.21 sec
+63/78 Test #33: editor_interaction ...............   Passed    0.16 sec
+      Start 77: state_delta
+      Start 67: level_project_store
+64/78 Test #17: vulkan_device_selection ..........   Passed    0.22 sec
+      Start 25: frame_descriptor_sync
+65/78 Test #21: campaign_session .................   Passed    0.22 sec
+66/78 Test #77: state_delta ......................   Passed    0.17 sec
+      Start 15: ui
+      Start 44: asset_manifest_editor
+67/78 Test #67: level_project_store ..............   Passed    0.24 sec
+      Start 14: image_data
+68/78 Test #25: frame_descriptor_sync ............   Passed    0.25 sec
+      Start 34: animation_controller
+69/78 Test #15: ui ...............................   Passed    0.27 sec
+      Start 28: renderer_reconfiguration
+70/78 Test #44: asset_manifest_editor ............   Passed    0.25 sec
+71/78 Test #14: image_data .......................   Passed    0.19 sec
+      Start 16: title
+      Start 32: decoration_gizmo
+72/78 Test #34: animation_controller .............   Passed    0.24 sec
+      Start  7: level_catalog
+73/78 Test #28: renderer_reconfiguration .........   Passed    0.22 sec
+74/78 Test #16: title ............................   Passed    0.17 sec
+      Start 46: particles
+      Start 62: tasks
+75/78 Test #32: decoration_gizmo .................   Passed    0.22 sec
+76/78 Test  #7: level_catalog ....................   Passed    0.17 sec
+77/78 Test #46: particles ........................   Passed    0.11 sec
+78/78 Test #62: tasks ............................   Passed    0.07 sec
+
+100% tests passed, 0 tests failed out of 78
+
+Label Time Summary:
+smoke     =   0.90 sec*proc (1 test)
+vulkan    =   0.90 sec*proc (1 test)
+
+Total Test time (real) =   6.86 sec

@@ -43,6 +43,7 @@ std::string corruptSuffix()
 enum class ProfileFileState {
     Missing,
     Valid,
+    Unsupported,
     Invalid,
 };
 
@@ -70,7 +71,9 @@ ProfileFileState profileFileState(const std::filesystem::path& path)
     try {
         (void)decodePlayerProfile(contents);
         return ProfileFileState::Valid;
-    } catch (const std::exception&) {
+    } catch (const UnsupportedPlayerProfileFormat&) {
+        return ProfileFileState::Unsupported;
+    } catch (const InvalidPlayerProfileData&) {
         return ProfileFileState::Invalid;
     }
 }
@@ -120,14 +123,38 @@ SaveStore::LoadResult SaveStore::load()
         const bool recoveredInterruptedWrite = recoverInterruptedWrites();
 
         if (std::filesystem::is_regular_file(primaryPath_)) {
+            const std::string contents = readFile(primaryPath_);
+            std::optional<DecodedPlayerProfile> decoded;
             try {
-                DecodedPlayerProfile decoded = decodePlayerProfile(readFile(primaryPath_));
-                if (decoded.sourceFormat != currentPlayerProfileFormat) {
-                    writePrimary(decoded.profile, true);
+                decoded = decodePlayerProfile(contents);
+            } catch (const UnsupportedPlayerProfileFormat& error) {
+                status_ = "Player profile format is unsupported; the file was preserved: " +
+                    std::string(error.what());
+                return {
+                    .profile = {},
+                    .disposition = LoadDisposition::UnsupportedFormat,
+                    .message = status_,
+                };
+            } catch (const InvalidPlayerProfileData&) {
+                archiveCorruptFile(primaryPath_);
+            }
+            if (decoded) {
+                if (decoded->sourceFormat != currentPlayerProfileFormat) {
+                    try {
+                        writePrimary(decoded->profile, true);
+                    } catch (const std::exception& error) {
+                        status_ = "Loaded legacy player profile, but migration could not be saved: " +
+                            std::string(error.what());
+                        return {
+                            .profile = std::move(decoded->profile),
+                            .disposition = LoadDisposition::LoadedWithPersistenceError,
+                            .message = status_,
+                        };
+                    }
                     status_ = "Migrated player profile from format " +
-                        std::to_string(decoded.sourceFormat) + ".";
+                        std::to_string(decoded->sourceFormat) + ".";
                     return {
-                        .profile = std::move(decoded.profile),
+                        .profile = std::move(decoded->profile),
                         .disposition = LoadDisposition::Migrated,
                         .message = status_,
                     };
@@ -136,29 +163,49 @@ SaveStore::LoadResult SaveStore::load()
                     ? "Recovered interrupted player profile write."
                     : "Loaded player profile.";
                 return {
-                    .profile = std::move(decoded.profile),
+                    .profile = std::move(decoded->profile),
                     .disposition = recoveredInterruptedWrite
                         ? LoadDisposition::RecoveredInterruptedWrite
                         : LoadDisposition::Loaded,
                     .message = status_,
                 };
-            } catch (const std::exception&) {
-                archiveCorruptFile(primaryPath_);
             }
         }
 
         if (std::filesystem::is_regular_file(backupPath_)) {
+            const std::string contents = readFile(backupPath_);
+            std::optional<DecodedPlayerProfile> decoded;
             try {
-                DecodedPlayerProfile decoded = decodePlayerProfile(readFile(backupPath_));
-                writePrimary(decoded.profile, false);
+                decoded = decodePlayerProfile(contents);
+            } catch (const UnsupportedPlayerProfileFormat& error) {
+                status_ = "Player profile backup format is unsupported; the file was preserved: " +
+                    std::string(error.what());
+                return {
+                    .profile = {},
+                    .disposition = LoadDisposition::UnsupportedFormat,
+                    .message = status_,
+                };
+            } catch (const InvalidPlayerProfileData&) {
+                archiveCorruptFile(backupPath_);
+            }
+            if (decoded) {
+                try {
+                    writePrimary(decoded->profile, false);
+                } catch (const std::exception& error) {
+                    status_ = "Recovered player profile from backup in memory, but primary repair failed: " +
+                        std::string(error.what());
+                    return {
+                        .profile = std::move(decoded->profile),
+                        .disposition = LoadDisposition::LoadedWithPersistenceError,
+                        .message = status_,
+                    };
+                }
                 status_ = "Recovered player profile from backup.";
                 return {
-                    .profile = std::move(decoded.profile),
+                    .profile = std::move(decoded->profile),
                     .disposition = LoadDisposition::RecoveredBackup,
                     .message = status_,
                 };
-            } catch (const std::exception&) {
-                archiveCorruptFile(backupPath_);
             }
         }
 
@@ -223,6 +270,12 @@ bool SaveStore::recoverInterruptedWrite(const std::filesystem::path& path)
         removeArtifact(displaced);
         return false;
     }
+    if (live == ProfileFileState::Unsupported) {
+        // This build cannot determine whether same-stem artifacts are stale
+        // relative to a committed save written by a newer build. Preserve all
+        // of them rather than replacing or deleting future-version data.
+        return false;
+    }
 
     const std::filesystem::path* recoverySource = nullptr;
     if (temporaryState == ProfileFileState::Valid) {
@@ -272,7 +325,13 @@ SaveStore::InspectionResult SaveStore::inspect() const
                     .disposition = InspectionDisposition::PrimaryValid,
                     .message = "Player profile is ready.",
                 };
-            } catch (const std::exception& error) {
+            } catch (const UnsupportedPlayerProfileFormat& error) {
+                return {
+                    .disposition = InspectionDisposition::UnsupportedFormat,
+                    .message = "Player profile format is unsupported; the file was preserved: " +
+                        std::string(error.what()),
+                };
+            } catch (const InvalidPlayerProfileData& error) {
                 primaryError = error.what();
             }
         }
@@ -293,7 +352,13 @@ SaveStore::InspectionResult SaveStore::inspect() const
                     .disposition = InspectionDisposition::BackupValid,
                     .message = "Player profile can be recovered from backup.",
                 };
-            } catch (const std::exception& error) {
+            } catch (const UnsupportedPlayerProfileFormat& error) {
+                return {
+                    .disposition = InspectionDisposition::UnsupportedFormat,
+                    .message = "Player profile backup format is unsupported; the file was preserved: " +
+                        std::string(error.what()),
+                };
+            } catch (const InvalidPlayerProfileData& error) {
                 backupError = error.what();
             }
         }
