@@ -6,13 +6,15 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Follow-up, 2026-09-07 (CQ-02):** Failed asynchronous snapshots now remain pending and retryable, flushing reports persistence failure, and channel replacement refuses to discard an unsaved outgoing profile. Slot switching keeps the original slot active and exposes the retained storage error until a later save succeeds.
 
+**Follow-up, 2026-09-07 (CQ-03):** Ordinary puzzle sources and their derived runtime mirrors now use durable atomic replacement with checked completion. Saving returns a structured outcome that distinguishes complete failure from a committed source whose mirror is stale; the latter remains dirty and can be retried without losing the authoritative source.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
 
 The most consequential remaining problems occur **between these components**. A successfully decoded save can be discarded when its migration write fails. A drained save queue is treated as a successful save. Editor changes conflict with immutable runtime-package validation. A deferred renderer publication consumes the data needed for its own retry. These are more valuable to fix than another broad file-splitting or formatting pass.
 
-This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 and CQ-02 have since been resolved, leaving 12 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
+This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-03 have since been resolved, leaving 11 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
 
 - **P1:** prioritize before relying on persistence or authoring for valuable work; existing data or unsaved progress can be lost or abandoned.
 - **P2:** schedule fixes for observable correctness, resource use, or validation gaps; several require unusual inputs or failure conditions.
@@ -95,7 +97,7 @@ This demonstrates an incorrect reset after a one-shot write failure. A persisten
 
 **Regression gate:** Fail outgoing writes with both immediate and deferred requests; verify the active slot and latest profile remain available and a later retry succeeds. Retain coverage for incoming-slot failures too.
 
-### CQ-03 — Use atomic replacement for ordinary puzzle saves
+### CQ-03 — Use atomic replacement for ordinary puzzle saves (resolved 2026-09-07)
 
 **Location:** [LevelEditor.cpp](../../../src/engine/LevelEditor.cpp), lines 1722–1761. Compare the overworld transaction immediately above this branch and [LevelProjectStore.cpp](../../../src/engine/LevelProjectStore.cpp).
 

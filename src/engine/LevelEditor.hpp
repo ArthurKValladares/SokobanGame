@@ -21,6 +21,35 @@ class OverworldMapEditor;
 // invoke these operations; no presentation framework is required to use it.
 class LevelEditor {
 public:
+    struct SaveResult {
+        enum class Outcome {
+            Failed,
+            Saved,
+            SourceSavedMirrorStale,
+        };
+
+        Outcome outcome = Outcome::Failed;
+
+        [[nodiscard]] bool succeeded() const noexcept
+        {
+            return outcome == Outcome::Saved;
+        }
+
+        [[nodiscard]] bool sourceSaved() const noexcept
+        {
+            return outcome != Outcome::Failed;
+        }
+
+        [[nodiscard]] bool mirrorStale() const noexcept
+        {
+            return outcome == Outcome::SourceSavedMirrorStale;
+        }
+
+        // Preserve the existing if/CHECK calling convention while allowing
+        // callers that handle partial saves to inspect the exact outcome.
+        operator bool() const noexcept { return succeeded(); }
+    };
+
     enum class Tool {
         Tiles,
         Decorations,
@@ -89,7 +118,7 @@ public:
     // and its document-local undo history.
     [[nodiscard]] bool openDocument(const std::filesystem::path& path);
     [[nodiscard]] bool loadDocument(const std::filesystem::path& path, bool recordHistory = true);
-    [[nodiscard]] bool saveDocument(const std::filesystem::path& path);
+    [[nodiscard]] SaveResult saveDocument(const std::filesystem::path& path);
     [[nodiscard]] Level::Definition documentDefinition() const;
     [[nodiscard]] Level documentToLevel() const;
     [[nodiscard]] std::optional<Level> beginDraftPlayback(

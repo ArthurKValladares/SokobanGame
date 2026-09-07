@@ -1,5 +1,6 @@
 #include "engine/LevelEditor.hpp"
 
+#include "engine/AtomicFile.hpp"
 #include "engine/OverworldMapEditor.hpp"
 
 #include "engine/LevelCatalog.hpp"
@@ -74,6 +75,22 @@ std::filesystem::path levelDirectoryPath(const std::filesystem::path& root, int 
 std::filesystem::path screenFilePath(const std::filesystem::path& levelDirectory, int screenIndex)
 {
     return levelDirectory / ("screen" + std::to_string(screenIndex) + ".scr");
+}
+
+std::string screenContents(const std::vector<std::string>& rows)
+{
+    std::size_t size = rows.size();
+    for (const std::string& row : rows) {
+        size += row.size();
+    }
+
+    std::string contents;
+    contents.reserve(size);
+    for (const std::string& row : rows) {
+        contents += row;
+        contents += '\n';
+    }
+    return contents;
 }
 
 void writeScreenRows(
@@ -1620,11 +1637,12 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
     return true;
 }
 
-bool LevelEditor::saveDocument(const std::filesystem::path& path)
+LevelEditor::SaveResult LevelEditor::saveDocument(
+    const std::filesystem::path& path)
 {
     if (document_.layers.empty()) {
         document_.status = "Nothing to save.";
-        return false;
+        return {};
     }
 
     const std::filesystem::path sourcePath = normalizedAbsolutePath(path);
@@ -1659,7 +1677,7 @@ bool LevelEditor::saveDocument(const std::filesystem::path& path)
             (relative.begin() != relative.end() && *relative.begin() == "..")) {
             document_.status =
                 "Overworld screen is outside the active level project.";
-            return false;
+            return {};
         }
         if (!applyProjectMutation(
                 [relative, serialized, documentContainsPlayer](
@@ -1699,7 +1717,7 @@ bool LevelEditor::saveDocument(const std::filesystem::path& path)
                     }
                     writeScreenRows(root / relative, serialized);
                 })) {
-            return false;
+            return {};
         }
         document_.filePath = sourcePath;
         document_.loadedPath = sourcePath;
@@ -1707,7 +1725,7 @@ bool LevelEditor::saveDocument(const std::filesystem::path& path)
         drafts_.erase(draftKey(sourcePath));
         document_.status =
             "Saved overworld screen and validated the complete map.";
-        return true;
+        return { .outcome = SaveResult::Outcome::Saved };
     }
 
     std::error_code error;
@@ -1715,62 +1733,59 @@ bool LevelEditor::saveDocument(const std::filesystem::path& path)
         std::filesystem::create_directories(sourcePath.parent_path(), error);
         if (error) {
             document_.status = "Failed to create directories: " + error.message();
-            return false;
+            return {};
         }
     }
 
-    std::ofstream file(sourcePath, std::ios::trunc);
-    if (!file) {
-        document_.status = "Failed to save: " + sourcePath.string();
-        return false;
+    const std::string contents = screenContents(serialized);
+    try {
+        atomicFile::write(sourcePath, contents);
+    } catch (const std::exception& exception) {
+        document_.status = "Failed to save " + sourcePath.string() +
+            ": " + exception.what();
+        return {};
     }
 
-    for (const std::string& line : serialized) {
-        file << line << '\n';
-    }
-    file.flush();
-    if (!file) {
-        document_.status = "Failed to save: " + sourcePath.string();
-        return false;
-    }
-    file.close();
+    // The source is now authoritative even if refreshing its derived runtime
+    // mirror fails. Keep the document dirty in that case so Save retries the
+    // mirror, but accurately record where this in-memory document was saved.
+    document_.filePath = sourcePath;
+    document_.loadedPath = sourcePath;
 
     const std::filesystem::path mirrorPath = runtimeMirrorPath(sourcePath);
     if (!mirrorPath.empty()) {
         if (mirrorPath.has_parent_path()) {
             std::filesystem::create_directories(mirrorPath.parent_path(), error);
             if (error) {
+                document_.dirty = true;
                 document_.status = "Saved source, but failed to create runtime mirror directories: " + error.message();
-                return false;
+                return {
+                    .outcome = SaveResult::Outcome::SourceSavedMirrorStale,
+                };
             }
         }
 
-        std::ofstream mirrorFile(mirrorPath, std::ios::trunc);
-        if (!mirrorFile) {
-            document_.status = "Saved source, but failed to update runtime mirror: " + mirrorPath.string();
-            return false;
-        }
-
-        for (const std::string& line : serialized) {
-            mirrorFile << line << '\n';
-        }
-        mirrorFile.flush();
-        if (!mirrorFile) {
-            document_.status = "Saved source, but failed to update runtime mirror: " + mirrorPath.string();
-            return false;
+        try {
+            atomicFile::write(mirrorPath, contents);
+        } catch (const std::exception& exception) {
+            document_.dirty = true;
+            document_.status =
+                "Saved source, but failed to update runtime mirror " +
+                mirrorPath.string() + ": " + exception.what();
+            return {
+                .outcome = SaveResult::Outcome::SourceSavedMirrorStale,
+            };
         }
     }
 
-    document_.filePath = sourcePath;
     // Saving a scratch document into levels/level<N>/screen<M>.scr makes it
     // that screen, so it gains that screen's splat map from here on.
-    document_.loadedPath = sourcePath;
     document_.dirty = false;
     drafts_.erase(draftKey(sourcePath));
     document_.status = mirrorPath.empty()
         ? "Saved " + sourcePath.string()
         : "Saved " + sourcePath.string() + " and updated runtime mirror.";
-    return true;
+    return { .outcome = SaveResult::Outcome::Saved };
 }
 
 void LevelEditor::addLevelAt(int levelIndex)

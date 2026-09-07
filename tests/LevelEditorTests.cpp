@@ -54,6 +54,15 @@ LevelEditor makeEditor(const TemporaryProject& project)
 using TreeSnapshot =
     std::vector<std::pair<std::filesystem::path, std::string>>;
 
+std::string readFile(const std::filesystem::path& path)
+{
+    std::ifstream file(path, std::ios::binary);
+    return {
+        std::istreambuf_iterator<char>(file),
+        std::istreambuf_iterator<char>(),
+    };
+}
+
 TreeSnapshot snapshotTree(const std::filesystem::path& root)
 {
     TreeSnapshot snapshot;
@@ -70,12 +79,7 @@ TreeSnapshot snapshotTree(const std::filesystem::path& root)
             continue;
         }
 
-        std::ifstream file(entry.path(), std::ios::binary);
-        snapshot.emplace_back(
-            relative,
-            std::string(
-                std::istreambuf_iterator<char>(file),
-                std::istreambuf_iterator<char>()));
+        snapshot.emplace_back(relative, readFile(entry.path()));
     }
     std::ranges::sort(snapshot, {}, &TreeSnapshot::value_type::first);
     return snapshot;
@@ -214,6 +218,79 @@ void testSaveLoadAndRuntimeMirror()
     CHECK(draft.has_value());
     CHECK(editor.playingDraft());
     CHECK(!editor.editingDocument());
+}
+
+void testAtomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness()
+{
+    TEST("atomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness");
+    TemporaryProject project;
+    LevelEditor editor = makeEditor(project);
+    editor.newDocument(5, 4, false);
+
+    const std::filesystem::path sourcePath =
+        project.source / "level0" / "screen0.scr";
+    const std::filesystem::path runtimePath =
+        project.runtime / "level0" / "screen0.scr";
+    CHECK(editor.saveDocument(sourcePath));
+    const std::string originalSource = readFile(sourcePath);
+    const std::string originalMirror = readFile(runtimePath);
+
+    editor.setCell({ 2, 2, 1 }, TileType::Wall);
+    const std::filesystem::path sourceTemporary =
+        sourcePath.string() + ".tmp";
+    std::filesystem::create_directories(sourceTemporary);
+    std::ofstream(sourceTemporary / "blocker.txt") << "blocked";
+
+    const LevelEditor::SaveResult sourceFailure =
+        editor.saveDocument(sourcePath);
+    CHECK(sourceFailure.outcome == LevelEditor::SaveResult::Outcome::Failed);
+    CHECK(!sourceFailure.sourceSaved());
+    CHECK(!sourceFailure.mirrorStale());
+    CHECK(readFile(sourcePath) == originalSource);
+    CHECK(readFile(runtimePath) == originalMirror);
+    CHECK(editor.dirty());
+    CHECK(editor.status().find("Failed to save") != std::string::npos);
+
+    std::filesystem::remove_all(sourceTemporary);
+    CHECK(editor.saveDocument(sourcePath));
+    const std::string sourceBeforeMirrorFailure = readFile(sourcePath);
+    const std::string mirrorBeforeMirrorFailure = readFile(runtimePath);
+
+    editor.setCell({ 3, 2, 1 }, TileType::Decorative);
+    const std::filesystem::path mirrorTemporary =
+        runtimePath.string() + ".tmp";
+    std::filesystem::create_directories(mirrorTemporary);
+    std::ofstream(mirrorTemporary / "blocker.txt") << "blocked";
+
+    const LevelEditor::SaveResult mirrorFailure =
+        editor.saveDocument(sourcePath);
+    CHECK(mirrorFailure.outcome ==
+        LevelEditor::SaveResult::Outcome::SourceSavedMirrorStale);
+    CHECK(!mirrorFailure.succeeded());
+    CHECK(mirrorFailure.sourceSaved());
+    CHECK(mirrorFailure.mirrorStale());
+    CHECK(readFile(sourcePath) != sourceBeforeMirrorFailure);
+    CHECK(readFile(runtimePath) == mirrorBeforeMirrorFailure);
+    CHECK(editor.loadedDocumentPath() == sourcePath);
+    CHECK(editor.dirty());
+    CHECK(editor.status().find("Saved source") != std::string::npos);
+
+    std::filesystem::remove_all(mirrorTemporary);
+    const LevelEditor::SaveResult retry = editor.saveDocument(sourcePath);
+    CHECK(retry.succeeded());
+    CHECK(!retry.mirrorStale());
+    CHECK(readFile(runtimePath) == readFile(sourcePath));
+    CHECK(!editor.dirty());
+
+    std::filesystem::create_directories(mirrorTemporary);
+    std::ofstream(mirrorTemporary / "blocker.txt") << "blocked";
+    const LevelEditor::SaveResult cleanMirrorFailure =
+        editor.saveDocument(sourcePath);
+    CHECK(cleanMirrorFailure.mirrorStale());
+    CHECK(editor.dirty());
+    std::filesystem::remove_all(mirrorTemporary);
+    CHECK(editor.saveDocument(sourcePath));
+    CHECK(!editor.dirty());
 }
 
 void testSelectedPathIsSeparateFromTheLoadedDocument()
@@ -1139,6 +1216,7 @@ int main()
     testTileValidationAndPlayerUniqueness();
     testAddLayerBelowShiftsContentAndWaterAndIsUndoable();
     testSaveLoadAndRuntimeMirror();
+    testAtomicSaveFailuresPreserveCommittedFilesAndExposeMirrorStaleness();
     testSelectedPathIsSeparateFromTheLoadedDocument();
     testOpeningScreensPreservesIndependentDraftsAndUndoHistory();
     testUndoRestoresTheLoadedDocumentPath();
