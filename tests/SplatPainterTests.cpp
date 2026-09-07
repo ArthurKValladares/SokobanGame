@@ -5,12 +5,14 @@
 #include "TestHarness.hpp"
 
 #include "engine/AssetManifest.hpp"
+#include "engine/ContentPipeline.hpp"
 #include "engine/SplatPainter.hpp"
 #include "engine/render/ImageData.hpp"
 #include "engine/render/PngWriter.hpp"
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 
@@ -374,6 +376,11 @@ void testSaveWritesBothTrees()
 {
     TEST("saveWritesBothTrees");
     const TemporaryDirectory directory;
+    const std::filesystem::path runtimeRoot = directory.path() / "staged";
+    std::filesystem::create_directories(runtimeRoot);
+    std::ofstream(runtimeRoot / "manifest.json", std::ios::binary) << "{}";
+    std::ofstream(runtimeRoot / "content.index", std::ios::binary)
+        << "format 1\ngame-version editor-test\n";
     SplatPainter painter;
     CHECK(painter.open(
         requestFor(directory, "level2/screen1.scr"), testManifest()));
@@ -396,6 +403,7 @@ void testSaveWritesBothTrees()
     // The staged copy is what the running game reads, so a painted map has to
     // survive a restart without re-running the content pipeline.
     CHECK(std::filesystem::exists(staged));
+    validateContentPackage(runtimeRoot, "editor-test");
 
     // Reopening reads back exactly what was painted.
     SplatPainter reopened;

@@ -2,6 +2,7 @@
 
 #include "engine/DecorationMeshCatalog.hpp"
 #include "engine/DecorationAssetRegistry.hpp"
+#include "engine/ContentPipeline.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -95,6 +96,9 @@ void testRegistrationPopulatesManifestsAndStagesGltfDependencies()
     std::filesystem::create_directories(source / "models/textures");
     std::filesystem::create_directories(runtime);
     std::ofstream(source / "manifest.json") << manifestJson;
+    std::ofstream(runtime / "manifest.json") << manifestJson;
+    std::ofstream(runtime / "content.index", std::ios::binary)
+        << "format 1\ngame-version editor-test\n";
     std::ofstream(source / "models/tree.gltf") << R"json({
       "buffers": [{ "uri": "tree.bin" }],
       "images": [{ "uri": "textures/tree.png" }],
@@ -119,6 +123,9 @@ void testRegistrationPopulatesManifestsAndStagesGltfDependencies()
             .runtimeManifest = live,
             .manifestEditor = editor,
         });
+    if (!added.succeeded) {
+        std::cerr << added.status << '\n';
+    }
 
     CHECK(added.succeeded);
     CHECK(added.added);
@@ -149,6 +156,7 @@ void testRegistrationPopulatesManifestsAndStagesGltfDependencies()
         sourceManifest.modelIdByName(added.modelName)).preserveSourceScale);
     CHECK(sourceManifest.textures().size() == 1);
     CHECK(runtimeManifest.textures().size() == 1);
+    sokoban::validateContentPackage(runtime, "editor-test");
 
     const sokoban::DecorationAssetRegistry::Result repeated =
         sokoban::DecorationAssetRegistry::registerMesh({

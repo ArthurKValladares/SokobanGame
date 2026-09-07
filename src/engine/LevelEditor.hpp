@@ -26,6 +26,7 @@ public:
             Failed,
             Saved,
             SourceSavedMirrorStale,
+            SourceAndMirrorSavedIndexStale,
         };
 
         Outcome outcome = Outcome::Failed;
@@ -43,6 +44,11 @@ public:
         [[nodiscard]] bool mirrorStale() const noexcept
         {
             return outcome == Outcome::SourceSavedMirrorStale;
+        }
+
+        [[nodiscard]] bool packageIndexStale() const noexcept
+        {
+            return outcome == Outcome::SourceAndMirrorSavedIndexStale;
         }
 
         // Preserve the existing if/CHECK calling convention while allowing

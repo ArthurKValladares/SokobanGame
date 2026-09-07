@@ -115,6 +115,7 @@ private:
     std::vector<uint8_t> strokeSnapshot_;
     std::filesystem::path sourcePath_;
     std::filesystem::path runtimePath_;
+    std::filesystem::path runtimeAssetRoot_;
     std::filesystem::path documentPath_;
     std::string status_;
     uint64_t revision_ = 0;

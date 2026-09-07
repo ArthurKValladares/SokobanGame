@@ -1,4 +1,5 @@
 #include "engine/AssetManifestEditor.hpp"
+#include "engine/ContentPipeline.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -250,6 +251,30 @@ void testInvalidSavePreservesFile(const std::filesystem::path& sourceManifest)
         "reload discards invalid edit");
 }
 
+void testSavePublishesAStartupValidRuntimeManifest(
+    const std::filesystem::path& sourceManifest)
+{
+    TemporaryManifest temporary(sourceManifest);
+    const std::filesystem::path runtimeRoot =
+        temporary.file().parent_path() / "runtime";
+    const std::filesystem::path runtimeManifest = runtimeRoot / "manifest.json";
+    std::filesystem::create_directories(runtimeRoot);
+    std::filesystem::copy_file(sourceManifest, runtimeManifest);
+    std::ofstream(runtimeRoot / "content.index", std::ios::binary)
+        << "format 1\ngame-version editor-test\n";
+
+    sokoban::AssetManifestEditor editor;
+    editor.initialize(temporary.file(), runtimeManifest);
+    auto music = editor.musicTracks().front();
+    music.volume = 0.625f;
+    editor.updateMusicTrack(0, music);
+    check(editor.save(), "manifest editor publishes its runtime mirror");
+    check(
+        readFile(temporary.file()) == readFile(runtimeManifest),
+        "source and runtime manifests match");
+    sokoban::validateContentPackage(runtimeRoot, "editor-test");
+}
+
 } // namespace
 
 int main()
@@ -264,6 +289,7 @@ int main()
     testRoundTripAndMutations(sourceManifest);
     testCollectionOperations(sourceManifest);
     testInvalidSavePreservesFile(sourceManifest);
+    testSavePublishesAStartupValidRuntimeManifest(sourceManifest);
 
     if (failures != 0) {
         std::cerr << failures << " asset manifest editor checks failed\n";

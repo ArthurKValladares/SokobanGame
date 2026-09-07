@@ -1,6 +1,7 @@
 #include "engine/AnimationCatalogEditor.hpp"
 
 #include "engine/AssetManifest.hpp"
+#include "engine/ContentPipeline.hpp"
 
 #include <exception>
 #include <system_error>
@@ -60,6 +61,7 @@ bool AnimationCatalogEditor::save(const AssetManifest& manifest)
         catalog_.save(sourcePath_, manifest);
         if (!runtimePath_.empty() && !samePath(sourcePath_, runtimePath_)) {
             catalog_.save(runtimePath_, manifest);
+            (void)refreshContentPackageIndex(runtimePath_.parent_path());
         }
         dirty_ = false;
         status_ = "Saved source and runtime animation catalogs.";

@@ -1,6 +1,7 @@
 #include "engine/AssetManifestEditor.hpp"
 
 #include "engine/AtomicFile.hpp"
+#include "engine/ContentPipeline.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -13,6 +14,21 @@ namespace sokoban {
 namespace {
 
 using Json = nlohmann::ordered_json;
+
+bool samePath(
+    const std::filesystem::path& left,
+    const std::filesystem::path& right)
+{
+    if (left.empty() || right.empty()) {
+        return false;
+    }
+    std::error_code error;
+    const bool equivalent = std::filesystem::equivalent(left, right, error);
+    if (!error) {
+        return equivalent;
+    }
+    return left.lexically_normal() == right.lexically_normal();
+}
 
 template <typename Item>
 std::string uniqueName(
@@ -76,8 +92,11 @@ void updateItem(std::vector<Item>& items, std::size_t index, Item item)
 
 } // namespace
 
-void AssetManifestEditor::initialize(std::filesystem::path filePath)
+void AssetManifestEditor::initialize(
+    std::filesystem::path filePath,
+    std::filesystem::path runtimePath)
 {
+    runtimePath_ = std::move(runtimePath);
     (void)load(std::move(filePath));
 }
 
@@ -132,10 +151,15 @@ bool AssetManifestEditor::save()
         (void)AssetManifest::parse(contents);
 
         atomicFile::write(filePath_, contents);
+        if (!runtimePath_.empty() && !samePath(filePath_, runtimePath_)) {
+            atomicFile::write(runtimePath_, contents);
+            (void)refreshContentPackageIndex(runtimePath_.parent_path());
+        }
         dirty_ = false;
         status_ = "Saved " + filePath_.string();
         return true;
     } catch (const std::exception& error) {
+        dirty_ = true;
         status_ = "Save failed: " + std::string(error.what());
         return false;
     }

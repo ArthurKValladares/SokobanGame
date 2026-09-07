@@ -1,6 +1,7 @@
 #include "engine/SplatPainter.hpp"
 
 #include "engine/AssetManifest.hpp"
+#include "engine/ContentPipeline.hpp"
 #include "engine/Log.hpp"
 #include "engine/render/ImageData.hpp"
 #include "engine/render/PngWriter.hpp"
@@ -94,28 +95,27 @@ CreatedSplatMap createBlankSplatMapAt(
     const std::filesystem::path sourcePath =
         sourceAssetRoot / result.relativePath;
     std::error_code error;
-    if (std::filesystem::exists(sourcePath, error)) {
-        // Never clobber an existing map - it may be painted. The caller wants
-        // the entry to exist, and it already does.
-        result.created = true;
-        result.message =
-            "Using the existing " + sourcePath.filename().string() + ".";
+    const bool sourceExists = std::filesystem::exists(sourcePath, error);
+    if (error) {
+        result.message = "Could not inspect the splat map: " + error.message();
         return result;
     }
 
-    const SplatCanvas blank =
-        SplatCanvas::createForBoard(boardTilesWide, boardTilesHigh);
-    try {
-        std::filesystem::create_directories(sourcePath.parent_path(), error);
-        writeGrayscalePng(
-            sourcePath, blank.width(), blank.height(), blank.weights());
-    } catch (const std::exception& failure) {
-        result.message =
-            "Could not create the splat map: " + std::string(failure.what());
-        log::error(log::Category::Assets)
-            << "Splat map creation failed for " << sourcePath.string()
-            << ": " << failure.what();
-        return result;
+    if (!sourceExists) {
+        const SplatCanvas blank =
+            SplatCanvas::createForBoard(boardTilesWide, boardTilesHigh);
+        try {
+            std::filesystem::create_directories(sourcePath.parent_path(), error);
+            writeGrayscalePng(
+                sourcePath, blank.width(), blank.height(), blank.weights());
+        } catch (const std::exception& failure) {
+            result.message =
+                "Could not create the splat map: " + std::string(failure.what());
+            log::error(log::Category::Assets)
+                << "Splat map creation failed for " << sourcePath.string()
+                << ": " << failure.what();
+            return result;
+        }
     }
 
     // The running game reads the staged tree, so without this copy the new map
@@ -126,8 +126,13 @@ CreatedSplatMap createBlankSplatMapAt(
         try {
             std::filesystem::create_directories(
                 runtimePath.parent_path(), error);
-            writeGrayscalePng(
-                runtimePath, blank.width(), blank.height(), blank.weights());
+            if (sourcePath.lexically_normal() != runtimePath.lexically_normal()) {
+                std::filesystem::copy_file(
+                    sourcePath,
+                    runtimePath,
+                    std::filesystem::copy_options::overwrite_existing);
+            }
+            (void)refreshContentPackageIndex(runtimeAssetRoot);
         } catch (const std::exception& failure) {
             result.message = "Created the splat map but could not stage it: " +
                 std::string(failure.what());
@@ -139,9 +144,11 @@ CreatedSplatMap createBlankSplatMapAt(
     }
 
     result.created = true;
-    result.message = "Created a blank " + sourcePath.filename().string() +
-        " (" + std::to_string(boardTilesWide) + "x" +
-        std::to_string(boardTilesHigh) + " tiles).";
+    result.message = sourceExists
+        ? "Using the existing " + sourcePath.filename().string() + "."
+        : "Created a blank " + sourcePath.filename().string() +
+            " (" + std::to_string(boardTilesWide) + "x" +
+            std::to_string(boardTilesHigh) + " tiles).";
     return result;
 }
 
@@ -182,6 +189,7 @@ bool SplatPainter::open(
     runtimePath_ = request.runtimeAssetRoot.empty()
         ? std::filesystem::path {}
         : request.runtimeAssetRoot / relative;
+    runtimeAssetRoot_ = request.runtimeAssetRoot;
     documentPath_ = request.documentPath;
 
     std::optional<SplatCanvas> loaded;
@@ -249,6 +257,7 @@ void SplatPainter::close()
     strokeSnapshot_.clear();
     sourcePath_.clear();
     runtimePath_.clear();
+    runtimeAssetRoot_.clear();
     documentPath_.clear();
     ++revision_;
 }
@@ -397,9 +406,6 @@ bool SplatPainter::save()
         return false;
     }
 
-    // Mirroring into the staged tree is a convenience, not the save itself:
-    // the committed copy is already written, so a failure here is a warning
-    // rather than a lost edit.
     if (!runtimePath_.empty()) {
         try {
             std::error_code error;
@@ -410,10 +416,14 @@ bool SplatPainter::save()
                 canvas_.width(),
                 canvas_.height(),
                 canvas_.weights());
+            (void)refreshContentPackageIndex(runtimeAssetRoot_);
         } catch (const std::exception& failure) {
-            log::warning(log::Category::Assets)
-                << "Saved the splat map but could not update the staged copy "
-                << runtimePath_.string() << ": " << failure.what();
+            dirty_ = true;
+            status_ =
+                "Saved the source splat map, but runtime publication failed: " +
+                std::string(failure.what());
+            log::error(log::Category::Assets) << status_;
+            return false;
         }
     }
 

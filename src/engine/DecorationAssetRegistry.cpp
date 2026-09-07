@@ -1,6 +1,7 @@
 #include "engine/DecorationAssetRegistry.hpp"
 
 #include "engine/AtomicFile.hpp"
+#include "engine/ContentPipeline.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -326,6 +327,7 @@ DecorationAssetRegistry::Result DecorationAssetRegistry::registerMesh(
             request.sourceAssetRoot, request.runtimeAssetRoot, files);
 
         bool editorChanged = false;
+        bool editorPublishedRuntime = false;
         bool textureAdded = false;
         std::optional<AssetManifest::Texture> materialTexture;
         if (const std::optional<std::filesystem::path> texturePath =
@@ -393,6 +395,9 @@ DecorationAssetRegistry::Result DecorationAssetRegistry::registerMesh(
                 (void)request.manifestEditor.reload();
                 throw std::runtime_error(failure);
             }
+            editorPublishedRuntime = pathKey(
+                request.manifestEditor.runtimePath()) == pathKey(
+                    request.runtimeAssetRoot / "manifest.json");
         }
 
         if (materialTexture &&
@@ -426,13 +431,15 @@ DecorationAssetRegistry::Result DecorationAssetRegistry::registerMesh(
                 model.preserveSourceScale) {
             status += " Restart the editor to reload the upgraded model.";
         }
-        try {
+        if (!editorPublishedRuntime &&
+            pathKey(request.manifestEditor.runtimePath()) != pathKey(
+                request.runtimeAssetRoot / "manifest.json")) {
             atomicFile::write(
                 request.runtimeAssetRoot / "manifest.json",
                 request.manifestEditor.serialize());
-        } catch (const std::exception& error) {
-            status += " The staged manifest could not be updated: " +
-                std::string(error.what());
+        }
+        if (!editorPublishedRuntime) {
+            (void)refreshContentPackageIndex(request.runtimeAssetRoot);
         }
 
         return {
@@ -442,9 +449,16 @@ DecorationAssetRegistry::Result DecorationAssetRegistry::registerMesh(
             .status = std::move(status),
         };
     } catch (const std::exception& error) {
+        std::string status = "Could not register decoration mesh: " +
+            std::string(error.what());
+        try {
+            (void)refreshContentPackageIndex(request.runtimeAssetRoot);
+        } catch (const std::exception& refreshError) {
+            status += "; runtime content index recovery also failed: " +
+                std::string(refreshError.what());
+        }
         return {
-            .status = "Could not register decoration mesh: " +
-                std::string(error.what()),
+            .status = std::move(status),
         };
     }
 }

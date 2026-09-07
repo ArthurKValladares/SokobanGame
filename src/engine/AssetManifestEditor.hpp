@@ -14,13 +14,16 @@ namespace sokoban {
 // replacement remain independent of ImGui.
 class AssetManifestEditor {
 public:
-    void initialize(std::filesystem::path filePath);
+    void initialize(
+        std::filesystem::path filePath,
+        std::filesystem::path runtimePath = {});
     [[nodiscard]] bool load(std::filesystem::path filePath);
     [[nodiscard]] bool reload();
     [[nodiscard]] bool validate();
     [[nodiscard]] bool save();
 
     [[nodiscard]] const std::filesystem::path& filePath() const { return filePath_; }
+    [[nodiscard]] const std::filesystem::path& runtimePath() const { return runtimePath_; }
     [[nodiscard]] bool dirty() const { return dirty_; }
     [[nodiscard]] const std::string& status() const { return status_; }
     [[nodiscard]] std::string serialize() const;
@@ -64,6 +67,7 @@ private:
     void markChanged();
 
     std::filesystem::path filePath_;
+    std::filesystem::path runtimePath_;
     std::vector<AssetManifest::Texture> textures_;
     std::vector<AssetManifest::Model> models_;
     std::vector<AssetManifest::Animation> animations_;

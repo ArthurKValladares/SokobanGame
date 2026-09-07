@@ -1,5 +1,6 @@
 #include "engine/LevelProjectStore.hpp"
 
+#include "engine/ContentPipeline.hpp"
 #include "engine/Level.hpp"
 #include "engine/LevelCatalog.hpp"
 #include "engine/OverworldMap.hpp"
@@ -48,6 +49,21 @@ std::filesystem::path workingPath(
         (root.filename().string() + std::string(suffix));
 }
 
+std::filesystem::path runtimeWorkingPath(
+    const std::filesystem::path& root,
+    std::string_view suffix)
+{
+    const std::filesystem::path packageRoot = root.parent_path();
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(
+            packageRoot / "content.index", error) || error) {
+        return workingPath(root, suffix);
+    }
+    return packageRoot.parent_path() /
+        (packageRoot.filename().string() + "." + root.filename().string() +
+         std::string(suffix));
+}
+
 void removeTree(const std::filesystem::path& path)
 {
     std::error_code error;
@@ -71,9 +87,11 @@ void renamePath(
     }
 }
 
-void recoverWorkingTree(const std::filesystem::path& root)
+void recoverWorkingTree(
+    const std::filesystem::path& root,
+    const std::filesystem::path& stage,
+    const std::filesystem::path& backup)
 {
-    const std::filesystem::path backup = workingPath(root, ".editor-backup");
     const bool rootExists = std::filesystem::exists(root);
     const bool backupExists = std::filesystem::exists(backup);
     if (!rootExists && backupExists) {
@@ -81,7 +99,7 @@ void recoverWorkingTree(const std::filesystem::path& root)
     } else if (rootExists && backupExists) {
         removeTree(backup);
     }
-    removeTree(workingPath(root, ".editor-stage"));
+    removeTree(stage);
 }
 
 void copyDirectoryContents(
@@ -342,8 +360,12 @@ LevelProjectStore::Result LevelProjectStore::transact(
         workingPath(projectRoot, ".editor-stage");
     const std::filesystem::path projectBackup =
         workingPath(projectRoot, ".editor-backup");
-    std::filesystem::path runtimeStage;
-    std::filesystem::path runtimeBackup;
+    const std::filesystem::path runtimeStage = runtimeRoot
+        ? runtimeWorkingPath(*runtimeRoot, ".editor-stage")
+        : std::filesystem::path {};
+    const std::filesystem::path runtimeBackup = runtimeRoot
+        ? runtimeWorkingPath(*runtimeRoot, ".editor-backup")
+        : std::filesystem::path {};
     bool projectInstalled = false;
     bool projectBackedUp = false;
     bool runtimeInstalled = false;
@@ -352,11 +374,9 @@ LevelProjectStore::Result LevelProjectStore::transact(
     bool runtimeHadOriginal = false;
 
     try {
-        recoverWorkingTree(projectRoot);
+        recoverWorkingTree(projectRoot, projectStage, projectBackup);
         if (runtimeRoot) {
-            recoverWorkingTree(*runtimeRoot);
-            runtimeStage = workingPath(*runtimeRoot, ".editor-stage");
-            runtimeBackup = workingPath(*runtimeRoot, ".editor-backup");
+            recoverWorkingTree(*runtimeRoot, runtimeStage, runtimeBackup);
         }
 
         copyDirectoryContents(projectRoot, projectStage);
@@ -382,6 +402,7 @@ LevelProjectStore::Result LevelProjectStore::transact(
             }
             renamePath(runtimeStage, *runtimeRoot);
             runtimeInstalled = true;
+            (void)refreshContentPackageIndex(runtimeRoot->parent_path());
         }
 
         std::error_code ignored;

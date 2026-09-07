@@ -1,4 +1,5 @@
 #include "engine/ContentPipeline.hpp"
+#include "engine/AtomicFile.hpp"
 #include "engine/render/SelectorRenderConfig.hpp"
 
 #include "engine/AnimationCatalog.hpp"
@@ -136,6 +137,28 @@ std::string contentPathKey(const std::filesystem::path& path)
     key = lowercase(std::move(key));
 #endif
     return key;
+}
+
+std::string contentIndexContents(
+    const std::vector<ContentFile>& files,
+    std::uintmax_t totalBytes,
+    std::string_view gameVersion)
+{
+    std::string contents = "format 1\n";
+    contents += "game-version " + std::string(gameVersion) + '\n';
+    contents += "file-count " + std::to_string(files.size()) + '\n';
+    contents += "total-bytes " + std::to_string(totalBytes) + '\n';
+    for (const ContentFile& file : files) {
+        const std::string relative = file.destination.generic_string();
+        if (relative.empty() || relative.find_first_of("\r\n") !=
+                std::string::npos) {
+            throw std::runtime_error(
+                "content path cannot be represented in content.index: " +
+                file.destination.string());
+        }
+        contents += "file " + std::to_string(file.size) + ' ' + relative + '\n';
+    }
+    return contents;
 }
 
 bool isNoticeFile(const std::filesystem::path& path)
@@ -1091,10 +1114,127 @@ void validateContentPackage(
         }
         ++discoveredCount;
     }
+    if (error) {
+        throw std::runtime_error(
+            "cannot enumerate runtime content: " + error.message());
+    }
     if (discoveredCount != declaredCount) {
         throw std::runtime_error(
             "runtime content file count does not match index: " + indexPath.string());
     }
+}
+
+bool refreshContentPackageIndex(const std::filesystem::path& root)
+{
+    std::error_code error;
+    const std::filesystem::path requestedIndex = root / "content.index";
+    const bool indexExists = std::filesystem::exists(requestedIndex, error);
+    if (error) {
+        throw std::runtime_error(
+            "cannot inspect runtime content index: " + requestedIndex.string() +
+            ": " + error.message());
+    }
+    if (!indexExists) {
+        return false;
+    }
+    if (!std::filesystem::is_regular_file(requestedIndex, error) || error) {
+        throw std::runtime_error(
+            "runtime content index is not a regular file: " +
+            requestedIndex.string());
+    }
+
+    const std::filesystem::path packageRoot =
+        canonicalRoot(root, "runtime content");
+    const std::filesystem::path indexPath = packageRoot / "content.index";
+    std::ifstream index(indexPath, std::ios::binary);
+    if (!index) {
+        throw std::runtime_error(
+            "cannot read runtime content index: " + indexPath.string());
+    }
+    std::string formatLine;
+    std::string versionLine;
+    constexpr std::string_view versionPrefix = "game-version ";
+    if (!std::getline(index, formatLine) || formatLine != "format 1" ||
+        !std::getline(index, versionLine) ||
+        !versionLine.starts_with(versionPrefix) ||
+        versionLine.size() == versionPrefix.size()) {
+        throw std::runtime_error(
+            "unsupported or corrupt runtime content index: " +
+            indexPath.string());
+    }
+    const std::string gameVersion = versionLine.substr(versionPrefix.size());
+    if (gameVersion.find_first_of("\r\n") != std::string::npos) {
+        throw std::runtime_error(
+            "invalid game version in runtime content index: " +
+            indexPath.string());
+    }
+    index.close();
+
+    const std::filesystem::path temporaryIndex =
+        indexPath.parent_path() / (indexPath.filename().string() + ".tmp");
+    error.clear();
+    std::filesystem::remove(temporaryIndex, error);
+    if (error) {
+        throw std::runtime_error(
+            "cannot clean temporary runtime content index: " +
+            error.message());
+    }
+
+    std::vector<ContentFile> files;
+    std::uintmax_t totalBytes = 0;
+    error.clear();
+    for (std::filesystem::recursive_directory_iterator it(packageRoot, error), end;
+         it != end;
+         it.increment(error)) {
+        if (error) {
+            throw std::runtime_error(
+                "cannot enumerate runtime content: " + error.message());
+        }
+        const std::filesystem::directory_entry& entry = *it;
+        if (entry.is_symlink(error) || error) {
+            throw std::runtime_error(
+                "runtime content package contains a symbolic link: " +
+                entry.path().string());
+        }
+        if (entry.is_directory(error) && !error) {
+            continue;
+        }
+        if (error || !entry.is_regular_file(error) || error) {
+            throw std::runtime_error(
+                "runtime content package contains an unsupported artifact: " +
+                entry.path().string());
+        }
+        const std::filesystem::path relative =
+            entry.path().lexically_relative(packageRoot);
+        if (relative == "content.index") {
+            continue;
+        }
+        const std::uintmax_t size = entry.file_size(error);
+        if (error) {
+            throw std::runtime_error(
+                "cannot read runtime content file size: " +
+                entry.path().string() + ": " + error.message());
+        }
+        if (totalBytes > std::numeric_limits<std::uintmax_t>::max() - size) {
+            throw std::runtime_error(
+                "runtime content byte total overflows: " + indexPath.string());
+        }
+        totalBytes += size;
+        files.push_back({ {}, relative, size, false });
+    }
+    if (error) {
+        throw std::runtime_error(
+            "cannot enumerate runtime content: " + error.message());
+    }
+    std::ranges::sort(files, {}, [](const ContentFile& file) {
+        return contentPathKey(file.destination);
+    });
+
+    atomicFile::write(
+        indexPath,
+        contentIndexContents(files, totalBytes, gameVersion));
+    validateContentPackage(packageRoot, gameVersion);
+    return true;
 }
 
 ContentInventory collectContentInventory(const ContentSourceRoots& roots)
@@ -1181,21 +1321,10 @@ ContentInventory stageContent(
             inventory.totalBytes += artifact.size();
         }
 
-        std::ofstream index(stagingRoot / "content.index", std::ios::binary);
-        if (!index) {
-            throw std::runtime_error("cannot create staged content index");
-        }
-        index << "format 1\n";
-        index << "game-version " << gameVersion << '\n';
-        index << "file-count " << inventory.files.size() << '\n';
-        index << "total-bytes " << inventory.totalBytes << '\n';
-        for (const ContentFile& file : inventory.files) {
-            index << "file " << file.size << ' ' << file.destination.generic_string() << '\n';
-        }
-        index.close();
-        if (!index) {
-            throw std::runtime_error("cannot finish staged content index");
-        }
+        atomicFile::write(
+            stagingRoot / "content.index",
+            contentIndexContents(
+                inventory.files, inventory.totalBytes, gameVersion));
         validateContentPackage(stagingRoot, gameVersion);
 
         std::filesystem::remove_all(backupRoot, error);

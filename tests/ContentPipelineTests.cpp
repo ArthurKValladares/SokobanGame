@@ -1,4 +1,5 @@
 #include "engine/ContentPipeline.hpp"
+#include "engine/LevelEditor.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/render/ShaderCatalog.hpp"
@@ -569,6 +570,70 @@ void testStagedContentIndexValidation()
         "content index rejects a truncated file list");
 }
 
+void testRuntimeIndexRefreshTracksEditorMutations()
+{
+    TempDirectory temp;
+    const auto roots = createValidContent(temp.path());
+    const std::filesystem::path output = temp.path() / "package/assets";
+    (void)sokoban::stageContent(roots, output, "1.2.3");
+
+    std::ofstream(output / "textures/hero.png", std::ios::app | std::ios::binary)
+        << "edited";
+    writeFile(output / "custom/editor-added.bin", "new editor asset");
+    std::filesystem::remove(output / "models/LICENSE.txt");
+    checkThrows(
+        [&] { sokoban::validateContentPackage(output, "1.2.3"); },
+        "runtime changes invalidate the previous content index");
+    check(
+        sokoban::refreshContentPackageIndex(output),
+        "an existing staged package refreshes its index");
+    sokoban::validateContentPackage(output, "1.2.3");
+    check(
+        readFile(output / "content.index").find("game-version 1.2.3\n") !=
+            std::string::npos,
+        "index refresh preserves the staged game version");
+
+    const std::filesystem::path sourceOnly = temp.path() / "source-only";
+    std::filesystem::create_directories(sourceOnly);
+    check(
+        !sokoban::refreshContentPackageIndex(sourceOnly),
+        "source-only editor roots do not acquire a package index");
+    check(
+        !std::filesystem::exists(sourceOnly / "content.index"),
+        "source-only roots remain unchanged");
+}
+
+void testLevelEditorPublishesAStartupValidPackage()
+{
+    TempDirectory temp;
+    const auto roots = createValidContent(temp.path());
+    const std::filesystem::path output = temp.path() / "package/assets";
+    (void)sokoban::stageContent(roots, output, "1.2.3");
+
+    sokoban::LevelEditor editor;
+    editor.initialize(roots.levels, output / "levels", 0, 0);
+    const std::filesystem::path screen =
+        roots.levels / "level0/screen0.scr";
+    editor.resizeDocument(4, 2, false);
+    check(editor.saveDocument(screen), "level resize publishes successfully");
+    sokoban::validateContentPackage(output, "1.2.3");
+
+    std::vector<sokoban::LevelEditor::LevelDirectory> levels =
+        editor.collectLevelDirectories();
+    editor.addScreenAt(levels.front(), 1);
+    check(
+        std::filesystem::is_regular_file(output / "levels/level0/screen1.scr"),
+        "added screen reaches the runtime package");
+    sokoban::validateContentPackage(output, "1.2.3");
+
+    levels = editor.collectLevelDirectories();
+    editor.deleteScreen(levels.front(), 1);
+    check(
+        !std::filesystem::exists(output / "levels/level0/screen1.scr"),
+        "deleted screen leaves the runtime package");
+    sokoban::validateContentPackage(output, "1.2.3");
+}
+
 void testUnassignedLegacySelectorIsStaged()
 {
     TempDirectory temp;
@@ -1074,6 +1139,8 @@ int main()
     try {
         testInventoryAndStaging();
         testStagedContentIndexValidation();
+        testRuntimeIndexRefreshTracksEditorMutations();
+        testLevelEditorPublishesAStartupValidPackage();
         testUnassignedLegacySelectorIsStaged();
         testComposedOverworldIsValidatedAndStaged();
         testBakedThumbnailsAreStaged();

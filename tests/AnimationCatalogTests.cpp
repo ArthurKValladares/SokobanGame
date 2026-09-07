@@ -1,6 +1,7 @@
 #include "engine/AnimationCatalog.hpp"
 #include "engine/AnimationCatalogEditor.hpp"
 #include "engine/AssetManifest.hpp"
+#include "engine/ContentPipeline.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -230,7 +231,14 @@ void testEditorPersistsSourceAndRuntimeCopies()
             assetRoot() / "animation_catalog.json", manifest);
     TempDirectory temporary;
     const std::filesystem::path source = temporary.path() / "source.json";
-    const std::filesystem::path runtime = temporary.path() / "staged.json";
+    const std::filesystem::path runtimeRoot = temporary.path() / "runtime";
+    const std::filesystem::path runtime =
+        runtimeRoot / "animation_catalog.json";
+    std::filesystem::create_directories(runtimeRoot);
+    std::filesystem::copy_file(
+        assetRoot() / "manifest.json", runtimeRoot / "manifest.json");
+    std::ofstream(runtimeRoot / "content.index", std::ios::binary)
+        << "format 1\ngame-version editor-test\n";
     {
         std::ofstream stream(source, std::ios::binary);
         stream << initial.serialize(manifest);
@@ -248,6 +256,7 @@ void testEditorPersistsSourceAndRuntimeCopies()
     check(editor.dirty(), "editing marks catalog dirty");
     check(editor.save(manifest), "editor saves mirrored catalogs");
     check(!editor.dirty(), "successful save clears dirty state");
+    sokoban::validateContentPackage(runtimeRoot, "editor-test");
 
     const sokoban::AnimationCatalog savedSource =
         sokoban::AnimationCatalog::loadFromFile(source, manifest);

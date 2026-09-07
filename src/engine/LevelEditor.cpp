@@ -1,6 +1,7 @@
 #include "engine/LevelEditor.hpp"
 
 #include "engine/AtomicFile.hpp"
+#include "engine/ContentPipeline.hpp"
 #include "engine/OverworldMapEditor.hpp"
 
 #include "engine/LevelCatalog.hpp"
@@ -1774,6 +1775,20 @@ LevelEditor::SaveResult LevelEditor::saveDocument(
                 mirrorPath.string() + ": " + exception.what();
             return {
                 .outcome = SaveResult::Outcome::SourceSavedMirrorStale,
+            };
+        }
+
+        try {
+            (void)refreshContentPackageIndex(
+                document_.runtimeLevelRoot.parent_path());
+        } catch (const std::exception& exception) {
+            document_.dirty = true;
+            document_.status =
+                "Saved source and runtime mirror, but failed to refresh the "
+                "runtime content index: " + std::string(exception.what());
+            return {
+                .outcome =
+                    SaveResult::Outcome::SourceAndMirrorSavedIndexStale,
             };
         }
     }

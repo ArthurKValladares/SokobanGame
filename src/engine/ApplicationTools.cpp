@@ -1,6 +1,6 @@
 #include "engine/ApplicationTools.hpp"
 
-#include "engine/AtomicFile.hpp"
+#include "engine/ContentPipeline.hpp"
 #include "engine/DecorationAssetRegistry.hpp"
 #include "engine/EditorInteraction.hpp"
 #include "engine/Log.hpp"
@@ -48,7 +48,9 @@ void ApplicationTools::initialize(
             manifest)) {
         animations = animationCatalogEditor.catalog();
     }
-    assetManifestEditor.initialize(sourceAssetRoot / "manifest.json");
+    assetManifestEditor.initialize(
+        sourceAssetRoot / "manifest.json",
+        runtimeAssetRoot / "manifest.json");
     (void)decorationMeshCatalog.refresh(sourceAssetRoot, manifest);
 }
 
@@ -161,8 +163,7 @@ bool ApplicationTools::createGroundSplatMap(
             return false;
         }
         renderer.syncManifestTextures();
-        persistManifestTexture(
-            runtimeAssetRoot, textureName, created.relativePath);
+        persistManifestTexture(textureName, created.relativePath);
     }
 
     return openGroundPainting(
@@ -170,7 +171,6 @@ bool ApplicationTools::createGroundSplatMap(
 }
 
 void ApplicationTools::persistManifestTexture(
-    const std::filesystem::path& runtimeAssetRoot,
     const std::string& name,
     const std::string& relativePath)
 {
@@ -192,15 +192,6 @@ void ApplicationTools::persistManifestTexture(
         return;
     }
 
-    try {
-        atomicFile::write(
-            runtimeAssetRoot / "manifest.json",
-            assetManifestEditor.serialize());
-    } catch (const std::exception& error) {
-        log::warning(log::Category::Assets)
-            << "Saved " << name << " to the source manifest but could not "
-            << "update the staged copy: " << error.what();
-    }
 }
 
 std::optional<std::string> ApplicationTools::registerDecorationMesh(
@@ -584,6 +575,15 @@ bool ApplicationTools::bakeTileThumbnails(
                 << "Could not bake a thumbnail for "
                 << tileTypeName(definition.type) << ": " << error.what();
         }
+    }
+
+    try {
+        (void)refreshContentPackageIndex(runtimeAssetRoot);
+    } catch (const std::exception& error) {
+        allSucceeded = false;
+        log::error(log::Category::Assets)
+            << "Tile thumbnails were written, but the runtime content index "
+            << "could not be refreshed: " << error.what();
     }
 
     log::info(log::Category::Assets)

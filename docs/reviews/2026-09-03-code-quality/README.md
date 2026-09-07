@@ -8,13 +8,15 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Follow-up, 2026-09-07 (CQ-03):** Ordinary puzzle sources and their derived runtime mirrors now use durable atomic replacement with checked completion. Saving returns a structured outcome that distinguishes complete failure from a committed source whose mirror is stale; the latter remains dirty and can be retried without losing the authoritative source.
 
+**Follow-up, 2026-09-07 (CQ-04):** Successful editor publication now atomically regenerates and validates the existing runtime `content.index` while preserving its staged game version. Level and overworld transactions, splat maps, manifests, imported decorations, animation catalogs, and tile-thumbnail baking all use this contract. Source-only test and authoring roots remain unindexed. CQ-09 still governs whether imported GLTF/GLB dependency discovery itself is complete.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
 
 The most consequential remaining problems occur **between these components**. A successfully decoded save can be discarded when its migration write fails. A drained save queue is treated as a successful save. Editor changes conflict with immutable runtime-package validation. A deferred renderer publication consumes the data needed for its own retry. These are more valuable to fix than another broad file-splitting or formatting pass.
 
-This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-03 have since been resolved, leaving 11 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
+This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-04 have since been resolved, leaving 10 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
 
 - **P1:** prioritize before relying on persistence or authoring for valuable work; existing data or unsaved progress can be lost or abandoned.
 - **P2:** schedule fixes for observable correctness, resource use, or validation gaps; several require unusual inputs or failure conditions.
@@ -109,7 +111,7 @@ Ordinary puzzle saving opens the authoritative source file with `std::ios::trunc
 
 **Regression gate:** Source write/replace failures leave the prior bytes intact. Mirror failure has a specific result and recoverable retry path. Keep puzzle and overworld save guarantees explicit and consistent with the UI.
 
-### CQ-04 — Coordinate authoring updates with runtime-package validation
+### CQ-04 — Coordinate authoring updates with runtime-package validation (resolved 2026-09-07)
 
 **Location:** [RuntimeContent.cpp](../../../src/engine/RuntimeContent.cpp), line 19; [ContentPipeline.cpp](../../../src/engine/ContentPipeline.cpp), lines 1040–1044 and 1088–1090; editor mirror writes in [LevelEditor.cpp](../../../src/engine/LevelEditor.cpp), lines 1738–1761.
 

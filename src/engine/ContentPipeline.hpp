@@ -79,4 +79,12 @@ void validateContentPackage(
     const std::filesystem::path& root,
     std::string_view expectedGameVersion);
 
+// Rebuilds an existing runtime content.index from the files currently in the
+// package while preserving its staged game version. Returns false when `root`
+// is not a staged package, allowing source-only editor fixtures to opt out.
+// The replacement is atomic and the completed package is validated before
+// this function returns.
+[[nodiscard]] bool refreshContentPackageIndex(
+    const std::filesystem::path& root);
+
 } // namespace sokoban

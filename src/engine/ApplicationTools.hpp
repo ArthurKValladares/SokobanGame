@@ -119,7 +119,6 @@ private:
         Vec2 pointerPixels,
         VulkanRenderer& renderer);
     void persistManifestTexture(
-        const std::filesystem::path& runtimeAssetRoot,
         const std::string& name,
         const std::string& relativePath);
 };
