@@ -53,8 +53,9 @@ public:
         ProfileSections sections);
 
     // Drains the channel's pending write and repoints it at a new store
-    // (e.g. a save-slot switch). No-op-safe from the game thread.
-    void replaceChannel(
+    // (e.g. a save-slot switch). Returns false without changing the channel
+    // when its latest requested snapshot could not be persisted.
+    [[nodiscard]] bool replaceChannel(
         int channel,
         std::filesystem::path root,
         std::string fileStem,
@@ -66,8 +67,14 @@ public:
     {
         requestSave(0, std::move(profile), urgency);
     }
-    // Blocks until every channel has no pending or in-flight write.
-    void flush();
+    // Makes a retained failed snapshot eligible for one more background write.
+    // Returns false when this channel has no failed snapshot to retry.
+    [[nodiscard]] bool retryFailedSave(int channel = 0);
+    // Blocks until every channel has no actionable or in-flight write. A
+    // failed snapshot remains pending but blocked from automatic retries;
+    // another request supersedes it. Returns false while any such snapshot
+    // remains unpersisted.
+    [[nodiscard]] bool flush();
 
     [[nodiscard]] std::string status(int channel = 0) const;
     [[nodiscard]] Diagnostics diagnostics(int channel = 0) const;
@@ -88,6 +95,7 @@ private:
         std::uint64_t completedWriteCount = 0;
         std::uint64_t coalescedRequestCount = 0;
         bool forceWrite = false;
+        bool retryBlocked = false;
         bool writing = false;
         bool lastWriteSucceeded = true;
     };

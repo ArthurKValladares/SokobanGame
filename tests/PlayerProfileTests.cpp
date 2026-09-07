@@ -1187,7 +1187,7 @@ void testAsyncSaveCoalescingAndFlush()
     check(queued.pending, "deferred save remains off the calling thread");
     check(queued.coalescedRequests == 1, "pending saves coalesce");
 
-    store.flush();
+    check(store.flush(), "successful coalesced flush reports success");
     const sokoban::AsyncSaveStore::Diagnostics flushed = store.diagnostics();
     check(flushed.completedWrites == 1, "coalesced profiles produce one write");
     check(!flushed.pending && !flushed.writing, "flush drains background writer");
@@ -1198,12 +1198,13 @@ void testAsyncSaveCoalescingAndFlush()
         std::istreambuf_iterator<char>(stream),
         std::istreambuf_iterator<char> {}
     };
+    stream.close();
     check(sokoban::decodePlayerProfile(contents).profile.settings.audio.musicVolume == 0.75f,
         "coalesced save writes newest profile");
 
     latest.settings.audio.musicVolume = 0.5f;
     store.requestSave(latest, sokoban::AsyncSaveStore::Urgency::Immediate);
-    store.flush();
+    check(store.flush(), "successful immediate flush reports success");
     check(store.diagnostics().completedWrites == 2,
         "immediate request is written by background worker");
 }
@@ -1225,6 +1226,53 @@ void testAsyncSaveDestructorFlushesNewestProfile()
     };
     check(sokoban::decodePlayerProfile(contents).profile.settings.audio.soundVolume == 0.35f,
         "async store destructor flushes newest profile");
+}
+
+void testAsyncSaveFailureRetainsRetryableSnapshot()
+{
+    TemporaryDirectory temporary;
+    sokoban::AsyncSaveStore store(
+        temporary.path(), std::chrono::hours(1));
+    const int independentChannel = store.addChannel(
+        temporary.path(), "settings", sokoban::ProfileSections::SettingsOnly);
+    sokoban::PlayerProfile profile;
+    profile.unlockedLevel = 4;
+    profile.setCurrentLevel(4);
+    profile.normalize();
+
+    sokoban::atomicFile::failWriteAfterForTesting(
+        0, std::errc::no_space_on_device);
+    store.requestSave(profile, sokoban::AsyncSaveStore::Urgency::Immediate);
+    check(!store.flush(), "failed asynchronous write makes flush report failure");
+
+    const sokoban::AsyncSaveStore::Diagnostics failed = store.diagnostics();
+    check(failed.pending && !failed.writing,
+        "failed asynchronous write retains its snapshot as pending");
+    check(!failed.lastWriteSucceeded,
+        "failed asynchronous write remains visible in diagnostics");
+    check(store.status().starts_with("Player profile save failed:"),
+        "failed asynchronous write retains its storage error");
+
+    sokoban::PlayerProfile settings;
+    settings.settings.audio.musicVolume = 0.25f;
+    store.requestSave(
+        independentChannel, settings, sokoban::AsyncSaveStore::Urgency::Immediate);
+    check(!store.flush(),
+        "another channel does not implicitly retry a retained failure");
+    check(store.diagnostics().completedWrites == failed.completedWrites,
+        "blocked failed snapshot is not retried by another channel's wakeup");
+    check(store.load(independentChannel).profile.settings.audio.musicVolume == 0.25f,
+        "independent channel still persists while a failed snapshot is retained");
+
+    check(store.retryFailedSave(), "retained asynchronous snapshot can be retried");
+    check(store.flush(), "successful retry makes flush report success");
+    check(!store.diagnostics().pending &&
+            store.diagnostics().lastWriteSucceeded,
+        "successful retry clears pending failure state");
+    check(store.load().profile == profile,
+        "retry persists the exact retained snapshot");
+    check(!store.retryFailedSave(),
+        "successful channel has no failed snapshot left to retry");
 }
 
 } // namespace
@@ -1251,7 +1299,7 @@ void testAsyncStoreMultipleChannels()
 
         store.requestSave(progress);
         store.requestSave(settings, config);
-        store.flush();
+        check(store.flush(), "multi-channel flush reports success");
 
         // One worker wrote both channels to their own files.
         check(store.diagnostics(0).completedWrites >= 1, "channel 0 wrote");
@@ -1275,12 +1323,13 @@ void testAsyncStoreMultipleChannels()
         slot2.setCurrentScreen(5, 0);
         slot2.normalize();
         store.requestSave(repointed, slot2);
-        store.flush();
+        check(store.flush(), "repointed channel flush reports success");
         check(std::filesystem::is_regular_file(temporary.path() / "profile-slot2.json"),
             "third channel wrote a distinct file");
-        store.replaceChannel(
-            repointed, temporary.path(), "profile-slot3",
-            sokoban::ProfileSections::ProgressOnly);
+        check(store.replaceChannel(
+                  repointed, temporary.path(), "profile-slot3",
+                  sokoban::ProfileSections::ProgressOnly),
+            "persisted channel can be replaced");
         check(store.load(repointed).profile.progressEmpty(),
             "replaced channel points at a fresh (empty) store");
     }
@@ -1475,6 +1524,7 @@ int main()
         testUnsupportedProfileFormatsArePreserved();
         testAsyncSaveCoalescingAndFlush();
         testAsyncSaveDestructorFlushesNewestProfile();
+        testAsyncSaveFailureRetainsRetryableSnapshot();
         testAsyncStoreMultipleChannels();
     } catch (const std::exception& error) {
         std::cerr << "Unexpected player profile test exception: "

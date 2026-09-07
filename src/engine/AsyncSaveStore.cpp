@@ -20,7 +20,7 @@ AsyncSaveStore::AsyncSaveStore(
 
 AsyncSaveStore::~AsyncSaveStore()
 {
-    flush();
+    (void)flush();
     {
         const std::scoped_lock lock(mutex_);
         stopping_ = true;
@@ -53,22 +53,35 @@ const AsyncSaveStore::Channel& AsyncSaveStore::channelAt(int channel) const
 bool AsyncSaveStore::anyPendingLocked() const
 {
     return std::ranges::any_of(channels_, [](const Channel& channel) {
-        return channel.pending.has_value();
+        return channel.pending.has_value() && !channel.retryBlocked;
     });
 }
 
-void AsyncSaveStore::replaceChannel(
+bool AsyncSaveStore::replaceChannel(
     int channel,
     std::filesystem::path root,
     std::string fileStem,
     ProfileSections sections)
 {
-    flush();
-    const std::scoped_lock lock(mutex_);
+    std::unique_lock lock(mutex_);
     Channel& target = channelAt(channel);
-    // flush() guarantees nothing pending or in flight for this channel.
+    if (target.pending && !target.retryBlocked) {
+        target.forceWrite = true;
+    }
+    condition_.notify_all();
+    condition_.wait(lock, [&target] {
+        return !target.writing &&
+            (!target.pending || target.retryBlocked);
+    });
+    if (target.pending || !target.lastWriteSucceeded) {
+        return false;
+    }
+
     target.store = SaveStore(std::move(root), std::move(fileStem), sections);
     target.status.clear();
+    target.lastWriteSucceeded = true;
+    target.retryBlocked = false;
+    return true;
 }
 
 SaveStore::LoadResult AsyncSaveStore::load(int channel)
@@ -103,6 +116,7 @@ void AsyncSaveStore::requestSave(int channel, PlayerProfile profile, Urgency urg
             target.deadline = std::chrono::steady_clock::now() + writeDelay_;
         }
         target.pending = std::move(profile);
+        target.retryBlocked = false;
         if (urgency == Urgency::Immediate) {
             target.forceWrite = true;
         }
@@ -110,19 +124,38 @@ void AsyncSaveStore::requestSave(int channel, PlayerProfile profile, Urgency urg
     condition_.notify_one();
 }
 
-void AsyncSaveStore::flush()
+bool AsyncSaveStore::retryFailedSave(int channel)
+{
+    {
+        const std::scoped_lock lock(mutex_);
+        Channel& target = channelAt(channel);
+        if (!target.pending || !target.retryBlocked) {
+            return false;
+        }
+        target.retryBlocked = false;
+        target.forceWrite = true;
+    }
+    condition_.notify_one();
+    return true;
+}
+
+bool AsyncSaveStore::flush()
 {
     std::unique_lock lock(mutex_);
     for (Channel& channel : channels_) {
-        if (channel.pending) {
+        if (channel.pending && !channel.retryBlocked) {
             channel.forceWrite = true;
         }
     }
     condition_.notify_all();
     condition_.wait(lock, [this] {
         return std::ranges::none_of(channels_, [](const Channel& channel) {
-            return channel.pending.has_value() || channel.writing;
+            return (channel.pending.has_value() && !channel.retryBlocked) ||
+                channel.writing;
         });
+    });
+    return std::ranges::none_of(channels_, [](const Channel& channel) {
+        return channel.pending.has_value() || !channel.lastWriteSucceeded;
     });
 }
 
@@ -172,7 +205,7 @@ void AsyncSaveStore::workerLoop()
             std::chrono::steady_clock::time_point::max();
         for (std::size_t i = 0; i < channels_.size(); ++i) {
             Channel& channel = channels_[i];
-            if (!channel.pending) {
+            if (!channel.pending || channel.retryBlocked) {
                 continue;
             }
             if (stopping_ || channel.forceWrite || now >= channel.deadline) {
@@ -200,6 +233,10 @@ void AsyncSaveStore::workerLoop()
         channel.writing = false;
         channel.lastWriteSucceeded = succeeded;
         channel.status = writeStatus;
+        if (!succeeded && !channel.pending) {
+            channel.pending = std::move(profile);
+            channel.retryBlocked = true;
+        }
         ++channel.completedWriteCount;
         condition_.notify_all();
     }

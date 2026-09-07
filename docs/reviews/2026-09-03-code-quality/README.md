@@ -4,13 +4,15 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Follow-up, 2026-09-07:** CQ-01 is resolved in the current working tree. Valid decoded profiles now survive migration/backup-repair write failures with an explicit persistence-error result, while unsupported formats are preserved and stop loading before an older build can overwrite them. New failure-injection and save-slot regressions pass in Debug and Release.
 
+**Follow-up, 2026-09-07 (CQ-02):** Failed asynchronous snapshots now remain pending and retryable, flushing reports persistence failure, and channel replacement refuses to discard an unsaved outgoing profile. Slot switching keeps the original slot active and exposes the retained storage error until a later save succeeds.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
 
 The most consequential remaining problems occur **between these components**. A successfully decoded save can be discarded when its migration write fails. A drained save queue is treated as a successful save. Editor changes conflict with immutable runtime-package validation. A deferred renderer publication consumes the data needed for its own retry. These are more valuable to fix than another broad file-splitting or formatting pass.
 
-This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 has since been resolved, leaving 13 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
+This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 and CQ-02 have since been resolved, leaving 12 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
 
 - **P1:** prioritize before relying on persistence or authoring for valuable work; existing data or unsaved progress can be lost or abandoned.
 - **P2:** schedule fixes for observable correctness, resource use, or validation gaps; several require unusual inputs or failure conditions.
@@ -81,7 +83,7 @@ This demonstrates an incorrect reset after a one-shot write failure. A persisten
 
 **Regression gate:** Valid legacy primary and valid backup, each with failures at every atomic-write phase; assert retained progress, accurate disposition/status, and no corruption archive caused solely by I/O failure.
 
-### CQ-02 — Make outgoing save success part of switching slots
+### CQ-02 — Make outgoing save success part of switching slots (resolved 2026-09-07)
 
 **Location:** [AsyncSaveStore.cpp](../../../src/engine/AsyncSaveStore.cpp), lines 60–71; [SaveSlotManager.cpp](../../../src/engine/SaveSlotManager.cpp), `switchTo`, lines 279–341; [Application.cpp](../../../src/engine/Application.cpp), slot-switch flow around 1342–1383.
 

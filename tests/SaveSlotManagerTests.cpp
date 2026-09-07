@@ -507,6 +507,59 @@ void testFailedMarkerCommitRollsBackSwitch()
         "failed destination is not used by later saves");
 }
 
+void testFailedOutgoingSavePreventsSlotSwitch()
+{
+    TemporaryDirectory directory;
+    sokoban::SaveSlotManager manager(directory.path(), std::chrono::hours(1));
+    (void)manager.loadActiveProfile();
+
+    const sokoban::PlayerProfile committed = profileWithProgress(1);
+    manager.saveProgress(committed, true);
+    manager.flush();
+
+    const std::filesystem::path blockedTemporary =
+        directory.path() / "profile.json.tmp";
+    std::filesystem::create_directories(blockedTemporary);
+    std::ofstream(blockedTemporary / "blocker.txt") << "blocked";
+
+    const sokoban::PlayerProfile latest = profileWithProgress(3);
+    manager.saveProgress(latest, true);
+    bool threw = false;
+    try {
+        (void)manager.switchTo(1, latest);
+    } catch (const std::runtime_error& error) {
+        threw = std::string_view(error.what()).find(
+                    "outgoing save slot could not be persisted") !=
+            std::string_view::npos;
+    }
+    check(threw, "failed outgoing save prevents slot switching");
+    check(manager.activeSlot() == 0,
+        "failed outgoing save keeps the original slot active");
+    check(manager.progressDiagnostics().pending &&
+            !manager.progressDiagnostics().lastWriteSucceeded,
+        "failed outgoing snapshot remains pending with failure diagnostics");
+    check(manager.progressStatus().starts_with("Player profile save failed:"),
+        "failed outgoing save status remains visible after rejected switch");
+
+    std::ifstream committedStream(
+        directory.path() / "profile.json", std::ios::binary);
+    const std::string committedContents {
+        std::istreambuf_iterator<char>(committedStream),
+        std::istreambuf_iterator<char>() };
+    committedStream.close();
+    check(sokoban::decodePlayerProfile(committedContents).profile == committed,
+        "rejected switch leaves the last committed outgoing profile intact");
+
+    std::filesystem::remove_all(blockedTemporary);
+    manager.saveProgress(latest, true);
+    const std::optional<sokoban::PlayerProfile> switched =
+        manager.switchTo(1, latest);
+    check(switched.has_value() && manager.activeSlot() == 1,
+        "resubmitting after storage recovery permits the switch");
+    check(sokoban::SaveStore(directory.path()).load().profile == latest,
+        "successful retry persists the newest outgoing profile");
+}
+
 void testDeletionFailurePreservesSummaryAndFiles()
 {
     TemporaryDirectory directory;
@@ -557,6 +610,7 @@ int main()
     testSummariesSwitchingAndDeletion();
     testSummaryCacheInvalidation();
     testSlotInspectionIsNonMutating();
+    testFailedOutgoingSavePreventsSlotSwitch();
     testFailedMarkerCommitRollsBackSwitch();
     testDeletionFailurePreservesSummaryAndFiles();
 

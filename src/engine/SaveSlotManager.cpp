@@ -347,18 +347,26 @@ std::optional<PlayerProfile> SaveSlotManager::switchTo(
     PlayerProfile profile = std::move(loaded.profile);
     profile.adoptSettingsFrom(currentProfile);
 
-    store_->replaceChannel(
-        progressChannel_, directory_, incomingStem,
-        ProfileSections::ProgressOnly);
+    if (!store_->replaceChannel(
+            progressChannel_, directory_, incomingStem,
+            ProfileSections::ProgressOnly)) {
+        throw std::runtime_error(
+            "outgoing save slot could not be persisted: " +
+            store_->status(progressChannel_));
+    }
 
     try {
         // The atomic marker replacement is the commit point. If it cannot be
         // written, restore the outgoing channel before exposing the failure.
         writeActiveSlotMarker(slot);
     } catch (...) {
-        store_->replaceChannel(
-            progressChannel_, directory_, slotFileStem(previousSlot),
-            ProfileSections::ProgressOnly);
+        if (!store_->replaceChannel(
+                progressChannel_, directory_, slotFileStem(previousSlot),
+                ProfileSections::ProgressOnly)) {
+            throw std::runtime_error(
+                "active save slot marker failed and the outgoing save channel "
+                "could not be restored");
+        }
         throw;
     }
 
@@ -379,7 +387,7 @@ SaveSlotManager::DeleteResult SaveSlotManager::deleteSlot(int slot)
     if (slot == activeSlot_) {
         // Drain pending writes so an in-flight save cannot resurrect the
         // files after removal.
-        store_->flush();
+        (void)store_->flush();
     }
     const SaveStore store(directory_, slotFileStem(slot));
     const auto removeFile = [](const std::filesystem::path& path)
@@ -424,7 +432,7 @@ void SaveSlotManager::saveSettings(const PlayerProfile& profile, bool immediate)
 
 void SaveSlotManager::flush()
 {
-    store_->flush();
+    (void)store_->flush();
 }
 
 std::string SaveSlotManager::progressStatus() const

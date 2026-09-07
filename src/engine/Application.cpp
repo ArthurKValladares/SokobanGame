@@ -1364,15 +1364,18 @@ void Application::switchSaveSlot(int slot)
     try {
         switched = saveSlots_.switchTo(slot, playerProfile_);
     } catch (const std::exception& error) {
-        log::error(log::Category::Persistence)
-            << "Could not switch to save slot " << (slot + 1) <<
-            ": " << error.what();
+        const std::string message =
+            "Could not switch to save slot " + std::to_string(slot + 1) +
+            ": " + error.what();
+        log::error(log::Category::Persistence) << message;
+        titleScreen_.setSaveSlotError(message);
         return;
     }
     if (!switched) {
         return;
     }
     playerProfile_ = std::move(*switched);
+    titleScreen_.setSaveSlotError({});
     log::info(log::Category::Persistence)
         << saveSlots_.progressStatus();
 
