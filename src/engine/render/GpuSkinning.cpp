@@ -1,87 +1,8 @@
 #include "engine/render/GpuSkinning.hpp"
 
-#include <algorithm>
 #include <stdexcept>
 
 namespace sokoban {
-namespace {
-
-void negateOutputAxis(Mat4& matrix, uint32_t axis)
-{
-    for (uint32_t column = 0; column < 4; ++column) {
-        matrix.values[column * 4 + axis] =
-            -matrix.values[column * 4 + axis];
-    }
-}
-
-Mat4 sourcePositionTransform(const SkinnedMeshData& mesh)
-{
-    const Vec3 extent {
-        std::max(mesh.sourceMaximum.x - mesh.sourceMinimum.x, 0.000001f),
-        std::max(mesh.sourceMaximum.y - mesh.sourceMinimum.y, 0.000001f),
-        std::max(mesh.sourceMaximum.z - mesh.sourceMinimum.z, 0.000001f),
-    };
-    const float sourceHeight = extent.y;
-    const Vec3 center {
-        (mesh.sourceMinimum.x + mesh.sourceMaximum.x) * 0.5f,
-        (mesh.sourceMinimum.y + mesh.sourceMaximum.y) * 0.5f,
-        (mesh.sourceMinimum.z + mesh.sourceMaximum.z) * 0.5f,
-    };
-    Mat4 result = mat4Identity;
-    if (mesh.preserveSourceScale) {
-        result.values[5] = 0.0f;
-        result.values[6] = 1.0f;
-        result.values[9] = -1.0f;
-        result.values[10] = 0.0f;
-    } else if (mesh.preserveAspectRatio) {
-        result.values[0] = 1.0f / sourceHeight;
-        result.values[5] = 0.0f;
-        result.values[6] = 1.0f / sourceHeight;
-        result.values[9] = -1.0f / sourceHeight;
-        result.values[10] = 0.0f;
-        result.values[12] = 0.5f - center.x / sourceHeight;
-        result.values[13] = 0.5f + center.z / sourceHeight;
-        result.values[14] = -mesh.sourceMinimum.y / sourceHeight;
-    } else {
-        result.values[0] = 1.0f / extent.x;
-        result.values[5] = 0.0f;
-        result.values[6] = 1.0f / extent.y;
-        result.values[9] = -1.0f / extent.z;
-        result.values[10] = 0.0f;
-        result.values[12] = -mesh.sourceMinimum.x / extent.x;
-        result.values[13] = mesh.sourceMaximum.z / extent.z;
-        result.values[14] = -mesh.sourceMinimum.y / extent.y;
-    }
-    if (mesh.rotateHalfTurn) {
-        negateOutputAxis(result, 0);
-        negateOutputAxis(result, 1);
-        if (!mesh.preserveSourceScale) {
-            // Normalized models rotate around the unit-square centre. The
-            // axis negation above gives -x/-y; CPU skinning uses 1-x/1-y.
-            // Restore that translation so the GPU path exactly matches the
-            // established normalizedVertex convention.
-            result.values[12] += 1.0f;
-            result.values[13] += 1.0f;
-        }
-    }
-    return result;
-}
-
-Mat4 sourceNormalTransform(const SkinnedMeshData& mesh)
-{
-    Mat4 result = mat4Identity;
-    result.values[5] = 0.0f;
-    result.values[6] = 1.0f;
-    result.values[9] = -1.0f;
-    result.values[10] = 0.0f;
-    if (mesh.rotateHalfTurn) {
-        negateOutputAxis(result, 0);
-        negateOutputAxis(result, 1);
-    }
-    return result;
-}
-
-} // namespace
 
 std::vector<GpuSkinnedVertex> makeGpuSkinnedVertices(const SkinnedMeshData& mesh)
 {
@@ -161,8 +82,16 @@ GpuSkinningInstance makeGpuSkinningInstance(
     for (uint32_t index = 0; index < pose.nodeMatrices.size(); ++index) {
         result.palette[maxSkinJoints + index] = pose.nodeMatrices[index];
     }
-    result.modelFromSource = sourcePositionTransform(mesh);
-    result.normalFromSource = sourceNormalTransform(mesh);
+    const GltfSourceTransform sourceTransform = makeGltfSourceTransform(
+        mesh.sourceMinimum,
+        mesh.sourceMaximum,
+        {
+            .preserveAspectRatio = mesh.preserveAspectRatio,
+            .preserveSourceScale = mesh.preserveSourceScale,
+            .rotateHalfTurn = mesh.rotateHalfTurn,
+        });
+    result.modelFromSource = sourceTransform.modelFromSource;
+    result.normalFromSource = sourceTransform.normalFromSource;
     return result;
 }
 

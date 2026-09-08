@@ -16,13 +16,15 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Follow-up, 2026-09-08 (CQ-07):** Skinned-model publication now converts and validates the CPU-ready mesh without transferring ownership, asks the residency ladder for admission, and moves the source into its resident slot only after admission succeeds. The converted vertex/index payload is reused for upload. A device-backed regression denies admission once at this seam, then verifies the retained nonempty mesh reaches ready GPU residency on retry without another load request.
 
+**Follow-up, 2026-09-08 (CQ-08):** Static loading and CPU/GPU skinning now share one source-to-model transform. Positions and tangents use its forward linear transform, normals use its inverse transpose, and tangent frames are normalized and orthogonalized while preserving handedness. Nonuniform 4×2×1 fixtures cover authored and generated tangents, fitting options, degenerate bounds, skinned bind poses, and full CPU/GPU basis parity.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
 
-The most consequential remaining problems still occur **between these components**. Partial task-system construction can terminate during unwinding, imported GLB assets can omit external dependencies, and nonuniform mesh normalization leaves normals incorrect. These are more valuable to fix than another broad file-splitting or formatting pass.
+The most consequential remaining problems still occur **between these components**. Partial task-system construction can terminate during unwinding, and imported GLB assets can omit external dependencies. These are more valuable to fix than another broad file-splitting or formatting pass.
 
-This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-07 have since been resolved, leaving 7 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
+This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-08 have since been resolved, leaving 6 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
 
 - **P1:** prioritize before relying on persistence or authoring for valuable work; existing data or unsaved progress can be lost or abandoned.
 - **P2:** schedule fixes for observable correctness, resource use, or validation gaps; several require unusual inputs or failure conditions.
@@ -165,7 +167,7 @@ This is a source-confirmed retry defect. Temporary admission failures are suppor
 
 **Regression gate:** At the actual publication seam, deny admission once, later permit it, and verify a nonempty skinned mesh uploads without re-decoding or becoming `Failed`. A residency arithmetic unit test cannot detect this ownership error.
 
-### CQ-08 — Apply nonuniform normalization to the normal/tangent basis
+### CQ-08 — Apply nonuniform normalization to the normal/tangent basis (resolved 2026-09-08)
 
 **Location:** [GltfMesh.cpp](../../../src/engine/render/GltfMesh.cpp), `normalizedVertex`, lines 618–678; [GpuSkinning.cpp](../../../src/engine/render/GpuSkinning.cpp), `sourceNormalTransform`, around lines 70–87.
 

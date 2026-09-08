@@ -605,75 +605,26 @@ Vec4 sampleKeyframes(const AnimationKeyframes& keyframes, float timeSeconds, boo
         t));
 }
 
-// Source space to engine space, for one vertex.
-//
-// This used to exist twice - once here for the skinning path and once inlined
-// in loadGltfMesh - which was tolerable while it moved two vectors and stopped
-// being so the moment a tangent had to travel the same road.
-//
-// Nothing here flips handedness, and that is worth stating because a mirrored
-// transform would: the axis swap below has determinant +1, every scale factor
-// is positive, and rotateHalfTurn negates two axes, which is a rotation and
-// not a reflection. So `tangent.w` passes through untouched.
 MeshVertex normalizedVertex(
     MeshVertex source,
-    Aabb bounds,
-    GltfMeshLoadOptions options)
+    const GltfSourceTransform& sourceTransform)
 {
-    const Vec3 position = source.position;
-    const Vec3 normal = source.normal;
-    const float sourceHeight = std::max(bounds.maximum.y - bounds.minimum.y, 0.000001f);
-    const Vec3 extent {
-        std::max(bounds.maximum.x - bounds.minimum.x, 0.000001f),
-        sourceHeight,
-        std::max(bounds.maximum.z - bounds.minimum.z, 0.000001f),
-    };
-    const Vec3 center {
-        (bounds.minimum.x + bounds.maximum.x) * 0.5f,
-        (bounds.minimum.y + bounds.maximum.y) * 0.5f,
-        (bounds.minimum.z + bounds.maximum.z) * 0.5f,
-    };
-
     MeshVertex vertex = source;
-    if (options.preserveSourceScale) {
-        vertex.position = {
-            position.x,
-            -position.z,
-            position.y,
-        };
-    } else if (options.preserveAspectRatio) {
-        vertex.position = {
-            0.5f + (position.x - center.x) / sourceHeight,
-            0.5f - (position.z - center.z) / sourceHeight,
-            (position.y - bounds.minimum.y) / sourceHeight,
-        };
-    } else {
-        vertex.position = {
-            (position.x - bounds.minimum.x) / extent.x,
-            (bounds.maximum.z - position.z) / extent.z,
-            (position.y - bounds.minimum.y) / extent.y,
-        };
-    }
+    vertex.position =
+        transformPoint(sourceTransform.modelFromSource, source.position);
     vertex.normal = normalizeOr(
-        Vec3 { normal.x, -normal.z, normal.y },
+        transformVector(sourceTransform.normalFromSource, source.normal),
         Vec3 { 0.0f, 0.0f, 1.0f });
-    const Vec3 tangent = normalizeOr(
-        Vec3 { source.tangent.x, -source.tangent.z, source.tangent.y },
+    Vec3 tangent = transformVector(
+        sourceTransform.modelFromSource,
+        Vec3 { source.tangent.x, source.tangent.y, source.tangent.z });
+    tangent = normalizeOr(tangent - vertex.normal * dot(vertex.normal, tangent),
         Vec3 {});
-    vertex.tangent = { tangent.x, tangent.y, tangent.z, source.tangent.w };
-    if (options.rotateHalfTurn) {
-        if (options.preserveSourceScale) {
-            vertex.position.x = -vertex.position.x;
-            vertex.position.y = -vertex.position.y;
-        } else {
-            vertex.position.x = 1.0f - vertex.position.x;
-            vertex.position.y = 1.0f - vertex.position.y;
-        }
-        vertex.normal.x = -vertex.normal.x;
-        vertex.normal.y = -vertex.normal.y;
-        vertex.tangent.x = -vertex.tangent.x;
-        vertex.tangent.y = -vertex.tangent.y;
-    }
+    // Every source transform below is orientation-preserving: the axis
+    // conversion and optional half turn are rotations, and all fitted scales
+    // are positive. The bitangent handedness therefore remains unchanged.
+    vertex.tangent = {
+        tangent.x, tangent.y, tangent.z, source.tangent.w };
     return vertex;
 }
 
@@ -815,6 +766,72 @@ void appendMaterialTextureDependency(
 }
 
 } // namespace
+
+GltfSourceTransform makeGltfSourceTransform(
+    Vec3 sourceMinimum,
+    Vec3 sourceMaximum,
+    const GltfMeshLoadOptions& options)
+{
+    const Vec3 extent {
+        std::max(sourceMaximum.x - sourceMinimum.x, 0.000001f),
+        std::max(sourceMaximum.y - sourceMinimum.y, 0.000001f),
+        std::max(sourceMaximum.z - sourceMinimum.z, 0.000001f),
+    };
+    const float sourceHeight = extent.y;
+    const Vec3 center {
+        (sourceMinimum.x + sourceMaximum.x) * 0.5f,
+        (sourceMinimum.y + sourceMaximum.y) * 0.5f,
+        (sourceMinimum.z + sourceMaximum.z) * 0.5f,
+    };
+
+    Mat4 modelFromSource = mat4Identity;
+    if (options.preserveSourceScale) {
+        modelFromSource.values[5] = 0.0f;
+        modelFromSource.values[6] = 1.0f;
+        modelFromSource.values[9] = -1.0f;
+        modelFromSource.values[10] = 0.0f;
+    } else if (options.preserveAspectRatio) {
+        modelFromSource.values[0] = 1.0f / sourceHeight;
+        modelFromSource.values[5] = 0.0f;
+        modelFromSource.values[6] = 1.0f / sourceHeight;
+        modelFromSource.values[9] = -1.0f / sourceHeight;
+        modelFromSource.values[10] = 0.0f;
+        modelFromSource.values[12] = 0.5f - center.x / sourceHeight;
+        modelFromSource.values[13] = 0.5f + center.z / sourceHeight;
+        modelFromSource.values[14] = -sourceMinimum.y / sourceHeight;
+    } else {
+        modelFromSource.values[0] = 1.0f / extent.x;
+        modelFromSource.values[5] = 0.0f;
+        modelFromSource.values[6] = 1.0f / extent.y;
+        modelFromSource.values[9] = -1.0f / extent.z;
+        modelFromSource.values[10] = 0.0f;
+        modelFromSource.values[12] = -sourceMinimum.x / extent.x;
+        modelFromSource.values[13] = sourceMaximum.z / extent.z;
+        modelFromSource.values[14] = -sourceMinimum.y / extent.y;
+    }
+    if (options.rotateHalfTurn) {
+        for (uint32_t column = 0; column < 4; ++column) {
+            modelFromSource.values[column * 4] =
+                -modelFromSource.values[column * 4];
+            modelFromSource.values[column * 4 + 1] =
+                -modelFromSource.values[column * 4 + 1];
+        }
+        if (!options.preserveSourceScale) {
+            modelFromSource.values[12] += 1.0f;
+            modelFromSource.values[13] += 1.0f;
+        }
+    }
+
+    Mat4 normalFromSource = mat4Identity;
+    const Mat3 normalLinear = normalMatrix(modelFromSource);
+    for (int column = 0; column < 3; ++column) {
+        for (int row = 0; row < 3; ++row) {
+            normalFromSource.values[static_cast<std::size_t>(column) * 4 +
+                static_cast<std::size_t>(row)] = at(normalLinear, row, column);
+        }
+    }
+    return { modelFromSource, normalFromSource };
+}
 
 GltfAssetDependencies inspectGltfAssetDependencies(
     const std::filesystem::path& path)
@@ -1046,12 +1063,13 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
             "Only non-empty triangle-list glTF meshes are supported");
     }
 
-    // Second pass: every mode below normalizes against the bounds of the
-    // whole file, not of one primitive. Spliced verbatim from the loader this
-    // replaced - the arithmetic is what decides where every static model
-    // sits, and rewriting it was not part of changing the parser.
+    // Every mode fits against the bounds of the whole file, not one
+    // primitive. Build the transform once so every vertex uses the same
+    // position and basis conversion.
+    const GltfSourceTransform sourceTransform = makeGltfSourceTransform(
+        bounds.minimum, bounds.maximum, options);
     for (MeshVertex& vertex : mesh.vertices) {
-        vertex = normalizedVertex(vertex, bounds, options);
+        vertex = normalizedVertex(vertex, sourceTransform);
     }
     // After the transform, not before: the aspect-ratio and unit-box modes
     // scale the axes unevenly, and a tangent derived in source space would
@@ -1444,15 +1462,13 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
 
     const SkinnedPoseMatrices pose = poseMatricesFromPoses(mesh, poses);
 
-    // Not aabbFromMinMax: that sorts the pair, which would silently repair an
-    // inverted box instead of leaving it invalid. These two are already
-    // ordered, having come from a fold over at least one vertex.
-    const Aabb bounds { mesh.sourceMinimum, mesh.sourceMaximum };
-    GltfMeshLoadOptions options {
+    const GltfMeshLoadOptions options {
         .preserveAspectRatio = mesh.preserveAspectRatio,
         .preserveSourceScale = mesh.preserveSourceScale,
         .rotateHalfTurn = mesh.rotateHalfTurn,
     };
+    const GltfSourceTransform sourceTransform = makeGltfSourceTransform(
+        mesh.sourceMinimum, mesh.sourceMaximum, options);
 
     MeshData result;
     result.indices = mesh.indices;
@@ -1498,8 +1514,7 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
                     .uv1 = source.uv1,
                     .materialIndex = source.materialIndex,
                 },
-                bounds,
-                options);
+                sourceTransform);
         }
     });
 
@@ -1551,8 +1566,7 @@ MeshData skinWithPoses(const SkinnedMeshData& mesh, const std::vector<NodePose>&
                     // after the fact because the old signature dropped it.
                     .materialIndex = vertex.materialIndex,
                 },
-                bounds,
-                options));
+                sourceTransform));
         }
         result.indices.reserve(
             result.indices.size() + attachment.mesh.indices.size());

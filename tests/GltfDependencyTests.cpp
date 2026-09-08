@@ -260,14 +260,15 @@ void testLoadsMaterialMapBindingsAndAuthoredParameters()
     TempDirectory temp;
     const std::filesystem::path model = temp.path() / "material-maps.glb";
 
+    const float inverseSqrt5 = 1.0f / std::sqrt(5.0f);
     std::vector<uint8_t> binary;
     for (float value : {
-             0.0f, 0.0f, 0.0f,
-             1.0f, 0.0f, 0.0f,
-             0.0f, 1.0f, 0.0f,
-             0.0f, 0.0f, 1.0f,
-             0.0f, 0.0f, 1.0f,
-             0.0f, 0.0f, 1.0f,
+             0.0f, 2.0f, 0.0f,
+             4.0f, 0.0f, 0.0f,
+             0.0f, 2.0f, 1.0f,
+             inverseSqrt5, 2.0f * inverseSqrt5, 0.0f,
+             inverseSqrt5, 2.0f * inverseSqrt5, 0.0f,
+             inverseSqrt5, 2.0f * inverseSqrt5, 0.0f,
              0.0f, 0.0f,
              1.0f, 0.0f,
              0.0f, 1.0f,
@@ -292,7 +293,7 @@ void testLoadsMaterialMapBindingsAndAuthoredParameters()
     {"buffer":0,"byteOffset":120,"byteLength":6}
   ],
   "accessors":[
-    {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]},
+    {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[4,2,1]},
     {"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},
     {"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"},
     {"bufferView":3,"componentType":5126,"count":3,"type":"VEC2"},
@@ -383,6 +384,9 @@ void testLoadsMaterialMapBindingsAndAuthoredParameters()
         CHECK(std::abs(dot(vertex.normal, tangent)) < 0.0001f);
         CHECK(std::abs(std::abs(vertex.tangent.w) - 1.0f) < 0.0001f);
     }
+    const Vec3 normalizedEdge =
+        bound.vertices[1].position - bound.vertices[0].position;
+    CHECK(std::abs(dot(bound.vertices[0].normal, normalizedEdge)) < 0.0001f);
 
     binding.bindBaseColorTexture = false;
     options.primitiveMaterials[0] = binding;
@@ -401,17 +405,18 @@ void testPreservesAuthoredTangentFrameForNormalMapping()
     TempDirectory temp;
     const std::filesystem::path model = temp.path() / "authored-tangent.glb";
 
+    const float inverseSqrt5 = 1.0f / std::sqrt(5.0f);
     std::vector<uint8_t> binary;
     for (float value : {
-             0.0f, 0.0f, 0.0f,
-             1.0f, 0.0f, 0.0f,
-             0.0f, 1.0f, 0.0f,
-             0.0f, 0.0f, 1.0f,
-             0.0f, 0.0f, 1.0f,
-             0.0f, 0.0f, 1.0f,
-             1.0f, 0.0f, 0.0f, -1.0f,
-             1.0f, 0.0f, 0.0f, -1.0f,
-             1.0f, 0.0f, 0.0f, -1.0f,
+             0.0f, 2.0f, 0.0f,
+             4.0f, 0.0f, 0.0f,
+             0.0f, 2.0f, 1.0f,
+             inverseSqrt5, 2.0f * inverseSqrt5, 0.0f,
+             inverseSqrt5, 2.0f * inverseSqrt5, 0.0f,
+             inverseSqrt5, 2.0f * inverseSqrt5, 0.0f,
+             2.0f * inverseSqrt5, -inverseSqrt5, 0.0f, -1.0f,
+             2.0f * inverseSqrt5, -inverseSqrt5, 0.0f, -1.0f,
+             2.0f * inverseSqrt5, -inverseSqrt5, 0.0f, -1.0f,
              0.0f, 0.0f,
              1.0f, 0.0f,
              0.0f, 1.0f,
@@ -433,7 +438,7 @@ void testPreservesAuthoredTangentFrameForNormalMapping()
     {"buffer":0,"byteOffset":144,"byteLength":6}
   ],
   "accessors":[
-    {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]},
+    {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[4,2,1]},
     {"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},
     {"bufferView":2,"componentType":5126,"count":3,"type":"VEC4"},
     {"bufferView":3,"componentType":5126,"count":3,"type":"VEC2"},
@@ -453,16 +458,52 @@ void testPreservesAuthoredTangentFrameForNormalMapping()
     binding.normalTextureIndex = 0;
     GltfMeshLoadOptions options;
     options.primitiveMaterials.push_back(binding);
+    const auto validateFrame = [](const MeshData& candidate) {
+        CHECK(candidate.vertices.size() == 3);
+        const Vec3 edge =
+            candidate.vertices[1].position - candidate.vertices[0].position;
+        for (const MeshVertex& vertex : candidate.vertices) {
+            const Vec3 tangent {
+                vertex.tangent.x, vertex.tangent.y, vertex.tangent.z };
+            CHECK(std::abs(length(vertex.normal) - 1.0f) < 0.0001f);
+            CHECK(std::abs(length(tangent) - 1.0f) < 0.0001f);
+            CHECK(std::abs(dot(vertex.normal, tangent)) < 0.0001f);
+            CHECK(std::abs(dot(vertex.normal, edge)) < 0.0001f);
+            CHECK(vertex.tangent.w == -1.0f);
+        }
+    };
+
     const MeshData mesh = loadGltfMesh(model, options);
     CHECK(mesh.materials.size() == 1);
     CHECK(mesh.materials[0].normalTexture == 1U);
-    CHECK(mesh.vertices.size() == 3);
+    validateFrame(mesh);
+    const float inverseSqrt2 = 1.0f / std::sqrt(2.0f);
     for (const MeshVertex& vertex : mesh.vertices) {
-        CHECK(std::abs(vertex.tangent.x - 1.0f) < 0.0001f);
+        CHECK(std::abs(vertex.normal.x - inverseSqrt2) < 0.0001f);
         CHECK(std::abs(vertex.tangent.y) < 0.0001f);
-        CHECK(std::abs(vertex.tangent.z) < 0.0001f);
-        CHECK(vertex.tangent.w == -1.0f);
+        CHECK(std::abs(vertex.normal.z - inverseSqrt2) < 0.0001f);
+        CHECK(std::abs(vertex.tangent.x - inverseSqrt2) < 0.0001f);
+        CHECK(std::abs(vertex.tangent.z + inverseSqrt2) < 0.0001f);
     }
+
+    options.preserveAspectRatio = true;
+    const MeshData aspectPreserved = loadGltfMesh(model, options);
+    validateFrame(aspectPreserved);
+    CHECK(std::abs((aspectPreserved.vertices[1].position.x -
+                       aspectPreserved.vertices[0].position.x) -
+                  2.0f) < 0.0001f);
+
+    options.preserveAspectRatio = false;
+    options.preserveSourceScale = true;
+    const MeshData sourceScale = loadGltfMesh(model, options);
+    validateFrame(sourceScale);
+    CHECK(std::abs((sourceScale.vertices[1].position.x -
+                       sourceScale.vertices[0].position.x) -
+                  4.0f) < 0.0001f);
+
+    options.preserveSourceScale = false;
+    options.rotateHalfTurn = true;
+    validateFrame(loadGltfMesh(model, options));
 }
 
 } // namespace

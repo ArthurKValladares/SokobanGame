@@ -98,6 +98,7 @@ void main() {
     // matrix, a normal by its inverse transpose.
     vec3 tangent = mat3(skinning.instances[gl_InstanceIndex].modelFromSource) *
         sourceTangent;
+    tangent = normalize(tangent - normal * dot(normal, tangent));
     // Rotation and scale are already in worldFromModel: its first three
     // columns are the model's axes, so their lengths are the scale and the
     // columns divided by that are the rotation. This used to rebuild the same

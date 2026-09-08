@@ -212,6 +212,20 @@ struct GltfMeshLoadOptions {
     std::vector<PrimitiveMaterialBinding> primitiveMaterials;
 };
 
+// The affine transform that fits glTF source geometry into engine model
+// space, plus the inverse-transpose transform for its normal basis. Keeping
+// the pair together prevents the static, CPU-skinned, and GPU-skinned paths
+// from independently rebuilding only part of the same conversion.
+struct GltfSourceTransform {
+    Mat4 modelFromSource {};
+    Mat4 normalFromSource {};
+};
+
+[[nodiscard]] GltfSourceTransform makeGltfSourceTransform(
+    Vec3 sourceMinimum,
+    Vec3 sourceMaximum,
+    const GltfMeshLoadOptions& options = {});
+
 // Read-only metadata used by content discovery before any image, buffer, or
 // GPU resource is loaded. These types deliberately describe glTF concepts in
 // engine-owned terms; cgltf remains private to GltfMesh.cpp.
