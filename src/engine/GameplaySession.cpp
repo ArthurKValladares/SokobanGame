@@ -153,7 +153,7 @@ void GameplaySession::reset(const Level& level)
     undoHistory_.clear();
     undoGroups_.clear();
     nextCausalGroup_ = 1;
-    moveHistory_.clear();
+    completedActionCount_ = 0;
     playerMoveCount_ = 0;
     mirrorActivationSequence_ = 0;
     lastMirrorSwapDestinations_.clear();
@@ -296,7 +296,7 @@ bool GameplaySession::restore(const Level& level, const Snapshot& snapshot)
     for (std::size_t i = 0; i < undoHistory_.size(); ++i) {
         undoGroups_.push_back(nextCausalGroup_++);
     }
-    moveHistory_.clear();
+    completedActionCount_ = 0;
     playerMoveCount_ = snapshot.playerMoveCount;
     mirrorActivationSequence_ = 0;
     lastMirrorSwapDestinations_.clear();
@@ -463,7 +463,7 @@ void GameplaySession::rebaseUndoFrom(std::size_t index)
 void GameplaySession::recordCompletion(
     const Action& action, std::size_t causalGroup)
 {
-    moveHistory_.push_back(action);
+    ++completedActionCount_;
     // The running total moves by what this action did, not to what it predicted
     // the total would be. A plan captures the total when it is made, and under
     // concurrency an ambient action planned alongside a player's step would

@@ -20,13 +20,15 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Follow-up, 2026-09-08 (CQ-09):** Decoration registration and distributable content staging now share the structured glTF external-file resolver for both GLTF and GLB documents. Registration validates every external buffer and image before copying or changing a manifest, ignores embedded data and unrelated JSON `uri` fields, registers a single external base-color texture from semantic material records, and refreshes the package index only after the runtime tree is complete. Loadable nested GLTF/GLB fixtures cover external buffers/images, embedded data, missing files, traversal rejection, runtime loading, and index validation.
 
+**Follow-up, 2026-09-08 (CQ-10):** Completed-action diagnostics now use a scalar counter instead of retaining full actions with world states and presentation timelines. Functional undo remains in its separate history. A 1,000-pair move/undo regression verifies 2,000 reported completions, an empty undo stack, restored move count and state, and counter reset behavior.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
 
 The most consequential remaining problems still occur **between these components**. Partial task-system construction can terminate during unwinding, and validation errors raised during renderer destruction can escape the smoke test's exit-status decision. These are more valuable to fix than another broad file-splitting or formatting pass.
 
-This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-09 have since been resolved, leaving 5 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
+This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-10 have since been resolved, leaving 4 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
 
 - **P1:** prioritize before relying on persistence or authoring for valuable work; existing data or unsaved progress can be lost or abandoned.
 - **P2:** schedule fixes for observable correctness, resource use, or validation gaps; several require unusual inputs or failure conditions.
@@ -77,7 +79,7 @@ Current sanitizer, clang-tidy, Linux builds, interactive controller/editor accep
 | CQ-07 | P2 | Residency deferral destroys the prepared skinned mesh | Source-confirmed |
 | CQ-08 | P2 | Nonuniform mesh normalization does not transform normals correctly | Reproduced |
 | CQ-09 | P2 | GLB registration omits external buffer dependencies | Reproduced |
-| CQ-10 | P2 | Diagnostic history retains complete actions indefinitely | Reproduced |
+| CQ-10 | P2 | Diagnostic history retains complete actions indefinitely | Resolved 2026-09-08 |
 | CQ-11 | P2 | Validation exit status is computed before renderer destruction | Source-confirmed |
 | CQ-12 | P2 | Partial thread-pool construction can terminate the process | Source-confirmed |
 | CQ-13 | P2 | The standalone headless build script has drifted from the build graph | Source-confirmed |
@@ -193,7 +195,7 @@ Dependency collection returns the mesh alone whenever its extension is not `.glt
 
 **Regression gate:** GLTF and GLB with external buffers, external images, embedded data, nested paths, and missing/invalid dependencies. Successful registration must imply the runtime loader can resolve all required data. Include index refresh under CQ-04.
 
-### CQ-10 — Replace unused full-action history with bounded telemetry
+### CQ-10 — Replace unused full-action history with bounded telemetry (resolved 2026-09-08)
 
 **Location:** [GameplaySession.cpp](../../../src/engine/GameplaySession.cpp), line 466; [GameplaySession.hpp](../../../src/engine/GameplaySession.hpp), `historySize` and `moveHistory_`; [ApplicationDebugUi.cpp](../../../src/engine/ApplicationDebugUi.cpp), around line 880.
 
@@ -333,7 +335,7 @@ Potential concerns were not promoted to findings when existing code supplied the
 1. **Protect player and author data:** CQ-01, CQ-02, CQ-03 and CQ-05. Establish explicit storage outcomes and small deterministic regression tests. Preserve existing formats and public behavior where possible.
 2. **Unify editor publication:** CQ-04 and CQ-09, then decide the appended-material contract. Test a complete stage/edit/restart cycle. This is a coherent boundary change, not several unrelated file helpers.
 3. **Repair runtime invariants:** CQ-06, CQ-07 and CQ-08 with focused state/retry/geometric tests. These can be reviewed separately from persistence changes.
-4. **Remove avoidable retention and failure hazards:** CQ-10 and CQ-12. Verify bounded history and partial construction cleanup.
+4. **Remove the remaining construction failure hazard:** CQ-12. Verify partial construction cleanup.
 5. **Make gates trustworthy:** CQ-11, CQ-13 and CQ-14; align warning policy and current documentation with what actually runs.
 6. **Do measured cleanup:** shared identity/delta helpers, stale artifacts/comments, incremental test-harness consistency, and performance experiments from the table above. Avoid broad churn while correctness changes are under review.
 

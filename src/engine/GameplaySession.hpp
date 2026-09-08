@@ -101,7 +101,12 @@ public:
     // Whether any action has run its full duration. `activeActionComplete`
     // asks the same of the oldest one only.
     [[nodiscard]] bool anyActionComplete() const;
-    [[nodiscard]] std::size_t historySize() const { return moveHistory_.size(); }
+    // Number of actions committed since reset or restore, including reversed
+    // actions. This is telemetry only; `undoCount` reports retained undo state.
+    [[nodiscard]] std::size_t completedActionCount() const
+    {
+        return completedActionCount_;
+    }
     [[nodiscard]] std::size_t undoCount() const { return undoHistory_.size(); }
     [[nodiscard]] std::size_t mirrorActivationSequence() const
     {
@@ -297,7 +302,7 @@ private:
     ActionScheduler scheduler_;
     std::deque<Command> pendingCommands_;
     // Completed forward actions that can still be undone. Reversed actions
-    // remain in moveHistory_ for diagnostics but never become undoable again.
+    // remove entries from this stack and never become undoable again.
     //
     // One entry per *player* action, not per scheduled action. A push and the
     // slide it sets off are two actions to the scheduler and one entry here:
@@ -313,7 +318,9 @@ private:
     // closed and each entry is its own.
     std::vector<std::size_t> undoGroups_;
     std::size_t nextCausalGroup_ = 1;
-    std::vector<Action> moveHistory_;
+    // Diagnostic telemetry needs the number of completions, not copies of
+    // their before/after states and presentation data.
+    std::size_t completedActionCount_ = 0;
     // The level's opening state, which is where the undo chain is anchored.
     // `restore` validates the stack by replaying from exactly this.
     GameState undoBaseState_;

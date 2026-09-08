@@ -143,7 +143,7 @@ int main(int argc, char** argv) {
             session.advanceActiveAction(session.activeActionDuration()); session.completeActiveAction();
         }
         std::cout << "after 1000 move/undo pairs: undo entries=" << session.undoCount()
-                  << " retained diagnostic full actions=" << session.historySize() << '\n';
+                  << " completed actions=" << session.completedActionCount() << '\n';
     }
     {
         try {

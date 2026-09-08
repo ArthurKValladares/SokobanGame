@@ -877,7 +877,9 @@ ApplicationDebugUi::Result ApplicationDebugUi::draw(
     ImGui::Text("Player instances: %zu", state.players.size());
     ImGui::Text("Movables %zu", state.movables.size());
     ImGui::Text("Enemies %zu", state.enemies.size());
-    ImGui::Text("History %zu", context.gameplaySession.historySize());
+    ImGui::Text(
+        "Completed actions %zu",
+        context.gameplaySession.completedActionCount());
 
     // Show which admission rule is preventing concurrent actions.
     const ActionScheduler::AdmissionStats& admissions =

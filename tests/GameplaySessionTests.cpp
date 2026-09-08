@@ -91,7 +91,7 @@ void testMoveCommitsAfterAnimation()
     session.completeActiveAction();
     CHECK(!session.moving());
     CHECK(session.state().players[0].cell == cell(2, 0, 1));
-    CHECK(session.historySize() == 1);
+    CHECK(session.completedActionCount() == 1);
 }
 
 void testPushMetadata()
@@ -147,7 +147,38 @@ void testUndoRoundTrip()
     CHECK(session.activeActionDuration() == 0.4f);
     finishAction(session);
     CHECK(session.state().players[0].cell == cell(1, 0, 1));
-    CHECK(session.historySize() == 2);
+    CHECK(session.completedActionCount() == 2);
+}
+
+void testCompletedActionTelemetryTracksLongUndoLoop()
+{
+    TEST("completedActionTelemetryTracksLongUndoLoop");
+    const Level level = makeLevel({
+        { "...." },
+        { " C  " },
+    });
+    const GameState initialState = rules::initialState(level);
+    GameplaySession session;
+    session.reset(level);
+
+    constexpr std::size_t pairCount = 1000;
+    for (std::size_t pair = 0; pair < pairCount; ++pair) {
+        session.queueMove(MoveDirection::Right);
+        CHECK(session.tryStartNextAction(level, {}));
+        finishAction(session);
+
+        session.queueUndo();
+        CHECK(session.tryStartNextAction(level, {}));
+        finishAction(session);
+    }
+
+    CHECK(session.completedActionCount() == pairCount * 2);
+    CHECK(session.undoCount() == 0);
+    CHECK(session.playerMoveCount() == 0);
+    CHECK(session.state() == initialState);
+
+    session.reset(level);
+    CHECK(session.completedActionCount() == 0);
 }
 
 void testContiguousUndoWalksOriginalHistory()
@@ -249,9 +280,9 @@ void testActionTimingClampsAndIgnoresNegativeDelta()
     CHECK(session.activeActionRemainingSeconds() == 0.0f);
     CHECK(session.activeActionComplete());
     session.completeActiveAction();
-    const std::size_t historySize = session.historySize();
+    const std::size_t completedActionCount = session.completedActionCount();
     session.completeActiveAction();
-    CHECK(session.historySize() == historySize);
+    CHECK(session.completedActionCount() == completedActionCount);
 }
 
 void testQueuedCommandsWaitForActiveAction()
@@ -442,6 +473,7 @@ void testSnapshotRestoresExactStateAndUndoStack()
     CHECK(restored.restore(level, saved));
     CHECK(restored.snapshot() == saved);
     CHECK(restored.undoCount() == 2);
+    CHECK(restored.completedActionCount() == 0);
 
     restored.queueUndo();
     CHECK(restored.tryStartNextAction(level, {}));
@@ -449,6 +481,7 @@ void testSnapshotRestoresExactStateAndUndoStack()
     CHECK(restored.state().players[0].cell == cell(2, 0, 1));
     CHECK(restored.playerMoveCount() == 1);
     CHECK(restored.undoCount() == 1);
+    CHECK(restored.completedActionCount() == 1);
 }
 
 void testResetClearsUndoStackForNewScreen()
@@ -1158,6 +1191,7 @@ int main()
     testMoveCommitsAfterAnimation();
     testPushMetadata();
     testUndoRoundTrip();
+    testCompletedActionTelemetryTracksLongUndoLoop();
     testContiguousUndoWalksOriginalHistory();
     testRestart();
     testUndoPausesAutomaticMotion();
