@@ -32,6 +32,7 @@ int runApplication(const sokoban::CommandLineOptions& options)
     sokoban::Application app {
         sokoban::ApplicationOptions {
             .smokeFrames = options.smokeFrames,
+            .showFailureDialogs = !options.smokeRun(),
             .saveDirectoryOverride = options.saveDirectory,
             .evidenceOutputDirectory = options.evidenceOutputDirectory,
             .evidenceRenderScalePercent = options.evidenceRenderScalePercent,
@@ -83,8 +84,7 @@ int runApplication(const sokoban::CommandLineOptions& options)
             << "Starting normally. Pass --bake-tile-thumbnails to re-bake "
                "the editor's tile palette pictures instead.";
     }
-    app.run();
-    return 0;
+    return app.run() ? 0 : 1;
 }
 
 } // namespace
@@ -101,10 +101,19 @@ int main(int argc, char** argv)
 
     std::filesystem::path diagnosticDirectory;
     std::filesystem::path logPath;
+    sokoban::CommandLineOptions options;
+    bool nonInteractive = false;
     int exitCode = 0;
     try {
-        diagnosticDirectory = sokoban::SaveStore::preferencePath(
-            "Sokoban3D", "Sokoban3D");
+        // Parse before selecting diagnostic storage. An automated smoke run
+        // keeps its logs and dumps beside its isolated save data, where the
+        // caller can capture them without reading a player's profile.
+        const std::vector<std::string_view> arguments(argv + 1, argv + argc);
+        options = sokoban::parseCommandLine(arguments);
+        nonInteractive = options.smokeRun();
+        diagnosticDirectory = options.saveDirectory.empty()
+            ? sokoban::SaveStore::preferencePath("Sokoban3D", "Sokoban3D")
+            : std::filesystem::path(options.saveDirectory);
         logPath = diagnosticDirectory / "log.txt";
         sokoban::log::addFileSink(logPath);
         sokoban::crash::install(diagnosticDirectory / "crashes");
@@ -114,12 +123,6 @@ int main(int argc, char** argv)
         sokoban::log::info(sokoban::log::Category::Application)
             << "Session started: Sokoban 3D " << SOKOBAN_GAME_VERSION;
 
-        // Parsed before a window, a device or a save file exists, so a bad
-        // argument costs nothing and says so plainly. The parser itself is
-        // headless and covered by tests/CommandLineOptionsTests.cpp.
-        const std::vector<std::string_view> arguments(argv + 1, argv + argc);
-        const sokoban::CommandLineOptions options =
-            sokoban::parseCommandLine(arguments);
         if (options.malformed) {
             sokoban::log::error(sokoban::log::Category::Application)
                 << options.error << ". " << sokoban::commandLineUsage;
@@ -148,7 +151,10 @@ int main(int argc, char** argv)
                 << "Wrote crash dump: " << dumpPath->string();
             sokoban::log::flush();
         }
-        sokoban::crash::showFatalErrorDialog(error.what(), logPath, dumpPath);
+        if (!nonInteractive) {
+            sokoban::crash::showFatalErrorDialog(
+                error.what(), logPath, dumpPath);
+        }
         exitCode = 1;
     } catch (...) {
         constexpr std::string_view unknownError = "An unknown exception escaped the game loop.";
@@ -156,7 +162,10 @@ int main(int argc, char** argv)
             << "Fatal error: " << unknownError;
         sokoban::log::flush();
         const auto dumpPath = sokoban::crash::writeMinidump();
-        sokoban::crash::showFatalErrorDialog(unknownError, logPath, dumpPath);
+        if (!nonInteractive) {
+            sokoban::crash::showFatalErrorDialog(
+                unknownError, logPath, dumpPath);
+        }
         exitCode = 1;
     }
 

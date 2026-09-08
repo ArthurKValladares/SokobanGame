@@ -25,9 +25,13 @@ powershell -ExecutionPolicy Bypass -File .\packaging\ValidateShippingPackage.ps1
 
 The script extracts the ZIP into a fresh temporary directory, rejects missing
 licenses and accidental PDBs, verifies every `content.index` path and size,
-and confirms that `sokoban.exe` stays alive for ten seconds when launched from
-that extracted directory. It deliberately closes the game after this check.
-Use `-KeepExtracted` to retain the exact runtime tree for manual inspection.
+then runs 240 frames through the packaged executable with an isolated profile.
+The executable must finish within 60 seconds with exit code 0. A timeout,
+startup failure, renderer failure, or nonzero exit fails the gate and includes
+the captured game log, stdout, and stderr. Use `-SmokeFrames` and
+`-SmokeTimeoutSeconds` to tune the bounded run, `-DiagnosticOutputDirectory` to
+retain its artifacts, or `-KeepExtracted` to retain the exact runtime tree for
+manual inspection.
 For an Inno Setup release, run the same script against the installer-stage
 Runtime directory after installation, then validate uninstall and upgrade
 separately.

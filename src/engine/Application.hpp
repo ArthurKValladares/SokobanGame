@@ -61,6 +61,9 @@ struct ApplicationOptions {
     // buildRenderFrame returns an empty RenderFrameData while no game is
     // loaded, so no tiles, models, shadows or SSAO are recorded at all.
     std::uint64_t smokeFrames = 0;
+    // Automated smoke runs have no operator who can dismiss an OS dialog.
+    // Errors still reach the log and process exit code.
+    bool showFailureDialogs = true;
     // Roots saves, settings and the pipeline cache here instead of the user's
     // preference path. Empty keeps the normal location.
     std::filesystem::path saveDirectoryOverride;
@@ -99,7 +102,7 @@ public:
     Application(const Application&) = delete;
     Application& operator=(const Application&) = delete;
 
-    void run();
+    [[nodiscard]] bool run();
 #if SOKOBAN_ENABLE_DEBUG_UI
     // Renders each tile type through the normal frame path and writes the
     // captured result to the source and staged asset trees. Returns false if

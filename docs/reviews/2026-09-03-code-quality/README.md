@@ -28,13 +28,15 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Follow-up, 2026-09-08 (CQ-13):** The standalone compiler/linker script has been removed. `SOKOBAN_HEADLESS_TESTS_ONLY` now configures the real core, UI, and SDK-independent test targets while omitting Vulkan discovery, shader compilation, the application, and packaging. The `headless-tests` preset provides the supported local entry point, and Linux CI configures it without downloading the Vulkan SDK before building and running every registered headless test.
 
+**Follow-up, 2026-09-08 (CQ-14):** Shipping validation now runs 240 real frames with an isolated profile, requires exit code 0 within a 60-second deadline, kills timeouts, and captures stdout, stderr, logs, and dumps. Smoke-mode initialization and renderer failures suppress dialogs and return failure. A Windows integration regression covers success, nonzero exit, hang termination, missing/corrupt content, and a real application initialization failure.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
 
-The remaining actionable problem is in the shipping release gate: launch validation can mistake a hung process for successful startup. It is more valuable to fix than another broad file-splitting or formatting pass.
+All actionable findings from this review are resolved. The remaining improvement backlog below contains measured cleanup and investigation candidates rather than demonstrated defects.
 
-This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-13 have since been resolved, leaving 1 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
+This review recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-14 have been resolved. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their originally untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
 
 - **P1:** prioritize before relying on persistence or authoring for valuable work; existing data or unsaved progress can be lost or abandoned.
 - **P2:** schedule fixes for observable correctness, resource use, or validation gaps; several require unusual inputs or failure conditions.
@@ -89,7 +91,7 @@ Current sanitizer, clang-tidy, Linux builds, interactive controller/editor accep
 | CQ-11 | P2 | Validation exit status is computed before renderer destruction | Resolved 2026-09-08 |
 | CQ-12 | P2 | Partial thread-pool construction can terminate the process | Resolved 2026-09-08 |
 | CQ-13 | P2 | The standalone headless build script has drifted from the build graph | Resolved 2026-09-08 |
-| CQ-14 | P2 | Shipping launch validation mistakes process survival for startup success | Source-confirmed |
+| CQ-14 | P2 | Shipping launch validation mistakes process survival for startup success | Resolved 2026-09-08 |
 
 ### CQ-01 — Preserve decoded saves when migration or promotion cannot write (resolved 2026-09-07)
 
@@ -247,15 +249,17 @@ This conclusion comes from comparing the script with current compiler requiremen
 
 **Resolution:** The bespoke script was deleted instead of acquiring another partial copy of target metadata. `SOKOBAN_HEADLESS_TESTS_ONLY` forces tests on and developer/Vulkan smoke targets off, skips Vulkan and `glslc` discovery, and does not declare the renderer, application, content-staging, install, or package targets. Core and UI retain their ordinary source lists, dependencies, public `SOKOBAN_ENABLE_DEBUG_UI` definition, cgltf wiring, and BC7 target. Only the seven tests whose declared dependencies require the renderer or compiled shaders are absent; the README names them. The Linux `Headless tests (no Vulkan SDK)` matrix entry performs the clean configure, build, and complete CTest run without restoring or exposing the SDK.
 
-### CQ-14 — Require successful bounded execution of the shipped executable
+### CQ-14 — Require successful bounded execution of the shipped executable (resolved 2026-09-08)
 
-**Location:** [ValidateShippingPackage.ps1](../../../packaging/ValidateShippingPackage.ps1), lines 139–157; fatal-error handling in [main.cpp](../../../src/main.cpp), lines 150–169.
+**Location:** [ValidateShippingPackage.ps1](../../../packaging/ValidateShippingPackage.ps1); fatal-error handling in [main.cpp](../../../src/main.cpp); process-result propagation in [Application.cpp](../../../src/engine/Application.cpp).
 
 The package check launches the game, waits, and asserts that its process is still alive. It then closes/kills it. A blocked fatal-error dialog or startup hang can satisfy this check; it does not prove the live Vulkan window claimed by its comment. The final shutdown result is not checked.
 
 **Change:** Launch the packaged executable with the existing bounded smoke mode and an isolated temporary save directory. Require completion within a timeout and a successful exit code, capture logs, and make smoke-mode fatal errors noninteractive so failures cannot wait indefinitely for a dialog. Keep manual visual/gameplay acceptance as a separate requirement.
 
 **Regression gate:** A good package completes a bounded smoke; missing/corrupt content, initialization failure, and a hang fail with captured diagnostics. The script itself was inspected but a deliberately broken installed package was not launched in this review.
+
+**Resolution:** The gate invokes the existing `--smoke-frames` mode for 240 frames under an isolated `--save-directory`, waits at most 60 seconds, requires exit code 0, and terminates an over-time process. Its native process wrapper drains stdout and stderr asynchronously, and failure messages include those streams plus the last 200 lines of each game log. Optional retained diagnostics feed the release-evidence bundle directly instead of reading a real player's profile. Smoke runs suppress both top-level fatal dialogs and renderer failure dialogs; renderer device/surface failures now propagate through `Application::run()` to a nonzero process result. The registered Windows package-gate integration test exercises a successful fixture, exit code 23 with captured output, a killed hang, missing and corrupt indexes, and the real executable failing during asset initialization without blocking.
 
 ## Maintainability, readability, reuse, and incomplete work
 
@@ -334,7 +338,7 @@ The existing frame arenas, scratch reuse, suballocators, draw sorting, shadow ca
 | Meshes, animation, skinning, materials, shaders | Transform conventions, dependencies, normal/tangent and CPU/GPU correspondence | CQ-08; fixtures need non-axis-aligned/nonuniform cases. No claim of exhaustive animation/glTF conformance. |
 | Vulkan resources, scheduling, descriptors, retirement | Retry ownership, admission, upload/publication, frame-lifetime ordering | CQ-07 and CQ-11; pressure and teardown injection were not exercised on hardware. |
 | Core utilities, tasks, memory, diagnostics, audio | Construction/destruction, bounded storage, thread contracts | CQ-12; telemetry candidate above. No complete audio-device or crash/minidump fault matrix was run. |
-| Build, tests, CI, packaging, documentation | Shared target graph, flags, source drift, observable release gates | CQ-14, warning-policy and stale-documentation cleanup. Linux/toolchain and installer execution remain unverified here. |
+| Build, tests, CI, packaging, documentation | Shared target graph, flags, source drift, observable release gates | Actionable findings resolved; warning-policy and stale-documentation cleanup remain. Linux/toolchain and installer execution remain unverified here. |
 
 Potential concerns were not promoted to findings when existing code supplied the missing invariant. In particular, the renderer's later color-output/overlay ordering matters when evaluating swapchain synchronization; a transfer operation alone was not treated as proof of a semaphore-stage bug. Similarly, storage designed for stable references was not labeled invalid merely because a container grows. Findings require a supported failure path, not just a suspicious isolated line.
 
@@ -343,7 +347,7 @@ Potential concerns were not promoted to findings when existing code supplied the
 1. **Protect player and author data:** CQ-01, CQ-02, CQ-03 and CQ-05. Establish explicit storage outcomes and small deterministic regression tests. Preserve existing formats and public behavior where possible.
 2. **Unify editor publication:** CQ-04 and CQ-09, then decide the appended-material contract. Test a complete stage/edit/restart cycle. This is a coherent boundary change, not several unrelated file helpers.
 3. **Repair runtime invariants:** CQ-06, CQ-07 and CQ-08 with focused state/retry/geometric tests. These can be reviewed separately from persistence changes.
-4. **Make the remaining gates trustworthy:** CQ-13 and CQ-14; align warning policy and current documentation with what actually runs.
+4. **Make the release gates trustworthy (completed):** CQ-13 and CQ-14; align warning policy and current documentation with what actually runs.
 5. **Do measured cleanup:** shared identity/delta helpers, stale artifacts/comments, incremental test-harness consistency, and performance experiments from the table above. Avoid broad churn while correctness changes are under review.
 
 Each packet should include a concrete failing-before/passing-after regression and one focused reviewable implementation. Rerun the relevant tests during development and the full Debug/Release suites before completion. Add sanitizer/tidy/platform gates where required by the affected code, rather than repeatedly running every expensive check after cosmetic changes.

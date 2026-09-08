@@ -174,7 +174,8 @@ Application::Application(ApplicationOptions options)
           assetLoadingBudgetFor(options),
           options.parallelScenePreparationEnabled,
           options.pointShadowOptimizationsEnabled,
-          options.recorderScratchReuseEnabled)
+          options.recorderScratchReuseEnabled,
+          options.showFailureDialogs)
     , ui_(uiFont_)
     , audioSystem_(assetRoot_, assetManifest_)
     , mirrorSwapParticleEffect_(
@@ -623,7 +624,7 @@ void Application::finishSmokeRunIfDue(std::uint64_t renderedFrames)
     }
 }
 
-void Application::run()
+bool Application::run()
 {
     if (smokeFrames_ > 0) {
         // Nobody is here to press New Game, and the title screen draws no
@@ -726,17 +727,19 @@ void Application::run()
             *preparedRenderFrame_,
             ui_.drawData(),
             developerWorkspaceVisible);
+        ++renderedFrames;
         if (renderer_.hasFatalFailure()) {
             log::error(log::Category::Application)
                 << "Rendering stopped: " << renderer_.fatalFailureMessage();
             running_ = false;
+        } else {
+            finishSmokeRunIfDue(renderedFrames);
         }
-        ++renderedFrames;
-        finishSmokeRunIfDue(renderedFrames);
         if (running_) {
             framePacer_.pace();
         }
     }
+    return !renderer_.hasFatalFailure();
 }
 
 void Application::update(

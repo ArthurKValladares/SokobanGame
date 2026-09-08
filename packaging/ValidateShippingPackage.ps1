@@ -4,8 +4,14 @@ param(
     [ValidateScript({ Test-Path -LiteralPath $_ })]
     [string]$Package,
 
-    [ValidateRange(1, 120)]
-    [int]$LaunchSeconds = 10,
+    [Alias('LaunchSeconds')]
+    [ValidateRange(1, 600)]
+    [int]$SmokeTimeoutSeconds = 60,
+
+    [ValidateRange(1, 10000)]
+    [int]$SmokeFrames = 240,
+
+    [string]$DiagnosticOutputDirectory,
 
     [switch]$SkipLaunch,
     [switch]$KeepExtracted
@@ -109,9 +115,87 @@ function Test-ContentIndex {
     Write-Host "Verified $actualCount indexed assets ($actualBytes bytes)."
 }
 
+function Get-SmokeDiagnosticText {
+    param(
+        [Parameter(Mandatory)]
+        [string]$SmokeRoot,
+        [Parameter(Mandatory)]
+        [string]$SaveDirectory
+    )
+
+    $diagnosticFiles = @(
+        Get-Item -LiteralPath (Join-Path $SmokeRoot 'stdout.txt') -ErrorAction SilentlyContinue
+        Get-Item -LiteralPath (Join-Path $SmokeRoot 'stderr.txt') -ErrorAction SilentlyContinue
+        Get-ChildItem -LiteralPath $SaveDirectory -Filter 'log*.txt' -File -ErrorAction SilentlyContinue
+    )
+    if ($diagnosticFiles.Count -eq 0) {
+        return 'No smoke-run stdout, stderr, or game log was produced.'
+    }
+
+    $sections = foreach ($file in $diagnosticFiles) {
+        $content = @(Get-Content -LiteralPath $file.FullName -Tail 200 -ErrorAction Continue)
+        "===== $($file.Name) (last 200 lines) =====`n$($content -join "`n")"
+    }
+    return $sections -join "`n"
+}
+
+function Copy-SmokeDiagnostics {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Source,
+        [Parameter(Mandatory)]
+        [string]$Destination
+    )
+
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    foreach ($name in @('stdout.txt', 'stderr.txt')) {
+        $path = Join-Path $Source $name
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            Copy-Item -LiteralPath $path -Destination $Destination -Force
+        }
+    }
+
+    $profileSource = Join-Path $Source 'profile'
+    $profileDestination = Join-Path $Destination 'profile'
+    $logs = @(Get-ChildItem -LiteralPath $profileSource `
+        -Filter 'log*.txt' -File -ErrorAction SilentlyContinue)
+    if ($logs.Count -gt 0) {
+        New-Item -ItemType Directory -Path $profileDestination -Force | Out-Null
+        foreach ($log in $logs) {
+            Copy-Item -LiteralPath $log.FullName -Destination $profileDestination -Force
+        }
+    }
+    $crashSource = Join-Path $profileSource 'crashes'
+    if (Test-Path -LiteralPath $crashSource -PathType Container) {
+        New-Item -ItemType Directory -Path $profileDestination -Force | Out-Null
+        Copy-Item -LiteralPath $crashSource -Destination $profileDestination -Recurse -Force
+    }
+}
+
+function Stop-SmokeProcess {
+    param(
+        [Parameter(Mandatory)]
+        [Diagnostics.Process]$Process
+    )
+
+    if ($Process.HasExited) {
+        return
+    }
+    try {
+        $Process.Kill()
+    } catch {
+        $Process.Refresh()
+        if (-not $Process.HasExited) {
+            throw
+        }
+    }
+    $Process.WaitForExit()
+}
+
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) (
     'Sokoban3D-PackageValidation-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
+$smokeRoot = Join-Path $temporaryRoot 'smoke'
 
 try {
     $runtimeRoot = Get-PackageRoot -Path $Package -ExtractionDirectory $temporaryRoot
@@ -127,6 +211,7 @@ try {
             'miniaudio-LICENSE.txt',
             'nlohmann-json-LICENSE.txt',
             'stb-LICENSE.txt',
+            'cgltf-LICENSE.txt',
             'imgui-LICENSE.txt')) {
         Assert-Condition (Test-Path -LiteralPath (Join-Path $runtimeRoot "licenses/$license") -PathType Leaf) `
             "Runtime package is missing license: $license"
@@ -137,28 +222,79 @@ try {
     Test-ContentIndex -AssetRoot $assetRoot
 
     if (-not $SkipLaunch) {
-        $game = Start-Process -FilePath $gameExecutable -WorkingDirectory $runtimeRoot -PassThru
-        Start-Sleep -Seconds $LaunchSeconds
-        $game.Refresh()
-        Assert-Condition (-not $game.HasExited) `
-            "Packaged game exited during its $LaunchSeconds-second launch check (exit code $($game.ExitCode))."
+        New-Item -ItemType Directory -Path $smokeRoot | Out-Null
+        $saveDirectory = Join-Path $smokeRoot 'profile'
+        New-Item -ItemType Directory -Path $saveDirectory | Out-Null
+        $stdoutPath = Join-Path $smokeRoot 'stdout.txt'
+        $stderrPath = Join-Path $smokeRoot 'stderr.txt'
+        $game = $null
+        $gameStarted = $false
+        $stdoutTask = $null
+        $stderrTask = $null
+        try {
+            try {
+                $startInfo = [Diagnostics.ProcessStartInfo]::new()
+                $startInfo.FileName = $gameExecutable
+                $startInfo.Arguments = "--smoke-frames $SmokeFrames --save-directory `"$saveDirectory`""
+                $startInfo.WorkingDirectory = $runtimeRoot
+                $startInfo.UseShellExecute = $false
+                $startInfo.CreateNoWindow = $true
+                $startInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+                $startInfo.RedirectStandardOutput = $true
+                $startInfo.RedirectStandardError = $true
+                $game = [Diagnostics.Process]::new()
+                $game.StartInfo = $startInfo
+                $gameStarted = $game.Start()
+                Assert-Condition $gameStarted `
+                    'The operating system refused to start the packaged game.'
+                # Drain while the process runs. Reading only after WaitForExit
+                # can deadlock once either pipe fills its fixed-size buffer.
+                $stdoutTask = $game.StandardOutput.ReadToEndAsync()
+                $stderrTask = $game.StandardError.ReadToEndAsync()
+            } catch {
+                throw "Could not start packaged game: $($_.Exception.Message)"
+            }
 
-        # The launch check proves the package reaches a live Vulkan window.
-        # It intentionally closes the process afterwards; manual gameplay
-        # acceptance remains part of the hardware matrix in ReleaseValidation.md.
-        if (-not $game.CloseMainWindow()) {
-            Stop-Process -Id $game.Id -ErrorAction Stop
-        } else {
-            $game.WaitForExit(5000) | Out-Null
-            if (-not $game.HasExited) {
-                Stop-Process -Id $game.Id -ErrorAction Stop
+            $completed = $game.WaitForExit($SmokeTimeoutSeconds * 1000)
+            if (-not $completed) {
+                Stop-SmokeProcess -Process $game
+                [IO.File]::WriteAllText($stdoutPath, $stdoutTask.Result)
+                [IO.File]::WriteAllText($stderrPath, $stderrTask.Result)
+                $diagnostics = Get-SmokeDiagnosticText `
+                    -SmokeRoot $smokeRoot -SaveDirectory $saveDirectory
+                throw "Packaged game did not complete its $SmokeFrames-frame smoke run within $SmokeTimeoutSeconds seconds.`n$diagnostics"
+            }
+
+            # WaitForExit(timeout) establishes process completion. The
+            # parameterless call also drains both redirected output streams.
+            $game.WaitForExit()
+            [IO.File]::WriteAllText($stdoutPath, $stdoutTask.Result)
+            [IO.File]::WriteAllText($stderrPath, $stderrTask.Result)
+            $exitCode = $game.ExitCode
+            if ($exitCode -ne 0) {
+                $diagnostics = Get-SmokeDiagnosticText `
+                    -SmokeRoot $smokeRoot -SaveDirectory $saveDirectory
+                throw "Packaged game smoke run exited with code $exitCode.`n$diagnostics"
+            }
+        } finally {
+            if ($gameStarted) {
+                Stop-SmokeProcess -Process $game
+            }
+            if ($game) {
+                $game.Dispose()
             }
         }
-        Write-Host "Packaged game remained running for $LaunchSeconds seconds."
+        Write-Host "Packaged game completed $SmokeFrames smoke frames successfully."
     }
 
     Write-Host "Package validation passed: $runtimeRoot"
 } finally {
+    if ($DiagnosticOutputDirectory -and (Test-Path -LiteralPath $smokeRoot)) {
+        Copy-SmokeDiagnostics `
+            -Source $smokeRoot `
+            -Destination ([IO.Path]::GetFullPath($DiagnosticOutputDirectory))
+        Write-Host "Smoke diagnostics copied to: $([IO.Path]::GetFullPath($DiagnosticOutputDirectory))"
+    }
     if ($KeepExtracted) {
         Write-Host "Extracted package retained at: $temporaryRoot"
     } else {

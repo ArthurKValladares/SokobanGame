@@ -245,7 +245,8 @@ VulkanRenderer::VulkanRenderer(
     AssetLoadingBudget assetLoadingBudget,
     bool parallelScenePreparationEnabled,
     bool pointShadowOptimizationsEnabled,
-    bool recorderScratchReuseEnabled)
+    bool recorderScratchReuseEnabled,
+    bool showFailureDialogs)
     : window_(window)
     , assetRoot_(std::move(assetRoot))
     , runtimeTextureCatalog_(
@@ -260,6 +261,7 @@ VulkanRenderer::VulkanRenderer(
     , parallelScenePreparationEnabled_(parallelScenePreparationEnabled)
     , pointShadowOptimizationsEnabled_(pointShadowOptimizationsEnabled)
     , recorderScratchReuseEnabled_(recorderScratchReuseEnabled)
+    , showFailureDialogs_(showFailureDialogs)
 {
     scenePreparer_.setPointShadowRangeCulling(
         pointShadowOptimizationsEnabled_);
@@ -1197,7 +1199,9 @@ void VulkanRenderer::reportFatalFailure(VulkanFailure failure) noexcept
     log::error(log::Category::Rendering)
         << vulkanFailureTitle(failure) << ": "
         << vulkanFailureMessage(failure);
-    showVulkanFailureDialog(window_, failure);
+    if (showFailureDialogs_) {
+        showVulkanFailureDialog(window_, failure);
+    }
 }
 
 AntiAliasingMode VulkanRenderer::antiAliasingMode() const

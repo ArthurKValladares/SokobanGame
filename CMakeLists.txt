@@ -1181,6 +1181,28 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/TileThumbnailBakeTests.cpp
     )
+    if(WIN32 AND NOT SOKOBAN_HEADLESS_TESTS_ONLY)
+        find_program(SOKOBAN_POWERSHELL_EXECUTABLE NAMES powershell REQUIRED)
+        add_executable(sokoban_package_validation_fixture
+            tests/PackageValidationFixture.cpp
+        )
+        sokoban_enable_warnings(sokoban_package_validation_fixture)
+        add_dependencies(sokoban_package_validation_fixture sokoban)
+        add_test(NAME shipping_package_validation
+            COMMAND "${SOKOBAN_POWERSHELL_EXECUTABLE}"
+                -NoProfile -ExecutionPolicy Bypass
+                -File "${CMAKE_CURRENT_SOURCE_DIR}/cmake/VerifyShippingPackageGate.ps1"
+                -Validator "${CMAKE_CURRENT_SOURCE_DIR}/packaging/ValidateShippingPackage.ps1"
+                -FixtureExecutable "$<TARGET_FILE:sokoban_package_validation_fixture>"
+                -ApplicationExecutable "$<TARGET_FILE:sokoban>"
+                -WorkingRoot "${CMAKE_CURRENT_BINARY_DIR}/test-output/shipping-package-validation/$<CONFIG>"
+                -GameVersion "${PROJECT_VERSION}"
+        )
+        set_tests_properties(shipping_package_validation PROPERTIES
+            LABELS "packaging"
+            TIMEOUT 45
+        )
+    endif()
 endif()
 
 if(SOKOBAN_BUILD_FUZZ_TESTS)

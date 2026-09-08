@@ -121,7 +121,8 @@ public:
         AssetLoadingBudget assetLoadingBudget = {},
         bool parallelScenePreparationEnabled = true,
         bool pointShadowOptimizationsEnabled = true,
-        bool recorderScratchReuseEnabled = true);
+        bool recorderScratchReuseEnabled = true,
+        bool showFailureDialogs = true);
     ~VulkanRenderer();
 
     VulkanRenderer(const VulkanRenderer&) = delete;
@@ -389,6 +390,7 @@ private:
     bool parallelScenePreparationEnabled_ = true;
     bool pointShadowOptimizationsEnabled_ = true;
     bool recorderScratchReuseEnabled_ = true;
+    bool showFailureDialogs_ = true;
     uint64_t nextStatsFrameIndex_ = 1;
     std::optional<GameViewportDisplay> gameViewportDisplay_;
     uint64_t pipelineRebuilds_ = 0;

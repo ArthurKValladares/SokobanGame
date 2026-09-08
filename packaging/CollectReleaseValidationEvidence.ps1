@@ -6,8 +6,9 @@ param(
 
     [string]$Installer,
 
-    [ValidateRange(1, 120)]
-    [int]$LaunchSeconds = 10,
+    [Alias('LaunchSeconds')]
+    [ValidateRange(1, 600)]
+    [int]$SmokeTimeoutSeconds = 60,
 
     [string]$OutputDirectory = (Join-Path (Get-Location) (
         'Sokoban3D-ReleaseValidation-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))),
@@ -30,17 +31,12 @@ function Write-JsonFile {
 
 function Copy-LogTail {
     param(
+        [Parameter(Mandatory)][string]$SourceDirectory,
         [Parameter(Mandatory)][string]$Destination
     )
 
-    $locations = @(
-        [Environment]::GetFolderPath('ApplicationData'),
-        [Environment]::GetFolderPath('LocalApplicationData')
-    ) | Where-Object { $_ }
-    $logFiles = foreach ($location in $locations) {
-        Get-ChildItem -LiteralPath (Join-Path $location 'Sokoban3D/Sokoban3D') `
-            -Filter 'log*.txt' -File -ErrorAction SilentlyContinue
-    }
+    $logFiles = @(Get-ChildItem -LiteralPath $SourceDirectory `
+        -Filter 'log*.txt' -Recurse -File -ErrorAction SilentlyContinue)
 
     if (-not $logFiles) {
         'No Sokoban 3D log was found after the package launch check.' |
@@ -194,8 +190,12 @@ try {
 
     $packageGate = Join-Path $PSScriptRoot 'ValidateShippingPackage.ps1'
     $gateLog = Join-Path $evidenceRoot 'package-gate.log'
+    $smokeDiagnostics = Join-Path $evidenceRoot 'smoke-diagnostics'
     try {
-        & $packageGate -Package $RuntimePackage -LaunchSeconds $LaunchSeconds *>&1 |
+        & $packageGate `
+            -Package $RuntimePackage `
+            -SmokeTimeoutSeconds $SmokeTimeoutSeconds `
+            -DiagnosticOutputDirectory $smokeDiagnostics *>&1 |
             Tee-Object -FilePath $gateLog
         $results.automatedPackageGate = 'pass'
     } catch {
@@ -203,7 +203,9 @@ try {
         $results.automatedPackageGate = 'fail'
         $results.packageGateError = $_.Exception.Message
     }
-    Copy-LogTail -Destination (Join-Path $evidenceRoot 'sokoban-log-tail.txt')
+    Copy-LogTail `
+        -SourceDirectory $smokeDiagnostics `
+        -Destination (Join-Path $evidenceRoot 'sokoban-log-tail.txt')
 
     if ($SkipManualChecklist) {
         $results.manualChecklist = 'skipped by operator'

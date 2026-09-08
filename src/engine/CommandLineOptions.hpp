@@ -22,7 +22,8 @@ struct CommandLineOptions {
     // Render this many frames through the ordinary loop, then exit. Zero runs
     // until the player quits.
     std::uint64_t smokeFrames = 0;
-    // Roots saves and the pipeline cache here instead of the preference path.
+    // Roots saves, diagnostics and the pipeline cache here instead of the
+    // preference path.
     std::string saveDirectory;
     // Fail rather than run when the Vulkan validation layer is not active.
     bool requireValidation = false;
