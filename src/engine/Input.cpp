@@ -67,12 +67,17 @@ void InputState::beginFrame()
     previousGamepadAxes_ = gamepadAxes_;
 }
 
-void InputState::handleEvent(const SDL_Event& event)
+void InputState::handleEvent(
+    const SDL_Event& event,
+    PressPolicy pressPolicy)
 {
+    const bool recordPress = pressPolicy == PressPolicy::Record;
     if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
         event.key.scancode < SDL_SCANCODE_COUNT) {
         keysDown_[event.key.scancode] = true;
-        keysPressed_[event.key.scancode] = true;
+        if (recordPress) {
+            keysPressed_[event.key.scancode] = true;
+        }
         activeDevice_ = ActiveInputDevice::KeyboardMouse;
     }
 
@@ -89,7 +94,9 @@ void InputState::handleEvent(const SDL_Event& event)
         mousePosition_ = { event.button.x, event.button.y };
         if (event.button.button < mouseButtonsDown_.size()) {
             mouseButtonsDown_[event.button.button] = true;
-            mouseButtonsPressed_[event.button.button] = true;
+            if (recordPress) {
+                mouseButtonsPressed_[event.button.button] = true;
+            }
         }
         activeDevice_ = ActiveInputDevice::KeyboardMouse;
     }
@@ -130,7 +137,9 @@ void InputState::handleEvent(const SDL_Event& event)
             activateGamepad(event.gbutton.which, false);
         }
         gamepadButtonsDown_[event.gbutton.button] = true;
-        gamepadButtonsPressed_[event.gbutton.button] = true;
+        if (recordPress) {
+            gamepadButtonsPressed_[event.gbutton.button] = true;
+        }
         activeDevice_ = ActiveInputDevice::Gamepad;
     }
     if (event.type == SDL_EVENT_GAMEPAD_BUTTON_UP &&
@@ -147,6 +156,12 @@ void InputState::handleEvent(const SDL_Event& event)
                 activateGamepad(event.gaxis.which, false);
             }
             gamepadAxes_[event.gaxis.axis] = value;
+            if (!recordPress) {
+                // Axis presses are derived from a threshold crossing rather
+                // than a stored edge. Move the comparison state with the
+                // physical state so capture cannot synthesize that crossing.
+                previousGamepadAxes_[event.gaxis.axis] = value;
+            }
             if (std::abs(value) >= 0.25f) {
                 activeDevice_ = ActiveInputDevice::Gamepad;
             }

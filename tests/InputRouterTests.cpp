@@ -16,6 +16,25 @@ SDL_Event keyEvent(Uint32 type, SDL_Scancode scancode)
     return event;
 }
 
+SDL_Event gamepadButtonEvent(Uint32 type, SDL_GamepadButton button)
+{
+    SDL_Event event {};
+    event.type = type;
+    event.gbutton.which = 42;
+    event.gbutton.button = static_cast<Uint8>(button);
+    return event;
+}
+
+SDL_Event gamepadAxisEvent(SDL_GamepadAxis axis, Sint16 value)
+{
+    SDL_Event event {};
+    event.type = SDL_EVENT_GAMEPAD_AXIS_MOTION;
+    event.gaxis.which = 42;
+    event.gaxis.axis = static_cast<Uint8>(axis);
+    event.gaxis.value = value;
+    return event;
+}
+
 void pressKey(
     sokoban::InputRouter& router,
     sokoban::InputState& input,
@@ -36,8 +55,9 @@ void testBindingCaptureAndUiCaptureAdmission()
         input,
         { .bindingCapture = true });
     CHECK(result.bindingCandidate.has_value());
-    CHECK(!result.forwardedToInput);
-    CHECK(!input.keyDown(SDL_SCANCODE_BACKSPACE));
+    CHECK(result.forwardedToInput);
+    CHECK(input.keyDown(SDL_SCANCODE_BACKSPACE));
+    CHECK(!input.keyPressed(SDL_SCANCODE_BACKSPACE));
 
     result = router.routeEvent(
         keyEvent(SDL_EVENT_KEY_DOWN, SDL_SCANCODE_ESCAPE),
@@ -58,6 +78,95 @@ void testBindingCaptureAndUiCaptureAdmission()
         input,
         { .keyboardCaptured = true, .editorEditing = true });
     CHECK(result.forwardedToInput);
+}
+
+void testBindingCaptureSynchronizesKeyboardRelease()
+{
+    sokoban::InputRouter router;
+    sokoban::InputState input(false);
+    input.beginFrame();
+    pressKey(router, input, SDL_SCANCODE_W);
+    CHECK(input.actionDown(sokoban::InputAction::MoveUp));
+
+    input.beginFrame();
+    const sokoban::InputRouter::EventResult release = router.routeEvent(
+        keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_W),
+        input,
+        { .bindingCapture = true });
+    CHECK(release.forwardedToInput);
+    CHECK(!release.bindingCandidate.has_value());
+    CHECK(!input.actionDown(sokoban::InputAction::MoveUp));
+    CHECK(!input.actionPressed(sokoban::InputAction::MoveUp));
+
+    // Completion and cancellation both leave capture by changing the routing
+    // context. Neither transition can restore the released key.
+    CHECK(!router.routeFrame(input, {}).gameplay.up.down);
+    CHECK(!router.routeFrame(input, { .optionsOpen = true }).options.up);
+}
+
+void testBindingCaptureSynchronizesGamepadButtonStateWithoutAnEdge()
+{
+    sokoban::InputRouter router;
+    sokoban::InputState input(false);
+    input.beginFrame();
+    (void)router.routeEvent(
+        gamepadButtonEvent(
+            SDL_EVENT_GAMEPAD_BUTTON_DOWN,
+            SDL_GAMEPAD_BUTTON_DPAD_UP),
+        input,
+        {});
+    CHECK(input.actionDown(sokoban::InputAction::MoveUp));
+
+    input.beginFrame();
+    (void)router.routeEvent(
+        gamepadButtonEvent(
+            SDL_EVENT_GAMEPAD_BUTTON_UP,
+            SDL_GAMEPAD_BUTTON_DPAD_UP),
+        input,
+        { .bindingCapture = true });
+    CHECK(!input.actionDown(sokoban::InputAction::MoveUp));
+
+    (void)router.routeEvent(
+        gamepadButtonEvent(
+            SDL_EVENT_GAMEPAD_BUTTON_DOWN,
+            SDL_GAMEPAD_BUTTON_DPAD_UP),
+        input,
+        { .bindingCapture = true });
+    CHECK(input.actionDown(sokoban::InputAction::MoveUp));
+    CHECK(!input.actionPressed(sokoban::InputAction::MoveUp));
+
+    input.beginFrame();
+    CHECK(input.actionDown(sokoban::InputAction::MoveUp));
+    CHECK(!input.actionPressed(sokoban::InputAction::MoveUp));
+}
+
+void testBindingCaptureSynchronizesAxisStateWithoutAnEdge()
+{
+    sokoban::InputRouter router;
+    sokoban::InputState input(false);
+    input.beginFrame();
+    (void)router.routeEvent(
+        gamepadAxisEvent(SDL_GAMEPAD_AXIS_LEFTX, -24000), input, {});
+    CHECK(input.actionDown(sokoban::InputAction::MoveLeft));
+
+    input.beginFrame();
+    (void)router.routeEvent(
+        gamepadAxisEvent(SDL_GAMEPAD_AXIS_LEFTX, 0),
+        input,
+        { .bindingCapture = true });
+    CHECK(!input.actionDown(sokoban::InputAction::MoveLeft));
+    CHECK(!input.actionPressed(sokoban::InputAction::MoveRight));
+
+    (void)router.routeEvent(
+        gamepadAxisEvent(SDL_GAMEPAD_AXIS_LEFTX, 24000),
+        input,
+        { .bindingCapture = true });
+    CHECK(input.actionDown(sokoban::InputAction::MoveRight));
+    CHECK(!input.actionPressed(sokoban::InputAction::MoveRight));
+
+    input.beginFrame();
+    CHECK(input.actionDown(sokoban::InputAction::MoveRight));
+    CHECK(!input.actionPressed(sokoban::InputAction::MoveRight));
 }
 
 void testModalFrameRouting()
@@ -248,6 +357,9 @@ void testEditorPointerExposesSecondaryPress()
 int main()
 {
     testBindingCaptureAndUiCaptureAdmission();
+    testBindingCaptureSynchronizesKeyboardRelease();
+    testBindingCaptureSynchronizesGamepadButtonStateWithoutAnEdge();
+    testBindingCaptureSynchronizesAxisStateWithoutAnEdge();
     testModalFrameRouting();
     testBackPriority();
     testEditorFrameUsesConfiguredControls();

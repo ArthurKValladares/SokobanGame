@@ -36,6 +36,11 @@ struct GamepadPresentation {
 // consumes actions; raw keyboard/mouse queries remain available for editor UI.
 class InputState {
 public:
+    enum class PressPolicy {
+        Record,
+        Suppress,
+    };
+
     explicit InputState(bool discoverConnectedGamepads = true);
     ~InputState();
 
@@ -43,7 +48,11 @@ public:
     InputState& operator=(const InputState&) = delete;
 
     void beginFrame();
-    void handleEvent(const SDL_Event& event);
+    // Suppress keeps physical held state current without creating a press
+    // edge. It is used while a binding capture owns the control event.
+    void handleEvent(
+        const SDL_Event& event,
+        PressPolicy pressPolicy = PressPolicy::Record);
     void setBindings(InputBindings bindings);
 
     [[nodiscard]] static std::optional<InputBinding> bindingCandidate(

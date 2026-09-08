@@ -12,13 +12,15 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Follow-up, 2026-09-07 (CQ-05):** Save deletion now belongs to `SaveStore`, which centrally owns the primary, backup, temporary, and displaced artifact set. A durable per-slot deletion marker commits the operation before cleanup and makes every old candidate ineligible for recovery across interruption or partial cleanup. The marker remains until a successful new save replaces the slot. Active-slot deletion is serialized with its async channel and discards a queued snapshot only after the marker commits.
 
+**Follow-up, 2026-09-08 (CQ-06):** Binding capture now forwards keyboard, gamepad-button, and gamepad-axis events through an edge-suppressed input path. Physical held state, releases, and axis neutralization stay current, while controls pressed or moved during capture cannot create a menu or gameplay press edge when capture completes or is cancelled.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
 
 The most consequential remaining problems still occur **between these components**. A deferred renderer publication consumes the data needed for its own retry, imported GLB assets can omit external dependencies, and nonuniform mesh normalization leaves normals incorrect. These are more valuable to fix than another broad file-splitting or formatting pass.
 
-This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-05 have since been resolved, leaving 9 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
+This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-06 have since been resolved, leaving 8 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
 
 - **P1:** prioritize before relying on persistence or authoring for valuable work; existing data or unsaved progress can be lost or abandoned.
 - **P2:** schedule fixes for observable correctness, resource use, or validation gaps; several require unusual inputs or failure conditions.
@@ -137,7 +139,7 @@ Startup unconditionally validates each packaged file's size and membership again
 
 **Regression gate:** Delete with each primary/backup temporary/replacement artifact present, then recreate the manager and reload. Also cover a deletion failure partway through and an active-slot pending write.
 
-### CQ-06 — Keep physical release state synchronized during binding capture
+### CQ-06 — Keep physical release state synchronized during binding capture (resolved 2026-09-08)
 
 **Location:** [InputRouter.cpp](../../../src/engine/InputRouter.cpp), lines 62–74; physical held-state processing in [Input.cpp](../../../src/engine/Input.cpp).
 

@@ -62,13 +62,19 @@ InputRouter::EventResult InputRouter::routeEvent(
         context.shellMenuOpen ||
         !context.mouseCaptured ||
         event.type == SDL_EVENT_MOUSE_BUTTON_UP;
-    const bool suppressForBindingCapture = context.bindingCapture &&
+    const bool suppressPressForBindingCapture = context.bindingCapture &&
         ((keyboardEvent && !menuBackKey) ||
             event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ||
             event.type == SDL_EVENT_GAMEPAD_BUTTON_UP ||
             event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION);
 
-    if (!suppressForBindingCapture && allowKeyboard && allowMouse) {
+    if (suppressPressForBindingCapture) {
+        // Capture owns the edge, but InputState still needs the current
+        // physical value. In particular, dropping releases or neutral axis
+        // motion would leave an action held after capture ends.
+        input.handleEvent(event, InputState::PressPolicy::Suppress);
+        result.forwardedToInput = true;
+    } else if (allowKeyboard && allowMouse) {
         input.handleEvent(event);
         result.forwardedToInput = true;
     }
