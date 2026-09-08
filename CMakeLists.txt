@@ -38,6 +38,11 @@ option(SOKOBAN_WARNINGS_AS_ERRORS
     "Fail the build on any compiler warning in Sokoban's own targets" OFF)
 option(SOKOBAN_BUILD_FUZZ_TESTS
     "Build libFuzzer harnesses for hostile serialized input" OFF)
+option(SOKOBAN_BUILD_TESTS "Build engine tests" ON)
+option(SOKOBAN_BUILD_VULKAN_SMOKE_TESTS
+    "Build the hidden-window Vulkan device and submission smoke test" ON)
+option(SOKOBAN_HEADLESS_TESTS_ONLY
+    "Configure only Vulkan-independent libraries and tests" OFF)
 option(SOKOBAN_BUILD_INSTALLER
     "Build a per-user Inno Setup installer from the shipping runtime component" OFF)
 option(SOKOBAN_SIGN_ARTIFACTS
@@ -48,6 +53,21 @@ set(SOKOBAN_SIGNING_CERTIFICATE_THUMBPRINT "" CACHE STRING
     "SHA-1 thumbprint of the current-user code-signing certificate")
 set(SOKOBAN_SIGNING_TIMESTAMP_URL "http://timestamp.digicert.com" CACHE STRING
     "RFC 3161 timestamp URL passed to signtool")
+
+if(SOKOBAN_HEADLESS_TESTS_ONLY)
+    if(SOKOBAN_SHIPPING_BUILD OR SOKOBAN_BUILD_INSTALLER OR SOKOBAN_SIGN_ARTIFACTS)
+        message(FATAL_ERROR
+            "SOKOBAN_HEADLESS_TESTS_ONLY cannot be combined with shipping, installer, or signing options")
+    endif()
+    # A headless configuration is a test-only build contract. Keep these
+    # values deterministic even when a reused cache previously enabled the
+    # application or Vulkan smoke coverage.
+    set(SOKOBAN_BUILD_TESTS ON CACHE BOOL "Build engine tests" FORCE)
+    set(SOKOBAN_BUILD_VULKAN_SMOKE_TESTS OFF CACHE BOOL
+        "Build the hidden-window Vulkan device and submission smoke test" FORCE)
+    set(SOKOBAN_ENABLE_DEVELOPER_TOOLS OFF CACHE BOOL
+        "Compile the Debug-only ImGui workspace and content-editing tools" FORCE)
+endif()
 
 if((SOKOBAN_BUILD_INSTALLER OR SOKOBAN_SIGN_ARTIFACTS) AND NOT WIN32)
     message(FATAL_ERROR
@@ -92,7 +112,9 @@ elseif(SOKOBAN_INSTALL_EXTERNAL_SYMBOLS)
         "SOKOBAN_INSTALL_EXTERNAL_SYMBOLS currently requires MSVC PDB support")
 endif()
 
-find_package(Vulkan REQUIRED)
+if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
+    find_package(Vulkan REQUIRED)
+endif()
 find_package(Threads REQUIRED)
 
 add_library(sokoban_json INTERFACE)
@@ -153,7 +175,8 @@ else()
 endif()
 
 set(SOKOBAN_IMGUI_SOURCES)
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/imgui.cpp")
+if(NOT SOKOBAN_HEADLESS_TESTS_ONLY
+        AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/imgui.cpp")
     set(SOKOBAN_IMGUI_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/imgui.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/imgui_draw.cpp"
@@ -172,13 +195,16 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/imgui.cpp")
     endif()
 endif()
 
+set(SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
+set(SHADER_INCLUDE_DIR "${SHADER_SOURCE_DIR}/include")
+set(LEVEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/levels")
+
+if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
 find_program(GLSLC_EXECUTABLE glslc
     HINTS "$ENV{VULKAN_SDK}/Bin"
     REQUIRED
 )
 
-set(SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
-set(SHADER_INCLUDE_DIR "${SHADER_SOURCE_DIR}/include")
 # Declarations shared by more than one shader - the GPU-side mirrors of
 # GpuDrawInstance, SceneFrameUniform, GpuMaterial and GpuSkinningInstance -
 # live here and are pulled in with #include rather than retyped per module.
@@ -190,7 +216,6 @@ set(SHADER_INCLUDE_DIR "${SHADER_SOURCE_DIR}/include")
 # header is picked up without a manual reconfigure.
 file(GLOB SHADER_INCLUDES CONFIGURE_DEPENDS "${SHADER_INCLUDE_DIR}/*.glsl")
 set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders")
-set(LEVEL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/levels")
 
 # Which shaders exist is sokoban::shaderCatalog's business, not this file's.
 # Read the list back out of it rather than repeating it: the same list decides
@@ -271,6 +296,7 @@ foreach(shader_source IN LISTS SHADER_SOURCES)
 endforeach()
 
 add_custom_target(sokoban_shaders DEPENDS ${SHADER_OUTPUTS})
+endif()
 
 # Warnings, and optionally the gate that makes them mean something.
 #
@@ -369,15 +395,17 @@ function(sokoban_enable_lto target)
     endif()
 endfunction()
 
-add_executable(sokoban_content_tool
-    tools/ContentTool.cpp
-)
-target_include_directories(sokoban_content_tool PRIVATE src)
-set_target_properties(sokoban_content_tool PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tools/$<CONFIG>"
-)
-sokoban_enable_warnings(sokoban_content_tool)
-sokoban_enable_lto(sokoban_content_tool)
+if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
+    add_executable(sokoban_content_tool
+        tools/ContentTool.cpp
+    )
+    target_include_directories(sokoban_content_tool PRIVATE src)
+    set_target_properties(sokoban_content_tool PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tools/$<CONFIG>"
+    )
+    sokoban_enable_warnings(sokoban_content_tool)
+    sokoban_enable_lto(sokoban_content_tool)
+endif()
 
 add_library(sokoban_core STATIC
     src/engine/ActionPlan.cpp
@@ -523,6 +551,13 @@ target_link_libraries(sokoban_ui
 sokoban_enable_warnings(sokoban_ui)
 sokoban_enable_lto(sokoban_ui)
 
+if(MSVC)
+    set_source_files_properties(src/engine/MiniaudioImpl.cpp PROPERTIES COMPILE_OPTIONS /W0)
+else()
+    set_source_files_properties(src/engine/MiniaudioImpl.cpp PROPERTIES COMPILE_OPTIONS -w)
+endif()
+
+if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
 add_library(sokoban_render_vulkan STATIC
     src/engine/render/VulkanRenderer.cpp
     src/engine/render/VulkanDeviceContext.cpp
@@ -666,11 +701,6 @@ target_include_directories(sokoban PRIVATE
     third_party/imgui/backends
     third_party/imgui/misc/cpp
 )
-if(MSVC)
-    set_source_files_properties(src/engine/MiniaudioImpl.cpp PROPERTIES COMPILE_OPTIONS /W0)
-else()
-    set_source_files_properties(src/engine/MiniaudioImpl.cpp PROPERTIES COMPILE_OPTIONS -w)
-endif()
 target_link_libraries(sokoban PRIVATE
     sokoban_core
     sokoban_ui
@@ -724,10 +754,7 @@ if(WIN32 AND SOKOBAN_SIGN_ARTIFACTS)
     )
     set(SOKOBAN_RUNTIME_SIGN_TARGET sokoban_sign_runtime)
 endif()
-
-option(SOKOBAN_BUILD_TESTS "Build headless engine tests" ON)
-option(SOKOBAN_BUILD_VULKAN_SMOKE_TESTS
-    "Build the hidden-window Vulkan device and submission smoke test" ON)
+endif()
 
 # Declares one headless test executable with the project's include path and
 # warning set, registered with CTest.
@@ -870,15 +897,17 @@ if(SOKOBAN_BUILD_TESTS)
         ASSET_DIR
         SOURCES tests/TitleScreenTests.cpp
     )
-    sokoban_add_test(NAME vulkan_device_selection TARGET sokoban_vulkan_device_selection_tests
-        LIBS sokoban_render_vulkan
-        SOURCES tests/VulkanDeviceSelectionTests.cpp
-    )
-    # Needs no device: vkCheck only formats and throws.
-    sokoban_add_test(NAME vulkan_diagnostics TARGET sokoban_vulkan_diagnostics_tests
-        LIBS sokoban_render_vulkan
-        SOURCES tests/VulkanDiagnosticsTests.cpp
-    )
+    if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
+        sokoban_add_test(NAME vulkan_device_selection TARGET sokoban_vulkan_device_selection_tests
+            LIBS sokoban_render_vulkan
+            SOURCES tests/VulkanDeviceSelectionTests.cpp
+        )
+        # Needs no device: vkCheck only formats and throws.
+        sokoban_add_test(NAME vulkan_diagnostics TARGET sokoban_vulkan_diagnostics_tests
+            LIBS sokoban_render_vulkan
+            SOURCES tests/VulkanDiagnosticsTests.cpp
+        )
+    endif()
     sokoban_add_test(NAME input_router TARGET sokoban_input_router_tests
         LIBS sokoban_ui
         SOURCES tests/InputRouterTests.cpp
@@ -903,10 +932,12 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/FramePacingTests.cpp
     )
-    sokoban_add_test(NAME frame_descriptor_sync TARGET sokoban_frame_descriptor_sync_tests
-        LIBS sokoban_render_vulkan
-        SOURCES tests/FrameDescriptorSyncTests.cpp
-    )
+    if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
+        sokoban_add_test(NAME frame_descriptor_sync TARGET sokoban_frame_descriptor_sync_tests
+            LIBS sokoban_render_vulkan
+            SOURCES tests/FrameDescriptorSyncTests.cpp
+        )
+    endif()
     sokoban_add_test(NAME frame_resource_tracker TARGET sokoban_frame_resource_tracker_tests
         LIBS sokoban_core
         SOURCES tests/FrameResourceTrackerTests.cpp
@@ -1038,13 +1069,15 @@ if(SOKOBAN_BUILD_TESTS)
     # descriptions of each GPU block cannot drift apart unnoticed. Needs the
     # shaders built, and needs to be told where they landed - SHADER_OUTPUT_DIR
     # has no $<CONFIG> component, so one path serves every configuration.
-    sokoban_add_test(NAME gpu_abi TARGET sokoban_gpu_abi_tests
-        LIBS sokoban_core
-        SOURCES tests/GpuAbiTests.cpp
-    )
-    target_compile_definitions(sokoban_gpu_abi_tests PRIVATE
-        SOKOBAN_TEST_SHADER_DIR="${SHADER_OUTPUT_DIR}")
-    add_dependencies(sokoban_gpu_abi_tests sokoban_shaders)
+    if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
+        sokoban_add_test(NAME gpu_abi TARGET sokoban_gpu_abi_tests
+            LIBS sokoban_core
+            SOURCES tests/GpuAbiTests.cpp
+        )
+        target_compile_definitions(sokoban_gpu_abi_tests PRIVATE
+            SOKOBAN_TEST_SHADER_DIR="${SHADER_OUTPUT_DIR}")
+        add_dependencies(sokoban_gpu_abi_tests sokoban_shaders)
+    endif()
     # Reads DrawMode.glsl as text and compares it to DrawMaterialMode. Needs
     # the shader *source* directory, not the compiled one: the value it checks
     # is folded into a branch by the optimizer and cannot be read back out of
@@ -1063,11 +1096,13 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/TextureDescriptorSpaceTests.cpp
     )
-    # Header-only and constexpr; it needs the Vulkan enums, not a device.
-    sokoban_add_test(NAME texture_upload_plan TARGET sokoban_texture_upload_plan_tests
-        LIBS sokoban_render_vulkan
-        SOURCES tests/TextureUploadPlanTests.cpp
-    )
+    if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
+        # Header-only and constexpr; it needs the Vulkan enums, not a device.
+        sokoban_add_test(NAME texture_upload_plan TARGET sokoban_texture_upload_plan_tests
+            LIBS sokoban_render_vulkan
+            SOURCES tests/TextureUploadPlanTests.cpp
+        )
+    endif()
     sokoban_add_test(NAME opaque_draw_sorter TARGET sokoban_opaque_draw_sorter_tests
         LIBS sokoban_core
         SOURCES tests/OpaqueDrawSorterTests.cpp
@@ -1175,6 +1210,7 @@ if(SOKOBAN_BUILD_FUZZ_TESTS)
     sokoban_enable_warnings(sokoban_player_profile_fuzz)
 endif()
 
+if(NOT SOKOBAN_HEADLESS_TESTS_ONLY)
 install(TARGETS sokoban
     RUNTIME DESTINATION . COMPONENT Runtime
 )
@@ -1314,3 +1350,4 @@ if(SOKOBAN_INSTALL_EXTERNAL_SYMBOLS)
         "PDB files for matching crash dumps to the optimized shipping build")
 endif()
 include(CPack)
+endif()

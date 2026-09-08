@@ -7,6 +7,19 @@
   },
   "configurePresets": [
     {
+      "name": "headless-tests",
+      "displayName": "Headless tests",
+      "description": "Vulkan-free Debug build of the core, UI, and every SDK-independent test.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/headless-tests",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_DISABLE_FIND_PACKAGE_Vulkan": "ON",
+        "SOKOBAN_HEADLESS_TESTS_ONLY": "ON",
+        "SOKOBAN_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
       "name": "shipping",
       "displayName": "Shipping package (x64)",
       "description": "Editor-free Release build with LTO and a separate PDB symbols package.",
@@ -42,6 +55,10 @@
   ],
   "buildPresets": [
     {
+      "name": "headless-tests",
+      "configurePreset": "headless-tests"
+    },
+    {
       "name": "shipping",
       "configurePreset": "shipping",
       "configuration": "Release",
@@ -64,6 +81,18 @@
       "targets": [
         "sokoban_sign_installer"
       ]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "headless-tests",
+      "configurePreset": "headless-tests",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
     }
   ],
   "packagePresets": [

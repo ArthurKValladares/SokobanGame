@@ -26,13 +26,15 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Follow-up, 2026-09-08 (CQ-12):** `TaskSystem` construction now catches worker-creation failures, signals the already-started workers to stop, joins them, and rethrows the original error. Construction failure and normal destruction share the same cleanup path. A one-shot fault-injection regression fails after two workers, verifies the caller receives the system error with zero live workers, and then successfully uses a new pool.
 
+**Follow-up, 2026-09-08 (CQ-13):** The standalone compiler/linker script has been removed. `SOKOBAN_HEADLESS_TESTS_ONLY` now configures the real core, UI, and SDK-independent test targets while omitting Vulkan discovery, shader compilation, the application, and packaging. The `headless-tests` preset provides the supported local entry point, and Linux CI configures it without downloading the Vulkan SDK before building and running every registered headless test.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
 
-The remaining problems are concentrated in release gates. The standalone headless build has drifted from CMake, and shipping validation can mistake a hung process for successful startup. These are more valuable to fix than another broad file-splitting or formatting pass.
+The remaining actionable problem is in the shipping release gate: launch validation can mistake a hung process for successful startup. It is more valuable to fix than another broad file-splitting or formatting pass.
 
-This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-12 have since been resolved, leaving 2 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
+This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-13 have since been resolved, leaving 1 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
 
 - **P1:** prioritize before relying on persistence or authoring for valuable work; existing data or unsaved progress can be lost or abandoned.
 - **P2:** schedule fixes for observable correctness, resource use, or validation gaps; several require unusual inputs or failure conditions.
@@ -86,7 +88,7 @@ Current sanitizer, clang-tidy, Linux builds, interactive controller/editor accep
 | CQ-10 | P2 | Diagnostic history retains complete actions indefinitely | Resolved 2026-09-08 |
 | CQ-11 | P2 | Validation exit status is computed before renderer destruction | Resolved 2026-09-08 |
 | CQ-12 | P2 | Partial thread-pool construction can terminate the process | Resolved 2026-09-08 |
-| CQ-13 | P2 | The standalone headless build script has drifted from the build graph | Source-confirmed |
+| CQ-13 | P2 | The standalone headless build script has drifted from the build graph | Resolved 2026-09-08 |
 | CQ-14 | P2 | Shipping launch validation mistakes process survival for startup success | Source-confirmed |
 
 ### CQ-01 — Preserve decoded saves when migration or promotion cannot write (resolved 2026-09-07)
@@ -231,9 +233,9 @@ The constructor starts `std::thread` objects in a loop with no rollback. If a la
 
 **Regression gate:** Inject failure on creation of a later worker; assert earlier workers stop and the caller receives an exception without termination or deadlock. This failure was not injected into the live application during the review.
 
-### CQ-13 — Retire or rebuild the stale headless compilation script
+### CQ-13 — Retire or rebuild the stale headless compilation script (resolved 2026-09-08)
 
-**Location:** [tools/build_headless_tests.sh](../../../tools/build_headless_tests.sh), include/flag setup around lines 37–43 and library/test assembly below it; [DebugUi.hpp](../../../src/engine/DebugUi.hpp), lines 7–13; current target definitions in [CMakeLists.txt](../../../CMakeLists.txt).
+**Location:** Headless option and renderer branches in [CMakeLists.txt](../../../CMakeLists.txt); supported entry point in [CMakePresets.json](../../../CMakePresets.json); enforcement in [required-tests.yml](../../../.github/workflows/required-tests.yml).
 
 The helper extracts `.cpp` lists from CMake but does not inherit target definitions, dependency targets, include directories, or the current test registry. It omits the required `SOKOBAN_ENABLE_DEBUG_UI` definition and newer cgltf/BC7 dependency wiring. Its 41-of-43-suite description is also obsolete. Extracting source filenames is not enough to keep a second build graph synchronized.
 
@@ -242,6 +244,8 @@ This conclusion comes from comparing the script with current compiler requiremen
 **Change:** Prefer a real CMake headless/test-only option with renderer SDK discovery inside the renderer branch, preserving shared target definitions. Remove the bespoke script once a supported equivalent exists, or temporarily fail fast with an accurate deprecation message. Do not keep silently patching a second list of compiler/linker requirements.
 
 **Regression gate:** A clean Linux environment without Vulkan/glslc configures and runs the supported headless target set; compare registered headless tests with CI. Document the small SDK-dependent subset accurately.
+
+**Resolution:** The bespoke script was deleted instead of acquiring another partial copy of target metadata. `SOKOBAN_HEADLESS_TESTS_ONLY` forces tests on and developer/Vulkan smoke targets off, skips Vulkan and `glslc` discovery, and does not declare the renderer, application, content-staging, install, or package targets. Core and UI retain their ordinary source lists, dependencies, public `SOKOBAN_ENABLE_DEBUG_UI` definition, cgltf wiring, and BC7 target. Only the seven tests whose declared dependencies require the renderer or compiled shaders are absent; the README names them. The Linux `Headless tests (no Vulkan SDK)` matrix entry performs the clean configure, build, and complete CTest run without restoring or exposing the SDK.
 
 ### CQ-14 — Require successful bounded execution of the shipped executable
 
@@ -330,7 +334,7 @@ The existing frame arenas, scratch reuse, suballocators, draw sorting, shadow ca
 | Meshes, animation, skinning, materials, shaders | Transform conventions, dependencies, normal/tangent and CPU/GPU correspondence | CQ-08; fixtures need non-axis-aligned/nonuniform cases. No claim of exhaustive animation/glTF conformance. |
 | Vulkan resources, scheduling, descriptors, retirement | Retry ownership, admission, upload/publication, frame-lifetime ordering | CQ-07 and CQ-11; pressure and teardown injection were not exercised on hardware. |
 | Core utilities, tasks, memory, diagnostics, audio | Construction/destruction, bounded storage, thread contracts | CQ-12; telemetry candidate above. No complete audio-device or crash/minidump fault matrix was run. |
-| Build, tests, CI, packaging, documentation | Shared target graph, flags, source drift, observable release gates | CQ-13/CQ-14, warning-policy and stale-documentation cleanup. Linux/toolchain and installer execution remain unverified here. |
+| Build, tests, CI, packaging, documentation | Shared target graph, flags, source drift, observable release gates | CQ-14, warning-policy and stale-documentation cleanup. Linux/toolchain and installer execution remain unverified here. |
 
 Potential concerns were not promoted to findings when existing code supplied the missing invariant. In particular, the renderer's later color-output/overlay ordering matters when evaluating swapchain synchronization; a transfer operation alone was not treated as proof of a semaphore-stage bug. Similarly, storage designed for stable references was not labeled invalid merely because a container grows. Findings require a supported failure path, not just a suspicious isolated line.
 

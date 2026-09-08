@@ -90,46 +90,63 @@ jobs:
         include:
           - name: Tests (Debug)
             build_type: Debug
+            build_dir: build
             # Validation layers are compiled in only for Debug, so this is the
-            # one configuration that can host the render gate below. The Vulkan
-            # smoke test defaults to OFF and had never been switched on here,
-            # which meant mesa-vulkan-drivers and vulkan-validationlayers were
-            # installed for nothing.
+            # one configuration that hosts the render gate below. Keep the
+            # smoke-test setting explicit because the runtime dependencies and
+            # validation step are conditional on this matrix entry.
             cmake_options: -DSOKOBAN_BUILD_TESTS=ON -DSOKOBAN_BUILD_VULKAN_SMOKE_TESTS=ON -DSOKOBAN_WARNINGS_AS_ERRORS=ON
             build_target: all
             run_tests: true
             run_fuzz: false
             run_smoke: true
+            requires_vulkan: true
           - name: Tests (Release)
             build_type: Release
+            build_dir: build
             cmake_options: -DSOKOBAN_BUILD_TESTS=ON -DSOKOBAN_WARNINGS_AS_ERRORS=ON
             build_target: all
             run_tests: true
             run_fuzz: false
             run_smoke: false
+            requires_vulkan: true
+          - name: Headless tests (no Vulkan SDK)
+            build_type: Debug
+            build_dir: out/headless-tests
+            build_target: all
+            run_tests: true
+            run_fuzz: false
+            run_smoke: false
+            requires_vulkan: false
           - name: Sanitizers (ASan + UBSan)
             build_type: Debug
+            build_dir: build
             cmake_options: -DSOKOBAN_BUILD_TESTS=ON -DSOKOBAN_ENABLE_SANITIZERS=ON -DSOKOBAN_WARNINGS_AS_ERRORS=ON
             build_target: all
             run_tests: true
             run_fuzz: false
             run_smoke: false
+            requires_vulkan: true
             compiler_options: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           - name: Static analysis (clang-tidy)
             build_type: Debug
+            build_dir: build
             cmake_options: -DSOKOBAN_BUILD_TESTS=OFF -DSOKOBAN_ENABLE_CLANG_TIDY=ON
             build_target: sokoban
             run_tests: false
             run_fuzz: false
             run_smoke: false
+            requires_vulkan: true
             compiler_options: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           - name: Fuzzing (player profile)
             build_type: Debug
+            build_dir: build
             cmake_options: -DSOKOBAN_BUILD_TESTS=OFF -DSOKOBAN_BUILD_FUZZ_TESTS=ON
             build_target: sokoban_player_profile_fuzz
             run_tests: false
             run_fuzz: true
             run_smoke: false
+            requires_vulkan: true
             compiler_options: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
 
     steps:
@@ -172,15 +189,20 @@ jobs:
             libxrandr-dev \
             libxss-dev \
             libxtst-dev \
-            mesa-vulkan-drivers \
             ninja-build \
             pkg-config \
-            vulkan-validationlayers \
             wayland-protocols \
             xvfb \
             xz-utils
 
+      - name: Install Vulkan runtime dependencies
+        if: matrix.requires_vulkan
+        run: >-
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+          mesa-vulkan-drivers vulkan-validationlayers
+
       - name: Restore Vulkan SDK
+        if: matrix.requires_vulkan
         id: vulkan-sdk-cache
         uses: actions/cache@v5
         with:
@@ -188,7 +210,7 @@ jobs:
           key: vulkan-sdk-linux-x64-${{ env.VULKAN_SDK_VERSION }}
 
       - name: Install Vulkan SDK
-        if: steps.vulkan-sdk-cache.outputs.cache-hit != 'true'
+        if: matrix.requires_vulkan && steps.vulkan-sdk-cache.outputs.cache-hit != 'true'
         run: |
           archive="${RUNNER_TEMP}/vulkan-sdk.tar.xz"
           install_root="${RUNNER_TOOL_CACHE}/vulkan-sdk"
@@ -200,6 +222,7 @@ jobs:
           tar -xf "${archive}" -C "${install_root}"
 
       - name: Expose Vulkan SDK
+        if: matrix.requires_vulkan
         run: |
           sdk="${RUNNER_TOOL_CACHE}/vulkan-sdk/${VULKAN_SDK_VERSION}/x86_64"
           test -x "${sdk}/bin/glslc"
@@ -219,14 +242,19 @@ jobs:
         run: tools/check_core_is_vulkan_free.sh
 
       - name: Configure ${{ matrix.name }}
+        if: matrix.requires_vulkan
         run: >-
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
           ${{ matrix.compiler_options }}
           ${{ matrix.cmake_options }}
 
+      - name: Configure ${{ matrix.name }}
+        if: matrix.requires_vulkan == false
+        run: cmake --preset headless-tests
+
       - name: Build ${{ matrix.name }}
-        run: cmake --build build --target ${{ matrix.build_target }} --parallel
+        run: cmake --build ${{ matrix.build_dir }} --target ${{ matrix.build_target }} --parallel
 
       - name: Test ${{ matrix.name }}
         if: matrix.run_tests
@@ -235,7 +263,7 @@ jobs:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: >-
           xvfb-run --auto-servernum
-          ctest --test-dir build
+          ctest --test-dir ${{ matrix.build_dir }}
           --build-config ${{ matrix.build_type }}
           --output-on-failure --no-tests=error --timeout 60
 

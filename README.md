@@ -39,8 +39,8 @@ pipeline, and a headless editor model exposed through Debug ImGui tools.
 
 - CMake 3.25+
 - Visual Studio 2022 or another C++20 compiler
-- Vulkan SDK 1.3+ with `glslc` available
-- A Vulkan-capable GPU and driver
+- Vulkan SDK 1.3+ with `glslc` available for the game and renderer tests
+- A Vulkan-capable GPU and driver to run the game
 
 SDL3, miniaudio, nlohmann/json, stb, ImGui, and the Karla UI font are vendored.
 Texture decoding uses stb_image rather than platform-specific image APIs.
@@ -55,6 +55,21 @@ cmake --build build --config Debug
 
 `SOKOBAN_ENABLE_VALIDATION` defaults to `ON`. Headless tests are built by
 default and can be disabled with `-DSOKOBAN_BUILD_TESTS=OFF`.
+
+To build and run every Vulkan-independent test on a machine without the Vulkan
+SDK or `glslc`, install Ninja and use the shared CMake headless preset:
+
+```powershell
+cmake --preset headless-tests
+cmake --build --preset headless-tests
+ctest --preset headless-tests
+```
+
+`SOKOBAN_HEADLESS_TESTS_ONLY=ON` omits the game, content staging, renderer, and
+seven SDK-dependent tests: `vulkan_smoke`, `application_validation_teardown`,
+`vulkan_device_selection`, `vulkan_diagnostics`, `frame_descriptor_sync`,
+`gpu_abi`, and `texture_upload_plan`. All other test declarations and their
+production libraries are the same CMake targets used by full builds.
 
 Debug builds include the ImGui developer tools and can mirror edited source
 levels into staged runtime content. Release builds use only packaged,
@@ -79,8 +94,9 @@ and Release builds on every push and pull request, runs the complete CTest
 registry (including a hidden-window Vulkan device/submission smoke test) in
 both configurations, and separately gates AddressSanitizer/UBSan,
 clang-tidy's static analyzer, and a bounded libFuzzer run against hostile
-player-profile input. Repository branch protection should require every
-workflow check before merging to `main`.
+player-profile input. It also configures and runs the headless registry on
+Linux without downloading the Vulkan SDK. Repository branch protection should
+require every workflow check before merging to `main`.
 
 For local diagnostics with a Clang or GCC toolchain:
 
