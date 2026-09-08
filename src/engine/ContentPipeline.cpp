@@ -201,6 +201,37 @@ std::filesystem::path gltfExternalRelativePath(
         "external glTF URI in " + document.string());
 }
 
+std::vector<std::filesystem::path> externalGltfFilesFrom(
+    const GltfAssetDependencies& dependencies,
+    const std::filesystem::path& document)
+{
+    std::vector<std::filesystem::path> result;
+    result.reserve(dependencies.buffers.size() + dependencies.images.size());
+    for (const GltfBufferDependency& buffer : dependencies.buffers) {
+        if (buffer.sourceKind == GltfBufferSourceKind::ExternalUri) {
+            result.push_back(gltfExternalRelativePath(document, buffer.uri));
+        }
+    }
+    for (const GltfImageDependency& image : dependencies.images) {
+        if (image.sourceKind == GltfImageSourceKind::ExternalUri) {
+            result.push_back(gltfExternalRelativePath(document, image.uri));
+        }
+    }
+    std::ranges::sort(result, {}, [](const std::filesystem::path& path) {
+        return contentPathKey(path);
+    });
+    result.erase(
+        std::unique(
+            result.begin(),
+            result.end(),
+            [](const std::filesystem::path& left,
+                const std::filesystem::path& right) {
+                return contentPathKey(left) == contentPathKey(right);
+            }),
+        result.end());
+    return result;
+}
+
 TextureColorSpace colorSpaceFor(MaterialTextureSemantic semantic)
 {
     switch (semantic) {
@@ -488,21 +519,6 @@ private:
         }
     }
 
-    std::filesystem::path addExternalGltfFile(
-        const std::filesystem::path& document,
-        std::string_view uri,
-        std::string_view kind)
-    {
-        const std::filesystem::path relative =
-            gltfExternalRelativePath(document, uri);
-        addFile(
-            roots_.assets,
-            relative,
-            relative,
-            std::string(kind) + " referenced by " + document.string());
-        return relative;
-    }
-
     void addGltfDependencies(
         const std::filesystem::path& document,
         const std::filesystem::path& absolute,
@@ -514,17 +530,14 @@ private:
         // Stage every external dependency, including images that are present
         // but currently unused. A package should never depend on whether a
         // future material edit happens to make an already-authored image live.
-        for (const GltfBufferDependency& buffer : dependencies.buffers) {
-            if (buffer.sourceKind == GltfBufferSourceKind::ExternalUri) {
-                (void)addExternalGltfFile(
-                    document, buffer.uri, "glTF buffer");
-            }
-        }
-        for (const GltfImageDependency& image : dependencies.images) {
-            if (image.sourceKind == GltfImageSourceKind::ExternalUri) {
-                (void)addExternalGltfFile(
-                    document, image.uri, "glTF image");
-            }
+        for (const std::filesystem::path& relative :
+             externalGltfFilesFrom(dependencies, document)) {
+            addFile(
+                roots_.assets,
+                relative,
+                relative,
+                "external glTF dependency referenced by " +
+                    document.string());
         }
 
         for (ResolvedMaterialTexture& texture : resolvedMaterialTexturesFrom(
@@ -1240,6 +1253,27 @@ bool refreshContentPackageIndex(const std::filesystem::path& root)
 ContentInventory collectContentInventory(const ContentSourceRoots& roots)
 {
     return InventoryBuilder(roots).build();
+}
+
+std::vector<std::filesystem::path> resolveGltfExternalFiles(
+    const std::filesystem::path& assetRoot,
+    const std::filesystem::path& document,
+    std::string_view assetLabel)
+{
+    const std::filesystem::path root = canonicalRoot(assetRoot, "asset source");
+    const std::filesystem::path relative =
+        normalizedRelativePath(document, assetLabel);
+    const std::filesystem::path absolute =
+        sourceFile(root, relative, assetLabel);
+    std::vector<std::filesystem::path> result = externalGltfFilesFrom(
+        inspectGltfAssetDependencies(absolute), relative);
+    for (const std::filesystem::path& dependency : result) {
+        (void)sourceFile(
+            root,
+            dependency,
+            std::string(assetLabel) + " external dependency");
+    }
+    return result;
 }
 
 std::vector<ResolvedMaterialTexture> resolveGltfMaterialTextures(

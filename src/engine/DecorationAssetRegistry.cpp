@@ -3,11 +3,8 @@
 #include "engine/AtomicFile.hpp"
 #include "engine/ContentPipeline.hpp"
 
-#include <nlohmann/json.hpp>
-
 #include <algorithm>
 #include <cctype>
-#include <fstream>
 #include <optional>
 #include <stdexcept>
 #include <system_error>
@@ -15,8 +12,6 @@
 
 namespace sokoban {
 namespace {
-
-using Json = nlohmann::json;
 
 std::string lowercase(std::string value)
 {
@@ -53,53 +48,6 @@ bool escapesRoot(const std::filesystem::path& relative)
     return normalized.empty() || *normalized.begin() == "..";
 }
 
-std::filesystem::path dependencyPath(
-    const std::filesystem::path& relativeMesh,
-    std::string_view uri)
-{
-    if (uri.empty() || uri.find('\\') != std::string_view::npos ||
-        uri.find('%') != std::string_view::npos ||
-        uri.find("://") != std::string_view::npos) {
-        throw std::runtime_error(
-            "unsupported external glTF URI '" + std::string(uri) + "'");
-    }
-    const std::filesystem::path dependency =
-        (relativeMesh.parent_path() / uri).lexically_normal();
-    if (escapesRoot(dependency)) {
-        throw std::runtime_error(
-            "glTF dependency escapes the asset root: " + std::string(uri));
-    }
-    return dependency;
-}
-
-std::string readText(const std::filesystem::path& path)
-{
-    std::ifstream input(path, std::ios::binary);
-    if (!input) {
-        throw std::runtime_error("could not open " + path.string());
-    }
-    return std::string(
-        std::istreambuf_iterator<char>(input),
-        std::istreambuf_iterator<char>());
-}
-
-void collectUris(const Json& value, std::vector<std::string>& uris)
-{
-    if (value.is_object()) {
-        for (const auto& [key, child] : value.items()) {
-            if (key == "uri" && child.is_string()) {
-                uris.push_back(child.get<std::string>());
-            } else {
-                collectUris(child, uris);
-            }
-        }
-    } else if (value.is_array()) {
-        for (const Json& child : value) {
-            collectUris(child, uris);
-        }
-    }
-}
-
 std::vector<std::filesystem::path> meshFiles(
     const std::filesystem::path& sourceRoot,
     const std::filesystem::path& relativeMesh)
@@ -110,20 +58,11 @@ std::vector<std::filesystem::path> meshFiles(
     }
 
     std::vector<std::filesystem::path> files { relativeMesh.lexically_normal() };
-    if (lowercase(relativeMesh.extension().string()) != ".gltf") {
-        return files;
-    }
-
-    const std::filesystem::path source = sourceRoot / relativeMesh;
-    const Json root = Json::parse(readText(source));
-    std::vector<std::string> uris;
-    collectUris(root, uris);
-    for (const std::string& uri : uris) {
-        if (uri.starts_with("data:")) {
-            continue;
-        }
-        files.push_back(dependencyPath(relativeMesh, uri));
-    }
+    std::vector<std::filesystem::path> dependencies =
+        resolveGltfExternalFiles(
+            sourceRoot, relativeMesh, "decoration mesh");
+    files.insert(
+        files.end(), dependencies.begin(), dependencies.end());
     std::ranges::sort(files);
     files.erase(std::unique(files.begin(), files.end()), files.end());
     return files;
@@ -255,62 +194,25 @@ std::optional<std::filesystem::path> singleBaseColorTexture(
     const std::filesystem::path& sourceRoot,
     const std::filesystem::path& relativeMesh)
 {
-    if (lowercase(relativeMesh.extension().string()) != ".gltf") {
-        return std::nullopt;
-    }
-
-    const Json root = Json::parse(readText(sourceRoot / relativeMesh));
-    if (!root.contains("materials") || !root["materials"].is_array() ||
-        !root.contains("textures") || !root["textures"].is_array() ||
-        !root.contains("images") || !root["images"].is_array()) {
-        return std::nullopt;
-    }
-
-    std::vector<std::size_t> textureIndices;
-    for (const Json& material : root["materials"]) {
-        if (!material.is_object() ||
-            !material.contains("pbrMetallicRoughness")) {
-            continue;
+    std::vector<TextureSourceIdentity> sources;
+    for (const ResolvedMaterialTexture& texture : resolveGltfMaterialTextures(
+             sourceRoot, relativeMesh, "decoration mesh")) {
+        if (texture.semantic == MaterialTextureSemantic::BaseColor &&
+            std::ranges::none_of(
+                sources,
+                [&](const TextureSourceIdentity& source) {
+                    return textureSourceIdentityKey(source) ==
+                        textureSourceIdentityKey(texture.identity);
+                })) {
+            sources.push_back(texture.identity);
         }
-        const Json& pbr = material["pbrMetallicRoughness"];
-        if (!pbr.is_object() || !pbr.contains("baseColorTexture")) {
-            continue;
-        }
-        const Json& baseColor = pbr["baseColorTexture"];
-        if (!baseColor.is_object() || !baseColor.contains("index") ||
-            !baseColor["index"].is_number_unsigned()) {
-            continue;
-        }
-        textureIndices.push_back(baseColor["index"].get<std::size_t>());
     }
-    std::ranges::sort(textureIndices);
-    textureIndices.erase(
-        std::unique(textureIndices.begin(), textureIndices.end()),
-        textureIndices.end());
-    if (textureIndices.size() != 1 ||
-        textureIndices.front() >= root["textures"].size()) {
+    if (sources.size() != 1) {
         return std::nullopt;
     }
-
-    const Json& texture = root["textures"][textureIndices.front()];
-    if (!texture.is_object() || !texture.contains("source") ||
-        !texture["source"].is_number_unsigned()) {
-        return std::nullopt;
-    }
-    const std::size_t imageIndex = texture["source"].get<std::size_t>();
-    if (imageIndex >= root["images"].size()) {
-        return std::nullopt;
-    }
-    const Json& image = root["images"][imageIndex];
-    if (!image.is_object() || !image.contains("uri") ||
-        !image["uri"].is_string()) {
-        return std::nullopt;
-    }
-    const std::string uri = image["uri"].get<std::string>();
-    if (uri.starts_with("data:")) {
-        return std::nullopt;
-    }
-    return dependencyPath(relativeMesh, uri);
+    const ExternalTextureSource* external =
+        std::get_if<ExternalTextureSource>(&sources.front().source);
+    return external ? std::optional(external->path) : std::nullopt;
 }
 
 } // namespace

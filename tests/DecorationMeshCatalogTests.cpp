@@ -3,11 +3,19 @@
 #include "engine/DecorationMeshCatalog.hpp"
 #include "engine/DecorationAssetRegistry.hpp"
 #include "engine/ContentPipeline.hpp"
+#include "engine/render/GltfMesh.hpp"
 
+#include <bit>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace {
 
@@ -35,6 +43,108 @@ void touch(const std::filesystem::path& path)
     std::ofstream(path) << "{}";
 }
 
+void appendUint32(std::vector<uint8_t>& bytes, uint32_t value)
+{
+    bytes.push_back(static_cast<uint8_t>(value));
+    bytes.push_back(static_cast<uint8_t>(value >> 8U));
+    bytes.push_back(static_cast<uint8_t>(value >> 16U));
+    bytes.push_back(static_cast<uint8_t>(value >> 24U));
+}
+
+void appendUint16(std::vector<uint8_t>& bytes, uint16_t value)
+{
+    bytes.push_back(static_cast<uint8_t>(value));
+    bytes.push_back(static_cast<uint8_t>(value >> 8U));
+}
+
+void appendFloat(std::vector<uint8_t>& bytes, float value)
+{
+    appendUint32(bytes, std::bit_cast<uint32_t>(value));
+}
+
+std::vector<uint8_t> triangleBytes()
+{
+    std::vector<uint8_t> bytes;
+    for (const float value : {
+             0.0f, 0.0f, 0.0f,
+             1.0f, 0.0f, 0.0f,
+             0.0f, 1.0f, 0.0f,
+             0.0f, 0.0f, 1.0f,
+             0.0f, 0.0f, 1.0f,
+             0.0f, 0.0f, 1.0f,
+             0.0f, 0.0f,
+             1.0f, 0.0f,
+             0.0f, 1.0f,
+         }) {
+        appendFloat(bytes, value);
+    }
+    appendUint16(bytes, 0);
+    appendUint16(bytes, 1);
+    appendUint16(bytes, 2);
+    return bytes;
+}
+
+void writeBytes(
+    const std::filesystem::path& path,
+    std::span<const uint8_t> bytes)
+{
+    std::ofstream output(path, std::ios::binary);
+    output.write(
+        reinterpret_cast<const char*>(bytes.data()),
+        static_cast<std::streamsize>(bytes.size()));
+}
+
+std::string triangleJson(
+    std::string_view bufferUri,
+    std::string_view imageUri)
+{
+    std::ostringstream json;
+    json << R"json({
+  "asset":{"version":"2.0"},
+  "buffers":[{"uri":")json" << bufferUri << R"json(","byteLength":102}],
+  "bufferViews":[
+    {"buffer":0,"byteOffset":0,"byteLength":36},
+    {"buffer":0,"byteOffset":36,"byteLength":36},
+    {"buffer":0,"byteOffset":72,"byteLength":24},
+    {"buffer":0,"byteOffset":96,"byteLength":6}
+  ],
+  "accessors":[
+    {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]},
+    {"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},
+    {"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"},
+    {"bufferView":3,"componentType":5123,"count":3,"type":"SCALAR"}
+  ],
+  "images":[
+    {"uri":")json" << imageUri << R"json("},
+    {"uri":"data:image/png;base64,AAAA"}
+  ],
+  "textures":[{"source":0}],
+  "materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0}}}],
+  "meshes":[{"primitives":[{
+    "attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2},
+    "indices":3,
+    "material":0
+  }]}],
+  "extras":{"uri":"decoy-that-is-not-a-dependency.bin"}
+})json";
+    return json.str();
+}
+
+void writeGlb(const std::filesystem::path& path, std::string json)
+{
+    while (json.size() % 4 != 0) {
+        json.push_back(' ');
+    }
+    std::vector<uint8_t> bytes;
+    appendUint32(bytes, 0x46546C67U);
+    appendUint32(bytes, 2U);
+    appendUint32(bytes, 20U + static_cast<uint32_t>(json.size()));
+    appendUint32(bytes, static_cast<uint32_t>(json.size()));
+    appendUint32(bytes, 0x4E4F534AU);
+    bytes.insert(bytes.end(), json.begin(), json.end());
+    writeBytes(path, bytes);
+}
+
 constexpr std::string_view manifestJson = R"json({
   "format": 1,
   "textures": [],
@@ -51,6 +161,18 @@ constexpr std::string_view manifestJson = R"json({
   ],
   "tiles": []
 })json";
+
+void initializePackage(
+    const std::filesystem::path& source,
+    const std::filesystem::path& runtime)
+{
+    std::filesystem::create_directories(source);
+    std::filesystem::create_directories(runtime);
+    std::ofstream(source / "manifest.json") << manifestJson;
+    std::ofstream(runtime / "manifest.json") << manifestJson;
+    std::ofstream(runtime / "content.index", std::ios::binary)
+        << "format 1\ngame-version editor-test\n";
+}
 
 sokoban::AssetManifest manifest()
 {
@@ -93,23 +215,12 @@ void testRegistrationPopulatesManifestsAndStagesGltfDependencies()
     TemporaryDirectory directory;
     const std::filesystem::path source = directory.path / "source";
     const std::filesystem::path runtime = directory.path / "runtime";
+    initializePackage(source, runtime);
+    std::filesystem::create_directories(source / "models/geometry");
     std::filesystem::create_directories(source / "models/textures");
-    std::filesystem::create_directories(runtime);
-    std::ofstream(source / "manifest.json") << manifestJson;
-    std::ofstream(runtime / "manifest.json") << manifestJson;
-    std::ofstream(runtime / "content.index", std::ios::binary)
-        << "format 1\ngame-version editor-test\n";
-    std::ofstream(source / "models/tree.gltf") << R"json({
-      "buffers": [{ "uri": "tree.bin" }],
-      "images": [{ "uri": "textures/tree.png" }],
-      "textures": [{ "source": 0 }],
-      "materials": [{
-        "pbrMetallicRoughness": {
-          "baseColorTexture": { "index": 0 }
-        }
-      }]
-    })json";
-    touch(source / "models/tree.bin");
+    std::ofstream(source / "models/tree.gltf")
+        << triangleJson("geometry/tree.bin", "textures/tree.png");
+    writeBytes(source / "models/geometry/tree.bin", triangleBytes());
     touch(source / "models/textures/tree.png");
 
     sokoban::AssetManifest live = manifest();
@@ -143,8 +254,12 @@ void testRegistrationPopulatesManifestsAndStagesGltfDependencies()
     CHECK(live.textures().front().path ==
         "models/textures/tree.png");
     CHECK(std::filesystem::exists(runtime / "models/tree.gltf"));
-    CHECK(std::filesystem::exists(runtime / "models/tree.bin"));
+    CHECK(std::filesystem::exists(runtime / "models/geometry/tree.bin"));
     CHECK(std::filesystem::exists(runtime / "models/textures/tree.png"));
+    CHECK(!std::filesystem::exists(
+        runtime / "models/decoy-that-is-not-a-dependency.bin"));
+    CHECK(sokoban::loadGltfMesh(runtime / "models/tree.gltf").vertices.size() ==
+        3);
 
     const sokoban::AssetManifest sourceManifest =
         sokoban::AssetManifest::loadFromFile(source / "manifest.json");
@@ -171,6 +286,98 @@ void testRegistrationPopulatesManifestsAndStagesGltfDependencies()
     CHECK(repeated.modelName == added.modelName);
     CHECK(live.models().size() == 3);
     CHECK(live.textures().size() == 1);
+
+    std::filesystem::create_directories(
+        source / "models/nested/geometry");
+    std::filesystem::create_directories(
+        source / "models/nested/textures");
+    writeGlb(
+        source / "models/nested/rock.glb",
+        triangleJson("geometry/rock.bin", "textures/rock.png"));
+    writeBytes(
+        source / "models/nested/geometry/rock.bin", triangleBytes());
+    touch(source / "models/nested/textures/rock.png");
+
+    const sokoban::DecorationAssetRegistry::Result glbAdded =
+        sokoban::DecorationAssetRegistry::registerMesh({
+            .sourceAssetRoot = source,
+            .runtimeAssetRoot = runtime,
+            .relativeMeshPath = "models/nested/rock.glb",
+            .runtimeManifest = live,
+            .manifestEditor = editor,
+        });
+    if (!glbAdded.succeeded) {
+        std::cerr << glbAdded.status << '\n';
+    }
+    CHECK(glbAdded.succeeded);
+    CHECK(glbAdded.added);
+    CHECK(glbAdded.modelName == "Decoration_rock");
+    CHECK(live.models().size() == 4);
+    CHECK(live.textures().size() == 2);
+    CHECK(live.textures().back().path ==
+        "models/nested/textures/rock.png");
+    CHECK(std::filesystem::exists(runtime / "models/nested/rock.glb"));
+    CHECK(std::filesystem::exists(
+        runtime / "models/nested/geometry/rock.bin"));
+    CHECK(std::filesystem::exists(
+        runtime / "models/nested/textures/rock.png"));
+    CHECK(!std::filesystem::exists(
+        runtime / "models/nested/decoy-that-is-not-a-dependency.bin"));
+    CHECK(sokoban::loadGltfMesh(
+              runtime / "models/nested/rock.glb").vertices.size() == 3);
+    const sokoban::AssetManifest publishedGlbManifest =
+        sokoban::AssetManifest::loadFromFile(runtime / "manifest.json");
+    CHECK(publishedGlbManifest.modelIdByName(glbAdded.modelName).value == 4);
+    CHECK(publishedGlbManifest.textures().size() == 2);
+    sokoban::validateContentPackage(runtime, "editor-test");
+}
+
+void testRegistrationRejectsMissingAndEscapingDependenciesBeforePublication()
+{
+    TemporaryDirectory directory;
+    const std::filesystem::path source = directory.path / "source";
+    const std::filesystem::path runtime = directory.path / "runtime";
+    initializePackage(source, runtime);
+    std::filesystem::create_directories(source / "models/textures");
+    writeGlb(
+        source / "models/missing.glb",
+        triangleJson("geometry/missing.bin", "textures/present.png"));
+    touch(source / "models/textures/present.png");
+
+    sokoban::AssetManifest live = manifest();
+    sokoban::AssetManifestEditor editor;
+    editor.initialize(source / "manifest.json");
+    const sokoban::DecorationAssetRegistry::Result missing =
+        sokoban::DecorationAssetRegistry::registerMesh({
+            .sourceAssetRoot = source,
+            .runtimeAssetRoot = runtime,
+            .relativeMeshPath = "models/missing.glb",
+            .runtimeManifest = live,
+            .manifestEditor = editor,
+        });
+    CHECK(!missing.succeeded);
+    CHECK(missing.status.find("missing") != std::string::npos);
+    CHECK(live.models().size() == 2);
+    CHECK(editor.models().size() == 2);
+    CHECK(!std::filesystem::exists(runtime / "models/missing.glb"));
+    sokoban::validateContentPackage(runtime, "editor-test");
+
+    std::ofstream(source / "models/escaping.gltf")
+        << triangleJson("../../outside.bin", "textures/present.png");
+    const sokoban::DecorationAssetRegistry::Result escaping =
+        sokoban::DecorationAssetRegistry::registerMesh({
+            .sourceAssetRoot = source,
+            .runtimeAssetRoot = runtime,
+            .relativeMeshPath = "models/escaping.gltf",
+            .runtimeManifest = live,
+            .manifestEditor = editor,
+        });
+    CHECK(!escaping.succeeded);
+    CHECK(escaping.status.find("escapes") != std::string::npos);
+    CHECK(live.models().size() == 2);
+    CHECK(editor.models().size() == 2);
+    CHECK(!std::filesystem::exists(runtime / "models/escaping.gltf"));
+    sokoban::validateContentPackage(runtime, "editor-test");
 }
 
 } // namespace
@@ -180,6 +387,7 @@ int main()
     testCatalogScansSupportedFilesAndResolvesManifestModels();
     testMissingRootFailsWithoutStaleEntries();
     testRegistrationPopulatesManifestsAndStagesGltfDependencies();
+    testRegistrationRejectsMissingAndEscapingDependenciesBeforePublication();
 
     if (failures == 0) {
         std::cout << "DecorationMeshCatalogTests: " << checks

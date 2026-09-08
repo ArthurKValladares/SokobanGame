@@ -50,6 +50,14 @@ struct ContentInventory {
     std::uintmax_t totalBytes = 0;
 };
 
+// Resolves every external buffer and image referenced by one glTF/GLB
+// document. Returned paths are normalized relative to assetRoot, deduplicated,
+// and verified to name regular files within that root.
+[[nodiscard]] std::vector<std::filesystem::path> resolveGltfExternalFiles(
+    const std::filesystem::path& assetRoot,
+    const std::filesystem::path& document,
+    std::string_view assetLabel);
+
 // Resolves only the core material-map uses in one glTF document. This is the
 // shared semantic boundary used by staging and by the runtime texture catalog;
 // `document` is relative to `assetRoot` and remains relative in every result.

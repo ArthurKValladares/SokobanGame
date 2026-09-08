@@ -18,13 +18,15 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Follow-up, 2026-09-08 (CQ-08):** Static loading and CPU/GPU skinning now share one source-to-model transform. Positions and tangents use its forward linear transform, normals use its inverse transpose, and tangent frames are normalized and orthogonalized while preserving handedness. Nonuniform 4×2×1 fixtures cover authored and generated tangents, fitting options, degenerate bounds, skinned bind poses, and full CPU/GPU basis parity.
 
+**Follow-up, 2026-09-08 (CQ-09):** Decoration registration and distributable content staging now share the structured glTF external-file resolver for both GLTF and GLB documents. Registration validates every external buffer and image before copying or changing a manifest, ignores embedded data and unrelated JSON `uri` fields, registers a single external base-color texture from semantic material records, and refreshes the package index only after the runtime tree is complete. Loadable nested GLTF/GLB fixtures cover external buffers/images, embedded data, missing files, traversal rejection, runtime loading, and index validation.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
 
-The most consequential remaining problems still occur **between these components**. Partial task-system construction can terminate during unwinding, and imported GLB assets can omit external dependencies. These are more valuable to fix than another broad file-splitting or formatting pass.
+The most consequential remaining problems still occur **between these components**. Partial task-system construction can terminate during unwinding, and validation errors raised during renderer destruction can escape the smoke test's exit-status decision. These are more valuable to fix than another broad file-splitting or formatting pass.
 
-This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-08 have since been resolved, leaving 6 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
+This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-09 have since been resolved, leaving 5 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
 
 - **P1:** prioritize before relying on persistence or authoring for valuable work; existing data or unsaved progress can be lost or abandoned.
 - **P2:** schedule fixes for observable correctness, resource use, or validation gaps; several require unusual inputs or failure conditions.
@@ -179,7 +181,7 @@ Default fitting divides position components by the corresponding bounds extents.
 
 **Regression gate:** Check geometric perpendicularity under nonuniform fitting, authored and generated tangents, axis remapping, preserved scale/aspect options, and skinned bind poses. Retain CPU/GPU parity checks as an additional test, not the only oracle.
 
-### CQ-09 — Stage external dependencies of GLB files
+### CQ-09 — Stage external dependencies of GLB files (resolved 2026-09-08)
 
 **Location:** [DecorationAssetRegistry.cpp](../../../src/engine/DecorationAssetRegistry.cpp), `meshFiles`, around lines 103–125.
 
