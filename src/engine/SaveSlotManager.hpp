@@ -34,6 +34,7 @@ public:
 
     struct DeleteResult {
         bool succeeded = false;
+        bool cleanupPending = false;
         std::string message;
     };
 
@@ -72,10 +73,10 @@ public:
         int slot,
         const PlayerProfile& currentProfile);
 
-    // Removes the slot's save files (primary and backup). Deleting the
-    // active slot drains pending writes first. The summary cache is changed
-    // only after both paths have been removed or confirmed absent, so callers
-    // can keep their live profile intact and present a recoverable error.
+    // Commits a durable deletion marker and removes every live/recovery
+    // artifact. Active-slot deletion is serialized with in-flight writes and
+    // discards queued data only after the marker commits. A committed deletion
+    // remains logically empty even when cleanup must be retried later.
     [[nodiscard]] DeleteResult deleteSlot(int slot);
 
     void saveProgress(const PlayerProfile& profile, bool immediate);

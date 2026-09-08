@@ -1413,7 +1413,12 @@ void Application::deleteSaveSlot(int slot)
         campaign_.resetForProfile(playerProfile_);
     }
     titleScreen_.setSaveSlots(saveSlotInfos(), saveSlots_.activeSlot());
-    titleScreen_.setSaveSlotError({});
+    if (deletion.cleanupPending) {
+        log::warning(log::Category::Persistence) << deletion.message;
+        titleScreen_.setSaveSlotError(deletion.message);
+    } else {
+        titleScreen_.setSaveSlotError({});
+    }
 }
 
 void Application::persistSettings(bool immediate)

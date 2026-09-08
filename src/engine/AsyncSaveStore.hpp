@@ -70,6 +70,9 @@ public:
     // Makes a retained failed snapshot eligible for one more background write.
     // Returns false when this channel has no failed snapshot to retry.
     [[nodiscard]] bool retryFailedSave(int channel = 0);
+    // Quiesces one channel, commits its deletion marker, and discards its
+    // queued or retained failed snapshot only after that commit succeeds.
+    [[nodiscard]] SaveStore::DeleteResult deleteProfile(int channel = 0);
     // Blocks until every channel has no actionable or in-flight write. A
     // failed snapshot remains pending but blocked from automatic retries;
     // another request supersedes it. Returns false while any such snapshot

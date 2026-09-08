@@ -329,6 +329,9 @@ void testSummariesSwitchingAndDeletion()
         "deleted slot primary removed");
     check(!std::filesystem::exists(directory.path() / "profile-slot2.backup.json"),
         "deleted slot backup removed");
+    check(std::filesystem::is_regular_file(
+            directory.path() / "profile-slot2.deleted"),
+        "deleted slot retains its durable deletion marker");
     check(std::filesystem::exists(directory.path() / "active-slot.txt"),
         "marker untouched by deletion");
 
@@ -586,16 +589,137 @@ void testDeletionFailurePreservesSummaryAndFiles()
     std::ofstream(backup) << "backup must remain";
 
     const sokoban::SaveSlotManager::DeleteResult result = manager.deleteSlot(1);
-    check(!result.succeeded, "delete failure is reported");
+    check(result.succeeded, "deletion commits before artifact cleanup");
+    check(result.cleanupPending, "partial cleanup is reported");
     check(result.message.find("profile-slot2.json") != std::string::npos,
-        "delete failure identifies the path");
+        "cleanup warning identifies the path");
     check(std::filesystem::exists(primary / "blocker.txt"),
-        "failed primary deletion preserves primary artifact");
-    check(std::filesystem::is_regular_file(backup),
-        "failed primary deletion leaves backup untouched");
+        "blocked primary artifact remains for later cleanup");
+    check(!std::filesystem::exists(backup),
+        "cleanup continues to remove other recovery candidates");
+    check(std::filesystem::is_regular_file(
+            directory.path() / "profile-slot2.deleted"),
+        "deletion marker remains while cleanup is pending");
+    check(manager.slotSummaries(active, 4)[1].state ==
+            sokoban::SaveSlotState::Empty,
+        "committed deletion immediately empties the cached summary");
+
+    const std::optional<sokoban::PlayerProfile> deleted =
+        manager.switchTo(1, active);
+    check(deleted && deleted->progressEmpty(),
+        "cleanup failure cannot resurrect the deleted slot");
+}
+
+void testDeletionRemovesEveryRecoverableArtifact()
+{
+    TemporaryDirectory directory;
+    sokoban::SaveSlotManager manager(directory.path(), instantWrites);
+    const sokoban::PlayerProfile active = manager.loadActiveProfile();
+    const sokoban::SaveStore slot(directory.path(), "profile-slot2");
+    const std::string profile = profileWithProgress(3).serialize(
+        sokoban::ProfileSections::ProgressOnly);
+    for (const std::filesystem::path& artifact :
+         slot.recoverableArtifactPaths()) {
+        std::ofstream(artifact, std::ios::binary) << profile;
+    }
+    const std::filesystem::path diagnostic =
+        slot.primaryPath().string() + ".corrupt-diagnostic";
+    std::ofstream(diagnostic, std::ios::binary) << profile;
+
+    check(manager.deleteSlot(1).succeeded,
+        "slot with every recovery artifact deletes successfully");
+    for (const std::filesystem::path& artifact :
+         slot.recoverableArtifactPaths()) {
+        check(!std::filesystem::exists(artifact),
+            "deleted slot has no eligible recovery artifact");
+    }
+    check(std::filesystem::is_regular_file(slot.deletionMarkerPath()),
+        "complete deletion retains its commit marker");
+    check(std::filesystem::is_regular_file(diagnostic),
+        "non-recoverable corrupt diagnostics are preserved");
+
+    sokoban::SaveSlotManager reopened(directory.path(), instantWrites);
+    const std::optional<sokoban::PlayerProfile> loaded =
+        reopened.switchTo(1, active);
+    check(loaded && loaded->progressEmpty(),
+        "reopening cannot recover deleted temporary or displaced data");
+    reopened.saveProgress(profileWithProgress(1), true);
+    reopened.flush();
+    check(!std::filesystem::exists(slot.deletionMarkerPath()),
+        "a successful new save replaces the deletion marker");
+    check(sokoban::SaveStore(directory.path(), "profile-slot2").load()
+            .profile.currentLevel == 1,
+        "the replacement slot loads its new progress");
+}
+
+void testDeletionMarkerFailurePreservesTheSlot()
+{
+    TemporaryDirectory directory;
+    sokoban::SaveSlotManager manager(directory.path(), instantWrites);
+    const sokoban::PlayerProfile active = manager.loadActiveProfile();
+    sokoban::SaveStore slot(directory.path(), "profile-slot2");
+    check(slot.save(profileWithProgress(2)),
+        "slot is seeded before marker failure");
+    const std::filesystem::path blockedTemporary =
+        slot.deletionMarkerPath().string() + ".tmp";
+    std::filesystem::create_directories(blockedTemporary);
+    std::ofstream(blockedTemporary / "blocker.txt") << "blocked";
+
+    const sokoban::SaveSlotManager::DeleteResult result = manager.deleteSlot(1);
+    check(!result.succeeded, "uncommitted deletion reports failure");
+    check(std::filesystem::is_regular_file(slot.primaryPath()),
+        "marker failure leaves the primary save intact");
     check(manager.slotSummaries(active, 4)[1].state ==
             sokoban::SaveSlotState::Ready,
-        "failed deletion preserves cached slot summary");
+        "marker failure preserves the saved-slot summary");
+}
+
+void testActiveDeletionDiscardsPendingSnapshotWithCleanupFailure()
+{
+    TemporaryDirectory directory;
+    sokoban::SaveSlotManager manager(directory.path(), std::chrono::hours(1));
+    (void)manager.loadActiveProfile();
+    const std::filesystem::path blockedTemporary =
+        directory.path() / "profile.json.tmp";
+    std::filesystem::create_directories(blockedTemporary);
+    std::ofstream(blockedTemporary / "blocker.txt") << "blocked";
+    manager.saveProgress(profileWithProgress(3), false);
+
+    const sokoban::SaveSlotManager::DeleteResult result = manager.deleteSlot(0);
+    check(result.succeeded && result.cleanupPending,
+        "active deletion commits despite a blocked recovery artifact");
+    check(!manager.progressDiagnostics().pending,
+        "committed deletion discards the retained failed snapshot");
+    std::filesystem::remove_all(blockedTemporary);
+
+    sokoban::SaveSlotManager reopened(directory.path(), instantWrites);
+    check(reopened.loadActiveProfile().progressEmpty(),
+        "discarded pending progress cannot return after restart");
+}
+
+void testFailedActiveDeletionRetainsItsPendingSnapshot()
+{
+    TemporaryDirectory directory;
+    sokoban::SaveSlotManager manager(directory.path(), std::chrono::hours(1));
+    (void)manager.loadActiveProfile();
+    const sokoban::SaveStore slot(directory.path());
+    const std::filesystem::path blockedTemporary =
+        slot.deletionMarkerPath().string() + ".tmp";
+    std::filesystem::create_directories(blockedTemporary);
+    std::ofstream(blockedTemporary / "blocker.txt") << "blocked";
+    const sokoban::PlayerProfile latest = profileWithProgress(3);
+    manager.saveProgress(latest, false);
+
+    const sokoban::SaveSlotManager::DeleteResult result = manager.deleteSlot(0);
+    check(!result.succeeded, "active marker failure rejects deletion");
+    check(manager.progressDiagnostics().pending,
+        "rejected deletion retains the queued active snapshot");
+
+    std::filesystem::remove_all(blockedTemporary);
+    manager.saveProgress(latest, true);
+    manager.flush();
+    check(sokoban::SaveStore(directory.path()).load().profile == latest,
+        "queued progress remains persistable after deletion fails");
 }
 
 } // namespace
@@ -613,6 +737,10 @@ int main()
     testFailedOutgoingSavePreventsSlotSwitch();
     testFailedMarkerCommitRollsBackSwitch();
     testDeletionFailurePreservesSummaryAndFiles();
+    testDeletionRemovesEveryRecoverableArtifact();
+    testDeletionMarkerFailurePreservesTheSlot();
+    testActiveDeletionDiscardsPendingSnapshotWithCleanupFailure();
+    testFailedActiveDeletionRetainsItsPendingSnapshot();
 
     if (failures == 0) {
         std::cout << "SaveSlotManagerTests: " << checks << " checks passed\n";

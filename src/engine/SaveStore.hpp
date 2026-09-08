@@ -2,6 +2,7 @@
 
 #include "engine/PlayerProfile.hpp"
 
+#include <array>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -50,6 +51,15 @@ public:
         std::string message;
     };
 
+    struct DeleteResult {
+        bool succeeded = false;
+        // A committed deletion can leave cleanup for a later load/save when
+        // an artifact could not be removed. The deletion marker still keeps
+        // every recovery candidate ineligible.
+        bool cleanupPending = false;
+        std::string message;
+    };
+
     // fileStem names the slot's files inside root (e.g. "profile" ->
     // profile.json / profile.backup.json). Slot 1 keeps the historical
     // "profile" stem so existing saves stay valid. `sections` selects which
@@ -72,10 +82,17 @@ public:
     // archiving, replacing, or creating anything on disk.
     [[nodiscard]] InspectionResult inspect() const;
     [[nodiscard]] bool save(const PlayerProfile& profile);
+    [[nodiscard]] DeleteResult deleteProfile();
 
     [[nodiscard]] const std::filesystem::path& root() const { return root_; }
     [[nodiscard]] const std::filesystem::path& primaryPath() const { return primaryPath_; }
     [[nodiscard]] const std::filesystem::path& backupPath() const { return backupPath_; }
+    [[nodiscard]] const std::filesystem::path& deletionMarkerPath() const
+    {
+        return deletionMarkerPath_;
+    }
+    [[nodiscard]] std::array<std::filesystem::path, 6>
+    recoverableArtifactPaths() const;
     [[nodiscard]] const std::string& status() const { return status_; }
 
 private:
@@ -83,10 +100,13 @@ private:
     [[nodiscard]] bool recoverInterruptedWrite(const std::filesystem::path& path);
     void writePrimary(const PlayerProfile& profile, bool updateBackup);
     void archiveCorruptFile(const std::filesystem::path& path);
+    [[nodiscard]] bool deletionMarked() const;
+    [[nodiscard]] std::string removeRecoverableArtifacts() const;
 
     std::filesystem::path root_;
     std::filesystem::path primaryPath_;
     std::filesystem::path backupPath_;
+    std::filesystem::path deletionMarkerPath_;
     ProfileSections sections_ = ProfileSections::All;
     std::string status_;
 };

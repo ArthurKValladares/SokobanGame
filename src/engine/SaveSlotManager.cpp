@@ -384,32 +384,23 @@ SaveSlotManager::DeleteResult SaveSlotManager::deleteSlot(int slot)
             .message = "save slot selection is invalid",
         };
     }
+    SaveStore::DeleteResult deletion;
     if (slot == activeSlot_) {
-        // Drain pending writes so an in-flight save cannot resurrect the
-        // files after removal.
-        (void)store_->flush();
+        deletion = store_->deleteProfile(progressChannel_);
+    } else {
+        SaveStore store(directory_, slotFileStem(slot));
+        deletion = store.deleteProfile();
     }
-    const SaveStore store(directory_, slotFileStem(slot));
-    const auto removeFile = [](const std::filesystem::path& path)
-        -> std::optional<std::string> {
-        std::error_code error;
-        (void)std::filesystem::remove(path, error);
-        if (error) {
-            return "could not delete " + path.filename().string() + ": " +
-                error.message();
-        }
-        return std::nullopt;
-    };
-
-    if (const std::optional<std::string> failure = removeFile(store.primaryPath())) {
-        return { .message = *failure };
-    }
-    if (const std::optional<std::string> failure = removeFile(store.backupPath())) {
-        return { .message = *failure };
+    if (!deletion.succeeded) {
+        return { .message = deletion.message };
     }
 
     summaryCache_[static_cast<std::size_t>(slot)] = SlotSummary {};
-    return { .succeeded = true };
+    return {
+        .succeeded = true,
+        .cleanupPending = deletion.cleanupPending,
+        .message = deletion.message,
+    };
 }
 
 void SaveSlotManager::saveProgress(const PlayerProfile& profile, bool immediate)

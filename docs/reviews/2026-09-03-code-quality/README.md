@@ -10,13 +10,15 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Follow-up, 2026-09-07 (CQ-04):** Successful editor publication now atomically regenerates and validates the existing runtime `content.index` while preserving its staged game version. Level and overworld transactions, splat maps, manifests, imported decorations, animation catalogs, and tile-thumbnail baking all use this contract. Source-only test and authoring roots remain unindexed. CQ-09 still governs whether imported GLTF/GLB dependency discovery itself is complete.
 
+**Follow-up, 2026-09-07 (CQ-05):** Save deletion now belongs to `SaveStore`, which centrally owns the primary, backup, temporary, and displaced artifact set. A durable per-slot deletion marker commits the operation before cleanup and makes every old candidate ineligible for recovery across interruption or partial cleanup. The marker remains until a successful new save replaces the slot. Active-slot deletion is serialized with its async channel and discards a queued snapshot only after the marker commits.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
 
-The most consequential remaining problems occur **between these components**. A successfully decoded save can be discarded when its migration write fails. A drained save queue is treated as a successful save. Editor changes conflict with immutable runtime-package validation. A deferred renderer publication consumes the data needed for its own retry. These are more valuable to fix than another broad file-splitting or formatting pass.
+The most consequential remaining problems still occur **between these components**. A deferred renderer publication consumes the data needed for its own retry, imported GLB assets can omit external dependencies, and nonuniform mesh normalization leaves normals incorrect. These are more valuable to fix than another broad file-splitting or formatting pass.
 
-This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-04 have since been resolved, leaving 10 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
+This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-05 have since been resolved, leaving 9 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
 
 - **P1:** prioritize before relying on persistence or authoring for valuable work; existing data or unsaved progress can be lost or abandoned.
 - **P2:** schedule fixes for observable correctness, resource use, or validation gaps; several require unusual inputs or failure conditions.
@@ -123,7 +125,7 @@ Startup unconditionally validates each packaged file's size and membership again
 
 **Regression gate:** Stage → edit through each supported editor → close/reopen or invoke the same startup loader. Cover file resize, addition, deletion, and dependency changes. Test this with CQ-03 and CQ-09 because they share the same publication boundary.
 
-### CQ-05 — Delete the complete save recovery set
+### CQ-05 — Delete the complete save recovery set (resolved 2026-09-07)
 
 **Location:** [SaveSlotManager.cpp](../../../src/engine/SaveSlotManager.cpp), lines 355–375; [SaveStore.cpp](../../../src/engine/SaveStore.cpp), `recoverInterruptedWrite` around line 216.
 

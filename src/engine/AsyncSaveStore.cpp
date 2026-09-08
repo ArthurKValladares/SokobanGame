@@ -139,6 +139,23 @@ bool AsyncSaveStore::retryFailedSave(int channel)
     return true;
 }
 
+SaveStore::DeleteResult AsyncSaveStore::deleteProfile(int channel)
+{
+    std::unique_lock lock(mutex_);
+    Channel& target = channelAt(channel);
+    condition_.wait(lock, [&target] { return !target.writing; });
+    SaveStore::DeleteResult result = target.store.deleteProfile();
+    target.status = result.message;
+    if (result.succeeded) {
+        target.pending.reset();
+        target.forceWrite = false;
+        target.retryBlocked = false;
+        target.lastWriteSucceeded = true;
+    }
+    condition_.notify_all();
+    return result;
+}
+
 bool AsyncSaveStore::flush()
 {
     std::unique_lock lock(mutex_);

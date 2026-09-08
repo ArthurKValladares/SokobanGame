@@ -96,8 +96,67 @@ SaveStore::SaveStore(
     : root_(std::move(root))
     , primaryPath_(root_ / (fileStem + ".json"))
     , backupPath_(root_ / (fileStem + ".backup.json"))
+    , deletionMarkerPath_(root_ / (fileStem + ".deleted"))
     , sections_(sections)
 {
+}
+
+std::array<std::filesystem::path, 6>
+SaveStore::recoverableArtifactPaths() const
+{
+    return {
+        primaryPath_,
+        std::filesystem::path(primaryPath_.string() + ".tmp"),
+        std::filesystem::path(primaryPath_.string() + ".replace-old"),
+        backupPath_,
+        std::filesystem::path(backupPath_.string() + ".tmp"),
+        std::filesystem::path(backupPath_.string() + ".replace-old"),
+    };
+}
+
+bool SaveStore::deletionMarked() const
+{
+    std::error_code error;
+    const bool exists = std::filesystem::exists(deletionMarkerPath_, error);
+    if (error) {
+        throw std::system_error(
+            error, "cannot inspect deletion marker " +
+                deletionMarkerPath_.string());
+    }
+    if (!exists) {
+        return false;
+    }
+    const bool regular =
+        std::filesystem::is_regular_file(deletionMarkerPath_, error);
+    if (error) {
+        throw std::system_error(
+            error, "cannot inspect deletion marker " +
+                deletionMarkerPath_.string());
+    }
+    if (!regular) {
+        throw std::runtime_error(
+            "deletion marker is not a regular file: " +
+            deletionMarkerPath_.string());
+    }
+    return true;
+}
+
+std::string SaveStore::removeRecoverableArtifacts() const
+{
+    std::string failures;
+    for (const std::filesystem::path& path : recoverableArtifactPaths()) {
+        std::error_code error;
+        (void)std::filesystem::remove(path, error);
+        if (!error) {
+            continue;
+        }
+        if (!failures.empty()) {
+            failures += "; ";
+        }
+        failures += "could not delete " + path.filename().string() + ": " +
+            error.message();
+    }
+    return failures;
 }
 
 std::filesystem::path SaveStore::preferencePath(
@@ -120,6 +179,18 @@ SaveStore::LoadResult SaveStore::load()
 {
     try {
         std::filesystem::create_directories(root_);
+        if (deletionMarked()) {
+            const std::string cleanupFailure = removeRecoverableArtifacts();
+            status_ = cleanupFailure.empty()
+                ? "Save slot was deleted; starting fresh."
+                : "Save slot was deleted; artifact cleanup remains pending: " +
+                    cleanupFailure;
+            return {
+                .profile = {},
+                .disposition = LoadDisposition::CreatedDefault,
+                .message = status_,
+            };
+        }
         const bool recoveredInterruptedWrite = recoverInterruptedWrites();
 
         if (std::filesystem::is_regular_file(primaryPath_)) {
@@ -300,6 +371,12 @@ bool SaveStore::recoverInterruptedWrite(const std::filesystem::path& path)
 SaveStore::InspectionResult SaveStore::inspect() const
 {
     try {
+        if (deletionMarked()) {
+            return {
+                .disposition = InspectionDisposition::Missing,
+                .message = "Save slot was deleted.",
+            };
+        }
         const bool primaryExists = std::filesystem::exists(primaryPath_);
         const bool backupExists = std::filesystem::exists(backupPath_);
         if (!primaryExists && !backupExists) {
@@ -386,12 +463,50 @@ bool SaveStore::save(const PlayerProfile& profile)
 {
     try {
         std::filesystem::create_directories(root_);
-        writePrimary(profile, true);
+        const bool replacingDeletedSlot = deletionMarked();
+        if (replacingDeletedSlot) {
+            const std::string cleanupFailure = removeRecoverableArtifacts();
+            if (!cleanupFailure.empty()) {
+                throw std::runtime_error(
+                    "cannot replace deleted save slot: " + cleanupFailure);
+            }
+        }
+        writePrimary(profile, !replacingDeletedSlot);
+        if (replacingDeletedSlot) {
+            removeArtifact(deletionMarkerPath_);
+        }
         status_ = "Saved player profile.";
         return true;
     } catch (const std::exception& error) {
         status_ = "Player profile save failed: " + std::string(error.what());
         return false;
+    }
+}
+
+SaveStore::DeleteResult SaveStore::deleteProfile()
+{
+    try {
+        std::filesystem::create_directories(root_);
+        // The durable marker is the deletion commit point. It remains until a
+        // later successful save creates a new slot, so an interrupted cleanup
+        // can never make an old temporary or displaced file recoverable.
+        if (!deletionMarked()) {
+            atomicFile::write(deletionMarkerPath_, "deleted\n");
+        }
+        const std::string cleanupFailure = removeRecoverableArtifacts();
+        return {
+            .succeeded = true,
+            .cleanupPending = !cleanupFailure.empty(),
+            .message = cleanupFailure.empty()
+                ? std::string {}
+                : "save slot was deleted, but cleanup remains pending: " +
+                    cleanupFailure,
+        };
+    } catch (const std::exception& error) {
+        return {
+            .message = "could not commit save-slot deletion: " +
+                std::string(error.what()),
+        };
     }
 }
 
