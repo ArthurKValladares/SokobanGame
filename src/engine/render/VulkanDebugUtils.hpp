@@ -58,6 +58,11 @@ void endLabel(VkDevice device, VkCommandBuffer commandBuffer) noexcept;
 // treat "no errors" as meaningful only when validation was actually enabled.
 [[nodiscard]] std::uint64_t validationErrorCount() noexcept;
 void resetValidationErrorCount() noexcept;
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+// Called from the device teardown seam when the integration-test environment
+// requests a deterministic late validation error.
+void injectTeardownValidationErrorIfRequestedForTesting() noexcept;
+#endif
 
 [[nodiscard]] log::Level validationMessageLogLevel(
     VkDebugUtilsMessageSeverityFlagBitsEXT severity);

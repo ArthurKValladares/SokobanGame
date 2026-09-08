@@ -501,6 +501,12 @@ void VulkanDeviceContext::destroy() noexcept
     }
     if (instance_) {
         vulkanDebug::shutdownObjectNaming();
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+        // Keep the hook at the end of device teardown, before an enabled
+        // validation messenger is destroyed. The application integration test
+        // uses it to prove that main observes errors emitted during destruction.
+        vulkanDebug::injectTeardownValidationErrorIfRequestedForTesting();
+#endif
         vulkanDebug::destroyValidationMessenger(
             instance_, validationMessenger_);
         validationMessenger_ = VK_NULL_HANDLE;

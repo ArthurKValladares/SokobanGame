@@ -2,6 +2,8 @@
 
 #include "engine/Log.hpp"
 
+#include <SDL3/SDL_stdinc.h>
+
 #include <atomic>
 #include <cstdint>
 #include <string>
@@ -250,6 +252,17 @@ void resetValidationErrorCount() noexcept
 {
     validationErrors.store(0, std::memory_order_relaxed);
 }
+
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+void injectTeardownValidationErrorIfRequestedForTesting() noexcept
+{
+    const char* const requested =
+        SDL_getenv("SOKOBAN_TEST_VALIDATION_ERROR_ON_TEARDOWN");
+    if (requested != nullptr && std::string_view(requested) == "1") {
+        validationErrors.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+#endif
 
 log::Level validationMessageLogLevel(
     VkDebugUtilsMessageSeverityFlagBitsEXT severity)

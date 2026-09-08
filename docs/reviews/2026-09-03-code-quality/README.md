@@ -22,13 +22,15 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Follow-up, 2026-09-08 (CQ-10):** Completed-action diagnostics now use a scalar counter instead of retaining full actions with world states and presentation timelines. Functional undo remains in its separate history. A 1,000-pair move/undo regression verifies 2,000 reported completions, an empty undo stack, restored move count and state, and counter reset behavior.
 
+**Follow-up, 2026-09-08 (CQ-11):** Every path that constructs `Application` now destroys it before validation results are read or logging shuts down. The process-wide validation result is also checked after exception unwinding, while an existing, more specific failure code retains precedence. A real-executable regression injects an error at the end of Vulkan device teardown and requires exit code 3.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
 
-The most consequential remaining problems still occur **between these components**. Partial task-system construction can terminate during unwinding, and validation errors raised during renderer destruction can escape the smoke test's exit-status decision. These are more valuable to fix than another broad file-splitting or formatting pass.
+The remaining problems are concentrated in construction and release gates. Partial task-system construction can terminate during unwinding, the standalone headless build has drifted from CMake, and shipping validation can mistake a hung process for successful startup. These are more valuable to fix than another broad file-splitting or formatting pass.
 
-This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-10 have since been resolved, leaving 4 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
+This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-11 have since been resolved, leaving 3 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
 
 - **P1:** prioritize before relying on persistence or authoring for valuable work; existing data or unsaved progress can be lost or abandoned.
 - **P2:** schedule fixes for observable correctness, resource use, or validation gaps; several require unusual inputs or failure conditions.
@@ -80,7 +82,7 @@ Current sanitizer, clang-tidy, Linux builds, interactive controller/editor accep
 | CQ-08 | P2 | Nonuniform mesh normalization does not transform normals correctly | Reproduced |
 | CQ-09 | P2 | GLB registration omits external buffer dependencies | Reproduced |
 | CQ-10 | P2 | Diagnostic history retains complete actions indefinitely | Resolved 2026-09-08 |
-| CQ-11 | P2 | Validation exit status is computed before renderer destruction | Source-confirmed |
+| CQ-11 | P2 | Validation exit status is computed before renderer destruction | Resolved 2026-09-08 |
 | CQ-12 | P2 | Partial thread-pool construction can terminate the process | Source-confirmed |
 | CQ-13 | P2 | The standalone headless build script has drifted from the build graph | Source-confirmed |
 | CQ-14 | P2 | Shipping launch validation mistakes process survival for startup success | Source-confirmed |
@@ -207,7 +209,7 @@ Every completed action is copied into `moveHistory_`, including undo. These reco
 
 **Regression gate:** Long move/undo loops keep diagnostic storage bounded while the counter and functional undo semantics remain correct. The retained-action count was measured; no unsupported claim about exact memory bytes or frame-rate loss is made here.
 
-### CQ-11 — Check validation errors after application teardown
+### CQ-11 — Check validation errors after application teardown (resolved 2026-09-08)
 
 **Location:** [main.cpp](../../../src/main.cpp), lines 134–149; `Application app` is still in the surrounding `try` scope.
 
@@ -336,7 +338,7 @@ Potential concerns were not promoted to findings when existing code supplied the
 2. **Unify editor publication:** CQ-04 and CQ-09, then decide the appended-material contract. Test a complete stage/edit/restart cycle. This is a coherent boundary change, not several unrelated file helpers.
 3. **Repair runtime invariants:** CQ-06, CQ-07 and CQ-08 with focused state/retry/geometric tests. These can be reviewed separately from persistence changes.
 4. **Remove the remaining construction failure hazard:** CQ-12. Verify partial construction cleanup.
-5. **Make gates trustworthy:** CQ-11, CQ-13 and CQ-14; align warning policy and current documentation with what actually runs.
+5. **Make the remaining gates trustworthy:** CQ-13 and CQ-14; align warning policy and current documentation with what actually runs.
 6. **Do measured cleanup:** shared identity/delta helpers, stale artifacts/comments, incremental test-harness consistency, and performance experiments from the table above. Avoid broad churn while correctness changes are under review.
 
 Each packet should include a concrete failing-before/passing-after regression and one focused reviewable implementation. Rerun the relevant tests during development and the full Debug/Release suites before completion. Add sanitizer/tidy/platform gates where required by the affected code, rather than repeatedly running every expensive check after cosmetic changes.

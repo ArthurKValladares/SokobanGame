@@ -791,6 +791,17 @@ if(SOKOBAN_BUILD_TESTS)
             set_property(TEST vulkan_smoke APPEND PROPERTY ENVIRONMENT
                 "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan.supp")
         endif()
+
+        add_test(NAME application_validation_teardown
+            COMMAND "${CMAKE_COMMAND}"
+                "-DSOKOBAN_EXECUTABLE=$<TARGET_FILE:sokoban>"
+                "-DSOKOBAN_SAVE_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/test-output/application-validation-teardown/$<CONFIG>"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/VerifyValidationTeardownExit.cmake"
+        )
+        set_tests_properties(application_validation_teardown PROPERTIES
+            LABELS "vulkan;smoke"
+            TIMEOUT 40
+        )
     endif()
 
     # Header-only and dependency-free, so it links nothing: the point is that
