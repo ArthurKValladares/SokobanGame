@@ -1,14 +1,20 @@
+#include "engine/AssetManifest.hpp"
+#include "engine/render/RenderAssetRequirements.hpp"
+#include "engine/render/RuntimeTextureCatalog.hpp"
 #include "engine/render/VulkanDeviceContext.hpp"
 #include "engine/render/VulkanMemoryAllocator.hpp"
+#include "engine/render/VulkanModelResources.hpp"
 
 #include <SDL3/SDL.h>
 
 #include <chrono>
 #include <cstddef>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -200,6 +206,97 @@ void exerciseMemoryAllocator(sokoban::VulkanDeviceContext& deviceContext)
     }
 }
 
+void exerciseSkinnedPublicationRetry(
+    sokoban::VulkanDeviceContext& deviceContext)
+{
+    constexpr std::string_view manifestJson = R"json({
+  "format": 1,
+  "models": [
+    {
+      "name": "RetryRig",
+      "path": "KayKit Adventurers 2.0/Characters/gltf/Rogue.glb",
+      "geometry": "skinned",
+      "role": "player"
+    }
+  ],
+  "animations": [
+    { "name": "Idle", "path": "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/Rig_Medium_General.glb", "clip": 8, "role": "player-idle" },
+    { "name": "Move", "path": "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/Rig_Medium_MovementBasic.glb", "clip": 7, "role": "player-move" },
+    { "name": "Push", "path": "custom/Rig_Medium_Push.glb", "clip": 1, "role": "player-push" },
+    { "name": "Death", "path": "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/Rig_Medium_General.glb", "clip": 3, "role": "player-death" },
+    { "name": "DeadIdle", "path": "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/Rig_Medium_General.glb", "clip": 4, "role": "player-dead-idle" }
+  ]
+})json";
+    const sokoban::AssetManifest manifest =
+        sokoban::AssetManifest::parse(manifestJson);
+    const sokoban::RuntimeTextureCatalog textureCatalog =
+        sokoban::buildRuntimeTextureCatalog(manifest, {});
+    const sokoban::RenderModel model = manifest.modelIdByName("RetryRig");
+    const std::filesystem::path assetRoot =
+        std::filesystem::path(SOKOBAN_TEST_SOURCE_DIR) / "assets";
+
+    sokoban::VulkanModelResources resources;
+    resources.create(
+        deviceContext.physicalDevice(),
+        deviceContext.memoryAllocator(),
+        deviceContext.device(),
+        deviceContext.commandPool(),
+        deviceContext.graphicsQueue(),
+        assetRoot,
+        manifest,
+        textureCatalog,
+        1,
+        1.0f,
+        {
+            .maxConcurrentCpuJobs = 1,
+            .maxPublicationsPerFrame = 1,
+        });
+
+    sokoban::RenderAssetRequirements requirements;
+    requirements.requireModel(model);
+    resources.requestAssets(requirements);
+    sokoban::VulkanModelResources::denyNextModelResidencyForTesting();
+
+    const auto admissionDeadline = std::chrono::steady_clock::now() +
+        std::chrono::seconds(10);
+    while (sokoban::VulkanModelResources::
+            modelResidencyDenialPendingForTesting() &&
+        std::chrono::steady_clock::now() < admissionDeadline) {
+        (void)resources.publishReadyAssets(1);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (sokoban::VulkanModelResources::
+            modelResidencyDenialPendingForTesting()) {
+        throw std::runtime_error(
+            "Timed out before the skinned model reached residency admission");
+    }
+
+    const sokoban::VulkanModelResources::LoadingStats denied =
+        resources.loadingStats();
+    if (resources.modelReady(model) || denied.failedAssets != 0 ||
+        denied.pendingModels != 1 || denied.modelResidencyBytes != 0) {
+        throw std::runtime_error(
+            "Residency denial did not preserve a retryable CPU-ready model");
+    }
+
+    const auto retryDeadline = std::chrono::steady_clock::now() +
+        std::chrono::seconds(10);
+    while (!resources.modelReady(model) &&
+        std::chrono::steady_clock::now() < retryDeadline) {
+        (void)resources.publishReadyAssets(1);
+        resources.retireCompletedUploads();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const sokoban::VulkanModelResources::LoadingStats retried =
+        resources.loadingStats();
+    if (!resources.modelReady(model) || retried.failedAssets != 0 ||
+        retried.loadedModels != 1 || retried.pendingModels != 0 ||
+        retried.modelResidencyBytes == 0) {
+        throw std::runtime_error(
+            "Retried skinned model did not publish its prepared geometry");
+    }
+}
+
 } // namespace
 
 int main()
@@ -209,6 +306,7 @@ int main()
         const SdlWindow window;
         sokoban::VulkanDeviceContext deviceContext(window.get());
         exerciseMemoryAllocator(deviceContext);
+        exerciseSkinnedPublicationRetry(deviceContext);
         submitNoOp(deviceContext);
         std::cout << "Vulkan hidden-surface smoke test passed\n";
         return 0;

@@ -14,13 +14,15 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Follow-up, 2026-09-08 (CQ-06):** Binding capture now forwards keyboard, gamepad-button, and gamepad-axis events through an edge-suppressed input path. Physical held state, releases, and axis neutralization stay current, while controls pressed or moved during capture cannot create a menu or gameplay press edge when capture completes or is cancelled.
 
+**Follow-up, 2026-09-08 (CQ-07):** Skinned-model publication now converts and validates the CPU-ready mesh without transferring ownership, asks the residency ladder for admission, and moves the source into its resident slot only after admission succeeds. The converted vertex/index payload is reused for upload. A device-backed regression denies admission once at this seam, then verifies the retained nonempty mesh reaches ready GPU residency on retry without another load request.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
 
-The most consequential remaining problems still occur **between these components**. A deferred renderer publication consumes the data needed for its own retry, imported GLB assets can omit external dependencies, and nonuniform mesh normalization leaves normals incorrect. These are more valuable to fix than another broad file-splitting or formatting pass.
+The most consequential remaining problems still occur **between these components**. Partial task-system construction can terminate during unwinding, imported GLB assets can omit external dependencies, and nonuniform mesh normalization leaves normals incorrect. These are more valuable to fix than another broad file-splitting or formatting pass.
 
-This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-06 have since been resolved, leaving 8 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
+This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-07 have since been resolved, leaving 7 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
 
 - **P1:** prioritize before relying on persistence or authoring for valuable work; existing data or unsaved progress can be lost or abandoned.
 - **P2:** schedule fixes for observable correctness, resource use, or validation gaps; several require unusual inputs or failure conditions.
@@ -151,7 +153,7 @@ Binding capture suppresses key-up, gamepad button-up, and axis-motion events alo
 
 **Regression gate:** Press before capture, release during it, then finish/cancel for keyboard, controller buttons, and axes. Existing press-suppression assertions alone do not establish this invariant.
 
-### CQ-07 — Preserve prepared skinned data until residency admission succeeds
+### CQ-07 — Preserve prepared skinned data until residency admission succeeds (resolved 2026-09-08)
 
 **Location:** [VulkanModelResources.cpp](../../../src/engine/render/VulkanModelResources.cpp), lines 830–845.
 

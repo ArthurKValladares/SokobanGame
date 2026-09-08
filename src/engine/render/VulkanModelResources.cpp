@@ -8,6 +8,7 @@
 #include "engine/render/VulkanResourceUtils.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -18,6 +19,10 @@
 
 namespace sokoban {
 namespace {
+
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+std::atomic_bool denyNextModelResidencyAdmissionForTesting = false;
+#endif
 
 template <typename Result>
 bool futureReady(std::future<Result>& future)
@@ -827,12 +832,12 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                 modelResidency_.addResident(bytes);
                 slot.state = LoadState::Uploading;
             } else {
-                slot.skinnedSource = std::make_shared<SkinnedMeshData>(
-                    std::move(std::get<SkinnedMeshData>(*slot.prepared)));
+                SkinnedMeshData& prepared =
+                    std::get<SkinnedMeshData>(*slot.prepared);
                 const std::vector<GpuSkinnedVertex> vertices =
-                    makeGpuSkinnedVertices(*slot.skinnedSource);
+                    makeGpuSkinnedVertices(prepared);
                 const std::vector<uint32_t> indices =
-                    makeGpuSkinnedIndices(*slot.skinnedSource);
+                    makeGpuSkinnedIndices(prepared);
                 if (vertices.empty() || indices.empty()) {
                     throw std::runtime_error("glTF skinned mesh contains no geometry");
                 }
@@ -841,15 +846,19 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                     static_cast<uint64_t>(indices.size()) *
                         sizeof(uint32_t);
                 if (!makeModelResident(model, bytes)) {
-                    slot.skinnedSource.reset();
                     return false;
                 }
+                // Residency refusal leaves the CpuReady source untouched.
+                // Transfer ownership only once publication is admitted.
+                slot.skinnedSource = std::make_shared<SkinnedMeshData>(
+                    std::move(prepared));
                 slot.materialPolicy = modelMaterialPolicy(
                     slot.skinnedSource->materials);
                 slot.materialBase = writeMaterials(slot.skinnedSource->materials);
                 slot.materialCount = static_cast<uint32_t>(
                     slot.skinnedSource->materials.size());
-                slot.skinnedGpu = uploadSkinnedMesh(*slot.skinnedSource, slot.upload);
+                slot.skinnedGpu = uploadSkinnedMesh(
+                    vertices, indices, slot.upload);
                 slot.gpuBytes = bytes;
                 modelResidency_.addResident(bytes);
                 slot.state = LoadState::Uploading;
@@ -1034,6 +1043,11 @@ bool VulkanModelResources::makeModelResident(
     RenderModel protectedModel,
     uint64_t requiredBytes)
 {
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+    if (denyNextModelResidencyAdmissionForTesting.exchange(false)) {
+        return false;
+    }
+#endif
     return residencyLadder_.admit(
         modelResidency_,
         models_,
@@ -1045,6 +1059,18 @@ bool VulkanModelResources::makeModelResident(
         [this](ModelSlot& slot) { retireModel(slot); },
         [this] { destroyCompletedResidencyRetirements(); });
 }
+
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+void VulkanModelResources::denyNextModelResidencyForTesting()
+{
+    denyNextModelResidencyAdmissionForTesting.store(true);
+}
+
+bool VulkanModelResources::modelResidencyDenialPendingForTesting()
+{
+    return denyNextModelResidencyAdmissionForTesting.load();
+}
+#endif
 
 bool VulkanModelResources::makeTextureResident(
     std::size_t protectedTexture,
@@ -1498,11 +1524,10 @@ VulkanModelResources::GpuMesh VulkanModelResources::uploadMesh(
 }
 
 VulkanModelResources::GpuSkinnedMesh VulkanModelResources::uploadSkinnedMesh(
-    const SkinnedMeshData& mesh,
+    const std::vector<GpuSkinnedVertex>& vertices,
+    const std::vector<uint32_t>& indices,
     VulkanGeometryArena::Upload& upload)
 {
-    const std::vector<GpuSkinnedVertex> vertices = makeGpuSkinnedVertices(mesh);
-    const std::vector<uint32_t> indices = makeGpuSkinnedIndices(mesh);
     if (vertices.empty() || indices.empty()) {
         throw std::runtime_error("glTF skinned mesh contains no geometry");
     }

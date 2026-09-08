@@ -259,6 +259,13 @@ public:
     [[nodiscard]] DrawInstanceBufferView drawInstanceBuffer() const;
     [[nodiscard]] MaterialBufferView materialBuffer() const;
 
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+    // Refuses the next model residency request before it can allocate or
+    // upload. This exercises the real CpuReady publication retry boundary.
+    static void denyNextModelResidencyForTesting();
+    [[nodiscard]] static bool modelResidencyDenialPendingForTesting();
+#endif
+
 private:
 
     // Both types belong to the uploader; these keep the spelling everything
@@ -399,7 +406,8 @@ private:
         const MeshData& mesh,
         VulkanGeometryArena::Upload& upload);
     [[nodiscard]] GpuSkinnedMesh uploadSkinnedMesh(
-        const SkinnedMeshData& mesh,
+        const std::vector<GpuSkinnedVertex>& vertices,
+        const std::vector<uint32_t>& indices,
         VulkanGeometryArena::Upload& upload);
     void createSkinningBuffer();
     void destroySkinningBuffer();

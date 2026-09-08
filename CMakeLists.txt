@@ -772,9 +772,15 @@ if(SOKOBAN_BUILD_TESTS)
     enable_testing()
 
     if(SOKOBAN_BUILD_VULKAN_SMOKE_TESTS)
+        target_compile_definitions(sokoban_render_vulkan PRIVATE
+            SOKOBAN_ENABLE_TEST_HOOKS=1)
         sokoban_add_test(NAME vulkan_smoke TARGET sokoban_vulkan_smoke_tests
             LIBS sokoban_render_vulkan
             SOURCES tests/VulkanSmokeTests.cpp
+        )
+        target_compile_definitions(sokoban_vulkan_smoke_tests PRIVATE
+            SOKOBAN_ENABLE_TEST_HOOKS=1
+            SOKOBAN_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         )
         set_tests_properties(vulkan_smoke PROPERTIES
             LABELS "vulkan;smoke"
