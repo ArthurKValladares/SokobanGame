@@ -24,13 +24,15 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Follow-up, 2026-09-08 (CQ-11):** Every path that constructs `Application` now destroys it before validation results are read or logging shuts down. The process-wide validation result is also checked after exception unwinding, while an existing, more specific failure code retains precedence. A real-executable regression injects an error at the end of Vulkan device teardown and requires exit code 3.
 
+**Follow-up, 2026-09-08 (CQ-12):** `TaskSystem` construction now catches worker-creation failures, signals the already-started workers to stop, joins them, and rethrows the original error. Construction failure and normal destruction share the same cleanup path. A one-shot fault-injection regression fails after two workers, verifies the caller receives the system error with zero live workers, and then successfully uses a new pool.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
 
-The remaining problems are concentrated in construction and release gates. Partial task-system construction can terminate during unwinding, the standalone headless build has drifted from CMake, and shipping validation can mistake a hung process for successful startup. These are more valuable to fix than another broad file-splitting or formatting pass.
+The remaining problems are concentrated in release gates. The standalone headless build has drifted from CMake, and shipping validation can mistake a hung process for successful startup. These are more valuable to fix than another broad file-splitting or formatting pass.
 
-This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-11 have since been resolved, leaving 3 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
+This review originally recorded **14 actionable findings: three P1 and eleven P2**. CQ-01 through CQ-12 have since been resolved, leaving 2 open. Nine had direct reproductions against production libraries. Five were established by source/control-flow inspection, with their untested conditions identified below. Priority expresses impact and urgency, not how frequently the failure has been observed in normal play. There are no P0 findings.
 
 - **P1:** prioritize before relying on persistence or authoring for valuable work; existing data or unsaved progress can be lost or abandoned.
 - **P2:** schedule fixes for observable correctness, resource use, or validation gaps; several require unusual inputs or failure conditions.
@@ -83,7 +85,7 @@ Current sanitizer, clang-tidy, Linux builds, interactive controller/editor accep
 | CQ-09 | P2 | GLB registration omits external buffer dependencies | Reproduced |
 | CQ-10 | P2 | Diagnostic history retains complete actions indefinitely | Resolved 2026-09-08 |
 | CQ-11 | P2 | Validation exit status is computed before renderer destruction | Resolved 2026-09-08 |
-| CQ-12 | P2 | Partial thread-pool construction can terminate the process | Source-confirmed |
+| CQ-12 | P2 | Partial thread-pool construction can terminate the process | Resolved 2026-09-08 |
 | CQ-13 | P2 | The standalone headless build script has drifted from the build graph | Source-confirmed |
 | CQ-14 | P2 | Shipping launch validation mistakes process survival for startup success | Source-confirmed |
 
@@ -219,7 +221,7 @@ The validation-error count is read after `app.run()` but before `Application` an
 
 **Regression gate:** A controlled validation error during renderer teardown must yield the validation-failure exit code. The reviewed smoke log did not contain such an error; the defect is in what the gate would detect.
 
-### CQ-12 — Roll back partially created worker threads
+### CQ-12 — Roll back partially created worker threads (resolved 2026-09-08)
 
 **Location:** [TaskSystem.cpp](../../../src/engine/TaskSystem.cpp), lines 90–100.
 
@@ -337,9 +339,8 @@ Potential concerns were not promoted to findings when existing code supplied the
 1. **Protect player and author data:** CQ-01, CQ-02, CQ-03 and CQ-05. Establish explicit storage outcomes and small deterministic regression tests. Preserve existing formats and public behavior where possible.
 2. **Unify editor publication:** CQ-04 and CQ-09, then decide the appended-material contract. Test a complete stage/edit/restart cycle. This is a coherent boundary change, not several unrelated file helpers.
 3. **Repair runtime invariants:** CQ-06, CQ-07 and CQ-08 with focused state/retry/geometric tests. These can be reviewed separately from persistence changes.
-4. **Remove the remaining construction failure hazard:** CQ-12. Verify partial construction cleanup.
-5. **Make the remaining gates trustworthy:** CQ-13 and CQ-14; align warning policy and current documentation with what actually runs.
-6. **Do measured cleanup:** shared identity/delta helpers, stale artifacts/comments, incremental test-harness consistency, and performance experiments from the table above. Avoid broad churn while correctness changes are under review.
+4. **Make the remaining gates trustworthy:** CQ-13 and CQ-14; align warning policy and current documentation with what actually runs.
+5. **Do measured cleanup:** shared identity/delta helpers, stale artifacts/comments, incremental test-harness consistency, and performance experiments from the table above. Avoid broad churn while correctness changes are under review.
 
 Each packet should include a concrete failing-before/passing-after regression and one focused reviewable implementation. Rerun the relevant tests during development and the full Debug/Release suites before completion. Add sanitizer/tidy/platform gates where required by the affected code, rather than repeatedly running every expensive check after cosmetic changes.
 

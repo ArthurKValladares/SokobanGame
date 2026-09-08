@@ -4,9 +4,47 @@
 #include <exception>
 #include <latch>
 #include <memory>
+#include <system_error>
 
 namespace sokoban {
 namespace {
+
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+std::atomic<std::int64_t> workerCreationsBeforeFailureForTesting { -1 };
+std::atomic<unsigned> liveWorkersForTesting { 0 };
+
+void maybeFailWorkerCreationForTesting()
+{
+    std::int64_t remaining =
+        workerCreationsBeforeFailureForTesting.load(std::memory_order_relaxed);
+    while (remaining >= 0) {
+        const std::int64_t next = remaining == 0 ? -1 : remaining - 1;
+        if (workerCreationsBeforeFailureForTesting.compare_exchange_weak(
+                remaining, next, std::memory_order_relaxed)) {
+            if (remaining == 0) {
+                throw std::system_error(
+                    std::make_error_code(
+                        std::errc::resource_unavailable_try_again),
+                    "test-injected worker creation failure");
+            }
+            return;
+        }
+    }
+}
+
+class LiveWorkerRegistration {
+public:
+    LiveWorkerRegistration()
+    {
+        liveWorkersForTesting.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    ~LiveWorkerRegistration()
+    {
+        liveWorkersForTesting.fetch_sub(1, std::memory_order_relaxed);
+    }
+};
+#endif
 
 class ParallelForState {
 public:
@@ -94,13 +132,33 @@ TaskSystem::TaskSystem(unsigned threadCount)
         threadCount = hardware > 1 ? hardware - 1 : 1;
     }
 
-    workers_.reserve(threadCount);
-    for (unsigned i = 0; i < threadCount; ++i) {
-        workers_.emplace_back([this] { workerLoop(); });
+    try {
+        workers_.reserve(threadCount);
+        for (unsigned i = 0; i < threadCount; ++i) {
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+            maybeFailWorkerCreationForTesting();
+#endif
+            workers_.emplace_back([this] { workerLoop(); });
+        }
+    } catch (...) {
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+        workerCreationsBeforeFailureForTesting.store(
+            -1, std::memory_order_relaxed);
+#endif
+        // The destructor will not run when construction fails. Stop and join
+        // every worker already placed in the vector before its std::thread
+        // destructor can observe a joinable thread and terminate the process.
+        stopAndJoinWorkers();
+        throw;
     }
 }
 
 TaskSystem::~TaskSystem()
+{
+    stopAndJoinWorkers();
+}
+
+void TaskSystem::stopAndJoinWorkers() noexcept
 {
     {
         const std::scoped_lock lock(mutex_);
@@ -108,7 +166,9 @@ TaskSystem::~TaskSystem()
     }
     condition_.notify_all();
     for (std::thread& worker : workers_) {
-        worker.join();
+        if (worker.joinable()) {
+            worker.join();
+        }
     }
 }
 
@@ -123,6 +183,9 @@ void TaskSystem::push(std::function<void()> task)
 
 void TaskSystem::workerLoop()
 {
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+    const LiveWorkerRegistration liveWorker;
+#endif
     while (true) {
         std::function<void()> task;
         {
@@ -138,6 +201,20 @@ void TaskSystem::workerLoop()
         executedTasks_.fetch_add(1, std::memory_order_relaxed);
     }
 }
+
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+void TaskSystem::failWorkerCreationAfterForTesting(
+    unsigned successfulWorkerCreations)
+{
+    workerCreationsBeforeFailureForTesting.store(
+        successfulWorkerCreations, std::memory_order_relaxed);
+}
+
+unsigned TaskSystem::liveWorkerCountForTesting()
+{
+    return liveWorkersForTesting.load(std::memory_order_relaxed);
+}
+#endif
 
 void TaskSystem::parallelFor(size_t count, size_t minChunk, const std::function<void(size_t, size_t)>& fn)
 {

@@ -9,6 +9,7 @@
 #include <iostream>
 #include <numeric>
 #include <stdexcept>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -196,6 +197,35 @@ void testParallelForPropagatesWorkerException()
     CHECK(completed.load(std::memory_order_relaxed) == 128);
 }
 
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+void testPartialConstructionStopsAndJoinsStartedWorkers()
+{
+    TEST("partialConstructionStopsAndJoinsStartedWorkers");
+    CHECK(sokoban::TaskSystem::liveWorkerCountForTesting() == 0);
+
+    sokoban::TaskSystem::failWorkerCreationAfterForTesting(2);
+    bool propagatedCreationFailure = false;
+    try {
+        sokoban::TaskSystem incomplete(4);
+    } catch (const std::system_error& error) {
+        propagatedCreationFailure =
+            error.code() == std::errc::resource_unavailable_try_again &&
+            std::string(error.what()).find("test-injected") !=
+                std::string::npos;
+    }
+
+    // Reaching this point proves no joinable std::thread was destroyed during
+    // constructor unwinding. The counter separately proves both started
+    // workers left their loops before the exception reached the caller.
+    CHECK(propagatedCreationFailure);
+    CHECK(sokoban::TaskSystem::liveWorkerCountForTesting() == 0);
+
+    sokoban::TaskSystem replacement(1);
+    auto future = replacement.enqueue([] { return 23; });
+    CHECK(future.get() == 23);
+}
+#endif
+
 void testGlobalInstance()
 {
     TEST("globalInstance");
@@ -240,6 +270,9 @@ int main()
     testParallelForPropagatesInlineExceptions();
     testParallelForWaitsBeforeRethrowingCallerException();
     testParallelForPropagatesWorkerException();
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+    testPartialConstructionStopsAndJoinsStartedWorkers();
+#endif
     testGlobalInstance();
     testManyConcurrentParallelFors();
 

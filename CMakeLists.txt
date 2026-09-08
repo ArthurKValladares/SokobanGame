@@ -1076,6 +1076,8 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/TaskSystemTests.cpp
     )
+    target_compile_definitions(sokoban_task_tests PRIVATE
+        SOKOBAN_ENABLE_TEST_HOOKS=1)
     sokoban_add_test(NAME logging TARGET sokoban_log_tests
         LIBS sokoban_core
         SOURCES tests/LogTests.cpp

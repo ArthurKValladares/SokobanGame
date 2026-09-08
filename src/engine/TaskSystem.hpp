@@ -58,9 +58,18 @@ public:
     [[nodiscard]] unsigned workerCount() const { return static_cast<unsigned>(workers_.size()); }
     [[nodiscard]] uint64_t executedTaskCount() const { return executedTasks_.load(std::memory_order_relaxed); }
 
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+    // Makes one later construction fail after this many workers have started.
+    // The hook resets when it fires so subsequent constructions are ordinary.
+    static void failWorkerCreationAfterForTesting(
+        unsigned successfulWorkerCreations);
+    [[nodiscard]] static unsigned liveWorkerCountForTesting();
+#endif
+
 private:
     void push(std::function<void()> task);
     void workerLoop();
+    void stopAndJoinWorkers() noexcept;
 
     std::vector<std::thread> workers_;
     std::deque<std::function<void()>> queue_;
