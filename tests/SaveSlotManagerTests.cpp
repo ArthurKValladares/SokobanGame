@@ -1,6 +1,9 @@
 // Headless tests for the save-slot lifecycle: marker, settings sharing,
 // summaries, switching, and deletion.
 
+#include "TestHarness.hpp"
+#include "ScopedTestDirectory.hpp"
+
 #include "engine/SaveSlotManager.hpp"
 
 #include <chrono>
@@ -8,45 +11,13 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
-#include <random>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 
 namespace {
 
-int failures = 0;
-int checks = 0;
-
-void check(bool condition, const char* label)
-{
-    ++checks;
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL: " << label << '\n';
-    }
-}
-
-struct TemporaryDirectory {
-    TemporaryDirectory()
-    {
-        std::mt19937_64 random(std::random_device {}());
-        path_ = std::filesystem::temp_directory_path() /
-            ("sokoban-slots-" + std::to_string(random()));
-        std::filesystem::create_directories(path_);
-    }
-
-    ~TemporaryDirectory()
-    {
-        std::error_code error;
-        std::filesystem::remove_all(path_, error);
-    }
-
-    [[nodiscard]] const std::filesystem::path& path() const { return path_; }
-
-private:
-    std::filesystem::path path_;
-};
+using TemporaryDirectory = ScopedTestDirectory;
 
 constexpr auto instantWrites = std::chrono::milliseconds(0);
 
@@ -87,13 +58,13 @@ void testFreshInstallWritesNothing()
 {
     TemporaryDirectory directory;
     sokoban::SaveSlotManager manager(directory.path(), instantWrites);
-    check(manager.activeSlot() == 0, "fresh install defaults to slot 1");
+    CHECK_MESSAGE(manager.activeSlot() == 0, "fresh install defaults to slot 1");
 
     const sokoban::PlayerProfile profile = manager.loadActiveProfile();
-    check(profile == sokoban::PlayerProfile {}, "fresh profile is default");
-    check(manager.flush().allPersisted(),
+    CHECK_MESSAGE(profile == sokoban::PlayerProfile {}, "fresh profile is default");
+    CHECK_MESSAGE(manager.flush().allPersisted(),
         "fresh profile flush reports both channels settled");
-    check(directoryEmpty(directory.path()), "fresh install writes no files");
+    CHECK_MESSAGE(directoryEmpty(directory.path()), "fresh install writes no files");
 }
 
 void testUnsupportedActiveDataStopsLoading()
@@ -115,15 +86,15 @@ void testUnsupportedActiveDataStopsLoading()
         threw = std::string_view(error.what()).find("unsupported") !=
             std::string_view::npos;
     }
-    check(threw, "unsupported active profile stops loading with an accurate error");
+    CHECK_MESSAGE(threw, "unsupported active profile stops loading with an accurate error");
 
     std::ifstream stream(directory.path() / "profile.json", std::ios::binary);
     const std::string preserved {
         std::istreambuf_iterator<char>(stream),
         std::istreambuf_iterator<char>() };
-    check(preserved == future,
+    CHECK_MESSAGE(preserved == future,
         "stopped active-profile load preserves the future-version file");
-    check(!std::filesystem::exists(directory.path() / "settings.json"),
+    CHECK_MESSAGE(!std::filesystem::exists(directory.path() / "settings.json"),
         "stopped active-profile load does not create replacement settings");
 
     TemporaryDirectory inactiveDirectory;
@@ -137,7 +108,7 @@ void testUnsupportedActiveDataStopsLoading()
             inactivePath, std::ios::binary | std::ios::trunc);
         inactiveStream << future;
     }
-    check(inactiveManager.slotSummaries(active, 4)[1].state ==
+    CHECK_MESSAGE(inactiveManager.slotSummaries(active, 4)[1].state ==
             sokoban::SaveSlotState::Unavailable,
         "unsupported inactive profile is presented as unavailable");
     bool switchThrew = false;
@@ -147,13 +118,13 @@ void testUnsupportedActiveDataStopsLoading()
         switchThrew = std::string_view(error.what()).find("unsupported") !=
             std::string_view::npos;
     }
-    check(switchThrew,
+    CHECK_MESSAGE(switchThrew,
         "switching to an unsupported profile stops with an accurate error");
     std::ifstream inactiveStream(inactivePath, std::ios::binary);
     const std::string inactivePreserved {
         std::istreambuf_iterator<char>(inactiveStream),
         std::istreambuf_iterator<char>() };
-    check(inactivePreserved == future,
+    CHECK_MESSAGE(inactivePreserved == future,
         "rejected slot switch preserves the future-version profile");
 }
 
@@ -167,9 +138,9 @@ void testInterruptedActiveSlotMarkerRecovery()
     }
 
     sokoban::SaveSlotManager temporaryRecovered(temporary.path(), instantWrites);
-    check(temporaryRecovered.activeSlot() == 1,
+    CHECK_MESSAGE(temporaryRecovered.activeSlot() == 1,
         "temporary active-slot marker is promoted at startup");
-    check(!std::filesystem::exists(marker.string() + ".tmp"),
+    CHECK_MESSAGE(!std::filesystem::exists(marker.string() + ".tmp"),
         "promoted active-slot temporary is removed");
 
     TemporaryDirectory displacedDirectory;
@@ -186,9 +157,9 @@ void testInterruptedActiveSlotMarkerRecovery()
 
     sokoban::SaveSlotManager displacedRecovered(
         displacedDirectory.path(), instantWrites);
-    check(displacedRecovered.activeSlot() == 2,
+    CHECK_MESSAGE(displacedRecovered.activeSlot() == 2,
         "displaced active-slot marker restores after a corrupt temporary");
-    check(!std::filesystem::exists(displacedMarker.string() + ".tmp") &&
+    CHECK_MESSAGE(!std::filesystem::exists(displacedMarker.string() + ".tmp") &&
             !std::filesystem::exists(
                 displacedMarker.string() + ".replace-old"),
         "active-slot fallback cleans both artifacts");
@@ -206,20 +177,20 @@ void testOverworldTargetSummaries()
 
     profile.recordScreenCompletion({ 0, 1 }, 4, 3.0);
     auto summaries = manager.slotSummaries(profile, targets);
-    check(summaries[0].state == sokoban::SaveSlotState::Ready,
+    CHECK_MESSAGE(summaries[0].state == sokoban::SaveSlotState::Ready,
         "screen completion makes overworld slot ready");
-    check(summaries[0].completedLevels == 1,
+    CHECK_MESSAGE(summaries[0].completedLevels == 1,
         "summary counts completed selector targets");
-    check(!summaries[0].completed,
+    CHECK_MESSAGE(!summaries[0].completed,
         "one unsolved target keeps slot incomplete");
-    check(summaries[0].currentLevel == -1,
+    CHECK_MESSAGE(summaries[0].currentLevel == -1,
         "overworld slot has no current puzzle level");
 
     profile.recordScreenCompletion({ 1, 0 }, 2, 1.0);
     summaries = manager.slotSummaries(profile, targets);
-    check(summaries[0].completedLevels == 2,
+    CHECK_MESSAGE(summaries[0].completedLevels == 2,
         "all solved selector targets are counted");
-    check(summaries[0].completed,
+    CHECK_MESSAGE(summaries[0].completed,
         "all selector targets complete the slot");
 }
 
@@ -231,29 +202,29 @@ void testPreSplitSettingsMigration()
         sokoban::SaveStore legacy(directory.path());
         sokoban::PlayerProfile combined = profileWithProgress(1);
         combined.settings.audio.musicVolume = 0.25f;
-        check(legacy.save(combined), "legacy combined save written");
+        CHECK_MESSAGE(legacy.save(combined), "legacy combined save written");
     }
 
     sokoban::SaveSlotManager manager(directory.path(), instantWrites);
     const sokoban::PlayerProfile profile = manager.loadActiveProfile();
-    check(profile.settings.audio.musicVolume == 0.25f, "migrated settings adopted");
-    check(profile.unlockedLevel == 1, "progress preserved through migration");
-    check(manager.flush().allPersisted(),
+    CHECK_MESSAGE(profile.settings.audio.musicVolume == 0.25f, "migrated settings adopted");
+    CHECK_MESSAGE(profile.unlockedLevel == 1, "progress preserved through migration");
+    CHECK_MESSAGE(manager.flush().allPersisted(),
         "settings migration reports durable completion");
-    check(std::filesystem::is_regular_file(directory.path() / "settings.json"),
+    CHECK_MESSAGE(std::filesystem::is_regular_file(directory.path() / "settings.json"),
         "shared settings file bootstrapped");
 
     // The shared file is now authoritative over slot copies.
     sokoban::SaveStore settings(directory.path(), "settings");
     sokoban::PlayerProfile shared = settings.load().profile;
-    check(shared.settings.audio.musicVolume == 0.25f, "bootstrapped settings persisted");
+    CHECK_MESSAGE(shared.settings.audio.musicVolume == 0.25f, "bootstrapped settings persisted");
     shared.settings.audio.musicVolume = 0.9f;
-    check(settings.save(shared), "shared settings updated");
+    CHECK_MESSAGE(settings.save(shared), "shared settings updated");
 
     sokoban::SaveSlotManager reloaded(directory.path(), instantWrites);
     const sokoban::PlayerProfile merged = reloaded.loadActiveProfile();
-    check(merged.settings.audio.musicVolume == 0.9f, "shared settings win over slot copy");
-    check(merged.unlockedLevel == 1, "slot progress still intact");
+    CHECK_MESSAGE(merged.settings.audio.musicVolume == 0.9f, "shared settings win over slot copy");
+    CHECK_MESSAGE(merged.unlockedLevel == 1, "slot progress still intact");
 }
 
 void testSummariesSwitchingAndDeletion()
@@ -265,7 +236,7 @@ void testSummariesSwitchingAndDeletion()
     // Slot 2 on disk with progress; slot 3 corrupt.
     {
         sokoban::SaveStore second(directory.path(), "profile-slot2");
-        check(second.save(profileWithProgress(2)), "slot 2 saved");
+        CHECK_MESSAGE(second.save(profileWithProgress(2)), "slot 2 saved");
         std::ofstream corrupt(
             directory.path() / "profile-slot3.json", std::ios::binary);
         corrupt << "not json";
@@ -273,13 +244,13 @@ void testSummariesSwitchingAndDeletion()
 
     std::vector<sokoban::SaveSlotManager::SlotSummary> summaries =
         manager.slotSummaries(active, 4);
-    check(summaries.size() == 3, "three slot summaries");
-    check(summaries[0].state == sokoban::SaveSlotState::Empty,
+    CHECK_MESSAGE(summaries.size() == 3, "three slot summaries");
+    CHECK_MESSAGE(summaries[0].state == sokoban::SaveSlotState::Empty,
         "live empty profile summarizes as empty");
-    check(summaries[1].state == sokoban::SaveSlotState::Ready &&
+    CHECK_MESSAGE(summaries[1].state == sokoban::SaveSlotState::Ready &&
             summaries[1].currentLevel == 2,
         "on-disk slot summarized from its file");
-    check(summaries[2].state == sokoban::SaveSlotState::Corrupt,
+    CHECK_MESSAGE(summaries[2].state == sokoban::SaveSlotState::Corrupt,
         "corrupt slot is reported as corrupt");
 
     bool corruptSwitchRejected = false;
@@ -288,63 +259,63 @@ void testSummariesSwitchingAndDeletion()
     } catch (const std::runtime_error&) {
         corruptSwitchRejected = true;
     }
-    check(corruptSwitchRejected, "corrupt slot cannot be switched into");
-    check(manager.activeSlot() == 0,
+    CHECK_MESSAGE(corruptSwitchRejected, "corrupt slot cannot be switched into");
+    CHECK_MESSAGE(manager.activeSlot() == 0,
         "rejected corrupt switch keeps active slot");
-    check(std::filesystem::is_regular_file(
+    CHECK_MESSAGE(std::filesystem::is_regular_file(
             directory.path() / "profile-slot3.json"),
         "rejected corrupt switch does not archive the save");
 
     // The regression that shipped: a reset live profile must read as empty.
     active = profileWithProgress(1);
-    check(manager.slotSummaries(active, 4)[0].state ==
+    CHECK_MESSAGE(manager.slotSummaries(active, 4)[0].state ==
             sokoban::SaveSlotState::Ready,
         "live progress summarizes as non-empty");
     active.resetProgress();
-    check(manager.slotSummaries(active, 4)[0].state ==
+    CHECK_MESSAGE(manager.slotSummaries(active, 4)[0].state ==
             sokoban::SaveSlotState::Empty,
         "reset live profile summarizes as empty again");
 
     // Switching: invalid and same-slot requests are rejected.
-    check(!manager.switchTo(-1, active), "negative slot rejected");
-    check(!manager.switchTo(3, active), "out-of-range slot rejected");
-    check(!manager.switchTo(0, active), "same slot rejected");
+    CHECK_MESSAGE(!manager.switchTo(-1, active), "negative slot rejected");
+    CHECK_MESSAGE(!manager.switchTo(3, active), "out-of-range slot rejected");
+    CHECK_MESSAGE(!manager.switchTo(0, active), "same slot rejected");
 
     active.settings.audio.musicVolume = 0.33f;
     std::optional<sokoban::PlayerProfile> switched = manager.switchTo(1, active);
-    check(switched.has_value(), "switch to slot 2 succeeds");
-    check(manager.activeSlot() == 1, "active slot updated");
-    check(switched->unlockedLevel == 2, "slot 2 progress loaded");
-    check(switched->settings.audio.musicVolume == 0.33f, "live settings carried over");
+    CHECK_MESSAGE(switched.has_value(), "switch to slot 2 succeeds");
+    CHECK_MESSAGE(manager.activeSlot() == 1, "active slot updated");
+    CHECK_MESSAGE(switched->unlockedLevel == 2, "slot 2 progress loaded");
+    CHECK_MESSAGE(switched->settings.audio.musicVolume == 0.33f, "live settings carried over");
 
     // The marker survives into a new manager instance.
     {
         sokoban::SaveSlotManager reopened(directory.path(), instantWrites);
-        check(reopened.activeSlot() == 1, "marker remembers the active slot");
+        CHECK_MESSAGE(reopened.activeSlot() == 1, "marker remembers the active slot");
     }
 
     // Deletion removes files without touching neighbours; a pending write
     // must not resurrect the deleted save.
     manager.saveProgress(*switched, true);
-    check(manager.deleteSlot(1).succeeded, "slot 2 deletion succeeds");
-    check(!std::filesystem::exists(directory.path() / "profile-slot2.json"),
+    CHECK_MESSAGE(manager.deleteSlot(1).succeeded, "slot 2 deletion succeeds");
+    CHECK_MESSAGE(!std::filesystem::exists(directory.path() / "profile-slot2.json"),
         "deleted slot primary removed");
-    check(!std::filesystem::exists(directory.path() / "profile-slot2.backup.json"),
+    CHECK_MESSAGE(!std::filesystem::exists(directory.path() / "profile-slot2.backup.json"),
         "deleted slot backup removed");
-    check(std::filesystem::is_regular_file(
+    CHECK_MESSAGE(std::filesystem::is_regular_file(
             directory.path() / "profile-slot2.deleted"),
         "deleted slot retains its durable deletion marker");
-    check(std::filesystem::exists(directory.path() / "active-slot.txt"),
+    CHECK_MESSAGE(std::filesystem::exists(directory.path() / "active-slot.txt"),
         "marker untouched by deletion");
 
     // Settings-only saves never contain progress.
     manager.saveSettings(*switched, true);
-    check(manager.flush().allPersisted(),
+    CHECK_MESSAGE(manager.flush().allPersisted(),
         "settings-only save reports durable completion");
     sokoban::SaveStore settings(directory.path(), "settings");
     const sokoban::PlayerProfile sharedSettings = settings.load().profile;
-    check(sharedSettings.progressEmpty(), "settings file carries no progress");
-    check(sharedSettings.settings.audio.musicVolume == 0.33f, "settings file has live values");
+    CHECK_MESSAGE(sharedSettings.progressEmpty(), "settings file carries no progress");
+    CHECK_MESSAGE(sharedSettings.settings.audio.musicVolume == 0.33f, "settings file has live values");
 }
 
 void testSummaryCacheInvalidation()
@@ -356,20 +327,20 @@ void testSummaryCacheInvalidation()
     // Seed the two non-active slots on disk before the first read.
     {
         sokoban::SaveStore s1(directory.path(), "profile-slot2");
-        check(s1.save(profileWithProgress(2)), "slot 2 seeded");
+        CHECK_MESSAGE(s1.save(profileWithProgress(2)), "slot 2 seeded");
         sokoban::SaveStore s2(directory.path(), "profile-slot3");
-        check(s2.save(profileWithProgress(1)), "slot 3 seeded");
+        CHECK_MESSAGE(s2.save(profileWithProgress(1)), "slot 3 seeded");
     }
-    check(manager.slotSummaries(active, 4)[1].currentLevel == 2, "slot 2 decoded");
-    check(manager.slotSummaries(active, 4)[2].currentLevel == 1, "slot 3 decoded");
+    CHECK_MESSAGE(manager.slotSummaries(active, 4)[1].currentLevel == 2, "slot 2 decoded");
+    CHECK_MESSAGE(manager.slotSummaries(active, 4)[2].currentLevel == 1, "slot 3 decoded");
 
     // An external overwrite of a cached non-active slot is intentionally not
     // reflected: only this process mutates slots during a run.
     {
         sokoban::SaveStore s1(directory.path(), "profile-slot2");
-        check(s1.save(profileWithProgress(3)), "slot 2 overwritten externally");
+        CHECK_MESSAGE(s1.save(profileWithProgress(3)), "slot 2 overwritten externally");
     }
-    check(manager.slotSummaries(active, 4)[1].currentLevel == 2, "cache reused");
+    CHECK_MESSAGE(manager.slotSummaries(active, 4)[1].currentLevel == 2, "cache reused");
 
     // The real update path: write the active slot, then switch away. The
     // switch invalidates the cache so the now-non-active slot 0 reflects its
@@ -377,24 +348,24 @@ void testSummaryCacheInvalidation()
     active = profileWithProgress(1);
     active.settings.audio.musicVolume = 0.4f;
     manager.saveProgress(active, true);
-    check(manager.flush().allPersisted(),
+    CHECK_MESSAGE(manager.flush().allPersisted(),
         "progress save reports durable completion before switching");
     std::optional<sokoban::PlayerProfile> switched = manager.switchTo(1, active);
-    check(switched.has_value(), "switch to slot 2");
-    check(manager.slotSummaries(*switched, 4)[0].currentLevel == 1,
+    CHECK_MESSAGE(switched.has_value(), "switch to slot 2");
+    CHECK_MESSAGE(manager.slotSummaries(*switched, 4)[0].currentLevel == 1,
         "switched-away slot reflects its saved progress");
     // Slot 2 (now the freshly-decoded on-disk value) shows the external write.
-    check(manager.slotSummaries(*switched, 4)[1].currentLevel == 3,
+    CHECK_MESSAGE(manager.slotSummaries(*switched, 4)[1].currentLevel == 3,
         "switch invalidation re-decodes each non-active slot");
 
     // Deleting a non-active slot invalidates just that entry to empty.
-    check(manager.slotSummaries(*switched, 4)[2].currentLevel == 1,
+    CHECK_MESSAGE(manager.slotSummaries(*switched, 4)[2].currentLevel == 1,
         "slot 3 primed before delete");
-    check(manager.deleteSlot(2).succeeded, "slot 3 deletion succeeds");
-    check(manager.slotSummaries(*switched, 4)[2].state ==
+    CHECK_MESSAGE(manager.deleteSlot(2).succeeded, "slot 3 deletion succeeds");
+    CHECK_MESSAGE(manager.slotSummaries(*switched, 4)[2].state ==
             sokoban::SaveSlotState::Empty,
         "delete invalidates the slot's cached summary");
-    check(manager.slotSummaries(*switched, 4)[0].currentLevel == 1,
+    CHECK_MESSAGE(manager.slotSummaries(*switched, 4)[0].currentLevel == 1,
         "delete leaves other cached summaries intact");
 
     // A changed level count invalidates completed flags across the board.
@@ -409,11 +380,11 @@ void testSummaryCacheInvalidation()
         complete.recordLevelCompletion(1, 5, 1.0, true);
         complete.normalize();
         sokoban::SaveStore s(levelCountDir.path(), "profile-slot2");
-        check(s.save(complete), "slot 2 completed 0 and 1");
+        CHECK_MESSAGE(s.save(complete), "slot 2 completed 0 and 1");
     }
-    check(fresh.slotSummaries(freshActive, 2)[1].completed,
+    CHECK_MESSAGE(fresh.slotSummaries(freshActive, 2)[1].completed,
         "2-level catalog marks the slot complete");
-    check(!fresh.slotSummaries(freshActive, 5)[1].completed,
+    CHECK_MESSAGE(!fresh.slotSummaries(freshActive, 5)[1].completed,
         "5-level catalog re-evaluates completion");
 }
 
@@ -422,9 +393,9 @@ void testSlotInspectionIsNonMutating()
     TemporaryDirectory directory;
     {
         sokoban::SaveStore recoverable(directory.path(), "profile-slot2");
-        check(recoverable.save(profileWithProgress(1)),
+        CHECK_MESSAGE(recoverable.save(profileWithProgress(1)),
             "recoverable slot initial profile saved");
-        check(recoverable.save(profileWithProgress(2)),
+        CHECK_MESSAGE(recoverable.save(profileWithProgress(2)),
             "recoverable slot backup created");
         std::ofstream(recoverable.primaryPath(), std::ios::binary | std::ios::trunc)
             << "corrupt primary";
@@ -438,28 +409,28 @@ void testSlotInspectionIsNonMutating()
     const std::vector<sokoban::SaveSlotManager::SlotSummary> summaries =
         manager.slotSummaries(active, 4);
 
-    check(summaries[1].state == sokoban::SaveSlotState::Recoverable,
+    CHECK_MESSAGE(summaries[1].state == sokoban::SaveSlotState::Recoverable,
         "valid backup is reported as recoverable");
-    check(summaries[1].currentLevel == 1,
+    CHECK_MESSAGE(summaries[1].currentLevel == 1,
         "recoverable summary comes from backup");
-    check(summaries[2].state == sokoban::SaveSlotState::Unavailable,
+    CHECK_MESSAGE(summaries[2].state == sokoban::SaveSlotState::Unavailable,
         "non-file save path is reported as unavailable");
 
     std::ifstream primary(directory.path() / "profile-slot2.json");
     std::string primaryContents;
     std::getline(primary, primaryContents);
     primary.close();
-    check(primaryContents == "corrupt primary",
+    CHECK_MESSAGE(primaryContents == "corrupt primary",
         "inspection does not archive corrupt primary");
-    check(std::filesystem::is_regular_file(
+    CHECK_MESSAGE(std::filesystem::is_regular_file(
             directory.path() / "profile-slot2.backup.json"),
         "inspection does not consume recoverable backup");
 
     const std::optional<sokoban::PlayerProfile> recovered =
         manager.switchTo(1, active);
-    check(recovered.has_value() && recovered->currentLevel == 1,
+    CHECK_MESSAGE(recovered.has_value() && recovered->currentLevel == 1,
         "explicit switch recovers backup profile");
-    check(sokoban::SaveStore(directory.path(), "profile-slot2").inspect()
+    CHECK_MESSAGE(sokoban::SaveStore(directory.path(), "profile-slot2").inspect()
             .disposition ==
             sokoban::SaveStore::InspectionDisposition::PrimaryValid,
         "recovered slot has a valid primary after switch");
@@ -470,15 +441,15 @@ void testFailedMarkerCommitRollsBackSwitch()
     TemporaryDirectory directory;
     {
         sokoban::SaveStore second(directory.path(), "profile-slot2");
-        check(second.save(profileWithProgress(1)), "slot 2 seeded for rollback");
+        CHECK_MESSAGE(second.save(profileWithProgress(1)), "slot 2 seeded for rollback");
         sokoban::SaveStore third(directory.path(), "profile-slot3");
-        check(third.save(profileWithProgress(2)), "slot 3 seeded for rollback");
+        CHECK_MESSAGE(third.save(profileWithProgress(2)), "slot 3 seeded for rollback");
     }
 
     sokoban::SaveSlotManager manager(directory.path(), instantWrites);
     sokoban::PlayerProfile active = manager.loadActiveProfile();
     std::optional<sokoban::PlayerProfile> third = manager.switchTo(2, active);
-    check(third.has_value() && manager.activeSlot() == 2,
+    CHECK_MESSAGE(third.has_value() && manager.activeSlot() == 2,
         "precondition switch to slot 3 succeeds");
 
     // A non-empty directory at the temporary path reliably prevents the
@@ -494,23 +465,23 @@ void testFailedMarkerCommitRollsBackSwitch()
     } catch (const std::runtime_error&) {
         threw = true;
     }
-    check(threw, "marker commit failure is reported");
-    check(manager.activeSlot() == 2,
+    CHECK_MESSAGE(threw, "marker commit failure is reported");
+    CHECK_MESSAGE(manager.activeSlot() == 2,
         "failed switch keeps previous active slot");
 
     std::ifstream marker(directory.path() / "active-slot.txt");
     int markedSlot = 0;
     marker >> markedSlot;
-    check(markedSlot == 3, "failed switch preserves previous marker");
+    CHECK_MESSAGE(markedSlot == 3, "failed switch preserves previous marker");
 
     sokoban::PlayerProfile replacement = profileWithProgress(0);
     manager.saveProgress(replacement, true);
-    check(manager.flush().allPersisted(),
+    CHECK_MESSAGE(manager.flush().allPersisted(),
         "post-rollback save reports durable completion");
-    check(sokoban::SaveStore(directory.path(), "profile-slot3").load()
+    CHECK_MESSAGE(sokoban::SaveStore(directory.path(), "profile-slot3").load()
             .profile.currentLevel == 0,
         "post-failure saves still target previous slot");
-    check(sokoban::SaveStore(directory.path(), "profile-slot2").load()
+    CHECK_MESSAGE(sokoban::SaveStore(directory.path(), "profile-slot2").load()
             .profile.currentLevel == 1,
         "failed destination is not used by later saves");
 }
@@ -523,7 +494,7 @@ void testFailedOutgoingSavePreventsSlotSwitch()
 
     const sokoban::PlayerProfile committed = profileWithProgress(1);
     manager.saveProgress(committed, true);
-    check(manager.flush().allPersisted(),
+    CHECK_MESSAGE(manager.flush().allPersisted(),
         "initial outgoing profile reports durable completion");
 
     const std::filesystem::path blockedTemporary =
@@ -541,13 +512,13 @@ void testFailedOutgoingSavePreventsSlotSwitch()
                     "outgoing save slot could not be persisted") !=
             std::string_view::npos;
     }
-    check(threw, "failed outgoing save prevents slot switching");
-    check(manager.activeSlot() == 0,
+    CHECK_MESSAGE(threw, "failed outgoing save prevents slot switching");
+    CHECK_MESSAGE(manager.activeSlot() == 0,
         "failed outgoing save keeps the original slot active");
-    check(manager.progressDiagnostics().pending &&
+    CHECK_MESSAGE(manager.progressDiagnostics().pending &&
             !manager.progressDiagnostics().lastWriteSucceeded,
         "failed outgoing snapshot remains pending with failure diagnostics");
-    check(manager.progressStatus().starts_with("Player profile save failed:"),
+    CHECK_MESSAGE(manager.progressStatus().starts_with("Player profile save failed:"),
         "failed outgoing save status remains visible after rejected switch");
 
     std::ifstream committedStream(
@@ -556,16 +527,16 @@ void testFailedOutgoingSavePreventsSlotSwitch()
         std::istreambuf_iterator<char>(committedStream),
         std::istreambuf_iterator<char>() };
     committedStream.close();
-    check(sokoban::decodePlayerProfile(committedContents).profile == committed,
+    CHECK_MESSAGE(sokoban::decodePlayerProfile(committedContents).profile == committed,
         "rejected switch leaves the last committed outgoing profile intact");
 
     std::filesystem::remove_all(blockedTemporary);
     manager.saveProgress(latest, true);
     const std::optional<sokoban::PlayerProfile> switched =
         manager.switchTo(1, latest);
-    check(switched.has_value() && manager.activeSlot() == 1,
+    CHECK_MESSAGE(switched.has_value() && manager.activeSlot() == 1,
         "resubmitting after storage recovery permits the switch");
-    check(sokoban::SaveStore(directory.path()).load().profile == latest,
+    CHECK_MESSAGE(sokoban::SaveStore(directory.path()).load().profile == latest,
         "successful retry persists the newest outgoing profile");
 }
 
@@ -580,9 +551,9 @@ void testDeletionFailurePreservesSummaryAndFiles()
 
     {
         sokoban::SaveStore second(directory.path(), "profile-slot2");
-        check(second.save(profileWithProgress(1)), "slot 2 seeded for delete failure");
+        CHECK_MESSAGE(second.save(profileWithProgress(1)), "slot 2 seeded for delete failure");
     }
-    check(manager.slotSummaries(active, 4)[1].state ==
+    CHECK_MESSAGE(manager.slotSummaries(active, 4)[1].state ==
             sokoban::SaveSlotState::Ready,
         "slot 2 summary is primed before deletion failure");
 
@@ -595,24 +566,24 @@ void testDeletionFailurePreservesSummaryAndFiles()
     std::ofstream(backup) << "backup must remain";
 
     const sokoban::SaveSlotManager::DeleteResult result = manager.deleteSlot(1);
-    check(result.succeeded, "deletion commits before artifact cleanup");
-    check(result.cleanupPending, "partial cleanup is reported");
-    check(result.message.find("profile-slot2.json") != std::string::npos,
+    CHECK_MESSAGE(result.succeeded, "deletion commits before artifact cleanup");
+    CHECK_MESSAGE(result.cleanupPending, "partial cleanup is reported");
+    CHECK_MESSAGE(result.message.find("profile-slot2.json") != std::string::npos,
         "cleanup warning identifies the path");
-    check(std::filesystem::exists(primary / "blocker.txt"),
+    CHECK_MESSAGE(std::filesystem::exists(primary / "blocker.txt"),
         "blocked primary artifact remains for later cleanup");
-    check(!std::filesystem::exists(backup),
+    CHECK_MESSAGE(!std::filesystem::exists(backup),
         "cleanup continues to remove other recovery candidates");
-    check(std::filesystem::is_regular_file(
+    CHECK_MESSAGE(std::filesystem::is_regular_file(
             directory.path() / "profile-slot2.deleted"),
         "deletion marker remains while cleanup is pending");
-    check(manager.slotSummaries(active, 4)[1].state ==
+    CHECK_MESSAGE(manager.slotSummaries(active, 4)[1].state ==
             sokoban::SaveSlotState::Empty,
         "committed deletion immediately empties the cached summary");
 
     const std::optional<sokoban::PlayerProfile> deleted =
         manager.switchTo(1, active);
-    check(deleted && deleted->progressEmpty(),
+    CHECK_MESSAGE(deleted && deleted->progressEmpty(),
         "cleanup failure cannot resurrect the deleted slot");
 }
 
@@ -632,29 +603,29 @@ void testDeletionRemovesEveryRecoverableArtifact()
         slot.primaryPath().string() + ".corrupt-diagnostic";
     std::ofstream(diagnostic, std::ios::binary) << profile;
 
-    check(manager.deleteSlot(1).succeeded,
+    CHECK_MESSAGE(manager.deleteSlot(1).succeeded,
         "slot with every recovery artifact deletes successfully");
     for (const std::filesystem::path& artifact :
          slot.recoverableArtifactPaths()) {
-        check(!std::filesystem::exists(artifact),
+        CHECK_MESSAGE(!std::filesystem::exists(artifact),
             "deleted slot has no eligible recovery artifact");
     }
-    check(std::filesystem::is_regular_file(slot.deletionMarkerPath()),
+    CHECK_MESSAGE(std::filesystem::is_regular_file(slot.deletionMarkerPath()),
         "complete deletion retains its commit marker");
-    check(std::filesystem::is_regular_file(diagnostic),
+    CHECK_MESSAGE(std::filesystem::is_regular_file(diagnostic),
         "non-recoverable corrupt diagnostics are preserved");
 
     sokoban::SaveSlotManager reopened(directory.path(), instantWrites);
     const std::optional<sokoban::PlayerProfile> loaded =
         reopened.switchTo(1, active);
-    check(loaded && loaded->progressEmpty(),
+    CHECK_MESSAGE(loaded && loaded->progressEmpty(),
         "reopening cannot recover deleted temporary or displaced data");
     reopened.saveProgress(profileWithProgress(1), true);
-    check(reopened.flush().allPersisted(),
+    CHECK_MESSAGE(reopened.flush().allPersisted(),
         "new save reports durable completion after deletion");
-    check(!std::filesystem::exists(slot.deletionMarkerPath()),
+    CHECK_MESSAGE(!std::filesystem::exists(slot.deletionMarkerPath()),
         "a successful new save replaces the deletion marker");
-    check(sokoban::SaveStore(directory.path(), "profile-slot2").load()
+    CHECK_MESSAGE(sokoban::SaveStore(directory.path(), "profile-slot2").load()
             .profile.currentLevel == 1,
         "the replacement slot loads its new progress");
 }
@@ -665,7 +636,7 @@ void testDeletionMarkerFailurePreservesTheSlot()
     sokoban::SaveSlotManager manager(directory.path(), instantWrites);
     const sokoban::PlayerProfile active = manager.loadActiveProfile();
     sokoban::SaveStore slot(directory.path(), "profile-slot2");
-    check(slot.save(profileWithProgress(2)),
+    CHECK_MESSAGE(slot.save(profileWithProgress(2)),
         "slot is seeded before marker failure");
     const std::filesystem::path blockedTemporary =
         slot.deletionMarkerPath().string() + ".tmp";
@@ -673,10 +644,10 @@ void testDeletionMarkerFailurePreservesTheSlot()
     std::ofstream(blockedTemporary / "blocker.txt") << "blocked";
 
     const sokoban::SaveSlotManager::DeleteResult result = manager.deleteSlot(1);
-    check(!result.succeeded, "uncommitted deletion reports failure");
-    check(std::filesystem::is_regular_file(slot.primaryPath()),
+    CHECK_MESSAGE(!result.succeeded, "uncommitted deletion reports failure");
+    CHECK_MESSAGE(std::filesystem::is_regular_file(slot.primaryPath()),
         "marker failure leaves the primary save intact");
-    check(manager.slotSummaries(active, 4)[1].state ==
+    CHECK_MESSAGE(manager.slotSummaries(active, 4)[1].state ==
             sokoban::SaveSlotState::Ready,
         "marker failure preserves the saved-slot summary");
 }
@@ -693,12 +664,12 @@ void testActiveDeletionDiscardsPendingSnapshotWithCleanupFailure()
     manager.saveProgress(profileWithProgress(3), false);
 
     const sokoban::SaveSlotManager::DeleteResult result = manager.deleteSlot(0);
-    check(result.succeeded && result.cleanupPending,
+    CHECK_MESSAGE(result.succeeded && result.cleanupPending,
         "active deletion commits despite a blocked recovery artifact");
-    check(!manager.progressDiagnostics().pending,
+    CHECK_MESSAGE(!manager.progressDiagnostics().pending,
         "committed deletion discards the retained failed snapshot");
     const sokoban::SaveSlotManager::FlushResult afterDeletion = manager.flush();
-    check(afterDeletion.progress.outcome ==
+    CHECK_MESSAGE(afterDeletion.progress.outcome ==
             sokoban::AsyncSaveStore::PersistenceOutcome::Persisted &&
             afterDeletion.progress.requestedRevision == 0 &&
             afterDeletion.progress.persistedRevision == 0,
@@ -706,7 +677,7 @@ void testActiveDeletionDiscardsPendingSnapshotWithCleanupFailure()
     std::filesystem::remove_all(blockedTemporary);
 
     sokoban::SaveSlotManager reopened(directory.path(), instantWrites);
-    check(reopened.loadActiveProfile().progressEmpty(),
+    CHECK_MESSAGE(reopened.loadActiveProfile().progressEmpty(),
         "discarded pending progress cannot return after restart");
 }
 
@@ -724,15 +695,15 @@ void testFailedActiveDeletionRetainsItsPendingSnapshot()
     manager.saveProgress(latest, false);
 
     const sokoban::SaveSlotManager::DeleteResult result = manager.deleteSlot(0);
-    check(!result.succeeded, "active marker failure rejects deletion");
-    check(manager.progressDiagnostics().pending,
+    CHECK_MESSAGE(!result.succeeded, "active marker failure rejects deletion");
+    CHECK_MESSAGE(manager.progressDiagnostics().pending,
         "rejected deletion retains the queued active snapshot");
 
     std::filesystem::remove_all(blockedTemporary);
     manager.saveProgress(latest, true);
-    check(manager.flush().allPersisted(),
+    CHECK_MESSAGE(manager.flush().allPersisted(),
         "retained snapshot reports durable completion after retry");
-    check(sokoban::SaveStore(directory.path()).load().profile == latest,
+    CHECK_MESSAGE(sokoban::SaveStore(directory.path()).load().profile == latest,
         "queued progress remains persistable after deletion fails");
 }
 

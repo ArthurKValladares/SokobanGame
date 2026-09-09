@@ -38,6 +38,8 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Maintainability follow-up, 2026-09-08 (shared puzzle path convention):** `LevelCatalog` now owns puzzle level/screen name parsing, canonical name and path construction, and conversion from a screen path to `LevelLocation`. Runtime loading, content staging, project transaction validation, the level editor, and splat painting consume that contract. Path parsing deliberately inspects only the final components; source/runtime containment remains an explicit editor or staging responsibility, and composed-overworld screen names retain their separate nonzero stable-ID rules.
 
+**Maintainability follow-up, 2026-09-08 (shared test scaffolding):** The common test harness now supports labeled assertions, and `ScopedTestDirectory` provides collision-checked creation with best-effort scope cleanup without adding filesystem dependencies to assertion-only suites. The large player-profile and save-slot suites plus level-catalog coverage now use these shared utilities, removing their local counters, assertion functions, and timestamp/random temporary-directory implementations while preserving their diagnostic labels.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
@@ -290,7 +292,7 @@ CQ-01 through CQ-05 show that the central weakness is ambiguous completion: deco
 | Mesh dependency discovery | Centralized by CQ-09; consumed by decoration registration and distributable content staging | Completed 2026-09-08; shared structured discovery covers GLTF/GLB buffers and images while ignoring embedded data and unrelated URI fields |
 | Source/model position, normal and tangent transforms | Centralized by CQ-08; consumed by static loading and CPU/GPU skinning | Completed 2026-09-08; shared transform and tangent-frame rules have nonuniform-scale parity coverage |
 | Numbered level/screen naming and path interpretation | Centralized in `LevelCatalog`; consumed by runtime loading, staging, transactions, editor browsing/mutation, and splat painting | Completed 2026-09-08; shared parsing and canonical construction are tested, while containment and composed-overworld stable-ID rules remain separate |
-| Test assertions and temporary directories | `tests/TestHarness.hpp` versus remaining local helpers such as SaveSlotManager/PlayerProfile tests | Incremental migration to one useful harness and scoped temporary-directory utility |
+| Test assertions and temporary directories | `tests/TestHarness.hpp`; `tests/ScopedTestDirectory.hpp`; remaining older suites with local helpers | In progress 2026-09-08; PlayerProfile, SaveSlotManager, and LevelCatalog now share labeled assertions and scoped temporary storage; migrate the remaining suites in coherent groups |
 
 Avoid generic utility abstractions that merely hide two short loops. Prioritize repeated logic whose disagreement changes saved data, asset identity, gameplay conflict detection, or package contents. Do not merge subtly different platform/path semantics just because the code looks similar.
 

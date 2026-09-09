@@ -13,10 +13,11 @@
 // that never names its tests prints exactly what it printed before, so adopting
 // this header changes no output.
 //
-// Deliberately small. It is not a test framework: no fixtures, no registration,
-// no assertion vocabulary beyond CHECK. Each suite still owns its own main() and
+// Deliberately small. It is not a test framework: no fixture registration and
+// no large assertion vocabulary. Each suite still owns its own main() and
 // decides what to run and what to report, because that is the part that differs
-// between suites for real reasons.
+// between suites for real reasons. CHECK_MESSAGE preserves a useful diagnostic
+// when the expression alone does not explain the intended invariant.
 
 #include <iostream>
 
@@ -48,6 +49,9 @@ inline void checkImpl(bool ok, const char* expression, int line)
 // Stringizes the expression, so a failure reports what was asked rather than a
 // hand-written label that can fall out of step with the code beside it.
 #define CHECK(expression) checkImpl((expression), #expression, __LINE__)
+
+#define CHECK_MESSAGE(expression, message) \
+    checkImpl((expression), (message), __LINE__)
 
 // Names the section that follows. Optional: a suite that does not call it still
 // reports failures, just without a name.

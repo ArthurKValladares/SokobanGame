@@ -1,3 +1,6 @@
+#include "TestHarness.hpp"
+#include "ScopedTestDirectory.hpp"
+
 #include "engine/AsyncSaveStore.hpp"
 #include "engine/AtomicFile.hpp"
 #include "engine/PlayerProfile.hpp"
@@ -14,22 +17,12 @@
 
 namespace {
 
-int failures = 0;
-
-void check(bool condition, const char* label)
-{
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL: " << label << '\n';
-    }
-}
-
 template <typename Fn>
 void checkThrows(Fn&& fn, const char* label)
 {
     try {
         fn();
-        check(false, label);
+        CHECK_MESSAGE(false, label);
     } catch (const std::exception&) {
     }
 }
@@ -72,27 +65,7 @@ const sokoban::KeyboardBinding* keyboardBinding(
     return nullptr;
 }
 
-class TemporaryDirectory {
-public:
-    TemporaryDirectory()
-    {
-        const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
-        path_ = std::filesystem::temp_directory_path() /
-            ("sokoban-profile-tests-" + std::to_string(suffix));
-        std::filesystem::create_directories(path_);
-    }
-
-    ~TemporaryDirectory()
-    {
-        std::error_code error;
-        std::filesystem::remove_all(path_, error);
-    }
-
-    [[nodiscard]] const std::filesystem::path& path() const { return path_; }
-
-private:
-    std::filesystem::path path_;
-};
+using TemporaryDirectory = ScopedTestDirectory;
 
 void testRoundTripAndBests()
 {
@@ -129,14 +102,14 @@ void testRoundTripAndBests()
     profile.recordLevelCompletion(0, 35, 40.0, true);
 
     const sokoban::PlayerProfile::LevelProgress* progress = profile.progressForLevel(0);
-    check(progress != nullptr && progress->completed, "completion status recorded");
-    check(progress != nullptr && progress->bestMoves == 30, "worse move count ignored");
-    check(progress != nullptr && progress->bestTimeSeconds == 40.0, "better time recorded independently");
+    CHECK_MESSAGE(progress != nullptr && progress->completed, "completion status recorded");
+    CHECK_MESSAGE(progress != nullptr && progress->bestMoves == 30, "worse move count ignored");
+    CHECK_MESSAGE(progress != nullptr && progress->bestTimeSeconds == 40.0, "better time recorded independently");
 
     const sokoban::DecodedPlayerProfile decoded =
         sokoban::decodePlayerProfile(profile.serialize());
-    check(decoded.sourceFormat == sokoban::currentPlayerProfileFormat, "current format decoded");
-    check(decoded.profile == profile, "current profile round-trips");
+    CHECK_MESSAGE(decoded.sourceFormat == sokoban::currentPlayerProfileFormat, "current format decoded");
+    CHECK_MESSAGE(decoded.profile == profile, "current profile round-trips");
 }
 
 void testReachedScreensAndProgressReset()
@@ -151,15 +124,15 @@ void testReachedScreensAndProgressReset()
     profile.recordReachedScreen(0, -2);
 
     const sokoban::PlayerProfile::LevelProgress* first = profile.progressForLevel(0);
-    check(first != nullptr && first->reachedScreens == 3, "reached screens track the max");
-    check(first != nullptr && !first->completed, "reaching screens does not complete");
+    CHECK_MESSAGE(first != nullptr && first->reachedScreens == 3, "reached screens track the max");
+    CHECK_MESSAGE(first != nullptr && !first->completed, "reaching screens does not complete");
     const sokoban::PlayerProfile::LevelProgress* second = profile.progressForLevel(1);
-    check(second != nullptr && second->reachedScreens == 1, "second level entry created");
-    check(profile.progressForLevel(-1) == nullptr, "negative level ignored");
+    CHECK_MESSAGE(second != nullptr && second->reachedScreens == 1, "second level entry created");
+    CHECK_MESSAGE(profile.progressForLevel(-1) == nullptr, "negative level ignored");
 
     const sokoban::DecodedPlayerProfile decoded =
         sokoban::decodePlayerProfile(profile.serialize());
-    check(decoded.profile == profile, "reached screens round-trip");
+    CHECK_MESSAGE(decoded.profile == profile, "reached screens round-trip");
 
     // Format-7 files (no reachedScreens) decode with zeroed counts.
     nlohmann::json legacy = nlohmann::json::parse(profile.serialize());
@@ -169,40 +142,40 @@ void testReachedScreensAndProgressReset()
     }
     const sokoban::DecodedPlayerProfile migrated =
         sokoban::decodePlayerProfile(legacy.dump());
-    check(migrated.sourceFormat == 7, "format 7 source reported");
+    CHECK_MESSAGE(migrated.sourceFormat == 7, "format 7 source reported");
     const sokoban::PlayerProfile::LevelProgress* migratedFirst =
         migrated.profile.progressForLevel(0);
-    check(migratedFirst != nullptr && migratedFirst->reachedScreens == 0,
+    CHECK_MESSAGE(migratedFirst != nullptr && migratedFirst->reachedScreens == 0,
         "format 7 migration defaults reached screens to zero");
 
     // Completing without recordBests keeps completion but no records.
     profile.recordLevelCompletion(1, 12, 5.0, true, false);
     const sokoban::PlayerProfile::LevelProgress* partial = profile.progressForLevel(1);
-    check(partial != nullptr && partial->completed, "partial run still completes");
-    check(partial != nullptr && !partial->bestMoves && !partial->bestTimeSeconds,
+    CHECK_MESSAGE(partial != nullptr && partial->completed, "partial run still completes");
+    CHECK_MESSAGE(partial != nullptr && !partial->bestMoves && !partial->bestTimeSeconds,
         "partial run records no bests");
 
     sokoban::PlayerProfile populated = profile;
     populated.settings.audio.musicVolume = 0.25f;
-    check(!populated.progressEmpty(), "populated profile has progress");
+    CHECK_MESSAGE(!populated.progressEmpty(), "populated profile has progress");
     populated.resetProgress();
-    check(populated.unlockedLevel == 0 && populated.currentLevel == 0 &&
+    CHECK_MESSAGE(populated.unlockedLevel == 0 && populated.currentLevel == 0 &&
             populated.currentScreen == 0,
         "reset clears position");
-    check(populated.levels.empty() && !populated.activeScreen, "reset clears records");
-    check(populated.settings.audio.musicVolume == 0.25f, "reset keeps audio settings");
-    check(populated.progressEmpty(), "reset profile reads as empty");
+    CHECK_MESSAGE(populated.levels.empty() && !populated.activeScreen, "reset clears records");
+    CHECK_MESSAGE(populated.settings.audio.musicVolume == 0.25f, "reset keeps audio settings");
+    CHECK_MESSAGE(populated.progressEmpty(), "reset profile reads as empty");
 
     // Settings split: settingsOnly strips progress, adoptSettingsFrom keeps it.
     const sokoban::PlayerProfile settings = populated.settingsOnly();
-    check(settings.progressEmpty(), "settingsOnly has no progress");
-    check(settings.settings.audio.musicVolume == 0.25f, "settingsOnly keeps audio");
+    CHECK_MESSAGE(settings.progressEmpty(), "settingsOnly has no progress");
+    CHECK_MESSAGE(settings.settings.audio.musicVolume == 0.25f, "settingsOnly keeps audio");
 
     sokoban::PlayerProfile target = profile;
     const int levelsBefore = static_cast<int>(target.levels.size());
     target.adoptSettingsFrom(settings);
-    check(target.settings.audio.musicVolume == 0.25f, "adopt applies audio settings");
-    check(static_cast<int>(target.levels.size()) == levelsBefore,
+    CHECK_MESSAGE(target.settings.audio.musicVolume == 0.25f, "adopt applies audio settings");
+    CHECK_MESSAGE(static_cast<int>(target.levels.size()) == levelsBefore,
         "adopt keeps progress records");
 }
 
@@ -219,32 +192,32 @@ void testSectionedSerialization()
     // settings but identical progress.
     const std::string progressOnly =
         profile.serialize(sokoban::ProfileSections::ProgressOnly);
-    check(progressOnly.find("\"settings\"") == std::string::npos,
+    CHECK_MESSAGE(progressOnly.find("\"settings\"") == std::string::npos,
         "progress-only file has no settings section");
     const sokoban::PlayerProfile progressDecoded =
         sokoban::decodePlayerProfile(progressOnly).profile;
-    check(progressDecoded.progressForLevel(0) != nullptr &&
+    CHECK_MESSAGE(progressDecoded.progressForLevel(0) != nullptr &&
             progressDecoded.progressForLevel(0)->bestMoves == 12,
         "progress-only round-trips progress");
-    check(progressDecoded.settings.audio.musicVolume ==
+    CHECK_MESSAGE(progressDecoded.settings.audio.musicVolume ==
             sokoban::PlayerProfile {}.settings.audio.musicVolume,
         "progress-only decodes default settings");
 
     // Settings-only files carry no progress section.
     const std::string settingsOnly =
         profile.serialize(sokoban::ProfileSections::SettingsOnly);
-    check(settingsOnly.find("\"progress\"") == std::string::npos,
+    CHECK_MESSAGE(settingsOnly.find("\"progress\"") == std::string::npos,
         "settings-only file has no progress section");
     const sokoban::PlayerProfile settingsDecoded =
         sokoban::decodePlayerProfile(settingsOnly).profile;
-    check(settingsDecoded.progressEmpty(), "settings-only decodes empty progress");
-    check(settingsDecoded.settings.audio.musicVolume == 0.25f,
+    CHECK_MESSAGE(settingsDecoded.progressEmpty(), "settings-only decodes empty progress");
+    CHECK_MESSAGE(settingsDecoded.settings.audio.musicVolume == 0.25f,
         "settings-only round-trips settings");
 
     // A bare format-9 document decodes as a fully default profile.
     const sokoban::PlayerProfile bare =
         sokoban::decodePlayerProfile("{\"format\": 9}").profile;
-    check(bare == sokoban::PlayerProfile {}, "sections are optional on read");
+    CHECK_MESSAGE(bare == sokoban::PlayerProfile {}, "sections are optional on read");
 }
 
 void testActiveScreenCheckpointRoundTrip()
@@ -335,24 +308,24 @@ void testActiveScreenCheckpointRoundTrip()
     const std::string serialized = profile.serialize();
     const sokoban::DecodedPlayerProfile decoded =
         sokoban::decodePlayerProfile(serialized);
-    check(decoded.profile == profile, "active screen checkpoint round-trips exactly");
-    check(decoded.profile.currentScreen == 3, "current screen round-trips");
-    check(decoded.profile.activeScreen->session.undoStack.size() == 1,
+    CHECK_MESSAGE(decoded.profile == profile, "active screen checkpoint round-trips exactly");
+    CHECK_MESSAGE(decoded.profile.currentScreen == 3, "current screen round-trips");
+    CHECK_MESSAGE(decoded.profile.activeScreen->session.undoStack.size() == 1,
         "undo stack round-trips");
-    check(decoded.profile.activeScreen->session.state == after,
+    CHECK_MESSAGE(decoded.profile.activeScreen->session.state == after,
         "exact committed game state round-trips");
 
     const nlohmann::json current = nlohmann::json::parse(serialized);
-    check(current["progress"]["activeScreen"]["session"]["state"]
+    CHECK_MESSAGE(current["progress"]["activeScreen"]["session"]["state"]
             .contains("players"),
         "checkpoint state uses the players array");
-    check(current["progress"]["activeScreen"]["session"]["state"]
+    CHECK_MESSAGE(current["progress"]["activeScreen"]["session"]["state"]
             .contains("enemies"),
         "checkpoint state persists enemies");
-    check(!current["progress"]["activeScreen"]["session"]["state"]
+    CHECK_MESSAGE(!current["progress"]["activeScreen"]["session"]["state"]
             .contains("playerClones"),
         "checkpoint state has no primary/clone compatibility fields");
-    check(current["progress"]["activeScreen"]["session"]["undoStack"][0]
+    CHECK_MESSAGE(current["progress"]["activeScreen"]["session"]["undoStack"][0]
             ["presentation"]["animations"].size() == 2,
         "undo presentation timeline is persisted");
 
@@ -362,9 +335,9 @@ void testActiveScreenCheckpointRoundTrip()
         .erase("presentation");
     const sokoban::DecodedPlayerProfile migrated15 =
         sokoban::decodePlayerProfile(format15.dump());
-    check(migrated15.profile.activeScreen.has_value(),
+    CHECK_MESSAGE(migrated15.profile.activeScreen.has_value(),
         "format 15 migration preserves the active checkpoint");
-    check(!migrated15.profile.activeScreen->session.undoStack[0]
+    CHECK_MESSAGE(!migrated15.profile.activeScreen->session.undoStack[0]
             .presentation.motions.empty(),
         "format 15 migration reconstructs generic motion tracks");
     nlohmann::json emptyPlayers = current;
@@ -378,9 +351,9 @@ void testActiveScreenCheckpointRoundTrip()
     format13["format"] = 13;
     const sokoban::DecodedPlayerProfile migrated13 =
         sokoban::decodePlayerProfile(format13.dump());
-    check(migrated13.sourceFormat == 13,
+    CHECK_MESSAGE(migrated13.sourceFormat == 13,
         "format 13 checkpoint source is reported");
-    check(!migrated13.profile.activeScreen,
+    CHECK_MESSAGE(!migrated13.profile.activeScreen,
         "format 13 active checkpoint is intentionally discarded");
 
     std::string mismatched = serialized;
@@ -405,23 +378,23 @@ void testNormalizationAndMigration()
     profile.settings.video.windowWidth = 20;
     profile.settings.video.windowHeight = 30;
     profile.normalize();
-    check(profile.currentLevel == 9,
+    CHECK_MESSAGE(profile.currentLevel == 9,
         "current level is independent of legacy unlock progression");
-    check(profile.settings.audio.masterVolume == 0.0f, "master volume clamps low");
-    check(profile.settings.audio.musicVolume == 1.0f, "music volume clamps high");
-    check(profile.settings.video.antiAliasingSamples ==
+    CHECK_MESSAGE(profile.settings.audio.masterVolume == 0.0f, "master volume clamps low");
+    CHECK_MESSAGE(profile.settings.audio.musicVolume == 1.0f, "music volume clamps high");
+    CHECK_MESSAGE(profile.settings.video.antiAliasingSamples ==
             sokoban::config::antiAliasingSamples,
         "invalid MSAA receives default");
-    check(profile.settings.video.renderScalePercent == 100, "invalid render scale receives default");
-    check(profile.settings.video.customRenderScalePercent == 25,
+    CHECK_MESSAGE(profile.settings.video.renderScalePercent == 100, "invalid render scale receives default");
+    CHECK_MESSAGE(profile.settings.video.customRenderScalePercent == 25,
         "custom render scale clamps to its minimum");
-    check(profile.settings.video.effectiveRenderScalePercent() == 25,
+    CHECK_MESSAGE(profile.settings.video.effectiveRenderScalePercent() == 25,
         "enabled custom render scale is effective");
-    check(profile.settings.video.exposureEv ==
+    CHECK_MESSAGE(profile.settings.video.exposureEv ==
             sokoban::minimumExposureEv,
         "exposure clamps to its safe minimum");
-    check(profile.settings.video.windowWidth == 640, "window width clamps low");
-    check(profile.settings.video.windowHeight == 480, "window height clamps low");
+    CHECK_MESSAGE(profile.settings.video.windowWidth == 640, "window width clamps low");
+    CHECK_MESSAGE(profile.settings.video.windowHeight == 480, "window height clamps low");
 
     constexpr std::string_view format1 = R"json({
   "format": 1,
@@ -432,11 +405,11 @@ void testNormalizationAndMigration()
   "musicVolume": 0.4
 })json";
     const sokoban::DecodedPlayerProfile migrated = sokoban::decodePlayerProfile(format1);
-    check(migrated.sourceFormat == 1, "format 1 source reported");
-    check(migrated.profile.currentLevel == 2, "format 1 current level migrated");
-    check(migrated.profile.progressForLevel(0) != nullptr, "format 1 completion migrated");
-    check(migrated.profile.settings.audio.soundVolume == 1.0f, "new setting receives migration default");
-    check(sokoban::decodePlayerProfile(migrated.profile.serialize()).sourceFormat ==
+    CHECK_MESSAGE(migrated.sourceFormat == 1, "format 1 source reported");
+    CHECK_MESSAGE(migrated.profile.currentLevel == 2, "format 1 current level migrated");
+    CHECK_MESSAGE(migrated.profile.progressForLevel(0) != nullptr, "format 1 completion migrated");
+    CHECK_MESSAGE(migrated.profile.settings.audio.soundVolume == 1.0f, "new setting receives migration default");
+    CHECK_MESSAGE(sokoban::decodePlayerProfile(migrated.profile.serialize()).sourceFormat ==
             sokoban::currentPlayerProfileFormat,
         "migrated profile serializes as current format");
 
@@ -463,16 +436,16 @@ void testNormalizationAndMigration()
     format2Root["settings"]["video"].erase("windowHeight");
     const sokoban::DecodedPlayerProfile migratedFormat2 =
         sokoban::decodePlayerProfile(format2Root.dump());
-    check(migratedFormat2.sourceFormat == 2, "format 2 source reported");
-    check(migratedFormat2.profile.currentScreen == 0,
+    CHECK_MESSAGE(migratedFormat2.sourceFormat == 2, "format 2 source reported");
+    CHECK_MESSAGE(migratedFormat2.profile.currentScreen == 0,
         "format 2 receives default screen");
-    check(!migratedFormat2.profile.activeScreen,
+    CHECK_MESSAGE(!migratedFormat2.profile.activeScreen,
         "format 2 receives no gameplay checkpoint");
     const sokoban::KeyboardBinding* migratedKeyboard = keyboardBinding(
         migratedFormat2.profile.settings.input, sokoban::InputAction::MoveUp);
-    check(migratedKeyboard && migratedKeyboard->scancode == "Up",
+    CHECK_MESSAGE(migratedKeyboard && migratedKeyboard->scancode == "Up",
         "format 2 keyboard binding migrates");
-    check(migratedFormat2.profile.settings.input.forAction(
+    CHECK_MESSAGE(migratedFormat2.profile.settings.input.forAction(
             sokoban::InputAction::MoveUp).size() == 3,
         "format 2 migration adds controller defaults");
 
@@ -489,10 +462,10 @@ void testNormalizationAndMigration()
     format3Root["settings"]["video"].erase("windowHeight");
     const sokoban::DecodedPlayerProfile migratedFormat3 =
         sokoban::decodePlayerProfile(format3Root.dump());
-    check(migratedFormat3.sourceFormat == 3, "format 3 source reported");
+    CHECK_MESSAGE(migratedFormat3.sourceFormat == 3, "format 3 source reported");
     migratedKeyboard = keyboardBinding(
         migratedFormat3.profile.settings.input, sokoban::InputAction::Undo);
-    check(migratedKeyboard && migratedKeyboard->scancode == "Backspace",
+    CHECK_MESSAGE(migratedKeyboard && migratedKeyboard->scancode == "Backspace",
         "format 3 keyboard binding migrates");
 
     nlohmann::json format4Root = nlohmann::json::parse(
@@ -508,14 +481,14 @@ void testNormalizationAndMigration()
     format4Root["settings"]["video"].erase("windowHeight");
     const sokoban::DecodedPlayerProfile migratedFormat4 =
         sokoban::decodePlayerProfile(format4Root.dump());
-    check(migratedFormat4.sourceFormat == 4, "format 4 source reported");
-    check(!migratedFormat4.profile.settings.input.forAction(
+    CHECK_MESSAGE(migratedFormat4.sourceFormat == 4, "format 4 source reported");
+    CHECK_MESSAGE(!migratedFormat4.profile.settings.input.forAction(
             sokoban::InputAction::MenuConfirm).empty(),
         "format 4 receives menu-confirm defaults");
-    check(migratedFormat4.profile.settings.video.antiAliasingSamples ==
+    CHECK_MESSAGE(migratedFormat4.profile.settings.video.antiAliasingSamples ==
             sokoban::config::antiAliasingSamples,
         "format 4 receives MSAA default");
-    check(migratedFormat4.profile.settings.video.windowWidth == 1280 &&
+    CHECK_MESSAGE(migratedFormat4.profile.settings.video.windowWidth == 1280 &&
             migratedFormat4.profile.settings.video.windowHeight == 720,
         "format 4 receives window-size defaults");
 
@@ -526,11 +499,11 @@ void testNormalizationAndMigration()
     format24["settings"]["video"].erase("frameRateLimit");
     const sokoban::DecodedPlayerProfile migratedFormat24 =
         sokoban::decodePlayerProfile(format24.dump());
-    check(migratedFormat24.sourceFormat == 24,
+    CHECK_MESSAGE(migratedFormat24.sourceFormat == 24,
         "format 24 source reported");
-    check(!migratedFormat24.profile.settings.video.allowTearing,
+    CHECK_MESSAGE(!migratedFormat24.profile.settings.video.allowTearing,
         "format 24 receives safe tearing default");
-    check(migratedFormat24.profile.settings.video.frameRateLimit == 0,
+    CHECK_MESSAGE(migratedFormat24.profile.settings.video.frameRateLimit == 0,
         "format 24 receives unlimited foreground cap default");
 
     nlohmann::json format25 = nlohmann::json::parse(
@@ -545,9 +518,9 @@ void testNormalizationAndMigration()
     };
     const sokoban::DecodedPlayerProfile migratedFormat25 =
         sokoban::decodePlayerProfile(format25.dump());
-    check(migratedFormat25.sourceFormat == 25,
+    CHECK_MESSAGE(migratedFormat25.sourceFormat == 25,
         "format 25 source reported");
-    check(migratedFormat25.profile.serialize().find("\"accessibility\"") ==
+    CHECK_MESSAGE(migratedFormat25.profile.serialize().find("\"accessibility\"") ==
             std::string::npos,
         "format 25 accessibility settings are removed during migration");
 
@@ -557,9 +530,9 @@ void testNormalizationAndMigration()
     format26["settings"]["video"].erase("exposureEv");
     const sokoban::DecodedPlayerProfile migratedFormat26 =
         sokoban::decodePlayerProfile(format26.dump());
-    check(migratedFormat26.sourceFormat == 26,
+    CHECK_MESSAGE(migratedFormat26.sourceFormat == 26,
         "format 26 source reported");
-    check(migratedFormat26.profile.settings.video.exposureEv == 0.0f,
+    CHECK_MESSAGE(migratedFormat26.profile.settings.video.exposureEv == 0.0f,
         "format 26 receives neutral exposure");
 
     nlohmann::json format5Root = nlohmann::json::parse(
@@ -570,8 +543,8 @@ void testNormalizationAndMigration()
     format5Root["settings"]["video"].erase("customRenderScalePercent");
     const sokoban::DecodedPlayerProfile migratedFormat5 =
         sokoban::decodePlayerProfile(format5Root.dump());
-    check(migratedFormat5.sourceFormat == 5, "format 5 source reported");
-    check(migratedFormat5.profile.settings.video.renderScalePercent == 100,
+    CHECK_MESSAGE(migratedFormat5.sourceFormat == 5, "format 5 source reported");
+    CHECK_MESSAGE(migratedFormat5.profile.settings.video.renderScalePercent == 100,
         "format 5 receives native render scale");
 
     nlohmann::json format6Root = nlohmann::json::parse(
@@ -581,10 +554,10 @@ void testNormalizationAndMigration()
     format6Root["settings"]["video"].erase("customRenderScalePercent");
     const sokoban::DecodedPlayerProfile migratedFormat6 =
         sokoban::decodePlayerProfile(format6Root.dump());
-    check(migratedFormat6.sourceFormat == 6, "format 6 source reported");
-    check(!migratedFormat6.profile.settings.video.customRenderScale,
+    CHECK_MESSAGE(migratedFormat6.sourceFormat == 6, "format 6 source reported");
+    CHECK_MESSAGE(!migratedFormat6.profile.settings.video.customRenderScale,
         "format 6 defaults to preset render scale");
-    check(migratedFormat6.profile.settings.video.customRenderScalePercent == 100,
+    CHECK_MESSAGE(migratedFormat6.profile.settings.video.customRenderScalePercent == 100,
         "format 6 receives a native custom value");
 
     nlohmann::json format9Root = nlohmann::json::parse(
@@ -598,10 +571,10 @@ void testNormalizationAndMigration()
     });
     const sokoban::DecodedPlayerProfile migratedFormat9 =
         sokoban::decodePlayerProfile(format9Root.dump());
-    check(migratedFormat9.sourceFormat == 9, "format 9 source reported");
+    CHECK_MESSAGE(migratedFormat9.sourceFormat == 9, "format 9 source reported");
     migratedKeyboard = keyboardBinding(
         migratedFormat9.profile.settings.input, sokoban::InputAction::Undo);
-    check(migratedKeyboard && migratedKeyboard->scancode == "Z",
+    CHECK_MESSAGE(migratedKeyboard && migratedKeyboard->scancode == "Z",
         "format 9 keeps the original undo default");
 
     nlohmann::json format10Root = nlohmann::json::parse(
@@ -618,10 +591,10 @@ void testNormalizationAndMigration()
     });
     const sokoban::DecodedPlayerProfile migratedFormat10 =
         sokoban::decodePlayerProfile(format10Root.dump());
-    check(migratedFormat10.sourceFormat == 10, "format 10 source reported");
+    CHECK_MESSAGE(migratedFormat10.sourceFormat == 10, "format 10 source reported");
     migratedKeyboard = keyboardBinding(
         migratedFormat10.profile.settings.input, sokoban::InputAction::Undo);
-    check(migratedKeyboard && migratedKeyboard->scancode == "Z",
+    CHECK_MESSAGE(migratedKeyboard && migratedKeyboard->scancode == "Z",
         "format 10 default undo returns to Z");
 
     format10Root["settings"]["input"]["mirror"] = nlohmann::json::array({
@@ -632,7 +605,7 @@ void testNormalizationAndMigration()
         sokoban::decodePlayerProfile(format10Root.dump());
     const nlohmann::json migratedCustomFormat10Json = nlohmann::json::parse(
         migratedCustomFormat10.profile.serialize());
-    check(!migratedCustomFormat10Json["settings"]["input"].contains("mirror"),
+    CHECK_MESSAGE(!migratedCustomFormat10Json["settings"]["input"].contains("mirror"),
         "retired custom mirror binding is removed");
 
     nlohmann::json format11Root = nlohmann::json::parse(
@@ -644,15 +617,15 @@ void testNormalizationAndMigration()
     });
     const sokoban::DecodedPlayerProfile migratedFormat11 =
         sokoban::decodePlayerProfile(format11Root.dump());
-    check(migratedFormat11.sourceFormat == 11, "format 11 source reported");
+    CHECK_MESSAGE(migratedFormat11.sourceFormat == 11, "format 11 source reported");
     migratedKeyboard = keyboardBinding(
         migratedFormat11.profile.settings.input,
         sokoban::InputAction::ShowTopDownView);
-    check(migratedKeyboard && migratedKeyboard->scancode == "T",
+    CHECK_MESSAGE(migratedKeyboard && migratedKeyboard->scancode == "T",
         "format 11 receives current-screen top-down default");
     migratedKeyboard = keyboardBinding(
         migratedFormat11.profile.settings.input, sokoban::InputAction::Undo);
-    check(migratedKeyboard && migratedKeyboard->scancode == "Z",
+    CHECK_MESSAGE(migratedKeyboard && migratedKeyboard->scancode == "Z",
         "format 11 binding displaced by T recovers its default");
 
     nlohmann::json format12Root = nlohmann::json::parse(
@@ -661,9 +634,9 @@ void testNormalizationAndMigration()
     format12Root["settings"]["video"].erase("ambientOcclusionStrength");
     const sokoban::DecodedPlayerProfile migratedFormat12 =
         sokoban::decodePlayerProfile(format12Root.dump());
-    check(migratedFormat12.sourceFormat == 12,
+    CHECK_MESSAGE(migratedFormat12.sourceFormat == 12,
         "format 12 source reported");
-    check(migratedFormat12.profile.settings.video.ambientOcclusionStrength ==
+    CHECK_MESSAGE(migratedFormat12.profile.settings.video.ambientOcclusionStrength ==
             sokoban::UserSettings {}.video.ambientOcclusionStrength,
         "format 12 receives AO strength default");
 
@@ -719,23 +692,23 @@ void testNormalizationAndMigration()
 void testScreenProgressOverworldCheckpointAndFormat17Migration()
 {
     sokoban::PlayerProfile progression;
-    check(progression.selectorStatus({ .level = 0, .screen = 0 }) ==
+    CHECK_MESSAGE(progression.selectorStatus({ .level = 0, .screen = 0 }) ==
             sokoban::ScreenSelectorStatus::Playable,
         "screen zero is immediately playable");
-    check(progression.selectorStatus({ .level = 0, .screen = 1 }) ==
+    CHECK_MESSAGE(progression.selectorStatus({ .level = 0, .screen = 1 }) ==
             sokoban::ScreenSelectorStatus::Unavailable,
         "later screen waits for its predecessor");
-    check(progression.selectorStatus({ .level = 7, .screen = 0 }) ==
+    CHECK_MESSAGE(progression.selectorStatus({ .level = 7, .screen = 0 }) ==
             sokoban::ScreenSelectorStatus::Playable,
         "a different level's first screen is independently playable");
     progression.recordScreenCompletion({ .level = 0, .screen = 0 }, 3, 2.0);
-    check(progression.selectorStatus({ .level = 0, .screen = 0 }) ==
+    CHECK_MESSAGE(progression.selectorStatus({ .level = 0, .screen = 0 }) ==
             sokoban::ScreenSelectorStatus::Solved,
         "completed screen is solved");
-    check(progression.selectorStatus({ .level = 0, .screen = 1 }) ==
+    CHECK_MESSAGE(progression.selectorStatus({ .level = 0, .screen = 1 }) ==
             sokoban::ScreenSelectorStatus::Playable,
         "solving a screen unlocks only its successor");
-    check(progression.selectorStatus({ .level = 0, .screen = 2 }) ==
+    CHECK_MESSAGE(progression.selectorStatus({ .level = 0, .screen = 2 }) ==
             sokoban::ScreenSelectorStatus::Unavailable,
         "unlocking does not skip a screen");
 
@@ -743,11 +716,11 @@ void testScreenProgressOverworldCheckpointAndFormat17Migration()
     profile.recordScreenCompletion({ .level = 2, .screen = 3 }, 18, 12.5);
     profile.recordScreenCompletion({ .level = 2, .screen = 3 }, 14, 13.0);
     profile.recordScreenCompletion({ .level = 1, .screen = 0 }, 7, 4.0);
-    check(profile.screenCompleted({ .level = 2, .screen = 3 }),
+    CHECK_MESSAGE(profile.screenCompleted({ .level = 2, .screen = 3 }),
         "screen completion is queryable");
-    check(profile.progressForScreen({ .level = 2, .screen = 3 })->bestMoves == 14,
+    CHECK_MESSAGE(profile.progressForScreen({ .level = 2, .screen = 3 })->bestMoves == 14,
         "screen best moves improve independently");
-    check(profile.progressForScreen({ .level = 2, .screen = 3 })->bestTimeSeconds == 12.5,
+    CHECK_MESSAGE(profile.progressForScreen({ .level = 2, .screen = 3 })->bestTimeSeconds == 12.5,
         "screen best time does not regress");
 
     const sokoban::Level overworld = sokoban::Level::loadFromLayers({
@@ -765,7 +738,7 @@ void testScreenProgressOverworldCheckpointAndFormat17Migration()
 
     const sokoban::DecodedPlayerProfile decoded =
         sokoban::decodePlayerProfile(profile.serialize());
-    check(decoded.profile == profile,
+    CHECK_MESSAGE(decoded.profile == profile,
         "screen progress and overworld checkpoint round-trip");
 
     nlohmann::json format17 = nlohmann::json::parse(
@@ -783,14 +756,14 @@ void testScreenProgressOverworldCheckpointAndFormat17Migration()
     } });
     const sokoban::DecodedPlayerProfile migrated =
         sokoban::decodePlayerProfile(format17.dump());
-    check(migrated.sourceFormat == 17, "format 17 source is reported");
-    check(migrated.profile.screenCompleted({ .level = 4, .screen = 0 }) &&
+    CHECK_MESSAGE(migrated.sourceFormat == 17, "format 17 source is reported");
+    CHECK_MESSAGE(migrated.profile.screenCompleted({ .level = 4, .screen = 0 }) &&
             migrated.profile.screenCompleted({ .level = 4, .screen = 1 }),
         "format 17 reached screens migrate as completed");
-    check(!migrated.profile.progressForScreen({ .level = 4, .screen = 0 })
+    CHECK_MESSAGE(!migrated.profile.progressForScreen({ .level = 4, .screen = 0 })
                 ->bestMoves,
         "legacy aggregate best is not copied to an individual screen");
-    check(migrated.profile.worldContext ==
+    CHECK_MESSAGE(migrated.profile.worldContext ==
             sokoban::PlayerProfile::WorldContext::Overworld,
         "format 17 without an active checkpoint resumes in overworld");
 
@@ -801,11 +774,11 @@ void testScreenProgressOverworldCheckpointAndFormat17Migration()
     format19["progress"].erase("overworldCheckpoint");
     const sokoban::DecodedPlayerProfile migrated19 =
         sokoban::decodePlayerProfile(format19.dump());
-    check(migrated19.sourceFormat == 19,
+    CHECK_MESSAGE(migrated19.sourceFormat == 19,
         "format 19 source is reported");
-    check(!migrated19.profile.overworldCheckpoint,
+    CHECK_MESSAGE(!migrated19.profile.overworldCheckpoint,
         "format 19 single-overworld checkpoint is safely discarded");
-    check(migrated19.profile.screenCompleted({ .level = 2, .screen = 3 }),
+    CHECK_MESSAGE(migrated19.profile.screenCompleted({ .level = 2, .screen = 3 }),
         "format 19 puzzle progress survives checkpoint migration");
 }
 
@@ -814,22 +787,22 @@ void testStoreBackupsAndRecovery()
     TemporaryDirectory temporary;
     sokoban::SaveStore store(temporary.path());
     sokoban::SaveStore::LoadResult created = store.load();
-    check(created.disposition == sokoban::SaveStore::LoadDisposition::CreatedDefault,
+    CHECK_MESSAGE(created.disposition == sokoban::SaveStore::LoadDisposition::CreatedDefault,
         "missing profile returns defaults");
-    check(!std::filesystem::is_regular_file(store.primaryPath()),
+    CHECK_MESSAGE(!std::filesystem::is_regular_file(store.primaryPath()),
         "fresh start writes no file");
 
     sokoban::PlayerProfile first = created.profile;
     first.unlockedLevel = 1;
     first.setCurrentLevel(1);
     first.settings.audio.musicVolume = 0.25f;
-    check(store.save(first), "first profile saves");
+    CHECK_MESSAGE(store.save(first), "first profile saves");
 
     sokoban::PlayerProfile second = first;
     second.settings.audio.musicVolume = 0.75f;
-    check(store.save(second), "second profile saves");
-    check(std::filesystem::is_regular_file(store.backupPath()), "backup written");
-    check(sokoban::decodePlayerProfile(
+    CHECK_MESSAGE(store.save(second), "second profile saves");
+    CHECK_MESSAGE(std::filesystem::is_regular_file(store.backupPath()), "backup written");
+    CHECK_MESSAGE(sokoban::decodePlayerProfile(
         [&] {
             std::ifstream stream(store.backupPath(), std::ios::binary);
             return std::string(
@@ -840,10 +813,10 @@ void testStoreBackupsAndRecovery()
 
     writeFile(store.primaryPath(), "{ definitely not json");
     const sokoban::SaveStore::LoadResult recovered = store.load();
-    check(recovered.disposition == sokoban::SaveStore::LoadDisposition::RecoveredBackup,
+    CHECK_MESSAGE(recovered.disposition == sokoban::SaveStore::LoadDisposition::RecoveredBackup,
         "corrupt primary recovers backup");
-    check(recovered.profile.settings.audio.musicVolume == 0.25f, "recovered backup data returned");
-    check(!std::filesystem::exists(store.primaryPath().string() + ".tmp"),
+    CHECK_MESSAGE(recovered.profile.settings.audio.musicVolume == 0.25f, "recovered backup data returned");
+    CHECK_MESSAGE(!std::filesystem::exists(store.primaryPath().string() + ".tmp"),
         "recovery leaves no temporary primary");
 
     bool foundCorruptArchive = false;
@@ -851,7 +824,7 @@ void testStoreBackupsAndRecovery()
         foundCorruptArchive = foundCorruptArchive ||
             entry.path().filename().string().starts_with("profile.json.corrupt-");
     }
-    check(foundCorruptArchive, "corrupt primary archived for diagnostics");
+    CHECK_MESSAGE(foundCorruptArchive, "corrupt primary archived for diagnostics");
 }
 
 void testInterruptedWriteRecovery()
@@ -865,12 +838,12 @@ void testInterruptedWriteRecovery()
     writeFile(store.primaryPath().string() + ".tmp", interrupted.serialize());
 
     const sokoban::SaveStore::LoadResult temporaryRecovered = store.load();
-    check(temporaryRecovered.disposition ==
+    CHECK_MESSAGE(temporaryRecovered.disposition ==
             sokoban::SaveStore::LoadDisposition::RecoveredInterruptedWrite,
         "valid temporary profile is promoted at startup");
-    check(temporaryRecovered.profile == interrupted,
+    CHECK_MESSAGE(temporaryRecovered.profile == interrupted,
         "temporary recovery returns its saved profile");
-    check(!std::filesystem::exists(store.primaryPath().string() + ".tmp"),
+    CHECK_MESSAGE(!std::filesystem::exists(store.primaryPath().string() + ".tmp"),
         "temporary recovery removes consumed artifact");
 
     TemporaryDirectory displacedDirectory;
@@ -883,12 +856,12 @@ void testInterruptedWriteRecovery()
         displaced.serialize());
 
     const sokoban::SaveStore::LoadResult displacedRecovered = displacedStore.load();
-    check(displacedRecovered.disposition ==
+    CHECK_MESSAGE(displacedRecovered.disposition ==
             sokoban::SaveStore::LoadDisposition::RecoveredInterruptedWrite,
         "displaced profile is restored when the live file is absent");
-    check(displacedRecovered.profile == displaced,
+    CHECK_MESSAGE(displacedRecovered.profile == displaced,
         "displaced recovery returns its saved profile");
-    check(!std::filesystem::exists(
+    CHECK_MESSAGE(!std::filesystem::exists(
             displacedStore.primaryPath().string() + ".replace-old"),
         "displaced recovery removes consumed artifact");
 
@@ -903,12 +876,12 @@ void testInterruptedWriteRecovery()
         fallback.serialize());
 
     const sokoban::SaveStore::LoadResult fallbackRecovered = fallbackStore.load();
-    check(fallbackRecovered.disposition ==
+    CHECK_MESSAGE(fallbackRecovered.disposition ==
             sokoban::SaveStore::LoadDisposition::RecoveredInterruptedWrite,
         "valid displaced profile is used when the temporary file is corrupt");
-    check(fallbackRecovered.profile == fallback,
+    CHECK_MESSAGE(fallbackRecovered.profile == fallback,
         "displaced fallback returns its saved profile");
-    check(!std::filesystem::exists(fallbackStore.primaryPath().string() + ".tmp") &&
+    CHECK_MESSAGE(!std::filesystem::exists(fallbackStore.primaryPath().string() + ".tmp") &&
             !std::filesystem::exists(
                 fallbackStore.primaryPath().string() + ".replace-old"),
         "fallback recovery cleans both artifacts");
@@ -921,11 +894,11 @@ void testInterruptedWriteRecovery()
     writeFile(backupStore.backupPath().string() + ".tmp", backup.serialize());
 
     const sokoban::SaveStore::LoadResult backupRecovered = backupStore.load();
-    check(backupRecovered.disposition == sokoban::SaveStore::LoadDisposition::RecoveredBackup,
+    CHECK_MESSAGE(backupRecovered.disposition == sokoban::SaveStore::LoadDisposition::RecoveredBackup,
         "interrupted backup write remains available for normal backup recovery");
-    check(backupRecovered.profile == backup,
+    CHECK_MESSAGE(backupRecovered.profile == backup,
         "recovered backup temporary returns its saved profile");
-    check(!std::filesystem::exists(backupStore.backupPath().string() + ".tmp") &&
+    CHECK_MESSAGE(!std::filesystem::exists(backupStore.backupPath().string() + ".tmp") &&
             std::filesystem::is_regular_file(backupStore.primaryPath()),
         "backup recovery removes its artifact and repairs the primary");
 
@@ -934,7 +907,7 @@ void testInterruptedWriteRecovery()
     sokoban::PlayerProfile live;
     live.unlockedLevel = 4;
     live.setCurrentLevel(4);
-    check(liveStore.save(live), "live profile saves before stale-artifact recovery");
+    CHECK_MESSAGE(liveStore.save(live), "live profile saves before stale-artifact recovery");
     sokoban::PlayerProfile stale = live;
     stale.unlockedLevel = 5;
     stale.setCurrentLevel(5);
@@ -944,11 +917,11 @@ void testInterruptedWriteRecovery()
         stale.serialize());
 
     const sokoban::SaveStore::LoadResult liveLoaded = liveStore.load();
-    check(liveLoaded.disposition == sokoban::SaveStore::LoadDisposition::Loaded,
+    CHECK_MESSAGE(liveLoaded.disposition == sokoban::SaveStore::LoadDisposition::Loaded,
         "valid live profile remains authoritative");
-    check(liveLoaded.profile == live,
+    CHECK_MESSAGE(liveLoaded.profile == live,
         "stale artifacts never overwrite a valid live profile");
-    check(!std::filesystem::exists(liveStore.primaryPath().string() + ".tmp") &&
+    CHECK_MESSAGE(!std::filesystem::exists(liveStore.primaryPath().string() + ".tmp") &&
             !std::filesystem::exists(
                 liveStore.primaryPath().string() + ".replace-old"),
         "valid live profile cleans stale artifacts");
@@ -963,7 +936,7 @@ void testStorageFailuresPreserveCommittedProfile()
     committed.setCurrentLevel(2);
     committed.settings.audio.musicVolume = 0.25f;
     committed.normalize();
-    check(store.save(committed), "committed profile saves before fault injection");
+    CHECK_MESSAGE(store.save(committed), "committed profile saves before fault injection");
 
     sokoban::PlayerProfile replacement = committed;
     replacement.unlockedLevel = 4;
@@ -973,12 +946,12 @@ void testStorageFailuresPreserveCommittedProfile()
 
     sokoban::atomicFile::failWriteAfterForTesting(
         0, std::errc::permission_denied);
-    check(!store.save(replacement), "permission-denied save reports failure");
-    check(store.status().starts_with("Player profile save failed:"),
+    CHECK_MESSAGE(!store.save(replacement), "permission-denied save reports failure");
+    CHECK_MESSAGE(store.status().starts_with("Player profile save failed:"),
         "permission-denied save records a diagnostic");
-    check(store.load().profile == committed,
+    CHECK_MESSAGE(store.load().profile == committed,
         "permission-denied save preserves committed profile");
-    check(!std::filesystem::exists(store.primaryPath().string() + ".tmp") &&
+    CHECK_MESSAGE(!std::filesystem::exists(store.primaryPath().string() + ".tmp") &&
             !std::filesystem::exists(store.backupPath().string() + ".tmp"),
         "permission-denied save cleans temporary artifacts");
 
@@ -986,12 +959,12 @@ void testStorageFailuresPreserveCommittedProfile()
     // that write finish, then simulate ENOSPC while writing the live file.
     sokoban::atomicFile::failWriteAfterForTesting(
         1, std::errc::no_space_on_device);
-    check(!store.save(replacement), "disk-full save reports failure");
-    check(store.load().profile == committed,
+    CHECK_MESSAGE(!store.save(replacement), "disk-full save reports failure");
+    CHECK_MESSAGE(store.load().profile == committed,
         "disk-full save preserves committed profile");
-    check(std::filesystem::is_regular_file(store.backupPath()),
+    CHECK_MESSAGE(std::filesystem::is_regular_file(store.backupPath()),
         "disk-full save retains the valid backup");
-    check(!std::filesystem::exists(store.primaryPath().string() + ".tmp") &&
+    CHECK_MESSAGE(!std::filesystem::exists(store.primaryPath().string() + ".tmp") &&
             !std::filesystem::exists(store.backupPath().string() + ".tmp"),
         "disk-full save cleans temporary artifacts");
 }
@@ -1001,31 +974,31 @@ void testSaveSlotStems()
     TemporaryDirectory directory;
     sokoban::SaveStore first(directory.path()); // historical "profile" stem
     sokoban::SaveStore second(directory.path(), "profile-slot2");
-    check(first.primaryPath() != second.primaryPath(),
+    CHECK_MESSAGE(first.primaryPath() != second.primaryPath(),
         "slot stems use separate primaries");
-    check(first.backupPath() != second.backupPath(),
+    CHECK_MESSAGE(first.backupPath() != second.backupPath(),
         "slot stems use separate backups");
 
     sokoban::PlayerProfile firstProfile;
     firstProfile.unlockedLevel = 1;
     firstProfile.normalize();
-    check(first.save(firstProfile), "slot 1 saves");
+    CHECK_MESSAGE(first.save(firstProfile), "slot 1 saves");
 
     sokoban::PlayerProfile secondProfile;
     secondProfile.settings.audio.musicVolume = 0.25f;
     secondProfile.normalize();
-    check(second.save(secondProfile), "slot 2 saves");
+    CHECK_MESSAGE(second.save(secondProfile), "slot 2 saves");
 
-    check(first.load().profile == firstProfile, "slot 1 reloads its own data");
-    check(second.load().profile == secondProfile, "slot 2 reloads its own data");
+    CHECK_MESSAGE(first.load().profile == firstProfile, "slot 1 reloads its own data");
+    CHECK_MESSAGE(second.load().profile == secondProfile, "slot 2 reloads its own data");
 
     // A corrupt neighbour slot does not disturb this slot's load.
     writeFile(second.primaryPath(), "not json");
     writeFile(second.backupPath(), "also not json");
-    check(first.load().profile == firstProfile,
+    CHECK_MESSAGE(first.load().profile == firstProfile,
         "slot 1 unaffected by corrupt slot 2");
     const sokoban::SaveStore::LoadResult recovered = second.load();
-    check(recovered.disposition == sokoban::SaveStore::LoadDisposition::ResetCorrupt,
+    CHECK_MESSAGE(recovered.disposition == sokoban::SaveStore::LoadDisposition::ResetCorrupt,
         "corrupt slot resets independently");
 }
 
@@ -1043,9 +1016,9 @@ void testMigrationAndDoubleCorruption()
   "soundVolume": 0.75
 })json");
     const sokoban::SaveStore::LoadResult migrated = migrationStore.load();
-    check(migrated.disposition == sokoban::SaveStore::LoadDisposition::Migrated,
+    CHECK_MESSAGE(migrated.disposition == sokoban::SaveStore::LoadDisposition::Migrated,
         "store migrates old primary");
-    check(sokoban::decodePlayerProfile(
+    CHECK_MESSAGE(sokoban::decodePlayerProfile(
         [&] {
             std::ifstream stream(migrationStore.primaryPath(), std::ios::binary);
             return std::string(
@@ -1059,10 +1032,10 @@ void testMigrationAndDoubleCorruption()
     writeFile(corruptStore.primaryPath(), "bad primary");
     writeFile(corruptStore.backupPath(), "bad backup");
     const sokoban::SaveStore::LoadResult reset = corruptStore.load();
-    check(reset.disposition == sokoban::SaveStore::LoadDisposition::ResetCorrupt,
+    CHECK_MESSAGE(reset.disposition == sokoban::SaveStore::LoadDisposition::ResetCorrupt,
         "double corruption resets defaults");
-    check(reset.profile == sokoban::PlayerProfile {}, "double corruption returns defaults");
-    check(sokoban::decodePlayerProfile(
+    CHECK_MESSAGE(reset.profile == sokoban::PlayerProfile {}, "double corruption returns defaults");
+    CHECK_MESSAGE(sokoban::decodePlayerProfile(
         [&] {
             std::ifstream stream(corruptStore.primaryPath(), std::ios::binary);
             return std::string(
@@ -1095,16 +1068,16 @@ void testMigrationPersistenceFailuresPreserveDecodedProfiles()
             writesBeforeFailure, std::errc::no_space_on_device);
         const sokoban::SaveStore::LoadResult loaded = store.load();
 
-        check(loaded.disposition ==
+        CHECK_MESSAGE(loaded.disposition ==
                 sokoban::SaveStore::LoadDisposition::LoadedWithPersistenceError,
             "migration write failure has a distinct load disposition");
-        check(loaded.profile == expected,
+        CHECK_MESSAGE(loaded.profile == expected,
             "migration write failure returns the decoded legacy profile");
-        check(readFile(store.primaryPath()) == legacy,
+        CHECK_MESSAGE(readFile(store.primaryPath()) == legacy,
             "migration write failure preserves the valid legacy primary");
-        check(!hasCorruptArchive(directory.path(), "profile.json.corrupt-"),
+        CHECK_MESSAGE(!hasCorruptArchive(directory.path(), "profile.json.corrupt-"),
             "migration write failure does not archive the valid primary");
-        check(loaded.message.starts_with(
+        CHECK_MESSAGE(loaded.message.starts_with(
                   "Loaded legacy player profile, but migration could not be saved:"),
             "migration write failure reports an accurate storage diagnostic");
     };
@@ -1125,17 +1098,17 @@ void testMigrationPersistenceFailuresPreserveDecodedProfiles()
     sokoban::atomicFile::failWriteAfterForTesting(
         0, std::errc::no_space_on_device);
     const sokoban::SaveStore::LoadResult recovered = backupStore.load();
-    check(recovered.disposition ==
+    CHECK_MESSAGE(recovered.disposition ==
             sokoban::SaveStore::LoadDisposition::LoadedWithPersistenceError,
         "backup repair failure has a distinct load disposition");
-    check(recovered.profile == backup,
+    CHECK_MESSAGE(recovered.profile == backup,
         "backup repair failure returns the decoded backup profile");
-    check(readFile(backupStore.backupPath()) == backup.serialize(),
+    CHECK_MESSAGE(readFile(backupStore.backupPath()) == backup.serialize(),
         "backup repair failure preserves the valid backup");
-    check(!hasCorruptArchive(
+    CHECK_MESSAGE(!hasCorruptArchive(
               backupDirectory.path(), "profile.backup.json.corrupt-"),
         "backup repair failure does not archive the valid backup");
-    check(recovered.message.starts_with(
+    CHECK_MESSAGE(recovered.message.starts_with(
               "Recovered player profile from backup in memory, but primary repair failed:"),
         "backup repair failure reports an accurate storage diagnostic");
 }
@@ -1153,19 +1126,19 @@ void testUnsupportedProfileFormatsArePreserved()
     writeFile(store.primaryPath().string() + ".tmp", staleTemporary);
 
     const sokoban::SaveStore::InspectionResult inspected = store.inspect();
-    check(inspected.disposition ==
+    CHECK_MESSAGE(inspected.disposition ==
             sokoban::SaveStore::InspectionDisposition::UnsupportedFormat,
         "inspection distinguishes an unsupported profile format from corruption");
 
     const sokoban::SaveStore::LoadResult loaded = store.load();
-    check(loaded.disposition ==
+    CHECK_MESSAGE(loaded.disposition ==
             sokoban::SaveStore::LoadDisposition::UnsupportedFormat,
         "loading distinguishes an unsupported profile format from corruption");
-    check(readFile(store.primaryPath()) == contents,
+    CHECK_MESSAGE(readFile(store.primaryPath()) == contents,
         "unsupported profile remains byte-for-byte intact");
-    check(readFile(store.primaryPath().string() + ".tmp") == staleTemporary,
+    CHECK_MESSAGE(readFile(store.primaryPath().string() + ".tmp") == staleTemporary,
         "unsupported profile prevents recovery from modifying ambiguous artifacts");
-    check(!hasCorruptArchive(directory.path(), "profile.json.corrupt-"),
+    CHECK_MESSAGE(!hasCorruptArchive(directory.path(), "profile.json.corrupt-"),
         "unsupported profile is not archived as corrupt");
 }
 
@@ -1182,23 +1155,23 @@ void testAsyncSaveCoalescingAndFlush()
 
     const auto firstRevision = store.requestSave(first);
     const auto latestRevision = store.requestSave(latest);
-    check(firstRevision == 1 && latestRevision == 2,
+    CHECK_MESSAGE(firstRevision == 1 && latestRevision == 2,
         "save requests receive ordered channel revisions");
     const sokoban::AsyncSaveStore::Diagnostics queued = store.diagnostics();
-    check(queued.requests == 2, "async save requests counted");
-    check(queued.pending, "deferred save remains off the calling thread");
-    check(queued.coalescedRequests == 1, "pending saves coalesce");
+    CHECK_MESSAGE(queued.requests == 2, "async save requests counted");
+    CHECK_MESSAGE(queued.pending, "deferred save remains off the calling thread");
+    CHECK_MESSAGE(queued.coalescedRequests == 1, "pending saves coalesce");
 
     const sokoban::AsyncSaveStore::FlushResult coalesced = store.flush();
-    check(coalesced.allPersisted(),
+    CHECK_MESSAGE(coalesced.allPersisted(),
         "successful coalesced flush reports success");
-    check(coalesced.forChannel(0).requestedRevision == latestRevision &&
+    CHECK_MESSAGE(coalesced.forChannel(0).requestedRevision == latestRevision &&
             coalesced.forChannel(0).persistedRevision == latestRevision,
         "coalesced flush identifies the newest durable revision");
     const sokoban::AsyncSaveStore::Diagnostics flushed = store.diagnostics();
-    check(flushed.completedWrites == 1, "coalesced profiles produce one write");
-    check(!flushed.pending && !flushed.writing, "flush drains background writer");
-    check(flushed.lastWriteSucceeded, "background save succeeds");
+    CHECK_MESSAGE(flushed.completedWrites == 1, "coalesced profiles produce one write");
+    CHECK_MESSAGE(!flushed.pending && !flushed.writing, "flush drains background writer");
+    CHECK_MESSAGE(flushed.lastWriteSucceeded, "background save succeeds");
 
     std::ifstream stream(store.primaryPath(), std::ios::binary);
     const std::string contents {
@@ -1206,14 +1179,14 @@ void testAsyncSaveCoalescingAndFlush()
         std::istreambuf_iterator<char> {}
     };
     stream.close();
-    check(sokoban::decodePlayerProfile(contents).profile.settings.audio.musicVolume == 0.75f,
+    CHECK_MESSAGE(sokoban::decodePlayerProfile(contents).profile.settings.audio.musicVolume == 0.75f,
         "coalesced save writes newest profile");
 
     latest.settings.audio.musicVolume = 0.5f;
     store.requestSave(latest, sokoban::AsyncSaveStore::Urgency::Immediate);
-    check(store.flush().allPersisted(),
+    CHECK_MESSAGE(store.flush().allPersisted(),
         "successful immediate flush reports success");
-    check(store.diagnostics().completedWrites == 2,
+    CHECK_MESSAGE(store.diagnostics().completedWrites == 2,
         "immediate request is written by background worker");
 }
 
@@ -1232,7 +1205,7 @@ void testAsyncSaveDestructorFlushesNewestProfile()
         std::istreambuf_iterator<char>(stream),
         std::istreambuf_iterator<char> {}
     };
-    check(sokoban::decodePlayerProfile(contents).profile.settings.audio.soundVolume == 0.35f,
+    CHECK_MESSAGE(sokoban::decodePlayerProfile(contents).profile.settings.audio.soundVolume == 0.35f,
         "async store destructor flushes newest profile");
 }
 
@@ -1252,20 +1225,20 @@ void testAsyncSaveFailureRetainsRetryableSnapshot()
         0, std::errc::no_space_on_device);
     store.requestSave(profile, sokoban::AsyncSaveStore::Urgency::Immediate);
     const sokoban::AsyncSaveStore::FlushResult failedFlush = store.flush();
-    check(!failedFlush.allPersisted(),
+    CHECK_MESSAGE(!failedFlush.allPersisted(),
         "failed asynchronous write makes flush report failure");
-    check(failedFlush.forChannel(0).outcome ==
+    CHECK_MESSAGE(failedFlush.forChannel(0).outcome ==
             sokoban::AsyncSaveStore::PersistenceOutcome::RetryableFailure &&
             failedFlush.forChannel(0).requestedRevision == 1 &&
             failedFlush.forChannel(0).persistedRevision == 0,
         "failed flush identifies the requested and last durable revisions");
 
     const sokoban::AsyncSaveStore::Diagnostics failed = store.diagnostics();
-    check(failed.pending && !failed.writing,
+    CHECK_MESSAGE(failed.pending && !failed.writing,
         "failed asynchronous write retains its snapshot as pending");
-    check(!failed.lastWriteSucceeded,
+    CHECK_MESSAGE(!failed.lastWriteSucceeded,
         "failed asynchronous write remains visible in diagnostics");
-    check(failedFlush.forChannel(0).message.starts_with(
+    CHECK_MESSAGE(failedFlush.forChannel(0).message.starts_with(
             "Player profile save failed:"),
         "failed flush returns its storage error without a separate status lookup");
 
@@ -1273,12 +1246,12 @@ void testAsyncSaveFailureRetainsRetryableSnapshot()
         store.replaceChannel(
             0, temporary.path(), "replacement",
             sokoban::ProfileSections::All);
-    check(rejectedReplacement.outcome ==
+    CHECK_MESSAGE(rejectedReplacement.outcome ==
             sokoban::AsyncSaveStore::PersistenceOutcome::RetryableFailure &&
             rejectedReplacement.requestedRevision == 1 &&
             rejectedReplacement.persistedRevision == 0,
         "channel replacement returns the retained persistence failure");
-    check(store.primaryPath() == temporary.path() / "profile.json",
+    CHECK_MESSAGE(store.primaryPath() == temporary.path() / "profile.json",
         "failed channel replacement keeps the original destination");
 
     sokoban::PlayerProfile settings;
@@ -1286,28 +1259,28 @@ void testAsyncSaveFailureRetainsRetryableSnapshot()
     store.requestSave(
         independentChannel, settings, sokoban::AsyncSaveStore::Urgency::Immediate);
     const sokoban::AsyncSaveStore::FlushResult independentFlush = store.flush();
-    check(!independentFlush.allPersisted(),
+    CHECK_MESSAGE(!independentFlush.allPersisted(),
         "another channel does not implicitly retry a retained failure");
-    check(independentFlush.forChannel(independentChannel).outcome ==
+    CHECK_MESSAGE(independentFlush.forChannel(independentChannel).outcome ==
             sokoban::AsyncSaveStore::PersistenceOutcome::Persisted,
         "flush reports successful channels independently");
-    check(store.diagnostics().completedWrites == failed.completedWrites,
+    CHECK_MESSAGE(store.diagnostics().completedWrites == failed.completedWrites,
         "blocked failed snapshot is not retried by another channel's wakeup");
-    check(store.load(independentChannel).profile.settings.audio.musicVolume == 0.25f,
+    CHECK_MESSAGE(store.load(independentChannel).profile.settings.audio.musicVolume == 0.25f,
         "independent channel still persists while a failed snapshot is retained");
 
-    check(store.retryFailedSave(), "retained asynchronous snapshot can be retried");
+    CHECK_MESSAGE(store.retryFailedSave(), "retained asynchronous snapshot can be retried");
     const sokoban::AsyncSaveStore::FlushResult retried = store.flush();
-    check(retried.allPersisted(),
+    CHECK_MESSAGE(retried.allPersisted(),
         "successful retry makes flush report success");
-    check(retried.forChannel(0).persistedRevision == 1,
+    CHECK_MESSAGE(retried.forChannel(0).persistedRevision == 1,
         "successful retry publishes the retained revision");
-    check(!store.diagnostics().pending &&
+    CHECK_MESSAGE(!store.diagnostics().pending &&
             store.diagnostics().lastWriteSucceeded,
         "successful retry clears pending failure state");
-    check(store.load().profile == profile,
+    CHECK_MESSAGE(store.load().profile == profile,
         "retry persists the exact retained snapshot");
-    check(!store.retryFailedSave(),
+    CHECK_MESSAGE(!store.retryFailedSave(),
         "successful channel has no failed snapshot left to retry");
 }
 
@@ -1323,7 +1296,7 @@ void testAsyncStoreMultipleChannels()
             sokoban::ProfileSections::ProgressOnly);
         const int settings = store.addChannel(
             temporary.path(), "settings", sokoban::ProfileSections::SettingsOnly);
-        check(settings == 1, "added channel gets the next id");
+        CHECK_MESSAGE(settings == 1, "added channel gets the next id");
 
         sokoban::PlayerProfile progress;
         progress.unlockedLevel = 2;
@@ -1335,20 +1308,20 @@ void testAsyncStoreMultipleChannels()
 
         store.requestSave(progress);
         store.requestSave(settings, config);
-        check(store.flush().allPersisted(),
+        CHECK_MESSAGE(store.flush().allPersisted(),
             "multi-channel flush reports success");
 
         // One worker wrote both channels to their own files.
-        check(store.diagnostics(0).completedWrites >= 1, "channel 0 wrote");
-        check(store.diagnostics(settings).completedWrites >= 1, "channel 1 wrote");
-        check(std::filesystem::is_regular_file(temporary.path() / "profile.json"),
+        CHECK_MESSAGE(store.diagnostics(0).completedWrites >= 1, "channel 0 wrote");
+        CHECK_MESSAGE(store.diagnostics(settings).completedWrites >= 1, "channel 1 wrote");
+        CHECK_MESSAGE(std::filesystem::is_regular_file(temporary.path() / "profile.json"),
             "progress channel wrote its file");
-        check(std::filesystem::is_regular_file(temporary.path() / "settings.json"),
+        CHECK_MESSAGE(std::filesystem::is_regular_file(temporary.path() / "settings.json"),
             "settings channel wrote its own file");
 
         // Each channel round-trips only its own sections.
-        check(store.load(0).profile.unlockedLevel == 2, "channel 0 has progress");
-        check(store.load(settings).profile.settings.audio.musicVolume == 0.2f,
+        CHECK_MESSAGE(store.load(0).profile.unlockedLevel == 2, "channel 0 has progress");
+        CHECK_MESSAGE(store.load(settings).profile.settings.audio.musicVolume == 0.2f,
             "channel 1 has settings");
 
         // Repointing a channel drains it then targets a new file.
@@ -1360,25 +1333,25 @@ void testAsyncStoreMultipleChannels()
         slot2.setCurrentScreen(5, 0);
         slot2.normalize();
         store.requestSave(repointed, slot2);
-        check(store.flush().allPersisted(),
+        CHECK_MESSAGE(store.flush().allPersisted(),
             "repointed channel flush reports success");
-        check(std::filesystem::is_regular_file(temporary.path() / "profile-slot2.json"),
+        CHECK_MESSAGE(std::filesystem::is_regular_file(temporary.path() / "profile-slot2.json"),
             "third channel wrote a distinct file");
         const sokoban::AsyncSaveStore::PersistenceResult replacement =
             store.replaceChannel(
                 repointed, temporary.path(), "profile-slot3",
                 sokoban::ProfileSections::ProgressOnly);
-        check(replacement.outcome ==
+        CHECK_MESSAGE(replacement.outcome ==
                 sokoban::AsyncSaveStore::PersistenceOutcome::Persisted &&
                 replacement.requestedRevision ==
                     replacement.persistedRevision,
             "persisted channel can be replaced");
         const sokoban::AsyncSaveStore::PersistenceResult freshDestination =
             store.flush().forChannel(repointed);
-        check(freshDestination.requestedRevision == 0 &&
+        CHECK_MESSAGE(freshDestination.requestedRevision == 0 &&
                 freshDestination.persistedRevision == 0,
             "replaced channel starts a fresh destination revision epoch");
-        check(store.load(repointed).profile.progressEmpty(),
+        CHECK_MESSAGE(store.load(repointed).profile.progressEmpty(),
             "replaced channel points at a fresh (empty) store");
     }
     // The single worker joined cleanly at destruction with all channels drained.
@@ -1395,16 +1368,16 @@ void testFormat18AddsEditorBindings()
 
     const sokoban::DecodedPlayerProfile migrated =
         sokoban::decodePlayerProfile(format18.dump());
-    check(migrated.sourceFormat == 18, "format 18 source is reported");
-    check(sokoban::actionBindingsDisplay(
+    CHECK_MESSAGE(migrated.sourceFormat == 18, "format 18 source is reported");
+    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
               migrated.profile.settings.input,
               sokoban::InputAction::EditorReplaceTile) == "R",
         "format 18 receives the editor replace default");
-    check(sokoban::actionBindingsDisplay(
+    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
               migrated.profile.settings.input,
               sokoban::InputAction::EditorDeleteTile) == "D",
         "format 18 receives the editor delete default");
-    check(sokoban::actionBindingsDisplay(
+    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
               migrated.profile.settings.input,
               sokoban::InputAction::EditorMoveTile) == "M",
         "format 18 receives the editor move default");
@@ -1419,8 +1392,8 @@ void testFormat20AddsScreenPreviewBinding()
 
     const sokoban::DecodedPlayerProfile migrated =
         sokoban::decodePlayerProfile(format20.dump());
-    check(migrated.sourceFormat == 20, "format 20 source is reported");
-    check(sokoban::actionBindingsDisplay(
+    CHECK_MESSAGE(migrated.sourceFormat == 20, "format 20 source is reported");
+    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
               migrated.profile.settings.input,
               sokoban::InputAction::PreviewScreen) ==
             "V / Pad rightshoulder",
@@ -1444,15 +1417,15 @@ void testFormat21ConsolidatesInteractBinding()
 
     const sokoban::DecodedPlayerProfile migrated =
         sokoban::decodePlayerProfile(format21.dump());
-    check(migrated.sourceFormat == 21, "format 21 source is reported");
-    check(sokoban::actionBindingsDisplay(
+    CHECK_MESSAGE(migrated.sourceFormat == 21, "format 21 source is reported");
+    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
               migrated.profile.settings.input,
               sokoban::InputAction::MenuConfirm) ==
             "Space / Pad south",
         "format 21 receives the consolidated interact default");
     const nlohmann::json current = nlohmann::json::parse(
         migrated.profile.serialize());
-    check(!current["settings"]["input"].contains("mirror"),
+    CHECK_MESSAGE(!current["settings"]["input"].contains("mirror"),
         "format 21 mirror binding is retired");
 
     format21["settings"]["input"]["mirror"] = nlohmann::json::array({
@@ -1461,7 +1434,7 @@ void testFormat21ConsolidatesInteractBinding()
     });
     const sokoban::DecodedPlayerProfile migratedMirrorCustom =
         sokoban::decodePlayerProfile(format21.dump());
-    check(sokoban::actionBindingsDisplay(
+    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
               migratedMirrorCustom.profile.settings.input,
               sokoban::InputAction::MenuConfirm) ==
             "G / Pad south",
@@ -1473,7 +1446,7 @@ void testFormat21ConsolidatesInteractBinding()
     });
     const sokoban::DecodedPlayerProfile migratedCustom =
         sokoban::decodePlayerProfile(format21.dump());
-    check(sokoban::actionBindingsDisplay(
+    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
               migratedCustom.profile.settings.input,
               sokoban::InputAction::MenuConfirm) ==
             "G / Pad south",
@@ -1493,13 +1466,13 @@ void testFormat22UpdatesOverworldViewBinding()
 
     const sokoban::DecodedPlayerProfile migrated =
         sokoban::decodePlayerProfile(format22.dump());
-    check(migrated.sourceFormat == 22, "format 22 source is reported");
-    check(sokoban::actionBindingsDisplay(
+    CHECK_MESSAGE(migrated.sourceFormat == 22, "format 22 source is reported");
+    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
               migrated.profile.settings.input,
               sokoban::InputAction::ShowTopDownView) ==
             "T",
         "format 22 receives the current-screen top-down default");
-    check(sokoban::actionBindingsDisplay(
+    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
               migrated.profile.settings.input,
               sokoban::InputAction::ShowOverworldMap) ==
             "Tab / Pad lefttrigger+",
@@ -1512,11 +1485,11 @@ void testFormat22UpdatesOverworldViewBinding()
         });
     const sokoban::DecodedPlayerProfile custom =
         sokoban::decodePlayerProfile(format22.dump());
-    check(sokoban::actionBindingsDisplay(
+    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
               custom.profile.settings.input,
               sokoban::InputAction::ShowTopDownView) == "Q",
         "format 22 preserves a customized overview binding");
-    check(sokoban::actionBindingsDisplay(
+    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
               custom.profile.settings.input,
               sokoban::InputAction::ShowOverworldMap) ==
             "Tab / Pad lefttrigger+",
@@ -1539,11 +1512,11 @@ void testFormat22UpdatesOverworldViewBinding()
         });
     const sokoban::DecodedPlayerProfile split =
         sokoban::decodePlayerProfile(format23.dump());
-    check(sokoban::actionBindingsDisplay(
+    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
               split.profile.settings.input,
               sokoban::InputAction::ShowTopDownView) == "T",
         "format 23 combined binding migrates back to T for current screen");
-    check(sokoban::actionBindingsDisplay(
+    CHECK_MESSAGE(sokoban::actionBindingsDisplay(
               split.profile.settings.input,
               sokoban::InputAction::ShowOverworldMap) ==
             "Tab / Pad lefttrigger+",
@@ -1557,8 +1530,8 @@ int main()
         testReachedScreensAndProgressReset();
         testSectionedSerialization();
         testActiveScreenCheckpointRoundTrip();
-    testNormalizationAndMigration();
-    testScreenProgressOverworldCheckpointAndFormat17Migration();
+        testNormalizationAndMigration();
+        testScreenProgressOverworldCheckpointAndFormat17Migration();
         testFormat18AddsEditorBindings();
         testFormat20AddsScreenPreviewBinding();
         testFormat21ConsolidatesInteractBinding();
