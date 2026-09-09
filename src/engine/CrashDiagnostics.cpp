@@ -84,6 +84,7 @@ void install(const std::filesystem::path& directory) noexcept
 #endif
     } catch (...) {
         // Crash reporting must never make startup less reliable.
+        (void)0;
     }
 }
 
@@ -143,6 +144,9 @@ void showFatalErrorDialog(
             message.c_str(), nullptr);
 #endif
     } catch (...) {
+        // A secondary reporting failure cannot be surfaced safely from this
+        // noexcept boundary.
+        (void)0;
     }
 }
 

@@ -46,7 +46,7 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Maintainability follow-up, 2026-09-09 (authoritative handoff and test documentation):** The 1,937-line chronological root handoff is preserved verbatim in `docs/history/` and replaced by a compact current guide containing supported commands, enduring subsystem contracts, evidence-based non-goals, and the remaining cleanup sequence. README now describes the configuration-specific Linux validation, Windows no-ICD coverage, and Vulkan-free preset accurately. Current full Windows and headless registries contain 80 and 72 suites respectively; CTest remains the source of truth instead of a count embedded in scripts.
 
-**Maintainability follow-up, 2026-09-09 (clang-tidy backlog):** `performance-move-const-arg` and `performance-unnecessary-value-param` are enabled again after separate clang-tidy 19.1.5 scans reported no findings across all 131 current `src/` translation units. Their prior 14- and 9-finding measurements remain documented as historical context, while the active exclusion list now contains only checks that still require code changes or have an explicit false-positive rationale.
+**Maintainability follow-up, 2026-09-09 (clang-tidy backlog):** The exclusion inventory remains a measured work queue. A local Windows clang-tidy 19 probe was rejected as evidence after every translation unit failed to parse against the installed newer MSVC headers and an unsupported `/pathmap` flag. The replacement Clang 22 probe removes only that unsupported reproducibility flag and disables MSVC STL vectorized implementations during analysis; it parsed all 131 first-party translation units. The seven intentional exception barriers now state their contract and contain an explicit no-op, the clean full-source scan enabled `bugprone-empty-catch`, and no other exclusion was removed without valid evidence.
 
 ## Assessment
 
@@ -327,10 +327,18 @@ At call sites with several booleans, such as overlay/render-pass mode selection,
 - `_to_delete/check_members_are_defined.sh` was removed on 2026-09-09; ordinary target builds and links are the maintained undefined-member check.
 - Test-count and configuration-specific smoke documentation was reconciled with the CMake registry and CI matrix on 2026-09-09.
 - The known MSVC diagnostics were resolved and Windows CI enabled `SOKOBAN_WARNINGS_AS_ERRORS` on 2026-09-09.
-- Continue reducing the named `.clang-tidy` backlog in measured categories. `performance-move-const-arg` and `performance-unnecessary-value-param` were re-enabled after separate zero-finding 131-translation-unit scans on 2026-09-09; keep dated baseline counts as history and record current probes as exclusions are removed.
+- Continue reducing the named `.clang-tidy` backlog in measured categories. `bugprone-empty-catch` was enabled on 2026-09-09 after the seven intentional exception barriers were documented and a valid Clang 22 full-source scan passed. The earlier Clang 19 probe remains discarded; keep every other exclusion until the same clean-parse standard or the Linux gate verifies it.
 - Keep useful invariant comments; shorten narratives about abandoned experiments and migration chronology in production code. Do not mass-delete comments or apply a repository-wide formatter just to reduce line counts. `.clang-format` itself says the repository has not yet adopted a formatting pass; choose that policy separately.
 
 Do not delete apparently unused art, shaders, or public helpers solely from a textual reference search. Manifests, content tooling, editor discovery, generated variants and external workflows can constitute real use. Require reachability evidence and a clean staged build for removals.
+
+## Current maintenance status — 2026-09-09
+
+The demonstrated CQ-01 through CQ-14 defects are resolved. The maintenance pass has also replaced ambiguous persistence booleans with revision-aware results, centralized repeated state-delta, texture-identity and puzzle-path rules, completed incremental PBR material import, enabled the Windows warnings-as-errors gate, removed stale tooling, replaced the chronological handoff with an authoritative guide while preserving its history, and migrated sixteen test suites to shared assertions, asset-root lookup and temporary-directory ownership. The current packet documents intentional exception suppression and enables `bugprone-empty-catch` after a clean 131-translation-unit analysis.
+
+The remaining work is improvement work rather than a known correctness-defect queue. Named `.clang-tidy` exclusions still require valid category-by-category scans and review. The large implementation units should be split only where doing so clarifies a lifecycle or ownership invariant. The efficiency candidates below still need measurements before implementation. Linux/toolchain, installer, real-controller, full audio-device, and broader hardware/driver behavior remain environment coverage gaps.
+
+Next, run the Clang 22 procedure against the remaining high-value `performance-*` and `bugprone-*` exclusions, fixing or documenting one category per reviewable packet. Then measure `FrameTimeTelemetry::summary()` query frequency and cost because that experiment has a small boundary and a clear cache-until-samples-change acceptance condition. After that, instrument prepared CPU asset bytes under prefetch pressure before choosing a backpressure design. Rerun the full Debug and Release registries after each behavior-changing packet; use focused targets for documentation and analyzer-only cleanup.
 
 ## Efficiency review
 
@@ -358,7 +366,7 @@ The existing frame arenas, scratch reuse, suballocators, draw sorting, shadow ca
 | Meshes, animation, skinning, materials, shaders | Transform conventions, dependencies, normal/tangent and CPU/GPU correspondence | CQ-08; fixtures need non-axis-aligned/nonuniform cases. No claim of exhaustive animation/glTF conformance. |
 | Vulkan resources, scheduling, descriptors, retirement | Retry ownership, admission, upload/publication, frame-lifetime ordering | CQ-07 and CQ-11; pressure and teardown injection were not exercised on hardware. |
 | Core utilities, tasks, memory, diagnostics, audio | Construction/destruction, bounded storage, thread contracts | CQ-12; telemetry candidate above. No complete audio-device or crash/minidump fault matrix was run. |
-| Build, tests, CI, packaging, documentation | Shared target graph, flags, source drift, observable release gates | Actionable findings resolved; warning-policy and stale-documentation cleanup remain. Linux/toolchain and installer execution remain unverified here. |
+| Build, tests, CI, packaging, documentation | Shared target graph, flags, source drift, observable release gates | Actionable findings, warning-policy alignment, shared test scaffolding, and stale-documentation cleanup are complete. Linux/toolchain and installer execution remain unverified here. |
 
 Potential concerns were not promoted to findings when existing code supplied the missing invariant. In particular, the renderer's later color-output/overlay ordering matters when evaluating swapchain synchronization; a transfer operation alone was not treated as proof of a semaphore-stage bug. Similarly, storage designed for stable references was not labeled invalid merely because a container grows. Findings require a supported failure path, not just a suspicious isolated line.
 
@@ -368,7 +376,7 @@ Potential concerns were not promoted to findings when existing code supplied the
 2. **Unify editor publication:** CQ-04 and CQ-09, then decide the appended-material contract. Test a complete stage/edit/restart cycle. This is a coherent boundary change, not several unrelated file helpers.
 3. **Repair runtime invariants:** CQ-06, CQ-07 and CQ-08 with focused state/retry/geometric tests. These can be reviewed separately from persistence changes.
 4. **Make the release gates trustworthy (completed):** CQ-13 and CQ-14; align warning policy and current documentation with what actually runs.
-5. **Do measured cleanup:** shared identity/delta helpers, stale artifacts/comments, incremental test-harness consistency, and performance experiments from the table above. Avoid broad churn while correctness changes are under review.
+5. **Continue measured cleanup:** reduce the remaining named analyzer exclusions, measure telemetry summary cost, then measure prepared-asset memory pressure. Make ownership extractions only when they reduce a specific lifecycle ambiguity.
 
 Each packet should include a concrete failing-before/passing-after regression and one focused reviewable implementation. Rerun the relevant tests during development and the full Debug/Release suites before completion. Add sanitizer/tidy/platform gates where required by the affected code, rather than repeatedly running every expensive check after cosmetic changes.
 

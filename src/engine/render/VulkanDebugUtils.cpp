@@ -64,6 +64,7 @@ VKAPI_ATTR VkBool32 VKAPI_CALL validationCallback(
     } catch (...) {
         // Vulkan callbacks are C entry points. Logging must never let an
         // allocation or formatting failure cross this boundary.
+        (void)0;
     }
     return VK_FALSE;
 }
@@ -194,6 +195,7 @@ void setObjectName(
         (void)setName(device, &nameInfo);
     } catch (...) {
         // Debug labels must never make renderer resource creation fail.
+        (void)0;
     }
 }
 
@@ -222,6 +224,7 @@ void beginLabel(
         begin(commandBuffer, &label);
     } catch (...) {
         // Debug labels are optional diagnostics, never renderer work.
+        (void)0;
     }
 }
 

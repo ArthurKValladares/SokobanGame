@@ -192,6 +192,7 @@ public:
         } catch (...) {
             // Logging must never terminate the process. Allocation failures
             // are intentionally invisible to the caller.
+            (void)0;
         }
     }
 
@@ -606,6 +607,8 @@ Message::~Message() noexcept
         processLogger().enqueue(
             level_, category_, stream_.str());
     } catch (...) {
+        // A logging failure cannot escape a noexcept destructor.
+        (void)0;
     }
 }
 
