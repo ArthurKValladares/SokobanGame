@@ -42,15 +42,14 @@ are enabled and eleven are explicitly excluded.
 
 Work through the remaining actionable categories in this order:
 
-1. `bugprone-optional-value-conversion`
-2. `bugprone-implicit-widening-of-multiplication-result`
-3. `bugprone-branch-clone`
-4. `bugprone-inc-dec-in-conditions`
-5. `bugprone-suspicious-include`
-6. `bugprone-switch-missing-default-case`
-7. `performance-inefficient-vector-operation`
-8. `performance-no-automatic-move`
-9. `performance-enum-size`
+1. `bugprone-implicit-widening-of-multiplication-result`
+2. `bugprone-branch-clone`
+3. `bugprone-inc-dec-in-conditions`
+4. `bugprone-suspicious-include`
+5. `bugprone-switch-missing-default-case`
+6. `performance-inefficient-vector-operation`
+7. `performance-no-automatic-move`
+8. `performance-enum-size`
 
 Two exclusions are policy exceptions rather than an automatic rewrite queue:
 
@@ -194,8 +193,8 @@ checks need the device, driver, package identity, steps, and observed result.
 
 ## Execution order
 
-1. Complete `bugprone-optional-value-conversion` and continue the analyzer queue
-   one category per commit.
+1. Complete `bugprone-implicit-widening-of-multiplication-result` and continue
+   the analyzer queue one category per commit.
 2. Measure frame-time summary queries and implement cache invalidation only if
    the recorded cost justifies it.
 3. Add prepared-asset byte instrumentation, capture a pressure baseline, and
