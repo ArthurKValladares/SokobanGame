@@ -1,3 +1,5 @@
+#include "TestHarness.hpp"
+
 #include "engine/render/VulkanDeviceSelection.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanDiagnostics.hpp"
@@ -8,21 +10,12 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdlib>
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
 
 namespace {
-
-void check(bool condition, const char* message)
-{
-    if (!condition) {
-        std::cerr << "FAILED: " << message << '\n';
-        std::exit(1);
-    }
-}
 
 VkPhysicalDeviceProperties properties(
     VkPhysicalDeviceType type,
@@ -82,52 +75,52 @@ int main()
     const auto virtualGpu = properties(VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU, 32768);
     const auto cpu = properties(VK_PHYSICAL_DEVICE_TYPE_CPU, 32768);
 
-    check(
+    CHECK_MESSAGE(
         sokoban::vulkanDevicePreferenceScore(discrete) >
             sokoban::vulkanDevicePreferenceScore(integrated),
         "a discrete GPU outranks an integrated GPU regardless of enumeration order");
-    check(
+    CHECK_MESSAGE(
         sokoban::vulkanDevicePreferenceScore(integrated) >
             sokoban::vulkanDevicePreferenceScore(virtualGpu),
         "an integrated GPU outranks a virtual GPU");
-    check(
+    CHECK_MESSAGE(
         sokoban::vulkanDevicePreferenceScore(virtualGpu) >
             sokoban::vulkanDevicePreferenceScore(cpu),
         "a virtual GPU outranks a CPU device");
-    check(
+    CHECK_MESSAGE(
         sokoban::vulkanDevicePreferenceScore(
             properties(VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU, 16384)) >
             sokoban::vulkanDevicePreferenceScore(discrete),
         "image limits break ties within a device class");
-    check(
+    CHECK_MESSAGE(
         std::string_view(sokoban::vulkanDeviceTypeName(
             VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)) == "discrete",
         "device type diagnostics are readable");
-    check(
-        sokoban::scaledRenderExtent({ 3840, 2160 }, 50) ==
-            sokoban::PixelExtent { 1920, 1080 },
+    CHECK_MESSAGE(
+        (sokoban::scaledRenderExtent({ 3840, 2160 }, 50) ==
+            sokoban::PixelExtent { 1920, 1080 }),
         "50 percent maps 4K output to 1080p rendering");
-    check(
-        sokoban::scaledRenderExtent({ 3840, 2160 }, 67) ==
-            sokoban::PixelExtent { 2560, 1440 },
+    CHECK_MESSAGE(
+        (sokoban::scaledRenderExtent({ 3840, 2160 }, 67) ==
+            sokoban::PixelExtent { 2560, 1440 }),
         "67 percent maps 4K output to 1440p rendering");
-    check(
-        sokoban::scaledRenderExtent({ 3840, 2160 }, 75) ==
-            sokoban::PixelExtent { 2880, 1620 },
+    CHECK_MESSAGE(
+        (sokoban::scaledRenderExtent({ 3840, 2160 }, 75) ==
+            sokoban::PixelExtent { 2880, 1620 }),
         "75 percent preset scales both dimensions");
-    check(
-        sokoban::scaledRenderExtent({ 1920, 1080 }, 63) ==
-            sokoban::PixelExtent { 1210, 680 },
+    CHECK_MESSAGE(
+        (sokoban::scaledRenderExtent({ 1920, 1080 }, 63) ==
+            sokoban::PixelExtent { 1210, 680 }),
         "custom percentages are rounded to the nearest pixel");
-    check(
-        sokoban::scaledRenderExtent({ 1, 1 }, 25) ==
-            sokoban::PixelExtent { 1, 1 },
+    CHECK_MESSAGE(
+        (sokoban::scaledRenderExtent({ 1, 1 }, 25) ==
+            sokoban::PixelExtent { 1, 1 }),
         "non-empty output never produces a zero-sized render target");
-    check(sokoban::normalizedRenderScalePercent(10) == 25,
+    CHECK_MESSAGE(sokoban::normalizedRenderScalePercent(10) == 25,
         "custom scales clamp to the minimum");
-    check(sokoban::normalizedRenderScalePercent(120) == 100,
+    CHECK_MESSAGE(sokoban::normalizedRenderScalePercent(120) == 100,
         "custom scales clamp to the maximum");
-    check(sokoban::normalizedRenderScalePresetPercent(42) == 100,
+    CHECK_MESSAGE(sokoban::normalizedRenderScalePresetPercent(42) == 100,
         "unsupported presets normalize to native resolution");
 
     VkSurfaceCapabilitiesKHR currentTransformSupported {};
@@ -136,7 +129,7 @@ int main()
         VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
     currentTransformSupported.currentTransform =
         VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
-    check(
+    CHECK_MESSAGE(
         sokoban::chooseSurfaceTransform(currentTransformSupported) ==
             VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR,
         "surface uses its supported current transform");
@@ -146,7 +139,7 @@ int main()
         VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR |
         VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR;
     fallbackTransform.currentTransform = VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR;
-    check(
+    CHECK_MESSAGE(
         sokoban::chooseSurfaceTransform(fallbackTransform) ==
             VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
         "unsupported current transform falls back to supported identity");
@@ -154,7 +147,7 @@ int main()
     VkSurfaceCapabilitiesKHR rotationOnlyTransform {};
     rotationOnlyTransform.supportedTransforms =
         VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR;
-    check(
+    CHECK_MESSAGE(
         sokoban::chooseSurfaceTransform(rotationOnlyTransform) ==
             VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR,
         "surface without identity uses an advertised transform");
@@ -163,7 +156,7 @@ int main()
     opaqueAlpha.supportedCompositeAlpha =
         VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR |
         VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
-    check(
+    CHECK_MESSAGE(
         sokoban::chooseCompositeAlpha(opaqueAlpha) ==
             VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         "opaque alpha is preferred when supported");
@@ -171,12 +164,12 @@ int main()
     VkSurfaceCapabilitiesKHR fallbackAlpha {};
     fallbackAlpha.supportedCompositeAlpha =
         VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR;
-    check(
+    CHECK_MESSAGE(
         sokoban::chooseCompositeAlpha(fallbackAlpha) ==
             VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
         "composite alpha falls back to an advertised mode");
 
-    check(throwsForNoSurfaceMode({}),
+    CHECK_MESSAGE(throwsForNoSurfaceMode({}),
         "surface with no composite alpha support is rejected");
 
     constexpr uint32_t requiredPushConstants = 128;
@@ -184,11 +177,11 @@ int main()
     const auto releaseOnlyTier = sokoban::chooseVulkanFeatureTier(
         releaseFeatureSupport(), requiredPushConstants,
         requiredSampledImages, requiredSampledImages);
-    check(releaseOnlyTier.releaseCompatible,
+    CHECK_MESSAGE(releaseOnlyTier.releaseCompatible,
         "the Vulkan 1.3 release feature tier accepts its documented baseline");
-    check(!releaseOnlyTier.wireframeSupported && !releaseOnlyTier.wideLinesSupported,
+    CHECK_MESSAGE(!releaseOnlyTier.wireframeSupported && !releaseOnlyTier.wideLinesSupported,
         "debug rasterization features do not gate the release tier");
-    check(!releaseOnlyTier.partiallyBoundDescriptorsSupported,
+    CHECK_MESSAGE(!releaseOnlyTier.partiallyBoundDescriptorsSupported,
         "fully populated descriptor heaps do not require partially-bound support");
 
     auto debugFeatureSupport = releaseFeatureSupport();
@@ -197,13 +190,13 @@ int main()
     const auto debugTier = sokoban::chooseVulkanFeatureTier(
         debugFeatureSupport, requiredPushConstants,
         requiredSampledImages, requiredSampledImages);
-    check(debugTier.releaseCompatible && debugTier.wireframeSupported &&
+    CHECK_MESSAGE(debugTier.releaseCompatible && debugTier.wireframeSupported &&
             debugTier.wideLinesSupported,
         "supported debug features augment but do not replace the release tier");
 
     auto oldApiSupport = releaseFeatureSupport();
     oldApiSupport.apiVersion = VK_API_VERSION_1_2;
-    check(!sokoban::chooseVulkanFeatureTier(
+    CHECK_MESSAGE(!sokoban::chooseVulkanFeatureTier(
                oldApiSupport, requiredPushConstants,
                requiredSampledImages, requiredSampledImages)
                .releaseCompatible,
@@ -211,7 +204,7 @@ int main()
 
     auto missingBaselineFeature = releaseFeatureSupport();
     missingBaselineFeature.extendedDynamicState = false;
-    check(!sokoban::chooseVulkanFeatureTier(
+    CHECK_MESSAGE(!sokoban::chooseVulkanFeatureTier(
                missingBaselineFeature,
                requiredPushConstants,
                requiredSampledImages,
@@ -221,7 +214,7 @@ int main()
     auto insufficientLimits = releaseFeatureSupport();
     insufficientLimits.maxPerStageDescriptorSampledImages =
         requiredSampledImages - 1;
-    check(!sokoban::chooseVulkanFeatureTier(
+    CHECK_MESSAGE(!sokoban::chooseVulkanFeatureTier(
                insufficientLimits,
                requiredPushConstants,
                requiredSampledImages,
@@ -234,7 +227,7 @@ int main()
     const auto insufficientSetTier = sokoban::chooseVulkanFeatureTier(
         insufficientSetLimits, requiredPushConstants,
         requiredSampledImages, requiredSampledImages);
-    check(!insufficientSetTier.releaseCompatible &&
+    CHECK_MESSAGE(!insufficientSetTier.releaseCompatible &&
             insufficientSetTier.rejection ==
                 sokoban::VulkanFeatureTierRejection::DescriptorSetSampledImageCapacity,
         "descriptor-set sampled-image capacity is checked independently");
@@ -244,7 +237,7 @@ int main()
     const auto noRuntimeArrayTier = sokoban::chooseVulkanFeatureTier(
         noRuntimeArrays, requiredPushConstants,
         requiredSampledImages, requiredSampledImages);
-    check(!noRuntimeArrayTier.releaseCompatible &&
+    CHECK_MESSAGE(!noRuntimeArrayTier.releaseCompatible &&
             sokoban::vulkanFeatureTierRejectionMessage(
                 noRuntimeArrayTier.rejection).find("runtimeDescriptorArray") !=
                 std::string_view::npos,
@@ -255,7 +248,7 @@ int main()
     const auto noVariableCountTier = sokoban::chooseVulkanFeatureTier(
         noVariableCount, requiredPushConstants,
         requiredSampledImages, requiredSampledImages);
-    check(!noVariableCountTier.releaseCompatible &&
+    CHECK_MESSAGE(!noVariableCountTier.releaseCompatible &&
             noVariableCountTier.rejection ==
                 sokoban::VulkanFeatureTierRejection::VariableDescriptorCount,
         "variable descriptor counts are required by the runtime heap tier");
@@ -265,7 +258,7 @@ int main()
     const auto noNonUniformTier = sokoban::chooseVulkanFeatureTier(
         noNonUniformIndexing, requiredPushConstants,
         requiredSampledImages, requiredSampledImages);
-    check(!noNonUniformTier.releaseCompatible &&
+    CHECK_MESSAGE(!noNonUniformTier.releaseCompatible &&
             noNonUniformTier.rejection ==
                 sokoban::VulkanFeatureTierRejection::SampledImageArrayNonUniformIndexing,
         "non-uniform sampled-image indexing is required by material handles");
@@ -275,7 +268,7 @@ int main()
     const auto partiallyBoundTier = sokoban::chooseVulkanFeatureTier(
         partiallyBoundSupport, requiredPushConstants,
         requiredSampledImages, requiredSampledImages);
-    check(partiallyBoundTier.releaseCompatible &&
+    CHECK_MESSAGE(partiallyBoundTier.releaseCompatible &&
             partiallyBoundTier.partiallyBoundDescriptorsSupported,
         "partially-bound support is reported without becoming a requirement");
 
@@ -284,46 +277,46 @@ int main()
     heapSupport.maxDescriptorSetSampledImages = 128;
     const auto boundedHeap = sokoban::chooseVulkanTextureHeapCapacity(
         heapSupport, 70, 8, 16, 256, 8);
-    check(boundedHeap.supported && boundedHeap.capacity == 128,
+    CHECK_MESSAGE(boundedHeap.supported && boundedHeap.capacity == 128,
         "texture heap capacity is bounded by the tightest device limit");
 
     const auto lowLimitHeap = sokoban::chooseVulkanTextureHeapCapacity(
         heapSupport, 110, 8, 16, 256, 8);
     const std::string lowLimitMessage =
         sokoban::vulkanTextureHeapCapacityFailureMessage(lowLimitHeap);
-    check(!lowLimitHeap.supported &&
+    CHECK_MESSAGE(!lowLimitHeap.supported &&
             lowLimitMessage.find("110 content") != std::string::npos &&
             lowLimitMessage.find("24 reserved") != std::string::npos &&
             lowLimitMessage.find("128") != std::string::npos,
         "low-limit heap rejection reports required, reserved and available counts");
 
-    check(
+    CHECK_MESSAGE(
         sokoban::vulkanDebug::validationMessageLogLevel(
             VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) ==
             sokoban::log::Level::Error,
         "validation errors are reported at error severity");
-    check(
+    CHECK_MESSAGE(
         sokoban::vulkanDebug::validationMessageLogLevel(
             VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) ==
             sokoban::log::Level::Warning,
         "validation warnings are reported at warning severity");
-    check(
+    CHECK_MESSAGE(
         sokoban::vulkanDebug::validationMessageLogLevel(
             VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) ==
             sokoban::log::Level::Debug,
         "verbose validation messages stay at debug severity");
 
-    check(
+    CHECK_MESSAGE(
         sokoban::vulkanFailureForResult(VK_ERROR_DEVICE_LOST) ==
             sokoban::VulkanFailure::DeviceLost,
         "device loss is classified for a user-facing shutdown");
-    check(
+    CHECK_MESSAGE(
         sokoban::vulkanFailureForResult(VK_ERROR_SURFACE_LOST_KHR) ==
             sokoban::VulkanFailure::SurfaceLost,
         "surface loss is classified for a user-facing shutdown");
-    check(!sokoban::vulkanFailureForResult(VK_ERROR_OUT_OF_DATE_KHR),
+    CHECK_MESSAGE(!sokoban::vulkanFailureForResult(VK_ERROR_OUT_OF_DATE_KHR),
         "ordinary swapchain recreation does not become a fatal graphics error");
-    check(
+    CHECK_MESSAGE(
         sokoban::vulkanFailureMessage(
             sokoban::VulkanFailure::UnsupportedHardware).find("Vulkan 1.3") !=
             std::string_view::npos,
@@ -334,18 +327,18 @@ int main()
     } catch (const sokoban::VulkanError& error) {
         preservedDeviceLossResult = error.result() == VK_ERROR_DEVICE_LOST;
     }
-    check(preservedDeviceLossResult,
+    CHECK_MESSAGE(preservedDeviceLossResult,
         "Vulkan errors preserve their result for renderer recovery diagnostics");
 
-    check(
+    CHECK_MESSAGE(
         sokoban::vulkanTimestampDeltaMilliseconds(100, 350, 2.0f, 64) ==
             0.0005,
         "timestamp deltas convert device nanoseconds to milliseconds");
-    check(
+    CHECK_MESSAGE(
         sokoban::vulkanTimestampDeltaMilliseconds(250, 5, 1.0f, 8) ==
             0.000011,
         "timestamp deltas account for a valid-bit counter wrap");
-    check(
+    CHECK_MESSAGE(
         sokoban::vulkanTimestampDeltaMilliseconds(1, 2, 0.0f, 64) == 0.0,
         "unavailable timestamps report no duration");
 
@@ -358,30 +351,34 @@ int main()
         sokoban::encodeVulkanPipelineCacheFile(cacheIdentity, cachePayload);
     const auto decodedPayload = sokoban::decodeVulkanPipelineCacheFile(
         cacheFile, cacheIdentity);
-    check(decodedPayload && *decodedPayload ==
+    CHECK_MESSAGE(decodedPayload && *decodedPayload ==
             std::vector<std::byte>(cachePayload.begin(), cachePayload.end()),
         "a versioned pipeline cache envelope round-trips binary driver data");
 
     auto wrongDevice = cacheIdentity;
     ++wrongDevice.deviceId;
-    check(!sokoban::decodeVulkanPipelineCacheFile(cacheFile, wrongDevice),
+    CHECK_MESSAGE(!sokoban::decodeVulkanPipelineCacheFile(cacheFile, wrongDevice),
         "pipeline cache data from another device is ignored");
 
     auto corruptCacheFile = cacheFile;
     corruptCacheFile.pop_back();
-    check(!sokoban::decodeVulkanPipelineCacheFile(corruptCacheFile, cacheIdentity),
+    CHECK_MESSAGE(!sokoban::decodeVulkanPipelineCacheFile(corruptCacheFile, cacheIdentity),
         "truncated pipeline cache data is ignored");
 
     auto tamperedCacheFile = cacheFile;
     tamperedCacheFile.back() = std::byte { 0x00 };
-    check(!sokoban::decodeVulkanPipelineCacheFile(tamperedCacheFile, cacheIdentity),
+    CHECK_MESSAGE(!sokoban::decodeVulkanPipelineCacheFile(tamperedCacheFile, cacheIdentity),
         "tampered pipeline cache data is ignored");
 
     auto oldFormatCacheFile = cacheFile;
     oldFormatCacheFile[8] = std::byte { 0x00 };
-    check(!sokoban::decodeVulkanPipelineCacheFile(oldFormatCacheFile, cacheIdentity),
+    CHECK_MESSAGE(!sokoban::decodeVulkanPipelineCacheFile(oldFormatCacheFile, cacheIdentity),
         "pipeline cache data from an unsupported envelope version is ignored");
 
+    if (failures != 0) {
+        std::cerr << failures << " Vulkan device selection checks failed\n";
+        return 1;
+    }
     std::cout << "Vulkan device selection tests passed\n";
     return 0;
 }
