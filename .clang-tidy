@@ -26,7 +26,7 @@
 # already made the other way. None of them belongs in a gate.
 #
 # The top four are not. 104 of their 104 checks are about correctness and
-# cost, and 95 of them pass clean today - so they are enabled here. The 9
+# cost, and 98 of them pass clean today - so they are enabled here. The 6
 # that do not pass are excluded by name, each with its current count, which
 # makes the exclusion list a work queue rather than a hole. A gate that starts
 # red is a gate people learn to ignore.
@@ -49,12 +49,10 @@ Checks: >
 
 # The work queue, in the order worth doing:
 #
-#   performance-enum-size                      3
-#   bugprone-inc-dec-in-conditions             2
-#   bugprone-suspicious-include                2
-#   performance-no-automatic-move              1
-#   performance-inefficient-vector-operation   1
 #   bugprone-switch-missing-default-case       1
+#   performance-inefficient-vector-operation   1
+#   performance-no-automatic-move              1
+#   performance-enum-size                      3
 #
 # `bugprone-empty-catch` was enabled on 2026-09-09 after all seven intentional
 # exception barriers were documented and made explicit. A Clang 22 scan parsed
