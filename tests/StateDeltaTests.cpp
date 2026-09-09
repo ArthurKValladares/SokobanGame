@@ -9,6 +9,7 @@
 
 #include "engine/StateDelta.hpp"
 
+#include <array>
 #include <iostream>
 #include <string>
 
@@ -67,6 +68,30 @@ void testApplyingReproducesAfter()
     // Equal as a whole value, not just entity by entity: vector order has to
     // survive too, because state comparisons throughout the game use ==.
     CHECK(applied == after);
+}
+
+void testChangedEntityIdsUseOneCanonicalOrder()
+{
+    TEST("changedEntityIdsUseOneCanonicalOrder");
+    const GameState before = twoPlayersAndARock();
+    GameState after = before;
+    after.players[0].cell = cell(1, 0, 1);
+    after.movables[0].cell = cell(3, 0, 1);
+    after.enemies[0].cell = cell(7, 6, 1);
+
+    const StateDelta delta = StateDelta::between(before, after);
+    CHECK(delta.changedEntityCount() == 3);
+    CHECK(delta.changedEntityIds() == std::vector<EntityId>({ 1, 3, 4 }));
+
+    std::vector<EntityId> appended { 99 };
+    delta.appendChangedEntityIds(appended);
+    CHECK(appended == std::vector<EntityId>({ 99, 1, 3, 4 }));
+
+    constexpr std::array<EntityId, 2> overlap { 42, 3 };
+    constexpr std::array<EntityId, 1> disjoint { 42 };
+    CHECK(delta.changesAny(overlap));
+    CHECK(!delta.changesAny(disjoint));
+    CHECK(!delta.changesAny(std::span<const EntityId> {}));
 }
 
 void testUnrelatedConcurrentChangeSurvives()
@@ -222,6 +247,7 @@ int main()
 {
     testUnchangedEntitiesAreAbsent();
     testApplyingReproducesAfter();
+    testChangedEntityIdsUseOneCanonicalOrder();
     testUnrelatedConcurrentChangeSurvives();
     testCreatedAndRemovedEntities();
     testKeyedByIdNotPosition();

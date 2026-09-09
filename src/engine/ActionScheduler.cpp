@@ -8,48 +8,27 @@
 
 namespace sokoban {
 
-namespace {
-
-// The entities a plan writes - which is to say the ones it is answerable for.
-[[nodiscard]] std::vector<EntityId> writtenEntities(const ActionPlan& plan)
-{
-    const StateDelta delta = StateDelta::between(plan.before, plan.after);
-    std::vector<EntityId> ids;
-    ids.reserve(
-        delta.players.size() + delta.movables.size() + delta.enemies.size());
-    for (const StateDelta::Change<GameState::Player>& change : delta.players) {
-        ids.push_back(change.id);
-    }
-    for (const StateDelta::Change<GameState::Movable>& change : delta.movables) {
-        ids.push_back(change.id);
-    }
-    for (const StateDelta::Change<GameState::Enemy>& change : delta.enemies) {
-        ids.push_back(change.id);
-    }
-    return ids;
-}
-
-} // namespace
-
 std::optional<ActionScheduler::Rejection> ActionScheduler::ownershipConflict(
     const ActionPlan& plan, std::size_t causalGroup) const
 {
-    const std::vector<EntityId> wanted = writtenEntities(plan);
+    // The entities a plan writes are the ones it is answerable for. The delta
+    // owns that domain interpretation and preserves its canonical kind order.
+    const std::vector<EntityId> wanted =
+        StateDelta::between(plan.before, plan.after).changedEntityIds();
     for (const InFlight& action : inFlight_) {
         if (causalGroup != 0 && action.causalGroup == causalGroup) {
             continue;
         }
-        for (const EntityId owned : writtenEntities(action.plan)) {
-            if (std::ranges::find(wanted, owned) != wanted.end()) {
-                return Rejection {
-                    .blockedBy = action.id,
-                    // Deliberately unset. The refusal is about an entity rather
-                    // than a place, and naming a cell would suggest the cell
-                    // was the problem.
-                    .cell = {},
-                    .step = currentStep(),
-                };
-            }
+        if (StateDelta::between(action.plan.before, action.plan.after)
+                .changesAny(wanted)) {
+            return Rejection {
+                .blockedBy = action.id,
+                // Deliberately unset. The refusal is about an entity rather
+                // than a place, and naming a cell would suggest the cell was
+                // the problem.
+                .cell = {},
+                .step = currentStep(),
+            };
         }
     }
     return std::nullopt;

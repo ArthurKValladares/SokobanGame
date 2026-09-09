@@ -1,5 +1,6 @@
 #include "engine/StateDelta.hpp"
 
+#include <algorithm>
 #include <cstddef>
 
 namespace sokoban {
@@ -101,6 +102,26 @@ template <typename Entity>
     return result;
 }
 
+template <typename Entity>
+void appendIds(
+    const std::vector<StateDelta::Change<Entity>>& changes,
+    std::vector<EntityId>& destination)
+{
+    for (const StateDelta::Change<Entity>& change : changes) {
+        destination.push_back(change.id);
+    }
+}
+
+template <typename Entity>
+[[nodiscard]] bool changesAny(
+    const std::vector<StateDelta::Change<Entity>>& changes,
+    std::span<const EntityId> ids)
+{
+    return std::ranges::any_of(changes, [ids](const auto& change) {
+        return std::ranges::find(ids, change.id) != ids.end();
+    });
+}
+
 } // namespace
 
 StateDelta StateDelta::between(
@@ -133,6 +154,34 @@ StateDelta StateDelta::inverted() const
 bool StateDelta::empty() const
 {
     return players.empty() && movables.empty() && enemies.empty();
+}
+
+std::size_t StateDelta::changedEntityCount() const
+{
+    return players.size() + movables.size() + enemies.size();
+}
+
+void StateDelta::appendChangedEntityIds(
+    std::vector<EntityId>& destination) const
+{
+    destination.reserve(destination.size() + changedEntityCount());
+    appendIds(players, destination);
+    appendIds(movables, destination);
+    appendIds(enemies, destination);
+}
+
+std::vector<EntityId> StateDelta::changedEntityIds() const
+{
+    std::vector<EntityId> ids;
+    appendChangedEntityIds(ids);
+    return ids;
+}
+
+bool StateDelta::changesAny(std::span<const EntityId> ids) const
+{
+    return ::sokoban::changesAny(players, ids) ||
+        ::sokoban::changesAny(movables, ids) ||
+        ::sokoban::changesAny(enemies, ids);
 }
 
 } // namespace sokoban

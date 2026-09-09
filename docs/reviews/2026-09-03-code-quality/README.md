@@ -32,6 +32,8 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Maintainability follow-up, 2026-09-08 (typed persistence results):** Asynchronous saves now assign ordered per-channel revisions and return typed persisted/retryable-failure outcomes from flush and channel replacement. Results carry both the newest requested revision and the latest durable revision plus the storage message, so slot switching and application shutdown no longer infer transaction state from a boolean followed by separate diagnostics. The public header now states which operations belong to the owner thread and which are synchronized producer/snapshot operations.
 
+**Maintainability follow-up, 2026-09-08 (shared delta entity interpretation):** `StateDelta` now owns the canonical player/movable/enemy id order, append operation, and overlap query. Scheduling, saved-action validation, and ambient-motion filtering use those operations directly. This removes three copies of the same domain walk and avoids allocating a temporary id vector for every in-flight ownership check.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
@@ -279,7 +281,7 @@ CQ-01 through CQ-05 show that the central weakness is ambiguous completion: deco
 
 | Repeated logic | Current locations | Focused extraction |
 | --- | --- | --- |
-| Changed player/movable/enemy IDs | `ActionScheduler.cpp:14–29`, `GameplaySession.cpp:75–91` | A `StateDelta` visitor/helper; preserve ordering/deduplication expectations and avoid repeated allocations where possible |
+| Changed player/movable/enemy IDs | Centralized in `StateDelta`; consumed by `ActionScheduler` and `GameplaySession` | Completed 2026-09-08; canonical kind order is tested, append preserves existing entries, and overlap checks avoid per-action id-vector allocation |
 | Manifest texture → source identity | `ContentPipeline.cpp` around 599; `render/RuntimeTextureCatalog.cpp:28–48` | One canonical conversion for sampler, color-space and texture identity fields |
 | Mesh dependency discovery | `DecorationAssetRegistry.cpp`; `ContentPipeline.cpp`; glTF inspection helpers | Shared structured discovery for startup, import and packaging; directly addresses CQ-09 |
 | Source/model position, normal and tangent transforms | `render/GltfMesh.cpp`; `render/GpuSkinning.cpp` | Shared mathematical convention with invariant tests; directly addresses CQ-08 |

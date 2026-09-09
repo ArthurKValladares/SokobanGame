@@ -3,7 +3,9 @@
 #include "engine/EntityId.hpp"
 #include "engine/Rules.hpp"
 
+#include <cstddef>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace sokoban {
@@ -56,6 +58,13 @@ struct StateDelta {
     [[nodiscard]] StateDelta inverted() const;
 
     [[nodiscard]] bool empty() const;
+    [[nodiscard]] std::size_t changedEntityCount() const;
+    // Entity ids use players, movables, enemies order, matching the delta's
+    // application order. Appending preserves that order and intentionally
+    // does not deduplicate ids.
+    void appendChangedEntityIds(std::vector<EntityId>& destination) const;
+    [[nodiscard]] std::vector<EntityId> changedEntityIds() const;
+    [[nodiscard]] bool changesAny(std::span<const EntityId> ids) const;
 
     bool operator==(const StateDelta&) const = default;
 

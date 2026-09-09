@@ -66,31 +66,6 @@ bool replayMatches(
     });
 }
 
-// The entities an entry changed, which is the scope it must have been resolved
-// under.
-//
-// Deliberately keyed off the delta rather than positions: an entry is stored as
-// a change replayed onto the running chain, so this is the same set the
-// scheduler committed.
-[[nodiscard]] std::vector<EntityId> changedEntities(
-    const GameState& before, const GameState& after)
-{
-    const StateDelta delta = StateDelta::between(before, after);
-    std::vector<EntityId> ids;
-    ids.reserve(
-        delta.players.size() + delta.movables.size() + delta.enemies.size());
-    for (const StateDelta::Change<GameState::Player>& change : delta.players) {
-        ids.push_back(change.id);
-    }
-    for (const StateDelta::Change<GameState::Movable>& change : delta.movables) {
-        ids.push_back(change.id);
-    }
-    for (const StateDelta::Change<GameState::Enemy>& change : delta.enemies) {
-        ids.push_back(change.id);
-    }
-    return ids;
-}
-
 bool matchesForwardTransition(
     const Level& level,
     const GameplaySession::Action& action,
@@ -131,8 +106,11 @@ bool matchesForwardTransition(
     // catches is an entry whose claimed outcome the rules would never produce
     // from its starting state, and the chain check around it still pins every
     // entry to the one before it and the last to the saved state.
+    // Deliberately keyed off the delta rather than positions: an entry is
+    // stored as a change replayed onto the running chain, so this is the same
+    // actor set the scheduler committed.
     std::vector<EntityId> changed =
-        changedEntities(action.before, action.after);
+        StateDelta::between(action.before, action.after).changedEntityIds();
     if (changed.empty()) {
         // An empty scope means the whole world, which the branch above already
         // tried; an action that changed nothing is not a transition anyway.
@@ -629,20 +607,8 @@ std::vector<EntityId> GameplaySession::withoutEntitiesInFlight(
 {
     std::vector<EntityId> ids;
     for (const ActionScheduler::InFlight& action : scheduler_.inFlight()) {
-        const StateDelta delta =
-            StateDelta::between(action.plan.before, action.plan.after);
-        for (const StateDelta::Change<GameState::Player>& change :
-                delta.players) {
-            ids.push_back(change.id);
-        }
-        for (const StateDelta::Change<GameState::Movable>& change :
-                delta.movables) {
-            ids.push_back(change.id);
-        }
-        for (const StateDelta::Change<GameState::Enemy>& change :
-                delta.enemies) {
-            ids.push_back(change.id);
-        }
+        StateDelta::between(action.plan.before, action.plan.after)
+            .appendChangedEntityIds(ids);
     }
     std::erase_if(candidates, [&ids](EntityId id) {
         return std::ranges::find(ids, id) != ids.end();
