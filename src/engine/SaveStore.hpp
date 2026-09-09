@@ -67,7 +67,7 @@ public:
     // the shared settings store settings only).
     explicit SaveStore(
         std::filesystem::path root,
-        std::string fileStem = "profile",
+        const std::string& fileStem = "profile",
         ProfileSections sections = ProfileSections::All);
 
     // SDL owns the platform-specific choice of roaming/local preference

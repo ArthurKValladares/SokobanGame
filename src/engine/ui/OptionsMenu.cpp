@@ -1057,7 +1057,7 @@ std::optional<OptionsAction> OptionsMenu::handleInput(
 {
     UserSettings current = settings;
     std::optional<OptionsAction> action;
-    auto apply = [&](OptionsMenuIntent intent) {
+    auto apply = [&](const OptionsMenuIntent& intent) {
         if (const std::optional<OptionsAction> next =
                 dispatch(current, intent)) {
             action = next;

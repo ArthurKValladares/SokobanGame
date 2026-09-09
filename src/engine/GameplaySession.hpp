@@ -239,7 +239,7 @@ private:
     // held from this moment and nothing can invalidate the outcome already
     // promised for it.
     [[nodiscard]] bool beginAction(
-        Action action,
+        const Action& action,
         std::vector<GameState> legs = {},
         std::size_t causalGroup = 0,
         ActionDeferral deferral = {});

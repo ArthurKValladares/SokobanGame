@@ -336,11 +336,11 @@ struct GltfAssetDependencies {
 
 [[nodiscard]] MeshData loadGltfMesh(
     const std::filesystem::path& path,
-    GltfMeshLoadOptions options = {});
+    const GltfMeshLoadOptions& options = {});
 
 [[nodiscard]] SkinnedMeshData loadGltfSkinnedMesh(
     const std::filesystem::path& path,
-    GltfMeshLoadOptions options = {});
+    const GltfMeshLoadOptions& options = {});
 
 // Binds source-scale static geometry to a named skeleton node. The attachment
 // is transformed by the sampled node pose and merged into every skinned frame.

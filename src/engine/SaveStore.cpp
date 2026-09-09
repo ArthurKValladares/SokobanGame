@@ -91,7 +91,7 @@ void removeArtifact(const std::filesystem::path& path)
 
 SaveStore::SaveStore(
     std::filesystem::path root,
-    std::string fileStem,
+    const std::string& fileStem,
     ProfileSections sections)
     : root_(std::move(root))
     , primaryPath_(root_ / (fileStem + ".json"))

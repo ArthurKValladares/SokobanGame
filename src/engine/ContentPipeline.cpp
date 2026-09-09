@@ -441,7 +441,7 @@ std::vector<ResolvedMaterialTexture> resolvedMaterialTexturesFrom(
 
 class InventoryBuilder {
 public:
-    explicit InventoryBuilder(ContentSourceRoots roots)
+    explicit InventoryBuilder(const ContentSourceRoots& roots)
         : roots_ {
               canonicalRoot(roots.assets, "asset source"),
               canonicalRoot(roots.levels, "level source"),

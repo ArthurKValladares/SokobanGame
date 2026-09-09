@@ -1283,11 +1283,6 @@ UnsupportedPlayerProfileFormat::UnsupportedPlayerProfileFormat(int format)
 {
 }
 
-InvalidPlayerProfileData::InvalidPlayerProfileData(std::string message)
-    : std::runtime_error(message)
-{
-}
-
 DecodedPlayerProfile decodePlayerProfile(std::string_view text)
 {
     try {

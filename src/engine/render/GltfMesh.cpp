@@ -965,7 +965,9 @@ std::vector<std::byte> loadGltfBufferViewBytes(
     return result;
 }
 
-MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions options)
+MeshData loadGltfMesh(
+    const std::filesystem::path& path,
+    const GltfMeshLoadOptions& options)
 {
     const Document document = loadDocument(path);
     const cgltf_data& data = *document;
@@ -1080,7 +1082,7 @@ MeshData loadGltfMesh(const std::filesystem::path& path, GltfMeshLoadOptions opt
 
 SkinnedMeshData loadGltfSkinnedMesh(
     const std::filesystem::path& path,
-    GltfMeshLoadOptions options)
+    const GltfMeshLoadOptions& options)
 {
     const Document document = loadDocument(path);
     const cgltf_data& data = *document;

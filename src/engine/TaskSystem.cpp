@@ -77,7 +77,7 @@ public:
         }
     }
 
-    void recordFailure(std::exception_ptr failure) noexcept
+    void recordFailure(const std::exception_ptr& failure) noexcept
     {
         bool expected = false;
         if (failureRecorded_.compare_exchange_strong(

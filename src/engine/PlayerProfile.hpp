@@ -136,7 +136,7 @@ struct DecodedPlayerProfile {
 
 class InvalidPlayerProfileData final : public std::runtime_error {
 public:
-    explicit InvalidPlayerProfileData(std::string message);
+    using std::runtime_error::runtime_error;
 };
 
 class UnsupportedPlayerProfileFormat final : public std::runtime_error {

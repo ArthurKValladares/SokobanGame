@@ -633,7 +633,7 @@ GameplaySession::StartOutcome GameplaySession::tryStartAmbientMotion(
         if (!actionAdmissionAllows(slide->action)) {
             return StartOutcome::Impossible;
         }
-        return beginAction(std::move(slide->action), std::move(slide->legs))
+        return beginAction(slide->action, std::move(slide->legs))
             ? StartOutcome::Started
             : StartOutcome::Refused;
     }
@@ -649,7 +649,7 @@ GameplaySession::StartOutcome GameplaySession::tryStartAmbientMotion(
         if (!actionAdmissionAllows(ride->action)) {
             return StartOutcome::Impossible;
         }
-        return beginAction(std::move(ride->action), std::move(ride->legs))
+        return beginAction(ride->action, std::move(ride->legs))
             ? StartOutcome::Started
             : StartOutcome::Refused;
     }
@@ -678,7 +678,7 @@ GameplaySession::StartOutcome GameplaySession::tryStartMirrorAction(
         lastMirrorSwapDestinations_.clear();
         return StartOutcome::Impossible;
     }
-    if (!beginAction(std::move(action))) {
+    if (!beginAction(action)) {
         lastMirrorSwapDestinations_.clear();
         return StartOutcome::Refused;
     }
@@ -712,7 +712,7 @@ GameplaySession::StartOutcome GameplaySession::tryStartUndoMove()
     if (!actionAdmissionAllows(action)) {
         return StartOutcome::Impossible;
     }
-    if (!beginAction(std::move(action))) {
+    if (!beginAction(action)) {
         return StartOutcome::Refused;
     }
     autoMotionPaused_ = true;
@@ -739,7 +739,7 @@ GameplaySession::StartOutcome GameplaySession::tryStartRestart(
     if (!actionAdmissionAllows(*action)) {
         return StartOutcome::Impossible;
     }
-    if (!beginAction(std::move(*action))) {
+    if (!beginAction(*action)) {
         return StartOutcome::Refused;
     }
     autoMotionPaused_ = false;
@@ -822,7 +822,7 @@ void GameplaySession::setActionDuration(
 }
 
 bool GameplaySession::beginAction(
-    Action action,
+    const Action& action,
     std::vector<GameState> legs,
     std::size_t causalGroup,
     ActionDeferral deferral)

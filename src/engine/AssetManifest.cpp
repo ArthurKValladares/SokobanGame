@@ -818,7 +818,7 @@ const std::string* AssetManifest::musicForLevel(int level) const
 
 TextureSourceIdentity manifestTextureSourceIdentity(
     const AssetManifest::Texture& texture,
-    std::filesystem::path sourcePath)
+    const std::filesystem::path& sourcePath)
 {
     return {
         .source = ExternalTextureSource { sourcePath.lexically_normal() },

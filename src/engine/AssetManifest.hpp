@@ -230,6 +230,6 @@ private:
 // function applies the shared lexical normalization.
 [[nodiscard]] TextureSourceIdentity manifestTextureSourceIdentity(
     const AssetManifest::Texture& texture,
-    std::filesystem::path sourcePath);
+    const std::filesystem::path& sourcePath);
 
 } // namespace sokoban

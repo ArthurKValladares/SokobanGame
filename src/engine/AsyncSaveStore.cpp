@@ -9,12 +9,12 @@ namespace sokoban {
 AsyncSaveStore::AsyncSaveStore(
     std::filesystem::path root,
     std::chrono::milliseconds writeDelay,
-    std::string fileStem,
+    const std::string& fileStem,
     ProfileSections sections)
     : writeDelay_(std::max(writeDelay, std::chrono::milliseconds::zero()))
 {
     channels_.emplace_back(
-        SaveStore(std::move(root), std::move(fileStem), sections));
+        SaveStore(std::move(root), fileStem, sections));
     worker_ = std::thread([this] { workerLoop(); });
 }
 
@@ -44,12 +44,12 @@ AsyncSaveStore::FlushResult::forChannel(int channel) const
 
 int AsyncSaveStore::addChannel(
     std::filesystem::path root,
-    std::string fileStem,
+    const std::string& fileStem,
     ProfileSections sections)
 {
     const std::scoped_lock lock(mutex_);
     channels_.emplace_back(
-        SaveStore(std::move(root), std::move(fileStem), sections));
+        SaveStore(std::move(root), fileStem, sections));
     return static_cast<int>(channels_.size()) - 1;
 }
 
@@ -88,7 +88,7 @@ AsyncSaveStore::PersistenceResult AsyncSaveStore::persistenceResultLocked(
 AsyncSaveStore::PersistenceResult AsyncSaveStore::replaceChannel(
     int channel,
     std::filesystem::path root,
-    std::string fileStem,
+    const std::string& fileStem,
     ProfileSections sections)
 {
     std::unique_lock lock(mutex_);
@@ -106,7 +106,7 @@ AsyncSaveStore::PersistenceResult AsyncSaveStore::replaceChannel(
         return persistence;
     }
 
-    target.store = SaveStore(std::move(root), std::move(fileStem), sections);
+    target.store = SaveStore(std::move(root), fileStem, sections);
     target.status.clear();
     target.lastWriteSucceeded = true;
     target.retryBlocked = false;

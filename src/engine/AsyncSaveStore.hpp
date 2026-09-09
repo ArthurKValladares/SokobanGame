@@ -64,7 +64,7 @@ public:
     explicit AsyncSaveStore(
         std::filesystem::path root,
         std::chrono::milliseconds writeDelay = std::chrono::seconds(2),
-        std::string fileStem = "profile",
+        const std::string& fileStem = "profile",
         ProfileSections sections = ProfileSections::All);
     ~AsyncSaveStore();
 
@@ -81,7 +81,7 @@ public:
     // id. Call only during owner-thread setup, before saves are in flight.
     [[nodiscard]] int addChannel(
         std::filesystem::path root,
-        std::string fileStem,
+        const std::string& fileStem,
         ProfileSections sections);
 
     // Drains the channel's pending write and repoints it at a new store (e.g. a
@@ -90,7 +90,7 @@ public:
     [[nodiscard]] PersistenceResult replaceChannel(
         int channel,
         std::filesystem::path root,
-        std::string fileStem,
+        const std::string& fileStem,
         ProfileSections sections);
 
     [[nodiscard]] SaveStore::LoadResult load(int channel = 0);

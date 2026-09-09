@@ -1813,7 +1813,7 @@ void LevelEditor::addLevelAt(int levelIndex)
 
 void LevelEditor::renameLevel(
     const LevelDirectory& level,
-    std::string name)
+    const std::string& name)
 {
     if (!isActiveLevelDirectory(level)) {
         document_.status =
@@ -1937,7 +1937,7 @@ void LevelEditor::addScreenAt(const LevelDirectory& level, int screenIndex)
 void LevelEditor::renameScreen(
     const LevelDirectory& level,
     int screenIndex,
-    std::string name)
+    const std::string& name)
 {
     if (!isActiveLevelDirectory(level)) {
         document_.status =
