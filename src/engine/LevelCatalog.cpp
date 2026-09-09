@@ -2,11 +2,86 @@
 
 #include <nlohmann/json.hpp>
 
+#include <charconv>
 #include <cstddef>
 #include <fstream>
 #include <stdexcept>
+#include <system_error>
 
 namespace sokoban {
+namespace {
+
+std::optional<int> numberedNameIndex(
+    std::string_view value,
+    std::string_view prefix,
+    std::string_view suffix = {}) noexcept
+{
+    if (!value.starts_with(prefix) || !value.ends_with(suffix) ||
+        value.size() <= prefix.size() + suffix.size()) {
+        return std::nullopt;
+    }
+
+    const char* begin = value.data() + prefix.size();
+    const char* end = value.data() + value.size() - suffix.size();
+    int number = 0;
+    const auto parsed = std::from_chars(begin, end, number);
+    if (parsed.ec != std::errc {} || parsed.ptr != end || number < 0) {
+        return std::nullopt;
+    }
+    return number;
+}
+
+} // namespace
+
+std::optional<int> levelIndexFromDirectoryName(std::string_view name) noexcept
+{
+    return numberedNameIndex(name, "level");
+}
+
+std::optional<int> screenIndexFromFilename(std::string_view name) noexcept
+{
+    return numberedNameIndex(name, "screen", ".scr");
+}
+
+std::string levelDirectoryName(int levelIndex)
+{
+    return "level" + std::to_string(levelIndex);
+}
+
+std::string screenFilename(int screenIndex)
+{
+    return "screen" + std::to_string(screenIndex) + ".scr";
+}
+
+std::filesystem::path levelDirectoryPath(
+    const std::filesystem::path& root,
+    int levelIndex)
+{
+    return root / levelDirectoryName(levelIndex);
+}
+
+std::filesystem::path screenFilePath(
+    const std::filesystem::path& levelDirectory,
+    int screenIndex)
+{
+    return levelDirectory / screenFilename(screenIndex);
+}
+
+std::optional<LevelLocation> levelLocationFromScreenPath(
+    const std::filesystem::path& screenPath)
+{
+    if (!screenPath.has_parent_path()) {
+        return std::nullopt;
+    }
+    const std::optional<int> screen =
+        screenIndexFromFilename(screenPath.filename().string());
+    const std::optional<int> level = levelIndexFromDirectoryName(
+        screenPath.parent_path().filename().string());
+    if (!screen || !level) {
+        return std::nullopt;
+    }
+    return LevelLocation { .level = *level, .screen = *screen };
+}
 
 LevelMetadata loadLevelMetadata(
     const std::filesystem::path& levelDirectory,

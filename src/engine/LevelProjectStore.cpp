@@ -6,7 +6,6 @@
 #include "engine/OverworldMap.hpp"
 
 #include <algorithm>
-#include <charconv>
 #include <stdexcept>
 #include <string_view>
 #include <system_error>
@@ -20,26 +19,6 @@ struct IndexedPath {
     int index = 0;
     std::filesystem::path path;
 };
-
-std::optional<int> numberedName(
-    std::string_view value,
-    std::string_view prefix,
-    std::string_view suffix = {})
-{
-    if (!value.starts_with(prefix) || !value.ends_with(suffix) ||
-        value.size() <= prefix.size() + suffix.size()) {
-        return std::nullopt;
-    }
-
-    const char* begin = value.data() + prefix.size();
-    const char* end = value.data() + value.size() - suffix.size();
-    int number = 0;
-    const auto parsed = std::from_chars(begin, end, number);
-    if (parsed.ec != std::errc {} || parsed.ptr != end || number < 0) {
-        return std::nullopt;
-    }
-    return number;
-}
 
 std::filesystem::path workingPath(
     const std::filesystem::path& root,
@@ -133,9 +112,8 @@ void copyDirectoryContents(
     }
 }
 
-std::vector<IndexedPath> indexedDirectories(
-    const std::filesystem::path& root,
-    std::string_view prefix)
+std::vector<IndexedPath> indexedLevelDirectories(
+    const std::filesystem::path& root)
 {
     std::vector<IndexedPath> entries;
     for (const std::filesystem::directory_entry& entry :
@@ -144,7 +122,7 @@ std::vector<IndexedPath> indexedDirectories(
             continue;
         }
         const std::optional<int> index =
-            numberedName(entry.path().filename().string(), prefix);
+            levelIndexFromDirectoryName(entry.path().filename().string());
         if (index) {
             entries.push_back({ *index, entry.path() });
         }
@@ -161,8 +139,8 @@ std::vector<IndexedPath> indexedScreens(const std::filesystem::path& levelRoot)
         if (!entry.is_regular_file()) {
             continue;
         }
-        const std::optional<int> index = numberedName(
-            entry.path().filename().string(), "screen", ".scr");
+        const std::optional<int> index =
+            screenIndexFromFilename(entry.path().filename().string());
         if (index) {
             screens.push_back({ *index, entry.path() });
         }
@@ -173,7 +151,7 @@ std::vector<IndexedPath> indexedScreens(const std::filesystem::path& levelRoot)
 
 std::vector<IndexedPath> validateProject(const std::filesystem::path& root)
 {
-    const std::vector<IndexedPath> levels = indexedDirectories(root, "level");
+    const std::vector<IndexedPath> levels = indexedLevelDirectories(root);
     std::vector<std::vector<IndexedPath>> screensByLevel;
     screensByLevel.reserve(levels.size());
     for (std::size_t levelIndex = 0; levelIndex < levels.size(); ++levelIndex) {

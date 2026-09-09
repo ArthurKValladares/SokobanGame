@@ -12,9 +12,7 @@
 #include <cmath>
 #include <exception>
 #include <fstream>
-#include <charconv>
 #include <stdexcept>
-#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -40,42 +38,6 @@ bool pathStartsWith(const std::filesystem::path& path, const std::filesystem::pa
     }
 
     return true;
-}
-
-std::optional<int> parseNumberedName(std::string_view value, std::string_view prefix, std::string_view suffix = {})
-{
-    if (!value.starts_with(prefix) || value.size() < prefix.size() + suffix.size()) {
-        return std::nullopt;
-    }
-    if (!suffix.empty() && !value.ends_with(suffix)) {
-        return std::nullopt;
-    }
-
-    const size_t numberStart = prefix.size();
-    const size_t numberEnd = value.size() - suffix.size();
-    if (numberStart == numberEnd) {
-        return std::nullopt;
-    }
-
-    int number = 0;
-    const char* begin = value.data() + numberStart;
-    const char* end = value.data() + numberEnd;
-    const auto result = std::from_chars(begin, end, number);
-    if (result.ec != std::errc {} || result.ptr != end || number < 0) {
-        return std::nullopt;
-    }
-
-    return number;
-}
-
-std::filesystem::path levelDirectoryPath(const std::filesystem::path& root, int levelIndex)
-{
-    return root / ("level" + std::to_string(levelIndex));
-}
-
-std::filesystem::path screenFilePath(const std::filesystem::path& levelDirectory, int screenIndex)
-{
-    return levelDirectory / ("screen" + std::to_string(screenIndex) + ".scr");
 }
 
 std::string screenContents(const std::vector<std::string>& rows)
@@ -163,9 +125,9 @@ void LevelEditor::initialize(
     document_.runtimeLevelRoot = runtimeLevelRoot;
     document_.browserRoot = sourceLevelRoot;
 
-    const std::filesystem::path currentSourcePath = document_.browserRoot /
-        ("level" + std::to_string(currentLevel)) /
-        ("screen" + std::to_string(currentScreen) + ".scr");
+    const std::filesystem::path currentSourcePath = screenFilePath(
+        levelDirectoryPath(document_.browserRoot, currentLevel),
+        currentScreen);
     if (std::filesystem::exists(currentSourcePath)) {
         (void)loadDocument(currentSourcePath, false);
     } else {
@@ -2300,7 +2262,8 @@ std::vector<LevelEditor::LevelDirectory> LevelEditor::collectLevelDirectories() 
             continue;
         }
 
-        const std::optional<int> levelIndex = parseNumberedName(entry.path().filename().string(), "level");
+        const std::optional<int> levelIndex =
+            levelIndexFromDirectoryName(entry.path().filename().string());
         if (!levelIndex) {
             continue;
         }
@@ -2318,7 +2281,8 @@ std::vector<LevelEditor::LevelDirectory> LevelEditor::collectLevelDirectories() 
                 continue;
             }
 
-            const std::optional<int> screenIndex = parseNumberedName(screenEntry.path().filename().string(), "screen", ".scr");
+            const std::optional<int> screenIndex =
+                screenIndexFromFilename(screenEntry.path().filename().string());
             if (!screenIndex) {
                 continue;
             }
@@ -2388,7 +2352,8 @@ std::vector<LevelEditor::LevelDirectory> LevelEditor::collectDeletedLevels() con
         }
         if (entry.is_directory(error)) {
             LevelDirectory level {
-                .index = parseNumberedName(entry.path().filename().string(), "level").value_or(0),
+                .index = levelIndexFromDirectoryName(
+                    entry.path().filename().string()).value_or(0),
                 .path = entry.path(),
             };
 
@@ -2400,7 +2365,9 @@ std::vector<LevelEditor::LevelDirectory> LevelEditor::collectDeletedLevels() con
                     continue;
                 }
 
-                const std::optional<int> screenIndex = parseNumberedName(screenEntry.path().filename().string(), "screen", ".scr");
+                const std::optional<int> screenIndex =
+                    screenIndexFromFilename(
+                        screenEntry.path().filename().string());
                 if (!screenIndex) {
                     continue;
                 }

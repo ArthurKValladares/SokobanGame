@@ -60,6 +60,48 @@ void testInvalidSavedLocationFallsBackToStart()
         "empty catalog falls back to first screen");
 }
 
+void testPuzzlePathConvention()
+{
+    check(sokoban::levelIndexFromDirectoryName("level0") == 0,
+        "zero level index parses");
+    check(sokoban::levelIndexFromDirectoryName("level0042") == 42,
+        "numeric level spelling parses");
+    check(!sokoban::levelIndexFromDirectoryName("level").has_value(),
+        "level name requires an index");
+    check(!sokoban::levelIndexFromDirectoryName("level-1").has_value(),
+        "negative level index is rejected");
+    check(!sokoban::levelIndexFromDirectoryName("Level1").has_value(),
+        "level prefix is case-sensitive");
+
+    check(sokoban::screenIndexFromFilename("screen3.scr") == 3,
+        "screen filename parses");
+    check(!sokoban::screenIndexFromFilename("screen3.txt").has_value(),
+        "screen extension is required");
+    check(!sokoban::screenIndexFromFilename(
+              "screen999999999999999999999999.scr").has_value(),
+        "overflowing screen index is rejected");
+
+    const std::filesystem::path root = "project/levels";
+    const std::filesystem::path level =
+        sokoban::levelDirectoryPath(root, 12);
+    const std::filesystem::path screen =
+        sokoban::screenFilePath(level, 3);
+    check(level == root / "level12",
+        "level path uses canonical unpadded name");
+    check(screen == root / "level12/screen3.scr",
+        "screen path uses canonical unpadded name");
+    check(sokoban::levelLocationFromScreenPath(screen) ==
+            sokoban::LevelLocation { .level = 12, .screen = 3 },
+        "screen path resolves to its puzzle location");
+    check(sokoban::levelLocationFromScreenPath(
+              "project/levels/level02/screen003.scr") ==
+            sokoban::LevelLocation { .level = 2, .screen = 3 },
+        "path interpretation matches accepted numeric spelling");
+    check(!sokoban::levelLocationFromScreenPath(
+              "project/levels/overworld/screen3.scr").has_value(),
+        "overworld screen is not a puzzle location");
+}
+
 void testOptionalLevelMetadataRoundTrips()
 {
     const auto unique =
@@ -93,6 +135,7 @@ int main()
     testValidSavedLocationIsPreserved();
     testCatalogBoundaries();
     testInvalidSavedLocationFallsBackToStart();
+    testPuzzlePathConvention();
     testOptionalLevelMetadataRoundTrips();
 
     if (failures != 0) {

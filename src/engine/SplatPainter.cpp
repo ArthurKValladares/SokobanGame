@@ -6,62 +6,12 @@
 #include "engine/render/ImageData.hpp"
 #include "engine/render/PngWriter.hpp"
 
-#include <charconv>
 #include <exception>
 #include <filesystem>
-#include <string_view>
 #include <system_error>
 #include <utility>
 
 namespace sokoban {
-namespace {
-
-// `<prefix><digits><suffix>` -> the digits, or nothing.
-[[nodiscard]] std::optional<int> parseNumbered(
-    std::string_view value,
-    std::string_view prefix,
-    std::string_view suffix = {})
-{
-    if (!value.starts_with(prefix) ||
-        value.size() < prefix.size() + suffix.size()) {
-        return std::nullopt;
-    }
-    if (!suffix.empty() && !value.ends_with(suffix)) {
-        return std::nullopt;
-    }
-    const std::size_t begin = prefix.size();
-    const std::size_t end = value.size() - suffix.size();
-    if (begin == end) {
-        return std::nullopt;
-    }
-    int number = 0;
-    const auto result =
-        std::from_chars(value.data() + begin, value.data() + end, number);
-    if (result.ec != std::errc {} ||
-        result.ptr != value.data() + end ||
-        number < 0) {
-        return std::nullopt;
-    }
-    return number;
-}
-
-} // namespace
-
-std::optional<LevelLocation> levelLocationFromScreenPath(
-    const std::filesystem::path& documentPath)
-{
-    if (!documentPath.has_parent_path()) {
-        return std::nullopt;
-    }
-    const std::optional<int> screen = parseNumbered(
-        documentPath.filename().string(), "screen", ".scr");
-    const std::optional<int> level = parseNumbered(
-        documentPath.parent_path().filename().string(), "level");
-    if (!screen || !level) {
-        return std::nullopt;
-    }
-    return LevelLocation { .level = *level, .screen = *screen };
-}
 
 CreatedSplatMap createBlankSplatMap(
     LevelLocation location,

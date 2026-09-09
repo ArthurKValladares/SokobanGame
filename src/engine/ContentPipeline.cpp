@@ -24,7 +24,6 @@
 #include <limits>
 #include <map>
 #include <optional>
-#include <regex>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -688,8 +687,6 @@ private:
 
     void addLevels()
     {
-        const std::regex levelPattern(R"(^level([0-9]+)$)");
-        const std::regex screenPattern(R"(^screen([0-9]+)\.scr$)");
         std::map<int, std::set<int>> screens;
 
         if (!manifest_) {
@@ -793,27 +790,27 @@ private:
                     levelDirectory.path().filename() == "overworld")) {
                 continue;
             }
-            std::smatch levelMatch;
             const std::string levelName = levelDirectory.path().filename().string();
-            if (!std::regex_match(levelName, levelMatch, levelPattern)) {
+            const std::optional<int> levelIndex =
+                levelIndexFromDirectoryName(levelName);
+            if (!levelIndex) {
                 throw std::runtime_error("unexpected level directory: " + levelDirectory.path().string());
             }
-            const int levelIndex = std::stoi(levelMatch[1].str());
-            auto& levelScreens = screens[levelIndex];
+            auto& levelScreens = screens[*levelIndex];
             for (const auto& screenFile : std::filesystem::directory_iterator(levelDirectory.path())) {
                 if (!screenFile.is_regular_file()) {
                     throw std::runtime_error("unexpected entry in level directory: " + screenFile.path().string());
                 }
-                std::smatch screenMatch;
                 const std::string screenName = screenFile.path().filename().string();
                 if (screenName == levelMetadataFilename) {
                     continue;
                 }
-                if (!std::regex_match(screenName, screenMatch, screenPattern)) {
+                const std::optional<int> screenIndex =
+                    screenIndexFromFilename(screenName);
+                if (!screenIndex) {
                     throw std::runtime_error("unexpected level file: " + screenFile.path().string());
                 }
-                const int screenIndex = std::stoi(screenMatch[1].str());
-                levelScreens.insert(screenIndex);
+                levelScreens.insert(*screenIndex);
                 const Level level = Level::loadFromFile(screenFile.path());
                 if (!level.selectors().empty()) {
                     throw std::runtime_error(

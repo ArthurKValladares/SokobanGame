@@ -121,11 +121,6 @@ private:
     uint64_t revision_ = 0;
 };
 
-// Level/screen named by a `.../level<N>/screen<M>.scr` path, or nothing when
-// the path does not follow that convention.
-[[nodiscard]] std::optional<LevelLocation> levelLocationFromScreenPath(
-    const std::filesystem::path& documentPath);
-
 struct CreatedSplatMap {
     bool created = false;
     // Manifest-relative path, ready to become a texture entry.

@@ -1635,10 +1635,9 @@ std::filesystem::path Application::screenPath(
     int levelIndex,
     int screenIndex) const
 {
-    return assetRoot_ /
-        "levels" /
-        ("level" + std::to_string(levelIndex)) /
-        ("screen" + std::to_string(screenIndex) + ".scr");
+    return screenFilePath(
+        levelDirectoryPath(assetRoot_ / "levels", levelIndex),
+        screenIndex);
 }
 
 std::filesystem::path Application::overworldPath() const
@@ -1665,8 +1664,7 @@ void Application::buildLevelCatalog()
         }
         screenCounts.push_back(screens);
         levelMetadata_.push_back(loadLevelMetadata(
-            assetRoot_ / "levels" /
-                ("level" + std::to_string(level)),
+            levelDirectoryPath(assetRoot_ / "levels", level),
             static_cast<std::size_t>(screens)));
     }
     std::vector<LevelLocation> selectorTargets;
