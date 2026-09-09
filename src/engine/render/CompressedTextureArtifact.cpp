@@ -134,7 +134,7 @@ std::vector<std::byte> compressBc7(
     std::vector<std::byte> result(
         static_cast<std::size_t>(blocksWide) * blocksHigh *
         BC7ENC16_BLOCK_SIZE);
-    std::array<uint8_t, 4U * 4U * 4U> block {};
+    std::array<uint8_t, 64> block {};
     for (uint32_t blockY = 0; blockY < blocksHigh; ++blockY) {
         for (uint32_t blockX = 0; blockX < blocksWide; ++blockX) {
             for (uint32_t y = 0; y < 4; ++y) {

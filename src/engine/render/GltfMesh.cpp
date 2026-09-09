@@ -811,10 +811,10 @@ GltfSourceTransform makeGltfSourceTransform(
     }
     if (options.rotateHalfTurn) {
         for (uint32_t column = 0; column < 4; ++column) {
-            modelFromSource.values[column * 4] =
-                -modelFromSource.values[column * 4];
-            modelFromSource.values[column * 4 + 1] =
-                -modelFromSource.values[column * 4 + 1];
+            const std::size_t offset = static_cast<std::size_t>(column) * 4U;
+            modelFromSource.values[offset] = -modelFromSource.values[offset];
+            modelFromSource.values[offset + 1U] =
+                -modelFromSource.values[offset + 1U];
         }
         if (!options.preserveSourceScale) {
             modelFromSource.values[12] += 1.0f;

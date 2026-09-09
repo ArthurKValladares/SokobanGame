@@ -26,9 +26,12 @@ constexpr std::array<std::byte, 8> pipelineCacheMagic {
     static_cast<std::byte>('N'), static_cast<std::byte>('P'),
 };
 constexpr uint32_t pipelineCacheFormatVersion = 1;
-constexpr std::size_t maximumPayloadBytes = 64U * 1024U * 1024U;
+constexpr std::size_t maximumPayloadBytes =
+    std::size_t { 64 } * 1024U * 1024U;
 constexpr std::size_t headerBytes = pipelineCacheMagic.size() +
-    sizeof(uint32_t) * 3 + VK_UUID_SIZE + sizeof(uint64_t) * 2;
+    sizeof(uint32_t) * std::size_t { 3 } +
+    std::size_t { VK_UUID_SIZE } +
+    sizeof(uint64_t) * std::size_t { 2 };
 
 template <typename Integer>
 void appendLittleEndian(std::vector<std::byte>& output, Integer value)

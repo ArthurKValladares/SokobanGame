@@ -29,8 +29,10 @@ EditorInteraction::BrushPreview EditorInteraction::brushPreview(
         return preview;
     }
 
-    preview.vertices.reserve((brushRings + 1) * brushSegments);
-    preview.indices.reserve(brushRings * brushSegments * 6);
+    preview.vertices.reserve(
+        static_cast<std::size_t>(brushRings + 1) * brushSegments);
+    preview.indices.reserve(
+        static_cast<std::size_t>(brushRings) * brushSegments * 6U);
     preview.rim.reserve(brushSegments);
 
     const auto projectRingPoint = [&](float radius, int segment) {

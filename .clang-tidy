@@ -26,7 +26,7 @@
 # already made the other way. None of them belongs in a gate.
 #
 # The top four are not. 104 of their 104 checks are about correctness and
-# cost, and 94 of them pass clean today - so they are enabled here. The 10
+# cost, and 95 of them pass clean today - so they are enabled here. The 9
 # that do not pass are excluded by name, each with its current count, which
 # makes the exclusion list a work queue rather than a hole. A gate that starts
 # red is a gate people learn to ignore.
@@ -42,7 +42,6 @@ Checks: >
   portability-*,
   -bugprone-easily-swappable-parameters,
   -bugprone-unchecked-optional-access,
-  -bugprone-implicit-widening-of-multiplication-result,
   -bugprone-branch-clone,
   -bugprone-suspicious-include,
   -bugprone-inc-dec-in-conditions,
@@ -53,7 +52,6 @@ Checks: >
 
 # The work queue, in the order worth doing:
 #
-#   bugprone-implicit-widening-of-mult-result  5
 #   bugprone-branch-clone                      4
 #   performance-enum-size                      3
 #   bugprone-inc-dec-in-conditions             2
@@ -73,6 +71,8 @@ Checks: >
 # made explicit or rewritten to remain size-based.
 # `bugprone-optional-value-conversion` was enabled after a clean full-source
 # scan reported no findings.
+# `bugprone-implicit-widening-of-multiplication-result` followed after seven
+# arithmetic boundaries were widened or made size-based.
 #
 # Two are excluded on their merits rather than as a queue:
 #

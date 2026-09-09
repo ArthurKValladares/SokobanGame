@@ -1724,7 +1724,7 @@ void VulkanRenderer::initializeDebugUi()
         2U, activeResources_.swapchain->imageCount());
     initInfo.PipelineInfoMain.PipelineRenderingCreateInfo = pipelineRendering;
     initInfo.UseDynamicRendering = true;
-    initInfo.MinAllocationSize = 1024 * 1024;
+    initInfo.MinAllocationSize = VkDeviceSize { 1024 } * 1024;
 
     if (!ImGui_ImplVulkan_Init(&initInfo)) {
         throw std::runtime_error("ImGui_ImplVulkan_Init failed");
