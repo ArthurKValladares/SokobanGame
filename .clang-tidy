@@ -42,7 +42,6 @@ Checks: >
   portability-*,
   -bugprone-easily-swappable-parameters,
   -bugprone-unchecked-optional-access,
-  -bugprone-suspicious-include,
   -bugprone-switch-missing-default-case,
   -performance-enum-size,
   -performance-no-automatic-move,
@@ -74,6 +73,8 @@ Checks: >
 # branches were consolidated without changing their fallback behavior.
 # `bugprone-inc-dec-in-conditions` followed after index iteration in compound
 # predicates was expressed with non-mutating views.
+# `bugprone-suspicious-include` remains enabled; the two intentional C source
+# inclusions in MiniaudioImpl.cpp carry local rationale suppressions.
 #
 # Two are excluded on their merits rather than as a queue:
 #
