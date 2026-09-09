@@ -44,6 +44,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <optional>
 #include <string>
@@ -386,6 +387,13 @@ struct ExpectedBlock {
     std::vector<ScalarKind> memberKinds;
 };
 
+template <typename Type>
+constexpr uint32_t byteSize()
+{
+    static_assert(sizeof(Type) <= std::numeric_limits<uint32_t>::max());
+    return static_cast<uint32_t>(sizeof(Type));
+}
+
 std::vector<ExpectedBlock> expectedBlocks()
 {
     return {
@@ -404,7 +412,7 @@ std::vector<ExpectedBlock> expectedBlocks()
             // The std140 trap. An array of 48-byte structs keeps a 48-byte
             // stride only because 48 is already a multiple of 16; a member
             // that broke that would silently move every light after the first.
-            .memberArrayStrides = { { 3u, sizeof(PointLightUniform) } },
+            .memberArrayStrides = { { 3u, byteSize<PointLightUniform>() } },
             .memberKinds = {
                 SOKOBAN_MEMBER_KIND(SceneFrameUniform, clipFromWorld),
                 SOKOBAN_MEMBER_KIND(SceneFrameUniform, shadowFromWorld),
@@ -421,8 +429,8 @@ std::vector<ExpectedBlock> expectedBlocks()
                 offsetof(GpuSkinningInstance, modelFromSource),
                 offsetof(GpuSkinningInstance, normalFromSource),
             },
-            .elementStride = sizeof(GpuSkinningInstance),
-            .memberArrayStrides = { { 0u, sizeof(Mat4) } },
+            .elementStride = byteSize<GpuSkinningInstance>(),
+            .memberArrayStrides = { { 0u, byteSize<Mat4>() } },
             .memberKinds = {
                 SOKOBAN_MEMBER_KIND(GpuSkinningInstance, palette),
                 SOKOBAN_MEMBER_KIND(GpuSkinningInstance, modelFromSource),
@@ -444,10 +452,10 @@ std::vector<ExpectedBlock> expectedBlocks()
                 offsetof(GpuDrawInstance, gridColor),
                 offsetof(GpuDrawInstance, textureOptions),
             },
-            .elementStride = sizeof(GpuDrawInstance),
+            .elementStride = byteSize<GpuDrawInstance>(),
             .memberArrayStrides = {
-                { 0u, sizeof(Vec4) },
-                { 1u, sizeof(Vec4) },
+                { 0u, byteSize<Vec4>() },
+                { 1u, byteSize<Vec4>() },
             },
             .memberKinds = {
                 SOKOBAN_MEMBER_KIND(GpuDrawInstance, vertices),
@@ -474,7 +482,7 @@ std::vector<ExpectedBlock> expectedBlocks()
                 offsetof(GpuMaterial, textureUvSets),
                 offsetof(GpuMaterial, materialState),
             },
-            .elementStride = sizeof(GpuMaterial),
+            .elementStride = byteSize<GpuMaterial>(),
             .memberArrayStrides = {},
             // The lane that matters most: three float lanes then four uint
             // lanes. Offsets alone cannot tell those apart.

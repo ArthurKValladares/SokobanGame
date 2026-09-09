@@ -42,6 +42,8 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Maintainability follow-up, 2026-09-08 (complete incremental PBR import):** Editor-appended models now run the same glTF material discovery and logical-to-descriptor remapping as startup. Existing source identities retain their descriptor slots, newly discovered maps claim reserved high slots downward, and capacity exhaustion is rejected before the live heap changes. A GLB fixture with normal, metallic-roughness, emissive, and occlusion maps verifies that appended and startup-loaded models resolve equivalent bindings while earlier descriptors remain stable.
 
+**Maintainability follow-up, 2026-09-09 (MSVC warning gate and stale artifacts):** The Windows Debug/Release CI matrix now enables the same warnings-as-errors policy as Linux. The known shadowed-`pi` and GPU-ABI size-conversion diagnostics are resolved without suppressions, the skinned-material shader comment describes its current consumer, and the disposal-only undefined-member shell probe has been removed now that normal builds and link steps provide its maintained replacement.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
@@ -316,11 +318,11 @@ At call sites with several booleans, such as overlay/render-pass mode selection,
 
 ### 5. Remove or repair demonstrably outdated material
 
-- Replace the obsolete “Nothing reads it yet; F3b-2…” comment at `shaders/skinned_model.vert.glsl:32`; the material varying is now part of the fragment interface. Historical implementation phases obscure the current shader contract.
+- The obsolete skinned-material varying comment was replaced with its current fragment-stage contract on 2026-09-09.
 - HANDOFF references `codequality-review.html` and `enginereview.html`, neither present in the tracked workspace inspected here. Its chronological texture-extraction guidance also changes direction across sections. Replace the current-status section with a compact authoritative status and move history to a dated archive; preserve reasoning behind rejected changes.
-- Remove `_to_delete/check_members_are_defined.sh` once any useful purpose has a maintained replacement. Its current location already marks it as disposal material.
+- `_to_delete/check_members_are_defined.sh` was removed on 2026-09-09; ordinary target builds and links are the maintained undefined-member check.
 - Reconcile the headless script's obsolete test counts and README/CI statements about configuration-specific smoke coverage. The Linux workflow enables application smoke on Debug; the Release matrix entry does not enable the same smoke options.
-- Resolve the actual C4459 warning in `ApplicationDebugUi.cpp` and align Windows warnings-as-errors with the intended Linux policy. Avoid treating a build with warnings as warning-free because tests passed.
+- The known MSVC diagnostics were resolved and Windows CI enabled `SOKOBAN_WARNINGS_AS_ERRORS` on 2026-09-09.
 - Treat `.clang-tidy` exclusions as a named, owned backlog. Re-enable targeted categories after resolving their remaining findings. Replace stale measured-count comments as those counts change.
 - Keep useful invariant comments; shorten narratives about abandoned experiments and migration chronology in production code. Do not mass-delete comments or apply a repository-wide formatter just to reduce line counts. `.clang-format` itself says the repository has not yet adopted a formatting pass; choose that policy separately.
 

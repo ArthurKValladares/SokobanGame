@@ -29,8 +29,8 @@ layout(location = 6) out vec3 outWorldPosition;
 layout(location = 7) flat out uint outDrawInstance;
 layout(location = 8) out vec4 outTangent;
 layout(location = 9) out vec2 outUv1;
-// Which material this vertex belongs to. Nothing reads it yet; F3b-2 is
-// where it stops being the vertex's job to carry a texture index at all.
+// Which material this vertex belongs to. The fragment stage uses it to select
+// the model's material-buffer entry.
 layout(location = 10) flat out uint outMaterialIndex;
 
 #include "Skinning.glsl"

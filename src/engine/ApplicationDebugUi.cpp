@@ -74,7 +74,6 @@ void drawSunDirectionPreview(Vec3 direction, float tiltDegrees)
         ImVec2 { sideCenter.x, sideCenter.y + radius },
         muted);
 
-    constexpr float pi = 3.14159265358979323846f;
     const float signedHorizontalLength =
         std::sin(tiltDegrees * pi / 180.0f);
     const ImVec2 sideEnd {

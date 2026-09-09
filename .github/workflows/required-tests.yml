@@ -377,6 +377,7 @@ jobs:
           cmake -S . -B build -G "Visual Studio 17 2022" -A x64
           -DSOKOBAN_BUILD_TESTS=ON
           -DSOKOBAN_BUILD_VULKAN_SMOKE_TESTS=OFF
+          -DSOKOBAN_WARNINGS_AS_ERRORS=ON
 
       - name: Build ${{ matrix.build_type }}
         run: cmake --build build --config ${{ matrix.build_type }} --parallel
