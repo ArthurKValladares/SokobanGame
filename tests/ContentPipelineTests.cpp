@@ -1,3 +1,6 @@
+#include "ScopedTestDirectory.hpp"
+#include "TestHarness.hpp"
+
 #include "engine/ContentPipeline.hpp"
 #include "engine/LevelEditor.hpp"
 #include "engine/TileThumbnailBake.hpp"
@@ -7,7 +10,6 @@
 #include "engine/render/PngWriter.hpp"
 
 #include <array>
-#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -19,27 +21,6 @@
 #include <vector>
 
 namespace {
-
-int failures = 0;
-
-void check(bool condition, const char* label)
-{
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL: " << label << '\n';
-    }
-}
-
-template <typename Fn>
-void checkThrows(Fn&& fn, const char* label)
-{
-    try {
-        fn();
-        ++failures;
-        std::cerr << "FAIL (no throw): " << label << '\n';
-    } catch (const std::exception&) {
-    }
-}
 
 template <typename Fn>
 void checkThrowsContaining(
@@ -62,28 +43,6 @@ void checkThrowsContaining(
         }
     }
 }
-
-class TempDirectory {
-public:
-    TempDirectory()
-    {
-        const auto id = std::chrono::steady_clock::now().time_since_epoch().count();
-        path_ = std::filesystem::temp_directory_path() /
-            ("sokoban-content-pipeline-" + std::to_string(id));
-        std::filesystem::create_directories(path_);
-    }
-
-    ~TempDirectory()
-    {
-        std::error_code error;
-        std::filesystem::remove_all(path_, error);
-    }
-
-    [[nodiscard]] const std::filesystem::path& path() const { return path_; }
-
-private:
-    std::filesystem::path path_;
-};
 
 void writeFile(const std::filesystem::path& path, std::string_view contents = "data")
 {
@@ -469,71 +428,71 @@ const sokoban::ResolvedMaterialTexture* findMaterialTexture(
 
 void testInventoryAndStaging()
 {
-    TempDirectory temp;
+    ScopedTestDirectory temp("sokoban-content-pipeline");
     const auto roots = createValidContent(temp.path());
     const sokoban::ContentInventory inventory = sokoban::collectContentInventory(roots);
 
-    check(contains(inventory, "manifest.json"), "manifest included");
-    check(
+    CHECK_MESSAGE(contains(inventory, "manifest.json"), "manifest included");
+    CHECK_MESSAGE(
         contains(inventory, "animation_catalog.json"),
         "animation catalog included");
-    check(contains(inventory, "models/hero.gltf"), "model included");
-    check(contains(inventory, "models/hero.bin"), "external glTF buffer included");
-    check(contains(inventory, "models/sword.gltf"), "attachment mesh included");
-    check(contains(inventory, "models/sword.bin"), "attachment dependency included");
-    check(contains(inventory, "models/LICENSE.txt"), "nearby asset license included");
-    check(contains(inventory, "ui/Karla-Regular.ttf"), "UI font included");
-    check(contains(inventory, "ui/OFL.txt"), "UI font license included");
-    check(
+    CHECK_MESSAGE(contains(inventory, "models/hero.gltf"), "model included");
+    CHECK_MESSAGE(contains(inventory, "models/hero.bin"), "external glTF buffer included");
+    CHECK_MESSAGE(contains(inventory, "models/sword.gltf"), "attachment mesh included");
+    CHECK_MESSAGE(contains(inventory, "models/sword.bin"), "attachment dependency included");
+    CHECK_MESSAGE(contains(inventory, "models/LICENSE.txt"), "nearby asset license included");
+    CHECK_MESSAGE(contains(inventory, "ui/Karla-Regular.ttf"), "UI font included");
+    CHECK_MESSAGE(contains(inventory, "ui/OFL.txt"), "UI font license included");
+    CHECK_MESSAGE(
         contains(inventory, "custom/ui/main-menu-rogue-pushing-rock-4k.png"),
         "title background included");
-    check(
+    CHECK_MESSAGE(
         contains(
             inventory,
             "kenney_input-prompts_1.5/Keyboard & Mouse/keyboard-&-mouse_sheet_default.xml"),
         "input prompt atlas included");
-    check(
+    CHECK_MESSAGE(
         contains(inventory, "kenney_input-prompts_1.5/License.txt"),
         "input prompt license included");
-    check(contains(inventory, "levels/level0/screen0.scr"), "playable level included");
-    check(contains(inventory, "levels/overworld.scr"), "overworld included");
-    check(contains(inventory, "levels/level0/metadata.json"),
+    CHECK_MESSAGE(contains(inventory, "levels/level0/screen0.scr"), "playable level included");
+    CHECK_MESSAGE(contains(inventory, "levels/overworld.scr"), "overworld included");
+    CHECK_MESSAGE(contains(inventory, "levels/level0/metadata.json"),
         "level names included");
-    check(!contains(inventory, "levels/Deleted/level9/screen0.scr"), "deleted level excluded");
-    check(contains(inventory, "shaders/model.vert.glsl.spv"), "compiled shader included");
-    check(contains(inventory, "shaders/ui.frag.glsl.spv"),
+    CHECK_MESSAGE(!contains(inventory, "levels/Deleted/level9/screen0.scr"), "deleted level excluded");
+    CHECK_MESSAGE(contains(inventory, "shaders/model.vert.glsl.spv"), "compiled shader included");
+    CHECK_MESSAGE(contains(inventory, "shaders/ui.frag.glsl.spv"),
         "dedicated UI fragment shader included");
 
     const std::filesystem::path output = temp.path() / "package/assets";
     writeFile(output / "stale.file");
     const sokoban::ContentInventory staged = sokoban::stageContent(roots, output, "1.2.3");
-    check(
+    CHECK_MESSAGE(
         staged.files.size() ==
             inventory.files.size() + inventory.textureSources.size(),
         "stage returns source and generated texture artifacts");
-    check(std::filesystem::is_regular_file(output / "content.index"), "content index written");
-    check(
+    CHECK_MESSAGE(std::filesystem::is_regular_file(output / "content.index"), "content index written");
+    CHECK_MESSAGE(
         std::ifstream(output / "content.index").good(),
         "content index readable");
-    check(std::filesystem::is_regular_file(output / "models/hero.bin"), "dependency staged");
+    CHECK_MESSAGE(std::filesystem::is_regular_file(output / "models/hero.bin"), "dependency staged");
     for (const sokoban::TextureSourceIdentity& identity :
          inventory.textureSources) {
         const std::filesystem::path artifact =
             sokoban::compressedTextureArtifactPath(identity);
-        check(
+        CHECK_MESSAGE(
             std::filesystem::is_regular_file(output / artifact),
             "BC7 KTX2 artifact staged for every texture identity");
         const sokoban::CompressedTextureArtifact parsed =
             sokoban::loadBc7Ktx2(output / artifact);
-        check(parsed.width == 2 && parsed.height == 2,
+        CHECK_MESSAGE(parsed.width == 2 && parsed.height == 2,
             "staged KTX2 dimensions preserved");
     }
-    check(!std::filesystem::exists(output / "stale.file"), "stale output removed");
+    CHECK_MESSAGE(!std::filesystem::exists(output / "stale.file"), "stale output removed");
 }
 
 void testStagedContentIndexValidation()
 {
-    TempDirectory temp;
+    ScopedTestDirectory temp("sokoban-content-pipeline");
     const auto roots = createValidContent(temp.path());
     const std::filesystem::path output = temp.path() / "package/assets";
 
@@ -572,7 +531,7 @@ void testStagedContentIndexValidation()
 
 void testRuntimeIndexRefreshTracksEditorMutations()
 {
-    TempDirectory temp;
+    ScopedTestDirectory temp("sokoban-content-pipeline");
     const auto roots = createValidContent(temp.path());
     const std::filesystem::path output = temp.path() / "package/assets";
     (void)sokoban::stageContent(roots, output, "1.2.3");
@@ -584,28 +543,28 @@ void testRuntimeIndexRefreshTracksEditorMutations()
     checkThrows(
         [&] { sokoban::validateContentPackage(output, "1.2.3"); },
         "runtime changes invalidate the previous content index");
-    check(
+    CHECK_MESSAGE(
         sokoban::refreshContentPackageIndex(output),
         "an existing staged package refreshes its index");
     sokoban::validateContentPackage(output, "1.2.3");
-    check(
+    CHECK_MESSAGE(
         readFile(output / "content.index").find("game-version 1.2.3\n") !=
             std::string::npos,
         "index refresh preserves the staged game version");
 
     const std::filesystem::path sourceOnly = temp.path() / "source-only";
     std::filesystem::create_directories(sourceOnly);
-    check(
+    CHECK_MESSAGE(
         !sokoban::refreshContentPackageIndex(sourceOnly),
         "source-only editor roots do not acquire a package index");
-    check(
+    CHECK_MESSAGE(
         !std::filesystem::exists(sourceOnly / "content.index"),
         "source-only roots remain unchanged");
 }
 
 void testLevelEditorPublishesAStartupValidPackage()
 {
-    TempDirectory temp;
+    ScopedTestDirectory temp("sokoban-content-pipeline");
     const auto roots = createValidContent(temp.path());
     const std::filesystem::path output = temp.path() / "package/assets";
     (void)sokoban::stageContent(roots, output, "1.2.3");
@@ -615,20 +574,20 @@ void testLevelEditorPublishesAStartupValidPackage()
     const std::filesystem::path screen =
         roots.levels / "level0/screen0.scr";
     editor.resizeDocument(4, 2, false);
-    check(editor.saveDocument(screen), "level resize publishes successfully");
+    CHECK_MESSAGE(editor.saveDocument(screen), "level resize publishes successfully");
     sokoban::validateContentPackage(output, "1.2.3");
 
     std::vector<sokoban::LevelEditor::LevelDirectory> levels =
         editor.collectLevelDirectories();
     editor.addScreenAt(levels.front(), 1);
-    check(
+    CHECK_MESSAGE(
         std::filesystem::is_regular_file(output / "levels/level0/screen1.scr"),
         "added screen reaches the runtime package");
     sokoban::validateContentPackage(output, "1.2.3");
 
     levels = editor.collectLevelDirectories();
     editor.deleteScreen(levels.front(), 1);
-    check(
+    CHECK_MESSAGE(
         !std::filesystem::exists(output / "levels/level0/screen1.scr"),
         "deleted screen leaves the runtime package");
     sokoban::validateContentPackage(output, "1.2.3");
@@ -636,7 +595,7 @@ void testLevelEditorPublishesAStartupValidPackage()
 
 void testUnassignedLegacySelectorIsStaged()
 {
-    TempDirectory temp;
+    ScopedTestDirectory temp("sokoban-content-pipeline");
     const auto roots = createValidContent(temp.path());
     writeFile(
         roots.levels / "overworld.scr",
@@ -648,14 +607,14 @@ void testUnassignedLegacySelectorIsStaged()
     const std::filesystem::path output =
         temp.path() / "unassigned-legacy-package/assets";
     (void)sokoban::stageContent(roots, output, "1.2.3");
-    check(
+    CHECK_MESSAGE(
         std::filesystem::is_regular_file(output / "levels/overworld.scr"),
         "legacy overworld with an unassigned selector is staged");
 }
 
 void testComposedOverworldIsValidatedAndStaged()
 {
-    TempDirectory temp;
+    ScopedTestDirectory temp("sokoban-content-pipeline");
     const auto roots = createValidContent(temp.path());
     std::filesystem::remove(roots.levels / "overworld.scr");
     writeFile(
@@ -680,27 +639,27 @@ void testComposedOverworldIsValidatedAndStaged()
 
     const sokoban::ContentInventory inventory =
         sokoban::collectContentInventory(roots);
-    check(
+    CHECK_MESSAGE(
         contains(inventory, "levels/overworld/layout.json"),
         "composed overworld layout included");
-    check(
+    CHECK_MESSAGE(
         contains(inventory, "levels/overworld/screen1.scr"),
         "composed overworld screen included");
-    check(
+    CHECK_MESSAGE(
         contains(inventory, "levels/level0/screen1.scr"),
         "uncovered puzzle screen does not block composed staging");
-    check(
+    CHECK_MESSAGE(
         !contains(inventory, "levels/overworld.scr"),
         "legacy overworld omitted when layout exists");
 
     const std::filesystem::path output =
         temp.path() / "composed-package/assets";
     (void)sokoban::stageContent(roots, output, "1.2.3");
-    check(
+    CHECK_MESSAGE(
         std::filesystem::is_regular_file(
             output / "levels/overworld/layout.json"),
         "composed layout staged");
-    check(
+    CHECK_MESSAGE(
         std::filesystem::is_regular_file(
             output / "levels/overworld/screen1.scr"),
         "composed screen staged");
@@ -708,7 +667,7 @@ void testComposedOverworldIsValidatedAndStaged()
 
 void testBakedThumbnailsAreStaged()
 {
-    TempDirectory temp;
+    ScopedTestDirectory temp("sokoban-content-pipeline");
     const auto roots = createValidContent(temp.path());
 
     // Nothing declares thumbnails - they are editor pictures, not manifest
@@ -725,19 +684,19 @@ void testBakedThumbnailsAreStaged()
 
     const sokoban::ContentInventory inventory =
         sokoban::collectContentInventory(roots);
-    check(contains(inventory, wall), "baked thumbnail included");
-    check(contains(inventory, player), "second baked thumbnail included");
+    CHECK_MESSAGE(contains(inventory, wall), "baked thumbnail included");
+    CHECK_MESSAGE(contains(inventory, player), "second baked thumbnail included");
 
     const std::filesystem::path output = temp.path() / "thumbnails/assets";
     (void)sokoban::stageContent(roots, output, "1.2.3");
-    check(
+    CHECK_MESSAGE(
         std::filesystem::is_regular_file(output / wall),
         "baked thumbnail staged to the runtime root");
 }
 
 void testMissingThumbnailsAreNotFatal()
 {
-    TempDirectory temp;
+    ScopedTestDirectory temp("sokoban-content-pipeline");
     const auto roots = createValidContent(temp.path());
 
     // Before the first bake there is nothing to copy. Unlike a manifest asset,
@@ -745,12 +704,12 @@ void testMissingThumbnailsAreNotFatal()
     // than refuse to stage the game at all.
     const sokoban::ContentInventory inventory =
         sokoban::collectContentInventory(roots);
-    check(
+    CHECK_MESSAGE(
         !contains(
             inventory,
             sokoban::tileThumbnails::assetPathFor(sokoban::TileType::Wall)),
         "absent thumbnail is not staged");
-    check(contains(inventory, "manifest.json"), "staging still succeeds");
+    CHECK_MESSAGE(contains(inventory, "manifest.json"), "staging still succeeds");
 
     // A partial bake is normal too: one tile present must not drag in the rest.
     const std::string wall =
@@ -758,8 +717,8 @@ void testMissingThumbnailsAreNotFatal()
     writeFile(roots.assets / wall, "png");
     const sokoban::ContentInventory partial =
         sokoban::collectContentInventory(roots);
-    check(contains(partial, wall), "the one baked thumbnail is staged");
-    check(
+    CHECK_MESSAGE(contains(partial, wall), "the one baked thumbnail is staged");
+    CHECK_MESSAGE(
         !contains(
             partial,
             sokoban::tileThumbnails::assetPathFor(sokoban::TileType::Player)),
@@ -768,7 +727,7 @@ void testMissingThumbnailsAreNotFatal()
 
 void testGltfTextureSourcesAreCanonicalAndInterpretationAware()
 {
-    TempDirectory temp;
+    ScopedTestDirectory temp("sokoban-content-pipeline");
     const auto roots = createValidContent(temp.path());
     constexpr std::string_view inlinePng = "data:image/png;base64,AAAA";
     writeFile(roots.assets / "textures/shared.png", "png");
@@ -810,52 +769,52 @@ void testGltfTextureSourcesAreCanonicalAndInterpretationAware()
     const sokoban::ContentInventory inventory =
         sokoban::collectContentInventory(roots);
 
-    check(
+    CHECK_MESSAGE(
         contains(inventory, "textures/shared.png"),
         "external glTF image included once at its canonical path");
-    check(
+    CHECK_MESSAGE(
         countExternalTextureSources(
             inventory,
             "textures/shared.png",
             sokoban::TextureColorSpace::Srgb) == 1,
         "duplicate external URI spellings deduplicate in sRGB");
-    check(
+    CHECK_MESSAGE(
         countExternalTextureSources(
             inventory,
             "textures/shared.png",
             sokoban::TextureColorSpace::Linear) == 2,
         "same external bytes retain distinct linear sampling interpretations");
-    check(
+    CHECK_MESSAGE(
         countDataUriTextureSources(
             inventory, inlinePng, sokoban::TextureColorSpace::Linear) == 1,
         "supported data URI enters the linear texture inventory");
-    check(
+    CHECK_MESSAGE(
         inventory.textureSources.size() == 6,
         "source, color and sampling interpretation form unique identities");
     const sokoban::ResolvedMaterialTexture* baseColor = findMaterialTexture(
         inventory,
         "models/hero.gltf",
         sokoban::MaterialTextureSemantic::BaseColor);
-    check(baseColor != nullptr, "base-color material use is preserved");
+    CHECK_MESSAGE(baseColor != nullptr, "base-color material use is preserved");
     if (baseColor) {
-        check(baseColor->assetLabel == "model 'Hero'", "model label preserved");
-        check(baseColor->materialName == "Mixed interpretation",
+        CHECK_MESSAGE(baseColor->assetLabel == "model 'Hero'", "model label preserved");
+        CHECK_MESSAGE(baseColor->materialName == "Mixed interpretation",
             "material name preserved");
-        check(baseColor->textureName == "Color A", "texture name preserved");
-        check(baseColor->texcoord == 1U, "TEXCOORD_1 selection preserved");
-        check(baseColor->identity.interpretation.colorSpace ==
+        CHECK_MESSAGE(baseColor->textureName == "Color A", "texture name preserved");
+        CHECK_MESSAGE(baseColor->texcoord == 1U, "TEXCOORD_1 selection preserved");
+        CHECK_MESSAGE(baseColor->identity.interpretation.colorSpace ==
                 sokoban::TextureColorSpace::Srgb,
             "base color is interpreted as sRGB");
-        check(baseColor->identity.interpretation.wrapU ==
+        CHECK_MESSAGE(baseColor->identity.interpretation.wrapU ==
                 sokoban::TextureAddressMode::ClampToEdge,
             "wrap S preserved");
-        check(baseColor->identity.interpretation.wrapV ==
+        CHECK_MESSAGE(baseColor->identity.interpretation.wrapV ==
                 sokoban::TextureAddressMode::MirroredRepeat,
             "wrap T preserved");
-        check(baseColor->identity.interpretation.magFilter ==
+        CHECK_MESSAGE(baseColor->identity.interpretation.magFilter ==
                 sokoban::TextureMagnificationFilter::Nearest,
             "magnification filter preserved");
-        check(baseColor->identity.interpretation.minFilter ==
+        CHECK_MESSAGE(baseColor->identity.interpretation.minFilter ==
                 sokoban::TextureMinificationFilter::LinearMipmapNearest,
             "minification and mip filtering preserved");
     }
@@ -864,16 +823,16 @@ void testGltfTextureSourcesAreCanonicalAndInterpretationAware()
             inventory,
             "models/hero.gltf",
             sokoban::MaterialTextureSemantic::MetallicRoughness);
-    check(metallicRoughness != nullptr,
+    CHECK_MESSAGE(metallicRoughness != nullptr,
         "metallic-roughness material use is preserved");
     if (metallicRoughness) {
-        check(metallicRoughness->identity.interpretation.colorSpace ==
+        CHECK_MESSAGE(metallicRoughness->identity.interpretation.colorSpace ==
                 sokoban::TextureColorSpace::Linear,
             "metallic-roughness is interpreted as linear data");
-        check(metallicRoughness->identity.interpretation.magFilter ==
+        CHECK_MESSAGE(metallicRoughness->identity.interpretation.magFilter ==
                 sokoban::TextureMagnificationFilter::Linear,
             "absent sampler uses deterministic linear magnification");
-        check(metallicRoughness->identity.interpretation.minFilter ==
+        CHECK_MESSAGE(metallicRoughness->identity.interpretation.minFilter ==
                 sokoban::TextureMinificationFilter::LinearMipmapLinear,
             "absent sampler uses deterministic trilinear minification");
     }
@@ -885,26 +844,26 @@ void testGltfTextureSourcesAreCanonicalAndInterpretationAware()
         inventory,
         "models/hero.gltf",
         sokoban::MaterialTextureSemantic::Occlusion);
-    check(normal != nullptr && occlusion != nullptr,
+    CHECK_MESSAGE(normal != nullptr && occlusion != nullptr,
         "normal and occlusion material uses are preserved");
     if (normal && occlusion) {
-        check(normal->identity != occlusion->identity,
+        CHECK_MESSAGE(normal->identity != occlusion->identity,
             "different sampler interpretations do not deduplicate");
-        check(normal->identity.interpretation.colorSpace ==
+        CHECK_MESSAGE(normal->identity.interpretation.colorSpace ==
                 sokoban::TextureColorSpace::Linear,
             "normal map is interpreted as linear data");
-        check(occlusion->identity.interpretation.colorSpace ==
+        CHECK_MESSAGE(occlusion->identity.interpretation.colorSpace ==
                 sokoban::TextureColorSpace::Linear,
             "occlusion map is interpreted as linear data");
-        check(occlusion->scale == 0.6f, "occlusion strength preserved");
+        CHECK_MESSAGE(occlusion->scale == 0.6f, "occlusion strength preserved");
     }
     const sokoban::ResolvedMaterialTexture* emissive = findMaterialTexture(
         inventory,
         "models/hero.gltf",
         sokoban::MaterialTextureSemantic::Emissive);
-    check(emissive != nullptr, "emissive material use is preserved");
+    CHECK_MESSAGE(emissive != nullptr, "emissive material use is preserved");
     if (emissive) {
-        check(emissive->identity.interpretation.colorSpace ==
+        CHECK_MESSAGE(emissive->identity.interpretation.colorSpace ==
                 sokoban::TextureColorSpace::Srgb,
             "emissive map is interpreted as sRGB");
     }
@@ -912,7 +871,7 @@ void testGltfTextureSourcesAreCanonicalAndInterpretationAware()
 
 void testEmbeddedGlbTextureSourcesEnterInventory()
 {
-    TempDirectory temp;
+    ScopedTestDirectory temp("sokoban-content-pipeline");
     const auto roots = createValidContent(temp.path());
     writeFile(
         roots.assets / "manifest.json",
@@ -940,17 +899,17 @@ void testEmbeddedGlbTextureSourcesEnterInventory()
     const sokoban::ContentInventory inventory =
         sokoban::collectContentInventory(roots);
 
-    check(
+    CHECK_MESSAGE(
         contains(inventory, "models/flag-a-blue.glb"),
         "GLB containing an embedded image is staged");
-    check(
+    CHECK_MESSAGE(
         countBufferViewTextureSources(
             inventory,
             "models/flag-a-blue.glb",
             0,
             sokoban::TextureColorSpace::Srgb) == 1,
         "embedded buffer view has an unambiguous sRGB identity");
-    check(
+    CHECK_MESSAGE(
         countBufferViewTextureSources(
             inventory,
             "models/flag-a-blue.glb",
@@ -961,7 +920,7 @@ void testEmbeddedGlbTextureSourcesEnterInventory()
 
 void testGltfTextureTraversalIsRejected()
 {
-    TempDirectory temp;
+    ScopedTestDirectory temp("sokoban-content-pipeline");
     const auto roots = createValidContent(temp.path());
     writeFile(temp.path() / "outside.png", "outside");
     writeFile(
@@ -995,7 +954,7 @@ void testGltfTextureTraversalIsRejected()
 
 void testUnsupportedGltfTextureSemanticsHaveContext()
 {
-    TempDirectory temp;
+    ScopedTestDirectory temp("sokoban-content-pipeline");
     const auto roots = createValidContent(temp.path());
     writeFile(
         roots.assets / "models/hero.gltf",
@@ -1046,7 +1005,7 @@ void testUnsupportedGltfTextureSemanticsHaveContext()
 
 void testValidationFailures()
 {
-    TempDirectory temp;
+    ScopedTestDirectory temp("sokoban-content-pipeline");
     auto roots = createValidContent(temp.path());
 
     std::filesystem::remove(roots.assets / "audio/music.ogg");
@@ -1086,7 +1045,7 @@ void testValidationFailures()
         roots.levels / "overworld.scr",
         "@selector {\"id\":1,\"cell\":[1,0,1],\"target\":null}\n\n"
         "@layer 0\n...\n\n@layer 1\nC  \n");
-    check(
+    CHECK_MESSAGE(
         contains(
             sokoban::collectContentInventory(roots),
             "levels/overworld.scr"),
@@ -1116,7 +1075,7 @@ void testValidationFailures()
     writeFile(
         roots.levels / "level0/screen1.scr",
         "@layer 0\n...\n\n@layer 1\n.CE\n");
-    check(
+    CHECK_MESSAGE(
         contains(
             sokoban::collectContentInventory(roots),
             "levels/level0/screen1.scr"),
