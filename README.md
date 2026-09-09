@@ -89,14 +89,16 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure --no-tests=error
 ```
 
-The `Required Tests` GitHub Actions workflow performs clean, independent Debug
-and Release builds on every push and pull request, runs the complete CTest
-registry (including a hidden-window Vulkan device/submission smoke test) in
-both configurations, and separately gates AddressSanitizer/UBSan,
-clang-tidy's static analyzer, and a bounded libFuzzer run against hostile
-player-profile input. It also configures and runs the headless registry on
-Linux without downloading the Vulkan SDK. Repository branch protection should
-require every workflow check before merging to `main`.
+The `Required Tests` GitHub Actions workflow performs clean Debug and Release
+builds on Linux and Windows for every push and pull request. Linux runs the
+complete registered CTest matrix, including the hidden-window Vulkan device
+smoke, and Debug additionally renders 240 frames under validation. Hosted
+Windows runners have no Vulkan ICD, so they omit device execution while still
+building the renderer and running the remaining tests and package gate. The
+workflow separately gates AddressSanitizer/UBSan, clang-tidy's static analyzer,
+a bounded player-profile fuzz run, and the Vulkan-free headless preset without
+downloading the SDK. Repository branch protection should require every workflow
+check before merging to `main`.
 
 For local diagnostics with a Clang or GCC toolchain:
 

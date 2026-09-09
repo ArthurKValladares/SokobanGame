@@ -44,6 +44,8 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Maintainability follow-up, 2026-09-09 (MSVC warning gate and stale artifacts):** The Windows Debug/Release CI matrix now enables the same warnings-as-errors policy as Linux. The known shadowed-`pi` and GPU-ABI size-conversion diagnostics are resolved without suppressions, the skinned-material shader comment describes its current consumer, and the disposal-only undefined-member shell probe has been removed now that normal builds and link steps provide its maintained replacement.
 
+**Maintainability follow-up, 2026-09-09 (authoritative handoff and test documentation):** The 1,937-line chronological root handoff is preserved verbatim in `docs/history/` and replaced by a compact current guide containing supported commands, enduring subsystem contracts, evidence-based non-goals, and the remaining cleanup sequence. README now describes the configuration-specific Linux validation, Windows no-ICD coverage, and Vulkan-free preset accurately. Current full Windows and headless registries contain 80 and 72 suites respectively; CTest remains the source of truth instead of a count embedded in scripts.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
@@ -319,9 +321,9 @@ At call sites with several booleans, such as overlay/render-pass mode selection,
 ### 5. Remove or repair demonstrably outdated material
 
 - The obsolete skinned-material varying comment was replaced with its current fragment-stage contract on 2026-09-09.
-- HANDOFF references `codequality-review.html` and `enginereview.html`, neither present in the tracked workspace inspected here. Its chronological texture-extraction guidance also changes direction across sections. Replace the current-status section with a compact authoritative status and move history to a dated archive; preserve reasoning behind rejected changes.
+- The root handoff was reduced to current commands and enduring contracts on 2026-09-09; its chronological history and rejected-change reasoning remain in a dated archive.
 - `_to_delete/check_members_are_defined.sh` was removed on 2026-09-09; ordinary target builds and links are the maintained undefined-member check.
-- Reconcile the headless script's obsolete test counts and README/CI statements about configuration-specific smoke coverage. The Linux workflow enables application smoke on Debug; the Release matrix entry does not enable the same smoke options.
+- Test-count and configuration-specific smoke documentation was reconciled with the CMake registry and CI matrix on 2026-09-09.
 - The known MSVC diagnostics were resolved and Windows CI enabled `SOKOBAN_WARNINGS_AS_ERRORS` on 2026-09-09.
 - Treat `.clang-tidy` exclusions as a named, owned backlog. Re-enable targeted categories after resolving their remaining findings. Replace stale measured-count comments as those counts change.
 - Keep useful invariant comments; shorten narratives about abandoned experiments and migration chronology in production code. Do not mass-delete comments or apply a repository-wide formatter just to reduce line counts. `.clang-format` itself says the repository has not yet adopted a formatting pass; choose that policy separately.
