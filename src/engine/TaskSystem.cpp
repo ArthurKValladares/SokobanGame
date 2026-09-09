@@ -85,7 +85,7 @@ public:
                 true,
                 std::memory_order_acq_rel,
                 std::memory_order_acquire)) {
-            firstFailure_ = std::move(failure);
+            firstFailure_ = failure;
         }
         cancelled_.store(true, std::memory_order_release);
     }

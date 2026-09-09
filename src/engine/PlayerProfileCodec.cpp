@@ -321,7 +321,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
         movable.sliding = directionFromJson(
             requiredProperty(item, "sliding", movableContext),
             movableContext + ".sliding");
-        state.movables.push_back(std::move(movable));
+        state.movables.push_back(movable);
     }
     const Json& enemies = requiredProperty(value, "enemies", context);
     if (!enemies.is_array()) {
@@ -535,7 +535,7 @@ GameplaySession::Action undoActionFromJson(
                 action.presentation.durationSeconds + 0.0001f) {
             fail(motionContext, "motion track is outside the timeline");
         }
-        action.presentation.motions.push_back(std::move(motion));
+        action.presentation.motions.push_back(motion);
     }
 
     const Json& animations =
@@ -602,7 +602,7 @@ GameplaySession::Action undoActionFromJson(
                     action.presentation.durationSeconds + 0.0001f) {
                 fail(segmentContext, "animation segment is outside the timeline");
             }
-            track.segments.push_back(std::move(segment));
+            track.segments.push_back(segment);
         }
         action.presentation.animations.push_back(std::move(track));
     }
@@ -947,7 +947,7 @@ void parseProgressSection(PlayerProfile& profile, const Json& progress)
             })) {
             fail(context, "duplicate level " + std::to_string(level.level));
         }
-        profile.levels.push_back(std::move(level));
+        profile.levels.push_back(level);
     }
 
     const Json& screens = requiredProperty(progress, "screens", "progress");
@@ -985,7 +985,7 @@ void parseProgressSection(PlayerProfile& profile, const Json& progress)
                 "duplicate screen " + std::to_string(screen.level) + ":" +
                 std::to_string(screen.screen));
         }
-        profile.screens.push_back(std::move(screen));
+        profile.screens.push_back(screen);
     }
 
     const std::string worldContext =
@@ -1284,7 +1284,7 @@ UnsupportedPlayerProfileFormat::UnsupportedPlayerProfileFormat(int format)
 }
 
 InvalidPlayerProfileData::InvalidPlayerProfileData(std::string message)
-    : std::runtime_error(std::move(message))
+    : std::runtime_error(message)
 {
 }
 

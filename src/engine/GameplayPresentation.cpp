@@ -654,7 +654,7 @@ void GameplayPresentation::syncToGameState(const GameState& state)
             });
         PlayerVisual visual;
         if (existing != oldPlayers.end()) {
-            visual = std::move(*existing);
+            visual = *existing;
         } else {
             visual.facingQuarterTurns = players_.empty()
                 ? facingQuarterTurns(MoveDirection::Down)
@@ -665,7 +665,7 @@ void GameplayPresentation::syncToGameState(const GameState& state)
             visual.motion,
             playerRenderTarget(player.cell, player.drowned));
         setRestAnimation(visual, playerRestAnimation(player));
-        players_.push_back(std::move(visual));
+        players_.push_back(visual);
     }
 
     std::vector<EntityVisual> oldMovables = std::move(movables_);
@@ -680,13 +680,13 @@ void GameplayPresentation::syncToGameState(const GameState& state)
             &EntityVisual::target);
         EntityVisual visual;
         if (existing != oldMovables.end()) {
-            visual = std::move(*existing);
+            visual = *existing;
         }
         visual.target = target;
         setImmediatePosition(
             visual,
             movableRenderTarget(movable.cell, movable.fallen));
-        movables_.push_back(std::move(visual));
+        movables_.push_back(visual);
     }
 
     std::vector<EnemyVisual> oldEnemies = std::move(enemies_);
@@ -702,14 +702,14 @@ void GameplayPresentation::syncToGameState(const GameState& state)
             });
         EnemyVisual visual;
         if (existing != oldEnemies.end()) {
-            visual = std::move(*existing);
+            visual = *existing;
         }
         visual.motion.target = target;
         setImmediatePosition(
             visual.motion,
             movableRenderTarget(enemy.cell, enemy.fallen));
         setRestAnimation(visual, AnimationUse::EnemyIdle);
-        enemies_.push_back(std::move(visual));
+        enemies_.push_back(visual);
     }
 }
 

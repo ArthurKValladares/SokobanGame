@@ -21,7 +21,7 @@ void PresentationTransactionBuilder::addMotion(ActionMotionTrack motion)
 {
     motion.startSeconds = std::max(motion.startSeconds, 0.0f);
     motion.durationSeconds = std::max(motion.durationSeconds, 0.0f);
-    motions_.push_back(std::move(motion));
+    motions_.push_back(motion);
 }
 
 void PresentationTransactionBuilder::setInitialAnimation(

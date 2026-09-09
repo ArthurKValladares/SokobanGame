@@ -897,7 +897,7 @@ void VulkanRenderer::setGameViewportDisplay(
         (display->size.x <= 0.0f || display->size.y <= 0.0f)) {
         display.reset();
     }
-    gameViewportDisplay_ = std::move(display);
+    gameViewportDisplay_ = display;
 }
 
 bool VulkanRenderer::hasGameViewportDisplay() const

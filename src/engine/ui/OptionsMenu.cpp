@@ -1091,8 +1091,8 @@ std::optional<OptionsAction> OptionsMenu::dispatch(
 {
     OptionsMenuReduction reduction =
         reduceOptionsMenu(state_, settings, intent);
-    state_ = std::move(reduction.state);
-    return std::move(reduction.action);
+    state_ = reduction.state;
+    return reduction.action;
 }
 
 std::optional<OptionsAction> OptionsMenu::provideBindingCandidate(
