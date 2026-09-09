@@ -46,6 +46,8 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Maintainability follow-up, 2026-09-09 (authoritative handoff and test documentation):** The 1,937-line chronological root handoff is preserved verbatim in `docs/history/` and replaced by a compact current guide containing supported commands, enduring subsystem contracts, evidence-based non-goals, and the remaining cleanup sequence. README now describes the configuration-specific Linux validation, Windows no-ICD coverage, and Vulkan-free preset accurately. Current full Windows and headless registries contain 80 and 72 suites respectively; CTest remains the source of truth instead of a count embedded in scripts.
 
+**Maintainability follow-up, 2026-09-09 (clang-tidy backlog):** `performance-move-const-arg` is enabled again after clang-tidy 19.1.5 reported no findings across all 131 current `src/` translation units. Its prior 14-finding measurement remains documented as historical context, while the active exclusion list now contains only checks that still require code changes or have an explicit false-positive rationale.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
@@ -325,7 +327,7 @@ At call sites with several booleans, such as overlay/render-pass mode selection,
 - `_to_delete/check_members_are_defined.sh` was removed on 2026-09-09; ordinary target builds and links are the maintained undefined-member check.
 - Test-count and configuration-specific smoke documentation was reconciled with the CMake registry and CI matrix on 2026-09-09.
 - The known MSVC diagnostics were resolved and Windows CI enabled `SOKOBAN_WARNINGS_AS_ERRORS` on 2026-09-09.
-- Treat `.clang-tidy` exclusions as a named, owned backlog. Re-enable targeted categories after resolving their remaining findings. Replace stale measured-count comments as those counts change.
+- Continue reducing the named `.clang-tidy` backlog in measured categories. `performance-move-const-arg` was re-enabled after a zero-finding 131-translation-unit scan on 2026-09-09; keep dated baseline counts as history and record current probes as exclusions are removed.
 - Keep useful invariant comments; shorten narratives about abandoned experiments and migration chronology in production code. Do not mass-delete comments or apply a repository-wide formatter just to reduce line counts. `.clang-format` itself says the repository has not yet adopted a formatting pass; choose that policy separately.
 
 Do not delete apparently unused art, shaders, or public helpers solely from a textual reference search. Manifests, content tooling, editor discovery, generated variants and external workflows can constitute real use. Require reachability evidence and a clean staged build for removals.

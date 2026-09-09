@@ -50,7 +50,6 @@ Checks: >
   -bugprone-suspicious-include,
   -bugprone-inc-dec-in-conditions,
   -bugprone-switch-missing-default-case,
-  -performance-move-const-arg,
   -performance-unnecessary-value-param,
   -performance-enum-size,
   -performance-no-automatic-move,
@@ -58,9 +57,6 @@ Checks: >
 
 # The work queue, in the order worth doing:
 #
-#   performance-move-const-arg                14  std::move on a const argument
-#                                                 does nothing; the fix deletes
-#                                                 the call.
 #   performance-unnecessary-value-param        9  by-value parameters that are
 #                                                 only read.
 #   bugprone-narrowing-conversions             9
@@ -76,6 +72,10 @@ Checks: >
 #   performance-no-automatic-move              1
 #   performance-inefficient-vector-operation   1
 #   bugprone-switch-missing-default-case       1
+#
+# `performance-move-const-arg` was re-enabled on 2026-09-09 after clang-tidy
+# 19.1.5 reported zero findings across the current 131 `src/` translation
+# units. Its original 14-finding count above remains part of the dated baseline.
 #
 # Two are excluded on their merits rather than as a queue:
 #
