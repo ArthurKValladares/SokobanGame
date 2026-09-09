@@ -3,9 +3,11 @@
 #include "engine/AssetManifest.hpp"
 #include "engine/ContentPipeline.hpp"
 #include "engine/render/GltfMesh.hpp"
+#include "engine/render/TextureDescriptorSpace.hpp"
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -74,5 +76,20 @@ private:
 [[nodiscard]] RuntimeTextureCatalog collectRuntimeTextureCatalog(
     const std::filesystem::path& assetRoot,
     const AssetManifest& manifest);
+
+// Reconciles a freshly collected logical catalog with a live descriptor heap.
+// Existing source identities keep their descriptors. New discovered textures
+// claim high slots downward, preserving both manifest ids and every descriptor
+// already used by a loaded model. Returns logical-catalog to descriptor indices.
+[[nodiscard]] std::vector<uint32_t> reconcileRuntimeTextureCatalog(
+    const RuntimeTextureCatalog& catalog,
+    TextureDescriptorSpace& descriptorSpace,
+    std::vector<std::optional<RuntimeTextureDefinition>>& definitions);
+
+// Applies a logical-to-descriptor mapping to every texture handle carried by a
+// model. Startup and incremental model registration use this same operation.
+[[nodiscard]] RuntimeModelTextures remapRuntimeModelTextures(
+    const RuntimeModelTextures& model,
+    std::span<const uint32_t> logicalToDescriptor);
 
 } // namespace sokoban

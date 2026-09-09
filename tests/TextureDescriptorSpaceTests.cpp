@@ -119,6 +119,37 @@ void testGrowingBackwardsDoesNothing()
     CHECK(space.active().empty());
 }
 
+void testDiscoveredSlotsGrowDownWithoutMovingExistingSlots()
+{
+    TEST("discoveredSlotsGrowDownWithoutMovingExistingSlots");
+    Space space;
+    space.reset(16, 3, 2);
+    space.markActive(14);
+    space.markActive(15);
+
+    const std::optional<uint32_t> first = space.claimDiscoveredSlot();
+    const std::optional<uint32_t> second = space.claimDiscoveredSlot();
+    CHECK(first == 13U);
+    CHECK(second == 12U);
+    CHECK(space.discoveredBase() == 12U);
+    CHECK(space.active().size() == 4U);
+    CHECK(space.active()[0] == 14U);
+    CHECK(space.active()[1] == 15U);
+    CHECK(space.active()[2] == 13U);
+    CHECK(space.active()[3] == 12U);
+}
+
+void testDiscoveredSlotsStopAtTheManifestRange()
+{
+    TEST("discoveredSlotsStopAtTheManifestRange");
+    Space space;
+    space.reset(5, 3, 1);
+    CHECK(space.claimDiscoveredSlot() == 3U);
+    CHECK(!space.claimDiscoveredSlot());
+    CHECK(space.discoveredBase() == 3U);
+    CHECK(space.manifestHeadroom() == 0U);
+}
+
 void testHeadroomSaturatesWhenTheRangesAlreadyOverlap()
 {
     TEST("headroomSaturatesWhenTheRangesAlreadyOverlap");
@@ -231,6 +262,8 @@ int main()
     testMembershipFollowsTheManifestCount();
     testGrowingTheManifestClaimsTheNewSlots();
     testGrowingBackwardsDoesNothing();
+    testDiscoveredSlotsGrowDownWithoutMovingExistingSlots();
+    testDiscoveredSlotsStopAtTheManifestRange();
     testHeadroomSaturatesWhenTheRangesAlreadyOverlap();
     testManifestCanHoldIsTheSameBoundary();
     testClearForgetsEverything();

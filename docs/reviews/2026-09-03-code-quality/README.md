@@ -40,6 +40,8 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Maintainability follow-up, 2026-09-08 (shared test scaffolding):** The common test harness now supports labeled assertions, and `ScopedTestDirectory` provides collision-checked creation with best-effort scope cleanup without adding filesystem dependencies to assertion-only suites. The large player-profile and save-slot suites plus level-catalog coverage now use these shared utilities, removing their local counters, assertion functions, and timestamp/random temporary-directory implementations while preserving their diagnostic labels.
 
+**Maintainability follow-up, 2026-09-08 (complete incremental PBR import):** Editor-appended models now run the same glTF material discovery and logical-to-descriptor remapping as startup. Existing source identities retain their descriptor slots, newly discovered maps claim reserved high slots downward, and capacity exhaustion is rejected before the live heap changes. A GLB fixture with normal, metallic-roughness, emissive, and occlusion maps verifies that appended and startup-loaded models resolve equivalent bindings while earlier descriptors remain stable.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
@@ -296,11 +298,11 @@ CQ-01 through CQ-05 show that the central weakness is ambiguous completion: deco
 
 Avoid generic utility abstractions that merely hide two short loops. Prioritize repeated logic whose disagreement changes saved data, asset identity, gameplay conflict detection, or package contents. Do not merge subtly different platform/path semantics just because the code looks similar.
 
-### 3. Finish runtime material import deliberately
+### 3. Finish runtime material import deliberately (completed 2026-09-08)
 
-`VulkanModelResources::syncManifestModels` around lines 1712–1740 explicitly limits appended models to manifest/base-color bindings. Normal, metallic-roughness, emissive, and occlusion discovery occurs at startup and has no matching append path. This is an acknowledged incomplete feature, rather than a newly discovered undocumented algorithm error.
+`VulkanModelResources::syncManifestModels` previously limited appended models to manifest/base-color bindings. Normal, metallic-roughness, emissive, and occlusion discovery occurred only at startup.
 
-Choose a supported contract: incrementally run the same material/dependency resolver used at startup, or clearly tell the editor user which features require a restage/restart. Combine this with CQ-04; a restart is not a workable fallback if the editor has just invalidated the package index. Add an import fixture with several PBR maps and compare startup-loaded versus editor-appended bindings.
+The append path now recollects the complete runtime texture catalog with the startup resolver and reconciles it against the live descriptor heap by source identity. Existing descriptors never move; new discovered maps grow downward into reserved capacity. Startup and append both use the same model-binding remapper. A GLB import fixture covers all four PBR map types, startup/append equivalence, stable prior descriptors, and non-mutating capacity failure.
 
 ### 4. Refactor by ownership and responsibility, not file length
 
@@ -346,7 +348,7 @@ The existing frame arenas, scratch reuse, suballocators, draw sorting, shadow ca
 | Rules, actions, scheduling, campaign, transitions | State deltas, undo, concurrent action claims, restore boundaries | Existing test coverage is extensive; CQ-10 and duplicate changed-entity logic stand out. No exhaustive proof of every puzzle interaction was attempted. |
 | Save/profile/settings/slots/atomic files | Migration, backup promotion, failures, switching, deletion | CQ-01, CQ-02 and CQ-05; prioritize failure sequences spanning several components. |
 | Input, bindings, menu/UI integration | Physical state versus capture, routing, ownership | CQ-06; still needs real controller and interactive cancel/focus testing after a fix. |
-| Level/overworld/decorations/animation authoring | Save guarantees, mirrors, staging, imports, runtime sync | CQ-03, CQ-04, CQ-09; appended PBR material handling remains incomplete. |
+| Level/overworld/decorations/animation authoring | Save guarantees, mirrors, staging, imports, runtime sync | CQ-03, CQ-04, CQ-09; appended PBR material handling now shares startup discovery and binding behavior. |
 | Meshes, animation, skinning, materials, shaders | Transform conventions, dependencies, normal/tangent and CPU/GPU correspondence | CQ-08; fixtures need non-axis-aligned/nonuniform cases. No claim of exhaustive animation/glTF conformance. |
 | Vulkan resources, scheduling, descriptors, retirement | Retry ownership, admission, upload/publication, frame-lifetime ordering | CQ-07 and CQ-11; pressure and teardown injection were not exercised on hardware. |
 | Core utilities, tasks, memory, diagnostics, audio | Construction/destruction, bounded storage, thread contracts | CQ-12; telemetry candidate above. No complete audio-device or crash/minidump fault matrix was run. |

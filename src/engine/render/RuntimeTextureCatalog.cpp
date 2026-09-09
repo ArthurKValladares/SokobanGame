@@ -218,4 +218,121 @@ RuntimeTextureCatalog collectRuntimeTextureCatalog(
     return buildRuntimeTextureCatalog(manifest, textures);
 }
 
+std::vector<uint32_t> reconcileRuntimeTextureCatalog(
+    const RuntimeTextureCatalog& catalog,
+    TextureDescriptorSpace& descriptorSpace,
+    std::vector<std::optional<RuntimeTextureDefinition>>& definitions)
+{
+    if (definitions.size() != descriptorSpace.capacity() ||
+        catalog.manifestTextureCount() != descriptorSpace.manifestCount()) {
+        throw std::runtime_error(
+            "Runtime texture catalog does not match the live descriptor heap");
+    }
+
+    std::unordered_map<std::string, uint32_t> descriptorByIdentity;
+    for (uint32_t logicalIndex = 0;
+         logicalIndex < catalog.manifestTextureCount();
+         ++logicalIndex) {
+        if (!definitions[logicalIndex] ||
+            textureSourceIdentityKey(definitions[logicalIndex]->identity) !=
+                textureSourceIdentityKey(catalog.textures()[logicalIndex].identity)) {
+            throw std::runtime_error(
+                "Manifest texture definitions changed while synchronizing models");
+        }
+        descriptorByIdentity.try_emplace(
+            textureSourceIdentityKey(definitions[logicalIndex]->identity),
+            logicalIndex);
+    }
+    for (uint32_t descriptor : descriptorSpace.active()) {
+        if (descriptor < descriptorSpace.manifestCount()) {
+            continue;
+        }
+        if (descriptor >= definitions.size() || !definitions[descriptor]) {
+            throw std::runtime_error(
+                "Active texture descriptor has no runtime definition");
+        }
+        descriptorByIdentity.try_emplace(
+            textureSourceIdentityKey(definitions[descriptor]->identity),
+            descriptor);
+    }
+
+    std::unordered_set<std::string> missingIdentities;
+    for (uint32_t logicalIndex = catalog.manifestTextureCount();
+         logicalIndex < catalog.textures().size();
+         ++logicalIndex) {
+        const std::string key = textureSourceIdentityKey(
+            catalog.textures()[logicalIndex].identity);
+        if (!descriptorByIdentity.contains(key)) {
+            missingIdentities.insert(key);
+        }
+    }
+    if (missingIdentities.size() > descriptorSpace.manifestHeadroom()) {
+        throw std::runtime_error(
+            "Discovered model textures exceed the remaining descriptor capacity");
+    }
+
+    std::vector<uint32_t> logicalToDescriptor(catalog.textures().size());
+    for (uint32_t logicalIndex = 0;
+         logicalIndex < catalog.manifestTextureCount();
+         ++logicalIndex) {
+        logicalToDescriptor[logicalIndex] = logicalIndex;
+    }
+    for (uint32_t logicalIndex = catalog.manifestTextureCount();
+         logicalIndex < catalog.textures().size();
+         ++logicalIndex) {
+        const RuntimeTextureDefinition& definition =
+            catalog.textures()[logicalIndex];
+        const std::string key = textureSourceIdentityKey(definition.identity);
+        const auto existing = descriptorByIdentity.find(key);
+        if (existing != descriptorByIdentity.end()) {
+            logicalToDescriptor[logicalIndex] = existing->second;
+            continue;
+        }
+
+        const std::optional<uint32_t> descriptor =
+            descriptorSpace.claimDiscoveredSlot();
+        if (!descriptor) {
+            throw std::runtime_error(
+                "Discovered model textures exceed the remaining descriptor capacity");
+        }
+        definitions[*descriptor] = definition;
+        descriptorByIdentity.emplace(key, *descriptor);
+        logicalToDescriptor[logicalIndex] = *descriptor;
+    }
+    return logicalToDescriptor;
+}
+
+RuntimeModelTextures remapRuntimeModelTextures(
+    const RuntimeModelTextures& model,
+    std::span<const uint32_t> logicalToDescriptor)
+{
+    const auto descriptorFor = [logicalToDescriptor](uint32_t logicalIndex) {
+        if (logicalIndex >= logicalToDescriptor.size()) {
+            throw std::out_of_range(
+                "Model material references an invalid runtime texture index");
+        }
+        return logicalToDescriptor[logicalIndex];
+    };
+    const auto remapOptional = [&descriptorFor](std::optional<uint32_t>& index) {
+        if (index) {
+            *index = descriptorFor(*index);
+        }
+    };
+
+    RuntimeModelTextures mapped = model;
+    for (uint32_t& texture : mapped.requiredTextures) {
+        texture = descriptorFor(texture);
+    }
+    for (PrimitiveMaterialBinding& binding : mapped.primitiveMaterials) {
+        if (binding.bindBaseColorTexture) {
+            binding.textureIndex = descriptorFor(binding.textureIndex);
+        }
+        remapOptional(binding.normalTextureIndex);
+        remapOptional(binding.metallicRoughnessTextureIndex);
+        remapOptional(binding.emissiveTextureIndex);
+        remapOptional(binding.occlusionTextureIndex);
+    }
+    return mapped;
+}
+
 } // namespace sokoban

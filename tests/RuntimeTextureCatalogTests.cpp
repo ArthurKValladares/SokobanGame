@@ -1,4 +1,5 @@
 #include "TestHarness.hpp"
+#include "ScopedTestDirectory.hpp"
 
 #include "engine/AssetManifest.hpp"
 #include "engine/render/RuntimeTextureCatalog.hpp"
@@ -7,7 +8,6 @@
 
 #include <algorithm>
 #include <bit>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -44,6 +44,26 @@ constexpr std::string_view manifestJson = R"json({
     {"name":"Hero","path":"models/shared.glb","geometry":"skinned","role":"player","material":{"mode":"texture","texture":"HeroBase"}},
     {"name":"Belt","path":"models/shared.glb","material":{"mode":"primitive-materials","slots":[{"texture":"BeltA"},{"texture":"BeltB","scrollV":true}]}},
     {"name":"Crate","path":"models/crate.glb"}
+  ],
+  "animations": [
+    {"name":"Idle","path":"anims/a.glb","role":"player-idle"},
+    {"name":"Move","path":"anims/a.glb","role":"player-move"},
+    {"name":"Push","path":"anims/a.glb","role":"player-push"},
+    {"name":"Death","path":"anims/a.glb","role":"player-death"},
+    {"name":"DeadIdle","path":"anims/a.glb","role":"player-dead-idle"}
+  ]
+})json";
+
+constexpr std::string_view initialManifestJson = R"json({
+  "format": 1,
+  "textures": [
+    {"name":"HeroBase","path":"textures/hero.png"},
+    {"name":"BeltA","path":"textures/belt-a.png"},
+    {"name":"BeltB","path":"textures/belt-b.png"}
+  ],
+  "models": [
+    {"name":"Hero","path":"models/shared.glb","geometry":"skinned","role":"player","material":{"mode":"texture","texture":"HeroBase"}},
+    {"name":"Belt","path":"models/shared.glb","material":{"mode":"primitive-materials","slots":[{"texture":"BeltA"},{"texture":"BeltB","scrollV":true}]}}
   ],
   "animations": [
     {"name":"Idle","path":"anims/a.glb","role":"player-idle"},
@@ -147,28 +167,182 @@ void testBuildsDeduplicatedPerModelCatalog()
     checkThrows([&] { (void)catalog.descriptorIndex(3, 5); });
 }
 
-class TempDirectory {
-public:
-    TempDirectory()
-    {
-        const auto id =
-            std::chrono::steady_clock::now().time_since_epoch().count();
-        path_ = std::filesystem::temp_directory_path() /
-            ("sokoban-runtime-textures-" + std::to_string(id));
-        std::filesystem::create_directories(path_);
+std::vector<uint32_t> installStartupCatalog(
+    const RuntimeTextureCatalog& catalog,
+    TextureDescriptorSpace& space,
+    std::vector<std::optional<RuntimeTextureDefinition>>& definitions)
+{
+    const uint32_t capacity = static_cast<uint32_t>(definitions.size());
+    space.reset(
+        capacity,
+        catalog.manifestTextureCount(),
+        catalog.discoveredTextureCount());
+    std::vector<uint32_t> mapping(catalog.textures().size());
+    for (uint32_t logicalIndex = 0;
+         logicalIndex < catalog.textures().size();
+         ++logicalIndex) {
+        const uint32_t descriptor =
+            catalog.descriptorIndex(logicalIndex, capacity);
+        definitions[descriptor] = catalog.textures()[logicalIndex];
+        space.markActive(descriptor);
+        mapping[logicalIndex] = descriptor;
     }
+    return mapping;
+}
 
-    ~TempDirectory()
-    {
-        std::error_code error;
-        std::filesystem::remove_all(path_, error);
+std::string textureIdentityAt(
+    const std::vector<std::optional<RuntimeTextureDefinition>>& definitions,
+    const std::optional<uint32_t>& descriptor)
+{
+    if (!descriptor || *descriptor >= definitions.size() ||
+        !definitions[*descriptor]) {
+        return {};
     }
+    return textureSourceIdentityKey(definitions[*descriptor]->identity);
+}
 
-    [[nodiscard]] const std::filesystem::path& path() const { return path_; }
+void writeGlb(
+    const std::filesystem::path& path,
+    std::string json,
+    std::span<const uint8_t> binary);
 
-private:
-    std::filesystem::path path_;
-};
+void testEditorAppendedModelMatchesStartupPbrBindings()
+{
+    TEST("editorAppendedModelMatchesStartupPbrBindings");
+    constexpr uint32_t descriptorCapacity = 16;
+    ScopedTestDirectory temp("sokoban-appended-pbr");
+    std::filesystem::create_directories(temp.path() / "models");
+    writeGlb(
+        temp.path() / "models/shared.glb",
+        R"json({
+  "asset":{"version":"2.0"},
+  "images":[
+    {"uri":"../maps/shared-normal.png"},
+    {"uri":"../maps/shared-emissive.png"}
+  ],
+  "textures":[{"source":0},{"source":1}],
+  "materials":[{
+    "normalTexture":{"index":0},
+    "emissiveTexture":{"index":1}
+  }]
+})json",
+        {});
+    writeGlb(
+        temp.path() / "models/crate.glb",
+        R"json({
+  "asset":{"version":"2.0"},
+  "images":[
+    {"uri":"../maps/crate-normal.png"},
+    {"uri":"../maps/crate-metallic-roughness.png"},
+    {"uri":"../maps/crate-emissive.png"},
+    {"uri":"../maps/crate-occlusion.png"}
+  ],
+  "textures":[{"source":0},{"source":1},{"source":2},{"source":3}],
+  "materials":[{
+    "pbrMetallicRoughness":{"metallicRoughnessTexture":{"index":1}},
+    "normalTexture":{"index":0},
+    "emissiveTexture":{"index":2},
+    "occlusionTexture":{"index":3}
+  }]
+})json",
+        {});
+    const AssetManifest initialManifest =
+        AssetManifest::parse(initialManifestJson);
+    const AssetManifest expandedManifest = AssetManifest::parse(manifestJson);
+
+    const RuntimeTextureCatalog initialCatalog =
+        collectRuntimeTextureCatalog(temp.path(), initialManifest);
+    TextureDescriptorSpace incrementalSpace;
+    std::vector<std::optional<RuntimeTextureDefinition>> incrementalDefinitions(
+        descriptorCapacity);
+    const std::vector<uint32_t> initialMapping = installStartupCatalog(
+        initialCatalog, incrementalSpace, incrementalDefinitions);
+    const uint32_t originalNormalDescriptor = initialMapping[3];
+    const uint32_t originalEmissiveDescriptor = initialMapping[4];
+
+    const RuntimeTextureCatalog expandedCatalog =
+        collectRuntimeTextureCatalog(temp.path(), expandedManifest);
+    const std::vector<uint32_t> incrementalMapping =
+        reconcileRuntimeTextureCatalog(
+            expandedCatalog, incrementalSpace, incrementalDefinitions);
+    CHECK(incrementalMapping[3] == originalNormalDescriptor);
+    CHECK(incrementalMapping[4] == originalEmissiveDescriptor);
+    CHECK(incrementalSpace.discoveredBase() == 10U);
+
+    const RuntimeModelTextures incrementalModel = remapRuntimeModelTextures(
+        expandedCatalog.model(2), incrementalMapping);
+    CHECK(incrementalModel.requiredTextures.size() == 4U);
+    CHECK(incrementalModel.primitiveMaterials.size() == 1U);
+    const PrimitiveMaterialBinding& incrementalBinding =
+        incrementalModel.primitiveMaterials[0];
+    CHECK(incrementalBinding.normalTextureIndex.has_value());
+    CHECK(incrementalBinding.metallicRoughnessTextureIndex.has_value());
+    CHECK(incrementalBinding.emissiveTextureIndex.has_value());
+    CHECK(incrementalBinding.occlusionTextureIndex.has_value());
+
+    TextureDescriptorSpace startupSpace;
+    std::vector<std::optional<RuntimeTextureDefinition>> startupDefinitions(
+        descriptorCapacity);
+    const std::vector<uint32_t> startupMapping = installStartupCatalog(
+        expandedCatalog, startupSpace, startupDefinitions);
+    const RuntimeModelTextures startupModel = remapRuntimeModelTextures(
+        expandedCatalog.model(2), startupMapping);
+    const PrimitiveMaterialBinding& startupBinding =
+        startupModel.primitiveMaterials[0];
+
+    CHECK(incrementalBinding.bindBaseColorTexture ==
+        startupBinding.bindBaseColorTexture);
+    CHECK(incrementalBinding.flags == startupBinding.flags);
+    CHECK(textureIdentityAt(
+        incrementalDefinitions, incrementalBinding.normalTextureIndex) ==
+        textureIdentityAt(startupDefinitions, startupBinding.normalTextureIndex));
+    CHECK(textureIdentityAt(
+        incrementalDefinitions,
+        incrementalBinding.metallicRoughnessTextureIndex) ==
+        textureIdentityAt(
+            startupDefinitions,
+            startupBinding.metallicRoughnessTextureIndex));
+    CHECK(textureIdentityAt(
+        incrementalDefinitions, incrementalBinding.emissiveTextureIndex) ==
+        textureIdentityAt(startupDefinitions, startupBinding.emissiveTextureIndex));
+    CHECK(textureIdentityAt(
+        incrementalDefinitions, incrementalBinding.occlusionTextureIndex) ==
+        textureIdentityAt(startupDefinitions, startupBinding.occlusionTextureIndex));
+}
+
+void testReconciliationRejectsDescriptorExhaustionWithoutMutation()
+{
+    TEST("reconciliationRejectsDescriptorExhaustionWithoutMutation");
+    const AssetManifest initialManifest =
+        AssetManifest::parse(initialManifestJson);
+    const AssetManifest expandedManifest = AssetManifest::parse(manifestJson);
+    const std::vector<ResolvedMaterialTexture> initialTextures {
+        materialTexture("models/shared.glb", 0,
+            MaterialTextureSemantic::Normal, identity("maps/shared.png")),
+    };
+    std::vector<ResolvedMaterialTexture> expandedTextures = initialTextures;
+    expandedTextures.push_back(materialTexture("models/crate.glb", 0,
+        MaterialTextureSemantic::Normal, identity("maps/crate-a.png")));
+    expandedTextures.push_back(materialTexture("models/crate.glb", 0,
+        MaterialTextureSemantic::Occlusion, identity("maps/crate-b.png")));
+
+    const RuntimeTextureCatalog initialCatalog =
+        buildRuntimeTextureCatalog(initialManifest, initialTextures);
+    TextureDescriptorSpace space;
+    std::vector<std::optional<RuntimeTextureDefinition>> definitions(5);
+    (void)installStartupCatalog(initialCatalog, space, definitions);
+    const std::vector<uint32_t> activeBefore = space.active();
+    const uint32_t baseBefore = space.discoveredBase();
+
+    const RuntimeTextureCatalog expandedCatalog =
+        buildRuntimeTextureCatalog(expandedManifest, expandedTextures);
+    checkThrows([&] {
+        (void)reconcileRuntimeTextureCatalog(
+            expandedCatalog, space, definitions);
+    });
+    CHECK(space.discoveredBase() == baseBefore);
+    CHECK(space.active() == activeBefore);
+}
 
 std::vector<uint8_t> readBytes(const std::filesystem::path& path)
 {
@@ -263,7 +437,7 @@ void testLoadsEverySupportedSourceForm()
     CHECK(inlineImage.height == external.height);
     CHECK(inlineImage.rgba == external.rgba);
 
-    TempDirectory temp;
+    ScopedTestDirectory temp("sokoban-runtime-textures");
     const std::filesystem::path glb = temp.path() / "embedded.glb";
     writeGlb(glb,
         "{\"asset\":{\"version\":\"2.0\"},\"buffers\":[{\"byteLength\":" +
@@ -304,7 +478,7 @@ void writeBytes(
 void testPreparedTextureSelectsArtifactOrSourceFallback()
 {
     TEST("preparedTextureSelectsArtifactOrSourceFallback");
-    TempDirectory temp;
+    ScopedTestDirectory temp("sokoban-runtime-textures");
     const std::filesystem::path relative = "textures/test.png";
     const std::vector<std::byte> png = encodeRgbaPng(
         2, 2,
@@ -396,6 +570,8 @@ void testCollectsProductionCatalog()
 int main()
 {
     testBuildsDeduplicatedPerModelCatalog();
+    testEditorAppendedModelMatchesStartupPbrBindings();
+    testReconciliationRejectsDescriptorExhaustionWithoutMutation();
     testLoadsEverySupportedSourceForm();
     testPreparedTextureSelectsArtifactOrSourceFallback();
     testManifestTextureIdentityIsShared();

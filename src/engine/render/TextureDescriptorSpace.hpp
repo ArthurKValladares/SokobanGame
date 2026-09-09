@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace sokoban {
@@ -118,6 +119,20 @@ public:
             active_.push_back(index);
         }
         manifestCount_ = count > manifestCount_ ? count : manifestCount_;
+    }
+
+    // Claims one more stable slot for a texture discovered after startup.
+    // Existing discovered descriptors stay where they are; the new entry
+    // takes the next free slot immediately below them. This is the mirror of
+    // growManifestRange(), which grows upward from the low end.
+    [[nodiscard]] std::optional<uint32_t> claimDiscoveredSlot()
+    {
+        if (discoveredBase_ <= manifestCount_) {
+            return std::nullopt;
+        }
+        --discoveredBase_;
+        active_.push_back(discoveredBase_);
+        return discoveredBase_;
     }
 
     void markActive(uint32_t descriptorIndex)

@@ -49,29 +49,6 @@ bool supportsBc7Textures(VkPhysicalDevice physicalDevice)
     return true;
 }
 
-void remapBindingTextures(
-    PrimitiveMaterialBinding& binding,
-    uint32_t manifestTextureCount,
-    uint32_t discoveredTextureBase)
-{
-    const auto remap = [=](std::optional<uint32_t>& index) {
-        if (index) {
-            *index = TextureDescriptorSpace::descriptorIndexFor(
-                *index, manifestTextureCount, discoveredTextureBase);
-        }
-    };
-    if (binding.bindBaseColorTexture) {
-        binding.textureIndex = TextureDescriptorSpace::descriptorIndexFor(
-            binding.textureIndex,
-            manifestTextureCount,
-            discoveredTextureBase);
-    }
-    remap(binding.normalTextureIndex);
-    remap(binding.metallicRoughnessTextureIndex);
-    remap(binding.emissiveTextureIndex);
-    remap(binding.occlusionTextureIndex);
-}
-
 } // namespace
 
 // A default Aabb is inverted, so the empty case needs no special handling:
@@ -174,6 +151,7 @@ void VulkanModelResources::create(
             "Runtime texture catalog leaves no stable manifest descriptor range");
     }
     textureSpace_.reserveActive(textureCatalog.textures().size());
+    std::vector<uint32_t> logicalToDescriptor(textureCatalog.textures().size());
     for (uint32_t logicalIndex = 0;
          logicalIndex < textureCatalog.textures().size();
          ++logicalIndex) {
@@ -182,27 +160,17 @@ void VulkanModelResources::create(
         textureDefinitions_[descriptorIndex] =
             textureCatalog.textures()[logicalIndex];
         textureSpace_.markActive(descriptorIndex);
+        logicalToDescriptor[logicalIndex] = descriptorIndex;
     }
     modelTextureDependencies_.resize(models_.size());
     modelMaterialBindings_.resize(models_.size());
     for (uint32_t modelIndex = 0; modelIndex < models_.size(); ++modelIndex) {
-        const RuntimeModelTextures& catalogModel =
-            textureCatalog.model(modelIndex);
-        std::vector<uint32_t>& dependencies =
-            modelTextureDependencies_[modelIndex];
-        dependencies.reserve(catalogModel.requiredTextures.size());
-        for (uint32_t logicalIndex : catalogModel.requiredTextures) {
-            dependencies.push_back(textureCatalog.descriptorIndex(
-                logicalIndex, textureDescriptorCapacity_));
-        }
-        modelMaterialBindings_[modelIndex] = catalogModel.primitiveMaterials;
-        for (PrimitiveMaterialBinding& binding :
-             modelMaterialBindings_[modelIndex]) {
-            remapBindingTextures(
-                binding,
-                textureSpace_.manifestCount(),
-                textureSpace_.discoveredBase());
-        }
+        RuntimeModelTextures mapped = remapRuntimeModelTextures(
+            textureCatalog.model(modelIndex), logicalToDescriptor);
+        modelTextureDependencies_[modelIndex] =
+            std::move(mapped.requiredTextures);
+        modelMaterialBindings_[modelIndex] =
+            std::move(mapped.primitiveMaterials);
     }
     animationController_.configure(
         manifest.playerModel(), manifest.playerIdleAnimation());
@@ -1725,6 +1693,16 @@ bool VulkanModelResources::syncManifestModels()
         models_.size() >= manifest_->models().size()) {
         return false;
     }
+    // Registration has already copied the model and its dependencies into the
+    // runtime asset tree. Recollecting is intentionally the same operation as
+    // startup: editor imports are rare, and sharing this path prevents new
+    // material semantics from silently working only after a restart.
+    const RuntimeTextureCatalog textureCatalog =
+        collectRuntimeTextureCatalog(assetRoot_, *manifest_);
+    const std::vector<uint32_t> logicalToDescriptor =
+        reconcileRuntimeTextureCatalog(
+            textureCatalog, textureSpace_, textureDefinitions_);
+
     const std::size_t previousSize = models_.size();
     models_.resize(manifest_->models().size());
     modelTextureDependencies_.resize(models_.size());
@@ -1732,44 +1710,13 @@ bool VulkanModelResources::syncManifestModels()
     for (std::size_t modelIndex = previousSize;
          modelIndex < models_.size();
          ++modelIndex) {
-        const AssetManifest::Model& definition =
-            manifest_->models()[modelIndex];
-        // Both of these are logical texture indices and have to be mapped into
-        // the descriptor heap, exactly as create() does for the startup path.
-        // The mapping is the identity for a manifest texture, which is all an
-        // editor-appended model can reference today - so this changes nothing
-        // now, and stops the path depending on an invariant stated nowhere.
-        // syncManifestTextures() runs immediately before this (ApplicationTools),
-        // so the manifest range already covers every index seen here.
-        //
-        // The bindings carry base colour only. That is not an omission: a
-        // manifest primitive material has a texture and a scroll flag and
-        // nothing else. Normal, metallic-roughness, emissive and occlusion
-        // handles come from glTF discovery, which builds the runtime catalog at
-        // startup and has no equivalent for a model appended later.
-        if (definition.materialMode == ModelMaterialMode::SingleTexture) {
-            modelTextureDependencies_[modelIndex].push_back(
-                textureSpace_.descriptorIndexFor(definition.textureIndex));
-        } else if (
-            definition.materialMode == ModelMaterialMode::PrimitiveMaterials) {
-            for (const AssetManifest::Model::PrimitiveMaterial& material :
-                 definition.primitiveMaterials) {
-                modelTextureDependencies_[modelIndex].push_back(
-                    textureSpace_.descriptorIndexFor(material.textureIndex));
-                modelMaterialBindings_[modelIndex].push_back({
-                    .textureIndex = material.textureIndex,
-                    .flags = material.scrollV
-                        ? PrimitiveMaterialScrollV
-                        : PrimitiveMaterialNone,
-                });
-                // The same call the startup path makes, so the two cannot
-                // drift: if a map handle is ever added here it is remapped too.
-                remapBindingTextures(
-                    modelMaterialBindings_[modelIndex].back(),
-                    textureSpace_.manifestCount(),
-                    textureSpace_.discoveredBase());
-            }
-        }
+        RuntimeModelTextures mapped = remapRuntimeModelTextures(
+            textureCatalog.model(static_cast<uint32_t>(modelIndex)),
+            logicalToDescriptor);
+        modelTextureDependencies_[modelIndex] =
+            std::move(mapped.requiredTextures);
+        modelMaterialBindings_[modelIndex] =
+            std::move(mapped.primitiveMaterials);
     }
     return true;
 }
