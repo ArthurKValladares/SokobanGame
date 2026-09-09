@@ -19,6 +19,7 @@
 // between suites for real reasons. CHECK_MESSAGE preserves a useful diagnostic
 // when the expression alone does not explain the intended invariant.
 
+#include <cmath>
 #include <iostream>
 
 // Counted across the whole run, and read by each suite's main() to decide its
@@ -44,6 +45,21 @@ inline void checkImpl(bool ok, const char* expression, int line)
         std::cerr << '[' << currentTest << "] ";
     }
     std::cerr << "line " << line << ": " << expression << '\n';
+}
+
+inline void checkNear(
+    float actual,
+    float expected,
+    const char* label,
+    float tolerance = 1e-5f)
+{
+    ++checks;
+    if (std::abs(actual - expected) <= tolerance) {
+        return;
+    }
+    ++failures;
+    std::cerr << "FAIL: " << label << " (expected " << expected
+              << ", got " << actual << ")\n";
 }
 
 // Stringizes the expression, so a failure reports what was asked rather than a

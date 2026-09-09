@@ -1,3 +1,5 @@
+#include "TestHarness.hpp"
+
 #include "engine/Math.hpp"
 
 #include <cmath>
@@ -5,24 +7,7 @@
 
 namespace {
 
-int failures = 0;
-
-void check(bool condition, const char* label)
-{
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL: " << label << '\n';
-    }
-}
-
-void checkNear(float actual, float expected, const char* label, float tolerance = 1e-5f)
-{
-    if (!(std::abs(actual - expected) <= tolerance)) {
-        ++failures;
-        std::cerr << "FAIL: " << label << " (expected " << expected
-                  << ", got " << actual << ")\n";
-    }
-}
+using ::checkNear;
 
 void checkNear(
     sokoban::Vec3 actual,
@@ -44,11 +29,11 @@ void testVectorAlgebra()
 {
     const Vec3 a { 1.0f, 2.0f, 3.0f };
     const Vec3 b { 4.0f, -5.0f, 6.0f };
-    check(a + b == Vec3 { 5.0f, -3.0f, 9.0f }, "vec3 add");
-    check(a - b == Vec3 { -3.0f, 7.0f, -3.0f }, "vec3 subtract");
-    check(a * 2.0f == Vec3 { 2.0f, 4.0f, 6.0f }, "vec3 scale");
-    check(2.0f * a == a * 2.0f, "scalar multiply commutes");
-    check(-a == Vec3 { -1.0f, -2.0f, -3.0f }, "vec3 negate");
+    CHECK_MESSAGE((a + b == Vec3 { 5.0f, -3.0f, 9.0f }), "vec3 add");
+    CHECK_MESSAGE((a - b == Vec3 { -3.0f, 7.0f, -3.0f }), "vec3 subtract");
+    CHECK_MESSAGE((a * 2.0f == Vec3 { 2.0f, 4.0f, 6.0f }), "vec3 scale");
+    CHECK_MESSAGE(2.0f * a == a * 2.0f, "scalar multiply commutes");
+    CHECK_MESSAGE((-a == Vec3 { -1.0f, -2.0f, -3.0f }), "vec3 negate");
     checkNear(dot(a, b), 4.0f - 10.0f + 18.0f, "vec3 dot");
 
     // Right-handed: x cross y is +z.
@@ -62,8 +47,8 @@ void testVectorAlgebra()
     checkNear(distance(Vec2 { 1.0f, 1.0f }, Vec2 { 4.0f, 5.0f }), 5.0f, "vec2 distance");
 
     // Orientation sign, which is what the hull and triangle tests rely on.
-    check(cross2D({ 1.0f, 0.0f }, { 0.0f, 1.0f }) > 0.0f, "cross2D left turn positive");
-    check(cross2D({ 0.0f, 1.0f }, { 1.0f, 0.0f }) < 0.0f, "cross2D right turn negative");
+    CHECK_MESSAGE(cross2D({ 1.0f, 0.0f }, { 0.0f, 1.0f }) > 0.0f, "cross2D left turn positive");
+    CHECK_MESSAGE(cross2D({ 0.0f, 1.0f }, { 1.0f, 0.0f }) < 0.0f, "cross2D right turn negative");
 
     checkNear(lerp(Vec3 { 0.0f, 0.0f, 0.0f }, Vec3 { 10.0f, 20.0f, 30.0f }, 0.25f),
         { 2.5f, 5.0f, 7.5f }, "vec3 lerp");
@@ -73,13 +58,14 @@ void testDegenerateNormalization()
 {
     // The policy that replaced two conflicting ones. `normalize` yields zero;
     // a caller wanting a specific axis back asks for it.
-    check(normalize(Vec3 {}) == Vec3 {}, "degenerate normalize is zero");
-    check(normalizeOr(Vec3 {}, { 0.0f, 0.0f, 1.0f }) == Vec3 { 0.0f, 0.0f, 1.0f },
+    CHECK_MESSAGE(normalize(Vec3 {}) == Vec3 {}, "degenerate normalize is zero");
+    CHECK_MESSAGE((normalizeOr(Vec3 {}, { 0.0f, 0.0f, 1.0f }) ==
+                      Vec3 { 0.0f, 0.0f, 1.0f }),
         "degenerate normalizeOr uses the fallback");
     // Just above the threshold: still normalized, not swallowed.
     const Vec3 tiny { 1e-5f, 0.0f, 0.0f };
     checkNear(length(normalize(tiny)), 1.0f, "a small but real vector still normalizes");
-    check(normalize(Vec3 { 1e-7f, 0.0f, 0.0f }) == Vec3 {},
+    CHECK_MESSAGE(normalize(Vec3 { 1e-7f, 0.0f, 0.0f }) == Vec3 {},
         "below the threshold is treated as directionless");
 }
 
@@ -176,7 +162,7 @@ void testMatrixLayoutAndAlgebra()
     checkNear(translation.values[13], 6.0f, "translation y at index 13");
     checkNear(translation.values[14], 7.0f, "translation z at index 14");
 
-    check(mat4Identity * mat4Identity == mat4Identity, "identity squared is identity");
+    CHECK_MESSAGE(mat4Identity * mat4Identity == mat4Identity, "identity squared is identity");
     checkNear(transformPoint(mat4Identity, { 1.0f, 2.0f, 3.0f }), { 1.0f, 2.0f, 3.0f },
         "identity transform is a no-op");
     checkNear(transformPoint(translation, { 1.0f, 1.0f, 1.0f }), { 6.0f, 7.0f, 8.0f },
@@ -222,7 +208,7 @@ void testInverse()
     singular.values[0] = 0.0f;
     singular.values[5] = 0.0f;
     singular.values[10] = 0.0f;
-    check(inverse(singular) == mat4Identity, "a singular matrix inverts to identity");
+    CHECK_MESSAGE(inverse(singular) == mat4Identity, "a singular matrix inverts to identity");
 }
 
 void testTrsAndNormalMatrix()
@@ -252,7 +238,7 @@ void testTrsAndNormalMatrix()
     const Vec3 movedTangent = transformVector(squash, tangent);
     const Vec3 naive = transformVector(squash, normal);
     const Vec3 corrected = transform(normalMatrix(squash), normal);
-    check(std::abs(dot(normalize(naive), normalize(movedTangent))) > 1e-3f,
+    CHECK_MESSAGE(std::abs(dot(normalize(naive), normalize(movedTangent))) > 1e-3f,
         "the naive normal stops being perpendicular under non-uniform scale");
     checkNear(dot(normalize(corrected), normalize(movedTangent)), 0.0f,
         "the normal matrix keeps normals perpendicular", 1e-4f);
@@ -263,8 +249,8 @@ void testScalarHelpers()
     checkNear(degreesToRadians(180.0f), pi, "degrees to radians");
     checkNear(radiansToDegrees(pi), 180.0f, "radians to degrees");
     checkNear(lerp(10.0f, 20.0f, 0.5f), 15.0f, "scalar lerp");
-    check(approximately(1.0f, 1.0f + 1e-6f), "approximately accepts tiny drift");
-    check(!approximately(1.0f, 1.01f), "approximately rejects real differences");
+    CHECK_MESSAGE(approximately(1.0f, 1.0f + 1e-6f), "approximately accepts tiny drift");
+    CHECK_MESSAGE(!approximately(1.0f, 1.01f), "approximately rejects real differences");
 }
 
 } // namespace
@@ -282,7 +268,7 @@ int main()
     testScalarHelpers();
 
     if (failures != 0) {
-        std::cerr << "MathTests: " << failures << " check(s) failed\n";
+        std::cerr << "MathTests: " << failures << " CHECK_MESSAGE(s) failed\n";
         return 1;
     }
     std::cout << "MathTests passed\n";
