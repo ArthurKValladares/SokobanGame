@@ -25,30 +25,6 @@ std::string documentKey(const std::filesystem::path& path)
     return key;
 }
 
-TextureSourceIdentity manifestIdentity(const AssetManifest::Texture& texture)
-{
-    return {
-        .source = ExternalTextureSource {
-            std::filesystem::path(texture.path).lexically_normal(),
-        },
-        .interpretation = {
-            .colorSpace = texture.colorSpace,
-            .wrapU = texture.tiling
-                ? TextureAddressMode::Repeat
-                : TextureAddressMode::ClampToEdge,
-            .wrapV = texture.tiling
-                ? TextureAddressMode::Repeat
-                : TextureAddressMode::ClampToEdge,
-            .magFilter = texture.filter == TextureFilter::Linear
-                ? TextureMagnificationFilter::Linear
-                : TextureMagnificationFilter::Nearest,
-            .minFilter = texture.filter == TextureFilter::Linear
-                ? TextureMinificationFilter::LinearMipmapLinear
-                : TextureMinificationFilter::Nearest,
-        },
-    };
-}
-
 void requireOnce(std::vector<uint32_t>& required, uint32_t texture)
 {
     if (std::ranges::find(required, texture) == required.end()) {
@@ -62,7 +38,7 @@ RuntimeTextureDefinition runtimeTextureDefinitionFor(
     const AssetManifest::Texture& texture)
 {
     return {
-        .identity = manifestIdentity(texture),
+        .identity = manifestTextureSourceIdentity(texture, texture.path),
         .label = "texture '" + texture.name + "'",
         .manifestOwned = true,
     };

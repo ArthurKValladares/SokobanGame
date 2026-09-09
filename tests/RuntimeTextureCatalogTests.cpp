@@ -345,6 +345,33 @@ void testPreparedTextureSelectsArtifactOrSourceFallback()
     });
 }
 
+void testManifestTextureIdentityIsShared()
+{
+    TEST("manifestTextureIdentityIsShared");
+    const AssetManifest::Texture texture {
+        .name = "Stone",
+        .path = "textures/intermediate/../stone.png",
+        .tiling = true,
+        .filter = TextureFilter::Linear,
+        .colorSpace = TextureColorSpace::Linear,
+    };
+
+    const TextureSourceIdentity identity = manifestTextureSourceIdentity(
+        texture, texture.path);
+    const RuntimeTextureDefinition runtime =
+        runtimeTextureDefinitionFor(texture);
+    CHECK(runtime.identity == identity);
+    CHECK(std::get<ExternalTextureSource>(identity.source).path ==
+        std::filesystem::path("textures/stone.png"));
+    CHECK(identity.interpretation.colorSpace == TextureColorSpace::Linear);
+    CHECK(identity.interpretation.wrapU == TextureAddressMode::Repeat);
+    CHECK(identity.interpretation.wrapV == TextureAddressMode::Repeat);
+    CHECK(identity.interpretation.magFilter ==
+        TextureMagnificationFilter::Linear);
+    CHECK(identity.interpretation.minFilter ==
+        TextureMinificationFilter::LinearMipmapLinear);
+}
+
 void testCollectsProductionCatalog()
 {
     TEST("collectsProductionCatalog");
@@ -371,6 +398,7 @@ int main()
     testBuildsDeduplicatedPerModelCatalog();
     testLoadsEverySupportedSourceForm();
     testPreparedTextureSelectsArtifactOrSourceFallback();
+    testManifestTextureIdentityIsShared();
     testCollectsProductionCatalog();
 
     if (failures == 0) {

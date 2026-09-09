@@ -628,27 +628,10 @@ private:
 
         for (const auto& texture : manifest.textures()) {
             addAssetPath(texture.path, "texture '" + texture.name + "'");
-            addTextureSource({
-                .source = ExternalTextureSource {
-                    normalizedRelativePath(
-                        texture.path, "texture '" + texture.name + "'"),
-                },
-                .interpretation = {
-                    .colorSpace = texture.colorSpace,
-                    .wrapU = texture.tiling
-                        ? TextureAddressMode::Repeat
-                        : TextureAddressMode::ClampToEdge,
-                    .wrapV = texture.tiling
-                        ? TextureAddressMode::Repeat
-                        : TextureAddressMode::ClampToEdge,
-                    .magFilter = texture.filter == TextureFilter::Linear
-                        ? TextureMagnificationFilter::Linear
-                        : TextureMagnificationFilter::Nearest,
-                    .minFilter = texture.filter == TextureFilter::Linear
-                        ? TextureMinificationFilter::LinearMipmapLinear
-                        : TextureMinificationFilter::Nearest,
-                },
-            });
+            addTextureSource(manifestTextureSourceIdentity(
+                texture,
+                normalizedRelativePath(
+                    texture.path, "texture '" + texture.name + "'")));
         }
         for (const auto& model : manifest.models()) {
             addAssetPath(model.path, "model '" + model.name + "'");

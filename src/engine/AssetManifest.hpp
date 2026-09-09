@@ -224,4 +224,12 @@ private:
     RenderAnimation enemyAttack_ {};
 };
 
+// Converts a manifest texture into the complete source/sampling identity used
+// by staging, runtime catalog construction and incremental manifest appends.
+// The caller supplies the path after applying its own containment policy; this
+// function applies the shared lexical normalization.
+[[nodiscard]] TextureSourceIdentity manifestTextureSourceIdentity(
+    const AssetManifest::Texture& texture,
+    std::filesystem::path sourcePath);
+
 } // namespace sokoban

@@ -816,4 +816,28 @@ const std::string* AssetManifest::musicForLevel(int level) const
     return nullptr;
 }
 
+TextureSourceIdentity manifestTextureSourceIdentity(
+    const AssetManifest::Texture& texture,
+    std::filesystem::path sourcePath)
+{
+    return {
+        .source = ExternalTextureSource { sourcePath.lexically_normal() },
+        .interpretation = {
+            .colorSpace = texture.colorSpace,
+            .wrapU = texture.tiling
+                ? TextureAddressMode::Repeat
+                : TextureAddressMode::ClampToEdge,
+            .wrapV = texture.tiling
+                ? TextureAddressMode::Repeat
+                : TextureAddressMode::ClampToEdge,
+            .magFilter = texture.filter == TextureFilter::Linear
+                ? TextureMagnificationFilter::Linear
+                : TextureMagnificationFilter::Nearest,
+            .minFilter = texture.filter == TextureFilter::Linear
+                ? TextureMinificationFilter::LinearMipmapLinear
+                : TextureMinificationFilter::Nearest,
+        },
+    };
+}
+
 } // namespace sokoban
