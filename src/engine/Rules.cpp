@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdlib>
+#include <ranges>
 #include <utility>
 #include <vector>
 
@@ -441,7 +442,8 @@ bool isAtUnlockedEnd(const Level& level, const GameState& state)
 {
     return !anyPlayerDead(state) && isEndUnlocked(level, state) &&
         [&] {
-            for (std::size_t i = 0; i < state.players.size(); ++i) {
+            for (const std::size_t i :
+                 std::views::iota(std::size_t { 0 }, state.players.size())) {
                 if (!level.isEnd(playerCell(state, i))) {
                     return false;
                 }

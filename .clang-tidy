@@ -43,7 +43,6 @@ Checks: >
   -bugprone-easily-swappable-parameters,
   -bugprone-unchecked-optional-access,
   -bugprone-suspicious-include,
-  -bugprone-inc-dec-in-conditions,
   -bugprone-switch-missing-default-case,
   -performance-enum-size,
   -performance-no-automatic-move,
@@ -73,6 +72,8 @@ Checks: >
 # arithmetic boundaries were widened or made size-based.
 # `bugprone-branch-clone` followed after three repeated UI and motion-selection
 # branches were consolidated without changing their fallback behavior.
+# `bugprone-inc-dec-in-conditions` followed after index iteration in compound
+# predicates was expressed with non-mutating views.
 #
 # Two are excluded on their merits rather than as a queue:
 #

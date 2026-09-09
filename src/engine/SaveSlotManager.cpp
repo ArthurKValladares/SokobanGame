@@ -3,6 +3,7 @@
 #include "engine/AtomicFile.hpp"
 
 #include <fstream>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -145,7 +146,7 @@ SaveSlotManager::SlotSummary SaveSlotManager::summarize(
         summary.completedLevels += level.completed ? 1 : 0;
     }
     summary.completed = levelCount > 0 && [&] {
-        for (int level = 0; level < levelCount; ++level) {
+        for (const int level : std::views::iota(0, levelCount)) {
             const PlayerProfile::LevelProgress* progress =
                 profile.progressForLevel(level);
             if (progress == nullptr || !progress->completed) {
