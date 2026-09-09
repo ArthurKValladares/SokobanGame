@@ -413,7 +413,6 @@ float pageHeight(OptionsMenuPage page)
     switch (page) {
     case OptionsMenuPage::Graphics: return 740.0f;
     case OptionsMenuPage::Controls: return 720.0f;
-    case OptionsMenuPage::EditorControls: return 540.0f;
     default: return 540.0f;
     }
 }

@@ -554,9 +554,11 @@ void GameplayPresentation::seekAction(
             const bool currentBegun = current <= sourceTime;
             // The latest leg that has begun; before any has, the earliest,
             // which is what holds the entity at the action's start pose.
-            if (candidateBegun && (!currentBegun || candidate > current)) {
-                chosen = i;
-            } else if (!candidateBegun && !currentBegun && candidate < current) {
+            const bool isLatestBegun =
+                candidateBegun && (!currentBegun || candidate > current);
+            const bool isEarliestPending =
+                !candidateBegun && !currentBegun && candidate < current;
+            if (isLatestBegun || isEarliestPending) {
                 chosen = i;
             }
         }

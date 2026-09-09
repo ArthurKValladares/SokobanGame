@@ -37,18 +37,17 @@ internals and art-asset quality or licensing remain outside its scope.
 
 ## MQ-01: clang-tidy queue
 
-The gate covers 104 correctness- and cost-oriented analyzer checks. Ninety-five
-are enabled and nine are explicitly excluded.
+The gate covers 104 correctness- and cost-oriented analyzer checks. Ninety-six
+are enabled and eight are explicitly excluded.
 
 Work through the remaining actionable categories in this order:
 
-1. `bugprone-branch-clone`
-2. `bugprone-inc-dec-in-conditions`
-3. `bugprone-suspicious-include`
-4. `bugprone-switch-missing-default-case`
-5. `performance-inefficient-vector-operation`
-6. `performance-no-automatic-move`
-7. `performance-enum-size`
+1. `bugprone-inc-dec-in-conditions`
+2. `bugprone-suspicious-include`
+3. `bugprone-switch-missing-default-case`
+4. `performance-inefficient-vector-operation`
+5. `performance-no-automatic-move`
+6. `performance-enum-size`
 
 Two exclusions are policy exceptions rather than an automatic rewrite queue:
 
@@ -192,8 +191,7 @@ checks need the device, driver, package identity, steps, and observed result.
 
 ## Execution order
 
-1. Complete `bugprone-branch-clone` and continue the analyzer queue one
-   category per commit.
+1. Complete the remaining clang-tidy queue one category per commit.
 2. Measure frame-time summary queries and implement cache invalidation only if
    the recorded cost justifies it.
 3. Add prepared-asset byte instrumentation, capture a pressure baseline, and

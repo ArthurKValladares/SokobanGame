@@ -11,7 +11,7 @@ float resolvedMeasuredSize(UiLayoutSize specification, float contentSize)
 {
     switch (specification.kind) {
     case UiLayoutSizeKind::Fixed: return std::max(specification.value, 0.0f);
-    case UiLayoutSizeKind::Content: return std::max(contentSize, 0.0f);
+    case UiLayoutSizeKind::Content:
     case UiLayoutSizeKind::Fill: return std::max(contentSize, 0.0f);
     }
     return 0.0f;
