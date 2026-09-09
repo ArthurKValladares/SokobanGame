@@ -89,8 +89,8 @@ ImageData nextMip(const ImageData& source, TextureColorSpace colorSpace)
                         (static_cast<std::size_t>(sourceY) * source.width +
                             sourceX) * 4U;
                     for (std::size_t channel = 0; channel < 4; ++channel) {
-                        float value = byteAt(source.rgba, offset + channel) /
-                            255.0f;
+                        float value = static_cast<float>(
+                            byteAt(source.rgba, offset + channel)) / 255.0f;
                         if (colorSpace == TextureColorSpace::Srgb &&
                             channel < 3) {
                             value = srgbToLinear(value);

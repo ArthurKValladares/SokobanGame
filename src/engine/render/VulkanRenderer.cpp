@@ -1799,7 +1799,7 @@ void VulkanRenderer::logRenderConfiguration() const
         << renderExtent.height << " at "
         << activeResources_.swapchain->renderScalePercent()
         << "% ("
-        << samplePixels / 1'000'000.0
+        << static_cast<double>(samplePixels) / 1'000'000.0
         << " M sample-pixels)";
 }
 

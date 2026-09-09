@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <span>
 
 namespace sokoban {
 
@@ -40,7 +41,7 @@ FrameTimeSummary FrameTimeTelemetry::summary() const
         sorted[index] = sample;
         total += sample;
     }
-    std::sort(sorted.begin(), sorted.begin() + sampleCount_);
+    std::ranges::sort(std::span(sorted).first(sampleCount_));
     result.averageMilliseconds = total / static_cast<double>(sampleCount_);
     const std::size_t p95Index =
         (sampleCount_ * 95 + 99) / 100 - 1;

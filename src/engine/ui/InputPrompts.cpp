@@ -300,6 +300,8 @@ InputPromptCatalog::InputPromptCatalog(
             atlasWidth = std::max(atlasWidth, region.x + region.width);
             atlasHeight = std::max(atlasHeight, region.y + region.height);
         }
+        const float atlasWidthPixels = static_cast<float>(atlasWidth);
+        const float atlasHeightPixels = static_cast<float>(atlasHeight);
         for (const PixelRegion& region : regions) {
             // Kenney's XML coordinates use a bottom-left origin, while the
             // decoded PNG rows and UI UVs use a top-left origin.
@@ -307,14 +309,15 @@ InputPromptCatalog::InputPromptCatalog(
             // Sample inside each cell so linear filtering cannot pull a color
             // from the immediately adjacent glyph in Kenney's packed sheet.
             target.regions.emplace(region.name, UiRect {
-                { (static_cast<float>(region.x) + 0.5f) / atlasWidth,
-                    (static_cast<float>(imageY) + 0.5f) / atlasHeight },
-                { (static_cast<float>(region.width) - 1.0f) / atlasWidth,
-                    (static_cast<float>(region.height) - 1.0f) / atlasHeight },
+                { (static_cast<float>(region.x) + 0.5f) / atlasWidthPixels,
+                    (static_cast<float>(imageY) + 0.5f) / atlasHeightPixels },
+                { (static_cast<float>(region.width) - 1.0f) / atlasWidthPixels,
+                    (static_cast<float>(region.height) - 1.0f) / atlasHeightPixels },
             });
             target.aspectRatios.emplace(
                 region.name,
-                static_cast<float>(region.width) / region.height);
+                static_cast<float>(region.width) /
+                    static_cast<float>(region.height));
         }
     }
 }

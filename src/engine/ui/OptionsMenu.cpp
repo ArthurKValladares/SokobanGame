@@ -540,8 +540,9 @@ bool drawBindingRowPrompts(
 
     constexpr float glyphSize = 36.0f;
     constexpr float glyphGap = 5.0f;
-    const float totalWidth = glyphs.size() * glyphSize +
-        (glyphs.size() - 1) * glyphGap;
+    const float glyphCount = static_cast<float>(glyphs.size());
+    const float totalWidth = glyphCount * glyphSize +
+        (glyphCount - 1.0f) * glyphGap;
     float x = row.position.x + row.size.x - horizontalPadding - totalWidth;
     const float y = row.position.y + (row.size.y - glyphSize) * 0.5f;
     const Vec4 color = focused

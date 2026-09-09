@@ -26,7 +26,7 @@
 # already made the other way. None of them belongs in a gate.
 #
 # The top four are not. 104 of their 104 checks are about correctness and
-# cost, and 92 of them pass clean today - so they are enabled here. The 12
+# cost, and 93 of them pass clean today - so they are enabled here. The 11
 # that do not pass are excluded by name, each with its current count, which
 # makes the exclusion list a work queue rather than a hole. A gate that starts
 # red is a gate people learn to ignore.
@@ -42,7 +42,6 @@ Checks: >
   portability-*,
   -bugprone-easily-swappable-parameters,
   -bugprone-unchecked-optional-access,
-  -bugprone-narrowing-conversions,
   -bugprone-optional-value-conversion,
   -bugprone-implicit-widening-of-multiplication-result,
   -bugprone-branch-clone,
@@ -55,7 +54,6 @@ Checks: >
 
 # The work queue, in the order worth doing:
 #
-#   bugprone-narrowing-conversions             9
 #   bugprone-optional-value-conversion         8
 #   bugprone-implicit-widening-of-mult-result  5
 #   bugprone-branch-clone                      4
@@ -73,6 +71,8 @@ Checks: >
 # ineffective moves and passing the same clean-parse scan.
 # `performance-unnecessary-value-param` followed after 14 read-only parameter
 # copies were changed to references or an inherited exception constructor.
+# `bugprone-narrowing-conversions` followed after ten numeric boundaries were
+# made explicit or rewritten to remain size-based.
 #
 # Two are excluded on their merits rather than as a queue:
 #
