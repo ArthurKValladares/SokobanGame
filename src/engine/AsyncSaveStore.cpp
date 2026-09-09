@@ -29,6 +29,19 @@ AsyncSaveStore::~AsyncSaveStore()
     worker_.join();
 }
 
+bool AsyncSaveStore::FlushResult::allPersisted() const
+{
+    return std::ranges::all_of(channels, [](const PersistenceResult& result) {
+        return result.outcome == PersistenceOutcome::Persisted;
+    });
+}
+
+const AsyncSaveStore::PersistenceResult&
+AsyncSaveStore::FlushResult::forChannel(int channel) const
+{
+    return channels.at(static_cast<std::size_t>(channel));
+}
+
 int AsyncSaveStore::addChannel(
     std::filesystem::path root,
     std::string fileStem,
@@ -57,7 +70,22 @@ bool AsyncSaveStore::anyPendingLocked() const
     });
 }
 
-bool AsyncSaveStore::replaceChannel(
+AsyncSaveStore::PersistenceResult AsyncSaveStore::persistenceResultLocked(
+    int channel) const
+{
+    const Channel& target = channelAt(channel);
+    return {
+        .outcome = target.pending || target.writing ||
+                !target.lastWriteSucceeded
+            ? PersistenceOutcome::RetryableFailure
+            : PersistenceOutcome::Persisted,
+        .requestedRevision = target.requestedRevision,
+        .persistedRevision = target.persistedRevision,
+        .message = target.status,
+    };
+}
+
+AsyncSaveStore::PersistenceResult AsyncSaveStore::replaceChannel(
     int channel,
     std::filesystem::path root,
     std::string fileStem,
@@ -73,15 +101,19 @@ bool AsyncSaveStore::replaceChannel(
         return !target.writing &&
             (!target.pending || target.retryBlocked);
     });
-    if (target.pending || !target.lastWriteSucceeded) {
-        return false;
+    const PersistenceResult persistence = persistenceResultLocked(channel);
+    if (persistence.outcome != PersistenceOutcome::Persisted) {
+        return persistence;
     }
 
     target.store = SaveStore(std::move(root), std::move(fileStem), sections);
     target.status.clear();
     target.lastWriteSucceeded = true;
     target.retryBlocked = false;
-    return true;
+    target.requestedRevision = 0;
+    target.pendingRevision = 0;
+    target.persistedRevision = 0;
+    return persistence;
 }
 
 SaveStore::LoadResult AsyncSaveStore::load(int channel)
@@ -104,24 +136,32 @@ SaveStore::LoadResult AsyncSaveStore::load(int channel)
     return result;
 }
 
-void AsyncSaveStore::requestSave(int channel, PlayerProfile profile, Urgency urgency)
+AsyncSaveStore::Revision AsyncSaveStore::requestSave(
+    int channel,
+    PlayerProfile profile,
+    Urgency urgency)
 {
+    Revision revision = 0;
     {
         const std::scoped_lock lock(mutex_);
         Channel& target = channelAt(channel);
         ++target.requestCount;
+        revision = ++target.nextRevision;
+        target.requestedRevision = revision;
         if (target.pending) {
             ++target.coalescedRequestCount;
         } else {
             target.deadline = std::chrono::steady_clock::now() + writeDelay_;
         }
         target.pending = std::move(profile);
+        target.pendingRevision = revision;
         target.retryBlocked = false;
         if (urgency == Urgency::Immediate) {
             target.forceWrite = true;
         }
     }
     condition_.notify_one();
+    return revision;
 }
 
 bool AsyncSaveStore::retryFailedSave(int channel)
@@ -151,12 +191,15 @@ SaveStore::DeleteResult AsyncSaveStore::deleteProfile(int channel)
         target.forceWrite = false;
         target.retryBlocked = false;
         target.lastWriteSucceeded = true;
+        target.requestedRevision = 0;
+        target.pendingRevision = 0;
+        target.persistedRevision = 0;
     }
     condition_.notify_all();
     return result;
 }
 
-bool AsyncSaveStore::flush()
+AsyncSaveStore::FlushResult AsyncSaveStore::flush()
 {
     std::unique_lock lock(mutex_);
     for (Channel& channel : channels_) {
@@ -171,9 +214,13 @@ bool AsyncSaveStore::flush()
                 channel.writing;
         });
     });
-    return std::ranges::none_of(channels_, [](const Channel& channel) {
-        return channel.pending.has_value() || !channel.lastWriteSucceeded;
-    });
+    FlushResult result;
+    result.channels.reserve(channels_.size());
+    for (std::size_t channel = 0; channel < channels_.size(); ++channel) {
+        result.channels.push_back(
+            persistenceResultLocked(static_cast<int>(channel)));
+    }
+    return result;
 }
 
 std::string AsyncSaveStore::status(int channel) const
@@ -196,7 +243,7 @@ AsyncSaveStore::Diagnostics AsyncSaveStore::diagnostics(int channel) const
     };
 }
 
-const std::filesystem::path& AsyncSaveStore::primaryPath(int channel) const
+std::filesystem::path AsyncSaveStore::primaryPath(int channel) const
 {
     const std::scoped_lock lock(mutex_);
     return channelAt(channel).store.primaryPath();
@@ -238,6 +285,7 @@ void AsyncSaveStore::workerLoop()
 
         Channel& channel = channels_[static_cast<std::size_t>(due)];
         PlayerProfile profile = std::move(*channel.pending);
+        const Revision revision = channel.pendingRevision;
         channel.pending.reset();
         channel.forceWrite = false;
         channel.writing = true;
@@ -250,8 +298,12 @@ void AsyncSaveStore::workerLoop()
         channel.writing = false;
         channel.lastWriteSucceeded = succeeded;
         channel.status = writeStatus;
+        if (succeeded) {
+            channel.persistedRevision = revision;
+        }
         if (!succeeded && !channel.pending) {
             channel.pending = std::move(profile);
+            channel.pendingRevision = revision;
             channel.retryBlocked = true;
         }
         ++channel.completedWriteCount;

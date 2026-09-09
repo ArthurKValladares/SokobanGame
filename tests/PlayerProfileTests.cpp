@@ -1180,14 +1180,21 @@ void testAsyncSaveCoalescingAndFlush()
     sokoban::PlayerProfile latest = first;
     latest.settings.audio.musicVolume = 0.75f;
 
-    store.requestSave(first);
-    store.requestSave(latest);
+    const auto firstRevision = store.requestSave(first);
+    const auto latestRevision = store.requestSave(latest);
+    check(firstRevision == 1 && latestRevision == 2,
+        "save requests receive ordered channel revisions");
     const sokoban::AsyncSaveStore::Diagnostics queued = store.diagnostics();
     check(queued.requests == 2, "async save requests counted");
     check(queued.pending, "deferred save remains off the calling thread");
     check(queued.coalescedRequests == 1, "pending saves coalesce");
 
-    check(store.flush(), "successful coalesced flush reports success");
+    const sokoban::AsyncSaveStore::FlushResult coalesced = store.flush();
+    check(coalesced.allPersisted(),
+        "successful coalesced flush reports success");
+    check(coalesced.forChannel(0).requestedRevision == latestRevision &&
+            coalesced.forChannel(0).persistedRevision == latestRevision,
+        "coalesced flush identifies the newest durable revision");
     const sokoban::AsyncSaveStore::Diagnostics flushed = store.diagnostics();
     check(flushed.completedWrites == 1, "coalesced profiles produce one write");
     check(!flushed.pending && !flushed.writing, "flush drains background writer");
@@ -1204,7 +1211,8 @@ void testAsyncSaveCoalescingAndFlush()
 
     latest.settings.audio.musicVolume = 0.5f;
     store.requestSave(latest, sokoban::AsyncSaveStore::Urgency::Immediate);
-    check(store.flush(), "successful immediate flush reports success");
+    check(store.flush().allPersisted(),
+        "successful immediate flush reports success");
     check(store.diagnostics().completedWrites == 2,
         "immediate request is written by background worker");
 }
@@ -1243,29 +1251,57 @@ void testAsyncSaveFailureRetainsRetryableSnapshot()
     sokoban::atomicFile::failWriteAfterForTesting(
         0, std::errc::no_space_on_device);
     store.requestSave(profile, sokoban::AsyncSaveStore::Urgency::Immediate);
-    check(!store.flush(), "failed asynchronous write makes flush report failure");
+    const sokoban::AsyncSaveStore::FlushResult failedFlush = store.flush();
+    check(!failedFlush.allPersisted(),
+        "failed asynchronous write makes flush report failure");
+    check(failedFlush.forChannel(0).outcome ==
+            sokoban::AsyncSaveStore::PersistenceOutcome::RetryableFailure &&
+            failedFlush.forChannel(0).requestedRevision == 1 &&
+            failedFlush.forChannel(0).persistedRevision == 0,
+        "failed flush identifies the requested and last durable revisions");
 
     const sokoban::AsyncSaveStore::Diagnostics failed = store.diagnostics();
     check(failed.pending && !failed.writing,
         "failed asynchronous write retains its snapshot as pending");
     check(!failed.lastWriteSucceeded,
         "failed asynchronous write remains visible in diagnostics");
-    check(store.status().starts_with("Player profile save failed:"),
-        "failed asynchronous write retains its storage error");
+    check(failedFlush.forChannel(0).message.starts_with(
+            "Player profile save failed:"),
+        "failed flush returns its storage error without a separate status lookup");
+
+    const sokoban::AsyncSaveStore::PersistenceResult rejectedReplacement =
+        store.replaceChannel(
+            0, temporary.path(), "replacement",
+            sokoban::ProfileSections::All);
+    check(rejectedReplacement.outcome ==
+            sokoban::AsyncSaveStore::PersistenceOutcome::RetryableFailure &&
+            rejectedReplacement.requestedRevision == 1 &&
+            rejectedReplacement.persistedRevision == 0,
+        "channel replacement returns the retained persistence failure");
+    check(store.primaryPath() == temporary.path() / "profile.json",
+        "failed channel replacement keeps the original destination");
 
     sokoban::PlayerProfile settings;
     settings.settings.audio.musicVolume = 0.25f;
     store.requestSave(
         independentChannel, settings, sokoban::AsyncSaveStore::Urgency::Immediate);
-    check(!store.flush(),
+    const sokoban::AsyncSaveStore::FlushResult independentFlush = store.flush();
+    check(!independentFlush.allPersisted(),
         "another channel does not implicitly retry a retained failure");
+    check(independentFlush.forChannel(independentChannel).outcome ==
+            sokoban::AsyncSaveStore::PersistenceOutcome::Persisted,
+        "flush reports successful channels independently");
     check(store.diagnostics().completedWrites == failed.completedWrites,
         "blocked failed snapshot is not retried by another channel's wakeup");
     check(store.load(independentChannel).profile.settings.audio.musicVolume == 0.25f,
         "independent channel still persists while a failed snapshot is retained");
 
     check(store.retryFailedSave(), "retained asynchronous snapshot can be retried");
-    check(store.flush(), "successful retry makes flush report success");
+    const sokoban::AsyncSaveStore::FlushResult retried = store.flush();
+    check(retried.allPersisted(),
+        "successful retry makes flush report success");
+    check(retried.forChannel(0).persistedRevision == 1,
+        "successful retry publishes the retained revision");
     check(!store.diagnostics().pending &&
             store.diagnostics().lastWriteSucceeded,
         "successful retry clears pending failure state");
@@ -1299,7 +1335,8 @@ void testAsyncStoreMultipleChannels()
 
         store.requestSave(progress);
         store.requestSave(settings, config);
-        check(store.flush(), "multi-channel flush reports success");
+        check(store.flush().allPersisted(),
+            "multi-channel flush reports success");
 
         // One worker wrote both channels to their own files.
         check(store.diagnostics(0).completedWrites >= 1, "channel 0 wrote");
@@ -1323,13 +1360,24 @@ void testAsyncStoreMultipleChannels()
         slot2.setCurrentScreen(5, 0);
         slot2.normalize();
         store.requestSave(repointed, slot2);
-        check(store.flush(), "repointed channel flush reports success");
+        check(store.flush().allPersisted(),
+            "repointed channel flush reports success");
         check(std::filesystem::is_regular_file(temporary.path() / "profile-slot2.json"),
             "third channel wrote a distinct file");
-        check(store.replaceChannel(
-                  repointed, temporary.path(), "profile-slot3",
-                  sokoban::ProfileSections::ProgressOnly),
+        const sokoban::AsyncSaveStore::PersistenceResult replacement =
+            store.replaceChannel(
+                repointed, temporary.path(), "profile-slot3",
+                sokoban::ProfileSections::ProgressOnly);
+        check(replacement.outcome ==
+                sokoban::AsyncSaveStore::PersistenceOutcome::Persisted &&
+                replacement.requestedRevision ==
+                    replacement.persistedRevision,
             "persisted channel can be replaced");
+        const sokoban::AsyncSaveStore::PersistenceResult freshDestination =
+            store.flush().forChannel(repointed);
+        check(freshDestination.requestedRevision == 0 &&
+                freshDestination.persistedRevision == 0,
+            "replaced channel starts a fresh destination revision epoch");
         check(store.load(repointed).profile.progressEmpty(),
             "replaced channel points at a fresh (empty) store");
     }

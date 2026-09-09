@@ -91,7 +91,8 @@ void testFreshInstallWritesNothing()
 
     const sokoban::PlayerProfile profile = manager.loadActiveProfile();
     check(profile == sokoban::PlayerProfile {}, "fresh profile is default");
-    manager.flush();
+    check(manager.flush().allPersisted(),
+        "fresh profile flush reports both channels settled");
     check(directoryEmpty(directory.path()), "fresh install writes no files");
 }
 
@@ -237,7 +238,8 @@ void testPreSplitSettingsMigration()
     const sokoban::PlayerProfile profile = manager.loadActiveProfile();
     check(profile.settings.audio.musicVolume == 0.25f, "migrated settings adopted");
     check(profile.unlockedLevel == 1, "progress preserved through migration");
-    manager.flush();
+    check(manager.flush().allPersisted(),
+        "settings migration reports durable completion");
     check(std::filesystem::is_regular_file(directory.path() / "settings.json"),
         "shared settings file bootstrapped");
 
@@ -337,7 +339,8 @@ void testSummariesSwitchingAndDeletion()
 
     // Settings-only saves never contain progress.
     manager.saveSettings(*switched, true);
-    manager.flush();
+    check(manager.flush().allPersisted(),
+        "settings-only save reports durable completion");
     sokoban::SaveStore settings(directory.path(), "settings");
     const sokoban::PlayerProfile sharedSettings = settings.load().profile;
     check(sharedSettings.progressEmpty(), "settings file carries no progress");
@@ -374,7 +377,8 @@ void testSummaryCacheInvalidation()
     active = profileWithProgress(1);
     active.settings.audio.musicVolume = 0.4f;
     manager.saveProgress(active, true);
-    manager.flush();
+    check(manager.flush().allPersisted(),
+        "progress save reports durable completion before switching");
     std::optional<sokoban::PlayerProfile> switched = manager.switchTo(1, active);
     check(switched.has_value(), "switch to slot 2");
     check(manager.slotSummaries(*switched, 4)[0].currentLevel == 1,
@@ -501,7 +505,8 @@ void testFailedMarkerCommitRollsBackSwitch()
 
     sokoban::PlayerProfile replacement = profileWithProgress(0);
     manager.saveProgress(replacement, true);
-    manager.flush();
+    check(manager.flush().allPersisted(),
+        "post-rollback save reports durable completion");
     check(sokoban::SaveStore(directory.path(), "profile-slot3").load()
             .profile.currentLevel == 0,
         "post-failure saves still target previous slot");
@@ -518,7 +523,8 @@ void testFailedOutgoingSavePreventsSlotSwitch()
 
     const sokoban::PlayerProfile committed = profileWithProgress(1);
     manager.saveProgress(committed, true);
-    manager.flush();
+    check(manager.flush().allPersisted(),
+        "initial outgoing profile reports durable completion");
 
     const std::filesystem::path blockedTemporary =
         directory.path() / "profile.json.tmp";
@@ -644,7 +650,8 @@ void testDeletionRemovesEveryRecoverableArtifact()
     check(loaded && loaded->progressEmpty(),
         "reopening cannot recover deleted temporary or displaced data");
     reopened.saveProgress(profileWithProgress(1), true);
-    reopened.flush();
+    check(reopened.flush().allPersisted(),
+        "new save reports durable completion after deletion");
     check(!std::filesystem::exists(slot.deletionMarkerPath()),
         "a successful new save replaces the deletion marker");
     check(sokoban::SaveStore(directory.path(), "profile-slot2").load()
@@ -690,6 +697,12 @@ void testActiveDeletionDiscardsPendingSnapshotWithCleanupFailure()
         "active deletion commits despite a blocked recovery artifact");
     check(!manager.progressDiagnostics().pending,
         "committed deletion discards the retained failed snapshot");
+    const sokoban::SaveSlotManager::FlushResult afterDeletion = manager.flush();
+    check(afterDeletion.progress.outcome ==
+            sokoban::AsyncSaveStore::PersistenceOutcome::Persisted &&
+            afterDeletion.progress.requestedRevision == 0 &&
+            afterDeletion.progress.persistedRevision == 0,
+        "committed deletion starts a fresh progress revision epoch");
     std::filesystem::remove_all(blockedTemporary);
 
     sokoban::SaveSlotManager reopened(directory.path(), instantWrites);
@@ -717,7 +730,8 @@ void testFailedActiveDeletionRetainsItsPendingSnapshot()
 
     std::filesystem::remove_all(blockedTemporary);
     manager.saveProgress(latest, true);
-    manager.flush();
+    check(manager.flush().allPersisted(),
+        "retained snapshot reports durable completion after retry");
     check(sokoban::SaveStore(directory.path()).load().profile == latest,
         "queued progress remains persistable after deletion fails");
 }

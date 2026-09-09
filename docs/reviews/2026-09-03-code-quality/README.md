@@ -30,6 +30,8 @@ Reviewed revision: `bd4f9496d467613cc875a6cde7edf07b26457ed2`. The working tree 
 
 **Follow-up, 2026-09-08 (CQ-14):** Shipping validation now runs 240 real frames with an isolated profile, requires exit code 0 within a 60-second deadline, kills timeouts, and captures stdout, stderr, logs, and dumps. Smoke-mode initialization and renderer failures suppress dialogs and return failure. A Windows integration regression covers success, nonzero exit, hang termination, missing/corrupt content, and a real application initialization failure.
 
+**Maintainability follow-up, 2026-09-08 (typed persistence results):** Asynchronous saves now assign ordered per-channel revisions and return typed persisted/retryable-failure outcomes from flush and channel replacement. Results carry both the newest requested revision and the latest durable revision plus the storage message, so slot switching and application shutdown no longer infer transaction state from a boolean followed by separate diagnostics. The public header now states which operations belong to the owner thread and which are synchronized producer/snapshot operations.
+
 ## Assessment
 
 The project has substantial engineering foundations: production code is shared with tests, gameplay has explicit state and presentation boundaries, content staging validates dependencies, save writes have recovery machinery, and Vulkan lifetimes have dedicated tracking and retirement helpers. Both current-source builds and all registered tests passed locally.
@@ -270,6 +272,8 @@ These recommendations are distinct from the defects above. They identify concret
 CQ-01 through CQ-05 show that the central weakness is ambiguous completion: decoded, queued, drained, persisted, mirrored, and indexed are different states. `bool`, `void`, and incidental status strings cannot express all of them reliably. Introduce small result types at the persistence/publication boundaries: persisted revision and storage error; source commit and mirror/index status; retryable deferral versus permanent failure. Use exhaustive enum handling where it protects transitions. Keep UI wording outside the underlying error classification.
 
 `AsyncSaveStore` also needs an explicit ownership/concurrency contract for public management operations. Its worker synchronization is not a blanket promise that callers may concurrently reconfigure and load channels. Document which operations are main-thread-only and which are safe producers; avoid adding locks indiscriminately.
+
+**Progress, 2026-09-08:** The persistence portion is implemented. `AsyncSaveStore::PersistenceResult` distinguishes durable completion from a retained retryable failure and reports requested/durable revisions. Multi-channel flush returns one result per channel, channel replacement returns the outgoing channel's result, and `SaveSlotManager` exposes named progress/settings results. Slot switching handles the outcome enum directly, while shutdown logs the returned storage failure instead of consulting mutable diagnostics after the fact. CQ-03/CQ-04 already supplied `LevelEditor::SaveResult` for source, mirror, and index outcomes. Regression coverage verifies coalesced revisions, independent channel outcomes, retained failed revisions, rejected replacement, and successful retry.
 
 ### 2. Consolidate repeated domain interpretation
 

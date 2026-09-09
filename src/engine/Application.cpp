@@ -407,14 +407,16 @@ Application::~Application()
     } else if (!playerProfile_.progressEmpty()) {
         persistProfile(true);
     }
-    saveSlots_.flush();
-    if (!saveSlots_.progressDiagnostics().lastWriteSucceeded) {
+    const SaveSlotManager::FlushResult persistence = saveSlots_.flush();
+    if (persistence.progress.outcome ==
+        AsyncSaveStore::PersistenceOutcome::RetryableFailure) {
         log::error(log::Category::Persistence)
-            << saveSlots_.progressStatus();
+            << persistence.progress.message;
     }
-    if (!saveSlots_.settingsDiagnostics().lastWriteSucceeded) {
+    if (persistence.settings.outcome ==
+        AsyncSaveStore::PersistenceOutcome::RetryableFailure) {
         log::error(log::Category::Persistence)
-            << saveSlots_.settingsStatus();
+            << persistence.settings.message;
     }
 #if SOKOBAN_ENABLE_DEBUG_UI
     DebugUi::clearTabs();

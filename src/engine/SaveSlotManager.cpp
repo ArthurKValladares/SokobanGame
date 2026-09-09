@@ -347,12 +347,17 @@ std::optional<PlayerProfile> SaveSlotManager::switchTo(
     PlayerProfile profile = std::move(loaded.profile);
     profile.adoptSettingsFrom(currentProfile);
 
-    if (!store_->replaceChannel(
+    const AsyncSaveStore::PersistenceResult outgoingPersistence =
+        store_->replaceChannel(
             progressChannel_, directory_, incomingStem,
-            ProfileSections::ProgressOnly)) {
+            ProfileSections::ProgressOnly);
+    switch (outgoingPersistence.outcome) {
+    case AsyncSaveStore::PersistenceOutcome::Persisted:
+        break;
+    case AsyncSaveStore::PersistenceOutcome::RetryableFailure:
         throw std::runtime_error(
             "outgoing save slot could not be persisted: " +
-            store_->status(progressChannel_));
+            outgoingPersistence.message);
     }
 
     try {
@@ -360,9 +365,12 @@ std::optional<PlayerProfile> SaveSlotManager::switchTo(
         // written, restore the outgoing channel before exposing the failure.
         writeActiveSlotMarker(slot);
     } catch (...) {
-        if (!store_->replaceChannel(
+        const AsyncSaveStore::PersistenceResult restoration =
+            store_->replaceChannel(
                 progressChannel_, directory_, slotFileStem(previousSlot),
-                ProfileSections::ProgressOnly)) {
+                ProfileSections::ProgressOnly);
+        if (restoration.outcome !=
+            AsyncSaveStore::PersistenceOutcome::Persisted) {
             throw std::runtime_error(
                 "active save slot marker failed and the outgoing save channel "
                 "could not be restored");
@@ -421,9 +429,13 @@ void SaveSlotManager::saveSettings(const PlayerProfile& profile, bool immediate)
             : AsyncSaveStore::Urgency::Deferred);
 }
 
-void SaveSlotManager::flush()
+SaveSlotManager::FlushResult SaveSlotManager::flush()
 {
-    (void)store_->flush();
+    const AsyncSaveStore::FlushResult result = store_->flush();
+    return {
+        .progress = result.forChannel(progressChannel_),
+        .settings = result.forChannel(kSettingsChannel),
+    };
 }
 
 std::string SaveSlotManager::progressStatus() const

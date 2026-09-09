@@ -38,6 +38,19 @@ public:
         std::string message;
     };
 
+    struct FlushResult {
+        AsyncSaveStore::PersistenceResult progress;
+        AsyncSaveStore::PersistenceResult settings;
+
+        [[nodiscard]] bool allPersisted() const
+        {
+            return progress.outcome ==
+                    AsyncSaveStore::PersistenceOutcome::Persisted &&
+                settings.outcome ==
+                    AsyncSaveStore::PersistenceOutcome::Persisted;
+        }
+    };
+
     explicit SaveSlotManager(
         std::filesystem::path directory,
         std::chrono::milliseconds writeDelay = std::chrono::seconds(2));
@@ -82,7 +95,7 @@ public:
     void saveProgress(const PlayerProfile& profile, bool immediate);
     // Persists only the settings sections into the shared settings file.
     void saveSettings(const PlayerProfile& profile, bool immediate);
-    void flush();
+    [[nodiscard]] FlushResult flush();
 
     [[nodiscard]] std::string progressStatus() const;
     [[nodiscard]] AsyncSaveStore::Diagnostics progressDiagnostics() const;
