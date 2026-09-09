@@ -1,3 +1,5 @@
+#include "TestHarness.hpp"
+
 #include "engine/render/CompressedTextureArtifact.hpp"
 #include "engine/render/TextureMipResidency.hpp"
 
@@ -9,26 +11,14 @@
 
 namespace {
 
-int failures = 0;
-int checks = 0;
-
-void check(bool condition, const char* label)
-{
-    ++checks;
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL: " << label << '\n';
-    }
-}
-
 template <typename Function>
 void checkThrows(Function&& function, const char* label)
 {
     try {
         function();
-        check(false, label);
+        CHECK_MESSAGE(false, label);
     } catch (const std::exception&) {
-        check(true, label);
+        CHECK_MESSAGE(true, label);
     }
 }
 
@@ -58,24 +48,24 @@ void testRoundTripPreservesFormatDimensionsAndMipBytes()
     const sokoban::CompressedTextureArtifact artifact =
         sokoban::parseBc7Ktx2(bytes);
 
-    check(artifact.format == sokoban::CompressedTextureFormat::Bc7Srgb,
+    CHECK_MESSAGE(artifact.format == sokoban::CompressedTextureFormat::Bc7Srgb,
         "sRGB interpretation selects BC7 SRGB");
-    check(artifact.width == 5 && artifact.height == 3,
+    CHECK_MESSAGE(artifact.width == 5 && artifact.height == 3,
         "base dimensions survive KTX2 round trip");
-    check(artifact.mips.size() == 3,
+    CHECK_MESSAGE(artifact.mips.size() == 3,
         "mipmapped filter emits a complete odd-sized pyramid");
-    check(artifact.mips[0].width == 5 && artifact.mips[0].height == 3,
+    CHECK_MESSAGE(artifact.mips[0].width == 5 && artifact.mips[0].height == 3,
         "level zero dimensions preserved");
-    check(artifact.mips[1].width == 2 && artifact.mips[1].height == 1,
+    CHECK_MESSAGE(artifact.mips[1].width == 2 && artifact.mips[1].height == 1,
         "odd dimensions halve using Vulkan mip rules");
-    check(artifact.mips[2].width == 1 && artifact.mips[2].height == 1,
+    CHECK_MESSAGE(artifact.mips[2].width == 1 && artifact.mips[2].height == 1,
         "pyramid terminates at one texel");
-    check(artifact.mips[0].bytes.size() == 32,
+    CHECK_MESSAGE(artifact.mips[0].bytes.size() == 32,
         "base BC7 level has one block per partial 4x4 region");
-    check(artifact.mips[1].bytes.size() == 16 &&
+    CHECK_MESSAGE(artifact.mips[1].bytes.size() == 16 &&
             artifact.mips[2].bytes.size() == 16,
         "small BC7 levels remain one whole block");
-    check(artifact.residentBytes() == 64,
+    CHECK_MESSAGE(artifact.residentBytes() == 64,
         "resident byte count is the exact sum of compressed mips");
 }
 
@@ -87,9 +77,9 @@ void testLinearNonMipmappedArtifactAndStableIdentityPath()
     };
     const sokoban::CompressedTextureArtifact artifact =
         sokoban::parseBc7Ktx2(sokoban::buildBc7Ktx2(oddImage(), linear));
-    check(artifact.format == sokoban::CompressedTextureFormat::Bc7Unorm,
+    CHECK_MESSAGE(artifact.format == sokoban::CompressedTextureFormat::Bc7Unorm,
         "linear interpretation selects BC7 UNORM");
-    check(artifact.mips.size() == 1,
+    CHECK_MESSAGE(artifact.mips.size() == 1,
         "non-mipmapped sampler stores only the base level");
 
     const sokoban::TextureSourceIdentity linearIdentity {
@@ -98,11 +88,11 @@ void testLinearNonMipmappedArtifactAndStableIdentityPath()
     };
     sokoban::TextureSourceIdentity srgbIdentity = linearIdentity;
     srgbIdentity.interpretation.colorSpace = sokoban::TextureColorSpace::Srgb;
-    check(
+    CHECK_MESSAGE(
         sokoban::compressedTextureArtifactPath(linearIdentity) ==
             sokoban::compressedTextureArtifactPath(linearIdentity),
         "artifact path is deterministic");
-    check(
+    CHECK_MESSAGE(
         sokoban::compressedTextureArtifactPath(linearIdentity) !=
             sokoban::compressedTextureArtifactPath(srgbIdentity),
         "colour interpretation participates in artifact identity");
@@ -140,27 +130,27 @@ void testMipResidencyChoosesTheFinestCompleteTailThatFits()
             oddImage(), sokoban::TextureInterpretation {}));
 
     const auto full = sokoban::chooseTextureMipResidency(artifact, 64);
-    check(full && full->sourceBaseMip == 0 && !full->degraded(),
+    CHECK_MESSAGE(full && full->sourceBaseMip == 0 && !full->degraded(),
         "full mip chain wins when it fits");
-    check(full && full->residentBytes == 64 &&
+    CHECK_MESSAGE(full && full->residentBytes == 64 &&
             full->fullQualityBytes == 64 && full->omittedBytes() == 0,
         "full-quality residency accounting is exact");
 
     const auto middle = sokoban::chooseTextureMipResidency(artifact, 32);
-    check(middle && middle->sourceBaseMip == 1,
+    CHECK_MESSAGE(middle && middle->sourceBaseMip == 1,
         "first source mip is omitted under moderate pressure");
-    check(middle && middle->width == 2 && middle->height == 1 &&
+    CHECK_MESSAGE(middle && middle->width == 2 && middle->height == 1 &&
             middle->mipLevels == 2,
         "selected source mip becomes the resident base level");
-    check(middle && middle->residentBytes == 32 &&
+    CHECK_MESSAGE(middle && middle->residentBytes == 32 &&
             middle->omittedBytes() == 32,
         "reduced residency reports saved bytes");
 
     const auto smallest = sokoban::chooseTextureMipResidency(artifact, 16);
-    check(smallest && smallest->sourceBaseMip == 2 &&
+    CHECK_MESSAGE(smallest && smallest->sourceBaseMip == 2 &&
             smallest->mipLevels == 1,
         "smallest complete tail remains a valid last resort");
-    check(!sokoban::chooseTextureMipResidency(artifact, 15),
+    CHECK_MESSAGE(!sokoban::chooseTextureMipResidency(artifact, 15),
         "selection fails when even the smallest compressed block cannot fit");
 
     sokoban::CompressedTextureArtifact empty;

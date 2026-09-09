@@ -1,3 +1,5 @@
+#include "TestHarness.hpp"
+
 #include "engine/AnimationCatalog.hpp"
 #include "engine/AnimationEventSequencer.hpp"
 #include "engine/AssetManifest.hpp"
@@ -8,16 +10,6 @@
 #include <iostream>
 
 namespace {
-
-int failures = 0;
-
-void check(bool condition, const char* label)
-{
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL: " << label << '\n';
-    }
-}
 
 std::filesystem::path assetRoot()
 {
@@ -58,29 +50,29 @@ int main()
         catalog.eventSourceTime(
             AnimationUse::EnemyAttack, "attack-connected") /
         catalog.effectiveSpeed(AnimationUse::EnemyAttack);
-    check(
+    CHECK_MESSAGE(
         sequencer.advance(instance, eventLogicalTime - 0.01f, catalog).empty(),
         "event does not fire before marker");
     const auto fired =
         sequencer.advance(instance, eventLogicalTime + 0.02f, catalog);
-    check(fired.size() == 1, "event fires when marker is crossed");
+    CHECK_MESSAGE(fired.size() == 1, "event fires when marker is crossed");
     if (!fired.empty()) {
-        check(fired[0].instanceId == instance, "event retains instance id");
-        check(fired[0].eventId == "attack-connected", "event retains id");
-        check(
+        CHECK_MESSAGE(fired[0].instanceId == instance, "event retains instance id");
+        CHECK_MESSAGE(fired[0].eventId == "attack-connected", "event retains id");
+        CHECK_MESSAGE(
             std::abs(fired[0].overshootSeconds - 0.02f) < 0.0001f,
             "event reports frame overshoot");
     }
-    check(
+    CHECK_MESSAGE(
         sequencer.advance(instance, eventLogicalTime + 1.0f, catalog).empty(),
         "event fires only once per begin");
 
     sequencer.begin(instance, AnimationUse::EnemyAttack);
-    check(
+    CHECK_MESSAGE(
         sequencer.advance(instance, eventLogicalTime, catalog).size() == 1,
         "begin rearms instance events");
     sequencer.clear();
-    check(
+    CHECK_MESSAGE(
         sequencer.advance(instance, 10.0f, catalog).empty(),
         "clear removes active instances");
 

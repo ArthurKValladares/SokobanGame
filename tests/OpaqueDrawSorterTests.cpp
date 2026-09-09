@@ -1,19 +1,11 @@
+#include "TestHarness.hpp"
+
 #include "engine/render/OpaqueDrawSorter.hpp"
 
 #include <iostream>
 #include <vector>
 
 namespace {
-
-int failures = 0;
-
-void check(bool condition, const char* message)
-{
-    if (!condition) {
-        std::cerr << "FAIL: " << message << '\n';
-        ++failures;
-    }
-}
 
 sokoban::OpaqueDrawSortKey key(
     uint32_t pipeline,
@@ -42,13 +34,13 @@ void testSortAndInstanceRepeatedOpaqueDraws()
     std::vector<sokoban::OpaqueDrawBatch> batches;
     sokoban::sortOpaqueDraws(items, batches);
 
-    check(items[0].drawIndex == 30, "sorts by material before mesh");
-    check(items[1].drawIndex == 70 && items[2].drawIndex == 71,
+    CHECK_MESSAGE(items[0].drawIndex == 30, "sorts by material before mesh");
+    CHECK_MESSAGE(items[1].drawIndex == 70 && items[2].drawIndex == 71,
         "keeps repeated mesh/material items adjacent");
-    check(items[3].drawIndex == 72, "keeps distinct fragment state separate");
-    check(items[4].drawIndex == 40, "sorts by pipeline before material and mesh");
-    check(batches.size() == 4, "creates one batch for compatible repeats");
-    check(batches[1].firstItem == 1 && batches[1].itemCount == 2,
+    CHECK_MESSAGE(items[3].drawIndex == 72, "keeps distinct fragment state separate");
+    CHECK_MESSAGE(items[4].drawIndex == 40, "sorts by pipeline before material and mesh");
+    CHECK_MESSAGE(batches.size() == 4, "creates one batch for compatible repeats");
+    CHECK_MESSAGE(batches[1].firstItem == 1 && batches[1].itemCount == 2,
         "repeated opaque work becomes one instanced batch");
 }
 
@@ -62,8 +54,8 @@ void testSkinnedItemsNeverShareAnInstanceBatch()
     std::vector<sokoban::OpaqueDrawBatch> batches;
     sokoban::sortOpaqueDraws(items, batches);
 
-    check(batches.size() == 3, "non-instancable draws remain separate");
-    check(batches[0].itemCount == 1 && batches[1].itemCount == 1 &&
+    CHECK_MESSAGE(batches.size() == 3, "non-instancable draws remain separate");
+    CHECK_MESSAGE(batches[0].itemCount == 1 && batches[1].itemCount == 1 &&
             batches[2].itemCount == 1,
         "skinned work does not merge with static work");
 }
@@ -80,19 +72,19 @@ void testCallerOwnedBatchStorageIsReused()
     const std::size_t retainedCapacity = batches.capacity();
 
     sokoban::sortOpaqueDraws(items, batches);
-    check(batches.data() == retainedStorage,
+    CHECK_MESSAGE(batches.data() == retainedStorage,
         "sorter retains caller-owned batch storage");
-    check(batches.capacity() == retainedCapacity,
+    CHECK_MESSAGE(batches.capacity() == retainedCapacity,
         "sorter does not shrink retained batch capacity");
-    check(batches.size() == 1 && batches[0].itemCount == 2,
+    CHECK_MESSAGE(batches.size() == 1 && batches[0].itemCount == 2,
         "retained output still batches compatible draws");
 
     items.resize(1);
     items[0].instancable = false;
     sokoban::sortOpaqueDraws(items, batches);
-    check(batches.data() == retainedStorage,
+    CHECK_MESSAGE(batches.data() == retainedStorage,
         "repeated sort reuses the same batch allocation");
-    check(batches.size() == 1 && batches[0].itemCount == 1,
+    CHECK_MESSAGE(batches.size() == 1 && batches[0].itemCount == 1,
         "repeated sort replaces prior output");
 }
 
