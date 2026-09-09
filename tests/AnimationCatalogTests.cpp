@@ -1,11 +1,13 @@
+#include "ScopedTestDirectory.hpp"
+#include "TestAssetRoot.hpp"
+#include "TestHarness.hpp"
+
 #include "engine/AnimationCatalog.hpp"
 #include "engine/AnimationCatalogEditor.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/ContentPipeline.hpp"
 
-#include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -13,95 +15,33 @@
 
 namespace {
 
-int failures = 0;
-
-void check(bool condition, const char* label)
-{
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL: " << label << '\n';
-    }
-}
-
-template <typename Fn>
-void checkThrows(Fn&& fn, const char* label)
-{
-    try {
-        fn();
-        ++failures;
-        std::cerr << "FAIL (no throw): " << label << '\n';
-    } catch (const std::exception&) {
-    }
-}
-
-std::filesystem::path assetRoot()
-{
-#ifdef _WIN32
-    char* root = nullptr;
-    std::size_t length = 0;
-    if (_dupenv_s(&root, &length, "SOKOBAN_ASSETS") == 0 && root != nullptr) {
-        const std::filesystem::path result = root;
-        std::free(root);
-        return result;
-    }
-#else
-    if (const char* root = std::getenv("SOKOBAN_ASSETS")) {
-        return root;
-    }
-#endif
-    return "assets";
-}
-
-class TempDirectory {
-public:
-    TempDirectory()
-    {
-        const auto id =
-            std::chrono::steady_clock::now().time_since_epoch().count();
-        path_ = std::filesystem::temp_directory_path() /
-            ("sokoban-animation-catalog-" + std::to_string(id));
-        std::filesystem::create_directories(path_);
-    }
-
-    ~TempDirectory()
-    {
-        std::error_code error;
-        std::filesystem::remove_all(path_, error);
-    }
-
-    [[nodiscard]] const std::filesystem::path& path() const { return path_; }
-
-private:
-    std::filesystem::path path_;
-};
-
 void testProductionCatalogIsCompleteAndRoundTrips()
 {
     const sokoban::AssetManifest manifest =
-        sokoban::AssetManifest::loadFromFile(assetRoot() / "manifest.json");
+        sokoban::AssetManifest::loadFromFile(testAssetRoot() / "manifest.json");
     sokoban::AnimationCatalog catalog =
         sokoban::AnimationCatalog::loadFromFile(
-            assetRoot() / "animation_catalog.json", manifest);
+            testAssetRoot() / "animation_catalog.json", manifest);
 
-    check(
+    CHECK_MESSAGE(
         sokoban::animationUseDefinitions().size() ==
             static_cast<std::size_t>(sokoban::AnimationUse::Count),
         "every enum value has a definition");
-    check(
+    CHECK_MESSAGE(
         catalog.animation(sokoban::AnimationUse::EnemyIdle) ==
             manifest.animationIdByName("RogueIdle"),
         "enemy idle can share the player idle clip");
-    check(
+    CHECK_MESSAGE(
         std::abs(catalog.clipDuration(
             manifest.animationIdByName("BarbarianAttack")) -
             1.3666667f) < 0.0001f,
         "source clip duration is catalogued");
-    check(
+    CHECK_MESSAGE(
         catalog.events(sokoban::AnimationUse::EnemyAttack).size() == 1 &&
             catalog.events(sokoban::AnimationUse::EnemyAttack)[0].id ==
                 "attack-connected",
         "enemy attack event is authored");
-    check(
+    CHECK_MESSAGE(
         catalog.startGate(sokoban::AnimationUse::PlayerDeath).has_value() &&
             catalog.startGate(sokoban::AnimationUse::PlayerDeath)->sourceUse ==
                 sokoban::AnimationUse::EnemyAttack,
@@ -110,7 +50,7 @@ void testProductionCatalogIsCompleteAndRoundTrips()
     const auto idle = manifest.animationIdByName("RogueIdle");
     catalog.setGlobalSpeed(idle, 1.5f);
     catalog.setUseSpeed(sokoban::AnimationUse::EnemyIdle, 0.5f);
-    check(
+    CHECK_MESSAGE(
         std::abs(catalog.effectiveSpeed(sokoban::AnimationUse::EnemyIdle) -
                  0.75f) < 0.0001f,
         "effective speed multiplies global and per-use controls");
@@ -118,10 +58,10 @@ void testProductionCatalogIsCompleteAndRoundTrips()
     const std::string serialized = catalog.serialize(manifest);
     const sokoban::AnimationCatalog reparsed =
         sokoban::AnimationCatalog::parse(serialized, manifest);
-    check(
+    CHECK_MESSAGE(
         std::abs(reparsed.globalSpeed(idle) - 1.5f) < 0.0001f,
         "global speed round trips");
-    check(
+    CHECK_MESSAGE(
         std::abs(reparsed.useSpeed(sokoban::AnimationUse::EnemyIdle) - 0.5f) <
             0.0001f,
         "per-use speed round trips");
@@ -134,7 +74,7 @@ void testProductionCatalogIsCompleteAndRoundTrips()
             .sourceUse = sokoban::AnimationUse::EnemyAttack,
             .eventId = "second-impact",
         });
-    check(
+    CHECK_MESSAGE(
         catalog.events(sokoban::AnimationUse::EnemyAttack).size() == 2,
         "timeline event can be added");
     catalog.updateTimelineEvent(
@@ -142,12 +82,12 @@ void testProductionCatalogIsCompleteAndRoundTrips()
         "second-impact",
         "renamed-impact",
         0.8f);
-    check(
+    CHECK_MESSAGE(
         catalog.startGate(sokoban::AnimationUse::PlayerDeath).has_value() &&
             catalog.startGate(sokoban::AnimationUse::PlayerDeath)->eventId ==
                 "renamed-impact",
         "renaming an event updates dependent gates transactionally");
-    check(
+    CHECK_MESSAGE(
         std::abs(catalog.eventSourceTime(
             sokoban::AnimationUse::EnemyAttack,
             "renamed-impact") -
@@ -163,14 +103,14 @@ void testProductionCatalogIsCompleteAndRoundTrips()
                 0.5f);
         },
         "renaming an event to a duplicate is rejected");
-    check(
+    CHECK_MESSAGE(
         catalog.startGate(sokoban::AnimationUse::PlayerDeath).has_value() &&
             catalog.startGate(sokoban::AnimationUse::PlayerDeath)->eventId ==
                 "renamed-impact",
         "failed event rename rolls back dependent gates");
     catalog.removeTimelineEvent(
         sokoban::AnimationUse::EnemyAttack, "renamed-impact");
-    check(
+    CHECK_MESSAGE(
         !catalog.startGate(sokoban::AnimationUse::PlayerDeath).has_value(),
         "removing an event clears dependent gates");
 
@@ -189,10 +129,10 @@ void testProductionCatalogIsCompleteAndRoundTrips()
 void testCatalogRejectsCodeAndManifestDrift()
 {
     const sokoban::AssetManifest manifest =
-        sokoban::AssetManifest::loadFromFile(assetRoot() / "manifest.json");
+        sokoban::AssetManifest::loadFromFile(testAssetRoot() / "manifest.json");
     const sokoban::AnimationCatalog valid =
         sokoban::AnimationCatalog::loadFromFile(
-            assetRoot() / "animation_catalog.json", manifest);
+            testAssetRoot() / "animation_catalog.json", manifest);
     const std::string text = valid.serialize(manifest);
 
     std::string unknownUse = text;
@@ -225,18 +165,18 @@ void testCatalogRejectsCodeAndManifestDrift()
 void testEditorPersistsSourceAndRuntimeCopies()
 {
     const sokoban::AssetManifest manifest =
-        sokoban::AssetManifest::loadFromFile(assetRoot() / "manifest.json");
+        sokoban::AssetManifest::loadFromFile(testAssetRoot() / "manifest.json");
     const sokoban::AnimationCatalog initial =
         sokoban::AnimationCatalog::loadFromFile(
-            assetRoot() / "animation_catalog.json", manifest);
-    TempDirectory temporary;
+            testAssetRoot() / "animation_catalog.json", manifest);
+    ScopedTestDirectory temporary("sokoban-animation-catalog");
     const std::filesystem::path source = temporary.path() / "source.json";
     const std::filesystem::path runtimeRoot = temporary.path() / "runtime";
     const std::filesystem::path runtime =
         runtimeRoot / "animation_catalog.json";
     std::filesystem::create_directories(runtimeRoot);
     std::filesystem::copy_file(
-        assetRoot() / "manifest.json", runtimeRoot / "manifest.json");
+        testAssetRoot() / "manifest.json", runtimeRoot / "manifest.json");
     std::ofstream(runtimeRoot / "content.index", std::ios::binary)
         << "format 1\ngame-version editor-test\n";
     {
@@ -245,7 +185,7 @@ void testEditorPersistsSourceAndRuntimeCopies()
     }
 
     sokoban::AnimationCatalogEditor editor;
-    check(
+    CHECK_MESSAGE(
         editor.initialize(source, runtime, manifest),
         "editor loads source catalog");
     const auto idle = manifest.animationIdByName("RogueIdle");
@@ -253,26 +193,26 @@ void testEditorPersistsSourceAndRuntimeCopies()
     editor.setUseSpeed(sokoban::AnimationUse::EnemyIdle, 0.6f);
     editor.setTimelineEvent(
         sokoban::AnimationUse::EnemyAttack, "recovery", 0.95f);
-    check(editor.dirty(), "editing marks catalog dirty");
-    check(editor.save(manifest), "editor saves mirrored catalogs");
-    check(!editor.dirty(), "successful save clears dirty state");
+    CHECK_MESSAGE(editor.dirty(), "editing marks catalog dirty");
+    CHECK_MESSAGE(editor.save(manifest), "editor saves mirrored catalogs");
+    CHECK_MESSAGE(!editor.dirty(), "successful save clears dirty state");
     sokoban::validateContentPackage(runtimeRoot, "editor-test");
 
     const sokoban::AnimationCatalog savedSource =
         sokoban::AnimationCatalog::loadFromFile(source, manifest);
     const sokoban::AnimationCatalog savedRuntime =
         sokoban::AnimationCatalog::loadFromFile(runtime, manifest);
-    check(
+    CHECK_MESSAGE(
         std::abs(savedSource.globalSpeed(idle) - 1.75f) < 0.0001f,
         "source catalog persisted global speed");
-    check(
+    CHECK_MESSAGE(
         std::abs(savedRuntime.useSpeed(sokoban::AnimationUse::EnemyIdle) -
                  0.6f) < 0.0001f,
         "runtime catalog persisted per-use speed");
-    check(
+    CHECK_MESSAGE(
         savedSource.events(sokoban::AnimationUse::EnemyAttack).size() == 2,
         "source catalog persisted timeline event");
-    check(
+    CHECK_MESSAGE(
         savedRuntime.events(sokoban::AnimationUse::EnemyAttack).size() == 2,
         "runtime catalog persisted timeline event");
 }

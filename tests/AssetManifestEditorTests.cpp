@@ -1,8 +1,10 @@
+#include "ScopedTestDirectory.hpp"
+#include "TestAssetRoot.hpp"
+#include "TestHarness.hpp"
+
 #include "engine/AssetManifestEditor.hpp"
 #include "engine/ContentPipeline.hpp"
 
-#include <chrono>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -13,35 +15,6 @@
 #include <string>
 
 namespace {
-
-int failures = 0;
-
-void check(bool condition, const char* label)
-{
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL: " << label << '\n';
-    }
-}
-
-std::optional<std::filesystem::path> assetsRootFromEnvironment()
-{
-#ifdef _WIN32
-    char* value = nullptr;
-    std::size_t length = 0;
-    if (_dupenv_s(&value, &length, "SOKOBAN_ASSETS") != 0 || value == nullptr) {
-        return std::nullopt;
-    }
-    const std::filesystem::path result(value);
-    std::free(value);
-    return result;
-#else
-    const char* value = std::getenv("SOKOBAN_ASSETS");
-    return value == nullptr
-        ? std::nullopt
-        : std::optional<std::filesystem::path>(value);
-#endif
-}
 
 std::string readFile(const std::filesystem::path& path)
 {
@@ -54,25 +27,16 @@ std::string readFile(const std::filesystem::path& path)
 class TemporaryManifest {
 public:
     explicit TemporaryManifest(const std::filesystem::path& source)
+        : directory_("sokoban-manifest-editor-tests")
+        , file_(directory_.path() / "manifest.json")
     {
-        const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
-        root_ = std::filesystem::temp_directory_path() /
-            ("sokoban-manifest-editor-tests-" + std::to_string(suffix));
-        std::filesystem::create_directories(root_);
-        file_ = root_ / "manifest.json";
         std::filesystem::copy_file(source, file_);
-    }
-
-    ~TemporaryManifest()
-    {
-        std::error_code error;
-        std::filesystem::remove_all(root_, error);
     }
 
     [[nodiscard]] const std::filesystem::path& file() const { return file_; }
 
 private:
-    std::filesystem::path root_;
+    ScopedTestDirectory directory_;
     std::filesystem::path file_;
 };
 
@@ -82,7 +46,7 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
     sokoban::AssetManifestEditor editor;
     editor.initialize(temporary.file());
 
-    check(!editor.dirty(), "loaded editor starts clean");
+    CHECK_MESSAGE(!editor.dirty(), "loaded editor starts clean");
     // 14 asset-pack textures, grass + rock, the shared splat map, and one
     // splat map per screen. The per-screen count is derived rather than
     // hardcoded, so adding a screen does not fail this for no reason - the
@@ -95,22 +59,22 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
                 return texture.name.starts_with("GroundSplatMap") &&
                     texture.name.find('_') != std::string::npos;
             }));
-    check(perScreenSplatMaps > 0, "per-screen splat maps present");
-    check(editor.textures().size() >= 18 + perScreenSplatMaps,
+    CHECK_MESSAGE(perScreenSplatMaps > 0, "per-screen splat maps present");
+    CHECK_MESSAGE(editor.textures().size() >= 18 + perScreenSplatMaps,
         "textures loaded");
-    check(std::ranges::any_of(
+    CHECK_MESSAGE(std::ranges::any_of(
         editor.textures(),
         [](const sokoban::AssetManifest::Texture& texture) {
             return texture.name == "PlatformerYellow";
         }), "decoration texture loaded");
-    check(editor.models().size() >= 6, "models loaded");
-    check(std::ranges::any_of(
+    CHECK_MESSAGE(editor.models().size() >= 6, "models loaded");
+    CHECK_MESSAGE(std::ranges::any_of(
         editor.models(),
         [](const sokoban::AssetManifest::Model& model) {
             return model.name == "Decoration_desk" &&
                 model.preserveSourceScale;
         }), "authored-scale decoration model loaded");
-    check(std::ranges::any_of(
+    CHECK_MESSAGE(std::ranges::any_of(
         editor.models(),
         [](const sokoban::AssetManifest::Model& model) {
             return model.name == "Barbarian" &&
@@ -118,11 +82,11 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
                 model.attachments[0].node == "handslot.r" &&
                 model.attachments[0].rotateHalfTurn;
         }), "skinned attachment loaded");
-    check(editor.animations().size() == 6, "animations loaded");
-    check(editor.tileEntries().size() == 14, "authored tile entries loaded");
-    check(editor.soundSets().size() == 3, "sound sets loaded");
-    check(editor.musicTracks().size() == 4, "music tracks loaded");
-    check(editor.validate(), "unchanged document validates");
+    CHECK_MESSAGE(editor.animations().size() == 6, "animations loaded");
+    CHECK_MESSAGE(editor.tileEntries().size() == 14, "authored tile entries loaded");
+    CHECK_MESSAGE(editor.soundSets().size() == 3, "sound sets loaded");
+    CHECK_MESSAGE(editor.musicTracks().size() == 4, "music tracks loaded");
+    CHECK_MESSAGE(editor.validate(), "unchanged document validates");
 
     auto texture = editor.textures()[0];
     texture.path = "textures/edited.png";
@@ -133,7 +97,7 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
         [](const sokoban::AssetManifest::Model& candidate) {
             return candidate.name == "Conveyor";
         });
-    check(conveyorIt != editor.models().end(), "conveyor model loaded");
+    CHECK_MESSAGE(conveyorIt != editor.models().end(), "conveyor model loaded");
     const std::size_t conveyorIndex = static_cast<std::size_t>(
         std::distance(editor.models().begin(), conveyorIt));
     auto model = *conveyorIt;
@@ -157,31 +121,31 @@ void testRoundTripAndMutations(const std::filesystem::path& sourceManifest)
     music.volume = 0.75f;
     editor.updateMusicTrack(0, music);
 
-    check(editor.dirty(), "field changes mark document dirty");
-    check(editor.validate(), "edited document validates");
-    check(editor.save(), "edited document saves");
-    check(!editor.dirty(), "save clears dirty state");
-    check(!std::filesystem::exists(temporary.file().string() + ".tmp"),
+    CHECK_MESSAGE(editor.dirty(), "field changes mark document dirty");
+    CHECK_MESSAGE(editor.validate(), "edited document validates");
+    CHECK_MESSAGE(editor.save(), "edited document saves");
+    CHECK_MESSAGE(!editor.dirty(), "save clears dirty state");
+    CHECK_MESSAGE(!std::filesystem::exists(temporary.file().string() + ".tmp"),
         "save removes temporary file");
-    check(!std::filesystem::exists(temporary.file().string() + ".bak"),
+    CHECK_MESSAGE(!std::filesystem::exists(temporary.file().string() + ".bak"),
         "save removes backup file");
 
     const sokoban::AssetManifest saved =
         sokoban::AssetManifest::loadFromFile(temporary.file());
-    check(saved.textures()[0].path == "textures/edited.png", "texture edit persisted");
+    CHECK_MESSAGE(saved.textures()[0].path == "textures/edited.png", "texture edit persisted");
     const sokoban::RenderModel conveyor = saved.modelIdByName("Conveyor");
-    check(saved.model(conveyor).primitiveMaterials[0].scrollV,
+    CHECK_MESSAGE(saved.model(conveyor).primitiveMaterials[0].scrollV,
         "per-material behavior edit persisted");
-    check(saved.animations()[0].clip == 12, "animation edit persisted");
-    check(saved.tileEntries()[0].scale == 1.25f, "tile edit persisted");
-    check(saved.soundSets()[0].files.size() == 6, "sound file edit persisted");
-    check(saved.soundSets()[0].volume == 0.45f, "sound volume edit persisted");
-    check(saved.musicTracks()[0].volume == 0.75f, "music volume edit persisted");
+    CHECK_MESSAGE(saved.animations()[0].clip == 12, "animation edit persisted");
+    CHECK_MESSAGE(saved.tileEntries()[0].scale == 1.25f, "tile edit persisted");
+    CHECK_MESSAGE(saved.soundSets()[0].files.size() == 6, "sound file edit persisted");
+    CHECK_MESSAGE(saved.soundSets()[0].volume == 0.45f, "sound volume edit persisted");
+    CHECK_MESSAGE(saved.musicTracks()[0].volume == 0.75f, "music volume edit persisted");
 
     sokoban::AssetManifestEditor reloaded;
     reloaded.initialize(temporary.file());
-    check(reloaded.textures()[0].path == "textures/edited.png", "saved JSON reloads into editor");
-    check(reloaded.serialize().find("\"format\": 1") != std::string::npos,
+    CHECK_MESSAGE(reloaded.textures()[0].path == "textures/edited.png", "saved JSON reloads into editor");
+    CHECK_MESSAGE(reloaded.serialize().find("\"format\": 1") != std::string::npos,
         "serialized document keeps format version");
 }
 
@@ -192,10 +156,10 @@ void testCollectionOperations(const std::filesystem::path& sourceManifest)
     editor.initialize(temporary.file());
 
     const std::string firstTexture = editor.textures()[0].name;
-    check(!editor.moveTexture(0, -1), "cannot move first item upward");
-    check(editor.moveTexture(0, 1), "texture moves downward");
-    check(editor.textures()[1].name == firstTexture, "move changes order");
-    check(editor.moveTexture(1, -1), "texture moves back upward");
+    CHECK_MESSAGE(!editor.moveTexture(0, -1), "cannot move first item upward");
+    CHECK_MESSAGE(editor.moveTexture(0, 1), "texture moves downward");
+    CHECK_MESSAGE(editor.textures()[1].name == firstTexture, "move changes order");
+    CHECK_MESSAGE(editor.moveTexture(1, -1), "texture moves back upward");
 
     const std::size_t textures = editor.textures().size();
     const std::size_t models = editor.models().size();
@@ -210,22 +174,22 @@ void testCollectionOperations(const std::filesystem::path& sourceManifest)
     editor.addTile();
     editor.addSoundSet();
     editor.addMusicTrack();
-    check(editor.textures().size() == textures + 1, "texture added");
-    check(editor.models().size() == models + 1, "model added");
-    check(editor.animations().size() == animations + 1, "animation added");
-    check(editor.tileEntries().size() == tiles + 1, "tile added");
-    check(editor.soundSets().size() == sounds + 1, "sound set added");
-    check(editor.musicTracks().size() == music + 1, "music track added");
-    check(editor.validate(), "default additions are schema-valid");
+    CHECK_MESSAGE(editor.textures().size() == textures + 1, "texture added");
+    CHECK_MESSAGE(editor.models().size() == models + 1, "model added");
+    CHECK_MESSAGE(editor.animations().size() == animations + 1, "animation added");
+    CHECK_MESSAGE(editor.tileEntries().size() == tiles + 1, "tile added");
+    CHECK_MESSAGE(editor.soundSets().size() == sounds + 1, "sound set added");
+    CHECK_MESSAGE(editor.musicTracks().size() == music + 1, "music track added");
+    CHECK_MESSAGE(editor.validate(), "default additions are schema-valid");
 
-    check(editor.removeTexture(editor.textures().size() - 1), "texture removed");
-    check(editor.removeModel(editor.models().size() - 1), "model removed");
-    check(editor.removeAnimation(editor.animations().size() - 1), "animation removed");
-    check(editor.removeTile(editor.tileEntries().size() - 1), "tile removed");
-    check(editor.removeSoundSet(editor.soundSets().size() - 1), "sound set removed");
-    check(editor.removeMusicTrack(editor.musicTracks().size() - 1), "music track removed");
-    check(!editor.removeTexture(editor.textures().size()), "out-of-range removal is rejected");
-    check(editor.validate(), "document validates after removals");
+    CHECK_MESSAGE(editor.removeTexture(editor.textures().size() - 1), "texture removed");
+    CHECK_MESSAGE(editor.removeModel(editor.models().size() - 1), "model removed");
+    CHECK_MESSAGE(editor.removeAnimation(editor.animations().size() - 1), "animation removed");
+    CHECK_MESSAGE(editor.removeTile(editor.tileEntries().size() - 1), "tile removed");
+    CHECK_MESSAGE(editor.removeSoundSet(editor.soundSets().size() - 1), "sound set removed");
+    CHECK_MESSAGE(editor.removeMusicTrack(editor.musicTracks().size() - 1), "music track removed");
+    CHECK_MESSAGE(!editor.removeTexture(editor.textures().size()), "out-of-range removal is rejected");
+    CHECK_MESSAGE(editor.validate(), "document validates after removals");
 }
 
 void testInvalidSavePreservesFile(const std::filesystem::path& sourceManifest)
@@ -238,16 +202,16 @@ void testInvalidSavePreservesFile(const std::filesystem::path& sourceManifest)
     auto duplicate = editor.textures()[0];
     duplicate.name = editor.textures()[1].name;
     editor.updateTexture(0, duplicate);
-    check(!editor.validate(), "duplicate texture fails validation");
-    check(!editor.save(), "invalid document is not saved");
-    check(editor.dirty(), "failed save remains dirty");
-    check(readFile(temporary.file()) == original, "failed save preserves original file");
-    check(!std::filesystem::exists(temporary.file().string() + ".tmp"),
+    CHECK_MESSAGE(!editor.validate(), "duplicate texture fails validation");
+    CHECK_MESSAGE(!editor.save(), "invalid document is not saved");
+    CHECK_MESSAGE(editor.dirty(), "failed save remains dirty");
+    CHECK_MESSAGE(readFile(temporary.file()) == original, "failed save preserves original file");
+    CHECK_MESSAGE(!std::filesystem::exists(temporary.file().string() + ".tmp"),
         "failed save cleans temporary file");
 
-    check(editor.reload(), "reload restores disk document");
-    check(!editor.dirty(), "reload clears dirty state");
-    check(editor.textures()[0].name != editor.textures()[1].name,
+    CHECK_MESSAGE(editor.reload(), "reload restores disk document");
+    CHECK_MESSAGE(!editor.dirty(), "reload clears dirty state");
+    CHECK_MESSAGE(editor.textures()[0].name != editor.textures()[1].name,
         "reload discards invalid edit");
 }
 
@@ -268,8 +232,8 @@ void testSavePublishesAStartupValidRuntimeManifest(
     auto music = editor.musicTracks().front();
     music.volume = 0.625f;
     editor.updateMusicTrack(0, music);
-    check(editor.save(), "manifest editor publishes its runtime mirror");
-    check(
+    CHECK_MESSAGE(editor.save(), "manifest editor publishes its runtime mirror");
+    CHECK_MESSAGE(
         readFile(temporary.file()) == readFile(runtimeManifest),
         "source and runtime manifests match");
     sokoban::validateContentPackage(runtimeRoot, "editor-test");
@@ -279,7 +243,7 @@ void testSavePublishesAStartupValidRuntimeManifest(
 
 int main()
 {
-    const std::optional<std::filesystem::path> assetsRoot = assetsRootFromEnvironment();
+    const std::optional<std::filesystem::path> assetsRoot = configuredTestAssetRoot();
     if (!assetsRoot) {
         std::cerr << "SOKOBAN_ASSETS is not set\n";
         return 1;

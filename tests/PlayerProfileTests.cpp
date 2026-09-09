@@ -17,16 +17,6 @@
 
 namespace {
 
-template <typename Fn>
-void checkThrows(Fn&& fn, const char* label)
-{
-    try {
-        fn();
-        CHECK_MESSAGE(false, label);
-    } catch (const std::exception&) {
-    }
-}
-
 void writeFile(const std::filesystem::path& path, std::string_view contents)
 {
     std::ofstream stream(path, std::ios::binary | std::ios::trunc);

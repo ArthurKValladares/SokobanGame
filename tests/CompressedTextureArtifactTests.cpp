@@ -11,17 +11,6 @@
 
 namespace {
 
-template <typename Function>
-void checkThrows(Function&& function, const char* label)
-{
-    try {
-        function();
-        CHECK_MESSAGE(false, label);
-    } catch (const std::exception&) {
-        CHECK_MESSAGE(true, label);
-    }
-}
-
 sokoban::ImageData oddImage()
 {
     sokoban::ImageData image { .width = 5, .height = 3 };

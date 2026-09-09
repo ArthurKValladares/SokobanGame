@@ -20,7 +20,9 @@
 // when the expression alone does not explain the intended invariant.
 
 #include <cmath>
+#include <exception>
 #include <iostream>
+#include <utility>
 
 // Counted across the whole run, and read by each suite's main() to decide its
 // exit code. Global rather than namespaced because that is where the per-file
@@ -60,6 +62,19 @@ inline void checkNear(
     ++failures;
     std::cerr << "FAIL: " << label << " (expected " << expected
               << ", got " << actual << ")\n";
+}
+
+template <typename Function>
+void checkThrows(Function&& function, const char* label)
+{
+    ++checks;
+    try {
+        std::forward<Function>(function)();
+    } catch (const std::exception&) {
+        return;
+    }
+    ++failures;
+    std::cerr << "FAIL (no throw): " << label << '\n';
 }
 
 // Stringizes the expression, so a failure reports what was asked rather than a

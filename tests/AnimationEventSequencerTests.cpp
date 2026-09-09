@@ -1,3 +1,4 @@
+#include "TestAssetRoot.hpp"
 #include "TestHarness.hpp"
 
 #include "engine/AnimationCatalog.hpp"
@@ -5,39 +6,15 @@
 #include "engine/AssetManifest.hpp"
 
 #include <cmath>
-#include <cstdlib>
-#include <filesystem>
 #include <iostream>
-
-namespace {
-
-std::filesystem::path assetRoot()
-{
-#ifdef _WIN32
-    char* root = nullptr;
-    std::size_t length = 0;
-    if (_dupenv_s(&root, &length, "SOKOBAN_ASSETS") == 0 && root != nullptr) {
-        const std::filesystem::path result = root;
-        std::free(root);
-        return result;
-    }
-#else
-    if (const char* root = std::getenv("SOKOBAN_ASSETS")) {
-        return root;
-    }
-#endif
-    return "assets";
-}
-
-} // namespace
 
 int main()
 {
     using namespace sokoban;
     const AssetManifest manifest =
-        AssetManifest::loadFromFile(assetRoot() / "manifest.json");
+        AssetManifest::loadFromFile(testAssetRoot() / "manifest.json");
     AnimationCatalog catalog = AnimationCatalog::loadFromFile(
-        assetRoot() / "animation_catalog.json", manifest);
+        testAssetRoot() / "animation_catalog.json", manifest);
     catalog.setGlobalSpeed(
         catalog.animation(AnimationUse::EnemyAttack), 2.0f);
     catalog.setUseSpeed(AnimationUse::EnemyAttack, 1.5f);

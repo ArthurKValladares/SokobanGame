@@ -1,9 +1,11 @@
+#include "TestAssetRoot.hpp"
+#include "TestHarness.hpp"
+
 #include "engine/AssetManifest.hpp"
 #include "engine/render/GltfMesh.hpp"
 
 #include <nlohmann/json.hpp>
 
-#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -12,46 +14,6 @@
 namespace {
 
 using Json = nlohmann::json;
-
-int failures = 0;
-
-void check(bool condition, const char* label)
-{
-    if (!condition) {
-        ++failures;
-        std::cerr << "FAIL: " << label << '\n';
-    }
-}
-
-template <typename Fn>
-void checkThrows(Fn&& fn, const char* label)
-{
-    try {
-        fn();
-        ++failures;
-        std::cerr << "FAIL (no throw): " << label << '\n';
-    } catch (const std::exception&) {
-    }
-}
-
-std::optional<std::filesystem::path> assetsRootFromEnvironment()
-{
-#ifdef _WIN32
-    char* value = nullptr;
-    std::size_t length = 0;
-    if (_dupenv_s(&value, &length, "SOKOBAN_ASSETS") != 0 || value == nullptr) {
-        return std::nullopt;
-    }
-    const std::filesystem::path result(value);
-    std::free(value);
-    return result;
-#else
-    const char* value = std::getenv("SOKOBAN_ASSETS");
-    return value == nullptr
-        ? std::nullopt
-        : std::optional<std::filesystem::path>(value);
-#endif
-}
 
 constexpr const char* validManifest = R"json(
 {
@@ -135,11 +97,11 @@ void testValidManifest()
     using sokoban::AssetManifest;
     const AssetManifest manifest = AssetManifest::parse(validManifest);
 
-    check(manifest.textures().size() == 5, "five textures");
-    check(!manifest.textures()[0].tiling, "textures clamp unless marked tiling");
-    check(manifest.textures()[0].filter == sokoban::TextureFilter::Nearest,
+    CHECK_MESSAGE(manifest.textures().size() == 5, "five textures");
+    CHECK_MESSAGE(!manifest.textures()[0].tiling, "textures clamp unless marked tiling");
+    CHECK_MESSAGE(manifest.textures()[0].filter == sokoban::TextureFilter::Nearest,
         "textures point sample unless asked for linear");
-    check(manifest.textures()[0].colorSpace == sokoban::TextureColorSpace::Srgb,
+    CHECK_MESSAGE(manifest.textures()[0].colorSpace == sokoban::TextureColorSpace::Srgb,
         "textures are colour unless declared linear data");
 
     // Address mode, filtering, and colour space are independent: the splat
@@ -159,89 +121,89 @@ void testValidManifest()
     { "name": "DeadIdle", "path": "a.glb", "role": "player-dead-idle" }
   ]
 })");
-    check(sampled.textures()[0].tiling, "tiling flag parsed");
-    check(sampled.textures()[0].filter == sokoban::TextureFilter::Linear,
+    CHECK_MESSAGE(sampled.textures()[0].tiling, "tiling flag parsed");
+    CHECK_MESSAGE(sampled.textures()[0].filter == sokoban::TextureFilter::Linear,
         "linear filter parsed");
-    check(sampled.textures()[0].colorSpace == sokoban::TextureColorSpace::Srgb,
+    CHECK_MESSAGE(sampled.textures()[0].colorSpace == sokoban::TextureColorSpace::Srgb,
         "tiling does not imply linear colour space");
-    check(!sampled.textures()[1].tiling,
+    CHECK_MESSAGE(!sampled.textures()[1].tiling,
         "linear filtering does not imply repeat addressing");
-    check(sampled.textures()[1].filter == sokoban::TextureFilter::Linear,
+    CHECK_MESSAGE(sampled.textures()[1].filter == sokoban::TextureFilter::Linear,
         "linear filter parsed on data texture");
-    check(sampled.textures()[1].colorSpace == sokoban::TextureColorSpace::Linear,
+    CHECK_MESSAGE(sampled.textures()[1].colorSpace == sokoban::TextureColorSpace::Linear,
         "linear colour space parsed");
-    check(manifest.models().size() == 3, "three models");
-    check(manifest.animations().size() == 5, "five animations");
+    CHECK_MESSAGE(manifest.models().size() == 3, "three models");
+    CHECK_MESSAGE(manifest.animations().size() == 5, "five animations");
 
     const sokoban::RenderModel box = manifest.modelIdByName("Box");
-    check(manifest.model(box).preserveSourceScale,
+    CHECK_MESSAGE(manifest.model(box).preserveSourceScale,
         "box preserves authored source scale");
 
     const sokoban::RenderModel hero = manifest.modelIdByName("Hero");
-    check(!hero.isCube(), "hero id valid");
-    check(manifest.playerModel() == hero, "player role resolved");
-    check(manifest.model(hero).geometry == sokoban::ModelGeometry::Skinned, "hero skinned");
-    check(manifest.model(hero).preserveAspectRatio, "hero preserves aspect");
-    check(manifest.model(hero).rotateHalfTurn, "hero rotates half turn");
-    check(manifest.model(hero).materialMode == sokoban::ModelMaterialMode::SingleTexture,
+    CHECK_MESSAGE(!hero.isCube(), "hero id valid");
+    CHECK_MESSAGE(manifest.playerModel() == hero, "player role resolved");
+    CHECK_MESSAGE(manifest.model(hero).geometry == sokoban::ModelGeometry::Skinned, "hero skinned");
+    CHECK_MESSAGE(manifest.model(hero).preserveAspectRatio, "hero preserves aspect");
+    CHECK_MESSAGE(manifest.model(hero).rotateHalfTurn, "hero rotates half turn");
+    CHECK_MESSAGE(manifest.model(hero).materialMode == sokoban::ModelMaterialMode::SingleTexture,
         "hero single texture");
-    check(manifest.model(hero).textureIndex == 1, "hero texture index resolved by name");
-    check(manifest.model(hero).attachments.size() == 1,
+    CHECK_MESSAGE(manifest.model(hero).textureIndex == 1, "hero texture index resolved by name");
+    CHECK_MESSAGE(manifest.model(hero).attachments.size() == 1,
         "hero attachment parsed");
-    check(manifest.model(hero).attachments[0].path == "models/sword.gltf" &&
+    CHECK_MESSAGE(manifest.model(hero).attachments[0].path == "models/sword.gltf" &&
             manifest.model(hero).attachments[0].node == "handslot.r",
         "attachment path and node preserved");
-    check(manifest.model(hero).attachments[0].rotateHalfTurn,
+    CHECK_MESSAGE(manifest.model(hero).attachments[0].rotateHalfTurn,
         "attachment local half turn parsed");
 
     const sokoban::RenderModel belt = manifest.modelIdByName("Belt");
-    check(manifest.model(belt).hasScrollingMaterial(), "scrolling material flag");
-    check(manifest.model(belt).materialMode == sokoban::ModelMaterialMode::PrimitiveMaterials,
+    CHECK_MESSAGE(manifest.model(belt).hasScrollingMaterial(), "scrolling material flag");
+    CHECK_MESSAGE(manifest.model(belt).materialMode == sokoban::ModelMaterialMode::PrimitiveMaterials,
         "belt primitive material");
-    check(manifest.model(belt).primitiveMaterials.size() == 2,
+    CHECK_MESSAGE(manifest.model(belt).primitiveMaterials.size() == 2,
         "belt material slot count");
-    check(manifest.model(belt).primitiveMaterials[0].textureIndex == 2 &&
+    CHECK_MESSAGE(manifest.model(belt).primitiveMaterials[0].textureIndex == 2 &&
             manifest.model(belt).primitiveMaterials[1].textureIndex == 4,
         "each primitive texture resolved independently by name");
-    check(!manifest.model(belt).primitiveMaterials[0].scrollV &&
+    CHECK_MESSAGE(!manifest.model(belt).primitiveMaterials[0].scrollV &&
             manifest.model(belt).primitiveMaterials[1].scrollV,
         "per-material behavior stays independent of descriptor index");
 
-    check(manifest.playerIdleAnimation() == manifest.animationIdByName("Idle"), "idle role");
-    check(manifest.playerMoveAnimation() == manifest.animationIdByName("Move"), "move role");
-    check(manifest.playerPushAnimation() == manifest.animationIdByName("Push"), "push role");
-    check(manifest.playerDeathAnimation() == manifest.animationIdByName("Death"), "death role");
-    check(manifest.playerDeadIdleAnimation() == manifest.animationIdByName("DeadIdle"),
+    CHECK_MESSAGE(manifest.playerIdleAnimation() == manifest.animationIdByName("Idle"), "idle role");
+    CHECK_MESSAGE(manifest.playerMoveAnimation() == manifest.animationIdByName("Move"), "move role");
+    CHECK_MESSAGE(manifest.playerPushAnimation() == manifest.animationIdByName("Push"), "push role");
+    CHECK_MESSAGE(manifest.playerDeathAnimation() == manifest.animationIdByName("Death"), "death role");
+    CHECK_MESSAGE(manifest.playerDeadIdleAnimation() == manifest.animationIdByName("DeadIdle"),
         "dead idle role");
-    check(manifest.animation(manifest.playerDeathAnimation()).clip == 3, "death clip number");
-    check(manifest.animation(manifest.playerDeadIdleAnimation()).clip == 4,
+    CHECK_MESSAGE(manifest.animation(manifest.playerDeathAnimation()).clip == 3, "death clip number");
+    CHECK_MESSAGE(manifest.animation(manifest.playerDeadIdleAnimation()).clip == 4,
         "dead idle clip number");
-    check(manifest.animation(manifest.playerIdleAnimation()).clip == 8, "idle clip");
-    check(manifest.animation(manifest.playerIdleAnimation()).path == "anims/idle.glb",
+    CHECK_MESSAGE(manifest.animation(manifest.playerIdleAnimation()).clip == 8, "idle clip");
+    CHECK_MESSAGE(manifest.animation(manifest.playerIdleAnimation()).path == "anims/idle.glb",
         "animation path parsed");
 
-    check(manifest.modelForTile(sokoban::TileType::Wall) == manifest.modelIdByName("Box"),
+    CHECK_MESSAGE(manifest.modelForTile(sokoban::TileType::Wall) == manifest.modelIdByName("Box"),
         "wall tile model");
-    check(manifest.tileScale(sokoban::TileType::Wall) == 1.25f, "wall tile scale");
-    check(manifest.tileEntries().size() == 3, "authored tile entries retained");
-    check(manifest.modelForTile(sokoban::TileType::Ground).isCube(), "ground stays cube");
-    check(manifest.tileScale(sokoban::TileType::Ground) == 0.9f, "ground scale without model");
-    check(manifest.modelForTile(sokoban::TileType::End).isCube(), "unlisted tile defaults to cube");
-    check(manifest.tileScale(sokoban::TileType::End) == 1.0f, "unlisted tile default scale");
+    CHECK_MESSAGE(manifest.tileScale(sokoban::TileType::Wall) == 1.25f, "wall tile scale");
+    CHECK_MESSAGE(manifest.tileEntries().size() == 3, "authored tile entries retained");
+    CHECK_MESSAGE(manifest.modelForTile(sokoban::TileType::Ground).isCube(), "ground stays cube");
+    CHECK_MESSAGE(manifest.tileScale(sokoban::TileType::Ground) == 0.9f, "ground scale without model");
+    CHECK_MESSAGE(manifest.modelForTile(sokoban::TileType::End).isCube(), "unlisted tile defaults to cube");
+    CHECK_MESSAGE(manifest.tileScale(sokoban::TileType::End) == 1.0f, "unlisted tile default scale");
 
-    check(manifest.soundSet("footsteps").size() == 2, "footstep files");
-    check(manifest.soundSet("footsteps")[0] == "audio/step with spaces 1.ogg",
+    CHECK_MESSAGE(manifest.soundSet("footsteps").size() == 2, "footstep files");
+    CHECK_MESSAGE(manifest.soundSet("footsteps")[0] == "audio/step with spaces 1.ogg",
         "sound path with spaces");
-    check(manifest.soundSet("missing").empty(), "unknown sound set is empty");
-    check(manifest.soundSetVolume("footsteps") == 0.3f, "sound set volume");
-    check(manifest.soundSetVolume("missing") == 1.0f, "unknown sound set volume defaults to 1");
+    CHECK_MESSAGE(manifest.soundSet("missing").empty(), "unknown sound set is empty");
+    CHECK_MESSAGE(manifest.soundSetVolume("footsteps") == 0.3f, "sound set volume");
+    CHECK_MESSAGE(manifest.soundSetVolume("missing") == 1.0f, "unknown sound set volume defaults to 1");
 
-    check(manifest.musicForLevel(0) != nullptr && *manifest.musicForLevel(0) == "audio/track zero.ogg",
+    CHECK_MESSAGE(manifest.musicForLevel(0) != nullptr && *manifest.musicForLevel(0) == "audio/track zero.ogg",
         "music level 0");
-    check(manifest.musicForLevel(1) == nullptr, "no music for level 1");
-    check(manifest.musicForLevel(2) != nullptr, "music level 2");
-    check(manifest.musicTracks()[0].volume == 1.0f, "music volume defaults to 1");
-    check(manifest.musicTracks()[1].volume == 0.8f, "music track volume parsed");
+    CHECK_MESSAGE(manifest.musicForLevel(1) == nullptr, "no music for level 1");
+    CHECK_MESSAGE(manifest.musicForLevel(2) != nullptr, "music level 2");
+    CHECK_MESSAGE(manifest.musicTracks()[0].volume == 1.0f, "music volume defaults to 1");
+    CHECK_MESSAGE(manifest.musicTracks()[1].volume == 0.8f, "music track volume parsed");
 }
 
 void testSyntaxAndSchemaFailures()
@@ -387,24 +349,24 @@ void testRuntimeTextureRegistration()
         .filter = sokoban::TextureFilter::Linear,
         .colorSpace = sokoban::TextureColorSpace::Linear,
     });
-    check(!added.isNone(), "runtime texture registered");
-    check(manifest.textures().size() == original + 1, "texture list grew");
-    check(manifest.findTextureIdByName("GroundSplatMap7_2") == added,
+    CHECK_MESSAGE(!added.isNone(), "runtime texture registered");
+    CHECK_MESSAGE(manifest.textures().size() == original + 1, "texture list grew");
+    CHECK_MESSAGE(manifest.findTextureIdByName("GroundSplatMap7_2") == added,
         "registered texture resolves by name");
-    check(manifest.findTextureIdByName(manifest.textures()[0].name) == existing,
+    CHECK_MESSAGE(manifest.findTextureIdByName(manifest.textures()[0].name) == existing,
         "existing texture ids are undisturbed");
-    check(manifest.textures()[added.index()].colorSpace ==
+    CHECK_MESSAGE(manifest.textures()[added.index()].colorSpace ==
             sokoban::TextureColorSpace::Linear,
         "registered sampling options are kept");
 
     // The same rules parsing enforces, since these would otherwise surface as
     // a duplicate name or an out-of-bounds descriptor index at draw time.
-    check(manifest.addTexture({ .name = "GroundSplatMap7_2", .path = "x.png" })
+    CHECK_MESSAGE(manifest.addTexture({ .name = "GroundSplatMap7_2", .path = "x.png" })
               .isNone(),
         "duplicate texture name rejected");
-    check(manifest.addTexture({ .name = "", .path = "x.png" }).isNone(),
+    CHECK_MESSAGE(manifest.addTexture({ .name = "", .path = "x.png" }).isNone(),
         "empty texture name rejected");
-    check(manifest.addTexture({ .name = "NoPath", .path = "" }).isNone(),
+    CHECK_MESSAGE(manifest.addTexture({ .name = "NoPath", .path = "" }).isNone(),
         "empty texture path rejected");
 
     while (manifest.textures().size() < 80) {
@@ -412,11 +374,11 @@ void testRuntimeTextureRegistration()
             .name = "Filler" + std::to_string(manifest.textures().size()),
             .path = "filler.png",
         });
-        check(!filler.isNone(), "filler texture registered");
+        CHECK_MESSAGE(!filler.isNone(), "filler texture registered");
     }
-    check(manifest.textures().size() == 80,
+    CHECK_MESSAGE(manifest.textures().size() == 80,
         "manifest registration is not capped by the retired 64-slot layout");
-    check(manifest.findTextureIdByName(manifest.textures()[0].name) == existing,
+    CHECK_MESSAGE(manifest.findTextureIdByName(manifest.textures()[0].name) == existing,
         "growing beyond the old descriptor cap preserves existing ids");
 
     Json largeManifestJson = Json::parse(validManifest);
@@ -430,7 +392,7 @@ void testRuntimeTextureRegistration()
     }
     const AssetManifest largeManifest =
         AssetManifest::parse(largeManifestJson.dump());
-    check(largeManifest.textures().size() == 80,
+    CHECK_MESSAGE(largeManifest.textures().size() == 80,
         "a parsed manifest may exceed the retired 64-texture cap");
 }
 
@@ -447,29 +409,29 @@ void testRuntimeDecorationModelRegistration()
         .path = "scenery/tree.gltf",
         .preserveSourceScale = true,
     });
-    check(!added.isCube(), "runtime decoration model registered");
-    check(manifest.models().size() == original + 1, "model list grew");
-    check(manifest.modelIdByName("Decoration_Tree") == added,
+    CHECK_MESSAGE(!added.isCube(), "runtime decoration model registered");
+    CHECK_MESSAGE(manifest.models().size() == original + 1, "model list grew");
+    CHECK_MESSAGE(manifest.modelIdByName("Decoration_Tree") == added,
         "registered model resolves by name");
-    check(manifest.model(added).preserveSourceScale,
+    CHECK_MESSAGE(manifest.model(added).preserveSourceScale,
         "runtime decoration retains authored scale policy");
-    check(manifest.modelIdByName(manifest.models().front().name) == existing,
+    CHECK_MESSAGE(manifest.modelIdByName(manifest.models().front().name) == existing,
         "existing model ids are undisturbed");
-    check(manifest.addModel({
+    CHECK_MESSAGE(manifest.addModel({
               .name = "Decoration_Tree",
               .path = "other.gltf",
           }).isCube(),
         "duplicate runtime model name rejected");
-    check(manifest.addModel({ .name = "", .path = "x.gltf" }).isCube(),
+    CHECK_MESSAGE(manifest.addModel({ .name = "", .path = "x.gltf" }).isCube(),
         "empty runtime model name rejected");
-    check(manifest.addModel({ .name = "NoPath", .path = "" }).isCube(),
+    CHECK_MESSAGE(manifest.addModel({ .name = "NoPath", .path = "" }).isCube(),
         "empty runtime model path rejected");
 }
 
 void testDecorationMeshCanPreserveAuthoredScale()
 {
     const std::optional<std::filesystem::path> root =
-        assetsRootFromEnvironment();
+        configuredTestAssetRoot();
     if (!root.has_value()) {
         return;
     }
@@ -497,26 +459,26 @@ void testDecorationMeshCanPreserveAuthoredScale()
             authoredKeepsWideBounds ||
             vertex.position.x < -1.0f || vertex.position.x > 1.0f;
     }
-    check(normalizedInsideUnitCube,
+    CHECK_MESSAGE(normalizedInsideUnitCube,
         "default mesh loading still normalizes into one tile");
-    check(authoredKeepsWideBounds,
+    CHECK_MESSAGE(authoredKeepsWideBounds,
         "decoration mesh loading retains authored dimensions");
 }
 
 void testRealManifestFile()
 {
-    const std::optional<std::filesystem::path> root = assetsRootFromEnvironment();
+    const std::optional<std::filesystem::path> root = configuredTestAssetRoot();
     if (!root.has_value()) {
         return;
     }
     using sokoban::AssetManifest;
     const AssetManifest manifest =
         AssetManifest::loadFromFile(*root / "manifest.json");
-    check(!manifest.playerModel().isCube(), "real manifest has a player model");
-    check(manifest.soundSet("footsteps").size() == 5, "real manifest footsteps");
-    check(manifest.soundSet("stone-drag").size() == 4, "real manifest drags");
-    check(manifest.soundSet("mirror-swap").size() == 1, "real manifest mirror swap");
-    check(manifest.soundSet("mirror-swap")[0].ends_with("Woosh/woosh1.ogg"),
+    CHECK_MESSAGE(!manifest.playerModel().isCube(), "real manifest has a player model");
+    CHECK_MESSAGE(manifest.soundSet("footsteps").size() == 5, "real manifest footsteps");
+    CHECK_MESSAGE(manifest.soundSet("stone-drag").size() == 4, "real manifest drags");
+    CHECK_MESSAGE(manifest.soundSet("mirror-swap").size() == 1, "real manifest mirror swap");
+    CHECK_MESSAGE(manifest.soundSet("mirror-swap")[0].ends_with("Woosh/woosh1.ogg"),
         "real manifest mirror swap uses woosh1");
     // The material layers are sampled in world-tile UVs that leave 0..1, so
     // they must repeat; without it the ground is smeared edge texels.
@@ -525,16 +487,16 @@ void testRealManifestFile()
              sokoban::groundSplatDetailTextureName,
          }) {
         const sokoban::RenderTexture id = manifest.findTextureIdByName(name);
-        check(!id.isNone(), "real manifest declares the ground material layer");
+        CHECK_MESSAGE(!id.isNone(), "real manifest declares the ground material layer");
         const AssetManifest::Texture& texture = manifest.textures()[id.index()];
-        check(texture.tiling, "real manifest ground material layer tiles");
-        check(texture.filter == sokoban::TextureFilter::Linear,
+        CHECK_MESSAGE(texture.tiling, "real manifest ground material layer tiles");
+        CHECK_MESSAGE(texture.filter == sokoban::TextureFilter::Linear,
             "real manifest ground material layer filters smoothly");
     }
     // Splat maps are the opposite: weight data spanning the board once. They
     // must NOT repeat (a painted spot would echo across the board) and must
     // NOT be sRGB (a painted 0.5 has to reach the shader as a 0.5 weight).
-    check(splatMapSamplingIsCorrect(
+    CHECK_MESSAGE(splatMapSamplingIsCorrect(
               manifest, sokoban::groundSplatMapTextureName),
         "real manifest shared splat map samples as clamped linear data");
     // Dropping the per-screen maps from the manifest is otherwise silent:
@@ -557,7 +519,7 @@ void testRealManifestFile()
                 .level = levelIndex,
                 .screen = screenIndex,
             };
-            check(
+            CHECK_MESSAGE(
                 splatMapSamplingIsCorrect(
                     manifest,
                     sokoban::groundSplatMapTextureNameForScreen(location)),
@@ -565,7 +527,7 @@ void testRealManifestFile()
             // The editor builds this path when creating a map in-game, and the
             // generator builds the same name in Python. If they drift, the two
             // write different files for one screen.
-            check(manifest.textures()[id.index()].path ==
+            CHECK_MESSAGE(manifest.textures()[id.index()].path ==
                     sokoban::groundSplatMapAssetPathForScreen(location),
                 "per-screen splat map path matches the shared convention");
             ++screensForLevel;
@@ -575,26 +537,26 @@ void testRealManifestFile()
         }
         screenSplatMaps += screensForLevel;
     }
-    check(screenSplatMaps > 0, "real manifest declares per-screen splat maps");
+    CHECK_MESSAGE(screenSplatMaps > 0, "real manifest declares per-screen splat maps");
     const sokoban::RenderTexture overworldSplat =
         manifest.findTextureIdByName(
             sokoban::groundSplatMapTextureNameForOverworldScreen(1));
-    check(!overworldSplat.isNone(),
+    CHECK_MESSAGE(!overworldSplat.isNone(),
         "real manifest declares migrated overworld splat map");
-    check(splatMapSamplingIsCorrect(
+    CHECK_MESSAGE(splatMapSamplingIsCorrect(
               manifest,
               sokoban::groundSplatMapTextureNameForOverworldScreen(1)),
         "real manifest overworld splat map samples as clamped linear data");
-    check(manifest.textures()[overworldSplat.index()].path ==
+    CHECK_MESSAGE(manifest.textures()[overworldSplat.index()].path ==
             sokoban::groundSplatMapAssetPathForOverworldScreen(1),
         "overworld splat map path uses stable screen ID convention");
-    check(!manifest.textureIdByName("Smoke01").isNone(),
+    CHECK_MESSAGE(!manifest.textureIdByName("Smoke01").isNone(),
         "real manifest has first mirror smoke texture");
-    check(!manifest.textureIdByName("Smoke10").isNone(),
+    CHECK_MESSAGE(!manifest.textureIdByName("Smoke10").isNone(),
         "real manifest has last mirror smoke texture");
-    check(manifest.musicForLevel(3) != nullptr, "real manifest level 3 music");
-    check(!manifest.modelForTile(sokoban::TileType::Wall).isCube(), "real manifest wall model");
-    check(manifest.modelForTile(sokoban::TileType::Decorative).isCube(),
+    CHECK_MESSAGE(manifest.musicForLevel(3) != nullptr, "real manifest level 3 music");
+    CHECK_MESSAGE(!manifest.modelForTile(sokoban::TileType::Wall).isCube(), "real manifest wall model");
+    CHECK_MESSAGE(manifest.modelForTile(sokoban::TileType::Decorative).isCube(),
         "real manifest decorative block defaults to procedural cube");
 
     const AssetManifest::Animation& death =
@@ -603,10 +565,10 @@ void testRealManifestFile()
         sokoban::animationIndexFromManifestClip(death.clip);
     const sokoban::GltfAnimationClip deathClip =
         sokoban::loadGltfAnimationClip(*root / death.path, deathIndex);
-    check(
+    CHECK_MESSAGE(
         deathClip.name == "Death_B",
         "real manifest death role resolves to Death_B");
-    check(deathClip.durationSeconds > 0.0f, "real death clip has a duration");
+    CHECK_MESSAGE(deathClip.durationSeconds > 0.0f, "real death clip has a duration");
 
     const AssetManifest::Animation& deadIdle =
         manifest.animation(manifest.playerDeadIdleAnimation());
@@ -614,7 +576,7 @@ void testRealManifestFile()
         sokoban::animationIndexFromManifestClip(deadIdle.clip);
     const sokoban::GltfAnimationClip deadIdleClip =
         sokoban::loadGltfAnimationClip(*root / deadIdle.path, deadIdleIndex);
-    check(
+    CHECK_MESSAGE(
         deadIdleClip.name == "Death_B_Pose",
         "real manifest dead idle role resolves to Death_B_Pose");
 }
