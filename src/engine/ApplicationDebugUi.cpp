@@ -630,11 +630,16 @@ void drawAssetResidencyStats(
     const auto showAssetStages = [](const char* label,
                                      const VulkanModelResources::AssetStageStats& stages) {
         ImGui::Text(
-            "%s stages: %u queued, %u decoding, %u CPU-ready (%.1f MiB), "
+            "%s stages: %u queued (%.1f MiB source), "
+            "%u decoding (%.1f MiB source), %u CPU-ready (%.1f MiB), "
             "%u uploading (%.1f MiB), %u resident (%.1f MiB), %u failed",
             label,
             stages.queued,
+            static_cast<double>(stages.queuedSourceBytes) /
+                (1024.0 * 1024.0),
             stages.decoding,
+            static_cast<double>(stages.decodingSourceBytes) /
+                (1024.0 * 1024.0),
             stages.cpuReady,
             static_cast<double>(stages.cpuReadyBytes) / (1024.0 * 1024.0),
             stages.uploading,
@@ -643,6 +648,14 @@ void drawAssetResidencyStats(
             stages.resident,
             static_cast<double>(stages.residentBytes) / (1024.0 * 1024.0),
             stages.failed);
+        if (stages.residencyDeferrals != 0) {
+            ImGui::Text(
+                "  %llu residency deferrals; %u active, %.1f ms total",
+                static_cast<unsigned long long>(stages.residencyDeferrals),
+                stages.residencyDeferredAssets,
+                static_cast<double>(stages.residencyDeferredMicroseconds) /
+                    1000.0);
+        }
     };
     showAssetStages("Model", assetStats.modelStages);
     showAssetStages("Texture", assetStats.textureStages);

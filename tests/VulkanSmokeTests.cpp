@@ -14,6 +14,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 
 namespace {
@@ -254,7 +255,23 @@ void exerciseSkinnedPublicationRetry(
 
     sokoban::RenderAssetRequirements requirements;
     requirements.requireModel(model);
+    resources.requestAssets(requirements, sokoban::AssetLoadPriority::Prefetch);
+    const sokoban::VulkanModelResources::LoadingStats queued =
+        resources.loadingStats();
+    if (queued.modelStages.queued != 1 ||
+        queued.modelStages.queuedSourceBytes == 0) {
+        throw std::runtime_error(
+            "Queued model did not expose its cached source-byte estimate");
+    }
+    resources.cancelQueuedPrefetches();
     resources.requestAssets(requirements);
+    const sokoban::VulkanModelResources::LoadingStats requeued =
+        resources.loadingStats();
+    if (requeued.modelStages.queuedSourceBytes !=
+        queued.modelStages.queuedSourceBytes) {
+        throw std::runtime_error(
+            "Queue cancellation discarded the model source-byte estimate");
+    }
     sokoban::VulkanModelResources::denyNextModelResidencyForTesting();
 
     const auto admissionDeadline = std::chrono::steady_clock::now() +
@@ -277,6 +294,8 @@ void exerciseSkinnedPublicationRetry(
         denied.pendingModels != 1 || denied.modelResidencyBytes != 0 ||
         denied.modelStages.cpuReady != 1 ||
         denied.modelStages.cpuReadyBytes == 0 ||
+        denied.modelStages.residencyDeferredAssets != 1 ||
+        denied.modelStages.residencyDeferrals == 0 ||
         denied.transientAssetBytes != denied.modelStages.cpuReadyBytes ||
         denied.transientAssetPeakBytes < denied.transientAssetBytes) {
         throw std::runtime_error(
@@ -290,6 +309,9 @@ void exerciseSkinnedPublicationRetry(
         uploading.modelStages.cpuReadyBytes != 0 ||
         uploading.modelStages.uploading != 1 ||
         uploading.modelStages.uploadInFlightBytes == 0 ||
+        uploading.modelStages.residencyDeferredAssets != 0 ||
+        uploading.modelStages.residencyDeferrals == 0 ||
+        uploading.modelStages.residencyDeferredMicroseconds == 0 ||
         uploading.transientAssetBytes !=
             uploading.modelStages.uploadInFlightBytes ||
         uploading.transientAssetPeakBytes <
@@ -317,9 +339,168 @@ void exerciseSkinnedPublicationRetry(
     }
 }
 
+struct PressureMetrics {
+    uint64_t queuedModelSourceBytes = 0;
+    uint64_t preparedModelBytes = 0;
+    uint64_t transientPeakBytes = 0;
+    uint64_t deferralAttempts = 0;
+    uint64_t deferredMicroseconds = 0;
+    uint64_t elapsedMicroseconds = 0;
+};
+
+class ModelResidencyHold final {
+public:
+    ModelResidencyHold()
+    {
+        sokoban::VulkanModelResources::setModelResidencyDeniedForTesting(true);
+    }
+
+    ~ModelResidencyHold()
+    {
+        sokoban::VulkanModelResources::setModelResidencyDeniedForTesting(false);
+    }
+
+    ModelResidencyHold(const ModelResidencyHold&) = delete;
+    ModelResidencyHold& operator=(const ModelResidencyHold&) = delete;
+};
+
+constexpr uint32_t pressureModelCount = 32;
+
+std::string pressureManifestJson()
+{
+    std::string result = R"json({
+  "format": 1,
+  "models": [
+)json";
+    for (uint32_t index = 0; index < pressureModelCount; ++index) {
+        if (index != 0) {
+            result += ",\n";
+        }
+        result += "    { \"name\": \"PressureRig" +
+            std::to_string(index) +
+            "\", \"path\": \"KayKit Adventurers 2.0/Characters/gltf/"
+            "Rogue.glb\", \"geometry\": \"skinned\"";
+        if (index == 0) {
+            result += ", \"role\": \"player\"";
+        }
+        result += " }";
+    }
+    result += R"json(
+  ],
+  "animations": [
+    { "name": "Idle", "path": "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/Rig_Medium_General.glb", "clip": 8, "role": "player-idle" },
+    { "name": "Move", "path": "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/Rig_Medium_MovementBasic.glb", "clip": 7, "role": "player-move" },
+    { "name": "Push", "path": "custom/Rig_Medium_Push.glb", "clip": 1, "role": "player-push" },
+    { "name": "Death", "path": "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/Rig_Medium_General.glb", "clip": 3, "role": "player-death" },
+    { "name": "DeadIdle", "path": "KayKit Adventurers 2.0/Animations/gltf/Rig_Medium/Rig_Medium_General.glb", "clip": 4, "role": "player-dead-idle" }
+  ]
+})json";
+    return result;
+}
+
+PressureMetrics exercisePreparedAssetPressure(
+    sokoban::VulkanDeviceContext& deviceContext)
+{
+    const sokoban::AssetManifest manifest =
+        sokoban::AssetManifest::parse(pressureManifestJson());
+    const sokoban::RuntimeTextureCatalog textureCatalog =
+        sokoban::buildRuntimeTextureCatalog(manifest, {});
+    const std::filesystem::path assetRoot =
+        std::filesystem::path(SOKOBAN_TEST_SOURCE_DIR) / "assets";
+
+    sokoban::VulkanModelResources resources;
+    resources.create(
+        deviceContext.physicalDevice(),
+        deviceContext.memoryAllocator(),
+        deviceContext.device(),
+        deviceContext.commandPool(),
+        deviceContext.graphicsQueue(),
+        assetRoot,
+        manifest,
+        textureCatalog,
+        1,
+        1.0f,
+        {
+            .maxConcurrentCpuJobs = 2,
+            .maxPublicationsPerFrame = 1,
+        });
+
+    sokoban::RenderAssetRequirements requirements;
+    for (uint32_t modelIndex = 0; modelIndex < manifest.models().size();
+         ++modelIndex) {
+        requirements.requireModel(sokoban::RenderModel { modelIndex + 1 });
+    }
+    resources.requestAssets(requirements, sokoban::AssetLoadPriority::Prefetch);
+    const sokoban::VulkanModelResources::LoadingStats queued =
+        resources.loadingStats();
+    if (queued.modelStages.queued != manifest.models().size() ||
+        queued.modelStages.queuedSourceBytes == 0) {
+        throw std::runtime_error(
+            "Pressure workload did not queue every model with a source estimate");
+    }
+
+    const auto started = std::chrono::steady_clock::now();
+    sokoban::VulkanModelResources::LoadingStats held;
+    {
+        ModelResidencyHold hold;
+        const auto deadline = started + std::chrono::seconds(20);
+        do {
+            (void)resources.publishReadyAssets(1);
+            held = resources.loadingStats();
+            if (held.modelStages.cpuReady == manifest.models().size() &&
+                held.modelStages.queued == 0 &&
+                held.modelStages.decoding == 0) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        } while (std::chrono::steady_clock::now() < deadline);
+
+        if (held.modelStages.cpuReady != manifest.models().size() ||
+            held.modelStages.cpuReadyBytes == 0 ||
+            held.modelStages.residencyDeferredAssets != manifest.models().size() ||
+            held.transientAssetPeakBytes < held.modelStages.cpuReadyBytes) {
+            throw std::runtime_error(
+                "Pressure workload did not retain every decoded model");
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+
+    const auto drainDeadline = std::chrono::steady_clock::now() +
+        std::chrono::seconds(20);
+    while (resources.loadingStats().loadedModels != manifest.models().size() &&
+        std::chrono::steady_clock::now() < drainDeadline) {
+        (void)resources.publishReadyAssets(1);
+        resources.retireCompletedUploads();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const sokoban::VulkanModelResources::LoadingStats drained =
+        resources.loadingStats();
+    if (drained.loadedModels != manifest.models().size() ||
+        drained.pendingModels != 0 || drained.failedAssets != 0 ||
+        drained.modelStages.cpuReadyBytes != 0 ||
+        drained.modelStages.residencyDeferredAssets != 0 ||
+        drained.modelStages.residencyDeferrals < manifest.models().size() ||
+        drained.modelStages.residencyDeferredMicroseconds == 0) {
+        throw std::runtime_error(
+            "Pressure workload did not make progress after admission resumed");
+    }
+
+    return {
+        .queuedModelSourceBytes = queued.modelStages.queuedSourceBytes,
+        .preparedModelBytes = held.modelStages.cpuReadyBytes,
+        .transientPeakBytes = drained.transientAssetPeakBytes,
+        .deferralAttempts = drained.modelStages.residencyDeferrals,
+        .deferredMicroseconds =
+            drained.modelStages.residencyDeferredMicroseconds,
+        .elapsedMicroseconds = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - started).count()),
+    };
+}
+
 } // namespace
 
-int main()
+int main(int argc, char** argv)
 {
     try {
         const SdlVideo video;
@@ -327,6 +508,19 @@ int main()
         sokoban::VulkanDeviceContext deviceContext(window.get());
         exerciseMemoryAllocator(deviceContext);
         exerciseSkinnedPublicationRetry(deviceContext);
+        const PressureMetrics pressure =
+            exercisePreparedAssetPressure(deviceContext);
+        if (argc == 2 &&
+            std::string_view(argv[1]) == "--benchmark-prepared-assets") {
+            std::cout
+                << "prepared_asset_pressure queued_model_source_bytes="
+                << pressure.queuedModelSourceBytes
+                << " prepared_model_bytes=" << pressure.preparedModelBytes
+                << " transient_peak_bytes=" << pressure.transientPeakBytes
+                << " deferral_attempts=" << pressure.deferralAttempts
+                << " deferred_us=" << pressure.deferredMicroseconds
+                << " elapsed_us=" << pressure.elapsedMicroseconds << '\n';
+        }
         submitNoOp(deviceContext);
         std::cout << "Vulkan hidden-surface smoke test passed\n";
         return 0;

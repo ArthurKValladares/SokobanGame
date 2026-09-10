@@ -12,9 +12,11 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 namespace sokoban {
@@ -22,6 +24,7 @@ namespace {
 
 #ifdef SOKOBAN_ENABLE_TEST_HOOKS
 std::atomic_bool denyNextModelResidencyAdmissionForTesting = false;
+std::atomic_bool denyModelResidencyAdmissionForTesting = false;
 #endif
 
 template <typename Result>
@@ -90,6 +93,65 @@ uint64_t animationPayloadBytes(const GltfAnimationClip& clip)
         bytes += vectorPayloadBytes(channel.keyframes.values);
     }
     return bytes;
+}
+
+uint64_t sourceFileBytes(const std::filesystem::path& path)
+{
+    std::error_code error;
+    const std::uintmax_t bytes = std::filesystem::file_size(path, error);
+    if (error || bytes > std::numeric_limits<uint64_t>::max()) {
+        return 0;
+    }
+    return static_cast<uint64_t>(bytes);
+}
+
+uint64_t combinedSourceBytes(
+    uint64_t current,
+    const std::filesystem::path& path)
+{
+    const uint64_t bytes = sourceFileBytes(path);
+    if (current > std::numeric_limits<uint64_t>::max() - bytes) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return current + bytes;
+}
+
+uint64_t modelSourceBytes(
+    const std::filesystem::path& assetRoot,
+    const AssetManifest::Model& model)
+{
+    uint64_t bytes = sourceFileBytes(assetRoot / model.path);
+    for (const AssetManifest::Model::Attachment& attachment : model.attachments) {
+        bytes = combinedSourceBytes(bytes, assetRoot / attachment.path);
+    }
+    return bytes;
+}
+
+uint64_t textureSourceBytes(
+    const std::filesystem::path& assetRoot,
+    const TextureSourceIdentity& identity,
+    bool supportsBc7)
+{
+    if (supportsBc7) {
+        const uint64_t artifactBytes = sourceFileBytes(
+            assetRoot / compressedTextureArtifactPath(identity));
+        if (artifactBytes != 0) {
+            return artifactBytes;
+        }
+    }
+    return std::visit(
+        [&assetRoot](const auto& source) -> uint64_t {
+            using Source = std::decay_t<decltype(source)>;
+            if constexpr (std::is_same_v<Source, ExternalTextureSource>) {
+                return sourceFileBytes(assetRoot / source.path);
+            } else if constexpr (
+                std::is_same_v<Source, GltfBufferViewTextureSource>) {
+                return sourceFileBytes(assetRoot / source.document);
+            } else {
+                return source.uri.size();
+            }
+        },
+        identity.source);
 }
 
 bool supportsBc7Textures(VkPhysicalDevice physicalDevice)
@@ -220,18 +282,29 @@ void VulkanModelResources::create(
             logicalIndex, textureDescriptorCapacity_);
         textureDefinitions_[descriptorIndex] =
             textureCatalog.textures()[logicalIndex];
+        textures_[descriptorIndex].sourceBytes = textureSourceBytes(
+            assetRoot_, textureCatalog.textures()[logicalIndex].identity,
+            supportsBc7_);
         textureSpace_.markActive(descriptorIndex);
         logicalToDescriptor[logicalIndex] = descriptorIndex;
     }
     modelTextureDependencies_.resize(models_.size());
     modelMaterialBindings_.resize(models_.size());
     for (uint32_t modelIndex = 0; modelIndex < models_.size(); ++modelIndex) {
+        models_[modelIndex].sourceBytes = modelSourceBytes(
+            assetRoot_, manifest.models()[modelIndex]);
         RuntimeModelTextures mapped = remapRuntimeModelTextures(
             textureCatalog.model(modelIndex), logicalToDescriptor);
         modelTextureDependencies_[modelIndex] =
             std::move(mapped.requiredTextures);
         modelMaterialBindings_[modelIndex] =
             std::move(mapped.primitiveMaterials);
+    }
+    for (uint32_t animationIndex = 0;
+         animationIndex < animations_.size();
+         ++animationIndex) {
+        animations_[animationIndex].sourceBytes = sourceFileBytes(
+            assetRoot_ / manifest.animations()[animationIndex].path);
     }
     animationController_.configure(
         manifest.playerModel(), manifest.playerIdleAnimation());
@@ -365,6 +438,8 @@ void VulkanModelResources::destroy()
     textureUploadSubmissions_ = 0;
     textureUploadCompletions_ = 0;
     transientAssetPeakBytes_ = 0;
+    modelAdmissionDeferrals_ = {};
+    textureAdmissionDeferrals_ = {};
     scheduler_.clear();
     visibleRequestStamp_ = 0;
     modelResidency_.reset();
@@ -810,19 +885,25 @@ void VulkanModelResources::resetCancelledAsset(AssetLoadKey key)
     case AssetLoadKind::Model:
         if (key.index < models_.size() &&
             models_[key.index].state == LoadState::Queued) {
+            const uint64_t sourceBytes = models_[key.index].sourceBytes;
             models_[key.index] = {};
+            models_[key.index].sourceBytes = sourceBytes;
         }
         return;
     case AssetLoadKind::Animation:
         if (key.index < animations_.size() &&
             animations_[key.index].state == LoadState::Queued) {
+            const uint64_t sourceBytes = animations_[key.index].sourceBytes;
             animations_[key.index] = {};
+            animations_[key.index].sourceBytes = sourceBytes;
         }
         return;
     case AssetLoadKind::Texture:
         if (key.index < textures_.size() &&
             textures_[key.index].state == LoadState::Queued) {
+            const uint64_t sourceBytes = textures_[key.index].sourceBytes;
             textures_[key.index] = {};
+            textures_[key.index].sourceBytes = sourceBytes;
         }
         return;
     }
@@ -850,8 +931,12 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                 const MeshData& mesh = std::get<MeshData>(*slot.prepared);
                 const uint64_t bytes = meshBytes(mesh);
                 if (!makeModelResident(model, bytes)) {
+                    recordAdmissionDeferral(
+                        slot.admissionDeferral, modelAdmissionDeferrals_);
                     return false;
                 }
+                resolveAdmissionDeferral(
+                    slot.admissionDeferral, modelAdmissionDeferrals_);
                 slot.bounds = boundsOf(mesh.vertices);
                 slot.materialPolicy = modelMaterialPolicy(mesh.materials);
                 slot.materialBase = writeMaterials(mesh.materials);
@@ -876,8 +961,12 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                     static_cast<uint64_t>(indices.size()) *
                         sizeof(uint32_t);
                 if (!makeModelResident(model, bytes)) {
+                    recordAdmissionDeferral(
+                        slot.admissionDeferral, modelAdmissionDeferrals_);
                     return false;
                 }
+                resolveAdmissionDeferral(
+                    slot.admissionDeferral, modelAdmissionDeferrals_);
                 // Residency refusal leaves the CpuReady source untouched.
                 // Transfer ownership only once publication is admitted.
                 slot.skinnedSource = std::make_shared<SkinnedMeshData>(
@@ -906,6 +995,8 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
             slot.prepared.reset();
             slot.preparedBytes = 0;
             slot.skinnedSource.reset();
+            resolveAdmissionDeferral(
+                slot.admissionDeferral, modelAdmissionDeferrals_);
             recordPublishFailure(slot, path, "model", "publication", wait);
         }
         return slot.state == LoadState::Ready ||
@@ -941,6 +1032,8 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
     } catch (...) {
         slot.prepared.reset();
         slot.preparedBytes = 0;
+        resolveAdmissionDeferral(
+            slot.admissionDeferral, modelAdmissionDeferrals_);
         recordPublishFailure(slot, path, "model", "publication", wait);
     }
     return true;
@@ -999,13 +1092,19 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
             if (!mipPlan) {
                 residencyLadder_.markBlocked(
                     ResidencyLadder::Block::NoMipTailFits);
+                recordAdmissionDeferral(
+                    slot.admissionDeferral, textureAdmissionDeferrals_);
                 return false;
             }
             bytes = mipPlan->residentBytes;
         }
         if (!makeTextureResident(textureIndex, bytes)) {
+            recordAdmissionDeferral(
+                slot.admissionDeferral, textureAdmissionDeferrals_);
             return false;
         }
+        resolveAdmissionDeferral(
+            slot.admissionDeferral, textureAdmissionDeferrals_);
         if (const auto* compressed =
                 std::get_if<CompressedTextureArtifact>(&texture)) {
             textureUploader_.beginTextureUpload(
@@ -1051,6 +1150,8 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
         }
         slot.prepared.reset();
         slot.preparedBytes = 0;
+        resolveAdmissionDeferral(
+            slot.admissionDeferral, textureAdmissionDeferrals_);
         recordPublishFailure(slot, path, "texture", "publication", wait);
     }
     return true;
@@ -1091,7 +1192,8 @@ bool VulkanModelResources::makeModelResident(
     uint64_t requiredBytes)
 {
 #ifdef SOKOBAN_ENABLE_TEST_HOOKS
-    if (denyNextModelResidencyAdmissionForTesting.exchange(false)) {
+    if (denyModelResidencyAdmissionForTesting.load() ||
+        denyNextModelResidencyAdmissionForTesting.exchange(false)) {
         return false;
     }
 #endif
@@ -1116,6 +1218,11 @@ void VulkanModelResources::denyNextModelResidencyForTesting()
 bool VulkanModelResources::modelResidencyDenialPendingForTesting()
 {
     return denyNextModelResidencyAdmissionForTesting.load();
+}
+
+void VulkanModelResources::setModelResidencyDeniedForTesting(bool denied)
+{
+    denyModelResidencyAdmissionForTesting.store(denied);
 }
 #endif
 
@@ -1149,6 +1256,7 @@ uint64_t VulkanModelResources::texturePublicationCapacity(
 
 void VulkanModelResources::retireModel(ModelSlot& slot)
 {
+    const uint64_t sourceBytes = slot.sourceBytes;
     modelResidency_.beginRetiring(slot.gpuBytes);
     retiredModels_.retire({
         .gpu = std::exchange(slot.gpu, {}),
@@ -1158,17 +1266,20 @@ void VulkanModelResources::retireModel(ModelSlot& slot)
         .gpuBytes = slot.gpuBytes,
     }, retirementFrameMask_);
     slot = {};
+    slot.sourceBytes = sourceBytes;
     residencyLadder_.countEviction();
 }
 
 void VulkanModelResources::retireTexture(TextureSlot& slot)
 {
+    const uint64_t sourceBytes = slot.sourceBytes;
     textureResidency_.beginRetiring(slot.gpuBytes);
     retiredTextures_.retire({
         .gpu = std::exchange(slot.gpu, {}),
         .gpuBytes = slot.gpuBytes,
     }, retirementFrameMask_);
     slot = {};
+    slot.sourceBytes = sourceBytes;
     textureDescriptorsDirty_ = true;
     residencyLadder_.countEviction();
 }
@@ -1540,6 +1651,11 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
             result.pendingModels,
             result.modelStages);
         result.requestedAssets += model.state != LoadState::Unrequested;
+        if (model.state == LoadState::Queued) {
+            result.modelStages.queuedSourceBytes += model.sourceBytes;
+        } else if (model.state == LoadState::Loading) {
+            result.modelStages.decodingSourceBytes += model.sourceBytes;
+        }
         result.modelStages.cpuReadyBytes += model.preparedBytes;
         if (model.state == LoadState::Uploading) {
             result.modelStages.uploadInFlightBytes += model.upload.staging.size;
@@ -1547,6 +1663,11 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
         if (model.state == LoadState::Uploading ||
             model.state == LoadState::Ready) {
             result.modelStages.residentBytes += model.gpuBytes;
+        }
+        if (model.admissionDeferral.since) {
+            ++result.modelStages.residencyDeferredAssets;
+            result.modelStages.residencyDeferredMicroseconds +=
+                deferredMicroseconds(model.admissionDeferral);
         }
     }
     for (uint32_t textureIndex : textureSpace_.active()) {
@@ -1557,6 +1678,11 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
             result.pendingTextures,
             result.textureStages);
         result.requestedAssets += texture.state != LoadState::Unrequested;
+        if (texture.state == LoadState::Queued) {
+            result.textureStages.queuedSourceBytes += texture.sourceBytes;
+        } else if (texture.state == LoadState::Loading) {
+            result.textureStages.decodingSourceBytes += texture.sourceBytes;
+        }
         result.textureStages.cpuReadyBytes += texture.preparedBytes;
         if (texture.state == LoadState::Uploading) {
             ++result.uploadingTextures;
@@ -1566,6 +1692,11 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
         if (texture.state == LoadState::Uploading ||
             texture.state == LoadState::Ready) {
             result.textureStages.residentBytes += texture.gpuBytes;
+        }
+        if (texture.admissionDeferral.since) {
+            ++result.textureStages.residencyDeferredAssets;
+            result.textureStages.residencyDeferredMicroseconds +=
+                deferredMicroseconds(texture.admissionDeferral);
         }
         if ((texture.state == LoadState::Ready ||
                 texture.state == LoadState::Uploading) &&
@@ -1587,8 +1718,21 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
             result.pendingAnimations,
             result.animationStages);
         result.requestedAssets += animation.state != LoadState::Unrequested;
+        if (animation.state == LoadState::Queued) {
+            result.animationStages.queuedSourceBytes += animation.sourceBytes;
+        } else if (animation.state == LoadState::Loading) {
+            result.animationStages.decodingSourceBytes += animation.sourceBytes;
+        }
         result.animationStages.cpuReadyBytes += animation.preparedBytes;
     }
+    result.modelStages.residencyDeferrals =
+        modelAdmissionDeferrals_.attempts;
+    result.modelStages.residencyDeferredMicroseconds +=
+        modelAdmissionDeferrals_.resolvedMicroseconds;
+    result.textureStages.residencyDeferrals =
+        textureAdmissionDeferrals_.attempts;
+    result.textureStages.residencyDeferredMicroseconds +=
+        textureAdmissionDeferrals_.resolvedMicroseconds;
     result.queuedAssets = static_cast<uint32_t>(scheduler_.queuedCount());
     result.activeCpuJobs = static_cast<uint32_t>(scheduler_.activeCount());
     result.cancelledPrefetches = scheduler_.cancelledPrefetchCount();
@@ -1643,6 +1787,38 @@ void VulkanModelResources::updateTransientAssetPeak()
 {
     transientAssetPeakBytes_ = std::max(
         transientAssetPeakBytes_, currentTransientAssetBytes());
+}
+
+void VulkanModelResources::recordAdmissionDeferral(
+    AdmissionDeferral& deferral,
+    AdmissionDeferralTotals& totals)
+{
+    ++totals.attempts;
+    if (!deferral.since) {
+        deferral.since = std::chrono::steady_clock::now();
+    }
+}
+
+void VulkanModelResources::resolveAdmissionDeferral(
+    AdmissionDeferral& deferral,
+    AdmissionDeferralTotals& totals)
+{
+    if (!deferral.since) {
+        return;
+    }
+    totals.resolvedMicroseconds += deferredMicroseconds(deferral);
+    deferral.since.reset();
+}
+
+uint64_t VulkanModelResources::deferredMicroseconds(
+    const AdmissionDeferral& deferral)
+{
+    if (!deferral.since) {
+        return 0;
+    }
+    const auto elapsed = std::chrono::steady_clock::now() - *deferral.since;
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count());
 }
 
 VulkanModelResources::GpuMesh VulkanModelResources::uploadMesh(
@@ -1858,6 +2034,8 @@ bool VulkanModelResources::syncManifestTextures()
          ++index) {
         textureDefinitions_[index] = runtimeTextureDefinitionFor(
             manifest_->textures()[index]);
+        textures_[index].sourceBytes = textureSourceBytes(
+            assetRoot_, textureDefinitions_[index]->identity, supportsBc7_);
     }
     textureSpace_.growManifestRange(wanted);
     return true;
@@ -1886,6 +2064,8 @@ bool VulkanModelResources::syncManifestModels()
     for (std::size_t modelIndex = previousSize;
          modelIndex < models_.size();
          ++modelIndex) {
+        models_[modelIndex].sourceBytes = modelSourceBytes(
+            assetRoot_, manifest_->models()[modelIndex]);
         RuntimeModelTextures mapped = remapRuntimeModelTextures(
             textureCatalog.model(static_cast<uint32_t>(modelIndex)),
             logicalToDescriptor);
@@ -1893,6 +2073,14 @@ bool VulkanModelResources::syncManifestModels()
             std::move(mapped.requiredTextures);
         modelMaterialBindings_[modelIndex] =
             std::move(mapped.primitiveMaterials);
+    }
+    for (uint32_t textureIndex : textureSpace_.active()) {
+        if (textures_[textureIndex].sourceBytes == 0 &&
+            textureDefinitions_[textureIndex]) {
+            textures_[textureIndex].sourceBytes = textureSourceBytes(
+                assetRoot_, textureDefinitions_[textureIndex]->identity,
+                supportsBc7_);
+        }
     }
     return true;
 }

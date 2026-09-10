@@ -619,6 +619,24 @@ void Application::finishSmokeRunIfDue(std::uint64_t renderedFrames)
             << " / " << assetStats.modelResidencyBudgetBytes
             << " bytes (peak " << assetStats.modelResidencyPeakBytes
             << ").";
+        log::info(log::Category::Rendering)
+            << "Asset transient memory " << assetStats.transientAssetBytes
+            << " bytes (peak " << assetStats.transientAssetPeakBytes
+            << "); queued source bytes "
+            << assetStats.modelStages.queuedSourceBytes << " models, "
+            << assetStats.textureStages.queuedSourceBytes << " textures, "
+            << assetStats.animationStages.queuedSourceBytes << " animations"
+            << "; decoding source bytes "
+            << assetStats.modelStages.decodingSourceBytes << " models, "
+            << assetStats.textureStages.decodingSourceBytes << " textures, "
+            << assetStats.animationStages.decodingSourceBytes << " animations"
+            << "; residency deferrals "
+            << assetStats.modelStages.residencyDeferrals << " models over "
+            << assetStats.modelStages.residencyDeferredMicroseconds
+            << " us, " << assetStats.textureStages.residencyDeferrals
+            << " textures over "
+            << assetStats.textureStages.residencyDeferredMicroseconds
+            << " us.";
         log::info(log::Category::Application)
             << "Smoke run finished after " << renderedFrames
             << " frames.";

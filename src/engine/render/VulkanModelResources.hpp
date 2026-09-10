@@ -26,6 +26,7 @@
 #include <vulkan/vulkan.h>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -86,9 +87,16 @@ public:
         uint32_t uploading = 0;
         uint32_t resident = 0;
         uint32_t failed = 0;
+        // Encoded source sizes are cached during resource creation. They make
+        // queued and active work comparable without filesystem I/O per frame.
+        uint64_t queuedSourceBytes = 0;
+        uint64_t decodingSourceBytes = 0;
         uint64_t cpuReadyBytes = 0;
         uint64_t uploadInFlightBytes = 0;
         uint64_t residentBytes = 0;
+        uint32_t residencyDeferredAssets = 0;
+        uint64_t residencyDeferrals = 0;
+        uint64_t residencyDeferredMicroseconds = 0;
     };
 
     struct LoadingStats {
@@ -283,6 +291,7 @@ public:
     // upload. This exercises the real CpuReady publication retry boundary.
     static void denyNextModelResidencyForTesting();
     [[nodiscard]] static bool modelResidencyDenialPendingForTesting();
+    static void setModelResidencyDeniedForTesting(bool denied);
 #endif
 
 private:
@@ -324,6 +333,15 @@ private:
 
     using PreparedModel = std::variant<MeshData, SkinnedMeshData>;
 
+    struct AdmissionDeferral {
+        std::optional<std::chrono::steady_clock::time_point> since;
+    };
+
+    struct AdmissionDeferralTotals {
+        uint64_t attempts = 0;
+        uint64_t resolvedMicroseconds = 0;
+    };
+
     struct ModelSlot {
         LoadState state = LoadState::Unrequested;
         GpuMesh gpu {};
@@ -331,6 +349,8 @@ private:
         std::future<PreparedModel> future;
         std::optional<PreparedModel> prepared;
         uint64_t preparedBytes = 0;
+        uint64_t sourceBytes = 0;
+        AdmissionDeferral admissionDeferral {};
         std::shared_ptr<const SkinnedMeshData> skinnedSource;
         std::exception_ptr failure;
         // Captured at upload, because the CPU mesh is released immediately
@@ -356,6 +376,8 @@ private:
         std::future<PreparedTextureSource> future;
         std::optional<PreparedTextureSource> prepared;
         uint64_t preparedBytes = 0;
+        uint64_t sourceBytes = 0;
+        AdmissionDeferral admissionDeferral {};
         std::exception_ptr failure;
         uint64_t lastRequested = 0;
         uint64_t gpuBytes = 0;
@@ -369,6 +391,7 @@ private:
         std::future<GltfAnimationClip> future;
         std::optional<GltfAnimationClip> prepared;
         uint64_t preparedBytes = 0;
+        uint64_t sourceBytes = 0;
         std::exception_ptr failure;
         uint64_t lastRequested = 0;
     };
@@ -417,6 +440,14 @@ private:
         const TextureInterpretation& interpretation);
     [[nodiscard]] uint64_t currentTransientAssetBytes() const;
     void updateTransientAssetPeak();
+    static void recordAdmissionDeferral(
+        AdmissionDeferral& deferral,
+        AdmissionDeferralTotals& totals);
+    static void resolveAdmissionDeferral(
+        AdmissionDeferral& deferral,
+        AdmissionDeferralTotals& totals);
+    [[nodiscard]] static uint64_t deferredMicroseconds(
+        const AdmissionDeferral& deferral);
 
     [[nodiscard]] bool publishModel(RenderModel model, bool wait);
     [[nodiscard]] bool publishTexture(std::size_t textureIndex, bool wait);
@@ -512,6 +543,8 @@ private:
     uint64_t textureUploadSubmissions_ = 0;
     uint64_t textureUploadCompletions_ = 0;
     uint64_t transientAssetPeakBytes_ = 0;
+    AdmissionDeferralTotals modelAdmissionDeferrals_ {};
+    AdmissionDeferralTotals textureAdmissionDeferrals_ {};
     AssetLoadScheduler scheduler_ {};
     uint64_t visibleRequestStamp_ = 0;
     // One pool each, with the same policy applied to both. The eviction
