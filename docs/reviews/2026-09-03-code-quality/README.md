@@ -26,7 +26,7 @@ internals and art-asset quality or licensing remain outside its scope.
 
 | ID | Priority | Work | Exit criteria |
 | --- | --- | --- | --- |
-| MQ-01 | Next | Bound prepared asset memory | Track queued, decoding, CPU-ready, uploading, and resident bytes under a large prefetch workload; define and enforce a prepared-byte budget without starving GPU publication |
+| MQ-01 | Next | Baseline and bound prepared asset memory | Measure the large-prefetch workload with the existing stage telemetry; add defensible pre-decode estimates, choose a budget, and enforce it without starving publication |
 | MQ-02 | Later | Remove duplicate skinned-mesh packing | Count packing passes, allocations, temporary bytes, and upload bytes; reuse a prepared packed payload or compute admission size without packing twice |
 | MQ-03 | Later | Quantify profile and undo snapshot copying | Benchmark save-request latency, serialization time, and peak memory late in a long level; optimize only after preserving the agreed undo-persistence contract |
 | MQ-04 | Later | Separate startup inspection cost from decode and upload | Record manifest inspection, glTF dependency discovery, decode, upload, and first-playable-frame timing; introduce cached metadata only with reliable invalidation |
@@ -71,22 +71,26 @@ definitions and include graph.
 ## MQ-01: prepared asset memory and backpressure
 
 GPU residency limits do not bound decoded CPU payloads waiting for publication.
-Instrument the asset scheduler before choosing a policy.
+Use the existing [prepared-asset memory telemetry](evidence/prepared-asset-memory-instrumentation.md)
+to capture a repeatable large-prefetch baseline before choosing a policy.
 
-Track per asset class:
+The next packet should:
 
-- queued request count and estimated bytes;
-- active decode count and bytes;
-- CPU-ready payload count and bytes;
-- upload-in-flight bytes;
-- resident GPU bytes;
-- admission deferrals and time spent deferred; and
-- peak total transient bytes during a repeatable large-prefetch workload.
+- define a workload that queues more model and texture data than can be
+  published in one frame;
+- add defensible byte estimates to queued and active decode stages without
+  performing synchronous filesystem work on the request path;
+- capture CPU-ready, upload-in-flight, resident, and peak transient bytes by
+  asset class, together with admission-deferral count and duration;
+- record the workload, build, asset set, publication rate, and three-run
+  baseline in an evidence document; and
+- choose a prepared-byte limit from that evidence, then admit new decode work
+  only when capacity is available.
 
-Define a budget only after capturing a baseline. A valid backpressure design
-must keep memory within the chosen limit, preserve retryable CPU-ready payloads,
-make forward progress when residency becomes available, and avoid turning a
-temporary admission denial into a second decode.
+The backpressure test must hold publication temporarily, fill the chosen
+budget, prove that additional decoding pauses, then release publication and
+prove forward progress. Residency denial must preserve the decoded payload and
+must not schedule a second decode.
 
 ## MQ-02 through MQ-04: remaining efficiency experiments
 
@@ -164,8 +168,8 @@ checks need the device, driver, package identity, steps, and observed result.
 
 Keep the analyzer gate green as checks and first-party code evolve.
 
-1. Add prepared-asset byte instrumentation, capture a pressure baseline, and
-   agree on the budget before implementing backpressure.
+1. Add queued/decode estimates, capture the prepared-asset pressure baseline,
+   and choose and enforce the budget.
 2. Measure duplicate skinned packing, profile snapshots, and startup inspection
    in that order.
 3. Perform ownership extractions only when the preceding analyzer or

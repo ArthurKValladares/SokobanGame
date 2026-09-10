@@ -31,6 +31,67 @@ bool futureReady(std::future<Result>& future)
         future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
 }
 
+template <typename Element>
+uint64_t vectorPayloadBytes(const std::vector<Element>& values)
+{
+    return static_cast<uint64_t>(values.size()) * sizeof(Element);
+}
+
+uint64_t meshPayloadBytes(const MeshData& mesh)
+{
+    return vectorPayloadBytes(mesh.vertices) +
+        vectorPayloadBytes(mesh.indices) +
+        vectorPayloadBytes(mesh.materials);
+}
+
+template <typename PreparedModel>
+uint64_t modelPayloadBytes(const PreparedModel& model)
+{
+    if (const auto* mesh = std::get_if<MeshData>(&model)) {
+        return meshPayloadBytes(*mesh);
+    }
+    const SkinnedMeshData& mesh = std::get<SkinnedMeshData>(model);
+    uint64_t bytes = vectorPayloadBytes(mesh.vertices) +
+        vectorPayloadBytes(mesh.indices) +
+        vectorPayloadBytes(mesh.materials) +
+        vectorPayloadBytes(mesh.nodes) +
+        vectorPayloadBytes(mesh.jointNodeIndices) +
+        vectorPayloadBytes(mesh.inverseBindMatrices) +
+        vectorPayloadBytes(mesh.attachments);
+    for (const SkeletonNode& node : mesh.nodes) {
+        bytes += node.name.size();
+    }
+    for (const SkinnedAttachment& attachment : mesh.attachments) {
+        bytes += meshPayloadBytes(attachment.mesh);
+    }
+    return bytes;
+}
+
+uint64_t texturePayloadBytes(const PreparedTextureSource& texture)
+{
+    if (const auto* image = std::get_if<ImageData>(&texture)) {
+        return image->rgba.size();
+    }
+    const CompressedTextureArtifact& compressed =
+        std::get<CompressedTextureArtifact>(texture);
+    uint64_t bytes = vectorPayloadBytes(compressed.mips);
+    for (const CompressedTextureMip& mip : compressed.mips) {
+        bytes += mip.bytes.size();
+    }
+    return bytes;
+}
+
+uint64_t animationPayloadBytes(const GltfAnimationClip& clip)
+{
+    uint64_t bytes = clip.name.size() + vectorPayloadBytes(clip.channels);
+    for (const AnimationChannel& channel : clip.channels) {
+        bytes += channel.targetNodeName.size();
+        bytes += vectorPayloadBytes(channel.keyframes.times);
+        bytes += vectorPayloadBytes(channel.keyframes.values);
+    }
+    return bytes;
+}
+
 bool supportsBc7Textures(VkPhysicalDevice physicalDevice)
 {
     for (VkFormat format : {
@@ -303,6 +364,7 @@ void VulkanModelResources::destroy()
     textureSpace_.clear();
     textureUploadSubmissions_ = 0;
     textureUploadCompletions_ = 0;
+    transientAssetPeakBytes_ = 0;
     scheduler_.clear();
     visibleRequestStamp_ = 0;
     modelResidency_.reset();
@@ -831,7 +893,9 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                 modelResidency_.addResident(bytes);
                 slot.state = LoadState::Uploading;
             }
+            updateTransientAssetPeak();
             slot.prepared.reset();
+            slot.preparedBytes = 0;
         } catch (...) {
             // This range was never published to a frame and is safe to reuse
             // immediately when Vulkan publication fails.
@@ -839,6 +903,9 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
             slot.materialBase = 0;
             slot.materialCount = 0;
             slot.materialPolicy = {};
+            slot.prepared.reset();
+            slot.preparedBytes = 0;
+            slot.skinnedSource.reset();
             recordPublishFailure(slot, path, "model", "publication", wait);
         }
         return slot.state == LoadState::Ready ||
@@ -856,7 +923,9 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
             static_cast<uint32_t>(model.index()),
         });
         slot.prepared = slot.future.get();
+        slot.preparedBytes = modelPayloadBytes(*slot.prepared);
         slot.state = LoadState::CpuReady;
+        updateTransientAssetPeak();
         if (std::holds_alternative<SkinnedMeshData>(*slot.prepared)) {
             const SkinnedMeshData& skinned =
                 std::get<SkinnedMeshData>(*slot.prepared);
@@ -870,6 +939,8 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
         }
         return publishModel(model, wait);
     } catch (...) {
+        slot.prepared.reset();
+        slot.preparedBytes = 0;
         recordPublishFailure(slot, path, "model", "publication", wait);
     }
     return true;
@@ -894,13 +965,17 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
                 static_cast<uint32_t>(textureIndex),
             });
             slot.prepared = slot.future.get();
+            slot.preparedBytes = texturePayloadBytes(*slot.prepared);
             slot.state = LoadState::CpuReady;
+            updateTransientAssetPeak();
         } catch (...) {
             if (!slot.upload.submitted) {
                 textureUploader_.destroyTextureUpload(slot.upload);
                 textureUploader_.destroyTexture(
                     slot.gpu.image, slot.gpu.sampler);
             }
+            slot.prepared.reset();
+            slot.preparedBytes = 0;
             recordPublishFailure(slot, path, "texture", "preparation", wait);
             return true;
         }
@@ -964,7 +1039,9 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
         }
         slot.gpuBytes = bytes;
         textureResidency_.addResident(bytes);
+        updateTransientAssetPeak();
         slot.prepared.reset();
+        slot.preparedBytes = 0;
         slot.state = LoadState::Uploading;
         ++textureUploadSubmissions_;
     } catch (...) {
@@ -972,6 +1049,8 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
             textureUploader_.destroyTextureUpload(slot.upload);
             textureUploader_.destroyTexture(slot.gpu.image, slot.gpu.sampler);
         }
+        slot.prepared.reset();
+        slot.preparedBytes = 0;
         recordPublishFailure(slot, path, "texture", "publication", wait);
     }
     return true;
@@ -1120,18 +1199,31 @@ bool VulkanModelResources::publishAnimation(RenderAnimation animation, bool wait
     if (publishGate(slot, path, "animation", wait) == PublishGate::Stop) {
         return false;
     }
-    if (!wait && !futureReady(slot.future)) {
-        return false;
-    }
-
     try {
-        completeCpuJob({
-            AssetLoadKind::Animation,
-            static_cast<uint32_t>(animation.index()),
-        });
-        animationController_.setClip(animation, slot.future.get());
+        if (slot.state == LoadState::Loading) {
+            if (!wait && !futureReady(slot.future)) {
+                return false;
+            }
+            completeCpuJob({
+                AssetLoadKind::Animation,
+                static_cast<uint32_t>(animation.index()),
+            });
+            slot.prepared = slot.future.get();
+            slot.preparedBytes = animationPayloadBytes(*slot.prepared);
+            slot.state = LoadState::CpuReady;
+            updateTransientAssetPeak();
+        }
+        if (!slot.prepared) {
+            throw std::runtime_error(
+                "Animation publication lost its prepared clip");
+        }
+        animationController_.setClip(animation, std::move(*slot.prepared));
+        slot.prepared.reset();
+        slot.preparedBytes = 0;
         slot.state = LoadState::Ready;
     } catch (...) {
+        slot.prepared.reset();
+        slot.preparedBytes = 0;
         recordPublishFailure(slot, path, "animation", "publication", wait);
     }
     return true;
@@ -1402,7 +1494,11 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
             static_cast<uint32_t>(textureSpace_.active().size()),
         .totalAnimations = static_cast<uint32_t>(animations_.size()),
     };
-    auto countState = [&result](LoadState state, uint32_t& loaded, uint32_t& pending) {
+    auto countState = [&result](
+                          LoadState state,
+                          uint32_t& loaded,
+                          uint32_t& pending,
+                          AssetStageStats& stages) {
         if (state == LoadState::Ready) {
             ++loaded;
             ++result.readyRequestedAssets;
@@ -1414,17 +1510,62 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
         } else if (state == LoadState::Failed) {
             ++result.failedAssets;
         }
+        switch (state) {
+        case LoadState::Queued:
+            ++stages.queued;
+            break;
+        case LoadState::Loading:
+            ++stages.decoding;
+            break;
+        case LoadState::CpuReady:
+            ++stages.cpuReady;
+            break;
+        case LoadState::Uploading:
+            ++stages.uploading;
+            break;
+        case LoadState::Ready:
+            ++stages.resident;
+            break;
+        case LoadState::Failed:
+            ++stages.failed;
+            break;
+        case LoadState::Unrequested:
+            break;
+        }
     };
     for (const ModelSlot& model : models_) {
-        countState(model.state, result.loadedModels, result.pendingModels);
+        countState(
+            model.state,
+            result.loadedModels,
+            result.pendingModels,
+            result.modelStages);
         result.requestedAssets += model.state != LoadState::Unrequested;
+        result.modelStages.cpuReadyBytes += model.preparedBytes;
+        if (model.state == LoadState::Uploading) {
+            result.modelStages.uploadInFlightBytes += model.upload.staging.size;
+        }
+        if (model.state == LoadState::Uploading ||
+            model.state == LoadState::Ready) {
+            result.modelStages.residentBytes += model.gpuBytes;
+        }
     }
     for (uint32_t textureIndex : textureSpace_.active()) {
         const TextureSlot& texture = textures_[textureIndex];
-        countState(texture.state, result.loadedTextures, result.pendingTextures);
+        countState(
+            texture.state,
+            result.loadedTextures,
+            result.pendingTextures,
+            result.textureStages);
         result.requestedAssets += texture.state != LoadState::Unrequested;
+        result.textureStages.cpuReadyBytes += texture.preparedBytes;
         if (texture.state == LoadState::Uploading) {
             ++result.uploadingTextures;
+            result.textureStages.uploadInFlightBytes +=
+                texture.upload.staging.size;
+        }
+        if (texture.state == LoadState::Uploading ||
+            texture.state == LoadState::Ready) {
+            result.textureStages.residentBytes += texture.gpuBytes;
         }
         if ((texture.state == LoadState::Ready ||
                 texture.state == LoadState::Uploading) &&
@@ -1440,8 +1581,13 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
         }
     }
     for (const AnimationSlot& animation : animations_) {
-        countState(animation.state, result.loadedAnimations, result.pendingAnimations);
+        countState(
+            animation.state,
+            result.loadedAnimations,
+            result.pendingAnimations,
+            result.animationStages);
         result.requestedAssets += animation.state != LoadState::Unrequested;
+        result.animationStages.cpuReadyBytes += animation.preparedBytes;
     }
     result.queuedAssets = static_cast<uint32_t>(scheduler_.queuedCount());
     result.activeCpuJobs = static_cast<uint32_t>(scheduler_.activeCount());
@@ -1466,7 +1612,37 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
     result.residencyBudgetBlocked = residencyLadder_.blocked();
     result.textureUploadSubmissions = textureUploadSubmissions_;
     result.textureUploadCompletions = textureUploadCompletions_;
+    result.transientAssetBytes = currentTransientAssetBytes();
+    result.transientAssetPeakBytes = transientAssetPeakBytes_;
     return result;
+}
+
+uint64_t VulkanModelResources::currentTransientAssetBytes() const
+{
+    uint64_t bytes = 0;
+    for (const ModelSlot& model : models_) {
+        bytes += model.preparedBytes;
+        if (model.upload.staging.valid()) {
+            bytes += model.upload.staging.size;
+        }
+    }
+    for (uint32_t textureIndex : textureSpace_.active()) {
+        const TextureSlot& texture = textures_[textureIndex];
+        bytes += texture.preparedBytes;
+        if (texture.upload.staging.valid()) {
+            bytes += texture.upload.staging.size;
+        }
+    }
+    for (const AnimationSlot& animation : animations_) {
+        bytes += animation.preparedBytes;
+    }
+    return bytes;
+}
+
+void VulkanModelResources::updateTransientAssetPeak()
+{
+    transientAssetPeakBytes_ = std::max(
+        transientAssetPeakBytes_, currentTransientAssetBytes());
 }
 
 VulkanModelResources::GpuMesh VulkanModelResources::uploadMesh(

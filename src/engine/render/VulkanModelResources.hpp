@@ -79,6 +79,18 @@ public:
         ModelMaterialPolicy policy {};
     };
 
+    struct AssetStageStats {
+        uint32_t queued = 0;
+        uint32_t decoding = 0;
+        uint32_t cpuReady = 0;
+        uint32_t uploading = 0;
+        uint32_t resident = 0;
+        uint32_t failed = 0;
+        uint64_t cpuReadyBytes = 0;
+        uint64_t uploadInFlightBytes = 0;
+        uint64_t residentBytes = 0;
+    };
+
     struct LoadingStats {
         uint32_t loadedModels = 0;
         uint32_t pendingModels = 0;
@@ -95,6 +107,13 @@ public:
         uint32_t queuedAssets = 0;
         uint32_t activeCpuJobs = 0;
         uint64_t cancelledPrefetches = 0;
+        AssetStageStats modelStages {};
+        AssetStageStats textureStages {};
+        AssetStageStats animationStages {};
+        // Decoded payloads awaiting publication plus upload-ring reservations.
+        // The peak is updated at transitions so it includes their brief overlap.
+        uint64_t transientAssetBytes = 0;
+        uint64_t transientAssetPeakBytes = 0;
         uint64_t modelResidencyBytes = 0;
         uint64_t textureResidencyBytes = 0;
         uint64_t modelResidencyPeakBytes = 0;
@@ -311,6 +330,7 @@ private:
         GpuSkinnedMesh skinnedGpu {};
         std::future<PreparedModel> future;
         std::optional<PreparedModel> prepared;
+        uint64_t preparedBytes = 0;
         std::shared_ptr<const SkinnedMeshData> skinnedSource;
         std::exception_ptr failure;
         // Captured at upload, because the CPU mesh is released immediately
@@ -335,6 +355,7 @@ private:
         PendingTextureUpload upload {};
         std::future<PreparedTextureSource> future;
         std::optional<PreparedTextureSource> prepared;
+        uint64_t preparedBytes = 0;
         std::exception_ptr failure;
         uint64_t lastRequested = 0;
         uint64_t gpuBytes = 0;
@@ -346,6 +367,8 @@ private:
     struct AnimationSlot {
         LoadState state = LoadState::Unrequested;
         std::future<GltfAnimationClip> future;
+        std::optional<GltfAnimationClip> prepared;
+        uint64_t preparedBytes = 0;
         std::exception_ptr failure;
         uint64_t lastRequested = 0;
     };
@@ -392,6 +415,8 @@ private:
     [[nodiscard]] static uint64_t textureBytes(
         const PreparedTextureSource& texture,
         const TextureInterpretation& interpretation);
+    [[nodiscard]] uint64_t currentTransientAssetBytes() const;
+    void updateTransientAssetPeak();
 
     [[nodiscard]] bool publishModel(RenderModel model, bool wait);
     [[nodiscard]] bool publishTexture(std::size_t textureIndex, bool wait);
@@ -486,6 +511,7 @@ private:
     uint32_t drawInstanceCount_ = 0;
     uint64_t textureUploadSubmissions_ = 0;
     uint64_t textureUploadCompletions_ = 0;
+    uint64_t transientAssetPeakBytes_ = 0;
     AssetLoadScheduler scheduler_ {};
     uint64_t visibleRequestStamp_ = 0;
     // One pool each, with the same policy applied to both. The eviction

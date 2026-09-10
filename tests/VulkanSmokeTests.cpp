@@ -274,9 +274,29 @@ void exerciseSkinnedPublicationRetry(
     const sokoban::VulkanModelResources::LoadingStats denied =
         resources.loadingStats();
     if (resources.modelReady(model) || denied.failedAssets != 0 ||
-        denied.pendingModels != 1 || denied.modelResidencyBytes != 0) {
+        denied.pendingModels != 1 || denied.modelResidencyBytes != 0 ||
+        denied.modelStages.cpuReady != 1 ||
+        denied.modelStages.cpuReadyBytes == 0 ||
+        denied.transientAssetBytes != denied.modelStages.cpuReadyBytes ||
+        denied.transientAssetPeakBytes < denied.transientAssetBytes) {
         throw std::runtime_error(
             "Residency denial did not preserve a retryable CPU-ready model");
+    }
+
+    (void)resources.publishReadyAssets(1);
+    const sokoban::VulkanModelResources::LoadingStats uploading =
+        resources.loadingStats();
+    if (uploading.modelStages.cpuReady != 0 ||
+        uploading.modelStages.cpuReadyBytes != 0 ||
+        uploading.modelStages.uploading != 1 ||
+        uploading.modelStages.uploadInFlightBytes == 0 ||
+        uploading.transientAssetBytes !=
+            uploading.modelStages.uploadInFlightBytes ||
+        uploading.transientAssetPeakBytes <
+            denied.transientAssetBytes +
+                uploading.modelStages.uploadInFlightBytes) {
+        throw std::runtime_error(
+            "Model publication did not transfer CPU-ready bytes into upload staging");
     }
 
     const auto retryDeadline = std::chrono::steady_clock::now() +

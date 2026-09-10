@@ -627,6 +627,32 @@ void drawAssetResidencyStats(
         assetStats.readyRequestedAssets,
         assetStats.queuedAssets,
         assetStats.activeCpuJobs);
+    const auto showAssetStages = [](const char* label,
+                                     const VulkanModelResources::AssetStageStats& stages) {
+        ImGui::Text(
+            "%s stages: %u queued, %u decoding, %u CPU-ready (%.1f MiB), "
+            "%u uploading (%.1f MiB), %u resident (%.1f MiB), %u failed",
+            label,
+            stages.queued,
+            stages.decoding,
+            stages.cpuReady,
+            static_cast<double>(stages.cpuReadyBytes) / (1024.0 * 1024.0),
+            stages.uploading,
+            static_cast<double>(stages.uploadInFlightBytes) /
+                (1024.0 * 1024.0),
+            stages.resident,
+            static_cast<double>(stages.residentBytes) / (1024.0 * 1024.0),
+            stages.failed);
+    };
+    showAssetStages("Model", assetStats.modelStages);
+    showAssetStages("Texture", assetStats.textureStages);
+    showAssetStages("Animation", assetStats.animationStages);
+    ImGui::Text(
+        "Transient asset payload %.1f MiB, peak %.1f MiB",
+        static_cast<double>(assetStats.transientAssetBytes) /
+            (1024.0 * 1024.0),
+        static_cast<double>(assetStats.transientAssetPeakBytes) /
+            (1024.0 * 1024.0));
     ImGui::Text(
         "Cancelled stale prefetches %llu",
         static_cast<unsigned long long>(
