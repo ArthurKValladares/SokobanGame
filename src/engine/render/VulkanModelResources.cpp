@@ -25,6 +25,7 @@ namespace {
 #ifdef SOKOBAN_ENABLE_TEST_HOOKS
 std::atomic_bool denyNextModelResidencyAdmissionForTesting = false;
 std::atomic_bool denyModelResidencyAdmissionForTesting = false;
+std::atomic_bool denyTextureResidencyAdmissionForTesting = false;
 #endif
 
 template <typename Result>
@@ -1224,12 +1225,22 @@ void VulkanModelResources::setModelResidencyDeniedForTesting(bool denied)
 {
     denyModelResidencyAdmissionForTesting.store(denied);
 }
+
+void VulkanModelResources::setTextureResidencyDeniedForTesting(bool denied)
+{
+    denyTextureResidencyAdmissionForTesting.store(denied);
+}
 #endif
 
 bool VulkanModelResources::makeTextureResident(
     std::size_t protectedTexture,
     uint64_t requiredBytes)
 {
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+    if (denyTextureResidencyAdmissionForTesting.load()) {
+        return false;
+    }
+#endif
     return residencyLadder_.admit(
         textureResidency_,
         textures_,

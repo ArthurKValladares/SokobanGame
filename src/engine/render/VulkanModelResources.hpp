@@ -306,6 +306,7 @@ public:
     static void denyNextModelResidencyForTesting();
     [[nodiscard]] static bool modelResidencyDenialPendingForTesting();
     static void setModelResidencyDeniedForTesting(bool denied);
+    static void setTextureResidencyDeniedForTesting(bool denied);
 #endif
 
 private:

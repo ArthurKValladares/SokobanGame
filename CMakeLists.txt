@@ -808,6 +808,7 @@ if(SOKOBAN_BUILD_TESTS)
         target_compile_definitions(sokoban_vulkan_smoke_tests PRIVATE
             SOKOBAN_ENABLE_TEST_HOOKS=1
             SOKOBAN_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+            SOKOBAN_GAME_VERSION="${PROJECT_VERSION}"
         )
         set_tests_properties(vulkan_smoke PROPERTIES
             LABELS "vulkan;smoke"

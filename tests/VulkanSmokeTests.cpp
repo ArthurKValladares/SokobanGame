@@ -1,4 +1,9 @@
 #include "engine/AssetManifest.hpp"
+#include "engine/AnimationCatalog.hpp"
+#include "engine/ContentPipeline.hpp"
+#include "engine/Level.hpp"
+#include "engine/LevelCatalog.hpp"
+#include "engine/OverworldMap.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/RuntimeTextureCatalog.hpp"
 #include "engine/render/VulkanDeviceContext.hpp"
@@ -12,6 +17,7 @@
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -63,6 +69,199 @@ public:
 private:
     SDL_Window* window_ = nullptr;
 };
+
+using Clock = std::chrono::steady_clock;
+
+[[nodiscard]] uint64_t elapsedMicroseconds(Clock::time_point started)
+{
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            Clock::now() - started).count());
+}
+
+class ResidencyHold final {
+public:
+    ResidencyHold()
+    {
+        sokoban::VulkanModelResources::setModelResidencyDeniedForTesting(true);
+        sokoban::VulkanModelResources::setTextureResidencyDeniedForTesting(true);
+    }
+
+    ~ResidencyHold()
+    {
+        release();
+    }
+
+    ResidencyHold(const ResidencyHold&) = delete;
+    ResidencyHold& operator=(const ResidencyHold&) = delete;
+
+    void release()
+    {
+        if (!held_) {
+            return;
+        }
+        sokoban::VulkanModelResources::setTextureResidencyDeniedForTesting(false);
+        sokoban::VulkanModelResources::setModelResidencyDeniedForTesting(false);
+        held_ = false;
+    }
+
+private:
+    bool held_ = true;
+};
+
+struct StartupMetrics {
+    uint64_t packageValidationMicroseconds = 0;
+    uint64_t manifestInspectionMicroseconds = 0;
+    uint64_t requirementDiscoveryMicroseconds = 0;
+    uint64_t gltfDependencyDiscoveryMicroseconds = 0;
+    uint64_t deviceSetupMicroseconds = 0;
+    uint64_t resourceSetupMicroseconds = 0;
+    uint64_t decodeMicroseconds = 0;
+    uint64_t uploadMicroseconds = 0;
+    uint64_t readyMicroseconds = 0;
+    uint32_t requestedModels = 0;
+    uint32_t requestedTextures = 0;
+    uint32_t requestedAnimations = 0;
+};
+
+[[nodiscard]] sokoban::RenderAssetRequirements startupAssetRequirements(
+    const std::filesystem::path& assetRoot,
+    const sokoban::AssetManifest& manifest,
+    const sokoban::AnimationCatalog& animations)
+{
+    sokoban::RenderAssetRequirements requirements =
+        sokoban::renderAssetRequirementsForLevel(
+            sokoban::OverworldMap::load(
+                assetRoot / "levels" / "overworld").level(),
+            manifest);
+
+    const std::filesystem::path levelDirectory =
+        sokoban::levelDirectoryPath(assetRoot / "levels", 0);
+    for (int screen = 0;; ++screen) {
+        const std::filesystem::path path =
+            sokoban::screenFilePath(levelDirectory, screen);
+        if (!std::filesystem::exists(path)) {
+            break;
+        }
+        requirements.merge(sokoban::renderAssetRequirementsForLevel(
+            sokoban::Level::loadFromFile(path),
+            manifest,
+            sokoban::LevelLocation { .level = 0, .screen = screen },
+            &animations));
+    }
+    return requirements;
+}
+
+[[nodiscard]] StartupMetrics benchmarkStartup(SDL_Window* window)
+{
+    StartupMetrics result;
+    const Clock::time_point benchmarkStarted = Clock::now();
+    const std::filesystem::path assetRoot =
+        std::filesystem::path(SDL_GetBasePath()) / "assets";
+
+    Clock::time_point phaseStarted = Clock::now();
+    sokoban::validateContentPackage(assetRoot, SOKOBAN_GAME_VERSION);
+    result.packageValidationMicroseconds = elapsedMicroseconds(phaseStarted);
+
+    phaseStarted = Clock::now();
+    const sokoban::AssetManifest manifest =
+        sokoban::AssetManifest::loadFromFile(assetRoot / "manifest.json");
+    const sokoban::AnimationCatalog animations =
+        sokoban::AnimationCatalog::loadFromFile(
+            assetRoot / "animation_catalog.json", manifest);
+    result.manifestInspectionMicroseconds = elapsedMicroseconds(phaseStarted);
+
+    phaseStarted = Clock::now();
+    const sokoban::RenderAssetRequirements requirements =
+        startupAssetRequirements(assetRoot, manifest, animations);
+    result.requirementDiscoveryMicroseconds = elapsedMicroseconds(phaseStarted);
+
+    phaseStarted = Clock::now();
+    const sokoban::RuntimeTextureCatalog textureCatalog =
+        sokoban::collectRuntimeTextureCatalog(assetRoot, manifest);
+    result.gltfDependencyDiscoveryMicroseconds =
+        elapsedMicroseconds(phaseStarted);
+
+    phaseStarted = Clock::now();
+    sokoban::VulkanDeviceContext deviceContext(
+        window, textureCatalog.textures().size());
+    result.deviceSetupMicroseconds = elapsedMicroseconds(phaseStarted);
+
+    phaseStarted = Clock::now();
+    sokoban::VulkanModelResources resources;
+    resources.create(
+        deviceContext.physicalDevice(),
+        deviceContext.memoryAllocator(),
+        deviceContext.device(),
+        deviceContext.commandPool(),
+        deviceContext.graphicsQueue(),
+        assetRoot,
+        manifest,
+        textureCatalog,
+        deviceContext.textureDescriptorCapacity(),
+        deviceContext.maxSamplerAnisotropy(),
+        {
+            .maxConcurrentCpuJobs = 2,
+            .maxPublicationsPerFrame = 1,
+            .preparedAssetBytes = 1024ULL * 1024ULL * 1024ULL,
+        });
+    result.resourceSetupMicroseconds = elapsedMicroseconds(phaseStarted);
+
+    ResidencyHold hold;
+    phaseStarted = Clock::now();
+    resources.requestAssets(requirements);
+    sokoban::VulkanModelResources::LoadingStats stats;
+    const Clock::time_point decodeDeadline =
+        phaseStarted + std::chrono::seconds(30);
+    do {
+        (void)resources.publishReadyAssets(
+            std::numeric_limits<std::size_t>::max());
+        stats = resources.loadingStats();
+        const uint32_t preparedAssets =
+            stats.modelStages.cpuReady + stats.textureStages.cpuReady +
+            stats.animationStages.resident;
+        if (stats.queuedAssets == 0 && stats.activeCpuJobs == 0 &&
+            preparedAssets == stats.requestedAssets) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    } while (Clock::now() < decodeDeadline);
+    result.decodeMicroseconds = elapsedMicroseconds(phaseStarted);
+    if (stats.failedAssets != 0 || stats.queuedAssets != 0 ||
+        stats.activeCpuJobs != 0 ||
+        stats.modelStages.cpuReady + stats.textureStages.cpuReady +
+                stats.animationStages.resident !=
+            stats.requestedAssets) {
+        throw std::runtime_error(
+            "Startup benchmark did not reach the CPU-ready boundary");
+    }
+    result.requestedModels = stats.modelStages.cpuReady;
+    result.requestedTextures = stats.textureStages.cpuReady;
+    result.requestedAnimations = stats.animationStages.resident;
+
+    hold.release();
+    phaseStarted = Clock::now();
+    const Clock::time_point uploadDeadline =
+        phaseStarted + std::chrono::seconds(30);
+    do {
+        (void)resources.publishReadyAssets(
+            std::numeric_limits<std::size_t>::max());
+        resources.retireCompletedUploads();
+        stats = resources.loadingStats();
+        if (stats.readyRequestedAssets == stats.requestedAssets) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    } while (Clock::now() < uploadDeadline);
+    result.uploadMicroseconds = elapsedMicroseconds(phaseStarted);
+    result.readyMicroseconds = elapsedMicroseconds(benchmarkStarted);
+    if (stats.failedAssets != 0 ||
+        stats.readyRequestedAssets != stats.requestedAssets) {
+        throw std::runtime_error(
+            "Startup benchmark did not make every requested asset resident");
+    }
+    return result;
+}
 
 void submitNoOp(sokoban::VulkanDeviceContext& deviceContext)
 {
@@ -576,6 +775,29 @@ int main(int argc, char** argv)
     try {
         const SdlVideo video;
         const SdlWindow window;
+        if (argc == 2 &&
+            std::string_view(argv[1]) == "--benchmark-startup") {
+            const StartupMetrics metrics = benchmarkStartup(window.get());
+            std::cout
+                << "startup_phases package_validation_us="
+                << metrics.packageValidationMicroseconds
+                << " manifest_inspection_us="
+                << metrics.manifestInspectionMicroseconds
+                << " requirement_discovery_us="
+                << metrics.requirementDiscoveryMicroseconds
+                << " gltf_dependency_discovery_us="
+                << metrics.gltfDependencyDiscoveryMicroseconds
+                << " device_setup_us=" << metrics.deviceSetupMicroseconds
+                << " resource_setup_us=" << metrics.resourceSetupMicroseconds
+                << " decode_us=" << metrics.decodeMicroseconds
+                << " upload_us=" << metrics.uploadMicroseconds
+                << " ready_us=" << metrics.readyMicroseconds
+                << " requested_models=" << metrics.requestedModels
+                << " requested_textures=" << metrics.requestedTextures
+                << " requested_animations=" << metrics.requestedAnimations
+                << '\n';
+            return 0;
+        }
         sokoban::VulkanDeviceContext deviceContext(window.get());
         exerciseMemoryAllocator(deviceContext);
         exerciseSkinnedPublicationRetry(deviceContext);

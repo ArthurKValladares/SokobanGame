@@ -26,8 +26,7 @@ internals and art-asset quality or licensing remain outside its scope.
 
 | ID | Priority | Work | Exit criteria |
 | --- | --- | --- | --- |
-| MQ-04 | Next | Separate startup inspection cost from decode and upload | Record manifest inspection, glTF dependency discovery, decode, upload, and first-playable-frame timing; introduce cached metadata only with reliable invalidation |
-| MQ-05 | Later | Extract cohesive ownership boundaries from large modules | Each extraction must reduce a specific lifetime or state-transition ambiguity and keep dependencies narrower than the source module |
+| MQ-05 | Next | Extract cohesive ownership boundaries from large modules | Each extraction must reduce a specific lifetime or state-transition ambiguity and keep dependencies narrower than the source module |
 | MQ-06 | Ongoing | Expand platform and device evidence | Run the Linux toolchain, installer, controller, audio-device, and broader Vulkan device matrix described below and retain actionable failure diagnostics |
 
 ## Analyzer gate maintenance
@@ -64,12 +63,6 @@ The Linux CI analyzer remains the portable authority. A Windows scan may
 disable MSVC STL vectorized implementations during analysis and omit unsupported
 reproducible-path flags, but it must otherwise preserve the real compile
 definitions and include graph.
-
-## MQ-04: startup efficiency experiment
-
-| Area | Experiment | Implementation threshold |
-| --- | --- | --- |
-| Startup inspection | Separate document parsing and dependency discovery from decode, upload, and first playable frame | Add cached metadata only when inspection is material and cache invalidation can be proven from source identity |
 
 Retain the existing frame arenas, scratch reuse, suballocators, draw sorting,
 shadow caching, compressed artifacts, upload scheduling, and residency tracking
@@ -139,9 +132,10 @@ checks need the device, driver, package identity, steps, and observed result.
 
 Keep the analyzer gate green as checks and first-party code evolve.
 
-1. Measure startup inspection and preserve phase-specific timing evidence.
-2. Perform ownership extractions only when the preceding analyzer or
-   measurement work exposes a concrete boundary to improve.
+1. Extract prepared-asset publication into a focused ownership boundary while
+   preserving its retry and retirement invariants.
+2. Continue with scene-recording inputs only if the first extraction leaves a
+   similarly concrete lifetime ambiguity.
 3. Expand platform and device validation alongside the code packets it covers.
 
 A roadmap item is complete only when its acceptance criteria, relevant tests,
