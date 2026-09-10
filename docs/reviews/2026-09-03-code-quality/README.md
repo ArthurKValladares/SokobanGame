@@ -37,15 +37,14 @@ internals and art-asset quality or licensing remain outside its scope.
 
 ## MQ-01: clang-tidy queue
 
-The gate covers 104 correctness- and cost-oriented analyzer checks. Ninety-eight
-are enabled and six are explicitly excluded.
+The gate covers 104 correctness- and cost-oriented analyzer checks. Ninety-nine
+are enabled and five are explicitly excluded.
 
 Work through the remaining actionable categories in this order:
 
-1. `bugprone-switch-missing-default-case`
-2. `performance-inefficient-vector-operation`
-3. `performance-no-automatic-move`
-4. `performance-enum-size`
+1. `performance-inefficient-vector-operation`
+2. `performance-no-automatic-move`
+3. `performance-enum-size`
 
 Two exclusions are policy exceptions rather than an automatic rewrite queue:
 

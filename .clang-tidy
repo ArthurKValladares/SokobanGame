@@ -42,14 +42,12 @@ Checks: >
   portability-*,
   -bugprone-easily-swappable-parameters,
   -bugprone-unchecked-optional-access,
-  -bugprone-switch-missing-default-case,
   -performance-enum-size,
   -performance-no-automatic-move,
   -performance-inefficient-vector-operation
 
 # The work queue, in the order worth doing:
 #
-#   bugprone-switch-missing-default-case       1
 #   performance-inefficient-vector-operation   1
 #   performance-no-automatic-move              1
 #   performance-enum-size                      3
@@ -73,6 +71,8 @@ Checks: >
 # predicates was expressed with non-mutating views.
 # `bugprone-suspicious-include` remains enabled; the two intentional C source
 # inclusions in MiniaudioImpl.cpp carry local rationale suppressions.
+# `bugprone-switch-missing-default-case` followed after the exhaustive range of
+# an unsigned modulo-four switch was documented explicitly.
 #
 # Two are excluded on their merits rather than as a queue:
 #

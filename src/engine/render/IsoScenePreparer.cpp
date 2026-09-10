@@ -778,6 +778,9 @@ ModelTransformPoints IsoScenePreparer::modelTransformPoints(
         result.xPoint = { x, y, z };
         result.yPoint = { x + width, y + depth, z };
         break;
+    default:
+        // Unsigned modulo four guarantees cases zero through three.
+        break;
     }
     if (std::abs(tile.modelRotationOffsetRadians) > 0.0001f) {
         const float centerX = x + width * 0.5f;
