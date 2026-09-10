@@ -208,6 +208,52 @@ void testInspectsExternalAndDataUriDependenciesWithoutLoadingThem()
     CHECK(material.textures[4].texcoord == 1U);
 }
 
+void testEstimatesPreparedPayloadFromDocumentStructure()
+{
+    TEST("estimatesPreparedPayloadFromDocumentStructure");
+    TempDirectory temp;
+    const std::filesystem::path model = temp.path() / "sizes.gltf";
+    writeTextFile(model, R"json({
+  "asset":{"version":"2.0"},
+  "buffers":[{"uri":"missing.bin","byteLength":4096}],
+  "bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":4096}],
+  "accessors":[
+    {"bufferView":0,"componentType":5126,"count":5,"type":"VEC3"},
+    {"bufferView":0,"componentType":5123,"count":9,"type":"SCALAR"},
+    {"bufferView":0,"componentType":5126,"count":2,"type":"MAT4"},
+    {"bufferView":0,"componentType":5126,"count":3,"type":"SCALAR"},
+    {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"}
+  ],
+  "meshes":[{"primitives":[{
+    "attributes":{"POSITION":0},"indices":1
+  }]}],
+  "nodes":[{"name":"root"},{"name":"joint"}],
+  "skins":[{"joints":[0,1],"inverseBindMatrices":2}],
+  "animations":[{
+    "name":"Walk",
+    "samplers":[{"input":3,"output":4}],
+    "channels":[{"sampler":0,"target":{"node":1,"path":"translation"}}]
+  }]
+})json");
+
+    // The referenced buffer is intentionally absent. Size inspection uses
+    // accessor counts and engine layouts without opening payload bytes.
+    const GltfPreparedSizeMetadata& sizes =
+        inspectGltfAssetDependencies(model).preparedSizes;
+    const uint64_t materialBytes = sizeof(MeshMaterial);
+    CHECK(sizes.materialBytes == materialBytes);
+    CHECK(sizes.staticMeshBytes ==
+        5U * sizeof(MeshVertex) + 9U * sizeof(uint32_t) + materialBytes);
+    CHECK(sizes.skinnedMeshBytes ==
+        5U * sizeof(SkinnedVertex) + 9U * sizeof(uint32_t) + materialBytes +
+        2U * sizeof(SkeletonNode) + 9U +
+        2U * sizeof(uint32_t) + 2U * sizeof(Mat4));
+    CHECK(sizes.animationBytes.size() == 1U);
+    CHECK(sizes.animationBytes[0] ==
+        4U + sizeof(AnimationChannel) + 5U +
+        3U * sizeof(float) + 3U * sizeof(Vec4));
+}
+
 void testInspectsEmbeddedGlbImage()
 {
     TEST("inspectsEmbeddedGlbImage");
@@ -511,6 +557,7 @@ void testPreservesAuthoredTangentFrameForNormalMapping()
 int main()
 {
     testInspectsExternalAndDataUriDependenciesWithoutLoadingThem();
+    testEstimatesPreparedPayloadFromDocumentStructure();
     testInspectsEmbeddedGlbImage();
     testLoadsMaterialMapBindingsAndAuthoredParameters();
     testPreservesAuthoredTangentFrameForNormalMapping();

@@ -10,6 +10,8 @@
 
 namespace sokoban {
 
+struct GltfAssetDependencies;
+
 struct ContentSourceRoots {
     std::filesystem::path assets;
     std::filesystem::path levels;
@@ -66,6 +68,16 @@ resolveGltfMaterialTextures(
     const std::filesystem::path& assetRoot,
     const std::filesystem::path& document,
     std::string_view assetLabel);
+
+// Reuses metadata already parsed by a caller that also needs structural size
+// information. Path containment and source-file validation remain identical
+// to the ordinary overload.
+[[nodiscard]] std::vector<ResolvedMaterialTexture>
+resolveGltfMaterialTextures(
+    const std::filesystem::path& assetRoot,
+    const std::filesystem::path& document,
+    std::string_view assetLabel,
+    const GltfAssetDependencies& dependencies);
 
 // Resolves and validates every file needed by a distributable build. Manifest
 // references remain relative to the assets root, while levels and compiled

@@ -1,6 +1,6 @@
 # Prepared asset memory instrumentation
 
-Captured 2026-09-09 for MQ-01.
+Captured 2026-09-09 for MQ-01; decoded-size metadata updated 2026-09-10.
 
 `VulkanModelResources::LoadingStats` exposes the asset publication pipeline by
 model, texture, and animation class. Each class reports queued, decoding,
@@ -60,6 +60,24 @@ The source metric is useful for queue visibility but cannot safely reserve a
 hard prepared-memory budget. A strict limit needs decoded-size metadata
 produced by document/image inspection or budget-aware loader allocation.
 
+Model and animation reservations now come from the same glTF document parse
+that discovers runtime material dependencies. Accessor, material, skeleton,
+joint, node-name, animation-channel, and keyframe counts are expanded through
+the engine's actual decoded C++ layouts without opening buffer payloads.
+Attachment reservations include the retained attachment object and the second
+material copy merged into the owning skinned mesh. Arithmetic saturates at the
+largest `uint64_t` value, so hostile counts cannot wrap into a small admission
+request.
+
+The runtime payload counters and startup estimates share
+`preparedPayloadBytes` as their definition. Structural tests derive static,
+skinned, skeleton, and animation totals from a document whose external buffer
+is deliberately absent. The production-catalog test requires a nonzero model
+reservation for every shipped model and compares every selected animation
+reservation with its decoded clip. Each distinct model, attachment, or
+animation document is parsed once per catalog collection; request and frame
+paths remain free of metadata I/O.
+
 Verification:
 
 - Debug build: `sokoban`, `sokoban_ui_tests`, and
@@ -68,5 +86,6 @@ Verification:
 - Debug CTest registry: 80 of 80 passed.
 - Release CTest registry: 80 of 80 passed.
 
-The remaining MQ-01 work is to produce a safe decoded-size estimate for each
-queued asset class, choose the prepared-memory budget, and enforce admission.
+The remaining MQ-01 work is to inspect the selected prepared texture form,
+choose the prepared-memory budget, and enforce admission across all three
+asset classes.

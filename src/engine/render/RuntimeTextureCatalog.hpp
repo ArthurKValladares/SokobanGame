@@ -28,6 +28,7 @@ struct RuntimeModelTextures {
     // to stable high descriptor slots after the device capacity is selected.
     std::vector<uint32_t> requiredTextures;
     std::vector<PrimitiveMaterialBinding> primitiveMaterials;
+    uint64_t preparedBytes = 0;
 };
 
 class RuntimeTextureCatalog {
@@ -39,6 +40,10 @@ public:
     [[nodiscard]] const RuntimeModelTextures& model(uint32_t index) const
     {
         return models_.at(index);
+    }
+    [[nodiscard]] uint64_t animationPreparedBytes(uint32_t index) const
+    {
+        return animationPreparedBytes_.at(index);
     }
     [[nodiscard]] uint32_t manifestTextureCount() const
     {
@@ -60,10 +65,14 @@ private:
     friend RuntimeTextureCatalog buildRuntimeTextureCatalog(
         const AssetManifest&,
         std::span<const ResolvedMaterialTexture>);
+    friend RuntimeTextureCatalog collectRuntimeTextureCatalog(
+        const std::filesystem::path&,
+        const AssetManifest&);
 
     uint32_t manifestTextureCount_ = 0;
     std::vector<RuntimeTextureDefinition> textures_;
     std::vector<RuntimeModelTextures> models_;
+    std::vector<uint64_t> animationPreparedBytes_;
 };
 
 // Pure catalog assembly used by tests and by runtime collection.
@@ -71,8 +80,9 @@ private:
     const AssetManifest& manifest,
     std::span<const ResolvedMaterialTexture> materialTextures);
 
-// Inspects each distinct manifest model document without loading image bytes
-// or creating GPU resources, then assembles stable logical texture slots.
+// Inspects each distinct model, attachment, and animation document without
+// loading buffer or image payloads. The resulting catalog carries stable
+// texture slots and decoded-size metadata for CPU admission.
 [[nodiscard]] RuntimeTextureCatalog collectRuntimeTextureCatalog(
     const std::filesystem::path& assetRoot,
     const AssetManifest& manifest);

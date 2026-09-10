@@ -1270,6 +1270,19 @@ std::vector<ResolvedMaterialTexture> resolveGltfMaterialTextures(
         inspectGltfAssetDependencies(absolute), relative, assetLabel);
 }
 
+std::vector<ResolvedMaterialTexture> resolveGltfMaterialTextures(
+    const std::filesystem::path& assetRoot,
+    const std::filesystem::path& document,
+    std::string_view assetLabel,
+    const GltfAssetDependencies& dependencies)
+{
+    const std::filesystem::path root = canonicalRoot(assetRoot, "asset source");
+    const std::filesystem::path relative =
+        normalizedRelativePath(document, assetLabel);
+    (void)sourceFile(root, relative, assetLabel);
+    return resolvedMaterialTexturesFrom(dependencies, relative, assetLabel);
+}
+
 ContentInventory stageContent(
     const ContentSourceRoots& roots,
     const std::filesystem::path& outputRoot,

@@ -40,34 +40,13 @@ uint64_t vectorPayloadBytes(const std::vector<Element>& values)
     return static_cast<uint64_t>(values.size()) * sizeof(Element);
 }
 
-uint64_t meshPayloadBytes(const MeshData& mesh)
-{
-    return vectorPayloadBytes(mesh.vertices) +
-        vectorPayloadBytes(mesh.indices) +
-        vectorPayloadBytes(mesh.materials);
-}
-
 template <typename PreparedModel>
 uint64_t modelPayloadBytes(const PreparedModel& model)
 {
     if (const auto* mesh = std::get_if<MeshData>(&model)) {
-        return meshPayloadBytes(*mesh);
+        return preparedPayloadBytes(*mesh);
     }
-    const SkinnedMeshData& mesh = std::get<SkinnedMeshData>(model);
-    uint64_t bytes = vectorPayloadBytes(mesh.vertices) +
-        vectorPayloadBytes(mesh.indices) +
-        vectorPayloadBytes(mesh.materials) +
-        vectorPayloadBytes(mesh.nodes) +
-        vectorPayloadBytes(mesh.jointNodeIndices) +
-        vectorPayloadBytes(mesh.inverseBindMatrices) +
-        vectorPayloadBytes(mesh.attachments);
-    for (const SkeletonNode& node : mesh.nodes) {
-        bytes += node.name.size();
-    }
-    for (const SkinnedAttachment& attachment : mesh.attachments) {
-        bytes += meshPayloadBytes(attachment.mesh);
-    }
-    return bytes;
+    return preparedPayloadBytes(std::get<SkinnedMeshData>(model));
 }
 
 uint64_t texturePayloadBytes(const PreparedTextureSource& texture)
@@ -80,17 +59,6 @@ uint64_t texturePayloadBytes(const PreparedTextureSource& texture)
     uint64_t bytes = vectorPayloadBytes(compressed.mips);
     for (const CompressedTextureMip& mip : compressed.mips) {
         bytes += mip.bytes.size();
-    }
-    return bytes;
-}
-
-uint64_t animationPayloadBytes(const GltfAnimationClip& clip)
-{
-    uint64_t bytes = clip.name.size() + vectorPayloadBytes(clip.channels);
-    for (const AnimationChannel& channel : clip.channels) {
-        bytes += channel.targetNodeName.size();
-        bytes += vectorPayloadBytes(channel.keyframes.times);
-        bytes += vectorPayloadBytes(channel.keyframes.values);
     }
     return bytes;
 }
@@ -295,6 +263,7 @@ void VulkanModelResources::create(
             assetRoot_, manifest.models()[modelIndex]);
         RuntimeModelTextures mapped = remapRuntimeModelTextures(
             textureCatalog.model(modelIndex), logicalToDescriptor);
+        models_[modelIndex].estimatedPreparedBytes = mapped.preparedBytes;
         modelTextureDependencies_[modelIndex] =
             std::move(mapped.requiredTextures);
         modelMaterialBindings_[modelIndex] =
@@ -303,6 +272,8 @@ void VulkanModelResources::create(
     for (uint32_t animationIndex = 0;
          animationIndex < animations_.size();
          ++animationIndex) {
+        animations_[animationIndex].estimatedPreparedBytes =
+            textureCatalog.animationPreparedBytes(animationIndex);
         animations_[animationIndex].sourceBytes = sourceFileBytes(
             assetRoot_ / manifest.animations()[animationIndex].path);
     }
@@ -1320,7 +1291,7 @@ bool VulkanModelResources::publishAnimation(RenderAnimation animation, bool wait
                 static_cast<uint32_t>(animation.index()),
             });
             slot.prepared = slot.future.get();
-            slot.preparedBytes = animationPayloadBytes(*slot.prepared);
+            slot.preparedBytes = preparedPayloadBytes(*slot.prepared);
             slot.state = LoadState::CpuReady;
             updateTransientAssetPeak();
         }
@@ -2069,6 +2040,7 @@ bool VulkanModelResources::syncManifestModels()
         RuntimeModelTextures mapped = remapRuntimeModelTextures(
             textureCatalog.model(static_cast<uint32_t>(modelIndex)),
             logicalToDescriptor);
+        models_[modelIndex].estimatedPreparedBytes = mapped.preparedBytes;
         modelTextureDependencies_[modelIndex] =
             std::move(mapped.requiredTextures);
         modelMaterialBindings_[modelIndex] =

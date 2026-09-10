@@ -1,6 +1,6 @@
 # Code quality roadmap
 
-Updated 2026-09-09. This is the active, forward-looking code-quality backlog
+Updated 2026-09-10. This is the active, forward-looking code-quality backlog
 for Sokoban 3D. It contains only remaining work; Git history and the archived
 handoff retain historical context. Remove an item when its acceptance criteria
 are met.
@@ -26,7 +26,7 @@ internals and art-asset quality or licensing remain outside its scope.
 
 | ID | Priority | Work | Exit criteria |
 | --- | --- | --- | --- |
-| MQ-01 | Next | Enforce a prepared asset memory budget | Produce safe decoded-size metadata, choose a limit from the pressure baseline, and gate decode admission without starving publication |
+| MQ-01 | Next | Enforce a prepared asset memory budget | Complete texture-size metadata, choose a limit from the pressure baseline, and gate decode admission without starving publication |
 | MQ-02 | Later | Remove duplicate skinned-mesh packing | Count packing passes, allocations, temporary bytes, and upload bytes; reuse a prepared packed payload or compute admission size without packing twice |
 | MQ-03 | Later | Quantify profile and undo snapshot copying | Benchmark save-request latency, serialization time, and peak memory late in a long level; optimize only after preserving the agreed undo-persistence contract |
 | MQ-04 | Later | Separate startup inspection cost from decode and upload | Record manifest inspection, glTF dependency discovery, decode, upload, and first-playable-frame timing; introduce cached metadata only with reliable invalidation |
@@ -76,9 +76,9 @@ to design the admission policy.
 
 The next packet should:
 
-- produce a safe decoded-size estimate during existing model-document and
-  texture-source inspection, without adding filesystem work to the request or
-  frame paths;
+- produce exact logical decoded-size metadata during texture-source inspection,
+  selecting the BC7 artifact or RGBA fallback after device capability is known,
+  without adding filesystem work to request or frame paths;
 - define how an asset larger than the whole budget runs alone and remains
   observable instead of starving permanently;
 - choose and document a default prepared-byte limit with explicit headroom for
@@ -168,8 +168,8 @@ checks need the device, driver, package identity, steps, and observed result.
 
 Keep the analyzer gate green as checks and first-party code evolve.
 
-1. Produce safe decoded-size metadata, choose the prepared-memory limit, and
-   enforce scheduler admission against it.
+1. Complete decoded texture-size metadata, choose the prepared-memory limit,
+   and enforce scheduler admission against it.
 2. Measure duplicate skinned packing, profile snapshots, and startup inspection
    in that order.
 3. Perform ownership extractions only when the preceding analyzer or

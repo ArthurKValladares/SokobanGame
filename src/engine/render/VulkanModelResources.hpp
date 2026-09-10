@@ -348,6 +348,7 @@ private:
         GpuSkinnedMesh skinnedGpu {};
         std::future<PreparedModel> future;
         std::optional<PreparedModel> prepared;
+        uint64_t estimatedPreparedBytes = 0;
         uint64_t preparedBytes = 0;
         uint64_t sourceBytes = 0;
         AdmissionDeferral admissionDeferral {};
@@ -390,6 +391,7 @@ private:
         LoadState state = LoadState::Unrequested;
         std::future<GltfAnimationClip> future;
         std::optional<GltfAnimationClip> prepared;
+        uint64_t estimatedPreparedBytes = 0;
         uint64_t preparedBytes = 0;
         uint64_t sourceBytes = 0;
         std::exception_ptr failure;

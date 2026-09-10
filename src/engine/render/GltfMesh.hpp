@@ -316,11 +316,23 @@ struct GltfMaterialDependency {
     std::vector<GltfMaterialTextureDependency> textures;
 };
 
+// Logical bytes retained by the corresponding decoded CPU objects. These
+// counts follow preparedPayloadBytes(), including owned string contents and
+// the engine's expanded vertex layouts, without opening any buffer payloads.
+// A zero mesh estimate means the document has no mesh of that kind.
+struct GltfPreparedSizeMetadata {
+    uint64_t staticMeshBytes = 0;
+    uint64_t skinnedMeshBytes = 0;
+    uint64_t materialBytes = 0;
+    std::vector<uint64_t> animationBytes;
+};
+
 struct GltfAssetDependencies {
     std::vector<GltfBufferDependency> buffers;
     std::vector<GltfImageDependency> images;
     std::vector<GltfSamplerDependency> samplers;
     std::vector<GltfMaterialDependency> materials;
+    GltfPreparedSizeMetadata preparedSizes;
 };
 
 // Parses and validates document structure only. External buffers and images
@@ -352,6 +364,13 @@ void addSkinnedAttachment(
 [[nodiscard]] GltfAnimationClip loadGltfAnimationClip(
     const std::filesystem::path& path,
     uint32_t animationIndex);
+
+// Logical retained bytes used by prepared-asset accounting. Keeping the
+// measurement beside the decoded types makes startup estimates and runtime
+// observations share one definition.
+[[nodiscard]] uint64_t preparedPayloadBytes(const MeshData& mesh);
+[[nodiscard]] uint64_t preparedPayloadBytes(const SkinnedMeshData& mesh);
+[[nodiscard]] uint64_t preparedPayloadBytes(const GltfAnimationClip& clip);
 
 // Names of all animations in a glTF/GLB file, in index order (unnamed clips
 // get "animation N"). Returns an empty list for files without animations or

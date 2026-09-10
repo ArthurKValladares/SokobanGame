@@ -765,7 +765,188 @@ void appendMaterialTextureDependency(
     material.textures.push_back(std::move(dependency));
 }
 
+uint64_t saturatedAdd(uint64_t left, uint64_t right)
+{
+    if (left > std::numeric_limits<uint64_t>::max() - right) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return left + right;
+}
+
+uint64_t saturatedMultiply(uint64_t count, uint64_t elementBytes)
+{
+    if (elementBytes != 0 &&
+        count > std::numeric_limits<uint64_t>::max() / elementBytes) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return count * elementBytes;
+}
+
+template <typename Element>
+uint64_t arrayBytes(cgltf_size count)
+{
+    return saturatedMultiply(static_cast<uint64_t>(count), sizeof(Element));
+}
+
+GltfPreparedSizeMetadata preparedSizeMetadata(const cgltf_data& data)
+{
+    GltfPreparedSizeMetadata sizes;
+    const uint64_t materialCount = static_cast<uint64_t>(
+        std::max<cgltf_size>(data.materials_count, 1));
+    sizes.materialBytes = saturatedMultiply(
+        materialCount, sizeof(MeshMaterial));
+
+    uint64_t staticVertexBytes = 0;
+    uint64_t skinnedVertexBytes = 0;
+    uint64_t indexBytes = 0;
+    for (cgltf_size meshIndex = 0;
+         meshIndex < data.meshes_count;
+         ++meshIndex) {
+        const cgltf_mesh& mesh = data.meshes[meshIndex];
+        for (cgltf_size primitiveIndex = 0;
+             primitiveIndex < mesh.primitives_count;
+             ++primitiveIndex) {
+            const cgltf_primitive& primitive = mesh.primitives[primitiveIndex];
+            const cgltf_accessor* positions = findAttribute(
+                primitive, cgltf_attribute_type_position);
+            if (positions) {
+                staticVertexBytes = saturatedAdd(
+                    staticVertexBytes,
+                    arrayBytes<MeshVertex>(positions->count));
+                skinnedVertexBytes = saturatedAdd(
+                    skinnedVertexBytes,
+                    arrayBytes<SkinnedVertex>(positions->count));
+            }
+            if (primitive.indices) {
+                indexBytes = saturatedAdd(
+                    indexBytes,
+                    arrayBytes<uint32_t>(primitive.indices->count));
+            }
+        }
+    }
+    if (data.meshes_count != 0) {
+        sizes.staticMeshBytes = saturatedAdd(
+            saturatedAdd(staticVertexBytes, indexBytes),
+            sizes.materialBytes);
+    }
+
+    if (data.meshes_count != 0 && data.skins_count != 0) {
+        uint64_t skinnedBytes = saturatedAdd(
+            saturatedAdd(skinnedVertexBytes, indexBytes),
+            sizes.materialBytes);
+        skinnedBytes = saturatedAdd(
+            skinnedBytes, arrayBytes<SkeletonNode>(data.nodes_count));
+        for (cgltf_size nodeIndex = 0;
+             nodeIndex < data.nodes_count;
+             ++nodeIndex) {
+            skinnedBytes = saturatedAdd(
+                skinnedBytes,
+                static_cast<uint64_t>(
+                    std::char_traits<char>::length(
+                        data.nodes[nodeIndex].name
+                            ? data.nodes[nodeIndex].name
+                            : "")));
+        }
+        const cgltf_skin& skin = data.skins[0];
+        skinnedBytes = saturatedAdd(
+            skinnedBytes, arrayBytes<uint32_t>(skin.joints_count));
+        if (skin.inverse_bind_matrices) {
+            skinnedBytes = saturatedAdd(
+                skinnedBytes,
+                arrayBytes<Mat4>(skin.inverse_bind_matrices->count));
+        }
+        sizes.skinnedMeshBytes = skinnedBytes;
+    }
+
+    sizes.animationBytes.reserve(data.animations_count);
+    for (cgltf_size animationIndex = 0;
+         animationIndex < data.animations_count;
+         ++animationIndex) {
+        const cgltf_animation& animation = data.animations[animationIndex];
+        uint64_t bytes = animation.name
+            ? static_cast<uint64_t>(std::char_traits<char>::length(animation.name))
+            : 0;
+        uint64_t supportedChannels = 0;
+        for (cgltf_size channelIndex = 0;
+             channelIndex < animation.channels_count;
+             ++channelIndex) {
+            const cgltf_animation_channel& channel =
+                animation.channels[channelIndex];
+            if (channel.target_path != cgltf_animation_path_type_translation &&
+                channel.target_path != cgltf_animation_path_type_rotation &&
+                channel.target_path != cgltf_animation_path_type_scale) {
+                continue;
+            }
+            ++supportedChannels;
+            if (channel.target_node && channel.target_node->name) {
+                bytes = saturatedAdd(
+                    bytes,
+                    static_cast<uint64_t>(std::char_traits<char>::length(
+                        channel.target_node->name)));
+            }
+            if (channel.sampler) {
+                if (channel.sampler->input) {
+                    bytes = saturatedAdd(
+                        bytes,
+                        arrayBytes<float>(channel.sampler->input->count));
+                }
+                if (channel.sampler->output) {
+                    bytes = saturatedAdd(
+                        bytes,
+                        arrayBytes<Vec4>(channel.sampler->output->count));
+                }
+            }
+        }
+        bytes = saturatedAdd(
+            bytes,
+            saturatedMultiply(supportedChannels, sizeof(AnimationChannel)));
+        sizes.animationBytes.push_back(bytes);
+    }
+    return sizes;
+}
+
 } // namespace
+
+uint64_t preparedPayloadBytes(const MeshData& mesh)
+{
+    return static_cast<uint64_t>(mesh.vertices.size()) * sizeof(MeshVertex) +
+        static_cast<uint64_t>(mesh.indices.size()) * sizeof(uint32_t) +
+        static_cast<uint64_t>(mesh.materials.size()) * sizeof(MeshMaterial);
+}
+
+uint64_t preparedPayloadBytes(const SkinnedMeshData& mesh)
+{
+    uint64_t bytes =
+        static_cast<uint64_t>(mesh.vertices.size()) * sizeof(SkinnedVertex) +
+        static_cast<uint64_t>(mesh.indices.size()) * sizeof(uint32_t) +
+        static_cast<uint64_t>(mesh.materials.size()) * sizeof(MeshMaterial) +
+        static_cast<uint64_t>(mesh.nodes.size()) * sizeof(SkeletonNode) +
+        static_cast<uint64_t>(mesh.jointNodeIndices.size()) * sizeof(uint32_t) +
+        static_cast<uint64_t>(mesh.inverseBindMatrices.size()) * sizeof(Mat4) +
+        static_cast<uint64_t>(mesh.attachments.size()) *
+            sizeof(SkinnedAttachment);
+    for (const SkeletonNode& node : mesh.nodes) {
+        bytes += node.name.size();
+    }
+    for (const SkinnedAttachment& attachment : mesh.attachments) {
+        bytes += preparedPayloadBytes(attachment.mesh);
+    }
+    return bytes;
+}
+
+uint64_t preparedPayloadBytes(const GltfAnimationClip& clip)
+{
+    uint64_t bytes = clip.name.size() +
+        static_cast<uint64_t>(clip.channels.size()) * sizeof(AnimationChannel);
+    for (const AnimationChannel& channel : clip.channels) {
+        bytes += channel.targetNodeName.size();
+        bytes += static_cast<uint64_t>(channel.keyframes.times.size()) *
+            sizeof(float);
+        bytes += static_cast<uint64_t>(channel.keyframes.values.size()) *
+            sizeof(Vec4);
+    }
+    return bytes;
+}
 
 GltfSourceTransform makeGltfSourceTransform(
     Vec3 sourceMinimum,
@@ -841,6 +1022,7 @@ GltfAssetDependencies inspectGltfAssetDependencies(
     const cgltf_data& data = *document;
 
     GltfAssetDependencies dependencies;
+    dependencies.preparedSizes = preparedSizeMetadata(data);
     dependencies.buffers.reserve(data.buffers_count);
     for (cgltf_size index = 0; index < data.buffers_count; ++index) {
         const cgltf_buffer& source = data.buffers[index];

@@ -32,6 +32,14 @@ void requireOnce(std::vector<uint32_t>& required, uint32_t texture)
     }
 }
 
+uint64_t saturatedAdd(uint64_t left, uint64_t right)
+{
+    if (left > std::numeric_limits<uint64_t>::max() - right) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return left + right;
+}
+
 } // namespace
 
 RuntimeTextureDefinition runtimeTextureDefinitionFor(
@@ -97,6 +105,7 @@ RuntimeTextureCatalog buildRuntimeTextureCatalog(
     }
 
     catalog.models_.resize(manifest.models().size());
+    catalog.animationPreparedBytes_.resize(manifest.animations().size());
     std::unordered_map<std::string, std::vector<uint32_t>> modelsByDocument;
     for (uint32_t index = 0; index < manifest.models().size(); ++index) {
         const AssetManifest::Model& definition = manifest.models()[index];
@@ -199,23 +208,84 @@ RuntimeTextureCatalog collectRuntimeTextureCatalog(
     const AssetManifest& manifest)
 {
     std::vector<ResolvedMaterialTexture> textures;
-    std::unordered_set<std::string> inspectedDocuments;
+    std::unordered_map<std::string, GltfAssetDependencies> inspections;
+    const auto inspect = [&](const std::filesystem::path& relative)
+        -> const GltfAssetDependencies& {
+        const std::string key = documentKey(relative);
+        const auto existing = inspections.find(key);
+        if (existing != inspections.end()) {
+            return existing->second;
+        }
+        auto [inserted, unused] = inspections.emplace(
+            key, inspectGltfAssetDependencies(assetRoot / relative));
+        (void)unused;
+        return inserted->second;
+    };
+
+    std::unordered_set<std::string> materialDocuments;
     for (const AssetManifest::Model& model : manifest.models()) {
         const std::string key = documentKey(model.path);
-        if (!inspectedDocuments.insert(key).second) {
-            continue;
+        const GltfAssetDependencies& dependencies = inspect(model.path);
+        if (materialDocuments.insert(key).second) {
+            std::vector<ResolvedMaterialTexture> resolved =
+                resolveGltfMaterialTextures(
+                    assetRoot,
+                    model.path,
+                    "model '" + model.name + "'",
+                    dependencies);
+            textures.insert(
+                textures.end(),
+                std::make_move_iterator(resolved.begin()),
+                std::make_move_iterator(resolved.end()));
         }
-        std::vector<ResolvedMaterialTexture> resolved =
-            resolveGltfMaterialTextures(
-                assetRoot,
-                model.path,
-                "model '" + model.name + "'");
-        textures.insert(
-            textures.end(),
-            std::make_move_iterator(resolved.begin()),
-            std::make_move_iterator(resolved.end()));
+        for (const AssetManifest::Model::Attachment& attachment :
+             model.attachments) {
+            (void)inspect(attachment.path);
+        }
     }
-    return buildRuntimeTextureCatalog(manifest, textures);
+    for (const AssetManifest::Animation& animation : manifest.animations()) {
+        (void)inspect(animation.path);
+    }
+
+    RuntimeTextureCatalog catalog =
+        buildRuntimeTextureCatalog(manifest, textures);
+    for (uint32_t modelIndex = 0;
+         modelIndex < manifest.models().size();
+         ++modelIndex) {
+        const AssetManifest::Model& model = manifest.models()[modelIndex];
+        const GltfPreparedSizeMetadata& prepared =
+            inspect(model.path).preparedSizes;
+        uint64_t bytes = model.geometry == ModelGeometry::Skinned
+            ? prepared.skinnedMeshBytes
+            : prepared.staticMeshBytes;
+        for (const AssetManifest::Model::Attachment& attachment :
+             model.attachments) {
+            const GltfPreparedSizeMetadata& attachmentPrepared =
+                inspect(attachment.path).preparedSizes;
+            bytes = saturatedAdd(bytes, attachmentPrepared.staticMeshBytes);
+            bytes = saturatedAdd(bytes, attachmentPrepared.materialBytes);
+            bytes = saturatedAdd(bytes, sizeof(SkinnedAttachment));
+        }
+        catalog.models_[modelIndex].preparedBytes = bytes;
+    }
+    for (uint32_t animationIndex = 0;
+         animationIndex < manifest.animations().size();
+         ++animationIndex) {
+        const AssetManifest::Animation& animation =
+            manifest.animations()[animationIndex];
+        const std::vector<uint64_t>& estimates =
+            inspect(animation.path).preparedSizes.animationBytes;
+        const uint32_t clipIndex =
+            animationIndexFromManifestClip(animation.clip);
+        if (clipIndex >= estimates.size()) {
+            throw std::runtime_error(
+                "Animation '" + animation.name +
+                "' references a clip outside its glTF document");
+        }
+        catalog.animationPreparedBytes_[animationIndex] =
+            estimates[clipIndex];
+    }
+    return catalog;
 }
 
 std::vector<uint32_t> reconcileRuntimeTextureCatalog(

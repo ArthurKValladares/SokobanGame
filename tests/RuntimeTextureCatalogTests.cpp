@@ -212,6 +212,7 @@ void testEditorAppendedModelMatchesStartupPbrBindings()
     constexpr uint32_t descriptorCapacity = 16;
     ScopedTestDirectory temp("sokoban-appended-pbr");
     std::filesystem::create_directories(temp.path() / "models");
+    std::filesystem::create_directories(temp.path() / "anims");
     writeGlb(
         temp.path() / "models/shared.glb",
         R"json({
@@ -244,6 +245,13 @@ void testEditorAppendedModelMatchesStartupPbrBindings()
     "emissiveTexture":{"index":2},
     "occlusionTexture":{"index":3}
   }]
+})json",
+        {});
+    writeGlb(
+        temp.path() / "anims/a.glb",
+        R"json({
+  "asset":{"version":"2.0"},
+  "animations":[{"name":"Idle","samplers":[],"channels":[]}]
 })json",
         {});
     const AssetManifest initialManifest =
@@ -560,8 +568,18 @@ void testCollectsProductionCatalog()
     CHECK(catalog.descriptorIndex(
         static_cast<uint32_t>(catalog.textures().size() - 1), 1024) < 1024U);
     for (uint32_t index = 0; index < manifest.models().size(); ++index) {
-        (void)catalog.model(index);
-        CHECK(true);
+        const RuntimeModelTextures& runtime = catalog.model(index);
+        CHECK(runtime.preparedBytes > 0);
+    }
+
+    for (uint32_t index = 0; index < manifest.animations().size(); ++index) {
+        const AssetManifest::Animation& definition =
+            manifest.animations()[index];
+        const GltfAnimationClip clip = loadGltfAnimationClip(
+            assets / definition.path,
+            animationIndexFromManifestClip(definition.clip));
+        CHECK(catalog.animationPreparedBytes(index) ==
+            preparedPayloadBytes(clip));
     }
 }
 
