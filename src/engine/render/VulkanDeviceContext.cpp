@@ -396,6 +396,7 @@ void VulkanDeviceContext::createDevice()
         queueFamilies_.present,
     };
     std::vector<VkDeviceQueueCreateInfo> queueInfos;
+    queueInfos.reserve(uniqueQueueFamilies.size());
     const float queuePriority = 1.0f;
     for (uint32_t queueFamily : uniqueQueueFamilies) {
         queueInfos.push_back({

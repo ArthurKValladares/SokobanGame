@@ -43,12 +43,10 @@ Checks: >
   -bugprone-easily-swappable-parameters,
   -bugprone-unchecked-optional-access,
   -performance-enum-size,
-  -performance-no-automatic-move,
-  -performance-inefficient-vector-operation
+  -performance-no-automatic-move
 
 # The work queue, in the order worth doing:
 #
-#   performance-inefficient-vector-operation   1
 #   performance-no-automatic-move              1
 #   performance-enum-size                      3
 #
@@ -73,6 +71,8 @@ Checks: >
 # inclusions in MiniaudioImpl.cpp carry local rationale suppressions.
 # `bugprone-switch-missing-default-case` followed after the exhaustive range of
 # an unsigned modulo-four switch was documented explicitly.
+# `performance-inefficient-vector-operation` followed after Vulkan device queue
+# creation reserved its known queue-family count.
 #
 # Two are excluded on their merits rather than as a queue:
 #
