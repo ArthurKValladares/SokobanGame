@@ -107,7 +107,7 @@ std::optional<std::string> optionalString(
     if (!it->is_string()) {
         fail(context, "property '" + std::string(key) + "' must be a string");
     }
-    const std::string result = it->get<std::string>();
+    std::string result = it->get<std::string>();
     if (result.empty()) {
         fail(context, "property '" + std::string(key) + "' must not be empty");
     }

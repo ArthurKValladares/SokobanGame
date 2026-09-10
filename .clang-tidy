@@ -42,12 +42,10 @@ Checks: >
   portability-*,
   -bugprone-easily-swappable-parameters,
   -bugprone-unchecked-optional-access,
-  -performance-enum-size,
-  -performance-no-automatic-move
+  -performance-enum-size
 
 # The work queue, in the order worth doing:
 #
-#   performance-no-automatic-move              1
 #   performance-enum-size                      3
 #
 # `bugprone-empty-catch` was enabled on 2026-09-09 after all seven intentional
@@ -73,6 +71,8 @@ Checks: >
 # an unsigned modulo-four switch was documented explicitly.
 # `performance-inefficient-vector-operation` followed after Vulkan device queue
 # creation reserved its known queue-family count.
+# `performance-no-automatic-move` followed after an optional manifest string
+# stopped forcing a copy during its return conversion.
 #
 # Two are excluded on their merits rather than as a queue:
 #
