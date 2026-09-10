@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -40,7 +41,7 @@ std::string corruptSuffix()
         std::to_string(sequence.fetch_add(1, std::memory_order_relaxed));
 }
 
-enum class ProfileFileState {
+enum class ProfileFileState : std::uint8_t {
     Missing,
     Valid,
     Unsupported,

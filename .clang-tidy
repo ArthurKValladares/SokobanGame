@@ -26,10 +26,9 @@
 # already made the other way. None of them belongs in a gate.
 #
 # The top four are not. 104 of their 104 checks are about correctness and
-# cost, and 98 of them pass clean today - so they are enabled here. The 6
-# that do not pass are excluded by name, each with its current count, which
-# makes the exclusion list a work queue rather than a hole. A gate that starts
-# red is a gate people learn to ignore.
+# cost, and 102 of them pass clean today - so they are enabled here. The two
+# remaining checks are excluded by name as documented policy exceptions. A
+# gate that starts red is a gate people learn to ignore.
 #
 # clang-analyzer-* stays, unchanged, for the reason it was there.
 
@@ -41,13 +40,8 @@ Checks: >
   concurrency-*,
   portability-*,
   -bugprone-easily-swappable-parameters,
-  -bugprone-unchecked-optional-access,
-  -performance-enum-size
+  -bugprone-unchecked-optional-access
 
-# The work queue, in the order worth doing:
-#
-#   performance-enum-size                      3
-#
 # `bugprone-empty-catch` was enabled on 2026-09-09 after all seven intentional
 # exception barriers were documented and made explicit. A Clang 22 scan parsed
 # all 131 first-party translation units and reported no remaining diagnostics.
@@ -73,6 +67,8 @@ Checks: >
 # creation reserved its known queue-family count.
 # `performance-no-automatic-move` followed after an optional manifest string
 # stopped forcing a copy during its return conversion.
+# `performance-enum-size` followed after the internal profile-file state enum
+# adopted an explicit one-byte underlying type.
 #
 # Two are excluded on their merits rather than as a queue:
 #
