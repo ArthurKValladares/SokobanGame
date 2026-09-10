@@ -472,16 +472,15 @@ AnimationUse animationUseFromJson(
 
 GameplaySession::Action undoActionFromJson(
     const Json& value,
-    std::string_view context)
+    std::string_view context,
+    GameState before)
 {
     rejectUnknownProperties(value, {
-        "before", "after", "playerPushing", "moveCountBefore",
+        "after", "playerPushing", "moveCountBefore",
         "moveCountAfter", "presentation",
     }, context);
     GameplaySession::Action action;
-    action.before = gameStateFromJson(
-        requiredProperty(value, "before", context),
-        std::string(context) + ".before");
+    action.before = std::move(before);
     action.after = gameStateFromJson(
         requiredProperty(value, "after", context),
         std::string(context) + ".after");
@@ -645,7 +644,6 @@ OrderedJson undoActionToJson(const GameplaySession::Action& action)
         });
     }
     return {
-        { "before", gameStateToJson(action.before) },
         { "after", gameStateToJson(action.after) },
         { "playerPushing", action.playerPushing },
         { "moveCountBefore", action.playerMoveCountBefore },
@@ -664,7 +662,8 @@ GameplaySession::Snapshot sessionSnapshotFromJson(
 {
     rejectUnknownProperties(
         value,
-        { "state", "undoStack", "playerMoveCount", "automaticMotionPaused" },
+        { "state", "undoBaseState", "undoStack", "playerMoveCount",
+          "automaticMotionPaused" },
         context);
     GameplaySession::Snapshot snapshot;
     snapshot.state = gameStateFromJson(
@@ -678,10 +677,25 @@ GameplaySession::Snapshot sessionSnapshotFromJson(
     if (!undoStack.is_array()) {
         fail(context, "property 'undoStack' must be an array");
     }
+    const Json& undoBaseState =
+        requiredProperty(value, "undoBaseState", context);
+    if (undoStack.empty() != undoBaseState.is_null()) {
+        fail(context,
+            "property 'undoBaseState' must be null exactly when the undo stack is empty");
+    }
+    GameState before;
+    if (!undoBaseState.is_null()) {
+        before = gameStateFromJson(
+            undoBaseState, std::string(context) + ".undoBaseState");
+    }
+    snapshot.undoStack.reserve(undoStack.size());
     for (std::size_t i = 0; i < undoStack.size(); ++i) {
-        snapshot.undoStack.push_back(undoActionFromJson(
+        GameplaySession::Action action = undoActionFromJson(
             undoStack[i],
-            std::string(context) + ".undoStack[" + std::to_string(i) + "]"));
+            std::string(context) + ".undoStack[" + std::to_string(i) + "]",
+            std::move(before));
+        before = action.after;
+        snapshot.undoStack.push_back(std::move(action));
     }
     return snapshot;
 }
@@ -694,6 +708,9 @@ OrderedJson sessionSnapshotToJson(const GameplaySession::Snapshot& snapshot)
     }
     return {
         { "state", gameStateToJson(snapshot.state) },
+        { "undoBaseState", snapshot.undoStack.empty()
+            ? OrderedJson(nullptr)
+            : gameStateToJson(snapshot.undoStack.front().before) },
         { "undoStack", std::move(undoStack) },
         { "playerMoveCount", snapshot.playerMoveCount },
         { "automaticMotionPaused", snapshot.automaticMotionPaused },
@@ -1143,35 +1160,53 @@ PlayerProfile parseCurrent(const Json& root)
 
 std::string PlayerProfile::serialize(ProfileSections sections) const
 {
-    PlayerProfile normalized = *this;
+    // Normalize only the small sections that serialization may rewrite. The
+    // gameplay checkpoints are immutable here and can be projected directly;
+    // copying them can duplicate an entire long undo history.
+    PlayerProfile normalized;
+    if (sections != ProfileSections::SettingsOnly) {
+        normalized.unlockedLevel = unlockedLevel;
+        normalized.currentLevel = currentLevel;
+        normalized.currentScreen = currentScreen;
+        normalized.levels = levels;
+        normalized.screens = screens;
+        normalized.worldContext = worldContext;
+    }
+    if (sections != ProfileSections::ProgressOnly) {
+        normalized.settings = settings;
+    }
     normalized.normalize();
+
+    const ActiveScreen* normalizedActiveScreen = nullptr;
+    if (sections != ProfileSections::SettingsOnly && activeScreen &&
+        activeScreen->level == normalized.currentLevel &&
+        activeScreen->screen == normalized.currentScreen) {
+        normalizedActiveScreen = &*activeScreen;
+    }
 
     OrderedJson root = {
         { "format", currentPlayerProfileFormat },
     };
 
     if (sections != ProfileSections::SettingsOnly) {
-        if (normalized.activeScreen &&
-            (normalized.activeScreen->level != normalized.currentLevel ||
-                normalized.activeScreen->screen != normalized.currentScreen ||
-                normalized.activeScreen->completedLevelMoveCount < 0 ||
-                !std::isfinite(normalized.activeScreen->levelElapsedSeconds) ||
-                normalized.activeScreen->levelElapsedSeconds < 0.0)) {
+        if (normalizedActiveScreen &&
+            (normalizedActiveScreen->completedLevelMoveCount < 0 ||
+                !std::isfinite(normalizedActiveScreen->levelElapsedSeconds) ||
+                normalizedActiveScreen->levelElapsedSeconds < 0.0)) {
             throw std::runtime_error(
                 "player profile active screen checkpoint is invalid");
         }
         if (normalized.worldContext == WorldContext::Puzzle &&
-            !normalized.activeScreen) {
+            normalizedActiveScreen == nullptr) {
             throw std::runtime_error(
                 "puzzle world context requires an active screen checkpoint");
         }
         if (normalized.worldContext == WorldContext::Overworld &&
-            normalized.activeScreen) {
+            normalizedActiveScreen != nullptr) {
             throw std::runtime_error(
                 "overworld context cannot have an active screen checkpoint");
         }
-        if (normalized.overworldCheckpoint &&
-            normalized.overworldCheckpoint->activeScreen == 0) {
+        if (overworldCheckpoint && overworldCheckpoint->activeScreen == 0) {
             throw std::runtime_error(
                 "player profile overworld checkpoint has no active screen");
         }
@@ -1209,26 +1244,25 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
         }
 
         OrderedJson activeScreenJson = nullptr;
-        if (normalized.activeScreen) {
+        if (normalizedActiveScreen) {
             activeScreenJson = {
-                { "level", normalized.activeScreen->level },
-                { "screen", normalized.activeScreen->screen },
-                { "completedLevelMoveCount", normalized.activeScreen->completedLevelMoveCount },
-                { "levelElapsedSeconds", normalized.activeScreen->levelElapsedSeconds },
-                { "session", sessionSnapshotToJson(normalized.activeScreen->session) },
+                { "level", normalizedActiveScreen->level },
+                { "screen", normalizedActiveScreen->screen },
+                { "completedLevelMoveCount", normalizedActiveScreen->completedLevelMoveCount },
+                { "levelElapsedSeconds", normalizedActiveScreen->levelElapsedSeconds },
+                { "session", sessionSnapshotToJson(normalizedActiveScreen->session) },
             };
         }
 
         OrderedJson overworldCheckpointJson = nullptr;
-        if (normalized.overworldCheckpoint) {
+        if (overworldCheckpoint) {
             overworldCheckpointJson = {
                 { "topologyFingerprint",
-                  normalized.overworldCheckpoint->topologyFingerprint },
+                  overworldCheckpoint->topologyFingerprint },
                 { "activeScreen",
-                  normalized.overworldCheckpoint->activeScreen },
+                  overworldCheckpoint->activeScreen },
                 { "session",
-                  sessionSnapshotToJson(
-                      normalized.overworldCheckpoint->session) },
+                  sessionSnapshotToJson(overworldCheckpoint->session) },
             };
         }
 
@@ -1273,7 +1307,10 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
         };
     }
 
-    return root.dump(2) + '\n';
+    // Save files can contain a complete undo history. Compact JSON materially
+    // reduces the string retained for asynchronous disk writes without
+    // changing the versioned document structure.
+    return root.dump() + '\n';
 }
 
 UnsupportedPlayerProfileFormat::UnsupportedPlayerProfileFormat(int format)

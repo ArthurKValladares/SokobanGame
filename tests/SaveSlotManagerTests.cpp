@@ -6,6 +6,8 @@
 
 #include "engine/SaveSlotManager.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -39,19 +41,10 @@ constexpr auto instantWrites = std::chrono::milliseconds(0);
 
 [[nodiscard]] std::string futureProfileContents()
 {
-    std::string contents = sokoban::PlayerProfile {}.serialize();
-    const std::string current =
-        "\"format\": " + std::to_string(sokoban::currentPlayerProfileFormat);
-    const std::size_t position = contents.find(current);
-    if (position == std::string::npos) {
-        throw std::runtime_error("serialized profile has no format field");
-    }
-    contents.replace(
-        position,
-        current.size(),
-        "\"format\": " +
-            std::to_string(sokoban::currentPlayerProfileFormat + 1));
-    return contents;
+    nlohmann::json document = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    document["format"] = sokoban::currentPlayerProfileFormat + 1;
+    return document.dump();
 }
 
 void testFreshInstallWritesNothing()

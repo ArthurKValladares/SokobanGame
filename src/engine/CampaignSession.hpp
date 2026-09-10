@@ -76,7 +76,7 @@ public:
     void addElapsedTime(float dt);
     void writeCheckpoint(
         PlayerProfile& profile,
-        const GameplaySession::Snapshot& snapshot);
+        GameplaySession::Snapshot snapshot);
     [[nodiscard]] bool deferCheckpoint();
     [[nodiscard]] bool updateDeferredCheckpoint(
         float dt,

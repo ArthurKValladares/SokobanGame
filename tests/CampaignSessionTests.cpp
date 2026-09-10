@@ -3,6 +3,7 @@
 #include "engine/CampaignSession.hpp"
 
 #include <iostream>
+#include <utility>
 
 namespace {
 
@@ -132,9 +133,12 @@ void testSelectorEntryAndBothCheckpointKinds()
     campaign.addElapsedTime(1.25f);
     GameplaySession::Snapshot puzzle;
     puzzle.playerMoveCount = 7;
-    campaign.writeCheckpoint(profile, puzzle);
+    puzzle.undoStack.resize(1);
+    const GameplaySession::Action* undoStorage = puzzle.undoStack.data();
+    campaign.writeCheckpoint(profile, std::move(puzzle));
     CHECK(profile.activeScreen.has_value());
     CHECK(profile.activeScreen->session.playerMoveCount == 7);
+    CHECK(profile.activeScreen->session.undoStack.data() == undoStorage);
     CHECK(profile.activeScreen->levelElapsedSeconds == 1.25);
 
     CampaignSession resumed = configuredCampaign();

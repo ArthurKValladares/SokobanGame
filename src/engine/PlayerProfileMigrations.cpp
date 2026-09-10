@@ -835,6 +835,63 @@ void migrate26to27(Json& root)
     }
 }
 
+// Format 28 stores the undo chain's base state once. Every later `before`
+// state was identical to the preceding action's `after`, so retaining all of
+// them doubled large checkpoint documents without preserving more state.
+void migrate27to28(Json& root)
+{
+    if (!root.contains("progress") || !root["progress"].is_object()) {
+        return;
+    }
+
+    const auto migrateSession = [](Json& checkpoint) {
+        if (!checkpoint.is_object() || !checkpoint.contains("session") ||
+            !checkpoint["session"].is_object()) {
+            return;
+        }
+        Json& session = checkpoint["session"];
+        if (session.contains("undoBaseState")) {
+            return;
+        }
+        if (!session.contains("undoStack") ||
+            !session["undoStack"].is_array()) {
+            session["undoBaseState"] = nullptr;
+            return;
+        }
+
+        Json& undoStack = session["undoStack"];
+        if (undoStack.empty()) {
+            session["undoBaseState"] = nullptr;
+            return;
+        }
+        const bool completeLegacyChain = std::ranges::all_of(
+            undoStack,
+            [](const Json& action) {
+                return action.is_object() && action.contains("before");
+            });
+        if (!completeLegacyChain) {
+            // Keep malformed legacy properties in place so the strict current
+            // parser rejects the document instead of repairing data silently.
+            session["undoBaseState"] = nullptr;
+            return;
+        }
+        session["undoBaseState"] = undoStack.front()["before"];
+        for (Json& action : undoStack) {
+            action.erase("before");
+        }
+    };
+
+    Json& progress = root["progress"];
+    if (progress.contains("activeScreen") &&
+        !progress["activeScreen"].is_null()) {
+        migrateSession(progress["activeScreen"]);
+    }
+    if (progress.contains("overworldCheckpoint") &&
+        !progress["overworldCheckpoint"].is_null()) {
+        migrateSession(progress["overworldCheckpoint"]);
+    }
+}
+
 } // namespace
 
 void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
@@ -867,6 +924,7 @@ void migratePlayerProfileToCurrent(Json& root, int sourceFormat)
         migrate24to25,
         migrate25to26,
         migrate26to27,
+        migrate27to28,
     };
     static_assert(std::size(migrations) == currentPlayerProfileFormat - 1);
 

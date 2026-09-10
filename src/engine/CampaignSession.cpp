@@ -270,7 +270,7 @@ void CampaignSession::addElapsedTime(float dt)
 
 void CampaignSession::writeCheckpoint(
     PlayerProfile& profile,
-    const GameplaySession::Snapshot& snapshot)
+    GameplaySession::Snapshot snapshot)
 {
     if (inOverworld_) {
         profile.worldContext = PlayerProfile::WorldContext::Overworld;
@@ -278,7 +278,7 @@ void CampaignSession::writeCheckpoint(
         profile.overworldCheckpoint = PlayerProfile::OverworldCheckpoint {
             .topologyFingerprint = overworldFingerprint_,
             .activeScreen = activeOverworldScreen_,
-            .session = snapshot,
+            .session = std::move(snapshot),
         };
     } else {
         profile.worldContext = PlayerProfile::WorldContext::Puzzle;
@@ -288,7 +288,7 @@ void CampaignSession::writeCheckpoint(
             .screen = current_.screen,
             .completedLevelMoveCount = 0,
             .levelElapsedSeconds = puzzleElapsedSeconds_,
-            .session = snapshot,
+            .session = std::move(snapshot),
         };
     }
     deferredCheckpointPending_ = false;

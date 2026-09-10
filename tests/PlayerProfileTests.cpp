@@ -3,17 +3,183 @@
 
 #include "engine/AsyncSaveStore.hpp"
 #include "engine/AtomicFile.hpp"
+#include "engine/CampaignSession.hpp"
 #include "engine/PlayerProfile.hpp"
 #include "engine/SaveStore.hpp"
 #include "engine/UserSettingsConfig.hpp"
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
+#include <new>
 #include <string>
+#include <string_view>
+#include <utility>
+
+namespace allocationTracking {
+
+struct AllocationHeader {
+    void* base = nullptr;
+    std::size_t size = 0;
+};
+
+static_assert(sizeof(AllocationHeader) % alignof(std::max_align_t) == 0);
+
+std::atomic_uint64_t liveBytes = 0;
+std::atomic_uint64_t peakBytes = 0;
+std::atomic_bool measuring = false;
+
+void recordPeak(uint64_t value)
+{
+    if (!measuring.load(std::memory_order_relaxed)) {
+        return;
+    }
+    uint64_t peak = peakBytes.load(std::memory_order_relaxed);
+    while (peak < value && !peakBytes.compare_exchange_weak(
+               peak, value, std::memory_order_relaxed)) {
+    }
+}
+
+void* allocate(std::size_t size, std::size_t alignment)
+{
+    const std::size_t storedSize = std::max(size, std::size_t { 1 });
+    if (storedSize > std::numeric_limits<std::size_t>::max() -
+            sizeof(AllocationHeader) - alignment) {
+        throw std::bad_alloc();
+    }
+    void* base = std::malloc(
+        storedSize + sizeof(AllocationHeader) + alignment - 1);
+    if (base == nullptr) {
+        throw std::bad_alloc();
+    }
+    const auto first = reinterpret_cast<std::uintptr_t>(base) +
+        sizeof(AllocationHeader);
+    const auto aligned = (first + alignment - 1) & ~(alignment - 1);
+    auto* header = reinterpret_cast<AllocationHeader*>(aligned) - 1;
+    header->base = base;
+    header->size = size;
+    const uint64_t live = liveBytes.fetch_add(
+        size, std::memory_order_relaxed) + size;
+    recordPeak(live);
+    return reinterpret_cast<void*>(aligned);
+}
+
+void deallocate(void* pointer) noexcept
+{
+    if (pointer == nullptr) {
+        return;
+    }
+    const auto* header =
+        reinterpret_cast<const AllocationHeader*>(pointer) - 1;
+    liveBytes.fetch_sub(header->size, std::memory_order_relaxed);
+    std::free(header->base);
+}
+
+struct Sample {
+    uint64_t elapsedMicroseconds = 0;
+    uint64_t peakAdditionalBytes = 0;
+    uint64_t retainedAdditionalBytes = 0;
+};
+
+template <typename Function>
+Sample measure(Function&& function)
+{
+    const uint64_t baseline = liveBytes.load(std::memory_order_relaxed);
+    peakBytes.store(baseline, std::memory_order_relaxed);
+    measuring.store(true, std::memory_order_relaxed);
+    const auto started = std::chrono::steady_clock::now();
+    try {
+        std::forward<Function>(function)();
+    } catch (...) {
+        measuring.store(false, std::memory_order_relaxed);
+        throw;
+    }
+    const uint64_t elapsed = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - started).count());
+    measuring.store(false, std::memory_order_relaxed);
+    const uint64_t retained = liveBytes.load(std::memory_order_relaxed);
+    const uint64_t peak = peakBytes.load(std::memory_order_relaxed);
+    return {
+        .elapsedMicroseconds = elapsed,
+        .peakAdditionalBytes = peak > baseline ? peak - baseline : 0,
+        .retainedAdditionalBytes =
+            retained > baseline ? retained - baseline : 0,
+    };
+}
+
+} // namespace allocationTracking
+
+void* operator new(std::size_t size)
+{
+    return allocationTracking::allocate(size, alignof(std::max_align_t));
+}
+
+void* operator new[](std::size_t size)
+{
+    return allocationTracking::allocate(size, alignof(std::max_align_t));
+}
+
+void* operator new(std::size_t size, std::align_val_t alignment)
+{
+    return allocationTracking::allocate(
+        size, static_cast<std::size_t>(alignment));
+}
+
+void* operator new[](std::size_t size, std::align_val_t alignment)
+{
+    return allocationTracking::allocate(
+        size, static_cast<std::size_t>(alignment));
+}
+
+void operator delete(void* pointer) noexcept
+{
+    allocationTracking::deallocate(pointer);
+}
+
+void operator delete[](void* pointer) noexcept
+{
+    allocationTracking::deallocate(pointer);
+}
+
+void operator delete(void* pointer, std::size_t) noexcept
+{
+    allocationTracking::deallocate(pointer);
+}
+
+void operator delete[](void* pointer, std::size_t) noexcept
+{
+    allocationTracking::deallocate(pointer);
+}
+
+void operator delete(void* pointer, std::align_val_t) noexcept
+{
+    allocationTracking::deallocate(pointer);
+}
+
+void operator delete[](void* pointer, std::align_val_t) noexcept
+{
+    allocationTracking::deallocate(pointer);
+}
+
+void operator delete(void* pointer, std::size_t, std::align_val_t) noexcept
+{
+    allocationTracking::deallocate(pointer);
+}
+
+void operator delete[](void* pointer, std::size_t, std::align_val_t) noexcept
+{
+    allocationTracking::deallocate(pointer);
+}
 
 namespace {
 
@@ -318,8 +484,43 @@ void testActiveScreenCheckpointRoundTrip()
     CHECK_MESSAGE(current["progress"]["activeScreen"]["session"]["undoStack"][0]
             ["presentation"]["animations"].size() == 2,
         "undo presentation timeline is persisted");
+    CHECK_MESSAGE(
+        current["progress"]["activeScreen"]["session"].contains(
+            "undoBaseState") &&
+            !current["progress"]["activeScreen"]["session"]["undoStack"][0]
+                .contains("before"),
+        "current undo schema stores the chain base without duplicate before states");
 
-    nlohmann::json format15 = current;
+    nlohmann::json missingUndoBase = current;
+    missingUndoBase["progress"]["activeScreen"]["session"].erase(
+        "undoBaseState");
+    checkThrows([&] {
+        (void)sokoban::decodePlayerProfile(missingUndoBase.dump());
+    }, "current undo history requires its base state");
+
+    nlohmann::json nullUndoBase = current;
+    nullUndoBase["progress"]["activeScreen"]["session"]["undoBaseState"] =
+        nullptr;
+    checkThrows([&] {
+        (void)sokoban::decodePlayerProfile(nullUndoBase.dump());
+    }, "non-empty current undo history rejects a null base state");
+
+    nlohmann::json format27 = current;
+    format27["format"] = 27;
+    nlohmann::json& format27Session =
+        format27["progress"]["activeScreen"]["session"];
+    nlohmann::json previousState = format27Session["undoBaseState"];
+    for (nlohmann::json& action : format27Session["undoStack"]) {
+        action["before"] = previousState;
+        previousState = action["after"];
+    }
+    format27Session.erase("undoBaseState");
+    const sokoban::DecodedPlayerProfile migrated27 =
+        sokoban::decodePlayerProfile(format27.dump());
+    CHECK_MESSAGE(migrated27.profile == profile,
+        "format 27 duplicate-state undo history migrates exactly");
+
+    nlohmann::json format15 = format27;
     format15["format"] = 15;
     format15["progress"]["activeScreen"]["session"]["undoStack"][0]
         .erase("presentation");
@@ -346,11 +547,10 @@ void testActiveScreenCheckpointRoundTrip()
     CHECK_MESSAGE(!migrated13.profile.activeScreen,
         "format 13 active checkpoint is intentionally discarded");
 
-    std::string mismatched = serialized;
-    const std::string screen = "\"screen\": 3";
-    mismatched.replace(mismatched.find(screen), screen.size(), "\"screen\": 1");
+    nlohmann::json mismatched = nlohmann::json::parse(serialized);
+    mismatched["progress"]["activeScreen"]["screen"] = 1;
     checkThrows([&] {
-        (void)sokoban::decodePlayerProfile(mismatched);
+        (void)sokoban::decodePlayerProfile(mismatched.dump());
     }, "checkpoint for a different screen is rejected");
 }
 
@@ -634,28 +834,36 @@ void testNormalizationAndMigration()
         (void)sokoban::decodePlayerProfile(R"json({ "format": 99 })json");
     }, "unsupported profile format rejected");
 
-    std::string duplicateLevels = sokoban::PlayerProfile {}.serialize();
-    const std::string emptyLevels = "\"levels\": []";
-    const std::string duplicateEntries =
-        "\"levels\": [{\"level\":0,\"completed\":false},"
-        "{\"level\":0,\"completed\":false}]";
-    duplicateLevels.replace(
-        duplicateLevels.find(emptyLevels),
-        emptyLevels.size(),
-        duplicateEntries);
+    nlohmann::json duplicateLevels = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    duplicateLevels["progress"]["levels"] = nlohmann::json::array({
+        {
+            { "level", 0 },
+            { "completed", false },
+            { "reachedScreens", 0 },
+        },
+        {
+            { "level", 0 },
+            { "completed", false },
+            { "reachedScreens", 0 },
+        },
+    });
     checkThrows([&] {
-        (void)sokoban::decodePlayerProfile(duplicateLevels);
+        (void)sokoban::decodePlayerProfile(duplicateLevels.dump());
     }, "duplicate level progress rejected");
 
-    std::string incompleteBest = sokoban::PlayerProfile {}.serialize();
-    const std::string incompleteEntry =
-        "\"levels\": [{\"level\":0,\"completed\":false,\"bestMoves\":2}]";
-    incompleteBest.replace(
-        incompleteBest.find(emptyLevels),
-        emptyLevels.size(),
-        incompleteEntry);
+    nlohmann::json incompleteBest = nlohmann::json::parse(
+        sokoban::PlayerProfile {}.serialize());
+    incompleteBest["progress"]["levels"] = nlohmann::json::array({
+        {
+            { "level", 0 },
+            { "completed", false },
+            { "reachedScreens", 0 },
+            { "bestMoves", 2 },
+        },
+    });
     checkThrows([&] {
-        (void)sokoban::decodePlayerProfile(incompleteBest);
+        (void)sokoban::decodePlayerProfile(incompleteBest.dump());
     }, "incomplete level best rejected");
 
     nlohmann::json invalidBindings = nlohmann::json::parse(
@@ -1513,9 +1721,159 @@ void testFormat22UpdatesOverworldViewBinding()
         "format 23 combined binding migrates to the whole-map action");
 }
 
-int main()
+sokoban::PlayerProfile longHistoryProfile()
+{
+    constexpr int actionCount = 2048;
+    constexpr int movableCount = 64;
+    constexpr int enemyCount = 32;
+
+    sokoban::GameState state;
+    state.players.push_back({ .cell = { 0, 0, 1 } });
+    for (int index = 0; index < movableCount; ++index) {
+        state.movables.push_back({
+            .type = sokoban::TileType::Rock,
+            .cell = { index, 1, 1 },
+        });
+    }
+    for (int index = 0; index < enemyCount; ++index) {
+        state.enemies.push_back({ .cell = { index, 2, 1 } });
+    }
+
+    sokoban::GameplaySession::Snapshot snapshot;
+    snapshot.undoStack.reserve(actionCount);
+    for (int index = 0; index < actionCount; ++index) {
+        sokoban::GameplaySession::Action action;
+        action.before = state;
+        state.players.front().cell.x = (index + 1) % 2;
+        action.after = state;
+        action.playerMoveCountBefore = index;
+        action.playerMoveCountAfter = index + 1;
+        snapshot.undoStack.push_back(std::move(action));
+    }
+    snapshot.state = state;
+    snapshot.playerMoveCount = actionCount;
+
+    sokoban::PlayerProfile profile;
+    profile.unlockedLevel = 24;
+    profile.currentLevel = 23;
+    profile.currentScreen = 9;
+    profile.worldContext = sokoban::PlayerProfile::WorldContext::Puzzle;
+    for (int level = 0; level < 24; ++level) {
+        profile.levels.push_back({
+            .level = level,
+            .completed = level < 23,
+            .reachedScreens = 10,
+        });
+        for (int screen = 0; screen < 10; ++screen) {
+            profile.screens.push_back({
+                .level = level,
+                .screen = screen,
+                .completed = level < 23 || screen < 9,
+            });
+        }
+    }
+    profile.activeScreen = sokoban::PlayerProfile::ActiveScreen {
+        .level = profile.currentLevel,
+        .screen = profile.currentScreen,
+        .completedLevelMoveCount = 12000,
+        .levelElapsedSeconds = 7200.0,
+        .session = std::move(snapshot),
+    };
+    profile.normalize();
+    return profile;
+}
+
+void benchmarkProfileSnapshots()
+{
+    using allocationTracking::Sample;
+    const sokoban::PlayerProfile profile = longHistoryProfile();
+    const sokoban::GameplaySession::Snapshot& source =
+        profile.activeScreen->session;
+
+    sokoban::GameplaySession::Snapshot snapshotCopy;
+    const Sample snapshot = allocationTracking::measure([&] {
+        snapshotCopy = source;
+    });
+
+    sokoban::GameplaySession::Snapshot checkpointSnapshot = source;
+    const auto* checkpointUndoStorage = checkpointSnapshot.undoStack.data();
+    sokoban::PlayerProfile checkpointProfile;
+    sokoban::CampaignSession campaign;
+    const Sample checkpointTransfer = allocationTracking::measure([&] {
+        campaign.writeCheckpoint(
+            checkpointProfile, std::move(checkpointSnapshot));
+    });
+    if (!checkpointProfile.overworldCheckpoint ||
+        checkpointProfile.overworldCheckpoint->session.undoStack.data() !=
+            checkpointUndoStorage) {
+        throw std::runtime_error(
+            "Checkpoint benchmark copied rather than transferred the snapshot");
+    }
+
+    std::string serialized;
+    const Sample serialization = allocationTracking::measure([&] {
+        serialized = profile.serialize(sokoban::ProfileSections::ProgressOnly);
+    });
+
+    TemporaryDirectory deferredDirectory("sokoban-profile-benchmark-deferred");
+    sokoban::AsyncSaveStore deferredStore(
+        deferredDirectory.path(), std::chrono::hours(1), "profile",
+        sokoban::ProfileSections::ProgressOnly);
+    const Sample deferred = allocationTracking::measure([&] {
+        deferredStore.requestSave(profile);
+    });
+    if (!deferredStore.flush().allPersisted()) {
+        throw std::runtime_error("Deferred benchmark save failed");
+    }
+
+    TemporaryDirectory immediateDirectory("sokoban-profile-benchmark-immediate");
+    sokoban::AsyncSaveStore immediateStore(
+        immediateDirectory.path(), std::chrono::hours(1), "profile",
+        sokoban::ProfileSections::ProgressOnly);
+    uint64_t immediateRequestMicroseconds = 0;
+    const Sample immediate = allocationTracking::measure([&] {
+        const auto requestStarted = std::chrono::steady_clock::now();
+        immediateStore.requestSave(
+            profile, sokoban::AsyncSaveStore::Urgency::Immediate);
+        immediateRequestMicroseconds = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - requestStarted).count());
+        if (!immediateStore.flush().allPersisted()) {
+            throw std::runtime_error("Immediate benchmark save failed");
+        }
+    });
+
+    std::cout
+        << "profile_snapshot_benchmark history=" << source.undoStack.size()
+        << " entities_per_state="
+        << source.state.players.size() + source.state.movables.size() +
+                source.state.enemies.size()
+        << " snapshot_copy_us=" << snapshot.elapsedMicroseconds
+        << " snapshot_peak_bytes=" << snapshot.peakAdditionalBytes
+        << " snapshot_retained_bytes=" << snapshot.retainedAdditionalBytes
+        << " checkpoint_transfer_us="
+        << checkpointTransfer.elapsedMicroseconds
+        << " checkpoint_transfer_peak_bytes="
+        << checkpointTransfer.peakAdditionalBytes
+        << " serialization_us=" << serialization.elapsedMicroseconds
+        << " serialization_peak_bytes=" << serialization.peakAdditionalBytes
+        << " serialized_bytes=" << serialized.size()
+        << " deferred_request_us=" << deferred.elapsedMicroseconds
+        << " deferred_peak_bytes=" << deferred.peakAdditionalBytes
+        << " deferred_retained_bytes=" << deferred.retainedAdditionalBytes
+        << " immediate_request_us=" << immediateRequestMicroseconds
+        << " immediate_durable_us=" << immediate.elapsedMicroseconds
+        << " immediate_peak_bytes=" << immediate.peakAdditionalBytes << '\n';
+}
+
+int main(int argc, char** argv)
 {
     try {
+        if (argc == 2 &&
+            std::string_view(argv[1]) == "--benchmark-profile-snapshots") {
+            benchmarkProfileSnapshots();
+            return 0;
+        }
         testRoundTripAndBests();
         testReachedScreensAndProgressReset();
         testSectionedSerialization();
