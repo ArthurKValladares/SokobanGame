@@ -639,6 +639,17 @@ void drawAssetResidencyStats(
         static_cast<unsigned long long>(
             assetStats.preparedBudgetDeferrals),
         static_cast<unsigned long long>(assetStats.oversizedAssetStarts));
+    ImGui::Text(
+        "Skinned packing %llu passes / %llu allocations; %.1f MiB "
+        "temporary total (%.1f MiB peak), %.1f MiB uploaded",
+        static_cast<unsigned long long>(assetStats.skinnedPackingPasses),
+        static_cast<unsigned long long>(assetStats.skinnedPackingAllocations),
+        static_cast<double>(assetStats.skinnedPackingTemporaryBytes) /
+            (1024.0 * 1024.0),
+        static_cast<double>(assetStats.skinnedPackingPeakBytes) /
+            (1024.0 * 1024.0),
+        static_cast<double>(assetStats.skinnedUploadBytes) /
+            (1024.0 * 1024.0));
     const auto showAssetStages = [](const char* label,
                                      const VulkanModelResources::AssetStageStats& stages) {
         ImGui::Text(

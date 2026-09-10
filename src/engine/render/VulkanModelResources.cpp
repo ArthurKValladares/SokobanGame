@@ -406,6 +406,11 @@ void VulkanModelResources::destroy()
     textureUploadSubmissions_ = 0;
     textureUploadCompletions_ = 0;
     transientAssetPeakBytes_ = 0;
+    skinnedPackingPasses_ = 0;
+    skinnedPackingAllocations_ = 0;
+    skinnedPackingTemporaryBytes_ = 0;
+    skinnedPackingPeakBytes_ = 0;
+    skinnedUploadBytes_ = 0;
     modelAdmissionDeferrals_ = {};
     textureAdmissionDeferrals_ = {};
     scheduler_.clear();
@@ -930,17 +935,12 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
             } else {
                 SkinnedMeshData& prepared =
                     std::get<SkinnedMeshData>(*slot.prepared);
-                const std::vector<GpuSkinnedVertex> vertices =
-                    makeGpuSkinnedVertices(prepared);
-                const std::vector<uint32_t> indices =
-                    makeGpuSkinnedIndices(prepared);
-                if (vertices.empty() || indices.empty()) {
+                const GpuSkinnedMeshLayout layout =
+                    inspectGpuSkinnedMeshLayout(prepared);
+                if (layout.vertexCount == 0 || layout.indexCount == 0) {
                     throw std::runtime_error("glTF skinned mesh contains no geometry");
                 }
-                const uint64_t bytes =
-                    static_cast<uint64_t>(vertices.size()) * sizeof(GpuSkinnedVertex) +
-                    static_cast<uint64_t>(indices.size()) *
-                        sizeof(uint32_t);
+                const uint64_t bytes = layout.uploadBytes();
                 if (!makeModelResident(model, bytes)) {
                     recordAdmissionDeferral(
                         slot.admissionDeferral, modelAdmissionDeferrals_);
@@ -957,8 +957,23 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                 slot.materialBase = writeMaterials(slot.skinnedSource->materials);
                 slot.materialCount = static_cast<uint32_t>(
                     slot.skinnedSource->materials.size());
-                slot.skinnedGpu = uploadSkinnedMesh(
-                    vertices, indices, slot.upload);
+                const PackedGpuSkinnedMesh packed =
+                    packGpuSkinnedMesh(*slot.skinnedSource);
+                const uint64_t temporaryBytes = packed.allocatedBytes();
+                ++skinnedPackingPasses_;
+                skinnedPackingAllocations_ += packed.allocationCount();
+                skinnedPackingTemporaryBytes_ += temporaryBytes;
+                skinnedPackingPeakBytes_ = std::max(
+                    skinnedPackingPeakBytes_, temporaryBytes);
+                slot.skinnedGpu = uploadSkinnedMesh(packed, slot.upload);
+                skinnedUploadBytes_ += packed.uploadBytes();
+                const uint64_t transientBytes = currentTransientAssetBytes();
+                transientAssetPeakBytes_ = std::max(
+                    transientAssetPeakBytes_,
+                    transientBytes >
+                            std::numeric_limits<uint64_t>::max() - temporaryBytes
+                        ? std::numeric_limits<uint64_t>::max()
+                        : transientBytes + temporaryBytes);
                 slot.gpuBytes = bytes;
                 modelResidency_.addResident(bytes);
                 slot.state = LoadState::Uploading;
@@ -1735,6 +1750,11 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
     result.preparedBudgetDeferrals =
         scheduler_.preparedBudgetDeferrals();
     result.oversizedAssetStarts = scheduler_.oversizedAssetStarts();
+    result.skinnedPackingPasses = skinnedPackingPasses_;
+    result.skinnedPackingAllocations = skinnedPackingAllocations_;
+    result.skinnedPackingTemporaryBytes = skinnedPackingTemporaryBytes_;
+    result.skinnedPackingPeakBytes = skinnedPackingPeakBytes_;
+    result.skinnedUploadBytes = skinnedUploadBytes_;
     result.modelResidencyBytes = modelResidency_.resident();
     result.textureResidencyBytes = textureResidency_.resident();
     result.modelResidencyPeakBytes = modelResidency_.peak();
@@ -1858,25 +1878,25 @@ VulkanModelResources::GpuMesh VulkanModelResources::uploadMesh(
 }
 
 VulkanModelResources::GpuSkinnedMesh VulkanModelResources::uploadSkinnedMesh(
-    const std::vector<GpuSkinnedVertex>& vertices,
-    const std::vector<uint32_t>& indices,
+    const PackedGpuSkinnedMesh& mesh,
     VulkanGeometryArena::Upload& upload)
 {
-    if (vertices.empty() || indices.empty()) {
+    if (mesh.vertices.empty() || mesh.indices.empty()) {
         throw std::runtime_error("glTF skinned mesh contains no geometry");
     }
-    const VkDeviceSize vertexBytes = sizeof(GpuSkinnedVertex) * vertices.size();
-    const VkDeviceSize indexBytes = sizeof(uint32_t) * indices.size();
+    const VkDeviceSize vertexBytes =
+        sizeof(GpuSkinnedVertex) * mesh.vertices.size();
+    const VkDeviceSize indexBytes = sizeof(uint32_t) * mesh.indices.size();
     GpuSkinnedMesh result;
     result.allocation = geometryArena_.allocate(vertexBytes, indexBytes);
     try {
         upload = geometryArena_.beginUpload(
             result.allocation,
-            vertices.data(),
+            mesh.vertices.data(),
             vertexBytes,
-            indices.data(),
+            mesh.indices.data(),
             indexBytes);
-        result.indexCount = static_cast<uint32_t>(indices.size());
+        result.indexCount = static_cast<uint32_t>(mesh.indices.size());
         return result;
     } catch (...) {
         geometryArena_.release(result.allocation);

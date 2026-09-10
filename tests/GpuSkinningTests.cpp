@@ -124,16 +124,23 @@ void testPaletteAndAttachmentEncoding()
         },
     };
 
-    const std::vector<GpuSkinnedVertex> vertices = makeGpuSkinnedVertices(mesh);
-    CHECK(vertices.size() == 2);
-    CHECK(vertices[0].attachmentNodeIndex == UINT32_MAX);
-    CHECK(vertices[1].attachmentNodeIndex == 0);
-    CHECK(std::abs(vertices[1].position.x - 2.0f) < 0.0001f);
-    CHECK(std::abs(vertices[1].position.y - 4.0f) < 0.0001f);
-    CHECK(std::abs(vertices[1].position.z + 3.0f) < 0.0001f);
-    const std::vector<uint32_t> indices = makeGpuSkinnedIndices(mesh);
-    CHECK(indices.size() == 1);
-    CHECK(indices[0] == 1);
+    const GpuSkinnedMeshLayout layout = inspectGpuSkinnedMeshLayout(mesh);
+    CHECK(layout.vertexCount == 2);
+    CHECK(layout.indexCount == 1);
+    CHECK(layout.vertexBytes == 2 * sizeof(GpuSkinnedVertex));
+    CHECK(layout.indexBytes == sizeof(uint32_t));
+    const PackedGpuSkinnedMesh packed = packGpuSkinnedMesh(mesh);
+    CHECK(packed.vertices.size() == 2);
+    CHECK(packed.vertices[0].attachmentNodeIndex == UINT32_MAX);
+    CHECK(packed.vertices[1].attachmentNodeIndex == 0);
+    CHECK(std::abs(packed.vertices[1].position.x - 2.0f) < 0.0001f);
+    CHECK(std::abs(packed.vertices[1].position.y - 4.0f) < 0.0001f);
+    CHECK(std::abs(packed.vertices[1].position.z + 3.0f) < 0.0001f);
+    CHECK(packed.indices.size() == 1);
+    CHECK(packed.indices[0] == 1);
+    CHECK(packed.uploadBytes() == layout.uploadBytes());
+    CHECK(packed.allocatedBytes() >= packed.uploadBytes());
+    CHECK(packed.allocationCount() == 2);
 
     const GltfAnimationClip animation;
     const SkinnedPoseMatrices pose = sampleGltfSkinPose(mesh, animation, 0.0f);
@@ -142,6 +149,32 @@ void testPaletteAndAttachmentEncoding()
     CHECK(instance.palette[maxSkinJoints] == mat4Identity);
     CHECK(std::abs(instance.modelFromSource.values[0] - 0.5f) < 0.0001f);
     CHECK(std::abs(instance.modelFromSource.values[9] + 1.0f / 6.0f) < 0.0001f);
+}
+
+void testLayoutRejectsInvalidGeometryWithoutPacking()
+{
+    TEST("layoutRejectsInvalidGeometryWithoutPacking");
+    SkinnedMeshData mesh;
+    mesh.nodes = { SkeletonNode { .name = "root" } };
+    mesh.vertices = { SkinnedVertex {} };
+    mesh.indices = { 1 };
+    checkThrows([&] {
+        (void)inspectGpuSkinnedMeshLayout(mesh);
+    }, "base mesh index outside vertex range");
+
+    mesh.indices = { 0 };
+    mesh.attachments = {
+        SkinnedAttachment {
+            .mesh = MeshData {
+                .vertices = { MeshVertex {} },
+                .indices = { 0 },
+            },
+            .nodeIndex = 1,
+        },
+    };
+    checkThrows([&] {
+        (void)inspectGpuSkinnedMeshLayout(mesh);
+    }, "attachment node outside skeleton range");
 }
 
 void testNonuniformNormalizationPreservesSkinnedBasis()
@@ -266,6 +299,7 @@ int main()
 {
     testModelInstanceDrawReadiness();
     testPaletteAndAttachmentEncoding();
+    testLayoutRejectsInvalidGeometryWithoutPacking();
     testNonuniformNormalizationPreservesSkinnedBasis();
     testRoguePaletteMatchesCpuSkinning();
     if (failures == 0) {

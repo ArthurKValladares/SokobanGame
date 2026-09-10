@@ -120,11 +120,20 @@ public:
         uint64_t preparedAssetBudgetBytes = 0;
         uint64_t preparedBudgetDeferrals = 0;
         uint64_t oversizedAssetStarts = 0;
+        // Packing totals are cumulative since resource creation. Temporary
+        // bytes use the two vectors' actual capacities; upload bytes count
+        // successful staging submissions.
+        uint64_t skinnedPackingPasses = 0;
+        uint64_t skinnedPackingAllocations = 0;
+        uint64_t skinnedPackingTemporaryBytes = 0;
+        uint64_t skinnedPackingPeakBytes = 0;
+        uint64_t skinnedUploadBytes = 0;
         AssetStageStats modelStages {};
         AssetStageStats textureStages {};
         AssetStageStats animationStages {};
-        // Decoded payloads awaiting publication plus upload-ring reservations.
-        // The peak is updated at transitions so it includes their brief overlap.
+        // Current decoded payloads plus upload-ring reservations. The peak is
+        // updated inside skinned packing so it also includes those temporary
+        // vectors while all three representations briefly overlap.
         uint64_t transientAssetBytes = 0;
         uint64_t transientAssetPeakBytes = 0;
         uint64_t modelResidencyBytes = 0;
@@ -471,8 +480,7 @@ private:
         const MeshData& mesh,
         VulkanGeometryArena::Upload& upload);
     [[nodiscard]] GpuSkinnedMesh uploadSkinnedMesh(
-        const std::vector<GpuSkinnedVertex>& vertices,
-        const std::vector<uint32_t>& indices,
+        const PackedGpuSkinnedMesh& mesh,
         VulkanGeometryArena::Upload& upload);
     void createSkinningBuffer();
     void destroySkinningBuffer();
@@ -552,6 +560,11 @@ private:
     uint64_t textureUploadSubmissions_ = 0;
     uint64_t textureUploadCompletions_ = 0;
     uint64_t transientAssetPeakBytes_ = 0;
+    uint64_t skinnedPackingPasses_ = 0;
+    uint64_t skinnedPackingAllocations_ = 0;
+    uint64_t skinnedPackingTemporaryBytes_ = 0;
+    uint64_t skinnedPackingPeakBytes_ = 0;
+    uint64_t skinnedUploadBytes_ = 0;
     AdmissionDeferralTotals modelAdmissionDeferrals_ {};
     AdmissionDeferralTotals textureAdmissionDeferrals_ {};
     AssetLoadScheduler scheduler_ {};

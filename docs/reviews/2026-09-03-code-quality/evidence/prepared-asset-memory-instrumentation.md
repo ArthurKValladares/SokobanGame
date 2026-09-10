@@ -7,8 +7,9 @@ model, texture, and animation class. Each class reports queued, decoding,
 CPU-ready, uploading, resident, and failed counts. Models and textures also
 report logical decoded payload bytes, upload-ring reservation bytes, and GPU
 resident bytes. The aggregate transient counter is decoded payload plus upload
-staging, and its high-water mark is sampled at state transitions so it includes
-the short interval where both copies coexist.
+staging. Its high-water mark is sampled at state transitions and during
+skinned-mesh packing so it includes the short interval where decoded, packed,
+and staging copies coexist.
 
 Encoded source sizes are cached once when resource slots are created and are
 reported for queued and active decode stages. Model estimates include the main
@@ -22,9 +23,9 @@ filesystem I/O.
 The decoded measurement counts retained dynamic payload content: vertex,
 index, material, skeleton, attachment, animation-keyframe, image, and compressed
 mip data. It intentionally excludes allocator metadata, spare vector capacity,
-future/task bookkeeping, and the temporary packed skinned-mesh vectors tracked
-by MQ-02. It is therefore a stable workload metric and a lower bound on process
-memory, rather than a claim about total heap consumption.
+and future/task bookkeeping. Prepared-payload totals remain a stable workload
+metric and a lower bound on process memory; transient peak telemetry separately
+adds the measured capacity of temporary packed skinned-mesh vectors.
 
 Model and texture residency refusals report attempt counts, the number of
 assets currently deferred, and cumulative microseconds from first refusal to
@@ -126,4 +127,5 @@ Verification:
 - Debug CTest registry: 80 of 80 passed.
 - Release CTest registry: 80 of 80 passed.
 
-MQ-01 is complete. The forward-looking roadmap begins with MQ-02.
+MQ-01 is complete. Skinned-packing follow-up evidence is recorded in
+[skinned-mesh-packing.md](skinned-mesh-packing.md).

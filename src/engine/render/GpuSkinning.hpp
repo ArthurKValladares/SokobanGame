@@ -33,9 +33,32 @@ static_assert(sizeof(Mat4) == 64);
 static_assert(sizeof(GpuSkinningInstance) ==
     (maxSkinPaletteMatrices + 2) * sizeof(Mat4));
 
-[[nodiscard]] std::vector<GpuSkinnedVertex> makeGpuSkinnedVertices(
+struct GpuSkinnedMeshLayout {
+    uint32_t vertexCount = 0;
+    uint32_t indexCount = 0;
+    uint64_t vertexBytes = 0;
+    uint64_t indexBytes = 0;
+
+    [[nodiscard]] uint64_t uploadBytes() const
+    {
+        return vertexBytes + indexBytes;
+    }
+};
+
+struct PackedGpuSkinnedMesh {
+    std::vector<GpuSkinnedVertex> vertices;
+    std::vector<uint32_t> indices;
+
+    [[nodiscard]] uint64_t uploadBytes() const;
+    [[nodiscard]] uint64_t allocatedBytes() const;
+    [[nodiscard]] uint32_t allocationCount() const;
+};
+
+// Computes upload admission size and validates the index remap without
+// allocating the temporary GPU-format vectors.
+[[nodiscard]] GpuSkinnedMeshLayout inspectGpuSkinnedMeshLayout(
     const SkinnedMeshData& mesh);
-[[nodiscard]] std::vector<uint32_t> makeGpuSkinnedIndices(
+[[nodiscard]] PackedGpuSkinnedMesh packGpuSkinnedMesh(
     const SkinnedMeshData& mesh);
 [[nodiscard]] GpuSkinningInstance makeGpuSkinningInstance(
     const SkinnedMeshData& mesh,

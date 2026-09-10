@@ -26,8 +26,7 @@ internals and art-asset quality or licensing remain outside its scope.
 
 | ID | Priority | Work | Exit criteria |
 | --- | --- | --- | --- |
-| MQ-02 | Next | Remove duplicate skinned-mesh packing | Count packing passes, allocations, temporary bytes, and upload bytes; reuse a prepared packed payload or compute admission size without packing twice |
-| MQ-03 | Later | Quantify profile and undo snapshot copying | Benchmark save-request latency, serialization time, and peak memory late in a long level; optimize only after preserving the agreed undo-persistence contract |
+| MQ-03 | Next | Quantify profile and undo snapshot copying | Benchmark save-request latency, serialization time, and peak memory late in a long level; optimize only after preserving the agreed undo-persistence contract |
 | MQ-04 | Later | Separate startup inspection cost from decode and upload | Record manifest inspection, glTF dependency discovery, decode, upload, and first-playable-frame timing; introduce cached metadata only with reliable invalidation |
 | MQ-05 | Later | Extract cohesive ownership boundaries from large modules | Each extraction must reduce a specific lifetime or state-transition ambiguity and keep dependencies narrower than the source module |
 | MQ-06 | Ongoing | Expand platform and device evidence | Run the Linux toolchain, installer, controller, audio-device, and broader Vulkan device matrix described below and retain actionable failure diagnostics |
@@ -67,11 +66,10 @@ disable MSVC STL vectorized implementations during analysis and omit unsupported
 reproducible-path flags, but it must otherwise preserve the real compile
 definitions and include graph.
 
-## MQ-02 through MQ-04: remaining efficiency experiments
+## MQ-03 and MQ-04: remaining efficiency experiments
 
 | Area | Experiment | Implementation threshold |
 | --- | --- | --- |
-| Skinned packing | Compare allocations and peak temporary bytes when sizing and uploading representative large meshes | Change the pipeline only if packing occurs twice or admission sizing materially increases peak memory |
 | Profile and undo snapshots | Measure request latency and peak memory for long undo histories across deferred and urgent saves | Change representation only if the cost is user-visible or breaches a defined memory target |
 | Startup inspection | Separate document parsing and dependency discovery from decode, upload, and first playable frame | Add cached metadata only when inspection is material and cache invalidation can be proven from source identity |
 
@@ -143,8 +141,7 @@ checks need the device, driver, package identity, steps, and observed result.
 
 Keep the analyzer gate green as checks and first-party code evolve.
 
-1. Measure duplicate skinned packing, profile snapshots, and startup inspection
-   in that order.
+1. Measure profile snapshots and startup inspection in that order.
 2. Perform ownership extractions only when the preceding analyzer or
    measurement work exposes a concrete boundary to improve.
 3. Expand platform and device validation alongside the code packets it covers.

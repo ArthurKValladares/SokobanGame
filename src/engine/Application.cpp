@@ -629,6 +629,12 @@ void Application::finishSmokeRunIfDue(std::uint64_t renderedFrames)
             << " budget; prepared-budget deferrals "
             << assetStats.preparedBudgetDeferrals
             << ", oversized starts " << assetStats.oversizedAssetStarts
+            << "; skinned packing " << assetStats.skinnedPackingPasses
+            << " passes, " << assetStats.skinnedPackingAllocations
+            << " allocations, " << assetStats.skinnedPackingTemporaryBytes
+            << " cumulative temporary bytes (peak "
+            << assetStats.skinnedPackingPeakBytes << "), "
+            << assetStats.skinnedUploadBytes << " upload bytes"
             << "; queued source bytes "
             << assetStats.modelStages.queuedSourceBytes << " models, "
             << assetStats.textureStages.queuedSourceBytes << " textures, "

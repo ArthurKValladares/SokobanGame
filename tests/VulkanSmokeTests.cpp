@@ -296,6 +296,10 @@ void exerciseSkinnedPublicationRetry(
         denied.modelStages.cpuReadyBytes == 0 ||
         denied.modelStages.residencyDeferredAssets != 1 ||
         denied.modelStages.residencyDeferrals == 0 ||
+        denied.skinnedPackingPasses != 0 ||
+        denied.skinnedPackingAllocations != 0 ||
+        denied.skinnedPackingTemporaryBytes != 0 ||
+        denied.skinnedUploadBytes != 0 ||
         denied.transientAssetBytes != denied.modelStages.cpuReadyBytes ||
         denied.transientAssetPeakBytes < denied.transientAssetBytes) {
         throw std::runtime_error(
@@ -312,11 +316,20 @@ void exerciseSkinnedPublicationRetry(
         uploading.modelStages.residencyDeferredAssets != 0 ||
         uploading.modelStages.residencyDeferrals == 0 ||
         uploading.modelStages.residencyDeferredMicroseconds == 0 ||
+        uploading.skinnedPackingPasses != 1 ||
+        uploading.skinnedPackingAllocations != 2 ||
+        uploading.skinnedPackingTemporaryBytes == 0 ||
+        uploading.skinnedPackingPeakBytes !=
+            uploading.skinnedPackingTemporaryBytes ||
+        uploading.skinnedUploadBytes == 0 ||
+        uploading.skinnedPackingTemporaryBytes <
+            uploading.skinnedUploadBytes ||
         uploading.transientAssetBytes !=
             uploading.modelStages.uploadInFlightBytes ||
         uploading.transientAssetPeakBytes <
             denied.transientAssetBytes +
-                uploading.modelStages.uploadInFlightBytes) {
+                uploading.modelStages.uploadInFlightBytes +
+                uploading.skinnedPackingPeakBytes) {
         throw std::runtime_error(
             "Model publication did not transfer CPU-ready bytes into upload staging");
     }
@@ -348,6 +361,11 @@ struct PressureMetrics {
     uint64_t elapsedMicroseconds = 0;
     uint64_t preparedBudgetBytes = 0;
     uint64_t preparedBudgetDeferrals = 0;
+    uint64_t packingPasses = 0;
+    uint64_t packingAllocations = 0;
+    uint64_t packingTemporaryBytes = 0;
+    uint64_t packingPeakBytes = 0;
+    uint64_t skinnedUploadBytes = 0;
     uint32_t heldReadyModels = 0;
     uint32_t heldQueuedModels = 0;
 };
@@ -503,7 +521,13 @@ PressureMetrics exercisePreparedAssetPressure(
         drained.modelStages.cpuReadyBytes != 0 ||
         drained.modelStages.residencyDeferredAssets != 0 ||
         drained.modelStages.residencyDeferrals < held.modelStages.cpuReady ||
-        drained.modelStages.residencyDeferredMicroseconds == 0) {
+        drained.modelStages.residencyDeferredMicroseconds == 0 ||
+        drained.skinnedPackingPasses != manifest.models().size() ||
+        drained.skinnedPackingAllocations !=
+            2 * manifest.models().size() ||
+        drained.skinnedPackingTemporaryBytes < drained.skinnedUploadBytes ||
+        drained.skinnedPackingPeakBytes == 0 ||
+        drained.skinnedUploadBytes == 0) {
         throw std::runtime_error(
             "Pressure workload did not make progress after admission resumed: "
             "loaded=" + std::to_string(drained.loadedModels) +
@@ -518,7 +542,9 @@ PressureMetrics exercisePreparedAssetPressure(
             std::to_string(
                 drained.modelStages.residencyDeferredAssets) +
             ", residency deferrals=" +
-            std::to_string(drained.modelStages.residencyDeferrals));
+            std::to_string(drained.modelStages.residencyDeferrals) +
+            ", packing passes=" +
+            std::to_string(drained.skinnedPackingPasses));
     }
 
     return {
@@ -533,6 +559,11 @@ PressureMetrics exercisePreparedAssetPressure(
                 std::chrono::steady_clock::now() - started).count()),
         .preparedBudgetBytes = drained.preparedAssetBudgetBytes,
         .preparedBudgetDeferrals = drained.preparedBudgetDeferrals,
+        .packingPasses = drained.skinnedPackingPasses,
+        .packingAllocations = drained.skinnedPackingAllocations,
+        .packingTemporaryBytes = drained.skinnedPackingTemporaryBytes,
+        .packingPeakBytes = drained.skinnedPackingPeakBytes,
+        .skinnedUploadBytes = drained.skinnedUploadBytes,
         .heldReadyModels = held.modelStages.cpuReady,
         .heldQueuedModels = held.modelStages.queued,
     };
@@ -563,6 +594,12 @@ int main(int argc, char** argv)
                 << pressure.preparedBudgetBytes
                 << " prepared_budget_deferrals="
                 << pressure.preparedBudgetDeferrals
+                << " packing_passes=" << pressure.packingPasses
+                << " packing_allocations=" << pressure.packingAllocations
+                << " packing_temporary_bytes="
+                << pressure.packingTemporaryBytes
+                << " packing_peak_bytes=" << pressure.packingPeakBytes
+                << " skinned_upload_bytes=" << pressure.skinnedUploadBytes
                 << " held_ready_models=" << pressure.heldReadyModels
                 << " held_queued_models=" << pressure.heldQueuedModels
                 << " elapsed_us=" << pressure.elapsedMicroseconds << '\n';
