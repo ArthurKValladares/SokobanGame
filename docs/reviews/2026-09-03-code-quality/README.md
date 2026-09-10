@@ -26,13 +26,12 @@ internals and art-asset quality or licensing remain outside its scope.
 
 | ID | Priority | Work | Exit criteria |
 | --- | --- | --- | --- |
-| MQ-01 | Next | Measure and, if justified, cache frame-time summaries | Record query count and CPU cost in the debug-statistics workload; if material, cache summaries until samples change and prove identical latest/average/p95/maximum results |
-| MQ-02 | Next | Bound prepared asset memory | Track queued, decoding, CPU-ready, uploading, and resident bytes under a large prefetch workload; define and enforce a prepared-byte budget without starving GPU publication |
-| MQ-03 | Later | Remove duplicate skinned-mesh packing | Count packing passes, allocations, temporary bytes, and upload bytes; reuse a prepared packed payload or compute admission size without packing twice |
-| MQ-04 | Later | Quantify profile and undo snapshot copying | Benchmark save-request latency, serialization time, and peak memory late in a long level; optimize only after preserving the agreed undo-persistence contract |
-| MQ-05 | Later | Separate startup inspection cost from decode and upload | Record manifest inspection, glTF dependency discovery, decode, upload, and first-playable-frame timing; introduce cached metadata only with reliable invalidation |
-| MQ-06 | Later | Extract cohesive ownership boundaries from large modules | Each extraction must reduce a specific lifetime or state-transition ambiguity and keep dependencies narrower than the source module |
-| MQ-07 | Ongoing | Expand platform and device evidence | Run the Linux toolchain, installer, controller, audio-device, and broader Vulkan device matrix described below and retain actionable failure diagnostics |
+| MQ-01 | Next | Bound prepared asset memory | Track queued, decoding, CPU-ready, uploading, and resident bytes under a large prefetch workload; define and enforce a prepared-byte budget without starving GPU publication |
+| MQ-02 | Later | Remove duplicate skinned-mesh packing | Count packing passes, allocations, temporary bytes, and upload bytes; reuse a prepared packed payload or compute admission size without packing twice |
+| MQ-03 | Later | Quantify profile and undo snapshot copying | Benchmark save-request latency, serialization time, and peak memory late in a long level; optimize only after preserving the agreed undo-persistence contract |
+| MQ-04 | Later | Separate startup inspection cost from decode and upload | Record manifest inspection, glTF dependency discovery, decode, upload, and first-playable-frame timing; introduce cached metadata only with reliable invalidation |
+| MQ-05 | Later | Extract cohesive ownership boundaries from large modules | Each extraction must reduce a specific lifetime or state-transition ambiguity and keep dependencies narrower than the source module |
+| MQ-06 | Ongoing | Expand platform and device evidence | Run the Linux toolchain, installer, controller, audio-device, and broader Vulkan device matrix described below and retain actionable failure diagnostics |
 
 ## Analyzer gate maintenance
 
@@ -69,25 +68,7 @@ disable MSVC STL vectorized implementations during analysis and omit unsupported
 reproducible-path flags, but it must otherwise preserve the real compile
 definitions and include graph.
 
-## MQ-01: frame-time summary cost
-
-`FrameTimeTelemetry::summary()` copies and sorts its sample window for every
-query. Renderer statistics request several summaries, so the first task is to
-establish whether summaries are recomputed more than once per sample update.
-
-Measure:
-
-- calls per rendered frame with statistics hidden and visible;
-- total and maximum CPU time spent summarizing;
-- sample-window size and number of independent telemetry streams; and
-- the effect on debug-overlay frame time at representative frame rates.
-
-If the cost is material, cache the summary beside the sample generation.
-`record()` and `reset()` must invalidate it. Repeated reads without a new sample
-must perform no copy or sort, and cached results must exactly match the current
-latest, mean, p95, maximum, and sample count.
-
-## MQ-02: prepared asset memory and backpressure
+## MQ-01: prepared asset memory and backpressure
 
 GPU residency limits do not bound decoded CPU payloads waiting for publication.
 Instrument the asset scheduler before choosing a policy.
@@ -107,7 +88,7 @@ must keep memory within the chosen limit, preserve retryable CPU-ready payloads,
 make forward progress when residency becomes available, and avoid turning a
 temporary admission denial into a second decode.
 
-## MQ-03 through MQ-05: remaining efficiency experiments
+## MQ-02 through MQ-04: remaining efficiency experiments
 
 | Area | Experiment | Implementation threshold |
 | --- | --- | --- |
@@ -119,7 +100,7 @@ Retain the existing frame arenas, scratch reuse, suballocators, draw sorting,
 shadow caching, compressed artifacts, upload scheduling, and residency tracking
 unless equivalent measurements identify a concrete regression.
 
-## MQ-06: ownership-focused refactoring
+## MQ-05: ownership-focused refactoring
 
 Candidate boundaries, in preferred order:
 
@@ -143,7 +124,7 @@ Prefer named option types where call sites contain several booleans with
 meaningful combinations. Keep independent booleans when their purpose is
 obvious at the call site.
 
-## MQ-07: coverage expansion
+## MQ-06: coverage expansion
 
 | Environment | Required evidence |
 | --- | --- |
@@ -183,15 +164,13 @@ checks need the device, driver, package identity, steps, and observed result.
 
 Keep the analyzer gate green as checks and first-party code evolve.
 
-1. Measure frame-time summary queries and implement cache invalidation only if
-   the recorded cost justifies it.
-2. Add prepared-asset byte instrumentation, capture a pressure baseline, and
+1. Add prepared-asset byte instrumentation, capture a pressure baseline, and
    agree on the budget before implementing backpressure.
-3. Measure duplicate skinned packing, profile snapshots, and startup inspection
+2. Measure duplicate skinned packing, profile snapshots, and startup inspection
    in that order.
-4. Perform ownership extractions only when the preceding analyzer or
+3. Perform ownership extractions only when the preceding analyzer or
    measurement work exposes a concrete boundary to improve.
-5. Expand platform and device validation alongside the code packets it covers.
+4. Expand platform and device validation alongside the code packets it covers.
 
 A roadmap item is complete only when its acceptance criteria, relevant tests,
 warning gate, and documentation all describe the resulting current state.

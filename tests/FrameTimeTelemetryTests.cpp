@@ -2,9 +2,14 @@
 
 #include "engine/render/FrameTimeTelemetry.hpp"
 
+#include <algorithm>
+#include <array>
+#include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <iostream>
 #include <limits>
+#include <string_view>
 
 namespace {
 
@@ -50,10 +55,72 @@ void testRollingHistoryAndInvalidSamples()
         "rolling history drops the overwritten oldest sample");
 }
 
+void benchmarkSummaries()
+{
+    constexpr std::size_t frameCount = 20'000;
+    constexpr std::size_t hiddenSummariesPerFrame = 3;
+    constexpr std::size_t visibleSummariesPerFrame = 27;
+    std::array<
+        sokoban::FrameTimeTelemetry,
+        visibleSummariesPerFrame> telemetry;
+    for (std::size_t stream = 0; stream < telemetry.size(); ++stream) {
+        for (std::size_t index = 0;
+             index < sokoban::FrameTimeTelemetry::historyCapacity;
+             ++index) {
+            telemetry[stream].record(
+                8.0 + static_cast<double>((index + stream) % 17) * 0.25);
+        }
+    }
+
+    const auto run = [&](std::string_view label, std::size_t summariesPerFrame) {
+        double checksum = 0.0;
+        std::chrono::nanoseconds total {};
+        std::chrono::nanoseconds maximum {};
+        for (std::size_t frame = 0; frame < frameCount; ++frame) {
+            for (std::size_t stream = 0;
+                 stream < summariesPerFrame;
+                 ++stream) {
+                telemetry[stream].record(
+                    8.0 + static_cast<double>((frame + stream) % 17) * 0.25);
+            }
+            const auto start = std::chrono::steady_clock::now();
+            for (std::size_t stream = 0;
+                 stream < summariesPerFrame;
+                 ++stream) {
+                const sokoban::FrameTimeSummary summary =
+                    telemetry[stream].summary();
+                checksum += summary.p95Milliseconds;
+            }
+            const auto elapsed = std::chrono::steady_clock::now() - start;
+            total += elapsed;
+            maximum = std::max(
+                maximum,
+                std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed));
+        }
+        const double totalMilliseconds =
+            std::chrono::duration<double, std::milli>(total).count();
+        std::cout << label << ": " << summariesPerFrame
+                  << " summaries/frame across " << frameCount
+                  << " frames; total " << totalMilliseconds
+                  << " ms; average " << totalMilliseconds /
+                         static_cast<double>(frameCount)
+                  << " ms/frame; maximum "
+                  << std::chrono::duration<double, std::milli>(maximum).count()
+                  << " ms/frame; checksum " << checksum << '\n';
+    };
+
+    run("stats hidden", hiddenSummariesPerFrame);
+    run("stats visible", visibleSummariesPerFrame);
+}
+
 } // namespace
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "--benchmark") {
+        benchmarkSummaries();
+        return 0;
+    }
     testSummaryAndPercentile();
     testRollingHistoryAndInvalidSamples();
     if (failures == 0) {
