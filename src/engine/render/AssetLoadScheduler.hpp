@@ -39,6 +39,10 @@ struct AssetLoadingBudget {
     // Vulkan publication runs on the render thread, so it has its own small
     // frame budget independent of background preparation.
     std::size_t maxPublicationsPerFrame = 1;
+    // Logical decoded CPU payload plus reservations held by active decodes.
+    // Upload staging has its own 64 MiB ring and remains separately visible
+    // in transient telemetry.
+    uint64_t preparedAssetBytes = 32ULL * 1024ULL * 1024ULL;
     // Residency budgets are enforced by VulkanModelResources before new GPU
     // resources are published. They exclude swapchain/frame resources.
     uint64_t modelResidencyBytes = 128ULL * 1024ULL * 1024ULL;
@@ -51,10 +55,14 @@ public:
 
     // Adds a job or raises its priority. Re-requesting an active job is a
     // no-op: filesystem work already started cannot safely be interrupted.
-    void request(AssetLoadKey key, AssetLoadPriority priority);
+    void request(
+        AssetLoadKey key,
+        AssetLoadPriority priority,
+        uint64_t estimatedPreparedBytes);
     // Returns the highest-priority queued job when the CPU budget permits and
     // marks it active. The caller must call complete() once its future exists.
-    [[nodiscard]] std::optional<AssetLoadKey> beginNext();
+    [[nodiscard]] std::optional<AssetLoadKey> beginNext(
+        uint64_t retainedPreparedBytes);
     void complete(AssetLoadKey key);
 
     // Removes prefetch jobs that have not started. The returned keys let the
@@ -64,6 +72,18 @@ public:
 
     [[nodiscard]] std::size_t queuedCount() const;
     [[nodiscard]] std::size_t activeCount() const { return activeCount_; }
+    [[nodiscard]] uint64_t activePreparedBytes() const
+    {
+        return activePreparedBytes_;
+    }
+    [[nodiscard]] uint64_t preparedBudgetDeferrals() const
+    {
+        return preparedBudgetDeferrals_;
+    }
+    [[nodiscard]] uint64_t oversizedAssetStarts() const
+    {
+        return oversizedAssetStarts_;
+    }
     [[nodiscard]] uint64_t cancelledPrefetchCount() const
     {
         return cancelledPrefetchCount_;
@@ -74,6 +94,7 @@ private:
     struct Entry {
         AssetLoadPriority priority = AssetLoadPriority::Prefetch;
         uint64_t sequence = 0;
+        uint64_t estimatedPreparedBytes = 0;
         bool active = false;
     };
 
@@ -88,6 +109,9 @@ private:
     std::unordered_map<AssetLoadKey, Entry, KeyHash> entries_;
     uint64_t nextSequence_ = 1;
     uint64_t cancelledPrefetchCount_ = 0;
+    uint64_t activePreparedBytes_ = 0;
+    uint64_t preparedBudgetDeferrals_ = 0;
+    uint64_t oversizedAssetStarts_ = 0;
     std::size_t activeCount_ = 0;
 };
 

@@ -1,6 +1,6 @@
 # Prepared asset memory instrumentation
 
-Captured 2026-09-09 for MQ-01; decoded-size metadata updated 2026-09-10.
+Captured 2026-09-09 for MQ-01; budget enforcement completed 2026-09-10.
 
 `VulkanModelResources::LoadingStats` exposes the asset publication pipeline by
 model, texture, and animation class. Each class reports queued, decoding,
@@ -12,11 +12,12 @@ the short interval where both copies coexist.
 
 Encoded source sizes are cached once when resource slots are created and are
 reported for queued and active decode stages. Model estimates include the main
-document and declared attachment documents. Texture estimates use a native BC7
-artifact when one will load, an external source file, the containing glTF/GLB
-document for a buffer-view image, or the data-URI length. Missing sources report
-zero and still fail through the normal loader. Queueing, reprioritizing,
-cancelling, and re-requesting therefore perform no size-related filesystem I/O.
+document and declared attachment documents. Texture source totals use a native
+BC7 artifact when one will load, an external source file, the containing
+glTF/GLB document for a buffer-view image, or the data-URI length. Missing
+sources report zero and still fail through the normal loader. Queueing,
+reprioritizing, cancelling, and re-requesting therefore perform no size-related
+filesystem I/O.
 
 The decoded measurement counts retained dynamic payload content: vertex,
 index, material, skeleton, attachment, animation-keyframe, image, and compressed
@@ -43,9 +44,10 @@ residency refusal and verifies that:
 
 The same executable provides `--benchmark-prepared-assets`, a repeatable
 pressure workload that prefetches 32 independent instances of the same skinned
-source with two CPU jobs, one publication per iteration, and model residency
-admission held until all decodes are CPU-ready. Releasing the hold must publish
-all 32 without a failure or second decode.
+source with two CPU jobs and one publication per iteration. Its original
+unbounded baseline held model residency admission until all decodes were
+CPU-ready. Releasing the hold published all 32 without a failure or second
+decode.
 
 Three Release runs on an NVIDIA GeForce RTX 4060 Laptop GPU produced:
 
@@ -56,9 +58,8 @@ Three Release runs on an NVIDIA GeForce RTX 4060 Laptop GPU produced:
 | 3 | 13,094,016 B | 20,307,264 B | 20,984,422 B | 289 | 2,176,910 us | 136,561 us |
 
 The decoded model payload is 1.551 times the encoded source total in every run.
-The source metric is useful for queue visibility but cannot safely reserve a
-hard prepared-memory budget. A strict limit needs decoded-size metadata
-produced by document/image inspection or budget-aware loader allocation.
+The source metric remains useful for queue visibility but does not reserve the
+prepared-memory budget.
 
 Model and animation reservations now come from the same glTF document parse
 that discovers runtime material dependencies. Accessor, material, skeleton,
@@ -78,14 +79,51 @@ reservation with its decoded clip. Each distinct model, attachment, or
 animation document is parsed once per catalog collection; request and frame
 paths remain free of metadata I/O.
 
+Texture reservations inspect the exact representation selected after Vulkan
+device capability is known. If a valid BC7 artifact is available, its mip
+records and compressed byte arrays determine the reservation. Otherwise the
+external file, glTF buffer view, or data URI is inspected for the exact RGBA8
+payload size. The inspector and loader share artifact selection and validation,
+and tests require every supported source form to match its decoded payload.
+
+The production scheduler uses a 32 MiB prepared-memory budget. The baseline's
+32 retained models used 20,307,264 bytes, leaving about 11.7 MiB of headroom for
+the normal two-job decode concurrency. Upload staging is bounded separately by
+the 64 MiB upload ring and remains included in transient-memory telemetry.
+
+Before starting a decode, the scheduler admits its cached logical payload only
+when retained prepared data plus active decode reservations remains within the
+budget. A zero or unavailable estimate reserves the full budget and therefore
+runs alone. An asset whose known size exceeds the entire limit also runs alone
+when no prepared data or decode reservation is live; an oversized-start counter
+makes this escape path visible. Priority and FIFO order are preserved when the
+head request is budget-blocked. Decode completion releases the reservation as
+the actual payload becomes retained, and publication or failure releases that
+payload. A decoded payload larger than a nonzero reservation fails explicitly
+instead of silently exceeding the limit.
+
+The enforced pressure workload uses a deliberately small 4 MiB test budget. It
+holds residency admission until prepared data fills the budget, requires
+additional queued decodes to pause with no job active, then releases admission
+and requires all 32 models to publish. It also verifies that every held
+CPU-ready model is residency-deferred and that the retained prepared total does
+not exceed the limit. Runtime and debug-panel telemetry report retained bytes,
+active decode reservations, the configured limit, budget deferrals, and
+oversized starts.
+
+Three Release runs of the enforced workload on the same GPU produced:
+
+| Run | Limit | Held payload | Held ready / queued | Budget deferrals | Transient peak | Workload time |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 4,194,304 B | 3,807,612 B | 6 / 26 | 5 | 4,484,770 B | 81,244 us |
+| 2 | 4,194,304 B | 3,807,612 B | 6 / 26 | 5 | 4,484,770 B | 81,907 us |
+| 3 | 4,194,304 B | 3,807,612 B | 6 / 26 | 5 | 4,484,770 B | 87,090 us |
+
 Verification:
 
-- Debug build: `sokoban`, `sokoban_ui_tests`, and
-  `sokoban_vulkan_smoke_tests`.
-- Release build: the same targets.
+- Full Debug warning-as-error build.
+- Full Release warning-as-error build.
 - Debug CTest registry: 80 of 80 passed.
 - Release CTest registry: 80 of 80 passed.
 
-The remaining MQ-01 work is to inspect the selected prepared texture form,
-choose the prepared-memory budget, and enforce admission across all three
-asset classes.
+MQ-01 is complete. The forward-looking roadmap begins with MQ-02.

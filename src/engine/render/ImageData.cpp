@@ -104,4 +104,53 @@ ImageData loadRgbaImage(
     return image;
 }
 
+uint64_t inspectRgbaImagePayloadBytes(const std::filesystem::path& path)
+{
+    const std::vector<stbi_uc> encoded = readImageFile(path);
+    return inspectRgbaImagePayloadBytes(
+        std::as_bytes(std::span(encoded)), path.string());
+}
+
+uint64_t inspectRgbaImagePayloadBytes(
+    std::span<const std::byte> encoded,
+    std::string_view label)
+{
+    if (encoded.empty()) {
+        throw std::runtime_error(
+            "Image data is empty: " + std::string(label));
+    }
+    if (encoded.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        throw std::runtime_error(
+            "Image data is too large to inspect: " + std::string(label));
+    }
+
+    int width = 0;
+    int height = 0;
+    int sourceChannels = 0;
+    if (stbi_info_from_memory(
+            reinterpret_cast<const stbi_uc*>(encoded.data()),
+            static_cast<int>(encoded.size()),
+            &width,
+            &height,
+            &sourceChannels) == 0) {
+        const char* reason = stbi_failure_reason();
+        throw std::runtime_error(
+            "Failed to inspect image '" + std::string(label) + "': " +
+            (reason != nullptr ? reason : "unknown decoder error"));
+    }
+    if (width <= 0 || height <= 0) {
+        throw std::runtime_error(
+            "Invalid image dimensions: " + std::string(label));
+    }
+    constexpr uint64_t rgbaChannels = 4;
+    const uint64_t imageWidth = static_cast<uint64_t>(width);
+    const uint64_t imageHeight = static_cast<uint64_t>(height);
+    if (imageWidth >
+        std::numeric_limits<uint64_t>::max() / rgbaChannels / imageHeight) {
+        throw std::runtime_error(
+            "Decoded image is too large: " + std::string(label));
+    }
+    return imageWidth * imageHeight * rgbaChannels;
+}
+
 } // namespace sokoban

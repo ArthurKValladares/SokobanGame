@@ -22,6 +22,8 @@ void testLoadsRgbaPixels()
     CHECK(image.height > 0);
     CHECK(image.rgba.size()
         == static_cast<size_t>(image.width) * image.height * 4);
+    CHECK(sokoban::inspectRgbaImagePayloadBytes(texturePath) ==
+        image.rgba.size());
 }
 
 void testConcurrentLoads()
@@ -70,6 +72,19 @@ void testNonImageDiagnostic()
     }
 }
 
+void testNonImageInspectionDiagnostic()
+{
+    try {
+        static_cast<void>(sokoban::inspectRgbaImagePayloadBytes(
+            std::filesystem::path(SOKOBAN_TEST_ASSET_DIR) / "manifest.json"));
+        CHECK(false);
+    } catch (const std::runtime_error& error) {
+        const std::string message = error.what();
+        CHECK(message.find("Failed to inspect image") != std::string::npos);
+        CHECK(message.find("manifest.json") != std::string::npos);
+    }
+}
+
 } // namespace
 
 int main()
@@ -78,6 +93,7 @@ int main()
     testConcurrentLoads();
     testMissingFileDiagnostic();
     testNonImageDiagnostic();
+    testNonImageInspectionDiagnostic();
 
     if (failures == 0) {
         std::cout << "ImageDataTests: " << checks << " checks passed\n";

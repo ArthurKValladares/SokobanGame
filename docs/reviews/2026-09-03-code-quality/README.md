@@ -26,8 +26,7 @@ internals and art-asset quality or licensing remain outside its scope.
 
 | ID | Priority | Work | Exit criteria |
 | --- | --- | --- | --- |
-| MQ-01 | Next | Enforce a prepared asset memory budget | Complete texture-size metadata, choose a limit from the pressure baseline, and gate decode admission without starving publication |
-| MQ-02 | Later | Remove duplicate skinned-mesh packing | Count packing passes, allocations, temporary bytes, and upload bytes; reuse a prepared packed payload or compute admission size without packing twice |
+| MQ-02 | Next | Remove duplicate skinned-mesh packing | Count packing passes, allocations, temporary bytes, and upload bytes; reuse a prepared packed payload or compute admission size without packing twice |
 | MQ-03 | Later | Quantify profile and undo snapshot copying | Benchmark save-request latency, serialization time, and peak memory late in a long level; optimize only after preserving the agreed undo-persistence contract |
 | MQ-04 | Later | Separate startup inspection cost from decode and upload | Record manifest inspection, glTF dependency discovery, decode, upload, and first-playable-frame timing; introduce cached metadata only with reliable invalidation |
 | MQ-05 | Later | Extract cohesive ownership boundaries from large modules | Each extraction must reduce a specific lifetime or state-transition ambiguity and keep dependencies narrower than the source module |
@@ -67,30 +66,6 @@ The Linux CI analyzer remains the portable authority. A Windows scan may
 disable MSVC STL vectorized implementations during analysis and omit unsupported
 reproducible-path flags, but it must otherwise preserve the real compile
 definitions and include graph.
-
-## MQ-01: prepared asset memory and backpressure
-
-GPU residency limits do not bound decoded CPU payloads waiting for publication.
-Use the existing [prepared-asset pressure baseline](evidence/prepared-asset-memory-instrumentation.md)
-to design the admission policy.
-
-The next packet should:
-
-- produce exact logical decoded-size metadata during texture-source inspection,
-  selecting the BC7 artifact or RGBA fallback after device capability is known,
-  without adding filesystem work to request or frame paths;
-- define how an asset larger than the whole budget runs alone and remains
-  observable instead of starving permanently;
-- choose and document a default prepared-byte limit with explicit headroom for
-  the two active CPU jobs and upload staging; and
-- reserve estimated bytes before a decode starts, reconcile the reservation
-  with the decoded result, and release it only when publication or failure
-  releases the payload.
-
-The backpressure test must hold publication temporarily, fill the chosen
-budget, prove that additional decoding pauses, then release publication and
-prove forward progress. Residency denial must preserve the decoded payload and
-must not schedule a second decode.
 
 ## MQ-02 through MQ-04: remaining efficiency experiments
 
@@ -168,13 +143,11 @@ checks need the device, driver, package identity, steps, and observed result.
 
 Keep the analyzer gate green as checks and first-party code evolve.
 
-1. Complete decoded texture-size metadata, choose the prepared-memory limit,
-   and enforce scheduler admission against it.
-2. Measure duplicate skinned packing, profile snapshots, and startup inspection
+1. Measure duplicate skinned packing, profile snapshots, and startup inspection
    in that order.
-3. Perform ownership extractions only when the preceding analyzer or
+2. Perform ownership extractions only when the preceding analyzer or
    measurement work exposes a concrete boundary to improve.
-4. Expand platform and device validation alongside the code packets it covers.
+3. Expand platform and device validation alongside the code packets it covers.
 
 A roadmap item is complete only when its acceptance criteria, relevant tests,
 warning gate, and documentation all describe the resulting current state.

@@ -230,11 +230,11 @@ void exerciseSkinnedPublicationRetry(
 })json";
     const sokoban::AssetManifest manifest =
         sokoban::AssetManifest::parse(manifestJson);
-    const sokoban::RuntimeTextureCatalog textureCatalog =
-        sokoban::buildRuntimeTextureCatalog(manifest, {});
-    const sokoban::RenderModel model = manifest.modelIdByName("RetryRig");
     const std::filesystem::path assetRoot =
         std::filesystem::path(SOKOBAN_TEST_SOURCE_DIR) / "assets";
+    const sokoban::RuntimeTextureCatalog textureCatalog =
+        sokoban::collectRuntimeTextureCatalog(assetRoot, manifest);
+    const sokoban::RenderModel model = manifest.modelIdByName("RetryRig");
 
     sokoban::VulkanModelResources resources;
     resources.create(
@@ -346,6 +346,10 @@ struct PressureMetrics {
     uint64_t deferralAttempts = 0;
     uint64_t deferredMicroseconds = 0;
     uint64_t elapsedMicroseconds = 0;
+    uint64_t preparedBudgetBytes = 0;
+    uint64_t preparedBudgetDeferrals = 0;
+    uint32_t heldReadyModels = 0;
+    uint32_t heldQueuedModels = 0;
 };
 
 class ModelResidencyHold final {
@@ -365,6 +369,7 @@ public:
 };
 
 constexpr uint32_t pressureModelCount = 32;
+constexpr uint64_t pressurePreparedBudgetBytes = 4ULL * 1024ULL * 1024ULL;
 
 std::string pressureManifestJson()
 {
@@ -403,10 +408,10 @@ PressureMetrics exercisePreparedAssetPressure(
 {
     const sokoban::AssetManifest manifest =
         sokoban::AssetManifest::parse(pressureManifestJson());
-    const sokoban::RuntimeTextureCatalog textureCatalog =
-        sokoban::buildRuntimeTextureCatalog(manifest, {});
     const std::filesystem::path assetRoot =
         std::filesystem::path(SOKOBAN_TEST_SOURCE_DIR) / "assets";
+    const sokoban::RuntimeTextureCatalog textureCatalog =
+        sokoban::collectRuntimeTextureCatalog(assetRoot, manifest);
 
     sokoban::VulkanModelResources resources;
     resources.create(
@@ -423,6 +428,7 @@ PressureMetrics exercisePreparedAssetPressure(
         {
             .maxConcurrentCpuJobs = 2,
             .maxPublicationsPerFrame = 1,
+            .preparedAssetBytes = pressurePreparedBudgetBytes,
         });
 
     sokoban::RenderAssetRequirements requirements;
@@ -447,20 +453,37 @@ PressureMetrics exercisePreparedAssetPressure(
         do {
             (void)resources.publishReadyAssets(1);
             held = resources.loadingStats();
-            if (held.modelStages.cpuReady == manifest.models().size() &&
-                held.modelStages.queued == 0 &&
+            if (held.preparedBudgetDeferrals != 0 &&
+                held.modelStages.cpuReady != 0 &&
+                held.modelStages.queued != 0 &&
                 held.modelStages.decoding == 0) {
                 break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         } while (std::chrono::steady_clock::now() < deadline);
 
-        if (held.modelStages.cpuReady != manifest.models().size() ||
+        if (held.modelStages.cpuReady == 0 ||
+            held.modelStages.queued == 0 ||
             held.modelStages.cpuReadyBytes == 0 ||
-            held.modelStages.residencyDeferredAssets != manifest.models().size() ||
+            held.modelStages.residencyDeferredAssets !=
+                held.modelStages.cpuReady ||
+            held.preparedAssetBytes != held.modelStages.cpuReadyBytes ||
+            held.activeDecodeReservationBytes != 0 ||
+            held.preparedAssetBudgetBytes != pressurePreparedBudgetBytes ||
+            held.preparedAssetBytes > held.preparedAssetBudgetBytes ||
+            held.preparedBudgetDeferrals == 0 ||
             held.transientAssetPeakBytes < held.modelStages.cpuReadyBytes) {
             throw std::runtime_error(
-                "Pressure workload did not retain every decoded model");
+                "Pressure workload did not pause decoding at its prepared "
+                "budget: ready=" +
+                std::to_string(held.modelStages.cpuReady) +
+                ", queued=" + std::to_string(held.modelStages.queued) +
+                ", decoding=" + std::to_string(held.modelStages.decoding) +
+                ", prepared=" + std::to_string(held.preparedAssetBytes) +
+                ", reserved=" +
+                std::to_string(held.activeDecodeReservationBytes) +
+                ", deferrals=" +
+                std::to_string(held.preparedBudgetDeferrals));
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
@@ -479,10 +502,23 @@ PressureMetrics exercisePreparedAssetPressure(
         drained.pendingModels != 0 || drained.failedAssets != 0 ||
         drained.modelStages.cpuReadyBytes != 0 ||
         drained.modelStages.residencyDeferredAssets != 0 ||
-        drained.modelStages.residencyDeferrals < manifest.models().size() ||
+        drained.modelStages.residencyDeferrals < held.modelStages.cpuReady ||
         drained.modelStages.residencyDeferredMicroseconds == 0) {
         throw std::runtime_error(
-            "Pressure workload did not make progress after admission resumed");
+            "Pressure workload did not make progress after admission resumed: "
+            "loaded=" + std::to_string(drained.loadedModels) +
+            ", pending=" + std::to_string(drained.pendingModels) +
+            ", failed=" + std::to_string(drained.failedAssets) +
+            ", queued=" + std::to_string(drained.modelStages.queued) +
+            ", decoding=" + std::to_string(drained.modelStages.decoding) +
+            ", ready=" + std::to_string(drained.modelStages.cpuReady) +
+            ", prepared deferrals=" +
+            std::to_string(drained.preparedBudgetDeferrals) +
+            ", residency-deferred=" +
+            std::to_string(
+                drained.modelStages.residencyDeferredAssets) +
+            ", residency deferrals=" +
+            std::to_string(drained.modelStages.residencyDeferrals));
     }
 
     return {
@@ -495,6 +531,10 @@ PressureMetrics exercisePreparedAssetPressure(
         .elapsedMicroseconds = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now() - started).count()),
+        .preparedBudgetBytes = drained.preparedAssetBudgetBytes,
+        .preparedBudgetDeferrals = drained.preparedBudgetDeferrals,
+        .heldReadyModels = held.modelStages.cpuReady,
+        .heldQueuedModels = held.modelStages.queued,
     };
 }
 
@@ -519,6 +559,12 @@ int main(int argc, char** argv)
                 << " transient_peak_bytes=" << pressure.transientPeakBytes
                 << " deferral_attempts=" << pressure.deferralAttempts
                 << " deferred_us=" << pressure.deferredMicroseconds
+                << " prepared_budget_bytes="
+                << pressure.preparedBudgetBytes
+                << " prepared_budget_deferrals="
+                << pressure.preparedBudgetDeferrals
+                << " held_ready_models=" << pressure.heldReadyModels
+                << " held_queued_models=" << pressure.heldQueuedModels
                 << " elapsed_us=" << pressure.elapsedMicroseconds << '\n';
         }
         submitNoOp(deviceContext);

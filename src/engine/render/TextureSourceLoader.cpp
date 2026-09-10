@@ -4,9 +4,11 @@
 
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace sokoban {
@@ -90,6 +92,61 @@ std::vector<std::byte> dataUriBytes(const std::string& uri)
     return decodeBase64(std::string_view(uri).substr(comma + 1));
 }
 
+std::optional<CompressedTextureArtifact> preparedBc7Artifact(
+    const std::filesystem::path& assetRoot,
+    const TextureSourceIdentity& identity,
+    bool supportsBc7)
+{
+    if (!supportsBc7) {
+        return std::nullopt;
+    }
+    const std::filesystem::path artifactPath =
+        assetRoot / compressedTextureArtifactPath(identity);
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(artifactPath, error)) {
+        return std::nullopt;
+    }
+    CompressedTextureArtifact artifact = loadBc7Ktx2(artifactPath);
+    const CompressedTextureFormat expected =
+        identity.interpretation.colorSpace == TextureColorSpace::Srgb
+        ? CompressedTextureFormat::Bc7Srgb
+        : CompressedTextureFormat::Bc7Unorm;
+    if (artifact.format != expected) {
+        throw std::runtime_error(
+            "Compressed texture artifact has the wrong colour space: " +
+            artifactPath.string());
+    }
+    return artifact;
+}
+
+uint64_t inspectRgbaTextureSourceBytes(
+    const std::filesystem::path& assetRoot,
+    const TextureSource& source)
+{
+    return std::visit(
+        [&assetRoot](const auto& typed) -> uint64_t {
+            using Source = std::decay_t<decltype(typed)>;
+            if constexpr (std::is_same_v<Source, ExternalTextureSource>) {
+                return inspectRgbaImagePayloadBytes(assetRoot / typed.path);
+            } else if constexpr (
+                std::is_same_v<Source, GltfBufferViewTextureSource>) {
+                const std::vector<std::byte> bytes =
+                    loadGltfBufferViewBytes(
+                        assetRoot / typed.document,
+                        typed.bufferViewIndex);
+                return inspectRgbaImagePayloadBytes(
+                    bytes,
+                    typed.document.string() + " buffer view " +
+                        std::to_string(typed.bufferViewIndex));
+            } else {
+                const std::vector<std::byte> bytes = dataUriBytes(typed.uri);
+                return inspectRgbaImagePayloadBytes(
+                    bytes, "glTF image data URI");
+            }
+        },
+        source);
+}
+
 } // namespace
 
 ImageData loadRgbaTextureSource(
@@ -124,25 +181,38 @@ PreparedTextureSource loadPreparedTextureSource(
     const TextureSourceIdentity& identity,
     bool supportsBc7)
 {
-    if (supportsBc7) {
-        const std::filesystem::path artifactPath =
-            assetRoot / compressedTextureArtifactPath(identity);
-        std::error_code error;
-        if (std::filesystem::is_regular_file(artifactPath, error)) {
-            CompressedTextureArtifact artifact = loadBc7Ktx2(artifactPath);
-            const CompressedTextureFormat expected =
-                identity.interpretation.colorSpace == TextureColorSpace::Srgb
-                ? CompressedTextureFormat::Bc7Srgb
-                : CompressedTextureFormat::Bc7Unorm;
-            if (artifact.format != expected) {
-                throw std::runtime_error(
-                    "Compressed texture artifact has the wrong colour space: " +
-                    artifactPath.string());
-            }
-            return artifact;
-        }
+    if (std::optional<CompressedTextureArtifact> artifact =
+            preparedBc7Artifact(assetRoot, identity, supportsBc7)) {
+        return std::move(*artifact);
     }
     return loadRgbaTextureSource(assetRoot, identity.source);
+}
+
+uint64_t preparedTexturePayloadBytes(const PreparedTextureSource& texture)
+{
+    if (const auto* image = std::get_if<ImageData>(&texture)) {
+        return image->rgba.size();
+    }
+    const CompressedTextureArtifact& compressed =
+        std::get<CompressedTextureArtifact>(texture);
+    uint64_t bytes = static_cast<uint64_t>(compressed.mips.size()) *
+        sizeof(CompressedTextureMip);
+    for (const CompressedTextureMip& mip : compressed.mips) {
+        bytes += mip.bytes.size();
+    }
+    return bytes;
+}
+
+uint64_t inspectPreparedTextureSourceBytes(
+    const std::filesystem::path& assetRoot,
+    const TextureSourceIdentity& identity,
+    bool supportsBc7)
+{
+    if (const std::optional<CompressedTextureArtifact> artifact =
+            preparedBc7Artifact(assetRoot, identity, supportsBc7)) {
+        return preparedTexturePayloadBytes(*artifact);
+    }
+    return inspectRgbaTextureSourceBytes(assetRoot, identity.source);
 }
 
 } // namespace sokoban

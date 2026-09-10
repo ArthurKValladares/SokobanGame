@@ -627,6 +627,18 @@ void drawAssetResidencyStats(
         assetStats.readyRequestedAssets,
         assetStats.queuedAssets,
         assetStats.activeCpuJobs);
+    ImGui::Text(
+        "Prepared payload %.1f MiB + %.1f MiB decoding / %.1f MiB; "
+        "%llu budget deferrals, %llu oversized starts",
+        static_cast<double>(assetStats.preparedAssetBytes) /
+            (1024.0 * 1024.0),
+        static_cast<double>(assetStats.activeDecodeReservationBytes) /
+            (1024.0 * 1024.0),
+        static_cast<double>(assetStats.preparedAssetBudgetBytes) /
+            (1024.0 * 1024.0),
+        static_cast<unsigned long long>(
+            assetStats.preparedBudgetDeferrals),
+        static_cast<unsigned long long>(assetStats.oversizedAssetStarts));
     const auto showAssetStages = [](const char* label,
                                      const VulkanModelResources::AssetStageStats& stages) {
         ImGui::Text(

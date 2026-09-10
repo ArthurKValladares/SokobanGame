@@ -436,14 +436,18 @@ void testLoadsEverySupportedSourceForm()
 
     const ImageData external = loadRgbaTextureSource(
         assets, ExternalTextureSource { relative });
-    const ImageData inlineImage = loadRgbaTextureSource(
-        assets,
-        DataUriTextureSource {
+    const TextureSourceIdentity inlineSource {
+        .source = DataUriTextureSource {
             "data:image/png;base64," + base64Encode(png),
-        });
+        },
+    };
+    const ImageData inlineImage = loadRgbaTextureSource(
+        assets, inlineSource.source);
     CHECK(inlineImage.width == external.width);
     CHECK(inlineImage.height == external.height);
     CHECK(inlineImage.rgba == external.rgba);
+    CHECK(inspectPreparedTextureSourceBytes(assets, inlineSource, false) ==
+        inlineImage.rgba.size());
 
     ScopedTestDirectory temp("sokoban-runtime-textures");
     const std::filesystem::path glb = temp.path() / "embedded.glb";
@@ -454,16 +458,20 @@ void testLoadsEverySupportedSourceForm()
             std::to_string(png.size()) +
             "}],\"images\":[{\"bufferView\":0,\"mimeType\":\"image/png\"}]}",
         png);
-    const ImageData embedded = loadRgbaTextureSource(
-        temp.path(),
-        GltfBufferViewTextureSource {
+    const TextureSourceIdentity embeddedSource {
+        .source = GltfBufferViewTextureSource {
             .document = "embedded.glb",
             .bufferViewIndex = 0,
             .mimeType = "image/png",
-        });
+        },
+    };
+    const ImageData embedded = loadRgbaTextureSource(
+        temp.path(), embeddedSource.source);
     CHECK(embedded.width == external.width);
     CHECK(embedded.height == external.height);
     CHECK(embedded.rgba == external.rgba);
+    CHECK(inspectPreparedTextureSourceBytes(
+        temp.path(), embeddedSource, false) == embedded.rgba.size());
 
     checkThrows([&] {
         (void)loadRgbaTextureSource(
@@ -510,16 +518,22 @@ void testPreparedTextureSelectsArtifactOrSourceFallback()
         loadPreparedTextureSource(temp.path(), source, true);
     CHECK(std::holds_alternative<CompressedTextureArtifact>(compressed));
     CHECK(std::get<CompressedTextureArtifact>(compressed).residentBytes() == 32U);
+    CHECK(inspectPreparedTextureSourceBytes(temp.path(), source, true) ==
+        preparedTexturePayloadBytes(compressed));
 
     const PreparedTextureSource unsupported =
         loadPreparedTextureSource(temp.path(), source, false);
     CHECK(std::holds_alternative<ImageData>(unsupported));
     CHECK(std::get<ImageData>(unsupported).rgba == rgba.rgba);
+    CHECK(inspectPreparedTextureSourceBytes(temp.path(), source, false) ==
+        preparedTexturePayloadBytes(unsupported));
 
     std::filesystem::remove(artifactPath);
     const PreparedTextureSource missing =
         loadPreparedTextureSource(temp.path(), source, true);
     CHECK(std::holds_alternative<ImageData>(missing));
+    CHECK(inspectPreparedTextureSourceBytes(temp.path(), source, true) ==
+        preparedTexturePayloadBytes(missing));
 
     writeBytes(artifactPath, std::span<const std::byte>(ktx).first(20));
     checkThrows([&] {

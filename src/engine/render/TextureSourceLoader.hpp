@@ -24,4 +24,15 @@ using PreparedTextureSource =
     const TextureSourceIdentity& identity,
     bool supportsBc7);
 
+[[nodiscard]] uint64_t preparedTexturePayloadBytes(
+    const PreparedTextureSource& texture);
+
+// Inspects the exact representation loadPreparedTextureSource() will choose
+// for this device. It performs source I/O so resource creation must cache the
+// result before requests begin.
+[[nodiscard]] uint64_t inspectPreparedTextureSourceBytes(
+    const std::filesystem::path& assetRoot,
+    const TextureSourceIdentity& identity,
+    bool supportsBc7);
+
 } // namespace sokoban

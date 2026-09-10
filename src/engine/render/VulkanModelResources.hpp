@@ -115,6 +115,11 @@ public:
         uint32_t queuedAssets = 0;
         uint32_t activeCpuJobs = 0;
         uint64_t cancelledPrefetches = 0;
+        uint64_t preparedAssetBytes = 0;
+        uint64_t activeDecodeReservationBytes = 0;
+        uint64_t preparedAssetBudgetBytes = 0;
+        uint64_t preparedBudgetDeferrals = 0;
+        uint64_t oversizedAssetStarts = 0;
         AssetStageStats modelStages {};
         AssetStageStats textureStages {};
         AssetStageStats animationStages {};
@@ -376,6 +381,7 @@ private:
         PendingTextureUpload upload {};
         std::future<PreparedTextureSource> future;
         std::optional<PreparedTextureSource> prepared;
+        uint64_t estimatedPreparedBytes = 0;
         uint64_t preparedBytes = 0;
         uint64_t sourceBytes = 0;
         AdmissionDeferral admissionDeferral {};
@@ -441,6 +447,7 @@ private:
         const PreparedTextureSource& texture,
         const TextureInterpretation& interpretation);
     [[nodiscard]] uint64_t currentTransientAssetBytes() const;
+    [[nodiscard]] uint64_t currentPreparedAssetBytes() const;
     void updateTransientAssetPeak();
     static void recordAdmissionDeferral(
         AdmissionDeferral& deferral,

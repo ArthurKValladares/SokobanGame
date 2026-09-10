@@ -16,22 +16,39 @@ AssetLoadScheduler::AssetLoadScheduler(AssetLoadingBudget budget)
         throw std::invalid_argument(
             "Asset loading publication budget must be greater than zero");
     }
+    if (budget_.preparedAssetBytes == 0) {
+        throw std::invalid_argument(
+            "Prepared asset memory budget must be greater than zero");
+    }
 }
 
 void AssetLoadScheduler::request(
     AssetLoadKey key,
-    AssetLoadPriority priority)
+    AssetLoadPriority priority,
+    uint64_t estimatedPreparedBytes)
 {
+    // Zero is reserved for legacy or unavailable metadata. Charging the full
+    // budget makes unknown work run alone instead of bypassing admission.
+    estimatedPreparedBytes = estimatedPreparedBytes == 0
+        ? budget_.preparedAssetBytes
+        : estimatedPreparedBytes;
     const auto [iterator, inserted] = entries_.try_emplace(
         key,
-        Entry { .priority = priority, .sequence = nextSequence_++ });
-    if (!inserted && !iterator->second.active &&
-        priority < iterator->second.priority) {
-        iterator->second.priority = priority;
+        Entry {
+            .priority = priority,
+            .sequence = nextSequence_++,
+            .estimatedPreparedBytes = estimatedPreparedBytes,
+        });
+    if (!inserted && !iterator->second.active) {
+        iterator->second.estimatedPreparedBytes = estimatedPreparedBytes;
+        if (priority < iterator->second.priority) {
+            iterator->second.priority = priority;
+        }
     }
 }
 
-std::optional<AssetLoadKey> AssetLoadScheduler::beginNext()
+std::optional<AssetLoadKey> AssetLoadScheduler::beginNext(
+    uint64_t retainedPreparedBytes)
 {
     if (activeCount_ >= budget_.maxConcurrentCpuJobs) {
         return std::nullopt;
@@ -53,8 +70,29 @@ std::optional<AssetLoadKey> AssetLoadScheduler::beginNext()
         return std::nullopt;
     }
 
+    const uint64_t estimate = selected->second.estimatedPreparedBytes;
+    const bool oversized = estimate > budget_.preparedAssetBytes;
+    bool admitted = false;
+    if (oversized) {
+        admitted = retainedPreparedBytes == 0 && activePreparedBytes_ == 0;
+    } else if (retainedPreparedBytes <= budget_.preparedAssetBytes &&
+        activePreparedBytes_ <=
+            budget_.preparedAssetBytes - retainedPreparedBytes) {
+        const uint64_t available = budget_.preparedAssetBytes -
+            retainedPreparedBytes - activePreparedBytes_;
+        admitted = estimate <= available;
+    }
+    if (!admitted) {
+        ++preparedBudgetDeferrals_;
+        return std::nullopt;
+    }
+
     selected->second.active = true;
     ++activeCount_;
+    activePreparedBytes_ += estimate;
+    if (oversized) {
+        ++oversizedAssetStarts_;
+    }
     return selected->first;
 }
 
@@ -64,6 +102,7 @@ void AssetLoadScheduler::complete(AssetLoadKey key)
     if (iterator == entries_.end() || !iterator->second.active) {
         throw std::logic_error("Completed an asset-loading job that was not active");
     }
+    activePreparedBytes_ -= iterator->second.estimatedPreparedBytes;
     entries_.erase(iterator);
     --activeCount_;
 }
@@ -88,7 +127,10 @@ void AssetLoadScheduler::clear()
 {
     entries_.clear();
     activeCount_ = 0;
+    activePreparedBytes_ = 0;
     cancelledPrefetchCount_ = 0;
+    preparedBudgetDeferrals_ = 0;
+    oversizedAssetStarts_ = 0;
     nextSequence_ = 1;
 }
 

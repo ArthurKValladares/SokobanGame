@@ -34,12 +34,6 @@ bool futureReady(std::future<Result>& future)
         future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
 }
 
-template <typename Element>
-uint64_t vectorPayloadBytes(const std::vector<Element>& values)
-{
-    return static_cast<uint64_t>(values.size()) * sizeof(Element);
-}
-
 template <typename PreparedModel>
 uint64_t modelPayloadBytes(const PreparedModel& model)
 {
@@ -49,18 +43,16 @@ uint64_t modelPayloadBytes(const PreparedModel& model)
     return preparedPayloadBytes(std::get<SkinnedMeshData>(model));
 }
 
-uint64_t texturePayloadBytes(const PreparedTextureSource& texture)
+void requirePreparedEstimate(
+    uint64_t estimatedBytes,
+    uint64_t actualBytes,
+    std::string_view assetKind)
 {
-    if (const auto* image = std::get_if<ImageData>(&texture)) {
-        return image->rgba.size();
+    if (estimatedBytes != 0 && actualBytes > estimatedBytes) {
+        throw std::runtime_error(
+            std::string(assetKind) +
+            " decoded payload exceeded its prepared-memory reservation");
     }
-    const CompressedTextureArtifact& compressed =
-        std::get<CompressedTextureArtifact>(texture);
-    uint64_t bytes = vectorPayloadBytes(compressed.mips);
-    for (const CompressedTextureMip& mip : compressed.mips) {
-        bytes += mip.bytes.size();
-    }
-    return bytes;
 }
 
 uint64_t sourceFileBytes(const std::filesystem::path& path)
@@ -250,6 +242,11 @@ void VulkanModelResources::create(
             logicalIndex, textureDescriptorCapacity_);
         textureDefinitions_[descriptorIndex] =
             textureCatalog.textures()[logicalIndex];
+        textures_[descriptorIndex].estimatedPreparedBytes =
+            inspectPreparedTextureSourceBytes(
+                assetRoot_,
+                textureCatalog.textures()[logicalIndex].identity,
+                supportsBc7_);
         textures_[descriptorIndex].sourceBytes = textureSourceBytes(
             assetRoot_, textureCatalog.textures()[logicalIndex].identity,
             supportsBc7_);
@@ -657,7 +654,7 @@ void VulkanModelResources::queueModel(
         scheduler_.request({
             AssetLoadKind::Model,
             static_cast<uint32_t>(model.index()),
-        }, priority);
+        }, priority, slot.estimatedPreparedBytes);
     }
 
     queueModelDependencies(model, priority);
@@ -727,7 +724,7 @@ void VulkanModelResources::queueTexture(
         scheduler_.request({
             AssetLoadKind::Texture,
             static_cast<uint32_t>(textureIndex),
-        }, priority);
+        }, priority, slot.estimatedPreparedBytes);
     }
 }
 
@@ -786,7 +783,7 @@ void VulkanModelResources::queueAnimation(
         scheduler_.request({
             AssetLoadKind::Animation,
             static_cast<uint32_t>(animation.index()),
-        }, priority);
+        }, priority, slot.estimatedPreparedBytes);
     }
 }
 
@@ -823,7 +820,8 @@ void VulkanModelResources::queueModelDependencies(
 
 void VulkanModelResources::startQueuedAssets()
 {
-    while (const std::optional<AssetLoadKey> key = scheduler_.beginNext()) {
+    while (const std::optional<AssetLoadKey> key =
+        scheduler_.beginNext(currentPreparedAssetBytes())) {
         try {
             startAsset(*key);
         } catch (...) {
@@ -857,24 +855,36 @@ void VulkanModelResources::resetCancelledAsset(AssetLoadKey key)
         if (key.index < models_.size() &&
             models_[key.index].state == LoadState::Queued) {
             const uint64_t sourceBytes = models_[key.index].sourceBytes;
+            const uint64_t estimatedPreparedBytes =
+                models_[key.index].estimatedPreparedBytes;
             models_[key.index] = {};
             models_[key.index].sourceBytes = sourceBytes;
+            models_[key.index].estimatedPreparedBytes =
+                estimatedPreparedBytes;
         }
         return;
     case AssetLoadKind::Animation:
         if (key.index < animations_.size() &&
             animations_[key.index].state == LoadState::Queued) {
             const uint64_t sourceBytes = animations_[key.index].sourceBytes;
+            const uint64_t estimatedPreparedBytes =
+                animations_[key.index].estimatedPreparedBytes;
             animations_[key.index] = {};
             animations_[key.index].sourceBytes = sourceBytes;
+            animations_[key.index].estimatedPreparedBytes =
+                estimatedPreparedBytes;
         }
         return;
     case AssetLoadKind::Texture:
         if (key.index < textures_.size() &&
             textures_[key.index].state == LoadState::Queued) {
             const uint64_t sourceBytes = textures_[key.index].sourceBytes;
+            const uint64_t estimatedPreparedBytes =
+                textures_[key.index].estimatedPreparedBytes;
             textures_[key.index] = {};
             textures_[key.index].sourceBytes = sourceBytes;
+            textures_[key.index].estimatedPreparedBytes =
+                estimatedPreparedBytes;
         }
         return;
     }
@@ -986,6 +996,8 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
         });
         slot.prepared = slot.future.get();
         slot.preparedBytes = modelPayloadBytes(*slot.prepared);
+        requirePreparedEstimate(
+            slot.estimatedPreparedBytes, slot.preparedBytes, "Model");
         slot.state = LoadState::CpuReady;
         updateTransientAssetPeak();
         if (std::holds_alternative<SkinnedMeshData>(*slot.prepared)) {
@@ -1029,7 +1041,9 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
                 static_cast<uint32_t>(textureIndex),
             });
             slot.prepared = slot.future.get();
-            slot.preparedBytes = texturePayloadBytes(*slot.prepared);
+            slot.preparedBytes = preparedTexturePayloadBytes(*slot.prepared);
+            requirePreparedEstimate(
+                slot.estimatedPreparedBytes, slot.preparedBytes, "Texture");
             slot.state = LoadState::CpuReady;
             updateTransientAssetPeak();
         } catch (...) {
@@ -1228,6 +1242,7 @@ uint64_t VulkanModelResources::texturePublicationCapacity(
 void VulkanModelResources::retireModel(ModelSlot& slot)
 {
     const uint64_t sourceBytes = slot.sourceBytes;
+    const uint64_t estimatedPreparedBytes = slot.estimatedPreparedBytes;
     modelResidency_.beginRetiring(slot.gpuBytes);
     retiredModels_.retire({
         .gpu = std::exchange(slot.gpu, {}),
@@ -1238,12 +1253,14 @@ void VulkanModelResources::retireModel(ModelSlot& slot)
     }, retirementFrameMask_);
     slot = {};
     slot.sourceBytes = sourceBytes;
+    slot.estimatedPreparedBytes = estimatedPreparedBytes;
     residencyLadder_.countEviction();
 }
 
 void VulkanModelResources::retireTexture(TextureSlot& slot)
 {
     const uint64_t sourceBytes = slot.sourceBytes;
+    const uint64_t estimatedPreparedBytes = slot.estimatedPreparedBytes;
     textureResidency_.beginRetiring(slot.gpuBytes);
     retiredTextures_.retire({
         .gpu = std::exchange(slot.gpu, {}),
@@ -1251,6 +1268,7 @@ void VulkanModelResources::retireTexture(TextureSlot& slot)
     }, retirementFrameMask_);
     slot = {};
     slot.sourceBytes = sourceBytes;
+    slot.estimatedPreparedBytes = estimatedPreparedBytes;
     textureDescriptorsDirty_ = true;
     residencyLadder_.countEviction();
 }
@@ -1292,6 +1310,8 @@ bool VulkanModelResources::publishAnimation(RenderAnimation animation, bool wait
             });
             slot.prepared = slot.future.get();
             slot.preparedBytes = preparedPayloadBytes(*slot.prepared);
+            requirePreparedEstimate(
+                slot.estimatedPreparedBytes, slot.preparedBytes, "Animation");
             slot.state = LoadState::CpuReady;
             updateTransientAssetPeak();
         }
@@ -1707,6 +1727,14 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
     result.queuedAssets = static_cast<uint32_t>(scheduler_.queuedCount());
     result.activeCpuJobs = static_cast<uint32_t>(scheduler_.activeCount());
     result.cancelledPrefetches = scheduler_.cancelledPrefetchCount();
+    result.preparedAssetBytes = currentPreparedAssetBytes();
+    result.activeDecodeReservationBytes =
+        scheduler_.activePreparedBytes();
+    result.preparedAssetBudgetBytes =
+        scheduler_.budget().preparedAssetBytes;
+    result.preparedBudgetDeferrals =
+        scheduler_.preparedBudgetDeferrals();
+    result.oversizedAssetStarts = scheduler_.oversizedAssetStarts();
     result.modelResidencyBytes = modelResidency_.resident();
     result.textureResidencyBytes = textureResidency_.resident();
     result.modelResidencyPeakBytes = modelResidency_.peak();
@@ -1747,6 +1775,21 @@ uint64_t VulkanModelResources::currentTransientAssetBytes() const
         if (texture.upload.staging.valid()) {
             bytes += texture.upload.staging.size;
         }
+    }
+    for (const AnimationSlot& animation : animations_) {
+        bytes += animation.preparedBytes;
+    }
+    return bytes;
+}
+
+uint64_t VulkanModelResources::currentPreparedAssetBytes() const
+{
+    uint64_t bytes = 0;
+    for (const ModelSlot& model : models_) {
+        bytes += model.preparedBytes;
+    }
+    for (uint32_t textureIndex : textureSpace_.active()) {
+        bytes += textures_[textureIndex].preparedBytes;
     }
     for (const AnimationSlot& animation : animations_) {
         bytes += animation.preparedBytes;
@@ -2005,6 +2048,11 @@ bool VulkanModelResources::syncManifestTextures()
          ++index) {
         textureDefinitions_[index] = runtimeTextureDefinitionFor(
             manifest_->textures()[index]);
+        textures_[index].estimatedPreparedBytes =
+            inspectPreparedTextureSourceBytes(
+                assetRoot_,
+                textureDefinitions_[index]->identity,
+                supportsBc7_);
         textures_[index].sourceBytes = textureSourceBytes(
             assetRoot_, textureDefinitions_[index]->identity, supportsBc7_);
     }
@@ -2052,6 +2100,14 @@ bool VulkanModelResources::syncManifestModels()
             textures_[textureIndex].sourceBytes = textureSourceBytes(
                 assetRoot_, textureDefinitions_[textureIndex]->identity,
                 supportsBc7_);
+        }
+        if (textures_[textureIndex].estimatedPreparedBytes == 0 &&
+            textureDefinitions_[textureIndex]) {
+            textures_[textureIndex].estimatedPreparedBytes =
+                inspectPreparedTextureSourceBytes(
+                    assetRoot_,
+                    textureDefinitions_[textureIndex]->identity,
+                    supportsBc7_);
         }
     }
     return true;

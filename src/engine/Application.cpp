@@ -622,7 +622,14 @@ void Application::finishSmokeRunIfDue(std::uint64_t renderedFrames)
         log::info(log::Category::Rendering)
             << "Asset transient memory " << assetStats.transientAssetBytes
             << " bytes (peak " << assetStats.transientAssetPeakBytes
-            << "); queued source bytes "
+            << "); prepared payload " << assetStats.preparedAssetBytes
+            << " + " << assetStats.activeDecodeReservationBytes
+            << " decoding bytes / "
+            << assetStats.preparedAssetBudgetBytes
+            << " budget; prepared-budget deferrals "
+            << assetStats.preparedBudgetDeferrals
+            << ", oversized starts " << assetStats.oversizedAssetStarts
+            << "; queued source bytes "
             << assetStats.modelStages.queuedSourceBytes << " models, "
             << assetStats.textureStages.queuedSourceBytes << " textures, "
             << assetStats.animationStages.queuedSourceBytes << " animations"
